@@ -12,7 +12,22 @@
   `dispatch_state` is an absolute path that resolves (a `~/` path, a NUL byte
   or a symlink loop now refuses instead of passing or raising), each event's
   `id` matches its `## ` section heading, no id names two events, and no
-  ledger line can overwrite the parser's record of that heading.
+  ledger line can overwrite the parser's record of that heading. Every other
+  field with a documented format is checked in every event, not only the
+  event being closed: `subject` is `task` or `assignment`, `decision` comes
+  from that subject's vocabulary in `references/task-ledger.md`,
+  `dispatch_id` / `worker` / `role` are `not_applicable` on a task event and
+  never on an assignment event, and `report` is an absolute path or
+  `unknown` (or `not_applicable` on a task event). A schema field repeated
+  inside one event, or in the frontmatter, is refused: the parser kept the
+  last value, so a second well-formed line could hide a malformed first one.
+  Only the free-text `observed`, `evidence` and `assessment` fields are
+  checked for presence alone, and `state-schema.md` now says exactly that.
+  Validating the whole ledger rather than narrowing the contract was the
+  safer choice: `close-member` acts on `subject`, `dispatch_id`, `worker`,
+  `report` and `decision` directly, so a ledger whose other events break the
+  format is not one the foreman wrote correctly, and closing on it would
+  trust a record the owner cannot vouch for.
   The refusal's repair hint changed with it: it used to say "append a correct
   event", which can never fix a malformed earlier event in an append-only log
   that is validated whole, so it now points at the documented recovery, a

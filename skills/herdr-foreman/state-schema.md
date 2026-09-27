@@ -227,13 +227,20 @@ decision log, not a new machine status API or an input to `foreman.sh apply`.
   its meaning. `close-member` (`skills/herdr-foreman/foreman/members.py`)
   reads it too, and only through a validated schema-1 document: frontmatter
   carrying every field above, `dispatch_state` resolving to the state the
-  command runs against, and every event carrying every field. Each field
-  holds the format the table and frontmatter name: a full `base_revision`
-  SHA, an absolute `dispatch_state`, a timezone-qualified `at`, and a full
-  `head_revision` SHA or its `unknown`/`not_applicable` literal. Each event's
-  `id` matches its section heading and names no other event. Any other
-  version, a missing or malformed field or another state's ledger is refused
-  and closes nothing. An append never repairs a malformed event; record a
+  command runs against, and every event carrying every field exactly once.
+  Every field other than `observed`, `evidence` and `assessment` holds the
+  format the table and frontmatter name, in every event: a full
+  `base_revision` SHA; an absolute `dispatch_state`; an `id` matching its
+  section heading and naming no other event; a timezone-qualified `at`; a
+  `subject` of `task` or `assignment`; a `decision` from that subject's
+  vocabulary in `references/task-ledger.md`; `dispatch_id`, `worker` and
+  `role` as `not_applicable` on a task event and never on an assignment
+  event; a `report` that is an absolute path or `unknown`, or
+  `not_applicable` on a task event; and a full `head_revision` SHA or its
+  `unknown`/`not_applicable` literal. `observed`, `evidence` and
+  `assessment` are free text and need only be present. Any other version,
+  a missing, repeated or malformed field or another state's ledger is
+  refused and closes nothing. An append never repairs a malformed event; record a
   recovered ledger at a new path, as Migration below describes. It matches an event by `dispatch_id`, `worker` and `report`, and
   never writes the ledger. Workers never write it. Standup reads it without migration and
   labels unaccepted worker claims as reported; it grants no completion status.

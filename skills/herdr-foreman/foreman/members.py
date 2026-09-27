@@ -39,6 +39,14 @@ EVENT_FIELDS = ("schema_version", "id", "at", "subject", "dispatch_id", "worker"
                 "decision", "head_revision", "evidence", "assessment")
 #: `head_revision` values that stand in for a SHA (state-schema.md, Task Ledger).
 HEAD_PLACEHOLDERS = frozenset({"unknown", "not_applicable"})
+#: Each subject's decision vocabulary (references/task-ledger.md, Record Decisions as They Happen).
+DECISIONS = {"assignment": ASSESSED | {"pending", "reported", "unknown"},
+             "task": frozenset({"in_progress", "awaiting_diagnosis", "diagnosed_stop", "waiting_for_operator",
+                                "ready_for_release", "completed"})}
+#: The assignment identity a task event carries as `not_applicable`, and an assignment event never does.
+ASSIGNMENT_IDENTITY = ("dispatch_id", "worker", "role")
+# `observed`, `evidence` and `assessment` are free text; the schema promises
+# no format for them beyond presence, so none is checked.
 #: A field name starts with a letter, so no ledger line can set the parser's own `_section` key.
 FIELD = re.compile(r"^- ([a-z][a-z_]*): (.*)$")
 FRONT_FIELD = re.compile(r"^([a-z_]+): (.*)$")
@@ -67,6 +75,8 @@ def ledger_events(path):
     for line in front.group(1).splitlines():
         match = FRONT_FIELD.match(line)
         if match:
+            if match.group(1) in FRONT_FIELDS and match.group(1) in header:
+                raise _unusable(path, "its frontmatter repeats {}".format(match.group(1)))
             header[match.group(1)] = match.group(2).strip()
     missing = [key for key in FRONT_FIELDS if not header.get(key)]
     if missing:
@@ -86,6 +96,11 @@ def ledger_events(path):
             continue
         match = FIELD.match(line)
         if current is not None and match:
+            # A repeated schema field would let a later line replace a malformed
+            # value before validation reads it. Prose bullets under `assessment`
+            # may repeat names the schema does not use.
+            if match.group(1) in EVENT_FIELDS and match.group(1) in current:
+                raise _unusable(path, "event {} repeats {}".format(current["_section"], match.group(1)))
             current[match.group(1)] = match.group(2).strip()
     for event in events:
         absent = [key for key in EVENT_FIELDS if not event.get(key)]
@@ -103,7 +118,7 @@ def ledger_events(path):
 
 
 def _check_formats(path, event):
-    """Refuse an event whose identity, time or revision is not in its schema-1 format."""
+    """Refuse an event whose non-prose fields are not in their schema-1 formats."""
     section = event["_section"]
     if event["id"] != section:
         raise _unusable(path, "event {} carries id {!r}, not its section heading".format(section, event["id"]))
@@ -116,6 +131,21 @@ def _check_formats(path, event):
     if head not in HEAD_PLACEHOLDERS and SHA_RE.fullmatch(head) is None:
         raise _unusable(path, "event {} has head_revision {!r}, not a full lowercase commit SHA, unknown or "
                         "not_applicable".format(section, head))
+    subject = event["subject"]
+    if subject not in DECISIONS:
+        raise _unusable(path, "event {} has subject {!r}, not task or assignment".format(section, subject))
+    if event["decision"] not in DECISIONS[subject]:
+        raise _unusable(path, "event {} has decision {!r}, not one of the {} decisions ({})".format(
+            section, event["decision"], subject, ", ".join(sorted(DECISIONS[subject]))))
+    for key in ASSIGNMENT_IDENTITY:
+        if (event[key] == "not_applicable") != (subject == "task"):
+            raise _unusable(path, "event {} has {} {!r}; a task event carries not_applicable and an assignment "
+                            "event its actual value".format(section, key, event[key]))
+    report = event["report"]
+    placeholders = {"unknown", "not_applicable"} if subject == "task" else {"unknown"}
+    if report not in placeholders and (not os.path.isabs(report) or "\0" in report):
+        raise _unusable(path, "event {} has report {!r}, not an absolute path or {}".format(
+            section, report, " or ".join(sorted(placeholders))))
 
 
 def assessed_event(path, member, state_path):

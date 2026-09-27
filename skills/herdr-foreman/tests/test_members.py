@@ -131,7 +131,13 @@ class CloseMemberTest(MembersCase):
                  ({}, "abc1234", None, "base_revision 'abc1234'"),
                  ({}, sha, "relative/state.json", "dispatch_state 'relative/state.json' is not an absolute"),
                  ({}, sha, "~/state.json", "dispatch_state '~/state.json' is not an absolute"),
-                 ({}, sha, "/nul\0state.json", "dispatch_state '/nul\\x00state.json' is not an absolute"))
+                 ({}, sha, "/nul\0state.json", "dispatch_state '/nul\\x00state.json' is not an absolute"),
+                 ({"subject": "round"}, sha, None, "has subject 'round', not task or assignment"),
+                 ({"decision": "approved"}, sha, None, "has decision 'approved', not one of the assignment"),
+                 ({"decision": "completed"}, sha, None, "has decision 'completed', not one of the assignment"),
+                 ({"worker": "not_applicable"}, sha, None, "has worker 'not_applicable'"),
+                 ({"report": "reviewer.md"}, sha, None, "has report 'reviewer.md', not an absolute path or unknown"),
+                 ({"report": "not_applicable"}, sha, None, "has report 'not_applicable', not an absolute path"))
         for fields, base, state, why in cases:
             with self.subTest(why=why):
                 self.write_ledger("accepted", fields=fields, base=base, state=state)
@@ -156,6 +162,43 @@ class CloseMemberTest(MembersCase):
         with self.assertRaisesRegex(UsageError, "event renamed-section carries id 'event-1'"):
             members.close(self.path, "dispatch-a", self.ledger, LATER)
         self.assertTrue(store.pending(store.load(self.path)))
+
+    def test_an_unrelated_malformed_event_still_closes_nothing(self):
+        self.emit()
+        self.write_ledger("accepted")
+        task_event = ("## task-1\n\n- schema_version: 1\n- id: task-1\n- at: {}\n- subject: task\n"
+                      "- dispatch_id: dispatch-a\n- worker: not_applicable\n- role: not_applicable\n"
+                      "- report: not_applicable\n- observed: round started\n- decision: in_progress\n"
+                      "- head_revision: not_applicable\n- evidence: unknown\n- assessment: open\n").format(AT)
+        self.ledger.write_text(self.ledger.read_text() + "\n" + task_event)
+        with self.assertRaisesRegex(UsageError, "event task-1 has dispatch_id 'dispatch-a'"):
+            members.close(self.path, "dispatch-a", self.ledger, LATER)
+        self.assertTrue(store.pending(store.load(self.path)))
+
+    def test_a_repeated_field_cannot_replace_a_malformed_value(self):
+        self.emit()
+        self.write_ledger("accepted", fields={"at": "not-a-timestamp"})
+        text = self.ledger.read_text().replace("- at: not-a-timestamp\n", "- at: not-a-timestamp\n- at: {}\n".format(AT))
+        self.ledger.write_text(text)
+        with self.assertRaisesRegex(UsageError, "event event-1 repeats at"):
+            members.close(self.path, "dispatch-a", self.ledger, LATER)
+        self.write_ledger("accepted")
+        text = self.ledger.read_text().replace("schema_version: 1\ntask:", "schema_version: 1\nbase_revision: bad\ntask:", 1)
+        self.ledger.write_text(text)
+        with self.assertRaisesRegex(UsageError, "frontmatter repeats base_revision"):
+            members.close(self.path, "dispatch-a", self.ledger, LATER)
+        self.assertTrue(store.pending(store.load(self.path)))
+
+    def test_a_task_event_and_prose_bullets_are_accepted(self):
+        self.emit()
+        self.write_ledger("accepted")
+        task_event = ("## task-1\n\n- schema_version: 1\n- id: task-1\n- at: {}\n- subject: task\n"
+                      "- dispatch_id: not_applicable\n- worker: not_applicable\n- role: not_applicable\n"
+                      "- report: not_applicable\n- observed: round started\n- decision: in_progress\n"
+                      "- head_revision: not_applicable\n- evidence: unknown\n- assessment: open\n"
+                      "- note: a prose bullet\n- note: another prose bullet\n").format(AT)
+        self.ledger.write_text(self.ledger.read_text() + "\n" + task_event)
+        self.assertEqual(members.close(self.path, "dispatch-a", self.ledger, LATER)["decision"], "accepted")
 
     def test_a_repeated_event_id_closes_nothing(self):
         self.emit()
