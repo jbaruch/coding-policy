@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.283 — 2026-09-27
+
 ### Fixed
 
 - **A Herdr worker session no longer fetches (#541).** `hooks/check-git-sync.sh`
