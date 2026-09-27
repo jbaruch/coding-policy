@@ -14,6 +14,7 @@ import argparse
 import hashlib
 import json
 import os
+import shlex
 import subprocess
 import sys
 from typing import NoReturn
@@ -2030,7 +2031,7 @@ def _dispatched_seat_briefs(plan, slice_paths, dispatches, task):
     context = plan.get("task_context")
     if not isinstance(context, dict) or context.get("task") != task:
         raise UsageError("The plan was not made for task {!r}, so no seat dispatch can be bound to it. Replan with "
-                         "`{}` and dispatch from that plan.".format(task, runnable.command("plan --partition ... --task {}".format(task))), {"task": task})
+                         "`{}` and dispatch from that plan.".format(task, runnable.command("plan --partition ... --task {}".format(shlex.quote(task)))), {"task": task})
     assignments = plan.get("assignments")
     if not isinstance(assignments, dict):
         raise UsageError("The plan carries no assignments; pass the JSON `{}` wrote.".format(runnable.command("plan --partition")), {})

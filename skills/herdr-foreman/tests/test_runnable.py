@@ -88,6 +88,14 @@ class BareHintTest(unittest.TestCase):
 
 
 class CommandTest(unittest.TestCase):
+    def test_a_task_identity_in_a_hint_is_one_shell_word(self):
+        from foreman.cli import _dispatched_seat_briefs
+        from foreman.errors import UsageError
+        with self.assertRaises(UsageError) as caught:
+            _dispatched_seat_briefs({"task_context": {"task": "other"}}, {}, [], "repo task 322; rm -rf x")
+        hint = re.search(r"`(bash [^`]+)`", caught.exception.message).group(1)
+        self.assertEqual(shlex.split(hint)[-2:], ["--task", "repo task 322; rm -rf x"])
+
     def test_command_names_the_quoted_launcher_beside_the_package(self):
         with patch.object(runnable, "launcher", return_value="/opt/my plugins/foreman.sh"):
             self.assertEqual(runnable.command("measure --state F"),
