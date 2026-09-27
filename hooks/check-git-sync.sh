@@ -23,7 +23,12 @@
 #     stall session start.
 #   - Acts when the answer is mechanical: a default branch strictly behind
 #     origin after a fresh fetch is fast-forwarded (git refuses every unsafe
-#     case); diverged, unverified and Herdr-worker sessions are reported only.
+#     case); diverged and unverified sessions are reported only.
+#   - A Herdr worker session (HERDR_ENV set, any value, linked worktree) never fetches: the
+#     fetch writes remote-tracking refs shared with the foreman's checkout. It
+#     reports drift from the refs as last fetched. A failed role probe (HERDR_ENV
+#     set or portable mode) or a portable linked worktree may be a worker: no
+#     fetch, and a sync-unverified notice naming the cause.
 #   - Never blocks (always exits 0), never exits 2.
 #
 # Contract:
@@ -32,8 +37,9 @@
 #           {"additionalContext": "<status>"} whose text begins with the
 #           "Session-start status — " marker (rules/hook-action-reporting.md) —
 #           reporting in-sync, ahead, fast-forwarded, behind (fast-forward refused), or
-#           diverged after a fresh fetch, or
-#           "sync not verified" when the fetch was throttled or failed.
+#           diverged after a fresh fetch,
+#           "sync not verified" when the fetch was throttled or failed, or,
+#           for a Herdr worker session, the unfetched drift with a do-not-sync note.
 #   exit  : always 0. Every best-effort failure emits an actionable stderr warning
 #           and continues/no-ops (rules/error-handling.md Shell Error Handling).
 #           Non-repo, no origin, and no local default branch are silent no-ops —
@@ -94,33 +100,76 @@ emit_notice() { # <notice-text>
 # linked worktree. In a linked worktree `--git-dir` and `--git-common-dir`
 # resolve differently; in the main checkout they are the same.
 #
-# 0 = a Herdr worker (suppress foreman-only advice), 1 = the foreman, a standalone
-# agent, or anything this cannot determine. Fail open: a hook that goes silent
-# because a git command failed would be worse than one that speaks up.
-is_herdr_worker() {
-  [[ -n "${HERDR_ENV:-}" ]] || return 1
+# HERDR_ENV counts when set at all, empty included (rules/agent-team-operation.md
+# Two Modes). Under tessl (SESSION_START_MODE=portable) the environment is
+# stripped, so an unset HERDR_ENV proves nothing there and a linked worktree
+# may be a worker's.
+#
+# Tri-state, so an indeterminate session never reads as "the foreman":
+#   0 = a Herdr worker (HERDR_ENV set, linked worktree),
+#   1 = the foreman or a standalone agent (HERDR_ENV unset outside portable
+#       mode, or a proven main checkout) — the only sessions that may fetch,
+#   2 = unknown — a failed role probe with HERDR_ENV set or in portable mode,
+#       or a portable linked worktree; treated as a possible worker: no fetch,
+#       no fast-forward. ROLE_WHY names the cause for the notice.
+herdr_role() {
+  ROLE_WHY=""
+  local portable=0
+  if [[ -z "${HERDR_ENV+x}" ]]; then
+    [[ "${SESSION_START_MODE:-}" == portable ]] || return 1
+    portable=1
+  fi
 
   local git_dir common_dir rc=0
-  git_dir="$(git rev-parse --absolute-git-dir 2>/dev/null)" || rc=$?
+  git_dir="$(git rev-parse --absolute-git-dir 2>&1)" || rc=$?
   if (( rc != 0 )); then
-    warn "git rev-parse --absolute-git-dir failed (exit ${rc}) — cannot tell a Herdr worker from the foreman; treating this as the foreman"
-    return 1
+    warn "git rev-parse --absolute-git-dir failed (exit ${rc}: ${git_dir//$'\n'/ }) — cannot tell a Herdr worker from the foreman; not fetching"
+    ROLE_WHY="this hook could not tell a Herdr worker from the foreman (see the warning above). Run \`git rev-parse --absolute-git-dir --path-format=absolute --git-common-dir\` to diagnose."
+    return 2
   fi
   rc=0
-  common_dir="$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" || rc=$?
+  common_dir="$(git rev-parse --path-format=absolute --git-common-dir 2>&1)" || rc=$?
   if (( rc != 0 )); then
-    warn "git rev-parse --git-common-dir failed (exit ${rc}) — cannot tell a Herdr worker from the foreman; treating this as the foreman"
-    return 1
+    warn "git rev-parse --git-common-dir failed (exit ${rc}: ${common_dir//$'\n'/ }) — cannot tell a Herdr worker from the foreman; not fetching"
+    ROLE_WHY="this hook could not tell a Herdr worker from the foreman (see the warning above). Run \`git rev-parse --absolute-git-dir --path-format=absolute --git-common-dir\` to diagnose."
+    return 2
   fi
 
-  [[ "$git_dir" != "$common_dir" ]]
+  [[ "$git_dir" != "$common_dir" ]] || return 1
+  if (( portable )); then
+    ROLE_WHY="this agent runs SessionStart through tessl, which hides the session's environment, and this linked worktree may be a Herdr worker's."
+    return 2
+  fi
+  return 0
+}
+
+# Count the local default branch's drift from its remote-tracking ref, as the
+# refs stand now (no fetch). --left-right --count on a three-dot range yields
+# "<ahead>\t<behind>" — ahead = local-only commits, behind = origin-only
+# commits — so a diverged branch (both > 0) can be distinguished from one that
+# is strictly behind (fast-forwardable). Sets DRIFT_AHEAD / DRIFT_BEHIND and
+# returns 0; a missing origin ref or a rev-list failure is warned and returns 1,
+# never swallowed as "up to date".
+drift_counts() { # <default-branch>
+  local db="$1" counts
+  if ! counts="$(git rev-list --left-right --count "refs/heads/${db}...refs/remotes/origin/${db}" 2>/dev/null)"; then
+    warn "could not compare ${db} against origin/${db} — run \`git status\` to inspect; skipping sync check"
+    return 1
+  fi
+  DRIFT_AHEAD="${counts%%[[:space:]]*}"
+  DRIFT_BEHIND="${counts##*[[:space:]]}"
+  if ! [[ "$DRIFT_AHEAD" =~ ^[0-9]+$ && "$DRIFT_BEHIND" =~ ^[0-9]+$ ]]; then
+    warn "unexpected ahead/behind counts '${counts}' for ${db} — run \`git status\` to inspect; skipping sync check"
+    return 1
+  fi
+  return 0
 }
 
 main() {
   local THROTTLE_HOURS="${SYNC_THROTTLE_HOURS:-0}"
   local FETCH_TIMEOUT="${SYNC_FETCH_TIMEOUT:-10}"
   local STATE_DIR="${SYNC_STATE_DIR:-${TMPDIR:-/tmp}/coding-policy-sync}"
-  local rc db inside cand now top repo_key stamp sv ts should_fetch preserve_future fetch_failed counts ahead behind
+  local rc db inside cand now top repo_key stamp sv ts should_fetch preserve_future fetch_failed ahead behind role ROLE_WHY
   local -a fetch
 
   # git is required to produce a signal; its absence is an expected environment
@@ -186,6 +235,22 @@ main() {
   # report as "behind". Silent no-op when absent; ref_exists surfaces a real
   # git failure before returning "absent".
   ref_exists "refs/heads/$db" || return 0
+
+  # A worker never touches the shared checkout, and a fetch writes the
+  # remote-tracking refs that checkout shares — so a worker session neither
+  # fetches nor stamps the throttle. It reports the drift from the refs as last
+  # fetched and names whose job syncing is.
+  role=0
+  herdr_role || role=$?
+  if (( role == 2 )); then
+    emit_notice "Session-start status — git: \`${db}\` sync not verified and not fetched or fast-forwarded here — ${ROLE_WHY} If this is a Herdr worker session, do not sync the shared checkout (rules/agent-team-operation.md Writers and Checkouts); if it is the foreman, run \`git fetch origin\`, then \`git status\` (rules/sync-before-work.md)."
+    return 0
+  fi
+  if (( role == 0 )); then
+    drift_counts "$db" || return 0
+    emit_notice "Session-start status — git: local \`${db}\` is ${DRIFT_BEHIND} behind / ${DRIFT_AHEAD} ahead of \`origin/${db}\` as last fetched (a Herdr worker session does not fetch). This is a Herdr worker session: the shared checkout is the foreman's (rules/agent-team-operation.md Writers and Checkouts). Do not sync it — work in this worktree and report the drift."
+    return 0
+  fi
 
   # Resolve the clock. A test may inject SYNC_NOW; otherwise read the system clock
   # and handle its failure. Validate as an integer before any arithmetic so a
@@ -284,21 +349,9 @@ main() {
     return 0
   fi
 
-  # Compare the local default branch against its remote-tracking ref. --left-right
-  # --count on a three-dot range yields "<ahead>\t<behind>" — ahead = local-only
-  # commits, behind = origin-only commits — so a diverged branch (both > 0) can be
-  # distinguished from one that is strictly behind (fast-forwardable). A missing
-  # origin ref or a rev-list failure is surfaced, not swallowed as "up to date".
-  if ! counts="$(git rev-list --left-right --count "refs/heads/${db}...refs/remotes/origin/${db}" 2>/dev/null)"; then
-    warn "could not compare ${db} against origin/${db} — run \`git status\` to inspect; skipping sync check"
-    return 0
-  fi
-  ahead="${counts%%[[:space:]]*}"
-  behind="${counts##*[[:space:]]}"
-  if ! [[ "$ahead" =~ ^[0-9]+$ && "$behind" =~ ^[0-9]+$ ]]; then
-    warn "unexpected ahead/behind counts '${counts}' for ${db} — run \`git status\` to inspect; skipping sync check"
-    return 0
-  fi
+  drift_counts "$db" || return 0
+  ahead="${DRIFT_AHEAD}"
+  behind="${DRIFT_BEHIND}"
 
   # Success path: nothing to pull from origin. Distinguish truly in-sync from
   # ahead-only — a branch ahead of origin (unpushed commits) is not "in sync".
@@ -308,13 +361,6 @@ main() {
     else
       emit_notice "Session-start status — git: local \`${db}\` is ${ahead} commit(s) ahead of \`origin/${db}\` (unpushed), none behind"
     fi
-    return 0
-  fi
-
-  # A worker never touches the shared checkout, so telling it to sync one is
-  # telling it to break the rule. Report the drift, name whose job it is.
-  if is_herdr_worker; then
-    emit_notice "Session-start status — git: local \`${db}\` is ${behind} behind / ${ahead} ahead of \`origin/${db}\`. This is a Herdr worker session: the shared checkout is the foreman's (rules/agent-team-operation.md Writers and Checkouts). Do not sync it — work in this worktree and report the drift."
     return 0
   fi
 

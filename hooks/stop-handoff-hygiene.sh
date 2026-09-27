@@ -87,7 +87,7 @@ in_list() { # <needle> <haystack...>
 # agent, or anything this cannot determine. Fail open: a hook that goes silent
 # because a git command failed would be worse than one that speaks up.
 is_herdr_worker() {
-  [[ -n "${HERDR_ENV:-}" ]] || return 1
+  [[ -n "${HERDR_ENV+x}" ]] || return 1
 
   local git_dir common_dir rc=0
   git_dir="$(git rev-parse --absolute-git-dir 2>/dev/null)" || rc=$?
