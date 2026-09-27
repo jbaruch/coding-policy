@@ -8,14 +8,11 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
-from types import SimpleNamespace
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from foreman import cli
 from foreman.herdr import HerdrClient
-from foreman.tiers import parse_tiers
 from foreman.planner import plan
 from foreman.state import STATE_SCHEMA_VERSION, add_assignment, empty_state, load_state_checked, role_counts
 from tests.fakes import FakeRunner, ScriptedReads, agent_json, composer_reads, composer_screen, ok_json
@@ -312,15 +309,22 @@ class TierIntegrationTest(CliCase):
 
     def test_the_pinned_judge_entry_has_the_shape_of_every_other_tier(self):
         # coding-policy#490: the judge branch returned before the projection
-        # that adds the pressure fields.
-        worker = SimpleNamespace(name="claude", kind="claude", tiers=parse_tiers({"build": tier_row()}, "claude"))
-        judge_worker = SimpleNamespace(name="judge", kind="claude", tiers={})
-        judge = SimpleNamespace(agent="judge", model="opus-5", effort="high")
-        candidates = cli._candidate_tiers(["developer", "judge"], [worker, judge_worker], {}, judge=judge)
-        assert candidates is not None, "a tiered worker and a pinned judge always yield candidates"
-        judged, built = candidates["judge"]["judge"], candidates["developer"]["claude"]
-        self.assertEqual(set(judged), set(built))
-        self.assertEqual((judged["pressure_headroom"], judged["de_escalated"]), (None, False))
+        # that adds the pressure fields, so a plan's `tiers.judge` lacked them.
+        judge = copy.deepcopy(self.settings["agents"][0])
+        judge["name"] = "judge"
+        del judge["tiers"]
+        self.settings["agents"].append(judge)
+        self.settings["judge"] = {"agent": "judge", "model": "opus-5", "effort": "high"}
+        self.write_config()
+        self.snapshot.write_text(json.dumps({"agents": {"claude": {"headroom_pct": 50},
+                                                        "judge": {"headroom_pct": 50}}}))
+        rc, output, error = self.run_cli(["plan", *self.base(), "--roles", "developer,judge",
+                                          "--judge-mode", "adjudication",
+                                          "--snapshot", str(self.snapshot), "--now", AT])
+        self.assertEqual(rc, 0, error)
+        tiers = json.loads(output)["tiers"]
+        self.assertEqual((tiers["judge"]["pressure_headroom"], tiers["judge"]["de_escalated"]), (None, False))
+        self.assertEqual(set(tiers["judge"]), set(tiers["developer"]))
 
     def test_a_schema_six_tier_row_migrates_as_never_de_escalated(self):
         # coding-policy#477: nothing could de-escalate before this version, so
