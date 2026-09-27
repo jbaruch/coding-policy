@@ -1,7 +1,11 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "extends": ["config:recommended"],
-  "ignorePaths": [".github/workflows/*.lock.yml"],
+  "extends": [
+    "config:recommended"
+  ],
+  "ignorePaths": [
+    ".github/workflows/*.lock.yml"
+  ],
   "customManagers": [
     {
       "customType": "regex",
@@ -15,6 +19,28 @@
         "# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)( versioning=(?<versioning>\\S+))?\\s+npm install -g pyright@(?<currentValue>\\S+)",
         "# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)( versioning=(?<versioning>\\S+))?[\\s\\S]*?npm install -g @openai/codex@(?<currentValue>\\S+)"
       ]
+    }
+  ],
+  "packageRules": [
+    {
+      "description": "ACR acceptance lane: the upstream FFA gate targets Python 3.12; stay within 3.12.x (see the step's renewal note).",
+      "matchFileNames": [
+        ".github/workflows/acr-codex-accept.yml"
+      ],
+      "matchDepNames": [
+        "python"
+      ],
+      "allowedVersions": "<3.13"
+    },
+    {
+      "description": "ACR acceptance lane: bubblewrap is pinned to a Noble (24.04) build; move the runner only together with a bubblewrap re-pin.",
+      "matchFileNames": [
+        ".github/workflows/acr-codex-accept.yml"
+      ],
+      "matchDepNames": [
+        "ubuntu"
+      ],
+      "allowedVersions": "<25"
     }
   ]
 }
