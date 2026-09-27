@@ -1,7 +1,5 @@
 # Changelog
 
-## 0.3.286 — 2026-09-27
-
 ### Fixed
 
 - **The ACR acceptance helper's output writes are descriptor-relative end to
@@ -30,6 +28,10 @@
   the output path (an `os.open` stand-in models the blocking read open, so no
   timer is involved), and the new refusal text.
   The documented threat model still scopes out a hostile same-user process.
+
+## 0.3.286 — 2026-09-27
+
+### Fixed
 
 - **Every inline diagnostic suppression now carries its cause, or is gone
   (#538).** `rules/language-diagnostics.md` Findings Are Non-Dismissible
