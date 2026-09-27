@@ -18,6 +18,52 @@
   pass `--state`). Low likelihood in practice (evaluate is an operator-run offline tool and
   migrate-home a one-time step), deferred from Copilot's advisory on #536.
 
+## 0.3.288 — 2026-09-27
+
+### Fixed
+
+- **The ACR acceptance helper's output writes are descriptor-relative end to
+  end (#558).** Follow-ups from #550's review, in
+  `.github/codex-accept/contract.py`. `write_new` resolved its parent with
+  `Path.mkdir` and a plain `O_DIRECTORY` open, so a symlinked intermediate
+  directory was followed; it now takes the owning root and walks every
+  component through `O_NOFOLLOW` descriptors, sharing one walk
+  (`write_under`) with `write_private`. The new-file branch `fchmod`ed without
+  re-reading the link count, so a hard link added while the file was being
+  written would have carried the mode change to a second name; both branches
+  now re-check `S_ISREG` and `st_nlink == 1` immediately before the `fchmod`
+  (`private_mode`). The existing-file comparison opened without
+  `O_NONBLOCK`, so a FIFO planted at an output path hung the job waiting for a
+  writer; it now opens non-blocking and the `S_ISREG` check refuses it. The
+  different-content refusal now says what to do: keep the run root for
+  inspection and re-run with a fresh run root. The walk also refuses `.` and
+  `..` components in both the root and the path (`relative_to` keeps a `..`
+  below the root and drops one inside it, and the kernel resolves either
+  through whatever link precedes it), and `extract_archive` now creates the
+  download destination through the same walk anchored at its parent instead of
+  `Path.mkdir`, so a symlinked parent refuses. `prove-runtime --output` now
+  requires the output's parent directory to exist. Regression tests cover a
+  symlinked parent at each depth, a symlinked or missing root, a `..` path, a `..` after a symlink in the root, a
+  download into a symlinked parent, a hard link added mid-create for both
+  writers (a 0277 umask makes a stray chmod visible on the link), a FIFO at
+  the output path (an `os.open` stand-in models the blocking read open, so no
+  timer is involved), and the new refusal text.
+  The documented threat model still scopes out a hostile same-user process.
+
+## 0.3.287 — 2026-09-27
+
+### Fixed
+
+- **`foreman-reset` resolves a relative `FOREMAN_HERDR_BIN` before the
+  deliverer starts (#533).** A relative `--herdr-bin` was already resolved to
+  an absolute path, but the same value from `FOREMAN_HERDR_BIN` passed through
+  as-is: the detached deliverer inherited it and ran from the package
+  directory, so it looked for Herdr in the wrong place, and the saved resume
+  prompt omitted it. `skills/herdr-foreman/foreman/cli.py` now resolves the
+  flag, or else the environment value, the same way for the deliverer's argv
+  and the recorded resume options; a bare command name still resolves on
+  `PATH`.
+
 ## 0.3.286 — 2026-09-27
 
 ### Fixed
