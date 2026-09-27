@@ -7,6 +7,8 @@ _ROOT = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
 if _ROOT not in _sys.path:
     _sys.path.insert(0, _ROOT)
 
+import contextlib
+import io
 import os
 import re
 import tempfile
@@ -302,6 +304,46 @@ class FrozenPathTest(unittest.TestCase):
             freeze_paths({"brief": str(braced / "brief.md")})
         with self.assertRaisesRegex(UsageError, r"Cannot read briefing file .*br\{0\}ce\{x\}/missing.md"):
             freeze_paths({"brief": str(braced / "missing.md")})
+
+    def failing_read_only_closes(self):
+        """Patches making every close of a descriptor opened without O_CREAT report EIO after closing it."""
+        real_open, real_close, read_only = os.open, os.close, set()
+
+        def tracking_open(name, flags, *args, **kwargs):
+            descriptor = real_open(name, flags, *args, **kwargs)
+            if not flags & os.O_CREAT:
+                read_only.add(descriptor)
+            return descriptor
+
+        def failing_close(descriptor):
+            real_close(descriptor)
+            if descriptor in read_only:
+                read_only.discard(descriptor)
+                raise OSError(5, "Input/output error")
+        return (patch("foreman.assign.os.open", side_effect=tracking_open),
+                patch("foreman.assign.os.close", side_effect=failing_close))
+
+    def test_a_failed_read_only_close_warns_and_the_freeze_stands(self):
+        # coding-policy#562 review: a close in a finally block escaped as a
+        # traceback. Nothing is written through these descriptors, so the
+        # freeze completes and the failure is reported on stderr.
+        from foreman.assign import read_frozen
+        (self.root / "source" / "brief.md").write_text("a new brief\n")
+        stderr = io.StringIO()
+        opener, closer = self.failing_read_only_closes()
+        with opener, closer, contextlib.redirect_stderr(stderr):
+            frozen = freeze_paths({"brief": str(self.root / "source" / "brief.md")})["brief"]
+        self.assertEqual(read_frozen(frozen), b"a new brief\n")
+        self.assertIn("Could not close the descriptor for", stderr.getvalue())
+        self.assertIn("Input/output error", stderr.getvalue())
+
+    def test_a_failed_close_never_hides_the_failure_being_reported(self):
+        stderr = io.StringIO()
+        opener, closer = self.failing_read_only_closes()
+        with opener, closer, contextlib.redirect_stderr(stderr):
+            with self.assertRaisesRegex(UsageError, "Cannot read briefing file .*missing.md"):
+                freeze_paths({"brief": str(self.root / "source" / "missing.md")})
+        self.assertIn("Could not close the descriptor for", stderr.getvalue())
 
     def test_a_fifo_source_is_refused_without_hanging(self):
         fifo = self.root / "source" / "fifo.md"

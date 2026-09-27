@@ -231,7 +231,7 @@ def freeze_paths(paths):
             target = directory / FROZEN_DIR / "{}.{}{}".format(Path(source).stem, digest[:16], Path(source).suffix)
             _write_frozen(held, target, data, source)
         finally:
-            os.close(held)
+            _release(held, directory)
         # Inspected apart from the write's handlers: an error raised inside a
         # handler never reaches a sibling handler, so it would escape as a
         # traceback (#460). A fresh copy is read back too, through the same
@@ -239,6 +239,33 @@ def freeze_paths(paths):
         _require_frozen_copy(target, digest)
         frozen[key] = str(target)
     return frozen
+
+
+def _close(fd):
+    """Close `fd`, returning the failure's text instead of raising it, or None.
+
+    POSIX releases the descriptor even when close reports an error, so the
+    caller never closes it again. Returning keeps a close inside `finally`
+    from replacing a failure already on its way out.
+    """
+    try:
+        os.close(fd)
+    except OSError as exc:
+        return exc.strerror or str(exc)
+    return None
+
+
+def _release(fd, path):
+    """Close a read-only or directory descriptor, warning on stderr when the close fails.
+
+    Nothing was written through such a descriptor, so a failed close loses
+    nothing and the operation it served stands; raising would turn that into
+    a traceback, or bury the error the caller is already reporting.
+    """
+    failure = _close(fd)
+    if failure is not None:
+        stderr_warn("Could not close the descriptor for {}: {}. Nothing was written through it; if this repeats, "
+                    "check the filesystem holding it.".format(path, failure))
 
 
 def _write_frozen(held, target, data, source):
@@ -267,7 +294,7 @@ def _write_frozen(held, target, data, source):
     try:
         _create_exclusive(frozen_dir, target, data, source)
     finally:
-        os.close(frozen_dir)
+        _release(frozen_dir, directory)
 
 
 def _create_exclusive(frozen_dir, target, data, source):
@@ -285,23 +312,15 @@ def _create_exclusive(frozen_dir, target, data, source):
     except OSError as exc:
         raise UsageError(failed.format(source, target, exc.strerror or str(exc)), {"path": str(target)}) from None
     reason = None
-    closed = False
     try:
-        try:
-            view = memoryview(data)
-            while view:
-                view = view[os.write(fd, view):]
-        except OSError as exc:
-            reason = exc.strerror or str(exc)
-        # Marked before the call: POSIX releases the descriptor even when
-        # close reports an error, so it is never closed twice.
-        closed = True
-        os.close(fd)
+        view = memoryview(data)
+        while view:
+            view = view[os.write(fd, view):]
     except OSError as exc:
-        reason = reason or exc.strerror or str(exc)
+        reason = exc.strerror or str(exc)
     finally:
-        if not closed:
-            os.close(fd)
+        closing = _close(fd)
+    reason = reason or closing
     if reason is None:
         return
     try:
@@ -344,13 +363,13 @@ def _open_directory_unlinked(target, open_failed=_FROZEN_OPEN_FAILED, linked=_FR
                                      {"path": str(target)}) from None
                 raise UsageError(open_failed.format(target, exc.strerror or str(exc), brief),
                                  {"path": str(target)}) from None
-            os.close(fd)
+            _release(fd, Path(*parts[:index - 1]))
             fd = child
         opened, fd = fd, None
         return opened
     finally:
         if fd is not None:
-            os.close(fd)
+            _release(fd, target)
 
 
 _SOURCE_OPEN_FAILED = ("Cannot read briefing file {2} to freeze it for dispatch ({0}): {1}. Restore readability "
@@ -382,7 +401,7 @@ def _read_source(held, canonical, given):
         raise UsageError(_SOURCE_OPEN_FAILED.format(canonical, exc.strerror or str(exc), given),
                          {"path": str(given)}) from None
     finally:
-        os.close(fd)
+        _release(fd, canonical)
     return b"".join(chunks)
 
 
@@ -406,7 +425,7 @@ def _read_unlinked_regular(target):
         raise UsageError("Cannot open frozen brief {}: {}. Restore its readability or move it aside and re-run."
                          .format(target, exc.strerror or str(exc)), {"path": str(target)}) from None
     finally:
-        os.close(parent)
+        _release(parent, target.parent)
     try:
         # On the raw descriptor, before any file object: wrapping a directory
         # fails first and would hide that it is not a regular file.
@@ -422,7 +441,7 @@ def _read_unlinked_regular(target):
         raise UsageError("Cannot read frozen brief {}: {}. Restore its readability or move it aside and re-run."
                          .format(target, exc.strerror or str(exc)), {"path": str(target)}) from None
     finally:
-        os.close(fd)
+        _release(fd, target)
     if not regular:
         raise UsageError("Frozen brief {} is a link or not a regular file; move it aside and re-run so the "
                          "freeze writes a real copy.".format(target), {"path": str(target)})

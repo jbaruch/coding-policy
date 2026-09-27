@@ -20,14 +20,18 @@
   directory's bytes under another's `.dispatched/`. A FIFO planted as a brief
   is refused rather than hung on. A write or `close` that fails removes the
   file it created, so a re-run succeeds instead of meeting a partial copy it
-  may never rewrite. Every copy, fresh or existing, is read back through the
+  may never rewrite. A failed `close` on a read-only or directory descriptor
+  warns on stderr and never raises: nothing was written through it, and
+  raising from a `finally` would turn the freeze into a traceback or bury
+  the error already being reported. Every copy, fresh or existing, is read back through the
   path walk the gate uses. A row recorded by an older build through a linked
   directory is refused with a dispatch-again repair. Regression tests cover
   a retargeted ancestor, a link deeper in the path, a brief under an
   aliased directory freezing canonically, an alias retargeted between
   resolution and read, a source directory swapped for a link before the read
   and before the write, a source directory replaced after the read, a failed
-  write and a failed close each followed by a clean retry, a brief path
+  write and a failed close each followed by a clean retry, a failed
+  read-only close warning without masking the primary error, a brief path
   containing braces, and a FIFO source. Carrying the verified bytes through
   the dispatch-identity and prompt reads that follow the freeze is #565.
 
