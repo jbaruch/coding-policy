@@ -39,6 +39,10 @@
   from PR #528's review. `herdr-foreman` Step 11's `check-member` follow-up
   paragraph, which merged several directives, is now one bullet per directive.
 
+## 0.3.300 — 2026-09-27
+
+### Fixed
+
 - **The Stop hook no longer runs the foreman's cleanup when it cannot tell a
   Herdr worker from the foreman (#556).** `hooks/stop-handoff-hygiene.sh` read
   a failed `git rev-parse --absolute-git-dir` or `--git-common-dir` probe with
