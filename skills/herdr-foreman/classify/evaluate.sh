@@ -50,7 +50,8 @@ die() { echo "evaluate: $*" >&2; exit 2; }
 
 corpus() { # <state-file-or-empty> <limit> <since-or-empty> <state-root> <skill-dir>
   # An empty state file reads the default home. That run checks the home and
-  # reads the store under one shared hold of the home guard
+  # reads the store, and checks every report path it names, under one shared
+  # hold of the home guard
   # (skills/herdr-foreman/foreman/home.py `guard`, `require_current`), so a
   # migrate-home starting between the check and the read is refused instead of
   # leaving a half-moved or empty corpus. An explicit --state is never moved
@@ -70,37 +71,43 @@ def read(state):
         raise SystemExit(2)
 
 
+def build(data):
+    rows, seen = [], set()
+    for dispatch in data.get("recovery", {}).get("dispatches", []):
+        report = dispatch.get("report") or {}
+        evidence = report.get("evidence")
+        verdict = report.get("verdict")
+        if not (isinstance(evidence, dict) and evidence.get("path")) or verdict not in {"blocking", "approved"}:
+            continue
+        path = pathlib.Path(evidence["path"])
+        # ISO timestamps order as strings, so a date prefix selects everything
+        # recorded on or after it.
+        if since and dispatch.get("at", "") < since:
+            continue
+        if path in seen or not path.is_file():
+            continue
+        seen.add(path)
+        rows.append({"report": str(path), "recorded": verdict, "at": dispatch.get("at", ""),
+                     "role": dispatch.get("role"), "task": dispatch.get("task")})
+    rows.sort(key=lambda row: row["at"], reverse=True)
+    return json.dumps(rows[:limit] if limit > 0 else rows)
+
+
 if explicit:
-    data = read(pathlib.Path(explicit).expanduser())
+    corpus = build(read(pathlib.Path(explicit).expanduser()))
 else:
     from foreman import home
     from foreman.errors import ForemanError
     try:
+        # Held through the report-file checks too: reports can live under the
+        # home, so a migration after the read could still drop them.
         with home.guard(False):
             home.require_current({"state"})
-            data = read(home.roots()["state"] / home.CURRENT / home.STATE_FILE)
+            corpus = build(read(home.roots()["state"] / home.CURRENT / home.STATE_FILE))
     except ForemanError as exc:
         sys.stderr.write("evaluate: {} Or pass --state.\n".format(exc.message))
         raise SystemExit(2)
-rows, seen = [], set()
-for dispatch in data.get("recovery", {}).get("dispatches", []):
-    report = dispatch.get("report") or {}
-    evidence = report.get("evidence")
-    verdict = report.get("verdict")
-    if not (isinstance(evidence, dict) and evidence.get("path")) or verdict not in {"blocking", "approved"}:
-        continue
-    path = pathlib.Path(evidence["path"])
-    # ISO timestamps order as strings, so a date prefix selects everything
-    # recorded on or after it.
-    if since and dispatch.get("at", "") < since:
-        continue
-    if path in seen or not path.is_file():
-        continue
-    seen.add(path)
-    rows.append({"report": str(path), "recorded": verdict, "at": dispatch.get("at", ""),
-                 "role": dispatch.get("role"), "task": dispatch.get("task")})
-rows.sort(key=lambda row: row["at"], reverse=True)
-print(json.dumps(rows[:limit] if limit > 0 else rows))
+print(corpus)
 PY
 }
 
