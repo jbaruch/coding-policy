@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.302 — 2026-09-27
+
 ### Fixed
 
 - **`verify-oracle` checks a round against the oracle bytes its plan was
