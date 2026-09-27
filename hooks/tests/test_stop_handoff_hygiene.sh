@@ -21,8 +21,10 @@
 #          dirty and unpushed ones are reported on stderr.
 #      4b. Owner script failure (no origin) -> warn, block nothing.
 #      4c. Herdr worker session -> no worktree finding; diagnostics still gate.
+#          An empty HERDR_ENV still marks the worker.
 #      4d. The foreman's session -> blocks, naming the round's sweep, never
 #          prune-worktrees.sh (case 4 names prune-worktrees.sh outside Herdr).
+#          An empty HERDR_ENV still marks the foreman.
 #      4e. A shared checkout whose name ends in a newline -> still blocks.
 #      4f. A finding naming a newline-bearing path -> reported whole.
 #   5. Dirty tree only -> allow (report-only, not a block).
@@ -117,7 +119,7 @@ run_hook() {
   local repo="$1" json="$2" pathspec="${3:-$PATH}"
   shift 2
   (( $# )) && shift
-  OUT="$(cd "$repo" && printf '%s' "$json" | env PATH="$pathspec" WORKTREE_ROOT="$TMP/wt" \
+  OUT="$(cd "$repo" && printf '%s' "$json" | env -u HERDR_ENV PATH="$pathspec" WORKTREE_ROOT="$TMP/wt" \
     PRUNE_NOW="$PRUNE_NOW" PRUNE_IDLE_HOURS=24 STOP_PRUNE_BUDGET_SEC=3600 "$@" bash "$HOOK" 2>"$TMP/hook.err")"
   RC=$?
   ERRTEXT="$(cat "$TMP/hook.err")"
@@ -258,6 +260,12 @@ main() {
     pass; else fail "worker diagnostics: expected a diagnostics block without the worktree finding, got RC=$RC OUT=$OUT"; fi
   rm -f "$TMP/wt/r4-worker/bad.sh" || die "r4-worker cleanup failed"
 
+  # HERDR_ENV set but empty is still a Herdr session (rules/agent-team-operation.md
+  # Two Modes): the worker's worktree finding stays suppressed.
+  run_hook "$TMP/wt/r4-worker" '{"stop_hook_active":false}' "$PATH" HERDR_ENV=
+  if [[ $RC -eq 0 && -z "$OUT" ]]; then
+    pass; else fail "empty HERDR_ENV worker session: expected silence, got RC=$RC OUT=$OUT ERR=$ERRTEXT"; fi
+
   # 4e. A shared checkout whose name ends in a newline still reaches the
   #     owner script whole: the inventory is read NUL-framed.
   local nl=$'\n'
@@ -296,6 +304,9 @@ main() {
   run_hook "$TMP/r4" '{"stop_hook_active":false}' "$PATH" HERDR_ENV=1
   if [[ $RC -eq 0 ]] && reason_has "r4-wt" && reason_has "sweep-worktrees.sh" && ! reason_has "prune-worktrees.sh"; then
     pass; else fail "foreman session: expected the worktree block naming the sweep, got RC=$RC OUT=$OUT ERR=$ERRTEXT"; fi
+  run_hook "$TMP/r4" '{"stop_hook_active":false}' "$PATH" HERDR_ENV=
+  if [[ $RC -eq 0 ]] && reason_has "r4-wt" && reason_has "sweep-worktrees.sh" && ! reason_has "prune-worktrees.sh"; then
+    pass; else fail "empty HERDR_ENV foreman session: expected the worktree block naming the sweep, got RC=$RC OUT=$OUT ERR=$ERRTEXT"; fi
 
   # 5. dirty tree only -> allow (report-only).
   mk_origin o5; clone_from "$BARE" "$TMP/r5"

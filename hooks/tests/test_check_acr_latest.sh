@@ -29,6 +29,7 @@
 #  15. Fetch fails with a secret URL  -> exit code only, no URL in the status.
 #  16. Unreadable acr version         -> reinstall guidance.
 #  6b. Herdr session, pinned dep      -> the carve-out NOTE, no update.
+#  6c. Empty HERDR_ENV                -> still Herdr: no update, the NOTE only.
 #  17. jq only, no timeout utility    -> check and update run (bounded-fetch fallback).
 #  18. Neither python3 nor jq         -> no update, warning on stderr.
 #  19. origin's default renamed       -> checked against origin's live HEAD.
@@ -164,6 +165,17 @@ main() {
   run "$PROJECT" HERDR_ENV=1 FAKE_OUT="Updated something" FAKE_LIST='{"ok":true,"result":{"dependencies":[{"declaration":{"source":"github:jbaruch/x","requested":"v1"}}]}}'
   if [[ $RC -eq 0 && -z "$CALLS" ]] && context | grep -q "github:jbaruch/x@v1"; then
     pass; else fail "herdr pin check: expected the NOTE and no update, got OUT=$OUT calls=$CALLS"; fi
+
+  # 6c. HERDR_ENV set but empty is still a Herdr session
+  #     (rules/agent-team-operation.md Two Modes): an update candidate is not
+  #     installed, and the read-only carve-out NOTE is still reported.
+  mk_project p6c
+  run "$PROJECT" HERDR_ENV= FAKE_OUT="Updated something"
+  if [[ $RC -eq 0 && -z "$OUT" && -z "$CALLS" ]]; then
+    pass; else fail "empty HERDR_ENV: expected silence and no acr call, got OUT=$OUT calls=$CALLS"; fi
+  run "$PROJECT" HERDR_ENV= FAKE_OUT="Updated something" FAKE_LIST='{"ok":true,"result":{"dependencies":[{"declaration":{"source":"github:jbaruch/x","requested":"v1"}}]}}'
+  if [[ $RC -eq 0 && -z "$CALLS" ]] && context | grep -q "github:jbaruch/x@v1"; then
+    pass; else fail "empty HERDR_ENV pin check: expected the NOTE and no update, got OUT=$OUT calls=$CALLS"; fi
 
   # 7. behind origin -> not updated, acr never called.
   mk_project p7
