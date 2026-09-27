@@ -177,6 +177,26 @@ class CloseMemberTest(MembersCase):
             members.close(self.path, "dispatch-a", self.ledger, LATER)
         self.assertTrue(store.pending(store.load(self.path)))
 
+    def test_a_missing_dispatch_state_refuses_without_a_second_resolve(self):
+        # On 3.11/3.12 a missing component followed by `..` and a loop makes a
+        # strict resolve raise FileNotFoundError and a non-strict one raise
+        # RuntimeError; either way the refusal must stay the usable-ledger one.
+        self.emit()
+        missing = str(self.root / "gone" / ".." / "loop" / "state.json")
+        self.write_ledger("accepted", state=missing)
+        real = Path.resolve
+
+        def resolve(path, strict=False):
+            if str(path) == missing:
+                if strict:
+                    raise FileNotFoundError(errno.ENOENT, "No such file or directory", missing)
+                raise RuntimeError("Symlink loop from {!r}".format(missing))
+            return real(path, strict=strict)
+
+        with patch.object(Path, "resolve", resolve), self.assertRaisesRegex(UsageError, "bound to dispatch state"):
+            members.close(self.path, "dispatch-a", self.ledger, LATER)
+        self.assertTrue(store.pending(store.load(self.path)))
+
     def test_a_ledger_line_cannot_forge_the_section_heading(self):
         self.emit()
         self.write_ledger("accepted", fields={"_heading": "renamed-section", "_section": "event-1"})

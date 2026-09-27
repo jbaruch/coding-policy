@@ -156,13 +156,16 @@ def _resolve_bound(path, dispatch_state):
 
     Non-strict `resolve` stopped raising on a symlink loop in Python 3.13, so
     resolve strictly: a loop raises RuntimeError before 3.13 and OSError from
-    it on. A path that does not exist cannot be a loop; it resolves
-    non-strictly and then fails the binding comparison as another state.
+    it on. A path that does not exist names no state this command runs
+    against, so it is returned as written (already validated absolute) and
+    fails the binding comparison as another state. It is never resolved a
+    second time: a non-strict resolve could itself raise on a loop behind a
+    missing component, or on a filesystem race.
     """
     try:
         return str(Path(dispatch_state).resolve(strict=True))
     except FileNotFoundError:
-        return str(Path(dispatch_state).resolve())
+        return dispatch_state
     except (OSError, RuntimeError) as exc:
         raise _unusable(path, "its dispatch_state {!r} does not resolve: {}".format(dispatch_state, exc)) from None
 
