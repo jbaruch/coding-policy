@@ -22,6 +22,46 @@
   large the expected output. Regression cases cover each gap and fail against
   the old code.
 
+## 0.3.292 — 2026-09-27
+
+### Fixed
+
+- **A frozen-brief path with a symlinked ancestor is no longer read back
+  (#554).** #534 made `assign.read_frozen` refuse relative paths and `..`
+  components, but an ancestor could still be a link:
+  `/tmp/alias/.dispatched/brief.<digest>.md` was accepted, so retargeting
+  `alias` after dispatch made `verify-partition` and recovery read another
+  source's intact frozen copy. `read_frozen` now reaches the file through a
+  descriptor walk from `/` that opens every directory component with
+  `O_NOFOLLOW` relative to the one before it, refusing a link anywhere on the
+  path without a resolve-then-open race. Each directory opens search-only
+  (`O_PATH` on Linux, `O_SEARCH` on Darwin), so an execute-only ancestor
+  that an ordinary path lookup passes is walked too. `freeze_paths` freezes under the
+  source directory's `realpath`, so paths it records carry no links (macOS
+  `/tmp` and `/var` included). It opens that directory once through the same
+  walk and holds the descriptor through both the source read and the copy's
+  creation (`.dispatched/`, then the file with `O_CREAT | O_EXCL |
+  O_NOFOLLOW`), so an alias retargeted, an ancestor swapped for a link, or
+  the directory replaced by another real one mid-freeze can never file one
+  directory's bytes under another's `.dispatched/`. A FIFO planted as a brief
+  is refused rather than hung on. A write or `close` that fails removes the
+  file it created, so a re-run succeeds instead of meeting a partial copy it
+  may never rewrite. A failed `close` on a read-only or directory descriptor
+  warns on stderr and never raises: nothing was written through it, and
+  raising from a `finally` would turn the freeze into a traceback or bury
+  the error already being reported. Every copy, fresh or existing, is read back through the
+  path walk the gate uses. A row recorded by an older build through a linked
+  directory is refused with a dispatch-again repair. Regression tests cover
+  a retargeted ancestor, a link deeper in the path, a brief under an
+  aliased directory freezing canonically, an alias retargeted between
+  resolution and read, a source directory swapped for a link before the read
+  and before the write, a source directory replaced after the read, a failed
+  write and a failed close each followed by a clean retry, a failed
+  read-only close warning without masking the primary error, an
+  execute-only ancestor, a brief path
+  containing braces, and a FIFO source. Carrying the verified bytes through
+  the dispatch-identity and prompt reads that follow the freeze is #565.
+
 ## 0.3.290 — 2026-09-27
 
 ### Fixed
