@@ -1,5 +1,44 @@
 # Changelog
 
+### Fixed
+
+- **Cleanup hardening left over from the #543 review (#583).** Copilot
+  advisories on the worktree/branch cleanup redesign, each judged against the
+  standing decision that only what origin restores is deleted.
+  - `hooks/check-leftover-worktrees.sh` and `hooks/stop-handoff-hygiene.sh`
+    appended `-o BatchMode=yes` only when `GIT_SSH_COMMAND` was unset, so a
+    user-set SSH command could stop at a passphrase prompt and hold the hook
+    until its budget. BatchMode is now appended to whatever command is set,
+    as `hooks/check-acr-latest.sh` already did.
+  - `skills/herdr-foreman/bounded-run.sh` cancelled its alarm after leaving
+    the protected block, so an expiry landing as the command exited raised
+    outside the handler: a Python traceback and exit 1 instead of 124. The
+    alarm is now blocked and cancelled inside the handler's reach. A new test
+    seam, `BOUNDED_RUN_TEST_EXPIRE_AFTER_EXIT=1`, delivers that expiry.
+  - `skills/herdr-foreman/sweep-worktrees.sh` proved the root's identity once,
+    before the first prune. A root replaced after one repository's prune ran
+    let the next prune read its moved worktrees as gone, drop their
+    registrations and delete their branches. The root is now re-proven before
+    every prune; a change after the first stops the rest with an `errors`
+    entry naming the repositories not pruned (exit 2), and the prunes that
+    already ran keep their results.
+  - `hooks/check-leftover-worktrees.sh` now captures `git worktree list` to a
+    file and checks git's exit before parsing, as the Stop hook does. The
+    review claimed the pipe masked a git failure after a valid prefix; under
+    `set -o pipefail` it did not (the pipeline returned git's exit), so this
+    is consistency and a clearer message naming git's own exit, not a fix of
+    a masked failure.
+  - Declined, with replies on the review threads: leasing origin's default
+    branch in `prune-remote-branches.sh`'s delete (git sends no command for an
+    unchanged ref, so a lease on it is a client-side re-read of the same
+    advertisement the gate just read, never a server-side compare, and losing
+    containment needs a force-push of the default, which drops the same
+    commits from the default itself); and a worktree identity check in
+    `prune-worktrees.sh`'s recheck (`git worktree remove` already refuses a
+    directory whose `.git` file does not point back at the registered gitdir,
+    and the recheck already requires the same clean HEAD origin holds, so a
+    replacement it could remove holds only what origin restores).
+
 ## 0.3.293 — 2026-09-27
 
 ### Changed
