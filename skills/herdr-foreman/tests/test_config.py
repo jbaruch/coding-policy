@@ -196,6 +196,32 @@ class ParseConfigTest(unittest.TestCase):
                       judge={"agent": untiered["name"], "model": "gpt-5.6-sol", "effort": "high"})
         self.assertEqual(len(parse_config(judged)), 1)
 
+    def test_schema_5_exempts_only_a_judge_block_that_parses(self):
+        # coding-policy#527: a partial judge block names an agent but no model,
+        # so parse_judge refuses it and it must exempt nobody from schema 5.
+        untiered = dict(VALID["agents"][1])
+        untiered.pop("tiers", None)
+        partial = dict(VALID, schema_version=5, agents=[untiered], judge={"agent": untiered["name"]})
+        with self.assertRaises(ConfigError) as caught:
+            parse_config(partial)
+        self.assertIn("judge.model", str(caught.exception))
+        with self.assertRaises(ConfigError) as expected:
+            parse_judge(partial)
+        self.assertEqual(str(caught.exception), str(expected.exception))
+
+    def test_a_malformed_judge_block_is_refused_by_parse_config(self):
+        for judge in (["codex"], {"agent": "codex", "model": "m", "effort": "turbo"}):
+            with self.subTest(judge=judge):
+                with self.assertRaises(ConfigError):
+                    parse_config(dict(VALID, judge=judge))
+
+    def test_a_full_judge_block_still_exempts_its_worker(self):
+        untiered = dict(VALID["agents"][1])
+        untiered.pop("tiers", None)
+        judged = dict(VALID, schema_version=5, agents=[untiered],
+                      judge={"agent": untiered["name"], "model": "gpt-5.6-sol"})
+        self.assertEqual([agent.name for agent in parse_config(judged)], ["codex"])
+
     def test_schema_4_tier_tables_carry_a_consultation_row(self):
         # coding-policy#518/#524: investigator and advisor default to
         # `consultation` from schema 4; an older table keeps its old default.
