@@ -139,7 +139,7 @@ if detail:
             payload = json.load(handle)
     except (OSError, ValueError) as exc:
         row.update(status="blocked", detail=None,
-                   reason="`{}` exited 0 but its output is not readable JSON ({}); re-run "
+                   reason="`{}` wrote output that is not readable JSON ({}); re-run "
                           "it, read its diagnostic, and repair it to emit one JSON object "
                           "before planning".format(command, exc))
     else:
@@ -149,7 +149,7 @@ if detail:
             row["detail"] = payload
         else:
             row.update(status="blocked", detail=None,
-                       reason="`{}` exited 0 with JSON {} where its contract emits one JSON "
+                       reason="`{}` wrote JSON {} where its contract emits one JSON "
                               "object; re-run it, read its diagnostic, and repair it to emit "
                               "an object before planning".format(command, type(payload).__name__))
 checks[name] = row

@@ -181,8 +181,8 @@ main() {
        && [[ "$(field "$OUT" 'd["checks"]["roster"]["status"]')" == '"blocked"' ]] \
        && [[ "$(field "$OUT" 'd["checks"]["gates"]["status"]')" == '"blocked"' ]] \
        && [[ "$(field "$OUT" 'd["checks"]["roster"]["detail"]')" == "null" ]] \
-       && printf '%s' "$OUT" | grep -q '`roster.sh` exited 0 with JSON' \
-       && printf '%s' "$OUT" | grep -q '`resolve-gates.sh /tmp` exited 0 with JSON'; then
+       && printf '%s' "$OUT" | grep -q '`roster.sh` wrote JSON' \
+       && printf '%s' "$OUT" | grep -q '`resolve-gates.sh /tmp` wrote JSON'; then
       pass; else fail "a '$shape' payload on exit 0 must block, got RC=$RC OUT=$OUT"; fi
   done
 
