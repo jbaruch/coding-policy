@@ -92,6 +92,8 @@
 #  83. Partial lsof         -> an unreadable cwd of a live process: idle-unknown;
 #                             a mount lsof could not stat, or an exited
 #                             process, is no gap.
+#  85. Default changed      -> origin's HEAD naming another branch before the
+#                             removal keeps a merged worktree and branch.
 #  84. Unreadable subdir    -> the nested-repository walk keeps the worktree.
 #
 # Run: bash skills/herdr-foreman/tests/test_prune_worktrees.sh
@@ -192,26 +194,26 @@ idle_run() { # <extra env...> -- runs the script on $SHARED with the fixed clock
 
 
 
-#: How many 0.1s polls the harness waits for a sleeper to report ready.
-SLEEPER_READY_TRIES=100
-
 # Start a background process whose cwd is <dir>, and return only once it is
-# provably there: the child writes its physical cwd to a ready file after the
-# cd, then execs sleep; the harness waits for that file (bounded) and registers
-# the process with the fake lsof.
+# there: the child writes its physical cwd into a FIFO after the cd, then
+# execs sleep; the harness's read of that FIFO returns exactly then, with no
+# polling and no deadline. The process is registered with the fake lsof.
 start_sleeper() { # <dir>
-  local want ready="$TMP/sleeper.ready" i got
+  local want ready="$TMP/sleeper.ready" got
   want="$(cd "$1" && pwd -P && printf x)" || die "cannot resolve the sleeper's directory $1"
   want="${want%x}"; want="${want%$'\n'}"
-  rm -f "$ready" "$ready.tmp" || die "cannot clear the sleeper's ready file $ready"
-  (cd "$1" && pwd -P > "$ready.tmp" && mv "$ready.tmp" "$ready" && exec sleep 300) &
+  rm -f "$ready" || die "cannot clear the sleeper's FIFO $ready"
+  mkfifo "$ready" || die "mkfifo $ready failed"
+  (
+    if cd "$1"; then
+      { pwd -P; printf x; } > "$ready"
+      exec sleep 3600
+    fi
+    printf 'cd-failed' > "$ready"
+  ) &
   SLEEPER=$!
-  for (( i = 0; i < SLEEPER_READY_TRIES; i++ )); do
-    [[ -s "$ready" ]] && break
-    sleep 0.1
-  done
-  [[ -s "$ready" ]] || die "the sleeper for $1 never reported ready after ${SLEEPER_READY_TRIES} polls — check that the directory is enterable"
-  got="$(cat "$ready" && printf x)" || die "cannot read the sleeper's ready file $ready"
+  got="$(cat "$ready")" || die "cannot read the sleeper's FIFO $ready"
+  [[ "$got" == *x ]] || die "the sleeper could not enter $1: $got"
   got="${got%x}"; got="${got%$'\n'}"
   [[ "$got" == "$want" ]] || die "the sleeper reported cwd '$got', not '$want'"
   # Registered with the fake probe; a path it cannot hold on one line is one
@@ -1064,6 +1066,22 @@ SH
   echo "83c. an unreadable cwd of an exited process still judges the worktree idle"
   if (( RC == 0 )) && ! listed "$SHARED" "$lg" && [[ -n "$(removed_head "$lg")" ]]; then
     pass; else fail "exited process: rc=$RC out=$OUT err=$ERRTEXT"; fi
+
+  # --- 85. origin's default branch changing mid-run voids a merged proof.
+  mk_repo newdefault
+  local nd="$ROOT/newdefault-wt"
+  add_wt "$SHARED" review/nd "$nd"
+  age_wt "$nd"
+  quiet "branch without a worktree failed" git -C "$SHARED" branch --no-track review/nd-nowt origin/main
+  quiet "push other failed" git -C "$SHARED" push -q origin origin/main:refs/heads/other
+  mkdir -p "$TMP/lsof85" || die "mkdir lsof85 failed"
+  printf '#!/usr/bin/env bash\nset -euo pipefail\ngit -C %q symbolic-ref HEAD refs/heads/other\n' "$BARE" > "$TMP/lsof85/lsof" || die "write lsof85 failed"
+  chmod +x "$TMP/lsof85/lsof" || die "chmod lsof85 failed"
+  idle_run PRUNE_LSOF="$TMP/lsof85/lsof"
+  echo "85. a default branch that changes before the removal keeps the worktree and the branch"
+  if (( RC == 0 )) && [[ "$(kept_reason "$nd")" == changed ]] && listed "$SHARED" "$nd" \
+    && [[ "$(branch_kept_reason review/nd-nowt)" == changed ]] && has_branch "$SHARED" review/nd-nowt; then
+    pass; else fail "default changed: rc=$RC out=$OUT err=$ERRTEXT"; fi
 
   # --- 84. a directory the nested-repository walk cannot read keeps the worktree.
   if [[ "$(id -u)" == 0 ]]; then

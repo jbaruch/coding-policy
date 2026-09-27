@@ -43,8 +43,8 @@
 # --no-optional-locks, so judging never rewrites the index.
 # Immediately before each removal, the path is re-proven to resolve to itself,
 # HEAD, branch tip, status, age and a fresh process probe are re-read, and the
-# removal proof is re-derived from origin as it is now; any change keeps the
-# worktree (reason changed). IDLE_HOURS and ACTIVITY_FILE_LIMIT are constants
+# removal proof is re-derived from origin as it is now, which branch origin's
+# HEAD names included; any change keeps the worktree (reason changed). IDLE_HOURS and ACTIVITY_FILE_LIMIT are constants
 # beside the functions that use them.
 # A git command that talks to origin (fetch, ls-remote, set-head) that fails
 # is reported by exit code and the command to rerun, never by its own message,
@@ -668,11 +668,24 @@ reachable_remotely() { # <shared> <commit>
 # Re-derive the removal proof immediately before a removal: 0 when <tip> is
 # still merged into origin's default (<mode> merged) or <head> still held by an
 # origin ref (<mode> reachable), 1 when the proof is gone, 2 on a failure.
+# Echo the branch origin's HEAD names now; 1 (ERRFILE says why) when it
+# cannot be read.
+origin_head_name() { # <shared>
+  local out rc=0 name
+  out="$(git -C "$1" ls-remote --symref origin HEAD 2>"$ERRFILE")" || rc=$?
+  if (( rc != 0 )); then network_failure "$rc" "$1" ls-remote --symref origin HEAD; return 1; fi
+  name="$(printf '%s\n' "$out" | sed -n 's#^ref: refs/heads/\(.*\)[[:space:]]HEAD$#\1#p' | head -n 1)"
+  if [[ -z "$name" ]]; then printf 'origin reports no default branch\n' > "$ERRFILE"; return 1; fi
+  printf '%s' "$name"
+}
+
 proof_holds() { # <shared> <mode> <tip> <head> <default>
   if [[ "$2" == merged ]]; then
     # Origin's default as it is now: a force-push since the run started can
-    # drop the merge.
-    local now_tip trc=0
+    # drop the merge, and a new default need not hold it at all.
+    local now_tip now_db trc=0
+    now_db="$(origin_head_name "$1")" || return 2
+    [[ "$now_db" == "$5" ]] || return 1
     now_tip="$(origin_default_tip "$1" "$5")" || trc=$?
     case "$trc" in
       0) ;;

@@ -12,14 +12,15 @@
 #   * NEVER TOUCHED OR LISTED when it is protected, or an open pull request
 #     has it as its head (`gh pr list --state open`);
 #   * DELETED when merged into origin's default branch: immediately before the
-#     deletion, the branch's tip, the default branch's tip and the open pull
-#     requests for it are read again from origin, and the deletion is
-#     `git push origin --delete` with `--force-with-lease=<branch>:<tip>`, so a
-#     push that landed since wins;
+#     deletion (and before a dry run's preview), the branch's tip, the default
+#     branch's tip, which branch origin's HEAD names, the open pull requests
+#     for it and its protection are read again, and any change keeps it
+#     (changed). The deletion is `git push origin --delete` with
+#     `--force-with-lease=<branch>:<tip>`, so a push that landed since wins;
 #   * QUESTIONABLE, reported for the operator's decision, when unmerged and its
 #     tip commit is at least REMOTE_IDLE_HOURS old: commits ahead of the
 #     default branch, age, last author, and the commands to open a pull
-#     request or delete it;
+#     request or delete it, the delete leased to the tip judged here;
 #   * KEPT silently when unmerged and younger than that (not-idle).
 # Without the GitHub CLI, or when it fails, nothing is deleted or listed:
 # `could_not_check` says why. A failed git or gh command that talks to origin
@@ -38,8 +39,9 @@
 #            "kept":[{"branch","reason"}],
 #            "could_not_check":"<why>"|null,
 #            "failed":[{"target","error"}]}
-#           kept reasons: changed (its tip or the default branch moved, or a
-#           pull request opened, since it was judged), not-idle.
+#           kept reasons: changed (its tip, the default branch or its tip,
+#           its protection, or its open pull requests changed since it was
+#           judged), not-idle.
 #   stderr: diagnostics only.
 #   exit  : 0 every decision applied (or previewed),
 #           1 precondition unmet (usage, git or python3 absent, not a repo,
@@ -98,6 +100,24 @@ open_pr_heads() { # <shared> [branch]
   [[ -n "${2:-}" ]] && args+=(--head "$2")
   out="$(cd "$1" && GH_PROMPT_DISABLED=1 gh "${args[@]}" 2>"$ERRFILE")" || rc=$?
   if (( rc != 0 )); then network_failure "$rc" "$1" gh "${args[@]}"; return 1; fi
+  printf '%s' "$out"
+}
+
+# Echo the branch origin's HEAD names now.
+remote_default() { # <shared>
+  local out rc=0 name
+  out="$(git -C "$1" ls-remote --symref origin HEAD 2>"$ERRFILE")" || rc=$?
+  if (( rc != 0 )); then network_failure "$rc" "$1" git ls-remote --symref origin HEAD; return 1; fi
+  name="$(printf '%s\n' "$out" | sed -n 's#^ref: refs/heads/\(.*\)[[:space:]]HEAD$#\1#p' | head -n 1)"
+  if [[ -z "$name" ]]; then printf 'origin reports no default branch\n' > "$ERRFILE"; return 1; fi
+  printf '%s' "$name"
+}
+
+# Echo "true" or "false": whether GitHub protects <branch> now.
+branch_protected() { # <shared> <branch>
+  local out rc=0
+  out="$(cd "$1" && GH_PROMPT_DISABLED=1 gh api "repos/{owner}/{repo}/branches/$2" --jq .protected 2>"$ERRFILE")" || rc=$?
+  if (( rc != 0 )); then network_failure "$rc" "$1" gh api "repos/{owner}/{repo}/branches/$2"; return 1; fi
   printf '%s' "$out"
 }
 
@@ -185,7 +205,9 @@ for i in range(0, len(fields), 6):
         where = shlex.quote(shared)
         out["questionable"].append({"branch": branch, "ahead": int(a), "age_hours": int(b), "author": c,
                                     "open_pr": "gh pr create --head {}".format(shlex.quote(branch)),
-                                    "delete": "git -C {} push origin --delete {}".format(where, shlex.quote(branch))})
+                                    "delete": "git -C {} push --force-with-lease={} origin --delete {}".format(
+                                        where, shlex.quote("refs/heads/{}:{}".format(branch, d)),
+                                        shlex.quote("refs/heads/" + branch))})
     else:
         out["failed"].append({"target": branch, "error": a})
 print(json.dumps(out, sort_keys=True))
@@ -200,18 +222,23 @@ decide_remote() { # <shared> <default> <default-tip> <branch> <tip> <dry 0|1>
   git -C "$shared" merge-base --is-ancestor "$tip" "$default_tip" 2>"$ERRFILE" || rc=$?
   case "$rc" in
     0)
-      if (( dry )); then row deleted "$branch"; return 0; fi
-      # Origin as it is now: the branch's tip, the default's, and its pull requests.
-      local now_tip now_default now_prs mrc=0
+      # Origin as it is now, for the preview as for the deletion: the
+      # branch's tip, the default's tip, its open pull requests, its
+      # protection, and which branch is the default.
+      local now_tip now_default now_prs now_protected now_db mrc=0
       if ! now_tip="$(remote_tip "$shared" "$branch")" || ! now_default="$(remote_tip "$shared" "$db")" \
-        || ! now_prs="$(open_pr_heads "$shared" "$branch")"; then
+        || ! now_prs="$(open_pr_heads "$shared" "$branch")" || ! now_protected="$(branch_protected "$shared" "$branch")" \
+        || ! now_db="$(remote_default "$shared")"; then
         row failed "$branch" "cannot re-read origin before deleting it, so it was kept: $(cat "$ERRFILE")"; return 0
       fi
-      if [[ "$now_tip" != "$tip" || -n "$now_prs" ]]; then row kept "$branch" changed; return 0; fi
+      if [[ "$now_tip" != "$tip" || -n "$now_prs" || "$now_protected" != false || "$now_db" != "$db" ]]; then
+        row kept "$branch" changed; return 0
+      fi
       if [[ "$now_default" != "$default_tip" ]]; then
         git -C "$shared" merge-base --is-ancestor "$tip" "$now_default" 2>"$ERRFILE" || mrc=$?
         if (( mrc != 0 )); then row kept "$branch" changed; return 0; fi
       fi
+      if (( dry )); then row deleted "$branch"; return 0; fi
       rc=0
       git -C "$shared" push --quiet "--force-with-lease=refs/heads/${branch}:${tip}" origin --delete "refs/heads/${branch}" 2>"$ERRFILE" || rc=$?
       if (( rc != 0 )); then
@@ -234,7 +261,7 @@ decide_remote() { # <shared> <default> <default-tip> <branch> <tip> <dry 0|1>
       fi
       age="$(python3 -c 'import sys, time; now = float(sys.argv[1]) if sys.argv[1] else time.time(); print(int(max(0.0, now - int(sys.argv[2])) // 3600))' "${PRUNE_NOW:-}" "$committed")"
       if (( age < REMOTE_IDLE_HOURS )); then row kept "$branch" not-idle; return 0; fi
-      row questionable "$branch" "$ahead" "$age" "$author" ;;
+      row questionable "$branch" "$ahead" "$age" "$author" "$tip" ;;
     *) row failed "$branch" "git merge-base failed: $(tr '\n' ' ' < "$ERRFILE")" ;;
   esac
 }

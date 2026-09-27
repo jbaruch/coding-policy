@@ -22,6 +22,10 @@
 #   9. Dry run                  -> the deletion is previewed, origin unchanged.
 #  10. Default branch           -> never judged.
 #  11. Usage                    -> exit 1, no JSON.
+#  12. Protected since listed   -> the final gate keeps it (changed).
+#  13. Default changed          -> the final gate keeps it (changed).
+#  14. Dry run, late PR         -> the preview re-reads origin and keeps it.
+#   3 also checks the reported delete command is leased to the judged tip.
 #
 # Run: bash skills/herdr-foreman/tests/test_prune_remote_branches.sh
 set -uo pipefail
@@ -67,7 +71,15 @@ set -euo pipefail
 d="${FAKE_GH_DIR:?}"
 if [[ -e "$d/fail" ]]; then echo "gh: HTTP 502 from https://token@example.invalid" >&2; exit 1; fi
 case "$1" in
-  api) [[ -f "$d/protected" ]] && cat "$d/protected"; exit 0 ;;
+  api)
+    if [[ "$2" == *'?protected'* ]]; then
+      if [[ -f "$d/protected" ]]; then cat "$d/protected"; fi
+    elif [[ -f "$d/protected" ]] && grep -qxF -- "${2#*/branches/}" "$d/protected"; then
+      echo true
+    else
+      echo false
+    fi
+    exit 0 ;;
   pr)
     head=""
     while (( $# )); do
@@ -135,6 +147,7 @@ jq_py() { # <python expression over doc>
 main() {
   command -v python3 >/dev/null || die "python3 is required"
   TMP="$(mktemp -d)" || die "mktemp failed"
+  TMP="$(cd "$TMP" && pwd -P)" || die "cannot resolve $TMP"
   trap cleanup EXIT
   # The operator's git config never reaches the script under test.
   : > "$TMP/gitconfig" || die "cannot create an empty global git config"
@@ -162,7 +175,8 @@ main() {
   run
   if [[ $RC -eq 0 ]] && on_origin feat/stale \
      && [[ "$(jq_py '[(q["branch"], q["ahead"], q["age_hours"], q["author"]) for q in doc["questionable"]]')" == "[('feat/stale', 1, 48, 'Ada')]" ]] \
-     && [[ "$(jq_py 'doc["questionable"][0]["open_pr"]')" == "gh pr create --head feat/stale" ]]; then pass
+     && [[ "$(jq_py 'doc["questionable"][0]["open_pr"]')" == "gh pr create --head feat/stale" ]] \
+     && [[ "$(jq_py 'doc["questionable"][0]["delete"]')" == "git -C $SHARED push --force-with-lease=refs/heads/feat/stale:$(git -C "$BARE" rev-parse feat/stale) origin --delete refs/heads/feat/stale" ]]; then pass
   else fail "c3: RC=$RC OUT=$OUT ERR=$ERR"; fi
 
   echo "4. an unmerged fresh branch is kept not-idle"
@@ -235,6 +249,34 @@ SH
   run
   if [[ $RC -eq 0 ]] && on_origin main && [[ "$(jq_py 'doc["deleted"] + doc["kept"] + doc["questionable"]')" == "[]" ]]; then pass
   else fail "c10: RC=$RC OUT=$OUT ERR=$ERR"; fi
+
+  echo "12. a branch protected after it was listed is kept by the final gate"
+  mk_case c12
+  push_branch feat/guarded "$STALE_DATE" 1
+  # shellcheck disable=SC2016  # The $1 belongs to the injector: the branch the fake gh was asked about.
+  printf 'printf "%%s\\n" "$1" >> "%s"\n' "$CASE/protected" > "$CASE/on-head" || die "write on-head failed"
+  run
+  if [[ $RC -eq 0 ]] && on_origin feat/guarded && [[ "$(jq_py 'doc["kept"]')" == "[{'branch': 'feat/guarded', 'reason': 'changed'}]" ]]; then pass
+  else fail "c12: RC=$RC OUT=$OUT ERR=$ERR"; fi
+
+  echo "13. a default branch that changes before the deletion keeps the branch"
+  mk_case c13
+  push_branch feat/old-default "$STALE_DATE" 1
+  quiet "push other" git -C "$SHARED" push -q origin "main~1:refs/heads/other"
+  printf 'git -C "%s" symbolic-ref HEAD refs/heads/other\n' "$BARE" > "$CASE/on-head" || die "write on-head failed"
+  run
+  if [[ $RC -eq 0 ]] && on_origin feat/old-default && [[ "$(jq_py '{"branch": "feat/old-default", "reason": "changed"} in doc["kept"] and not doc["deleted"]')" == True ]]; then pass
+  else fail "c13: RC=$RC OUT=$OUT ERR=$ERR"; fi
+
+  echo "14. a dry run re-reads origin too: a pull request opened since the listing keeps it"
+  mk_case c14
+  push_branch feat/late-pr "$STALE_DATE" 1
+  # shellcheck disable=SC2016  # The $1 belongs to the injector: the branch the fake gh was asked about.
+  printf 'printf "%%s\\n" "$1" >> "%s"\n' "$CASE/prs" > "$CASE/on-head" || die "write on-head failed"
+  run --dry-run
+  if [[ $RC -eq 0 ]] && on_origin feat/late-pr && [[ "$(jq_py 'doc["deleted"]')" == "[]" ]] \
+     && [[ "$(jq_py 'doc["kept"]')" == "[{'branch': 'feat/late-pr', 'reason': 'changed'}]" ]]; then pass
+  else fail "c14: RC=$RC OUT=$OUT ERR=$ERR"; fi
 
   echo "11. usage is exit 1 with no JSON"
   RC=0
