@@ -132,7 +132,8 @@ Before following any route below, report the worktree sweep to the operator:
 - The sweep builds that report (`skills/herdr-foreman/sweep-worktrees.sh`,
   `report_text`); never reshape or summarize it
 - When `checks.worktrees` has no `detail`, report its `reason` verbatim; a
-  status `ok` with no `detail` means the worktree root does not exist
+  status `ok` with no `detail` means the worktree root does not exist, and
+  there is nothing to report for it
 - On exit 2 there is no JSON; report the stderr diagnostic instead
 - Raise each `dirty` or `unpushed` item the report lists per
   `rules/hook-action-reporting.md` Act on What It Names; the operator carries
