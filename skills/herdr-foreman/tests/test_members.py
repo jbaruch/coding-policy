@@ -7,6 +7,7 @@ _ROOT = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
 if _ROOT not in _sys.path:
     _sys.path.insert(0, _ROOT)
 
+import errno
 import re
 import subprocess
 import tempfile
@@ -153,6 +154,25 @@ class CloseMemberTest(MembersCase):
         (self.root / "loop-b").symlink_to(self.root / "loop-a")
         self.write_ledger("accepted", state=str(self.root / "loop-a" / "state.json"))
         with self.assertRaisesRegex(UsageError, "does not resolve"):
+            members.close(self.path, "dispatch-a", self.ledger, LATER)
+        self.assertTrue(store.pending(store.load(self.path)))
+
+    def test_a_symlink_loop_is_refused_under_the_python_3_13_resolve_contract(self):
+        # From 3.13, non-strict resolve returns a looping path without raising
+        # and only strict resolve reports ELOOP; model that on any interpreter.
+        self.emit()
+        looping = str(self.root / "loop" / "state.json")
+        self.write_ledger("accepted", state=looping)
+        real = Path.resolve
+
+        def resolve(path, strict=False):
+            if str(path) == looping:
+                if strict:
+                    raise OSError(errno.ELOOP, "Too many levels of symbolic links", looping)
+                return path
+            return real(path, strict=strict)
+
+        with patch.object(Path, "resolve", resolve), self.assertRaisesRegex(UsageError, "does not resolve"):
             members.close(self.path, "dispatch-a", self.ledger, LATER)
         self.assertTrue(store.pending(store.load(self.path)))
 

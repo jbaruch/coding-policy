@@ -148,17 +148,29 @@ def _check_formats(path, event):
             section, report, " or ".join(sorted(placeholders))))
 
 
+def _resolve_bound(path, dispatch_state):
+    """The ledger's dispatch_state resolved the same way on every supported Python, or a refusal.
+
+    Non-strict `resolve` stopped raising on a symlink loop in Python 3.13, so
+    resolve strictly: a loop raises RuntimeError before 3.13 and OSError from
+    it on. A path that does not exist cannot be a loop; it resolves
+    non-strictly and then fails the binding comparison as another state.
+    """
+    try:
+        return str(Path(dispatch_state).resolve(strict=True))
+    except FileNotFoundError:
+        return str(Path(dispatch_state).resolve())
+    except (OSError, RuntimeError) as exc:
+        raise _unusable(path, "its dispatch_state {!r} does not resolve: {}".format(dispatch_state, exc)) from None
+
+
 def assessed_event(path, member, state_path):
     """The latest assessed event for this enrollment's dispatch, from a ledger bound to this state."""
     header, events = ledger_events(path)
     if header["task"] != member["task"]:
         raise UsageError("Task ledger {} records task {!r}, not this enrollment's {!r}; pass the ledger for {}.".format(
             path, header["task"], member["task"], member["task"]), {"ledger": str(path)})
-    try:
-        bound = str(Path(header["dispatch_state"]).resolve())
-    # A symlink loop raises RuntimeError before Python 3.13 and OSError from it on.
-    except (OSError, RuntimeError) as exc:
-        raise _unusable(path, "its dispatch_state {!r} does not resolve: {}".format(header["dispatch_state"], exc)) from None
+    bound = _resolve_bound(path, header["dispatch_state"])
     if bound != str(Path(state_path).expanduser().resolve()):
         raise _unusable(path, "it is bound to dispatch state {}, not {}".format(header["dispatch_state"], state_path))
     matching = [row for row in events if row["subject"] == "assignment" and row["dispatch_id"] == member["id"]
