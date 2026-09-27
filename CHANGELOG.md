@@ -9,15 +9,32 @@
   refuses, closing nothing, unless `at` is a timezone-qualified ISO-8601
   timestamp, `head_revision` is a full lowercase SHA or the literal `unknown` /
   `not_applicable`, the frontmatter `base_revision` is a full SHA,
-  `dispatch_state` is an absolute path (a `~/` path or a NUL byte no longer
-  passes), each
-  event's `id` matches its `## ` section heading, and no id names two events.
+  `dispatch_state` is an absolute path that resolves (a `~/` path, a NUL byte
+  or a symlink loop now refuses instead of passing or raising), each event's
+  `id` matches its `## ` section heading, no id names two events, and no
+  ledger line can overwrite the parser's record of that heading.
   The refusal's repair hint changed with it: it used to say "append a correct
   event", which can never fix a malformed earlier event in an append-only log
   that is validated whole, so it now points at the documented recovery, a
   recovered ledger at a new path (`state-schema.md`, Task Ledger). Deferred
   from PR #528's review. `herdr-foreman` Step 11's `check-member` follow-up
   paragraph, which merged several directives, is now one bullet per directive.
+
+- **`evaluate.sh` reads the default corpus under the home guard (#537).**
+  `skills/herdr-foreman/classify/evaluate.sh` checked the default state home
+  with `home.require_current` in one python run, then read `state.json` in a
+  second run holding nothing, so a `migrate-home` starting between the two
+  could leave it scoring a half-moved or empty corpus. The default-home path
+  now checks the home, reads the store and checks every report path it names
+  in one run under a shared hold of `$XDG_STATE_HOME/.foreman-home.lock`
+  (`home.guard(False)`, the same guard every foreman command takes), since
+  reports can live under the home too. A migration in flight refuses the
+  evaluation naming migrate-home. An explicit `--state` is never moved and
+  still takes no guard. A regression case holds the guard exclusively while
+  evaluate runs and requires the refusal; it fails against the old script.
+  An unreadable state file now names its recovery (restore readable JSON, or
+  pass `--state`). Low likelihood in practice (evaluate is an operator-run offline tool and
+  migrate-home a one-time step), deferred from Copilot's advisory on #536.
 
 ## 0.3.289 — 2026-09-27
 
