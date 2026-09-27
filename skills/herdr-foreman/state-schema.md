@@ -187,7 +187,11 @@ Plan schema 9 adds `pressure_headroom` and `de_escalated` to each entry in
 `tiers` (#477). Writer: `plan`, from the measured snapshot. Reader: `apply`,
 which recomputes each tier against the headroom the plan resolved with rather
 than measuring again. An older plan carries neither field, reads as unmeasured
-pressure, and resolves as it always did.
+pressure, and resolves as it always did. The pinned judge's entry carries both
+as null and false. `de_escalated` is true only when the declined escalation
+would have changed the row, model or effort. `snapshot_ref.source` names the
+snapshot by its absolute path, so `apply` finds it from any working
+directory.
 
 The optional `role_costs` key is the second:
 `{"<role>": <number>}`, what one round in that seat is expected to

@@ -4,7 +4,9 @@ import copy
 import hashlib
 import json
 import os
+import shutil
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -305,6 +307,61 @@ class TierIntegrationTest(CliCase):
         self.state.write_text(json.dumps(state))
         _stored, usable = load_state_checked(self.state)
         self.assertFalse(usable)
+
+    def test_an_overflowing_stored_pressure_is_refused_not_raised(self):
+        # coding-policy#490: `math.isfinite(10**1000)` raises OverflowError,
+        # which escaped the unusable-state path as a traceback.
+        state = empty_state()
+        argv = ["claude", "--model", "sonnet-5", "--effort", "high"]
+        add_assignment(state, AT, "developer", "claude", tier={
+            "kind": "claude", "model": "sonnet-5", "effort": "high", "launch_args": [],
+            "verified": {"source": "launch_argv", "model": "sonnet-5", "effort": "high", "pane_id": "w1:p2", "argv": argv}})
+        state["assignments"][0]["tier"]["pressure_headroom"] = 10 ** 1000
+        self.state.write_text(json.dumps(state))
+        _stored, usable = load_state_checked(self.state, warn=lambda _: None)
+        self.assertFalse(usable)
+
+    def test_a_relative_snapshot_path_survives_a_directory_change(self):
+        # coding-policy#490: apply re-reads the snapshot the plan names. A
+        # relative name resolved against apply's own directory reads as
+        # unmeasured, and a legitimate de-escalation is refused as stale.
+        self.snapshot.write_text(json.dumps({"agents": {"claude": {"headroom_pct": 8}}}))
+        context = self.tmp / "round-context.json"
+        context.write_text(json.dumps({"developer": {"risk_flags": ["network", "persistence"]}}))
+        elsewhere = Path(tempfile.mkdtemp(prefix="foreman-elsewhere-"))
+        self.addCleanup(shutil.rmtree, elsewhere)
+        self.addCleanup(os.chdir, os.getcwd())
+        os.chdir(self.tmp)
+        rc, output, error = self.run_cli(["plan", *self.base(), "--roles", "developer",
+                                          "--snapshot", self.snapshot.name,
+                                          "--round-context", str(context), "--now", AT])
+        self.assertEqual(rc, 0, error)
+        document = json.loads(output)
+        self.assertTrue(document["tiers"]["developer"]["de_escalated"])
+        self.assertTrue(Path(document["snapshot_ref"]["source"]).is_absolute())
+        os.chdir(elsewhere)
+        rc, _output, error = self.run_cli(self.apply_args(document) + ["--dry-run"],
+                                          client=HerdrClient("herdr", FakeRunner()))
+        self.assertEqual(rc, 0, error)
+
+    def test_the_pinned_judge_entry_has_the_shape_of_every_other_tier(self):
+        # coding-policy#490: the judge branch returned before the projection
+        # that adds the pressure fields, so a plan's `tiers.judge` lacked them.
+        judge = copy.deepcopy(self.settings["agents"][0])
+        judge["name"] = "judge"
+        del judge["tiers"]
+        self.settings["agents"].append(judge)
+        self.settings["judge"] = {"agent": "judge", "model": "opus-5", "effort": "high"}
+        self.write_config()
+        self.snapshot.write_text(json.dumps({"agents": {"claude": {"headroom_pct": 50},
+                                                        "judge": {"headroom_pct": 50}}}))
+        rc, output, error = self.run_cli(["plan", *self.base(), "--roles", "developer,judge",
+                                          "--judge-mode", "adjudication",
+                                          "--snapshot", str(self.snapshot), "--now", AT])
+        self.assertEqual(rc, 0, error)
+        tiers = json.loads(output)["tiers"]
+        self.assertEqual((tiers["judge"]["pressure_headroom"], tiers["judge"]["de_escalated"]), (None, False))
+        self.assertEqual(set(tiers["judge"]), set(tiers["developer"]))
 
     def test_a_schema_six_tier_row_migrates_as_never_de_escalated(self):
         # coding-policy#477: nothing could de-escalate before this version, so
