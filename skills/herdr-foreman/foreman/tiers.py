@@ -450,6 +450,8 @@ def oracle_shape_problem(oracle):
         return "a {} oracle carries a digest value".format(kind)
     if not isinstance(path, str) or not path.strip():
         return "a {} oracle names no path".format(kind)
+    if "\0" in path:
+        return "a {} oracle's path carries a NUL byte".format(kind)
     # A plan is replayed at apply, possibly from another directory. A
     # relative path would resolve to a different file, or none.
     if not Path(path).is_absolute():

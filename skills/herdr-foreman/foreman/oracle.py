@@ -42,8 +42,12 @@ def _sha256(path, what):
             for chunk in iter(lambda: handle.read(CHUNK_BYTES), b""):
                 digest.update(chunk)
     except OSError as exc:
-        raise UsageError("Cannot read the {} at {}: {}. Pass the file the round produced.".format(
-            what, path, exc.strerror or exc), {"path": str(path)}) from None
+        raise UsageError("Cannot read the {} at {!r}: {}. Pass the file the round produced.".format(
+            what, str(path), exc.strerror or exc), {"path": str(path)}) from None
+    except ValueError as exc:
+        # An embedded NUL or an unencodable character never names a file.
+        raise UsageError("The {} path {!r} is not a usable file name: {}. Pass the file the round "
+                         "produced.".format(what, str(path), exc), {"path": repr(str(path))}) from None
     return digest.hexdigest()
 
 

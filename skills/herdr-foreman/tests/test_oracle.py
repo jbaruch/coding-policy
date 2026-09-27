@@ -5,15 +5,14 @@ import io
 import json
 import sys
 import tempfile
+import tracemalloc
 import unittest
 from pathlib import Path
-from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from foreman.cli import main
 from foreman.errors import UsageError
-from foreman import oracle as oracle_module
 from foreman.oracle import pin_oracles, plan_oracle, verify
 
 
@@ -114,6 +113,7 @@ class OracleTest(unittest.TestCase):
                  ("unknown kind", {"kind": "vibes", "value": "a" * 64}),
                  ("unhashable kind", {"kind": ["patch"], "path": "/x"}),
                  ("short digest", {"kind": "digest", "value": "a" * 63}),
+                 ("NUL in the path", {"kind": "patch", "path": "/tmp/a\0b"}),
                  ("not an object", "digest"),
                  ("stray key", {"kind": "digest", "value": "a" * 64, "extra": 1}))
         for label, oracle in cases:
@@ -123,37 +123,39 @@ class OracleTest(unittest.TestCase):
                 self.assertIn("malformed", error)
                 self.assertNotIn("Traceback", error)
 
-    def test_files_are_hashed_in_bounded_chunks(self):
-        # coding-policy#488: neither file is loaded whole. A result spanning
-        # many chunks still matches its oracle, with no whole-file read.
-        self.result.write_bytes(b"0123456789" * 50)
-        expected = self.root / "expected"
-        expected.write_bytes(self.result.read_bytes())
-        reads = []
-        real_open = Path.open
-
-        def tracking_open(path, *args, **kwargs):
-            handle = real_open(path, *args, **kwargs)
-            if "b" not in (args[0] if args else kwargs.get("mode", "r")):
-                return handle  # The plan's JSON text, not a file being hashed.
-            real_read = handle.read
-
-            def read(size=-1):
-                reads.append(size)
-                return real_read(size)
-            handle.read = read
-            return handle
-
-        with patch.object(oracle_module, "CHUNK_BYTES", 64), \
-                patch.object(Path, "read_bytes", side_effect=AssertionError("whole-file read")), \
-                patch.object(Path, "open", tracking_open):
-            plan = self.plan({"kind": "fixture", "path": str(expected)})
+    def test_memory_stays_bounded_however_large_the_files(self):
+        # coding-policy#488: verifying a large result against a large oracle
+        # must not hold either file in memory. The peak Python allocation while
+        # verifying two 16 MiB files stays far below the size of one of them.
+        size = 16 * 1024 * 1024
+        block = bytes(range(256)) * 4096
+        for path in (self.result, self.root / "expected"):
+            with path.open("wb") as handle:
+                for _ in range(size // len(block)):
+                    handle.write(block)
+        plan = self.plan({"kind": "fixture", "path": str(self.root / "expected")})
+        tracemalloc.start()
+        try:
             code, output, error = self.run_cli(plan)
+            _current, peak = tracemalloc.get_traced_memory()
+        finally:
+            tracemalloc.stop()
         self.assertEqual(code, 0, error)
         self.assertTrue(json.loads(output)["match"])
-        self.assertTrue(reads)
-        self.assertTrue(all(0 < size <= 64 for size in reads), reads)
+        self.assertLess(peak, size // 4)
 
+    def test_an_unusable_file_name_is_a_usage_error_not_a_traceback(self):
+        # A NUL or a lone surrogate never names a file; opening one raises
+        # ValueError, which must surface as the documented usage error.
+        for label, oracle, result in (
+                ("NUL in the result path", {"kind": "digest", "value": "a" * 64}, "/tmp/a\0b"),
+                ("surrogate in the oracle path", {"kind": "fixture", "path": "/tmp/x\ud800", "sha256": "a" * 64},
+                 str(self.result))):
+            with self.subTest(label):
+                with self.assertRaisesRegex(UsageError, "not a usable file name"):
+                    verify(oracle, result)
+        with self.assertRaisesRegex(UsageError, "not a usable file name"):
+            pin_oracles({"developer": {"context": {"oracle": {"kind": "patch", "path": "/tmp/x\ud800"}}}})
 
 if __name__ == "__main__":
     unittest.main()
