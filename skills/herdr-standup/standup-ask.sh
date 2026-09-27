@@ -31,8 +31,8 @@
 #             line — nothing was sent. A wrapped marker is one the wait can
 #             never confirm.
 #   env   : HERDR_BIN overrides the herdr binary; the tests point it at a fake.
-#           It reaches `foreman marker-fit` as --herdr-bin, and PY_BIN and
-#           the XDG homes pass through to the foreman launcher.
+#           It reaches `foreman marker-fit` as --herdr-bin, and PY_BIN passes
+#           through to the foreman launcher. marker-fit reads no foreman home.
 #           STANDUP_REPORT_PATH_MAX_COLS overrides the report path length
 #           limit; a non-integer or zero value is a precondition failure.
 set -euo pipefail

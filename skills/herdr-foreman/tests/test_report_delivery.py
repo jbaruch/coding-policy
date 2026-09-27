@@ -88,14 +88,26 @@ class MarkerFitTests(unittest.TestCase):
         runner.set("pane layout --pane " + pane, pane_layout(pane, width))
         return runner
 
-    def run_cli(self, runner, report=None):
+    def run_cli(self, runner, report=None, homes=None):
         output, errors = io.StringIO(), io.StringIO()
-        # Empty default homes, so the host's own foreman home never decides the outcome.
-        with tempfile.TemporaryDirectory() as home, \
-                patch.dict(os.environ, {"XDG_STATE_HOME": home + "/state", "XDG_CONFIG_HOME": home + "/config"}):
-            code = cli.main(["marker-fit", "--agent", "worker", "--report", report or self.REPORT],
-                            stdout=output, stderr=errors, client=HerdrClient(runner=runner))
+        # Empty default homes unless a test supplies its own, so the host's own
+        # foreman home never decides the outcome.
+        with tempfile.TemporaryDirectory() as scratch:
+            state, config = homes or (scratch + "/state", scratch + "/config")
+            with patch.dict(os.environ, {"XDG_STATE_HOME": state, "XDG_CONFIG_HOME": config}):
+                code = cli.main(["marker-fit", "--agent", "worker", "--report", report or self.REPORT],
+                                stdout=output, stderr=errors, client=HerdrClient(runner=runner))
         return code, output.getvalue(), errors.getvalue()
+
+    def test_a_home_awaiting_migration_neither_refuses_nor_gains_a_guard(self):
+        with tempfile.TemporaryDirectory() as scratch:
+            state, config = Path(scratch, "state"), Path(scratch, "config")
+            (state / "teamlead").mkdir(parents=True)
+            (config / "teamlead").mkdir(parents=True)
+            code, out, errors = self.run_cli(self.runner("codex", 200), homes=(str(state), str(config)))
+            self.assertEqual(code, 0, errors)
+            self.assertTrue(json.loads(out)["fits"])
+            self.assertEqual(sorted(p.name for p in state.iterdir()), ["teamlead"])
 
     def test_a_pane_one_column_short_does_not_fit(self):
         needed = delivery.marker_columns("grok", self.REPORT)

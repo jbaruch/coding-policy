@@ -2174,6 +2174,10 @@ COMMANDS = {
 }
 
 
+#: Commands that read neither the state nor the config home.
+HOME_FREE_COMMANDS = frozenset({"marker-fit"})
+
+
 def main(argv=None, stdout=None, stderr=None, client=None):
     """Entry point. Returns the process exit code rather than calling sys.exit."""
     stdout = stdout if stdout is not None else sys.stdout
@@ -2205,8 +2209,11 @@ def main(argv=None, stdout=None, stderr=None, client=None):
         # Only a command reading a default home takes the guard: explicit
         # --state and --config paths are never moved, so a migration never
         # blocks them.
-        defaults = {kind for kind, given in (("state", getattr(args, "state", None)),
-                                             ("config", getattr(args, "config", None))) if not given}
+        # A command that reads no state or config uses no home, so it neither
+        # takes the guard nor refuses on a home awaiting migration.
+        defaults = set() if args.command in HOME_FREE_COMMANDS else {
+            kind for kind, given in (("state", getattr(args, "state", None)),
+                                     ("config", getattr(args, "config", None))) if not given}
         with home.guard(False) if defaults else nullcontext():
             home.require_current(defaults)
             # Commands that may migrate or write state share its canonical lock.
