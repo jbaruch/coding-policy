@@ -14,6 +14,7 @@ import argparse
 import hashlib
 import json
 import os
+import shlex
 import subprocess
 import sys
 from typing import NoReturn
@@ -24,6 +25,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
+from . import runnable
 from . import __version__
 from .assign import apply as apply_assignments
 from .assign import APPLY_SCHEMA_VERSION, dry_run, freeze_decision, freeze_paths, read_frozen, native_context_session, normalize_assignments, resolve_paths, validate_fix_history
@@ -542,8 +544,8 @@ def _load_assignments(value, document=False):
             text = path.read_text(encoding="utf-8")
         except FileNotFoundError:
             raise UsageError(
-                "--assignments file {} not found - pass the path to `foreman "
-                "plan` output, or the JSON object itself.".format(path),
+                "--assignments file {} not found - pass the path to `{}` "
+                "output, or the JSON object itself.".format(path, runnable.command("plan")),
                 {"path": str(path)},
             ) from None
         except IsADirectoryError:
@@ -560,8 +562,8 @@ def _load_assignments(value, document=False):
     except json.JSONDecodeError as exc:
         raise UsageError(
             "--assignments is not valid JSON ({} at line {} column {}) - expected "
-            "`foreman plan` output or a {{\"role\": \"agent\"}} object.".format(
-                exc.msg, exc.lineno, exc.colno
+            "`{}` output or a {{\"role\": \"agent\"}} object.".format(
+                exc.msg, exc.lineno, exc.colno, runnable.command("plan")
             ),
             {},
         ) from None
@@ -884,9 +886,10 @@ def cmd_plan(args, client=None, warn=None, trace=None):
     if seated:
         raise UsageError(
             "--roles names responsibilities, not seats: {} came pre-seated. Pass {} and "
-            "seat the slices with --partition, after validate-partition has checked it "
+            "seat the slices with --partition, after `{}` has checked it "
             "disjoint and exhaustive over the round's change.".format(
-                ", ".join(seated), ", ".join(sorted({canonical_role(role) for role in seated}))),
+                ", ".join(seated), ", ".join(sorted({canonical_role(role) for role in seated})),
+                runnable.command("validate-partition")),
             {"roles": seated})
     roles, seats, seat_paths, proof = _expand_partition_seats(canonical, getattr(args, "partition", None))
     if "judge" in canonical:
@@ -910,8 +913,8 @@ def cmd_plan(args, client=None, warn=None, trace=None):
             snapshot = json.loads(snapshot_path.read_text(encoding="utf-8"))
         except FileNotFoundError:
             raise PlanError(
-                "Snapshot file {} not found - run `foreman measure` or point "
-                "--snapshot at a saved snapshot.".format(snapshot_path),
+                "Snapshot file {} not found - run `{}` or point "
+                "--snapshot at a saved snapshot.".format(snapshot_path, runnable.command("measure")),
                 {"path": str(snapshot_path)},
             ) from None
         except json.JSONDecodeError as exc:
@@ -929,8 +932,8 @@ def cmd_plan(args, client=None, warn=None, trace=None):
         snapshot = latest_snapshot(state)
         if snapshot is None:
             raise PlanError(
-                "No snapshot in {} - run `foreman measure` first, or pass "
-                "--snapshot FILE.".format(state_path),
+                "No snapshot in {} - run `{}` first, or pass "
+                "--snapshot FILE.".format(state_path, runnable.command("measure")),
                 {"state": str(state_path)},
             )
         source = str(state_path)
@@ -1057,9 +1060,9 @@ def _require_bound_slices(document, seated, briefs, bodies=None):
     if not isinstance(recorded, str) or not isinstance(slice_paths, dict):
         raise UsageError(
             "Seats {} need the plan's slice_paths and slice_digest: seat them with "
-            "`plan --partition <validate-partition output>` rather than hand-writing the "
+            "`{}` rather than hand-writing the "
             "assignments, so the boundary that ships is the one that was checked.".format(
-                ", ".join(seated)),
+                ", ".join(seated), runnable.command("plan --partition <validate-partition output>")),
             {"roles": seated})
     # Shape before hashing: `slice_paths` rides in an editable `--assignments`
     # document, and a seat mapped to a non-list — or to a list carrying a
@@ -1071,9 +1074,10 @@ def _require_bound_slices(document, seated, briefs, bodies=None):
     if malformed:
         raise UsageError(
             "The plan's slice_paths maps {} to something other than a non-empty list of "
-            "globs; re-run `plan --partition <validate-partition output>` rather than "
+            "globs; re-run `{}` rather than "
             "editing the assignments.".format(
-                ", ".join(repr(seat) for seat in sorted(map(str, malformed)))),
+                ", ".join(repr(seat) for seat in sorted(map(str, malformed))),
+                runnable.command("plan --partition <validate-partition output>")),
             {"seats": [str(seat) for seat in malformed]})
     # A glob is rendered verbatim into the brief, so a backtick or a control
     # character closes the code span and appends instructions of its own.
@@ -1084,9 +1088,9 @@ def _require_bound_slices(document, seated, briefs, bodies=None):
     if unsafe:
         raise UsageError(
             "The plan's slice_paths gives {} a glob carrying a backtick or a control "
-            "character, which the brief renders verbatim; re-run `plan --partition "
-            "<validate-partition output>` rather than editing the assignments.".format(
-                ", ".join(repr(seat) for seat in unsafe)),
+            "character, which the brief renders verbatim; re-run `{}` "
+            "rather than editing the assignments.".format(
+                ", ".join(repr(seat) for seat in unsafe), runnable.command("plan --partition <validate-partition output>")),
             {"seats": unsafe})
     # Exactly the seated assignments, no more and no less: a plan stripped of a
     # seat would otherwise dispatch the remainder as if the partition still
@@ -1104,8 +1108,8 @@ def _require_bound_slices(document, seated, briefs, bodies=None):
     if expected != recorded:
         raise UsageError(
             "The plan's slice_paths no longer match its slice_digest ({} vs {}); the "
-            "boundary changed after planning. Re-run validate-partition and plan rather "
-            "than editing either.".format(expected, recorded),
+            "boundary changed after planning. Re-run `{}` and `{}` rather "
+            "than editing either.".format(expected, recorded, runnable.command("validate-partition"), runnable.command("plan")),
             {"expected": expected, "recorded": recorded})
     for role in seated:
         if role not in slice_paths:
@@ -1121,7 +1125,7 @@ def _require_bound_slices(document, seated, briefs, bodies=None):
             raise UsageError(
                 "Cannot read the brief for seat {!r} at {}: {}. Restore a readable UTF-8 brief "
                 "at that path, or regenerate the round's briefs with compose-briefs.sh, then "
-                "re-run apply.".format(role, brief, exc),
+                "re-run `{}`.".format(role, brief, exc, runnable.command("apply")),
                 {"role": role}) from None
         # The whole scope block, not the facts it contains. A brief that
         # scatters the digest, the slice name and a path while directing a
@@ -1182,7 +1186,7 @@ def cmd_apply(args, client=None, warn=None, trace=None):
     reports = _parse_reports(args.reports, assignments)
     supervised = supervision.dispatch_binding(state_path) is not None
     if requirements and not args.dry_run and not supervised:
-        raise UsageError("Bind the foreman with supervision-bind before dispatching specialist requirements; every specialist needs durable observation ownership.", {})
+        raise UsageError("Bind the foreman with `{}` before dispatching specialist requirements; every specialist needs durable observation ownership.".format(runnable.command("supervision-bind")), {})
     if supervised and (not args.task or set(reports) != set(assignments)):
         raise UsageError("Bound team rounds require --task and one --report ROLE=ABS_PATH for every assigned role before any worker input.", {})
     # The mode is part of what a judge dispatch IS: one brief sent as an
@@ -1277,7 +1281,7 @@ def cmd_apply(args, client=None, warn=None, trace=None):
                 # so this is no longer the recorded dispatch and would send a
                 # mutable file (#460).
                 raise UsageError("The source brief for {} changed after it matched its recorded dispatch, so it is "
-                                 "new work. Re-run apply; a new dispatch is sent from a frozen copy.".format(role),
+                                 "new work. Re-run `{}`; a new dispatch is sent from a frozen copy.".format(role, runnable.command("apply")),
                                  {"role": role})
             resolved.append((role, name, identifier, fingerprint, prior))
         fresh = [role for role, _name, _identifier, _fingerprint, prior in resolved if not (prior and prior["status"] == "applied")]
@@ -1369,7 +1373,7 @@ def cmd_apply(args, client=None, warn=None, trace=None):
                 tiers[role] = candidates[role][name]
         saved_tiers = {role: tier for role, tier in document.get("tiers", {}).items() if tier is not None and role in assignments} if isinstance(document.get("tiers", {}), dict) else None
         if "tiers" in document and saved_tiers != tiers:
-            raise UsageError("Plan tiers differ from current config or fix context; re-run plan before dispatch.", {})
+            raise UsageError("Plan tiers differ from current config or fix context; re-run `{}` before dispatch.".format(runnable.command("plan")), {})
         # The capability verdict explains the plan; it is not part of the tier a
         # dispatch records, so the assignment row keeps its schema (#520).
         tiers = {role: {key: value for key, value in tier.items() if key not in PLAN_ONLY_TIER_FIELDS}
@@ -1678,7 +1682,8 @@ def cmd_check_member(args, client=None, warn=None, trace=None):
     payload, code = members.check(_state_path(args), args.enrollment, args.worktree, warn=warn)
     if code not in members.VERDICT_EXITS:
         return payload, {"error": "wait_failed", "message": "wait-report.sh exited {} without a verdict: {} Resolve "
-                         "that diagnostic, then run check-member again.".format(code, payload["diagnostics"] or "(no diagnostic)"),
+                         "that diagnostic, then run `{}` again.".format(code, payload["diagnostics"] or "(no diagnostic)",
+                                                                 runnable.command("check-member")),
                          "details": {"exit": code}}
     return payload, None
 
@@ -1709,10 +1714,11 @@ def cmd_load_set(args, client=None, warn=None, trace=None):
     _document, entries, _progress = attention.load(state_path)
     if args.decision == "wake" and (args.enrollment not in reports
                                     or not any(row.get("id") == args.enrollment for row in state["recovery"]["dispatches"])):
-        raise UsageError("Enrollment {} has no supervision enrollment with a recorded dispatch; read supervision-status for the enrollment id.".format(args.enrollment), {})
+        raise UsageError("Enrollment {} has no supervision enrollment with a recorded dispatch; read `{}` for the enrollment id.".format(
+            args.enrollment, runnable.command("supervision-status")), {})
     if args.decision != "wake" and args.task not in state["recovery"]["tasks"] and not any(
             row.get("task") == args.task for row in state["assignments"]):
-        raise UsageError("Task {!r} is neither registered nor assigned; check its identity with `foreman state`.".format(args.task), {})
+        raise UsageError("Task {!r} is neither registered nor assigned; check its identity with `{}`.".format(args.task, runnable.command("state")), {})
     return load_set.build(state, reports, entries, busy, args.decision, task=args.task, enrollment=args.enrollment,
                           exists=_file_present), None
 
@@ -1763,7 +1769,7 @@ def _record_stopped_task(state_path, diagnosis, at):
         "context": "Diagnosis {} returned REMEDY: stop at fix round {}, ruling on the investigator's assessment.".format(
             diagnosis["id"], diagnosis["fix_round"]),
         "consequence": "Implementation on this task has ended. What is clean ships; the remainder is a tracked accepted defect under rules/review-severity.md Judge-Accepted Defect Carve-Out.",
-        "resolution_condition": "Record the acknowledgement, authorize a plan over this remedy, or approve a different approach with `foreman authorize-approach` to override it.",
+        "resolution_condition": "Record the acknowledgement, authorize a plan over this remedy, or approve a different approach with `{}` to override it.".format(runnable.command("authorize-approach")),
         "sources": [{"schema_version": attention.SCHEMA_VERSION, "kind": "artifact",
                      "ref": diagnosis["judge_evidence"]["path"]}],
     }, at)
@@ -1897,7 +1903,7 @@ def cmd_start_judge(args, client=None, warn=None, trace=None):
     document = _load_assignments(args.assignments, document=True)
     tier = document.get("judge") if isinstance(document, dict) else None
     if not isinstance(tier, dict) or not isinstance(tier.get("agent"), str) or not tier["agent"].strip():
-        raise UsageError("Plan has no usable judge tier; run plan --roles judge.", {})
+        raise UsageError("Plan has no usable judge tier; run `{}`.".format(runnable.command("plan --roles judge")), {})
     if normalize_assignments(document).get("judge") != tier["agent"]:
         raise UsageError("Plan judge tier and assignment name different workers; replan.", {})
     # The plan carries the mode the foreman declared; the flag overrides it, and
@@ -1952,8 +1958,9 @@ def cmd_capability(args, client=None, warn=None, trace=None):
             # An unreadable ledger is not an empty one: whether work exists, and
             # so whether a refresh is due, is unknown.
             raise StateError("The ledger at {} exists but cannot be read, so whether the capability "
-                             "table is due is unknown. Repair or migrate it with `foreman state`, "
-                             "then re-run capability-check.".format(path), {"path": str(path)})
+                             "table is due is unknown. Repair or migrate it with `{}`, "
+                             "then re-run `{}`.".format(path, runnable.command("state"), runnable.command("capability-check")),
+                             {"path": str(path)})
         result = capabilities.cadence(document, at, existing_work=bool(state["assignments"]))
         return {"schema_version": capabilities.SCHEMA_VERSION, **result,
                 "entries": len(document["entries"])}, None
@@ -1978,7 +1985,8 @@ def cmd_retrospective(args, client=None, warn=None, trace=None):
         saved = _read_record(data["check"])
         if (not isinstance(saved, dict) or saved.get("schema_version") != retrospective.SCHEMA_VERSION
                 or saved.get("state_path") != str(retrospective.canonical_state(path))):
-            raise UsageError("Retrospective check receipt belongs to another state or schema; rerun retro-check for this --state.", {})
+            raise UsageError("Retrospective check receipt belongs to another state or schema; rerun `{}` for this --state.".format(
+                runnable.command("retro-check")), {})
         retrospective.validate_coverage(saved.get("coverage"))
         value = saved.get("request")
     else:
@@ -2034,10 +2042,10 @@ def _dispatched_seat_briefs(plan, slice_paths, dispatches, task):
     context = plan.get("task_context")
     if not isinstance(context, dict) or context.get("task") != task:
         raise UsageError("The plan was not made for task {!r}, so no seat dispatch can be bound to it. Replan with "
-                         "`plan --partition ... --task {}` and dispatch from that plan.".format(task, task), {"task": task})
+                         "`{}` and dispatch from that plan.".format(task, runnable.command("plan --partition ... --task {}".format(shlex.quote(task)))), {"task": task})
     assignments = plan.get("assignments")
     if not isinstance(assignments, dict):
-        raise UsageError("The plan carries no assignments; pass the JSON `plan --partition` wrote.", {})
+        raise UsageError("The plan carries no assignments; pass the JSON `{}` wrote.".format(runnable.command("plan --partition")), {})
     bodies = {}
     for seat in slice_paths:
         agent = assignments.get(seat)
@@ -2075,10 +2083,11 @@ def cmd_verify_partition(args, client=None, warn=None, trace=None):
     try:
         plan = json.loads(Path(args.plan).read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
-        raise UsageError("Cannot read the plan at {}: {}. Pass the JSON `plan --partition` wrote.".format(args.plan, exc),
+        raise UsageError("Cannot read the plan at {}: {}. Pass the JSON `{}` wrote.".format(args.plan, exc, runnable.command("plan --partition")),
                          {"path": str(args.plan)}) from None
     if not isinstance(plan, dict):
-        raise UsageError("The plan at {} is not a JSON object; pass the JSON `plan --partition` wrote.".format(args.plan), {})
+        raise UsageError("The plan at {} is not a JSON object; pass the JSON `{}` wrote.".format(
+            args.plan, runnable.command("plan --partition")), {})
     state, usable = load_state_checked(_state_path(args), warn, persist_migration=False)
     if not usable:
         raise StateError("The dispatch state is unusable, so the task's base and dispatched briefs cannot be read; "

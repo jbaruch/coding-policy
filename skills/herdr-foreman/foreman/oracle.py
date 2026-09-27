@@ -24,6 +24,7 @@ import hashlib
 import json
 from pathlib import Path
 
+from . import runnable
 from .errors import UsageError
 from .tiers import ORACLE_DIGEST, ORACLE_KINDS, oracle_shape_problem
 
@@ -87,8 +88,9 @@ def plan_oracle(plan, role):
     pin = pins.get(role) if isinstance(pins, dict) else None
     if (not isinstance(pin, dict) or pin.get("path") != oracle["path"]
             or not isinstance(pin.get("sha256"), str) or not ORACLE_DIGEST.match(pin["sha256"])):
-        raise UsageError("The plan pins no content for the {} oracle of {!r} at {}; replan so `plan` "
-                         "records the file's sha256.".format(oracle["kind"], role, oracle["path"]),
+        raise UsageError("The plan pins no content for the {} oracle of {!r} at {}; replan with `{}` "
+                         "so the plan records the file's sha256.".format(
+                             oracle["kind"], role, oracle["path"], runnable.command("plan")),
                          {"role": role, "path": oracle["path"]})
     return {**oracle, "sha256": pin["sha256"]}
 

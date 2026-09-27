@@ -56,6 +56,7 @@ without requirements retain the ordering above.
 
 import math
 
+from . import runnable
 from .diagnostics import stderr_warn
 from .errors import PlanError
 from .tiers import SEAT_SEPARATOR, canonical_role
@@ -321,9 +322,9 @@ def _refuse_uncovered_roster(roster, agents):
         return
     raise PlanError(
         "Snapshot does not cover {} - config.json declares {} and this "
-        "snapshot measured {}. Run `foreman measure` over the roster before "
+        "snapshot measured {}. Run `{}` over the roster before "
         "planning, or drop the worker from config.json.".format(
-            ", ".join(uncovered), ", ".join(sorted(roster)), ", ".join(sorted(agents))
+            ", ".join(uncovered), ", ".join(sorted(roster)), ", ".join(sorted(agents)), runnable.command("measure")
         ),
         {"uncovered": uncovered, "roster": sorted(roster), "agents": sorted(agents)},
     )
@@ -379,9 +380,9 @@ def _refuse_degenerate_field(roles, agents, judge_agent, roster):
     measured = "one agent ({})".format(field[0]) if field else "no agent at all"
     raise PlanError(
         "Role {} would be filled from a measured field of {} - one candidate "
-        "is a forced pick, not a ranking. Run `foreman measure` over the "
+        "is a forced pick, not a ranking. Run `{}` over the "
         "roster so every idle worker is a candidate, then plan "
-        "again.".format(", ".join(repr(role) for role in ranked), measured),
+        "again.".format(", ".join(repr(role) for role in ranked), measured, runnable.command("measure")),
         {"roles": ranked, "agents": field},
     )
 
@@ -520,21 +521,21 @@ def plan(roles, snapshot, counts=None, exclude=None, role_costs=None, snapshot_r
     if not isinstance(snapshot, dict):
         raise PlanError(
             "Snapshot is a JSON {}, not an object - pass --snapshot pointing at "
-            "a file `foreman measure` wrote.".format(type(snapshot).__name__),
+            "a file `{}` wrote.".format(type(snapshot).__name__, runnable.command("measure")),
             {"snapshot_type": type(snapshot).__name__},
         )
     agents = snapshot.get("agents") or {}
     if not isinstance(agents, dict):
         raise PlanError(
             "Snapshot `agents` is a JSON {}, not an object keyed by agent name - "
-            "re-run `foreman measure`, or pass --snapshot pointing at its "
-            "output.".format(type(agents).__name__),
+            "re-run `{}`, or pass --snapshot pointing at its "
+            "output.".format(type(agents).__name__, runnable.command("measure")),
             {"agents_type": type(agents).__name__},
         )
     if not agents:
         raise PlanError(
-            "Snapshot contains no agents - run `foreman measure` first, or "
-            "pass --snapshot pointing at a snapshot that has an `agents` object.",
+            "Snapshot contains no agents - run `{}` first, or "
+            "pass --snapshot pointing at a snapshot that has an `agents` object.".format(runnable.command("measure")),
             {},
         )
     # Before the capacity count: a snapshot that missed declared workers fails
