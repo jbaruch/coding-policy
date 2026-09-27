@@ -13,6 +13,11 @@
   tracked-diff refusal on a no-write round is unchanged. The second item in
   #499, naming the no-write alternative in `SKILL.md` Step 5, had already
   landed.
+
+## 0.3.288 — 2026-09-27
+
+### Fixed
+
 - **The ACR acceptance helper's output writes are descriptor-relative end to
   end (#558).** Follow-ups from #550's review, in
   `.github/codex-accept/contract.py`. `write_new` resolved its parent with
