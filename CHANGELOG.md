@@ -29,6 +29,8 @@
   pinned oracle after planning cannot hang the gate. Regression cases cover
   each gap and fail against the old code.
 
+### Fixed
+
 - **Four edges in the tier-pressure fields #477 added (#490).** Deferred
   Copilot advisories from #489's last review, all latent until a worker has a
   `tiers` table. `select_tier` recorded `de_escalated` whenever scarcity met
