@@ -1531,8 +1531,9 @@ def cmd_foreman_reset(args, client=None, warn=None, trace=None, spawn=None):
     # The deliverer runs from the package directory, so every path it gets is absolute.
     argv = [sys.executable, "-m", "foreman", "foreman-reset-deliver", "--pane", plan["pane_id"], "--stow", plan["stow"],
             "--state", str(state_path), "--config", str(Path(_config_path(args)).expanduser().resolve())]
-    if getattr(args, "herdr_bin", None):
-        argv += ["--herdr-bin", _absolute_executable(args.herdr_bin)]
+    herdr_bin = _herdr_bin_setting(args)
+    if herdr_bin:
+        argv += ["--herdr-bin", herdr_bin]
 
     def start():
         try:
@@ -1555,6 +1556,17 @@ def _absolute_executable(value):
     return str(Path(value).expanduser().resolve()) if os.sep in value else value
 
 
+def _herdr_bin_setting(args):
+    """The non-default herdr executable this call uses, flag first, then FOREMAN_HERDR_BIN.
+
+    The detached deliverer runs from another directory and a resumed foreman
+    from a fresh context, so a relative path from either source is resolved
+    here, against this call's directory, or it names a different file there.
+    """
+    value = getattr(args, "herdr_bin", None) or os.environ.get("FOREMAN_HERDR_BIN")
+    return _absolute_executable(value) if value else None
+
+
 def _spawn_detached(argv, sink):
     """Start `argv` in its own session so it outlives the foreman's turn."""
     process = subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=sink, stderr=sink,
@@ -1565,8 +1577,9 @@ def _spawn_detached(argv, sink):
 def _resume_options(args):
     """The non-default owner settings a resumed foreman must keep passing."""
     options = {"config": str(Path(_config_path(args)).expanduser().resolve())}
-    if getattr(args, "herdr_bin", None):
-        options["herdr_bin"] = _absolute_executable(args.herdr_bin)
+    herdr_bin = _herdr_bin_setting(args)
+    if herdr_bin:
+        options["herdr_bin"] = herdr_bin
     return options
 
 
