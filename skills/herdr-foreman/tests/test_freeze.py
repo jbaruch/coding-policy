@@ -116,6 +116,42 @@ class FreezeLinkTest(FreezeTest):
                 freeze_paths(self.paths)
 
 
+class FrozenPathTest(unittest.TestCase):
+    """`read_frozen` reads only a copy anchored under its own `.dispatched/` (#534)."""
+
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory(prefix="foreman-frozen-path-")
+        self.addCleanup(temporary.cleanup)
+        self.root = Path(temporary.name).resolve()
+        for name in ("source", "other"):
+            (self.root / name).mkdir()
+            (self.root / name / "brief.md").write_text("brief in {}\n".format(name))
+        self.other = Path(freeze_paths({"brief": str(self.root / "other" / "brief.md")})["brief"])
+        freeze_paths({"brief": str(self.root / "source" / "brief.md")})
+
+    def test_an_intact_absolute_copy_reads_back(self):
+        from foreman.assign import read_frozen
+        self.assertEqual(read_frozen(str(self.other)), b"brief in other\n")
+
+    def test_a_traversal_through_another_frozen_directory_is_refused(self):
+        from foreman.assign import read_frozen
+        # Lexically under source/.dispatched, but it names other's intact copy.
+        traversal = "{}/source/{}/../../other/{}/{}".format(self.root, FROZEN_DIR, FROZEN_DIR, self.other.name)
+        self.assertTrue(Path(traversal).is_file())
+        with self.assertRaisesRegex(UsageError, "not an intact frozen copy"):
+            read_frozen(traversal)
+
+    def test_a_relative_path_is_refused(self):
+        from foreman.assign import read_frozen
+        relative = os.path.relpath(self.other, self.root)
+        previous = os.getcwd()
+        os.chdir(self.root)
+        self.addCleanup(os.chdir, previous)
+        self.assertTrue(Path(relative).is_file())
+        with self.assertRaisesRegex(UsageError, "not an intact frozen copy"):
+            read_frozen(relative)
+
+
 class FreezeDecisionTest(unittest.TestCase):
     """The decision follows the replay answer per role, and never lets a new role skip the freeze."""
 
