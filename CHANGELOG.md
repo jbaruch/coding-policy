@@ -32,6 +32,20 @@
   name ends in a newline — for the Stop hook, the plugin root too — and each
   fixture fails against the old code.
 
+## 0.3.287 — 2026-09-27
+
+### Fixed
+
+- **`foreman-reset` resolves a relative `FOREMAN_HERDR_BIN` before the
+  deliverer starts (#533).** A relative `--herdr-bin` was already resolved to
+  an absolute path, but the same value from `FOREMAN_HERDR_BIN` passed through
+  as-is: the detached deliverer inherited it and ran from the package
+  directory, so it looked for Herdr in the wrong place, and the saved resume
+  prompt omitted it. `skills/herdr-foreman/foreman/cli.py` now resolves the
+  flag, or else the environment value, the same way for the deliverer's argv
+  and the recorded resume options; a bare command name still resolves on
+  `PATH`.
+
 ## 0.3.286 — 2026-09-27
 
 ### Fixed
