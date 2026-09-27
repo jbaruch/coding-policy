@@ -17,6 +17,7 @@ from datetime import timedelta
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
+from . import runnable
 from . import supervision as store
 from .errors import HerdrError, StateError, ForemanError, UsageError
 from .herdr import HerdrClient, scrub_for_trace
@@ -166,7 +167,8 @@ def sweep(state_path, client, at, watcher_id):
     def mutate(current):
         watcher = current["watchers"][-1]
         if watcher["id"] != watcher_id or watcher["status"] != "running":
-            raise StateError("This watcher no longer owns the fleet observation lease; retain its output and inspect supervision-status.", {})
+            raise StateError("This watcher no longer owns the fleet observation lease; retain its output and inspect `{}`.".format(
+                runnable.command("supervision-status")), {})
         watcher["heartbeat"] = at
         for member_id, assignment_digest, sample in samples:
             member = next(row for row in current["members"] if row["id"] == member_id)

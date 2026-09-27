@@ -14,6 +14,7 @@ import json
 import os
 import sys
 
+from . import runnable
 from . import supervision as store
 from . import supervision_runtime as runtime
 from .errors import ForemanError
@@ -47,7 +48,8 @@ def check(payload, environ, at, *, root=None, probe=runtime.process_identity):
                 return block("This bound foreman's supervision state is missing. Restore {} before stopping; missing state cannot prove its work was resolved.".format(store.store_path(binding["state_path"])))
             if data["binding"]["identity"] != who:
                 if binding["generation"] >= data["binding"]["generation"]:
-                    return block("This foreman's native binding handoff is incomplete. Retry supervision-bind for the same owner state before stopping.")
+                    return block("This foreman's native binding handoff is incomplete. Retry `{}` for the same owner state before stopping.".format(
+                        runnable.command("supervision-bind")))
                 continue
             events = store.pending(data)
             active = [row["id"] for row in data["members"] if row["active"]]
@@ -56,7 +58,10 @@ def check(payload, environ, at, *, root=None, probe=runtime.process_identity):
             if not events and not active:
                 return None
             health = runtime.health(data, at, probe)
-            return block("{} active assignment(s), {} unhandled event(s); watcher is {}. Run supervision-drain, reconcile report/ledger evidence, acknowledge handled outcomes, and keep awaiting the foreground supervision-watch handle. To pause for the user or hand off, save supervision-hold with a disposition and evidence for every active assignment. State: {}".format(len(active), len(events), health["state"], binding["state_path"]))
+            return block("{} active assignment(s), {} unhandled event(s); watcher is {}. Run `{}`, reconcile report/ledger evidence, acknowledge handled outcomes, and keep awaiting the foreground `{}` handle. To pause for the user or hand off, save a hold with `{}` with a disposition and evidence for every active assignment. State: {}".format(
+                len(active), len(events), health["state"], runnable.command("supervision-drain"), runnable.command("supervision-watch"),
+                runnable.command("supervision-hold"),
+                binding["state_path"]))
         except ForemanError as exc:
             return block("Cannot verify this bound foreman's supervision: {} Resume from its saved state before stopping.".format(exc))
     return None

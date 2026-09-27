@@ -13,6 +13,7 @@ if _ROOT not in _sys.path:
 
 import unittest
 
+from foreman import runnable
 from foreman.errors import PlanError
 from foreman.planner import DEFAULT_ROLE_COSTS, PLAN_SCHEMA_VERSION, _costs_for, plan
 
@@ -491,7 +492,7 @@ class RosterCoverageTest(unittest.TestCase):
                 roster=["alpha", "zeta", "idle"],
             )
         self.assertIn("idle", str(caught.exception))
-        self.assertIn("foreman measure", str(caught.exception))
+        self.assertIn("`{}`".format(runnable.command("measure")), str(caught.exception))
         self.assertEqual(caught.exception.details["uncovered"], ["idle"])
 
     def test_an_uncovered_roster_is_named_before_the_capacity_count(self):
@@ -504,7 +505,7 @@ class RosterCoverageTest(unittest.TestCase):
                 snapshot(alpha=90.0),
                 roster=["alpha", "zeta", "idle"],
             )
-        self.assertIn("foreman measure", str(caught.exception))
+        self.assertIn("`{}`".format(runnable.command("measure")), str(caught.exception))
         self.assertNotIn("pass fewer roles", str(caught.exception))
         self.assertEqual(caught.exception.details["uncovered"], ["idle", "zeta"])
 
@@ -543,7 +544,7 @@ class RefusalTest(unittest.TestCase):
     def test_empty_snapshot_is_an_error_naming_measure(self):
         with self.assertRaises(PlanError) as caught:
             plan(ROLES, {"agents": {}})
-        self.assertIn("foreman measure", str(caught.exception))
+        self.assertIn("`{}`".format(runnable.command("measure")), str(caught.exception))
 
     def test_missing_snapshot_is_an_error(self):
         with self.assertRaises(PlanError):
@@ -555,7 +556,7 @@ class RefusalTest(unittest.TestCase):
         with self.assertRaises(PlanError) as caught:
             plan(ROLES, {"agents": ["claude", "grok", "codex"]})
         self.assertIn("not an object keyed by agent name", str(caught.exception))
-        self.assertIn("foreman measure", str(caught.exception))
+        self.assertIn("`{}`".format(runnable.command("measure")), str(caught.exception))
 
     def test_a_snapshot_that_is_not_an_object_is_a_plan_error(self):
         with self.assertRaises(PlanError) as caught:

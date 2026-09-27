@@ -40,6 +40,7 @@ import hashlib
 from pathlib import Path
 from functools import partial
 
+from . import runnable
 from .composer import (
     COMPOSER_SETTLE_SEC,
     DEFAULT_START_TIMEOUT_MS,
@@ -132,8 +133,8 @@ def normalize_assignments(payload):
     if not isinstance(payload, dict) or not payload:
         raise UsageError(
             "--assignments needs a JSON object mapping roles to agent names, or "
-            "the output of `foreman plan` (which nests one under "
-            "\"assignments\"). Got: {}.".format(type(payload).__name__),
+            "the output of `{plan}` (which nests one under "
+            "\"assignments\"). Got: {}.".format(type(payload).__name__, plan=runnable.command("plan")),
             {},
         )
     for role, agent in payload.items():
@@ -568,8 +569,8 @@ def refuse_reserved(assignments, task, reserved):
     held = seat_holds(list(assignments), task, reserved or {}, {})
     for role, name in assignments.items():
         if name in held["exclude"].get(role, []):
-            raise UsageError("Assigned worker {} is reserved as developer for {}. Replan, or close that task with `foreman close-task` before reusing its developer.".format(
-                name, reserved[name]), {"agent": name, "task": reserved[name]})
+            raise UsageError("Assigned worker {} is reserved as developer for {}. Replan, or close that task with `{}` before reusing its developer.".format(
+                name, reserved[name], runnable.command("close-task")), {"agent": name, "task": reserved[name]})
 
 
 def validate_context_mode(assignments, no_clear, retain_context, task, fix_round, *, recovery=None, history=None, plan_id=None, work=None, retain_specialist=False, requirements=None):
@@ -626,7 +627,7 @@ def validate_context_mode(assignments, no_clear, retain_context, task, fix_round
         )
     if "developer" in assignments and fix_round in RETAIN_CONTEXT_ROUNDS and not retain_context:
         if transition is None:
-            raise UsageError("Early developer fixes require --retain-context or a recorded fresh handoff. Use recover-role-clear for a verified automatic role clear, or follow dispatch-recovery.md for other causes; never reset the task.", {})
+            raise UsageError("Early developer fixes require --retain-context or a recorded fresh handoff. Use `{}` for a verified automatic role clear, or follow dispatch-recovery.md for other causes; never reset the task.".format(runnable.command("recover-role-clear")), {})
         task_record(store, task)
         if no_clear:
             raise UsageError("A replacement developer session requires an automatic clear; omit --no-clear.", {})
@@ -1179,10 +1180,10 @@ def apply(client, assignments, agents_by_name, paths, at, no_clear=False, settle
             ) if landing["landed"] or landing["started"] else None)
         if grok_new and step["role"] != "developer":
             warn("{} received a fresh Grok assignment. Wait for its report; if delivery is unconfirmed, "
-                 "stale-ID recovery through recover-report requires the recorded pre-clear native ID, original plan and native updates. "
+                 "stale-ID recovery through `{recover}` requires the recorded pre-clear native ID, original plan and native updates. "
                  "Without that ID, stale-ID recovery is unavailable: record the report as unavailable "
                  "and notify the operator of the missing pre-clear evidence. Keep review/release gates "
-                 "unsatisfied; never rerun completed work.".format(name))
+                 "unsatisfied; never rerun completed work.".format(name, recover=runnable.command("recover-report")))
         checked = statuses.get(name, {})
         record = {
             "role": step["role"],

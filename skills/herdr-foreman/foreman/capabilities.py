@@ -22,6 +22,7 @@ from datetime import date, timedelta, timezone
 from pathlib import Path
 from typing import NoReturn
 
+from . import runnable
 from .chronology import timestamp
 from .diagnostics import stderr_warn as _warn
 from .errors import UsageError
@@ -277,8 +278,8 @@ def assess(document, model, effort, capabilities):
             source = entry["source"]
             raise InadequateCapability(
                 "The capability table records {} at {} effort as inadequate for {} ({} source {}, read {}). Configure "
-                "another model for this round, or record newer evidence through capability-record.".format(
-                    model, effort, name, source["kind"], source["ref"], source["dated"]),
+                "another model for this round, or record newer evidence through `{}`.".format(
+                    model, effort, name, source["kind"], source["ref"], source["dated"], runnable.command("capability-record")),
                 {"model": model, "effort": effort, "capability": name, "source": source})
         supported = entry["verdict"] == "adequate" and entry["source"]["kind"] in SUPPORTING_SOURCES
         verdicts.append("adequate" if supported else "unknown")
