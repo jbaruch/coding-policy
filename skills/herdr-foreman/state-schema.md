@@ -228,9 +228,9 @@ decision log, not a new machine status API or an input to `foreman.sh apply`.
   reads it too, and only through a validated schema-1 document: frontmatter
   carrying every field above, `dispatch_state` resolving to the state the
   command runs against, and every event carrying every field exactly once.
-  Every field other than `observed`, `evidence` and `assessment` holds the
-  format the table and frontmatter name, in every event: a full
-  `base_revision` SHA; an absolute `dispatch_state`; an `id` matching its
+  The frontmatter holds a full `base_revision` SHA and an absolute
+  `dispatch_state`. Every event field other than `observed`, `evidence` and
+  `assessment` holds the format the table names, in every event: an `id` matching its
   section heading and naming no other event; a timezone-qualified `at`; a
   `subject` of `task` or `assignment`; a `decision` from that subject's
   vocabulary in `references/task-ledger.md`; `dispatch_id`, `worker` and
