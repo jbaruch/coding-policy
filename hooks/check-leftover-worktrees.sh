@@ -15,7 +15,7 @@
 # and stale branches on origin merged nowhere with no pull request. Nothing
 # else is listed: no removals, no counts, no other repository.
 #
-# Never acts in a Herdr worker session (HERDR_ENV set in a linked worktree):
+# Never acts in a Herdr worker session (HERDR_ENV set, even empty, in a linked worktree):
 # workers never delete (rules/agent-team-operation.md Writers and Checkouts).
 # In portable mode (SESSION_START_MODE=portable, set by hooks/session-start.sh
 # under `tessl hook run`, which strips HERDR_ENV) the scripts run --dry-run:
@@ -116,7 +116,7 @@ main() {
     return 0
   fi
   # A worker session: acting here would break the rule the worker runs under.
-  if [[ -n "${HERDR_ENV:-}" && "$git_dir" != "$common_dir" ]]; then
+  if [[ -n "${HERDR_ENV+x}" && "$git_dir" != "$common_dir" ]]; then
     return 0
   fi
 

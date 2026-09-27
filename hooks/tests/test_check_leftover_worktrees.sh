@@ -327,8 +327,11 @@ main() {
   age_wt "$ROOT/spent" "$AGED_MTIME"
   push_branch feat/remote-merged 1
   run_hook "$ROOT/worker" HERDR_ENV=1
-  if [[ $RC -eq 0 && -z "$OUT" && -e "$ROOT/spent" ]] && on_origin feat/remote-merged; then pass
-  else fail "c6: RC=$RC OUT=$OUT ERR=$ERR"; fi
+  local rc_set=$RC out_set=$OUT
+  # Set but empty is still Herdr: the role is unknown, so it acts as a worker.
+  run_hook "$ROOT/worker" HERDR_ENV=
+  if [[ $rc_set -eq 0 && -z "$out_set" && $RC -eq 0 && -z "$OUT" && -e "$ROOT/spent" ]] && on_origin feat/remote-merged; then pass
+  else fail "c6: set RC=$rc_set OUT=$out_set; empty RC=$RC OUT=$OUT ERR=$ERR"; fi
 
   echo "7. portable mode deletes nothing and still lists what awaits the operator"
   mk_case c7
