@@ -43,6 +43,19 @@
   change; it stays recorded so the next edit to that list lands its formatting
   in a commit of its own.
 
+### Tests
+
+- **Empty `HERDR_ENV` regression tests for the ACR and stop hooks (#557).**
+  #552 made every hook treat `HERDR_ENV` as set when present with any value,
+  empty included, but only `check-git-sync.sh` had an empty-value case. A
+  refactor to `${HERDR_ENV:+x}` would have passed the suite while a worker
+  with `HERDR_ENV=` installed ACR updates and got told to remove worktrees.
+  `hooks/tests/test_check_acr_latest.sh` case 6c and
+  `hooks/tests/test_stop_handoff_hygiene.sh` cases 4c/4d now run with
+  `HERDR_ENV=`; each fails against that refactor. The stop-hook harness also
+  unsets the host's `HERDR_ENV`, so a run from inside a Herdr pane no longer
+  flips the non-Herdr cases.
+
 ## 0.3.296 — 2026-09-27
 
 ### Fixed
