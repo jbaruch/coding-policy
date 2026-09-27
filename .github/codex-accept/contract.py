@@ -8,6 +8,7 @@ never include subprocess output, untrusted JSON, or credential values. See
 from __future__ import annotations
 
 import argparse
+import errno
 from contextlib import contextmanager
 import hashlib
 import io
@@ -148,16 +149,116 @@ def regular(path: Path, limit: int = MAX_TEXT) -> bytes:
     return path.read_bytes()
 
 
+DIR_FLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+
+
+def write_at(dirfd: int, name: str, value: bytes) -> None:
+    """Create <name> under <dirfd> holding <value>, or accept an identical existing file; 0600 either way.
+
+    Every operation goes through descriptors opened with O_NOFOLLOW, so a symlink swapped in at
+    <name> is never followed and a chmod never lands on an inode outside the owned directory.
+    """
+    try:
+        fd = os.open(name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=dirfd)
+    except FileExistsError:
+        fd = None
+    if fd is not None:
+        try:
+            view = memoryview(value)
+            while view:
+                view = view[os.write(fd, view):]
+            os.fchmod(fd, 0o600)
+            os.fsync(fd)
+            require(stat.S_IMODE(os.fstat(fd).st_mode) == 0o600,
+                    "Output file mode is not 0600; inspect the run root's filesystem and ownership")
+        finally:
+            os.close(fd)
+        return
+    try:
+        fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=dirfd)
+    except OSError as exc:
+        if exc.errno != errno.ELOOP:
+            raise
+        raise Refusal(f"Output {name} is a symlink; remove it and re-run in a fresh run root") from exc
+    try:
+        info = os.fstat(fd)
+        require(stat.S_ISREG(info.st_mode),
+                f"Output {name} exists but is not a regular file; remove it and re-run in a fresh run root")
+        require(info.st_nlink == 1,
+                f"Output {name} is hard-linked elsewhere or was replaced mid-run; "
+                "remove it and re-run in a fresh run root")
+        chunks, size = [], 0
+        while size <= len(value):
+            chunk = os.read(fd, len(value) + 1 - size)
+            if not chunk:
+                break
+            chunks.append(chunk); size += len(chunk)
+        require(b"".join(chunks) == value, "Output already exists with different content; refuse to overwrite it")
+        # Re-apply on the idempotent path too: an interrupted run can leave a permissive mode.
+        os.fchmod(fd, 0o600)
+        require(stat.S_IMODE(os.fstat(fd).st_mode) == 0o600,
+                "Output file mode is not 0600; inspect the run root's filesystem and ownership")
+    finally:
+        os.close(fd)
+
+
+def open_child(parent: int, name: str, private: bool) -> int:
+    """Open (creating 0700 if absent) directory <name> under <parent> without following a symlink."""
+    try:
+        os.mkdir(name, 0o700, dir_fd=parent)
+    except FileExistsError:
+        pass  # An existing entry is validated by the no-follow open below.
+    try:
+        fd = os.open(name, DIR_FLAGS, dir_fd=parent)
+    except OSError as exc:
+        if exc.errno not in (errno.ELOOP, errno.ENOTDIR):
+            raise
+        raise Refusal(f"Credential directory {name} is a symlink or not a directory; "
+                      "remove it and re-run seed in a fresh run root") from exc
+    opened = False
+    try:
+        if private:
+            os.fchmod(fd, 0o700)
+            require(stat.S_IMODE(os.fstat(fd).st_mode) == 0o700,
+                    "Credential directory mode is not 0700; inspect the run root's filesystem and ownership")
+        opened = True
+        return fd
+    finally:
+        if not opened:
+            os.close(fd)
+
+
 def write_new(path: Path, value: bytes) -> None:
     """Create <path> holding <value>; an existing file with exactly <value> is success (idempotent re-run)."""
     path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-    if path.exists() or path.is_symlink():
-        require(not path.is_symlink() and path.is_file() and path.read_bytes() == value,
-                "Output already exists with different content; refuse to overwrite it")
-        return
-    with path.open("xb") as handle:
-        handle.write(value)
-    path.chmod(0o600)
+    dirfd = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        write_at(dirfd, path.name, value)
+    finally:
+        os.close(dirfd)
+
+
+def write_private(root: Path, path: Path, value: bytes) -> None:
+    """write_new for credential material under the owned run <root>, entirely descriptor-relative.
+
+    No component from <root> down is followed through a symlink; each directory is 0700 and the
+    file 0600 on every run.
+    """
+    parts = path.relative_to(root).parts  # ValueError: a caller bug, never input
+    try:
+        fd = os.open(root, DIR_FLAGS)
+    except OSError as exc:
+        if exc.errno not in (errno.ELOOP, errno.ENOTDIR):
+            raise
+        raise Refusal("Run root is a symlink or not a directory; use a fresh run root") from exc
+    try:
+        for name in parts[:-1]:
+            child = open_child(fd, name, private=True)
+            os.close(fd)
+            fd = child
+        write_at(fd, parts[-1], value)
+    finally:
+        os.close(fd)
 
 
 def fresh_private(path: Path) -> None:
@@ -344,16 +445,30 @@ def run_proof(acr_root: Path, root: Path) -> None:
     prove_runtime(acr_root, events, result.returncode, root / "evidence/credential-boundary.json")
 
 
+# Floor shared with codex-review/mask-secrets.sh, which masks only strings this long;
+# a shorter credential would be neither masked in logs nor a reliable scan oracle.
+MIN_SECRET = 16
+# Credential fields of a Codex auth.json `tokens` object. Metadata such as `auth_mode`
+# (top level, or inside `tokens` in older shapes) and `last_refresh` is never a credential.
+TOKEN_FIELDS = ("id_token", "access_token", "refresh_token", "account_id")
+
+
 def secret_values(document: Any) -> list[str]:
-    """The credential strings an auth.json carries: account-session tokens, an API key, or both."""
+    """The credential strings an auth.json carries: account-session tokens, an API key, or both.
+
+    Every non-empty credential field is returned; one shorter than MIN_SECRET refuses.
+    """
     values = []
     if type(document) is dict:
         tokens = document.get("tokens")
         if type(tokens) is dict:
-            values += [v for v in tokens.values() if type(v) is str and len(v) >= 16]
+            values += [v for v in (tokens.get(f) for f in TOKEN_FIELDS) if type(v) is str and v]
         key = document.get("OPENAI_API_KEY")
-        if type(key) is str and len(key) >= 16:
+        if type(key) is str and key:
             values.append(key)
+    require(all(len(v) >= MIN_SECRET for v in values),
+            f"auth.json carries a credential shorter than {MIN_SECRET} characters, which masking skips; "
+            "regenerate it with `codex login` or supply the full OPENAI_API_KEY")
     return values
 
 
@@ -379,8 +494,8 @@ def seed(root: Path) -> None:
     require(bool(secret_values(document)), f"{SEED_SECRET} must be an auth.json with session tokens or an OPENAI_API_KEY")
     auth = root / "seed/auth.json"
     data = encoded(document)
-    write_new(auth, data)
-    write_new(root / "central/seed-oracle.json", data)
+    write_private(root, auth, data)
+    write_private(root, root / "central/seed-oracle.json", data)
     # Existing central masking helper; it emits only Actions mask commands.
     subprocess.run(["bash", str(Path(__file__).resolve().parents[1] / "codex-review/mask-secrets.sh"), str(auth)], check=True)
 

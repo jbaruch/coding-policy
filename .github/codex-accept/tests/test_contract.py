@@ -1285,6 +1285,135 @@ class ExportTests(unittest.TestCase):
                 c.seed(self.root)
         self.assertEqual((self.root / "seed/auth.json").read_bytes(), auth)
 
+    def test_seed_rerun_restores_private_modes(self):
+        auth = self.root / "seed/auth.json"
+        oracle = self.root / "central/seed-oracle.json"
+        for path in (auth, oracle):
+            path.chmod(0o644)
+            path.parent.chmod(0o755)
+        original_run = c.subprocess.run
+        quiet = mock.patch.object(c.subprocess, "run", side_effect=lambda *a, **kw: original_run(*a, **kw, capture_output=True))
+        with quiet, mock.patch.dict(os.environ, {"CODEX_AUTH_JSON": json.dumps({"tokens": {"access_token": SEED}})}):
+            c.seed(self.root)
+        for path in (auth, oracle):
+            self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+            self.assertEqual(path.parent.stat().st_mode & 0o777, 0o700)
+
+    def test_symlinked_credential_directory_refuses_without_writing_outside_root(self):
+        original_run = c.subprocess.run
+        quiet = mock.patch.object(c.subprocess, "run", side_effect=lambda *a, **kw: original_run(*a, **kw, capture_output=True))
+        for name in ("seed", "central"):
+            with self.subTest(directory=name), tempfile.TemporaryDirectory() as run, tempfile.TemporaryDirectory() as out:
+                root, outside = Path(run).resolve(), Path(out).resolve()
+                c.write_new(root / "evidence/credential-boundary.json", c.encoded(proof()))
+                outside.chmod(0o755)
+                (root / name).symlink_to(outside, target_is_directory=True)
+                with quiet, mock.patch.dict(os.environ, {"CODEX_AUTH_JSON": json.dumps({"tokens": {"access_token": SEED}})}):
+                    with self.assertRaisesRegex(c.Refusal, "symlink or not a directory"):
+                        c.seed(root)
+                self.assertEqual(list(outside.iterdir()), [])
+                self.assertEqual(outside.stat().st_mode & 0o777, 0o755)
+                self.assertFalse((root / "central").exists() and not (root / "central").is_symlink())
+
+    def test_directory_swapped_to_symlink_after_root_open_writes_nothing_outside(self):
+        real_mkdir = os.mkdir
+        with tempfile.TemporaryDirectory() as run, tempfile.TemporaryDirectory() as out:
+            root, outside = Path(run).resolve(), Path(out).resolve()
+            outside.chmod(0o755)
+
+            def swap(name, mode=0o777, *, dir_fd=None):
+                real_mkdir(name, mode, dir_fd=dir_fd)
+                os.rmdir(name, dir_fd=dir_fd)
+                os.symlink(outside, name, dir_fd=dir_fd)
+
+            with mock.patch.object(c.os, "mkdir", side_effect=swap):
+                with self.assertRaisesRegex(c.Refusal, "symlink or not a directory"):
+                    c.write_private(root, root / "seed/auth.json", b"{}")
+            self.assertEqual(list(outside.iterdir()), [])
+            self.assertEqual(outside.stat().st_mode & 0o777, 0o755)
+
+    def test_identical_hard_link_outside_root_refuses_without_chmod(self):
+        with tempfile.TemporaryDirectory() as run, tempfile.TemporaryDirectory() as out:
+            root, outside = Path(run).resolve(), Path(out).resolve()
+            external = outside / "auth.json"; external.write_bytes(b"{}"); external.chmod(0o644)
+            (root / "seed").mkdir(mode=0o700)
+            os.link(external, root / "seed/auth.json")
+            with self.assertRaisesRegex(c.Refusal, "hard-linked elsewhere"):
+                c.write_private(root, root / "seed/auth.json", b"{}")
+            self.assertEqual(external.stat().st_mode & 0o777, 0o644)
+
+    def test_file_swapped_to_symlink_is_never_chmodded_through(self):
+        real_open = os.open
+        for when in ("before-open", "after-open"):
+            with self.subTest(when=when), tempfile.TemporaryDirectory() as run, tempfile.TemporaryDirectory() as out:
+                root, outside = Path(run).resolve(), Path(out).resolve()
+                external = outside / "target"; external.write_bytes(b"{}"); external.chmod(0o644)
+                c.write_private(root, root / "seed/auth.json", b"{}")
+                (root / "seed/auth.json").chmod(0o644)
+
+                def racing_open(name, flags, mode=0o777, *, dir_fd=None):
+                    idempotent = name == "auth.json" and not flags & os.O_CREAT
+                    if idempotent and when == "before-open":
+                        os.unlink(name, dir_fd=dir_fd); os.symlink(external, name, dir_fd=dir_fd)
+                    fd = real_open(name, flags, mode, dir_fd=dir_fd)
+                    if idempotent and when == "after-open":
+                        os.unlink(name, dir_fd=dir_fd); os.symlink(external, name, dir_fd=dir_fd)
+                    return fd
+
+                expected = "is a symlink" if when == "before-open" else "replaced mid-run"
+                with mock.patch.object(c.os, "open", side_effect=racing_open):
+                    with self.assertRaisesRegex(c.Refusal, expected):
+                        c.write_private(root, root / "seed/auth.json", b"{}")
+                self.assertEqual(external.stat().st_mode & 0o777, 0o644)
+
+    def test_non_directory_credential_parent_refuses(self):
+        with tempfile.TemporaryDirectory() as run:
+            root = Path(run).resolve()
+            (root / "central").write_bytes(b"not a directory")
+            with self.assertRaisesRegex(c.Refusal, "symlink or not a directory"):
+                c.write_private(root, root / "central/seed-oracle.json", b"{}")
+            self.assertEqual((root / "central").read_bytes(), b"not a directory")
+
+    def test_short_credential_refuses_instead_of_escaping_mask_and_scan(self):
+        short = "sk-short-12"
+        for document in ({"tokens": {"access_token": SEED, "refresh_token": short}}, {"OPENAI_API_KEY": short}):
+            with self.subTest(document=document):
+                with self.assertRaisesRegex(c.Refusal, "shorter than 16 characters"):
+                    c.secret_values(document)
+                auth = self.base / "short-auth.json"; auth.write_bytes(c.encoded(document))
+                with self.assertRaisesRegex(c.Refusal, "shorter than 16 characters"):
+                    c.credentials(auth, SUITE)
+                with mock.patch.dict(os.environ, {"CODEX_AUTH_JSON": json.dumps(document)}):
+                    with self.assertRaisesRegex(c.Refusal, "shorter than 16 characters"):
+                        c.seed(self.root)
+
+    def test_realistic_auth_metadata_seeds_and_is_not_a_credential(self):
+        tokens = {"id_token": "i" * 40, "access_token": SEED, "refresh_token": "r" * 40,
+                  "account_id": "00000000-0000-0000-0000-000000000000"}
+        for document in ({"auth_mode": "chatgpt", "OPENAI_API_KEY": None, "tokens": tokens,
+                          "last_refresh": "2026-07-19T00:00:00Z"},
+                         {"tokens": {**tokens, "auth_mode": "chatgpt"}, "last_refresh": "2026-07-19T00:00:00Z"}):
+            with self.subTest(document=document):
+                self.assertEqual(sorted(c.secret_values(document)), sorted(tokens.values()))
+        with tempfile.TemporaryDirectory() as name:
+            root = Path(name).resolve()
+            c.write_new(root / "evidence/credential-boundary.json", c.encoded(proof()))
+            original_run = c.subprocess.run
+            quiet = mock.patch.object(c.subprocess, "run", side_effect=lambda *a, **kw: original_run(*a, **kw, capture_output=True))
+            with quiet, mock.patch.dict(os.environ, {"CODEX_AUTH_JSON": json.dumps(document)}):
+                c.seed(root)
+            self.assertEqual(json.loads((root / "seed/auth.json").read_bytes()), document)
+
+    def test_every_credential_at_the_floor_is_scanned(self):
+        values = {"access_token": "a" * 16, "refresh_token": "r" * 16, "id_token": "i" * 16}
+        auth = self.base / "floor-auth.json"
+        auth.write_bytes(c.encoded({"tokens": values, "OPENAI_API_KEY": "k" * 16}))
+        known = c.credentials(auth, SUITE)
+        for value in [*values.values(), "k" * 16]:
+            self.assertIn(value.encode(), known)
+            with self.assertRaisesRegex(c.Refusal, "Credential material"):
+                c.scan(b"leaked " + value.encode(), known)
+
     def test_missing_seed_secret_names_it_and_the_recovery(self):
         env = {k: v for k, v in os.environ.items() if k != "CODEX_AUTH_JSON"}
         with tempfile.TemporaryDirectory() as name, mock.patch.dict(os.environ, env, clear=True):
