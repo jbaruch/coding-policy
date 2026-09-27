@@ -91,6 +91,25 @@
     Act on What It Names raises each listed item with the user, one question
     at a time, and forbids acting on one unasked.
 
+## 0.3.286 — 2026-09-27
+
+### Fixed
+
+- **Every inline diagnostic suppression now carries its cause, or is gone
+  (#538).** `rules/language-diagnostics.md` Findings Are Non-Dismissible
+  Without Cause requires the reason beside each suppression. Two `# noqa`
+  comments were removed rather than annotated, since neither suppressed
+  anything a gate reads: the bare `# noqa: E402` in
+  `skills/herdr-foreman/tests/test_slice_scope_parity.py` (no flake8/ruff gate
+  runs in this repo, and the sibling herdr test files use the same
+  `sys.path.insert`-then-import pattern with no suppression), and the
+  `# noqa: F401` on `probe.py`'s `stderr_warn` import (the module calls
+  `stderr_warn` itself, so the import is used and F401 never fires). The
+  audit also found ten bare `# shellcheck disable=SC1090` directives on the
+  test harnesses' `source "$SCRIPT"` lines; each now states that ShellCheck
+  cannot resolve the dynamically constructed source path, matching the
+  wording `test_verify_github_release.sh` already used.
+
 ## 0.3.284 — 2026-09-27
 
 ### Fixed
