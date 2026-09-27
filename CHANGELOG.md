@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.282 — 2026-09-27
+
 ### Changed
 
 - **Renovate stays within the ACR acceptance lane's compatible versions.** The
