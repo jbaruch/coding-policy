@@ -103,18 +103,25 @@ declared, instructions, runners, notes, missing = False, [], [], None, []
 # symlinked directory is not the workflows location.
 workflows = []
 workflow_dir = os.path.join(checkout, ".github", "workflows")
-# A symlinked workflows directory is not the platform's location: its files
-# live elsewhere, possibly outside the checkout, so it lists nothing. Only an
-# absent path -- no entry, or a `.github` that is a file -- means no workflows;
-# any other failure to probe it is a tool error.
-try:
-    probe = os.lstat(workflow_dir)
-except (FileNotFoundError, NotADirectoryError):
-    probe = None
-except OSError as exc:
-    sys.stderr.write("resolve-gates: cannot inspect {}: {} -- check its permissions.\n".format(workflow_dir, exc))
-    raise SystemExit(2)
-if probe is not None and stat.S_ISDIR(probe.st_mode):
+# A symlinked `.github` or workflows directory is not the platform's location:
+# its files live elsewhere, possibly outside the checkout, so it lists nothing.
+# Each component is probed without following links. Only an absent path -- no
+# entry, or a `.github` that is a file -- means no workflows; any other
+# failure to probe it is a tool error.
+real_dirs = True
+for component in (os.path.join(checkout, ".github"), workflow_dir):
+    try:
+        probe = os.lstat(component)
+    except (FileNotFoundError, NotADirectoryError):
+        real_dirs = False
+        break
+    except OSError as exc:
+        sys.stderr.write("resolve-gates: cannot inspect {}: {} -- check its permissions.\n".format(component, exc))
+        raise SystemExit(2)
+    if not stat.S_ISDIR(probe.st_mode):
+        real_dirs = False
+        break
+if real_dirs:
     try:
         with os.scandir(workflow_dir) as entries:
             for entry in entries:

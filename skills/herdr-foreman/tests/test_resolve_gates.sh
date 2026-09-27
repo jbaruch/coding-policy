@@ -188,6 +188,14 @@ JSON
   if [[ $RC -eq 0 ]] && [[ "$(list "$OUT" workflows)" == "" ]]; then
     pass; else fail "a symlinked workflows directory lists nothing, got RC=$RC OUT=$OUT"; fi
 
+  # Nor is a workflows directory reached through a symlinked `.github`.
+  mkdir -p "$TMP/ghlink" "$TMP/outside-github/workflows" || die "mkdir ghlink"
+  printf 'x\n' > "$TMP/outside-github/workflows/foreign.yml" || die "write foreign workflow"
+  ln -s "$TMP/outside-github" "$TMP/ghlink/.github" || die "link .github"
+  run "$TMP/ghlink"
+  if [[ $RC -eq 0 ]] && [[ "$(list "$OUT" workflows)" == "" ]]; then
+    pass; else fail "a symlinked .github lists nothing, got RC=$RC OUT=$OUT"; fi
+
   # A workflows directory that exists but cannot be probed is a tool error,
   # never an empty list. Root can probe anything, so the case needs a user.
   if [[ "$(id -u)" -ne 0 ]]; then
