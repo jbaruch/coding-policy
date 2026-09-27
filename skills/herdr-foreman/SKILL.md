@@ -135,7 +135,8 @@ Before following any route below, report the worktree sweep to the operator:
   status `ok` with no `detail` means the worktree root does not exist
 - On exit 2 there is no JSON; report the stderr diagnostic instead
 - Raise each `dirty` or `unpushed` item the report lists per
-  `rules/hook-action-reporting.md` Act on What It Names
+  `rules/hook-action-reporting.md` Act on What It Names; the operator carries
+  out the resolution chosen, and the foreman runs none of it
 
 - **Exit 0** — read `due`, satisfy any cadence it names, and proceed to Step 5.
   A resumed foreman proceeds to the stow's continuation step instead (Step 17
