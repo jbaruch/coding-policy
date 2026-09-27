@@ -867,7 +867,7 @@ decide_worktree() { # <shared> <abs_root> <default> <dry-run 0|1> <path> <branch
     1) row kept "$path" "$branch" changed; warn "kept ${path}: origin no longer holds ${head}"; return 0 ;;
     *) row failed "$path" "$branch" "cannot re-verify that origin holds ${head}, so it was kept: $(tr '\n' ' ' < "$ERRFILE")"; return 0 ;;
   esac
-  remove_worktree "$shared" "$dry" "$path" "$branch" "$tip"
+  remove_worktree "$shared" "$dry" "$path" "$branch" "$tip" "$mode" "$head" "$db"
   return 0
 }
 
@@ -880,10 +880,11 @@ unpushed_count() { # <shared> <commit>
 }
 
 # Remove the worktree at <path> with plain `git worktree remove` (git itself
-# refuses a tree that turned dirty), then delete its branch at <tip>, which
-# origin was just proven to hold.
-remove_worktree() { # <shared> <dry> <path> <branch> <tip>
-  local shared="$1" dry="$2" path="$3" branch="$4" tip="$5"
+# refuses a tree that turned dirty), then delete its branch at <tip> once
+# origin is proven, again, to hold it: the removal takes time, and a
+# force-push inside it would leave the branch the last ref to its commits.
+remove_worktree() { # <shared> <dry> <path> <branch> <tip> <mode> <head> <default>
+  local shared="$1" dry="$2" path="$3" branch="$4" tip="$5" mode="$6" head="$7" db="$8"
   if (( dry )); then
     row removed "$path" "$branch" "" "$tip"; return 0
   fi
@@ -895,6 +896,12 @@ remove_worktree() { # <shared> <dry> <path> <branch> <tip>
   row removed "$path" "$branch" "" "$tip"
   [[ -n "$branch" ]] || return 0
   local rc=0
+  proof_holds "$shared" "$mode" "$tip" "$head" "$db" || rc=$?
+  case "$rc" in
+    0) ;;
+    1) row failed "$branch" "$branch" "origin stopped holding ${tip} after its worktree was removed, so ${branch} was kept; push it or delete it by hand"; return 0 ;;
+    *) row failed "$branch" "$branch" "cannot re-verify that origin holds ${tip} after its worktree was removed, so ${branch} was kept: $(tr '\n' ' ' < "$ERRFILE")"; return 0 ;;
+  esac
   delete_branch "$shared" "$branch" "$tip" || rc=$?
   report_branch_delete "$branch" "$tip" "$rc"
   return 0

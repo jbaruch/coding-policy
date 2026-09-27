@@ -1032,6 +1032,26 @@ SHIM
   if (( RC == 0 )) && [[ "$(branch_kept_reason review/bp)" == changed ]] && has_branch "$SHARED" review/bp; then
     pass; else fail "branch proof: rc=$RC out=$OUT err=$ERRTEXT"; fi
 
+  # --- 86. origin dropping the commit while the worktree is removed keeps the branch.
+  mk_repo wtproof
+  local wp="$ROOT/wtproof-wt"
+  add_wt "$SHARED" review/wp "$wp"; commit_in "$wp" wp.txt
+  quiet "push review/wp failed" git -C "$wp" push -q origin HEAD:review/wp
+  quiet "fetch after push failed" git -C "$SHARED" fetch -q origin
+  mkdir -p "$TMP/shim86" || die "mkdir shim86 failed"
+  # The real removal runs, then origin loses the branch: the window between
+  # the first proof and the branch deletion. A failed drop breaks the premise.
+  # shellcheck disable=SC2016  # The shim's "$@" and $? must expand in the shim, not here.
+  printf '#!/usr/bin/env bash\nset -euo pipefail\nif [[ "$*" == *"worktree remove"* ]]; then rc=0; %q "$@" || rc=$?; %q -C %q update-ref -d refs/heads/review/wp || { echo "shim86: could not drop review/wp" >&2; exit 1; }; exit "$rc"; fi\nexec %q "$@"\n' \
+    "$real_git" "$real_git" "$BARE" "$real_git" > "$TMP/shim86/git" || die "shim86 write failed"
+  chmod +x "$TMP/shim86/git" || die "chmod shim86 failed"
+  RUN_SEQ=$((RUN_SEQ+1))
+  OUT="$(env WORKTREE_ROOT="$ROOT" PRUNE_IDLE_HOURS=0 PATH="$TMP/shim86:$PATH" bash "$SCRIPT" "$SHARED" 2>"$TMP/err.$RUN_SEQ")"; RC=$?
+  ERRTEXT="$(cat "$TMP/err.$RUN_SEQ")"
+  echo "86. origin dropping the commit while its worktree is removed keeps the branch, exit 2"
+  if (( RC == 2 )) && [[ "$(removed_paths)" == *"$wp"* ]] && [[ "$OUT" == *"origin stopped holding"* ]] && has_branch "$SHARED" review/wp; then
+    pass; else fail "worktree proof: rc=$RC out=$OUT err=$ERRTEXT"; fi
+
   # --- 83. a partial lsof listing (exit 0, an unreadable cwd) is not an answer.
   mk_repo lsofpartial
   local lp="$ROOT/lsofpartial-detached"
