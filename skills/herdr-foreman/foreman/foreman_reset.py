@@ -40,9 +40,9 @@ kind while the deliverer waits (#523). `foreman-reset` records the native
 session bound at `supervision-bind` on the row, and every keystroke of the
 clear command, extra Enters included, refuses unless the pane still holds that
 session.
-The clear itself starts a new native session by design, so once the composer
-confirms the command consumed, the resume prompt's keystrokes keep the name,
-kind and idle checks alone.
+The clear itself starts a new native session by design. The deliverer waits
+for Herdr to report that new session, pins it, and every keystroke of the
+resume prompt refuses unless the pane still holds the pinned session.
 """
 
 import copy
@@ -77,6 +77,10 @@ CLAIM_LOCK_POLL_SEC = 0.2
 #: Herdr can report `done` for a single read while a turn is still running
 #: (references/herdr.md), so one settled read is not an ended turn.
 RESET_STABLE_READS = 3
+#: How long the deliverer waits, after the clear, for Herdr to report the new
+#: native session the clear started, and how often it looks.
+CLEAR_SESSION_BUDGET_SEC = 30
+CLEAR_SESSION_POLL_SEC = 1
 #: The detail keys a failure record keeps. Herdr and composer errors can carry
 #: raw subprocess output or pane text; the record keeps identifiers only.
 FAILURE_DETAIL_KEYS = frozenset({"pane_id", "stow", "record", "status", "pid", "lock", "kind", "reconciled",
@@ -754,6 +758,26 @@ def mechanics(agents, kind, name):
     return foreman
 
 
+def _cleared_session(client, pane_id, before, *, sleep, clock,
+                     budget_sec=CLEAR_SESSION_BUDGET_SEC, poll_sec=CLEAR_SESSION_POLL_SEC):
+    """The new native session the clear started, once Herdr reports it for the pane.
+
+    A pane still reporting the bound session, or none, is polled until the
+    budget is spent; the clear then proved no new session, and nothing
+    further is sent.
+    """
+    deadline = clock() + budget_sec
+    while True:
+        current = pane_session(client, pane_id)
+        if current is not None and current != before:
+            return current
+        if clock() >= deadline:
+            raise HerdrError("The foreman's pane {} reported no new native session within {}s of the clear, so the resume "
+                             "prompt was not sent. {}".format(pane_id, budget_sec, OPERATOR_RECOVERY),
+                             {"pane_id": pane_id, "reason": "clear_session_unchanged"})
+        sleep(poll_sec)
+
+
 class DeliveryInterrupted(HerdrError):
     """A delivery that failed after typing into the pane; never retried automatically."""
 
@@ -774,6 +798,9 @@ def deliver(client, agents, pane_id, stow, state, *, native_session, still_ready
     `native_session` is the row's bound session: every keystroke of the clear
     command, extra Enters included, refuses unless the pane still holds it. A
     null one, from a row migrated off schema 1, refuses before any keystroke.
+    Once the clear is consumed, the new session Herdr reports for the pane is
+    pinned, and every keystroke of the resume prompt refuses unless the pane
+    still holds that one.
     """
     deadline = clock() + budget_sec
     settled = 0
@@ -794,10 +821,11 @@ def deliver(client, agents, pane_id, stow, state, *, native_session, still_ready
         raise UsageError("Stow {} is no longer reset-ready; nothing was sent. {}".format(stow, OPERATOR_RECOVERY), {"stow": stow})
 
     typed = []
-    # Set once send_command confirms the clear consumed. Until then no Enter,
-    # configured or extra, is known to have submitted it (Codex's first Enter
-    # only accepts autocomplete), so every keystroke checks the session.
-    consumed = []
+    # The session every keystroke must find in the pane: the bound one until
+    # send_command confirms the clear consumed (no single Enter proves it
+    # submitted; Codex's first only accepts autocomplete), then the new one
+    # the clear started, once Herdr reports it.
+    expected = [native_session]
 
     def guard():
         # The stow and the pane are both re-read right before every keystroke.
@@ -809,24 +837,23 @@ def deliver(client, agents, pane_id, stow, state, *, native_session, still_ready
                 or live.get("agent_status") not in SETTLE_STATES):
             raise HerdrError("The foreman's pane {} changed ({} {}, {}) before typing, so the reset stopped. {}".format(
                 pane_id, live.get("agent"), live.get("name"), live.get("agent_status"), OPERATOR_RECOVERY), {"pane_id": pane_id})
-        # A same-name, same-kind replacement is another session (#523). Once
-        # the clear has been submitted the session changes by design.
-        if not consumed and (native_session is None or pane_session(client, pane_id) != native_session):
-            raise SessionChanged("The foreman's pane {} no longer holds the native session its supervision binding recorded{}, so "
-                                 "the reset stopped. {}".format(
-                                     pane_id, "" if native_session is not None else " (this reset recorded none)",
-                                     OPERATOR_RECOVERY), {"pane_id": pane_id, "reason": "native_session_changed"})
+        # A same-name, same-kind replacement is another session (#523).
+        if expected[0] is None or pane_session(client, pane_id) != expected[0]:
+            raise SessionChanged("The foreman's pane {} no longer holds the native session {}{}, so the reset stopped. {}".format(
+                pane_id, "its supervision binding recorded" if expected[0] is native_session else "the clear started",
+                "" if expected[0] is not None else " (this reset recorded none)", OPERATOR_RECOVERY),
+                {"pane_id": pane_id, "reason": "native_session_changed"})
         typed.append(True)
 
     try:
         outcome = send_command(client, agent, pane_id, agent.clear_prompt, sleep=sleep, warn=warn, settle_sec=settle_sec,
                                before_input=guard)
-        consumed.append(True)
         if not outcome["screen_changed"]:
             raise HerdrError("The foreman consumed {} but its screen did not change, so its context was not cleared and nothing further was sent. Check the clear command configured for kind {} in pane {}. {}".format(
                 agent.clear_prompt, agent.kind, pane_id, OPERATOR_RECOVERY), {"pane_id": pane_id})
         client.agent_wait(agent.name, until=SETTLE_STATES, timeout_ms=DEFAULT_SETTLE_TIMEOUT_MS)
         sleep(settle_sec)
+        expected[0] = _cleared_session(client, pane_id, native_session, sleep=sleep, clock=clock)
         landing = send_message(client, agent, resume_prompt(stow, state, **(options or {})), RESUME_OPENING, pane_id=pane_id, sleep=sleep, warn=warn,
                                settle_sec=settle_sec, before_input=guard)
         if not (landing["landed"] and landing["started"]):

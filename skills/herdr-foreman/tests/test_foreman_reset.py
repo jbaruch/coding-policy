@@ -26,6 +26,8 @@ from tests.test_cli import CliCase
 PANE = "w9:p1"
 #: The foreman's native session as supervision-bind stores it.
 SESSION = {"kind": "id", "value": "11111111-1111-4111-8111-111111111111"}
+#: The new native session a consumed /clear starts.
+CLEARED = "55555555-5555-4555-8555-555555555555"
 READY = {"id": "round-7", "kind": "stow", "reset_ready": True}
 #: The runnable operator-recovery directive every ended reset carries (#532).
 DO_NOT_RERUN = re.escape("Do not run `{}` again".format(runnable.command("foreman-reset")))
@@ -147,8 +149,11 @@ class ResumePromptRunsTest(unittest.TestCase):
 class FakeClient:
     def __init__(self, statuses, kind="claude", sessions=None):
         self.statuses, self.kind, self.waits = list(statuses), kind, []
-        # The native session each `pane get` reports, last one repeating.
-        self.sessions = list(sessions or [SESSION["value"]])
+        # A scripted list is what each `pane get` reports in turn, last one
+        # repeating; unscripted, the pane holds the bound session until the
+        # clear is consumed, then the new one the clear started.
+        self.sessions = list(sessions) if sessions is not None else None
+        self.cleared = False
         self.keystrokes = []
 
     # Slash delivery runs the real client code, so its guards and submits
@@ -166,7 +171,10 @@ class FakeClient:
         self.keystrokes.append(text)
 
     def pane_get(self, pane_id):
-        value = self.sessions.pop(0) if len(self.sessions) > 1 else self.sessions[0]
+        if self.sessions is None:
+            value = CLEARED if self.cleared else SESSION["value"]
+        else:
+            value = self.sessions.pop(0) if len(self.sessions) > 1 else self.sessions[0]
         return {"pane_id": pane_id, "agent_session": {"source": "herdr:" + self.kind, "agent": self.kind,
                                                       "kind": "id", "value": value}}
 
@@ -208,6 +216,7 @@ class DeliverTest(unittest.TestCase):
                 if kw.get("after_submit") is not None:
                     kw["after_submit"]()
             calls.append(("command", agent.name, pane, text))
+            c.cleared = screen_changed
             return {"screen_changed": screen_changed}
 
         def message(c, agent, text, needle, **kw):
@@ -394,6 +403,32 @@ class DeliverTest(unittest.TestCase):
         with self.assertRaises(foreman_reset.SessionChanged):
             self.run_deliver(Nul(["idle"]), native_session={"kind": "path", "value": "/tmp/t.jsonl"})
 
+    def test_a_replacement_after_the_clear_gets_no_resume_prompt(self):
+        # Text and Enter find the bound session; the clear's new one is pinned;
+        # then another session holds the pane before the resume prompt.
+        client = FakeClient(["idle"], sessions=[SESSION["value"], SESSION["value"], CLEARED,
+                                                "22222222-2222-4222-8222-222222222222"])
+        with self.assertRaisesRegex(foreman_reset.SessionInterrupted, "native session the clear started") as caught:
+            self.run_deliver(client)
+        self.assertEqual(client.keystrokes, ["/clear", "enter"])
+        record = foreman_reset.failure(caught.exception, "round-7", "/s.json")
+        self.assertEqual((record["error"], record["details"]["reason"]), ("reset_session_changed", "native_session_changed"))
+
+    def test_a_clear_that_starts_no_new_session_sends_no_resume_prompt(self):
+        client = FakeClient(["idle"], sessions=[SESSION["value"]])
+        with self.assertRaisesRegex(foreman_reset.DeliveryInterrupted, "no new native session") as caught:
+            self.run_deliver(client)
+        self.assertEqual(client.keystrokes, ["/clear", "enter"])
+        self.assertEqual(foreman_reset.failure(caught.exception, "round-7", "/s.json")["details"]["reason"],
+                         "clear_session_unchanged")
+
+    def test_the_resume_prompt_waits_for_herdr_to_report_the_new_session(self):
+        # Herdr reports the bound session twice more after the clear, then the new one.
+        client = FakeClient(["idle"], sessions=[SESSION["value"]] * 4 + [CLEARED])
+        result, calls = self.run_deliver(client)
+        self.assertEqual([call[0] for call in calls], ["command", "message"])
+        self.assertTrue(result["cleared"])
+
     def test_a_pasted_clear_is_submitted_by_its_paste(self):
         client = FakeClient(["idle"], sessions=[SESSION["value"], "33333333-3333-4333-8333-333333333333"])
         result, _ = self.run_deliver(client, claude_delivery="paste")
@@ -407,7 +442,8 @@ class DeliverTest(unittest.TestCase):
     def test_a_transcript_path_session_matches_its_canonical_binding(self):
         class PathClient(FakeClient):
             def pane_get(self, pane_id):
-                return {"pane_id": pane_id, "agent_session": {"kind": "path", "value": "/tmp/../tmp/t.jsonl"}}
+                value = "/tmp/../tmp/cleared.jsonl" if self.cleared else "/tmp/../tmp/t.jsonl"
+                return {"pane_id": pane_id, "agent_session": {"kind": "path", "value": value}}
         bound = {"kind": "path", "value": str(Path("/tmp/t.jsonl").resolve())}
         self.assertEqual(foreman_reset.pane_session(PathClient(["idle"]), PANE), bound)
         result, _ = self.run_deliver(PathClient(["idle"]), native_session=bound)

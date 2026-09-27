@@ -22,8 +22,12 @@
   is still caught. A transcript path that cannot be resolved (a link loop,
   an embedded NUL) matches no session instead of escaping as an unrecorded
   error.
-  The clear itself starts a new native session by design, so the keystrokes
-  after it keep the name, kind and idle checks alone. The reset record moves
+  The clear itself starts a new native session by design, so after it the
+  deliverer waits up to `CLEAR_SESSION_BUDGET_SEC` for Herdr to report that
+  new session, pins it, and every resume-prompt keystroke must find the
+  pinned session; a replacement after the clear is refused the same way, and
+  a clear that starts no new session stops the reset
+  (`clear_session_unchanged`). The reset record moves
   to schema 2 (`skills/herdr-foreman/state-schema.md` Foreman Reset Record);
   the owner migrates a schema-1 record on read and rewrites it at once,
   catch-up's read included, giving each row `native_session: null`; a
@@ -34,7 +38,8 @@
   replacement (no keystroke, row records why), a replacement between the
   clear's text and Enter and between Codex's two Enters, the post-clear
   session change for typed and pasted clears, a replacement before an extra
-  Enter, an unresolvable transcript path, the migration rewrite, and the
+  Enter, a replacement after the clear, a clear that starts no new session,
+  an unresolvable transcript path, the migration rewrite, and the
   CLI end to end; the unfixed deliverer typed `/clear` and the resume prompt
   into the replacement session.
 
