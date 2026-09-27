@@ -48,7 +48,10 @@
 #
 # Exit 0 whether or not the repo declared anything. Exit 2 on a usage error, an
 # unreadable checkout, or a malformed declaration -- a declaration that cannot
-# be parsed is a repair, never an empty map.
+# be parsed is a repair, never an empty map. A declared path, a note or a
+# workflow filename carrying a control character, or a path or filename
+# carrying a backtick, is malformed: the GATES block renders them into every
+# brief's Markdown, where either breaks the block.
 
 set -euo pipefail
 
@@ -59,28 +62,50 @@ main() {
   local checkout="$1"
   [ -d "$checkout" ] || die "'${checkout}' is not a directory -- pass the repository checkout"
 
-  local workflows=() found listing
-  # A location the platform defines, not a filename anyone guessed. A repo
-  # with no workflows directory has no workflows; any other failure to list
-  # one is a tool error, never an empty list.
-  if [ -d "${checkout}/.github/workflows" ]; then
-    listing="$(find "${checkout}/.github/workflows" -maxdepth 1 -type f \
-                 \( -name '*.yml' -o -name '*.yaml' \) -print)" \
-      || die "cannot list ${checkout}/.github/workflows -- check its permissions"
-    while IFS= read -r found; do
-      if [ -n "$found" ]; then workflows+=("${found#"${checkout}/"}"); fi
-    done <<< "$(printf '%s\n' "$listing" | sort)"
-  fi
-
-  python3 - "$checkout" "${#workflows[@]}" ${workflows[@]+"${workflows[@]}"} <<'PY'
+  python3 - "$checkout" <<'PY'
 import json, os, sys
 
 checkout = sys.argv[1]
-count = int(sys.argv[2])
-workflows = sorted(sys.argv[3:3 + count])
 
 path = os.path.join(checkout, ".herdr", "gates.json")
+
+
+def refuse_unrenderable(value, label, code_span):
+    """Refuse text the GATES block cannot carry intact.
+
+    Every brief renders these values into Markdown. A control character -- a
+    newline, a NUL, an escape -- injects lines into every worker's brief or
+    breaks path resolution; a backtick closes the code span a path renders in.
+    """
+    bad = sorted({char for char in value
+                  if ord(char) < 0x20 or 0x7f <= ord(char) <= 0x9f or (code_span and char == "`")})
+    if bad:
+        sys.stderr.write("resolve-gates: {} {!r} carries {}, which the briefs' Markdown GATES block "
+                         "cannot render intact. Rename the file, or declare a path without "
+                         "control characters or backticks.\n".format(
+                             label, value, ", ".join(repr(char) for char in bad)))
+        raise SystemExit(2)
+
+
 declared, instructions, runners, notes, missing = False, [], [], None, []
+
+# A location the platform defines, not a filename anyone guessed. A repo with
+# no workflows directory has no workflows; any other failure to list one is a
+# tool error, never an empty list. Symlinks are not workflow files.
+workflows = []
+workflow_dir = os.path.join(checkout, ".github", "workflows")
+if os.path.isdir(workflow_dir):
+    try:
+        with os.scandir(workflow_dir) as entries:
+            for entry in entries:
+                if entry.name.endswith((".yml", ".yaml")) and entry.is_file(follow_symlinks=False):
+                    workflows.append(".github/workflows/" + entry.name)
+    except OSError as exc:
+        sys.stderr.write("resolve-gates: cannot list {}: {} -- check its permissions.\n".format(workflow_dir, exc))
+        raise SystemExit(2)
+workflows.sort()
+for entry in workflows:
+    refuse_unrenderable(entry, "workflow file", code_span=True)
 
 try:
     with open(path, encoding="utf-8") as handle:
@@ -109,11 +134,15 @@ if document is not None:
                 not isinstance(item, str) or not item.strip() for item in value):
             sys.stderr.write("resolve-gates: {}'s {} lists repo-relative paths.\n".format(path, key))
             raise SystemExit(2)
+        for item in value:
+            refuse_unrenderable(item, "{}'s {} entry".format(path, key), code_span=True)
         target.extend(value)
     notes = document.get("notes")
     if notes is not None and (not isinstance(notes, str) or not notes.strip()):
         sys.stderr.write("resolve-gates: {}'s notes is one non-empty line, or absent.\n".format(path))
         raise SystemExit(2)
+    if notes is not None:
+        refuse_unrenderable(notes, "{}'s notes".format(path), code_span=False)
     declared = True
     # A declared path is a pointer a worker follows, so it must stay inside the
     # checkout: an absolute path, a `..` or a symlink out of the tree is refused.
