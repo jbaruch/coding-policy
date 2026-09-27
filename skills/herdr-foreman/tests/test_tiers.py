@@ -269,11 +269,12 @@ class SelectionTest(unittest.TestCase):
         # coding-policy#490: a row already at its top model and effort, or a
         # kind with no effort above its configured one, has nothing to decline.
         risk = {"risk_flags": ["network", "persistence"]}
-        top = {"claude": ("opus-5", "xhigh"), "codex": ("gpt-5.6-sol", "xhigh"), "grok": ("grok-4.6", "high")}
-        for kind, (model, effort) in top.items():
+        top = (("claude", "opus-5", "xhigh"), ("claude", "opus-5", "max"),
+               ("codex", "gpt-5.6-sol", "xhigh"), ("grok", "grok-4.6", "high"))
+        for kind, model, effort in top:
             worker = SimpleNamespace(name=kind, kind=kind, tiers=parse_tiers(
                 {"build": {"model": model, "effort": effort}}, kind))
-            with self.subTest(kind=kind):
+            with self.subTest(kind=kind, effort=effort):
                 tier = select_tier(worker, "developer", context=risk, headroom=1.0)
                 self.assertEqual((tier["model"], tier["effort"], tier["tier_row"]), (model, effort, "build"))
                 self.assertFalse(tier["de_escalated"])
