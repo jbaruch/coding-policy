@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.298 — 2026-09-27
+
 ### Fixed
 
 - **Four edges in the tier-pressure fields #477 added (#490).** Deferred
