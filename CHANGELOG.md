@@ -1,5 +1,36 @@
 # Changelog
 
+### Fixed
+
+- **Four hardening edges from #491's final review (#493).**
+  `round-preflight.sh` recorded a collaborator that exited 0 with valid JSON
+  of the wrong shape (`[]`, `null`, a bare number) as an `ok` check; every
+  collaborator's contract is one JSON object, so any other shape now blocks
+  the round with a reason naming the file, and the inline authority and
+  capability-cadence parses read a non-object as an unreadable verdict rather
+  than crashing with a traceback. `resolve-gates.sh` rendered declared
+  paths, notes and workflow filenames into every worker's Markdown `GATES`
+  block unchecked: a backtick closed a path's code span, a newline injected
+  lines into every brief, and a NUL made `realpath` raise outside the
+  documented exit-2 path. A control character (C0, DEL or C1) anywhere, or a
+  backtick in a path or workflow filename, is now refused with exit 2 before
+  anything resolves or renders; a backtick in `notes`, which render as plain
+  text, stays accepted. The workflow listing moved from a newline-split
+  `find` into the same Python pass so a filename with a newline cannot split
+  into two entries. `capabilities.load` read a dangling
+  `<state>.capabilities.json` link as a missing table, and `record` then
+  replaced the link through `save_state`'s atomic rename, destroying the
+  redirect; a symlinked table, live or dangling, is now refused and left as
+  found, as the reset record already refuses one. The rename is the shared
+  hazard, so the owner fix is in `state.save_state`: it refuses a symlink at
+  the target path for every owner file (attention, memory, supervision,
+  retrospectives and the ledger included), live or dangling, instead of
+  replacing the link and leaving its target stale; a symlinked parent
+  directory is still followed. The fourth edge, the pyright include list
+  re-sorted inside functional commit 418bab3, is already merged and needs no
+  change; it stays recorded so the next edit to that list lands its
+  formatting in a commit of its own.
+
 ## 0.3.292 — 2026-09-27
 
 ### Fixed
