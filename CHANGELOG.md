@@ -29,6 +29,8 @@
   pinned oracle after planning cannot hang the gate. Regression cases cover
   each gap and fail against the old code.
 
+## 0.3.299 — 2026-09-27
+
 ### Fixed
 
 - **A judge dispatch carries its mode from reservation, and a pending send's
