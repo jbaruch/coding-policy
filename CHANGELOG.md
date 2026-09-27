@@ -20,6 +20,10 @@
   from PR #528's review. `herdr-foreman` Step 11's `check-member` follow-up
   paragraph, which merged several directives, is now one bullet per directive.
 
+## 0.3.290 — 2026-09-27
+
+### Fixed
+
 - **`evaluate.sh` reads the default corpus under the home guard (#537).**
   `skills/herdr-foreman/classify/evaluate.sh` checked the default state home
   with `home.require_current` in one python run, then read `state.json` in a
