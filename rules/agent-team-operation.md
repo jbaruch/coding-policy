@@ -295,7 +295,8 @@ description: Running a multi-agent team — task-based specialist composition, c
 - The sweep also reaches idle worktrees a standalone agent left under `~/.worktrees/`
 - The foreman relays the sweep's `report` to the operator at Step 2 whenever the preflight's `checks.worktrees.detail` carries one
 - Without that report, the foreman relays the `checks.worktrees` reason, or the stderr diagnostic when the preflight returned no JSON
-- The foreman raises each item the report lists for a decision per `rules/hook-action-reporting.md` Act on What It Names
+- The foreman raises each dirty or unpushed item the report lists for a decision per `rules/hook-action-reporting.md` Act on What It Names
+- Every other kept item the report lists is relayed, never raised for a decision
 - The operator carries out the resolution chosen for a listed item — push, commit, pull request or delete
 - The foreman executes none of those resolutions
 - The foreman never removes a worktree by hand

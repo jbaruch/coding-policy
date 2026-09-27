@@ -32,8 +32,11 @@ alwaysApply: true
 - It deletes an unprotected branch on origin merged into the default branch with no open pull request
 - The removal and deletion predicates live in `skills/herdr-foreman/prune-worktrees.sh` and `skills/herdr-foreman/prune-remote-branches.sh` (top-of-file docstrings)
 - A dirty or unpushed idle worktree is reported, never removed automatically
-- A local branch holding commits origin lacks is reported, never deleted automatically
-- A stale unmerged branch on origin with no pull request is reported, never deleted automatically
+- A local branch holding commits origin lacks is never deleted automatically
+- It is reported once idle
+- An unmerged branch on origin with no pull request is never deleted automatically
+- It is reported once stale
+- A protected branch on origin is never touched or reported
 - A reported item follows `rules/hook-action-reporting.md` Act on What It Names
 - In a Herdr team round, see `rules/agent-team-operation.md` Writers and Checkouts
 - Leave no orphans in `git worktree list`
