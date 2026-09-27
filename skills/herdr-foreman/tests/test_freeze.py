@@ -232,6 +232,30 @@ class FrozenPathTest(unittest.TestCase):
                 freeze_paths({"brief": str(self.root / "source" / "brief.md")})
         self.assertEqual(sorted((self.root / "other" / FROZEN_DIR).iterdir()), before)
 
+    def test_a_failed_write_leaves_nothing_behind_and_a_retry_succeeds(self):
+        # coding-policy#562 review: a partial copy left at the content-addressed
+        # name would be refused as "never rewritten" on every retry.
+        source = str(self.root / "source" / "brief.md")
+        (self.root / "source" / "brief.md").write_text("a new brief\n")
+        frozen_dir = self.root / "source" / FROZEN_DIR
+        before = sorted(frozen_dir.iterdir())
+        with patch("foreman.assign.os.write", side_effect=OSError(28, "No space left on device")):
+            with self.assertRaisesRegex(UsageError, "No space left on device. Make its directory writable"):
+                freeze_paths({"brief": source})
+        self.assertEqual(sorted(frozen_dir.iterdir()), before)
+        frozen = Path(freeze_paths({"brief": source})["brief"])
+        self.assertEqual(frozen.read_bytes(), b"a new brief\n")
+
+    def test_a_source_path_with_braces_is_reported_not_crashed(self):
+        braced = self.root / "br{0}ce{x}"
+        braced.mkdir()
+        (braced / "brief.md").write_text("braced\n")
+        (braced / FROZEN_DIR).symlink_to(self.root / "other")
+        with self.assertRaisesRegex(UsageError, "is a link or not a directory"):
+            freeze_paths({"brief": str(braced / "brief.md")})
+        with self.assertRaisesRegex(UsageError, r"Cannot read briefing file .*br\{0\}ce\{x\}/missing.md"):
+            freeze_paths({"brief": str(braced / "missing.md")})
+
     def test_a_fifo_source_is_refused_without_hanging(self):
         fifo = self.root / "source" / "fifo.md"
         os.mkfifo(fifo)

@@ -18,13 +18,16 @@
   `.dispatched/`, and a FIFO planted as a brief is refused rather than hung
   on. It creates `.dispatched/` and the copy (`O_CREAT | O_EXCL |
   O_NOFOLLOW`) relative to that walked descriptor, so an ancestor swapped for
-  a link after the lookup never receives the brief, and it reads every copy
-  back, fresh or existing, through the same walk. A row recorded by an older build through a linked
+  a link after the lookup never receives the brief; a write that fails
+  part-way removes the file it created, so a re-run succeeds instead of
+  meeting a partial copy it may never rewrite. It reads every copy back,
+  fresh or existing, through the same walk. A row recorded by an older build through a linked
   directory is refused with a dispatch-again repair. Regression tests cover
   a retargeted ancestor, a link deeper in the path, a brief under an
   aliased directory freezing canonically, an alias retargeted between
   resolution and read, a source directory swapped for a link before the read
-  and before the write, and a FIFO source; all fail or hang on `main`.
+  and before the write, a failed write followed by a clean retry, a brief
+  path containing braces, and a FIFO source.
 
 ## 0.3.286 — 2026-09-27
 
