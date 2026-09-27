@@ -12,9 +12,10 @@ one is caught before it ships.
 Each logical fenced line (backslash continuations joined) is tokenized with
 `shlex` in POSIX mode, so quotes, escapes and operators are the shell's, not a
 regex's. A command position is the first token, or the one after an operator,
-a backtick or `$(`. Leading `NAME=value` assignments, redirections with their
-targets, the keywords and braces in `KEYWORDS`, and the wrappers in `WRAPPERS`
-with their own options and assignments are skipped. A token there ending in
+a backtick, or the `(` of `$(`. Leading `NAME=value` assignments, redirections
+with their targets, the keywords and braces in `KEYWORDS`, and the wrappers in
+`WRAPPERS` with their assignments, their options and the values those options
+take are skipped. A token there ending in
 `.sh` or `.py` is a bare invocation. A line `shlex` cannot tokenize is
 reported, never skipped.
 """
@@ -45,8 +46,17 @@ OPERATOR_CHARS = frozenset("();<>|&")
 #: Words that precede a command without being one.
 KEYWORDS = frozenset({"if", "then", "do", "else", "elif", "while", "until", "!", "{", "}"})
 
-#: Commands that run their first non-option, non-assignment operand.
-WRAPPERS = frozenset({"env", "sudo", "exec", "command", "time", "nohup", "nice"})
+#: Commands that run their first non-option, non-assignment operand, each
+#: mapped to its options that consume the following token as their value.
+WRAPPERS = {
+    "env": frozenset({"-u", "-C", "-S", "-P"}),
+    "sudo": frozenset({"-u", "-g", "-C", "-D", "-h", "-p", "-r", "-t", "-U", "-T", "-R"}),
+    "exec": frozenset({"-a"}),
+    "command": frozenset(),
+    "time": frozenset({"-f", "-o"}),
+    "nohup": frozenset(),
+    "nice": frozenset({"-n"}),
+}
 
 
 def shell_blocks(text):
@@ -96,19 +106,19 @@ def bare_invocations(line):
     words = tokens(line)
     found = []
     expecting = True
-    wrapped = False
+    wrapper = None
     index = 0
     while index < len(words):
         token = words[index]
         index += 1
-        if token == "`" or token.endswith("$"):
-            expecting, wrapped = True, False
+        if token == "`":
+            expecting, wrapper = True, None
             continue
         if set(token) <= OPERATOR_CHARS:
             if "<" in token or ">" in token:
                 index += 1
             else:
-                expecting, wrapped = True, False
+                expecting, wrapper = True, None
             continue
         if token.isdigit() and index < len(words) and words[index][0] in "<>":
             continue
@@ -116,14 +126,16 @@ def bare_invocations(line):
             continue
         if ASSIGNMENT.match(token) or token in KEYWORDS:
             continue
-        if wrapped and token.startswith("-"):
+        if wrapper is not None and token.startswith("-"):
+            if token in WRAPPERS[wrapper]:
+                index += 1
             continue
         if token in WRAPPERS:
-            wrapped = True
+            wrapper = token
             continue
         if SCRIPT.search(token):
             found.append(token)
-        expecting, wrapped = False, False
+        expecting, wrapper = False, None
     return found
 
 
@@ -155,6 +167,9 @@ class BareInvocationDetectorTest(unittest.TestCase):
             ("X=a\\ b skills/x/run.sh", ["skills/x/run.sh"]),
             ("env MODE=1 skills/x/run.sh", ["skills/x/run.sh"]),
             ("sudo -E skills/x/run.sh", ["skills/x/run.sh"]),
+            ("sudo -u runner skills/x/run.sh", ["skills/x/run.sh"]),
+            ("env -u NAME skills/x/run.sh", ["skills/x/run.sh"]),
+            ("nice -n 10 skills/x/run.sh", ["skills/x/run.sh"]),
             (">out skills/x/run.sh", ["skills/x/run.sh"]),
             ("2>/dev/null skills/x/run.sh", ["skills/x/run.sh"]),
         ):
@@ -174,6 +189,8 @@ class BareInvocationDetectorTest(unittest.TestCase):
             "bash a.sh > skills/x/out.sh",
             "bash a.sh 2>&1 | tee log",
             "env MODE=1 bash skills/x/run.sh",
+            "echo 'cost$' skills/x/run.sh",
+            "sudo -u runner bash skills/x/run.sh",
         ):
             with self.subTest(line=line):
                 self.assertEqual(bare_invocations(line), [])
