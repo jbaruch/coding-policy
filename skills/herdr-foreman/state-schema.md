@@ -926,31 +926,26 @@ Writer / reader contract:
 - The prune's JSON names each written archive under `worktrees_archived`
   (`archive_ref`, `trash_path`)
 - The same script is the only reader. Every live run reads every record and
-  expires one older than the expiry window. It first checks the record
-  against the ref, the commit and the expected trash path. It then checks
-  that the trash worktree is present and registered, carries the sweep's
-  lock and no other, sits on the recorded HEAD and branch, is idle with no
-  process inside, and matches the content fingerprint; a missing trash
-  worktree keeps the archive. It reads the branch, telling absence from a git
-  error. Only then does it remove the trash worktree, the branch (only when
-  its tip equals `head`), the ref and the note, in that order. Any failed
-  check or step before the ref deletion keeps the ref and its record
+  expires one older than the expiry window
+- Expiry's checks and the order of its removals are the script's, not
+  restated here: the top-of-file docstring ("Expiry" and "Orphan notes") and
+  the functions `plan_archives`, `trash_gates`, `expire_archives` and
+  `remove_orphan_notes`
+- Side effects of an expiry: the trash worktree, the branch (only when its tip
+  is the recorded head), the archive ref and its note are removed. A failed
+  check or step keeps the archive
 - Invariant: an archive ref never exists without its record. The note is
   written before the ref and removed after it
-- An expiry interrupted between the ref deletion and the note removal leaves
-  an orphan note: a note on a commit no archive ref points at. No reader takes
-  it for an archive. Each later live run removes an orphan note once its
-  commit is older than the orphan grace window (so an archive whose note is
-  written but whose ref is not yet is never touched) and lists it under
-  `orphan_notes_removed`
+- An interrupted expiry can leave an orphan note: a note on a commit no
+  archive ref points at. No reader takes it for an archive, and a later live
+  run removes it (`orphan_notes_removed`)
 - Results: `archives_expired`, `archives_kept` (with the reason),
   `archives_migrated`, `orphan_notes_removed`; a dry run only reports
 - Operator reader: restore with `git worktree add <path> <archive_ref>`, read
   one file with `git show <archive_ref>:<file>`, or use the trash worktree
   directly before it expires
 - The idle windows, the in-use test, the expiry window and the orphan grace
-  window are that script's top-of-file docstring and constants, not restated
-  here
+  window are that script's top-of-file docstring and constants
 
 Migration:
 

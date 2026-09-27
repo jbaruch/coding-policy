@@ -26,10 +26,12 @@
     path is written while the first waits (`archive-pending`). The path hash
     keeps two worktrees with one basename apart.
   - A worktree holding another repository's checkout is kept before any
-    removal or archive: a gitlink found from the index, not `.gitmodules`,
-    whose checkout changed (`submodule-dirty`) or is populated
-    (`submodule`), or an untracked directory with its own `.git`
-    (`nested-repo`), which `add -A` would reduce to a bare gitlink.
+    removal or archive. That means a gitlink found from the index, not
+    `.gitmodules`, whose checkout changed (`submodule-dirty`) or is
+    populated (`submodule`). It also means any other `.git` anywhere below
+    the worktree (`nested-repo`), found by walking the whole tree: git's own
+    listing collapses an untracked directory and skips an ignored one, and
+    `add -A` would reduce the repository to a bare gitlink.
   - Merged-ness is judged against the commit origin's default branch points
     at right now, read with `git ls-remote`. The pre-removal proof re-reads
     it, so a force-push that drops the merge keeps the worktree.
@@ -79,7 +81,9 @@
       (only when its tip equals the recorded head), the ref, and its note.
       The ref goes first, so a ref never exists without its record.
       Immediately before the forced removal the process probe is re-read
-      fresh and the fingerprint recomputed. A failure before the ref
+      fresh, the fingerprint recomputed, and the registration, HEAD, branch
+      and lock re-read: a checkout to another commit with the same tree
+      would pass the fingerprint alone. A failure before the ref
       deletion keeps the ref and its record. A failure after it leaves an
       orphan note on an unreferenced commit, which the next live run removes
       once the commit is older than `ORPHAN_NOTE_GRACE_HOURS`.
@@ -102,7 +106,11 @@
     symlinked directory. A worktree in the root's `.trash` names its
     repository but is never a candidate, so a repository whose only
     worktrees are archived still gets its expiry pass. A prune that exits
-    without readable JSON fails the sweep. A symlinked `.trash`, or a
+    without readable JSON fails the sweep. A root that vanishes or becomes
+    unreadable mid-run is exit 1 with a repair message, never a traceback.
+    Its JSON carries `report`, the operator-facing summary: notable kept
+    worktrees by path, the rest as counts. SKILL.md Step 2 relays it
+    verbatim instead of shaping it. A symlinked `.trash`, or a
     symlinked entry in it, is never followed. Missing `python3`, `git` or
     `bash` is exit 1 with an install message. It groups them by repository
     and runs the prune once each. A plain directory, a clone or a repository

@@ -128,13 +128,8 @@ answer.
 
 Before following any route below, report the worktree sweep to the operator:
 
-- When `checks.worktrees.detail` is present, report from it every archive with
-  its `archive_ref` and `trash_path`, every expired, kept or migrated archive,
-  every removed orphan note,
-  every `errors` entry, and every kept worktree: list the ones kept for
-  `locked`, `in-use`, `changed`, `idle-unknown`, `archive-pending`, `trash-unsafe`,
-  `submodule`, `submodule-dirty` or `nested-repo` by path, and give the rest
-  as counts by reason
+- When `checks.worktrees.detail` is present, relay its `report` verbatim: the
+  sweep builds it (`skills/herdr-foreman/sweep-worktrees.sh`, `report_text`)
 - When `checks.worktrees` has no `detail`, report its `reason` verbatim; a
   status `ok` with no `detail` means the worktree root does not exist
 - On exit 2 there is no JSON; report the stderr diagnostic instead

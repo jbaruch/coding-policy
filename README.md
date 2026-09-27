@@ -6,7 +6,13 @@ Coding policy plugin for Baruch's AI agents. Language-agnostic code quality rule
 
 ## What's New
 
-- `sweep-worktrees.sh` — the foreman's round sweep over every repository owning a worktree under `~/.worktrees`: idle clean worktrees whose HEAD a branch on origin holds (as `git ls-remote` reports it now) are removed, idle dirty or unpushed ones are archived under `refs/archive/worktrees/` and moved into the root's `.trash/` (a failed move leaves them in place, reported); locked, in-use, changed ones and ones holding a submodule or embedded repository are kept; an archive expires with its trash worktree after a set window, only if the trash still matches it
+- `sweep-worktrees.sh` — the foreman's round sweep over every repository owning a worktree under `~/.worktrees`
+  - An idle clean worktree whose HEAD a branch on origin holds is removed; origin is read with `git ls-remote` at the sweep
+  - An idle dirty or unpushed worktree is archived under `refs/archive/worktrees/` and moved into the root's `.trash/`
+  - A failed move leaves the worktree in place, reported with its archive
+  - A locked, in-use or changed worktree is kept, and so is one holding a submodule or an embedded repository
+  - An archive expires with its trash worktree after a set window, only if the trash still matches it
+  - The sweep's JSON carries a `report` the foreman relays verbatim
 - `herdr-foreman` and `herdr-standup` skills + `agent-team-operation` rule + `herdr-team-status` hook — run a three-agent team round inside [Herdr](https://herdr.dev): measure each worker's subscription headroom, assign developer / tester / reviewer by measured headroom, clear each worker's context and send a fresh role brief, wait on the report file plus its `REPORT: ` marker, and hand the merge to `release`; a non-rotating **judge** seat on the most capable model, dispatched from its own balancer config, rules on disputed verdicts, foreman overrides of blocking findings, fifth-round fix loops, and bot disagreements
 - `stop-handoff-hygiene` hook — a `Stop` hook (Claude Code + Codex) that blocks the handoff once (loop-safe via `stop_hook_active`) when it finds leftover local branches (merged, upstream deleted), orphaned worktrees, or diagnostics findings in the changed set; a dirty working tree is reported, not blocked
 - `check-acr-latest` hook — the ACR counterpart of `check-tessl-latest`: runs `acr freshness run --policy install` in a project with `agents.yaml`, so ACR dependencies at `latest` update at session start instead of being reported as behind. Never blocks

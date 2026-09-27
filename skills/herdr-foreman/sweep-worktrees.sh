@@ -17,7 +17,12 @@
 #                     | {"shared":"<abs>","exit":N,"error":"<stderr>"}],
 #            "skipped":[{"path":"<abs>","reason":"<why>"}],
 #            "errors":[{"path":"<abs>","repo":"<abs>"|null,"exit":N|null,
-#                       "error":"<stderr>"}]}
+#                       "error":"<stderr>"}],
+#            "report":"<text>"}
+#           `report` is the operator-facing summary, ready to relay verbatim:
+#           a headline with counts, then one line per archive, notable kept
+#           worktree (NOTABLE, by path), archive outcome, failure and error;
+#           other kept worktrees appear only as counts by reason.
 #           `result` is that repository's prune-worktrees.sh JSON. `error`
 #           replaces it when the prune decided nothing (exit 1: no origin, a
 #           failed fetch, ...). Worktrees are found anywhere below the root; a
@@ -35,8 +40,9 @@
 #           the repository owning it when its gitdir's files name one.
 #   stderr: diagnostics, and each prune's stderr prefixed with its repository.
 #   exit  : 0 every repository decided cleanly,
-#           1 usage, python3, git or bash absent, or the root unreadable — no
-#             JSON,
+#           1 usage, python3, git or bash absent, or the root missing or
+#             unreadable (checked first, and again if it vanishes mid-run) —
+#             no JSON, a repair message on stderr,
 #           2 at least one repository's prune exited non-zero or returned
 #             no readable JSON (its entry carries `error`), or `errors` is
 #             non-empty; every other repository still ran.
@@ -151,7 +157,13 @@ def discover(root):
 
 
 repos, skipped, errors = {}, [], []
-found, empty_tops = discover(root)
+try:
+    found, empty_tops = discover(root)
+except OSError as exc:
+    # The root itself vanished or became unreadable after the shell's check.
+    sys.stderr.write("sweep-worktrees: cannot read the worktree root {} ({}) — restore it, or pass the "
+                     "directory holding the worktrees; nothing was swept\n".format(root, exc.strerror or exc))
+    sys.exit(1)
 skipped += [{"path": path, "reason": "not-a-worktree"} for path in empty_tops]
 for kind, path in found:
     if kind == "clone":
@@ -215,7 +227,55 @@ for shared in sorted(repos):
         failed = True
     results.append(entry)
 
-print(json.dumps({"root": root, "dry_run": dry, "repos": results, "skipped": skipped, "errors": errors}, sort_keys=True))
+#: Kept reasons the operator acts on: listed by path. Every other kept
+#: reason (ordinary not-yet-idle worktrees) is given as a count.
+NOTABLE = ("locked", "in-use", "changed", "idle-unknown", "archive-pending", "trash-unsafe",
+           "submodule", "submodule-dirty", "nested-repo")
+
+
+def report_text():
+    """The operator-facing summary, relayed verbatim."""
+    lines, counts = [], {}
+    removed = archived = 0
+    for repo in results:
+        res = repo.get("result")
+        if res is None:
+            lines.append("Error in {}: {}".format(repo["shared"], repo.get("error", "")))
+            continue
+        removed += len(res.get("worktrees_removed", []))
+        for a in res.get("worktrees_archived", []):
+            archived += 1
+            if a.get("trash_path"):
+                lines.append("Archived {} as {}, moved to {}".format(a["path"], a["archive_ref"], a["trash_path"]))
+            else:
+                lines.append("Archived {} as {}, left in place".format(a["path"], a["archive_ref"]))
+        for k in res.get("worktrees_kept", []):
+            if k["reason"] in NOTABLE:
+                extra = " ({})".format(k["lock_reason"]) if k.get("lock_reason") else ""
+                lines.append("Kept {}: {}{}".format(k["reason"], k["path"], extra))
+            else:
+                counts[k["reason"]] = counts.get(k["reason"], 0) + 1
+        for x in res.get("archives_expired", []):
+            lines.append("Expired archive {}".format(x["ref"]))
+        for x in res.get("archives_kept", []):
+            lines.append("Kept archive {}: {}".format(x["ref"], x["reason"]))
+        for x in res.get("archives_migrated", []):
+            lines.append("Migrated archive record {}".format(x["ref"]))
+        for x in res.get("orphan_notes_removed", []):
+            lines.append("Removed orphan archive note on {}".format(x))
+        for f in res.get("failed", []):
+            lines.append("Failed in {}: {}: {}".format(repo["shared"], f["target"], f["error"]))
+    for e in errors:
+        lines.append("Error reading {}{}: {}".format(e["path"], " ({})".format(e["repo"]) if e.get("repo") else "", e["error"]))
+    head = "Worktree sweep{}: {} repositories, {} removed, {} archived".format(
+        " (dry run)" if dry else "", len(results), removed, archived)
+    if counts:
+        head += "; kept not yet idle: " + ", ".join("{} {}".format(n, r) for r, n in sorted(counts.items()))
+    return "\n".join([head + "."] + lines)
+
+
+print(json.dumps({"root": root, "dry_run": dry, "repos": results, "skipped": skipped, "errors": errors,
+                  "report": report_text()}, sort_keys=True))
 sys.exit(2 if failed else 0)
 PY
 }

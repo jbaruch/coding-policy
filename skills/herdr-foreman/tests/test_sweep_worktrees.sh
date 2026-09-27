@@ -30,6 +30,10 @@
 #  13. No git            -> exit 1 with an actionable message, no traceback.
 #  14. Symlinked trash   -> a symlinked .trash, or a symlinked entry in .trash,
 #                           never names a repository.
+#  15. Report            -> the ready-to-relay report: a headline with counts,
+#                           notable kept worktrees by path, the rest as counts.
+#  16. Unreadable root   -> exit 1, no JSON, a repair message.
+#  17. Unreadable subdir -> an errors entry, exit 2; the rest still swept.
 #
 # Run: bash skills/herdr-foreman/tests/test_sweep_worktrees.sh
 set -uo pipefail
@@ -89,9 +93,23 @@ main() {
   # its own. Fixtures pass theirs with -c.
   : > "$TMP/gitconfig" || die "cannot create an empty global git config"
   export GIT_CONFIG_GLOBAL="$TMP/gitconfig" GIT_CONFIG_NOSYSTEM=1
+  # --- 4. dry run, on its own two repositories and root.
+  local droot="$TMP/worktrees-dry"
+  mkdir -p "$droot" || die "mkdir dry root failed"
+  mk_repo dalpha; local dalpha="$SHARED"
+  "${G[@]}" -C "$dalpha" worktree add -q -b review/a "$droot/dalpha-merged" origin/main 2>/dev/null || die "dalpha worktree failed"
+  mk_repo dbeta; local dbeta="$SHARED"
+  "${G[@]}" -C "$dbeta" worktree add -q -b review/b "$droot/dbeta-merged" origin/main 2>/dev/null || die "dbeta worktree failed"
+  run "$droot" --dry-run
+  echo "4. a dry run reports every repository's decisions and removes nothing"
+  if (( RC == 0 )) && [[ "$(q 'len(d["repos"])')" == 2 ]] \
+    && [[ "$(q 'sum(len(r["result"]["worktrees_removed"]) for r in d["repos"])')" == 2 ]] \
+    && listed "$dalpha" "$droot/dalpha-merged" && listed "$dbeta" "$droot/dbeta-merged"; then
+    pass; else fail "dry run: rc=$RC out=$OUT err=$ERRTEXT"; fi
+
+  # --- 1-2. live run, on repositories and a root no other check touched.
   local root="$TMP/worktrees"
   mkdir -p "$root" || die "mkdir root failed"
-
   mk_repo alpha; local alpha="$SHARED"
   "${G[@]}" -C "$alpha" worktree add -q -b review/a "$root/alpha-merged" origin/main 2>/dev/null || die "alpha worktree failed"
   mk_repo beta; local beta="$SHARED"
@@ -99,14 +117,6 @@ main() {
   mkdir -p "$root/plain" || die "mkdir plain failed"
   printf 'x\n' > "$root/afile" || die "write afile failed"
   "${G[@]}" clone -q "$TMP/alpha.git" "$root/a-clone" 2>/dev/null || die "clone under root failed"
-
-  run "$root" --dry-run
-  echo "4. a dry run reports every repository's decisions and removes nothing"
-  if (( RC == 0 )) && [[ "$(q 'len(d["repos"])')" == 2 ]] \
-    && [[ "$(q 'sum(len(r["result"]["worktrees_removed"]) for r in d["repos"])')" == 2 ]] \
-    && listed "$alpha" "$root/alpha-merged" && listed "$beta" "$root/beta-merged"; then
-    pass; else fail "dry run: rc=$RC out=$OUT err=$ERRTEXT"; fi
-
   run "$root"
   echo "1. each repository is pruned once and its merged worktree removed"
   if (( RC == 0 )) && [[ "$(q '",".join(sorted(r["shared"] for r in d["repos"]))')" == "$alpha,$beta" ]] \
@@ -116,13 +126,16 @@ main() {
   if [[ "$(q '",".join(s["reason"] for s in sorted(d["skipped"], key=lambda s: s["path"]))')" == "clone,not-a-worktree,not-a-worktree" ]]; then
     pass; else fail "skipped: out=$OUT"; fi
 
+  # --- 3. no origin, on its own root.
+  local nroot="$TMP/worktrees-noorigin"
+  mkdir -p "$nroot" || die "mkdir no-origin root failed"
   mk_repo gamma no-origin; local gamma="$SHARED"
-  "${G[@]}" -C "$gamma" worktree add -q -b review/g "$root/gamma-wt" 2>/dev/null || die "gamma worktree failed"
-  "${G[@]}" -C "$alpha" worktree add -q -b review/a2 "$root/alpha-again" origin/main 2>/dev/null || die "alpha second worktree failed"
-  run "$root"
+  "${G[@]}" -C "$gamma" worktree add -q -b review/g "$nroot/gamma-wt" 2>/dev/null || die "gamma worktree failed"
+  "${G[@]}" -C "$alpha" worktree add -q -b review/a2 "$nroot/alpha-again" origin/main 2>/dev/null || die "alpha second worktree failed"
+  run "$nroot"
   echo "3. a repository without origin reports an error; the others still ran"
   if (( RC == 2 )) && [[ "$(q 'next(r.get("error","") for r in d["repos"] if r["shared"].endswith("gamma-shared"))')" == *"no origin"* ]] \
-    && ! listed "$alpha" "$root/alpha-again" && listed "$gamma" "$root/gamma-wt"; then
+    && ! listed "$alpha" "$nroot/alpha-again" && listed "$gamma" "$nroot/gamma-wt"; then
     pass; else fail "no origin: rc=$RC out=$OUT err=$ERRTEXT"; fi
 
   # --- 6-8 on a fresh root.
@@ -231,6 +244,46 @@ main() {
   echo "14. a symlinked .trash or trash entry names no repository"
   if [[ "$repos5" == 0 && "$repos6" == 0 ]] && listed "$alpha" "$outside/alpha-out"; then
     pass; else fail "symlinked trash: repos5=$repos5 repos6=$repos6 out=$OUT"; fi
+
+  # --- 15. the report, on its own repository and root.
+  local root15="$TMP/worktrees15"
+  mkdir -p "$root15" || die "mkdir root15 failed"
+  mk_repo epsilon; local eps="$SHARED"
+  "${G[@]}" -C "$eps" worktree add -q -b review/e1 "$root15/eps-merged" origin/main 2>/dev/null || die "eps merged failed"
+  "${G[@]}" -C "$eps" worktree add -q -b review/e2 "$root15/eps-held" origin/main 2>/dev/null || die "eps held failed"
+  "${G[@]}" -C "$eps" worktree lock --reason "operator hold" "$root15/eps-held" || die "lock failed"
+  "${G[@]}" -C "$eps" worktree add -q -b feat/e3 "$root15/eps-local" origin/main 2>/dev/null || die "eps local failed"
+  printf 'e\n' > "$root15/eps-local/e.txt" || die "eps write failed"
+  "${G[@]}" -C "$root15/eps-local" add e.txt || die "eps add failed"
+  "${G[@]}" -C "$root15/eps-local" commit -q -m e || die "eps commit failed"
+  run "$root15"
+  local want
+  want="$(printf 'Worktree sweep: 1 repositories, 1 removed, 0 archived; kept not yet idle: 1 unmerged.\nKept locked: %s (operator hold)' "$root15/eps-held")"
+  echo "15. the report names notable kept worktrees by path and counts the rest"
+  if (( RC == 0 )) && [[ "$(q 'd["report"]')" == "$want" ]]; then
+    pass; else fail "report: rc=$RC report=$(q 'd["report"]') want=$want"; fi
+
+  # --- 16-17. unreadable root, unreadable directory under a root (skipped as root).
+  if [[ "$(id -u)" == 0 ]]; then
+    echo "16-17. skipped: root reads every directory"
+  else
+    local root16="$TMP/worktrees16" root17="$TMP/worktrees17"
+    mkdir -p "$root16" "$root17/locked-away/deeper" || die "mkdir root16/17 failed"
+    chmod 000 "$root16" || die "chmod root16 failed"
+    run "$root16"
+    chmod 755 "$root16" || die "restore root16 failed"
+    echo "16. an unreadable root is exit 1 with no JSON and a repair message"
+    if (( RC == 1 )) && [[ -z "$OUT" ]] && [[ "$ERRTEXT" == *"missing or unreadable"* ]] && [[ "$ERRTEXT" != *Traceback* ]]; then
+      pass; else fail "unreadable root: rc=$RC out=$OUT err=$ERRTEXT"; fi
+    "${G[@]}" -C "$alpha" worktree add -q -b review/seventeen "$root17/alpha-17" origin/main 2>/dev/null || die "alpha-17 failed"
+    chmod 000 "$root17/locked-away" || die "chmod locked-away failed"
+    run "$root17"
+    chmod 755 "$root17/locked-away" || die "restore locked-away failed"
+    echo "17. an unreadable directory under the root is an errors entry; the rest is still swept"
+    if (( RC == 2 )) && [[ "$(q 'next((e["path"] for e in d["errors"]), "")')" == "$root17/locked-away" ]] \
+      && ! listed "$alpha" "$root17/alpha-17" && [[ "$ERRTEXT" != *Traceback* ]]; then
+      pass; else fail "unreadable subdir: rc=$RC out=$OUT err=$ERRTEXT"; fi
+  fi
 
   run
   echo "5a. no root is exit 1 with no JSON"

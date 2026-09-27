@@ -79,8 +79,9 @@
 #     recorded tree; anything else KEEPS the archive;
 #   * the branch is read with absence told apart from a git error (an error
 #     KEEPS the archive); only a tip equal to the recorded head is deleted;
-#   * then, in order: the process probe is re-read fresh and the fingerprint
-#     recomputed (any change keeps it); the trash worktree is force-removed
+#   * then, in order: the process probe is re-read fresh, the fingerprint
+#     recomputed, and the registration, HEAD, branch and lock re-read (any
+#     change keeps it); the trash worktree is force-removed
 #     past its lock (safe: its content is the archive); the branch is
 #     deleted; the ref is compare-and-deleted; its note is removed last, so
 #     a ref never exists without its record. A failure before the ref
@@ -777,8 +778,9 @@ PY
 #                    untracked files
 #   submodule        a populated gitlink checkout; git refuses to move or
 #                    remove a worktree holding one
-#   nested-repo      an untracked directory holding its own .git, which
-#                    `add -A` would record as a bare gitlink
+#   nested-repo      any other .git anywhere below the worktree, in untracked
+#                    or ignored directories alike, found by walking the tree;
+#                    `add -A` would record one as a bare gitlink or skip it
 # Returns 1 on a tool failure.
 nested_checkouts() { # <real>
   python3 - "$1" 2>"$ERRFILE" <<'PY'
@@ -808,9 +810,16 @@ gitlinks = [line.split("\t", 1)[1] for line in git("ls-files", "-s", "-z").split
 if any(os.path.exists(os.path.join(path, link, ".git")) for link in gitlinks):
     print("submodule")
     sys.exit(0)
-untracked = git("ls-files", "-z", "-o", "--exclude-standard", "--directory")
-if any(name.endswith("/") and os.path.exists(os.path.join(path, name, ".git")) for name in untracked.split("\0") if name):
-    print("nested-repo")
+# Any other .git below the worktree root is an embedded repository: walk the
+# whole tree, ignored and untracked directories included, never trusting git's
+# own listing (it collapses an untracked directory and skips ignored ones).
+own = os.path.join(path, ".git")
+for current, dirs, files in os.walk(path, followlinks=False):
+    if ".git" in dirs or ".git" in files:
+        if os.path.join(current, ".git") != own:
+            print("nested-repo")
+            sys.exit(0)
+    dirs[:] = [d for d in dirs if d != ".git"]
 PY
 }
 
@@ -1246,6 +1255,17 @@ sys.stdout.write("\x1f".join([r["trash"], r["head"], r.get("branch") or "", r["t
       row failed "$ref" "" "cannot snapshot the trash worktree ${trash} before removal, so ${ref} was kept: $(tr '\n' ' ' < "$ERRFILE")"; continue
     fi
     if [[ "$last_tree" != "$tree" ]]; then row archive-kept "$ref" "" "its trash worktree changed after the gates" "$sha" "$trash"; continue; fi
+    # The full identity again, last: a checkout to another commit with the same
+    # tree would pass the fingerprint alone.
+    local last_entry l_head l_branch l_locked l_reason lrc=0
+    last_entry="$(registered_worktree "$1" "$trash")" || lrc=$?
+    if (( lrc != 0 )); then
+      row archive-kept "$ref" "" "its trash worktree's registration could not be re-read before removal" "$sha" "$trash"; continue
+    fi
+    IFS=$'\x1f' read -r l_head l_branch l_locked l_reason <<<"$last_entry"
+    if [[ "$l_head" != "$head" || "$l_branch" != "$branch" || "$l_locked" != 1 || "$l_reason" != "$(trash_lock_reason "$ref")" ]]; then
+      row archive-kept "$ref" "" "its trash worktree's HEAD, branch or lock changed after the gates" "$sha" "$trash"; continue
+    fi
     # Twice forced: the trash worktree carries the sweep's own lock.
     if ! git -C "$1" worktree remove --force --force "$trash" 2>"$ERRFILE"; then
       row failed "$ref" "" "removing the trash worktree ${trash} failed, so ${ref} was kept: $(tr '\n' ' ' < "$ERRFILE")"; continue

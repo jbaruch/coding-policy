@@ -92,7 +92,8 @@
 #  60. Other remote         -> a ref of a remote other than origin proves nothing.
 #  61. Proof gone           -> reachability re-derived just before removal.
 #  62. Gitlink, embedded    -> a dirty gitlink without .gitmodules, and an
-#                             untracked embedded repository, keep the worktree.
+#                             embedded repository (untracked, ignored, or below
+#                             an untracked directory), keep the worktree.
 #  63. Unusable records     -> schema_version 0, or unparseable: kept.
 #  64. Twin archives        -> one parent and tree in one second: two commits,
 #                             two records.
@@ -105,6 +106,8 @@
 #  70. Symlinked .trash     -> the candidate is kept, nothing archived.
 #  71. Force-push           -> a merge dropped before the removal keeps it.
 #  72. Credential URL       -> a failed remote command never relays the URL.
+#  73. Same-tree checkout   -> the full identity is re-read before the forced
+#                             trash removal.
 #
 # Run: bash skills/herdr-foreman/tests/test_prune_worktrees.sh
 set -uo pipefail
@@ -865,7 +868,21 @@ SHIM
   if [[ "$(kept_reason "$rf")" == archive-pending ]] && [[ "$(git -C "$SHARED" for-each-ref refs/archive/ | wc -l | tr -d ' ')" == 1 ]]; then
     pass; else fail "pending archive: out=$OUT err=$ERRTEXT"; fi
 
-  # --- 50. expiry: every gate passes, then trash, branch, ref and note go.
+  # --- 50a. a dry run previews an expiry, on its own repository.
+  mk_repo expirydry
+  local d1 d1ref d1trash
+  d1="$(archive_one dexp1 feat/dexp1)"; d1ref="${d1%% *}"; d1trash="${d1#* }"
+  age_trash "$d1trash"
+  IDLE_ARGS=(--dry-run)
+  later_run
+  IDLE_ARGS=()
+  echo "50a. a dry run previews the expiry and changes nothing"
+  if (( RC == 0 )) && [[ "$(expired_refs)" == "$d1ref" ]] && listed "$SHARED" "$d1trash" \
+    && git -C "$SHARED" rev-parse --verify --quiet "$d1ref" >/dev/null && has_branch "$SHARED" feat/dexp1; then
+    pass; else fail "expiry dry run: rc=$RC out=$OUT err=$ERRTEXT"; fi
+
+  # --- 50b-c. expiry on a repository no dry run touched: every gate passes,
+  #            then trash, branch, ref and note go.
   mk_repo expiry
   local e1 e1ref e1trash
   e1="$(archive_one exp1 feat/exp1)"; e1ref="${e1%% *}"; e1trash="${e1#* }"
@@ -873,13 +890,6 @@ SHIM
   local bare_c; bare_c="$(git -C "$SHARED" rev-parse origin/main)" || die "rev-parse origin/main failed"
   git -C "$SHARED" update-ref refs/archive/worktrees/nonote-0000000000-20191201T000000Z "$bare_c" || die "update-ref nonote failed"
   git -C "$SHARED" update-ref refs/archive/worktrees/nostamp "$bare_c" || die "update-ref nostamp failed"
-  IDLE_ARGS=(--dry-run)
-  later_run
-  IDLE_ARGS=()
-  echo "50a. a dry run previews the expiry and changes nothing"
-  if (( RC == 0 )) && [[ "$(expired_refs)" == "$e1ref" ]] && listed "$SHARED" "$e1trash" \
-    && git -C "$SHARED" rev-parse --verify --quiet "$e1ref" >/dev/null && has_branch "$SHARED" feat/exp1; then
-    pass; else fail "expiry dry run: rc=$RC out=$OUT err=$ERRTEXT"; fi
   later_run
   echo "50b. a live run removes the trash worktree, its branch, the ref and the note"
   if (( RC == 0 )) && [[ "$(expired_refs)" == "$e1ref" ]] && ! listed "$SHARED" "$e1trash" && [[ ! -e "$e1trash" ]] \
@@ -1026,13 +1036,30 @@ SHIM
   add_wt "$SHARED" feat/nested "$nr"; commit_in "$nr" base.txt
   git init -q "$nr/embedded" || die "embedded init failed"
   printf 'inner\n' > "$nr/embedded/inner.txt" || die "inner write failed"
-  age_wt "$gl"; age_wt "$nr"
+  # An embedded repository inside an ignored directory, and one nested below an
+  # untracked directory: git's own listing shows neither.
+  local ig="$ROOT/gitlink-ignored" deep="$ROOT/gitlink-deep"
+  add_wt "$SHARED" feat/ignored "$ig"
+  printf 'vendor/\n' > "$ig/.gitignore" || die "gitignore write failed"
+  git -C "$ig" -c user.name=t -c user.email=t@t add .gitignore || die "gitignore add failed"
+  git -C "$ig" -c user.name=t -c user.email=t@t commit -q -m ignore || die "gitignore commit failed"
+  mkdir -p "$ig/vendor" || die "mkdir vendor failed"
+  git init -q "$ig/vendor/lib" || die "ignored embedded init failed"
+  add_wt "$SHARED" feat/deep "$deep"; commit_in "$deep" d.txt
+  mkdir -p "$deep/outer" || die "mkdir outer failed"
+  printf 'o\n' > "$deep/outer/plain.txt" || die "outer write failed"
+  git init -q "$deep/outer/inner" || die "deep embedded init failed"
+  age_wt "$gl"; age_wt "$nr"; age_wt "$ig"; age_wt "$deep"
   idle_run
   echo "62a. a dirty submodule is kept even with .gitmodules gone"
   if [[ "$(kept_reason "$gl")" == submodule-dirty ]] && listed "$SHARED" "$gl"; then pass; else fail "gitlink: out=$OUT err=$ERRTEXT"; fi
   echo "62b. an untracked embedded repository keeps its worktree"
-  if [[ "$(kept_reason "$nr")" == nested-repo ]] && listed "$SHARED" "$nr" && [[ -z "$(git -C "$SHARED" for-each-ref refs/archive/)" ]]; then
+  if [[ "$(kept_reason "$nr")" == nested-repo ]] && listed "$SHARED" "$nr"; then
     pass; else fail "nested repo: out=$OUT err=$ERRTEXT"; fi
+  echo "62c. an embedded repository in an ignored directory, or below an untracked one, keeps its worktree"
+  if [[ "$(kept_reason "$ig")" == nested-repo && "$(kept_reason "$deep")" == nested-repo ]] && listed "$SHARED" "$ig" && listed "$SHARED" "$deep" \
+    && [[ -z "$(git -C "$SHARED" for-each-ref refs/archive/)" ]]; then
+    pass; else fail "hidden nested repos: out=$OUT err=$ERRTEXT"; fi
 
   # --- 63. an older record with no migration, and an unparseable one, are kept.
   mk_repo oldrec
@@ -1189,6 +1216,27 @@ SHIM
   echo "72. a failed fetch reports its exit code and repair, never the credential-bearing URL"
   if (( RC == 1 )) && [[ "$ERRTEXT" == *"exited"* && "$ERRTEXT" == *"to see why"* ]] && [[ "$ERRTEXT" != *s3cr3t-token* ]]; then
     pass; else fail "secret redaction: rc=$RC err=$ERRTEXT"; fi
+
+  # --- 73. a checkout to another commit with the same tree, after the expiry
+  #         gates and before the forced removal, keeps the archive.
+  mk_repo samedtree
+  local sd sd_trash sd_other; sd="$(archive_one same1 feat/same1)"; sd_trash="${sd#* }"
+  sd_other="$(git -C "$sd_trash" -c user.name=t -c user.email=t@t commit-tree "HEAD^{tree}" -p HEAD -m sametree)" || die "commit-tree failed"
+  age_trash "$sd_trash"
+  mkdir -p "$TMP/lsof73" || die "mkdir lsof73 failed"
+  # The second probe (the pre-removal one) first switches the trash worktree to a
+  # commit with the same tree, then reports no process.
+  # shellcheck disable=SC2016  # The stand-in's $(...) must run in the stand-in, not here.
+  printf '#!/usr/bin/env bash\nset -euo pipefail\nprintf x >> %q\nif [[ "$(cat %q)" == xx ]]; then %q -C %q checkout -q --detach %q; fi\n' \
+    "$TMP/lsof73/calls" "$TMP/lsof73/calls" "$real_git" "$sd_trash" "$sd_other" > "$TMP/lsof73/lsof" || die "write lsof73 failed"
+  chmod +x "$TMP/lsof73/lsof" || die "chmod lsof73 failed"
+  RUN_SEQ=$((RUN_SEQ+1))
+  OUT="$(env WORKTREE_ROOT="$ROOT" PRUNE_NOW="$LATER_NOW" PRUNE_LSOF="$TMP/lsof73/lsof" bash "$SCRIPT" "$SHARED" 2>"$TMP/err.$RUN_SEQ")"; RC=$?
+  ERRTEXT="$(cat "$TMP/err.$RUN_SEQ")"
+  echo "73. a same-tree checkout just before the forced removal keeps the archive and the trash"
+  if (( RC == 0 )) && [[ "$(archives_kept_reason "${sd%% *}")" == *"HEAD, branch or lock changed"* ]] && listed "$SHARED" "$sd_trash" \
+    && git -C "$SHARED" rev-parse --verify --quiet "${sd%% *}" >/dev/null; then
+    pass; else fail "same-tree checkout: rc=$RC out=$OUT err=$ERRTEXT"; fi
 
   # --- 14. usage / not a repo.
   run
