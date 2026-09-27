@@ -1299,6 +1299,30 @@ class ExportTests(unittest.TestCase):
             self.assertEqual(path.stat().st_mode & 0o777, 0o600)
             self.assertEqual(path.parent.stat().st_mode & 0o777, 0o700)
 
+    def test_symlinked_credential_directory_refuses_without_writing_outside_root(self):
+        original_run = c.subprocess.run
+        quiet = mock.patch.object(c.subprocess, "run", side_effect=lambda *a, **kw: original_run(*a, **kw, capture_output=True))
+        for name in ("seed", "central"):
+            with self.subTest(directory=name), tempfile.TemporaryDirectory() as run, tempfile.TemporaryDirectory() as out:
+                root, outside = Path(run).resolve(), Path(out).resolve()
+                c.write_new(root / "evidence/credential-boundary.json", c.encoded(proof()))
+                outside.chmod(0o755)
+                (root / name).symlink_to(outside, target_is_directory=True)
+                with quiet, mock.patch.dict(os.environ, {"CODEX_AUTH_JSON": json.dumps({"tokens": {"access_token": SEED}})}):
+                    with self.assertRaisesRegex(c.Refusal, "symlink or not a directory"):
+                        c.seed(root)
+                self.assertEqual(list(outside.iterdir()), [])
+                self.assertEqual(outside.stat().st_mode & 0o777, 0o755)
+                self.assertFalse((root / "central").exists() and not (root / "central").is_symlink())
+
+    def test_non_directory_credential_parent_refuses(self):
+        with tempfile.TemporaryDirectory() as run:
+            root = Path(run).resolve()
+            (root / "central").write_bytes(b"not a directory")
+            with self.assertRaisesRegex(c.Refusal, "symlink or not a directory"):
+                c.write_private(root, root / "central/seed-oracle.json", b"{}")
+            self.assertEqual((root / "central").read_bytes(), b"not a directory")
+
     def test_short_credential_refuses_instead_of_escaping_mask_and_scan(self):
         short = "sk-short-12"
         for document in ({"tokens": {"access_token": SEED, "refresh_token": short}}, {"OPENAI_API_KEY": short}):

@@ -163,11 +163,27 @@ def write_new(path: Path, value: bytes) -> None:
             "Output file mode is not 0600; inspect the run root's filesystem and ownership")
 
 
-def write_private(path: Path, value: bytes) -> None:
+def owned_directories(root: Path, path: Path) -> None:
+    """Refuse a symlinked or non-directory ancestor of <path> at or below the owned run <root>."""
+    relative = path.relative_to(root)  # ValueError: a caller bug, never input
+    for depth in range(len(relative.parts)):
+        entry = root.joinpath(*relative.parts[:depth])
+        try:
+            info = entry.lstat()
+        except FileNotFoundError:
+            return  # write_new creates the rest as fresh private directories.
+        require(not stat.S_ISLNK(info.st_mode) and stat.S_ISDIR(info.st_mode),
+                f"Credential directory {entry} is a symlink or not a directory; "
+                "remove it and re-run seed in a fresh run root")
+
+
+def write_private(root: Path, path: Path, value: bytes) -> None:
     """write_new for credential material: the file is 0600 and its directory 0700, on every run."""
+    owned_directories(root, path)
     write_new(path, value)
+    owned_directories(root, path)  # Re-checked right before chmod so it never follows a swapped-in link.
     path.parent.chmod(0o700)
-    require(stat.S_IMODE(path.parent.stat().st_mode) == 0o700,
+    require(stat.S_IMODE(path.parent.lstat().st_mode) == 0o700,
             "Credential directory mode is not 0700; inspect the run root's filesystem and ownership")
 
 
@@ -404,8 +420,8 @@ def seed(root: Path) -> None:
     require(bool(secret_values(document)), f"{SEED_SECRET} must be an auth.json with session tokens or an OPENAI_API_KEY")
     auth = root / "seed/auth.json"
     data = encoded(document)
-    write_private(auth, data)
-    write_private(root / "central/seed-oracle.json", data)
+    write_private(root, auth, data)
+    write_private(root, root / "central/seed-oracle.json", data)
     # Existing central masking helper; it emits only Actions mask commands.
     subprocess.run(["bash", str(Path(__file__).resolve().parents[1] / "codex-review/mask-secrets.sh"), str(auth)], check=True)
 
