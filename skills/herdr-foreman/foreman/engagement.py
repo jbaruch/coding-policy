@@ -8,6 +8,7 @@ Warm follow-up revalidates those sources and the retired fleet enrollment.
 
 import json
 
+from . import runnable
 from .chronology import latest_assignment
 from .errors import UsageError
 from .recovery import receipt, text, validate_receipt
@@ -88,7 +89,8 @@ def record_assessment(state, state_path, data, at):
     fleet = supervision.load(state_path)
     member = next((row for row in fleet["members"] if row["id"] == data["dispatch"]), None)
     if member is None or member["assignment"]["report"] != data["report"] or member["assignment"]["agent"] != dispatch["agent"] or member["assignment"]["task"] != dispatch["task"]:
-        raise UsageError("Assessment must name the report enrolled before this dispatch; inspect supervision-status and preserve that report path.", {})
+        raise UsageError("Assessment must name the report enrolled before this dispatch; inspect `{}` and preserve that report path.".format(
+            runnable.command("supervision-status")), {})
     report_evidence, _body = receipt(data["report"])
     delivery_evidence, delivered = receipt(data["delivery"])
     try:
@@ -124,7 +126,8 @@ def require_followup(state, state_path, assignments):
         index, row = prior
         assessment = next((item for item in reversed(state["specialist_assessments"]) if item["assignment_index"] == index), None)
         if assessment is None or row["role"] != canonical_role(role):
-            raise UsageError("Retained specialist needs the preceding assignment's saved foreman assessment; run assess-specialist before following up.", {})
+            raise UsageError("Retained specialist needs the preceding assignment's saved foreman assessment; run `{}` before following up.".format(
+                runnable.command("assess-specialist")), {})
         for key in ("report_evidence", "delivery_evidence"):
             current, _body = receipt(assessment[key]["path"])
             if current != assessment[key]:

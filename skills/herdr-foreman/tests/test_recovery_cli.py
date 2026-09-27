@@ -14,6 +14,7 @@ import unittest
 from datetime import datetime, timedelta
 from unittest.mock import patch
 
+from foreman import runnable
 from foreman.errors import UsageError
 from foreman.state import add_assignment, empty_state, save_state, state_lock
 from tests import test_cli as fixture
@@ -785,7 +786,7 @@ class RecoveryCommandTests(fixture.CliCase):
         before = self.state.read_bytes()
         code, _, err = self.invoke(self.apply_args("developer", None, "--dry-run"), self._client({}))
         self.assertEqual(code, 1, err)
-        self.assertIn("Run `foreman state`", err)
+        self.assertIn("Run `{}`".format(runnable.command("state")), json.loads(err)["message"])
         self.assertEqual(self.runner.calls, [])
         self.assertEqual(self.state.read_bytes(), before)
         self.assertFalse(self.state.with_suffix(".json.lock").exists())

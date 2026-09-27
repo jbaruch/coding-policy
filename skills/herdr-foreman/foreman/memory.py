@@ -14,6 +14,7 @@ from datetime import timezone
 from pathlib import Path
 from urllib.parse import urlsplit
 
+from . import runnable
 from .chronology import timestamp
 from .errors import StateError, UsageError
 from .state import save_state, state_lock
@@ -284,7 +285,8 @@ def _append(path, data, kind, at):
         if kind == "lesson":
             prior_lesson = next((old for old in reversed(document["records"]) if old["kind"] == "lesson" and old["lesson_id"] == row["lesson_id"]), None)
             _require(row["supersedes"] == (prior_lesson["id"] if prior_lesson else None),
-                     "Memory revision must supersede the current lesson record id; reload memory-list and retain its history.")
+                     "Memory revision must supersede the current lesson record id; reload `{}` and retain its history.".format(
+                         runnable.command("memory-list")))
             _require(prior_lesson is not None or row["status"] == "active", "Record an active lesson before archiving it; preserve existing revision history.")
         document["records"].append(row)
         save_state(location(path), document)
@@ -355,7 +357,8 @@ def show(path, at, name="latest"):
     rows = document["records"]
     selected = ([row for row in rows if row["kind"] == "stow"] if name == "latest"
                 else [row for row in rows if row["id"] == name])
-    _require(bool(selected), "No saved memory matches; use memory-list or memory-show --id latest with the same --state path.")
+    _require(bool(selected), "No saved memory matches; use `{}` or `{}` with the same --state path.".format(
+        runnable.command("memory-list"), runnable.command("memory-show --id latest")))
     return {"schema_version": SCHEMA_VERSION, "memory_path": str(location(path)), "checked_at": at,
             "record": _view(selected[-1], at), "history": [row for row in rows if selected[-1]["kind"] == "lesson"
                                                           and row["kind"] == "lesson" and row["lesson_id"] == selected[-1]["lesson_id"]]}
@@ -384,4 +387,5 @@ def run_command(args, state_path, now):
         return list_lessons(state_path, now, scopes=args.scopes, include_archived=args.include_archived)
     if args.command == "memory-show":
         return show(state_path, now, args.id)
-    raise UsageError("Unknown memory command; use memory-record, memory-stow, memory-list or memory-show.", {})
+    raise UsageError("Unknown memory command; use one of {}.".format(", ".join(
+        "`{}`".format(runnable.command(name)) for name in sorted(COMMANDS))), {})
