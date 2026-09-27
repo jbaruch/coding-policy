@@ -487,7 +487,8 @@ Then act on the checkpoint:
 
 - Read delivered reports in full
 - Pass the worker's checkout as `--worktree` when it has one
-- With `--worktree`, an exit 1 carries either `reason: checkpoint_pending` or a `stall` object
+- An exit 1 carries either `reason: checkpoint_pending` or a `stall` object
+- A `stall` is classified only when `--worktree` names the checkout
 - Act on a stall under `rules/agent-team-operation.md` Stalled Workers
 - Record a stall's obligation through `references/attention.md`
 - Preserve the blocked/refusal and native-recovery paths in the references below
