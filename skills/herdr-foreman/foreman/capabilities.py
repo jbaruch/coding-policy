@@ -17,7 +17,9 @@ and where a model failed here that failure is itself a `project` source.
 """
 
 import json
+import os
 import re
+import stat
 from datetime import date, timedelta, timezone
 from pathlib import Path
 from typing import NoReturn
@@ -122,7 +124,14 @@ def load(path, *, for_write=False):
     # A dangling link is not a missing table, and a live one is not the owner's
     # file: a later `record` would replace the link through save_state's atomic
     # rename and destroy the redirect. Either way the link is left as found.
-    if target.is_symlink():
+    try:
+        linked = stat.S_ISLNK(os.lstat(target).st_mode)
+    except (FileNotFoundError, NotADirectoryError):
+        linked = False
+    except OSError as exc:
+        _fail("Cannot inspect the capability table at {}: {}. Restore search permission on its "
+              "directory; the table is left untouched.".format(target, exc))
+    if linked:
         _fail("The capability table at {} is a symlink, not the owner's file. It is left "
               "untouched: restore the regular file at that path, or remove the link to start an "
               "empty table.".format(target))

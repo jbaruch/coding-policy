@@ -105,6 +105,17 @@ class RoundTripTest(unittest.TestCase):
         self.assertEqual(real.read_bytes(), original)
         self.assertFalse((Path(self.tmp) / "gone.json").exists())
 
+    @unittest.skipIf(os.geteuid() == 0, "root searches any directory")
+    def test_save_refuses_a_target_it_cannot_inspect(self):
+        # An unsearchable ancestor makes the link probe itself fail; that is a
+        # StateError naming the path, never a traceback or a blind write.
+        locked = Path(self.tmp) / "locked"
+        (locked / "sub").mkdir(parents=True)
+        os.chmod(locked, 0)
+        self.addCleanup(os.chmod, locked, 0o755)
+        with self.assertRaisesRegex(StateError, "Cannot inspect the state file"):
+            save_state(locked / "sub" / "state.json", empty_state())
+
     def test_save_follows_a_symlinked_parent_directory(self):
         real = Path(self.tmp) / "real-dir"
         real.mkdir()

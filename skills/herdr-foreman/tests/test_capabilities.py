@@ -16,7 +16,7 @@ if _ROOT not in _sys.path:
 
 from foreman import capabilities
 from foreman.cli import main
-from foreman.errors import UsageError
+from foreman.errors import StateError, UsageError
 
 #: A fixed past reference; every other instant and date is derived from it
 #: (rules/testing-standards.md Determinism).
@@ -105,6 +105,19 @@ class CapabilityTableTest(unittest.TestCase):
             capabilities.record(self.state, {"entries": [entry(verdict="unknown")]}, LATER)
         self.assertTrue(target.is_symlink())
         self.assertEqual(capabilities.storage_path(real).read_bytes(), original)
+
+    @unittest.skipIf(_os.geteuid() == 0, "root searches any directory")
+    def test_a_table_it_cannot_inspect_is_refused_with_its_repair(self):
+        locked = Path(self.tmp.name) / "locked"
+        locked.mkdir()
+        state = locked / "state.json"
+        _os.chmod(locked, 0)
+        self.addCleanup(_os.chmod, locked, 0o755)
+        with self.assertRaisesRegex(UsageError, "Cannot inspect the capability table"):
+            capabilities.load(state)
+        # The writer meets its lock first; either way a structured refusal.
+        with self.assertRaises((UsageError, StateError)):
+            capabilities.record(state, {"entries": [entry()]}, AT)
 
     def test_a_report_never_supplies_what_the_writer_stamps(self):
         for extra in ({"recorded_at": AT}, {"schema_version": 1}):

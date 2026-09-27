@@ -70,6 +70,7 @@ Reading follows one rule per direction:
 import json
 import math
 import os
+import stat
 import tempfile
 import fcntl
 from contextlib import contextmanager
@@ -640,7 +641,20 @@ def save_state(path, state):
     exactly as found. A symlinked parent directory is followed as usual.
     """
     path = Path(path)
-    if path.is_symlink():
+    # `Path.is_symlink` swallows only a missing entry; a probe that cannot
+    # search an ancestor raises. That is an environment to fix, never a pass.
+    try:
+        linked = stat.S_ISLNK(os.lstat(path).st_mode)
+    except (FileNotFoundError, NotADirectoryError):
+        linked = False
+    except OSError as exc:
+        raise StateError(
+            "Cannot inspect the state file {}: {} - restore search permission on its "
+            "directory or pass --state at a readable location; nothing was "
+            "written.".format(path, exc),
+            {"path": str(path)},
+        ) from None
+    if linked:
         raise StateError(
             "State file {} is a symlink; writing would replace the link and leave its "
             "target stale. The link is left untouched: replace it with the owner's "
