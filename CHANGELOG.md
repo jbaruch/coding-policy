@@ -18,6 +18,10 @@
   from PR #528's review. `herdr-foreman` Step 11's `check-member` follow-up
   paragraph, which merged several directives, is now one bullet per directive.
 
+## 0.3.288 — 2026-09-27
+
+### Fixed
+
 - **The ACR acceptance helper's output writes are descriptor-relative end to
   end (#558).** Follow-ups from #550's review, in
   `.github/codex-accept/contract.py`. `write_new` resolved its parent with
