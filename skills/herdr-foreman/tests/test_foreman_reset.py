@@ -384,6 +384,14 @@ class DeliverTest(unittest.TestCase):
             with self.assertRaises(foreman_reset.SessionChanged):
                 self.run_deliver(Looping(["idle"]), native_session={"kind": "path", "value": "/loop/t.jsonl"})
 
+    def test_a_transcript_path_with_a_nul_matches_no_session(self):
+        class Nul(FakeClient):
+            def pane_get(self, pane_id):
+                return {"pane_id": pane_id, "agent_session": {"kind": "path", "value": "/tmp/t\x00.jsonl"}}
+        self.assertIsNone(foreman_reset.pane_session(Nul(["idle"]), PANE))
+        with self.assertRaises(foreman_reset.SessionChanged):
+            self.run_deliver(Nul(["idle"]), native_session={"kind": "path", "value": "/tmp/t.jsonl"})
+
     def test_a_pasted_clear_is_submitted_by_its_paste(self):
         client = FakeClient(["idle"], sessions=[SESSION["value"], "33333333-3333-4333-8333-333333333333"])
         result, _ = self.run_deliver(client, claude_delivery="paste")

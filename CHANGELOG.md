@@ -19,8 +19,9 @@
   `details.reason` `native_session_changed`. No single Enter proves the clear
   submitted (Codex's first of two Enters only accepts autocomplete, and
   `send_command` may add extra Enters), so a replacement between any of them
-  is still caught. A transcript path that cannot be resolved matches no
-  session instead of escaping as an unrecorded error.
+  is still caught. A transcript path that cannot be resolved (a link loop,
+  an embedded NUL) matches no session instead of escaping as an unrecorded
+  error.
   The clear itself starts a new native session by design, so the keystrokes
   after it keep the name, kind and idle checks alone. The reset record moves
   to schema 2 (`skills/herdr-foreman/state-schema.md` Foreman Reset Record);

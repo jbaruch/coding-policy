@@ -729,9 +729,9 @@ def pane_session(client, pane_id):
             return None
         try:
             value = str(supervision.canonical(value))
-        except (OSError, RuntimeError):
+        except (OSError, RuntimeError, ValueError):
             # A path that cannot be resolved (a link loop, an unreadable
-            # ancestor) names no session this reset can match.
+            # ancestor, an embedded NUL) names no session this reset can match.
             return None
     return {"kind": ref["kind"], "value": value}
 
