@@ -53,7 +53,7 @@ KEYWORDS = frozenset({"if", "then", "do", "else", "elif", "while", "until", "!",
 #: mapped to its options that consume the following token as their value.
 #: A `--long=value` spelling carries its value and consumes nothing.
 WRAPPERS = {
-    "env": frozenset({"-u", "-C", "-S", "-P", "--unset", "--chdir", "--split-string"}),
+    "env": frozenset({"-u", "-C", "-P", "--unset", "--chdir"}),
     "sudo": frozenset({
         "-u", "-g", "-C", "-D", "-h", "-p", "-r", "-t", "-U", "-T", "-R",
         "--user", "--group", "--close-from", "--chdir", "--host", "--prompt",
@@ -69,6 +69,9 @@ WRAPPERS = {
 #: Wrapper options that turn the wrapper into a lookup: the next token is a
 #: name it reports on, never runs.
 QUERIES = {"command": frozenset({"-v", "-V"})}
+
+#: `env` options whose value is itself a command line, split and run.
+SPLIT_STRING = frozenset({"-S", "--split-string"})
 
 
 def shell_blocks(text):
@@ -201,6 +204,15 @@ def bare_invocations(line):
             continue
         if ASSIGNMENT.match(token) or token in KEYWORDS:
             continue
+        if wrapper == "env" and (token in SPLIT_STRING or token.startswith("--split-string=")):
+            if "=" in token:
+                operand = token.split("=", 1)[1]
+            else:
+                operand = words[index] if index < len(words) else ""
+                index += 1
+            found.extend(bare_invocations(operand))
+            expecting, wrapper = False, None
+            continue
         if wrapper is not None and token.startswith("-"):
             if token in QUERIES.get(wrapper, frozenset()):
                 expecting, wrapper = False, None
@@ -255,6 +267,8 @@ class BareInvocationDetectorTest(unittest.TestCase):
             ("env --unset NAME skills/x/run.sh", ["skills/x/run.sh"]),
             ("sudo --user runner skills/x/run.sh", ["skills/x/run.sh"]),
             ("sudo --user=runner skills/x/run.sh", ["skills/x/run.sh"]),
+            ("env -S 'skills/x/run.sh --flag'", ["skills/x/run.sh"]),
+            ("env --split-string='skills/x/run.sh'", ["skills/x/run.sh"]),
             (">out skills/x/run.sh", ["skills/x/run.sh"]),
             ("2>/dev/null skills/x/run.sh", ["skills/x/run.sh"]),
         ):
@@ -278,6 +292,7 @@ class BareInvocationDetectorTest(unittest.TestCase):
             "sudo -u runner bash skills/x/run.sh",
             "command -v skills/x/run.sh",
             "command -V skills/x/run.sh",
+            "env -S 'bash skills/x/run.sh'",
             "echo 'literal `skills/x/run.sh`'",
             "echo '$(skills/x/run.sh)'",
         ):
