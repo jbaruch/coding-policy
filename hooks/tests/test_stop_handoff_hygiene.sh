@@ -71,8 +71,8 @@ make_gone_branch() {
 
 mk_stub_bin() { # <dir> <sc_rc> <py_rc>
   mkdir -p "$1" || die "mk_stub_bin: mkdir $1 failed"
-  printf '#!/usr/bin/env bash\nexit %s\n' "$2" > "$1/shellcheck" || die "stub shellcheck failed"
-  printf '#!/usr/bin/env bash\nexit %s\n' "$3" > "$1/pyright"    || die "stub pyright failed"
+  printf '#!/usr/bin/env bash\nset -euo pipefail\nexit %s\n' "$2" > "$1/shellcheck" || die "stub shellcheck failed"
+  printf '#!/usr/bin/env bash\nset -euo pipefail\nexit %s\n' "$3" > "$1/pyright"    || die "stub pyright failed"
   chmod +x "$1/shellcheck" "$1/pyright" || die "chmod stubs failed"
 }
 
@@ -316,7 +316,7 @@ main() {
 
   # 6. changed-set diagnostics finding -> block. Uncommitted .sh + failing engine.
   mk_origin o6; clone_from "$BARE" "$TMP/r6"
-  printf '#!/usr/bin/env bash\necho hi\n' > "$TMP/r6/new.sh" || die "r6 new.sh failed"
+  printf '#!/usr/bin/env bash\nset -euo pipefail\necho hi\n' > "$TMP/r6/new.sh" || die "r6 new.sh failed"
   mk_stub_bin "$TMP/r6-bin" 1 0     # stub engine exits 1 (a finding)
   run_hook "$TMP/r6" '{"stop_hook_active":false}' "$TMP/r6-bin:$PATH"
   if [[ $RC -eq 0 ]] && reason_has "shellcheck findings" \
@@ -326,7 +326,7 @@ main() {
   # 7. changed-set diagnostics clean -> no diagnostics block (dirty tree is only
   #    report-only, so allow). Proves the changed set was linted and passed.
   mk_origin o7; clone_from "$BARE" "$TMP/r7"
-  printf '#!/usr/bin/env bash\necho hi\n' > "$TMP/r7/new.sh" || die "r7 new.sh failed"
+  printf '#!/usr/bin/env bash\nset -euo pipefail\necho hi\n' > "$TMP/r7/new.sh" || die "r7 new.sh failed"
   mk_stub_bin "$TMP/r7-bin" 0 0     # engines clean
   run_hook "$TMP/r7" '{"stop_hook_active":false}' "$TMP/r7-bin:$PATH"
   if [[ $RC -eq 0 && -z "$OUT" ]]; then pass; else fail "diag clean: expected allow/silence, got RC=$RC OUT=$OUT"; fi
@@ -352,7 +352,7 @@ main() {
   #     engine). PATH has git/jq/cat/bash but no shellcheck; a changed .sh forces
   #     the check.
   mk_origin o10; clone_from "$BARE" "$TMP/r10"
-  printf '#!/usr/bin/env bash\necho hi\n' > "$TMP/r10/new.sh" || die "r10 new.sh failed"
+  printf '#!/usr/bin/env bash\nset -euo pipefail\necho hi\n' > "$TMP/r10/new.sh" || die "r10 new.sh failed"
   local engbin="$TMP/engbin"; mkdir -p "$engbin" || die "engbin mkdir failed"
   local u p2
   for u in bash git jq cat mktemp rm; do
@@ -436,7 +436,7 @@ main() {
   cp "$HOOK" "$stage12/hooks/" || die "stage the stop hook failed"
   cp "$(dirname "$HOOK")/../skills/herdr-foreman/bounded-run.sh" "$stage12/skills/herdr-foreman/" || die "stage the runner failed"
   # shellcheck disable=SC2016  # GIT_SSH_COMMAND expands in the stand-in, not here.
-  printf '#!/usr/bin/env bash\nprintf "%%s\\n" "${GIT_SSH_COMMAND:-}" >> %q\nexit 1\n' "$calls12" \
+  printf '#!/usr/bin/env bash\nset -euo pipefail\nprintf "%%s\\n" "${GIT_SSH_COMMAND:-}" >> %q\nexit 1\n' "$calls12" \
     > "$stage12/skills/herdr-foreman/prune-worktrees.sh" || die "write the recording prune failed"
   HOOK="$stage12/hooks/stop-handoff-hygiene.sh"
   run_hook "$TMP/r12" '{"stop_hook_active":false}' "$PATH" GIT_SSH_COMMAND="ssh -i /keys/case12"

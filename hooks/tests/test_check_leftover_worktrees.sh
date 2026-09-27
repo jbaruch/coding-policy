@@ -261,7 +261,7 @@ stage_recording_plugin() { # <dir> <calls>
   local owner
   for owner in prune-worktrees.sh prune-remote-branches.sh; do
     # shellcheck disable=SC2016  # GIT_SSH_COMMAND expands in the stand-in, not here.
-    printf '#!/usr/bin/env bash\nprintf "%%s %%s\\n" "%s" "${GIT_SSH_COMMAND:-}" >> %q\nexit 1\n' "$owner" "$2" \
+    printf '#!/usr/bin/env bash\nset -euo pipefail\nprintf "%%s %%s\\n" "%s" "${GIT_SSH_COMMAND:-}" >> %q\nexit 1\n' "$owner" "$2" \
       > "$1/skills/herdr-foreman/$owner" || die "write the recording $owner failed"
   done
 }
@@ -401,7 +401,7 @@ main() {
   stage_plugin "$stage"
   cp "${HERE}/../../skills/herdr-foreman/prune-worktrees.sh" "${HERE}/../../skills/herdr-foreman/prune-remote-branches.sh" \
     "$stage/skills/herdr-foreman/" || die "stage the owner scripts failed"
-  printf '#!/usr/bin/env bash\necho "bounded-run: stand-in budget spent" >&2\nexit 124\n' > "$stage/skills/herdr-foreman/bounded-run.sh" \
+  printf '#!/usr/bin/env bash\nset -euo pipefail\necho "bounded-run: stand-in budget spent" >&2\nexit 124\n' > "$stage/skills/herdr-foreman/bounded-run.sh" \
     || die "write the stand-in runner failed"
   local real_hook="$HOOK"
   HOOK="$stage/hooks/$(basename "$real_hook")"
@@ -437,7 +437,7 @@ main() {
   cp "${HERE}/../../skills/herdr-foreman/bounded-run.sh" "$stage13/skills/herdr-foreman/" || die "stage the runner failed"
   local owner
   for owner in prune-worktrees.sh prune-remote-branches.sh; do
-    printf '#!/usr/bin/env bash\nprintf "%%s\\n" "%s" >> %q\nexit 1\n' "$owner" "$calls13" > "$stage13/skills/herdr-foreman/$owner" \
+    printf '#!/usr/bin/env bash\nset -euo pipefail\nprintf "%%s\\n" "%s" >> %q\nexit 1\n' "$owner" "$calls13" > "$stage13/skills/herdr-foreman/$owner" \
       || die "write the recording $owner failed"
   done
   local refs_before refs_after
@@ -455,8 +455,8 @@ main() {
   local stage12="$CASE/stage"
   stage_plugin "$stage12"
   cp "${HERE}/../../skills/herdr-foreman/bounded-run.sh" "$stage12/skills/herdr-foreman/" || die "stage the runner failed"
-  printf '#!/usr/bin/env bash\nprintf "{}\\n"\n' > "$stage12/skills/herdr-foreman/prune-worktrees.sh" || die "write the stand-in prune failed"
-  printf '#!/usr/bin/env bash\nprintf "{\\"deleted\\": [], \\"questionable\\": [{\\"branch\\": 7}], \\"kept\\": [], \\"failed\\": [], \\"could_not_check\\": null, \\"default_branch\\": \\"main\\"}\\n"\n' \
+  printf '#!/usr/bin/env bash\nset -euo pipefail\nprintf "{}\\n"\n' > "$stage12/skills/herdr-foreman/prune-worktrees.sh" || die "write the stand-in prune failed"
+  printf '#!/usr/bin/env bash\nset -euo pipefail\nprintf "{\\"deleted\\": [], \\"questionable\\": [{\\"branch\\": 7}], \\"kept\\": [], \\"failed\\": [], \\"could_not_check\\": null, \\"default_branch\\": \\"main\\"}\\n"\n' \
     > "$stage12/skills/herdr-foreman/prune-remote-branches.sh" || die "write the stand-in remote pass failed"
   local real_hook12="$HOOK"
   HOOK="$stage12/hooks/$(basename "$real_hook12")"
@@ -494,7 +494,7 @@ main() {
   mkdir -p "$CASE/failing-git" || die "mkdir failing-git failed"
   # Prints the real inventory, then fails: the prefix alone parses cleanly.
   # shellcheck disable=SC2016  # The $@ belongs to the stand-in git.
-  printf '#!/usr/bin/env bash\nset -uo pipefail\nif [[ "${1:-}" == worktree && "${2:-}" == list ]]; then\n  %q "$@"\n  echo "fatal: stand-in failure after the listing" >&2\n  exit 1\nfi\nexec %q "$@"\n' \
+  printf '#!/usr/bin/env bash\nset -euo pipefail\nif [[ "${1:-}" == worktree && "${2:-}" == list ]]; then\n  %q "$@"\n  echo "fatal: stand-in failure after the listing" >&2\n  exit 1\nfi\nexec %q "$@"\n' \
     "$real_git" "$real_git" > "$CASE/failing-git/git" || die "write the failing git failed"
   chmod +x "$CASE/failing-git/git" || die "chmod the failing git failed"
   local real_hook14="$HOOK"
