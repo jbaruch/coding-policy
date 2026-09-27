@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.289 — 2026-09-27
+
 ### Fixed
 
 - **`foreman detect-triggers` no longer reads untracked files on a round that
