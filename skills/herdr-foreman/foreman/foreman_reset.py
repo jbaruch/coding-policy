@@ -161,6 +161,8 @@ ROW_FIELDS_V1 = frozenset({"schema_version", "pane_id", "stow", "status", "sched
 ROW_FIELDS = ROW_FIELDS_V1 | {"native_session"}
 OPTION_FIELDS = frozenset({"config", "herdr_bin"})
 SESSION_KINDS = ("id", "path")
+#: The agents whose native session supervision-bind accepts (supervision_runtime.bind_current).
+SESSION_AGENTS = ("claude", "codex")
 
 
 def _version(value, expected=RESET_SCHEMA_VERSION):
@@ -723,12 +725,15 @@ def bound_session(supervision_data):
 def pane_session(client, pane_id):
     """The native session Herdr reports for the pane now, in the binding's form, or None when it names none.
 
-    The same source `supervision-bind` reads (supervision_runtime.bind_current);
-    a transcript path is canonicalized the way the binding stored it.
+    The same source `supervision-bind` reads, held to the same proof
+    (supervision_runtime.bind_current): a supported agent reported by its own
+    Herdr integration. A transcript path is canonicalized the way the binding
+    stored it.
     """
     pane = client.pane_get(pane_id)
     ref = pane.get("agent_session") if isinstance(pane, dict) else None
     if (not isinstance(pane, dict) or pane.get("pane_id") != pane_id or not isinstance(ref, dict)
+            or ref.get("agent") not in SESSION_AGENTS or ref.get("source") != "herdr:" + ref["agent"]
             or ref.get("kind") not in SESSION_KINDS or not isinstance(ref.get("value"), str) or not ref["value"]):
         return None
     value = ref["value"]

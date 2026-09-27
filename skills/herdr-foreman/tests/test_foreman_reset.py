@@ -404,7 +404,7 @@ class DeliverTest(unittest.TestCase):
     def test_an_unresolvable_transcript_path_matches_no_session(self):
         class Looping(FakeClient):
             def pane_get(self, pane_id):
-                return {"pane_id": pane_id, "agent_session": {"kind": "path", "value": "/loop/t.jsonl"}}
+                return {"pane_id": pane_id, "agent_session": {"source": "herdr:claude", "agent": "claude", "kind": "path", "value": "/loop/t.jsonl"}}
         with patch("foreman.foreman_reset.supervision.canonical", side_effect=RuntimeError("Symlink loop")):
             self.assertIsNone(foreman_reset.pane_session(Looping(["idle"]), PANE))
             with self.assertRaises(foreman_reset.SessionChanged):
@@ -413,7 +413,7 @@ class DeliverTest(unittest.TestCase):
     def test_a_transcript_path_with_a_nul_matches_no_session(self):
         class Nul(FakeClient):
             def pane_get(self, pane_id):
-                return {"pane_id": pane_id, "agent_session": {"kind": "path", "value": "/tmp/t\x00.jsonl"}}
+                return {"pane_id": pane_id, "agent_session": {"source": "herdr:claude", "agent": "claude", "kind": "path", "value": "/tmp/t\x00.jsonl"}}
         self.assertIsNone(foreman_reset.pane_session(Nul(["idle"]), PANE))
         with self.assertRaises(foreman_reset.SessionChanged):
             self.run_deliver(Nul(["idle"]), native_session={"kind": "path", "value": "/tmp/t.jsonl"})
@@ -460,6 +460,17 @@ class DeliverTest(unittest.TestCase):
             self.run_deliver(client)
         self.assertEqual(client.keystrokes, ["/clear", "enter"])
 
+    def test_a_session_another_integration_reports_is_no_match(self):
+        for ref in ({"source": "other:claude", "agent": "claude"}, {"source": "herdr:grok", "agent": "grok"},
+                    {"agent": "claude"}, {"source": "herdr:claude"}):
+            with self.subTest(ref=ref):
+                class Foreign(FakeClient):
+                    def pane_get(self, pane_id, ref=ref):
+                        return {"pane_id": pane_id, "agent_session": {**ref, "kind": "id", "value": SESSION["value"]}}
+                self.assertIsNone(foreman_reset.pane_session(Foreign(["idle"]), PANE))
+                with self.assertRaises(foreman_reset.SessionChanged):
+                    self.run_deliver(Foreign(["idle"]))
+
     def test_a_pane_with_no_foreground_process_gets_no_keystroke(self):
         client = FakeClient(["idle"], pids=[None])
         with self.assertRaisesRegex(HerdrError, "no foreground process") as caught:
@@ -481,7 +492,7 @@ class DeliverTest(unittest.TestCase):
         class PathClient(FakeClient):
             def pane_get(self, pane_id):
                 value = "/tmp/../tmp/cleared.jsonl" if self.cleared else "/tmp/../tmp/t.jsonl"
-                return {"pane_id": pane_id, "agent_session": {"kind": "path", "value": value}}
+                return {"pane_id": pane_id, "agent_session": {"source": "herdr:claude", "agent": "claude", "kind": "path", "value": value}}
         bound = {"kind": "path", "value": str(Path("/tmp/t.jsonl").resolve())}
         self.assertEqual(foreman_reset.pane_session(PathClient(["idle"]), PANE), bound)
         result, _ = self.run_deliver(PathClient(["idle"]), native_session=bound)
@@ -490,7 +501,7 @@ class DeliverTest(unittest.TestCase):
     def test_a_pane_reporting_no_session_or_another_pane_is_no_match(self):
         class Bare(FakeClient):
             def pane_get(self, pane_id):
-                return {"pane_id": "w2:p1", "agent_session": {"kind": "id", "value": SESSION["value"]}}
+                return {"pane_id": "w2:p1", "agent_session": {"source": "herdr:claude", "agent": "claude", "kind": "id", "value": SESSION["value"]}}
         self.assertIsNone(foreman_reset.pane_session(Bare(["idle"]), PANE))
         with self.assertRaises(foreman_reset.SessionChanged):
             self.run_deliver(Bare(["idle"]))
