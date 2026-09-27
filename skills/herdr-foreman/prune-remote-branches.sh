@@ -23,8 +23,11 @@
 #     default branch, age, last author, and the commands to open a pull
 #     request or delete it, the delete leased to the tip judged here;
 #   * KEPT silently when unmerged and younger than that (not-idle).
-# Without the GitHub CLI, or when it fails, nothing is deleted or listed:
-# `could_not_check` says why. A failed git or gh command that talks to origin
+# Without the GitHub CLI, or when its first reads (protected branches, open
+# pull requests) fail, nothing is deleted or listed: `could_not_check` says
+# why. Each deletion stands on its own final re-read of origin, so a gh read
+# that fails there keeps that branch alone (`failed`); a branch already
+# deleted passed its own re-read and is reported in `deleted`. A failed git or gh command that talks to origin
 # is reported by exit code and the command to rerun, never by its own
 # message, which can carry the remote URL with credentials.
 #
