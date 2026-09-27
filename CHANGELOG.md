@@ -38,6 +38,8 @@
   from PR #528's review. `herdr-foreman` Step 11's `check-member` follow-up
   paragraph, which merged several directives, is now one bullet per directive.
 
+## 0.3.294 — 2026-09-27
+
 ### Tests
 
 - **The cross-task check on a diagnosis's `approach_change` has a regression
