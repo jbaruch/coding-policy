@@ -17,12 +17,13 @@
   writer; it now opens non-blocking and the `S_ISREG` check refuses it. The
   different-content refusal now says what to do: keep the run root for
   inspection and re-run with a fresh run root. The walk also refuses `.` and
-  `..` components (`relative_to` keeps `..`, which the descriptor walk would
-  otherwise follow out of the root), and `extract_archive` now creates the
+  `..` components in both the root and the path (`relative_to` keeps a `..`
+  below the root and drops one inside it, and the kernel resolves either
+  through whatever link precedes it), and `extract_archive` now creates the
   download destination through the same walk anchored at its parent instead of
   `Path.mkdir`, so a symlinked parent refuses. `prove-runtime --output` now
   requires the output's parent directory to exist. Regression tests cover a
-  symlinked parent at each depth, a symlinked or missing root, a `..` path, a
+  symlinked parent at each depth, a symlinked or missing root, a `..` path, a `..` after a symlink in the root, a
   download into a symlinked parent, a hard link added mid-create for both
   writers (a 0277 umask makes a stray chmod visible on the link), a FIFO at
   the output path (an `os.open` stand-in models the blocking read open, so no

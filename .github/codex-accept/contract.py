@@ -250,9 +250,12 @@ def write_under(root: Path, path: Path, value: bytes, private: bool) -> None:
     No component from <root> down is followed through a symlink. Missing directories are created
     0700; with <private> every directory on the way is also forced to 0700.
     """
-    parts = path.relative_to(root).parts  # ValueError: a caller bug, never input
-    require(parts and all(part not in (".", "..") for part in parts),
+    # relative_to() is lexical: a ".." in <root> itself would be dropped from <parts> and
+    # resolved by the kernel through whatever link precedes it, so both paths are checked.
+    require(all(part not in (".", "..") for part in (*root.parts, *path.parts)),
             "Output path must name a file below its root without . or .. components; pass a contained path")
+    parts = path.relative_to(root).parts  # ValueError: a caller bug, never input
+    require(parts, "Output path names the root directory itself; pass a file below it")
     try:
         fd = os.open(root, DIR_FLAGS)
     except FileNotFoundError as exc:

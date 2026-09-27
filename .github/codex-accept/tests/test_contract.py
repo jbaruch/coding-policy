@@ -1590,6 +1590,17 @@ class WriteTests(unittest.TestCase):
                     writer(root / "inner", root / "inner/../escaped.json", b"{}")
                 self.assertFalse((root / "escaped.json").exists())
 
+    def test_traversal_in_the_root_itself_refuses_without_writing_through_a_link(self):
+        root, outside = self.dirs()
+        (outside / "inner").mkdir()
+        (root / "link").symlink_to(outside / "inner", target_is_directory=True)
+        anchor = root / "link" / ".."  # The kernel resolves this to <outside>, not <root>.
+        for writer in (c.write_new, c.write_private):
+            with self.subTest(writer=writer.__name__):
+                with self.assertRaisesRegex(c.Refusal, "without . or .. components"):
+                    writer(anchor, anchor / "escaped.json", b"{}")
+                self.assertEqual(sorted(p.name for p in outside.iterdir()), ["inner"])
+
     def test_fifo_at_output_path_refuses_instead_of_blocking(self):
         root, _ = self.dirs()
         (root / "evidence").mkdir(mode=0o700)
