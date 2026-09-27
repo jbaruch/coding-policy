@@ -1,5 +1,17 @@
 # Changelog
 
+### Changed
+
+- **The ACR acceptance lane reads `CODEX_AUTH_JSON`; `ACR_ACCEPT_CODEX_AUTH_JSON`
+  is gone.** The separate secret assumed a second Codex credential, but the
+  operator has one subscription, so both secrets held the same session and a
+  re-login meant two uploads, one of which was easy to forget.
+  `.github/workflows/acr-codex-accept.yml`'s seed step now reads
+  `CODEX_AUTH_JSON`, the contract strips it from the candidate's environment as
+  before, and an empty secret refuses with the `codex login` / `gh secret set`
+  recovery. Shared-session risk, documented in `docs/acr-codex-accept.md`: a
+  refresh during acceptance can rotate the reviewer's session.
+
 ## 0.3.279 — 2026-09-26
 
 ### Fixed
