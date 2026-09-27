@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.280 — 2026-09-27
+
 ### Changed
 
 - **The ACR acceptance lane reads `CODEX_AUTH_JSON`; `ACR_ACCEPT_CODEX_AUTH_JSON`
