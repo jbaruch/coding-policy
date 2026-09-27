@@ -12,22 +12,24 @@
   `O_NOFOLLOW` relative to the one before it, refusing a link anywhere on the
   path without a resolve-then-open race. `freeze_paths` freezes under the
   source directory's `realpath`, so paths it records carry no links (macOS
-  `/tmp` and `/var` included). It resolves that directory before reading
-  the source and reads the source through the same walk, so an alias
-  retargeted mid-freeze cannot place one directory's bytes under another's
-  `.dispatched/`, and a FIFO planted as a brief is refused rather than hung
-  on. It creates `.dispatched/` and the copy (`O_CREAT | O_EXCL |
-  O_NOFOLLOW`) relative to that walked descriptor, so an ancestor swapped for
-  a link after the lookup never receives the brief; a write that fails
-  part-way removes the file it created, so a re-run succeeds instead of
-  meeting a partial copy it may never rewrite. It reads every copy back,
-  fresh or existing, through the same walk. A row recorded by an older build through a linked
+  `/tmp` and `/var` included). It opens that directory once through the same
+  walk and holds the descriptor through both the source read and the copy's
+  creation (`.dispatched/`, then the file with `O_CREAT | O_EXCL |
+  O_NOFOLLOW`), so an alias retargeted, an ancestor swapped for a link, or
+  the directory replaced by another real one mid-freeze can never file one
+  directory's bytes under another's `.dispatched/`. A FIFO planted as a brief
+  is refused rather than hung on. A write or `close` that fails removes the
+  file it created, so a re-run succeeds instead of meeting a partial copy it
+  may never rewrite. Every copy, fresh or existing, is read back through the
+  path walk the gate uses. A row recorded by an older build through a linked
   directory is refused with a dispatch-again repair. Regression tests cover
   a retargeted ancestor, a link deeper in the path, a brief under an
   aliased directory freezing canonically, an alias retargeted between
   resolution and read, a source directory swapped for a link before the read
-  and before the write, a failed write followed by a clean retry, a brief
-  path containing braces, and a FIFO source.
+  and before the write, a source directory replaced after the read, a failed
+  write and a failed close each followed by a clean retry, a brief path
+  containing braces, and a FIFO source. Carrying the verified bytes through
+  the dispatch-identity and prompt reads that follow the freeze is #565.
 
 ## 0.3.287 — 2026-09-27
 

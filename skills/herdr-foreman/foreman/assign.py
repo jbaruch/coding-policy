@@ -218,14 +218,20 @@ def freeze_paths(paths):
     """
     frozen = {}
     for key, source in paths.items():
-        # Canonical first, then read through that directory: reading the
-        # given path first would let an alias retargeted in between place one
+        # Canonical first, then one descriptor for that directory, held
+        # through both the read and the write: a path resolved twice would let
+        # an alias retargeted, or the directory replaced, in between place one
         # directory's bytes under another's `.dispatched` (#554).
         directory = Path(os.path.realpath(Path(source).parent))
-        data = _read_source(directory / Path(source).name, source)
-        digest = hashlib.sha256(data).hexdigest()
-        target = directory / FROZEN_DIR / "{}.{}{}".format(Path(source).stem, digest[:16], Path(source).suffix)
-        _write_frozen(target, data, source)
+        canonical = directory / Path(source).name
+        held = _open_directory_unlinked(canonical, _SOURCE_OPEN_FAILED, _SOURCE_LINKED, brief=source)
+        try:
+            data = _read_source(held, canonical, source)
+            digest = hashlib.sha256(data).hexdigest()
+            target = directory / FROZEN_DIR / "{}.{}{}".format(Path(source).stem, digest[:16], Path(source).suffix)
+            _write_frozen(held, target, data, source)
+        finally:
+            os.close(held)
         # Inspected apart from the write's handlers: an error raised inside a
         # handler never reaches a sibling handler, so it would escape as a
         # traceback (#460). A fresh copy is read back too, through the same
@@ -235,35 +241,29 @@ def freeze_paths(paths):
     return frozen
 
 
-def _write_frozen(target, data, source):
-    """Create `target` exclusively, every directory on its way opened without following a link.
+def _write_frozen(held, target, data, source):
+    """Create `target` exclusively under `held`, the source directory's descriptor, without following a link.
 
     An existing `target` is left untouched for `_require_frozen_copy` to judge.
     Creating by pathname would follow an ancestor swapped for a link after the
     canonical lookup, and write the brief into another source's directory
     before any read-back could refuse it (#554). A `FROZEN_DIR` that is a link
-    would place copies somewhere nothing keeps immutable (#460). A write that
-    fails part-way removes the file it created, so a re-run starts clean
-    instead of meeting a partial copy it may never rewrite.
+    would place copies somewhere nothing keeps immutable (#460).
     """
     directory = target.parent
-    open_failed = "Cannot create {0} beside brief {2}: {1}. Make its directory writable and re-run."
-    parent = _open_directory_unlinked(directory, open_failed, _FROZEN_LINKED, brief=source)
     try:
         try:
-            os.mkdir(FROZEN_DIR, dir_fd=parent)
+            os.mkdir(FROZEN_DIR, dir_fd=held)
         except FileExistsError:
             pass
-        frozen_dir = os.open(FROZEN_DIR, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=parent)
+        frozen_dir = os.open(FROZEN_DIR, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=held)
     except OSError as exc:
         if exc.errno in (errno.ELOOP, errno.ENOTDIR):
             raise UsageError("Frozen-brief directory {} is a link or not a directory; move it aside and re-run so "
                              "the freeze writes real copies beside the source.".format(directory),
                              {"path": str(directory)}) from None
-        raise UsageError(open_failed.format(directory, exc.strerror or str(exc), source),
-                         {"path": str(directory)}) from None
-    finally:
-        os.close(parent)
+        raise UsageError("Cannot create {} beside brief {}: {}. Make its directory writable and re-run.".format(
+            directory, source, exc.strerror or str(exc)), {"path": str(directory)}) from None
     try:
         _create_exclusive(frozen_dir, target, data, source)
     finally:
@@ -271,7 +271,12 @@ def _write_frozen(target, data, source):
 
 
 def _create_exclusive(frozen_dir, target, data, source):
-    """Write `data` to a new `target.name` under `frozen_dir`, removing it again if the write fails."""
+    """Write `data` to a new `target.name` under `frozen_dir`, removing it again if the write does not complete.
+
+    A partial copy left at the content-addressed name would be refused as
+    never-rewritten on every retry. A failed `close` counts as a failed
+    write: it is where a delayed ENOSPC, EDQUOT or EIO surfaces.
+    """
     failed = "Cannot freeze brief {} at {}: {}. Make its directory writable and re-run."
     try:
         fd = os.open(target.name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o666, dir_fd=frozen_dir)
@@ -279,16 +284,24 @@ def _create_exclusive(frozen_dir, target, data, source):
         return
     except OSError as exc:
         raise UsageError(failed.format(source, target, exc.strerror or str(exc)), {"path": str(target)}) from None
+    reason = None
+    closed = False
     try:
-        view = memoryview(data)
-        while view:
-            view = view[os.write(fd, view):]
-    except OSError as exc:
-        reason = exc.strerror or str(exc)
-    else:
-        reason = None
-    finally:
+        try:
+            view = memoryview(data)
+            while view:
+                view = view[os.write(fd, view):]
+        except OSError as exc:
+            reason = exc.strerror or str(exc)
+        # Marked before the call: POSIX releases the descriptor even when
+        # close reports an error, so it is never closed twice.
+        closed = True
         os.close(fd)
+    except OSError as exc:
+        reason = reason or exc.strerror or str(exc)
+    finally:
+        if not closed:
+            os.close(fd)
     if reason is None:
         return
     try:
@@ -340,34 +353,34 @@ def _open_directory_unlinked(target, open_failed=_FROZEN_OPEN_FAILED, linked=_FR
             os.close(fd)
 
 
-def _read_source(canonical, given):
-    """The bytes of the brief at `canonical`, its directory reached without following a link.
+_SOURCE_OPEN_FAILED = ("Cannot read briefing file {2} to freeze it for dispatch ({0}): {1}. Restore readability "
+                       "or correct its --common/--brief path before dispatch.")
+_SOURCE_LINKED = ("Briefing file {2} ({0}) passes through {1}, which became a link or not a directory while it was "
+                  "frozen. Stop whatever is moving its directory and dispatch again.")
 
-    `canonical` is `given` with its directory resolved; the walk keeps a
-    component retargeted after that resolution from redirecting the read. The
-    brief file itself may be a link: its bytes are what the copy freezes.
+
+def _read_source(held, canonical, given):
+    """The bytes of the brief named `canonical.name` under `held`, its directory's descriptor.
+
+    The brief file itself may be a link: its bytes are what the copy freezes.
+    Non-blocking, so a FIFO planted as a brief is refused rather than hung on.
     """
-    open_failed = ("Cannot read briefing file {2} to freeze it for dispatch ({0}): {1}. Restore readability or "
-                   "correct its --common/--brief path before dispatch.")
-    linked = ("Briefing file {2} ({0}) passes through {1}, which became a link or not a directory while it was "
-              "frozen. Stop whatever is moving its directory and dispatch again.")
-    parent = _open_directory_unlinked(canonical, open_failed, linked, brief=given)
     try:
-        fd = os.open(canonical.name, os.O_RDONLY | os.O_NONBLOCK, dir_fd=parent)
+        fd = os.open(canonical.name, os.O_RDONLY | os.O_NONBLOCK, dir_fd=held)
     except OSError as exc:
-        raise UsageError(open_failed.format(canonical, exc.strerror or str(exc), given), {"path": str(given)}) from None
-    finally:
-        os.close(parent)
+        raise UsageError(_SOURCE_OPEN_FAILED.format(canonical, exc.strerror or str(exc), given),
+                         {"path": str(given)}) from None
     try:
         if not stat.S_ISREG(os.fstat(fd).st_mode):
-            raise UsageError(open_failed.format(canonical, "not a regular file", given), {"path": str(given)})
+            raise UsageError(_SOURCE_OPEN_FAILED.format(canonical, "not a regular file", given), {"path": str(given)})
         chunks = []
         chunk = os.read(fd, 1 << 16)
         while chunk:
             chunks.append(chunk)
             chunk = os.read(fd, 1 << 16)
     except OSError as exc:
-        raise UsageError(open_failed.format(canonical, exc.strerror or str(exc), given), {"path": str(given)}) from None
+        raise UsageError(_SOURCE_OPEN_FAILED.format(canonical, exc.strerror or str(exc), given),
+                         {"path": str(given)}) from None
     finally:
         os.close(fd)
     return b"".join(chunks)

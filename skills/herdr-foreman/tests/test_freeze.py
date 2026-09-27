@@ -221,8 +221,8 @@ class FrozenPathTest(unittest.TestCase):
         before = sorted((self.root / "other" / FROZEN_DIR).iterdir())
         real_read = assign._read_source
 
-        def read_then_swap(canonical, given):
-            data = real_read(canonical, given)
+        def read_then_swap(held, canonical, given):
+            data = real_read(held, canonical, given)
             (self.root / "source").rename(moved)
             (self.root / "source").symlink_to(self.root / "other")
             return data
@@ -231,6 +231,53 @@ class FrozenPathTest(unittest.TestCase):
             with self.assertRaisesRegex(UsageError, "passes through {}, which is a link".format(self.root / "source")):
                 freeze_paths({"brief": str(self.root / "source" / "brief.md")})
         self.assertEqual(sorted((self.root / "other" / FROZEN_DIR).iterdir()), before)
+
+    def test_a_source_directory_replaced_after_the_read_never_receives_the_copy(self):
+        # coding-policy#562 review: a real directory renamed into place is no
+        # link, so only the held descriptor keeps the write on the directory
+        # the bytes were read from; the read-back then finds no copy there.
+        from foreman import assign
+        moved = self.root / "moved"
+        (self.root / "source" / "brief.md").write_text("a new brief\n")
+        real_read = assign._read_source
+
+        def read_then_replace(held, canonical, given):
+            data = real_read(held, canonical, given)
+            (self.root / "source").rename(moved)
+            (self.root / "source").mkdir()
+            return data
+        with patch("foreman.assign._read_source", side_effect=read_then_replace):
+            with self.assertRaisesRegex(UsageError, "Cannot open frozen brief"):
+                freeze_paths({"brief": str(self.root / "source" / "brief.md")})
+        self.assertFalse((self.root / "source" / FROZEN_DIR).exists())
+        self.assertEqual([path.read_bytes() for path in (moved / FROZEN_DIR).glob("brief.*")
+                          if path.read_bytes() == b"a new brief\n"], [b"a new brief\n"])
+
+    def test_a_failed_close_leaves_nothing_behind_and_a_retry_succeeds(self):
+        # coding-policy#562 review: close is where a delayed ENOSPC surfaces.
+        source = str(self.root / "source" / "brief.md")
+        (self.root / "source" / "brief.md").write_text("a new brief\n")
+        frozen_dir = self.root / "source" / FROZEN_DIR
+        before = sorted(frozen_dir.iterdir())
+        real_open, real_close, created = os.open, os.close, set()
+
+        def tracking_open(name, flags, *args, **kwargs):
+            descriptor = real_open(name, flags, *args, **kwargs)
+            if flags & os.O_CREAT:
+                created.add(descriptor)
+            return descriptor
+
+        def failing_close(descriptor):
+            real_close(descriptor)
+            if descriptor in created:
+                raise OSError(122, "Disk quota exceeded")
+        with patch("foreman.assign.os.open", side_effect=tracking_open), \
+                patch("foreman.assign.os.close", side_effect=failing_close):
+            with self.assertRaisesRegex(UsageError, "Disk quota exceeded. Make its directory writable"):
+                freeze_paths({"brief": source})
+        self.assertEqual(sorted(frozen_dir.iterdir()), before)
+        frozen = Path(freeze_paths({"brief": source})["brief"])
+        self.assertEqual(frozen.read_bytes(), b"a new brief\n")
 
     def test_a_failed_write_leaves_nothing_behind_and_a_retry_succeeds(self):
         # coding-policy#562 review: a partial copy left at the content-addressed
