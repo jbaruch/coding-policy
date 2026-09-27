@@ -55,10 +55,11 @@
 #             no JSON, a repair message on stderr,
 #           2 at least one repository's prune exited non-zero or returned
 #             no readable JSON (its entry carries `error`), or `errors` is
-#             non-empty; every other repository still ran. The root is
-#             re-proven before every later prune too: one replaced or
-#             unreadable after a prune ran stops the rest, with an `errors`
-#             entry for the root naming the repositories not pruned.
+#             non-empty. Every other repository still ran, except after a
+#             root change: the root is re-proven before every later prune
+#             too, and one replaced or unreadable after a prune ran stops
+#             the rest, with an `errors` entry for the root naming the
+#             repositories not pruned.
 #   env   : PRUNE_* variables pass through to prune-worktrees.sh.
 set -euo pipefail
 
