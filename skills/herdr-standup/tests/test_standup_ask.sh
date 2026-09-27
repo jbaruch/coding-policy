@@ -16,13 +16,20 @@
 #   5. Message shape  -> `agent prompt`, never a slash command, and the four
 #                        field names plus the report path are in the text.
 #   6. Relative path  -> exit 1 before any herdr call.
-#  6b. Over-long path -> exit 1; the marker line must fit one pane row.
+#  6b. Over-long path -> exit 1; the coarse length bound, before Herdr.
 #  6c. Bad limit      -> a non-integer override is exit 1, not an abort.
 #  6d. `0100` is 100  -> a leading zero is decimal, never octal, downstream.
 #   7. Outside Herdr  -> exit 1.
 #   8. herdr failure  -> exit 2, no verdict.
 #   9. Bad payload    -> exit 2.
+#  10. Narrow pane    -> exit 4, nothing sent, the verdict names the width
+#                        and the columns the marker needs (#515).
+#  11. Exact fit      -> a pane exactly as wide as that need is asked.
+#  12. Measure fails  -> a failed `foreman marker-fit` is exit 2, nothing sent.
+#  13. No foreman.sh  -> exit 1 before any herdr call.
 #
+# The width gate runs the real sibling foreman.sh against the fake herdr, with
+# empty XDG homes so the host's own foreman home never decides an outcome.
 # Run: bash skills/herdr-standup/tests/test_standup_ask.sh
 set -uo pipefail
 
@@ -44,6 +51,12 @@ case "${1:-} ${2:-}" in
       "${FAKE_STATUS:-idle}" "${3:-worker}"
     exit 0
     ;;
+  "pane layout")
+    [[ -n "${FAKE_LAYOUT_ERR:-}" ]] && { printf '{"error":{"code":"pane_not_found"}}\n' >&2; exit 1; }
+    printf '{"result":{"type":"pane_layout","layout":{"panes":[{"pane_id":"w2:p1","rect":{"height":48,"width":%s,"x":0,"y":0}}]}}}\n' \
+      "${FAKE_WIDTH:-400}"
+    exit 0
+    ;;
   "agent prompt")
     [[ -n "${FAKE_PROMPT_ERR:-}" ]] && { printf '{"error":{"code":"agent_blocked"}}\n' >&2; exit 1; }
     printf '{"id":"cli:agent:prompt","result":{"type":"agent_prompt"}}\n'
@@ -60,8 +73,9 @@ run() { # [env...] -- runs standup-ask worker <report>
   RUN_SEQ=$((RUN_SEQ+1))
   ARGV="$TMP/argv.$RUN_SEQ"
   : > "$ARGV" || die "could not create $ARGV"
-  OUT="$(env HERDR_ENV=1 HERDR_BIN="$FAKE" FAKE_ARGV_FILE="$ARGV" "$@" \
-    bash "$SCRIPT" worker "$REPORT" 2>"$TMP/err.$RUN_SEQ")"
+  OUT="$(env HERDR_ENV=1 HERDR_BIN="$FAKE" FAKE_ARGV_FILE="$ARGV" \
+    XDG_STATE_HOME="$TMP/xdg/state" XDG_CONFIG_HOME="$TMP/xdg/config" "$@" \
+    bash "${RUN_SCRIPT:-$SCRIPT}" worker "$REPORT" 2>"$TMP/err.$RUN_SEQ")"
   RC=$?
   ERRTEXT="$(cat "$TMP/err.$RUN_SEQ")"
   ARGVTEXT="$(cat "$ARGV")"
@@ -120,7 +134,7 @@ main() {
   if [[ $RC -eq 1 && -z "$OUT" ]] && grep -q "relative" "$TMP/e6"; then
     pass; else fail "relative path: expected exit 1, got RC=$RC"; fi
 
-  # 6b. A report path that would wrap the worker's marker line is refused.
+  # 6b. A report path over the coarse length bound is refused before Herdr.
   RUN_SEQ=$((RUN_SEQ+1))
   OUT="$(env HERDR_ENV=1 HERDR_BIN="$FAKE" STANDUP_REPORT_PATH_MAX_COLS=100 bash "$SCRIPT" worker "/very/long/reports/directory/that/keeps/going/and/going/round-3/reports/standup-answer-from-worker.md" 2>"$TMP/e6b")"; RC=$?
   if [[ $RC -eq 1 && -z "$OUT" ]] && grep -q "limit" "$TMP/e6b"; then
@@ -159,6 +173,39 @@ main() {
   run FAKE_STATUS=idle FAKE_PROMPT_ERR=1
   if [[ $RC -eq 2 && -z "$OUT" ]] && printf '%s' "$ERRTEXT" | grep -q "agent_blocked"; then
     pass; else fail "prompt refused: expected exit 2, got RC=$RC OUT=$OUT ERR=$ERRTEXT"; fi
+
+  # 10. A pane too narrow for the marker is refused before anything is sent.
+  run FAKE_STATUS=idle FAKE_WIDTH=40
+  if [[ $RC -eq 4 ]] && printf '%s' "$OUT" | jq -e '.sent == false and .pane_width == 40 and .needed > 40' >/dev/null 2>&1 \
+     && ! printf '%s' "$ARGVTEXT" | grep -q "agent prompt" \
+     && printf '%s' "$ERRTEXT" | grep -q "40 columns"; then
+    pass; else fail "narrow pane: expected exit 4 with nothing sent, got RC=$RC OUT=$OUT ARGV=$ARGVTEXT ERR=$ERRTEXT"; fi
+
+  # 11. The need the refusal reported is enough: a pane that wide is asked.
+  local needed
+  needed="$(printf '%s' "$OUT" | jq -r '.needed')" || die "could not read the needed columns from: $OUT"
+  run FAKE_STATUS=idle FAKE_WIDTH="$needed"
+  if [[ $RC -eq 0 ]] && printf '%s' "$OUT" | jq -e '.sent == true' >/dev/null 2>&1 \
+     && printf '%s' "$ARGVTEXT" | grep -q "agent prompt worker"; then
+    pass; else fail "exact fit: expected a ${needed}-column pane to be asked, got RC=$RC OUT=$OUT ERR=$ERRTEXT"; fi
+  run FAKE_STATUS=idle FAKE_WIDTH="$((needed - 1))"
+  if [[ $RC -eq 4 ]] && ! printf '%s' "$ARGVTEXT" | grep -q "agent prompt"; then
+    pass; else fail "one short: expected a $((needed - 1))-column pane to be refused, got RC=$RC OUT=$OUT"; fi
+
+  # 12. A measurement that fails is a tool failure, never a send.
+  run FAKE_STATUS=idle FAKE_LAYOUT_ERR=1
+  if [[ $RC -eq 2 && -z "$OUT" ]] && printf '%s' "$ERRTEXT" | grep -q "marker-fit" \
+     && ! printf '%s' "$ARGVTEXT" | grep -q "agent prompt"; then
+    pass; else fail "measure failure: expected exit 2 with nothing sent, got RC=$RC OUT=$OUT ERR=$ERRTEXT"; fi
+
+  # 13. Installed without its herdr-foreman sibling, nothing is asked.
+  mkdir -p "$TMP/lonely/herdr-standup" || die "could not create the lonely skill dir"
+  cp "$SCRIPT" "$TMP/lonely/herdr-standup/standup-ask.sh" || die "could not copy standup-ask.sh"
+  RUN_SCRIPT="$TMP/lonely/herdr-standup/standup-ask.sh"
+  run FAKE_STATUS=idle
+  RUN_SCRIPT=""
+  if [[ $RC -eq 1 && -z "$OUT" && -z "$ARGVTEXT" ]] && printf '%s' "$ERRTEXT" | grep -q "foreman.sh not found"; then
+    pass; else fail "missing foreman.sh: expected exit 1 before herdr, got RC=$RC ARGV=$ARGVTEXT ERR=$ERRTEXT"; fi
 
   echo "─────────────────────────────────────────────" >&2
   if [[ $FAIL -gt 0 ]]; then echo "FAILED: ${FAIL} failed, ${PASS} passed" >&2; exit 1; fi

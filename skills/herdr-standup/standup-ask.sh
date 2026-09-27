@@ -14,17 +14,24 @@
 # Contract:
 #   argv  : <agent-name> <report-path>
 #           report-path must be absolute; the worker writes its four lines there.
-#   stdout: one JSON object —
+#   stdout: one JSON object on exits 0, 3 and 4 —
 #           {"agent":"<n>","report_path":"<p>","state":"<s>","sent":true}
+#           exit 4 adds "pane_width" and "needed" (columns) with sent false.
 #   stderr: diagnostics only.
 #   exit  : 0 the prompt was accepted by a worker that was idle or done,
 #           1 precondition unmet (usage, relative or over-long path, not inside Herdr,
-#             `herdr` or `jq` absent),
-#           2 a herdr failure, or an unreadable `agent get` payload,
+#             `herdr`, `jq` or the sibling foreman.sh absent),
+#           2 a herdr failure, an unreadable `agent get` payload, or a failed
+#             or unreadable `foreman marker-fit` measurement,
 #           3 the worker is not idle or done — nothing was sent. A standup
 #             never interrupts a turn (`rules/agent-team-operation.md`
-#             Dispatch Safety).
+#             Dispatch Safety),
+#           4 the worker's live pane is too narrow for its `REPORT: <path>`
+#             line — nothing was sent. A wrapped marker is one the wait can
+#             never confirm.
 #   env   : HERDR_BIN overrides the herdr binary; the tests point it at a fake.
+#           It reaches `foreman marker-fit` as --herdr-bin, and PY_BIN and
+#           the XDG homes pass through to the foreman launcher.
 #           STANDUP_REPORT_PATH_MAX_COLS overrides the report path length
 #           limit; a non-integer or zero value is a precondition failure.
 set -euo pipefail
@@ -33,10 +40,15 @@ HERDR_BIN="${HERDR_BIN:-herdr}"
 
 # States that may receive a message. Anything else is left alone.
 READY_STATES="idle done"
-# Longest report path the prompt may name; the same limit compose-briefs.sh
-# applies to a brief's REPORT, for the same reason: the worker's final
-# `REPORT: <path>` line must fit one pane row for the wait to confirm it.
+# Longest report path the prompt may name; the same coarse bound
+# compose-briefs.sh applies to a brief's REPORT. It rejects hopeless paths
+# before Herdr is touched and never proves fit: the worker's live pane width
+# decides that, measured by `foreman marker-fit` against the fit rule in
+# skills/herdr-foreman/foreman/report_delivery.py (`marker_columns`).
 STANDUP_REPORT_PATH_MAX_COLS="${STANDUP_REPORT_PATH_MAX_COLS:-100}"
+
+SKILL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+FOREMAN="${SKILL_DIR}/../herdr-foreman/foreman.sh"
 
 ERRFILE=""
 AGENT=""
@@ -93,7 +105,7 @@ main() {
   # Normalize to decimal once, so a validated `08` is not reparsed as octal.
   STANDUP_REPORT_PATH_MAX_COLS=$(( 10#$STANDUP_REPORT_PATH_MAX_COLS ))
   if (( ${#REPORT_PATH} > STANDUP_REPORT_PATH_MAX_COLS )); then
-    warn "report path is ${#REPORT_PATH} characters; the limit is ${STANDUP_REPORT_PATH_MAX_COLS} so the worker's \`REPORT: <path>\` line fits one pane row — use a shorter reports directory (e.g. one under \$HOME/.local/state)"
+    warn "report path is ${#REPORT_PATH} characters; the limit is ${STANDUP_REPORT_PATH_MAX_COLS}, a coarse bound on the worker's \`REPORT: <path>\` line (the live pane width is checked before sending) — use a shorter reports directory (e.g. one under \$HOME/.local/state)"
     return 1
   fi
   if [[ "${HERDR_ENV:-}" != "1" ]]; then
@@ -107,6 +119,10 @@ main() {
       return 1
     fi
   done
+  if [[ ! -f "$FOREMAN" || ! -r "$FOREMAN" ]]; then
+    warn "foreman.sh not found at ${FOREMAN} — herdr-standup runs beside the herdr-foreman skill; install both with \`tessl install jbaruch/coding-policy\`"
+    return 1
+  fi
 
   ERRFILE="$(mktemp)"
   trap cleanup EXIT
@@ -136,6 +152,35 @@ main() {
     jq -n --arg a "$AGENT" --arg p "$REPORT_PATH" --arg s "$state" \
       '{agent: $a, report_path: $p, state: $s, sent: false}'
     return 3
+  fi
+
+  # The live pane decides whether the worker's marker stays on one row; the
+  # fit rule lives in the foreman package, never restated here.
+  local fit verdict width needed fits
+  rc=0
+  fit="$(bash "$FOREMAN" marker-fit --herdr-bin "$HERDR_BIN" --agent "$AGENT" --report "$REPORT_PATH" 2>"$ERRFILE")" || rc=$?
+  if (( rc != 0 )); then
+    warn "\`foreman marker-fit\` for ${AGENT} failed (exit ${rc}): $(tr '\n' ' ' < "$ERRFILE") — nothing was sent"
+    return 2
+  fi
+  rc=0
+  verdict="$(printf '%s' "$fit" | jq -r '
+    if (.fits | type) != "boolean" or (.pane_width | type) != "number" or (.needed | type) != "number" then
+      error("marker-fit payload lacks fits, pane_width or needed")
+    else
+      "\(.fits) \(.pane_width) \(.needed)"
+    end' 2>"$ERRFILE")" || rc=$?
+  if (( rc != 0 )); then
+    warn "could not read the \`foreman marker-fit\` verdict (jq exit ${rc}): $(tr '\n' ' ' < "$ERRFILE") — nothing was sent"
+    return 2
+  fi
+  read -r fits width needed <<<"$verdict"
+  if [[ "$fits" != "true" ]]; then
+    warn "${AGENT}'s pane is ${width} columns; its \`REPORT: <path>\` line needs ${needed}, so it would wrap and the wait could never confirm it. Nothing was sent — widen the pane or use a shorter reports directory, then ask again."
+    jq -n --arg a "$AGENT" --arg p "$REPORT_PATH" --arg s "$state" \
+      --argjson w "$width" --argjson n "$needed" \
+      '{agent: $a, report_path: $p, state: $s, sent: false, pane_width: $w, needed: $n}'
+    return 4
   fi
 
   rc=0

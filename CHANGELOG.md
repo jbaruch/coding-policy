@@ -1,5 +1,27 @@
 # Changelog
 
+### Fixed
+
+- **`standup-ask.sh` measures the worker's live pane before asking (#515).**
+  The script capped the report path at 100 characters and claimed the
+  worker's `REPORT: <path>` line then fit one pane row; #513 showed a
+  106-column Grok pane wraps any marker path over ~93 characters, and a
+  wrapped marker is one the wait can never confirm. `teamlead apply` (now
+  `foreman apply`) already measured the target pane, but the standup sends
+  through `herdr agent prompt` and never reached that gate. A new read-only
+  `foreman marker-fit --agent --report` subcommand reads the worker's pane and
+  TUI kind from `herdr agent get`, its width from `herdr pane layout`, and
+  applies the same `marker_columns` rule in
+  `skills/herdr-foreman/foreman/report_delivery.py`, so the fit rule is never
+  restated in bash. `standup-ask.sh` calls it after the readiness check and
+  refuses with the new exit 4 — nothing sent, the JSON naming `pane_width`
+  and `needed` — when the marker would wrap; a failed measurement is exit 2.
+  The 100-character cap stays as a coarse bound. Folded in from the issue
+  thread: the over-cap warning in `skills/herdr-foreman/compose-briefs.sh` no
+  longer promises that staying under the cap makes the marker fit one pane
+  row; it names the live pane-width check in `foreman apply` instead (raised
+  by Copilot on #516).
+
 ## 0.3.286 — 2026-09-27
 
 ### Fixed

@@ -379,6 +379,9 @@ def build_parser():
     report_parser.add_argument("--pane", required=True)
     report_parser.add_argument("--report", required=True)
     report_parser.add_argument("--lines", type=int, required=True)
+    fit_parser = sub.add_parser("marker-fit", parents=[common], help="Measure a worker's live pane against its `REPORT: <path>` row, for a sender outside apply.")
+    fit_parser.add_argument("--agent", required=True)
+    fit_parser.add_argument("--report", required=True)
 
     for command in ("task", "checkpoint", "authorize-corrections", "authorize-approach", "recover-context", "recover-role-clear", "record-report", "record-refusal", "authorize-refused-dispatch", "diagnose", "reconcile", "record-release-clear", "import-correction", "record-historical-review", "recover-report", "assess-specialist", "close-task"):
         record_parser = sub.add_parser(command, parents=[common], help="Record owner-managed {} evidence.".format(command))
@@ -2087,6 +2090,15 @@ def cmd_probe_report(args, client=None, warn=None, trace=None):
     return report_delivery.probe(client, args.agent, args.pane, args.report, sys.stdin.read().rstrip("\n"), args.lines), None
 
 
+def cmd_marker_fit(args, client=None, warn=None, trace=None):
+    """Read-only width verdict; a marker that would wrap is `fits: false`, never an error."""
+    if not Path(args.report).is_absolute() or any(ord(char) < 32 for char in args.report):
+        raise UsageError("marker-fit needs an absolute one-row --report path; pass the exact path the worker "
+                         "will print after `REPORT: `.", {"report": args.report})
+    client = client if client is not None else _client(args, trace=trace)
+    return report_delivery.marker_fit(client, args.agent, args.report), None
+
+
 def cmd_memory(args, client=None, warn=None, trace=None):
     return memory.run_command(args, _state_path(args), args.now or now_iso()), None
 
@@ -2138,6 +2150,7 @@ COMMANDS = {
     "verify-oracle": cmd_verify_oracle,
     "start-judge": cmd_start_judge,
     "probe-report": cmd_probe_report,
+    "marker-fit": cmd_marker_fit,
     **{command: cmd_retrospective for command in ("retro-check", "retro-record", "retro-list", "retro-show")},
     **{command: cmd_capability for command in ("capability-check", "capability-record", "capability-show")},
     "supervision-gate": cmd_supervision_gate,
@@ -2185,7 +2198,7 @@ def main(argv=None, stdout=None, stderr=None, client=None):
             home.require_current(defaults)
             # Commands that may migrate or write state share its canonical lock.
             # Dry runs, probes, and retrospective reads remain read-only.
-            readonly = args.command in {"probe-report", "detect-triggers", "validate-partition", "verify-oracle", "retro-check", "retro-list", "retro-show", "capability-check", "capability-show", "supervision-gate", "load-set", "foreman-queue", "check-member"} or getattr(args, "dry_run", False)
+            readonly = args.command in {"probe-report", "marker-fit", "detect-triggers", "validate-partition", "verify-oracle", "retro-check", "retro-list", "retro-show", "capability-check", "capability-show", "supervision-gate", "load-set", "foreman-queue", "check-member"} or getattr(args, "dry_run", False)
             # The deliverer starts while `foreman-reset` still holds the state lock;
             # it serializes on the reset record's own lock instead. close-member
             # writes only through the supervision owner's own lock.
