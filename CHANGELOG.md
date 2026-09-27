@@ -39,6 +39,10 @@
   from PR #528's review. `herdr-foreman` Step 11's `check-member` follow-up
   paragraph, which merged several directives, is now one bullet per directive.
 
+## 0.3.299 — 2026-09-27
+
+### Fixed
+
 - **A judge dispatch carries its mode from reservation, and a pending send's
   mode is checked (#495).** `assign.apply` refused a mode-less judge dispatch
   and `_dispatch_version` refused a malformed mode, but `recovery.reserve`
