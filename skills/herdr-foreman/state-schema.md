@@ -131,7 +131,7 @@ dispatch for the task by event time (applied, to the plan's assigned agent,
 under the plan's `task_context`, from an intact frozen brief and common brief)
 against its seat digest, under the state lock, the repo, the task's recorded base,
 the tip against `head`, and that the slices cover exactly
-`git diff base...head` (#460). A plan without the proof is refused there.
+`git diff base..head` (#460, #534). A plan without the proof is refused there.
 From schema 11, `slice_digest` and every `seat_digests` entry also cover
 `partition_proof`, so a seat brief composed for one proven head fails the
 gate for a plan proven at another, even over the same paths. `plan` takes the

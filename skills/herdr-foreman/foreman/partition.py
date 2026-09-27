@@ -405,7 +405,10 @@ def run_command(args, runner=None):
     # Resolved first, so an unknown revision is named rather than failing the diff.
     base_sha = _revision(run, args.base)
     head_sha = _revision(run, head) if head else None
-    span = [base_sha + "..." + head_sha] if head_sha else [base_sha]
+    # Two-dot: the diff between the recorded base and the head themselves,
+    # never from their merge base, so a base that is not an ancestor of the
+    # head still counts every path that differs (#534).
+    span = [base_sha + ".." + head_sha] if head_sha else [base_sha]
     changes = parse_name_status(run(["diff", "--no-renames", *span, "--name-status", "-z"]))
     result = validate(set(changes), partition)
     result["schema_version"] = RESULT_SCHEMA_VERSION
@@ -472,7 +475,7 @@ def verify(plan, repo, head, task_base, runner=None):
         raise UsageError("The partition was proven at {}, but the tip under review is {}. A new push can change the diff "
                          "the slices cover: re-run validate-partition at the tip, replan, and review the slices again."
                          .format(proof["head"], tip), {"proven": proof["head"], "tip": tip})
-    changed = set(parse_name_status(run(["diff", "--no-renames", proof["base"] + "..." + tip, "--name-status", "-z"])))
+    changed = set(parse_name_status(run(["diff", "--no-renames", proof["base"] + ".." + tip, "--name-status", "-z"])))
     owners_of = {}
     for seat, paths in slice_paths.items():
         for path in paths:
@@ -481,7 +484,7 @@ def verify(plan, repo, head, task_base, runner=None):
     stale = sorted(set(owners_of) - changed)
     shared = sorted(path for path, seats in owners_of.items() if len(seats) > 1)
     if unowned or stale or shared:
-        raise UsageError("The plan's slices do not cover exactly the diff {}...{}: {} unowned, {} no longer changed, {} "
+        raise UsageError("The plan's slices do not cover exactly the diff {}..{}: {} unowned, {} no longer changed, {} "
                          "owned twice. Re-run validate-partition at the tip and replan.".format(
                              proof["base"][:12], tip[:12], len(unowned), len(stale), len(shared)),
                          {"unowned": unowned, "stale": stale, "shared": shared})
