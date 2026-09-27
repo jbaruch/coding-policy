@@ -38,6 +38,8 @@
   CLI end to end; the unfixed deliverer typed `/clear` and the resume prompt
   into the replacement session.
 
+## 0.3.293 — 2026-09-27
+
 ### Changed
 
 - **Spent worktrees and branches are removed automatically; work that exists
