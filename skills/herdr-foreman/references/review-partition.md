@@ -39,7 +39,7 @@ role; a single-seat round needs none.
 ## Validate before planning
 
 ```bash
-foreman.sh validate-partition --repo <repo> --base <base> [--head <head>] \
+foreman validate-partition --repo <repo> --base <base> [--head <head>] \
   --partition <partition.json>
 ```
 
