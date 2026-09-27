@@ -130,7 +130,8 @@ class CloseMemberTest(MembersCase):
                  ({"_heading": "renamed-section"}, sha, None, "carries id 'event-1', not its section heading"),
                  ({}, "abc1234", None, "base_revision 'abc1234'"),
                  ({}, sha, "relative/state.json", "dispatch_state 'relative/state.json' is not an absolute"),
-                 ({}, sha, "~/state.json", "dispatch_state '~/state.json' is not an absolute"))
+                 ({}, sha, "~/state.json", "dispatch_state '~/state.json' is not an absolute"),
+                 ({}, sha, "/nul\0state.json", "dispatch_state '/nul\\x00state.json' is not an absolute"))
         for fields, base, state, why in cases:
             with self.subTest(why=why):
                 self.write_ledger("accepted", fields=fields, base=base, state=state)

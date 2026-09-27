@@ -75,8 +75,8 @@ def ledger_events(path):
             header["schema_version"], LEDGER_SCHEMA_VERSION))
     if SHA_RE.fullmatch(header["base_revision"]) is None:
         raise _unusable(path, "its base_revision {!r} is not a full lowercase commit SHA".format(header["base_revision"]))
-    if not os.path.isabs(header["dispatch_state"]):
-        raise _unusable(path, "its dispatch_state {!r} is not an absolute path".format(header["dispatch_state"]))
+    if not os.path.isabs(header["dispatch_state"]) or "\0" in header["dispatch_state"]:
+        raise _unusable(path, "its dispatch_state {!r} is not an absolute path free of NUL bytes".format(header["dispatch_state"]))
     events, current = [], None
     for line in text[front.end():].splitlines():
         if line.startswith("## "):
@@ -93,10 +93,11 @@ def ledger_events(path):
         if event["schema_version"] != LEDGER_SCHEMA_VERSION:
             raise _unusable(path, "event {} is schema {}".format(event["_section"], event["schema_version"]))
         _check_formats(path, event)
-    ids = [event["id"] for event in events]
-    repeated = sorted({value for value in ids if ids.count(value) > 1})
+    seen, repeated = set(), set()
+    for event in events:
+        (repeated if event["id"] in seen else seen).add(event["id"])
     if repeated:
-        raise _unusable(path, "event id {} names more than one event".format(", ".join(repeated)))
+        raise _unusable(path, "event id {} names more than one event".format(", ".join(sorted(repeated))))
     return header, events
 
 
