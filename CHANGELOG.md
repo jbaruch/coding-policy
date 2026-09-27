@@ -1,5 +1,15 @@
 # Changelog
 
+### Changed
+
+- **Renovate stays within the ACR acceptance lane's compatible versions.** The
+  lane runs the upstream FFA gate, which targets Python 3.12, and pins a Noble
+  (24.04) build of bubblewrap, so Renovate's jumps to Python 3.14 (#545) and
+  an Ubuntu 26.04 runner (#546) were incompatible and were closed.
+  `.github/renovate.json` now limits `acr-codex-accept.yml`'s Python to
+  `<3.13` (3.12.x bumps still arrive, matching the step's renewal note) and
+  its runner to `<25`; lifting either needs the matching re-pin.
+
 ## 0.3.280 — 2026-09-27
 
 ### Changed
