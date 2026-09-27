@@ -17,8 +17,9 @@
 #     for it and its protection are read again, and any change keeps it
 #     (changed). The deletion is `git push origin --delete` with
 #     `--force-with-lease=<branch>:<tip>`, so a push that landed since wins;
-#   * QUESTIONABLE, reported for the operator's decision, when unmerged and its
-#     tip commit is at least REMOTE_IDLE_HOURS old: commits ahead of the
+#   * QUESTIONABLE, reported for the operator's decision, when unmerged, its
+#     tip commit is at least REMOTE_IDLE_HOURS old, and the same final
+#     re-read of origin finds nothing changed: commits ahead of the
 #     default branch, age, last author, and the commands to open a pull
 #     request or delete it, the delete leased to the tip judged here;
 #   * KEPT silently when unmerged and younger than that (not-idle).
@@ -41,7 +42,7 @@
 #            "failed":[{"target","error"}]}
 #           kept reasons: changed (its tip, the default branch or its tip,
 #           its protection, or its open pull requests changed since it was
-#           judged), not-idle.
+#           judged, for a deletion or a listing alike), not-idle.
 #   stderr: diagnostics only.
 #   exit  : 0 every decision applied (or previewed),
 #           1 precondition unmet (usage, git or python3 absent, not a repo,
@@ -54,18 +55,16 @@ set -euo pipefail
 #: An unmerged branch is reported only once its tip commit is this old.
 REMOTE_IDLE_HOURS="${PRUNE_REMOTE_IDLE_HOURS:-24}"
 
+WORKDIR=""
 ERRFILE=""
 ROWS=""
 
 warn() { printf 'prune-remote-branches: %s\n' "$1" >&2; }
 
 cleanup() {
-  local f
-  for f in "$ERRFILE" "$ROWS"; do
-    if [[ -n "$f" ]] && ! rm -f "$f"; then
-      warn "could not remove temp file ${f} — remove it by hand"
-    fi
-  done
+  if [[ -n "$WORKDIR" ]] && ! rm -rf "$WORKDIR"; then
+    warn "could not remove the temporary directory ${WORKDIR} — remove it by hand"
+  fi
   return 0
 }
 
@@ -135,8 +134,14 @@ main() {
   for tool in git python3; do
     if ! command -v "$tool" >/dev/null; then warn "${tool} not found on PATH — install it"; return 1; fi
   done
-  ERRFILE="$(mktemp)"; ROWS="$(mktemp)"
+  if ! WORKDIR="$(mktemp -d "${TMPDIR:-/tmp}/prune-remote-branches.XXXXXX")"; then
+    WORKDIR=""
+    warn "cannot create a temporary directory under ${TMPDIR:-/tmp} — make it writable, then re-run"
+    return 1
+  fi
   trap cleanup EXIT
+  ERRFILE="${WORKDIR}/err"; ROWS="${WORKDIR}/rows"
+  : > "$ERRFILE"; : > "$ROWS"
   if [[ ! -d "$shared" ]] || ! git -C "$shared" rev-parse --is-inside-work-tree >/dev/null 2>"$ERRFILE"; then
     warn "'${shared}' is not a git work tree ($(tr '\n' ' ' < "$ERRFILE")) — pass the shared checkout's path"; return 1
   fi
@@ -216,28 +221,41 @@ PY
   return "$rc"
 }
 
+# The final gate, before a deletion (or its preview) and before a listing:
+# origin as it is now. 0 when the branch's tip, the default branch's name,
+# its open pull requests and its protection are as judged, and the default's
+# tip still settles the verdict (a merged tip still contained; an unmerged
+# one against an unmoved default). 1 when anything changed, 2 when a read
+# failed (ERRFILE says why).
+origin_gate() { # <shared> <default> <default-tip> <branch> <tip> <merged|unmerged>
+  local shared="$1" db="$2" default_tip="$3" branch="$4" tip="$5" verdict="$6"
+  local now_tip now_default now_prs now_protected now_db mrc=0
+  if ! now_tip="$(remote_tip "$shared" "$branch")" || ! now_default="$(remote_tip "$shared" "$db")" \
+    || ! now_prs="$(open_pr_heads "$shared" "$branch")" || ! now_protected="$(branch_protected "$shared" "$branch")" \
+    || ! now_db="$(remote_default "$shared")"; then
+    return 2
+  fi
+  if [[ "$now_tip" != "$tip" || -n "$now_prs" || "$now_protected" != false || "$now_db" != "$db" ]]; then
+    return 1
+  fi
+  [[ "$now_default" == "$default_tip" ]] && return 0
+  [[ "$verdict" == merged ]] || return 1
+  git -C "$shared" merge-base --is-ancestor "$tip" "$now_default" 2>"$ERRFILE" || mrc=$?
+  (( mrc == 0 ))
+}
+
 # Decide one branch on origin; delete it (unless dry-run) or record why not.
 decide_remote() { # <shared> <default> <default-tip> <branch> <tip> <dry 0|1>
   local shared="$1" db="$2" default_tip="$3" branch="$4" tip="$5" dry="$6" rc=0
   git -C "$shared" merge-base --is-ancestor "$tip" "$default_tip" 2>"$ERRFILE" || rc=$?
   case "$rc" in
     0)
-      # Origin as it is now, for the preview as for the deletion: the
-      # branch's tip, the default's tip, its open pull requests, its
-      # protection, and which branch is the default.
-      local now_tip now_default now_prs now_protected now_db mrc=0
-      if ! now_tip="$(remote_tip "$shared" "$branch")" || ! now_default="$(remote_tip "$shared" "$db")" \
-        || ! now_prs="$(open_pr_heads "$shared" "$branch")" || ! now_protected="$(branch_protected "$shared" "$branch")" \
-        || ! now_db="$(remote_default "$shared")"; then
-        row failed "$branch" "cannot re-read origin before deleting it, so it was kept: $(cat "$ERRFILE")"; return 0
-      fi
-      if [[ "$now_tip" != "$tip" || -n "$now_prs" || "$now_protected" != false || "$now_db" != "$db" ]]; then
-        row kept "$branch" changed; return 0
-      fi
-      if [[ "$now_default" != "$default_tip" ]]; then
-        git -C "$shared" merge-base --is-ancestor "$tip" "$now_default" 2>"$ERRFILE" || mrc=$?
-        if (( mrc != 0 )); then row kept "$branch" changed; return 0; fi
-      fi
+      rc=0; origin_gate "$shared" "$db" "$default_tip" "$branch" "$tip" merged || rc=$?
+      case "$rc" in
+        0) ;;
+        1) row kept "$branch" changed; return 0 ;;
+        *) row failed "$branch" "cannot re-read origin before deleting it, so it was kept: $(cat "$ERRFILE")"; return 0 ;;
+      esac
       if (( dry )); then row deleted "$branch"; return 0; fi
       rc=0
       git -C "$shared" push --quiet "--force-with-lease=refs/heads/${branch}:${tip}" origin --delete "refs/heads/${branch}" 2>"$ERRFILE" || rc=$?
@@ -261,7 +279,12 @@ decide_remote() { # <shared> <default> <default-tip> <branch> <tip> <dry 0|1>
       fi
       age="$(python3 -c 'import sys, time; now = float(sys.argv[1]) if sys.argv[1] else time.time(); print(int(max(0.0, now - int(sys.argv[2])) // 3600))' "${PRUNE_NOW:-}" "$committed")"
       if (( age < REMOTE_IDLE_HOURS )); then row kept "$branch" not-idle; return 0; fi
-      row questionable "$branch" "$ahead" "$age" "$author" "$tip" ;;
+      rc=0; origin_gate "$shared" "$db" "$default_tip" "$branch" "$tip" unmerged || rc=$?
+      case "$rc" in
+        0) row questionable "$branch" "$ahead" "$age" "$author" "$tip" ;;
+        1) row kept "$branch" changed ;;
+        *) row failed "$branch" "cannot re-read origin before listing it, so it was kept: $(cat "$ERRFILE")" ;;
+      esac ;;
     *) row failed "$branch" "git merge-base failed: $(tr '\n' ' ' < "$ERRFILE")" ;;
   esac
 }

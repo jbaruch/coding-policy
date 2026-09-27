@@ -121,6 +121,7 @@
 #           constants, PRUNE_NOW (epoch seconds) the clock, PRUNE_LSOF the probe.
 set -euo pipefail
 
+WORKDIR=""
 ERRFILE=""
 ROWS=""
 
@@ -139,7 +140,10 @@ network_failure() { # <exit> <shared> <git args...>
 
 cleanup() {
   local f
-  for f in "$ERRFILE" "$ROWS" "$CWD_FILE" "$ORIGIN_TIPS"; do
+  if [[ -n "$WORKDIR" ]] && ! rm -rf "$WORKDIR"; then
+    warn "could not remove the temporary directory ${WORKDIR} — remove it by hand"
+  fi
+  for f in "$CWD_FILE" "$ORIGIN_TIPS"; do
     if [[ -n "$f" ]] && ! rm -f "$f"; then
       warn "could not remove temp file ${f} — remove it by hand"
     fi
@@ -995,9 +999,14 @@ main() {
       return 1
     fi
   done
-  ERRFILE="$(mktemp)"
-  ROWS="$(mktemp)"
+  if ! WORKDIR="$(mktemp -d "${TMPDIR:-/tmp}/prune-worktrees.XXXXXX")"; then
+    WORKDIR=""
+    warn "cannot create a temporary directory under ${TMPDIR:-/tmp} — make it writable, then re-run"
+    return 1
+  fi
   trap cleanup EXIT
+  ERRFILE="${WORKDIR}/err"; ROWS="${WORKDIR}/rows"
+  : > "$ERRFILE"; : > "$ROWS"
   if [[ ! -d "$shared" ]] || ! git -C "$shared" rev-parse --is-inside-work-tree >/dev/null 2>"$ERRFILE"; then
     warn "'${shared}' is not a git work tree ($(tr '\n' ' ' < "$ERRFILE")) — pass the shared checkout's path"
     return 1
@@ -1053,7 +1062,7 @@ main() {
   # to prune" with exit 0 (rules/file-hygiene.md I/O Conventions). Nothing has
   # been decided yet, so an unreadable inventory is a precondition failure.
   local inventory branches
-  inventory="$(mktemp)"; branches="$(mktemp)"
+  inventory="${WORKDIR}/inventory"; branches="${WORKDIR}/branches"
   # `-z` (git >= 2.36) terminates each attribute with NUL, so a path holding a
   # newline stays one field. Without it there is no unambiguous read and no
   # cross-check that settles one: a scan refusing unrecognized lines still

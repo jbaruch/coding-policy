@@ -17,7 +17,9 @@
 # Contract:
 #   argv  : <seconds> <command> [args...] — seconds is a positive integer.
 #   stdin : passed to the command.
-#   stdout: the command's own stdout, unchanged.
+#   stdout: the command's own stdout, unchanged; the runner adds nothing
+#           (rules/script-delegation.md, the bounded-run.sh carve-out). On
+#           exit 124 or 125 a caller discards whatever the command printed.
 #   stderr: the command's own stderr, plus one diagnostic line when the budget
 #           ran out or the command could not be started.
 #   exit  : the command's own exit code; 124 when the budget ran out (the

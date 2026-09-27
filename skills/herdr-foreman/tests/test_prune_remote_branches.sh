@@ -25,6 +25,8 @@
 #  12. Protected since listed   -> the final gate keeps it (changed).
 #  13. Default changed          -> the final gate keeps it (changed).
 #  14. Dry run, late PR         -> the preview re-reads origin and keeps it.
+#  15. Stale, changed           -> a pull request or protection arriving before
+#                                  the listing keeps it (changed), unlisted.
 #   3 also checks the reported delete command is leased to the judged tip.
 #
 # Run: bash skills/herdr-foreman/tests/test_prune_remote_branches.sh
@@ -277,6 +279,18 @@ SH
   if [[ $RC -eq 0 ]] && on_origin feat/late-pr && [[ "$(jq_py 'doc["deleted"]')" == "[]" ]] \
      && [[ "$(jq_py 'doc["kept"]')" == "[{'branch': 'feat/late-pr', 'reason': 'changed'}]" ]]; then pass
   else fail "c14: RC=$RC OUT=$OUT ERR=$ERR"; fi
+
+  echo "15. a stale branch whose pull request opens, or protection lands, before the listing is not listed"
+  mk_case c15
+  push_branch feat/stale-pr "$STALE_DATE" 0
+  push_branch feat/stale-guard "$STALE_DATE" 0
+  # shellcheck disable=SC2016  # The $1 belongs to the injector: the branch the fake gh was asked about.
+  printf 'case "$1" in\n  feat/stale-pr) printf "%%s\\n" "$1" >> "%s" ;;\n  feat/stale-guard) printf "%%s\\n" "$1" >> "%s" ;;\nesac\n' \
+    "$CASE/prs" "$CASE/protected" > "$CASE/on-head" || die "write on-head failed"
+  run
+  if [[ $RC -eq 0 ]] && on_origin feat/stale-pr && on_origin feat/stale-guard && [[ "$(jq_py 'doc["questionable"]')" == "[]" ]] \
+     && [[ "$(jq_py 'sorted(k["branch"] for k in doc["kept"] if k["reason"] == "changed")')" == "['feat/stale-guard', 'feat/stale-pr']" ]]; then pass
+  else fail "c15: RC=$RC OUT=$OUT ERR=$ERR"; fi
 
   echo "11. usage is exit 1 with no JSON"
   RC=0

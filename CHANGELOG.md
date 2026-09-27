@@ -27,7 +27,8 @@
     `--force-with-lease`). Every proof is re-read from origin with
     `git ls-remote` immediately before the deletion, in dry and live runs
     alike, which branch origin's HEAD names included; on origin the branch's
-    protection and open pull requests are re-read too. The remote pass is its own script: it needs the network and `gh`,
+    protection and open pull requests are re-read too, before a stale branch
+    is listed as well as before a deletion. The remote pass is its own script: it needs the network and `gh`,
     which the worktree pass does not (`rules/script-delegation.md`).
   - Reported, for the operator's decision: an idle dirty worktree (changed
     files, age, `git -C <path> status`), an idle worktree holding commits no
@@ -54,7 +55,11 @@
     share a 40-second budget through the new
     `skills/herdr-foreman/bounded-run.sh`; `timeout` is absent from a stock
     macOS. The round preflight runs the sweep under the same runner with a
-    600-second budget; a sweep past it blocks the round. It no longer reads
+    600-second budget; a sweep past it blocks the round. The runner's stdout
+    is the wrapped command's own, which `rules/script-delegation.md` Script
+    Requirements now allows through a narrow carve-out naming
+    `bounded-run.sh`. A missing git or python3 still reaches the session as
+    a fixed "could not check" status. It no longer reads
     `skills/release/check-leftovers.sh`, which still gates the release.
   - `hooks/stop-handoff-hygiene.sh` drops its own leftover-branch and
     orphaned-worktree predicate and reads `prune-worktrees.sh --dry-run`

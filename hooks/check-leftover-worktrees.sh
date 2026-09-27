@@ -28,9 +28,11 @@
 #           items awaiting the operator's decision, each with its command, and
 #           one "could not check" line naming every owner script that failed,
 #           ran out of time, reported an undecided item, or could not reach
-#           gh, with the command to rerun it. Silent when neither applies,
-#           outside a repository, in a repository without an origin remote,
-#           in a bare repository, and in a Herdr worker session.
+#           gh, with the command to rerun it. A missing git or python3 is
+#           that line too, a fixed JSON string printed without either tool.
+#           Silent when neither applies, outside a repository, in a
+#           repository without an origin remote, in a bare repository, and in
+#           a Herdr worker session.
 #   stderr: the owner scripts' diagnostics, relayed, plus this hook's warnings.
 #   exit  : always 0 (a failure is the "could not check" line, never silence
 #           and never a failed session start).
@@ -55,11 +57,21 @@ discard() {
   return 0
 }
 
+# Print a could-not-check status that needs no tool to encode. <why> is one
+# of this script's own fixed ASCII sentences, never input: no character in
+# it needs JSON escaping.
+static_cannot_check() { # <fixed-why>
+  printf '{"additionalContext": "Session-start status \\u2014 could not check this repository for leftover worktrees and branches: %s"}\n' "$1"
+}
+
 # Print the could-not-check status alone, for a failure before any result.
+# When python3 cannot encode <why>, the fixed status still reaches the session.
 cannot_check() { # <why>
-  python3 -c 'import json, sys; print(json.dumps({"additionalContext": sys.argv[1]}))' \
-    "Session-start status — could not check this repository for leftover worktrees and branches: $1" \
-    || warn "python3 could not encode the status — this session gets none"
+  if ! python3 -c 'import json, sys; print(json.dumps({"additionalContext": sys.argv[1]}))' \
+      "Session-start status — could not check this repository for leftover worktrees and branches: $1"; then
+    warn "python3 could not encode the status (${1}) — reporting the fixed status instead"
+    static_cannot_check "python3 failed; run this hook by hand to see why."
+  fi
 }
 
 # Relay one owner script's stderr, each line prefixed with this hook's name.
@@ -75,10 +87,12 @@ relay() { # <file>
 main() {
   if ! command -v git >/dev/null; then
     warn "git not found on PATH — install it so session start can clean this repository"
+    static_cannot_check "git is not on PATH; install it, then start a new session."
     return 0
   fi
   if ! command -v python3 >/dev/null; then
     warn "python3 not found on PATH — install it so session start can clean this repository"
+    static_cannot_check "python3 is not on PATH; install it, then start a new session."
     return 0
   fi
   # `rev-parse` exits 128 both outside a repository and for one it cannot
@@ -259,6 +273,7 @@ PY
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
   if ! main "$@"; then
     warn "internal error — no leftover report this session; run 'bash ${BASH_SOURCE[0]}' directly to see why"
+    static_cannot_check "the hook failed internally; run hooks/check-leftover-worktrees.sh by hand to see why."
   fi
   exit 0
 fi

@@ -34,6 +34,8 @@
 #   7. Portable mode        -> nothing deleted; the questionable list still
 #                              printed.
 #   8. No origin, no repo   -> silent.
+#  10. Missing tool         -> a missing git or python3 still prints the
+#                              could-not-check status, as fixed JSON.
 #   9. Out of time          -> a could-not-check line naming the budget (a
 #                              stand-in runner reports the timeout; no case
 #                              waits on a clock, and every other run gets an
@@ -370,6 +372,23 @@ main() {
   ctx="$(context)"
   if [[ $RC -eq 0 && -e "$ROOT/spent" ]] && [[ "$ctx" == "Session-start status — could not check"*"time budget"* ]]; then pass
   else fail "c9: RC=$RC OUT=$OUT ERR=$ERR"; fi
+
+  echo "10. a missing git or python3 is a could-not-check status, never stderr alone"
+  mk_case c10
+  local bare_path="$CASE/path-nogit" real_bash
+  real_bash="$(command -v bash)" || die "bash not found"
+  mkdir -p "$bare_path" "$CASE/path-nopy" || die "mkdir the PATH dirs failed"
+  ln -s "$(command -v git)" "$CASE/path-nopy/git" || die "link git failed"
+  local ctx_git ctx_py
+  RC=0; OUT="$(cd "$SHARED" && PATH="$bare_path" "$real_bash" "$HOOK" </dev/null 2>"$CASE/hook.err")" || RC=$?
+  ctx_git="$(context)"
+  local rc_git=$RC
+  RC=0; OUT="$(cd "$SHARED" && PATH="$CASE/path-nopy" "$real_bash" "$HOOK" </dev/null 2>"$CASE/hook.err")" || RC=$?
+  ctx_py="$(context)"
+  if [[ $rc_git -eq 0 && $RC -eq 0 ]] \
+     && [[ "$ctx_git" == "Session-start status — could not check this repository"*"git is not on PATH"* ]] \
+     && [[ "$ctx_py" == "Session-start status — could not check this repository"*"python3 is not on PATH"* ]]; then pass
+  else fail "c10: git=$ctx_git python3=$ctx_py"; fi
 
   echo
   echo "passed=${PASS} failed=${FAIL}"
