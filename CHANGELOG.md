@@ -59,7 +59,11 @@
     is the wrapped command's own, which `rules/script-delegation.md` Script
     Requirements now allows through a narrow carve-out naming
     `bounded-run.sh`. A missing git or python3 still reaches the session as
-    a fixed "could not check" status. It no longer reads
+    a fixed "could not check" status. The runner keeps SIGALRM blocked
+    until the command is launched and the alarm armed, so an expiry at any
+    point stops the process group and exits 124. Both hooks read the
+    worktree inventory NUL-framed, so a shared checkout whose path ends in
+    a newline reaches the owner scripts whole. It no longer reads
     `skills/release/check-leftovers.sh`, which still gates the release.
   - `hooks/stop-handoff-hygiene.sh` drops its own leftover-branch and
     orphaned-worktree predicate and reads `prune-worktrees.sh --dry-run`
@@ -68,7 +72,9 @@
   - `skills/herdr-foreman/sweep-worktrees.sh` runs the worktree pass across
     every repository owning a worktree under the root, for the round
     preflight; its `report` names each kept dirty or unpushed item with its
-    age and command, and SKILL Step 2 relays it verbatim.
+    age and command, and SKILL Step 2 relays it verbatim. A `.git` file
+    counts only when its repository registers a worktree at that path; a
+    copied or stale one is an error and never runs a prune.
   - Rules: `rules/agent-worktree-isolation.md` Cleanup states the lifecycle
     and the session-start cleanup; `rules/agent-team-operation.md` Writers
     and Checkouts keeps the sweep and the Step 15 merged-task exception and

@@ -145,7 +145,10 @@ main() {
   if [[ ! -d "$shared" ]] || ! git -C "$shared" rev-parse --is-inside-work-tree >/dev/null 2>"$ERRFILE"; then
     warn "'${shared}' is not a git work tree ($(tr '\n' ' ' < "$ERRFILE")) — pass the shared checkout's path"; return 1
   fi
-  shared="$(git -C "$shared" rev-parse --show-toplevel)"
+  # A sentinel past git's own newline: command substitution strips both, and a
+  # path ending in a newline would lose its own.
+  shared="$(git -C "$shared" rev-parse --show-toplevel && printf x)"
+  shared="${shared%x}"; shared="${shared%$'\n'}"
   if ! git -C "$shared" remote get-url origin >/dev/null 2>"$ERRFILE"; then
     warn "${shared} has no origin remote ($(tr '\n' ' ' < "$ERRFILE")) — nothing to judge"; return 1
   fi

@@ -37,6 +37,8 @@
 #                           refuses such a name, as macOS APFS does).
 #  19. Symlinked .git    -> a directory whose .git is a symlink names no
 #                           repository; the walk reports it.
+#  21. Copied .git         -> a .git file whose repository does not register
+#                             the path is an errors entry; no prune runs.
 #  20. Unreadable path   -> a directory lstat cannot read, or a worktree whose
 #                           gitdir cannot be stat'ed, is an errors entry (exit
 #                           2), never a skip or a stale worktree.
@@ -364,6 +366,19 @@ main() {
       && [[ "$(q '[s["path"] for s in d["skipped"] if s["reason"] in ("broken-worktree","not-a-worktree")]')" == "[]" ]]; then
       pass; else fail "unreadable paths: rc=$RC out=$OUT err=$ERRTEXT"; fi
   fi
+
+  # --- 21. a copied .git file naming an unrelated repository runs no prune.
+  mk_repo gamma21; local gamma="$SHARED" root21="$TMP/worktrees21"
+  mkdir -p "$root21/copied" || die "mkdir root21 failed"
+  quiet "gamma worktree failed" "${G[@]}" -C "$gamma" worktree add -q -b review/gamma "$TMP/outside21/gamma-wt" origin/main
+  quiet "gamma branch failed" "${G[@]}" -C "$gamma" branch -q --no-track review/gamma-merged origin/main
+  cp "$TMP/outside21/gamma-wt/.git" "$root21/copied/.git" || die "copy the .git file failed"
+  run "$root21"
+  echo "21. a .git file its repository does not register is an errors entry, and that repository is never pruned"
+  if (( RC == 2 )) && [[ "$(q 'len(d["repos"])')" == 0 ]] \
+    && [[ "$(q '[(e["path"].rsplit("/",1)[1], e["repo"]) for e in d["errors"]]')" == "[('copied', None)]" ]] \
+    && git -C "$gamma" show-ref --verify --quiet refs/heads/review/gamma-merged; then
+    pass; else fail "copied .git: rc=$RC out=$OUT err=$ERRTEXT"; fi
 
   run
   echo "5a. no root is exit 1 with no JSON"

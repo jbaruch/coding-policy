@@ -9,6 +9,8 @@
 #   1. Pass-through   -> stdin, stdout and the exit code are the command's own.
 #   2. Budget spent   -> exit 124 with a diagnostic, and a grandchild the
 #                        command started is stopped with it.
+#  2b. Early expiry  -> an expiry before the launch is still exit 124, with no
+#                        traceback and nothing left running.
 #   3. Not startable  -> exit 125 with a diagnostic.
 #   4. Usage          -> a non-positive budget is exit 125.
 #
@@ -65,6 +67,17 @@ main() {
   wait "$reader" || die "the FIFO reader failed"
   if [[ $rc -eq 124 && -n "$grandchild" ]] && grep -q "budget" "$TMP/2.err"; then pass
   else fail "budget: rc=$rc grandchild=$grandchild err=$(cat "$TMP/2.err")"; fi
+
+  echo "2b. an expiry that lands before the command is launched is exit 124, no traceback, nothing left running"
+  rc=0
+  BOUNDED_RUN_TEST_EXPIRE_BEFORE_LAUNCH=1 bash "$RUNNER" "$HOUR" bash -c 'echo $$ > "$0"; exec sleep 3600' "$TMP/early.pid" \
+    2>"$TMP/2b.err" || rc=$?
+  # The runner waits for its direct child before exiting, so a pid it wrote
+  # names a process already reaped.
+  local early_alive=0
+  if [[ -s "$TMP/early.pid" ]] && kill -0 "$(cat "$TMP/early.pid")" 2>"$TMP/kill.err"; then early_alive=1; fi
+  if [[ $rc -eq 124 && $early_alive -eq 0 ]] && grep -q "budget" "$TMP/2b.err" && ! grep -q "Traceback" "$TMP/2b.err"; then pass
+  else fail "early expiry: rc=$rc alive=$early_alive err=$(cat "$TMP/2b.err")"; fi
 
   echo "3. a command that cannot start is exit 125 with a diagnostic"
   rc=0

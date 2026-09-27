@@ -1012,7 +1012,10 @@ main() {
     return 1
   fi
   local abs_shared
-  abs_shared="$(git -C "$shared" rev-parse --show-toplevel)"
+  # A sentinel past git's own newline: command substitution strips both, and a
+  # path ending in a newline would lose its own.
+  abs_shared="$(git -C "$shared" rev-parse --show-toplevel && printf x)"
+  abs_shared="${abs_shared%x}"; abs_shared="${abs_shared%$'\n'}"
   if ! git -C "$shared" remote get-url origin >/dev/null 2>"$ERRFILE"; then
     warn "${shared} has no origin remote — merged-ness is judged against origin's default branch"
     return 1

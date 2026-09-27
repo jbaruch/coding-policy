@@ -39,7 +39,9 @@
 #           no longer exists). An `errors` entry is a path or worktree that
 #           could not be read (listing, lstat, gitdir stat, rev-parse or
 #           worktree list failed), with its exit code and the repository
-#           owning it when its gitdir's files name one.
+#           owning it when its gitdir's files name one. A `.git` file whose
+#           repository registers no worktree at that path (copied or stale)
+#           is an `errors` entry with a null repo, and never runs a prune.
 #   stderr: diagnostics, and each prune's stderr prefixed with its repository.
 #   exit  : 0 every repository decided cleanly,
 #           1 usage, python3, git or bash absent, or the root missing or
@@ -219,7 +221,16 @@ for kind, path in found:
     if listed.returncode != 0:
         errors.append({"path": path, "repo": owner, "exit": listed.returncode, "error": listed.stderr.strip()})
         continue
-    shared = next((f[len("worktree "):] for f in listed.stdout.split("\0") if f.startswith("worktree ")), None)
+    registered = [f[len("worktree "):] for f in listed.stdout.split("\0") if f.startswith("worktree ")]
+    if os.path.realpath(path) not in {os.path.realpath(p) for p in registered[1:]}:
+        # A copied or stale .git file: the repository it names does not
+        # register this path, so nothing about it may run that repository's
+        # prune.
+        errors.append({"path": path, "repo": None, "exit": 0,
+                       "error": "its .git file points at {}, which registers no worktree at this path; "
+                                "a copied or stale .git file".format(common_dir)})
+        continue
+    shared = registered[0] if registered else None
     if not shared or not os.path.isdir(shared):
         errors.append({"path": path, "repo": owner, "exit": 0, "error": "its repository lists no main checkout on disk"})
         continue

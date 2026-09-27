@@ -22,6 +22,7 @@
 #      4b. Owner script failure (no origin) -> warn, block nothing.
 #      4c. Herdr worker session -> no worktree finding; diagnostics still gate.
 #      4d. The foreman's session -> blocks.
+#      4e. A shared checkout whose name ends in a newline -> still blocks.
 #   5. Dirty tree only -> allow (report-only, not a block).
 #   6. Diag finding    -> block; changed uncommitted .sh with a failing engine.
 #   7. Diag clean      -> changed uncommitted .sh, engines clean -> no diag block.
@@ -251,6 +252,21 @@ main() {
   if [[ $RC -eq 0 ]] && reason_has "shellcheck findings" && ! reason_has "prune-worktrees"; then
     pass; else fail "worker diagnostics: expected a diagnostics block without the worktree finding, got RC=$RC OUT=$OUT"; fi
   rm -f "$TMP/wt/r4-worker/bad.sh" || die "r4-worker cleanup failed"
+
+  # 4e. A shared checkout whose name ends in a newline still reaches the
+  #     owner script whole: the inventory is read NUL-framed.
+  local nl=$'\n'
+  if mkdir "$TMP/r4e-nl${nl}" 2>"$TMP/nl.err"; then
+    rmdir "$TMP/r4e-nl${nl}" || die "rmdir the newline probe failed"
+    mk_origin o4e; clone_from "$BARE" "$TMP/r4e-nl${nl}"
+    g -C "$TMP/r4e-nl${nl}" worktree add -q "$TMP/wt/r4e-wt" -b review/nl || die "r4e worktree add failed"
+    age_wt "$TMP/wt/r4e-wt"
+    run_hook "$TMP/r4e-nl${nl}" '{"stop_hook_active":false}'
+    if [[ $RC -eq 0 ]] && reason_has "r4e-wt"; then
+      pass; else fail "newline-ending shared checkout: expected the worktree block, got RC=$RC OUT=$OUT ERR=$ERRTEXT"; fi
+  else
+    echo "4e. skipped: this filesystem refuses a name ending in a newline ($(cat "$TMP/nl.err"))" >&2
+  fi
 
   # 4d. The foreman's own session (main checkout) still blocks with HERDR_ENV
   # set: the suppression keys on being in a linked worktree, not on Herdr alone.

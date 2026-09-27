@@ -146,8 +146,11 @@ if not first or not first[0].startswith(b"worktree "):
     sys.exit(3)
 if b"bare" in first:
     sys.exit(4)
-sys.stdout.buffer.write(first[0][len(b"worktree "):])
+sys.stdout.buffer.write(first[0][len(b"worktree "):] + b"x")
 ')" || rc=$?
+  # The sentinel keeps a trailing newline in the path through the command
+  # substitution; it comes off only here.
+  shared="${shared%x}"
   local list_err
   list_err="$(cat "$err")"
   if ! rm -f "$err"; then warn "could not remove ${err} — delete it by hand"; fi

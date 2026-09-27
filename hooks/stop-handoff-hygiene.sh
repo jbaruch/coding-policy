@@ -171,15 +171,51 @@ main() {
   return 0
 }
 
+#: Set by read_inventory: how many worktrees `git worktree list` registers,
+#: and the shared checkout's path (the first record), byte for byte.
+WT_COUNT=0
+WT_SHARED=""
+
+# Read the NUL-framed worktree inventory. A path ending in a newline, or
+# holding one, stays one field; the path comes back behind a sentinel so
+# command substitution cannot strip its trailing newline. 1 (warned) when
+# git or the parse fails.
+read_inventory() {
+  local dir rc=0 parsed rest
+  dir="$(mktemp -d)" || { warn "mktemp failed — skipping the worktree check"; return 1; }
+  git worktree list --porcelain -z >"${dir}/list" 2>"${dir}/err" || rc=$?
+  if (( rc != 0 )); then
+    warn "\`git worktree list --porcelain -z\` failed (exit ${rc}): $(tr '\n' ' ' < "${dir}/err") — skipping the worktree check"
+    rm -rf "$dir" || warn "could not remove ${dir} — delete it by hand"
+    return 1
+  fi
+  rc=0
+  parsed="$(python3 -c '
+import sys
+with open(sys.argv[1], "rb") as handle:
+    fields = handle.read().split(b"\0")
+paths = [f[len(b"worktree "):] for f in fields if f.startswith(b"worktree ")]
+if not paths:
+    sys.exit(3)
+sys.stdout.buffer.write(str(len(paths)).encode() + b"\n" + paths[0] + b"x")
+' "${dir}/list")" || rc=$?
+  rm -rf "$dir" || warn "could not remove ${dir} — delete it by hand"
+  if (( rc != 0 )); then
+    warn "cannot name the shared checkout from \`git worktree list --porcelain -z\` (exit ${rc}) — skipping the worktree check"
+    return 1
+  fi
+  WT_COUNT="${parsed%%$'\n'*}"
+  rest="${parsed#*$'\n'}"
+  WT_SHARED="${rest%x}"
+  return 0
+}
+
 # Does this repository hold anything the owner script could act on: a linked
 # worktree, or a local branch other than the checked-out one? A cheap local
 # gate, never a verdict: the owner script decides. Unreadable counts as yes.
 has_candidates() {
   local out rc=0
-  out="$(git worktree list --porcelain 2>&1)" || rc=$?
-  if (( rc != 0 )); then warn "\`git worktree list\` failed (exit ${rc}): ${out}"; return 0; fi
-  (( $(grep -c '^worktree ' <<<"$out") > 1 )) && return 0
-  rc=0
+  (( WT_COUNT > 1 )) && return 0
   out="$(git for-each-ref --count=2 --format='%(refname)' refs/heads 2>&1)" || rc=$?
   if (( rc != 0 )); then warn "\`git for-each-ref refs/heads\` failed (exit ${rc}): ${out}"; return 0; fi
   (( $(grep -c . <<<"$out") > 1 ))
@@ -188,6 +224,11 @@ has_candidates() {
 # Run the owner script's dry run and turn its decisions into findings: what it
 # would remove blocks, what it keeps for the operator is reported.
 read_owner_decisions() {
+  if ! command -v python3 >/dev/null; then
+    warn "python3 not found on PATH — install it; skipping the worktree check"
+    return 0
+  fi
+  read_inventory || return 0
   has_candidates || return 0
   local here shared prune runner out err rc=0
   here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)" || { warn "cannot resolve the hooks directory — skipping the worktree check"; return 0; }
@@ -197,16 +238,7 @@ read_owner_decisions() {
     warn "${prune} or ${runner} is not readable — reinstall the plugin; skipping the worktree check"
     return 0
   fi
-  local list
-  if ! list="$(git worktree list --porcelain 2>&1)"; then
-    warn "\`git worktree list\` failed (${list}) — skipping the worktree check"
-    return 0
-  fi
-  shared="$(sed -n '1s/^worktree //p' <<<"$list")"
-  if [[ -z "$shared" ]]; then
-    warn "cannot name the shared checkout from \`git worktree list\` — skipping the worktree check"
-    return 0
-  fi
+  shared="$WT_SHARED"
   err="$(mktemp)" || { warn "mktemp failed — skipping the worktree check"; return 0; }
   out="$(GIT_TERMINAL_PROMPT=0 GIT_SSH_COMMAND="${GIT_SSH_COMMAND:-ssh -o BatchMode=yes}" \
     bash "$runner" "$PRUNE_BUDGET_SEC" bash "$prune" "$shared" --dry-run 2>"$err")" || rc=$?

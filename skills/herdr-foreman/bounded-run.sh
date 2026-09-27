@@ -25,7 +25,11 @@
 #   exit  : the command's own exit code; 124 when the budget ran out (the
 #           `timeout` convention); 125 on a usage error, a missing python3, or
 #           a command that could not be started.
-#   signal: SIGALRM ends the budget now.
+#   signal: SIGALRM ends the budget now. It is blocked until the command is
+#           launched and the alarm armed, so an expiry at any point stops the
+#           command's whole process group and exits 124, never a traceback.
+#   env   : BOUNDED_RUN_TEST_EXPIRE_BEFORE_LAUNCH=1 (tests only) delivers the
+#           expiry before the command is launched.
 set -euo pipefail
 
 #: Seconds between SIGTERM and SIGKILL once the budget is spent.
@@ -58,9 +62,19 @@ def expire(signum, frame):
 
 
 grace, budget, command = float(sys.argv[1]), int(sys.argv[2]), sys.argv[3:]
+ALARM = {signal.SIGALRM}
+
+# SIGALRM stays blocked until the child exists and the alarm is armed: an
+# expiry that arrives earlier waits, pending, and is handled below with a
+# process group to stop. The child starts with it unblocked again.
+signal.pthread_sigmask(signal.SIG_BLOCK, ALARM)
 signal.signal(signal.SIGALRM, expire)
+if os.environ.get("BOUNDED_RUN_TEST_EXPIRE_BEFORE_LAUNCH") == "1":
+    # Test seam: an expiry that lands before the command is launched.
+    os.kill(os.getpid(), signal.SIGALRM)
 try:
-    child = subprocess.Popen(command, start_new_session=True)
+    child = subprocess.Popen(command, start_new_session=True,
+                             preexec_fn=lambda: signal.pthread_sigmask(signal.SIG_UNBLOCK, ALARM))
 except OSError as exc:
     sys.stderr.write("bounded-run: cannot start {}: {} — check the path and its permissions\n".format(command[0], exc))
     sys.exit(125)
@@ -73,8 +87,9 @@ def signal_group(sig):
         pass
 
 
-signal.alarm(budget)
 try:
+    signal.alarm(budget)
+    signal.pthread_sigmask(signal.SIG_UNBLOCK, ALARM)
     code = child.wait()
 except Expired:
     signal.signal(signal.SIGALRM, signal.SIG_IGN)

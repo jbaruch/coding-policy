@@ -34,6 +34,8 @@
 #   7. Portable mode        -> nothing deleted; the questionable list still
 #                              printed.
 #   8. No origin, no repo   -> silent.
+#  11. Newline path         -> a shared checkout whose name ends in a newline
+#                              is cleaned, never truncated.
 #  10. Missing tool         -> a missing git or python3 still prints the
 #                              could-not-check status, as fixed JSON.
 #   9. Out of time          -> a could-not-check line naming the budget (a
@@ -389,6 +391,24 @@ main() {
      && [[ "$ctx_git" == "Session-start status — could not check this repository"*"git is not on PATH"* ]] \
      && [[ "$ctx_py" == "Session-start status — could not check this repository"*"python3 is not on PATH"* ]]; then pass
   else fail "c10: git=$ctx_git python3=$ctx_py"; fi
+
+  echo "11. a shared checkout whose name ends in a newline is cleaned, never truncated"
+  local nl=$'\n'
+  if mkdir "$TMP/nl-probe${nl}" 2>"$TMP/nl.err"; then
+    rmdir "$TMP/nl-probe${nl}" || die "rmdir the newline probe failed"
+    mk_case c11
+    local nl_shared="$CASE/shared-nl${nl}"
+    quiet "clone newline" git clone -q "$BARE" "$nl_shared"
+    quiet "set-head newline" git -C "$nl_shared" remote set-head origin --auto
+    quiet "wt spent" git -C "$nl_shared" worktree add -q --detach "$ROOT/spent" origin/main
+    age_wt "$ROOT/spent" "$AGED_MTIME"
+    push_branch feat/remote-merged 1
+    run_hook "$nl_shared"
+    if [[ $RC -eq 0 && -z "$OUT" && ! -e "$ROOT/spent" ]] && ! on_origin feat/remote-merged; then pass
+    else fail "c11: RC=$RC OUT=$OUT ERR=$ERR"; fi
+  else
+    echo "11. skipped: this filesystem refuses a name ending in a newline ($(cat "$TMP/nl.err"))"
+  fi
 
   echo
   echo "passed=${PASS} failed=${FAIL}"
