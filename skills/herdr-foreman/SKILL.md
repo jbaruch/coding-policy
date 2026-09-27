@@ -366,33 +366,27 @@ Proceed immediately to Step 8.
 ## Step 8 — Provision the Worktrees
 
 Step 2's preflight swept every repository with a worktree directory under
-the root, every round, and Step 2 reported its outcomes. `degraded` means another
-repository's prune failed; it does not block this round. Never remove a
-worktree by hand; Step 15's removal of the merged task's own worktree is the
-one exception. Run the sweep alone only to re-sweep, and report its outcomes
-the same way:
+the root, every round, and Step 2 reported its outcomes. Route on its
+`checks.worktrees.status`; the classification is
+`skills/herdr-foreman/round-preflight.sh`'s (the `checks.worktrees` comment
+at the top of the file):
+
+- `ok` or `degraded` — provision
+- any other status — do not provision; report its `reason` and detail,
+  repair what it names, then run Step 2's preflight again with
+  `--no-measure` and route on the new status
+
+Never remove a worktree by hand; Step 15's removal of the merged task's own
+worktree is the one exception. To re-sweep without provisioning (Step 15),
+run the sweep alone and relay its `report` verbatim, as Step 2 does:
 
 ```bash
 CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"
 bash "$CP/skills/herdr-foreman/sweep-worktrees.sh" "$HOME/.worktrees"
 ```
 
-Emits one entry per repository with that repository's prune result (worktrees
-removed and kept with their reasons, branches deleted and kept, `failed`) or
-its `error`, plus the root's `skipped` and `errors`
-entries. Report each failing `repos` and `errors` entry. Provision only on
-one of these, the classification `round-preflight.sh` applies:
-
-- Exit 0
-- Exit 2 where every failure is another repository's: no `repos` entry for
-  this checkout has a non-zero `exit` or lacks `result`, and every `errors`
-  entry names a `repo` other than this checkout (`degraded`)
-
-Anything else blocks provisioning: exit 1 (no JSON), this checkout's own
-entry failing, an `errors` entry naming this checkout, or an `errors` entry
-naming no repository. Report it, repair what it names, and run the sweep
-again. The removal predicates live in
-`skills/herdr-foreman/prune-worktrees.sh` (top-of-file docstring).
+The removal predicates live in `skills/herdr-foreman/prune-worktrees.sh`
+(top-of-file docstring).
 
 Then run once per writing worker and every worktree named in a brief:
 

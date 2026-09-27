@@ -21,7 +21,8 @@
 #          dirty and unpushed ones are reported on stderr.
 #      4b. Owner script failure (no origin) -> warn, block nothing.
 #      4c. Herdr worker session -> no worktree finding; diagnostics still gate.
-#      4d. The foreman's session -> blocks.
+#      4d. The foreman's session -> blocks, naming the round's sweep, never
+#          prune-worktrees.sh (case 4 names prune-worktrees.sh outside Herdr).
 #      4e. A shared checkout whose name ends in a newline -> still blocks.
 #      4f. A finding naming a newline-bearing path -> reported whole.
 #   5. Dirty tree only -> allow (report-only, not a block).
@@ -203,7 +204,7 @@ main() {
   g -C "$TMP/r4" worktree add -q "$TMP/wt/r4-wt" -b feat/wt || die "r4 worktree add failed"
   age_wt "$TMP/wt/r4-wt"
   run_hook "$TMP/r4" '{"stop_hook_active":false}'
-  if [[ $RC -eq 0 ]] && reason_has "worktree .*r4-wt \\(feat/wt\\)" && reason_has "prune-worktrees.sh" \
+  if [[ $RC -eq 0 ]] && reason_has "worktree .*r4-wt \\(feat/wt\\)" && reason_has "prune-worktrees.sh" && ! reason_has "sweep-worktrees.sh" \
      && [[ -d "$TMP/wt/r4-wt" ]]; then
     pass; else fail "spent worktree: expected a block naming r4-wt, got RC=$RC OUT=$OUT ERR=$ERRTEXT"; fi
 
@@ -290,8 +291,8 @@ main() {
   # 4d. The foreman's own session (main checkout) still blocks with HERDR_ENV
   # set: the suppression keys on being in a linked worktree, not on Herdr alone.
   run_hook "$TMP/r4" '{"stop_hook_active":false}' "$PATH" HERDR_ENV=1
-  if [[ $RC -eq 0 ]] && reason_has "r4-wt"; then
-    pass; else fail "foreman session: expected the worktree block, got RC=$RC OUT=$OUT ERR=$ERRTEXT"; fi
+  if [[ $RC -eq 0 ]] && reason_has "r4-wt" && reason_has "sweep-worktrees.sh" && ! reason_has "prune-worktrees.sh"; then
+    pass; else fail "foreman session: expected the worktree block naming the sweep, got RC=$RC OUT=$OUT ERR=$ERRTEXT"; fi
 
   # 5. dirty tree only -> allow (report-only).
   mk_origin o5; clone_from "$BARE" "$TMP/r5"

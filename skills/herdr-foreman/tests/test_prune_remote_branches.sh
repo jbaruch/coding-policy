@@ -25,6 +25,8 @@
 #  12. Protected since listed   -> the final gate keeps it (changed).
 #  13. Default changed          -> the final gate keeps it (changed).
 #  14. Dry run, late PR         -> the preview re-reads origin and keeps it.
+#  16. Slash in the name     -> the protection lookup encodes the branch as one
+#                                  path segment; feat/add-auth is deleted.
 #  15. Stale, changed           -> a pull request or protection arriving before
 #                                  the listing keeps it (changed), unlisted.
 #   3 also checks the reported delete command is leased to the judged tip.
@@ -76,10 +78,13 @@ case "$1" in
   api)
     if [[ "$2" == *'?protected'* ]]; then
       if [[ -f "$d/protected" ]]; then cat "$d/protected"; fi
-    elif [[ -f "$d/protected" ]] && grep -qxF -- "${2#*/branches/}" "$d/protected"; then
-      echo true
     else
-      echo false
+      # GitHub routes a raw slash as another path segment: 404, as here.
+      seg="${2#*/branches/}"
+      if [[ "$seg" == */* ]]; then echo "gh: HTTP 404: Not Found (branches/${seg})" >&2; exit 1; fi
+      printf '%s\n' "$seg" >> "$d/api-branches"
+      b="$(python3 -c 'import sys, urllib.parse; print(urllib.parse.unquote(sys.argv[1]))' "$seg")"
+      if [[ -f "$d/protected" ]] && grep -qxF -- "$b" "$d/protected"; then echo true; else echo false; fi
     fi
     exit 0 ;;
   pr)
@@ -291,6 +296,14 @@ SH
   if [[ $RC -eq 0 ]] && on_origin feat/stale-pr && on_origin feat/stale-guard && [[ "$(jq_py 'doc["questionable"]')" == "[]" ]] \
      && [[ "$(jq_py 'sorted(k["branch"] for k in doc["kept"] if k["reason"] == "changed")')" == "['feat/stale-guard', 'feat/stale-pr']" ]]; then pass
   else fail "c15: RC=$RC OUT=$OUT ERR=$ERR"; fi
+
+  echo "16. a merged branch with a slash in its name passes the protection re-check and is deleted"
+  mk_case c16
+  push_branch feat/add-auth "$STALE_DATE" 1
+  run
+  if [[ $RC -eq 0 ]] && ! on_origin feat/add-auth && [[ "$(jq_py 'doc["deleted"]')" == "['feat/add-auth']" ]] \
+     && grep -qxF 'feat%2Fadd-auth' "$CASE/api-branches"; then pass
+  else fail "c16: RC=$RC OUT=$OUT ERR=$ERR"; fi
 
   echo "11. usage is exit 1 with no JSON"
   RC=0

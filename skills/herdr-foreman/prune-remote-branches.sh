@@ -114,9 +114,12 @@ remote_default() { # <shared>
 
 # Echo "true" or "false": whether GitHub protects <branch> now.
 branch_protected() { # <shared> <branch>
-  local out rc=0
-  out="$(cd "$1" && GH_PROMPT_DISABLED=1 gh api "repos/{owner}/{repo}/branches/$2" --jq .protected 2>"$ERRFILE")" || rc=$?
-  if (( rc != 0 )); then network_failure "$rc" "$1" gh api "repos/{owner}/{repo}/branches/$2"; return 1; fi
+  local out rc=0 segment
+  # One path segment: a branch named feat/add-auth would otherwise route as
+  # two, and the lookup would fail for every such branch.
+  segment="$(python3 -c 'import sys, urllib.parse; print(urllib.parse.quote(sys.argv[1], safe=""))' "$2")"
+  out="$(cd "$1" && GH_PROMPT_DISABLED=1 gh api "repos/{owner}/{repo}/branches/${segment}" --jq .protected 2>"$ERRFILE")" || rc=$?
+  if (( rc != 0 )); then network_failure "$rc" "$1" gh api "repos/{owner}/{repo}/branches/${segment}"; return 1; fi
   printf '%s' "$out"
 }
 

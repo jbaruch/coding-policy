@@ -253,17 +253,16 @@ read_owner_decisions() {
   # to a file: a path holding a newline stays inside its record.
   program="$(cat <<'PY'
 import json
-import shlex
 import sys
 
-prune, shared, out = sys.argv[1], sys.argv[2], sys.argv[3]
+remedy, out = sys.argv[1], sys.argv[2]
 doc = json.load(sys.stdin)
 records = []
 removable = ["  - worktree {} ({})".format(r["path"], r.get("branch") or "detached") for r in doc["worktrees_removed"]]
 removable += ["  - branch {}".format(b) for b in doc["branches_deleted"]]
 if removable:
-    records.append(("block", "Spent worktrees and branches origin already holds — remove them with `bash {} {}`:\n{}".format(
-        shlex.quote(prune), shlex.quote(shared), "\n".join(removable))))
+    records.append(("block", "Spent worktrees and branches origin already holds — remove them with `{}`:\n{}".format(
+        remedy, "\n".join(removable))))
 for k in doc["worktrees_kept"]:
     if k["reason"] in ("dirty", "unpushed"):
         records.append(("report", "Worktree left for the operator: {} ({}), {} — `{}`".format(
@@ -283,7 +282,16 @@ PY
     warn "mktemp failed — skipping the worktree check; make ${TMPDIR:-/tmp} writable"
     return 0
   fi
-  python3 -c "$program" "$prune" "$shared" "$records" <<<"$out" || frc=$?
+  # A Herdr foreman removes worktrees only through the round's sweep
+  # (rules/agent-team-operation.md Writers and Checkouts); everyone else runs
+  # the owner script for this repository.
+  local remedy
+  if [[ -n "${HERDR_ENV+x}" ]]; then
+    remedy="bash $(printf '%q' "${here}/../skills/herdr-foreman/sweep-worktrees.sh") $(printf '%q' "${WORKTREE_ROOT:-${HOME}/.worktrees}")"
+  else
+    remedy="bash $(printf '%q' "$prune") $(printf '%q' "$shared")"
+  fi
+  python3 -c "$program" "$remedy" "$records" <<<"$out" || frc=$?
   if (( frc != 0 )); then
     warn "the worktree check's JSON could not be read (python3 exited ${frc}) — nothing is blocked on it; run \`bash ${prune} ${shared} --dry-run\` to see its output"
     rm -f "$records" || warn "could not remove ${records} — delete it by hand"

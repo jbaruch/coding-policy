@@ -100,10 +100,13 @@ case "$1" in
   api)
     if [[ "$2" == *'?protected'* ]]; then
       if [[ -f "$d/protected" ]]; then cat "$d/protected"; fi
-    elif [[ -f "$d/protected" ]] && grep -qxF -- "${2#*/branches/}" "$d/protected"; then
-      echo true
     else
-      echo false
+      # GitHub routes a raw slash as another path segment: 404, as here.
+      seg="${2#*/branches/}"
+      if [[ "$seg" == */* ]]; then echo "gh: HTTP 404: Not Found (branches/${seg})" >&2; exit 1; fi
+      printf '%s\n' "$seg" >> "$d/api-branches"
+      b="$(python3 -c 'import sys, urllib.parse; print(urllib.parse.unquote(sys.argv[1]))' "$seg")"
+      if [[ -f "$d/protected" ]] && grep -qxF -- "$b" "$d/protected"; then echo true; else echo false; fi
     fi
     exit 0 ;;
   pr)
