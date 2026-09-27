@@ -48,15 +48,24 @@ KEYWORDS = frozenset({"if", "then", "do", "else", "elif", "while", "until", "!",
 
 #: Commands that run their first non-option, non-assignment operand, each
 #: mapped to its options that consume the following token as their value.
+#: A `--long=value` spelling carries its value and consumes nothing.
 WRAPPERS = {
-    "env": frozenset({"-u", "-C", "-S", "-P"}),
-    "sudo": frozenset({"-u", "-g", "-C", "-D", "-h", "-p", "-r", "-t", "-U", "-T", "-R"}),
+    "env": frozenset({"-u", "-C", "-S", "-P", "--unset", "--chdir", "--split-string"}),
+    "sudo": frozenset({
+        "-u", "-g", "-C", "-D", "-h", "-p", "-r", "-t", "-U", "-T", "-R",
+        "--user", "--group", "--close-from", "--chdir", "--host", "--prompt",
+        "--role", "--type", "--other-user", "--command-timeout", "--chroot",
+    }),
     "exec": frozenset({"-a"}),
     "command": frozenset(),
-    "time": frozenset({"-f", "-o"}),
+    "time": frozenset({"-f", "-o", "--format", "--output"}),
     "nohup": frozenset(),
-    "nice": frozenset({"-n"}),
+    "nice": frozenset({"-n", "--adjustment"}),
 }
+
+#: Wrapper options that turn the wrapper into a lookup: the next token is a
+#: name it reports on, never runs.
+QUERIES = {"command": frozenset({"-v", "-V"})}
 
 
 def shell_blocks(text):
@@ -127,7 +136,9 @@ def bare_invocations(line):
         if ASSIGNMENT.match(token) or token in KEYWORDS:
             continue
         if wrapper is not None and token.startswith("-"):
-            if token in WRAPPERS[wrapper]:
+            if token in QUERIES.get(wrapper, frozenset()):
+                expecting, wrapper = False, None
+            elif token in WRAPPERS[wrapper]:
                 index += 1
             continue
         if token in WRAPPERS:
@@ -170,6 +181,10 @@ class BareInvocationDetectorTest(unittest.TestCase):
             ("sudo -u runner skills/x/run.sh", ["skills/x/run.sh"]),
             ("env -u NAME skills/x/run.sh", ["skills/x/run.sh"]),
             ("nice -n 10 skills/x/run.sh", ["skills/x/run.sh"]),
+            ("env --chdir /tmp skills/x/run.sh", ["skills/x/run.sh"]),
+            ("env --unset NAME skills/x/run.sh", ["skills/x/run.sh"]),
+            ("sudo --user runner skills/x/run.sh", ["skills/x/run.sh"]),
+            ("sudo --user=runner skills/x/run.sh", ["skills/x/run.sh"]),
             (">out skills/x/run.sh", ["skills/x/run.sh"]),
             ("2>/dev/null skills/x/run.sh", ["skills/x/run.sh"]),
         ):
@@ -191,6 +206,8 @@ class BareInvocationDetectorTest(unittest.TestCase):
             "env MODE=1 bash skills/x/run.sh",
             "echo 'cost$' skills/x/run.sh",
             "sudo -u runner bash skills/x/run.sh",
+            "command -v skills/x/run.sh",
+            "command -V skills/x/run.sh",
         ):
             with self.subTest(line=line):
                 self.assertEqual(bare_invocations(line), [])
