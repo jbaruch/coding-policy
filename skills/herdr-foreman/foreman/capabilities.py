@@ -109,12 +109,22 @@ def empty():
 def load(path, *, for_write=False):
     """The saved table, or an empty one. Readers never create the file.
 
+    A symlink at the table's path is refused, live or dangling, the way the
+    reset record refuses one.
+
     A table stamped with a newer schema than this build owns was written by a
     newer owner. A reader treats it as no usable prior state and says so; a
     writer refuses, so an older build never overwrites what it cannot read
     (rules/stateful-artifacts.md Migration Policy).
     """
     target = storage_path(path)
+    # A dangling link is not a missing table, and a live one is not the owner's
+    # file: a later `record` would replace the link through save_state's atomic
+    # rename and destroy the redirect. Either way the link is left as found.
+    if target.is_symlink():
+        _fail("The capability table at {} is a symlink, not the owner's file. It is left "
+              "untouched: restore the regular file at that path, or remove the link to start an "
+              "empty table.".format(target))
     try:
         document = json.loads(target.read_text(encoding="utf-8"))
     except FileNotFoundError:

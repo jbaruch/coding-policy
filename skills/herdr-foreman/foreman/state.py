@@ -630,8 +630,21 @@ def load_state_checked(path, warn=None, *, persist_migration=True):
 
 
 def save_state(path, state):
-    """Write `state` atomically, creating the parent directory when needed."""
+    """Write `state` atomically, creating the parent directory when needed.
+
+    The atomic rename replaces whatever sits at `path`. On a symlink that is
+    the link itself: the redirect is destroyed and its target keeps the old
+    bytes. So a symlinked owner file is refused, live or dangling, and left
+    exactly as found. A symlinked parent directory is followed as usual.
+    """
     path = Path(path)
+    if path.is_symlink():
+        raise StateError(
+            "State file {} is a symlink; writing would replace the link and leave its "
+            "target stale. The link is left untouched: replace it with the owner's "
+            "regular file, or pass --state at the real location.".format(path),
+            {"path": str(path)},
+        )
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
     except (PermissionError, FileExistsError, NotADirectoryError) as exc:

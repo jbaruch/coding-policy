@@ -81,6 +81,31 @@ class CapabilityTableTest(unittest.TestCase):
             capabilities.record(self.state, {"entries": [entry()]}, AT)
         self.assertEqual(target.read_text(encoding="utf-8"), original)
 
+    def test_a_dangling_table_link_is_refused_never_read_as_missing(self):
+        target = capabilities.storage_path(self.state)
+        missing = Path(self.tmp.name) / "moved" / "capabilities.json"
+        target.symlink_to(missing)
+        with self.assertRaisesRegex(UsageError, "is a symlink"):
+            capabilities.load(self.state)
+        with self.assertRaisesRegex(UsageError, "is a symlink"):
+            capabilities.record(self.state, {"entries": [entry()]}, AT)
+        self.assertTrue(target.is_symlink())
+        self.assertEqual(_os.readlink(target), str(missing))
+        self.assertFalse(missing.exists())
+
+    def test_a_live_table_link_is_refused_and_its_target_left_as_found(self):
+        real = Path(self.tmp.name) / "elsewhere.json"
+        capabilities.record(real, {"entries": [entry()]}, AT)
+        original = capabilities.storage_path(real).read_bytes()
+        target = capabilities.storage_path(self.state)
+        target.symlink_to(capabilities.storage_path(real))
+        with self.assertRaisesRegex(UsageError, "is a symlink"):
+            capabilities.load(self.state)
+        with self.assertRaisesRegex(UsageError, "is a symlink"):
+            capabilities.record(self.state, {"entries": [entry(verdict="unknown")]}, LATER)
+        self.assertTrue(target.is_symlink())
+        self.assertEqual(capabilities.storage_path(real).read_bytes(), original)
+
     def test_a_report_never_supplies_what_the_writer_stamps(self):
         for extra in ({"recorded_at": AT}, {"schema_version": 1}):
             with self.subTest(extra=extra), self.assertRaisesRegex(UsageError, "carries exactly"):

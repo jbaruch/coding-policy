@@ -180,7 +180,8 @@ alone. Readers: `capability-check`, `capability-show`, the round preflight,
 records inadequate before anything launches. `plan` and `apply` read it read-only through
 `capabilities.load`: a missing file is an empty table, a table written by a
 newer build is read as empty with a warning and left untouched, and an
-unreadable or malformed one refuses the command naming the file.
+unreadable or malformed one refuses the command naming the file. A symlink at
+the table's path, live or dangling, refuses the command and is left as found.
 
 ```json
 {
@@ -212,7 +213,8 @@ unreadable or malformed one refuses the command naming the file.
 An absent file reads as an empty table: `refreshed_at: null`, no entries. A
 file stamped with a newer schema than the reader owns reads as no prior state,
 with a diagnostic to update the plugin; `capability-record` refuses to write
-over it. An older or malformed file is refused with its repair. No field has a
+over it. An older or malformed file is refused with its repair, and so is a
+symlink in the file's place. No field has a
 default: an entry missing one is refused, never filled in.
 
 `capability-record --record <report.json>` reads the consultation's report,
