@@ -29,8 +29,8 @@ CONTRACT = "acr-credential-boundary/v1"
 CENTRAL = "jbaruch/coding-policy"
 ACR = "jbaruch/agentic-context-registry"
 WORKFLOW = ".github/workflows/acr-codex-accept.yml"
-#: This lane's own Codex credential; the fleet reviewer's CODEX_AUTH_JSON is never read here.
-SEED_SECRET = "ACR_ACCEPT_CODEX_AUTH_JSON"
+#: The operator's one Codex subscription session, shared with the policy reviewer.
+SEED_SECRET = "CODEX_AUTH_JSON"
 MAX_FILES = 1000
 MAX_TEXT = 8 * 1024 * 1024
 MAX_TEXT_TOTAL = 64 * 1024 * 1024
@@ -331,7 +331,7 @@ def run_proof(acr_root: Path, root: Path) -> None:
     for name in ("home", "codex", "state", "tmp"):
         (private / name).mkdir(mode=0o700)
     env = {k: v for k, v in os.environ.items() if not k.startswith(("ACR_CODEX_", "CODEX_", "OPENAI_"))
-           and k not in ("GH_TOKEN", "GITHUB_TOKEN", "CODEX_AUTH_JSON", SEED_SECRET)}
+           and k not in ("GH_TOKEN", "GITHUB_TOKEN", SEED_SECRET)}
     env.update(HOME=str(private / "home"), CODEX_HOME=str(private / "codex"),
                ACR_STATE_HOME=str(private / "state"), TMPDIR=str(private / "tmp"),
                PYTHONDONTWRITEBYTECODE="1")
@@ -372,9 +372,9 @@ def scan(data: bytes, known: list[bytes]) -> None:
 def seed(root: Path) -> None:
     validate_proof(parse(regular(root / "evidence/credential-boundary.json")), binding())
     raw = os.environ.get(SEED_SECRET, "")
-    require(raw, f"{SEED_SECRET} is empty or not configured. Set it at https://github.com/{CENTRAL}/settings/secrets/actions "
-                 "to an auth.json holding this lane's own Codex account session or an OPENAI_API_KEY; the fleet "
-                 "reviewer's CODEX_AUTH_JSON is never used here")
+    require(raw, f"{SEED_SECRET} is empty or not configured. Run `codex login` on a trusted machine, then "
+                 f"`gh secret set {SEED_SECRET} --repo {CENTRAL} < ~/.codex/auth.json` "
+                 f"(https://github.com/{CENTRAL}/settings/secrets/actions)")
     document = parse(raw.encode())
     require(bool(secret_values(document)), f"{SEED_SECRET} must be an auth.json with session tokens or an OPENAI_API_KEY")
     auth = root / "seed/auth.json"
@@ -985,7 +985,7 @@ def convert(acr_root: Path, root: Path) -> None:
     checkout(acr_root, context["acr_sha"])
     validate_proof(parse(regular(root / "evidence/credential-boundary.json")), context)
     credentials(root / "seed/auth.json", os.environ.get("GH_TOKEN", ""))
-    env = {k: v for k, v in os.environ.items() if k not in ("CODEX_AUTH_JSON", SEED_SECRET, "CODEX_API_KEY", "OPENAI_API_KEY", "GITHUB_TOKEN")}
+    env = {k: v for k, v in os.environ.items() if k not in (SEED_SECRET, "CODEX_API_KEY", "OPENAI_API_KEY", "GITHUB_TOKEN")}
     env.update(CODEX_HOME=str(root / "seed"), TMPDIR=str(root / "tmp"),
                ACR_STATE_HOME=str(root / "homes"), ACR_CODEX_LIVE="1", ACR_CODEX_LIVE_REQUIRED="1",
                ACR_CODEX_LIVE_EVIDENCE=str(root / "evidence"), PYTHONDONTWRITEBYTECODE="1")
