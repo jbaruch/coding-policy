@@ -9,8 +9,8 @@ kept six bare invocations it did not reach (#487). This suite scans every
 fenced shell block under the shipped `skills/` and `hooks/` trees so the next
 one is caught before it ships.
 
-A command position is the start of a line, or what follows `$(`, a backtick,
-`|`, `||`, `&&` or `;`, after leading `NAME=value` assignments and the shell
+A command position is the start of a line, or what follows `$(`, `)`, a
+backtick, `|`, `||`, `&&` or `;`, after leading `NAME=value` assignments and the shell
 keywords that precede a command. A word there ending in `.sh` or `.py` is a
 bare invocation.
 """
@@ -29,8 +29,9 @@ SHIPPED = ("skills", "hooks")
 SHELL_FENCES = frozenset({"", "bash", "sh", "shell", "zsh", "console"})
 
 FENCE = re.compile(r"^\s*(```|~~~)\s*([\w+-]*)")
-SEPARATOR = re.compile(r"\$\(|`|\|\||&&|\||;")
-ASSIGNMENT = re.compile(r"^[A-Za-z_]\w*=\S*\s*")
+SEPARATOR = re.compile(r"\$\(|\)|`|\|\||&&|\||;")
+#: A leading `NAME=value`, where the value may hold quoted runs with spaces.
+ASSIGNMENT = re.compile(r"""^[A-Za-z_]\w*=(?:"[^"]*"|'[^']*'|[^\s"'])*\s*""")
 KEYWORDS = frozenset({"if", "then", "do", "else", "elif", "while", "until", "!", "exec", "command", "time"})
 SCRIPT = re.compile(r"\.(sh|py)$")
 
@@ -91,6 +92,9 @@ class BareInvocationDetectorTest(unittest.TestCase):
             ("git status && ./check.sh", ["./check.sh"]),
             ("if skills/a/b.sh; then echo ok; fi", ["skills/a/b.sh"]),
             ("FOO=1 skills/a/b.sh", ["skills/a/b.sh"]),
+            ("out=$(skills/x/run.sh)", ["skills/x/run.sh"]),
+            ('X="two words" skills/x/run.sh', ["skills/x/run.sh"]),
+            ("Y='a b' Z=c skills/x/run.sh", ["skills/x/run.sh"]),
         ):
             with self.subTest(line=line):
                 self.assertEqual(bare_invocations(line), expected)
