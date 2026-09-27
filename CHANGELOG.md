@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.281 — 2026-09-27
+
 ### Fixed
 
 - **Frozen-brief reads refuse traversal, and partition proofs diff
