@@ -59,8 +59,12 @@
 #             root change: the root is re-proven before every later prune
 #             too, and one replaced or unreadable after a prune ran stops
 #             the rest, with an `errors` entry for the root naming the
-#             repositories not pruned.
-#   env   : PRUNE_* variables pass through to prune-worktrees.sh.
+#             repositories not pruned. Each prune also gets the root's
+#             proven identity as PRUNE_ROOT_ID and re-proves it before its
+#             own destructive steps, so a root replaced while one runs ends
+#             that prune's removals too (its `failed` rows name each step).
+#   env   : PRUNE_* variables pass through to prune-worktrees.sh;
+#           PRUNE_ROOT_ID is set by the sweep, overriding any passed in.
 set -euo pipefail
 
 warn() { printf 'sweep-worktrees: %s\n' "$1" >&2; }
@@ -281,7 +285,9 @@ why_root = root_changed()
 if why_root:
     root_gone(why_root)
 results, failed = [], bool(errors)
-env = dict(os.environ, WORKTREE_ROOT=root)
+# The prune re-proves this identity before each of its own destructive steps,
+# so a root replaced while it runs stops it too.
+env = dict(os.environ, WORKTREE_ROOT=root, PRUNE_ROOT_ID="{}:{}".format(root_id.st_dev, root_id.st_ino))
 for index, shared in enumerate(sorted(repos)):
     # Re-proven before every prune: before the first, a change prunes
     # nothing; after an earlier prune, it stops the rest and that prune's

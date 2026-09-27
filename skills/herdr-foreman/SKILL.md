@@ -396,8 +396,9 @@ script's top-of-file contract.
   `dirty` or `unpushed` item it lists, and continue.
 - **Exit 2** — JSON is present; at least one repository's prune failed or a
   path could not be read. Every other repository still ran, unless the
-  root changed mid-sweep: then its error line names the repositories left
-  unpruned.
+  root changed mid-sweep: then the prune in flight stopped its removals,
+  and the error and failure lines name the repositories and steps left
+  undone.
   - Relay `report`; its failure and error lines name each one.
   - Repair what they name.
   - Run the sweep again.

@@ -57,6 +57,11 @@
 #                             name ends in a newline.
 #  33. Unreadable recheck   -> a failed post-deletion occupancy read is a
 #                             failure, never an unoccupied answer.
+#  87. Root replaced      -> a root swapped after the first removal stops
+#                             every later removal, branch deletion and the
+#                             metadata prune; exit 2.
+#  88. Caller's root id    -> a root other than PRUNE_ROOT_ID names decides
+#                             nothing; exit 1.
 #  34. Recreated config   -> a branch.<name> section recreated after the
 #                             deletion is left untouched.
 #  35. Reachable, idle      -> a clean worktree whose HEAD an origin branch
@@ -1137,6 +1142,48 @@ SH
     if (( RC == 2 )) && listed "$SHARED" "$we" && [[ "$OUT" == *"cannot read its submodules or nested repositories"* ]]; then
       pass; else fail "walk error: rc=$RC out=$OUT err=$ERRTEXT"; fi
   fi
+
+  # --- 87. a root replaced during the run stops every later destructive step.
+  mk_repo eightyfive
+  add_wt "$SHARED" review/a85 "$ROOT/a85"
+  add_wt "$SHARED" review/b85 "$ROOT/b85"
+  git -C "$SHARED" branch --no-track review/c85 origin/main || die "branch c85 failed"
+  local shim85="$TMP/shim85" root85="$ROOT"
+  mkdir -p "$shim85" || die "mkdir shim85 failed"
+  # The first `worktree remove` runs for real, then swaps the root for an
+  # empty directory of the same name: the later worktree, the removed one's
+  # branch, the metadata prune and the branch pass all come after the swap.
+  cat > "$shim85/git" <<SHIM || die "shim85 write failed"
+#!/usr/bin/env bash
+set -euo pipefail
+if [[ "\$*" == *"worktree remove"* && ! -e "$shim85/done" ]]; then
+  "$real_git" "\$@"
+  : > "$shim85/done"
+  mv "$root85" "$root85.moved"
+  mkdir "$root85"
+  exit 0
+fi
+exec "$real_git" "\$@"
+SHIM
+  chmod +x "$shim85/git" || die "chmod shim85 failed"
+  RUN_SEQ=$((RUN_SEQ+1))
+  OUT="$(env WORKTREE_ROOT="$ROOT" PRUNE_IDLE_HOURS=0 PATH="$shim85:$PATH" bash "$SCRIPT" "$SHARED" 2>"$TMP/err.$RUN_SEQ")"; RC=$?
+  ERRTEXT="$(cat "$TMP/err.$RUN_SEQ")"
+  echo "87. a root replaced during the run stops every later removal, deletion and the metadata prune"
+  if (( RC == 2 )) && [[ -e "$shim85/done" ]] && [[ "$OUT" == *"worktree root was replaced"* ]] \
+    && listed "$SHARED" "$ROOT/b85" && [[ -d "$root85.moved/b85" ]] \
+    && has_branch "$SHARED" review/a85 && has_branch "$SHARED" review/b85 && has_branch "$SHARED" review/c85; then
+    pass; else fail "root replaced mid-run: rc=$RC out=$OUT err=$ERRTEXT"; fi
+
+  # --- 88. a root that is not the one the caller proved decides nothing.
+  mk_repo eightysix
+  add_wt "$SHARED" review/a86 "$ROOT/a86"
+  RUN_SEQ=$((RUN_SEQ+1))
+  OUT="$(env WORKTREE_ROOT="$ROOT" PRUNE_IDLE_HOURS=0 PRUNE_ROOT_ID="0:0" bash "$SCRIPT" "$SHARED" 2>"$TMP/err.$RUN_SEQ")"; RC=$?
+  ERRTEXT="$(cat "$TMP/err.$RUN_SEQ")"
+  echo "88. a root other than the one PRUNE_ROOT_ID names is exit 1, no JSON, nothing removed"
+  if (( RC == 1 )) && [[ -z "$OUT" && -d "$ROOT/a86" && "$ERRTEXT" == *PRUNE_ROOT_ID* ]] && has_branch "$SHARED" review/a86; then
+    pass; else fail "caller root id: rc=$RC out=$OUT err=$ERRTEXT"; fi
 
   # --- 14. usage / not a repo.
   run

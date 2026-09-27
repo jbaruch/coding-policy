@@ -25,6 +25,16 @@
     repository; a change after the first prune stops the rest with an `errors`
     entry naming the repositories not pruned (exit 2), and the prunes that
     already ran keep their results.
+  - A root replaced while one prune is running (#593): `prune-worktrees.sh`
+    now proves the root's identity (lstat `<dev>:<ino>`) at its start, or
+    takes the one the sweep proved through the new `PRUNE_ROOT_ID`, and
+    re-proves it immediately before every `git worktree remove`, every
+    branch deletion and the `git worktree prune`. From the first mismatch on,
+    each of those steps is refused and listed in `failed` (exit 2), so a
+    moved dirty or unpushed worktree keeps its registration and its branch.
+    A `PRUNE_ROOT_ID` that no longer matches at the start is exit 1, nothing
+    decided. The session-start and Stop hooks, which call the prune
+    directly, get the same guard from the start-of-run proof.
   - `hooks/check-leftover-worktrees.sh` now captures `git worktree list` to a
     file and checks git's exit before parsing, as the Stop hook does. The
     review claimed the pipe masked a git failure after a valid prefix; under
