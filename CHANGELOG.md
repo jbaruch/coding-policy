@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.287 — 2026-09-27
+
 ### Fixed
 
 - **`foreman-reset` resolves a relative `FOREMAN_HERDR_BIN` before the
