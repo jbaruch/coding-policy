@@ -81,6 +81,14 @@ last standup, say so in DONE. Do not start any new work: answer, write the \
 file, and stop."
 }
 
+# True when the text holds a Unicode Cc control: C0 and DEL through the C
+# locale's [[:cntrl:]], C1 (U+0080..U+009F) through its UTF-8 lead byte 0xC2.
+# Bytewise under LC_ALL=C, so the answer never depends on the caller's locale.
+has_control() { # <text>
+  local LC_ALL=C
+  [[ "$1" == *[[:cntrl:]]* || "$1" == *$'\xc2'[$'\x80'-$'\x9f']* ]]
+}
+
 main() {
   if (( $# != 2 )); then
     warn "usage: standup-ask.sh <agent-name> <report-path>"
@@ -93,7 +101,7 @@ main() {
     warn "report path '${REPORT_PATH}' is relative — pass an absolute path; the worker resolves it in its own working directory, not yours"
     return 1
   fi
-  if [[ "$REPORT_PATH" == *[[:cntrl:]]* ]]; then
+  if has_control "$REPORT_PATH"; then
     warn "report path contains a control character — the worker's \`REPORT: <path>\` line must be one printable row; pass a plain absolute path"
     return 1
   fi

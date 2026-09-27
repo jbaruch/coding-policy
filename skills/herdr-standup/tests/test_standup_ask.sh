@@ -18,6 +18,8 @@
 #   6. Relative path  -> exit 1 before any herdr call.
 #  6b. Over-long path -> exit 1; the coarse length bound, before Herdr.
 #  6e. Control char   -> exit 1 before Herdr.
+#  6f. DEL, UTF-8 C1   -> exit 1 before Herdr, in a UTF-8 locale too.
+#  6g. Non-ASCII path -> a letter such as U+00E9 is asked normally.
 #  6c. Bad limit      -> a non-integer override is exit 1, not an abort.
 #  6d. `0100` is 100  -> a leading zero is decimal, never octal, downstream.
 #   7. Outside Herdr  -> exit 1.
@@ -160,6 +162,24 @@ main() {
   OUT="$(env HERDR_ENV=1 HERDR_BIN="$FAKE" FAKE_ARGV_FILE="$TMP/argv6e" bash "$SCRIPT" worker "$TMP/reports/a"$'\t'"b.md" 2>"$TMP/e6e")"; RC=$?
   if [[ $RC -eq 1 && -z "$OUT" && ! -s "$TMP/argv6e" ]] && grep -q "control character" "$TMP/e6e"; then
     pass; else fail "control character: expected exit 1 before herdr, got RC=$RC OUT=$OUT ERR=$(cat "$TMP/e6e")"; fi
+
+  # 6f. DEL and UTF-8 C1 controls are the same precondition, whatever the locale.
+  local ctl
+  for ctl in $'\x7f' $'\xc2\x85' $'\xc2\x9b'; do
+    RUN_SEQ=$((RUN_SEQ+1))
+    : > "$TMP/argv6f" || die "could not create $TMP/argv6f"
+    OUT="$(env HERDR_ENV=1 HERDR_BIN="$FAKE" FAKE_ARGV_FILE="$TMP/argv6f" LC_ALL=en_US.UTF-8 \
+      bash "$SCRIPT" worker "$TMP/reports/a${ctl}b.md" 2>"$TMP/e6f")"; RC=$?
+    if [[ $RC -eq 1 && -z "$OUT" && ! -s "$TMP/argv6f" ]] && grep -q "control character" "$TMP/e6f"; then
+      pass; else fail "control $(printf '%s' "$ctl" | od -An -tx1): expected exit 1 before herdr, got RC=$RC ERR=$(cat "$TMP/e6f")"; fi
+  done
+
+  # 6g. A non-ASCII letter (UTF-8 lead byte 0xC3) is not a control character.
+  RUN_SEQ=$((RUN_SEQ+1))
+  OUT="$(env HERDR_ENV=1 HERDR_BIN="$FAKE" XDG_STATE_HOME="$TMP/xdg/state" XDG_CONFIG_HOME="$TMP/xdg/config" \
+    bash "$SCRIPT" worker "$TMP/reports/caf"$'\xc3\xa9'"-"$'\xc3\x85'".md" 2>"$TMP/e6g")"; RC=$?
+  if [[ $RC -eq 0 ]] && ! grep -q "control character" "$TMP/e6g"; then
+    pass; else fail "non-ASCII path: expected it to be asked, got RC=$RC ERR=$(cat "$TMP/e6g")"; fi
 
   # 7. Outside Herdr.
   OUT="$(env -u HERDR_ENV HERDR_BIN="$FAKE" bash "$SCRIPT" worker "$REPORT" 2>"$TMP/e7")"; RC=$?
