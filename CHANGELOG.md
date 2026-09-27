@@ -1,7 +1,5 @@
 # Changelog
 
-## 0.3.295 — 2026-09-27
-
 ### Fixed
 
 - **Four hardening edges from #491's final review (#493).**
@@ -38,6 +36,10 @@
   re-sorted inside functional commit 418bab3, is already merged and needs no
   change; it stays recorded so the next edit to that list lands its formatting
   in a commit of its own.
+
+## 0.3.295 — 2026-09-27
+
+### Fixed
 
 - **`standup-ask.sh` measures the worker's live pane before asking (#515).**
   The script capped the report path at 100 characters and claimed the
