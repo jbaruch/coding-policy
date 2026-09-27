@@ -27,10 +27,13 @@
 #           `timeout` convention); 125 on a usage error, a missing python3, or
 #           a command that could not be started.
 #   signal: SIGALRM ends the budget now. It is blocked until the command is
-#           launched and the alarm armed, so an expiry at any point stops the
-#           command's whole process group and exits 124, never a traceback.
+#           launched and the alarm armed, and blocked again before the alarm
+#           is cancelled, so an expiry at any point stops the command's whole
+#           process group and exits 124, never a traceback.
 #   env   : BOUNDED_RUN_TEST_EXPIRE_BEFORE_LAUNCH=1 (tests only) delivers the
-#           expiry before the command is launched.
+#           expiry before the command is launched;
+#           BOUNDED_RUN_TEST_EXPIRE_AFTER_EXIT=1 (tests only) delivers it
+#           after the command exits, before the alarm is cancelled.
 set -euo pipefail
 
 #: Seconds between SIGTERM and SIGKILL once the budget is spent.
@@ -106,6 +109,13 @@ try:
     signal.alarm(budget)
     signal.pthread_sigmask(signal.SIG_UNBLOCK, ALARM)
     code = child.wait()
+    if os.environ.get("BOUNDED_RUN_TEST_EXPIRE_AFTER_EXIT") == "1":
+        # Test seam: an expiry that lands as the command exits.
+        os.kill(os.getpid(), signal.SIGALRM)
+    # Cancelled inside the handler's reach: an expiry landing after the wait
+    # but before this is still stopped here, never a traceback.
+    signal.pthread_sigmask(signal.SIG_BLOCK, ALARM)
+    signal.alarm(0)
 except Expired:
     signal.signal(signal.SIGALRM, signal.SIG_IGN)
     signal_group(signal.SIGTERM)
@@ -125,7 +135,6 @@ except Expired:
     sys.stderr.write("bounded-run: {} ran past its {}s budget and was stopped — run it by hand to see where it waits\n".format(
         os.path.basename(command[0]), budget))
     sys.exit(124)
-signal.alarm(0)
 # A command killed by a signal exits 128 + that signal, as a shell reports it.
 sys.exit(code if code >= 0 else 128 - code)
 PY
