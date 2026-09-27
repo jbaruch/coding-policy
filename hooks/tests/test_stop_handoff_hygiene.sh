@@ -25,6 +25,8 @@
 #          prune-worktrees.sh (case 4 names prune-worktrees.sh outside Herdr).
 #      4e. A shared checkout whose name ends in a newline -> still blocks.
 #      4f. A finding naming a newline-bearing path -> reported whole.
+#      4g. HERDR_ENV set, role probes fail (git shim) -> no worktree check,
+#          a skip report naming the diagnostic command; diagnostics still gate.
 #   5. Dirty tree only -> allow (report-only, not a block).
 #   6. Diag finding    -> block; changed uncommitted .sh with a failing engine.
 #   7. Diag clean      -> changed uncommitted .sh, engines clean -> no diag block.
@@ -293,6 +295,40 @@ main() {
   run_hook "$TMP/r4" '{"stop_hook_active":false}' "$PATH" HERDR_ENV=1
   if [[ $RC -eq 0 ]] && reason_has "r4-wt" && reason_has "sweep-worktrees.sh" && ! reason_has "prune-worktrees.sh"; then
     pass; else fail "foreman session: expected the worktree block naming the sweep, got RC=$RC OUT=$OUT ERR=$ERRTEXT"; fi
+
+  # 4g. HERDR_ENV set and the role probes fail (a git shim on PATH refuses
+  #     them): the role is unknown, so the foreman-only worktree check never
+  #     runs, even from the main checkout holding case 4's spent worktree. The
+  #     hook says why and names the diagnostic command.
+  local realgit shim probe
+  realgit="$(command -v git)" || die "no git on PATH"
+  for probe in both common; do
+    shim="$TMP/shim4g-$probe"
+    mkdir -p "$shim" || die "could not create $shim"
+    if [[ "$probe" == both ]]; then
+      # shellcheck disable=SC2016  # the shim's own "$@"/"$a" must stay literal in its source
+      printf '#!/usr/bin/env bash\nfor a in "$@"; do case "$a" in --absolute-git-dir|--git-common-dir) echo "shim: role probe refused" >&2; exit 1 ;; esac; done\nexec %q "$@"\n' "$realgit" > "$shim/git" \
+        || die "could not write the git shim"
+    else
+      # shellcheck disable=SC2016  # the shim's own "$@"/"$a" must stay literal in its source
+      printf '#!/usr/bin/env bash\nfor a in "$@"; do case "$a" in --git-common-dir) echo "shim: role probe refused" >&2; exit 1 ;; esac; done\nexec %q "$@"\n' "$realgit" > "$shim/git" \
+        || die "could not write the git shim"
+    fi
+    chmod +x "$shim/git" || die "could not make the git shim executable"
+    run_hook "$TMP/r4" '{"stop_hook_active":false}' "$shim:$PATH" HERDR_ENV=1
+    if [[ $RC -eq 0 && -z "$OUT" ]] \
+       && [[ "$ERRTEXT" == *"Worktree and branch check skipped"* ]] \
+       && [[ "$ERRTEXT" == *"\`git rev-parse --absolute-git-dir --path-format=absolute --git-common-dir\`"* ]] \
+       && [[ "$ERRTEXT" != *r4-wt* && "$ERRTEXT" != *"worktree check could not"* ]]; then
+      pass; else fail "unknown role ($probe probe fails): expected no worktree check and a skip report, got RC=$RC OUT=$OUT ERR=$ERRTEXT"; fi
+  done
+  # The unknown role still gates the session's own changed files.
+  # shellcheck disable=SC2016  # The literal `$x` IS the fixture.
+  printf 'if [ $x = 1 ]; then :; fi\n' > "$TMP/r4/bad.sh" || die "r4 bad.sh failed"
+  run_hook "$TMP/r4" '{"stop_hook_active":false}' "$TMP/shim4g-both:$PATH" HERDR_ENV=1
+  if [[ $RC -eq 0 ]] && reason_has "shellcheck findings" && reason_has "Worktree and branch check skipped" && ! reason_has "r4-wt"; then
+    pass; else fail "unknown role diagnostics: expected a diagnostics block without the worktree finding, got RC=$RC OUT=$OUT ERR=$ERRTEXT"; fi
+  rm -f "$TMP/r4/bad.sh" || die "r4 bad.sh cleanup failed"
 
   # 5. dirty tree only -> allow (report-only).
   mk_origin o5; clone_from "$BARE" "$TMP/r5"
