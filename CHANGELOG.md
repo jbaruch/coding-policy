@@ -1,7 +1,5 @@
 # Changelog
 
-## 0.3.295 — 2026-09-27
-
 ### Fixed
 
 - **The foreman reset deliverer types only into the foreman's bound native
@@ -39,6 +37,10 @@
   Enter, an unresolvable transcript path, the migration rewrite, and the
   CLI end to end; the unfixed deliverer typed `/clear` and the resume prompt
   into the replacement session.
+
+## 0.3.295 — 2026-09-27
+
+### Fixed
 
 - **`standup-ask.sh` measures the worker's live pane before asking (#515).**
   The script capped the report path at 100 characters and claimed the
