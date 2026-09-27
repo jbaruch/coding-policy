@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.290 — 2026-09-27
+
 ### Fixed
 
 - **`evaluate.sh` reads the default corpus under the home guard (#537).**
