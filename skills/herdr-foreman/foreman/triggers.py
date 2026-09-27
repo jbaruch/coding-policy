@@ -440,8 +440,13 @@ def run_command(args, runner=None):
     common = ["diff", "--no-renames", *span]
     changes = parse_name_status(run([*common, "--name-status", "-z"]))
     churn = parse_numstat(run([*common, "--numstat", "-z"]))
+    writes = plan is None or plan["writes_repository"]
     untracked = {}
-    if not head:
+    # Untracked files are a working tree's added surface. A round that writes
+    # nothing has no surface for them to belong to, so they are never read:
+    # an unreadable or oversized scratch file in the shared checkout must not
+    # refuse an investigation it plays no part in (#499).
+    if not head and writes:
         collect_untracked(run, args.repo, changes, churn, untracked)
     planned_lines = {}
     if plan is not None:
@@ -461,13 +466,13 @@ def run_command(args, runner=None):
             # path that is also a trust boundary fires security too; validating
             # it and classifying nothing let UX and product answer for both.
             changes.setdefault(path, "M")
-    writes = plan is None or plan["writes_repository"]
     if not writes:
         # An investigation touches no repository surface, so it has nothing to
         # declare and every trigger is quiet by construction. The claim is
         # checkable rather than asserted: the seats are the read-only ones, and
-        # a diff on the tree contradicts it (#471).
-        tracked = sorted(set(changes) - set(untracked))
+        # a tracked diff on the tree contradicts it (#471). Untracked files were
+        # never collected, so `changes` holds the tracked diff alone.
+        tracked = sorted(changes)
         if tracked:
             raise UsageError("This round declares writes_repository false, but its tracked diff is not empty: {}. Evidence outranks intent -- declare the surfaces the work touches, or classify the round that produced them.".format(
                 ", ".join(tracked[:5])), {})
@@ -476,9 +481,6 @@ def run_command(args, runner=None):
         if not set(roles) <= READ_ONLY_ROLES:
             raise UsageError("Only {} write no repository content; this round seats {} and cannot declare writes_repository false.".format(
                 ", ".join(sorted(READ_ONLY_ROLES)), ", ".join(sorted(set(roles) - READ_ONLY_ROLES))), {})
-        # Untracked scratch in the shared checkout is not this round's surface:
-        # it passed the refusal above, and it must not fire a trigger either.
-        changes, churn, untracked = {}, {}, {}
     # An empty plan classifies exactly as much as an absent one, so the guard
     # reads the combined inputs rather than the plan's presence: a vacuous
     # success here is the silence the triggers exist to end (#415).
