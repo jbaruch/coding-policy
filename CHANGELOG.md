@@ -27,8 +27,9 @@
   new session, pins it, and every resume-prompt keystroke must find the
   pinned session; a replacement after the clear is refused the same way, and
   a new session counts as the clear's only while the pane's foreground
-  processes are the ones the first keystroke found (the clear keeps its
-  process, a replacement is a new one), and
+  processes are the ones the first keystroke found, compared by pid, start
+  time and command line (the clear keeps its process; a replacement is a new
+  one, or a reused pid or an exec in place that changes them), and
   a clear that starts no new session stops the reset
   (`clear_session_unchanged`). The reset record moves
   to schema 2 (`skills/herdr-foreman/state-schema.md` Foreman Reset Record);

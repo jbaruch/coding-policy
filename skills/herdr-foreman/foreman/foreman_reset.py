@@ -45,7 +45,8 @@ for Herdr to report that new session, pins it, and every keystroke of the
 resume prompt refuses unless the pane still holds the pinned session. A new
 session alone cannot tell the clear's from a replacement's, so the pin also
 requires the pane's foreground processes to be the ones the first keystroke
-found: the clear keeps its process, and a replacement is a new one.
+found, by pid, start time and command line: the clear keeps its process, and a
+replacement is a new one.
 """
 
 import copy
@@ -761,19 +762,27 @@ def mechanics(agents, kind, name):
     return foreman
 
 
-def foreground_pids(client, pane_id):
-    """The pane's foreground process ids, sorted, or None when Herdr reports none usable."""
+def foreground_processes(client, pane_id):
+    """The pane's foreground processes as identities, or None when Herdr reports none usable.
+
+    Each is `supervision_runtime.process_identity`: the pid with a digest of
+    its start time and command line, so a reused pid or a process that
+    exec'd in place reads as another process.
+    """
     info = client.pane_process_info(pane_id)
     processes = info.get("foreground_processes") if isinstance(info, dict) else None
     if not isinstance(processes, list) or not processes:
         return None
-    pids = []
+    identities = []
     for process in processes:
         pid = process.get("pid") if isinstance(process, dict) else None
         if type(pid) is not int or pid <= 0:
             return None
-        pids.append(pid)
-    return sorted(pids)
+        identity = process_identity(pid)
+        if identity is None:
+            return None
+        identities.append(identity)
+    return sorted(identities, key=lambda identity: (identity["pid"], identity["identity"]))
 
 
 def _cleared_session(client, pane_id, before, processes, *, sleep, clock,
@@ -790,7 +799,7 @@ def _cleared_session(client, pane_id, before, processes, *, sleep, clock,
     while True:
         current = pane_session(client, pane_id)
         if current is not None and current != before:
-            if foreground_pids(client, pane_id) != processes:
+            if foreground_processes(client, pane_id) != processes:
                 raise SessionChanged("The foreman's pane {} holds a new native session under another process after the "
                                      "clear, so it is not the session the clear started and the resume prompt was not "
                                      "sent. {}".format(pane_id, OPERATOR_RECOVERY),
@@ -871,7 +880,7 @@ def deliver(client, agents, pane_id, stow, state, *, native_session, still_ready
                 "" if expected[0] is not None else " (this reset recorded none)", OPERATOR_RECOVERY),
                 {"pane_id": pane_id, "reason": "native_session_changed"})
         if not processes:
-            found = foreground_pids(client, pane_id)
+            found = foreground_processes(client, pane_id)
             if found is None:
                 raise HerdrError("Herdr reports no foreground process for the foreman's pane {}, so the clear could not be "
                                  "tied to it; nothing was sent. {}".format(pane_id, OPERATOR_RECOVERY), {"pane_id": pane_id})

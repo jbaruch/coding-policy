@@ -147,16 +147,23 @@ class ResumePromptRunsTest(unittest.TestCase):
 
 
 class FakeClient:
-    def __init__(self, statuses, kind="claude", sessions=None, pids=None):
+    def __init__(self, statuses, kind="claude", sessions=None, pids=None, starts=None):
         self.statuses, self.kind, self.waits = list(statuses), kind, []
         # The foreground pid each `pane process-info` reports in turn, last repeating.
         self.pids = list(pids or [4242])
+        # The start-and-command digest each identity probe reports in turn, last repeating.
+        self.starts = list(starts or ["started-once"])
         # A scripted list is what each `pane get` reports in turn, last one
         # repeating; unscripted, the pane holds the bound session until the
         # clear is consumed, then the new one the clear started.
         self.sessions = list(sessions) if sessions is not None else None
         self.cleared = False
         self.keystrokes = []
+
+    def identify(self, pid):
+        """Stands in for supervision_runtime.process_identity, which reads `ps`."""
+        start = self.starts.pop(0) if len(self.starts) > 1 else self.starts[0]
+        return {"pid": pid, "identity": start}
 
     # Slash delivery runs the real client code, so its guards and submits
     # fire exactly where production fires them.
@@ -232,7 +239,8 @@ class DeliverTest(unittest.TestCase):
             return {"landed": landed, "started": landed if started is None else started}
 
         with patch("foreman.foreman_reset.send_command", side_effect=command), \
-             patch("foreman.foreman_reset.send_message", side_effect=message):
+             patch("foreman.foreman_reset.send_message", side_effect=message), \
+             patch("foreman.foreman_reset.process_identity", side_effect=client.identify):
             # Shipped Codex config takes two Enters; the first can only accept autocomplete.
             result = foreman_reset.deliver(client, [worker("codex-a", "codex", enters=2),
                                                     worker("claude-a", "claude", delivery=claude_delivery)], PANE, "round-7",
@@ -444,6 +452,13 @@ class DeliverTest(unittest.TestCase):
         self.assertEqual(client.keystrokes, ["/clear", "enter"])
         self.assertEqual(foreman_reset.failure(caught.exception, "round-7", "/s.json")["details"]["reason"],
                          "native_session_changed")
+
+    def test_a_replacement_that_reuses_the_pid_gets_no_resume_prompt(self):
+        # Same pid, another start and command line: a process that exec'd in place.
+        client = FakeClient(["idle"], starts=["started-once", "exec-in-place"])
+        with self.assertRaisesRegex(foreman_reset.SessionInterrupted, "under another process"):
+            self.run_deliver(client)
+        self.assertEqual(client.keystrokes, ["/clear", "enter"])
 
     def test_a_pane_with_no_foreground_process_gets_no_keystroke(self):
         client = FakeClient(["idle"], pids=[None])
