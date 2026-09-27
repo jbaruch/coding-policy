@@ -3,6 +3,7 @@
 import fcntl
 import io
 import json
+import re
 import sys
 import tempfile
 import unittest
@@ -11,7 +12,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from foreman import home
+from foreman import home, runnable
 from foreman.cli import main
 from foreman.errors import StateError, UsageError
 
@@ -135,7 +136,7 @@ class MigrateTest(HomeCase):
     def test_a_failed_link_names_the_partial_move_and_a_rerun_finishes_it(self):
         self.legacy_home()
         with mock.patch.object(home.os, "symlink", side_effect=OSError(30, "read-only")):
-            with self.assertRaisesRegex(StateError, "run migrate-home again to finish"):
+            with self.assertRaisesRegex(StateError, re.escape("run `{}` again to finish".format(runnable.command("migrate-home")))):
                 home.migrate(self.env)
         self.assertTrue((self.state_root / "foreman").is_dir())
         self.assertFalse((self.state_root / "teamlead").exists())
