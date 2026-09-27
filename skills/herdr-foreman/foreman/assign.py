@@ -225,45 +225,60 @@ def freeze_paths(paths):
         data = _read_source(directory / Path(source).name, source)
         digest = hashlib.sha256(data).hexdigest()
         target = directory / FROZEN_DIR / "{}.{}{}".format(Path(source).stem, digest[:16], Path(source).suffix)
-        try:
-            target.parent.mkdir(parents=True, exist_ok=True)
-        except OSError as exc:
-            raise UsageError("Cannot create {} beside brief {}: {}. Make its directory writable and re-run.".format(
-                target.parent, source, exc.strerror or str(exc)), {"path": str(target.parent)}) from None
-        _require_frozen_dir(target.parent)
-        try:
-            with open(target, "xb") as handle:
-                handle.write(data)
-        except FileExistsError:
-            pass
-        except OSError as exc:
-            raise UsageError("Cannot freeze brief {} at {}: {}. Make its directory writable and re-run.".format(
-                source, target, exc), {"path": str(target)}) from None
-        # Inspected outside the `except` above: an error raised inside a
+        _write_frozen(target, data, source)
+        # Inspected apart from the write's handlers: an error raised inside a
         # handler never reaches a sibling handler, so it would escape as a
         # traceback (#460). A fresh copy is read back too, through the same
-        # link-refusing walk the gate uses, so an ancestor retargeted between
-        # the canonical lookup and the write is refused here (#554).
+        # link-refusing walk the gate uses (#554).
         _require_frozen_copy(target, digest)
         frozen[key] = str(target)
     return frozen
 
 
-def _require_frozen_dir(directory):
-    """Refuse a `FROZEN_DIR` that is a link or not a directory.
+def _write_frozen(target, data, source):
+    """Create `target` exclusively, every directory on its way opened without following a link.
 
-    A symlinked directory would place frozen copies, and the gate's later
-    read of them, somewhere outside the source's own directory that nothing
-    keeps immutable (#460).
+    An existing `target` is left untouched for `_require_frozen_copy` to judge.
+    Creating by pathname would follow an ancestor swapped for a link after the
+    canonical lookup, and write the brief into another source's directory
+    before any read-back could refuse it (#554). A `FROZEN_DIR` that is a link
+    would place copies somewhere nothing keeps immutable (#460).
     """
+    directory = target.parent
+    open_failed = "Cannot create {} beside brief " + str(source) + ": {}. Make its directory writable and re-run."
+    parent = _open_directory_unlinked(directory, open_failed, _FROZEN_LINKED)
     try:
-        status = os.lstat(directory)
+        try:
+            os.mkdir(FROZEN_DIR, dir_fd=parent)
+        except FileExistsError:
+            pass
+        frozen_dir = os.open(FROZEN_DIR, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=parent)
     except OSError as exc:
-        raise UsageError("Cannot inspect frozen-brief directory {}: {}. Restore it or move it aside and re-run."
-                         .format(directory, exc.strerror or str(exc)), {"path": str(directory)}) from None
-    if not stat.S_ISDIR(status.st_mode):
-        raise UsageError("Frozen-brief directory {} is a link or not a directory; move it aside and re-run so the "
-                         "freeze writes real copies beside the source.".format(directory), {"path": str(directory)})
+        if exc.errno in (errno.ELOOP, errno.ENOTDIR):
+            raise UsageError("Frozen-brief directory {} is a link or not a directory; move it aside and re-run so "
+                             "the freeze writes real copies beside the source.".format(directory),
+                             {"path": str(directory)}) from None
+        raise UsageError(open_failed.format(directory, exc.strerror or str(exc)), {"path": str(directory)}) from None
+    finally:
+        os.close(parent)
+    try:
+        fd = os.open(target.name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o666, dir_fd=frozen_dir)
+    except FileExistsError:
+        return
+    except OSError as exc:
+        raise UsageError("Cannot freeze brief {} at {}: {}. Make its directory writable and re-run.".format(
+            source, target, exc.strerror or str(exc)), {"path": str(target)}) from None
+    finally:
+        os.close(frozen_dir)
+    try:
+        view = memoryview(data)
+        while view:
+            view = view[os.write(fd, view):]
+    except OSError as exc:
+        raise UsageError("Cannot freeze brief {} at {}: {}. Make its directory writable and re-run.".format(
+            source, target, exc.strerror or str(exc)), {"path": str(target)}) from None
+    finally:
+        os.close(fd)
 
 
 _FROZEN_OPEN_FAILED = "Cannot open frozen brief {}: {}. Restore its readability or move it aside and re-run."

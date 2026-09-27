@@ -116,17 +116,17 @@ class FreezeLinkTest(FreezeTest):
             return re.search(r"\.[0-9a-f]{16}\.md$", str(name)) is not None
 
         for error in (FileNotFoundError(2, "No such file or directory"), PermissionError(13, "Permission denied")):
-            def failing_open(name, *args, error=error, **kwargs):
-                if is_copy(name):
+            def failing_open(name, flags, *args, error=error, **kwargs):
+                if is_copy(name) and not flags & os.O_CREAT:
                     raise error
-                return real_open(name, *args, **kwargs)
+                return real_open(name, flags, *args, **kwargs)
             with self.subTest(error=type(error).__name__), patch("foreman.assign.os.open", side_effect=failing_open):
                 with self.assertRaisesRegex(UsageError, "Cannot open frozen brief .*: {}. Restore".format(error.strerror)):
                     freeze_paths(self.paths)
 
-        def tracking_open(name, *args, **kwargs):
-            descriptor = real_open(name, *args, **kwargs)
-            if is_copy(name):
+        def tracking_open(name, flags, *args, **kwargs):
+            descriptor = real_open(name, flags, *args, **kwargs)
+            if is_copy(name) and not flags & os.O_CREAT:
                 copies.add(descriptor)
             return descriptor
 
@@ -212,6 +212,25 @@ class FrozenPathTest(unittest.TestCase):
             (self.root / "source").symlink_to(moved)
             with self.assertRaisesRegex(UsageError, "passes through {}, which became a link".format(self.root / "source")):
                 freeze_paths({"brief": str(self.root / "source" / "brief.md")})
+
+    def test_a_freeze_directory_swapped_for_a_link_writes_nothing_there(self):
+        # Resolved while real, then source swapped for a link to other before
+        # the write: the brief must not land in other's .dispatched.
+        from foreman import assign
+        moved = self.root / "moved"
+        before = sorted((self.root / "other" / FROZEN_DIR).iterdir())
+        real_read = assign._read_source
+
+        def read_then_swap(canonical, given):
+            data = real_read(canonical, given)
+            (self.root / "source").rename(moved)
+            (self.root / "source").symlink_to(self.root / "other")
+            return data
+        with patch("foreman.assign.os.path.realpath", return_value=str(self.root / "source")), \
+                patch("foreman.assign._read_source", side_effect=read_then_swap):
+            with self.assertRaisesRegex(UsageError, "passes through {}, which is a link".format(self.root / "source")):
+                freeze_paths({"brief": str(self.root / "source" / "brief.md")})
+        self.assertEqual(sorted((self.root / "other" / FROZEN_DIR).iterdir()), before)
 
     def test_a_fifo_source_is_refused_without_hanging(self):
         fifo = self.root / "source" / "fifo.md"
