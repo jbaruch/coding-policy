@@ -13,12 +13,12 @@ Each logical fenced line (backslash continuations joined) is tokenized with
 `shlex` in POSIX mode, so quotes, escapes and operators are the shell's, not a
 regex's. Comments are dropped, and each command or process substitution
 outside single quotes is lifted out first and scanned as a command line of its
-own. A command position is the
-first token, or the one after an operator. Leading `NAME=value` assignments,
-redirections with their targets, the keywords and braces in `KEYWORDS`, and the
-wrappers in `WRAPPERS` with their assignments, their options and the values
-those options take are skipped. A token there ending in `.sh` or `.py` is a
-bare invocation. A line `shlex` cannot tokenize is reported, never skipped.
+own, as is the operand of a shell's `-c` or `env -S`. A command position is
+the first token, or the one after an operator. Leading `NAME=value`
+assignments, redirections with their targets, the keywords and braces in
+`KEYWORDS`, and the wrappers in `WRAPPERS` with their assignments, their
+options and the values those options take are skipped. A token there ending in
+`.sh` or `.py` is a bare invocation. A line `shlex` cannot tokenize is reported, never skipped.
 """
 
 import re
@@ -73,6 +73,9 @@ QUERIES = {"command": frozenset({"-v", "-V"})}
 
 #: `env` options whose value is itself a command line, split and run.
 SPLIT_STRING = frozenset({"-S", "--split-string"})
+
+#: Shells whose `-c` operand is a command line of its own.
+SHELLS = frozenset({"bash", "sh", "zsh"})
 
 
 def shell_blocks(text):
@@ -209,6 +212,12 @@ def bare_invocations(line):
             continue
         if ASSIGNMENT.match(token) or token in KEYWORDS:
             continue
+        if token in SHELLS and index < len(words) and words[index] == "-c":
+            operand = words[index + 1] if index + 1 < len(words) else ""
+            found.extend(bare_invocations(operand))
+            index += 2
+            expecting, wrapper = False, None
+            continue
         if wrapper == "env" and (token in SPLIT_STRING or token.startswith("--split-string=")):
             if "=" in token:
                 operand = token.split("=", 1)[1]
@@ -277,6 +286,8 @@ class BareInvocationDetectorTest(unittest.TestCase):
             ("sudo --user=runner skills/x/run.sh", ["skills/x/run.sh"]),
             ("env -S 'skills/x/run.sh --flag'", ["skills/x/run.sh"]),
             ("env --split-string='skills/x/run.sh'", ["skills/x/run.sh"]),
+            ("bash -c 'skills/x/run.sh --flag'", ["skills/x/run.sh"]),
+            ('sh -c "cd /tmp && skills/x/run.sh"', ["skills/x/run.sh"]),
             (">out skills/x/run.sh", ["skills/x/run.sh"]),
             ("2>/dev/null skills/x/run.sh", ["skills/x/run.sh"]),
         ):
@@ -301,6 +312,7 @@ class BareInvocationDetectorTest(unittest.TestCase):
             "command -v skills/x/run.sh",
             "command -V skills/x/run.sh",
             "env -S 'bash skills/x/run.sh'",
+            "bash -c 'bash skills/x/run.sh'",
             "echo 'literal `skills/x/run.sh`'",
             "echo '$(skills/x/run.sh)'",
             "bash a.sh  # then $(skills/x/run.sh) or `skills/x/run.sh`",
