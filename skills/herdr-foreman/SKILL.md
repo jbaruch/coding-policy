@@ -385,6 +385,20 @@ CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"
 bash "$CP/skills/herdr-foreman/sweep-worktrees.sh" "$HOME/.worktrees"
 ```
 
+Input is the worktree root. It removes the spent worktrees and local branches
+of every repository with a worktree under that root. Stdout is one JSON
+object whose `report` is the operator-facing summary; the full shape is the
+script's top-of-file contract.
+
+- **Exit 0** — every repository decided cleanly. Relay `report`, raise each
+  `dirty` or `unpushed` item it lists, and continue.
+- **Exit 2** — JSON is present; at least one repository's prune failed or a
+  path could not be read, and every other repository still ran. Relay
+  `report` (its failure and error lines name each one), repair what they
+  name, then run the sweep again.
+- **Exit 1** — no JSON; a precondition is unmet. Report the stderr
+  diagnostic, repair what it names, then run the sweep again.
+
 The removal predicates live in `skills/herdr-foreman/prune-worktrees.sh`
 (top-of-file docstring).
 
