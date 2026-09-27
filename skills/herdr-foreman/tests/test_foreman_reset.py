@@ -147,8 +147,10 @@ class ResumePromptRunsTest(unittest.TestCase):
 
 
 class FakeClient:
-    def __init__(self, statuses, kind="claude", sessions=None):
+    def __init__(self, statuses, kind="claude", sessions=None, pids=None):
         self.statuses, self.kind, self.waits = list(statuses), kind, []
+        # The foreground pid each `pane process-info` reports in turn, last repeating.
+        self.pids = list(pids or [4242])
         # A scripted list is what each `pane get` reports in turn, last one
         # repeating; unscripted, the pane holds the bound session until the
         # clear is consumed, then the new one the clear started.
@@ -177,6 +179,11 @@ class FakeClient:
             value = self.sessions.pop(0) if len(self.sessions) > 1 else self.sessions[0]
         return {"pane_id": pane_id, "agent_session": {"source": "herdr:" + self.kind, "agent": self.kind,
                                                       "kind": "id", "value": value}}
+
+    def pane_process_info(self, pane_id):
+        pid = self.pids.pop(0) if len(self.pids) > 1 else self.pids[0]
+        foreground = [] if pid is None else [{"pid": pid, "name": self.kind}]
+        return {"pane_id": pane_id, "shell_pid": 100, "foreground_processes": foreground}
 
     def agent_list(self):
         status = self.statuses.pop(0) if len(self.statuses) > 1 else self.statuses[0]
@@ -428,6 +435,22 @@ class DeliverTest(unittest.TestCase):
         result, calls = self.run_deliver(client)
         self.assertEqual([call[0] for call in calls], ["command", "message"])
         self.assertTrue(result["cleared"])
+
+    def test_a_replacement_before_the_clear_session_is_pinned_gets_no_resume_prompt(self):
+        # The new session appears under another process: a replacement, not the clear.
+        client = FakeClient(["idle"], pids=[4242, 5151])
+        with self.assertRaisesRegex(foreman_reset.SessionInterrupted, "under another process") as caught:
+            self.run_deliver(client)
+        self.assertEqual(client.keystrokes, ["/clear", "enter"])
+        self.assertEqual(foreman_reset.failure(caught.exception, "round-7", "/s.json")["details"]["reason"],
+                         "native_session_changed")
+
+    def test_a_pane_with_no_foreground_process_gets_no_keystroke(self):
+        client = FakeClient(["idle"], pids=[None])
+        with self.assertRaisesRegex(HerdrError, "no foreground process") as caught:
+            self.run_deliver(client)
+        self.assertNotIsInstance(caught.exception, foreman_reset.DeliveryInterrupted)
+        self.assertEqual(client.keystrokes, [])
 
     def test_a_pasted_clear_is_submitted_by_its_paste(self):
         client = FakeClient(["idle"], sessions=[SESSION["value"], "33333333-3333-4333-8333-333333333333"])

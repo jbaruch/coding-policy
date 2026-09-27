@@ -42,7 +42,10 @@ clear command, extra Enters included, refuses unless the pane still holds that
 session.
 The clear itself starts a new native session by design. The deliverer waits
 for Herdr to report that new session, pins it, and every keystroke of the
-resume prompt refuses unless the pane still holds the pinned session.
+resume prompt refuses unless the pane still holds the pinned session. A new
+session alone cannot tell the clear's from a replacement's, so the pin also
+requires the pane's foreground processes to be the ones the first keystroke
+found: the clear keeps its process, and a replacement is a new one.
 """
 
 import copy
@@ -758,18 +761,37 @@ def mechanics(agents, kind, name):
     return foreman
 
 
-def _cleared_session(client, pane_id, before, *, sleep, clock,
+def foreground_pids(client, pane_id):
+    """The pane's foreground process ids, sorted, or None when Herdr reports none usable."""
+    info = client.pane_process_info(pane_id)
+    processes = info.get("foreground_processes") if isinstance(info, dict) else None
+    if not isinstance(processes, list) or not processes:
+        return None
+    pids = [process.get("pid") if isinstance(process, dict) else None for process in processes]
+    if not all(type(pid) is int and pid > 0 for pid in pids):
+        return None
+    return sorted(pids)
+
+
+def _cleared_session(client, pane_id, before, processes, *, sleep, clock,
                      budget_sec=CLEAR_SESSION_BUDGET_SEC, poll_sec=CLEAR_SESSION_POLL_SEC):
     """The new native session the clear started, once Herdr reports it for the pane.
 
     A pane still reporting the bound session, or none, is polled until the
     budget is spent; the clear then proved no new session, and nothing
-    further is sent.
+    further is sent. A new session is the clear's only while the pane's
+    foreground processes are still `processes`, the ones found before the
+    first keystroke; any other is a replacement, refused like a changed session.
     """
     deadline = clock() + budget_sec
     while True:
         current = pane_session(client, pane_id)
         if current is not None and current != before:
+            if foreground_pids(client, pane_id) != processes:
+                raise SessionChanged("The foreman's pane {} holds a new native session under another process after the "
+                                     "clear, so it is not the session the clear started and the resume prompt was not "
+                                     "sent. {}".format(pane_id, OPERATOR_RECOVERY),
+                                     {"pane_id": pane_id, "reason": "native_session_changed"})
             return current
         if clock() >= deadline:
             raise HerdrError("The foreman's pane {} reported no new native session within {}s of the clear, so the resume "
@@ -826,6 +848,8 @@ def deliver(client, agents, pane_id, stow, state, *, native_session, still_ready
     # submitted; Codex's first only accepts autocomplete), then the new one
     # the clear started, once Herdr reports it.
     expected = [native_session]
+    # The foreground processes the first keystroke found; the clear keeps them.
+    processes = []
 
     def guard():
         # The stow and the pane are both re-read right before every keystroke.
@@ -843,6 +867,12 @@ def deliver(client, agents, pane_id, stow, state, *, native_session, still_ready
                 pane_id, "its supervision binding recorded" if expected[0] is native_session else "the clear started",
                 "" if expected[0] is not None else " (this reset recorded none)", OPERATOR_RECOVERY),
                 {"pane_id": pane_id, "reason": "native_session_changed"})
+        if not processes:
+            found = foreground_pids(client, pane_id)
+            if found is None:
+                raise HerdrError("Herdr reports no foreground process for the foreman's pane {}, so the clear could not be "
+                                 "tied to it; nothing was sent. {}".format(pane_id, OPERATOR_RECOVERY), {"pane_id": pane_id})
+            processes.append(found)
         typed.append(True)
 
     try:
@@ -853,7 +883,7 @@ def deliver(client, agents, pane_id, stow, state, *, native_session, still_ready
                 agent.clear_prompt, agent.kind, pane_id, OPERATOR_RECOVERY), {"pane_id": pane_id})
         client.agent_wait(agent.name, until=SETTLE_STATES, timeout_ms=DEFAULT_SETTLE_TIMEOUT_MS)
         sleep(settle_sec)
-        expected[0] = _cleared_session(client, pane_id, native_session, sleep=sleep, clock=clock)
+        expected[0] = _cleared_session(client, pane_id, native_session, processes[0], sleep=sleep, clock=clock)
         landing = send_message(client, agent, resume_prompt(stow, state, **(options or {})), RESUME_OPENING, pane_id=pane_id, sleep=sleep, warn=warn,
                                settle_sec=settle_sec, before_input=guard)
         if not (landing["landed"] and landing["started"]):
