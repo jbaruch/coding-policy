@@ -1,62 +1,57 @@
 #!/usr/bin/env bash
-# Report worktrees holding work that nothing in git preserves, at session start.
+# Clean this session's repository at session start; report what only the
+# operator can decide.
 #
-# The safety net under skills/release/check-leftovers.sh. That script gates the
-# release flow, which catches a leftover the next time someone ships; this
-# catches it the next time someone opens a session, whichever comes first. A
-# pane-label change sat uncommitted for nine days with neither in place, on a
-# branch that read as merged.
+# Worktrees and branches pile up faster than anyone removes them by hand. This
+# hook runs the two owner scripts for the session's repository, live, so
+# everything recoverable from origin goes without a word: idle clean worktrees
+# origin holds, local branches origin holds or merged, and branches on origin
+# merged with no open pull request. The decisions are the owner scripts', never
+# this hook's (rules/script-as-black-box.md):
+#   - skills/herdr-foreman/prune-worktrees.sh — worktrees and local branches
+#   - skills/herdr-foreman/prune-remote-branches.sh — branches on origin
+# What they keep because it exists nowhere else is listed for the operator:
+# idle dirty or unpushed worktrees, idle local branches with unpushed commits,
+# and stale branches on origin merged nowhere with no pull request. Nothing
+# else is listed: no removals, no counts, no other repository.
 #
-# Detection is not reimplemented here. The release script owns the predicate and
-# this hook reads its JSON, so the two cannot drift into disagreeing about what
-# a leftover is. The hook reports only the "abandoned" verdict -- work in
-# progress is what a session is for, and a hook that nags about it gets turned
-# off.
-#
-# Complementary to hooks/stop-handoff-hygiene.sh, which covers the inverse case
-# and must not be folded into this one. That hook lists worktrees safe to
-# REMOVE, so its `worktree_is_spent` returns early with SPENT_REASON="dirty" and
-# a dirty worktree is deliberately left out of the report -- correct for its
-# purpose, telling nobody to delete a tree holding work. Its separate dirty-tree
-# line runs a bare `git status`, so it sees the current worktree alone. Between
-# them a dirty OTHER worktree is the one state neither reports, and it is the
-# only state where work exists that git does not hold.
-#
-# Design choices, shared with hooks/check-git-sync.sh:
-#   - It DOES something (runs the detector), it does not re-state a rule.
-#   - SessionStart fires once per session, not per turn — no per-turn tax.
-#   - No network and no `gh`: the predicate is three local git signals.
-#   - Informative only. Never blocks (always exits 0), never exits 2.
+# Never acts in a Herdr worker session (HERDR_ENV set, even empty, in a
+# linked worktree): workers never delete (rules/agent-team-operation.md
+# Writers and Checkouts). In portable mode (SESSION_START_MODE=portable, set
+# by hooks/session-start.sh under `tessl hook run`, which strips HERDR_ENV) a
+# linked worktree may be a worker's, so neither script runs there at all, and
+# a proven main checkout runs both --dry-run: the list is the same, and
+# nothing is deleted.
 #
 # Contract:
-#   stdin : consensus SessionStart JSON — not read (the script needs none of it).
-#   stdout: one JSON object {"additionalContext": "<status>"} whose text begins
-#           with the "Session-start status — " marker
-#           (rules/hook-action-reporting.md), emitted ONLY when at least one
-#           worktree carries the abandoned verdict. Silent otherwise, which
-#           covers the common cases: a clean tree, work in progress, a
-#           non-repository, and a checkout with no worktrees but its own.
-#   stderr: every line the detector wrote, relayed with a `detector: ` prefix, so
-#           a path whose age it could not read stays visible here too.
-#   exit  : always 0. A missing detector, an unresolvable repo, a detector
-#           exit other than the detector's own 0 or 1, or output missing any
-#           documented envelope or entry field emits an actionable stderr warning
-#           and no-ops. A broken
-#           detector stays visible rather than reading as "nothing abandoned",
-#           which is the reassuring answer and the one report this hook exists to
-#           rule out (rules/error-handling.md Shell Error Handling).
-#   env   : LEFTOVERS_MIN_AGE_HOURS passes through to the detector.
+#   stdin : consensus SessionStart JSON — not read.
+#   stdout: at most one JSON object {"additionalContext": "<status>"}. The
+#           status holds up to two "Session-start status — " paragraphs: the
+#           items awaiting the operator's decision, each with its command, and
+#           one "could not check" line naming every owner script that failed,
+#           ran out of time, reported an undecided item, or could not reach
+#           gh, with the command to rerun it. A missing git or python3 is
+#           that line too, a fixed JSON string printed without either tool.
+#           Silent when neither applies, outside a repository, in a
+#           repository without an origin remote, in a bare repository, in
+#           a Herdr worker session, and under tessl in a linked worktree.
+#   stderr: the owner scripts' diagnostics, relayed, plus this hook's warnings.
+#   exit  : always 0 (a failure is the "could not check" line, never silence
+#           and never a failed session start).
+#   env   : LEFTOVER_BUDGET_SEC overrides BUDGET_SEC; WORKTREE_ROOT and the
+#           PRUNE_* variables pass through to the owner scripts.
 set -euo pipefail
+
+#: Wall-clock seconds for both owner scripts together. Session start waits on
+#: this hook, and the network is the part that can hang.
+BUDGET_SEC="${LEFTOVER_BUDGET_SEC:-40}"
 
 warn() { printf 'check-leftover-worktrees: %s\n' "$1" >&2; }
 
-#: The scratch directory, global so the RETURN trap can name a function instead
-#: of interpolating a path into shell source.
+#: The scratch directory, global so the RETURN trap can name a function
+#: instead of interpolating a path into shell source.
 SCRATCH=""
 
-# `return 0` last, and the removal checked explicitly rather than suppressed, so
-# neither a failed cleanup nor `set -e` can turn this hook's exit-0 contract into
-# a failed session start (rules/error-handling.md Shell Error Handling).
 discard() {
   if [[ -n "$SCRATCH" ]] && ! rm -rf "$SCRATCH"; then
     warn "could not remove the temporary directory ${SCRATCH} — delete it by hand"
@@ -64,163 +59,247 @@ discard() {
   return 0
 }
 
+# Print a could-not-check status that needs no tool to encode. <why> is one
+# of this script's own fixed ASCII sentences, never input: no character in
+# it needs JSON escaping.
+static_cannot_check() { # <fixed-why>
+  printf '{"additionalContext": "Session-start status \\u2014 could not check this repository for leftover worktrees and branches: %s"}\n' "$1"
+}
+
+# Print the could-not-check status alone, for a failure before any result.
+# When python3 cannot encode <why>, the fixed status still reaches the session.
+cannot_check() { # <why>
+  if ! python3 -c 'import json, sys; print(json.dumps({"additionalContext": sys.argv[1]}))' \
+      "Session-start status — could not check this repository for leftover worktrees and branches: $1"; then
+    warn "python3 could not encode the status (${1}) — reporting the fixed status instead"
+    static_cannot_check "python3 failed; run this hook by hand to see why."
+  fi
+}
+
+# Relay one owner script's stderr, each line prefixed with this hook's name.
+relay() { # <file>
+  local line
+  [[ -s "$1" ]] || return 0
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    if [[ -n "$line" ]]; then warn "$line"; fi
+  done < "$1"
+  return 0
+}
+
 main() {
-  command -v git >/dev/null || {
-    warn "git not found on PATH — install it or restore it before session start can report abandoned worktrees"
+  if ! command -v git >/dev/null; then
+    warn "git not found on PATH — install it so session start can clean this repository"
+    static_cannot_check "git is not on PATH; install it, then start a new session."
     return 0
-  }
-  # `rev-parse --git-dir` exits 128 for standing outside a repository and for a
-  # repository it cannot read, so the exit code cannot separate them and the
-  # message is the only signal that can. Only the walked-up-and-found-nothing
-  # message is silent -- that is where sessions get opened, and a hook that warns
-  # in an ordinary directory gets turned off. A named GIT_DIR that does not
-  # resolve, a corrupt .git, a permission error: each says something else, and
-  # each is worth saying out loud.
-  local repo_err repo_status=0
-  repo_err="$(git rev-parse --git-dir 2>&1 >/dev/null)" || repo_status=$?
-  if [[ "$repo_status" -ne 0 ]]; then
-    case "$repo_err" in
-      *"or any of the parent directories"*) : ;;
-      *) warn "cannot read this repository (${repo_err:-git exited ${repo_status} silently}) — session start cannot report abandoned worktrees until that resolves" ;;
+  fi
+  if ! command -v python3 >/dev/null; then
+    warn "python3 not found on PATH — install it so session start can clean this repository"
+    static_cannot_check "python3 is not on PATH; install it, then start a new session."
+    return 0
+  fi
+  # `rev-parse` exits 128 both outside a repository and for one it cannot
+  # read; only the walked-up-and-found-nothing message is silent.
+  local err rc=0
+  err="$(git rev-parse --git-dir 2>&1 >/dev/null)" || rc=$?
+  if (( rc != 0 )); then
+    case "$err" in
+      *"or any of the parent directories"*) ;;
+      *) cannot_check "git cannot read it (${err:-git exited ${rc} silently}); run \`git status\` here to see why." ;;
     esac
     return 0
   fi
 
-  local here detector
+  local git_dir common_dir
+  rc=0
+  git_dir="$(git rev-parse --path-format=absolute --git-dir 2>&1)" || rc=$?
+  if (( rc == 0 )); then common_dir="$(git rev-parse --path-format=absolute --git-common-dir 2>&1)" || rc=$?; fi
+  if (( rc != 0 )); then
+    cannot_check "\`git rev-parse --git-common-dir\` exited ${rc}; run it here to see why."
+    return 0
+  fi
+  # A worker session: acting here would break the rule the worker runs under.
+  if [[ -n "${HERDR_ENV+x}" && "$git_dir" != "$common_dir" ]]; then
+    return 0
+  fi
+  # Under tessl the environment is stripped, so an unset HERDR_ENV proves
+  # nothing: a linked worktree may be a worker's, and a worker neither fetches
+  # nor deletes. Only a proven main checkout runs the owner scripts there,
+  # and only --dry-run (the rule hooks/check-git-sync.sh applies).
+  if [[ "${SESSION_START_MODE:-native}" == portable && "$git_dir" != "$common_dir" ]]; then
+    return 0
+  fi
+
+  # Exit 2 is git's "no such remote": nothing is recoverable from origin, so
+  # nothing is judged.
+  rc=0
+  err="$(git remote get-url origin 2>&1 >/dev/null)" || rc=$?
+  case "$rc" in
+    0) ;;
+    2) return 0 ;;
+    *) cannot_check "\`git remote get-url origin\` exited ${rc} (${err}); run it here to see why."; return 0 ;;
+  esac
+
+  # The shared checkout is the first entry of the worktree list, whichever
+  # worktree this session sits in; a bare repository has no checkout to clean.
+  local shared
+  rc=0
+  err="$(mktemp)" || { cannot_check "mktemp failed; make ${TMPDIR:-/tmp} writable."; return 0; }
+  shared="$(git worktree list --porcelain -z 2>"$err" | python3 -c '
+import sys
+first = []
+for field in sys.stdin.buffer.read().split(b"\0"):
+    if not field:
+        break
+    first.append(field)
+if not first or not first[0].startswith(b"worktree "):
+    sys.exit(3)
+if b"bare" in first:
+    sys.exit(4)
+sys.stdout.buffer.write(first[0][len(b"worktree "):] + b"x")
+')" || rc=$?
+  # The sentinel keeps a trailing newline in the path through the command
+  # substitution; it comes off only here.
+  shared="${shared%x}"
+  local list_err
+  list_err="$(cat "$err")"
+  if ! rm -f "$err"; then warn "could not remove ${err} — delete it by hand"; fi
+  case "$rc" in
+    0) ;;
+    4) return 0 ;;
+    *) cannot_check "\`git worktree list --porcelain -z\` gave no worktree (exit ${rc}; ${list_err}); run it here to see why."; return 0 ;;
+  esac
+
+  local here
   # `pwd` through command substitution loses a trailing newline in the plugin
   # directory's own name; the sentinel survives the strip (#466).
   here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd && printf x)"
   here="${here%x}"
   here="${here%$'\n'}"
-  detector="${here}/../skills/release/check-leftovers.sh"
-  if [[ ! -f "$detector" || ! -r "$detector" ]]; then
-    warn "detector not readable at ${detector} — reinstall the plugin so session start can report abandoned worktrees"
-    return 0
-  fi
+  local runner="${here}/../skills/herdr-foreman/bounded-run.sh" prune="${here}/../skills/herdr-foreman/prune-worktrees.sh"
+  local remote="${here}/../skills/herdr-foreman/prune-remote-branches.sh" f
+  for f in "$runner" "$prune" "$remote"; do
+    if [[ ! -f "$f" || ! -r "$f" ]]; then
+      cannot_check "${f} is not readable; reinstall the plugin."
+      return 0
+    fi
+  done
 
   SCRATCH="$(mktemp -d "${TMPDIR:-/tmp}/leftover-hook.XXXXXX")" || {
-    warn "cannot create a temporary directory under ${TMPDIR:-/tmp} — session start cannot report abandoned worktrees until it is writable"
+    cannot_check "no temporary directory could be created under ${TMPDIR:-/tmp}; make it writable."
     return 0
   }
-  # The trap names a function and interpolates nothing: a path spliced into a
-  # trap string is shell source, so a TMPDIR carrying a quote and a separator
-  # would run as commands when RETURN fires.
   trap discard RETURN
 
-  # rc 1 is the detector's finding, not a failure: `|| status=$?` keeps `set -e`
-  # from aborting on the very outcome this hook exists to report. The detector's
-  # stderr is captured rather than discarded, and relayed: it warns on a path
-  # whose age it could not read, and that warning is the difference between an
-  # under-reported age and a hook that looks like it found nothing.
-  local payload status=0 line
-  payload="$(bash "$detector" 2>"${SCRATCH}/detector-stderr")" || status=$?
-  if [[ -s "${SCRATCH}/detector-stderr" ]]; then
-    while IFS= read -r line; do
-      [[ -n "$line" ]] && warn "detector: ${line}"
-    done < "${SCRATCH}/detector-stderr"
-  fi
-  # 0 and 1 are the detector's two verdicts; everything else is a failure,
-  # including an unexpected status carrying a payload that happens to parse.
-  # Accepting one of those would make a crashed detector read as a clean session.
-  if [[ "$status" -gt 1 || -z "$payload" ]]; then
-    warn "detector exited ${status} instead of reporting a verdict — run 'bash ${detector}' directly to see why"
-    return 0
-  fi
+  local -a mode_args=()
+  if [[ "${SESSION_START_MODE:-native}" == portable ]]; then mode_args=(--dry-run); fi
+  # Nothing may stop to ask for a credential: an unattended prompt is a hang.
+  export GIT_TERMINAL_PROMPT=0 GH_PROMPT_DISABLED=1
+  export GIT_SSH_COMMAND="${GIT_SSH_COMMAND:-ssh -o BatchMode=yes}"
 
-  command -v python3 >/dev/null || { warn "python3 not found on PATH — cannot read the detector's JSON"; return 0; }
-
-  local notice
-  # shellcheck disable=SC2016  # The single quotes are the point: the python
-  # program must reach the interpreter verbatim, with no shell expansion of the
-  # $-free but brace-heavy text inside it.
-  notice="$(printf '%s' "$payload" | python3 -c '
-import json, sys
-
-MALFORMED = 3
-ENVELOPE = ("ok", "self", "others", "blocking")
-ENTRY = ("path", "branch", "age_hours", "tip_in_main", "verdict")
-VERDICTS = ("clean", "in_progress", "abandoned")
-
-
-def reject(why):
-    sys.stderr.write("{}\n".format(why))
-    sys.exit(MALFORMED)
-
-
-try:
-    doc = json.load(sys.stdin)
-except ValueError as exc:
-    reject("not JSON: {}".format(exc))
-
-# Validated before classification, never after. An entry missing "verdict" would
-# otherwise read as not-abandoned, and "nothing abandoned" is the reassuring
-# answer a broken detector must never be able to give.
-if not isinstance(doc, dict):
-    reject("expected a JSON object, got {}".format(type(doc).__name__))
-missing = [k for k in ENVELOPE if k not in doc]
-if missing:
-    reject("envelope is missing {}".format(", ".join(missing)))
-if not isinstance(doc["ok"], bool):
-    reject("the ok field is not a boolean")
-if not isinstance(doc["blocking"], list):
-    reject("the blocking field is not a list")
-if not isinstance(doc["others"], list):
-    reject("the others field is not a list")
-if not isinstance(doc["self"], dict):
-    reject("the self field is not an object")
-
-for entry in list(doc["others"]) + [doc["self"]]:
-    if not isinstance(entry, dict):
-        reject("a worktree entry is not an object")
-    absent = [k for k in ENTRY if k not in entry]
-    if absent:
-        reject("a worktree entry is missing {}".format(", ".join(absent)))
-    # Types and values, not just presence: a null or unknown verdict compares
-    # unequal to abandoned and would pass as the reassuring answer.
-    if not isinstance(entry["path"], str) or not isinstance(entry["branch"], str):
-        reject("a worktree entry has a non-string path or branch")
-    if not isinstance(entry["age_hours"], int) or isinstance(entry["age_hours"], bool):
-        reject("a worktree entry has a non-integer age_hours")
-    if not isinstance(entry["tip_in_main"], bool):
-        reject("a worktree entry has a non-boolean tip_in_main")
-    if entry["verdict"] not in VERDICTS:
-        reject("a worktree entry has the verdict {!r}, which is not one of {}".format(
-            entry["verdict"], ", ".join(VERDICTS)))
-
-rows = []
-me = doc["self"]
-if me is not None and me["verdict"] == "abandoned":
-    rows.append((me["path"], me["branch"], me["age_hours"], True))
-for row in doc["others"]:
-    if row["verdict"] == "abandoned":
-        rows.append((row["path"], row["branch"], row["age_hours"], False))
-if not rows:
-    sys.exit(0)
-
-lines = ["Session-start status — {} worktree(s) hold uncommitted work on a branch "
-         "carrying no commits of its own; nothing in git preserves it:".format(len(rows))]
-for path, branch, age, is_self in sorted(rows, key=lambda r: -r[2]):
-    lines.append("  - {}{} on `{}`, last written {}h ago".format(
-        path, " (this session)" if is_self else "", branch, age))
-lines.append("Inspect with `git -C <path> status`, then commit, stash or gitignore it. "
-             "`skills/release/check-leftovers.sh` refuses to start a release until this clears.")
-print("\n".join(lines))
-')" || { warn "the detector's output is not the JSON envelope this hook reads (see above) — run 'bash ${detector}' directly to see what it printed"; return 0; }
-
-  [[ -n "$notice" ]] || return 0
-
-  if command -v jq >/dev/null; then
-    jq -n --arg c "$notice" '{additionalContext: $c}' || warn "jq failed to encode the notice"
+  local start=$SECONDS left prune_rc=0 remote_rc=0
+  bash "$runner" "$BUDGET_SEC" bash "$prune" "$shared" ${mode_args[@]+"${mode_args[@]}"} \
+    >"${SCRATCH}/prune.json" 2>"${SCRATCH}/prune.err" || prune_rc=$?
+  relay "${SCRATCH}/prune.err"
+  left=$(( BUDGET_SEC - (SECONDS - start) ))
+  if (( left > 0 )); then
+    bash "$runner" "$left" bash "$remote" "$shared" ${mode_args[@]+"${mode_args[@]}"} \
+      >"${SCRATCH}/remote.json" 2>"${SCRATCH}/remote.err" || remote_rc=$?
+    relay "${SCRATCH}/remote.err"
   else
-    printf '%s' "$notice" | python3 -c 'import json,sys; print(json.dumps({"additionalContext": sys.stdin.read()}))' \
-      || warn "could not encode the notice as JSON"
+    remote_rc=124
+  fi
+
+  rc=0
+  python3 - "$shared" "$prune" "$prune_rc" "${SCRATCH}/prune.json" \
+      "$remote" "$remote_rc" "${SCRATCH}/remote.json" "${mode_args[*]-}" <<'PY' || rc=$?
+import json
+import os
+import shlex
+import sys
+
+shared, prune, prune_rc, prune_out, remote, remote_rc, remote_out, flags = sys.argv[1:9]
+items, failures = [], []
+
+
+# The result shapes are the prune scripts' own; one module checks them for
+# every reader (skills/herdr-foreman/foreman/prune_result.py).
+sys.path.insert(0, os.path.dirname(prune))
+from foreman.prune_result import prune_schema_error, remote_schema_error
+
+SCHEMA = {prune: prune_schema_error, remote: remote_schema_error}
+
+
+def load(path, rc, script):
+    """The script's JSON when it answered (exit 0, or 2 with its JSON) in its
+    documented shape; anything else is a failure, never a clean result."""
+    rerun = "`bash {} {}{}`".format(shlex.quote(script), shlex.quote(shared), " " + flags if flags else "")
+    name = script.rsplit("/", 1)[-1]
+    if rc == "124":
+        failures.append("{} ran past its time budget (run {})".format(name, rerun))
+        return None
+    try:
+        with open(path, encoding="utf-8", errors="surrogateescape") as handle:
+            doc = json.load(handle)
+    except (OSError, ValueError):
+        doc = None
+    if rc not in ("0", "2") or not isinstance(doc, dict):
+        failures.append("{} exited {} (run {})".format(name, rc, rerun))
+        return None
+    why = SCHEMA[script](doc)
+    if why:
+        failures.append("{} exited {} with a result holding {} (run {})".format(name, rc, why, rerun))
+        return None
+    if doc.get("failed"):
+        failures.append("{} could not decide {} item(s) (run {})".format(name, len(doc["failed"]), rerun))
+    if doc.get("could_not_check"):
+        failures.append("{}: {}".format(name, doc["could_not_check"]))
+    return doc
+
+
+local = load(prune_out, prune_rc, prune)
+if local is not None:
+    for kept in local.get("worktrees_kept", []):
+        where = "{} ({})".format(kept["path"], kept.get("branch") or "detached")
+        if kept.get("reason") == "dirty":
+            items.append("worktree {}: {} uncommitted file(s), idle {}h — `{}`".format(
+                where, kept["dirty_files"], kept["age_hours"], kept["command"]))
+        elif kept.get("reason") == "unpushed":
+            items.append("worktree {}: {} commit(s) origin does not hold, idle {}h — `{}`".format(
+                where, kept["unpushed_commits"], kept["age_hours"], kept["command"]))
+    for kept in local.get("branches_kept", []):
+        if kept.get("reason") == "unpushed":
+            items.append("local branch {}: {} unpushed commit(s), idle {}h — `{}`".format(
+                kept["branch"], kept["unpushed_commits"], kept["age_hours"], kept["command"]))
+
+origin = load(remote_out, remote_rc, remote)
+if origin is not None:
+    for q in origin.get("questionable", []):
+        items.append("origin branch {}: {} commit(s) not in {}, no open pull request, last commit {}h ago by {} — `{}` or `{}`".format(
+            q["branch"], q["ahead"], origin.get("default_branch"), q["age_hours"], q["author"], q["open_pr"], q["delete"]))
+
+paragraphs = []
+if items:
+    lines = ["Session-start status — {} item(s) in this repository hold work only the operator can decide on; "
+             "nothing was touched:".format(len(items))]
+    lines += ["  - " + item for item in items]
+    lines.append("Raise each with the user, one at a time: push, commit, open a pull request, delete or keep.")
+    paragraphs.append("\n".join(lines))
+if failures:
+    paragraphs.append("Session-start status — could not check this repository for leftover worktrees and branches: "
+                      + "; ".join(failures) + ".")
+if paragraphs:
+    print(json.dumps({"additionalContext": "\n\n".join(paragraphs)}))
+PY
+  if (( rc != 0 )); then
+    cannot_check "the owner scripts' results could not be read (exit ${rc}); run \`bash ${prune} ${shared} --dry-run\` to see them."
   fi
   return 0
 }
 
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
   if ! main "$@"; then
-    warn "internal error — session start has no worktree report; run 'bash ${BASH_SOURCE[0]}' directly to see why"
+    warn "internal error — no leftover report this session; run 'bash ${BASH_SOURCE[0]}' directly to see why"
+    static_cannot_check "the hook failed internally; run hooks/check-leftover-worktrees.sh by hand to see why."
   fi
   exit 0
 fi
