@@ -230,11 +230,15 @@ def entries_ok(entries, fields):
         isinstance(e, dict) and all(check(e.get(k)) for k, check in fields.items()) for e in entries)
 
 
-STR = lambda v: isinstance(v, str)  # noqa: E731
-STR_OR_NONE = lambda v: v is None or isinstance(v, str)  # noqa: E731
+def is_str(v):
+    return isinstance(v, str)
+
+
+def is_str_or_none(v):
+    return v is None or isinstance(v, str)
 KEPT_BY_REASON = {
-    "dirty": {"path": STR, "age_hours": is_int, "dirty_files": is_int, "command": STR},
-    "unpushed": {"path": STR, "age_hours": is_int, "unpushed_commits": is_int, "command": STR},
+    "dirty": {"path": is_str, "age_hours": is_int, "dirty_files": is_int, "command": is_str},
+    "unpushed": {"path": is_str, "age_hours": is_int, "unpushed_commits": is_int, "command": is_str},
 }
 
 
@@ -243,15 +247,15 @@ def prune_schema_error(doc):
     for key in ("worktrees_removed", "worktrees_kept", "branches_deleted", "branches_kept", "failed"):
         if not isinstance(doc.get(key), list):
             return "no {} list".format(key)
-    if not entries_ok(doc["worktrees_kept"], {"path": STR, "reason": STR}):
+    if not entries_ok(doc["worktrees_kept"], {"path": is_str, "reason": is_str}):
         return "a malformed worktrees_kept entry"
     for kept in doc["worktrees_kept"]:
         if not entries_ok([kept], KEPT_BY_REASON.get(kept["reason"], {})):
             return "a malformed {} worktree entry".format(kept["reason"])
-    if not entries_ok(doc["branches_kept"], {"branch": STR, "reason": STR}):
+    if not entries_ok(doc["branches_kept"], {"branch": is_str, "reason": is_str}):
         return "a malformed branches_kept entry"
     unpushed = [b for b in doc["branches_kept"] if b["reason"] == "unpushed"]
-    if not entries_ok(unpushed, {"unpushed_commits": is_int, "age_hours": is_int, "command": STR}):
+    if not entries_ok(unpushed, {"unpushed_commits": is_int, "age_hours": is_int, "command": is_str}):
         return "a malformed unpushed branch entry"
     return None
 
@@ -261,11 +265,11 @@ def remote_schema_error(doc):
     for key in ("deleted", "questionable", "kept", "failed"):
         if not isinstance(doc.get(key), list):
             return "no {} list".format(key)
-    if "could_not_check" not in doc or not STR_OR_NONE(doc["could_not_check"]):
+    if "could_not_check" not in doc or not is_str_or_none(doc["could_not_check"]):
         return "no could_not_check field"
-    if not STR(doc.get("default_branch")):
+    if not is_str(doc.get("default_branch")):
         return "no default_branch"
-    fields = {"branch": STR, "ahead": is_int, "age_hours": is_int, "author": STR, "open_pr": STR, "delete": STR}
+    fields = {"branch": is_str, "ahead": is_int, "age_hours": is_int, "author": is_str, "open_pr": is_str, "delete": is_str}
     if not entries_ok(doc["questionable"], fields):
         return "a malformed questionable entry"
     return None
