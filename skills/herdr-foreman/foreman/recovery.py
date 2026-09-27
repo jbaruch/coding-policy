@@ -1353,10 +1353,10 @@ def mark_sending(store, identifier, at, context):
     record = _item(store["dispatches"], identifier, "dispatch")
     if not isinstance(context, dict):
         raise UsageError("A pre-send context is an object of clear and session evidence; "
-                         "re-run apply so it records one.", {"dispatch": identifier})
+                         "re-run `{}` so it records one.".format(runnable.command("apply")), {"dispatch": identifier})
     if not _context_mode_matches(record, context):
         raise UsageError("The pre-send context names a different judge mode than its dispatch was reserved for; "
-                         "re-run apply with the reserved mode.", {"dispatch": identifier})
+                         "re-run `{}` with the reserved mode.".format(runnable.command("apply")), {"dispatch": identifier})
     record["status"] = "sending"
     record["context_before_send"] = context
     _event(store, at, "dispatch_sending", record["task"], {"dispatch": identifier, "context": context})
