@@ -37,11 +37,12 @@ still reset-ready and the same agent is still idle.
 The pane's name and runtime kind do not identify the foreman: the operator can
 replace the process in that pane with another session of the same name and
 kind while the deliverer waits (#523). `foreman-reset` records the native
-session bound at `supervision-bind` on the row, and every keystroke up to the
-Enter that submits the clear command refuses unless the pane still holds that
+session bound at `supervision-bind` on the row, and every keystroke of the
+clear command, extra Enters included, refuses unless the pane still holds that
 session.
-The clear itself starts a new native session by design, so the keystrokes
-after it keep the name, kind and idle checks alone.
+The clear itself starts a new native session by design, so once the composer
+confirms the command consumed, the resume prompt's keystrokes keep the name,
+kind and idle checks alone.
 """
 
 import copy
@@ -55,7 +56,7 @@ from pathlib import Path
 from .assign import SETTLE_STATES
 from .composer import COMPOSER_SETTLE_SEC, send_command, send_message
 from .errors import HerdrError, StateError, ForemanError, UsageError
-from .herdr import DEFAULT_SETTLE_TIMEOUT_MS, SLASH_DELIVERY_TYPE
+from .herdr import DEFAULT_SETTLE_TIMEOUT_MS
 from . import supervision
 from .chronology import timestamp
 from .supervision_runtime import process_identity
@@ -225,38 +226,31 @@ def _load(path):
     return document, migrated
 
 
-def _open(path, alive, *, write):
+def _open(path):
     """The reset record, a schema-1 one upgraded and rewritten; the caller holds the record lock.
 
     The owner rewrites a migrated record at once (rules/stateful-artifacts.md
-    Migration Policy), unless a deliverer of the schema-1 build is still
-    running a `scheduled` or `delivering` row: that build refuses a schema-2
-    record, so it could not record its outcome. Until it finishes, a read
-    takes the migrated shape without writing, and a write refuses.
+    Migration Policy). A deliverer of the schema-1 build still running then
+    reads a newer record and cannot record its outcome; its row stays
+    `scheduled` or `delivering`, and once that process is gone `outstanding`
+    names the `foreman-reset-reconcile` command, the recovery for any outcome
+    the record could not take.
     """
     document, migrated = _load(path)
     if migrated:
-        running = [row["process"]["pid"] for row in document["resets"]
-                   if row["status"] in ("scheduled", "delivering") and row["process"] is not None
-                   and alive(row["process"])]
-        if not running:
-            save_state(path, document)
-        elif write:
-            raise UsageError("Reset record {} is schema 1 and a deliverer of that build (pid {}) is still running; upgrading "
-                             "it now would strand that delivery. Nothing was changed; wait for that reset to finish, then "
-                             "retry.".format(path, ", ".join(map(str, running))), {"record": str(path)})
+        save_state(path, document)
     return document
 
 
-def _records(path, alive=_alive):
+def _records(path):
     """The reset record to write through; a newer one refuses, untouched."""
-    return _open(path, alive, write=True)
+    return _open(path)
 
 
-def _readable(path, alive=_alive):
+def _readable(path):
     """The reset record for a read, or None when a newer build wrote it."""
     try:
-        return _open(path, alive, write=False)
+        return _open(path)
     except ResetRecordNewer:
         return None
 
@@ -351,7 +345,7 @@ def replay(state_path, plan, *, alive=_alive):
     """
     path = record_path(state_path)
     with state_lock(path):
-        document = _readable(path, alive)
+        document = _readable(path)
         if document is None:
             return None
         row = _row(document, plan)
@@ -386,7 +380,7 @@ def schedule(state_path, plan, at, start, *, native_session, alive=_alive, probe
                          "pane, then foreman-reset. Nothing was scheduled.".format(plan.get("stow")), {"stow": plan.get("stow")})
     path = record_path(state_path)
     with state_lock(path):
-        document = _records(path, alive)
+        document = _records(path)
         prior = _row(document, plan)
         if prior is not None:
             live, changed = _settle(document, prior, state_path, alive)
@@ -474,7 +468,7 @@ def outstanding(state_path, *, alive=_alive):
             # Only a schema-1 record takes the owner lock, to be rewritten; any
             # other read writes nothing, not even a lock file.
             with state_lock(path):
-                document = _readable(path, alive)
+                document = _readable(path)
     except ResetRecordUnusable as exc:
         return [{"pane_id": None, "stow": None, "status": "record_unusable", "record": str(path),
                  "needed": exc.message, "resume_prompt": None}]
@@ -532,7 +526,7 @@ def reconcile(state_path, plan, outcome, at, *, alive=_alive):
         raise UsageError("Reconcile outcome is delivered or failed.", {"outcome": outcome})
     path = record_path(state_path)
     with state_lock(path):
-        document = _records(path, alive)
+        document = _records(path)
         row = _row(document, plan)
         if row is None:
             raise UsageError("Reset record {} holds no reset for stow {} in pane {}; nothing to reconcile.".format(
@@ -733,7 +727,12 @@ def pane_session(client, pane_id):
     if ref["kind"] == "path":
         if not Path(value).is_absolute():
             return None
-        value = str(supervision.canonical(value))
+        try:
+            value = str(supervision.canonical(value))
+        except (OSError, RuntimeError):
+            # A path that cannot be resolved (a link loop, an unreadable
+            # ancestor) names no session this reset can match.
+            return None
     return {"kind": ref["kind"], "value": value}
 
 
@@ -772,8 +771,8 @@ def deliver(client, agents, pane_id, stow, state, *, native_session, still_ready
 
     `still_ready()` re-checks the stow right before the clear; a stow that
     changed while the deliverer waited stops the reset with nothing sent.
-    `native_session` is the row's bound session: every keystroke up to the
-    Enter that submits the clear refuses unless the pane still holds it. A
+    `native_session` is the row's bound session: every keystroke of the clear
+    command, extra Enters included, refuses unless the pane still holds it. A
     null one, from a row migrated off schema 1, refuses before any keystroke.
     """
     deadline = clock() + budget_sec
@@ -795,10 +794,10 @@ def deliver(client, agents, pane_id, stow, state, *, native_session, still_ready
         raise UsageError("Stow {} is no longer reset-ready; nothing was sent. {}".format(stow, OPERATOR_RECOVERY), {"stow": stow})
 
     typed = []
-    # Enters that submit the clear: a typed slash command takes its configured
-    # count (the first can only accept Codex's autocomplete), a paste one.
-    submits_needed = agent.slash_enter_count if agent.slash_delivery == SLASH_DELIVERY_TYPE else 1
-    submits = []
+    # Set once send_command confirms the clear consumed. Until then no Enter,
+    # configured or extra, is known to have submitted it (Codex's first Enter
+    # only accepts autocomplete), so every keystroke checks the session.
+    consumed = []
 
     def guard():
         # The stow and the pane are both re-read right before every keystroke.
@@ -812,7 +811,7 @@ def deliver(client, agents, pane_id, stow, state, *, native_session, still_ready
                 pane_id, live.get("agent"), live.get("name"), live.get("agent_status"), OPERATOR_RECOVERY), {"pane_id": pane_id})
         # A same-name, same-kind replacement is another session (#523). Once
         # the clear has been submitted the session changes by design.
-        if len(submits) < submits_needed and (native_session is None or pane_session(client, pane_id) != native_session):
+        if not consumed and (native_session is None or pane_session(client, pane_id) != native_session):
             raise SessionChanged("The foreman's pane {} no longer holds the native session bound at supervision-bind{}, so "
                                  "the reset stopped. {}".format(
                                      pane_id, "" if native_session is not None else " (this reset recorded none)",
@@ -821,7 +820,8 @@ def deliver(client, agents, pane_id, stow, state, *, native_session, still_ready
 
     try:
         outcome = send_command(client, agent, pane_id, agent.clear_prompt, sleep=sleep, warn=warn, settle_sec=settle_sec,
-                               before_input=guard, after_submit=lambda: submits.append(True))
+                               before_input=guard)
+        consumed.append(True)
         if not outcome["screen_changed"]:
             raise HerdrError("The foreman consumed {} but its screen did not change, so its context was not cleared and nothing further was sent. Check the clear command configured for kind {} in pane {}. {}".format(
                 agent.clear_prompt, agent.kind, pane_id, OPERATOR_RECOVERY), {"pane_id": pane_id})

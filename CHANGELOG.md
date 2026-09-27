@@ -13,25 +13,27 @@
   (`native_session`), and refuses to schedule when the binding names none.
   The deliverer's guard reads `herdr pane get` (the source `supervision-bind`
   reads) and refuses unless the pane still holds that session, for every
-  keystroke up to the Enter that submits the clear command: the row
-  finishes `failed` before any keystroke, `interrupted` after one, both with
-  error `reset_session_changed` and `details.reason` `native_session_changed`.
-  A typed clear counts as submitted only at its last configured Enter
-  (`slash_enter_count`): Codex's first of two Enters only accepts
-  autocomplete, so a replacement between them is still caught.
+  keystroke of the clear command, extra Enters included, until the composer
+  confirms it consumed: the row finishes `failed` before any keystroke,
+  `interrupted` after one, both with error `reset_session_changed` and
+  `details.reason` `native_session_changed`. No single Enter proves the clear
+  submitted (Codex's first of two Enters only accepts autocomplete, and
+  `send_command` may add extra Enters), so a replacement between any of them
+  is still caught. A transcript path that cannot be resolved matches no
+  session instead of escaping as an unrecorded error.
   The clear itself starts a new native session by design, so the keystrokes
   after it keep the name, kind and idle checks alone. The reset record moves
   to schema 2 (`skills/herdr-foreman/state-schema.md` Foreman Reset Record);
   the owner migrates a schema-1 record on read and rewrites it at once,
   catch-up's read included, giving each row `native_session: null`; a
-  deliverer that claims such a row refuses before any keystroke. While a
-  schema-1 deliverer is still running its row, the rewrite waits (that build
-  refuses a schema-2 record): reads use the migrated shape and writes refuse
-  naming its pid. Regression tests cover a same-name, same-kind
+  deliverer that claims such a row refuses before any keystroke. A
+  schema-1-build deliverer still running at the upgrade cannot record its
+  outcome, and catch-up names the reconcile command for its row once it
+  exits. Regression tests cover a same-name, same-kind
   replacement (no keystroke, row records why), a replacement between the
   clear's text and Enter and between Codex's two Enters, the post-clear
-  session change for typed and pasted clears, the migration rewrite and its
-  deferral for a live schema-1 deliverer, and the
+  session change for typed and pasted clears, a replacement before an extra
+  Enter, an unresolvable transcript path, the migration rewrite, and the
   CLI end to end; the unfixed deliverer typed `/clear` and the resume prompt
   into the replacement session.
 

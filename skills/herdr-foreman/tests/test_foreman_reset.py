@@ -190,7 +190,7 @@ class HandoffHoldTest(unittest.TestCase):
 
 class DeliverTest(unittest.TestCase):
     def run_deliver(self, client, *, screen_changed=True, landed=True, started=None, budget=30, still_ready=lambda: True,
-                    native_session=SESSION, claude_delivery="type"):
+                    native_session=SESSION, claude_delivery="type", extra_enters=0):
         calls = []
         ticks = iter(range(0, 10000, 5))
 
@@ -198,7 +198,13 @@ class DeliverTest(unittest.TestCase):
             # The real delivery: its text and each configured Enter run the guard.
             HerdrClient.deliver_slash_command(c, agent.slash_delivery, agent.name, pane, text,  # pyright: ignore[reportArgumentType] -- duck-typed stand-in for the client
                                               enter_count=agent.slash_enter_count, before_input=kw["before_input"],
-                                              after_submit=kw["after_submit"])
+                                              after_submit=kw.get("after_submit"))
+            # The extra Enters send_command presses while the command still shows.
+            for _ in range(extra_enters):
+                kw["before_input"]()
+                c.pane_send_keys(pane, ["enter"])
+                if kw.get("after_submit") is not None:
+                    kw["after_submit"]()
             calls.append(("command", agent.name, pane, text))
             return {"screen_changed": screen_changed}
 
@@ -361,6 +367,22 @@ class DeliverTest(unittest.TestCase):
                 self.assertEqual([call[0] for call in calls], ["command", "message"])
                 self.assertEqual(client.keystrokes, ["/clear"] + ["enter"] * (bound_reads - 1))
                 self.assertTrue(result["cleared"])
+
+    def test_a_replacement_before_an_extra_enter_gets_no_keystroke(self):
+        # The configured Enter did not consume /clear; the composer presses another.
+        client = FakeClient(["idle"], sessions=[SESSION["value"], SESSION["value"], "22222222-2222-4222-8222-222222222222"])
+        with self.assertRaises(foreman_reset.SessionInterrupted):
+            self.run_deliver(client, extra_enters=1)
+        self.assertEqual(client.keystrokes, ["/clear", "enter"])
+
+    def test_an_unresolvable_transcript_path_matches_no_session(self):
+        class Looping(FakeClient):
+            def pane_get(self, pane_id):
+                return {"pane_id": pane_id, "agent_session": {"kind": "path", "value": "/loop/t.jsonl"}}
+        with patch("foreman.foreman_reset.supervision.canonical", side_effect=RuntimeError("Symlink loop")):
+            self.assertIsNone(foreman_reset.pane_session(Looping(["idle"]), PANE))
+            with self.assertRaises(foreman_reset.SessionChanged):
+                self.run_deliver(Looping(["idle"]), native_session={"kind": "path", "value": "/loop/t.jsonl"})
 
     def test_a_pasted_clear_is_submitted_by_its_paste(self):
         client = FakeClient(["idle"], sessions=[SESSION["value"], "33333333-3333-4333-8333-333333333333"])
@@ -624,21 +646,17 @@ class RecordTest(unittest.TestCase):
         self.assertEqual([item["stow"] for item in foreman_reset.outstanding(self.state)], ["round-6"])
         self.assertEqual(json.loads(path.read_text())["resets"][0], {**row, "schema_version": 2, "native_session": None})
 
-    def test_a_running_schema_1_deliverer_defers_the_rewrite_and_refuses_writes(self):
+    def test_a_schema_1_delivery_still_running_is_rewritten_and_surfaces_once_gone(self):
         path = foreman_reset.record_path(self.state)
         row = {"schema_version": 1, "pane_id": PANE, "stow": "round-7", "status": "delivering",
                "scheduled_at": "2026-09-24T10:00:00+00:00", "options": {}, "process": self.me(), "result": None}
-        before = json.dumps({"schema_version": 1, "resets": [row]})
-        path.write_text(before)
-        # Reads still see the migrated shape; the old build keeps its file.
+        path.write_text(json.dumps({"schema_version": 1, "resets": [row]}))
         self.assertEqual(foreman_reset.outstanding(self.state, alive=lambda process: True), [])
-        live = foreman_reset.replay(self.state, self.plan, alive=lambda process: True)
-        assert live is not None, "a live delivery replays"
-        self.assertEqual(live["native_session"], None)
-        with self.assertRaisesRegex(UsageError, "deliverer of that build \\(pid 1001\\) is still running"):
-            foreman_reset.schedule(self.state, {"pane_id": PANE, "stow": "round-8"}, "2026-09-24T11:00:00+00:00",
-                                   self.start, alive=lambda process: True, native_session=SESSION)
-        self.assertEqual((path.read_text(), self.starts), (before, 0))
+        self.assertEqual(json.loads(path.read_text())["resets"][0], {**row, "schema_version": 2, "native_session": None})
+        # That build cannot record its outcome now; once it is gone, catch-up names the repair.
+        items = foreman_reset.outstanding(self.state, alive=lambda process: False)
+        self.assertEqual([(item["stow"], item["status"]) for item in items], [("round-7", "delivering")])
+        self.assertIn("foreman-reset-reconcile", items[0]["needed"])
 
     def test_a_malformed_schema_1_record_is_unusable_and_untouched(self):
         path = foreman_reset.record_path(self.state)
