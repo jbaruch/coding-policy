@@ -11,6 +11,7 @@ mandatory at recovery and again at normal apply; this module sends no input.
 import json
 from fnmatch import fnmatchcase
 
+from . import runnable
 from . import recovery as ledger
 from .chronology import assignment_after, latest_assignment
 from .errors import UsageError
@@ -19,7 +20,8 @@ from .historical import fields, timestamp
 
 def _assignment(assignments, index):
     if type(index) is not int or not 0 <= index < len(assignments):
-        raise UsageError("Use the original developer and clearing assignment indices from foreman state; preserve history.", {})
+        raise UsageError("Use the original developer and clearing assignment indices from `{}`; preserve history.".format(
+            runnable.command("state")), {})
     return assignments[index]
 
 
@@ -75,7 +77,8 @@ def _source(store, assignments, data):
     clear = _assignment(assignments, data["clearing_assignment_index"])
     if (developer.get("task") != data["task"] or developer.get("role") != "developer"
             or developer.get("status") != "applied" or developer.get("context_session") is None):
-        raise UsageError("Role-clear recovery requires the original confirmed developer assignment with known native-session proof; use recover-context for missing proof.", {})
+        raise UsageError("Role-clear recovery requires the original confirmed developer assignment with known native-session proof; use `{}` for missing proof.".format(
+            runnable.command("recover-context")), {})
     if (clear.get("agent") != developer.get("agent") or clear.get("role") == "developer"
             or clear.get("status") != "applied" or clear.get("cleared") is not True
             or clear.get("clear_reason") != "automatic" or not clear.get("task")):

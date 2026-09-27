@@ -23,6 +23,7 @@ import re
 import subprocess
 from pathlib import Path
 
+from . import runnable
 from . import supervision
 from .chronology import timestamp
 from .errors import StateError, UsageError
@@ -190,7 +191,8 @@ def assessed_event(path, member, state_path):
 def _member(data, enrollment):
     member = next((row for row in data["members"] if row["id"] == enrollment), None)
     if member is None:
-        raise UsageError("Unknown enrollment {!r}; run supervision-status to list active assignments.".format(enrollment),
+        raise UsageError("Unknown enrollment {!r}; run `{}` to list active assignments.".format(
+            enrollment, runnable.command("supervision-status")),
                          {"enrollment": enrollment})
     return member
 
