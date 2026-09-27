@@ -1,7 +1,5 @@
 # Changelog
 
-## 0.3.299 — 2026-09-27
-
 ### Fixed
 
 - **Four hardening edges from #491's final review (#493).**
@@ -44,6 +42,10 @@
   re-sorted inside functional commit 418bab3, is already merged and needs no
   change; it stays recorded so the next edit to that list lands its formatting
   in a commit of its own.
+
+## 0.3.299 — 2026-09-27
+
+### Fixed
 
 - **A judge dispatch carries its mode from reservation, and a pending send's
   mode is checked (#495).** `assign.apply` refused a mode-less judge dispatch
