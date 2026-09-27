@@ -193,8 +193,18 @@ main() {
       [[ -n "$tip" ]] || continue
       branch="${line#refs/heads/}"
       [[ "$branch" == "$db" ]] && continue
-      grep -qxF "$branch" <<<"$protected" && continue
-      grep -qxF "$branch" <<<"$prs" && continue
+      rc=0; listed "$branch" "$protected" || rc=$?
+      case "$rc" in
+        0) continue ;;
+        1) ;;
+        *) row failed "$branch" "cannot check it against the protected branches, so it was kept"; continue ;;
+      esac
+      rc=0; listed "$branch" "$prs" || rc=$?
+      case "$rc" in
+        0) continue ;;
+        1) ;;
+        *) row failed "$branch" "cannot check it against the open pull requests, so it was kept"; continue ;;
+      esac
       decide_remote "$shared" "$db" "$default_tip" "$branch" "$tip" "$dry"
     done <<<"$heads"
   fi
@@ -228,6 +238,12 @@ print(json.dumps(out, sort_keys=True))
 sys.exit(2 if out["failed"] or out["could_not_check"] else 0)
 PY
   return "$rc"
+}
+
+# Is <name> a whole line of <list>? grep's own exit: 0 listed, 1 not listed,
+# anything else a failure the caller keeps the branch on.
+listed() { # <name> <list>
+  grep -qxF -e "$1" <<<"$2"
 }
 
 # The final gate, before a deletion (or its preview) and before a listing:

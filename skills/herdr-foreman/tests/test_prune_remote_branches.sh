@@ -305,6 +305,16 @@ SH
      && grep -qxF 'feat%2Fadd-auth' "$CASE/api-branches"; then pass
   else fail "c16: RC=$RC OUT=$OUT ERR=$ERR"; fi
 
+  echo "17. a failing membership check keeps the branch as failed, never deletes it"
+  mk_case c17
+  push_branch feat/done "$STALE_DATE" 1
+  printf '#!/bin/sh\necho "fake grep: broken" >&2\nexit 2\n' > "$CASE/bin/grep" || die "write fake grep failed"
+  chmod +x "$CASE/bin/grep" || die "cannot make the fake grep executable"
+  run
+  if [[ $RC -eq 2 ]] && on_origin feat/done && [[ "$(jq_py 'doc["deleted"]')" == "[]" ]] \
+     && [[ "$(jq_py '[f["target"] for f in doc["failed"]]')" == "['feat/done']" ]]; then pass
+  else fail "c17: RC=$RC OUT=$OUT ERR=$ERR"; fi
+
   echo "11. usage is exit 1 with no JSON"
   RC=0
   OUT="$(bash "$SCRIPT" 2>"$TMP/usage.err")" || RC=$?
