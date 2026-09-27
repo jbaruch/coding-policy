@@ -88,14 +88,24 @@ import sys
 root, dry, prune = os.path.realpath(sys.argv[1]), sys.argv[2] == "1", sys.argv[3]
 
 
+class Run:
+    """A finished command with stdout and stderr decoded like file names:
+    surrogateescape, so a non-UTF-8 path or diagnostic never raises."""
+
+    def __init__(self, done):
+        self.returncode = done.returncode
+        self.stdout = done.stdout.decode("utf-8", "surrogateescape")
+        self.stderr = done.stderr.decode("utf-8", "surrogateescape")
+
+
 def git(*args):
-    return subprocess.run(["git", *args], capture_output=True, text=True)
+    return Run(subprocess.run(["git", *args], capture_output=True))
 
 
 def gitdir_of(path):
     """The gitdir a linked worktree's .git file names, or None when unreadable."""
     try:
-        with open(os.path.join(path, ".git"), encoding="utf-8") as handle:
+        with open(os.path.join(path, ".git"), encoding="utf-8", errors="surrogateescape") as handle:
             first = handle.readline().strip()
     except OSError:
         return None
@@ -107,7 +117,7 @@ def gitdir_of(path):
 def repo_of(gitdir):
     """The main checkout owning a linked worktree's gitdir, read from its files, or None."""
     try:
-        with open(os.path.join(gitdir, "commondir"), encoding="utf-8") as handle:
+        with open(os.path.join(gitdir, "commondir"), encoding="utf-8", errors="surrogateescape") as handle:
             common = os.path.normpath(os.path.join(gitdir, handle.read().strip()))
     except OSError:
         return None
@@ -205,8 +215,8 @@ for entry in errors:
 results, failed = [], bool(errors)
 env = dict(os.environ, WORKTREE_ROOT=root)
 for shared in sorted(repos):
-    run = subprocess.run(["bash", prune, shared, *(["--dry-run"] if dry else [])],
-                         capture_output=True, text=True, env=env)
+    run = Run(subprocess.run(["bash", prune, shared, *(["--dry-run"] if dry else [])],
+                             capture_output=True, env=env))
     for line in run.stderr.splitlines():
         sys.stderr.write("sweep-worktrees: {}: {}\n".format(shared, line))
     entry = {"shared": shared, "exit": run.returncode}

@@ -21,8 +21,10 @@ alwaysApply: true
 
 - A worktree's lifecycle ends when its branch merges or the worktree is abandoned
 - A merged worktree is removed at that point, by the post-merge order below
-- Abandoned means idle past the windows in `skills/herdr-foreman/prune-worktrees.sh` (top-of-file docstring)
-- An abandoned worktree leaves through the foreman's sweep (`rules/agent-team-operation.md` Writers and Checkouts)
+- Outside a Herdr team round, the agent removes its own abandoned worktree with `git worktree remove`
+- In a Herdr team round (`rules/agent-team-operation.md` Two Modes), an abandoned worktree leaves only through the foreman's sweep
+- Abandoned in a Herdr team round means idle past the windows in `skills/herdr-foreman/prune-worktrees.sh` (top-of-file docstring)
+- The sweep reaches every idle worktree under `~/.worktrees/`, a standalone agent's included (`rules/agent-team-operation.md` Writers and Checkouts)
 - Leave no orphans in `git worktree list`
 - Use `git worktree remove <path>`; never `rm -rf` the directory
 - When the worktree's branch lands via `skills/release/SKILL.md` Step 7, the post-merge order is mandatory: `cd` back to the base checkout → fast-forward base `main` → `git worktree remove <worktree-path>` → `git branch -d <branch>`. Teardown precedes branch delete

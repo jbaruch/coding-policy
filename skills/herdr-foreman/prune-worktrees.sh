@@ -615,14 +615,15 @@ import subprocess
 import sys
 
 shared, listing, out = sys.argv[1:4]
-with open(listing, encoding="utf-8") as handle:
+with open(listing, encoding="utf-8", errors="surrogateescape") as handle:
     shas = sorted({line.split("\t", 1)[0] for line in handle if line.strip()})
 check = subprocess.run(["git", "-C", shared, "cat-file", "--batch-check=%(objectname) %(objecttype)"],
-                       input="".join(sha + "\n" for sha in shas), capture_output=True, text=True)
+                       input="".join(sha + "\n" for sha in shas).encode("ascii"), capture_output=True)
 if check.returncode != 0:
-    sys.stderr.write(check.stderr)
+    sys.stderr.write(check.stderr.decode("utf-8", "surrogateescape"))
     sys.exit(1)
-present = [line.split(" ")[0] for line in check.stdout.splitlines() if line.endswith(" commit")]
+present = [line.split(" ")[0] for line in check.stdout.decode("utf-8", "surrogateescape").splitlines()
+           if line.endswith(" commit")]
 with open(out, "w", encoding="utf-8") as handle:
     handle.write("".join(sha + "\n" for sha in present))
 PY
@@ -1311,9 +1312,17 @@ shared, notes_ref, now, grace = sys.argv[1], sys.argv[2], sys.argv[3], int(sys.a
 now = float(now) if now else time.time()
 
 
+class Run:
+    """A finished git command, decoded with surrogateescape so any byte is safe."""
+
+    def __init__(self, done):
+        self.returncode = done.returncode
+        self.stdout = done.stdout.decode("utf-8", "surrogateescape")
+        self.stderr = done.stderr.decode("utf-8", "surrogateescape")
+
+
 def git(*args):
-    run = subprocess.run(["git", "-C", shared, *args], capture_output=True, text=True)
-    return run
+    return Run(subprocess.run(["git", "-C", shared, *args], capture_output=True))
 
 
 exists = git("rev-parse", "--verify", "--quiet", notes_ref)

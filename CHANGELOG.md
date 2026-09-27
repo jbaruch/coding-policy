@@ -108,7 +108,11 @@
     worktrees are archived still gets its expiry pass. A prune that exits
     without readable JSON fails the sweep. A root that vanishes or becomes
     unreadable mid-run is exit 1 with a repair message, never a traceback.
-    Its JSON carries `report`, the operator-facing summary: notable kept
+    Every command it runs is captured as bytes and decoded with
+    `surrogateescape`, and every file it reads too, so a non-UTF-8 worktree
+    path yields valid JSON, never a decode traceback (checked on Linux, where
+    such names exist; macOS refuses them). Its JSON carries `report`, the
+    operator-facing summary: notable kept
     worktrees by path, the rest as counts. SKILL.md Step 2 relays it
     verbatim instead of shaping it. A symlinked `.trash`, or a
     symlinked entry in it, is never followed. Missing `python3`, `git` or
@@ -132,9 +136,13 @@
     Checkouts and the `stop-handoff-hygiene` report text now describe the
     sweep instead of "never removes a dirty, unmerged, locked or detached
     worktree".
-  - `rules/agent-worktree-isolation.md` Cleanup defines abandoned: idle past
-    the prune script's windows. An abandoned worktree is removed once an
-    origin ref holds its work, or archived and moved to `.trash/` (operator
+  - `rules/agent-worktree-isolation.md` Cleanup splits by mode (Two Modes):
+    outside a Herdr team round an agent removes its own abandoned worktree
+    with `git worktree remove`; in a team round an abandoned worktree leaves
+    only through the sweep, which reaches every idle worktree under
+    `~/.worktrees/`, a standalone agent's included. Abandoned there means idle
+    past the prune script's windows. An abandoned worktree is removed once a
+    branch on origin holds its work, or archived and moved to `.trash/` (operator
     decision); a merged worktree is removed by the post-merge order.
   - `rules/agent-team-operation.md` Writers and Checkouts adds a narrow
     exception naming the one removal the foreman makes itself: the merged

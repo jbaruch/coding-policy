@@ -288,6 +288,7 @@ description: Running a multi-agent team — task-based specialist composition, c
 - A worker's repository writes happen only in the worktree its brief names, under `~/.worktrees/`
 - The foreman sweeps every repository owning a worktree under `~/.worktrees/` every round, before provisioning and after the merge
 - The sweep runs through `skills/herdr-foreman/sweep-worktrees.sh`
+- The sweep also reaches idle worktrees a standalone agent left under `~/.worktrees/`
 - The sweep removes an idle clean worktree on a merged branch
 - The sweep deletes merged local branches
 - The sweep removes an idle clean worktree whose HEAD a branch on origin holds, as origin reports it at the sweep

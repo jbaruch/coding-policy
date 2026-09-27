@@ -34,6 +34,9 @@
 #                           notable kept worktrees by path, the rest as counts.
 #  16. Unreadable root   -> exit 1, no JSON, a repair message.
 #  17. Unreadable subdir -> an errors entry, exit 2; the rest still swept.
+#  18. Non-UTF-8 path    -> valid JSON naming it; kept idle-unknown, never a
+#                           decode traceback (skipped where the filesystem
+#                           refuses such a name, as macOS APFS does).
 #
 # Run: bash skills/herdr-foreman/tests/test_sweep_worktrees.sh
 set -uo pipefail
@@ -283,6 +286,23 @@ main() {
     if (( RC == 2 )) && [[ "$(q 'next((e["path"] for e in d["errors"]), "")')" == "$root17/locked-away" ]] \
       && ! listed "$alpha" "$root17/alpha-17" && [[ "$ERRTEXT" != *Traceback* ]]; then
       pass; else fail "unreadable subdir: rc=$RC out=$OUT err=$ERRTEXT"; fi
+  fi
+
+  # --- 18. a worktree whose path is not valid UTF-8.
+  local root18="$TMP/worktrees18" bad
+  bad="$root18/bad$(printf '\377')wt"
+  mkdir -p "$root18" || die "mkdir root18 failed"
+  if ! mkdir "$bad" 2>"$TMP/mk18.err"; then
+    echo "18. skipped: this filesystem refuses a non-UTF-8 name ($(cat "$TMP/mk18.err"))"
+  else
+    rmdir "$bad" || die "rmdir probe failed"
+    "${G[@]}" -C "$alpha" worktree add -q -b review/badname "$bad" origin/main 2>/dev/null || die "non-UTF-8 worktree add failed"
+    run "$root18"
+    echo "18. a non-UTF-8 worktree path yields valid JSON, the worktree kept as idle-unknown"
+    if (( RC == 0 )) && [[ "$ERRTEXT" != *Traceback* ]] \
+      && [[ "$(q '[k["reason"] for r in d["repos"] for k in r["result"]["worktrees_kept"] if "/worktrees18/" in k["path"]]')" == "['idle-unknown']" ]] \
+      && listed "$alpha" "$bad"; then
+      pass; else fail "non-UTF-8 path: rc=$RC out=$OUT err=$ERRTEXT"; fi
   fi
 
   run
