@@ -280,6 +280,13 @@ PY
   ERRTEXT="$(cat "$ERRFILE")"
   if [[ $RC -eq 2 && -z "$OUT" ]] && printf '%s' "$ERRTEXT" | grep -q 'on or after 2026-09-04'; then
     pass; else fail "--since past every report names the date, got RC=$RC ERR=$ERRTEXT"; fi
+  # An unreadable state file is a usage error that names the recovery.
+  printf '{not json' > "$TMP/broken-state.json" || die "write broken state fixture"
+  OUT="$(bash "$DIR/evaluate.sh" --corpus-only --state "$TMP/broken-state.json" 2>"$ERRFILE")"
+  RC=$?
+  ERRTEXT="$(cat "$ERRFILE")"
+  if [[ $RC -eq 2 && -z "$OUT" ]] && printf '%s' "$ERRTEXT" | grep -q 'readable UTF-8 JSON'; then
+    pass; else fail "an unreadable state file names its recovery, got RC=$RC ERR=$ERRTEXT"; fi
 
   # The default corpus refuses a state home still at the legacy teamlead path
   # rather than reading the new path as empty; a migrated home (legacy path

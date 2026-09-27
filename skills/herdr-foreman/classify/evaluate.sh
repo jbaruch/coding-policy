@@ -65,7 +65,8 @@ def read(state):
     try:
         return json.loads(state.read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
-        sys.stderr.write("evaluate: cannot read {}: {}\n".format(state, exc))
+        sys.stderr.write("evaluate: cannot read {}: {}. Restore it as readable UTF-8 JSON (the foreman's state "
+                         "file), or pass --state with a readable copy.\n".format(state, exc))
         raise SystemExit(2)
 
 
@@ -128,7 +129,7 @@ main() {
   local selected="${work}/corpus.json"
   local source="${state:-the default home under ${state_root}}"
   corpus "$state" "$limit" "$since" "$state_root" "$skill_dir" > "$selected" \
-    || die "cannot build the labelled corpus from ${source}"
+    || die "cannot build the labelled corpus from ${source}; fix the cause reported above, or pass --state with a readable state file"
   local total
   total="$(python3 -c 'import json,sys; print(len(json.load(open(sys.argv[1]))))' "$selected")" \
     || die "cannot read the corpus it just built at ${selected}"
