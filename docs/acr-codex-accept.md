@@ -1,10 +1,11 @@
 # Central ACR Codex acceptance
 
 `.github/workflows/acr-codex-accept.yml` is a manual, separate acceptance lane
-in `jbaruch/coding-policy`. It authenticates with its own secret,
-`ACR_ACCEPT_CODEX_AUTH_JSON`, and never reads the fleet reviewer's
-`CODEX_AUTH_JSON`: a token refresh during acceptance must not rotate the
-reviewer's session. It does not change fleet review.
+in `jbaruch/coding-policy`. It authenticates with `CODEX_AUTH_JSON`, the one
+Codex subscription session the policy reviewer also uses (the operator has a
+single subscription). A token refresh during acceptance can rotate that
+session; the reviewer then fails on auth until a fresh `codex login` is stored
+again. It does not change fleet review.
 The Python standard-library helper is `.github/codex-accept/contract.py`;
 the workflow uses JSON syntax, a YAML subset, so its complete job/step structure
 can be tested without adding a YAML dependency. Existing Renovate GitHub
@@ -135,12 +136,11 @@ Seal binds to this convert run. Verify binds to the authenticated **producer**
 run, never to a later consume run. The private-event digest is an identifier,
 not an independent attestation of an arbitrary executable.
 
-`ACR_ACCEPT_CODEX_AUTH_JSON` holds a complete Codex `auth.json`: either a
-ChatGPT account session (`tokens`) for an account used by nothing else, or an
-`OPENAI_API_KEY`. Codex reads both. Configure it at
+`CODEX_AUTH_JSON` holds a complete Codex `auth.json` (a ChatGPT session in
+`tokens`; an `OPENAI_API_KEY` also works). Configure it at
 https://github.com/jbaruch/coding-policy/settings/secrets/actions. An absent or
-empty secret refuses `seed` with that URL; there is no fallback to
-`CODEX_AUTH_JSON`. The central scanner treats every token and the API key as
+empty secret refuses `seed` with the `codex login` and `gh secret set`
+recovery. The central scanner treats every token and the API key as
 credentials.
 
 Only after proof passes does `seed` write that JSON under the
@@ -153,7 +153,7 @@ regular, valid and byte-identical to the retained oracle. Missing, malformed or
 unreadable oracle also refuses export. This detects accidental seed mutation;
 it does not authenticate files against a hostile process running as the same
 user. The snapshot is never exported and cleanup removes it on every path.
-`ACR_ACCEPT_CODEX_AUTH_JSON` is scoped to that single step. The suite token is scoped to conversion and sealing.
+`CODEX_AUTH_JSON` is scoped to that single step. The suite token is scoped to conversion and sealing.
 The future ACR harness must capture it before journey setup, pass it solely to
 original-test children, clear `GITHUB_TOKEN` there, and exclude both tokens from
 Codex children. Missing or `journey-fixture-token` values refuse centrally.

@@ -178,7 +178,7 @@
           "run": "set -euo pipefail\npython3 .github/codex-accept/contract.py seed --run-root \"$RUNNER_TEMP/acr-accept\"",
           "id": "seed",
           "env": {
-            "ACR_ACCEPT_CODEX_AUTH_JSON": "${{ secrets.ACR_ACCEPT_CODEX_AUTH_JSON }}"
+            "CODEX_AUTH_JSON": "${{ secrets.CODEX_AUTH_JSON }}"
           }
         },
         {
