@@ -604,6 +604,33 @@ class RecoveryTests(unittest.TestCase):
         row["approach"] = "diag-1:approach"
         validate_store(self.store, self.history)
 
+    def test_a_diagnosis_cannot_approve_another_tasks_approach(self):
+        # coding-policy#497: the cross-task check covers `approach_change` as
+        # well as `approach`. A diagnosed approach cites its diagnosis back, so
+        # that back-reference already rejects most cross-task edits; the
+        # diagnosis-side check is the only guard once the task's own approach
+        # carries operator provenance and cites no diagnosis at all.
+        other = "another-task"
+        register_task(self.store, {"task": other, "base_revision": BASE, "scope": WORK["scope"],
+                                   "allowed_paths": ["src/*"], "authorization": AUTH}, AT)
+        self.seed_checkpoint()
+        self.run_approach_diagnosis(self.approach_diagnosis("diag-1", 5))
+        own = self.store["approaches"][-1]
+        own.update(origin="operator", diagnosis=None, judge_evidence=None,
+                   investigator_report=None, authorization=OVERRIDE)
+        validate_store(self.store, self.history)
+        origin_checkpoint = _item(self.store["checkpoints"], own["checkpoint"], "checkpoint")
+        self.store["checkpoints"].append(dict(origin_checkpoint, id="foreign-checkpoint", task=other))
+        self.store["approaches"].append(dict(own, id="foreign-approach", task=other,
+                                             checkpoint="foreign-checkpoint"))
+        validate_store(self.store, self.history)
+        row = next(item for item in self.store["diagnoses"] if item["id"] == "diag-1")
+        row["approach_change"] = "foreign-approach"
+        with self.assertRaisesRegex(UsageError, "cites approach foreign-approach, which belongs to task " + other):
+            validate_store(self.store, self.history)
+        row["approach_change"] = own["id"]
+        validate_store(self.store, self.history)
+
     def test_a_new_approach_starts_its_ladder_rather_than_inheriting_one(self):
         # An earlier approach's exhausted rungs never force a newly approved
         # direction down a lifetime ladder to permanent stop (#462).
