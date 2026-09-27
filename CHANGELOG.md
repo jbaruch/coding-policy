@@ -82,6 +82,34 @@
     Act on What It Names raises each listed item with the user, one question
     at a time, and forbids acting on one unasked.
 
+## 0.3.284 — 2026-09-27
+
+### Fixed
+
+- **The ACR acceptance helper no longer lets a short credential or a loosened
+  file mode slip past it (#544).** `secret_values()` in
+  `.github/codex-accept/contract.py` silently dropped token and
+  `OPENAI_API_KEY` strings under 16 characters, so such a credential was
+  neither masked nor scanned. It now returns every non-empty credential field
+  (`id_token`, `access_token`, `refresh_token`, `account_id`, `OPENAI_API_KEY`),
+  never metadata like `auth_mode` or `last_refresh`, and refuses, with a `codex login` recovery, when one is shorter than the 16-char
+  floor `codex-review/mask-secrets.sh` masks at, since that helper would leave
+  it unmasked in logs. `write_new`'s idempotent path accepted an existing
+  identical file without touching its mode, so an interrupted run could leave
+  `seed/auth.json` or `central/seed-oracle.json` group- or world-readable; it
+  now re-applies and verifies `0600` on every run, and `seed` re-applies and
+  verifies `0700` on both credential directories. Every write, compare and
+  mode change now runs through `O_NOFOLLOW` descriptors opened relative to the
+  run root (`fchmod`, never a path `chmod`), so a symlink swapped in mid-run is
+  refused rather than followed, and an existing output with a hard link
+  elsewhere is refused before its mode is touched. Regression tests cover a
+  short token, a short API key, credentials at the floor, a realistic
+  auth.json with `auth_mode` metadata seeding cleanly, and a loosened mode
+  restored by a re-run of `seed`, and `seed/` or `central/` swapped for a
+  symlink, before or during the run, and a hard link or swapped-in symlink
+  to a file outside the root, each refusing with nothing written or chmodded
+  outside the root.
+
 ## 0.3.283 — 2026-09-27
 
 ### Fixed
