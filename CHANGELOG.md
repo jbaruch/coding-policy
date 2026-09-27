@@ -19,6 +19,10 @@
   from PR #528's review. `herdr-foreman` Step 11's `check-member` follow-up
   paragraph, which merged several directives, is now one bullet per directive.
 
+## 0.3.289 — 2026-09-27
+
+### Fixed
+
 - **`foreman detect-triggers` no longer reads untracked files on a round that
   writes nothing (#499).** `run_command` in
   `skills/herdr-foreman/foreman/triggers.py` collected and decoded every
