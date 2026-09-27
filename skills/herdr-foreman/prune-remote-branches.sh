@@ -265,8 +265,15 @@ origin_gate() { # <shared> <default> <default-tip> <branch> <tip> <merged|unmerg
   fi
   [[ "$now_default" == "$default_tip" ]] && return 0
   [[ "$verdict" == merged ]] || return 1
+  # The moved default may hold commits the fetch did not bring in.
+  git -C "$shared" fetch --quiet origin "refs/heads/${db}" 2>"$ERRFILE" || mrc=$?
+  if (( mrc != 0 )); then network_failure "$mrc" "$shared" git fetch --quiet origin "refs/heads/${db}"; return 2; fi
   git -C "$shared" merge-base --is-ancestor "$tip" "$now_default" 2>"$ERRFILE" || mrc=$?
-  (( mrc == 0 ))
+  case "$mrc" in
+    0) return 0 ;;
+    1) return 1 ;;
+    *) return 2 ;;
+  esac
 }
 
 # Decide one branch on origin; delete it (unless dry-run) or record why not.
