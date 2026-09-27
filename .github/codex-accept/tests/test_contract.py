@@ -1312,6 +1312,23 @@ class ExportTests(unittest.TestCase):
                     with self.assertRaisesRegex(c.Refusal, "shorter than 16 characters"):
                         c.seed(self.root)
 
+    def test_realistic_auth_metadata_seeds_and_is_not_a_credential(self):
+        tokens = {"id_token": "i" * 40, "access_token": SEED, "refresh_token": "r" * 40,
+                  "account_id": "00000000-0000-0000-0000-000000000000"}
+        for document in ({"auth_mode": "chatgpt", "OPENAI_API_KEY": None, "tokens": tokens,
+                          "last_refresh": "2026-07-19T00:00:00Z"},
+                         {"tokens": {**tokens, "auth_mode": "chatgpt"}, "last_refresh": "2026-07-19T00:00:00Z"}):
+            with self.subTest(document=document):
+                self.assertEqual(sorted(c.secret_values(document)), sorted(tokens.values()))
+        with tempfile.TemporaryDirectory() as name:
+            root = Path(name).resolve()
+            c.write_new(root / "evidence/credential-boundary.json", c.encoded(proof()))
+            original_run = c.subprocess.run
+            quiet = mock.patch.object(c.subprocess, "run", side_effect=lambda *a, **kw: original_run(*a, **kw, capture_output=True))
+            with quiet, mock.patch.dict(os.environ, {"CODEX_AUTH_JSON": json.dumps(document)}):
+                c.seed(root)
+            self.assertEqual(json.loads((root / "seed/auth.json").read_bytes()), document)
+
     def test_every_credential_at_the_floor_is_scanned(self):
         values = {"access_token": "a" * 16, "refresh_token": "r" * 16, "id_token": "i" * 16}
         auth = self.base / "floor-auth.json"

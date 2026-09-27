@@ -358,18 +358,21 @@ def run_proof(acr_root: Path, root: Path) -> None:
 # Floor shared with codex-review/mask-secrets.sh, which masks only strings this long;
 # a shorter credential would be neither masked in logs nor a reliable scan oracle.
 MIN_SECRET = 16
+# Credential fields of a Codex auth.json `tokens` object. Metadata such as `auth_mode`
+# (top level, or inside `tokens` in older shapes) and `last_refresh` is never a credential.
+TOKEN_FIELDS = ("id_token", "access_token", "refresh_token", "account_id")
 
 
 def secret_values(document: Any) -> list[str]:
     """The credential strings an auth.json carries: account-session tokens, an API key, or both.
 
-    Every non-empty credential string is returned; one shorter than MIN_SECRET refuses.
+    Every non-empty credential field is returned; one shorter than MIN_SECRET refuses.
     """
     values = []
     if type(document) is dict:
         tokens = document.get("tokens")
         if type(tokens) is dict:
-            values += [v for v in tokens.values() if type(v) is str and v]
+            values += [v for v in (tokens.get(f) for f in TOKEN_FIELDS) if type(v) is str and v]
         key = document.get("OPENAI_API_KEY")
         if type(key) is str and key:
             values.append(key)
