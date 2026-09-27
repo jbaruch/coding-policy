@@ -19,8 +19,13 @@
   `mechanical_allowed` also uses so the two checks cannot drift apart. Both
   files were loaded whole with `read_bytes()`; they are now hashed in
   `CHUNK_BYTES` pieces and compared by sha256, so memory stays bounded however
-  large the expected output. Regression cases cover each gap and fail against
-  the old code.
+  large the expected output. An unusable path, a NUL or a character the
+  filesystem encoding cannot carry, is a usage error naming the fix, and each
+  unreadable file names its own recovery. Only a `mechanical` round's oracle is
+  pinned and checked: an oracle riding on any other round licensed nothing,
+  so `plan` no longer reads it (a FIFO there hung `plan`) and `verify-oracle`
+  refuses to gate on it. Regression cases cover each gap and fail against the
+  old code.
 
 ## 0.3.294 — 2026-09-27
 

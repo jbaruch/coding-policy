@@ -48,8 +48,10 @@ def _sha256(path, what, remedy):
     except OSError as exc:
         raise UsageError("Cannot read the {} at {!r}: {}. {}".format(
             what, str(path), exc.strerror or exc, remedy), {"path": str(path)}) from None
-    except ValueError as exc:
-        # An embedded NUL or an unencodable character never names a file.
+    except (UnicodeEncodeError, ValueError) as exc:
+        # An embedded NUL (ValueError) or a character the filesystem encoding
+        # cannot carry, such as a lone surrogate (UnicodeEncodeError, itself a
+        # ValueError), never names a file.
         raise UsageError("The {} path {!r} is not a usable file name: {}. {}".format(
             what, str(path), exc, remedy), {"path": repr(str(path))}) from None
     return digest.hexdigest()
@@ -68,6 +70,13 @@ def plan_oracle(plan, role):
     if oracle is None:
         raise UsageError("The plan declares no oracle for {!r}; only a mechanical round is checked "
                          "against one.".format(role), {"role": role})
+    round_type = entry.get("type") if isinstance(entry, dict) else None
+    if round_type != "mechanical":
+        # An oracle licenses only a mechanical round; one riding on any other
+        # round was never checked at plan time and is never pinned (#576).
+        raise UsageError("The plan's round for {!r} is {!r}, not mechanical; its oracle licensed "
+                         "nothing and is not checked. Gate the round on its own review.".format(
+                             role, round_type), {"role": role})
     problem = oracle_shape_problem(oracle)
     if problem is not None:
         raise UsageError("The plan's oracle for {!r} is malformed: {}. Replan with a well-formed "
@@ -87,12 +96,16 @@ def plan_oracle(plan, role):
 def pin_oracles(rounds):
     """Each role's patch or fixture oracle file, pinned to its sha256 as `plan` writes the plan.
 
-    A malformed oracle is left unpinned: the round's tier check has already
-    refused it where it licenses anything, and `verify-oracle` refuses it again.
+    Only a mechanical round's oracle is pinned: it is the only one that
+    licenses anything, and `mechanical_allowed` has already checked its file is
+    a readable regular file. A malformed oracle is left unpinned: the round's
+    tier check has already refused it, and `verify-oracle` refuses it again.
     """
     pins = {}
     for role, entry in (rounds or {}).items():
-        context = entry.get("context") if isinstance(entry, dict) else None
+        if not isinstance(entry, dict) or entry.get("type") != "mechanical":
+            continue
+        context = entry.get("context")
         oracle = context.get("oracle") if isinstance(context, dict) else None
         if oracle is None or oracle_shape_problem(oracle) is not None or oracle["kind"] == "digest":
             continue

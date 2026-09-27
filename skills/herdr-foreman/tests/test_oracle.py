@@ -3,6 +3,7 @@
 import hashlib
 import io
 import json
+import os
 import sys
 import tempfile
 import tracemalloc
@@ -155,7 +156,7 @@ class OracleTest(unittest.TestCase):
                 with self.assertRaisesRegex(UsageError, "not a usable file name"):
                     verify(oracle, result)
         with self.assertRaisesRegex(UsageError, "not a usable file name"):
-            pin_oracles({"developer": {"context": {"oracle": {"kind": "patch", "path": "/tmp/x\ud800"}}}})
+            pin_oracles({"developer": {"type": "mechanical", "context": {"oracle": {"kind": "patch", "path": "/tmp/x\ud800"}}}})
 
     def test_each_unreadable_file_names_its_own_recovery(self):
         # A missing result is re-passed; a missing oracle is restored and the
@@ -166,7 +167,22 @@ class OracleTest(unittest.TestCase):
         with self.assertRaisesRegex(UsageError, "Cannot read the patch oracle.*Restore the oracle file.*replan"):
             verify({"kind": "patch", "path": missing, "sha256": "a" * 64}, self.result)
         with self.assertRaisesRegex(UsageError, "Cannot read the fixture oracle.*replan"):
-            pin_oracles({"developer": {"context": {"oracle": {"kind": "fixture", "path": missing}}}})
+            pin_oracles({"developer": {"type": "mechanical", "context": {"oracle": {"kind": "fixture", "path": missing}}}})
+
+    def test_an_oracle_on_a_non_mechanical_round_is_neither_pinned_nor_checked(self):
+        # An oracle licenses only a mechanical round, and only that round's
+        # file was checked at plan time. One riding on a build round is not
+        # read while planning (a FIFO there must not hang `plan`) and
+        # `verify-oracle` refuses to gate on it.
+        fifo = self.root / "fifo"
+        os.mkfifo(fifo)
+        rounds = {"developer": {"type": "build", "context": {"oracle": {"kind": "patch", "path": str(fifo)}}}}
+        self.assertEqual(pin_oracles(rounds), {})
+        path = self.root / "plan.json"
+        path.write_text(json.dumps({"assignments": {"developer": "codex"}, "rounds": rounds}))
+        code, output, error = self.run_cli(path)
+        self.assertEqual((code, output), (1, ""))
+        self.assertIn("not mechanical", error)
 
 if __name__ == "__main__":
     unittest.main()
