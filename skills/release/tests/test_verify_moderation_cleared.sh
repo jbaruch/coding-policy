@@ -50,7 +50,7 @@ export VERIFY_MODERATION_BASE_DELAY_SEC=1
 export VERIFY_MODERATION_MAX_DELAY_SEC=2
 export VERIFY_MODERATION_BUDGET_SEC=4
 
-# shellcheck disable=SC1090
+# shellcheck disable=SC1090  # ShellCheck cannot resolve the dynamically constructed source path.
 source "$SCRIPT"
 set +e
 
