@@ -1672,7 +1672,7 @@ class JudgeModeReservationTests(unittest.TestCase):
         reserve(self.store, self.judge(judge_mode="diagnosis"), AT)
         validate_store(self.store, [])
         mark_sending(self.store, "judge-1", AT, {"cleared": True, "judge_mode": "diagnosis"})
-        for status in ("sending", "sent_but_not_started"):
+        for status in ("sending", "sent_but_not_started", "applied"):
             for broken in (None, "diagnosis", ["diagnosis"]):
                 with self.subTest(status=status, context=broken):
                     corrupt = copy.deepcopy(self.store)
