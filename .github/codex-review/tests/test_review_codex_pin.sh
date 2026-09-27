@@ -64,7 +64,7 @@ t_self_review_pin() {
 
   local bin work
   bin=$(mktemp -d) || { echo "fatal: mktemp -d failed" >&2; exit 2; }
-  work=$(mktemp -d) || { echo "fatal: mktemp -d failed" >&2; exit 2; }
+  work=$(mktemp -d) || { echo "fatal: mktemp -d failed" >&2; rmwarn "$bin"; exit 2; }
   # A `set -e` subshell so any failed fixture write aborts the run
   # (rules/error-handling.md aggregate carve-out, setup-step check).
   if ! (
