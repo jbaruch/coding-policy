@@ -32,6 +32,8 @@ class PruneResultTest(unittest.TestCase):
         cases = {
             "not a JSON object": [],
             "no failed list": prune_doc(failed=None),
+            "a malformed worktrees_removed entry": prune_doc(worktrees_removed=[None]),
+            "a malformed branches_deleted entry": prune_doc(branches_deleted=[{}]),
             "a malformed worktrees_kept entry": prune_doc(worktrees_kept=[None]),
             "a malformed dirty worktree entry": prune_doc(worktrees_kept=[{"path": "/w/a", "reason": "dirty"}]),
             "a malformed branches_kept entry": prune_doc(branches_kept=[{"reason": "unpushed"}]),
@@ -47,6 +49,8 @@ class PruneResultTest(unittest.TestCase):
         self.assertEqual(remote_schema_error(remote_doc(default_branch=None)), "no default_branch")
         self.assertEqual(remote_schema_error(remote_doc(questionable=[{"branch": "b"}])), "a malformed questionable entry")
         self.assertEqual(remote_schema_error(remote_doc(failed=[None])), "a malformed failed entry")
+        self.assertEqual(remote_schema_error(remote_doc(deleted=[None])), "a malformed deleted entry")
+        self.assertEqual(remote_schema_error(remote_doc(kept=[{}])), "a malformed kept entry")
         self.assertEqual(remote_schema_error({"deleted": []}), "no questionable list")
 
 

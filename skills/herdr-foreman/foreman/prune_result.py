@@ -40,6 +40,10 @@ def prune_schema_error(doc):
     for key in ("worktrees_removed", "worktrees_kept", "branches_deleted", "branches_kept", "failed"):
         if not isinstance(doc.get(key), list):
             return "no {} list".format(key)
+    if not entries_ok(doc["worktrees_removed"], {"path": is_str}):
+        return "a malformed worktrees_removed entry"
+    if not all(is_str(b) for b in doc["branches_deleted"]):
+        return "a malformed branches_deleted entry"
     if not entries_ok(doc["worktrees_kept"], {"path": is_str, "reason": is_str}):
         return "a malformed worktrees_kept entry"
     for kept in doc["worktrees_kept"]:
@@ -66,6 +70,10 @@ def remote_schema_error(doc):
         return "no could_not_check field"
     if not is_str(doc.get("default_branch")):
         return "no default_branch"
+    if not all(is_str(b) for b in doc["deleted"]):
+        return "a malformed deleted entry"
+    if not entries_ok(doc["kept"], {"branch": is_str, "reason": is_str}):
+        return "a malformed kept entry"
     fields = {"branch": is_str, "ahead": is_int, "age_hours": is_int, "author": is_str, "open_pr": is_str, "delete": is_str}
     if not entries_ok(doc["questionable"], fields):
         return "a malformed questionable entry"
