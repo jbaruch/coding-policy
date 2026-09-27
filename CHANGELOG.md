@@ -1,7 +1,5 @@
 # Changelog
 
-## 0.3.299 — 2026-09-27
-
 ### Fixed
 
 - **The foreman reset deliverer types only into the foreman's bound native
@@ -14,7 +12,8 @@
   records the native session bound at `supervision-bind` on the reset row
   (`native_session`), and refuses to schedule when the binding names none.
   The deliverer's guard reads `herdr pane get` (the source `supervision-bind`
-  reads) and refuses unless the pane still holds that session, for every
+  reads, held to its proof: a claude or codex session its own Herdr
+  integration reports) and refuses unless the pane still holds that session, for every
   keystroke of the clear command, extra Enters included, until the composer
   confirms it consumed: the row finishes `failed` before any keystroke,
   `interrupted` after one, both with error `reset_session_changed` and
@@ -48,6 +47,10 @@
   an unresolvable transcript path, the migration rewrite, and the
   CLI end to end; the unfixed deliverer typed `/clear` and the resume prompt
   into the replacement session.
+
+## 0.3.299 — 2026-09-27
+
+### Fixed
 
 - **A judge dispatch carries its mode from reservation, and a pending send's
   mode is checked (#495).** `assign.apply` refused a mode-less judge dispatch
