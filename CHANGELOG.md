@@ -10,7 +10,9 @@
   source's intact frozen copy. `read_frozen` now reaches the file through a
   descriptor walk from `/` that opens every directory component with
   `O_NOFOLLOW` relative to the one before it, refusing a link anywhere on the
-  path without a resolve-then-open race. `freeze_paths` freezes under the
+  path without a resolve-then-open race. Each directory opens search-only
+  (`O_PATH` on Linux, `O_SEARCH` on Darwin), so an execute-only ancestor
+  that an ordinary path lookup passes is walked too. `freeze_paths` freezes under the
   source directory's `realpath`, so paths it records carry no links (macOS
   `/tmp` and `/var` included). It opens that directory once through the same
   walk and holds the descriptor through both the source read and the copy's
@@ -31,7 +33,8 @@
   resolution and read, a source directory swapped for a link before the read
   and before the write, a source directory replaced after the read, a failed
   write and a failed close each followed by a clean retry, a failed
-  read-only close warning without masking the primary error, a brief path
+  read-only close warning without masking the primary error, an
+  execute-only ancestor, a brief path
   containing braces, and a FIFO source. Carrying the verified bytes through
   the dispatch-identity and prompt reads that follow the freeze is #565.
 

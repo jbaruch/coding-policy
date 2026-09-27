@@ -345,6 +345,19 @@ class FrozenPathTest(unittest.TestCase):
                 freeze_paths({"brief": str(self.root / "source" / "missing.md")})
         self.assertIn("Could not close the descriptor for", stderr.getvalue())
 
+    def test_an_execute_only_ancestor_is_walked_like_a_path_lookup(self):
+        # coding-policy#562 review: opening each ancestor for reading refused
+        # a directory the caller may search but not list, which a lookup by
+        # name passes.
+        from foreman.assign import read_frozen
+        locked = self.root / "locked"
+        (locked / "source").mkdir(parents=True)
+        (locked / "source" / "brief.md").write_text("behind a search-only directory\n")
+        locked.chmod(0o311)
+        self.addCleanup(locked.chmod, 0o755)
+        frozen = freeze_paths({"brief": str(locked / "source" / "brief.md")})["brief"]
+        self.assertEqual(read_frozen(frozen), b"behind a search-only directory\n")
+
     def test_a_fifo_source_is_refused_without_hanging(self):
         fifo = self.root / "source" / "fifo.md"
         os.mkfifo(fifo)

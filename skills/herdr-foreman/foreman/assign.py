@@ -34,6 +34,7 @@ builders live on the transport) and prints them without running anything.
 import errno
 import os
 import stat
+import sys
 import time
 import hashlib
 from pathlib import Path
@@ -181,6 +182,26 @@ def reject_duplicate_agents(assignments):
 FROZEN_DIR = ".dispatched"
 
 
+def _directory_search_flag():
+    """The open flag that reaches a directory for lookups alone, needing search permission, not read.
+
+    A path walk by name needs only search (x) on each ancestor; opening each
+    one `O_RDONLY` would refuse an execute-only ancestor that the kernel's own
+    lookup passes (#562 review). Python exposes `O_PATH` on Linux and no name
+    for Darwin's `O_SEARCH`, whose `O_EXEC` bit is `sys/fcntl.h`'s 0x40000000.
+    `O_RDONLY` is the fallback where neither exists.
+    """
+    for name in ("O_SEARCH", "O_PATH"):
+        if hasattr(os, name):
+            return getattr(os, name)
+    if sys.platform == "darwin":
+        return 0x40000000
+    return os.O_RDONLY
+
+
+_SEARCH = _directory_search_flag()
+
+
 def freeze_decision(assignments, is_replay):
     """`source` when every assigned role replays a dispatch recorded under these source paths, else `frozen`.
 
@@ -283,7 +304,7 @@ def _write_frozen(held, target, data, source):
             os.mkdir(FROZEN_DIR, dir_fd=held)
         except FileExistsError:
             pass
-        frozen_dir = os.open(FROZEN_DIR, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=held)
+        frozen_dir = os.open(FROZEN_DIR, _SEARCH | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=held)
     except OSError as exc:
         if exc.errno in (errno.ELOOP, errno.ENOTDIR):
             raise UsageError("Frozen-brief directory {} is a link or not a directory; move it aside and re-run so "
@@ -350,13 +371,13 @@ def _open_directory_unlinked(target, open_failed=_FROZEN_OPEN_FAILED, linked=_FR
     """
     parts = Path(target).parent.parts
     try:
-        fd = os.open(parts[0], os.O_RDONLY | os.O_DIRECTORY)
+        fd = os.open(parts[0], _SEARCH | os.O_DIRECTORY)
     except OSError as exc:
         raise UsageError(open_failed.format(target, exc.strerror or str(exc), brief), {"path": str(target)}) from None
     try:
         for index, name in enumerate(parts[1:], 2):
             try:
-                child = os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
+                child = os.open(name, _SEARCH | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
             except OSError as exc:
                 if exc.errno in (errno.ELOOP, errno.ENOTDIR):
                     raise UsageError(linked.format(target, Path(*parts[:index]), brief),
