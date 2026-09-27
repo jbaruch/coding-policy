@@ -139,7 +139,10 @@ class CloseMemberTest(MembersCase):
                  ({"decision": "completed"}, sha, None, "has decision 'completed', not one of the assignment"),
                  ({"worker": "not_applicable"}, sha, None, "has worker 'not_applicable'"),
                  ({"report": "reviewer.md"}, sha, None, "has report 'reviewer.md', not an absolute path or unknown"),
-                 ({"report": "not_applicable"}, sha, None, "has report 'not_applicable', not an absolute path"))
+                 ({"report": "not_applicable"}, sha, None, "has report 'not_applicable', not an absolute path"),
+                 ({"subject": "task", "decision": "in_progress", "dispatch_id": "not_applicable",
+                   "worker": "not_applicable", "role": "not_applicable", "report": "not_applicable"}, sha, None,
+                  "has report 'not_applicable', not an absolute path or unknown"))
         for fields, base, state, why in cases:
             with self.subTest(why=why):
                 self.write_ledger("accepted", fields=fields, base=base, state=state)
@@ -209,7 +212,7 @@ class CloseMemberTest(MembersCase):
         self.write_ledger("accepted")
         task_event = ("## task-1\n\n- schema_version: 1\n- id: task-1\n- at: {}\n- subject: task\n"
                       "- dispatch_id: dispatch-a\n- worker: not_applicable\n- role: not_applicable\n"
-                      "- report: not_applicable\n- observed: round started\n- decision: in_progress\n"
+                      "- report: unknown\n- observed: round started\n- decision: in_progress\n"
                       "- head_revision: not_applicable\n- evidence: unknown\n- assessment: open\n").format(AT)
         self.ledger.write_text(self.ledger.read_text() + "\n" + task_event)
         with self.assertRaisesRegex(UsageError, "event task-1 has dispatch_id 'dispatch-a'"):
@@ -235,7 +238,7 @@ class CloseMemberTest(MembersCase):
         self.write_ledger("accepted")
         task_event = ("## task-1\n\n- schema_version: 1\n- id: task-1\n- at: {}\n- subject: task\n"
                       "- dispatch_id: not_applicable\n- worker: not_applicable\n- role: not_applicable\n"
-                      "- report: not_applicable\n- observed: round started\n- decision: in_progress\n"
+                      "- report: unknown\n- observed: round started\n- decision: in_progress\n"
                       "- head_revision: not_applicable\n- evidence: unknown\n- assessment: open\n"
                       "- note: a prose bullet\n- note: another prose bullet\n").format(AT)
         self.ledger.write_text(self.ledger.read_text() + "\n" + task_event)

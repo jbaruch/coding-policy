@@ -18,10 +18,11 @@
   from that subject's vocabulary in `references/task-ledger.md`,
   `dispatch_id` / `worker` / `role` are `not_applicable` on a task event and
   never on an assignment event, and `report` is an absolute path or
-  `unknown` (or `not_applicable` on a task event, which the template's "use
-  `not_applicable` for the assignment fields" already invited; the
-  `state-schema.md` table and the `references/task-ledger.md` template now
-  say so explicitly). A schema field repeated
+  `unknown` on every event, as the schema-1 table always said (the template's
+  "use `not_applicable` for the assignment fields" now names `dispatch_id`,
+  `worker` and `role` so it no longer reads as covering `report`; accepting
+  `not_applicable` there would have been a shape change needing a schema
+  bump). A schema field repeated
   inside one event, or in the frontmatter, is refused: the parser kept the
   last value, so a second well-formed line could hide a malformed first one.
   Only the free-text `observed`, `evidence` and `assessment` fields are

@@ -70,8 +70,8 @@ into a working or blocked worker.
 
 Fill this as a reasoning document; placeholder values are not evidence.
 Append one uniquely named event section per decision. For task events use
-`not_applicable` for `dispatch_id`, `worker` and `role`; a task event's `report`
-is `unknown` or `not_applicable`. Use `unknown` for unavailable evidence.
+`not_applicable` for `dispatch_id`, `worker` and `role`; `report` stays an
+absolute path or `unknown`. Use `unknown` for unavailable evidence.
 
 ```markdown
 ---
@@ -92,7 +92,7 @@ dispatch_state: <absolute utility state.json path>
 - dispatch_id: <actual dispatch id or not_applicable>
 - worker: <worker name or not_applicable>
 - role: <role or not_applicable>
-- report: <absolute path or unknown; not_applicable allowed on a task event>
+- report: <absolute path or unknown>
 - observed: <source and its actual observation>
 - decision: <foreman assessment from the table>
 - head_revision: <full inspected SHA, unknown, or not_applicable>

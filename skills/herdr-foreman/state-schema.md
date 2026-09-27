@@ -211,7 +211,7 @@ required fields; unavailable values are the literal `unknown`, never guesses:
 | `id`, `at` | Unique event identity and timezone-qualified observation time |
 | `subject` | `task` or `assignment` |
 | `dispatch_id`, `worker`, `role` | Actual utility dispatch identity and assigned worker/role; `not_applicable` for task events |
-| `report` | Absolute report path, or `unknown` before it is known; `not_applicable` is also accepted on task events |
+| `report` | Absolute report path, or `unknown` before it is known |
 | `observed` | Source-attributed dispatch result, wait result, worker claim, or Herdr state; never an acceptance decision |
 | `decision` | Foreman assessment using the status vocabulary in `references/task-ledger.md` |
 | `head_revision` | Full inspected commit SHA, `unknown` when unverified, or `not_applicable` for work without a VCS artifact |
@@ -239,8 +239,8 @@ decision log, not a new machine status API or an input to `foreman.sh apply`.
   `subject` of `task` or `assignment`; a `decision` from that subject's
   vocabulary in `references/task-ledger.md`; `dispatch_id`, `worker` and
   `role` as `not_applicable` on a task event and never on an assignment
-  event; a `report` that is an absolute path or `unknown`, or
-  `not_applicable` on a task event; and a full `head_revision` SHA or its
+  event; a `report` that is an absolute path or `unknown`; and a full
+  `head_revision` SHA or its
   `unknown`/`not_applicable` literal. `observed`, `evidence` and
   `assessment` are free text and need only be present. Any other version,
   a missing, repeated or malformed field or another state's ledger is

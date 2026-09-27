@@ -145,10 +145,8 @@ def _check_formats(path, event):
             raise _unusable(path, "event {} has {} {!r}; a task event carries not_applicable and an assignment "
                             "event its actual value".format(section, key, event[key]))
     report = event["report"]
-    placeholders = {"unknown", "not_applicable"} if subject == "task" else {"unknown"}
-    if report not in placeholders and (not os.path.isabs(report) or "\0" in report):
-        raise _unusable(path, "event {} has report {!r}, not an absolute path or {}".format(
-            section, report, " or ".join(sorted(placeholders))))
+    if report != "unknown" and (not os.path.isabs(report) or "\0" in report):
+        raise _unusable(path, "event {} has report {!r}, not an absolute path or unknown".format(section, report))
 
 
 def _resolve_bound(path, dispatch_state):
