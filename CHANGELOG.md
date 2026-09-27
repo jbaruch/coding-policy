@@ -38,6 +38,10 @@
   from PR #528's review. `herdr-foreman` Step 11's `check-member` follow-up
   paragraph, which merged several directives, is now one bullet per directive.
 
+## 0.3.295 — 2026-09-27
+
+### Fixed
+
 - **`standup-ask.sh` measures the worker's live pane before asking (#515).**
   The script capped the report path at 100 characters and claimed the
   worker's `REPORT: <path>` line then fit one pane row; #513 showed a
