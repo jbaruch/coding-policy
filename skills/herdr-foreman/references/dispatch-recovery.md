@@ -585,6 +585,13 @@ contract — its per-block JSONL rows, the `parentUuid` chain, both parallel
 tool-call orderings, and where its transcripts live — sits beside it in
 `skills/herdr-foreman/foreman/claude_native.py`.
 
+A sender that bypasses `foreman apply` — `skills/herdr-standup/standup-ask.sh`
+— measures the marker with `foreman marker-fit --agent <name> --report <abs>`
+before it sends. It emits `agent`, `pane_id`, `kind`, `agent_status`, `report`,
+`pane_width`, `needed` and `fits`, exiting 0 for either verdict and non-zero
+on a Herdr or usage failure. It reads no state or config home and writes nothing. The lookup and the fit rule
+are `marker_fit` in `skills/herdr-foreman/foreman/report_delivery.py`.
+
 A Grok `/new` keeps continuity null when Herdr repeats the pre-clear ID or no
 pre-clear ID was observed. Wait normally; an unconfirmed native marker is not
 permission to send the assignment again. The watcher never scans for a newer
