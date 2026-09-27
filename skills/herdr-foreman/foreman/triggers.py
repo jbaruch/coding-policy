@@ -37,6 +37,7 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
+from . import runnable
 from .composition import REQUIREMENTS_SCHEMA_VERSION
 from .errors import UsageError
 
@@ -199,7 +200,8 @@ def load_requirements(path):
     try:
         raw = Path(path).read_text(encoding="utf-8")
     except OSError as exc:
-        raise UsageError("Cannot read requirements at {} ({}); pass the same file Step 6 gives `plan`.".format(path, exc.strerror), {}) from None
+        raise UsageError("Cannot read requirements at {} ({}); pass the same file Step 6 gives `{}`.".format(
+            path, exc.strerror, runnable.command("plan")), {}) from None
     try:
         payload = json.loads(raw)
     except json.JSONDecodeError as exc:
