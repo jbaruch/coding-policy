@@ -683,6 +683,9 @@ def _candidate_tiers(roles, agents, rounds, fix_round=None, judge=None, excludes
                     candidates[role][agent.name] = {"round": "judge", "tier_row": "judge", "kind": agent.kind,
                         "model": judge.model, "effort": judge.effort or None,
                         "billing_window": "unknown", "multiplier": 1.0, "effective_multiplier": 1.0,
+                        # A judgment round never meets pressure, but every
+                        # schema-9 tier entry carries both fields (#490).
+                        "pressure_headroom": None, "de_escalated": False,
                         "capability": verdict, "cheaper_adequate": None}
                 continue
             if role == "judge":
@@ -920,7 +923,9 @@ def cmd_plan(args, client=None, warn=None, trace=None):
         except (OSError, UnicodeDecodeError) as exc:
             raise PlanError("Cannot read snapshot {}: {}. Supply a readable UTF-8 JSON file with --snapshot.".format(snapshot_path, exc),
                             {"path": str(snapshot_path)}) from None
-        source = str(snapshot_path)
+        # Apply re-reads this path, possibly from another working directory; a
+        # relative one would resolve elsewhere and read as unmeasured (#490).
+        source = str(snapshot_path.absolute())
     else:
         snapshot = latest_snapshot(state)
         if snapshot is None:

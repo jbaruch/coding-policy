@@ -265,6 +265,44 @@ class SelectionTest(unittest.TestCase):
                 self.assertFalse(tier["de_escalated"])
                 self.assertEqual(tier["effort"], "xhigh")
 
+    def test_de_escalated_is_recorded_only_when_the_escalation_would_have_changed_the_tier(self):
+        # coding-policy#490: a row already at its top model and effort, or a
+        # kind with no effort above its configured one, has nothing to decline.
+        risk = {"risk_flags": ["network", "persistence"]}
+        top = {"claude": ("opus-5", "xhigh"), "codex": ("gpt-5.6-sol", "xhigh"), "grok": ("grok-4.6", "high")}
+        for kind, (model, effort) in top.items():
+            worker = SimpleNamespace(name=kind, kind=kind, tiers=parse_tiers(
+                {"build": {"model": model, "effort": effort}}, kind))
+            with self.subTest(kind=kind):
+                tier = select_tier(worker, "developer", context=risk, headroom=1.0)
+                self.assertEqual((tier["model"], tier["effort"], tier["tier_row"]), (model, effort, "build"))
+                self.assertFalse(tier["de_escalated"])
+                self.assertEqual(tier["pressure_headroom"], 1.0)
+
+    def test_a_declined_row_switch_is_recorded_even_where_effort_cannot_rise(self):
+        # Grok has no effort above `high`, but a lower build model would still
+        # have moved to the review row: that step is real and was declined.
+        tier = select_tier(agent("grok"), "developer", "build",
+                           {"risk_flags": ["network", "persistence"]}, headroom=1.0)
+        self.assertEqual(tier["tier_row"], "build")
+        self.assertFalse(tier["de_escalated"])
+        worker = SimpleNamespace(name="grok", kind="grok", tiers=parse_tiers({
+            "review": {"model": "grok-4.6", "effort": "high"},
+            "build": {"model": "grok-code-fast", "effort": "high"}}, "grok"))
+        scarce = select_tier(worker, "developer", context={"risk_flags": ["network", "persistence"]}, headroom=1.0)
+        self.assertEqual((scarce["model"], scarce["tier_row"], scarce["de_escalated"]), ("grok-code-fast", "build", True))
+
+    def test_scarcity_on_a_row_with_no_review_fallback_declines_rather_than_refuses(self):
+        # The step it would have taken needs a review row; under scarcity that
+        # step is declined, so the configured row runs without one.
+        worker = SimpleNamespace(name="claude", kind="claude", tiers=parse_tiers(
+            {"build": {"model": "sonnet-5", "effort": "high"}}, "claude"))
+        risk = {"risk_flags": ["network", "persistence"]}
+        scarce = select_tier(worker, "developer", context=risk, headroom=1.0)
+        self.assertEqual((scarce["model"], scarce["de_escalated"]), ("sonnet-5", True))
+        with self.assertRaises(MissingTierError):
+            select_tier(worker, "developer", context=risk, headroom=80.0)
+
     def test_an_overflowing_headroom_reads_as_unmeasured(self):
         tier = select_tier(agent(), "developer", context={"risk_flags": ["network", "persistence"]}, headroom=10 ** 1000)
         self.assertIsNone(tier["pressure_headroom"])

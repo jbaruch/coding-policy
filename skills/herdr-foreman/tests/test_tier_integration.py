@@ -3,14 +3,19 @@
 import copy
 import json
 import os
+import shutil
 import sys
+import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from foreman import cli
 from foreman.herdr import HerdrClient
+from foreman.tiers import parse_tiers
 from foreman.planner import plan
 from foreman.state import STATE_SCHEMA_VERSION, add_assignment, empty_state, load_state_checked, role_counts
 from tests.fakes import FakeRunner, ScriptedReads, agent_json, composer_reads, composer_screen, ok_json
@@ -268,6 +273,54 @@ class TierIntegrationTest(CliCase):
         self.state.write_text(json.dumps(state))
         _stored, usable = load_state_checked(self.state)
         self.assertFalse(usable)
+
+    def test_an_overflowing_stored_pressure_is_refused_not_raised(self):
+        # coding-policy#490: `math.isfinite(10**1000)` raises OverflowError,
+        # which escaped the unusable-state path as a traceback.
+        state = empty_state()
+        argv = ["claude", "--model", "sonnet-5", "--effort", "high"]
+        add_assignment(state, AT, "developer", "claude", tier={
+            "kind": "claude", "model": "sonnet-5", "effort": "high", "launch_args": [],
+            "verified": {"source": "launch_argv", "model": "sonnet-5", "effort": "high", "pane_id": "w1:p2", "argv": argv}})
+        state["assignments"][0]["tier"]["pressure_headroom"] = 10 ** 1000
+        self.state.write_text(json.dumps(state))
+        _stored, usable = load_state_checked(self.state, warn=lambda _: None)
+        self.assertFalse(usable)
+
+    def test_a_relative_snapshot_path_survives_a_directory_change(self):
+        # coding-policy#490: apply re-reads the snapshot the plan names. A
+        # relative name resolved against apply's own directory reads as
+        # unmeasured, and a legitimate de-escalation is refused as stale.
+        self.snapshot.write_text(json.dumps({"agents": {"claude": {"headroom_pct": 8}}}))
+        context = self.tmp / "round-context.json"
+        context.write_text(json.dumps({"developer": {"risk_flags": ["network", "persistence"]}}))
+        elsewhere = Path(tempfile.mkdtemp(prefix="foreman-elsewhere-"))
+        self.addCleanup(shutil.rmtree, elsewhere)
+        self.addCleanup(os.chdir, os.getcwd())
+        os.chdir(self.tmp)
+        rc, output, error = self.run_cli(["plan", *self.base(), "--roles", "developer",
+                                          "--snapshot", self.snapshot.name,
+                                          "--round-context", str(context), "--now", AT])
+        self.assertEqual(rc, 0, error)
+        document = json.loads(output)
+        self.assertTrue(document["tiers"]["developer"]["de_escalated"])
+        self.assertTrue(Path(document["snapshot_ref"]["source"]).is_absolute())
+        os.chdir(elsewhere)
+        rc, _output, error = self.run_cli(self.apply_args(document) + ["--dry-run"],
+                                          client=HerdrClient("herdr", FakeRunner()))
+        self.assertEqual(rc, 0, error)
+
+    def test_the_pinned_judge_entry_has_the_shape_of_every_other_tier(self):
+        # coding-policy#490: the judge branch returned before the projection
+        # that adds the pressure fields.
+        worker = SimpleNamespace(name="claude", kind="claude", tiers=parse_tiers({"build": tier_row()}, "claude"))
+        judge_worker = SimpleNamespace(name="judge", kind="claude", tiers={})
+        judge = SimpleNamespace(agent="judge", model="opus-5", effort="high")
+        candidates = cli._candidate_tiers(["developer", "judge"], [worker, judge_worker], {}, judge=judge)
+        assert candidates is not None, "a tiered worker and a pinned judge always yield candidates"
+        judged, built = candidates["judge"]["judge"], candidates["developer"]["claude"]
+        self.assertEqual(set(judged), set(built))
+        self.assertEqual((judged["pressure_headroom"], judged["de_escalated"]), (None, False))
 
     def test_a_schema_six_tier_row_migrates_as_never_de_escalated(self):
         # coding-policy#477: nothing could de-escalate before this version, so
