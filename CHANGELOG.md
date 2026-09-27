@@ -1,5 +1,19 @@
 # Changelog
 
+### Fixed
+
+- **`foreman detect-triggers` no longer reads untracked files on a round that
+  writes nothing (#499).** `run_command` in
+  `skills/herdr-foreman/foreman/triggers.py` collected and decoded every
+  untracked file in the working tree before the `writes_repository: false`
+  branch discarded them. An unreadable scratch file in the shared checkout (a
+  dangling symlink, a permission-denied file) refused an investigation over
+  workspace state it had no part in, and a large scratch tree was scanned for
+  nothing. Untracked collection now runs only for a round that writes, and the
+  tracked-diff refusal on a no-write round is unchanged. The second item in
+  #499, naming the no-write alternative in `SKILL.md` Step 5, had already
+  landed.
+
 ## 0.3.288 — 2026-09-27
 
 ### Fixed
