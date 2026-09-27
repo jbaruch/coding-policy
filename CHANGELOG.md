@@ -1,5 +1,23 @@
 # Changelog
 
+### Fixed
+
+- **Frozen-brief reads refuse traversal, and partition proofs diff
+  `base..head` (#534).** Two Copilot findings deferred from #529. First,
+  `assign.read_frozen` accepted any path whose lexical parent was
+  `.dispatched`, so `source/.dispatched/../../other/.dispatched/brief.<digest>.md`
+  passed the gate while naming an intact copy frozen for a different source.
+  It now also requires an absolute path with no `..` component; `verify-partition`
+  and recovery reach frozen copies only through it. Second, `validate-partition`
+  proved, and `verify-partition` re-checked, the slices against
+  `git diff base...head`, which diffs from the merge base and drops every
+  change on the base side when the task's recorded base is not an ancestor of
+  the head. Both now use `base..head`, the range #460's contract names, and
+  `state-schema.md` says so. Regressions cover a traversal path, a relative
+  path, and a fixture repository whose base sits on a sibling branch, where
+  the two ranges differ. `detect-triggers` keeps its merge-base range: it reads
+  "absent from the base" at the merge base on purpose.
+
 ## 0.3.280 — 2026-09-27
 
 ### Changed
