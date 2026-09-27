@@ -56,13 +56,19 @@ bash "$CP/skills/herdr-standup/standup-ask.sh" \
 
 Sends the standup question as a plain message and emits
 `{"agent","report_path","state","sent"}`. Exit 3 means the worker was not ready
-and nothing was sent — move it to Step 4's list. Exit 1 is a precondition,
-including a report path longer than the script's limit (the worker's
-`REPORT: <path>` line must fit one pane row), exit 2 a herdr failure. The question text and the four-line shape it demands are the
+and nothing was sent — move it to Step 4's list. Exit 4 means the worker's live
+pane is too narrow for its `REPORT: <path>` line and nothing was sent; the JSON
+adds `pane_width` and `needed`. Relay both to the operator, who widens the pane
+or picks a shorter reports directory, and move the worker to Step 4's list.
+Exit 1 is a precondition, including a report path over the script's coarse
+length bound, exit 2 a herdr or measurement failure. On exit 1 or 2 nothing
+was sent: relay the diagnostic verbatim to the operator and move the worker
+to Step 4's list. The question text and the four-line shape it demands are the
 script's contract; see the header of
 `skills/herdr-standup/standup-ask.sh`.
 
-Proceed immediately to Step 3.
+Proceed immediately to Step 3 with every worker whose ask exited 0. When no
+ask exited 0, skip Step 3 and proceed immediately to Step 4.
 
 ## Step 3 — Wait for Each Answer
 
@@ -92,8 +98,8 @@ first continuation that applies:
   Other exits take their documented branches. A second exit 4 is
   terminal: move the worker to Step 4's list with what you know.
 - The state is `idle` or `done` — move the worker to Step 4's list with what
-  you know. `standup-ask.sh` refuses a report path too long for one pane row,
-  so this outcome means the path bypassed it.
+  you know. `standup-ask.sh` refuses a marker the worker's live pane would
+  wrap, so this outcome means the pane narrowed after the ask.
 
 Proceed immediately to Step 4.
 
