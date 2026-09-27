@@ -1,7 +1,5 @@
 # Changelog
 
-## 0.3.300 — 2026-09-27
-
 ### Fixed
 
 - **The release publication contract and the plugin's hooks now run from an
@@ -34,6 +32,10 @@
   die when `cd` fails. Each has a fixture staging it under a directory whose
   name ends in a newline — for the Stop hook, the plugin root too — and each
   fixture fails against the old code.
+
+## 0.3.300 — 2026-09-27
+
+### Fixed
 
 - **The Stop hook no longer runs the foreman's cleanup when it cannot tell a
   Herdr worker from the foreman (#556).** `hooks/stop-handoff-hygiene.sh` read
