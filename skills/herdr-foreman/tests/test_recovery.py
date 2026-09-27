@@ -1640,6 +1640,23 @@ class JudgeModeReservationTests(unittest.TestCase):
                 with self.assertRaisesRegex(UsageError, "different judge mode"):
                     validate_store(corrupt, [])
 
+    def test_a_sent_judge_without_its_pre_send_context_is_refused(self):
+        # Reconcile reads the mode from this context; losing it recovers `unknown`.
+        reserve(self.store, self.judge(judge_mode="diagnosis"), AT)
+        validate_store(self.store, [])
+        mark_sending(self.store, "judge-1", AT, {"cleared": True, "judge_mode": "diagnosis"})
+        for status in ("sending", "sent_but_not_started"):
+            for broken in (None, "diagnosis", ["diagnosis"]):
+                with self.subTest(status=status, context=broken):
+                    corrupt = copy.deepcopy(self.store)
+                    corrupt["dispatches"][0]["status"] = status
+                    if broken is None:
+                        del corrupt["dispatches"][0]["context_before_send"]
+                    else:
+                        corrupt["dispatches"][0]["context_before_send"] = broken
+                    with self.assertRaisesRegex(UsageError, "lost the pre-send context"):
+                        validate_store(corrupt, [])
+
     def test_a_non_judge_context_carrying_a_mode_is_refused(self):
         reserve(self.store, {**self.judge(), "id": "review-1", "role": "reviewer"}, AT)
         mark_sending(self.store, "review-1", AT, {"cleared": True})

@@ -456,7 +456,8 @@ are never restamped: a judge dispatch recorded before version 3 keeps no mode,
 and its ledger row reads `unknown`. A new judge reservation without a mode is
 refused; only stored rows keep the mode-less shape. A dispatch's
 `context_before_send.judge_mode` equals the dispatch's own `judge_mode` (both
-absent off the judge seat) from the send onward, pending or applied. Checkpoints are at
+absent off the judge seat) from the send onward, pending or applied; a
+version-3 dispatch past `reserved` without a `context_before_send` object is refused. Checkpoints are at
 version 2: the owner upgrades a version-1 row on load, stamping it and
 preserving its identity, fix round, base and recorded ruling, and refuses one
 missing the ruling evidence its version required. The owner adds empty `role_clearances` and

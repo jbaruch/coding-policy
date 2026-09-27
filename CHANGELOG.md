@@ -14,7 +14,9 @@
   `context_before_send`. `mark_sending` now refuses a pre-send context naming
   a different mode than the dispatch, and the validator checks every
   dispatch's `context_before_send.judge_mode` against the row, pending or
-  applied.
+  applied, and refuses a version-3 dispatch past `reserved` whose
+  `context_before_send` is missing or not an object, since reconcile would
+  otherwise recover it as `unknown`.
 
 ## 0.3.292 — 2026-09-27
 

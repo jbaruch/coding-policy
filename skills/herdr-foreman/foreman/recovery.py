@@ -101,6 +101,8 @@ TASK_CLOSE_OUTCOMES = ("merged", "abandoned")
 RETAINED_FIX_ROUNDS = frozenset({0, 1, 2, 3})
 PENDING_STATUSES = frozenset({"reserved", "sending", "sent_but_not_started"})
 DISPATCH_STATUSES = PENDING_STATUSES | {"applied", "not_sent"}
+#: Statuses a dispatch reaches only through `mark_sending`.
+SENT_STATUSES = frozenset({"sending", "sent_but_not_started", "applied"})
 #: The wait-report reason a refusal receipt must carry (see wait-report.sh
 #: exit 5). A terminal provider refusal is recorded against the applied
 #: dispatch it stopped, keyed by task, role and fix round: the brief that
@@ -1958,6 +1960,12 @@ def validate_store(store, assignments):
             # Reconcile reads a pending judge's mode from this context, so it is
             # checked before the dispatch applies, not only after (#495).
             context = row.get("context_before_send")
+            # A mode-bearing dispatch past `reserved` went through
+            # `mark_sending`; without that context reconcile recovers `unknown`.
+            if (row["schema_version"] == JUDGE_DISPATCH_VERSION and row["status"] in SENT_STATUSES
+                    and not isinstance(context, dict)):
+                raise UsageError("A sent judge dispatch lost the pre-send context carrying its mode; "
+                                 "restore the original context_before_send.", {})
             if isinstance(context, dict) and context.get("judge_mode") != row.get("judge_mode"):
                 raise UsageError("The pre-send context names a different judge mode than its dispatch; "
                                  "restore the mode the judge was sent for.", {})
