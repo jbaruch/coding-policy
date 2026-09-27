@@ -126,6 +126,19 @@ Emits one JSON object: `ready`, the `blocking` reasons, the cadences that are
 failure — something blocks the round. Exit 2 means the preflight could not
 answer.
 
+Before following any route below, report the worktree sweep to the operator:
+
+- When `checks.worktrees.detail` is present, relay its `report` verbatim
+- The sweep builds that report (`skills/herdr-foreman/sweep-worktrees.sh`,
+  `report_text`); never reshape or summarize it
+- When `checks.worktrees` has no `detail`, report its `reason` verbatim; a
+  status `ok` with no `detail` means the worktree root does not exist, and
+  there is nothing to report for it
+- On exit 2 there is no JSON; report the stderr diagnostic instead
+- Raise each `dirty` or `unpushed` item the report lists per
+  `rules/hook-action-reporting.md` Act on What It Names; the operator carries
+  out the resolution chosen, and the foreman runs none of it
+
 - **Exit 0** — read `due`, satisfy any cadence it names, and proceed to Step 5.
   A resumed foreman proceeds to the stow's continuation step instead (Step 17
   Resume Route).
@@ -354,19 +367,42 @@ Proceed immediately to Step 8.
 
 ## Step 8 — Provision the Worktrees
 
-Step 2's preflight pruned, every round, and reported the result under
-`checks.worktrees`. Report every kept `dirty`, `unmerged`, `locked` and
-`detached` entry to the operator; never remove them by hand. Run it alone only
-to re-prune:
+Step 2's preflight swept every repository with a worktree directory under
+the root, every round, and Step 2 reported its outcomes. Route on its
+`checks.worktrees.status`; the classification is
+`skills/herdr-foreman/round-preflight.sh`'s (the `checks.worktrees` comment
+at the top of the file):
+
+- `ok` or `degraded` — provision
+- any other status — do not provision; report its `reason` and detail,
+  repair what it names, then run Step 2's preflight again with
+  `--no-measure` and route on the new status
+
+Never remove a worktree by hand; Step 15's removal of the merged task's own
+worktree is the one exception. To re-sweep without provisioning (Step 15),
+run the sweep alone and relay its `report` verbatim, as Step 2 does:
 
 ```bash
 CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"
-bash "$CP/skills/herdr-foreman/prune-worktrees.sh" <shared-checkout>
+bash "$CP/skills/herdr-foreman/sweep-worktrees.sh" "$HOME/.worktrees"
 ```
 
-Emits the worktrees and branches removed, each kept one with its reason, and
-`failed`; exit 2 lists every check or removal git refused. Exit 1 decided
-nothing: fix its diagnostic and re-run before provisioning.
+Input is the worktree root. It removes the spent worktrees and local branches
+of every repository with a worktree under that root. Stdout is one JSON
+object whose `report` is the operator-facing summary; the full shape is the
+script's top-of-file contract.
+
+- **Exit 0** — every repository decided cleanly. Relay `report`, raise each
+  `dirty` or `unpushed` item it lists, and continue.
+- **Exit 2** — JSON is present; at least one repository's prune failed or a
+  path could not be read, and every other repository still ran. Relay
+  `report` (its failure and error lines name each one), repair what they
+  name, then run the sweep again.
+- **Exit 1** — no JSON; a precondition is unmet. Report the stderr
+  diagnostic, repair what it names, then run the sweep again.
+
+The removal predicates live in `skills/herdr-foreman/prune-worktrees.sh`
+(top-of-file docstring).
 
 Then run once per writing worker and every worktree named in a brief:
 
@@ -655,9 +691,12 @@ Record that evidence in the task ledger.
 
 ## Step 15 — Clean Up the Worktree
 
-Fast-forward the shared checkout, remove the worktree, and delete the branch
-per `rules/agent-worktree-isolation.md`, then run Step 8's prune script again
-for the round's other worktrees. Proceed immediately to Step 16.
+Fast-forward the shared checkout, remove the merged task's own worktree with
+`git worktree remove`, and delete the branch, in the post-merge order of
+`rules/agent-worktree-isolation.md` Cleanup. This is the one removal the
+foreman makes itself (`rules/agent-team-operation.md` Writers and Checkouts,
+the merged-task exception). Then run Step 8's sweep again for the round's other
+worktrees. Proceed immediately to Step 16.
 
 ## Step 16 — Log the Round
 

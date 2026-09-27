@@ -286,9 +286,28 @@ description: Running a multi-agent team — task-based specialist composition, c
 - The worker names that drift in its report
 - The worker acts on none of it
 - A worker's repository writes happen only in the worktree its brief names, under `~/.worktrees/`
-- The foreman prunes merged, clean worktrees and merged local branches every round, before provisioning and after the merge
-- A dirty, unmerged, locked or detached worktree is reported to the operator
-- The foreman never removes a dirty, unmerged, locked or detached worktree
+- The foreman sweeps every repository with a worktree directory under `~/.worktrees/` every round, before provisioning and after the merge
+- A vanished worktree's leftover registration is cleared by the `git worktree prune` the prune runs for each swept repository
+- Such a registration is otherwise inert
+- The sweep runs through `skills/herdr-foreman/sweep-worktrees.sh`
+- The sweep removes worktrees and deletes local branches by the predicates `rules/agent-worktree-isolation.md` Cleanup names
+- The sweep never deletes a branch on origin
+- The sweep also reaches idle worktrees a standalone agent left under `~/.worktrees/`
+- The foreman relays the sweep's `report` to the operator at Step 2 whenever the preflight's `checks.worktrees.detail` carries one
+- Without that report, the foreman relays the `checks.worktrees` reason, or the stderr diagnostic when the preflight returned no JSON
+- A `checks.worktrees` status `ok` with no report means no worktree root exists
+- The foreman reports nothing for that status
+- The foreman raises each dirty or unpushed item the report lists for a decision per `rules/hook-action-reporting.md` Act on What It Names
+- Every other kept item the report lists is relayed, never raised for a decision
+- The operator carries out the resolution chosen for a listed item — push, commit, pull request or delete
+- The foreman executes none of those resolutions
+- The foreman never removes a worktree by hand
+- Narrow exception for the merged task's own worktree.
+- Preconditions (all required):
+  1. The task's branch has merged
+  2. The foreman is at `skills/herdr-foreman/SKILL.md` Step 15, the release cleanup
+  3. The removal is `git worktree remove` in the post-merge order of `rules/agent-worktree-isolation.md` Cleanup
+- Every other worktree leaves only through the sweep or the session-start cleanup of `rules/agent-worktree-isolation.md` Cleanup
 - A worker's report, plan, and patch artifacts go only under the reports directory its brief names
 - A worker writes nowhere else
 - Narrow exception for a task-owned fixture root outside the reports directory
