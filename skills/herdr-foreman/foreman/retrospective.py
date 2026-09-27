@@ -289,7 +289,8 @@ def load(path, *, allow_pending=False):
 def require_no_pending(path):
     """Refuse sidecar changes until the recording owner reconciles its journal."""
     if (directory(path) / "pending.json").exists():
-        raise StateError("A retrospective recording transaction is pending. Retry its original retro-record command to reconcile it before dispatching or changing retrospective state.", {})
+        raise StateError("A retrospective recording transaction is pending. Retry its original `{}` command to reconcile it before dispatching or changing retrospective state.".format(
+            runnable.command("retro-record")), {})
 
 
 def cadence(index, at, *, existing_work=False):

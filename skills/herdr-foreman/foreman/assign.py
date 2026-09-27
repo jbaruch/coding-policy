@@ -1015,10 +1015,10 @@ def apply(client, assignments, agents_by_name, paths, at, no_clear=False, settle
             ) if landing["landed"] or landing["started"] else None)
         if grok_new and step["role"] != "developer":
             warn("{} received a fresh Grok assignment. Wait for its report; if delivery is unconfirmed, "
-                 "stale-ID recovery through recover-report requires the recorded pre-clear native ID, original plan and native updates. "
+                 "stale-ID recovery through `{recover}` requires the recorded pre-clear native ID, original plan and native updates. "
                  "Without that ID, stale-ID recovery is unavailable: record the report as unavailable "
                  "and notify the operator of the missing pre-clear evidence. Keep review/release gates "
-                 "unsatisfied; never rerun completed work.".format(name))
+                 "unsatisfied; never rerun completed work.".format(name, recover=runnable.command("recover-report")))
         checked = statuses.get(name, {})
         record = {
             "role": step["role"],

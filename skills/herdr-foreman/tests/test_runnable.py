@@ -18,6 +18,9 @@ from foreman import runnable
 from foreman.cli import build_parser
 
 PACKAGE = Path(__file__).resolve().parents[1] / "foreman"
+#: Verbs that put a one-word subcommand in a command position.
+IMPERATIVE_VERBS = "|".join(("[Rr]un", "[Rr]e-?run", "[Rr]etry", "[Rr]eload", "[Uu]se", "with", "[Ii]nspect",
+                             "save", "[Vv]alidate", "[Ff]inish", "through"))
 
 
 def subcommands():
@@ -46,42 +49,81 @@ def _help_strings(tree):
     return found
 
 
-def string_literals(source):
-    """Every directive string literal in one module: (line, text), docstrings and help text excluded."""
+#: Calls whose string arguments name a subcommand as data, never as a hint to the reader.
+NAMING_CALLS = frozenset({"runnable.command", "command", "sub.add_parser"})
+
+
+def _named_as_data(tree, names):
+    """String nodes that are subcommand names as data: a rendering argument, or a bare name (a dispatch key)."""
+    found = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call) and ast.unparse(node.func) in NAMING_CALLS:
+            found.update(id(inner) for inner in ast.walk(node))
+        elif isinstance(node, ast.Constant) and node.value in names:
+            found.add(id(node))
+    return found
+
+
+def string_literals(source, names=()):
+    """Every directive string literal in one module: (line, text).
+
+    Docstrings, argparse help text and subcommand names used as data are excluded.
+    """
     tree = ast.parse(source)
-    skipped = _docstrings(tree) | _help_strings(tree)
+    skipped = _docstrings(tree) | _help_strings(tree) | _named_as_data(tree, set(names))
     return [(node.lineno, node.value) for node in ast.walk(tree)
             if isinstance(node, ast.Constant) and isinstance(node.value, str) and id(node) not in skipped]
 
 
 def bare_hints(text, names):
-    """The subcommand references in `text` that do not run as written."""
+    """The subcommand references in `text` that do not run as written.
+
+    A hyphenated name is never English, so any bare occurrence is a reference;
+    only a message opening with its own command's name (`start-judge requires
+    ...`) and the resume template's `{tl}` launcher placeholder are rendered
+    forms. A one-word name (`plan`, `state`) counts only in a command position:
+    backticked, after `foreman `, or after a verb that tells the reader to run it.
+    """
     alternation = "|".join(re.escape(name) for name in names)
+    hyphenated = "|".join(re.escape(name) for name in names if "-" in name)
     end = r"(?![\w-])"
-    patterns = (
+    patterns = [
         r"`(?:foreman )?(?:{}){}".format(alternation, end),
         r"\bforeman (?:{}){}".format(alternation, end),
-        r"\b(?:[Rr]un|[Rr]e-?run|[Uu]se|with|[Ii]nspect|save|[Vv]alidate) (?:{}){}".format(alternation, end),
-    )
-    return [match.group(0) for pattern in patterns for match in re.finditer(pattern, text)]
+        r"\b(?:{}) (?:{}){}".format(IMPERATIVE_VERBS, alternation, end),
+    ]
+    if hyphenated:
+        patterns.append(r"(?<!^)(?<![\w./`-])(?<!\{{tl\}} )(?<!foreman )(?:{})(?![\w/-]|\.\w)".format(hyphenated))
+    found = []
+    for pattern in patterns:
+        found.extend(match.group(0) for match in re.finditer(pattern, text) if match.group(0) not in found)
+    return found
 
 
 class BareHintTest(unittest.TestCase):
     def test_the_detector_flags_each_bare_shape_and_passes_the_rendered_one(self):
         names = ["measure", "supervision-bind", "state"]
         self.assertEqual(bare_hints("run `foreman measure` first", names), ["`foreman measure", "foreman measure"])
-        self.assertEqual(bare_hints("run supervision-bind from the pane", names), ["run supervision-bind"])
+        self.assertEqual(bare_hints("run supervision-bind from the pane", names),
+                         ["run supervision-bind", "supervision-bind"])
         self.assertEqual(bare_hints("inspect foreman state", names), ["foreman state"])
         self.assertEqual(bare_hints("re-run `measure`", names), ["`measure"])
         self.assertEqual(bare_hints("run `{}` first", names), [])
         self.assertEqual(bare_hints("the foreman's state file", names), [])
+        self.assertEqual(bare_hints("Retry state for the owner", names), ["Retry state"])
+        self.assertEqual(bare_hints("the handoff needs supervision-bind first", names),
+                         ["supervision-bind"])
+        self.assertEqual(bare_hints("supervision-bind requires a pane", names), [])
+        self.assertEqual(bare_hints("run `{tl} supervision-bind {flags}`", names), [])
+        self.assertEqual(bare_hints("the .supervision-bind.json lock", names), [])
+        self.assertEqual(bare_hints("the owner needs supervision-bind.", names), ["supervision-bind"])
 
     def test_no_package_string_names_a_subcommand_that_does_not_run_as_written(self):
         names = subcommands()
         self.assertIn("measure", names)
         offenders = []
         for path in sorted(PACKAGE.glob("*.py")):
-            for line, text in string_literals(path.read_text(encoding="utf-8")):
+            for line, text in string_literals(path.read_text(encoding="utf-8"), names):
                 for hint in bare_hints(text, names):
                     offenders.append("{}:{}: {}".format(path.name, line, hint))
         self.assertEqual(offenders, [], "render these through foreman.runnable.command()")

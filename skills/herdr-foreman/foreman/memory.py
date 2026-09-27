@@ -285,7 +285,8 @@ def _append(path, data, kind, at):
         if kind == "lesson":
             prior_lesson = next((old for old in reversed(document["records"]) if old["kind"] == "lesson" and old["lesson_id"] == row["lesson_id"]), None)
             _require(row["supersedes"] == (prior_lesson["id"] if prior_lesson else None),
-                     "Memory revision must supersede the current lesson record id; reload memory-list and retain its history.")
+                     "Memory revision must supersede the current lesson record id; reload `{}` and retain its history.".format(
+                         runnable.command("memory-list")))
             _require(prior_lesson is not None or row["status"] == "active", "Record an active lesson before archiving it; preserve existing revision history.")
         document["records"].append(row)
         save_state(location(path), document)

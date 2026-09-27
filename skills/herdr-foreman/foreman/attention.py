@@ -116,7 +116,8 @@ def _update(data):
     for key in ("id", "event_id"):
         _id(data[key])
     if type(data["expected_revision"]) is not int or data["expected_revision"] < 1:
-        _fail("expected_revision must match the current entry revision; read attention-show before updating stale context.")
+        _fail("expected_revision must match the current entry revision; read `{}` before updating stale context.".format(
+            runnable.command("attention-show")))
     _text(data["reason"], "Lifecycle reason")
     extras = {"present": {"evidence"}, "resolve": {"evidence"}, "defer": {"until", "evidence"},
               "reopen": {"evidence"}, "supersede": {"replacement", "evidence"}, "amend": {"changes", "evidence"}}
@@ -168,7 +169,8 @@ def _apply(event, entries, progress):
     data = _update(data)
     entry = entries.get(data["id"])
     if entry is None or data["expected_revision"] != entry["revision"]:
-        _fail("Attention entry is missing or its revision changed; read attention-show and reconcile before submitting a new event id.")
+        _fail("Attention entry is missing or its revision changed; read `{}` and reconcile before submitting a new event id.".format(
+            runnable.command("attention-show")))
     action = data["action"]
     if action != "reopen" and entry["status"] in CLOSED:
         _fail("This attention entry is closed; use an evidenced reopen before changing it.")

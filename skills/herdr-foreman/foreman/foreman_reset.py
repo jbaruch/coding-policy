@@ -403,8 +403,8 @@ def outstanding(state_path, *, alive=_alive):
             delivered = reconcile_command(state_path, row["pane_id"], row["stow"], "delivered")
             if row["status"] == "scheduled":
                 needed = ("The deliverer stopped before claiming the reset, so nothing was typed and the foreman in pane {} "
-                          "still holds its old context. Run `{}`; catch-up then shows the saved resume "
-                          "prompt for recovery.".format(row["pane_id"], failed))
+                          "still holds its old context. Run `{}`; `{}` then shows the saved resume "
+                          "prompt for recovery.".format(row["pane_id"], failed, command("catch-up")))
             else:
                 needed = ("The deliverer stopped mid-delivery and its outcome is unknown. Look at pane {}: if a resumed "
                           "foreman is running there, run `{}`; otherwise run `{}` "
@@ -584,8 +584,9 @@ def preflight(stow, supervision_data, caller_pane):
         raise UsageError("Memory record {} is not a stow; name the stow to resume from.".format(stow.get("id")), {"record": stow.get("id")})
     if stow["id"] == "latest":
         # `memory-show --id latest` selects the newest stow, so the resume prompt could not name this one.
-        raise UsageError("Stow id 'latest' is the memory-show selector, so the resume prompt cannot name it exactly. "
-                         "Record the handoff under another stow id before resetting.", {"stow": "latest"})
+        raise UsageError("Stow id 'latest' is a selector for `{}`, so the resume prompt cannot name it exactly. "
+                         "Record the handoff under another stow id before resetting.".format(
+                             command("memory-show --id latest")), {"stow": "latest"})
     if not stow["reset_ready"]:
         raise UsageError("Stow {} is not reset-ready: a required read changed or a gap names no task. Record a new stow before resetting.".format(
             stow["id"]), {"stow": stow["id"]})

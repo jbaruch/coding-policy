@@ -882,9 +882,10 @@ def cmd_plan(args, client=None, warn=None, trace=None):
     if seated:
         raise UsageError(
             "--roles names responsibilities, not seats: {} came pre-seated. Pass {} and "
-            "seat the slices with --partition, after validate-partition has checked it "
+            "seat the slices with --partition, after `{}` has checked it "
             "disjoint and exhaustive over the round's change.".format(
-                ", ".join(seated), ", ".join(sorted({canonical_role(role) for role in seated}))),
+                ", ".join(seated), ", ".join(sorted({canonical_role(role) for role in seated})),
+                runnable.command("validate-partition")),
             {"roles": seated})
     roles, seats, seat_paths, proof = _expand_partition_seats(canonical, getattr(args, "partition", None))
     if "judge" in canonical:
@@ -1704,7 +1705,8 @@ def cmd_load_set(args, client=None, warn=None, trace=None):
     _document, entries, _progress = attention.load(state_path)
     if args.decision == "wake" and (args.enrollment not in reports
                                     or not any(row.get("id") == args.enrollment for row in state["recovery"]["dispatches"])):
-        raise UsageError("Enrollment {} has no supervision enrollment with a recorded dispatch; read supervision-status for the enrollment id.".format(args.enrollment), {})
+        raise UsageError("Enrollment {} has no supervision enrollment with a recorded dispatch; read `{}` for the enrollment id.".format(
+            args.enrollment, runnable.command("supervision-status")), {})
     if args.decision != "wake" and args.task not in state["recovery"]["tasks"] and not any(
             row.get("task") == args.task for row in state["assignments"]):
         raise UsageError("Task {!r} is neither registered nor assigned; check its identity with `{}`.".format(args.task, runnable.command("state")), {})

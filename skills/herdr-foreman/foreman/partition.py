@@ -462,7 +462,8 @@ def verify(plan, repo, head, task_base, runner=None):
     if plan.get("slice_digest") != slice_digest(slice_paths, proof) or plan.get("seat_digests") != {
             seat: seat_digest(seat, paths, proof) for seat, paths in slice_paths.items()}:
         raise UsageError("The plan's slice_paths or partition_proof no longer match its slice_digest and seat_digests, "
-                         "so its boundary was edited after planning. Replan from the validate-partition result.", {})
+                         "so its boundary was edited after planning. Replan from the `{}` result.".format(
+                             runnable.command("validate-partition")), {})
     if proof["head"] is None:
         raise UsageError("The partition was validated against the working tree, not a pushed head, so no tip can be "
                          "checked against it. Re-run `{}` at the pushed tip, replan, and "

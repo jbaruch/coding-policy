@@ -298,7 +298,7 @@ def acknowledge(state_path, record, at):
     def mutate(data):
         high = record["through"]
         if type(high) is not int or not 0 <= high <= len(data["events"]):
-            raise UsageError("Use the through sequence returned by supervision-drain.", {})
+            raise UsageError("Use the through sequence returned by `{}`.".format(runnable.command("supervision-drain")), {})
         for row in prepared:
             event = next((item for item in data["events"] if item["id"] == row["event"]), None)
             if event is None or event["seq"] > high:
@@ -447,7 +447,8 @@ def dispatch_binding(state_path, *, root=None):
     if data["binding"] is not None:
         return data["binding"]
     if store_path(state_path).exists():
-        raise StateError("Supervision owner initialization is incomplete. Finish supervision-bind for this state before dispatching worker input.", {})
+        raise StateError("Supervision owner initialization is incomplete. Finish `{}` for this state before dispatching worker input.".format(
+            runnable.command("supervision-bind")), {})
     directory = canonical(root) if root is not None else default_state_path().parent / "supervision-bindings"
     _refuse_lost_owner(state_path, directory)
     return None

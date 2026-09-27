@@ -14,8 +14,12 @@
   `wait-report.sh`'s terminal-refusal warning names
   `bash <quoted foreman.sh> record-refusal` the same way.
   `tests/test_runnable.py` walks every string literal in the package
-  (docstrings and argparse `help=` text excepted) and fails on any bare
-  subcommand reference, so a new hint cannot regress to the bare form.
+  (docstrings, argparse `help=` text and subcommand names used as dispatch
+  data excepted) and fails on a bare subcommand reference: any bare
+  hyphenated name such as `retry supervision-bind` or `reload memory-list`,
+  and a one-word name such as `plan` or `state` when it is backticked,
+  prefixed with `foreman `, or follows an imperative verb. A new hint cannot
+  regress to the bare form.
 
 ## 0.3.290 — 2026-09-27
 
