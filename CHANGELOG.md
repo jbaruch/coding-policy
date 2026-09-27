@@ -13,8 +13,6 @@
   unsets the host's `HERDR_ENV`, so a run from inside a Herdr pane no longer
   flips the non-Herdr cases.
 
-## 0.3.296 — 2026-09-27
-
 ### Fixed
 
 - **`verify-oracle` checks a round against the oracle bytes its plan was
@@ -39,8 +37,14 @@
   unreadable file names its own recovery. Only a `mechanical` round's oracle is
   pinned and checked: an oracle riding on any other round licensed nothing,
   so `plan` no longer reads it (a FIFO there hung `plan`) and `verify-oracle`
-  refuses to gate on it. Regression cases cover each gap and fail against the
-  old code.
+  refuses to gate on it. Every file is opened non-blocking and refused unless
+  it is a regular file, so a FIFO or device swapped in for the result or the
+  pinned oracle after planning cannot hang the gate. Regression cases cover
+  each gap and fail against the old code.
+
+## 0.3.296 — 2026-09-27
+
+### Fixed
 
 - **Foreman error and help hints name the runnable launcher (#532).** About a
   hundred hints across `skills/herdr-foreman/foreman/` told the reader to run

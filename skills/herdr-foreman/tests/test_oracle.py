@@ -184,5 +184,21 @@ class OracleTest(unittest.TestCase):
         self.assertEqual((code, output), (1, ""))
         self.assertIn("not mechanical", error)
 
+    def test_a_non_regular_file_is_refused_without_blocking(self):
+        # A FIFO swapped in for the result or the pinned oracle after planning
+        # would block the read forever; it is refused before any read.
+        expected = self.root / "expected"
+        expected.write_bytes(self.result.read_bytes())
+        plan = self.plan({"kind": "fixture", "path": str(expected)})
+        fifo = self.root / "swapped"
+        os.mkfifo(fifo)
+        with self.assertRaisesRegex(UsageError, "round result .* is not a regular file"):
+            verify({"kind": "digest", "value": "a" * 64}, fifo)
+        expected.unlink()
+        os.mkfifo(expected)
+        code, output, error = self.run_cli(plan)
+        self.assertEqual((code, output), (1, ""))
+        self.assertIn("is not a regular file", error)
+
 if __name__ == "__main__":
     unittest.main()

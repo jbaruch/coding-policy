@@ -22,6 +22,8 @@ finding on the round, never a warning.
 
 import hashlib
 import json
+import os
+import stat
 from pathlib import Path
 
 from . import runnable
@@ -43,7 +45,13 @@ def _sha256(path, what, remedy):
     """The hex sha256 of a file, read in CHUNK_BYTES pieces; `remedy` tells the caller what to do on failure."""
     digest = hashlib.sha256()
     try:
-        with Path(path).open("rb") as handle:
+        # Opened non-blocking and checked before any read: a FIFO or a device
+        # swapped in for the file would block the gate, or never reach EOF.
+        descriptor = os.open(path, os.O_RDONLY | os.O_NONBLOCK)
+        with os.fdopen(descriptor, "rb") as handle:
+            if not stat.S_ISREG(os.fstat(handle.fileno()).st_mode):
+                raise UsageError("The {} at {!r} is not a regular file. {}".format(
+                    what, str(path), remedy), {"path": str(path)})
             for chunk in iter(lambda: handle.read(CHUNK_BYTES), b""):
                 digest.update(chunk)
     except OSError as exc:
