@@ -16,8 +16,10 @@
 #   6. Bad value types       -> exit 2, named.
 #   7. Workflows             -> .yml and .yaml, sorted, relative; absent dir is [].
 #   8. Usage / bad checkout  -> exit 2, no JSON.
-#   9. Unrenderable text     -> control characters or backticks in a path, a
-#                               note or a workflow filename: exit 2.
+#   9. Unrenderable text     -> a control character in a path, a note or a
+#                               workflow filename, or a backtick in a path or
+#                               workflow filename: exit 2. A backtick in a
+#                               note stays accepted.
 #
 # No case asserts a filename this script recognises, because it recognises none.
 # An earlier draft matched a hardcoded list of names, which is the enumerated
@@ -164,6 +166,26 @@ JSON
   run "$TMP/wflink"
   if [[ $RC -eq 0 ]] && [[ "$(list "$OUT" workflows)" == ".github/workflows/real.yml" ]]; then
     pass; else fail "a symlinked workflow is not listed, got RC=$RC OUT=$OUT"; fi
+
+  # Nor is a symlinked workflows directory, whose files live elsewhere.
+  mkdir -p "$TMP/wfdirlink/.github" "$TMP/outside-workflows" || die "mkdir wfdirlink"
+  printf 'x\n' > "$TMP/outside-workflows/foreign.yml" || die "write foreign workflow"
+  ln -s "$TMP/outside-workflows" "$TMP/wfdirlink/.github/workflows" || die "link workflows dir"
+  run "$TMP/wfdirlink"
+  if [[ $RC -eq 0 ]] && [[ "$(list "$OUT" workflows)" == "" ]]; then
+    pass; else fail "a symlinked workflows directory lists nothing, got RC=$RC OUT=$OUT"; fi
+
+  # Each refusal names the repair for the field it refused.
+  printf '%s\n' '{"schema_version": 1, "notes": "one\ntwo"}' > "$TMP/render/.herdr/gates.json" \
+    || die "write notes declaration"
+  run "$TMP/render"
+  if [[ $RC -eq 2 ]] && printf '%s' "$ERRTEXT" | grep -q 'Rewrite notes as one line'; then
+    pass; else fail "a notes refusal names the notes repair, got ERR=$ERRTEXT"; fi
+  printf '%s\n' '{"schema_version": 1, "runners": ["a\tb.sh"]}' > "$TMP/render/.herdr/gates.json" \
+    || die "write runner declaration"
+  run "$TMP/render"
+  if [[ $RC -eq 2 ]] && printf '%s' "$ERRTEXT" | grep -q 'Remove those characters from the declared path'; then
+    pass; else fail "a path refusal names the path repair, got ERR=$ERRTEXT"; fi
 
   echo "▶ workflows and usage" >&2
 

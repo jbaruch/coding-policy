@@ -132,11 +132,14 @@ main() {
     stub "$TMP/shape-$shape" roster.sh 0 "$shape"
     stub "$TMP/shape-$shape" resolve-gates.sh 0 "$shape"
     run "$TMP/shape-$shape"
+    # The backticks are literal Markdown in the reason, not command substitution.
+    # shellcheck disable=SC2016
     if [[ $RC -eq 1 ]] && [[ "$(field "$OUT" 'd["ready"]')" == "false" ]] \
        && [[ "$(field "$OUT" 'd["checks"]["roster"]["status"]')" == '"blocked"' ]] \
        && [[ "$(field "$OUT" 'd["checks"]["gates"]["status"]')" == '"blocked"' ]] \
        && [[ "$(field "$OUT" 'd["checks"]["roster"]["detail"]')" == "null" ]] \
-       && printf '%s' "$OUT" | grep -q 'where its contract emits an object'; then
+       && printf '%s' "$OUT" | grep -q '`roster.sh` exited 0 with JSON' \
+       && printf '%s' "$OUT" | grep -q '`resolve-gates.sh /tmp` exited 0 with JSON'; then
       pass; else fail "a '$shape' payload on exit 0 must block, got RC=$RC OUT=$OUT"; fi
   done
 
@@ -148,6 +151,14 @@ main() {
   if [[ $RC -eq 1 ]] && [[ "$(field "$OUT" 'd["checks"]["authority"]["status"]')" == '"failed"' ]] \
      && ! printf '%s' "$ERRTEXT" | grep -q 'Traceback'; then
     pass; else fail "a non-object authority payload must fail cleanly, got RC=$RC OUT=$OUT ERR=$ERRTEXT"; fi
+
+  shadow "$TMP/shape-capability"
+  printf '#!/bin/sh\ncase "$*" in\n  *capability-check*) printf %s; exit 0 ;;\n  *measure*) printf %s; exit 0 ;;\nesac\nexit 9\n' \
+    "'[]'" "'{\"agents\":{}}'" > "$TMP/shape-capability/foreman.sh" || die "write foreman stub"
+  run "$TMP/shape-capability"
+  if [[ $RC -eq 1 ]] && [[ "$(field "$OUT" 'd["checks"]["capability"]["status"]')" == '"failed"' ]] \
+     && ! printf '%s' "$ERRTEXT" | grep -q 'Traceback'; then
+    pass; else fail "a non-object capability payload must fail cleanly, got RC=$RC OUT=$OUT ERR=$ERRTEXT"; fi
 
   echo "▶ what is due without blocking" >&2
 

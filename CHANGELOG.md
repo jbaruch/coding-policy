@@ -6,7 +6,8 @@
   `round-preflight.sh` recorded a collaborator that exited 0 with valid JSON
   of the wrong shape (`[]`, `null`, a bare number) as an `ok` check; every
   collaborator's contract is one JSON object, so any other shape now blocks
-  the round with a reason naming the file, and the inline authority and
+  the round with a reason naming the collaborator command to re-run (the
+  output file is scratch the exit trap removes), and the inline authority and
   capability-cadence parses read a non-object as an unreadable verdict rather
   than crashing with a traceback. `resolve-gates.sh` rendered declared
   paths, notes and workflow filenames into every worker's Markdown `GATES`
@@ -14,10 +15,11 @@
   lines into every brief, and a NUL made `realpath` raise outside the
   documented exit-2 path. A control character (C0, DEL or C1) anywhere, or a
   backtick in a path or workflow filename, is now refused with exit 2 before
-  anything resolves or renders; a backtick in `notes`, which render as plain
-  text, stays accepted. The workflow listing moved from a newline-split
+  anything resolves or renders, each refusal naming the repair for its field;
+  a backtick in `notes`, which render as plain text, stays accepted. The workflow listing moved from a newline-split
   `find` into the same Python pass so a filename with a newline cannot split
-  into two entries. `capabilities.load` read a dangling
+  into two entries; a symlinked `.github/workflows` directory lists nothing,
+  as `find -type f` never descended through it. `capabilities.load` read a dangling
   `<state>.capabilities.json` link as a missing table, and `record` then
   replaced the link through `save_state`'s atomic rename, destroying the
   redirect; a symlinked table, live or dangling, is now refused and left as

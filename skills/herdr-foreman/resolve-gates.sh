@@ -70,7 +70,7 @@ checkout = sys.argv[1]
 path = os.path.join(checkout, ".herdr", "gates.json")
 
 
-def refuse_unrenderable(value, label, code_span):
+def refuse_unrenderable(value, label, code_span, remedy):
     """Refuse text the GATES block cannot carry intact.
 
     Every brief renders these values into Markdown. A control character -- a
@@ -81,9 +81,8 @@ def refuse_unrenderable(value, label, code_span):
                   if ord(char) < 0x20 or 0x7f <= ord(char) <= 0x9f or (code_span and char == "`")})
     if bad:
         sys.stderr.write("resolve-gates: {} {!r} carries {}, which the briefs' Markdown GATES block "
-                         "cannot render intact. Rename the file, or declare a path without "
-                         "control characters or backticks.\n".format(
-                             label, value, ", ".join(repr(char) for char in bad)))
+                         "cannot render intact. {}\n".format(
+                             label, value, ", ".join(repr(char) for char in bad), remedy))
         raise SystemExit(2)
 
 
@@ -91,10 +90,13 @@ declared, instructions, runners, notes, missing = False, [], [], None, []
 
 # A location the platform defines, not a filename anyone guessed. A repo with
 # no workflows directory has no workflows; any other failure to list one is a
-# tool error, never an empty list. Symlinks are not workflow files.
+# tool error, never an empty list. Symlinks are not workflow files, and a
+# symlinked directory is not the workflows location.
 workflows = []
 workflow_dir = os.path.join(checkout, ".github", "workflows")
-if os.path.isdir(workflow_dir):
+# A symlinked workflows directory is not the platform's location: its files
+# live elsewhere, possibly outside the checkout, so it lists nothing.
+if os.path.isdir(workflow_dir) and not os.path.islink(workflow_dir):
     try:
         with os.scandir(workflow_dir) as entries:
             for entry in entries:
@@ -105,7 +107,8 @@ if os.path.isdir(workflow_dir):
         raise SystemExit(2)
 workflows.sort()
 for entry in workflows:
-    refuse_unrenderable(entry, "workflow file", code_span=True)
+    refuse_unrenderable(entry, "workflow file", code_span=True,
+                        remedy="Rename the workflow file without control characters or backticks.")
 
 try:
     with open(path, encoding="utf-8") as handle:
@@ -135,14 +138,17 @@ if document is not None:
             sys.stderr.write("resolve-gates: {}'s {} lists repo-relative paths.\n".format(path, key))
             raise SystemExit(2)
         for item in value:
-            refuse_unrenderable(item, "{}'s {} entry".format(path, key), code_span=True)
+            refuse_unrenderable(item, "{}'s {} entry".format(path, key), code_span=True,
+                                remedy="Remove those characters from the declared path, renaming "
+                                       "the file it names if needed.")
         target.extend(value)
     notes = document.get("notes")
     if notes is not None and (not isinstance(notes, str) or not notes.strip()):
         sys.stderr.write("resolve-gates: {}'s notes is one non-empty line, or absent.\n".format(path))
         raise SystemExit(2)
     if notes is not None:
-        refuse_unrenderable(notes, "{}'s notes".format(path), code_span=False)
+        refuse_unrenderable(notes, "{}'s notes".format(path), code_span=False,
+                            remedy="Rewrite notes as one line without control characters.")
     declared = True
     # A declared path is a pointer a worker follows, so it must stay inside the
     # checkout: an absolute path, a `..` or a symlink out of the tree is refused.
