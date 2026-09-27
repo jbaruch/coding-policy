@@ -34,7 +34,8 @@
 #     predicate of its own (rules/script-as-black-box.md). It runs only when the
 #     repository has a linked worktree or a local branch besides the checked-out
 #     one, so a plain checkout pays no fetch. A failed or timed-out run warns
-#     and blocks nothing.
+#     and blocks nothing. It never runs in a Herdr worker session, nor when
+#     HERDR_ENV is set and the role cannot be determined (see herdr_role).
 #   - Diagnostics findings in the CHANGED set only (uncommitted .sh/.py):
 #     lint the .sh with shellcheck, the .py with pyright. Skipped when nothing
 #     lintable changed, so a clean handoff costs nothing. An absent engine is
@@ -86,26 +87,37 @@ warn() { printf 'stop-handoff-hygiene: %s\n' "$1" >&2; }
 # linked worktree. In a linked worktree `--git-dir` and `--git-common-dir`
 # resolve differently; in the main checkout they are the same.
 #
-# 0 = a Herdr worker (suppress foreman-only advice), 1 = the foreman, a standalone
-# agent, or anything this cannot determine. Fail open: a hook that goes silent
-# because a git command failed would be worse than one that speaks up.
-is_herdr_worker() {
+# HERDR_ENV counts when set at all, empty included (rules/agent-team-operation.md
+# Two Modes).
+#
+# Tri-state, so an indeterminate session never reads as "the foreman":
+#   0 = a Herdr worker (HERDR_ENV set, linked worktree),
+#   1 = the foreman or a standalone agent (HERDR_ENV unset, or a proven main
+#       checkout) — the only sessions that run the foreman-only cleanup,
+#   2 = unknown — HERDR_ENV set and a role probe failed; treated as a possible
+#       worker: no cleanup, and a report says why. ROLE_WHY names the cause.
+herdr_role() {
+  ROLE_WHY=""
   [[ -n "${HERDR_ENV+x}" ]] || return 1
 
   local git_dir common_dir rc=0
+  local why="Worktree and branch check skipped: this hook could not tell a Herdr worker from the foreman (see the warning above). Run \`git rev-parse --absolute-git-dir --path-format=absolute --git-common-dir\` here to diagnose."
   git_dir="$(git rev-parse --absolute-git-dir 2>&1)" || rc=$?
   if (( rc != 0 )); then
-    warn "git rev-parse --absolute-git-dir failed (exit ${rc}: ${git_dir}) — cannot tell a Herdr worker from the foreman; treating this as the foreman — run it here to see why"
-    return 1
+    warn "git rev-parse --absolute-git-dir failed (exit ${rc}: ${git_dir//$'\n'/ }) — cannot tell a Herdr worker from the foreman; skipping the foreman-only worktree check"
+    ROLE_WHY="$why"
+    return 2
   fi
   rc=0
   common_dir="$(git rev-parse --path-format=absolute --git-common-dir 2>&1)" || rc=$?
   if (( rc != 0 )); then
-    warn "git rev-parse --git-common-dir failed (exit ${rc}: ${common_dir}) — cannot tell a Herdr worker from the foreman; treating this as the foreman — run it here to see why"
-    return 1
+    warn "git rev-parse --git-common-dir failed (exit ${rc}: ${common_dir//$'\n'/ }) — cannot tell a Herdr worker from the foreman; skipping the foreman-only worktree check"
+    ROLE_WHY="$why"
+    return 2
   fi
 
-  [[ "$git_dir" != "$common_dir" ]]
+  [[ "$git_dir" != "$common_dir" ]] || return 1
+  return 0
 }
 
 main() {
@@ -154,8 +166,14 @@ main() {
   # report apply to a worker's own changed files, which are its to fix
   # (rules/language-diagnostics.md Gate It Deterministically) -- skipping them
   # here would let a worker hand off findings nobody else is going to see.
-  if ! is_herdr_worker; then
+  # An indeterminate role runs no cleanup either: a worker whose role probe
+  # failed must not be handed the foreman's teardown.
+  local role=0
+  herdr_role || role=$?
+  if (( role == 1 )); then
     read_owner_decisions
+  elif (( role == 2 )); then
+    reports+=("$ROLE_WHY")
   fi
 
   run_changed_diagnostics

@@ -42,6 +42,23 @@
     and the recheck already requires the same clean HEAD origin holds, so a
     replacement it could remove holds only what origin restores).
 
+## 0.3.300 — 2026-09-27
+
+### Fixed
+
+- **The Stop hook no longer runs the foreman's cleanup when it cannot tell a
+  Herdr worker from the foreman (#556).** `hooks/stop-handoff-hygiene.sh` read
+  a failed `git rev-parse --absolute-git-dir` or `--git-common-dir` probe with
+  `HERDR_ENV` set as "the foreman", so a real worker whose role detection
+  failed ran the foreman-only worktree and branch check and could be blocked
+  over leftovers it is forbidden to remove. The role is now tri-state (worker,
+  foreman, unknown), matching `hooks/check-git-sync.sh` since #552: an unknown
+  role skips the check and reports why, naming
+  `git rev-parse --absolute-git-dir --path-format=absolute --git-common-dir`
+  as the diagnostic. Only `HERDR_ENV` unset or a proven main checkout runs the
+  check. The changed-set diagnostics gate still applies to every role. New
+  test case 4g drives both probe failures through a git shim.
+
 ## 0.3.299 — 2026-09-27
 
 ### Fixed
