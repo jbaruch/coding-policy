@@ -140,6 +140,9 @@ than taken — `--roles` must name only read-only responsibilities
 (`READ_ONLY_ROLES` in `skills/herdr-foreman/foreman/triggers.py`), every other
 planned field must be empty, and a
 tracked diff against the base refuses it, since evidence outranks intent.
+Untracked files are never listed or read on such a round: scratch in the
+shared checkout is no surface of it, and an unreadable scratch file does not
+refuse it.
 Omitting `writes_repository` reads as `true`, so a plan written before the
 field keeps its meaning.
 
