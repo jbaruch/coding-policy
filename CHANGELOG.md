@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.290 — 2026-09-27
+
 ### Fixed
 
 - **Foreman error and help hints name the runnable launcher (#532).** About a
