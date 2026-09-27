@@ -148,7 +148,7 @@ with_sourced_sandbox() {
 
   (
     cd "$sandbox"
-    # shellcheck disable=SC1090
+    # shellcheck disable=SC1090  # ShellCheck cannot resolve the dynamically constructed source path.
     source "$SCRIPT" --override 2>/dev/null || true
     set +e
     "$fn"
