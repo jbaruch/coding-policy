@@ -141,6 +141,13 @@ class CloseMemberTest(MembersCase):
                 self.assertTrue(store.pending(data))
                 self.assertTrue(next(row for row in data["members"] if row["id"] == "dispatch-a")["active"])
 
+    def test_a_ledger_line_cannot_forge_the_section_heading(self):
+        self.emit()
+        self.write_ledger("accepted", fields={"_heading": "renamed-section", "_section": "event-1"})
+        with self.assertRaisesRegex(UsageError, "event renamed-section carries id 'event-1'"):
+            members.close(self.path, "dispatch-a", self.ledger, LATER)
+        self.assertTrue(store.pending(store.load(self.path)))
+
     def test_a_repeated_event_id_closes_nothing(self):
         self.emit()
         self.write_ledger("reported", "accepted", fields={"id": "event-1", "_heading": "event-1"})

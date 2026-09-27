@@ -39,7 +39,8 @@ EVENT_FIELDS = ("schema_version", "id", "at", "subject", "dispatch_id", "worker"
                 "decision", "head_revision", "evidence", "assessment")
 #: `head_revision` values that stand in for a SHA (state-schema.md, Task Ledger).
 HEAD_PLACEHOLDERS = frozenset({"unknown", "not_applicable"})
-FIELD = re.compile(r"^- ([a-z_]+): (.*)$")
+#: A field name starts with a letter, so no ledger line can set the parser's own `_section` key.
+FIELD = re.compile(r"^- ([a-z][a-z_]*): (.*)$")
 FRONT_FIELD = re.compile(r"^([a-z_]+): (.*)$")
 
 
