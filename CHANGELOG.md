@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.286 — 2026-09-27
+
 ### Fixed
 
 - **Every inline diagnostic suppression now carries its cause, or is gone
