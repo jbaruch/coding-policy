@@ -20,25 +20,26 @@
 #                       "error":"<stderr>"}],
 #            "report":"<text>"}
 #           `report` is the operator-facing summary, ready to relay verbatim:
-#           a headline with counts, then one line per archive, notable kept
-#           worktree (NOTABLE, by path), archive outcome, failure and error;
-#           other kept worktrees appear only as counts by reason.
+#           a headline with counts, then one line per dirty or unpushed
+#           worktree (path, branch, what is at stake, the operator's
+#           command), unpushed branch, other notable kept worktree (NOTABLE,
+#           by path), failure and error; other kept worktrees appear only as
+#           counts by reason.
 #           `result` is that repository's prune-worktrees.sh JSON. `error`
 #           replaces it when the prune decided nothing (exit 1: no origin, a
 #           failed fetch, ...). Worktrees are found anywhere below the root; a
 #           found checkout, a .git directory and a symlinked directory are
-#           not descended; a symlinked .trash, and a symlinked entry inside
-#           .trash, are never followed. The root's .trash holds the prune's archived
-#           worktrees: each names its repository, so a repository whose only
-#           worktrees are archived still gets its prune (and expiry) run,
-#           but a trash worktree is never a candidate.
-#           A skipped entry is not-a-worktree (a direct child of
-#           the root holding no checkout), clone (a repository's own main
-#           checkout), symlinked-git (a directory whose .git is a symlink,
-#           never followed; a trash entry like it is ignored), or broken-worktree (its .git file names a gitdir that
-#           no longer exists). An `errors` entry is a worktree git could not
-#           read (rev-parse or worktree list failed), with its exit code and
-#           the repository owning it when its gitdir's files name one.
+#           not descended. Every path is classified with lstat: only a
+#           missing path is absent, and any other failure to read one is an
+#           `errors` entry, never a skip.
+#           A skipped entry is not-a-worktree (a direct child of the root
+#           holding no checkout), clone (a repository's own main checkout),
+#           symlinked-git (a directory whose .git is a symlink, never
+#           followed), or broken-worktree (its .git file names a gitdir that
+#           no longer exists). An `errors` entry is a path or worktree that
+#           could not be read (listing, lstat, gitdir stat, rev-parse or
+#           worktree list failed), with its exit code and the repository
+#           owning it when its gitdir's files name one.
 #   stderr: diagnostics, and each prune's stderr prefixed with its repository.
 #   exit  : 0 every repository decided cleanly,
 #           1 usage, python3, git or bash absent, or the root missing or
@@ -83,6 +84,7 @@ main() {
   python3 - "$root" "$dry" "${here}/prune-worktrees.sh" <<'PY'
 import json
 import os
+import stat
 import subprocess
 import sys
 
@@ -125,49 +127,55 @@ def repo_of(gitdir):
     return os.path.dirname(common) if os.path.basename(common) == ".git" else None
 
 
+def kind_of(path):
+    """lstat-based: "dir", "file", "link", "other", or None when the path does
+    not exist. Only FileNotFoundError is absence: any other failure raises, so
+    an unreadable path is never read as missing or as a plain directory."""
+    try:
+        mode = os.lstat(path).st_mode
+    except FileNotFoundError:
+        return None
+    if stat.S_ISLNK(mode):
+        return "link"
+    if stat.S_ISDIR(mode):
+        return "dir"
+    return "file" if stat.S_ISREG(mode) else "other"
+
+
 def discover(root):
-    """Walk the whole root: a checkout found is not descended, nor is .git,
-    the prune's .trash, or a symlinked directory."""
+    """Walk the whole root: a checkout found is not descended, nor is .git or
+    a symlinked directory."""
     found, empty_tops = [], []
     for top in sorted(os.listdir(root)):
         top_path = os.path.join(root, top)
-        if top == ".trash" and not os.path.islink(top_path):
-            # The prune's archived worktrees: never pruned as candidates, but
-            # each still names a repository whose expiry pass must run.
-            try:
-                trashed = sorted(os.listdir(top_path))
-            except OSError as exc:
-                errors.append({"path": top_path, "repo": None, "exit": None, "error": "cannot list: {}".format(exc)})
-                continue
-            # A symlinked entry is never followed: it could name a checkout
-            # outside the root.
-            found.extend(("trash", os.path.join(top_path, name)) for name in trashed
-                         if not os.path.islink(os.path.join(top_path, name))
-                         and not os.path.islink(os.path.join(top_path, name, ".git"))
-                         and os.path.isfile(os.path.join(top_path, name, ".git")))
-            continue
-        before, reported = len(found), len(skipped)
+        before, reported, failed_before = len(found), len(skipped), len(errors)
         stack = [top_path]
         while stack:
             current = stack.pop()
-            if os.path.islink(current) or not os.path.isdir(current):
+            try:
+                if kind_of(current) != "dir":
+                    continue
+                dotgit_kind = kind_of(os.path.join(current, ".git"))
+            except OSError as exc:
+                errors.append({"path": current, "repo": None, "exit": None,
+                               "error": "cannot read: {}".format(exc.strerror or exc)})
                 continue
-            dotgit = os.path.join(current, ".git")
-            if os.path.islink(dotgit):
+            if dotgit_kind == "link":
                 # Never followed: it could name a checkout outside the root.
                 skipped.append({"path": current, "reason": "symlinked-git"}); continue
-            if os.path.isdir(dotgit):
+            if dotgit_kind == "dir":
                 found.append(("clone", current)); continue
-            if os.path.isfile(dotgit):
+            if dotgit_kind == "file":
                 found.append(("worktree", current)); continue
             try:
                 children = sorted(os.listdir(current), reverse=True)
             except OSError as exc:
-                errors.append({"path": current, "repo": None, "exit": None, "error": "cannot list: {}".format(exc)})
+                errors.append({"path": current, "repo": None, "exit": None,
+                               "error": "cannot list: {}".format(exc.strerror or exc)})
                 continue
             stack.extend(os.path.join(current, child) for child in children if child != ".git")
         # A top that held nothing and was not already reported with a reason.
-        if len(found) == before and len(skipped) == reported:
+        if len(found) == before and len(skipped) == reported and len(errors) == failed_before:
             empty_tops.append(top_path)
     return found, empty_tops
 
@@ -189,9 +197,15 @@ for kind, path in found:
     if gitdir is None:
         errors.append({"path": path, "repo": None, "exit": None, "error": "its .git file names no gitdir"})
         continue
-    if not os.path.exists(gitdir):
+    try:
+        os.stat(gitdir)
+    except FileNotFoundError:
         # Proven stale: the metadata the .git file points at is gone.
         skipped.append({"path": path, "reason": "broken-worktree"})
+        continue
+    except OSError as exc:
+        errors.append({"path": path, "repo": None, "exit": None,
+                       "error": "cannot read its gitdir {}: {}".format(gitdir, exc.strerror or exc)})
         continue
     owner = repo_of(gitdir)
     common = git("-C", path, "rev-parse", "--path-format=absolute", "--git-common-dir")
@@ -209,9 +223,7 @@ for kind, path in found:
     if not shared or not os.path.isdir(shared):
         errors.append({"path": path, "repo": owner, "exit": 0, "error": "its repository lists no main checkout on disk"})
         continue
-    candidates = repos.setdefault(os.path.realpath(shared), [])
-    if kind == "worktree":
-        candidates.append(path)
+    repos.setdefault(os.path.realpath(shared), []).append(path)
 
 for entry in errors:
     if entry["repo"]:
@@ -244,49 +256,47 @@ for shared in sorted(repos):
     results.append(entry)
 
 #: Kept reasons the operator acts on: listed by path. Every other kept
-#: reason (ordinary not-yet-idle worktrees) is given as a count.
-NOTABLE = ("locked", "in-use", "changed", "idle-unknown", "archive-pending", "trash-unsafe",
+#: reason is given as a count.
+NOTABLE = ("dirty", "unpushed", "locked", "in-use", "changed", "idle-unknown",
            "submodule", "submodule-dirty", "nested-repo")
 
 
 def report_text():
     """The operator-facing summary, relayed verbatim."""
     lines, counts = [], {}
-    removed = archived = 0
+    removed = deleted = 0
     for repo in results:
         res = repo.get("result")
         if res is None:
             lines.append("Error in {}: {}".format(repo["shared"], repo.get("error", "")))
             continue
         removed += len(res.get("worktrees_removed", []))
-        for a in res.get("worktrees_archived", []):
-            archived += 1
-            if a.get("trash_path"):
-                lines.append("Archived {} as {}, moved to {}".format(a["path"], a["archive_ref"], a["trash_path"]))
-            else:
-                lines.append("Archived {} as {}, left in place".format(a["path"], a["archive_ref"]))
+        deleted += len(res.get("branches_deleted", []))
         for k in res.get("worktrees_kept", []):
-            if k["reason"] in NOTABLE:
+            reason = k["reason"]
+            if reason == "dirty":
+                lines.append("Kept dirty: {} ({}), {} changed file(s), idle {}h: {}".format(
+                    k["path"], k.get("branch") or "detached", k.get("dirty_files"), k.get("age_hours"), k.get("command")))
+            elif reason == "unpushed":
+                lines.append("Kept unpushed: {} ({}), {} commit(s) origin does not hold, idle {}h: {}".format(
+                    k["path"], k.get("branch") or "detached", k.get("unpushed_commits"), k.get("age_hours"), k.get("command")))
+            elif reason in NOTABLE:
                 extra = " ({})".format(k["lock_reason"]) if k.get("lock_reason") else ""
-                lines.append("Kept {}: {}{}".format(k["reason"], k["path"], extra))
+                lines.append("Kept {}: {}{}".format(reason, k["path"], extra))
             else:
-                counts[k["reason"]] = counts.get(k["reason"], 0) + 1
-        for x in res.get("archives_expired", []):
-            lines.append("Expired archive {}".format(x["ref"]))
-        for x in res.get("archives_kept", []):
-            lines.append("Kept archive {}: {}".format(x["ref"], x["reason"]))
-        for x in res.get("archives_migrated", []):
-            lines.append("Migrated archive record {}".format(x["ref"]))
-        for x in res.get("orphan_notes_removed", []):
-            lines.append("Removed orphan archive note on {}".format(x))
+                counts[reason] = counts.get(reason, 0) + 1
+        for b in res.get("branches_kept", []):
+            if b["reason"] == "unpushed":
+                lines.append("Kept unpushed branch {} in {}, {} commit(s), idle {}h: {}".format(
+                    b["branch"], repo["shared"], b.get("unpushed_commits"), b.get("age_hours"), b.get("command")))
         for f in res.get("failed", []):
             lines.append("Failed in {}: {}: {}".format(repo["shared"], f["target"], f["error"]))
     for e in errors:
         lines.append("Error reading {}{}: {}".format(e["path"], " ({})".format(e["repo"]) if e.get("repo") else "", e["error"]))
-    head = "Worktree sweep{}: {} repositories, {} removed, {} archived".format(
-        " (dry run)" if dry else "", len(results), removed, archived)
+    head = "Worktree sweep{}: {} repositories, {} worktree(s) removed, {} branch(es) deleted".format(
+        " (dry run)" if dry else "", len(results), removed, deleted)
     if counts:
-        head += "; kept not yet idle: " + ", ".join("{} {}".format(n, r) for r, n in sorted(counts.items()))
+        head += "; kept: " + ", ".join("{} {}".format(n, r) for r, n in sorted(counts.items()))
     return "\n".join([head + "."] + lines)
 
 

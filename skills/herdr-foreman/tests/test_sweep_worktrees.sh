@@ -19,17 +19,15 @@
 #   6. Nested            -> a worktree below an intermediate directory is found.
 #   7. Stale metadata    -> a .git file naming a vanished gitdir is broken-worktree.
 #   8. Unreadable        -> a worktree git cannot read is an error entry, exit 2.
-#   9. Deep, linked, trash-> a worktree six levels down is found; a symlinked
-#                           directory and the root's .trash are not descended.
+#   9. Deep, linked      -> a worktree six levels down is found; a symlinked
+#                           directory is not descended.
 #  10. Attributed error  -> an error names its repository when the gitdir's
 #                           files resolve it.
-#  11. Trash only        -> a repository whose only worktree is archived in
-#                           .trash still gets its prune, so its archive expires.
 #  12. Unreadable result -> a prune exiting 0 without readable JSON fails the
 #                           sweep (exit 2, stderr diagnostic).
 #  13. No git            -> exit 1 with an actionable message, no traceback.
-#  14. Symlinked trash   -> a symlinked .trash, or a symlinked entry in .trash,
-#                           never names a repository.
+#  14. Symlinked dirs    -> a symlinked top-level directory, or a symlinked
+#                           entry below one, never names a repository.
 #  15. Report            -> the ready-to-relay report: a headline with counts,
 #                           notable kept worktrees by path, the rest as counts.
 #  16. Unreadable root   -> exit 1, no JSON, a repair message.
@@ -37,8 +35,11 @@
 #  18. Non-UTF-8 path    -> valid JSON naming it; kept idle-unknown, never a
 #                           decode traceback (skipped where the filesystem
 #                           refuses such a name, as macOS APFS does).
-#  19. Symlinked .git    -> a trash entry or a walked directory whose .git is a
-#                           symlink names no repository; the walk reports it.
+#  19. Symlinked .git    -> a directory whose .git is a symlink names no
+#                           repository; the walk reports it.
+#  20. Unreadable path   -> a directory lstat cannot read, or a worktree whose
+#                           gitdir cannot be stat'ed, is an errors entry (exit
+#                           2), never a skip or a stale worktree.
 #
 # Run: bash skills/herdr-foreman/tests/test_sweep_worktrees.sh
 set -uo pipefail
@@ -187,9 +188,8 @@ main() {
   # --- 9-10 on a third root.
   fresh_pair 9
   local root3="$TMP/worktrees3" deep="$TMP/worktrees3/a/b/c/d/e/f/beta-deep"
-  mkdir -p "$(dirname "$deep")" "$root3/.trash" "$TMP/elsewhere" || die "mkdir root3 failed"
+  mkdir -p "$(dirname "$deep")" "$TMP/elsewhere" || die "mkdir root3 failed"
   quiet "deep worktree failed" "${G[@]}" -C "$beta" worktree add -q -b review/deep "$deep" origin/main
-  quiet "trash worktree failed" "${G[@]}" -C "$beta" worktree add -q -b review/trashed "$root3/.trash/beta-trashed" origin/main
   quiet "linked worktree failed" "${G[@]}" -C "$alpha" worktree add -q -b review/linked "$TMP/elsewhere/alpha-linked" origin/main
   ln -s "$TMP/elsewhere" "$root3/link" || die "symlink failed"
   quiet "badhead worktree failed" "${G[@]}" -C "$alpha" worktree add -q -b review/badhead "$root3/badhead" origin/main
@@ -197,38 +197,13 @@ main() {
   bgitdir="$(git -C "$root3/badhead" rev-parse --absolute-git-dir)" || die "rev-parse badhead gitdir failed"
   printf 'garbage\n' > "$bgitdir/HEAD" || die "corrupt HEAD failed"
   run "$root3"
-  echo "9. a deep worktree is found; a symlinked directory and .trash are not descended"
-  if ! listed "$beta" "$deep" && listed "$beta" "$root3/.trash/beta-trashed" && listed "$alpha" "$TMP/elsewhere/alpha-linked" \
+  echo "9. a deep worktree is found; a symlinked directory is not descended"
+  if ! listed "$beta" "$deep" && listed "$alpha" "$TMP/elsewhere/alpha-linked" \
     && [[ "$(q '[s["reason"] for s in d["skipped"] if s["path"].endswith("/link")]')" == "['not-a-worktree']" ]]; then
-    pass; else fail "deep/linked/trash: rc=$RC out=$OUT err=$ERRTEXT"; fi
+    pass; else fail "deep/linked: rc=$RC out=$OUT err=$ERRTEXT"; fi
   echo "10. an unreadable worktree names its repository when its gitdir resolves it"
   if (( RC == 2 )) && [[ "$(q 'next((e["repo"] for e in d["errors"] if e["path"].endswith("/badhead")), "")')" == "$alpha" ]]; then
     pass; else fail "attributed error: rc=$RC out=$OUT"; fi
-
-  # --- 11. a repository whose only worktree sits in .trash still expires.
-  local root4="$TMP/worktrees4" tw="$TMP/worktrees4/delta-wt"
-  mkdir -p "$root4" || die "mkdir root4 failed"
-  mk_repo delta; local delta="$SHARED"
-  quiet "delta worktree failed" "${G[@]}" -C "$delta" worktree add -q -b feat/delta "$tw" origin/main
-  printf 'd\n' > "$tw/d.txt" || die "delta write failed"
-  "${G[@]}" -C "$tw" add d.txt || die "delta add failed"
-  "${G[@]}" -C "$tw" commit -q -m d || die "delta commit failed"
-  local gd; gd="$(git -C "$tw" rev-parse --absolute-git-dir)" || die "delta gitdir failed"
-  local f; for f in "$gd/HEAD" "$gd/index" "$gd/logs/HEAD"; do touch -t 202001010000 "$f" || die "touch $f failed"; done
-  find "$tw" -path "$tw/.git" -prune -o -exec touch -h -t 202001010000 {} + || die "age delta failed"
-  OUT="$(PRUNE_NOW=1578614400 bash "$SCRIPT" "$root4" 2>"$TMP/err.trash1")"; RC=$?
-  local trash_path; trash_path="$(q 'd["repos"][0]["result"]["worktrees_archived"][0]["trash_path"]')"
-  [[ -d "$trash_path" ]] || die "trash-only setup: no trash worktree, out=$OUT err=$(cat "$TMP/err.trash1")"
-  gd="$(git -C "$trash_path" rev-parse --absolute-git-dir)" || die "trash gitdir failed"
-  for f in "$gd/HEAD" "$gd/index" "$gd/logs/HEAD"; do touch -t 202001100000 "$f" || die "touch $f failed"; done
-  find "$trash_path" -path "$trash_path/.git" -prune -o -exec touch -h -t 202001100000 {} + || die "age trash failed"
-  RUN_SEQ=$((RUN_SEQ+1))
-  OUT="$(PRUNE_NOW=$((1578614400 + 31 * 86400)) bash "$SCRIPT" "$root4" 2>"$TMP/err.$RUN_SEQ")"; RC=$?
-  ERRTEXT="$(cat "$TMP/err.$RUN_SEQ")"
-  echo "11. a repository whose only worktree is in .trash still gets its expiry pass"
-  if (( RC == 0 )) && [[ "$(q 'len(d["repos"][0]["result"]["archives_expired"])')" == 1 ]] && [[ ! -e "$trash_path" ]] \
-    && [[ "$(q '[s for s in d["skipped"] if ".trash" in s["path"]]')" == "[]" ]]; then
-    pass; else fail "trash only: rc=$RC out=$OUT err=$ERRTEXT"; fi
 
   # --- 12. a prune exiting 0 with unreadable JSON fails the sweep.
   fresh_pair 12
@@ -260,19 +235,19 @@ main() {
   if (( RC == 1 )) && [[ -z "$OUT" ]] && [[ "$ERRTEXT" == *"git not found on PATH"* ]] && [[ "$ERRTEXT" != *Traceback* ]]; then
     pass; else fail "no git: rc=$RC out=$OUT err=$ERRTEXT"; fi
 
-  # --- 14. symlinked .trash, and a symlinked entry inside a real .trash.
+  # --- 14. a symlinked top-level directory, and a symlinked entry below one.
   fresh_pair 14
-  local root5="$TMP/worktrees5" root6="$TMP/worktrees6" outside="$TMP/outside-trash"
-  mkdir -p "$root5" "$root6/.trash" "$outside" || die "mkdir root5/6 failed"
+  local root5="$TMP/worktrees5" root6="$TMP/worktrees6" outside="$TMP/outside-linked"
+  mkdir -p "$root5" "$root6/linked" "$outside" || die "mkdir root5/6 failed"
   quiet "outside worktree failed" "${G[@]}" -C "$alpha" worktree add -q -b review/outside "$outside/alpha-out" origin/main
-  ln -s "$outside" "$root5/.trash" || die "symlink .trash failed"
-  ln -s "$outside/alpha-out" "$root6/.trash/alpha-out" || die "symlink trash entry failed"
+  ln -s "$outside" "$root5/linked" || die "symlink linked failed"
+  ln -s "$outside/alpha-out" "$root6/linked/alpha-out" || die "symlink linked entry failed"
   local repos5 repos6
   run "$root5"; repos5="$(q 'len(d["repos"])')"
   run "$root6"; repos6="$(q 'len(d["repos"])')"
-  echo "14. a symlinked .trash or trash entry names no repository"
+  echo "14. a symlinked directory, at the top or below, names no repository"
   if [[ "$repos5" == 0 && "$repos6" == 0 ]] && listed "$alpha" "$outside/alpha-out"; then
-    pass; else fail "symlinked trash: repos5=$repos5 repos6=$repos6 out=$OUT"; fi
+    pass; else fail "symlinked directory: repos5=$repos5 repos6=$repos6 out=$OUT"; fi
 
   # --- 15. the report, on its own repository and root.
   local root15="$TMP/worktrees15"
@@ -286,8 +261,9 @@ main() {
   "${G[@]}" -C "$root15/eps-local" add e.txt || die "eps add failed"
   "${G[@]}" -C "$root15/eps-local" commit -q -m e || die "eps commit failed"
   run "$root15"
-  local want
-  want="$(printf 'Worktree sweep: 1 repositories, 1 removed, 0 archived; kept not yet idle: 1 unmerged.\nKept locked: %s (operator hold)' "$root15/eps-held")"
+  local want age15
+  age15="$(q 'next(k["age_hours"] for k in d["repos"][0]["result"]["worktrees_kept"] if k["reason"] == "unpushed")')"
+  want="$(printf 'Worktree sweep: 1 repositories, 1 worktree(s) removed, 0 branch(es) deleted.\nKept locked: %s (operator hold)\nKept unpushed: %s (feat/e3), 1 commit(s) origin does not hold, idle %sh: git -C %s push -u origin HEAD' "$root15/eps-held" "$root15/eps-local" "$age15" "$root15/eps-local")"
   echo "15. the report names notable kept worktrees by path and counts the rest"
   if (( RC == 0 )) && [[ "$(q 'd["report"]')" == "$want" ]]; then
     pass; else fail "report: rc=$RC report=$(q 'd["report"]') want=$want"; fi
@@ -333,12 +309,12 @@ main() {
       pass; else fail "non-UTF-8 path: rc=$RC out=$OUT err=$ERRTEXT"; fi
   fi
 
-  # --- 19. a symlinked .git, in a trash entry and in a walked directory.
+  # --- 19. a symlinked .git, one level down and at the top of a walked directory.
   fresh_pair 19
   local root19="$TMP/worktrees19" ext="$TMP/outside19"
-  mkdir -p "$root19/.trash/entry" "$root19/linked" "$ext" || die "mkdir root19 failed"
+  mkdir -p "$root19/nested/entry" "$root19/linked" "$ext" || die "mkdir root19 failed"
   quiet "outside worktree failed" "${G[@]}" -C "$alpha" worktree add -q -b review/nineteen "$ext/alpha-19" origin/main
-  ln -s "$ext/alpha-19/.git" "$root19/.trash/entry/.git" || die "symlink trash .git failed"
+  ln -s "$ext/alpha-19/.git" "$root19/nested/entry/.git" || die "symlink nested .git failed"
   ln -s "$ext/alpha-19/.git" "$root19/linked/.git" || die "symlink walked .git failed"
   run "$root19"
   echo "19. a symlinked .git names no repository; the walked one is reported as symlinked-git"
@@ -346,6 +322,27 @@ main() {
     && [[ "$(q '[s["reason"] for s in d["skipped"] if s["path"].endswith("/linked")]')" == "['symlinked-git']" ]] \
     && listed "$alpha" "$ext/alpha-19"; then
     pass; else fail "symlinked .git: rc=$RC out=$OUT err=$ERRTEXT"; fi
+
+  # --- 20. unreadable paths are errors, never skips or stale worktrees.
+  if [[ "$(id -u)" == 0 ]]; then
+    echo "20. skipped: root reads every path"
+  else
+    fresh_pair 20
+    local root20="$TMP/worktrees20" gd20
+    mkdir -p "$root20/noexec" || die "mkdir root20 failed"
+    printf 'gitdir: /nowhere\n' > "$root20/noexec/.git" || die "write .git failed"
+    chmod 644 "$root20/noexec" || die "chmod noexec failed"
+    quiet "alpha-20 failed" "${G[@]}" -C "$alpha" worktree add -q -b review/twenty "$root20/alpha-20" origin/main
+    gd20="$(git -C "$root20/alpha-20" rev-parse --absolute-git-dir)" || die "rev-parse gitdir failed"
+    chmod 000 "$(dirname "$gd20")" || die "chmod worktrees dir failed"
+    run "$root20"
+    chmod 755 "$(dirname "$gd20")" || die "restore worktrees dir failed"
+    chmod 755 "$root20/noexec" || die "restore noexec failed"
+    echo "20. an unreadable path and an unreadable gitdir are errors entries, exit 2"
+    if (( RC == 2 )) && [[ "$(q 'sorted(e["path"].rsplit("/",1)[1] for e in d["errors"])')" == "['alpha-20', 'noexec']" ]] \
+      && [[ "$(q '[s["path"] for s in d["skipped"] if s["reason"] in ("broken-worktree","not-a-worktree")]')" == "[]" ]]; then
+      pass; else fail "unreadable paths: rc=$RC out=$OUT err=$ERRTEXT"; fi
+  fi
 
   run
   echo "5a. no root is exit 1 with no JSON"

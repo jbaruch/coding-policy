@@ -32,7 +32,7 @@
 #
 # `--no-measure` skips the headroom snapshot, which is the one check that
 # writes. Every other check is read-only except the worktree sweep, which
-# removes and archives worktrees under its own contract.
+# removes worktrees and deletes local branches under its own contract.
 #
 # `checks.worktrees` (the sweep, sweep-worktrees.sh):
 #   ok         no detail when the worktree root does not exist; otherwise the

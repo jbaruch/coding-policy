@@ -15,8 +15,6 @@ the utility alone records the saved notes and their separate index.
 | `<task-reports-dir>/TASK-LEDGER.md` | `herdr-foreman`, written by the foreman | Evidence-backed assignment acceptance and task completion across rounds |
 | `<canonical-state-path>.retrospectives/` | `herdr-foreman`, through its retrospective utility | Immutable retrospective notes, versioned index, and transition coverage |
 | `<canonical-state-path>.foreman-reset.json` | `skills/herdr-foreman/foreman/foreman_reset.py` | One record per foreman round-boundary reset; see Foreman Reset Record below |
-| `refs/archive/worktrees/<name>-<pathhash>-<YYYYMMDDTHHMMSSZ>` in each repository | `skills/herdr-foreman/prune-worktrees.sh` | Archive ref: the snapshot commit of an idle dirty or unpushed worktree moved to the root's `.trash/`; see Worktree Archives below |
-| JSON note on each archive commit under `refs/notes/worktree-archive` | `skills/herdr-foreman/prune-worktrees.sh` | Archive record (`schema_version`, ref, source, trash, head, branch, stamp, tree, ignored); see Worktree Archives below |
 
 ## Home Migration
 
@@ -873,92 +871,3 @@ and an `interrupted` row the operator saw resume (`delivered` only): `failed` re
 own `options`, `delivered` records `reconciled`. An identical retry returns
 the recorded row with `replayed: true`; a row that already ended any other
 way, or whose deliverer is still running, is refused.
-
-## Worktree Archives
-
-The round's sweep (`skills/herdr-foreman/sweep-worktrees.sh`) runs
-`skills/herdr-foreman/prune-worktrees.sh` per repository. Before moving an
-idle worktree that is dirty or holds commits origin lacks into the root's
-`.trash/`, the prune writes one archive in that repository: a commit, its ref,
-and a JSON record in a git note on that commit.
-
-Archive commit and ref:
-
-- Ref: `refs/archive/worktrees/<name>-<pathhash>-<YYYYMMDDTHHMMSSZ>`, where
-  `<name>` is the worktree directory's basename with every character outside
-  `A-Za-z0-9._-` replaced by `-`, and `<pathhash>` is the first 10 hex digits
-  of the SHA-1 of the worktree's absolute path
-- Commit: parent is the worktree's HEAD; message names the ref and the source
-  path, so every archive is its own commit; tree is every tracked and untracked
-  non-ignored file as it stood. Ignored files are not kept. A worktree holding
-  a submodule or an embedded repository is never archived
-- The root's `.trash` must be a plain directory: a symlinked or non-directory
-  `.trash` keeps every archive candidate (`trash-unsafe`) and nothing is
-  archived
-- The trash worktree is the original, moved by `git worktree move` to
-  `<root>/.trash/<ref basename>` and locked with the reason
-  `prune-worktrees archive <ref>`; it stays registered with git, lock and all,
-  until expiry. A failed move leaves the original in place with its archive
-  resolved, and no second archive of that path is written while the first
-  waits for its trash
-
-Archive record — one JSON object, the note on the archive commit under
-`refs/notes/worktree-archive`:
-
-| Field | Meaning |
-| ----- | ------- |
-| `schema_version` | integer, at least 1 (a boolean is not an integer); `1` is the first schema |
-| `ref` | the archive ref |
-| `source` | the worktree's absolute path when archived |
-| `trash` | the trash worktree's absolute path |
-| `head` | the worktree's HEAD when archived (the commit's parent) |
-| `branch` | its branch, or `null` when detached |
-| `stamp` | the ref's `YYYYMMDDTHHMMSSZ` UTC stamp |
-| `tree` | the fingerprint: the archive commit's tree id |
-| `ignored` | SHA-256 over the ignored untracked files' paths, sizes, mtimes and modes, never their contents; the snapshot leaves ignored files out, so expiry compares this instead |
-
-Writer / reader contract:
-
-- Owner and only writer: `skills/herdr-foreman/prune-worktrees.sh`. The note is
-  written before the ref and never over an existing note (a note already on
-  the commit refuses the archive); the ref is create-only
-  (`update-ref <ref> <commit> ""`), so an archive ref never exists without its
-  own record
-- The prune's JSON names each written archive under `worktrees_archived`
-  (`archive_ref`, `trash_path`)
-- The same script is the only reader. Every live run reads every record and
-  expires one older than the expiry window
-- Expiry's checks and the order of its removals are the script's, not
-  restated here: the top-of-file docstring ("Expiry" and "Orphan notes") and
-  the functions `plan_archives`, `trash_gates`, `expire_archives` and
-  `remove_orphan_notes`
-- Side effects of an expiry: the trash worktree, the branch (only when its tip
-  is the recorded head), the archive ref and its note are removed. A failed
-  check or step keeps the archive
-- Invariant: an archive ref never exists without its record. The note is
-  written before the ref and removed after it
-- An interrupted expiry can leave an orphan note: a note on a commit no
-  archive ref points at. No reader takes it for an archive, and a later live
-  run removes it (`orphan_notes_removed`)
-- Results: `archives_expired`, `archives_kept` (with the reason),
-  `archives_migrated`, `orphan_notes_removed`; a dry run only reports
-- Operator reader: restore with `git worktree add <path> <archive_ref>`, read
-  one file with `git show <archive_ref>:<file>`, or use the trash worktree
-  directly before it expires
-- The idle windows, the in-use test, the expiry window and the orphan grace
-  window are that script's top-of-file docstring and constants
-
-Migration:
-
-- `ARCHIVE_SCHEMA` in the script is the current `schema_version`
-- The owner alone migrates: an older record is upgraded and its note
-  rewritten on a live run, reported under `archives_migrated`; a reader never
-  migrates
-- The upgrade steps are `MIGRATIONS` in `plan_archives`
-  (`skills/herdr-foreman/prune-worktrees.sh`); version 1 is the first schema
-- A record whose version is newer than `ARCHIVE_SCHEMA` is no usable state,
-  and so is one that is missing, unparseable, or older than any migration
-  reaches: it is reported under `archives_kept` and never expired
-- A ref under `refs/archive/worktrees/` not named
-  `<name>-<pathhash>-<YYYYMMDDTHHMMSSZ>`, with `<name>` drawn only from
-  `A-Za-z0-9._-` and `<pathhash>` 10 hex digits, is never touched
