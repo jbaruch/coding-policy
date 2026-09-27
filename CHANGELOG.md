@@ -1,7 +1,5 @@
 # Changelog
 
-## 0.3.282 — 2026-09-27
-
 ### Changed
 
 - **Spent worktrees and branches are removed automatically; work that exists
@@ -77,6 +75,10 @@
     references Cleanup for the predicates; `rules/hook-action-reporting.md`
     Act on What It Names raises each listed item with the user, one question
     at a time, and forbids acting on one unasked.
+
+## 0.3.282 — 2026-09-27
+
+### Changed
 
 - **Renovate stays within the ACR acceptance lane's compatible versions.** The
   lane runs the upstream FFA gate, which targets Python 3.12, and pins a Noble
