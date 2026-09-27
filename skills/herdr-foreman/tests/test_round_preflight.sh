@@ -23,6 +23,7 @@
 #   9. Missing --repo/--checkout-> exit 2, usage error, no JSON verdict.
 #  10. Every check's payload    -> carried through under `checks.<name>.detail`.
 #  11. Gate pointers            -> resolved once, carried for the briefs.
+#  12. Non-object payload       -> exit 0 with `[]`/`null` blocks, never `ok`.
 
 set -uo pipefail
 
@@ -124,6 +125,29 @@ main() {
   run "$TMP/prune2"
   if [[ $RC -eq 1 ]] && [[ "$(field "$OUT" 'd["checks"]["worktrees"]["status"]')" == '"failed"' ]]; then
     pass; else fail "prune exit 2 is failed, got RC=$RC OUT=$OUT"; fi
+
+  # Exit 0 with valid JSON that is not an object is not the check's evidence.
+  for shape in '[]' 'null' '7'; do
+    shadow "$TMP/shape-$shape"
+    stub "$TMP/shape-$shape" roster.sh 0 "$shape"
+    stub "$TMP/shape-$shape" resolve-gates.sh 0 "$shape"
+    run "$TMP/shape-$shape"
+    if [[ $RC -eq 1 ]] && [[ "$(field "$OUT" 'd["ready"]')" == "false" ]] \
+       && [[ "$(field "$OUT" 'd["checks"]["roster"]["status"]')" == '"blocked"' ]] \
+       && [[ "$(field "$OUT" 'd["checks"]["gates"]["status"]')" == '"blocked"' ]] \
+       && [[ "$(field "$OUT" 'd["checks"]["roster"]["detail"]')" == "null" ]] \
+       && printf '%s' "$OUT" | grep -q 'where its contract emits an object'; then
+      pass; else fail "a '$shape' payload on exit 0 must block, got RC=$RC OUT=$OUT"; fi
+  done
+
+  # The authority and capability verdicts parse a field out of the payload; a
+  # non-object there is an unreadable verdict, never a crash or a pass.
+  shadow "$TMP/shape-authority"
+  stub "$TMP/shape-authority" verify-authority.sh 0 '[]'
+  run "$TMP/shape-authority"
+  if [[ $RC -eq 1 ]] && [[ "$(field "$OUT" 'd["checks"]["authority"]["status"]')" == '"failed"' ]] \
+     && ! printf '%s' "$ERRTEXT" | grep -q 'Traceback'; then
+    pass; else fail "a non-object authority payload must fail cleanly, got RC=$RC OUT=$OUT ERR=$ERRTEXT"; fi
 
   echo "▶ what is due without blocking" >&2
 

@@ -115,10 +115,20 @@ if detail:
     # code said: it blocks, and the reason names the file.
     try:
         with open(detail, encoding="utf-8") as handle:
-            row["detail"] = json.load(handle)
+            payload = json.load(handle)
     except (OSError, ValueError) as exc:
         row.update(status="blocked", detail=None,
                    reason="cannot read this check's output at {}: {}".format(detail, exc))
+    else:
+        # Every collaborator emits one JSON object. Valid JSON of another shape
+        # -- `[]`, `null`, a bare number -- is not that check's evidence.
+        if isinstance(payload, dict):
+            row["detail"] = payload
+        else:
+            row.update(status="blocked", detail=None,
+                       reason="this check's output at {} is JSON {} where its contract emits an "
+                              "object; re-run the check and read its diagnostic".format(
+                                  detail, type(payload).__name__))
 checks[name] = row
 with open(path, "w", encoding="utf-8") as handle:
     json.dump(checks, handle)
@@ -152,7 +162,7 @@ PY
   cat "${scratch}/authority.err" >&2
   local authorized=""
   if [ "$rc" -eq 0 ]; then
-    if ! authorized="$(python3 -c 'import json,sys; v=json.load(open(sys.argv[1])).get("authorized"); print("1" if v is True else "0" if v is False else sys.exit("authorized is not a boolean"))' "${scratch}/authority.json")"; then
+    if ! authorized="$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); v=d.get("authorized") if isinstance(d, dict) else None; print("1" if v is True else "0" if v is False else sys.exit("authorized is not a boolean"))' "${scratch}/authority.json")"; then
       authorized=""
     fi
   fi
@@ -189,7 +199,7 @@ PY
   cat "${scratch}/capability.err" >&2
   if [ "$rc" -eq 0 ]; then
     local capability_due
-    if capability_due="$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print("1" if d["due"] is True else "0" if d["due"] is False else sys.exit("due is not a boolean"))' "${scratch}/capability.json")"; then
+    if capability_due="$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); d=d if isinstance(d, dict) else {}; print("1" if d.get("due") is True else "0" if d.get("due") is False else sys.exit("due is not a boolean"))' "${scratch}/capability.json")"; then
       record capability ok "" "$capability_due" "${scratch}/capability.json"
     else
       record capability failed "foreman capability-check exited 0 without a readable due flag; the table's cadence is unknown" 0 ""
