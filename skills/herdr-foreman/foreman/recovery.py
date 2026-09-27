@@ -102,6 +102,8 @@ TASK_CLOSE_OUTCOMES = ("merged", "abandoned")
 RETAINED_FIX_ROUNDS = frozenset({0, 1, 2, 3})
 PENDING_STATUSES = frozenset({"reserved", "sending", "sent_but_not_started"})
 DISPATCH_STATUSES = PENDING_STATUSES | {"applied", "not_sent"}
+#: Statuses a dispatch reaches only through `mark_sending`.
+SENT_STATUSES = frozenset({"sending", "sent_but_not_started", "applied"})
 #: The wait-report reason a refusal receipt must carry (see wait-report.sh
 #: exit 5). A terminal provider refusal is recorded against the applied
 #: dispatch it stopped, keyed by task, role and fix round: the brief that
@@ -1307,6 +1309,12 @@ def reserve(store, record, at):
     if pending:
         raise UsageError("Task has an unresolved dispatch {}; reconcile it before another assignment.".format(pending[0]["id"]), {})
     prior = next((row for row in store["dispatches"] if row["id"] == record["id"]), None)
+    # A stored judge row with no mode is legacy history `_dispatch_version`
+    # still reads. A reservation without one -- new, or a retry of that row --
+    # would send an undeclared judge, which the Judge Seat refuses (#495).
+    if canonical_role(record.get("role")) == "judge" and record.get("judge_mode") is None:
+        raise UsageError("A judge dispatch declares its mode, one of {}, before it is reserved; "
+                         "pass judge_mode.".format(" | ".join(JUDGE_MODES)), {"dispatch": record.get("id")})
     if prior:
         if prior["status"] != "not_sent" or prior["fingerprint"] != record["fingerprint"]:
             raise UsageError("Dispatch already exists; inspect its recorded result instead of sending again.", {})
@@ -1334,8 +1342,21 @@ def reserve(store, record, at):
     return item
 
 
+def _context_mode_matches(record, context):
+    """A mode-bearing dispatch's context carries that mode; any other carries no key."""
+    if record.get("judge_mode") is None:
+        return "judge_mode" not in context
+    return context.get("judge_mode") == record["judge_mode"]
+
+
 def mark_sending(store, identifier, at, context):
     record = _item(store["dispatches"], identifier, "dispatch")
+    if not isinstance(context, dict):
+        raise UsageError("A pre-send context is an object of clear and session evidence; "
+                         "re-run `{}` so it records one.".format(runnable.command("apply")), {"dispatch": identifier})
+    if not _context_mode_matches(record, context):
+        raise UsageError("The pre-send context names a different judge mode than its dispatch was reserved for; "
+                         "re-run `{}` with the reserved mode.".format(runnable.command("apply")), {"dispatch": identifier})
     record["status"] = "sending"
     record["context_before_send"] = context
     _event(store, at, "dispatch_sending", record["task"], {"dispatch": identifier, "context": context})
@@ -1956,6 +1977,22 @@ def validate_store(store, assignments):
             require_seatable(row["role"])
             if row["status"] not in DISPATCH_STATUSES:
                 raise UsageError("Unknown dispatch status; recover through the owner without dropping the attempt.", {})
+            # Reconcile reads a pending judge's mode from this context, so it is
+            # checked before the dispatch applies, not only after (#495).
+            context = row.get("context_before_send")
+            # `mark_sending` writes only an object, on every status.
+            if "context_before_send" in row and not isinstance(context, dict):
+                raise UsageError("A dispatch's pre-send context is not an object; "
+                                 "restore the original context_before_send.", {})
+            # A mode-bearing dispatch past `reserved` went through
+            # `mark_sending`; without that context reconcile recovers `unknown`.
+            if (row["schema_version"] == JUDGE_DISPATCH_VERSION and row["status"] in SENT_STATUSES
+                    and not isinstance(context, dict)):
+                raise UsageError("A sent judge dispatch lost the pre-send context carrying its mode; "
+                                 "restore the original context_before_send.", {})
+            if isinstance(context, dict) and not _context_mode_matches(row, context):
+                raise UsageError("The pre-send context names a different judge mode than its dispatch; "
+                                 "restore the mode the judge was sent for.", {})
             if row["status"] in PENDING_STATUSES:
                 if row["agent"] in pending_workers or row["role"] in {"developer", "release"} and row["task"] in pending_tasks:
                     raise UsageError("Concurrent pending dispatches overlap a worker or implementation task; preserve and reconcile their outcomes.", {})
