@@ -26,7 +26,6 @@ from pathlib import Path
 from . import supervision
 from .chronology import timestamp
 from .errors import StateError, UsageError
-from .recovery import SHA_RE
 from .state import load_state_checked
 
 #: Ledger decisions that record an assessment (references/task-ledger.md);
@@ -37,6 +36,9 @@ LEDGER_SCHEMA_VERSION = "1"
 FRONT_FIELDS = ("schema_version", "task", "base_revision", "dispatch_state")
 EVENT_FIELDS = ("schema_version", "id", "at", "subject", "dispatch_id", "worker", "role", "report", "observed",
                 "decision", "head_revision", "evidence", "assessment")
+#: A full SHA-1 or SHA-256 commit id in either case: schema 1 promises a "full SHA"
+#: and never a case, so an uppercase id a writer copied is still schema 1.
+LEDGER_SHA = re.compile(r"[0-9a-fA-F]{40}(?:[0-9a-fA-F]{24})?")
 #: `head_revision` values that stand in for a SHA (state-schema.md, Task Ledger).
 HEAD_PLACEHOLDERS = frozenset({"unknown", "not_applicable"})
 #: Each subject's decision vocabulary (references/task-ledger.md, Record Decisions as They Happen).
@@ -84,8 +86,8 @@ def ledger_events(path):
     if header["schema_version"] != LEDGER_SCHEMA_VERSION:
         raise _unusable(path, "it is schema {}, and this build reads schema {}".format(
             header["schema_version"], LEDGER_SCHEMA_VERSION))
-    if SHA_RE.fullmatch(header["base_revision"]) is None:
-        raise _unusable(path, "its base_revision {!r} is not a full lowercase commit SHA".format(header["base_revision"]))
+    if LEDGER_SHA.fullmatch(header["base_revision"]) is None:
+        raise _unusable(path, "its base_revision {!r} is not a full hexadecimal commit SHA".format(header["base_revision"]))
     if not os.path.isabs(header["dispatch_state"]) or "\0" in header["dispatch_state"]:
         raise _unusable(path, "its dispatch_state {!r} is not an absolute path free of NUL bytes".format(header["dispatch_state"]))
     events, current = [], None
@@ -128,8 +130,8 @@ def _check_formats(path, event):
         raise _unusable(path, "event {} has at {!r}, not a timezone-qualified ISO-8601 timestamp".format(
             section, event["at"])) from None
     head = event["head_revision"]
-    if head not in HEAD_PLACEHOLDERS and SHA_RE.fullmatch(head) is None:
-        raise _unusable(path, "event {} has head_revision {!r}, not a full lowercase commit SHA, unknown or "
+    if head not in HEAD_PLACEHOLDERS and LEDGER_SHA.fullmatch(head) is None:
+        raise _unusable(path, "event {} has head_revision {!r}, not a full hexadecimal commit SHA, unknown or "
                         "not_applicable".format(section, head))
     subject = event["subject"]
     if subject not in DECISIONS:

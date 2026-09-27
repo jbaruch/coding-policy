@@ -127,7 +127,8 @@ class CloseMemberTest(MembersCase):
                  ({"at": "2026-09-01T12:00:00"}, sha, None, "not a timezone-qualified"),
                  ({"head_revision": "not-a-sha"}, sha, None, "has head_revision 'not-a-sha'"),
                  ({"head_revision": "abc1234"}, sha, None, "has head_revision 'abc1234'"),
-                 ({"head_revision": "A" * 40}, sha, None, "not a full lowercase commit SHA"),
+                 ({"head_revision": "g" * 40}, sha, None, "not a full hexadecimal commit SHA"),
+                 ({}, "g" * 40, None, "base_revision '{}' is not a full hexadecimal".format("g" * 40)),
                  ({"_heading": "renamed-section"}, sha, None, "carries id 'event-1', not its section heading"),
                  ({}, "abc1234", None, "base_revision 'abc1234'"),
                  ({}, sha, "relative/state.json", "dispatch_state 'relative/state.json' is not an absolute"),
@@ -229,9 +230,10 @@ class CloseMemberTest(MembersCase):
 
     def test_well_formed_field_formats_are_accepted(self):
         self.emit()
-        for head in ("b" * 40, "c" * 64, "unknown", "not_applicable"):
+        for head in ("b" * 40, "c" * 64, "A" * 40, "unknown", "not_applicable"):
             with self.subTest(head=head):
-                self.write_ledger("accepted", fields={"head_revision": head, "at": "2026-09-01T12:00:00Z"})
+                self.write_ledger("accepted", fields={"head_revision": head, "at": "2026-09-01T12:00:00Z"},
+                                  base="D" * 40)
                 self.assertEqual(members.ledger_events(self.ledger)[1][0]["head_revision"], head)
         result = members.close(self.path, "dispatch-a", self.ledger, LATER)
         self.assertEqual(result["decision"], "accepted")

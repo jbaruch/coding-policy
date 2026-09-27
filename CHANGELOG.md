@@ -7,7 +7,7 @@
   was present and non-empty, so an event with `at: not-a-timestamp` or
   `head_revision: not-a-sha` still authorized closing an enrollment. It now
   refuses, closing nothing, unless `at` is a timezone-qualified ISO-8601
-  timestamp, `head_revision` is a full lowercase SHA or the literal `unknown` /
+  timestamp, `head_revision` is a full SHA (either case) or the literal `unknown` /
   `not_applicable`, the frontmatter `base_revision` is a full SHA,
   `dispatch_state` is an absolute path that resolves (a `~/` path, a NUL byte
   or a symlink loop now refuses instead of passing or raising), each event's
