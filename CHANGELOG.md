@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.295 — 2026-09-27
+
 ### Fixed
 
 - **`standup-ask.sh` measures the worker's live pane before asking (#515).**
