@@ -12,12 +12,11 @@ one is caught before it ships.
 Each logical fenced line (backslash continuations joined) is tokenized with
 `shlex` in POSIX mode, so quotes, escapes and operators are the shell's, not a
 regex's. A command position is the first token, or the one after an operator,
-a backtick, or the `(` of `$(`. Leading `NAME=value` assignments, redirections
-with their targets, the keywords and braces in `KEYWORDS`, and the wrappers in
-`WRAPPERS` with their assignments, their options and the values those options
-take are skipped. A token there ending in
-`.sh` or `.py` is a bare invocation. A line `shlex` cannot tokenize is
-reported, never skipped.
+an unquoted backtick, or the `(` of `$(`. Leading `NAME=value` assignments,
+redirections with their targets, the keywords and braces in `KEYWORDS`, and the
+wrappers in `WRAPPERS` with their assignments, their options and the values
+those options take are skipped. A token there ending in `.sh` or `.py` is a
+bare invocation. A line `shlex` cannot tokenize is reported, never skipped.
 """
 
 import re
@@ -41,7 +40,7 @@ SCRIPT = re.compile(r"\.(sh|py)$")
 #: `shlex` groups a run of these into one operator token. A run holding `<` or
 #: `>` is a redirection, whose next token is its target; any other run ends a
 #: command, so the next word is in command position.
-OPERATOR_CHARS = frozenset("();<>|&")
+OPERATOR_CHARS = frozenset("();<>|&`")
 
 #: Words that precede a command without being one.
 KEYWORDS = frozenset({"if", "then", "do", "else", "elif", "while", "until", "!", "{", "}"})
@@ -94,17 +93,14 @@ def shell_blocks(text):
 
 
 def tokens(line):
-    """POSIX shell tokens, with each backtick split off as its own token."""
-    lexer = shlex.shlex(line, posix=True, punctuation_chars=True)
+    """POSIX shell tokens; an unquoted backtick is an operator of its own.
+
+    `shlex` groups punctuation only outside quotes, so a backtick inside
+    single or double quotes stays literal text of its word.
+    """
+    lexer = shlex.shlex(line, posix=True, punctuation_chars="();<>|&`")
     lexer.whitespace_split = True
-    out = []
-    for token in lexer:
-        for index, part in enumerate(token.split("`")):
-            if index:
-                out.append("`")
-            if part:
-                out.append(part)
-    return out
+    return list(lexer)
 
 
 def bare_invocations(line):
@@ -120,9 +116,6 @@ def bare_invocations(line):
     while index < len(words):
         token = words[index]
         index += 1
-        if token == "`":
-            expecting, wrapper = True, None
-            continue
         if set(token) <= OPERATOR_CHARS:
             if "<" in token or ">" in token:
                 index += 1
@@ -208,6 +201,7 @@ class BareInvocationDetectorTest(unittest.TestCase):
             "sudo -u runner bash skills/x/run.sh",
             "command -v skills/x/run.sh",
             "command -V skills/x/run.sh",
+            "echo 'literal `skills/x/run.sh`'",
         ):
             with self.subTest(line=line):
                 self.assertEqual(bare_invocations(line), [])
