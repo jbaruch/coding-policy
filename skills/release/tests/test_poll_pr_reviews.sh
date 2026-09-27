@@ -20,7 +20,7 @@ set -uo pipefail
 SCRIPT="$(cd "$(dirname "$0")/.." && pwd)/poll-pr-reviews.sh"
 [[ -x "$SCRIPT" ]] || { echo "fatal: poll-pr-reviews.sh not executable at $SCRIPT" >&2; exit 2; }
 
-# shellcheck disable=SC1090
+# shellcheck disable=SC1090  # ShellCheck cannot resolve the dynamically constructed source path.
 source "$SCRIPT" || true
 set +e
 

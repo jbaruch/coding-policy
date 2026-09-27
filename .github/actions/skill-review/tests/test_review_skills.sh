@@ -35,7 +35,7 @@ SCRIPT="$(cd "$(dirname "$0")/.." && pwd)/review-skills.sh"
 # The config vars below are `export`ed, mirroring how the action passes them to
 # review-skills.sh (via `env:`) — which also tells shellcheck they're used
 # externally by the sourced functions, not dead (SC2034).
-# shellcheck disable=SC1090
+# shellcheck disable=SC1090  # ShellCheck cannot resolve the dynamically constructed source path.
 source "$SCRIPT" || true
 set +e
 

@@ -15,7 +15,7 @@ HERE = Path(__file__).resolve().parent
 SKILL = HERE.parent
 sys.path.insert(0, str(SKILL))
 
-from foreman.partition import slice_scope  # noqa: E402
+from foreman.partition import slice_scope
 
 CASES = (
     ("reviewer#api", ["src/api/*"], "0123456789ab"),
