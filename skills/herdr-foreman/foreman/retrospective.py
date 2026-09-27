@@ -15,6 +15,7 @@ from datetime import timedelta, timezone
 from pathlib import Path
 from typing import NoReturn
 
+from . import runnable
 from .chronology import timestamp
 from .errors import StateError, UsageError
 from .state import save_state, state_lock
@@ -288,7 +289,8 @@ def load(path, *, allow_pending=False):
 def require_no_pending(path):
     """Refuse sidecar changes until the recording owner reconciles its journal."""
     if (directory(path) / "pending.json").exists():
-        raise StateError("A retrospective recording transaction is pending. Retry its original retro-record command to reconcile it before dispatching or changing retrospective state.", {})
+        raise StateError("A retrospective recording transaction is pending. Retry its original `{}` command to reconcile it before dispatching or changing retrospective state.".format(
+            runnable.command("retro-record")), {})
 
 
 def cadence(index, at, *, existing_work=False):
@@ -460,5 +462,6 @@ def show(path, name="latest", *, task=None):
     records = list_notes(path, task=task)["records"]
     record = (max(records, key=lambda row: timestamp(row["completed_at"], "Retrospective completion")) if records else None) if name == "latest" else next((row for row in records if row["id"] == name), None)
     if record is None:
-        raise UsageError("No saved retrospective matches; use retro-list with the same --state path to inspect available notes.", {})
+        raise UsageError("No saved retrospective matches; use `{}` with the same --state path to inspect available notes.".format(
+            runnable.command("retro-list")), {})
     return {"schema_version": SCHEMA_VERSION, "record": record, "markdown": _read_note(record)}

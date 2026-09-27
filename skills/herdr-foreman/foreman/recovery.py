@@ -13,6 +13,7 @@ from copy import deepcopy
 from fnmatch import fnmatchcase
 from pathlib import Path, PurePosixPath
 
+from . import runnable
 from .errors import UsageError
 from .chronology import assignment_after, latest_assignment, timestamp
 from .tiers import SEAT_SEPARATOR, canonical_role, require_seatable
@@ -385,7 +386,7 @@ def _event(store, at, kind, task, details):
 def _item(items, identifier, label):
     value = next((row for row in items if row.get("id") == identifier), None)
     if value is None:
-        raise UsageError("Unknown {} {!r}; inspect `foreman state` and use its recorded identity.".format(label, identifier), {})
+        raise UsageError("Unknown {} {!r}; inspect `{}` and use its recorded identity.".format(label, identifier, runnable.command("state")), {})
     return value
 
 
@@ -477,7 +478,8 @@ def register_task(store, data, at):
 def task_record(store, task):
     record = store["tasks"].get(task)
     if record is None:
-        raise UsageError("Task {!r} has no recorded base/scope. Run `foreman task --record FILE` with its original brief and authorization; do not reset the task.".format(task), {})
+        raise UsageError("Task {!r} has no recorded base/scope. Run `{}` with its original brief and authorization; do not reset the task.".format(
+            task, runnable.command("task --record FILE")), {})
     return record
 
 
@@ -497,7 +499,7 @@ def close_task(store, assignments, data, at):
     text(data["evidence"], "evidence")
     instant = timestamp(at, "Close-task time")
     if task not in store["tasks"] and not any(row.get("task") == task for row in assignments):
-        raise UsageError("Task {!r} is neither registered nor assigned; check its identity with `foreman state` before closing it.".format(task), {})
+        raise UsageError("Task {!r} is neither registered nor assigned; check its identity with `{}` before closing it.".format(task, runnable.command("state")), {})
     details = {"outcome": data["outcome"], "evidence": data["evidence"]}
     # The same request replays from anywhere in history, even after the task
     # reopened: closing a reopened task takes a new decision with new evidence.
@@ -717,7 +719,8 @@ def require_investigation_before_judge(store, assignments, task, investigations,
         return None
     if mode == "diagnosis" and any(row["remedy"] == "stop" for row in current_diagnoses(store, task)):
         if not any(row["task"] == task for row in active_plans(store)):
-            raise UsageError("Task {} is diagnosed `stop` with no plan or approach authorized over it: implementation has ended and this approach's ladder is spent, so a diagnosis round records nothing. Ship what is clean and track the remainder, or record the operator's decision over this remedy with `foreman authorize-approach` first.".format(task), {})
+            raise UsageError("Task {} is diagnosed `stop` with no plan or approach authorized over it: implementation has ended and this approach's ladder is spent, so a diagnosis round records nothing. Ship what is clean and track the remainder, or record the operator's decision over this remedy with `{}` first.".format(
+                task, runnable.command("authorize-approach")), {})
     if mode == "adjudication":
         return None
     count = confirmed_fix(assignments, task)
@@ -907,7 +910,7 @@ def diagnose(store, assignments, data, at, judge_agent, enrolled_report, supervi
     active = next((row for row in active_plans(store) if row["task"] == data["task"] and row["last_fix"] > count), None)
     if data.get("supersedes"):
         if active is None or data["supersedes"] != active["id"]:
-            raise UsageError("Supersedes must name this task's current unexhausted plan; inspect foreman status before recording the changed decision.", {})
+            raise UsageError("Supersedes must name this task's current unexhausted plan; inspect `{}` before recording the changed decision.".format(runnable.command("status")), {})
         # Re-entry before the bound is spent is for a changed scope or an
         # operator override; neither is proved by naming the plan alone.
         changed = data["scope"] != active["scope"] or data["allowed_paths"] != active["allowed_paths"]
@@ -1051,12 +1054,13 @@ def authorize_plan(store, assignments, data, at):
     # recorded diagnosis this path would reopen the budget prompt the judge
     # replaced (rules/agent-team-operation.md Judge Seat).
     if not any(row["fix_round"] == count for row in diagnoses_for(store, data["task"])):
-        raise UsageError("This task has no diagnosis at fix round {}; an older remedy cannot authorize these attempts. Take the judge's diagnosis for this exhaustion with `foreman diagnose` first.".format(count), {})
+        raise UsageError("This task has no diagnosis at fix round {}; an older remedy cannot authorize these attempts. Take the judge's diagnosis for this exhaustion with `{}` first.".format(
+            count, runnable.command("diagnose")), {})
     active = next((row for row in active_plans(store) if row["task"] == data["task"] and row["last_fix"] > count), None)
     if active and data.get("supersedes") != active["id"]:
         raise UsageError("This task still has an approved plan. Use its bounds, or explicitly name it in supersedes with the operator's changed decision.", {})
     if data.get("supersedes") and (active is None or data["supersedes"] != active["id"]):
-        raise UsageError("Supersedes must name this task's current unexhausted plan; inspect foreman status before recording the changed decision.", {})
+        raise UsageError("Supersedes must name this task's current unexhausted plan; inspect `{}` before recording the changed decision.".format(runnable.command("status")), {})
     record = {"schema_version": RECOVERY_SCHEMA_VERSION, "at": at, **data,
               "base_revision": source["base_revision"], "first_fix": count + 1, "last_fix": count + data["additional_fixes"]}
     store["plans"].append(record)
@@ -1117,7 +1121,7 @@ def authorize_approach(store, assignments, data, at):
     if active is not None and data.get("supersedes") != active["id"]:
         raise UsageError("Plan {} still holds unspent attempts for the approach this replaces; name it in supersedes, or spend it before starting another direction.".format(active["id"]), {})
     if data.get("supersedes") and (active is None or data["supersedes"] != active["id"]):
-        raise UsageError("Supersedes must name this task's current unexhausted plan; inspect foreman status before recording the changed decision.", {})
+        raise UsageError("Supersedes must name this task's current unexhausted plan; inspect `{}` before recording the changed decision.".format(runnable.command("status")), {})
     record = {"schema_version": APPROACH_RECORD_VERSION, "at": at, "id": data["id"], "task": data["task"],
               "checkpoint": data["checkpoint"], "base_revision": task["base_revision"], "from_fix": count,
               "allowance": data["allowance"], "direction": data["direction"],
@@ -1152,7 +1156,8 @@ def validate_work(store, assignments, task, fix_round, plan_id=None, work=None, 
         override = next((row for row in active_plans(store)
                          if row["task"] == task and row["first_fix"] > stopped["fix_round"]), None)
         if override is None:
-            raise UsageError("This approach's diagnosis is `stop`, which is terminal: ship what is clean and track the remainder. Only the operator overrides it, by authorizing a plan over that remedy or a different approach with `foreman authorize-approach`.", {})
+            raise UsageError("This approach's diagnosis is `stop`, which is terminal: ship what is clean and track the remainder. Only the operator overrides it, by authorizing a plan over that remedy or a different approach with `{}`.".format(
+                runnable.command("authorize-approach")), {})
         if plan_id != override["id"]:
             raise UsageError("This task's `stop` remedy is overridden by plan {}; name it to spend its attempts.".format(override["id"]), {})
     if fix_round is None:
@@ -1168,7 +1173,8 @@ def validate_work(store, assignments, task, fix_round, plan_id=None, work=None, 
             raise UsageError("An extra-correction plan cannot relabel a fix inside the current approach's allowance; preserve the cumulative number.", {})
         return None
     if not task or not plan_id:
-        raise UsageError("This approach's correction allowance is exhausted. Record the checkpoint and take the judge's diagnosis with `foreman diagnose`; its bounded remedy authorizes the next attempts, and an unbounded further attempt is refused.", {})
+        raise UsageError("This approach's correction allowance is exhausted. Record the checkpoint and take the judge's diagnosis with `{}`; its bounded remedy authorizes the next attempts, and an unbounded further attempt is refused.".format(
+            runnable.command("diagnose")), {})
     plan = _item(store["plans"], plan_id, "correction plan")
     if plan not in active_plans(store):
         raise UsageError("That approval was superseded by an explicit operator decision; use the current recorded bounds.", {})
@@ -1195,7 +1201,8 @@ def validate_work(store, assignments, task, fix_round, plan_id=None, work=None, 
     if implementation and historical and historical["fix_round"] >= plan["first_fix"]:
         report = historical["reviews"][-1] if historical["reviews"] else None
         if not report or report["input"]["verdict"] != "blocking":
-            raise UsageError("Record the imported correction's actual blocking review with record-historical-review before spending the next approved attempt.", {})
+            raise UsageError("Record the imported correction's actual blocking review with `{}` before spending the next approved attempt.".format(
+                runnable.command("record-historical-review")), {})
         evidence, _body = receipt(report["input"]["report"])
         if evidence != report["evidence"]:
             raise UsageError("The imported correction's review artifact changed; record its actual current review before continuing.", {})
@@ -1233,7 +1240,8 @@ def prior_dispatch(store, identifier, fingerprint):
     if prior["fingerprint"] != fingerprint:
         raise UsageError("Dispatch identity already names different inputs; inspect its outcome before assigning a new identity.", {})
     if prior["status"] in PENDING_STATUSES:
-        raise UsageError("Dispatch {!r} has an uncertain outcome. Implementation is paused; inspect the worker and run `foreman reconcile` with explicit evidence. Do not resend it.".format(identifier), {})
+        raise UsageError("Dispatch {!r} has an uncertain outcome. Implementation is paused; inspect the worker and run `{}` with explicit evidence. Do not resend it.".format(
+            identifier, runnable.command("reconcile")), {})
     return prior
 
 
@@ -1590,8 +1598,8 @@ def refusal_move(store, task, role, fix_round, provider, identity, report=None):
                 "provider": provider, "authorization": authorized["id"]}
     providers = _refusal_providers(store, task, role, fix_round)
     if len(providers) >= REFUSAL_LIMIT:
-        raise UsageError("Task {} {} round {} was refused by {} providers ({}); the line stops here. Record the operator's decision with authorize-refused-dispatch before any further dispatch of this brief.".format(
-            task, role, fix_round, len(providers), ", ".join(providers)), {"refusals": [row["id"] for row in refused]})
+        raise UsageError("Task {} {} round {} was refused by {} providers ({}); the line stops here. Record the operator's decision with `{}` before any further dispatch of this brief.".format(
+            task, role, fix_round, len(providers), ", ".join(providers), runnable.command("authorize-refused-dispatch")), {"refusals": [row["id"] for row in refused]})
     for row in refused:
         if row.get("brief_identity") is None:
             raise UsageError("Refused dispatch {} predates brief identity, so an unchanged move cannot be verified; record the operator's decision before any further dispatch of this brief.".format(row["id"]), {"refusals": [item["id"] for item in refused]})
@@ -1741,7 +1749,7 @@ def authorize_context(store, assignments, data, at, observed_session):
     authorization(data["authorization"])
     index = data["assignment_index"]
     if type(index) is not int or not 0 <= index < len(assignments):
-        raise UsageError("Use the original assignment_index from `foreman state`; do not replace history.", {})
+        raise UsageError("Use the original assignment_index from `{}`; do not replace history.".format(runnable.command("state")), {})
     row = assignments[index]
     if row.get("task") != data["task"] or row.get("role") != "developer" or row.get("status") != "applied" or row.get("context_session") is not None:
         raise UsageError("This recovery covers a confirmed developer assignment whose original native-session proof is null.", {})
@@ -1800,7 +1808,8 @@ def recovery_agent(store, assignments, command, data):
     if command in {"recover-context", "record-release-clear", "recover-role-clear"}:
         index = data.get("assignment_index")
         if type(index) is not int or not 0 <= index < len(assignments):
-            raise UsageError("Use the original assignment_index from foreman state; do not guess a worker identity.", {})
+            raise UsageError("Use the original assignment_index from `{}`; do not guess a worker identity.".format(
+                runnable.command("state")), {})
         return assignments[index]["agent"]
     return _item(store["dispatches"], data.get("dispatch"), "dispatch")["agent"]
 
@@ -1943,8 +1952,9 @@ def validate_store(store, assignments):
                         "Diagnosis {} cites approach {}, which belongs to task {} rather than {}; "
                         "a diagnosis rules on its own task's approach. Leave the ledger untouched, "
                         "restore the owner-written recovery store, and re-record the diagnosis with "
-                        "`foreman diagnose` against an approach of {}.".format(
-                            row["id"], row[field], approach["task"], row["task"], row["task"]), {})
+                        "`{diagnose}` against an approach of {}.".format(
+                            row["id"], row[field], approach["task"], row["task"], row["task"],
+                            diagnose=runnable.command("diagnose")), {})
         for row in store["plans"]:
             source = _item(store["checkpoints"], row["checkpoint"], "checkpoint")
             authorization(row["authorization"])

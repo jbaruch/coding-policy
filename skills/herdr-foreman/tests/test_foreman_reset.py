@@ -17,13 +17,15 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from foreman import foreman_reset, retrospective, supervision_runtime
+from foreman import foreman_reset, retrospective, runnable, supervision_runtime
 from foreman.state import state_lock
 from foreman.errors import HerdrError, StateError, UsageError
 from tests.test_cli import CliCase
 
 PANE = "w9:p1"
 READY = {"id": "round-7", "kind": "stow", "reset_ready": True}
+#: The runnable operator-recovery directive every ended reset carries (#532).
+DO_NOT_RERUN = re.escape("Do not run `{}` again".format(runnable.command("foreman-reset")))
 
 
 def supervision_data(*, active=False, events=False, held=False, hold_kind="handoff"):
@@ -106,7 +108,7 @@ class ResumePromptRunsTest(unittest.TestCase):
                                       "unresolved_work": ["Continue at Step 14 for task t."], "gaps": [],
                                       "required_reads": [str(ledger)]}), encoding="utf-8")
         stowed = self.run_command("bash {} memory-stow --state {} --record {}".format(
-            shlex.quote(foreman_reset.launcher()), shlex.quote(str(self.state)), shlex.quote(str(record))))
+            shlex.quote(runnable.launcher()), shlex.quote(str(self.state)), shlex.quote(str(record))))
         self.assertEqual(stowed.returncode, 0, stowed.stderr)
 
     def run_command(self, command):
@@ -197,7 +199,7 @@ class DeliverTest(unittest.TestCase):
         self.assertTrue(result["cleared"])
 
     def test_a_pane_that_never_idles_sends_nothing(self):
-        with self.assertRaisesRegex(HerdrError, "(?s)stayed working.*Do not run foreman-reset again"):
+        with self.assertRaisesRegex(HerdrError, "(?s)stayed working.*" + DO_NOT_RERUN):
             self.run_deliver(FakeClient(["working"]), budget=10)
 
     def test_a_clear_that_changed_nothing_is_an_interrupted_delivery(self):
@@ -221,7 +223,7 @@ class DeliverTest(unittest.TestCase):
         prompt = foreman_reset.resume_prompt("round-7", "/s.json")
         for command in ("memory-show", "supervision-bind", "supervision-resume", "supervision-status",
                         "supervision-drain", "foreman-queue", "load-set"):
-            self.assertIn("`bash {} {} --state /s.json".format(foreman_reset.launcher(), command), prompt)
+            self.assertIn("`bash {} {} --state /s.json".format(runnable.launcher(), command), prompt)
 
     def test_the_resume_prompt_routes_to_the_stow_continuation_step(self):
         prompt = foreman_reset.resume_prompt("round-7", "/s.json")
@@ -246,7 +248,7 @@ class DeliverTest(unittest.TestCase):
 
     def test_a_pane_that_starts_working_again_gets_no_keystroke(self):
         client = FakeClient(["idle"] * foreman_reset.RESET_STABLE_READS + ["working"])
-        with self.assertRaisesRegex(HerdrError, "(?s)changed .* before typing.*Do not run foreman-reset again"):
+        with self.assertRaisesRegex(HerdrError, "(?s)changed .* before typing.*" + DO_NOT_RERUN):
             self.run_deliver(client)
 
     def test_a_pane_whose_runtime_changed_gets_no_keystroke(self):
@@ -266,7 +268,7 @@ class DeliverTest(unittest.TestCase):
             self.run_deliver(client)
 
     def test_a_stow_that_changed_while_waiting_stops_the_reset(self):
-        with self.assertRaisesRegex(UsageError, "(?s)no longer reset-ready.*Do not run foreman-reset again"):
+        with self.assertRaisesRegex(UsageError, "(?s)no longer reset-ready.*" + DO_NOT_RERUN):
             self.run_deliver(FakeClient(["idle"]), still_ready=lambda: False)
 
     def test_the_resume_prompt_quotes_a_state_path_with_spaces(self):
@@ -285,7 +287,7 @@ class DeliverTest(unittest.TestCase):
         class Unnamed(FakeClient):
             def agent_list(self):
                 return [{"pane_id": PANE, "agent_status": "idle", "agent": "claude"}]
-        with self.assertRaisesRegex(HerdrError, "(?s)no agent name.*Do not run foreman-reset again"):
+        with self.assertRaisesRegex(HerdrError, "(?s)no agent name.*" + DO_NOT_RERUN):
             self.run_deliver(Unnamed(["idle"]))
 
     def test_mechanics_copy_does_not_rename_the_template(self):
@@ -344,7 +346,7 @@ class RecordTest(unittest.TestCase):
                 with self.assertRaises(foreman_reset.ResetEnded) as caught:
                     self.schedule("2026-09-24T10:05:00+00:00", False)
                 self.assertEqual(caught.exception.code, "reset_ended")
-                self.assertIn("Do not run foreman-reset again", caught.exception.message)
+                self.assertIn(foreman_reset.OPERATOR_RECOVERY, caught.exception.message)
                 expected = "resume" if status in ("failed", "interrupted") else "memory-show --state"
                 self.assertIn(expected, caught.exception.details["resume_prompt"])
                 row = json.loads(foreman_reset.record_path(self.state).read_text())["resets"][-1]
@@ -368,7 +370,7 @@ class RecordTest(unittest.TestCase):
     def test_a_launch_failure_leaves_a_failed_row_with_the_resume_prompt(self):
         def broken():
             raise StateError("spawn failed", {})
-        with self.assertRaisesRegex(foreman_reset.ResetEnded, "(?s)spawn failed.*Do not run foreman-reset again") as caught:
+        with self.assertRaisesRegex(foreman_reset.ResetEnded, "(?s)spawn failed.*" + DO_NOT_RERUN) as caught:
             foreman_reset.schedule(self.state, self.plan, "2026-09-24T10:00:00+00:00", broken)
         row = json.loads(foreman_reset.record_path(self.state).read_text())["resets"][-1]
         self.assertEqual((row["status"], row["process"]), ("failed", None))
@@ -756,8 +758,8 @@ class ResetCommandTest(CliCase):
         needed = foreman_reset.outstanding(self.state, alive=lambda process: False)[0]["needed"]
         self.assertIn("foreman-reset-reconcile --state {} --pane {} --stow round-7 --outcome failed".format(
             self.state.resolve(), PANE), needed)
-        self.assertIn("bash {}".format(foreman_reset.launcher()), needed)
-        self.assertTrue(Path(foreman_reset.launcher()).is_file())
+        self.assertIn("bash {}".format(runnable.launcher()), needed)
+        self.assertTrue(Path(runnable.launcher()).is_file())
 
     def test_a_caller_outside_herdr_is_not_the_foreman_pane(self):
         with patch("foreman.cli.memory.show", return_value={"record": READY}), \
