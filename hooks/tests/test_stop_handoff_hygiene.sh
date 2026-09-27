@@ -29,6 +29,8 @@
 #      4f. A finding naming a newline-bearing path -> reported whole.
 #      4g. HERDR_ENV set, role probes fail (git shim) -> no worktree check,
 #          a skip report naming the diagnostic command; diagnostics still gate.
+#      4h. A hooks directory whose name ends in a newline -> still reaches
+#          the owner scripts and blocks (#487).
 #   5. Dirty tree only -> allow (report-only, not a block).
 #   6. Diag finding    -> block; changed uncommitted .sh with a failing engine.
 #   7. Diag clean      -> changed uncommitted .sh, engines clean -> no diag block.
@@ -298,24 +300,27 @@ main() {
     echo "4e. skipped: this filesystem refuses a name ending in a newline ($(cat "$TMP/nl.err"))" >&2
   fi
 
-  # 4g. A hooks directory whose name ends in a newline still reaches the owner
+  # 4h. A hooks directory whose name ends in a newline still reaches the owner
   #     scripts: a `$(dirname ...)` capture drops the newline and looks beside
-  #     a directory that does not exist (#487).
-  if mkdir "$TMP/probe4g${nl}" 2>"$TMP/nl4g.err"; then
-    rmdir "$TMP/probe4g${nl}" || die "rmdir the newline probe failed"
-    local stage4g="$TMP/stage4g" real_hook4g="$HOOK"
-    mkdir -p "$stage4g/hooks${nl}" "$stage4g/skills/herdr-foreman" || die "mkdir the 4g stage failed"
-    cp "$real_hook4g" "$stage4g/hooks${nl}/" || die "stage the hook failed"
-    cp "$(dirname "$real_hook4g")/../skills/herdr-foreman/prune-worktrees.sh" \
-      "$(dirname "$real_hook4g")/../skills/herdr-foreman/bounded-run.sh" "$stage4g/skills/herdr-foreman/" \
+  #     a directory that does not exist (#487). Its own fixture: no case state.
+  if mkdir "$TMP/probe4h${nl}" 2>"$TMP/nl4h.err"; then
+    rmdir "$TMP/probe4h${nl}" || die "rmdir the newline probe failed"
+    mk_origin o4h; clone_from "$BARE" "$TMP/r4h"
+    g -C "$TMP/r4h" worktree add -q "$TMP/wt/r4h-wt" -b feat/r4h || die "r4h worktree add failed"
+    age_wt "$TMP/wt/r4h-wt"
+    local stage4h="$TMP/stage4h" real_hook4h="$HOOK"
+    mkdir -p "$stage4h/hooks${nl}" "$stage4h/skills/herdr-foreman" || die "mkdir the 4h stage failed"
+    cp "$real_hook4h" "$stage4h/hooks${nl}/" || die "stage the hook failed"
+    cp "$(dirname "$real_hook4h")/../skills/herdr-foreman/prune-worktrees.sh" \
+      "$(dirname "$real_hook4h")/../skills/herdr-foreman/bounded-run.sh" "$stage4h/skills/herdr-foreman/" \
       || die "stage the owner scripts failed"
-    HOOK="$stage4g/hooks${nl}/$(basename "$real_hook4g")"
-    run_hook "$TMP/r4" '{"stop_hook_active":false}'
-    HOOK="$real_hook4g"
-    if [[ $RC -eq 0 ]] && reason_has "worktree .*r4-wt \\(feat/wt\\)"; then
+    HOOK="$stage4h/hooks${nl}/$(basename "$real_hook4h")"
+    run_hook "$TMP/r4h" '{"stop_hook_active":false}'
+    HOOK="$real_hook4h"
+    if [[ $RC -eq 0 ]] && reason_has "worktree .*r4h-wt \\(feat/r4h\\)"; then
       pass; else fail "newline-ending hooks dir: expected the worktree block, got RC=$RC OUT=$OUT ERR=$ERRTEXT"; fi
   else
-    echo "4g. skipped: this filesystem refuses a name ending in a newline ($(cat "$TMP/nl4g.err"))" >&2
+    echo "4h. skipped: this filesystem refuses a name ending in a newline ($(cat "$TMP/nl4h.err"))" >&2
   fi
 
   # 4f. A finding whose text carries a newline-bearing path arrives whole: an
