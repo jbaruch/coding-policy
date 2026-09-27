@@ -14,10 +14,32 @@
   identical file without touching its mode, so an interrupted run could leave
   `seed/auth.json` or `central/seed-oracle.json` group- or world-readable; it
   now re-applies and verifies `0600` on every run, and `seed` re-applies and
-  verifies `0700` on both credential directories. Regression tests cover a
+  verifies `0700` on both credential directories, refusing a symlinked or
+  non-directory ancestor under the run root before writing or chmodding. Regression tests cover a
   short token, a short API key, credentials at the floor, a realistic
   auth.json with `auth_mode` metadata seeding cleanly, and a loosened mode
-  restored by a re-run of `seed`.
+  restored by a re-run of `seed`, and `seed/` or `central/` swapped for a
+  symlink refusing with nothing written or chmodded outside the root.
+
+## 0.3.281 — 2026-09-27
+
+### Fixed
+
+- **Frozen-brief reads refuse traversal, and partition proofs diff
+  `base..head` (#534).** Two Copilot findings deferred from #529. First,
+  `assign.read_frozen` accepted any path whose lexical parent was
+  `.dispatched`, so `source/.dispatched/../../other/.dispatched/brief.<digest>.md`
+  passed the gate while naming an intact copy frozen for a different source.
+  It now also requires an absolute path with no `..` component; `verify-partition`
+  and recovery reach frozen copies only through it. Second, `validate-partition`
+  proved, and `verify-partition` re-checked, the slices against
+  `git diff base...head`, which diffs from the merge base and drops every
+  change on the base side when the task's recorded base is not an ancestor of
+  the head. Both now use `base..head`, the range #460's contract names, and
+  `state-schema.md` says so. Regressions cover a traversal path, a relative
+  path, and a fixture repository whose base sits on a sibling branch, where
+  the two ranges differ. `detect-triggers` keeps its merge-base range: it reads
+  "absent from the base" at the merge base on purpose.
 
 ## 0.3.280 — 2026-09-27
 
