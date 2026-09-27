@@ -278,6 +278,26 @@ main() {
     echo "4e. skipped: this filesystem refuses a name ending in a newline ($(cat "$TMP/nl.err"))" >&2
   fi
 
+  # 4g. A hooks directory whose name ends in a newline still reaches the owner
+  #     scripts: a `$(dirname ...)` capture drops the newline and looks beside
+  #     a directory that does not exist (#487).
+  if mkdir "$TMP/probe4g${nl}" 2>"$TMP/nl4g.err"; then
+    rmdir "$TMP/probe4g${nl}" || die "rmdir the newline probe failed"
+    local stage4g="$TMP/stage4g" real_hook4g="$HOOK"
+    mkdir -p "$stage4g/hooks${nl}" "$stage4g/skills/herdr-foreman" || die "mkdir the 4g stage failed"
+    cp "$real_hook4g" "$stage4g/hooks${nl}/" || die "stage the hook failed"
+    cp "$(dirname "$real_hook4g")/../skills/herdr-foreman/prune-worktrees.sh" \
+      "$(dirname "$real_hook4g")/../skills/herdr-foreman/bounded-run.sh" "$stage4g/skills/herdr-foreman/" \
+      || die "stage the owner scripts failed"
+    HOOK="$stage4g/hooks${nl}/$(basename "$real_hook4g")"
+    run_hook "$TMP/r4" '{"stop_hook_active":false}'
+    HOOK="$real_hook4g"
+    if [[ $RC -eq 0 ]] && reason_has "worktree .*r4-wt \\(feat/wt\\)"; then
+      pass; else fail "newline-ending hooks dir: expected the worktree block, got RC=$RC OUT=$OUT ERR=$ERRTEXT"; fi
+  else
+    echo "4g. skipped: this filesystem refuses a name ending in a newline ($(cat "$TMP/nl4g.err"))" >&2
+  fi
+
   # 4f. A finding whose text carries a newline-bearing path arrives whole: an
   #     unpushed branch's push command names a shared checkout whose name
   #     ends in a newline.

@@ -25,8 +25,9 @@
   but still fed `cd` a `$(dirname ...)` capture, which strips a trailing
   newline from the hooks directory's name before `cd` sees it. The same shape,
   without even the sentinel, sat in `hooks/session-start.sh` (which dispatches
-  the leftover hook, so its fix was unreachable), `hooks/herdr-team-status.sh`
-  and `hooks/herdr-supervision-stop.sh`. All four now derive the directory by
+  the leftover hook, so its fix was unreachable), `hooks/herdr-team-status.sh`,
+  `hooks/herdr-supervision-stop.sh` and `hooks/stop-handoff-hygiene.sh`. All
+  five now derive the directory by
   parameter expansion, carry `pwd` through a sentinel, and warn rather than
   die when `cd` fails. Each has a fixture staging it under a directory whose
   name ends in a newline — for the Stop hook, the plugin root too — and each
