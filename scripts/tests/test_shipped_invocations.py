@@ -11,8 +11,9 @@ one is caught before it ships.
 
 Each logical fenced line (backslash continuations joined) is tokenized with
 `shlex` in POSIX mode, so quotes, escapes and operators are the shell's, not a
-regex's. Each `$(...)` or backtick substitution outside single quotes is lifted
-out first and scanned as a command line of its own. A command position is the
+regex's. Comments are dropped, and each command or process substitution
+outside single quotes is lifted out first and scanned as a command line of its
+own. A command position is the
 first token, or the one after an operator. Leading `NAME=value` assignments,
 redirections with their targets, the keywords and braces in `KEYWORDS`, and the
 wrappers in `WRAPPERS` with their assignments, their options and the values
@@ -47,7 +48,7 @@ OPERATOR_CHARS = frozenset("();<>|&")
 SUBSTITUTED = "__substitution__"
 
 #: Words that precede a command without being one.
-KEYWORDS = frozenset({"if", "then", "do", "else", "elif", "while", "until", "!", "{", "}"})
+KEYWORDS = frozenset({"if", "then", "do", "else", "elif", "while", "until", "!", "{", "}", "coproc"})
 
 #: Commands that run their first non-option, non-assignment operand, each
 #: mapped to its options that consume the following token as their value.
@@ -100,12 +101,14 @@ def shell_blocks(text):
 
 
 def split_substitutions(line):
-    """Lift each `$(...)` and backtick substitution out of `line`.
+    """Lift each `$(...)`, backtick and `<(...)`/`>(...)` substitution out of `line`.
 
     Returns the line with every substitution replaced by a placeholder word,
-    and the list of substitution bodies. The shell expands both forms outside
-    quotes and inside double quotes, never inside single quotes; `shlex` would
-    fold a double-quoted one into its word, so they are found here first.
+    and the list of substitution bodies. The shell expands command
+    substitutions outside quotes and inside double quotes, and process
+    substitutions only outside quotes, never inside single quotes; `shlex`
+    would fold a double-quoted one into its word, so they are found here
+    first. An unquoted `#` at the start of a word ends the line as a comment.
     Raises ValueError on an unterminated substitution.
     """
     out, bodies = [], []
@@ -121,11 +124,13 @@ def split_substitutions(line):
             out.append(line[index:index + 2])
             index += 2
             continue
+        if char == "#" and not double and (index == 0 or line[index - 1].isspace()):
+            break
         if char == "'" and not double:
             single = True
         elif char == '"':
             double = not double
-        elif char == "$" and line.startswith("$(", index):
+        elif (char == "$" or (char in "<>" and not double)) and line.startswith("(", index + 1):
             end = _close_paren(line, index + 2)
             bodies.append(line[index + 2:end])
             out.append(SUBSTITUTED)
@@ -251,6 +256,9 @@ class BareInvocationDetectorTest(unittest.TestCase):
             ('X="$(skills/x/run.sh --a "b c")" && next', ["skills/x/run.sh"]),
             ('echo "`skills/x/run.sh`"', ["skills/x/run.sh"]),
             ("out=$(echo $(skills/x/run.sh))", ["skills/x/run.sh"]),
+            ("diff <(skills/x/run.sh) expected", ["skills/x/run.sh"]),
+            ("tee >(skills/x/run.sh) </dev/null", ["skills/x/run.sh"]),
+            ("coproc skills/x/run.sh", ["skills/x/run.sh"]),
             ("echo done & skills/x/run.sh", ["skills/x/run.sh"]),
             ("(skills/x/run.sh)", ["skills/x/run.sh"]),
             ("{ skills/x/run.sh; }", ["skills/x/run.sh"]),
@@ -295,6 +303,8 @@ class BareInvocationDetectorTest(unittest.TestCase):
             "env -S 'bash skills/x/run.sh'",
             "echo 'literal `skills/x/run.sh`'",
             "echo '$(skills/x/run.sh)'",
+            "bash a.sh  # then $(skills/x/run.sh) or `skills/x/run.sh`",
+            "echo a#$(true)",
         ):
             with self.subTest(line=line):
                 self.assertEqual(bare_invocations(line), [])
