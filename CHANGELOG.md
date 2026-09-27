@@ -2,165 +2,70 @@
 
 ### Changed
 
-- **The foreman's worktree cleanup reaches every repository and removes what
-  is spent (#535).** `~/.worktrees` held 94 entries across 14 repositories.
-  Run against the real root on 2026-09-25, `prune-worktrees.sh` would have
-  removed 2. Only branches merged into origin's default were removable, so
-  review, test and detached checkouts stayed forever, and a round pruned only
-  the repository in front of it.
-  - `skills/herdr-foreman/prune-worktrees.sh` now also removes an idle clean
-    worktree whose HEAD an origin remote-tracking ref holds, detached included,
-    with plain `git worktree remove`: git refuses a tree that turned dirty.
-  - An idle dirty or unpushed worktree is never deleted. It is archived: its
-    HEAD plus every tracked and untracked non-ignored file become one commit
-    at `refs/archive/worktrees/<name>-<pathhash>-<stamp>`, and a JSON record
-    with `schema_version` 1 (ref, source, trash, head, branch, stamp, tree
-    fingerprint) is written first as a git note under
-    `refs/notes/worktree-archive`, never over an existing note. The commit
-    message names the ref and source, so two archives of one parent and tree
-    in one second are two commits with two records. Then `git worktree move` renames it into the root's
-    `.trash/`, so a writer that got in after the last check lands in the
-    moved copy, and the sweep locks it with its own reason, so `git worktree
-    prune` never drops its registration. A failed move leaves it in place
-    with the archive resolved and reported, and no second archive of that
-    path is written while the first waits (`archive-pending`). The path hash
-    keeps two worktrees with one basename apart.
-  - A worktree holding another repository's checkout is kept before any
-    removal or archive. That means a gitlink found from the index, not
-    `.gitmodules`, whose checkout changed (`submodule-dirty`) or is
-    populated (`submodule`). It also means any other `.git` anywhere below
-    the worktree (`nested-repo`), found by walking the whole tree: git's own
-    listing collapses an untracked directory and skips an ignored one, and
-    `add -A` would reduce the repository to a bare gitlink.
-  - Merged-ness is judged against the commit origin's default branch points
-    at right now, read with `git ls-remote`. The pre-removal proof re-reads
-    it, so a force-push that drops the merge keeps the worktree.
-  - A failed fetch, `ls-remote` or `remote set-head` is reported by its exit
-    code and the command to rerun, never by its own message. git strips
-    `user:password@` from its errors but prints the rest of the URL, so a
-    token in the path would leak.
-  - A symlinked or non-directory `.trash` keeps every archive candidate
-    (`trash-unsafe`); nothing is archived or moved outside the root. After
-    the move, the worktree must have landed at exactly the recorded path in a
-    real `.trash`; one swapped mid-move lands elsewhere, is moved back, and
-    is reported with its archive kept.
-  - Reachability counts only the branch tips origin holds right now, read
-    with `git ls-remote --heads origin`. A stale local ref, whether of
-    another remote or of an origin branch deleted since the last fetch,
-    proves nothing, and a dry run and a live run judge the same origin. The removal
-    proof (merged, or origin holds HEAD) is re-derived immediately before
-    the removal, after every other recheck, so a concurrent fetch or
-    force-push that drops it keeps the worktree.
-  - "Idle" is two facts: no process of this user has its cwd inside
-    (`lsof`), and no activity for the window. The clock covers the worktree
-    dir, its gitdir's HEAD, index and logs/HEAD, and every modified tracked
-    or untracked non-ignored file, bounded by `ACTIVITY_FILE_LIMIT`. Workers
-    run `cd <worktree> && ...`, so a cwd alone never proves idleness. A
-    missing or failing probe keeps everything (`idle-unknown`). The probe is
-    NUL-framed (`lsof -F pn0`). lsof still prints a newline or other control
-    byte in a name as escaped text, so a path holding one, a backslash, or a
-    non-ASCII byte cannot be matched against its output and is never judged
-    idle. Every read
-    uses `--no-optional-locks`, so judging never resets the clock. Every
-    removal waits for idleness, the merged path included.
-  - Immediately before a removal, and again after an archive is written,
-    HEAD, the branch tip, status, age and the process probe are re-read; any
-    change keeps the worktree (`changed`). A written archive is always
-    listed, with `trash_path: null` when its worktree stayed in place.
-  - Expiry, for a record older than `ARCHIVE_EXPIRE_DAYS` (default 30),
-    checks everything before it destroys anything:
-    - The record must name this ref and stamp, hash its source to the ref's
-      path hash, and name the commit's parent and tree and exactly
-      `<root>/.trash/<ref basename>`. A recorded path is never trusted on
-      its own.
-    - The trash worktree must exist and be registered here at that exact
-      path, carry the sweep's lock and no other, sit on the recorded HEAD and
-      branch, and be idle with no process inside. It must have a real `.git`
-      and hold no submodule or embedded repository. It must match the
-      record's `ignored` inventory, a SHA-256 over the ignored files' paths,
-      sizes, mtimes and modes (never contents), since the snapshot leaves
-      ignored files out. And it must snapshot to exactly the recorded tree. A missing trash worktree keeps the archive, and a trash
-      path whose directory vanished is never pruned as an ordinary worktree.
-    - The branch is read with absence told apart from a git error; an error
-      keeps the archive.
-    - Only then does it remove, in order: the trash worktree, the branch
-      (only when its tip equals the recorded head), the ref, and its note.
-      The ref goes first, so a ref never exists without its record.
-      Immediately before the forced removal the process probe is re-read
-      fresh, the fingerprint recomputed, and the registration, HEAD, branch
-      and lock re-read: a checkout to another commit with the same tree
-      would pass the fingerprint alone. A failure before the ref
-      deletion keeps the ref and its record. A failure after it leaves an
-      orphan note on an unreferenced commit, which the next live run removes
-      once the commit is older than `ORPHAN_NOTE_GRACE_HOURS`.
-  - The owner migrates an older record through `MIGRATIONS` (empty: v1 is
-    the first schema) and rewrites its note. A newer, missing, unparseable
-    or unmigratable record, or a `schema_version` that is not an integer of
-    at least 1 (a JSON `true` included), is kept and reported under
-    `archives_kept`, never expired.
-  - Every commit the prune writes (the archive commit, and each notes-ref
-    commit from `notes add` and `notes remove`) carries the script's own
-    identity, never the operator's config: `notes remove` first ran without
-    one and failed on the Linux runner, which has no global identity. Both
-    test suites now run with an empty global git config, so a Mac run
-    reproduces the runner.
-  - Every removal is restorable: removed rows carry `head`, archived rows
-    carry `archive_ref` and `trash_path`, and locked rows carry
-    `lock_reason`.
-  - New `skills/herdr-foreman/sweep-worktrees.sh` finds worktrees anywhere
-    under the root, never descending into a found checkout, `.git` or a
-    symlinked directory. A worktree in the root's `.trash` names its
-    repository but is never a candidate, so a repository whose only
-    worktrees are archived still gets its expiry pass. A prune that exits
-    without readable JSON fails the sweep. A root that vanishes or becomes
-    unreadable mid-run is exit 1 with a repair message, never a traceback.
-    Every command it runs is captured as bytes and decoded with
-    `surrogateescape`, and every file it reads too, so a non-UTF-8 worktree
-    path yields valid JSON, never a decode traceback (checked on Linux, where
-    such names exist; macOS refuses them). Its JSON carries `report`, the
-    operator-facing summary: notable kept
-    worktrees by path, the rest as counts. SKILL.md Step 2 relays it
-    verbatim instead of shaping it. A symlinked `.trash`, or a
-    symlinked entry in it, is never followed, and neither is a symlinked
-    `.git` anywhere (reported as `symlinked-git`). Missing `python3`, `git` or
-    `bash` is exit 1 with an install message. It groups them by repository
-    and runs the prune once each. A plain directory, a clone or a repository
-    without origin is reported, never fatal. A worktree git cannot read is
-    an `errors` entry naming its repository when the gitdir's files resolve
-    it (exit 2); `broken-worktree` is only a `.git` file naming a vanished
-    gitdir.
-  - `round-preflight.sh` runs the sweep in place of the single-repository
-    prune and keeps the sweep JSON on every failed check that produced one;
-    its header documents each worktrees status and when `detail` is present.
-    This checkout's own failure (a non-zero prune exit, or a prune result
-    that could not be read), or an error naming no repository, blocks the
-    round; another repository's failure is `degraded`. SKILL.md Step 2
-    reports the sweep's outcomes on every route, every kept worktree
-    included (the ordinary ones as counts by reason).
-  - The ledger records no worktree path per assignment, so the issue's
-    "ledger join" was dropped: locked worktrees stay kept and are reported
-    with their lock reason. `rules/agent-team-operation.md` Writers and
-    Checkouts and the `stop-handoff-hygiene` report text now describe the
-    sweep instead of "never removes a dirty, unmerged, locked or detached
-    worktree".
-  - Test hygiene: both suites run every fixture command through `quiet`, which
-    stops the harness with the command's stderr and the command to rerun; no
-    `2>/dev/null` is left in either. A background process is started with a
-    readiness handshake (it writes its cwd after the `cd`; the harness waits,
-    bounded by `SLEEPER_READY_TRIES`, and confirms the cwd with `lsof`).
-    Every case builds its own repositories and worktree root.
-  - `rules/agent-worktree-isolation.md` Cleanup splits by mode (Two Modes):
-    outside a Herdr team round an agent removes its own abandoned worktree
-    with `git worktree remove`; in a team round an abandoned worktree leaves
-    only through the sweep, which reaches every idle worktree under
-    `~/.worktrees/`, a standalone agent's included. Abandoned there means idle
-    past the prune script's windows. An abandoned worktree is removed once a
-    branch on origin holds its work, or archived and moved to `.trash/` (operator
-    decision); a merged worktree is removed by the post-merge order.
-  - `rules/agent-team-operation.md` Writers and Checkouts adds a narrow
-    exception naming the one removal the foreman makes itself: the merged
-    task's own worktree at SKILL.md Step 15, with `git worktree remove` in the
-    post-merge order. Every other worktree leaves only through the sweep.
+- **Spent worktrees and branches are removed automatically; work that exists
+  nowhere else is reported, never touched (#535).** `~/.worktrees` held 94
+  entries across 14 repositories, and the round's prune would have removed 2
+  of them: only branches merged into origin's default were removable, and a
+  round pruned only the repository in front of it.
+  - The design first shipped an archive half for the rest: an idle dirty or
+    unpushed worktree was snapshotted into `refs/archive/worktrees/`, recorded
+    in a git note, moved into the root's `.trash/` and expired after a window.
+    Twelve review rounds kept finding new races in it, because it existed to
+    delete work that exists nowhere else safely against concurrent writers,
+    which cannot be proven. The operator's decision after that design review:
+    automatic deletion of such work is destructive, so it is reported and
+    never touched. The archive refs, notes, `schema_version` migrations,
+    orphan-note pass, `.trash/` moves, expiry windows, ignored-file inventory
+    and trash locks are gone, and `skills/herdr-foreman/state-schema.md` holds
+    no worktree record.
+  - Deleted, because origin restores it: an idle clean worktree whose HEAD a
+    branch on origin holds, detached included (`prune-worktrees.sh`, plain
+    non-forced `git worktree remove`); a local branch with no worktree whose
+    tip origin holds or which origin's default merged (compare-and-delete
+    `update-ref -d`); a branch on origin merged into the default with no open
+    pull request (new `prune-remote-branches.sh`, `git push --delete` under
+    `--force-with-lease`). Every proof is re-read from origin with
+    `git ls-remote` immediately before the deletion, in dry and live runs
+    alike. The remote pass is its own script: it needs the network and `gh`,
+    which the worktree pass does not (`rules/script-delegation.md`).
+  - Reported, for the operator's decision: an idle dirty worktree (changed
+    files, age, `git -C <path> status`), an idle worktree holding commits no
+    origin branch holds (count, age, `git -C <path> push -u origin HEAD`), an
+    idle local branch with unpushed commits, and a branch on origin unmerged,
+    with no pull request, whose last commit is past the window (commits
+    ahead, age, author, the `gh pr create` and delete commands). A branch
+    with an open pull request, or a protected one, is never touched or
+    listed. Without a working `gh` nothing on origin is deleted and the
+    result says it could not check.
+  - Kept silently: a worktree in use (`lsof`), not yet idle, locked, or
+    holding a submodule or an embedded repository. An `lsof` listing with an
+    unreadable cwd of a live process still keeps every worktree; a warning
+    about a mount lsof could not stat, or the record of a process that exited
+    mid-listing, no longer does. A stale Time Machine SMB mount made every
+    worktree `idle-unknown` on the maintainer's machine.
+  - `hooks/check-leftover-worktrees.sh` now cleans the session's own
+    repository at session start: it runs both owner scripts live, removes
+    silently, and lists only the reported items above, plus one "could not
+    check" line when either script fails, times out or cannot reach `gh`.
+    It deletes nothing in a Herdr worker session, and runs `--dry-run` under
+    tessl, which strips the environment a worker check needs. Both scripts
+    share a 40-second budget through the new `hooks/bounded-run.sh`; `timeout`
+    is absent from a stock macOS. It no longer reads
+    `skills/release/check-leftovers.sh`, which still gates the release.
+  - `hooks/stop-handoff-hygiene.sh` drops its own leftover-branch and
+    orphaned-worktree predicate and reads `prune-worktrees.sh --dry-run`
+    instead: what the owner script would remove blocks once, naming the
+    command that removes it; what it keeps for the operator is reported.
+  - `skills/herdr-foreman/sweep-worktrees.sh` runs the worktree pass across
+    every repository owning a worktree under the root, for the round
+    preflight; its `report` names each kept dirty or unpushed item with its
+    age and command, and SKILL Step 2 relays it verbatim.
+  - Rules: `rules/agent-worktree-isolation.md` Cleanup states the lifecycle
+    and the session-start cleanup; `rules/agent-team-operation.md` Writers
+    and Checkouts keeps the sweep and the Step 15 merged-task exception and
+    references Cleanup for the predicates; `rules/hook-action-reporting.md`
+    Act on What It Names raises each listed item with the user, one question
+    at a time, and forbids acting on one unasked.
 
 ## 0.3.280 — 2026-09-27
 

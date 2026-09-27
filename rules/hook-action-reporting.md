@@ -19,6 +19,10 @@ alwaysApply: true
 - A payload may name an action: a branch to sync, a pinned dependency to fix, an update that failed
 - After relaying the block, act on any such action per its governing rule
 - An all-green status needs only the report, no further action
+- A status may list worktrees and branches awaiting an operator decision
+- Raise each listed item with the user, one question at a time
+- Offer the choices push, commit, open a pull request, delete, or keep
+- Never push, commit, stash, delete or discard a listed item unasked
 
 ## Reconciliation With `response-clarity`
 

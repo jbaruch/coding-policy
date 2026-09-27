@@ -134,6 +134,8 @@ Before following any route below, report the worktree sweep to the operator:
 - When `checks.worktrees` has no `detail`, report its `reason` verbatim; a
   status `ok` with no `detail` means the worktree root does not exist
 - On exit 2 there is no JSON; report the stderr diagnostic instead
+- Raise each `dirty` or `unpushed` item the report lists per
+  `rules/hook-action-reporting.md` Act on What It Names
 
 - **Exit 0** — read `due`, satisfy any cadence it names, and proceed to Step 5.
   A resumed foreman proceeds to the stow's continuation step instead (Step 17
@@ -376,15 +378,15 @@ bash "$CP/skills/herdr-foreman/sweep-worktrees.sh" "$HOME/.worktrees"
 ```
 
 Emits one entry per repository with that repository's prune result (worktrees
-removed, archived and kept with their reasons, archives expired, branches
-deleted, `failed`) or its `error`, plus the root's `skipped` and `errors`
+removed and kept with their reasons, branches deleted and kept, `failed`) or
+its `error`, plus the root's `skipped` and `errors`
 entries. Exit 2 means at least one repository's entry carries a non-zero
 `exit` or an `error`, or the `errors` array is non-empty: inspect both `repos`
 and `errors`, and report each failing entry. Exit 1 decided nothing (no
 JSON): report its stderr diagnostic, repair what it names, and run the sweep
 again. Never provision a worktree until the sweep exits 0 or 2. The removal
-and archive predicates live in
-`skills/herdr-foreman/prune-worktrees.sh` (top-of-file docstring).
+predicates live in `skills/herdr-foreman/prune-worktrees.sh` (top-of-file
+docstring).
 
 Then run once per writing worker and every worktree named in a brief:
 

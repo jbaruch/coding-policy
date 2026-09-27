@@ -288,42 +288,17 @@ description: Running a multi-agent team — task-based specialist composition, c
 - A worker's repository writes happen only in the worktree its brief names, under `~/.worktrees/`
 - The foreman sweeps every repository owning a worktree under `~/.worktrees/` every round, before provisioning and after the merge
 - The sweep runs through `skills/herdr-foreman/sweep-worktrees.sh`
+- The sweep removes worktrees and deletes local branches by the predicates `rules/agent-worktree-isolation.md` Cleanup names
+- The sweep never deletes a branch on origin
 - The sweep also reaches idle worktrees a standalone agent left under `~/.worktrees/`
-- The sweep removes an idle clean worktree on a merged branch
-- The sweep deletes merged local branches
-- The sweep removes an idle clean worktree whose HEAD a branch on origin holds, as origin reports it at the sweep
-- The sweep archives an idle dirty or unpushed worktree under `refs/archive/worktrees/`
-- The sweep moves an archived worktree into the root's `.trash/` once its archive ref resolves
-- The sweep locks each trash worktree with its own lock reason
-- A failed move keeps the archived worktree in place
-- The sweep reports a failed move with its archive ref
-- A move that lands anywhere but the recorded trash path is moved back
-- A symlinked or non-directory `.trash` keeps every archive candidate, with nothing archived
-- The sweep never archives a worktree again while its earlier archive awaits a trash worktree
-- The sweep never deletes an archived worktree before its archive expires
-- A failed archive keeps the worktree
-- A worktree holding a submodule or an embedded repository is kept, never archived
-- Idle windows and the in-use test live in `skills/herdr-foreman/prune-worktrees.sh` (top-of-file docstring)
-- A locked, in-use or not-yet-idle worktree is kept
-- A worktree that changes between judgment and removal is kept
-- The sweep expires an archive past the expiry window in `skills/herdr-foreman/prune-worktrees.sh`
-- Expiry removes the archive's trash worktree only once it is present, idle, unused, unchanged since the archive, and locked by the sweep alone
-- Unchanged covers the trash's ignored files, and no submodule or embedded repository appearing in it
-- A missing trash worktree keeps its archive
-- Expiry deletes the archive ref after the trash worktree and the branch
-- Expiry deletes the archive record after the archive ref
-- A failed expiry step before the ref deletion keeps the archive ref and its record
-- A later live run removes a record left on a commit no archive ref points at
-- An archive record the sweep cannot read or validate is kept
-- The sweep reports an archive record it cannot read or validate
-- The foreman reports the sweep's archives, trash moves, expiries, kept archives, kept worktrees and errors to the operator at Step 2, on every route
+- The foreman relays the sweep's `report` to the operator at Step 2, on every route
 - The foreman never removes a worktree by hand
 - Narrow exception for the merged task's own worktree.
 - Preconditions (all required):
   1. The task's branch has merged
   2. The foreman is at `skills/herdr-foreman/SKILL.md` Step 15, the release cleanup
   3. The removal is `git worktree remove` in the post-merge order of `rules/agent-worktree-isolation.md` Cleanup
-- Every other worktree leaves only through the sweep
+- Every other worktree leaves only through the sweep or the session-start cleanup of `rules/agent-worktree-isolation.md` Cleanup
 - A worker's report, plan, and patch artifacts go only under the reports directory its brief names
 - A worker writes nowhere else
 - Narrow exception for a task-owned fixture root outside the reports directory
