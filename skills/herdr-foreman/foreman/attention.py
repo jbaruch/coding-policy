@@ -7,6 +7,7 @@ from datetime import timezone
 from pathlib import Path
 from typing import NoReturn
 
+from . import runnable
 from .chronology import timestamp
 from .errors import StateError, UsageError
 from .state import save_state, state_lock
@@ -115,7 +116,8 @@ def _update(data):
     for key in ("id", "event_id"):
         _id(data[key])
     if type(data["expected_revision"]) is not int or data["expected_revision"] < 1:
-        _fail("expected_revision must match the current entry revision; read attention-show before updating stale context.")
+        _fail("expected_revision must match the current entry revision; read `{}` before updating stale context.".format(
+            runnable.command("attention-show")))
     _text(data["reason"], "Lifecycle reason")
     extras = {"present": {"evidence"}, "resolve": {"evidence"}, "defer": {"until", "evidence"},
               "reopen": {"evidence"}, "supersede": {"replacement", "evidence"}, "amend": {"changes", "evidence"}}
@@ -167,7 +169,8 @@ def _apply(event, entries, progress):
     data = _update(data)
     entry = entries.get(data["id"])
     if entry is None or data["expected_revision"] != entry["revision"]:
-        _fail("Attention entry is missing or its revision changed; read attention-show and reconcile before submitting a new event id.")
+        _fail("Attention entry is missing or its revision changed; read `{}` and reconcile before submitting a new event id.".format(
+            runnable.command("attention-show")))
     action = data["action"]
     if action != "reopen" and entry["status"] in CLOSED:
         _fail("This attention entry is closed; use an evidenced reopen before changing it.")
@@ -314,16 +317,16 @@ def require_dispatch_clear(path, task, at):
         return None
     first = gating[0]
     raise UsageError(
-        "Dispatch on task {} is gated by unanswered {} {}: {} Resolve it with attention-update and the evidence "
+        "Dispatch on task {} is gated by unanswered {} {}: {} Resolve it with `{}` and the evidence "
         "its kind requires, or defer it with recorded rationale, then rerun this command.".format(
-            task, first["kind"], first["id"], first["resolution_condition"]),
+            task, first["kind"], first["id"], first["resolution_condition"], runnable.command("attention-update")),
         {"task": task, "gating": gating})
 
 
 def show(path, name):
     document, entries, _progress_rows = load(path)
     if name not in entries:
-        _fail("No attention entry matches {}; use attention-list with the same --state path.".format(name))
+        _fail("No attention entry matches {}; use `{}` with the same --state path.".format(name, runnable.command("attention-list")))
     return {"schema_version": SCHEMA_VERSION, "entry": entries[name],
             "history": [event for event in document["events"] if event["action"] != "progress" and event["data"]["id"] == name]}
 

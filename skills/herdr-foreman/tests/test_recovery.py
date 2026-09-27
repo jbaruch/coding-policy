@@ -10,10 +10,12 @@ if ROOT not in sys.path:
 import copy
 import hashlib
 import json
+import re
 import tempfile
 import unittest
 from pathlib import Path
 
+from foreman import runnable
 from foreman.errors import UsageError
 from foreman.recovery import (
     DIAGNOSIS_BOUND_CEILING, DIAGNOSIS_RECORD_VERSION, RECOVERY_STORE_VERSION,
@@ -912,7 +914,7 @@ class RecoveryTests(unittest.TestCase):
                 "change_in_approach": "Reassess"}, AT, "judge")
 
     def test_an_exhausted_budget_names_the_diagnosis_not_an_operator_plan(self):
-        with self.assertRaisesRegex(UsageError, "foreman diagnose"):
+        with self.assertRaisesRegex(UsageError, re.escape("`{}`".format(runnable.command("diagnose")))):
             validate_work(self.store, self.history, TASK, 6, None, WORK)
 
     def replay_data(self):
