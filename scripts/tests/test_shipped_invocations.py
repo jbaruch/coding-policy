@@ -11,8 +11,9 @@ one is caught before it ships.
 
 Each logical fenced line (backslash continuations joined) is tokenized with
 `shlex` in POSIX mode, so quotes, escapes and operators are the shell's, not a
-regex's. A command position is the first token, or the one after an operator,
-an unquoted backtick, or the `(` of `$(`. Leading `NAME=value` assignments,
+regex's. Each `$(...)` or backtick substitution outside single quotes is lifted
+out first and scanned as a command line of its own. A command position is the
+first token, or the one after an operator. Leading `NAME=value` assignments,
 redirections with their targets, the keywords and braces in `KEYWORDS`, and the
 wrappers in `WRAPPERS` with their assignments, their options and the values
 those options take are skipped. A token there ending in `.sh` or `.py` is a
@@ -40,7 +41,10 @@ SCRIPT = re.compile(r"\.(sh|py)$")
 #: `shlex` groups a run of these into one operator token. A run holding `<` or
 #: `>` is a redirection, whose next token is its target; any other run ends a
 #: command, so the next word is in command position.
-OPERATOR_CHARS = frozenset("();<>|&`")
+OPERATOR_CHARS = frozenset("();<>|&")
+
+#: Stands in for a lifted substitution so the outer line keeps its shape.
+SUBSTITUTED = "__substitution__"
 
 #: Words that precede a command without being one.
 KEYWORDS = frozenset({"if", "then", "do", "else", "elif", "while", "until", "!", "{", "}"})
@@ -92,13 +96,77 @@ def shell_blocks(text):
         pending = None
 
 
-def tokens(line):
-    """POSIX shell tokens; an unquoted backtick is an operator of its own.
+def split_substitutions(line):
+    """Lift each `$(...)` and backtick substitution out of `line`.
 
-    `shlex` groups punctuation only outside quotes, so a backtick inside
-    single or double quotes stays literal text of its word.
+    Returns the line with every substitution replaced by a placeholder word,
+    and the list of substitution bodies. The shell expands both forms outside
+    quotes and inside double quotes, never inside single quotes; `shlex` would
+    fold a double-quoted one into its word, so they are found here first.
+    Raises ValueError on an unterminated substitution.
     """
-    lexer = shlex.shlex(line, posix=True, punctuation_chars="();<>|&`")
+    out, bodies = [], []
+    index, single, double = 0, False, False
+    while index < len(line):
+        char = line[index]
+        if single:
+            single = char != "'"
+            out.append(char)
+            index += 1
+            continue
+        if char == "\\" and index + 1 < len(line):
+            out.append(line[index:index + 2])
+            index += 2
+            continue
+        if char == "'" and not double:
+            single = True
+        elif char == '"':
+            double = not double
+        elif char == "$" and line.startswith("$(", index):
+            end = _close_paren(line, index + 2)
+            bodies.append(line[index + 2:end])
+            out.append(SUBSTITUTED)
+            index = end + 1
+            continue
+        elif char == "`":
+            end = line.find("`", index + 1)
+            if end < 0:
+                raise ValueError("unterminated backtick substitution")
+            bodies.append(line[index + 1:end])
+            out.append(SUBSTITUTED)
+            index = end + 1
+            continue
+        out.append(char)
+        index += 1
+    return "".join(out), bodies
+
+
+def _close_paren(line, start):
+    """Index of the `)` closing a `$(` whose body begins at `start`."""
+    depth, index, single, double = 1, start, False, False
+    while index < len(line):
+        char = line[index]
+        if single:
+            single = char != "'"
+        elif char == "\\":
+            index += 1
+        elif char == "'" and not double:
+            single = True
+        elif char == '"':
+            double = not double
+        elif not double and char == "(":
+            depth += 1
+        elif not double and char == ")":
+            depth -= 1
+            if depth == 0:
+                return index
+        index += 1
+    raise ValueError("unterminated $( substitution")
+
+
+def tokens(line):
+    """POSIX shell tokens of a line whose substitutions are already lifted."""
+    lexer = shlex.shlex(line, posix=True, punctuation_chars="();<>|&")
     lexer.whitespace_split = True
     return list(lexer)
 
@@ -106,10 +174,15 @@ def tokens(line):
 def bare_invocations(line):
     """Words in command position that name a script with no interpreter.
 
-    Raises ValueError when the line does not tokenize (an unbalanced quote).
+    Substitution bodies are scanned as commands of their own. Raises
+    ValueError when the line does not tokenize (an unbalanced quote or an
+    unterminated substitution).
     """
-    words = tokens(line)
+    outer, bodies = split_substitutions(line)
     found = []
+    for body in bodies:
+        found.extend(bare_invocations(body))
+    words = tokens(outer)
     expecting = True
     wrapper = None
     index = 0
@@ -162,6 +235,10 @@ class BareInvocationDetectorTest(unittest.TestCase):
             ("out=$(skills/x/run.sh)", ["skills/x/run.sh"]),
             ("out=$(true);skills/x/run.sh", ["skills/x/run.sh"]),
             ("out=`skills/x/run.sh`", ["skills/x/run.sh"]),
+            ('echo "$(skills/x/run.sh)"', ["skills/x/run.sh"]),
+            ('X="$(skills/x/run.sh --a "b c")" && next', ["skills/x/run.sh"]),
+            ('echo "`skills/x/run.sh`"', ["skills/x/run.sh"]),
+            ("out=$(echo $(skills/x/run.sh))", ["skills/x/run.sh"]),
             ("echo done & skills/x/run.sh", ["skills/x/run.sh"]),
             ("(skills/x/run.sh)", ["skills/x/run.sh"]),
             ("{ skills/x/run.sh; }", ["skills/x/run.sh"]),
@@ -202,13 +279,15 @@ class BareInvocationDetectorTest(unittest.TestCase):
             "command -v skills/x/run.sh",
             "command -V skills/x/run.sh",
             "echo 'literal `skills/x/run.sh`'",
+            "echo '$(skills/x/run.sh)'",
         ):
             with self.subTest(line=line):
                 self.assertEqual(bare_invocations(line), [])
 
     def test_refuses_an_untokenizable_line(self):
-        with self.assertRaises(ValueError):
-            bare_invocations('echo "unterminated')
+        for line in ('echo "unterminated', "out=$(skills/x/run.sh", "echo `skills/x/run.sh"):
+            with self.subTest(line=line), self.assertRaises(ValueError):
+                bare_invocations(line)
 
     def test_reads_only_shell_fences(self):
         text = "\n".join((
