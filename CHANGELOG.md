@@ -1,7 +1,5 @@
 # Changelog
 
-## 0.3.289 — 2026-09-27
-
 ### Fixed
 
 - **The release publication contract and the plugin's hooks now run from an
@@ -33,6 +31,10 @@
   die when `cd` fails. Each has a fixture staging it under a directory whose
   name ends in a newline — for the Stop hook, the plugin root too — and each
   fixture fails against the old code.
+
+## 0.3.289 — 2026-09-27
+
+### Fixed
 
 - **`foreman detect-triggers` no longer reads untracked files on a round that
   writes nothing (#499).** `run_command` in
