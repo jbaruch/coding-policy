@@ -435,7 +435,7 @@ main() {
     done
     report_paths+=("$report")
     if (( ${#report} > FOREMAN_REPORT_PATH_MAX_COLS )); then
-      warn "REPORT for role '${role}' is ${#report} characters; the limit is ${FOREMAN_REPORT_PATH_MAX_COLS} so the worker's \`REPORT: <path>\` line fits one pane row and the wait can confirm it — use a shorter reports directory (e.g. one under \$HOME/.local/state) and re-run"
+      warn "REPORT for role '${role}' is ${#report} characters; the limit is ${FOREMAN_REPORT_PATH_MAX_COLS}, a coarse bound on the worker's \`REPORT: <path>\` line (\`foreman apply\` checks the live pane width before dispatch) — use a shorter reports directory (e.g. one under \$HOME/.local/state) and re-run"
       return 2
     fi
     rendered="$(substitute "$role_tpl" "$merged")"
