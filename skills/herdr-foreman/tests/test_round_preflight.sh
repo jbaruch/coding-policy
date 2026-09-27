@@ -18,7 +18,9 @@
 #   4. Authority fails          -> blocks; an unanswerable check is not permission.
 #   5. Two checks fail          -> both reported; neither hides the other.
 #   6. Capability due           -> surfaces in `due`, does NOT block.
-#   7. Prune exit 1 vs 2        -> distinct statuses, both blocking.
+#   7. Prune exit 1 vs 2        -> distinct statuses, both blocking; a sweep
+#                                  past its budget (a stand-in runner's 124)
+#                                  blocks too.
 #   8. --no-measure             -> headroom skipped, still ready.
 #   9. Missing --repo/--checkout-> exit 2, usage error, no JSON verdict.
 #  10. Every check's payload    -> carried through under `checks.<name>.detail`.
@@ -47,7 +49,20 @@ shadow() { # <dir> [roster-rc] [authority-rc] [prune-rc] [capability-due] [autho
   cp "$REAL/round-preflight.sh" "$dir/" || die "copy the script under test"
   stub "$dir" roster.sh "$roster" '{"agents":[{"name":"grok"}]}'
   stub "$dir" verify-authority.sh "$authority" "{\"authorized\":${authorized}}"
-  stub "$dir" prune-worktrees.sh "$prune" '{"removed":[],"kept":[]}'
+  local sweep_out='{"repos":[],"skipped":[]}'
+  case "$prune" in
+    2) sweep_out='{"repos":[{"shared":"/tmp","exit":2}],"skipped":[]}' ;;
+    other) prune=2; sweep_out='{"repos":[{"shared":"/elsewhere","exit":1}],"skipped":[],"errors":[{"path":"/w/x","repo":"/elsewhere","exit":128,"error":"e"}]}' ;;
+    orphan) prune=2; sweep_out='{"repos":[],"skipped":[],"errors":[{"path":"/w/x","repo":null,"exit":128,"error":"e"}]}' ;;
+    mine) prune=2; sweep_out='{"repos":[],"skipped":[],"errors":[{"path":"/w/x","repo":"/tmp","exit":128,"error":"e"}]}' ;;
+    noresult) prune=2; sweep_out='{"repos":[{"shared":"/tmp","exit":0,"error":"no JSON"}],"skipped":[],"errors":[]}' ;;
+  esac
+  stub "$dir" sweep-worktrees.sh "$prune" "$sweep_out"
+  if [[ "$prune" == timeout ]]; then
+    printf '#!/bin/sh\necho "bounded-run: stand-in budget spent" >&2\nexit 124\n' > "$dir/bounded-run.sh" || die "write runner stub"
+  else
+    cp "$REAL/bounded-run.sh" "$dir/" || die "copy the bounded runner"
+  fi
   stub "$dir" resolve-gates.sh 0 '{"instructions":["AGENTS.md"],"workflows":[],"runners":[]}'
   printf '#!/bin/sh\ncase "$*" in\n  *capability-check*) printf %s; exit 0 ;;\n  *measure*) printf %s; exit 0 ;;\nesac\nexit 9\n' \
     "'{\"due\":$due,\"entries\":0}'" "'{\"agents\":{}}'" > "$dir/foreman.sh" || die "write foreman stub"
@@ -56,7 +71,7 @@ shadow() { # <dir> [roster-rc] [authority-rc] [prune-rc] [capability-due] [autho
 
 run() { # <dir> [extra args...]
   local dir="$1"; shift
-  OUT="$(HERDR_ENV=fixture bash "$dir/round-preflight.sh" \
+  OUT="$(HERDR_ENV=fixture WORKTREE_ROOT="$TMP" bash "$dir/round-preflight.sh" \
     --repo owner/repo --checkout /tmp "$@" 2>"$ERRFILE")"
   RC=$?
   ERRTEXT="$(cat "$ERRFILE")"
@@ -82,7 +97,7 @@ main() {
     pass; else fail "every check clean is ready, got RC=$RC OUT=$OUT"; fi
 
   shadow "$TMP/roster"
-  OUT="$(HERDR_ENV='' bash "$TMP/roster/round-preflight.sh" --repo o/r --checkout /tmp 2>"$ERRFILE")"
+  OUT="$(HERDR_ENV='' WORKTREE_ROOT="$TMP" bash "$TMP/roster/round-preflight.sh" --repo o/r --checkout /tmp 2>"$ERRFILE")"
   RC=$?
   if [[ $RC -eq 1 ]] && [[ "$(field "$OUT" 'd["checks"]["mode"]["status"]')" == '"standalone"' ]] \
      && ! printf '%s' "$OUT" | grep -q '"roster"'; then
@@ -125,6 +140,34 @@ main() {
   if [[ $RC -eq 1 ]] && [[ "$(field "$OUT" 'd["checks"]["worktrees"]["status"]')" == '"failed"' ]]; then
     pass; else fail "prune exit 2 is failed, got RC=$RC OUT=$OUT"; fi
 
+  shadow "$TMP/prune-other" 0 0 other
+  run "$TMP/prune-other"
+  if [[ $RC -eq 0 ]] && [[ "$(field "$OUT" 'd["checks"]["worktrees"]["status"]')" == '"degraded"' ]] \
+     && [[ "$(field "$OUT" 'd["ready"]')" == "true" ]]; then
+    pass; else fail "another repository's failed prune must not block this round, got RC=$RC OUT=$OUT"; fi
+
+  shadow "$TMP/prune-orphan" 0 0 orphan
+  run "$TMP/prune-orphan"
+  if [[ $RC -eq 1 ]] && [[ "$(field "$OUT" 'd["checks"]["worktrees"]["status"]')" == '"failed"' ]] \
+     && [[ "$(field "$OUT" 'd["checks"]["worktrees"]["detail"]["errors"][0]["path"]')" == '"/w/x"' ]]; then
+    pass; else fail "an error naming no repository must block and keep the sweep detail, got RC=$RC OUT=$OUT"; fi
+
+  shadow "$TMP/prune-mine" 0 0 mine
+  run "$TMP/prune-mine"
+  if [[ $RC -eq 1 ]] && [[ "$(field "$OUT" 'd["checks"]["worktrees"]["status"]')" == '"failed"' ]]; then
+    pass; else fail "an error naming this checkout must block, got RC=$RC OUT=$OUT"; fi
+
+  shadow "$TMP/prune-timeout" 0 0 timeout
+  run "$TMP/prune-timeout"
+  if [[ $RC -eq 1 ]] && [[ "$(field "$OUT" 'd["checks"]["worktrees"]["status"]')" == '"failed"' ]] \
+     && [[ "$(field "$OUT" 'd["checks"]["worktrees"]["reason"]')" == *budget* ]]; then
+    pass; else fail "a sweep past its budget must block, got RC=$RC OUT=$OUT"; fi
+
+  shadow "$TMP/prune-noresult" 0 0 noresult
+  run "$TMP/prune-noresult"
+  if [[ $RC -eq 1 ]] && [[ "$(field "$OUT" 'd["checks"]["worktrees"]["status"]')" == '"failed"' ]]; then
+    pass; else fail "this checkout's unreadable prune result must block, got RC=$RC OUT=$OUT"; fi
+
   echo "▶ what is due without blocking" >&2
 
   shadow "$TMP/due" 0 0 0 true
@@ -143,7 +186,7 @@ main() {
   shadow "$TMP/usage"
   for args in "--checkout /tmp" "--repo o/r"; do
     # shellcheck disable=SC2086  # deliberate word splitting of the fixture args
-    OUT="$(HERDR_ENV=fixture bash "$TMP/usage/round-preflight.sh" $args 2>"$ERRFILE")"
+    OUT="$(HERDR_ENV=fixture WORKTREE_ROOT="$TMP" bash "$TMP/usage/round-preflight.sh" $args 2>"$ERRFILE")"
     RC=$?
     ERRTEXT="$(cat "$ERRFILE")"
     if [[ $RC -eq 2 && -z "$OUT" ]] && printf '%s' "$ERRTEXT" | grep -q 'round-preflight:'; then
