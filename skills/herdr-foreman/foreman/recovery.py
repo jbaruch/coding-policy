@@ -1302,9 +1302,9 @@ def reserve(store, record, at):
         raise UsageError("Task has an unresolved dispatch {}; reconcile it before another assignment.".format(pending[0]["id"]), {})
     prior = next((row for row in store["dispatches"] if row["id"] == record["id"]), None)
     # A stored judge row with no mode is legacy history `_dispatch_version`
-    # still reads, and its retry keeps that shape; a NEW reservation without
-    # one would write it today, bypassing the mode `assign.apply` requires (#495).
-    if prior is None and canonical_role(record.get("role")) == "judge" and record.get("judge_mode") is None:
+    # still reads. A reservation without one -- new, or a retry of that row --
+    # would send an undeclared judge, which the Judge Seat refuses (#495).
+    if canonical_role(record.get("role")) == "judge" and record.get("judge_mode") is None:
         raise UsageError("A judge dispatch declares its mode, one of {}, before it is reserved; "
                          "pass judge_mode.".format(" | ".join(JUDGE_MODES)), {"dispatch": record.get("id")})
     if prior:

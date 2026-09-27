@@ -1696,13 +1696,14 @@ class JudgeModeReservationTests(unittest.TestCase):
                     with self.assertRaisesRegex(UsageError, "pre-send context is not an object"):
                         validate_store(store, [])
 
-    def test_a_stored_mode_less_judge_row_can_still_be_retried(self):
-        # A legacy row that never reached a worker keeps its own retry path.
+    def test_a_stored_mode_less_judge_row_is_never_resent_without_a_mode(self):
+        # The row stays readable, but a retry would send an undeclared judge.
         self.store["dispatches"].append({**self.judge(), "at": AT, "schema_version": 1,
                                          "status": "not_sent", "result": None, "report": None})
-        item = reserve(self.store, self.judge(), AT)
-        self.assertEqual((item["status"], item["schema_version"]), ("reserved", 1))
-        self.assertNotIn("judge_mode", item)
+        validate_store(self.store, [])
+        with self.assertRaisesRegex(UsageError, "declares its mode"):
+            reserve(self.store, self.judge(), AT)
+        self.assertEqual(self.store["dispatches"][0]["status"], "not_sent")
 
     def test_sending_refuses_a_context_that_is_not_an_object(self):
         reserve(self.store, self.judge(judge_mode="diagnosis"), AT)

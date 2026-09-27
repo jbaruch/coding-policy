@@ -7,8 +7,8 @@
   and `_dispatch_version` refused a malformed mode, but `recovery.reserve`
   still accepted a judge record whose `judge_mode` was absent or null, so a
   direct caller could write a new version-1 judge row. `reserve` now refuses
-  that for new reservations; stored mode-less rows still read as legacy
-  history, and a retry of such a stored `not_sent` row keeps its shape. The
+  that for new reservations and for a mode-less retry of a stored
+  `not_sent` row; stored mode-less rows still read as legacy history. The
   store validator compared a version-3 dispatch's mode with its
   ledger row and saved result only once the dispatch was `applied`, while
   `reconcile` recovers an interrupted judge's mode from
