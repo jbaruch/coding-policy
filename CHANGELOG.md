@@ -22,7 +22,8 @@
   so a filename with a newline cannot split into two entries; a symlinked
   `.github/workflows` directory lists nothing, as `find -type f` never
   descended through it, and a workflows path that exists but cannot be probed
-  exits 2 instead of reading as no workflows. `capabilities.load` read a
+  exits 2 instead of reading as no workflows (a `.github` that is a file
+  still reads as none). `capabilities.load` read a
   dangling `<state>.capabilities.json` link as a missing table, and `record`
   then replaced the link through `save_state`'s atomic rename, destroying the
   redirect; a symlinked table, live or dangling, is now refused and left as
@@ -35,6 +36,8 @@
   re-sorted inside functional commit 418bab3, is already merged and needs no
   change; it stays recorded so the next edit to that list lands its formatting
   in a commit of its own.
+
+## 0.3.293 — 2026-09-27
 
 ### Changed
 
