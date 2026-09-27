@@ -1,6 +1,7 @@
 """Exercise tier planning, dispatch refusal, verified handoff, and old ledgers."""
 
 import copy
+import hashlib
 import json
 import os
 import shutil
@@ -69,6 +70,42 @@ class TierIntegrationTest(CliCase):
                                           client=HerdrClient("herdr", FakeRunner()))
         self.assertEqual(rc, 0, error)
         self.assertNotIn("Plan tiers differ", error)
+
+    def test_plan_pins_the_oracle_file_and_verify_refuses_it_edited(self):
+        # coding-policy#488: the licence is the bytes the oracle file held when
+        # the plan was written, not whatever the path holds at the gate.
+        self.settings["agents"][0]["tiers"]["mechanical"] = tier_row()
+        self.write_config()
+        expected = self.tmp / "exact.patch"
+        expected.write_bytes(b"+licensed\n")
+        context = self.tmp / "round-context.json"
+        context.write_text(json.dumps({"developer": {"oracle": {"kind": "patch", "path": str(expected)}}}))
+        rc, output, error = self.run_cli(["plan", *self.base(), "--roles", "developer",
+                                          "--snapshot", str(self.snapshot), "--round", "developer=mechanical",
+                                          "--round-context", str(context), "--now", AT])
+        self.assertEqual(rc, 0, error)
+        document = json.loads(output)
+        self.assertEqual(document["oracle_pins"], {"developer": {
+            "path": str(expected), "sha256": hashlib.sha256(b"+licensed\n").hexdigest()}})
+        plan_file = self.tmp / "plan.json"
+        plan_file.write_text(output)
+        result = self.tmp / "result.diff"
+        result.write_bytes(b"+licensed\n")
+        verify = ["verify-oracle", "--plan", str(plan_file), "--role", "developer", "--result", str(result)]
+        self.out.seek(0)
+        self.out.truncate()
+        rc, output, error = self.run_cli(verify)
+        self.assertEqual(rc, 0, error)
+        self.assertTrue(json.loads(output)["match"])
+        expected.write_bytes(b"+rewritten\n")
+        result.write_bytes(b"+rewritten\n")
+        self.out.seek(0)
+        self.out.truncate()
+        self.err.seek(0)
+        self.err.truncate()
+        rc, output, error = self.run_cli(verify)
+        self.assertEqual((rc, output), (1, ""))
+        self.assertIn("changed since the plan was written", error)
 
     def test_a_retired_qualification_field_is_refused_with_the_allowed_fields(self):
         self.settings["agents"][0]["tiers"]["build"]["qualification"] = []

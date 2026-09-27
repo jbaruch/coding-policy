@@ -12,6 +12,37 @@
   new test runs the rendered fallback command to exit 0. An audit of the
   package found no other bare `foreman --...` strings.
 
+## 0.3.302 — 2026-09-27
+
+### Fixed
+
+- **`verify-oracle` checks a round against the oracle bytes its plan was
+  licensed on, refuses a malformed saved oracle cleanly, and hashes in
+  bounded chunks (#488).** Three gaps in
+  `skills/herdr-foreman/foreman/oracle.py`, all deferred from #486's review.
+  A `patch` or `fixture` oracle was only a path, so a file edited or replaced
+  after planning was compared as if it were the licensed one; `plan` now
+  records each such file's sha256 in a new `oracle_pins` map (plan schema 12),
+  and `verify-oracle` refuses an oracle file that no longer hashes to its pin,
+  and a plan that pinned nothing for it, rather than compare. The pin check and
+  the comparison share one read of the oracle file, so nothing can change
+  between them. A saved oracle such as `{"kind": "patch"}` with no path, or a
+  non-string path, reached `Path(None)` and raised a `TypeError` traceback;
+  `plan_oracle` now validates the shape before any file read, through
+  `oracle_shape_problem` in `skills/herdr-foreman/foreman/tiers.py`, which
+  `mechanical_allowed` also uses so the two checks cannot drift apart. Both
+  files were loaded whole with `read_bytes()`; they are now hashed in
+  `CHUNK_BYTES` pieces and compared by sha256, so memory stays bounded however
+  large the expected output. An unusable path, a NUL or a character the
+  filesystem encoding cannot carry, is a usage error naming the fix, and each
+  unreadable file names its own recovery. Only a `mechanical` round's oracle is
+  pinned and checked: an oracle riding on any other round licensed nothing,
+  so `plan` no longer reads it (a FIFO there hung `plan`) and `verify-oracle`
+  refuses to gate on it. Every file is opened non-blocking and refused unless
+  it is a regular file, so a FIFO or device swapped in for the result or the
+  pinned oracle after planning cannot hang the gate. Regression cases cover
+  each gap and fail against the old code.
+
 ## 0.3.301 — 2026-09-27
 
 ### Fixed
