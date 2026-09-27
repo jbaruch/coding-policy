@@ -29,6 +29,8 @@
   pinned oracle after planning cannot hang the gate. Regression cases cover
   each gap and fail against the old code.
 
+## 0.3.300 — 2026-09-27
+
 ### Fixed
 
 - **The Stop hook no longer runs the foreman's cleanup when it cannot tell a
