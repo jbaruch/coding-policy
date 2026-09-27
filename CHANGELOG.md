@@ -9,11 +9,15 @@
   and report "sync not verified". The worker check (`HERDR_ENV` set plus a
   linked worktree) now runs before the throttle stamp and the fetch; a worker
   reports the drift from the refs as last fetched and keeps the do-not-sync
-  notice. `hooks/check-acr-latest.sh` already returns for every Herdr session
+  notice. Role detection is tri-state: with `HERDR_ENV` set and the
+  `git rev-parse` role probes failing, the session may be a worker, so the hook
+  neither fetches nor fast-forwards and reports "sync not verified" with the
+  diagnostic command — only a standalone session or a proven main checkout
+  fetches. `hooks/check-acr-latest.sh` already returns for every Herdr session
   before its sync-proof fetch, so it needs no change.
   `hooks/tests/test_check_git_sync.sh` asserts a worker session leaves
-  `refs/remotes/origin/*` unchanged while origin has moved, and the foreman
-  still fetches.
+  `refs/remotes/origin/*` unchanged while origin has moved, the foreman still
+  fetches, and a git shim failing the role probes leaves the refs unchanged.
 
 ## 0.3.280 — 2026-09-27
 

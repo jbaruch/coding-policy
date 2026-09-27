@@ -28,6 +28,8 @@
 #                       a fast-forward (local both ahead and behind origin).
 #  10. Worker fetch -> a Herdr worker session leaves refs/remotes/origin/*
 #                       unchanged while origin has moved; the foreman fetches.
+#  11. Role unknown -> HERDR_ENV set and the role probes fail (git shim): no
+#                       fetch (refs unchanged) and a sync-not-verified notice.
 #   9. Future stamp  -> a schema_version > 1 record is not throttled on and is
 #                       preserved (not downgraded to version 1).
 #
@@ -307,6 +309,31 @@ main() {
   tip10="$(git -C "$TMP/r10" rev-parse --verify --quiet 'origin/main^{commit}')" || die "cannot resolve origin/main in r10"
   if [[ $RC -eq 0 && "$refs10_foreman" != "$refs10_before" && "$tip10" == "$seed10" ]]; then
     pass; else fail "foreman fetch: expected the main checkout to fetch the moved origin, got RC=$RC OUT=$OUT"; fi
+
+  # 11. HERDR_ENV set but the role probes fail: the session may be a worker,
+  #     so the hook neither fetches nor fast-forwards, and says how to
+  #     diagnose. A git shim on PATH fails only the two role probes.
+  mk_origin o11
+  clone_from "$BARE" "$TMP/r11"
+  commit_push "$SEED" "c2"
+  local realgit refs11_before refs11_after main11_before main11_after
+  realgit="$(command -v git)" || die "cannot locate git"
+  mkdir -p "$TMP/shim11" || die "could not create $TMP/shim11"
+  # shellcheck disable=SC2016  # the shim's own "$@"/"$a" must stay literal in its source
+  printf '#!/usr/bin/env bash\nfor a in "$@"; do case "$a" in --absolute-git-dir|--git-common-dir) echo "shim: role probe refused" >&2; exit 1 ;; esac; done\nexec %q "$@"\n' "$realgit" > "$TMP/shim11/git" \
+    || die "could not write the git shim"
+  chmod +x "$TMP/shim11/git" || die "could not make the git shim executable"
+  refs11_before="$(git -C "$TMP/r11" for-each-ref refs/remotes/origin)" || die "r11 for-each-ref (before) failed"
+  [[ -n "$refs11_before" ]] || die "r11 has no refs/remotes/origin refs to compare"
+  main11_before="$(git -C "$TMP/r11" rev-parse --verify --quiet 'main^{commit}')" || die "cannot resolve main in r11"
+  run "$TMP/r11" "$TMP/s11" HERDR_ENV=1 PATH="$TMP/shim11:$PATH"
+  refs11_after="$(git -C "$TMP/r11" for-each-ref refs/remotes/origin)" || die "r11 for-each-ref (after) failed"
+  main11_after="$(git -C "$TMP/r11" rev-parse --verify --quiet 'main^{commit}')" || die "cannot resolve main in r11 after the run"
+  if [[ "$refs11_before" == "$refs11_after" ]]; then
+    pass; else fail "role unknown: refs/remotes/origin changed (before=$refs11_before after=$refs11_after)"; fi
+  if [[ $RC -eq 0 ]] && printf '%s' "$OUT" | jq -e '.additionalContext | test("sync not verified") and test("could not tell a Herdr worker") and test("git rev-parse --absolute-git-dir") and (test("fast-forwarded local") | not)' >/dev/null 2>&1 \
+    && [[ "$main11_before" == "$main11_after" ]]; then
+    pass; else fail "role unknown: expected a no-fetch sync-not-verified notice, got RC=$RC OUT=$OUT"; fi
 
   echo "─────────────────────────────────────────────" >&2
   if [[ $FAIL -gt 0 ]]; then echo "FAILED: ${FAIL} failed, ${PASS} passed" >&2; exit 1; fi
