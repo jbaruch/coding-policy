@@ -19,9 +19,28 @@ alwaysApply: true
 
 ## Cleanup
 
-- A worktree's lifecycle ends when its branch merges or is abandoned — remove it at that point; do not leave orphans in `git worktree list`
-- Use `git worktree remove <path>`; never `rm -rf` the directory
+- A worktree's lifecycle ends when its branch merges or the worktree is abandoned
+- An idle clean worktree whose HEAD origin holds counts as abandoned
+- Outside a Herdr team round, the agent removes its own worktree after the merge
 - When the worktree's branch lands via `skills/release/SKILL.md` Step 7, the post-merge order is mandatory: `cd` back to the base checkout → fast-forward base `main` → `git worktree remove <worktree-path>` → `git branch -d <branch>`. Teardown precedes branch delete
+- Use `git worktree remove <path>`; never `rm -rf` the directory
+- The session-start hook `hooks/check-leftover-worktrees.sh` cleans the session's own repository in a native session
+- Under tessl (portable mode), it reports from a dry run in a main checkout and deletes nothing
+- Under tessl, it skips a linked worktree
+- In a Herdr worker session, it deletes nothing
+- It removes an idle clean worktree whose HEAD origin holds
+- It deletes a local branch whose tip origin holds or whose tip origin's default branch contains
+- It deletes an unprotected branch on origin merged into the default branch with no open pull request
+- The removal and deletion predicates live in `skills/herdr-foreman/prune-worktrees.sh` and `skills/herdr-foreman/prune-remote-branches.sh` (top-of-file docstrings)
+- A dirty or unpushed idle worktree is reported, never removed automatically
+- A local branch holding commits origin lacks is never deleted automatically
+- It is reported once idle
+- An unmerged branch on origin with no pull request is never deleted automatically
+- It is reported once stale
+- A protected branch on origin is never touched or reported
+- A reported item follows `rules/hook-action-reporting.md` Act on What It Names
+- In a Herdr team round, see `rules/agent-team-operation.md` Writers and Checkouts
+- Leave no orphans in `git worktree list`
 
 ## Exception — Single-Reader Inspection
 

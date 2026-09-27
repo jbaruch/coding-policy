@@ -21,6 +21,99 @@
   `context_before_send` is missing or not an object, since reconcile would
   otherwise recover it as `unknown`.
 
+## 0.3.293 — 2026-09-27
+
+### Changed
+
+- **Spent worktrees and branches are removed automatically; work that exists
+  nowhere else is reported, never touched (#535).** `~/.worktrees` held 94
+  entries across 14 repositories, and the round's prune would have removed 2
+  of them: only branches merged into origin's default were removable, and a
+  round pruned only the repository in front of it.
+  - The design first shipped an archive half for the rest: an idle dirty or
+    unpushed worktree was snapshotted into `refs/archive/worktrees/`, recorded
+    in a git note, moved into the root's `.trash/` and expired after a window.
+    Twelve review rounds kept finding new races in it, because it existed to
+    delete work that exists nowhere else safely against concurrent writers,
+    which cannot be proven. The operator's decision after that design review:
+    automatic deletion of such work is destructive, so it is reported and
+    never touched. The archive refs, notes, `schema_version` migrations,
+    orphan-note pass, `.trash/` moves, expiry windows, ignored-file inventory
+    and trash locks are gone, and `skills/herdr-foreman/state-schema.md` holds
+    no worktree record.
+  - Deleted, because origin restores it: an idle clean worktree whose HEAD a
+    branch on origin holds, detached included (`prune-worktrees.sh`, plain
+    non-forced `git worktree remove`); a local branch with no worktree whose
+    tip origin holds or which origin's default merged (compare-and-delete
+    `update-ref -d`); a branch on origin merged into the default with no open
+    pull request (new `prune-remote-branches.sh`, `git push --delete` under
+    `--force-with-lease`). Every proof is re-read from origin with
+    `git ls-remote` immediately before the deletion, in dry and live runs
+    alike, which branch origin's HEAD names included; on origin the branch's
+    protection and open pull requests are re-read too, before a stale branch
+    is listed as well as before a deletion. The remote pass is its own script: it needs the network and `gh`,
+    which the worktree pass does not (`rules/script-delegation.md`).
+  - Reported, for the operator's decision: an idle dirty worktree (changed
+    files, age, `git -C <path> status`), an idle worktree holding commits no
+    origin branch holds (count, age, `git -C <path> push -u origin HEAD`), an
+    idle local branch with unpushed commits, and a branch on origin unmerged,
+    with no pull request, whose last commit is past the window (commits
+    ahead, age, author, the `gh pr create` command and a delete leased to
+    the tip judged). A branch
+    with an open pull request, or a protected one, is never touched or
+    listed. Without a working `gh` nothing on origin is deleted and the
+    result says it could not check.
+  - Kept silently: a worktree in use (`lsof`), not yet idle, locked, or
+    holding a submodule or an embedded repository. An `lsof` listing with an
+    unreadable cwd of a live process still keeps every worktree; a warning
+    about a mount lsof could not stat, or the record of a process that exited
+    mid-listing, no longer does. A stale Time Machine SMB mount made every
+    worktree `idle-unknown` on the maintainer's machine.
+  - `hooks/check-leftover-worktrees.sh` now cleans the session's own
+    repository at session start: it runs both owner scripts live, removes
+    silently, and lists only the reported items above, plus one "could not
+    check" line when either script fails, times out or cannot reach `gh`.
+    It deletes nothing in a Herdr worker session. Under tessl, which strips
+    the environment a worker check needs, a linked worktree runs neither
+    script (it may be a worker's) and a main checkout runs both
+    `--dry-run`, the rule `check-git-sync` applies. Both scripts
+    share a 40-second budget through the new
+    `skills/herdr-foreman/bounded-run.sh`; `timeout` is absent from a stock
+    macOS. The round preflight runs the sweep under the same runner with a
+    600-second budget; a sweep past it blocks the round. The runner's stdout
+    is the wrapped command's own, which `rules/script-delegation.md` Script
+    Requirements now allows through a narrow carve-out naming
+    `bounded-run.sh`. A missing git or python3 still reaches the session as
+    a fixed "could not check" status. The runner keeps SIGALRM blocked
+    until the command is launched and the alarm armed, so an expiry at any
+    point stops the process group and exits 124. The grace period ends in
+    SIGKILL for any group member still running, even once the direct child
+    has exited. The session-start hook validates each owner's documented
+    result shape; a malformed result is a "could not check" line, and the
+    stop hook carries its findings as NUL-framed records. Both hooks read the
+    worktree inventory NUL-framed, so a shared checkout whose path ends in
+    a newline reaches the owner scripts whole. It no longer reads
+    `skills/release/check-leftovers.sh`, which still gates the release.
+  - `hooks/stop-handoff-hygiene.sh` drops its own leftover-branch and
+    orphaned-worktree predicate and reads `prune-worktrees.sh --dry-run`
+    instead: what the owner script would remove blocks once, naming the
+    command that removes it; what it keeps for the operator is reported.
+  - `skills/herdr-foreman/sweep-worktrees.sh` runs the worktree pass across
+    every repository with a worktree directory under the root, for the round
+    preflight; its `report` names each kept dirty or unpushed item with its
+    age and command, and SKILL Step 2 relays it verbatim. A `.git` file
+    counts only when its repository registers a worktree at that path; a
+    copied or stale one is an error and never runs a prune. The root is
+    re-read after discovery; one replaced or unreadable by then prunes
+    nothing and exits 1. A dry run takes the same pre-removal recheck as a
+    live run.
+  - Rules: `rules/agent-worktree-isolation.md` Cleanup states the lifecycle
+    and the session-start cleanup; `rules/agent-team-operation.md` Writers
+    and Checkouts keeps the sweep and the Step 15 merged-task exception and
+    references Cleanup for the predicates; `rules/hook-action-reporting.md`
+    Act on What It Names raises each listed item with the user, one question
+    at a time, and forbids acting on one unasked.
+
 ## 0.3.292 — 2026-09-27
 
 ### Fixed
