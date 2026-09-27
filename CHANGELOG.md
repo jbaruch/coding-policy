@@ -12,8 +12,11 @@
   fenced shell block under `skills/` and `hooks/` for a script named by bare
   path in command position, so the next one fails CI instead of a consumer's
   release; its first run caught a `foreman.sh validate-partition` in
-  `skills/herdr-foreman/references/review-partition.md`, now the
-  `foreman validate-partition` shorthand its sibling references use.
+  `skills/herdr-foreman/references/review-partition.md`, a path that resolves
+  nowhere. It and the matching `foreman detect-triggers` block in
+  `specialists.md` are now `text` synopses pointing at the runnable form in
+  `skills/herdr-foreman/SKILL.md` Step 5, the shape `working-memory.md`
+  already uses.
   `hooks/check-leftover-worktrees.sh` added #466's newline sentinel to `pwd`
   but still fed `cd` a `$(dirname ...)` capture, which strips a trailing
   newline from the hooks directory's name before `cd` sees it. The same shape,
