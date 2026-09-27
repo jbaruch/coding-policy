@@ -18,6 +18,7 @@ import subprocess
 import sys
 from typing import NoReturn
 import time
+import unicodedata
 from contextlib import nullcontext
 from datetime import datetime, timezone
 from pathlib import Path
@@ -2105,7 +2106,8 @@ def cmd_probe_report(args, client=None, warn=None, trace=None):
 
 def cmd_marker_fit(args, client=None, warn=None, trace=None):
     """Read-only width verdict; a marker that would wrap is `fits: false`, never an error."""
-    if not Path(args.report).is_absolute() or any(ord(char) < 32 for char in args.report):
+    # Category Cc covers C0, DEL and C1: none renders as one column of a row.
+    if not Path(args.report).is_absolute() or any(unicodedata.category(char) == "Cc" for char in args.report):
         raise UsageError("marker-fit needs an absolute one-row --report path; pass the exact path the worker "
                          "will print after `REPORT: `.", {"report": args.report})
     client = client if client is not None else _client(args, trace=trace)

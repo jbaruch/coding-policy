@@ -147,6 +147,15 @@ class MarkerFitTests(unittest.TestCase):
         self.assertIn("absolute", errors)
         self.assertEqual(runner.calls, [])
 
+    def test_every_control_character_is_refused_before_herdr(self):
+        for char in ("\t", "\x7f", "\x85", "\x9b"):
+            with self.subTest(char=hex(ord(char))):
+                runner = self.runner("codex", 200)
+                code, out, errors = self.run_cli(runner, report="/r/a" + char + "b.md")
+                self.assertEqual((code, out), (1, ""))
+                self.assertIn("one-row", errors)
+                self.assertEqual(runner.calls, [])
+
     def test_an_agent_record_without_a_pane_is_a_herdr_failure(self):
         runner = FakeRunner()
         runner.set("agent get worker", json.dumps({"result": {"agent": {"agent": "codex", "agent_status": "idle"}}}))
