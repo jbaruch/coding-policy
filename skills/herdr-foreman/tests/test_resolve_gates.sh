@@ -129,6 +129,7 @@ JSON
                 '{"schema_version": 1, "runners": ["scripts/nul\u0000.sh"]}' \
                 '{"schema_version": 1, "runners": ["scripts/esc\u001b.sh"]}' \
                 '{"schema_version": 1, "runners": ["scripts/c1\u0085.sh"]}' \
+                '{"schema_version": 1, "runners": ["scripts/sur\ud800.sh"]}' \
                 '{"schema_version": 1, "notes": "line one\n- injected"}'; do
     printf '%s\n' "$unsafe" > "$TMP/render/.herdr/gates.json" || die "write unsafe declaration"
     run "$TMP/render"
@@ -174,6 +175,17 @@ JSON
   run "$TMP/wfdirlink"
   if [[ $RC -eq 0 ]] && [[ "$(list "$OUT" workflows)" == "" ]]; then
     pass; else fail "a symlinked workflows directory lists nothing, got RC=$RC OUT=$OUT"; fi
+
+  # A workflows directory that exists but cannot be probed is a tool error,
+  # never an empty list. Root can probe anything, so the case needs a user.
+  if [[ "$(id -u)" -ne 0 ]]; then
+    mkdir -p "$TMP/wfperm/.github/workflows" || die "mkdir wfperm"
+    chmod 000 "$TMP/wfperm/.github" || die "chmod wfperm"
+    run "$TMP/wfperm"
+    chmod 755 "$TMP/wfperm/.github" || die "restore wfperm"
+    if [[ $RC -eq 2 && -z "$OUT" ]] && printf '%s' "$ERRTEXT" | grep -q 'cannot inspect'; then
+      pass; else fail "an unprobeable workflows directory is a tool error, got RC=$RC OUT=$OUT ERR=$ERRTEXT"; fi
+  fi
 
   # Each refusal names the repair for the field it refused.
   printf '%s\n' '{"schema_version": 1, "notes": "one\ntwo"}' > "$TMP/render/.herdr/gates.json" \

@@ -13,13 +13,16 @@
   paths, notes and workflow filenames into every worker's Markdown `GATES`
   block unchecked: a backtick closed a path's code span, a newline injected
   lines into every brief, and a NUL made `realpath` raise outside the
-  documented exit-2 path. A control character (C0, DEL or C1) anywhere, or a
+  documented exit-2 path. A control character (C0, DEL or C1) or a lone
+  surrogate (which JSON escapes can carry and which crashed path resolution)
+  anywhere, or a
   backtick in a path or workflow filename, is now refused with exit 2 before
   anything resolves or renders, each refusal naming the repair for its field;
   a backtick in `notes`, which render as plain text, stays accepted. The workflow listing moved from a newline-split
   `find` into the same Python pass so a filename with a newline cannot split
   into two entries; a symlinked `.github/workflows` directory lists nothing,
-  as `find -type f` never descended through it. `capabilities.load` read a dangling
+  as `find -type f` never descended through it, and a workflows path that
+  exists but cannot be probed exits 2 instead of reading as no workflows. `capabilities.load` read a dangling
   `<state>.capabilities.json` link as a missing table, and `record` then
   replaced the link through `save_state`'s atomic rename, destroying the
   redirect; a symlinked table, live or dangling, is now refused and left as

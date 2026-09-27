@@ -63,7 +63,7 @@ main() {
   [ -d "$checkout" ] || die "'${checkout}' is not a directory -- pass the repository checkout"
 
   python3 - "$checkout" <<'PY'
-import json, os, sys
+import json, os, stat, sys
 
 checkout = sys.argv[1]
 
@@ -75,10 +75,12 @@ def refuse_unrenderable(value, label, code_span, remedy):
 
     Every brief renders these values into Markdown. A control character -- a
     newline, a NUL, an escape -- injects lines into every worker's brief or
-    breaks path resolution; a backtick closes the code span a path renders in.
+    breaks path resolution, and so does a lone surrogate JSON can smuggle in;
+    a backtick closes the code span a path renders in.
     """
     bad = sorted({char for char in value
-                  if ord(char) < 0x20 or 0x7f <= ord(char) <= 0x9f or (code_span and char == "`")})
+                  if ord(char) < 0x20 or 0x7f <= ord(char) <= 0x9f or 0xd800 <= ord(char) <= 0xdfff
+                  or (code_span and char == "`")})
     if bad:
         sys.stderr.write("resolve-gates: {} {!r} carries {}, which the briefs' Markdown GATES block "
                          "cannot render intact. {}\n".format(
@@ -95,8 +97,16 @@ declared, instructions, runners, notes, missing = False, [], [], None, []
 workflows = []
 workflow_dir = os.path.join(checkout, ".github", "workflows")
 # A symlinked workflows directory is not the platform's location: its files
-# live elsewhere, possibly outside the checkout, so it lists nothing.
-if os.path.isdir(workflow_dir) and not os.path.islink(workflow_dir):
+# live elsewhere, possibly outside the checkout, so it lists nothing. Only an
+# absent path means no workflows; any other failure to probe it is a tool error.
+try:
+    probe = os.lstat(workflow_dir)
+except FileNotFoundError:
+    probe = None
+except OSError as exc:
+    sys.stderr.write("resolve-gates: cannot inspect {}: {} -- check its permissions.\n".format(workflow_dir, exc))
+    raise SystemExit(2)
+if probe is not None and stat.S_ISDIR(probe.st_mode):
     try:
         with os.scandir(workflow_dir) as entries:
             for entry in entries:
