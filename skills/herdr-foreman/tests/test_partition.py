@@ -284,6 +284,50 @@ class RunCommand(unittest.TestCase):
             with self.subTest(malformed=malformed), self.assertRaisesRegex(UsageError, "no usable proof"):
                 partition.check_proof({**plan["partition_proof"], "base": malformed}, "The plan")
 
+    def test_a_non_ancestor_base_is_proven_and_gated_over_base_dot_dot_head(self):
+        # coding-policy#534: the recorded base sits on a sibling branch, so
+        # `base...head` (from the merge base) drops the base-side change that
+        # `base..head` counts. Both the proof and the gate use `base..head`.
+        import subprocess
+        repo = self.tmp / "diverged"
+        repo.mkdir()
+
+        def git(*command):
+            return subprocess.run(["git", "-C", str(repo), "-c", "user.name=t", "-c", "user.email=t@example.com",
+                                   *command], check=True, capture_output=True, text=True).stdout.strip()
+
+        git("init", "-q")
+        (repo / "src" / "api").mkdir(parents=True)
+        (repo / "src" / "core").mkdir(parents=True)
+        (repo / "src" / "api" / "routes.py").write_text("routes\n")
+        (repo / "src" / "core" / "db.py").write_text("db\n")
+        git("add", "-A")
+        git("commit", "-q", "-m", "root")
+        root = git("rev-parse", "HEAD")
+        (repo / "src" / "core" / "db.py").write_text("db on the base branch\n")
+        git("commit", "-q", "-am", "base")
+        base = git("rev-parse", "HEAD")
+        git("checkout", "-q", "--detach", root)
+        (repo / "src" / "api" / "routes.py").write_text("routes on the head branch\n")
+        git("commit", "-q", "-am", "head")
+        head = git("rev-parse", "HEAD")
+        both = {"src/api/routes.py", "src/core/db.py"}
+        self.assertEqual(set(git("diff", "--name-only", base + ".." + head).split()), both)
+        self.assertEqual(git("diff", "--name-only", base + "..." + head).split(), ["src/api/routes.py"])
+
+        args = SimpleNamespace(repo=str(repo), base=base, head=head, partition=str(self.path))
+        result, failure = partition.run_command(args)
+        self.assertIsNone(failure)
+        seats = partition.seat_paths(result, "reviewer")
+        self.assertEqual({path for paths in seats.values() for path in paths}, both)
+        proof = result["proof"]
+        plan = {"slice_paths": seats, "slice_digest": partition.slice_digest(seats, proof),
+                "seat_digests": {seat: partition.seat_digest(seat, paths, proof) for seat, paths in seats.items()},
+                "partition_proof": proof}
+        verified = partition.verify(plan, str(repo), head, base)
+        self.assertTrue(verified["verified"])
+        self.assertEqual(verified["changed"], 2)
+
     def test_a_missing_repository_keeps_gits_diagnostic(self):
         with self.assertRaisesRegex(UsageError, "git rev-parse"):
             partition._revision(partition.git_runner(self.tmp / "absent"), "HEAD")
