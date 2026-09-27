@@ -767,9 +767,12 @@ def foreground_pids(client, pane_id):
     processes = info.get("foreground_processes") if isinstance(info, dict) else None
     if not isinstance(processes, list) or not processes:
         return None
-    pids = [process.get("pid") if isinstance(process, dict) else None for process in processes]
-    if not all(type(pid) is int and pid > 0 for pid in pids):
-        return None
+    pids = []
+    for process in processes:
+        pid = process.get("pid") if isinstance(process, dict) else None
+        if type(pid) is not int or pid <= 0:
+            return None
+        pids.append(pid)
     return sorted(pids)
 
 
