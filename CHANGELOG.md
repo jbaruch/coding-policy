@@ -1,5 +1,18 @@
 # Changelog
 
+### Fixed
+
+- **A partial `judge` block no longer exempts an untiered worker from config
+  schema 5 (#527).** `parse_config` in `skills/herdr-foreman/foreman/config.py`
+  took the exempt worker's name straight from `judge.agent` without validating
+  the rest of the block, so `"judge": {"agent": "codex"}` with no model let an
+  untiered `codex` worker through, although `parse_judge` refuses that block.
+  A caller using only `load_config` then ran with the untiered worker schema 5
+  exists to forbid. `parse_config` now derives the exemption from
+  `parse_judge`: a block that does not parse exempts nobody and is refused with
+  `parse_judge`'s own diagnostic. A fully specified judge block still exempts
+  its worker.
+
 ## 0.3.289 — 2026-09-27
 
 ### Fixed
