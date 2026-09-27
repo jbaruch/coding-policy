@@ -43,6 +43,8 @@
   CLI end to end; the unfixed deliverer typed `/clear` and the resume prompt
   into the replacement session.
 
+## 0.3.297 — 2026-09-27
+
 ### Tests
 
 - **Empty `HERDR_ENV` regression tests for the ACR and stop hooks (#557).**
