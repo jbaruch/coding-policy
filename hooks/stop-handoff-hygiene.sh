@@ -24,13 +24,17 @@
 # consumers and inspecting .claude/settings.json and .codex/config.toml.
 #
 # Blocking findings (gate the stop, once):
-#   - Leftover local branches whose upstream is gone (merged then remote-deleted).
-#   - Orphaned linked worktrees: clean AND either the branch's upstream is gone,
-#     or the tree holds nothing the default branch does not already have. The
-#     upstream test alone saw only worktrees whose branch had been pushed, so
-#     every review, test and judge seat -- which pin a tip and report to a file,
-#     and never push -- was invisible to it (#433). Detached worktrees are read
-#     the same way, against their HEAD.
+#   - Spent worktrees and local branches, as the owner script decides them:
+#     `skills/herdr-foreman/prune-worktrees.sh <shared-checkout> --dry-run`,
+#     run under hooks/bounded-run.sh for STOP_PRUNE_BUDGET_SEC. Its would-remove
+#     worktrees and would-delete branches block, with the one command that
+#     removes them all (the same script, live). Its idle dirty or unpushed
+#     worktrees and unpushed branches are reported, never blocking: that work
+#     exists nowhere else and is the operator's call. This hook holds no
+#     predicate of its own (rules/script-as-black-box.md). It runs only when the
+#     repository has a linked worktree or a local branch besides the checked-out
+#     one, so a plain checkout pays no fetch. A failed or timed-out run warns
+#     and blocks nothing.
 #   - Diagnostics findings in the CHANGED set only (uncommitted .sh/.py):
 #     lint the .sh with shellcheck, the .py with pyright. Skipped when nothing
 #     lintable changed, so a clean handoff costs nothing. An absent engine is
@@ -57,16 +61,15 @@
 #   exit  : always 0 (block is expressed in stdout JSON, never via exit code).
 #           Best-effort failures warn to stderr and allow the stop.
 #   state : none — every check reads live git state.
+#   env   : STOP_PRUNE_BUDGET_SEC overrides PRUNE_BUDGET_SEC; WORKTREE_ROOT and
+#           the PRUNE_* variables pass through to the owner script.
 set -euo pipefail
 
-warn() { printf 'stop-handoff-hygiene: %s\n' "$1" >&2; }
+#: Wall-clock seconds for the owner script's dry run. It fetches, and a Stop
+#: waits on it.
+PRUNE_BUDGET_SEC="${STOP_PRUNE_BUDGET_SEC:-20}"
 
-# Membership test without associative arrays (macOS ships bash 3.2).
-in_list() { # <needle> <haystack...>
-  local needle="$1" x; shift
-  for x in "$@"; do [[ "$x" == "$needle" ]] && return 0; done
-  return 1
-}
+warn() { printf 'stop-handoff-hygiene: %s\n' "$1" >&2; }
 
 # Is this session a Herdr WORKER rather than the foreman?
 #
@@ -90,15 +93,15 @@ is_herdr_worker() {
   [[ -n "${HERDR_ENV:-}" ]] || return 1
 
   local git_dir common_dir rc=0
-  git_dir="$(git rev-parse --absolute-git-dir 2>/dev/null)" || rc=$?
+  git_dir="$(git rev-parse --absolute-git-dir 2>&1)" || rc=$?
   if (( rc != 0 )); then
-    warn "git rev-parse --absolute-git-dir failed (exit ${rc}) — cannot tell a Herdr worker from the foreman; treating this as the foreman"
+    warn "git rev-parse --absolute-git-dir failed (exit ${rc}: ${git_dir}) — cannot tell a Herdr worker from the foreman; treating this as the foreman"
     return 1
   fi
   rc=0
-  common_dir="$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" || rc=$?
+  common_dir="$(git rev-parse --path-format=absolute --git-common-dir 2>&1)" || rc=$?
   if (( rc != 0 )); then
-    warn "git rev-parse --git-common-dir failed (exit ${rc}) — cannot tell a Herdr worker from the foreman; treating this as the foreman"
+    warn "git rev-parse --git-common-dir failed (exit ${rc}: ${common_dir}) — cannot tell a Herdr worker from the foreman; treating this as the foreman"
     return 1
   fi
 
@@ -107,12 +110,12 @@ is_herdr_worker() {
 
 main() {
   local input active inside
-  local -a gone_branches=() wt_paths=() wt_branches=() wt_locked=() leftover=() orphaned=() spent_detached=() held=() changed=()
+  local -a changed=()
   local -a blocking=() reports=()
 
   # jq is required to read stop_hook_active and to emit the block JSON safely.
   # Without it we cannot evaluate loop-safety, so fail open (allow the stop).
-  if ! command -v jq >/dev/null 2>&1; then
+  if ! command -v jq >/dev/null; then
     warn "jq not found — install jq to enable the handoff-hygiene gate; allowing stop"
     return 0
   fi
@@ -120,11 +123,13 @@ main() {
   # Read the Stop payload and honor the loop guard: if this stop is already the
   # result of our prior block, allow it — never block twice (no loop).
   input="$(cat)" || input=""
-  active="$(printf '%s' "$input" | jq -r '.stop_hook_active // false' 2>/dev/null)" || active="parse-error"
+  if ! active="$(printf '%s' "$input" | jq -r '.stop_hook_active // false' 2>&1)"; then
+    warn "could not parse Stop payload (${active}) — allowing stop"
+    return 0
+  fi
   [[ "$active" == "true" ]] && return 0
-  [[ "$active" == "parse-error" ]] && { warn "could not parse Stop payload — allowing stop"; return 0; }
 
-  command -v git >/dev/null 2>&1 || { warn "git not found — allowing stop"; return 0; }
+  command -v git >/dev/null || { warn "git not found — allowing stop"; return 0; }
 
   # Outside a work tree there is nothing to check. `--is-inside-work-tree` prints
   # true/false and exits 0 inside any repo; exit 128 is the expected "not a git
@@ -132,9 +137,9 @@ main() {
   # is surfaced before failing open (rules/error-handling.md). A bare repo /
   # gitdir ("false") also allows silently.
   rc=0
-  inside="$(git rev-parse --is-inside-work-tree 2>/dev/null)" || rc=$?
+  inside="$(git rev-parse --is-inside-work-tree 2>&1)" || rc=$?
   if (( rc != 0 )); then
-    (( rc == 128 )) || warn "git rev-parse --is-inside-work-tree failed (exit ${rc}) — allowing stop"
+    (( rc == 128 )) || warn "git rev-parse --is-inside-work-tree failed (exit ${rc}: ${inside}) — allowing stop"
     return 0
   fi
   [[ "$inside" == "true" ]] || return 0
@@ -150,69 +155,7 @@ main() {
   # (rules/language-diagnostics.md Gate It Deterministically) -- skipping them
   # here would let a worker hand off findings nobody else is going to see.
   if ! is_herdr_worker; then
-    collect_gone_branches
-    collect_worktrees
-
-    # Partition gone branches: those checked out in a linked worktree are
-    # reported as orphaned worktrees (remove the worktree); the rest as
-    # leftover branches.
-    local b p i
-    for b in ${gone_branches[@]+"${gone_branches[@]}"}; do
-      in_list "$b" ${wt_branches[@]+"${wt_branches[@]}"} || leftover+=("$b")
-    done
-    local base=""
-    base="$(default_branch_ref)" || base=""
-    if [[ -z "$base" ]]; then
-      warn "could not resolve origin's default branch — reporting only worktrees whose upstream is gone"
-    fi
-    # `rules/agent-team-operation.md` Writers and Checkouts: removal beyond a
-    # merged, clean worktree is the round's sweep (idle windows, archive), never
-    # this hook. So a removal named here ALWAYS requires clean and contained --
-    # a gone upstream is a reason to look, never a licence, since an upstream
-    # can vanish while its tree is dirty or ahead.
-    local spent
-    for (( i = 0; i < ${#wt_paths[@]}; i++ )); do
-      b="${wt_branches[$i]}"; p="${wt_paths[$i]}"
-      if [[ "${wt_locked[$i]}" == "1" ]]; then
-        held+=("${p}$([[ -n "$b" ]] && printf ' (branch %s)' "$b" || printf ' (detached)') — locked")
-        continue
-      fi
-      spent=0; SPENT_REASON="unreadable"
-      if [[ -n "$base" ]] && worktree_is_spent "$p" "$b" "$base"; then spent=1; fi
-      local named
-      named="${p}$([[ -n "$b" ]] && printf ' (branch %s)' "$b" || printf ' (detached)')"
-      if (( spent )) && [[ -n "$b" ]]; then
-        orphaned+=("${p} (branch ${b}, nothing ${base} lacks)")
-      elif (( spent )); then
-        spent_detached+=("${p} (detached, nothing ${base} lacks)")
-      elif [[ -z "$base" ]]; then
-        # No default branch to judge containment against. What IS observable
-        # still reaches the operator: a detached tree is detached whatever the
-        # base, and `status` needs none.
-        local why="containment unknown — no default branch resolved"
-        [[ -n "$b" ]] || why="detached, ${why}"
-        if [[ -d "$p" ]]; then
-          local st strc=0
-          st="$(git -C "$p" status --porcelain 2>/dev/null)" || strc=$?
-          if (( strc != 0 )); then
-            warn "\`git status\` failed in ${p} (exit ${strc}) — its cleanliness is unknown; inspect that checkout by hand"
-            why="unreadable, ${why}"
-          elif [[ -n "$st" ]]; then
-            why="dirty, ${why}"
-          fi
-        else
-          warn "worktree ${p} is listed but its directory is missing — inspect it by hand"
-          why="missing, ${why}"
-        fi
-        held+=("${named} — ${why}")
-      else
-        # Every protected state reaches the operator, whatever its upstream:
-        # a never-pushed dirty or unmerged tree has no upstream to be gone.
-        held+=("${named} — ${SPENT_REASON}")
-      fi
-    done
-
-    build_branch_findings
+    read_owner_decisions
   fi
 
   run_changed_diagnostics
@@ -228,169 +171,87 @@ main() {
   return 0
 }
 
-# Populate gone_branches with local branches whose upstream is [gone]. Capture
-# for-each-ref's output and exit status so a failure is surfaced, not silently
-# read as "no leftovers" (rules/error-handling.md).
-collect_gone_branches() {
-  local out rc=0 name track
-  out="$(git for-each-ref --format='%(refname:short)%09%(upstream:track)' refs/heads)" || rc=$?
-  if (( rc != 0 )); then
-    warn "git for-each-ref failed (exit ${rc}) — skipping the leftover-branch check"
-    return 0
-  fi
-  while IFS=$'\t' read -r name track; do
-    [[ "$track" == "[gone]" ]] && gone_branches+=("$name")
-  done <<< "$out"
-  return 0
-}
-
-# Populate wt_paths/wt_branches for LINKED worktrees only (the first porcelain
-# record is the main worktree and is skipped). A detached worktree is recorded
-# with an EMPTY branch rather than dropped: it can be as merged and as removable
-# as any other, and a branch-name predicate could never see it (#433).
-collect_worktrees() {
-  local out rc=0 line key val cur_path="" cur_branch="" cur_locked=0 first=1
-  out="$(git worktree list --porcelain)" || rc=$?
-  if (( rc != 0 )); then
-    warn "git worktree list failed (exit ${rc}) — skipping the orphaned-worktree check"
-    return 0
-  fi
-  flush() {
-    if (( first )); then first=0
-    elif [[ -n "$cur_path" ]]; then
-      wt_paths+=("$cur_path"); wt_branches+=("$cur_branch"); wt_locked+=("$cur_locked")
-    fi
-    cur_path=""; cur_branch=""; cur_locked=0
-  }
-  while IFS= read -r line; do
-    if [[ -z "$line" ]]; then flush; continue; fi
-    key="${line%% *}"; val="${line#* }"
-    case "$key" in
-      worktree) cur_path="$val" ;;
-      branch)   cur_branch="${val#refs/heads/}" ;;
-      locked)   cur_locked=1 ;;
-    esac
-  done <<< "$out"
-  [[ -n "$cur_path" ]] && flush   # flush a trailing record with no blank line
-  return 0
-}
-
-# Echo the default branch's ref (`origin/main`), or return 1 when none can be
-# confirmed. Named explicitly rather than read off the current checkout: this
-# hook can run from a linked worktree, whose HEAD is not the default branch.
-default_branch_ref() {
-  local out rc=0 cand
-  # `--quiet` makes exit 1 the expected "no such symbolic ref"; any other exit
-  # is git failing, and reading it as an absent ref would hide the fault behind
-  # the main/master fallback (rules/error-handling.md).
-  out="$(git symbolic-ref --quiet refs/remotes/origin/HEAD 2>/dev/null)" || rc=$?
-  if (( rc == 0 )) && [[ "$out" == refs/remotes/origin/* ]]; then
-    printf 'origin/%s' "${out#refs/remotes/origin/}"
-    return 0
-  fi
-  if (( rc != 0 && rc != 1 )); then
-    warn "git symbolic-ref refs/remotes/origin/HEAD failed (exit ${rc}) — falling back to origin/main or origin/master; run \`git remote set-head origin --auto\` if the fallback is wrong"
-  fi
-  for cand in main master; do
-    rc=0
-    git show-ref --verify --quiet "refs/remotes/origin/${cand}" || rc=$?
-    case "$rc" in
-      0) printf 'origin/%s' "$cand"; return 0 ;;
-      1) ;;  # the expected "no such ref"; try the next candidate
-      *) warn "\`git show-ref --verify refs/remotes/origin/${cand}\` failed (exit ${rc}) — cannot confirm the default branch; no worktree is reported removable this run"
-         return 1 ;;
-    esac
-  done
-  return 1
-}
-
-# Does <path> hold nothing the default branch does not already have?
-#
-# 0 = clean and fully contained, 1 = no (dirty, ahead, or unreadable). FAIL
-# CLOSED: a check that cannot run returns 1, so a tree this never inspected is
-# never reported removable. Reading an unreadable tree as clean is how the
-# first hand-rolled version of this passed trees it had never looked at (#433).
-#: Why the last `worktree_is_spent` said no, for the operator-facing report:
-#: `dirty`, `unmerged` or `unreadable`. Empty when it said yes.
-SPENT_REASON=""
-
-worktree_is_spent() { # <path> <branch|""> <default-ref>
-  local path="$1" branch="$2" base="$3" status rc=0 ahead head
-  SPENT_REASON="unreadable"
-  if [[ ! -d "$path" ]]; then
-    warn "worktree ${path} is listed but its directory is missing — not reporting it as removable; run \`git worktree prune\` after confirming it by hand"
-    SPENT_REASON="missing"
-    return 1
-  fi
-  status="$(git -C "$path" status --porcelain 2>/dev/null)" || rc=$?
-  if (( rc != 0 )); then
-    warn "\`git status\` failed in ${path} (exit ${rc}) — not reporting it as removable; inspect that checkout by hand"
-    return 1
-  fi
-  if [[ -n "$status" ]]; then SPENT_REASON="dirty"; return 1; fi
-  if [[ -n "$branch" ]]; then
-    rc=0
-    ahead="$(git -C "$path" rev-list --count "${base}..${branch}" 2>/dev/null)" || rc=$?
-    if (( rc != 0 )) || [[ ! "$ahead" =~ ^[0-9]+$ ]]; then
-      warn "\`git rev-list --count ${base}..${branch}\` failed in ${path} (exit ${rc}) — not reporting it as removable; inspect its history by hand"
-      return 1
-    fi
-    if [[ "$ahead" != "0" ]]; then SPENT_REASON="unmerged"; return 1; fi
-    SPENT_REASON=""
-    return 0
-  fi
+# Does this repository hold anything the owner script could act on: a linked
+# worktree, or a local branch other than the checked-out one? A cheap local
+# gate, never a verdict: the owner script decides. Unreadable counts as yes.
+has_candidates() {
+  local out rc=0
+  out="$(git worktree list --porcelain 2>&1)" || rc=$?
+  if (( rc != 0 )); then warn "\`git worktree list\` failed (exit ${rc}): ${out}"; return 0; fi
+  (( $(grep -c '^worktree ' <<<"$out") > 1 )) && return 0
   rc=0
-  head="$(git -C "$path" rev-parse --verify HEAD 2>/dev/null)" || rc=$?
-  if (( rc != 0 )) || [[ -z "$head" ]]; then
-    warn "\`git rev-parse HEAD\` failed in ${path} (exit ${rc}) — not reporting it as removable; inspect that checkout by hand"
-    return 1
-  fi
-  # merge-base exits 1 for the expected "not an ancestor"; anything else is a
-  # tool failure and must not read as a plain negative.
-  rc=0
-  git -C "$path" merge-base --is-ancestor "$head" "$base" 2>/dev/null || rc=$?
-  case "$rc" in
-    0) SPENT_REASON=""; return 0 ;;
-    1) SPENT_REASON="unmerged"; return 1 ;;
-    *) warn "\`git merge-base --is-ancestor\` failed in ${path} (exit ${rc}) — not reporting it as removable; inspect its history by hand"
-       return 1 ;;
-  esac
+  out="$(git for-each-ref --count=2 --format='%(refname)' refs/heads 2>&1)" || rc=$?
+  if (( rc != 0 )); then warn "\`git for-each-ref refs/heads\` failed (exit ${rc}): ${out}"; return 0; fi
+  (( $(grep -c . <<<"$out") > 1 ))
 }
 
-# Turn leftover branches and orphaned worktrees into blocking-finding sections.
-build_branch_findings() {
-  local current b p section rc=0
-  # symbolic-ref exits 1 for the expected detached-HEAD non-result (no current
-  # branch); any other exit is a real failure and is surfaced.
-  current="$(git symbolic-ref --quiet --short HEAD 2>/dev/null)" || rc=$?
-  (( rc == 0 )) || current=""
-  (( rc == 0 || rc == 1 )) || warn "git symbolic-ref HEAD failed (exit ${rc})"
-  if (( ${#leftover[@]} > 0 )); then
-    section="Leftover local branches (merged, upstream deleted) — delete them:"
-    for b in "${leftover[@]}"; do
-      if [[ "$b" == "$current" ]]; then
-        section+=$'\n'"  - ${b} (currently checked out — switch away first): git switch <other> && git branch -d ${b}"
-      else
-        section+=$'\n'"  - ${b}: git branch -d ${b}"
-      fi
-    done
-    blocking+=("$section")
+# Run the owner script's dry run and turn its decisions into findings: what it
+# would remove blocks, what it keeps for the operator is reported.
+read_owner_decisions() {
+  has_candidates || return 0
+  local here shared prune runner out err rc=0
+  here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)" || { warn "cannot resolve the hooks directory — skipping the worktree check"; return 0; }
+  prune="${here}/../skills/herdr-foreman/prune-worktrees.sh"
+  runner="${here}/bounded-run.sh"
+  if [[ ! -f "$prune" || ! -r "$prune" || ! -f "$runner" || ! -r "$runner" ]]; then
+    warn "${prune} or ${runner} is not readable — reinstall the plugin; skipping the worktree check"
+    return 0
   fi
-  if (( ${#orphaned[@]} > 0 )); then
-    section="Orphaned worktrees (clean, holding nothing the default branch lacks) — remove them:"
-    for p in "${orphaned[@]}"; do
-      section+=$'\n'"  - ${p}: git worktree remove <path> && git branch -d <branch>"
-    done
-    blocking+=("$section")
+  local list
+  if ! list="$(git worktree list --porcelain 2>&1)"; then
+    warn "\`git worktree list\` failed (${list}) — skipping the worktree check"
+    return 0
   fi
-  # Report-only, never an instruction to remove: a detached, dirty or unmerged
-  # worktree is the sweep's once idle, and a locked one is the operator's.
-  for p in ${spent_detached[@]+"${spent_detached[@]}"}; do
-    reports+=("Detached worktree holding nothing new: ${p} — never remove it by hand; the foreman's sweep (skills/herdr-foreman/sweep-worktrees.sh) removes it once idle.")
-  done
-  for p in ${held[@]+"${held[@]}"}; do
-    reports+=("Worktree left for the operator: ${p} — never remove it by hand; the foreman's sweep removes or archives it once idle, and a locked one stays until its lock is released.")
-  done
+  shared="$(sed -n '1s/^worktree //p' <<<"$list")"
+  if [[ -z "$shared" ]]; then
+    warn "cannot name the shared checkout from \`git worktree list\` — skipping the worktree check"
+    return 0
+  fi
+  err="$(mktemp)" || { warn "mktemp failed — skipping the worktree check"; return 0; }
+  out="$(GIT_TERMINAL_PROMPT=0 GIT_SSH_COMMAND="${GIT_SSH_COMMAND:-ssh -o BatchMode=yes}" \
+    bash "$runner" "$PRUNE_BUDGET_SEC" bash "$prune" "$shared" --dry-run 2>"$err")" || rc=$?
+  if (( rc != 0 && rc != 2 )) || [[ -z "$out" ]]; then
+    warn "the worktree check could not run (\`bash ${prune} ${shared} --dry-run\` exited ${rc}: $(tr '\n' ' ' < "$err")) — nothing is blocked on it"
+    rm -f "$err" || warn "could not remove ${err} — delete it by hand"
+    return 0
+  fi
+  rm -f "$err" || warn "could not remove ${err} — delete it by hand"
+  local findings frc=0 line kind program
+  program="$(cat <<'PY'
+import json
+import shlex
+import sys
+
+prune, shared = sys.argv[1], sys.argv[2]
+doc = json.load(sys.stdin)
+removable = ["  - worktree {} ({})".format(r["path"], r.get("branch") or "detached") for r in doc["worktrees_removed"]]
+removable += ["  - branch {}".format(b) for b in doc["branches_deleted"]]
+if removable:
+    print("block\tSpent worktrees and branches origin already holds — remove them with `bash {} {}`:\n{}".format(
+        shlex.quote(prune), shlex.quote(shared), "\n".join(removable)).replace("\n", "\\n"))
+for k in doc["worktrees_kept"]:
+    if k["reason"] in ("dirty", "unpushed"):
+        print("report\tWorktree left for the operator: {} ({}), {} — `{}`".format(
+            k["path"], k.get("branch") or "detached", k["reason"], k["command"]))
+for b in doc["branches_kept"]:
+    if b["reason"] == "unpushed":
+        print("report\tBranch left for the operator: {}, {} unpushed commit(s) — `{}`".format(
+            b["branch"], b["unpushed_commits"], b["command"]))
+for f in doc["failed"]:
+    print("report\tThe worktree check could not decide {}: {}".format(f["target"], f["error"]))
+PY
+)"
+  findings="$(python3 -c "$program" "$prune" "$shared" <<<"$out")" || frc=$?
+  if (( frc != 0 )); then
+    warn "the worktree check's JSON could not be read (python3 exited ${frc}) — nothing is blocked on it"
+    return 0
+  fi
+  while IFS=$'\t' read -r kind line; do
+    case "$kind" in
+      block) blocking+=("${line//\\n/$'\n'}") ;;
+      report) reports+=("$line") ;;
+    esac
+  done <<<"$findings"
   return 0
 }
 
@@ -421,7 +282,7 @@ run_changed_diagnostics() {
   done
 
   if (( ${#sh_files[@]} > 0 )); then
-    if command -v shellcheck >/dev/null 2>&1; then
+    if command -v shellcheck >/dev/null; then
       if ! out="$(shellcheck "${sh_files[@]}" 2>&1)"; then
         blocking+=("shellcheck findings in changed shell files — fix before handoff:"$'\n'"${out}")
       fi
@@ -473,7 +334,7 @@ collect_changed_lintable() {
   tmp="$(mktemp)" || { warn "mktemp failed — skipping changed-set diagnostics"; return 0; }
 
   rc=0
-  if git rev-parse --verify -q HEAD >/dev/null 2>&1; then
+  if git rev-parse --verify -q HEAD >/dev/null; then
     git diff --name-only -z --diff-filter=ACMR HEAD -- '*.sh' '*.py' > "$tmp" || rc=$?
   else
     git diff --name-only -z --diff-filter=ACMR --cached -- '*.sh' '*.py' > "$tmp" || rc=$?
