@@ -16,11 +16,17 @@
   `O_NONBLOCK`, so a FIFO planted at an output path hung the job waiting for a
   writer; it now opens non-blocking and the `S_ISREG` check refuses it. The
   different-content refusal now says what to do: keep the run root for
-  inspection and re-run with a fresh run root. `prove-runtime --output` now
+  inspection and re-run with a fresh run root. The walk also refuses `.` and
+  `..` components (`relative_to` keeps `..`, which the descriptor walk would
+  otherwise follow out of the root), and `extract_archive` now creates the
+  download destination through the same walk anchored at its parent instead of
+  `Path.mkdir`, so a symlinked parent refuses. `prove-runtime --output` now
   requires the output's parent directory to exist. Regression tests cover a
-  symlinked parent at each depth, a symlinked or missing root, a hard link
-  added mid-create for both writers, a FIFO at the output path (bounded by an
-  alarm so a regression fails instead of hanging), and the new refusal text.
+  symlinked parent at each depth, a symlinked or missing root, a `..` path, a
+  download into a symlinked parent, a hard link added mid-create for both
+  writers (a 0277 umask makes a stray chmod visible on the link), a FIFO at
+  the output path (an `os.open` stand-in models the blocking read open, so no
+  timer is involved), and the new refusal text.
   The documented threat model still scopes out a hostile same-user process.
 
 ## 0.3.284 — 2026-09-27

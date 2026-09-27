@@ -9,7 +9,7 @@ import io
 import json
 import os
 from pathlib import Path
-import signal
+import stat
 import subprocess
 import sys
 import tempfile
@@ -1461,6 +1461,14 @@ class ExportTests(unittest.TestCase):
             c.extract_archive(buffer.getvalue(), destination)
         self.assertEqual((destination / "manifest.json").read_bytes(), b"{}")
 
+    def test_extract_into_symlinked_parent_refuses_without_writing_outside(self):
+        self.seal()
+        outside = self.base / "outside"; outside.mkdir()
+        (self.base / "link").symlink_to(outside, target_is_directory=True)
+        with self.assertRaisesRegex(c.Refusal, "symlink or not a directory"):
+            c.extract_archive(self.archive_bytes(self.output), self.base / "link/download")
+        self.assertEqual(list(outside.iterdir()), [])
+
     def test_clean_archive_roundtrip(self):
         self.seal(); buffer = io.BytesIO()
         with zipfile.ZipFile(buffer, "w") as archive:
@@ -1555,6 +1563,7 @@ class WriteTests(unittest.TestCase):
         for writer in (c.write_new, c.write_private):
             with self.subTest(writer=writer.__name__):
                 root, outside = self.dirs()
+                (root / "seed").mkdir(); (root / "seed").chmod(0o700)
                 external = outside / "linked"
                 real_write = os.write
 
@@ -1563,29 +1572,42 @@ class WriteTests(unittest.TestCase):
                         os.link(root / "seed/auth.json", external)
                     return real_write(fd, data)
 
-                with mock.patch.object(c.os, "write", side_effect=linking_write), \
-                        mock.patch.object(c.os, "fchmod", wraps=os.fchmod) as fchmod:
+                # A 0277 umask creates the file 0400, so a chmod to 0600 would be visible on the link.
+                previous = os.umask(0o277)
+                self.addCleanup(os.umask, previous)
+                with mock.patch.object(c.os, "write", side_effect=linking_write):
                     with self.assertRaisesRegex(c.Refusal, "hard-linked elsewhere"):
                         writer(root, root / "seed/auth.json", b"{}")
-                self.assertTrue(external.exists())
-                self.assertFalse(any(call.args[1] == 0o600 for call in fchmod.call_args_list))
+                os.umask(previous)
+                self.assertEqual(external.stat().st_mode & 0o777, 0o400)
+
+    def test_traversal_components_refuse_without_writing_outside(self):
+        root, _ = self.dirs()
+        (root / "inner").mkdir()
+        for writer in (c.write_new, c.write_private):
+            with self.subTest(writer=writer.__name__):
+                with self.assertRaisesRegex(c.Refusal, "without . or .. components"):
+                    writer(root / "inner", root / "inner/../escaped.json", b"{}")
+                self.assertFalse((root / "escaped.json").exists())
 
     def test_fifo_at_output_path_refuses_instead_of_blocking(self):
         root, _ = self.dirs()
         (root / "evidence").mkdir(mode=0o700)
         fifo = root / "evidence/credential-boundary.json"
         os.mkfifo(fifo, 0o600)
-        # No writer ever opens the FIFO: without O_NONBLOCK the read open would block
-        # forever, so a regression is turned into a failure by the alarm, not a hung job.
-        def blocked(_signum, _frame):
-            raise AssertionError("Opening a FIFO output blocked; the existing-file open lost O_NONBLOCK")
+        real_open = os.open
 
-        previous = signal.signal(signal.SIGALRM, blocked)
-        self.addCleanup(signal.signal, signal.SIGALRM, previous)
-        signal.alarm(10)
-        self.addCleanup(signal.alarm, 0)
-        with self.assertRaisesRegex(c.Refusal, "not a regular file"):
-            c.write_new(root, fifo, b"{}")
+        # Kernel semantics, modelled deterministically: a read-only open of a FIFO with
+        # no writer blocks unless O_NONBLOCK is set. No writer ever opens it here.
+        def fifo_aware_open(name, flags, mode=0o777, *, dir_fd=None):
+            info = os.stat(name, dir_fd=dir_fd, follow_symlinks=False) if not flags & os.O_CREAT else None
+            if info is not None and stat.S_ISFIFO(info.st_mode) and not flags & os.O_NONBLOCK:
+                raise AssertionError("Opening a writerless FIFO without O_NONBLOCK would block the job")
+            return real_open(name, flags, mode, dir_fd=dir_fd)
+
+        with mock.patch.object(c.os, "open", side_effect=fifo_aware_open):
+            with self.assertRaisesRegex(c.Refusal, "not a regular file"):
+                c.write_new(root, fifo, b"{}")
         self.assertTrue(fifo.exists())
 
 

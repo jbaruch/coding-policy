@@ -159,7 +159,8 @@ members) is written descriptor-relative below its owning directory: each parent
 component is opened with `O_NOFOLLOW` (created 0700 when absent), the file is
 created exclusively or compared through an `O_NOFOLLOW | O_NONBLOCK`
 descriptor, and its link count is re-checked right before the 0600 `fchmod`.
-A symlinked parent, a FIFO or other non-regular file, a hard link, or different
+A `.` or `..` component, a symlinked parent, a FIFO or other non-regular file, a
+hard link, or different
 existing content refuses; keep that run root for inspection and re-run with a
 fresh one.
 `CODEX_AUTH_JSON` is scoped to that single step. The suite token is scoped to conversion and sealing.

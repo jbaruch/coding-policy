@@ -251,7 +251,8 @@ def write_under(root: Path, path: Path, value: bytes, private: bool) -> None:
     0700; with <private> every directory on the way is also forced to 0700.
     """
     parts = path.relative_to(root).parts  # ValueError: a caller bug, never input
-    require(parts, "Output path names the root directory itself; pass a file below it")
+    require(parts and all(part not in (".", "..") for part in parts),
+            "Output path must name a file below its root without . or .. components; pass a contained path")
     try:
         fd = os.open(root, DIR_FLAGS)
     except FileNotFoundError as exc:
@@ -961,9 +962,9 @@ def extract_archive(data: bytes, destination: Path) -> None:
             require(not destination.is_symlink() and members(destination) == {item.filename: archive.read(item) for item in entries},
                     "Download destination holds different content; refuse to overwrite it")
             return
-        destination.mkdir(mode=0o700)
+        # Anchor at the parent: the walk creates <destination> 0700 without following a symlink.
         for item in entries:
-            write_new(destination, destination / item.filename, archive.read(item))
+            write_new(destination.parent, destination / item.filename, archive.read(item))
 
 
 def download(acr_sha: str, run_id: str, attempt: str, destination: Path) -> dict[str, Any]:
