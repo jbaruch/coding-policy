@@ -59,7 +59,7 @@ command -v jq >/dev/null || { echo "fatal: jq is required — the transport mock
 export RESOLVE_PUBLISH_RUN_INTERVAL_SEC=1
 export RESOLVE_PUBLISH_RUN_BUDGET_SEC=3
 
-# shellcheck disable=SC1090
+# shellcheck disable=SC1090  # ShellCheck cannot resolve the dynamically constructed source path.
 source "$SCRIPT" || true
 set +e
 

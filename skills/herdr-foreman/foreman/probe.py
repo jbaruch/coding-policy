@@ -20,7 +20,7 @@ agent's config, so the per-agent signatures live with the operator and the
 decision logic is testable against inline fixtures.
 """
 
-from .diagnostics import stderr_warn  # noqa: F401  (re-exported for callers)
+from .diagnostics import stderr_warn
 
 #: Probe verdicts.
 IDLE = "idle"
