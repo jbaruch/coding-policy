@@ -113,7 +113,7 @@ run_hook() {
   shift 2
   (( $# )) && shift
   OUT="$(cd "$repo" && printf '%s' "$json" | env PATH="$pathspec" WORKTREE_ROOT="$TMP/wt" \
-    PRUNE_NOW="$PRUNE_NOW" PRUNE_IDLE_HOURS=24 "$@" bash "$HOOK" 2>"$TMP/hook.err")"
+    PRUNE_NOW="$PRUNE_NOW" PRUNE_IDLE_HOURS=24 STOP_PRUNE_BUDGET_SEC=3600 "$@" bash "$HOOK" 2>"$TMP/hook.err")"
   RC=$?
   ERRTEXT="$(cat "$TMP/hook.err")"
 }

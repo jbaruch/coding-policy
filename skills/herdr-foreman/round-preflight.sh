@@ -44,6 +44,9 @@
 #              or no repository: reason, sweep JSON detail; the sweep's JSON
 #              was unreadable or it exited other than 0/1/2: reason, no detail
 #   degraded   only another repository failed: sweep JSON detail; not blocking
+# The sweep runs under bounded-run.sh for SWEEP_BUDGET_SEC: it fetches every
+# repository it finds, and a dead remote would otherwise hold the round. A run
+# past the budget is failed (reason names the budget, no detail).
 # A detail file that cannot be read turns any status into blocked (reason
 # names the file).
 
@@ -55,6 +58,9 @@ set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd && printf x)"
 HERE="${HERE%x}"
 HERE="${HERE%$'\n'}"
+
+#: Wall-clock seconds the worktree sweep may take across every repository.
+SWEEP_BUDGET_SEC=600
 
 SCRATCH=""
 # An EXIT trap's final status becomes the script's, so cleanup ends on zero and
@@ -230,7 +236,8 @@ PY
   if [ ! -d "$wroot" ]; then
     record worktrees ok "" 0 ""
   else
-    bash "${HERE}/sweep-worktrees.sh" "$wroot" > "${scratch}/sweep.json" 2>"${scratch}/sweep.err"
+    bash "${HERE}/bounded-run.sh" "$SWEEP_BUDGET_SEC" bash "${HERE}/sweep-worktrees.sh" "$wroot" \
+      > "${scratch}/sweep.json" 2>"${scratch}/sweep.err"
     rc=$?
     cat "${scratch}/sweep.err" >&2
     case "$rc" in
@@ -268,6 +275,7 @@ PY
             *) record worktrees degraded "" 0 "${scratch}/sweep.json" ;;
           esac
         fi ;;
+      124) record worktrees failed "sweep-worktrees.sh ran past its ${SWEEP_BUDGET_SEC}s budget and was stopped; run it by hand to see which repository's origin it waits on" 0 "" ;;
       *) record worktrees failed "sweep-worktrees.sh exited ${rc}" 0 "" ;;
     esac
   fi

@@ -26,14 +26,16 @@
     pull request (new `prune-remote-branches.sh`, `git push --delete` under
     `--force-with-lease`). Every proof is re-read from origin with
     `git ls-remote` immediately before the deletion, in dry and live runs
-    alike. The remote pass is its own script: it needs the network and `gh`,
+    alike, which branch origin's HEAD names included; on origin the branch's
+    protection and open pull requests are re-read too. The remote pass is its own script: it needs the network and `gh`,
     which the worktree pass does not (`rules/script-delegation.md`).
   - Reported, for the operator's decision: an idle dirty worktree (changed
     files, age, `git -C <path> status`), an idle worktree holding commits no
     origin branch holds (count, age, `git -C <path> push -u origin HEAD`), an
     idle local branch with unpushed commits, and a branch on origin unmerged,
     with no pull request, whose last commit is past the window (commits
-    ahead, age, author, the `gh pr create` and delete commands). A branch
+    ahead, age, author, the `gh pr create` command and a delete leased to
+    the tip judged). A branch
     with an open pull request, or a protected one, is never touched or
     listed. Without a working `gh` nothing on origin is deleted and the
     result says it could not check.
@@ -49,8 +51,10 @@
     check" line when either script fails, times out or cannot reach `gh`.
     It deletes nothing in a Herdr worker session, and runs `--dry-run` under
     tessl, which strips the environment a worker check needs. Both scripts
-    share a 40-second budget through the new `hooks/bounded-run.sh`; `timeout`
-    is absent from a stock macOS. It no longer reads
+    share a 40-second budget through the new
+    `skills/herdr-foreman/bounded-run.sh`; `timeout` is absent from a stock
+    macOS. The round preflight runs the sweep under the same runner with a
+    600-second budget; a sweep past it blocks the round. It no longer reads
     `skills/release/check-leftovers.sh`, which still gates the release.
   - `hooks/stop-handoff-hygiene.sh` drops its own leftover-branch and
     orphaned-worktree predicate and reads `prune-worktrees.sh --dry-run`

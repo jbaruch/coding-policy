@@ -34,7 +34,10 @@
 #   7. Portable mode        -> nothing deleted; the questionable list still
 #                              printed.
 #   8. No origin, no repo   -> silent.
-#   9. Out of time          -> a could-not-check line naming the budget.
+#   9. Out of time          -> a could-not-check line naming the budget (a
+#                              stand-in runner reports the timeout; no case
+#                              waits on a clock, and every other run gets an
+#                              hour).
 #
 # The harness drops `set -e` to aggregate results; every fixture command is
 # checked explicitly (rules/error-handling.md aggregate-reporting carve-out).
@@ -86,7 +89,15 @@ set -euo pipefail
 d="${FAKE_GH_DIR:?}"
 if [[ -e "$d/fail" ]]; then echo "gh: HTTP 502 from https://s3cr3t@example.invalid" >&2; exit 1; fi
 case "$1" in
-  api) exit 0 ;;
+  api)
+    if [[ "$2" == *'?protected'* ]]; then
+      if [[ -f "$d/protected" ]]; then cat "$d/protected"; fi
+    elif [[ -f "$d/protected" ]] && grep -qxF -- "${2#*/branches/}" "$d/protected"; then
+      echo true
+    else
+      echo false
+    fi
+    exit 0 ;;
   pr)
     head=""
     while (( $# )); do
@@ -156,7 +167,7 @@ run_hook() { # <dir> [VAR=value...]
   local dir="$1"; shift
   RC=0
   OUT="$(cd "$dir" && env PATH="$CASE/bin:$PATH" FAKE_GH_DIR="$CASE" WORKTREE_ROOT="$ROOT" \
-    PRUNE_NOW="$PRUNE_NOW" PRUNE_IDLE_HOURS=24 PRUNE_REMOTE_IDLE_HOURS=24 "$@" \
+    PRUNE_NOW="$PRUNE_NOW" PRUNE_IDLE_HOURS=24 PRUNE_REMOTE_IDLE_HOURS=24 LEFTOVER_BUDGET_SEC=3600 "$@" \
     bash "$HOOK" </dev/null 2>"$CASE/hook.err")" || RC=$?
   ERR="$(cat "$CASE/hook.err")"
 }
@@ -168,15 +179,21 @@ context() {
 }
 
 # A process with its cwd inside <dir>, registered with the fake lsof;
-# returns once it is there.
+# returns once it is there. The FIFO read returns when the child writes after
+# its cd: no polling, no deadline.
 start_sleeper() { # <dir>
-  local ready="$CASE/sleeper.ready" tries=0
-  (cd "$1" && : > "$ready" && exec sleep 600) &
+  local ready="$CASE/sleeper.ready" said
+  mkfifo "$ready" || die "mkfifo $ready failed"
+  (
+    if cd "$1"; then
+      printf 'in' > "$ready"
+      exec sleep 3600
+    fi
+    printf 'cd-failed' > "$ready"
+  ) &
   SLEEPER=$!
-  while [[ ! -e "$ready" ]]; do
-    (( tries++ < 100 )) || die "the sleeper never became ready"
-    sleep 0.1
-  done
+  said="$(cat "$ready")" || die "cannot read the sleeper's FIFO $ready"
+  [[ "$said" == in ]] || die "the sleeper could not enter $1"
   printf '%s %s\n' "$SLEEPER" "$1" >> "$FAKE_LSOF_CWDS" || die "cannot register the sleeper with the fake lsof"
 }
 stop_sleeper() {
@@ -337,9 +354,19 @@ main() {
   mk_case c9
   quiet "wt spent" git -C "$SHARED" worktree add -q --detach "$ROOT/spent" origin/main
   age_wt "$ROOT/spent" "$AGED_MTIME"
-  printf '#!/usr/bin/env bash\nset -euo pipefail\nexec sleep 30\n' > "$CASE/slow-lsof" || die "write slow lsof failed"
-  chmod +x "$CASE/slow-lsof" || die "chmod slow lsof failed"
-  run_hook "$SHARED" LEFTOVER_BUDGET_SEC=2 PRUNE_LSOF="$CASE/slow-lsof"
+  # A staged plugin whose bounded runner reports every command out of time:
+  # the budget ends by the runner's own verdict, never by waiting on a clock.
+  local stage="$CASE/stage"
+  mkdir -p "$stage/hooks" "$stage/skills/herdr-foreman" || die "mkdir stage failed"
+  cp "$HOOK" "$stage/hooks/" || die "stage the hook failed"
+  cp "${HERE}/../../skills/herdr-foreman/prune-worktrees.sh" "${HERE}/../../skills/herdr-foreman/prune-remote-branches.sh" \
+    "$stage/skills/herdr-foreman/" || die "stage the owner scripts failed"
+  printf '#!/usr/bin/env bash\necho "bounded-run: stand-in budget spent" >&2\nexit 124\n' > "$stage/skills/herdr-foreman/bounded-run.sh" \
+    || die "write the stand-in runner failed"
+  local real_hook="$HOOK"
+  HOOK="$stage/hooks/$(basename "$real_hook")"
+  run_hook "$SHARED"
+  HOOK="$real_hook"
   ctx="$(context)"
   if [[ $RC -eq 0 && -e "$ROOT/spent" ]] && [[ "$ctx" == "Session-start status — could not check"*"time budget"* ]]; then pass
   else fail "c9: RC=$RC OUT=$OUT ERR=$ERR"; fi

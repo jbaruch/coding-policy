@@ -18,7 +18,9 @@
 #   4. Authority fails          -> blocks; an unanswerable check is not permission.
 #   5. Two checks fail          -> both reported; neither hides the other.
 #   6. Capability due           -> surfaces in `due`, does NOT block.
-#   7. Prune exit 1 vs 2        -> distinct statuses, both blocking.
+#   7. Prune exit 1 vs 2        -> distinct statuses, both blocking; a sweep
+#                                  past its budget (a stand-in runner's 124)
+#                                  blocks too.
 #   8. --no-measure             -> headroom skipped, still ready.
 #   9. Missing --repo/--checkout-> exit 2, usage error, no JSON verdict.
 #  10. Every check's payload    -> carried through under `checks.<name>.detail`.
@@ -56,6 +58,11 @@ shadow() { # <dir> [roster-rc] [authority-rc] [prune-rc] [capability-due] [autho
     noresult) prune=2; sweep_out='{"repos":[{"shared":"/tmp","exit":0,"error":"no JSON"}],"skipped":[],"errors":[]}' ;;
   esac
   stub "$dir" sweep-worktrees.sh "$prune" "$sweep_out"
+  if [[ "$prune" == timeout ]]; then
+    printf '#!/bin/sh\necho "bounded-run: stand-in budget spent" >&2\nexit 124\n' > "$dir/bounded-run.sh" || die "write runner stub"
+  else
+    cp "$REAL/bounded-run.sh" "$dir/" || die "copy the bounded runner"
+  fi
   stub "$dir" resolve-gates.sh 0 '{"instructions":["AGENTS.md"],"workflows":[],"runners":[]}'
   printf '#!/bin/sh\ncase "$*" in\n  *capability-check*) printf %s; exit 0 ;;\n  *measure*) printf %s; exit 0 ;;\nesac\nexit 9\n' \
     "'{\"due\":$due,\"entries\":0}'" "'{\"agents\":{}}'" > "$dir/foreman.sh" || die "write foreman stub"
@@ -149,6 +156,12 @@ main() {
   run "$TMP/prune-mine"
   if [[ $RC -eq 1 ]] && [[ "$(field "$OUT" 'd["checks"]["worktrees"]["status"]')" == '"failed"' ]]; then
     pass; else fail "an error naming this checkout must block, got RC=$RC OUT=$OUT"; fi
+
+  shadow "$TMP/prune-timeout" 0 0 timeout
+  run "$TMP/prune-timeout"
+  if [[ $RC -eq 1 ]] && [[ "$(field "$OUT" 'd["checks"]["worktrees"]["status"]')" == '"failed"' ]] \
+     && [[ "$(field "$OUT" 'd["checks"]["worktrees"]["reason"]')" == *budget* ]]; then
+    pass; else fail "a sweep past its budget must block, got RC=$RC OUT=$OUT"; fi
 
   shadow "$TMP/prune-noresult" 0 0 noresult
   run "$TMP/prune-noresult"

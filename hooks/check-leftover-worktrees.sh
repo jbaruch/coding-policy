@@ -149,7 +149,7 @@ sys.stdout.buffer.write(first[0][len(b"worktree "):])
   here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd && printf x)"
   here="${here%x}"
   here="${here%$'\n'}"
-  local runner="${here}/bounded-run.sh" prune="${here}/../skills/herdr-foreman/prune-worktrees.sh"
+  local runner="${here}/../skills/herdr-foreman/bounded-run.sh" prune="${here}/../skills/herdr-foreman/prune-worktrees.sh"
   local remote="${here}/../skills/herdr-foreman/prune-remote-branches.sh" f
   for f in "$runner" "$prune" "$remote"; do
     if [[ ! -f "$f" || ! -r "$f" ]]; then
