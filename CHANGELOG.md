@@ -1,5 +1,17 @@
 # Changelog
 
+### Fixed
+
+- **The unknown-supervision-command fallback names a runnable help command
+  (#590).** `foreman/supervision_runtime.py` told the reader to "run foreman
+  --help", but no install puts a `foreman` executable on `PATH`, so the hint
+  did not run as written. It now renders through `runnable.command("--help")`
+  like every other hint since #571. The #532 guard in
+  `tests/test_runnable.py` missed it because it only matched bare subcommand
+  names, never a bare `foreman --<flag>`; it now flags that shape too, and a
+  new test runs the rendered fallback command to exit 0. An audit of the
+  package found no other bare `foreman --...` strings.
+
 ## 0.3.302 — 2026-09-27
 
 ### Fixed
