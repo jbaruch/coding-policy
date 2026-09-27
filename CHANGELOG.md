@@ -43,6 +43,8 @@
   change; it stays recorded so the next edit to that list lands its formatting
   in a commit of its own.
 
+## 0.3.297 — 2026-09-27
+
 ### Tests
 
 - **Empty `HERDR_ENV` regression tests for the ACR and stop hooks (#557).**
