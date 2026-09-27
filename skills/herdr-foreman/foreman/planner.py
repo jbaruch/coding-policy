@@ -90,7 +90,10 @@ from .tiers import SEAT_SEPARATOR, canonical_role
 #: consumed inside one round and never migrated (rules/stateful-artifacts.md).
 #: Version 11 adds `partition_proof` to a partitioned plan, copied from the
 #: validate-partition result (#460); `verify-partition` refuses a plan without it.
-PLAN_SCHEMA_VERSION = 11
+#: Version 12 adds `oracle_pins`, each patch or fixture oracle's path and the
+#: sha256 of its bytes when the plan was written (#488). `verify-oracle`
+#: refuses an older plan's patch or fixture oracle, which pinned nothing; replan.
+PLAN_SCHEMA_VERSION = 12
 
 #: What one round in each seat is expected to burn, in points of the agent's
 #: remaining headroom percentage. The ORDER is what the planner acts on:

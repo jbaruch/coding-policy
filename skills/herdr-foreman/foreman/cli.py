@@ -1003,6 +1003,11 @@ def cmd_plan(args, client=None, warn=None, trace=None):
         )
     result["task_context"] = ({"task": args.task, "fix_round": args.fix_round,
                                "plan": args.correction_plan, "work": work} if args.task else None)
+    # A patch or fixture oracle is a path; pin the bytes behind it now, so
+    # `verify-oracle` checks the round against the file it was licensed on (#488).
+    pins = oracle.pin_oracles(result.get("rounds"))
+    if pins:
+        result["oracle_pins"] = pins
     # The composer requires each seat's owned paths and reads no partition, so
     # the plan hands them over from the document `validate-partition` accepted.
     if seat_paths:
