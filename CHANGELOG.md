@@ -1,7 +1,5 @@
 # Changelog
 
-## 0.3.288 — 2026-09-27
-
 ### Fixed
 
 - **The release publication contract and the plugin's hooks now run from an
@@ -33,6 +31,10 @@
   die when `cd` fails. Each has a fixture staging it under a directory whose
   name ends in a newline — for the Stop hook, the plugin root too — and each
   fixture fails against the old code.
+
+## 0.3.288 — 2026-09-27
+
+### Fixed
 
 - **The ACR acceptance helper's output writes are descriptor-relative end to
   end (#558).** Follow-ups from #550's review, in
