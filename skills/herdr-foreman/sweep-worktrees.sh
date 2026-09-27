@@ -97,6 +97,9 @@ import subprocess
 import sys
 
 root, dry, prune = os.path.realpath(sys.argv[1]), sys.argv[2] == "1", sys.argv[3]
+# The prune result's shape is checked by the module every reader shares.
+sys.path.insert(0, os.path.dirname(prune))
+from foreman.prune_result import prune_schema_error
 
 
 class Run:
@@ -278,11 +281,15 @@ for shared in sorted(repos):
         entry["result"] = json.loads(run.stdout) if run.returncode in (0, 2) else None
     except ValueError:
         entry["result"] = None
-    if not isinstance(entry["result"], dict):
+    why = None if entry["result"] is None else prune_schema_error(entry["result"])
+    if entry["result"] is None or why:
         del entry["result"]
-        entry["error"] = run.stderr.strip() or "prune-worktrees.sh exited {} with no JSON".format(run.returncode)
-        # A prune whose result cannot be read decided nothing we can report,
-        # whatever its exit code said.
+        # A prune whose result cannot be read, or is not in its documented
+        # shape, decided nothing we can report, whatever its exit code said.
+        if why:
+            entry["error"] = "prune-worktrees.sh exited {} with a result holding {}".format(run.returncode, why)
+        else:
+            entry["error"] = run.stderr.strip() or "prune-worktrees.sh exited {} with no JSON".format(run.returncode)
         if run.returncode in (0, 2):
             sys.stderr.write("sweep-worktrees: {}: prune-worktrees.sh exited {} without a readable JSON result "
                              "— run it directly to see why\n".format(shared, run.returncode))

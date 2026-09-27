@@ -235,6 +235,7 @@ main() {
   local shadow="$TMP/shadow12"
   mkdir -p "$shadow" || die "mkdir shadow failed"
   cp "$SCRIPT" "$shadow/" || die "copy sweep failed"
+  cp -R "$(dirname "$SCRIPT")/foreman" "$shadow/" || die "copy the foreman package failed"
   printf '#!/usr/bin/env bash\nset -euo pipefail\nprintf "not json\\n"\n' > "$shadow/prune-worktrees.sh" || die "stub prune failed"
   local root12="$TMP/worktrees12"
   mkdir -p "$root12" || die "mkdir root12 failed"
@@ -246,6 +247,18 @@ main() {
   if (( RC == 2 )) && [[ "$(q '"error" in d["repos"][0] and "result" not in d["repos"][0]')" == True ]] \
     && [[ "$ERRTEXT" == *"without a readable JSON result"* ]]; then
     pass; else fail "unreadable result: rc=$RC out=$OUT err=$ERRTEXT"; fi
+
+  # --- 12b. a prune exiting 0 with JSON outside its shape fails the sweep,
+  # and the sweep still prints its own JSON and report.
+  printf '#!/usr/bin/env bash\nset -euo pipefail\nprintf "%%s\\n" '"'"'{"worktrees_removed":[],"worktrees_kept":[null],"branches_deleted":[],"branches_kept":[],"failed":[]}'"'"'\n' \
+    > "$shadow/prune-worktrees.sh" || die "stub malformed prune failed"
+  RUN_SEQ=$((RUN_SEQ+1))
+  OUT="$(bash "$shadow/sweep-worktrees.sh" "$root12" 2>"$TMP/err.$RUN_SEQ")"; RC=$?
+  ERRTEXT="$(cat "$TMP/err.$RUN_SEQ")"
+  echo "12b. a prune result outside its documented shape is a repository error, never a crash"
+  if (( RC == 2 )) && [[ "$(q '"malformed worktrees_kept" in d["repos"][0]["error"] and "result" not in d["repos"][0]')" == True ]] \
+    && [[ "$(q '"Error in" in d["report"]')" == True ]]; then
+    pass; else fail "malformed result: rc=$RC out=$OUT err=$ERRTEXT"; fi
 
   # --- 13. git missing from PATH.
   local nogit="$TMP/nogit" tool

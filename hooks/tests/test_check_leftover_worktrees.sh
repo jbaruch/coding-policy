@@ -239,6 +239,15 @@ SH
   chmod +x "$1" || die "chmod the fake lsof failed"
 }
 
+# A staged plugin: the hook and the result-check module it imports, laid out
+# as the plugin ships them. Each case adds its own owner scripts.
+stage_plugin() { # <dir>
+  mkdir -p "$1/hooks" "$1/skills/herdr-foreman/foreman" || die "mkdir stage $1 failed"
+  cp "$HOOK" "$1/hooks/" || die "stage the hook failed"
+  cp "${HERE}/../../skills/herdr-foreman/foreman/__init__.py" "${HERE}/../../skills/herdr-foreman/foreman/prune_result.py" \
+    "$1/skills/herdr-foreman/foreman/" || die "stage the result checks failed"
+}
+
 main() {
   command -v python3 >/dev/null || die "python3 is required"
   TMP="$(mktemp -d)" || die "mktemp failed"
@@ -371,8 +380,7 @@ main() {
   # A staged plugin whose bounded runner reports every command out of time:
   # the budget ends by the runner's own verdict, never by waiting on a clock.
   local stage="$CASE/stage"
-  mkdir -p "$stage/hooks" "$stage/skills/herdr-foreman" || die "mkdir stage failed"
-  cp "$HOOK" "$stage/hooks/" || die "stage the hook failed"
+  stage_plugin "$stage"
   cp "${HERE}/../../skills/herdr-foreman/prune-worktrees.sh" "${HERE}/../../skills/herdr-foreman/prune-remote-branches.sh" \
     "$stage/skills/herdr-foreman/" || die "stage the owner scripts failed"
   printf '#!/usr/bin/env bash\necho "bounded-run: stand-in budget spent" >&2\nexit 124\n' > "$stage/skills/herdr-foreman/bounded-run.sh" \
@@ -407,8 +415,7 @@ main() {
   quiet "wt linked" git -C "$SHARED" worktree add -q -b review/linked13 "$ROOT/linked" origin/main
   push_branch feat/remote-merged 1
   local stage13="$CASE/stage13" calls13="$CASE/calls13"
-  mkdir -p "$stage13/hooks" "$stage13/skills/herdr-foreman" || die "mkdir stage failed"
-  cp "$HOOK" "$stage13/hooks/" || die "stage the hook failed"
+  stage_plugin "$stage13"
   cp "${HERE}/../../skills/herdr-foreman/bounded-run.sh" "$stage13/skills/herdr-foreman/" || die "stage the runner failed"
   local owner
   for owner in prune-worktrees.sh prune-remote-branches.sh; do
@@ -428,8 +435,7 @@ main() {
   echo "12. an owner result missing its documented fields is a could-not-check status, never a clean one"
   mk_case c12
   local stage12="$CASE/stage"
-  mkdir -p "$stage12/hooks" "$stage12/skills/herdr-foreman" || die "mkdir stage failed"
-  cp "$HOOK" "$stage12/hooks/" || die "stage the hook failed"
+  stage_plugin "$stage12"
   cp "${HERE}/../../skills/herdr-foreman/bounded-run.sh" "$stage12/skills/herdr-foreman/" || die "stage the runner failed"
   printf '#!/usr/bin/env bash\nprintf "{}\\n"\n' > "$stage12/skills/herdr-foreman/prune-worktrees.sh" || die "write the stand-in prune failed"
   printf '#!/usr/bin/env bash\nprintf "{\\"deleted\\": [], \\"questionable\\": [{\\"branch\\": 7}], \\"kept\\": [], \\"failed\\": [], \\"could_not_check\\": null, \\"default_branch\\": \\"main\\"}\\n"\n' \
