@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.287 — 2026-09-27
+
 ### Fixed
 
 - **A frozen-brief path with a symlinked ancestor is no longer read back
