@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.282 — 2026-09-27
+
 ### Changed
 
 - **Spent worktrees and branches are removed automatically; work that exists
