@@ -14,12 +14,17 @@
   identical file without touching its mode, so an interrupted run could leave
   `seed/auth.json` or `central/seed-oracle.json` group- or world-readable; it
   now re-applies and verifies `0600` on every run, and `seed` re-applies and
-  verifies `0700` on both credential directories, refusing a symlinked or
-  non-directory ancestor under the run root before writing or chmodding. Regression tests cover a
+  verifies `0700` on both credential directories. Every write, compare and
+  mode change now runs through `O_NOFOLLOW` descriptors opened relative to the
+  run root (`fchmod`, never a path `chmod`), so a symlink swapped in mid-run is
+  refused rather than followed, and an existing output with a hard link
+  elsewhere is refused before its mode is touched. Regression tests cover a
   short token, a short API key, credentials at the floor, a realistic
   auth.json with `auth_mode` metadata seeding cleanly, and a loosened mode
   restored by a re-run of `seed`, and `seed/` or `central/` swapped for a
-  symlink refusing with nothing written or chmodded outside the root.
+  symlink, before or during the run, and a hard link or swapped-in symlink
+  to a file outside the root, each refusing with nothing written or chmodded
+  outside the root.
 
 ## 0.3.282 — 2026-09-27
 

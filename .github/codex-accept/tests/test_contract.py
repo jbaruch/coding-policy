@@ -1315,6 +1315,57 @@ class ExportTests(unittest.TestCase):
                 self.assertEqual(outside.stat().st_mode & 0o777, 0o755)
                 self.assertFalse((root / "central").exists() and not (root / "central").is_symlink())
 
+    def test_directory_swapped_to_symlink_after_root_open_writes_nothing_outside(self):
+        real_mkdir = os.mkdir
+        with tempfile.TemporaryDirectory() as run, tempfile.TemporaryDirectory() as out:
+            root, outside = Path(run).resolve(), Path(out).resolve()
+            outside.chmod(0o755)
+
+            def swap(name, mode=0o777, *, dir_fd=None):
+                real_mkdir(name, mode, dir_fd=dir_fd)
+                os.rmdir(name, dir_fd=dir_fd)
+                os.symlink(outside, name, dir_fd=dir_fd)
+
+            with mock.patch.object(c.os, "mkdir", side_effect=swap):
+                with self.assertRaisesRegex(c.Refusal, "symlink or not a directory"):
+                    c.write_private(root, root / "seed/auth.json", b"{}")
+            self.assertEqual(list(outside.iterdir()), [])
+            self.assertEqual(outside.stat().st_mode & 0o777, 0o755)
+
+    def test_identical_hard_link_outside_root_refuses_without_chmod(self):
+        with tempfile.TemporaryDirectory() as run, tempfile.TemporaryDirectory() as out:
+            root, outside = Path(run).resolve(), Path(out).resolve()
+            external = outside / "auth.json"; external.write_bytes(b"{}"); external.chmod(0o644)
+            (root / "seed").mkdir(mode=0o700)
+            os.link(external, root / "seed/auth.json")
+            with self.assertRaisesRegex(c.Refusal, "hard-linked elsewhere"):
+                c.write_private(root, root / "seed/auth.json", b"{}")
+            self.assertEqual(external.stat().st_mode & 0o777, 0o644)
+
+    def test_file_swapped_to_symlink_is_never_chmodded_through(self):
+        real_open = os.open
+        for when in ("before-open", "after-open"):
+            with self.subTest(when=when), tempfile.TemporaryDirectory() as run, tempfile.TemporaryDirectory() as out:
+                root, outside = Path(run).resolve(), Path(out).resolve()
+                external = outside / "target"; external.write_bytes(b"{}"); external.chmod(0o644)
+                c.write_private(root, root / "seed/auth.json", b"{}")
+                (root / "seed/auth.json").chmod(0o644)
+
+                def racing_open(name, flags, mode=0o777, *, dir_fd=None):
+                    idempotent = name == "auth.json" and not flags & os.O_CREAT
+                    if idempotent and when == "before-open":
+                        os.unlink(name, dir_fd=dir_fd); os.symlink(external, name, dir_fd=dir_fd)
+                    fd = real_open(name, flags, mode, dir_fd=dir_fd)
+                    if idempotent and when == "after-open":
+                        os.unlink(name, dir_fd=dir_fd); os.symlink(external, name, dir_fd=dir_fd)
+                    return fd
+
+                expected = "is a symlink" if when == "before-open" else "replaced mid-run"
+                with mock.patch.object(c.os, "open", side_effect=racing_open):
+                    with self.assertRaisesRegex(c.Refusal, expected):
+                        c.write_private(root, root / "seed/auth.json", b"{}")
+                self.assertEqual(external.stat().st_mode & 0o777, 0o644)
+
     def test_non_directory_credential_parent_refuses(self):
         with tempfile.TemporaryDirectory() as run:
             root = Path(run).resolve()
