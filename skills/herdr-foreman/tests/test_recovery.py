@@ -1654,8 +1654,20 @@ class JudgeModeReservationTests(unittest.TestCase):
                         del corrupt["dispatches"][0]["context_before_send"]
                     else:
                         corrupt["dispatches"][0]["context_before_send"] = broken
-                    with self.assertRaisesRegex(UsageError, "lost the pre-send context"):
+                    with self.assertRaisesRegex(UsageError, "pre-send context"):
                         validate_store(corrupt, [])
+
+    def test_a_present_context_is_an_object_on_every_status(self):
+        for record, status in ((self.judge(judge_mode="diagnosis"), "reserved"),
+                               ({**self.judge(), "id": "review-1", "role": "reviewer"}, "not_sent")):
+            for broken in (None, "diagnosis", ["diagnosis"]):
+                with self.subTest(role=record["role"], status=status, context=broken):
+                    store = empty_state()["recovery"]
+                    reserve(store, record, AT)
+                    store["dispatches"][0]["status"] = status
+                    store["dispatches"][0]["context_before_send"] = broken
+                    with self.assertRaisesRegex(UsageError, "pre-send context is not an object"):
+                        validate_store(store, [])
 
     def test_a_stored_mode_less_judge_row_can_still_be_retried(self):
         # A legacy row that never reached a worker keeps its own retry path.

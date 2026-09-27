@@ -17,9 +17,10 @@
   with no mode must carry no `judge_mode` key at all, null included. The
   validator checks every
   dispatch's `context_before_send.judge_mode` against the row, pending or
-  applied, and refuses a version-3 dispatch past `reserved` whose
-  `context_before_send` is missing or not an object, since reconcile would
-  otherwise recover it as `unknown`.
+  applied, refuses a `context_before_send` that is present but not an
+  object on any status, and refuses a version-3 dispatch past `reserved`
+  with no such object, since reconcile would otherwise recover it as
+  `unknown`.
 
 ## 0.3.293 — 2026-09-27
 

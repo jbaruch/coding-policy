@@ -1970,6 +1970,10 @@ def validate_store(store, assignments):
             # Reconcile reads a pending judge's mode from this context, so it is
             # checked before the dispatch applies, not only after (#495).
             context = row.get("context_before_send")
+            # `mark_sending` writes only an object, on every status.
+            if "context_before_send" in row and not isinstance(context, dict):
+                raise UsageError("A dispatch's pre-send context is not an object; "
+                                 "restore the original context_before_send.", {})
             # A mode-bearing dispatch past `reserved` went through
             # `mark_sending`; without that context reconcile recovers `unknown`.
             if (row["schema_version"] == JUDGE_DISPATCH_VERSION and row["status"] in SENT_STATUSES

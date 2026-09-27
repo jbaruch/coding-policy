@@ -455,7 +455,7 @@ dispatch/result carrying its `judge_mode` uses version 3. Version 1 and 2 rows
 are never restamped: a judge dispatch recorded before version 3 keeps no mode,
 and its ledger row reads `unknown`. A new judge reservation without a mode is
 refused; only stored rows, and a retry of one, keep the mode-less shape.
-`context_before_send` is an object. On a mode-bearing dispatch it carries
+`context_before_send`, wherever present, is an object. On a mode-bearing dispatch it carries
 `judge_mode` equal to the dispatch's own; on any other dispatch it carries no
 `judge_mode` key, null included. This holds from the send onward, pending or
 applied, and a version-3 dispatch past `reserved` without the object is refused. Checkpoints are at
