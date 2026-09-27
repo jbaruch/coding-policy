@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.288 — 2026-09-27
+
 ### Fixed
 
 - **The ACR acceptance helper's output writes are descriptor-relative end to
