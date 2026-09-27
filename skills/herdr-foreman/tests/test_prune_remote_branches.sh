@@ -136,6 +136,9 @@ main() {
   command -v python3 >/dev/null || die "python3 is required"
   TMP="$(mktemp -d)" || die "mktemp failed"
   trap cleanup EXIT
+  # The operator's git config never reaches the script under test.
+  : > "$TMP/gitconfig" || die "cannot create an empty global git config"
+  export GIT_CONFIG_GLOBAL="$TMP/gitconfig" GIT_CONFIG_NOSYSTEM=1
 
   echo "1. a merged branch with no pull request is deleted on origin"
   mk_case c1

@@ -197,8 +197,8 @@ SLEEPER_READY_TRIES=100
 
 # Start a background process whose cwd is <dir>, and return only once it is
 # provably there: the child writes its physical cwd to a ready file after the
-# cd, then execs sleep; the harness waits for that file (bounded) and confirms
-# the pid's cwd with lsof (or the ready file itself, for a path lsof escapes).
+# cd, then execs sleep; the harness waits for that file (bounded) and registers
+# the process with the fake lsof.
 start_sleeper() { # <dir>
   local want ready="$TMP/sleeper.ready" i got
   want="$(cd "$1" && pwd -P && printf x)" || die "cannot resolve the sleeper's directory $1"
@@ -214,10 +214,10 @@ start_sleeper() { # <dir>
   got="$(cat "$ready" && printf x)" || die "cannot read the sleeper's ready file $ready"
   got="${got%x}"; got="${got%$'\n'}"
   [[ "$got" == "$want" ]] || die "the sleeper reported cwd '$got', not '$want'"
-  if LC_ALL=C python3 -c 'import sys; sys.exit(0 if all(0x20 <= b <= 0x7e for b in sys.argv[1].encode("utf-8", "surrogateescape")) and "\\" not in sys.argv[1] else 1)' "$want"; then
-    local listed
-    listed="$(lsof -a -p "$SLEEPER" -d cwd -Fn 2>"$TMP/lsof.err")" || die "lsof could not read the sleeper's cwd: $(cat "$TMP/lsof.err") — install lsof"
-    [[ "$listed" == *$'\n'"n${want}"* ]] || die "lsof shows the sleeper's cwd is not $want: $listed"
+  # Registered with the fake probe; a path it cannot hold on one line is one
+  # the script refuses to match before probing at all.
+  if [[ "$want" != *$'\n'* ]]; then
+    printf '%s %s\n' "$SLEEPER" "$want" >> "$FAKE_LSOF_CWDS" || die "cannot register the sleeper with the fake lsof"
   fi
 }
 
@@ -241,10 +241,29 @@ stop_sleeper() {
   kill "$SLEEPER" || die "could not stop the sleeper $SLEEPER"
   wait "$SLEEPER" || st=$?
   case "$st" in
-    143) SLEEPER="" ;;
+    143) SLEEPER=""; : > "$FAKE_LSOF_CWDS" || die "cannot clear the fake lsof's records" ;;
     *) die "the sleeper $SLEEPER ended with status $st, not 143 (SIGTERM)" ;;
   esac
 }
+# The process probe every run uses: a stand-in for lsof that prints one
+# NUL-framed cwd record per "<pid> <cwd>" line of $FAKE_LSOF_CWDS and nothing
+# else, so the host's own process table never reaches a test. A case that
+# needs a process inside a worktree registers it there; a case exercising the
+# probe's failure modes names its own stand-in through PRUNE_LSOF.
+write_fake_lsof() { # <path>
+  mkdir -p "$(dirname "$1")" || die "mkdir for the fake lsof failed"
+  cat > "$1" <<'SH' || die "write the fake lsof failed"
+#!/usr/bin/env bash
+set -euo pipefail
+list="${FAKE_LSOF_CWDS:-}"
+if [[ -z "$list" || ! -s "$list" ]]; then exit 0; fi
+while IFS=' ' read -r pid cwd; do
+  printf 'p%s\0\nfcwd\0n%s\0\n' "$pid" "$cwd"
+done < "$list"
+SH
+  chmod +x "$1" || die "chmod the fake lsof failed"
+}
+
 main() {
   PASS=0; FAIL=0; RUN_SEQ=0
   SCRIPT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/prune-worktrees.sh"
@@ -258,6 +277,8 @@ main() {
   # its own. Fixtures pass theirs with -c.
   : > "$TMP/gitconfig" || die "cannot create an empty global git config"
   export GIT_CONFIG_GLOBAL="$TMP/gitconfig" GIT_CONFIG_NOSYSTEM=1
+  write_fake_lsof "$TMP/fake-lsof/lsof"
+  export PRUNE_LSOF="$TMP/fake-lsof/lsof" FAKE_LSOF_CWDS="$TMP/fake-lsof/cwds"
   ROOT="$TMP/worktrees"
   mkdir -p "$ROOT" || die "mkdir root failed"
   real_git="$(command -v git)" || die "git not found on PATH — install git to run these tests"

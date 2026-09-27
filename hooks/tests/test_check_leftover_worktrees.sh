@@ -167,7 +167,8 @@ context() {
   printf '%s' "$OUT" | python3 -c 'import json,sys; print(json.load(sys.stdin)["additionalContext"])'
 }
 
-# A process with its cwd inside <dir>; returns once it is there.
+# A process with its cwd inside <dir>, registered with the fake lsof;
+# returns once it is there.
 start_sleeper() { # <dir>
   local ready="$CASE/sleeper.ready" tries=0
   (cd "$1" && : > "$ready" && exec sleep 600) &
@@ -176,6 +177,7 @@ start_sleeper() { # <dir>
     (( tries++ < 100 )) || die "the sleeper never became ready"
     sleep 0.1
   done
+  printf '%s %s\n' "$SLEEPER" "$1" >> "$FAKE_LSOF_CWDS" || die "cannot register the sleeper with the fake lsof"
 }
 stop_sleeper() {
   if [[ -n "$SLEEPER" ]]; then
@@ -184,15 +186,38 @@ stop_sleeper() {
     wait "$SLEEPER"
   fi
   SLEEPER=""
+  if [[ -n "${FAKE_LSOF_CWDS:-}" && -e "${FAKE_LSOF_CWDS:-}" ]] && ! : > "$FAKE_LSOF_CWDS"; then
+    echo "warn: could not clear the fake lsof's records" >&2
+  fi
   return 0
+}
+
+# The process probe every run uses: a stand-in for lsof that prints one
+# NUL-framed cwd record per "<pid> <cwd>" line of $FAKE_LSOF_CWDS and nothing
+# else, so the host's own process table never reaches a test. A case that
+# needs a process inside a worktree registers it there; a case exercising the
+# probe's failure modes names its own stand-in through PRUNE_LSOF.
+write_fake_lsof() { # <path>
+  mkdir -p "$(dirname "$1")" || die "mkdir for the fake lsof failed"
+  cat > "$1" <<'SH' || die "write the fake lsof failed"
+#!/usr/bin/env bash
+set -euo pipefail
+list="${FAKE_LSOF_CWDS:-}"
+if [[ -z "$list" || ! -s "$list" ]]; then exit 0; fi
+while IFS=' ' read -r pid cwd; do
+  printf 'p%s\0\nfcwd\0n%s\0\n' "$pid" "$cwd"
+done < "$list"
+SH
+  chmod +x "$1" || die "chmod the fake lsof failed"
 }
 
 main() {
   command -v python3 >/dev/null || die "python3 is required"
-  command -v lsof >/dev/null || die "lsof is required: the owner script's in-use probe runs it"
   TMP="$(mktemp -d)" || die "mktemp failed"
   TMP="$(cd "$TMP" && pwd -P)" || die "cannot resolve $TMP"
   trap cleanup EXIT
+  write_fake_lsof "$TMP/fake-lsof/lsof"
+  export PRUNE_LSOF="$TMP/fake-lsof/lsof" FAKE_LSOF_CWDS="$TMP/fake-lsof/cwds"
   export HOME="$TMP/home" GIT_CONFIG_NOSYSTEM=1
   mkdir -p "$HOME" || die "mkdir HOME failed"
   export GIT_AUTHOR_NAME=Ada GIT_AUTHOR_EMAIL=ada@example.invalid

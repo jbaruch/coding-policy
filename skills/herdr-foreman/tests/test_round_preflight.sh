@@ -90,7 +90,7 @@ main() {
     pass; else fail "every check clean is ready, got RC=$RC OUT=$OUT"; fi
 
   shadow "$TMP/roster"
-  OUT="$(HERDR_ENV='' bash "$TMP/roster/round-preflight.sh" --repo o/r --checkout /tmp 2>"$ERRFILE")"
+  OUT="$(HERDR_ENV='' WORKTREE_ROOT="$TMP" bash "$TMP/roster/round-preflight.sh" --repo o/r --checkout /tmp 2>"$ERRFILE")"
   RC=$?
   if [[ $RC -eq 1 ]] && [[ "$(field "$OUT" 'd["checks"]["mode"]["status"]')" == '"standalone"' ]] \
      && ! printf '%s' "$OUT" | grep -q '"roster"'; then
@@ -173,7 +173,7 @@ main() {
   shadow "$TMP/usage"
   for args in "--checkout /tmp" "--repo o/r"; do
     # shellcheck disable=SC2086  # deliberate word splitting of the fixture args
-    OUT="$(HERDR_ENV=fixture bash "$TMP/usage/round-preflight.sh" $args 2>"$ERRFILE")"
+    OUT="$(HERDR_ENV=fixture WORKTREE_ROOT="$TMP" bash "$TMP/usage/round-preflight.sh" $args 2>"$ERRFILE")"
     RC=$?
     ERRTEXT="$(cat "$ERRFILE")"
     if [[ $RC -eq 2 && -z "$OUT" ]] && printf '%s' "$ERRTEXT" | grep -q 'round-preflight:'; then

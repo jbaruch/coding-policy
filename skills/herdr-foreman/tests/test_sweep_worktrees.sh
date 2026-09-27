@@ -104,6 +104,25 @@ listed() { # <shared> <path>  -> 0 listed, 1 not listed; any other failure abort
   case "$rc" in 0) return 0 ;; 1) return 1 ;; *) die "grep failed (exit $rc) reading the worktree inventory" ;; esac
 }
 
+# The process probe every run uses: a stand-in for lsof that prints one
+# NUL-framed cwd record per "<pid> <cwd>" line of $FAKE_LSOF_CWDS and nothing
+# else, so the host's own process table never reaches a test. A case that
+# needs a process inside a worktree registers it there; a case exercising the
+# probe's failure modes names its own stand-in through PRUNE_LSOF.
+write_fake_lsof() { # <path>
+  mkdir -p "$(dirname "$1")" || die "mkdir for the fake lsof failed"
+  cat > "$1" <<'SH' || die "write the fake lsof failed"
+#!/usr/bin/env bash
+set -euo pipefail
+list="${FAKE_LSOF_CWDS:-}"
+if [[ -z "$list" || ! -s "$list" ]]; then exit 0; fi
+while IFS=' ' read -r pid cwd; do
+  printf 'p%s\0\nfcwd\0n%s\0\n' "$pid" "$cwd"
+done < "$list"
+SH
+  chmod +x "$1" || die "chmod the fake lsof failed"
+}
+
 main() {
   PASS=0; FAIL=0; RUN_SEQ=0
   SCRIPT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/sweep-worktrees.sh"
@@ -116,6 +135,8 @@ main() {
   # its own. Fixtures pass theirs with -c.
   : > "$TMP/gitconfig" || die "cannot create an empty global git config"
   export GIT_CONFIG_GLOBAL="$TMP/gitconfig" GIT_CONFIG_NOSYSTEM=1
+  write_fake_lsof "$TMP/fake-lsof/lsof"
+  export PRUNE_LSOF="$TMP/fake-lsof/lsof" FAKE_LSOF_CWDS="$TMP/fake-lsof/cwds"
   # --- 4. dry run, on its own two repositories and root.
   local droot="$TMP/worktrees-dry"
   mkdir -p "$droot" || die "mkdir dry root failed"
