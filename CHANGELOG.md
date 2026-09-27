@@ -38,6 +38,10 @@
   from PR #528's review. `herdr-foreman` Step 11's `check-member` follow-up
   paragraph, which merged several directives, is now one bullet per directive.
 
+## 0.3.298 — 2026-09-27
+
+### Fixed
+
 - **Four edges in the tier-pressure fields #477 added (#490).** Deferred
   Copilot advisories from #489's last review, all latent until a worker has a
   `tiers` table. `select_tier` recorded `de_escalated` whenever scarcity met
