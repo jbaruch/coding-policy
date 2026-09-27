@@ -11,7 +11,11 @@
   `bash ` prefix. `scripts/tests/test_shipped_invocations.py` scans every
   fenced shell block under `skills/` and `hooks/` for a script named by bare
   path in command position, so the next one fails CI instead of a consumer's
-  release; its first run caught a `foreman.sh validate-partition` in
+  release. It tokenizes each line with `shlex` rather than a regex: three
+  review rounds each found a quoting, operator or wrapper form a regex split
+  missed, and a real tokenizer settles the whole class. It skips assignments,
+  redirections, keywords and wrappers such as `env` and `sudo`, and reports a
+  line it cannot tokenize instead of skipping it; its first run caught a `foreman.sh validate-partition` in
   `skills/herdr-foreman/references/review-partition.md`, a path that resolves
   nowhere. It and the matching `foreman detect-triggers` block in
   `specialists.md` are now `text` synopses pointing at the runnable form in

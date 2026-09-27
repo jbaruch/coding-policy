@@ -9,13 +9,18 @@ kept six bare invocations it did not reach (#487). This suite scans every
 fenced shell block under the shipped `skills/` and `hooks/` trees so the next
 one is caught before it ships.
 
-A command position is the start of a line, or what follows `$(`, `(`, `)`,
-a backtick, `|`, `||`, `&`, `&&` or `;`, after leading `NAME=value`
-assignments and the shell keywords and braces that precede a command. A word
-there ending in `.sh` or `.py`, quoted or not, is a bare invocation.
+Each logical fenced line (backslash continuations joined) is tokenized with
+`shlex` in POSIX mode, so quotes, escapes and operators are the shell's, not a
+regex's. A command position is the first token, or the one after an operator,
+a backtick or `$(`. Leading `NAME=value` assignments, redirections with their
+targets, the keywords and braces in `KEYWORDS`, and the wrappers in `WRAPPERS`
+with their own options and assignments are skipped. A token there ending in
+`.sh` or `.py` is a bare invocation. A line `shlex` cannot tokenize is
+reported, never skipped.
 """
 
 import re
+import shlex
 import sys
 import unittest
 from pathlib import Path
@@ -29,16 +34,25 @@ SHIPPED = ("skills", "hooks")
 SHELL_FENCES = frozenset({"", "bash", "sh", "shell", "zsh", "console"})
 
 FENCE = re.compile(r"^\s*(```|~~~)\s*([\w+-]*)")
-SEPARATOR = re.compile(r"\$\(|\(|\)|`|\|\||&&|&|\||;")
-#: A leading `NAME=value`, where the value may hold quoted runs with spaces.
-ASSIGNMENT = re.compile(r"""^[A-Za-z_]\w*=(?:"[^"]*"|'[^']*'|[^\s"'])*\s*""")
-KEYWORDS = frozenset({"if", "then", "do", "else", "elif", "while", "until", "!", "exec", "command", "time", "{", "}"})
+ASSIGNMENT = re.compile(r"^[A-Za-z_]\w*=")
 SCRIPT = re.compile(r"\.(sh|py)$")
+
+#: `shlex` groups a run of these into one operator token. A run holding `<` or
+#: `>` is a redirection, whose next token is its target; any other run ends a
+#: command, so the next word is in command position.
+OPERATOR_CHARS = frozenset("();<>|&")
+
+#: Words that precede a command without being one.
+KEYWORDS = frozenset({"if", "then", "do", "else", "elif", "while", "until", "!", "{", "}"})
+
+#: Commands that run their first non-option, non-assignment operand.
+WRAPPERS = frozenset({"env", "sudo", "exec", "command", "time", "nohup", "nice"})
 
 
 def shell_blocks(text):
-    """Yield (line_number, line) for every line inside a shell fence."""
+    """Yield (line_number, line) for every logical line inside a shell fence."""
     fence = None
+    pending = None
     for number, line in enumerate(text.splitlines(), start=1):
         match = FENCE.match(line)
         if fence is None:
@@ -46,33 +60,70 @@ def shell_blocks(text):
                 fence = (match.group(1), match.group(2).lower() in SHELL_FENCES)
             continue
         if match and match.group(1) == fence[0] and not match.group(2):
-            fence = None
+            if pending is not None:
+                yield pending
+            fence, pending = None, None
             continue
-        if fence[1]:
-            yield number, line
+        if not fence[1]:
+            continue
+        pending = (number, line) if pending is None else (pending[0], pending[1] + " " + line)
+        if pending[1].endswith("\\"):
+            pending = (pending[0], pending[1][:-1])
+            continue
+        yield pending
+        pending = None
+
+
+def tokens(line):
+    """POSIX shell tokens, with each backtick split off as its own token."""
+    lexer = shlex.shlex(line, posix=True, punctuation_chars=True)
+    lexer.whitespace_split = True
+    out = []
+    for token in lexer:
+        for index, part in enumerate(token.split("`")):
+            if index:
+                out.append("`")
+            if part:
+                out.append(part)
+    return out
 
 
 def bare_invocations(line):
-    """Words in command position that name a script with no interpreter."""
+    """Words in command position that name a script with no interpreter.
+
+    Raises ValueError when the line does not tokenize (an unbalanced quote).
+    """
+    words = tokens(line)
     found = []
-    for segment in SEPARATOR.split(line):
-        rest = segment.strip()
-        while True:
-            assignment = ASSIGNMENT.match(rest)
-            if assignment:
-                rest = rest[assignment.end():]
-                continue
-            words = rest.split(None, 1)
-            if words and words[0] in KEYWORDS:
-                rest = words[1] if len(words) > 1 else ""
-                continue
-            break
-        words = rest.split(None, 1)
-        if not words:
+    expecting = True
+    wrapped = False
+    index = 0
+    while index < len(words):
+        token = words[index]
+        index += 1
+        if token == "`" or token.endswith("$"):
+            expecting, wrapped = True, False
             continue
-        word = words[0].strip("\"'")
-        if SCRIPT.search(word):
-            found.append(word)
+        if set(token) <= OPERATOR_CHARS:
+            if "<" in token or ">" in token:
+                index += 1
+            else:
+                expecting, wrapped = True, False
+            continue
+        if token.isdigit() and index < len(words) and words[index][0] in "<>":
+            continue
+        if not expecting:
+            continue
+        if ASSIGNMENT.match(token) or token in KEYWORDS:
+            continue
+        if wrapped and token.startswith("-"):
+            continue
+        if token in WRAPPERS:
+            wrapped = True
+            continue
+        if SCRIPT.search(token):
+            found.append(token)
+        expecting, wrapped = False, False
     return found
 
 
@@ -93,12 +144,19 @@ class BareInvocationDetectorTest(unittest.TestCase):
             ("if skills/a/b.sh; then echo ok; fi", ["skills/a/b.sh"]),
             ("FOO=1 skills/a/b.sh", ["skills/a/b.sh"]),
             ("out=$(skills/x/run.sh)", ["skills/x/run.sh"]),
+            ("out=$(true);skills/x/run.sh", ["skills/x/run.sh"]),
+            ("out=`skills/x/run.sh`", ["skills/x/run.sh"]),
             ("echo done & skills/x/run.sh", ["skills/x/run.sh"]),
             ("(skills/x/run.sh)", ["skills/x/run.sh"]),
             ("{ skills/x/run.sh; }", ["skills/x/run.sh"]),
             ('"skills/x/run.sh" --flag', ["skills/x/run.sh"]),
             ('X="two words" skills/x/run.sh', ["skills/x/run.sh"]),
             ("Y='a b' Z=c skills/x/run.sh", ["skills/x/run.sh"]),
+            ("X=a\\ b skills/x/run.sh", ["skills/x/run.sh"]),
+            ("env MODE=1 skills/x/run.sh", ["skills/x/run.sh"]),
+            ("sudo -E skills/x/run.sh", ["skills/x/run.sh"]),
+            (">out skills/x/run.sh", ["skills/x/run.sh"]),
+            ("2>/dev/null skills/x/run.sh", ["skills/x/run.sh"]),
         ):
             with self.subTest(line=line):
                 self.assertEqual(bare_invocations(line), expected)
@@ -111,9 +169,18 @@ class BareInvocationDetectorTest(unittest.TestCase):
             "cat skills/a/b.sh | head",
             "bash -n skills/a/b.sh",
             "echo done",
+            'echo "(skills/x/run.sh)"',
+            'echo "literal; skills/x/run.sh"',
+            "bash a.sh > skills/x/out.sh",
+            "bash a.sh 2>&1 | tee log",
+            "env MODE=1 bash skills/x/run.sh",
         ):
             with self.subTest(line=line):
                 self.assertEqual(bare_invocations(line), [])
+
+    def test_refuses_an_untokenizable_line(self):
+        with self.assertRaises(ValueError):
+            bare_invocations('echo "unterminated')
 
     def test_reads_only_shell_fences(self):
         text = "\n".join((
@@ -130,6 +197,12 @@ class BareInvocationDetectorTest(unittest.TestCase):
         ))
         self.assertEqual([line for _, line in shell_blocks(text)], ["skills/in/bash.sh", "skills/in/plain.sh"])
 
+    def test_joins_continued_lines(self):
+        text = "\n".join(("```bash", "bash a.sh \\", "  --flag | skills/x/run.sh", "```"))
+        blocks = list(shell_blocks(text))
+        self.assertEqual([number for number, _ in blocks], [2])
+        self.assertEqual(bare_invocations(blocks[0][1]), ["skills/x/run.sh"])
+
 
 class ShippedInvocationTest(unittest.TestCase):
     """Every shipped command block names its interpreter."""
@@ -138,8 +211,13 @@ class ShippedInvocationTest(unittest.TestCase):
         offenders = []
         for path in shipped_markdown():
             for number, line in shell_blocks(path.read_text(encoding="utf-8")):
-                for word in bare_invocations(line):
-                    offenders.append("{}:{}: {}".format(path.relative_to(ROOT), number, word))
+                where = "{}:{}".format(path.relative_to(ROOT), number)
+                try:
+                    words = bare_invocations(line)
+                except ValueError as error:
+                    offenders.append("{}: cannot tokenize ({}); balance its quotes".format(where, error))
+                    continue
+                offenders.extend("{}: {}".format(where, word) for word in words)
         self.assertEqual(offenders, [], "prefix each invocation with `bash ` or `python3 ` — "
                          "an installed plugin's scripts are mode 0644")
 
