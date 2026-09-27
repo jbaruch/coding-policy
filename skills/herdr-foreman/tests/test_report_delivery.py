@@ -19,7 +19,7 @@ from foreman import cli, recovery, report_delivery as delivery, state
 from foreman.assign import assignment_text
 from foreman.errors import UsageError
 from foreman.herdr import HerdrClient
-from tests.fakes import FakeRunner
+from tests.fakes import FakeRunner, pane_layout
 from tests import test_recovery_cli as owner_fixture
 
 AT = "2026-09-01T12:00:00+00:00"
@@ -74,6 +74,103 @@ class MarkerColumnsTests(unittest.TestCase):
     def test_wide_characters_count_two_columns(self):
         self.assertEqual(delivery.marker_columns("codex", "/r/\u5831\u544a.md"),
                          delivery.marker_columns("codex", "/r/abcd.md"))
+
+
+class MarkerFitTests(unittest.TestCase):
+    """`foreman marker-fit`: the live-width gate for a sender outside apply (#515)."""
+
+    REPORT = "/Users/me/.local/state/fleet/standup/2026-09-27/worker-with-a-long-name.md"
+
+    def runner(self, kind, width, pane=PANE, status: "str | None" = "idle"):
+        runner = FakeRunner()
+        record = {"agent": kind, "pane_id": pane, "name": "worker"}
+        if status is not None:
+            record["agent_status"] = status
+        runner.set("agent get worker", json.dumps({"result": {"agent": record}}))
+        runner.set("pane layout --pane " + pane, pane_layout(pane, width))
+        return runner
+
+    def run_cli(self, runner, report=None, homes=None):
+        output, errors = io.StringIO(), io.StringIO()
+        # Empty default homes unless a test supplies its own, so the host's own
+        # foreman home never decides the outcome.
+        with tempfile.TemporaryDirectory() as scratch:
+            state, config = homes or (scratch + "/state", scratch + "/config")
+            with patch.dict(os.environ, {"XDG_STATE_HOME": state, "XDG_CONFIG_HOME": config}):
+                code = cli.main(["marker-fit", "--agent", "worker", "--report", report or self.REPORT],
+                                stdout=output, stderr=errors, client=HerdrClient(runner=runner))
+        return code, output.getvalue(), errors.getvalue()
+
+    def test_a_home_awaiting_migration_neither_refuses_nor_gains_a_guard(self):
+        with tempfile.TemporaryDirectory() as scratch:
+            state, config = Path(scratch, "state"), Path(scratch, "config")
+            (state / "teamlead").mkdir(parents=True)
+            (config / "teamlead").mkdir(parents=True)
+            code, out, errors = self.run_cli(self.runner("codex", 200), homes=(str(state), str(config)))
+            self.assertEqual(code, 0, errors)
+            self.assertTrue(json.loads(out)["fits"])
+            self.assertEqual(sorted(p.name for p in state.iterdir()), ["teamlead"])
+
+    def test_a_pane_one_column_short_does_not_fit(self):
+        needed = delivery.marker_columns("grok", self.REPORT)
+        code, out, _ = self.run_cli(self.runner("grok", needed - 1))
+        self.assertEqual(code, 0)
+        self.assertEqual(json.loads(out), {"agent": "worker", "pane_id": PANE, "kind": "grok", "agent_status": "idle",
+                                           "report": self.REPORT,
+                                           "pane_width": needed - 1, "needed": needed, "fits": False})
+
+    def test_a_pane_exactly_as_wide_as_needed_fits(self):
+        needed = delivery.marker_columns("codex", self.REPORT)
+        code, out, _ = self.run_cli(self.runner("codex", needed))
+        self.assertEqual(code, 0)
+        self.assertTrue(json.loads(out)["fits"])
+
+    def test_the_kind_herdr_reports_sets_the_reserve(self):
+        width = delivery.marker_columns("codex", self.REPORT)
+        _, claude, _ = self.run_cli(self.runner("claude", width))
+        _, grok, _ = self.run_cli(self.runner("grok", width))
+        self.assertTrue(json.loads(claude)["fits"])
+        self.assertFalse(json.loads(grok)["fits"])
+
+    def test_an_unknown_kind_is_measured_at_the_widest(self):
+        needed = delivery.marker_columns("grok", self.REPORT)
+        _, out, _ = self.run_cli(self.runner("gemini", needed - 1))
+        self.assertEqual(json.loads(out)["needed"], needed)
+        self.assertFalse(json.loads(out)["fits"])
+
+    def test_the_measured_pane_is_the_one_herdr_names(self):
+        runner = self.runner("codex", 200, pane="w9:p3")
+        self.run_cli(runner)
+        self.assertIn(["pane", "layout", "--pane", "w9:p3"], [call[1:] for call in runner.calls])
+
+    def test_a_relative_report_is_refused_before_herdr(self):
+        runner = self.runner("codex", 200)
+        code, out, errors = self.run_cli(runner, report="reports/w.md")
+        self.assertEqual((code, out), (1, ""))
+        self.assertIn("absolute", errors)
+        self.assertEqual(runner.calls, [])
+
+    def test_the_fresh_status_rides_along_and_an_absent_one_is_unknown(self):
+        _, working, _ = self.run_cli(self.runner("codex", 200, status="working"))
+        _, absent, _ = self.run_cli(self.runner("codex", 200, status=None))
+        self.assertEqual(json.loads(working)["agent_status"], "working")
+        self.assertEqual(json.loads(absent)["agent_status"], "unknown")
+
+    def test_every_control_character_is_refused_before_herdr(self):
+        for char in ("\t", "\x7f", "\x85", "\x9b", " ", " "):
+            with self.subTest(char=hex(ord(char))):
+                runner = self.runner("codex", 200)
+                code, out, errors = self.run_cli(runner, report="/r/a" + char + "b.md")
+                self.assertEqual((code, out), (1, ""))
+                self.assertIn("one-row", errors)
+                self.assertEqual(runner.calls, [])
+
+    def test_an_agent_record_without_a_pane_is_a_herdr_failure(self):
+        runner = FakeRunner()
+        runner.set("agent get worker", json.dumps({"result": {"agent": {"agent": "codex", "agent_status": "idle"}}}))
+        code, out, errors = self.run_cli(runner)
+        self.assertEqual((code, out), (1, ""))
+        self.assertIn("pane_id", errors)
 
 
 class NativeDeliveryTests(unittest.TestCase):

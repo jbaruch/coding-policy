@@ -13,6 +13,38 @@
   unsets the host's `HERDR_ENV`, so a run from inside a Herdr pane no longer
   flips the non-Herdr cases.
 
+## 0.3.295 — 2026-09-27
+
+### Fixed
+
+- **`standup-ask.sh` measures the worker's live pane before asking (#515).**
+  The script capped the report path at 100 characters and claimed the
+  worker's `REPORT: <path>` line then fit one pane row; #513 showed a
+  106-column Grok pane wraps any marker path over ~93 characters, and a
+  wrapped marker is one the wait can never confirm. `teamlead apply` (now
+  `foreman apply`) already measured the target pane, but the standup sends
+  through `herdr agent prompt` and never reached that gate. A new read-only
+  `foreman marker-fit --agent --report` subcommand reads the worker's pane and
+  TUI kind from `herdr agent get`, its width from `herdr pane layout`, and
+  applies the same `marker_columns` rule in
+  `skills/herdr-foreman/foreman/report_delivery.py`, so the fit rule is never
+  restated in bash. `standup-ask.sh` calls it after the readiness check and
+  refuses with the new exit 4 — nothing sent, the JSON naming `pane_width`
+  and `needed` — when the marker would wrap; a failed measurement is exit 2.
+  The 100-character cap stays as a coarse bound. Folded in from the issue
+  thread: the over-cap warning in `skills/herdr-foreman/compose-briefs.sh` no
+  longer promises that staying under the cap makes the marker fit one pane
+  row; it names the live pane-width check in `foreman apply` instead (raised
+  by Copilot on #516). The policy review also caught that
+  `skills/herdr-standup/SKILL.md` Step 2 sent a worker whose ask exited 1 or
+  2 on to Step 3's wait for a question never asked; those workers now go to
+  Step 4 with the diagnostic relayed. `marker-fit` reads no foreman home, so
+  it takes no home guard and never refuses on a home awaiting migration, and
+  it refuses any Unicode `Cc` control or U+2028/U+2029 separator in the path;
+  `standup-ask.sh` refuses the same set itself as exit 1, before Herdr. The
+  measurement re-reads the worker, and a worker that started a turn since the
+  readiness read is refused as exit 3, never prompted.
+
 ## 0.3.294 — 2026-09-27
 
 ### Tests
