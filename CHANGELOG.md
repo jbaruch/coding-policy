@@ -1,5 +1,30 @@
 # Changelog
 
+### Fixed
+
+- **The release publication contract and the plugin's hooks now run from an
+  installed plugin whatever its directory is called (#487).**
+  `skills/release/PUBLICATION.md`, which release Step 7 sends the agent to,
+  still invoked six scripts by bare path — the #465 defect #485 fixed
+  everywhere else. From an installed plugin those files are mode 0644, so every
+  confirmation step would stop at `permission denied`; each now carries a
+  `bash ` prefix. `scripts/tests/test_shipped_invocations.py` scans every
+  fenced shell block under `skills/` and `hooks/` for a script named by bare
+  path in command position, so the next one fails CI instead of a consumer's
+  release; its first run caught a `foreman.sh validate-partition` in
+  `skills/herdr-foreman/references/review-partition.md`, now the
+  `foreman validate-partition` shorthand its sibling references use.
+  `hooks/check-leftover-worktrees.sh` added #466's newline sentinel to `pwd`
+  but still fed `cd` a `$(dirname ...)` capture, which strips a trailing
+  newline from the hooks directory's name before `cd` sees it. The same shape,
+  without even the sentinel, sat in `hooks/session-start.sh` (which dispatches
+  the leftover hook, so its fix was unreachable), `hooks/herdr-team-status.sh`
+  and `hooks/herdr-supervision-stop.sh`. All four now derive the directory by
+  parameter expansion, carry `pwd` through a sentinel, and warn rather than
+  die when `cd` fails. Each has a fixture staging it under a directory whose
+  name ends in a newline — for the Stop hook, the plugin root too — and each
+  fixture fails against the old code.
+
 ## 0.3.284 — 2026-09-27
 
 ### Fixed

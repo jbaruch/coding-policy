@@ -116,7 +116,18 @@ main() {
   # environment is gone, so they report instead of acting.
   export SESSION_START_MODE="$MODE"
   local -a hooks statuses=() names=() codes=() outputs=()
-  here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)" || { warn "cannot resolve the hooks directory"; return 0; }
+  # Command substitution strips every trailing newline, so the hooks directory
+  # never passes through one bare: parameter expansion derives it, and a
+  # sentinel carries `pwd` across the strip (#487).
+  local src dir
+  src="${BASH_SOURCE[0]}"
+  case "$src" in
+    */*) dir="${src%/*}" ;;
+    *) dir=. ;;
+  esac
+  here="$(cd -- "${dir:-/}" && pwd && printf x)" || { warn "cannot enter the hooks directory ${dir:-/} — reinstall the plugin"; return 0; }
+  here="${here%x}"
+  here="${here%$'\n'}"
   read -r -a hooks <<<"${SESSION_START_HOOKS:-${HOOKS[*]}}"
 
   # Run every hook first, so a missing JSON tool never stops one from acting.

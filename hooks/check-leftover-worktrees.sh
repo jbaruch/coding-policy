@@ -86,10 +86,19 @@ main() {
     return 0
   fi
 
-  local here detector
-  # `pwd` through command substitution loses a trailing newline in the plugin
-  # directory's own name; the sentinel survives the strip (#466).
-  here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd && printf x)"
+  local src dir here detector
+  # Command substitution strips every trailing newline, so the hooks directory
+  # never passes through one bare: parameter expansion derives it (#487), and a
+  # sentinel carries `pwd` across the strip (#466).
+  src="${BASH_SOURCE[0]}"
+  case "$src" in
+    */*) dir="${src%/*}" ;;
+    *) dir=. ;;
+  esac
+  here="$(cd -- "${dir:-/}" && pwd && printf x)" || {
+    warn "cannot enter the hooks directory ${dir:-/} — reinstall the plugin so session start can report abandoned worktrees"
+    return 0
+  }
   here="${here%x}"
   here="${here%$'\n'}"
   detector="${here}/../skills/release/check-leftovers.sh"

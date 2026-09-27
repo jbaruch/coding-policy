@@ -42,13 +42,13 @@ new_repo() { # <dir>
 # `mktemp -d` rather than a counter: this runs inside $(...), a subshell, so an
 # incremented global would be discarded and every case would reuse one stage —
 # inheriting whichever detector an earlier case put there.
-stage_hook() { # <detector-source-or-empty>
-  local src="${1:-}" root
+stage_hook() { # <detector-source-or-empty> [hooks-dir-name]
+  local src="${1:-}" hooks="${2:-hooks}" root
   root="$(mktemp -d "$TMP/stage.XXXXXX")" || die "mktemp stage"
-  mkdir -p "$root/hooks" "$root/skills/release" || die "mkdir"
-  cp "$HOOK" "$root/hooks/" || die "cp hook"
+  mkdir -p "$root/$hooks" "$root/skills/release" || die "mkdir"
+  cp "$HOOK" "$root/$hooks/" || die "cp hook"
   if [ -n "$src" ]; then cp "$src" "$root/skills/release/check-leftovers.sh" || die "cp detector"; fi
-  printf '%s\n' "$root/hooks/$(basename "$HOOK")"
+  printf '%s\n' "$root/$hooks/$(basename "$HOOK")"
 }
 
 # Every fixture's mtime is this fixed past literal and the age floor is passed
@@ -132,6 +132,14 @@ main() {
   run_hook "$TMP/aband" "$HOOKPATH"
   if [[ $RC -eq 0 ]] && context_of "$OUT" | grep -qF 'aband-wt'; then
     pass; else fail "an abandoned worktree is reported with the marker, got RC=$RC OUT=$OUT"; fi
+
+  # The same finding from a hooks directory whose name ends in a newline: a
+  # `$(dirname ...)` capture would drop it and look for the detector beside a
+  # directory that does not exist (#487).
+  HOOKPATH="$(stage_hook "$real" $'hooks\n')"
+  run_hook "$TMP/aband" "$HOOKPATH"
+  if [[ $RC -eq 0 ]] && context_of "$OUT" | grep -qF 'aband-wt'; then
+    pass; else fail "a hooks directory ending in a newline still reaches its detector, got RC=$RC OUT=$OUT ERR=$ERRTEXT"; fi
 
   # Work in progress is what a session is for.
   new_repo "$TMP/busy"

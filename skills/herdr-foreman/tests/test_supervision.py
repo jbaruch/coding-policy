@@ -502,6 +502,26 @@ class SupervisionTest(unittest.TestCase):
                 self.assertEqual(json.loads(result.stdout)["decision"], "block")
 
 
+    def test_wrapper_resolves_directory_names_ending_in_a_newline(self):
+        """Command substitution strips trailing newlines from either name (#487)."""
+        self.member()
+        native_root = self.root / "xdg" / "foreman" / "supervision-bindings"
+        store.bind(self.path, self.who, AT, root=native_root)
+        repo = Path(_ROOT).parent.parent
+        environment = {**os.environ, **self.environ, "XDG_STATE_HOME": str(self.root / "xdg")}
+        for plugin_name, hooks_name in (("plain plugin", "hooks\n"), ("newline plugin\n", "hooks")):
+            with self.subTest(plugin=plugin_name, hooks=hooks_name):
+                plugin = self.root / plugin_name
+                shutil.copytree(Path(_ROOT) / "foreman", plugin / "skills/herdr-foreman/foreman",
+                                ignore=shutil.ignore_patterns("__pycache__"))
+                (plugin / hooks_name).mkdir()
+                script = plugin / hooks_name / "herdr-supervision-stop.sh"
+                shutil.copyfile(repo / "hooks/herdr-supervision-stop.sh", script)
+                result = subprocess.run(["bash", str(script)], input=json.dumps(self.payload), env=environment,
+                                        capture_output=True, text=True, check=False)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(json.loads(result.stdout)["decision"], "block")
+
     def test_wrapper_leaves_no_bytecode_cache_in_the_installed_tree(self):
         """The evaluator's read-only contract covers incidental caches too (#385)."""
         self.member()

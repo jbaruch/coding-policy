@@ -37,7 +37,21 @@ main() {
   # Not a Herdr session => no team to report. Silent no-op.
   [[ "${HERDR_ENV:-}" == "1" ]] || return 0
 
-  hook_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  # Command substitution strips every trailing newline, so the hooks directory
+  # never passes through one bare: parameter expansion derives it, and a
+  # sentinel carries `pwd` across the strip (#487).
+  local src dir
+  src="${BASH_SOURCE[0]}"
+  case "$src" in
+    */*) dir="${src%/*}" ;;
+    *) dir=. ;;
+  esac
+  hook_dir="$(cd -- "${dir:-/}" && pwd && printf x)" || {
+    warn "cannot enter the hooks directory ${dir:-/} — reinstall the plugin with \`tessl install jbaruch/coding-policy\`; skipping the team status"
+    return 0
+  }
+  hook_dir="${hook_dir%x}"
+  hook_dir="${hook_dir%$'\n'}"
   roster_script="${hook_dir}/../skills/herdr-foreman/roster.sh"
   if [[ ! -r "$roster_script" ]]; then
     warn "roster script not found at ${roster_script} — reinstall the plugin with \`tessl install jbaruch/coding-policy\`; skipping the team status"
