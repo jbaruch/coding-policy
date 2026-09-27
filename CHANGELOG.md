@@ -37,6 +37,8 @@
   change; it stays recorded so the next edit to that list lands its formatting
   in a commit of its own.
 
+## 0.3.294 — 2026-09-27
+
 ### Tests
 
 - **The cross-task check on a diagnosis's `approach_change` has a regression
