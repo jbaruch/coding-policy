@@ -218,14 +218,12 @@ def freeze_paths(paths):
     """
     frozen = {}
     for key, source in paths.items():
-        try:
-            data = Path(source).read_bytes()
-        except OSError as exc:
-            raise UsageError("Cannot read briefing file {} to freeze it for dispatch: {}. Restore readability or "
-                             "correct its --common/--brief path before dispatch.".format(source, exc.strerror or str(exc)),
-                             {"path": source}) from None
-        digest = hashlib.sha256(data).hexdigest()
+        # Canonical first, then read through that directory: reading the
+        # given path first would let an alias retargeted in between place one
+        # directory's bytes under another's `.dispatched` (#554).
         directory = Path(os.path.realpath(Path(source).parent))
+        data = _read_source(directory / Path(source).name, source)
+        digest = hashlib.sha256(data).hexdigest()
         target = directory / FROZEN_DIR / "{}.{}{}".format(Path(source).stem, digest[:16], Path(source).suffix)
         try:
             target.parent.mkdir(parents=True, exist_ok=True)
@@ -268,32 +266,34 @@ def _require_frozen_dir(directory):
                          "freeze writes real copies beside the source.".format(directory), {"path": str(directory)})
 
 
-def _open_directory_unlinked(target):
+_FROZEN_OPEN_FAILED = "Cannot open frozen brief {}: {}. Restore its readability or move it aside and re-run."
+_FROZEN_LINKED = ("Frozen brief {} passes through {}, which is a link or not a directory. Dispatch again with this "
+                  "build, which freezes under the brief's canonical directory.")
+
+
+def _open_directory_unlinked(target, open_failed=_FROZEN_OPEN_FAILED, linked=_FROZEN_LINKED):
     """A descriptor for absolute `target`'s directory, reached without following a link.
 
     Each component is opened relative to the one before it, refusing a
     symlink. A symlinked ancestor would let one recorded path read another
     source's frozen copy once the link is retargeted (#554); the lexical
     checks in `read_frozen` cannot see that, and a resolve-then-open would
-    race the retarget.
+    race the retarget. `open_failed` and `linked` are the refusal texts,
+    formatted with the target and the failure or the offending component.
     """
     parts = Path(target).parent.parts
     try:
         fd = os.open(parts[0], os.O_RDONLY | os.O_DIRECTORY)
     except OSError as exc:
-        raise UsageError("Cannot open frozen brief {}: {}. Restore its readability or move it aside and re-run."
-                         .format(target, exc.strerror or str(exc)), {"path": str(target)}) from None
+        raise UsageError(open_failed.format(target, exc.strerror or str(exc)), {"path": str(target)}) from None
     try:
         for index, name in enumerate(parts[1:], 2):
             try:
                 child = os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
             except OSError as exc:
                 if exc.errno in (errno.ELOOP, errno.ENOTDIR):
-                    raise UsageError("Frozen brief {} passes through {}, which is a link or not a directory. Dispatch "
-                                     "again with this build, which freezes under the brief's canonical directory."
-                                     .format(target, Path(*parts[:index])), {"path": str(target)}) from None
-                raise UsageError("Cannot open frozen brief {}: {}. Restore its readability or move it aside and "
-                                 "re-run.".format(target, exc.strerror or str(exc)), {"path": str(target)}) from None
+                    raise UsageError(linked.format(target, Path(*parts[:index])), {"path": str(target)}) from None
+                raise UsageError(open_failed.format(target, exc.strerror or str(exc)), {"path": str(target)}) from None
             os.close(fd)
             fd = child
         opened, fd = fd, None
@@ -301,6 +301,39 @@ def _open_directory_unlinked(target):
     finally:
         if fd is not None:
             os.close(fd)
+
+
+def _read_source(canonical, given):
+    """The bytes of the brief at `canonical`, its directory reached without following a link.
+
+    `canonical` is `given` with its directory resolved; the walk keeps a
+    component retargeted after that resolution from redirecting the read. The
+    brief file itself may be a link: its bytes are what the copy freezes.
+    """
+    open_failed = ("Cannot read briefing file " + str(given) + " to freeze it for dispatch ({}): {}. Restore "
+                   "readability or correct its --common/--brief path before dispatch.")
+    linked = ("Briefing file " + str(given) + " ({}) passes through {}, which became a link or not a directory "
+              "while it was frozen. Stop whatever is moving its directory and dispatch again.")
+    parent = _open_directory_unlinked(canonical, open_failed, linked)
+    try:
+        fd = os.open(canonical.name, os.O_RDONLY | os.O_NONBLOCK, dir_fd=parent)
+    except OSError as exc:
+        raise UsageError(open_failed.format(canonical, exc.strerror or str(exc)), {"path": str(given)}) from None
+    finally:
+        os.close(parent)
+    try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            raise UsageError(open_failed.format(canonical, "not a regular file"), {"path": str(given)})
+        chunks = []
+        chunk = os.read(fd, 1 << 16)
+        while chunk:
+            chunks.append(chunk)
+            chunk = os.read(fd, 1 << 16)
+    except OSError as exc:
+        raise UsageError(open_failed.format(canonical, exc.strerror or str(exc)), {"path": str(given)}) from None
+    finally:
+        os.close(fd)
+    return b"".join(chunks)
 
 
 def _read_unlinked_regular(target):

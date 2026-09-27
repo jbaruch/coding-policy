@@ -8,6 +8,7 @@ if _ROOT not in _sys.path:
     _sys.path.insert(0, _ROOT)
 
 import os
+import re
 import tempfile
 import unittest
 from pathlib import Path
@@ -106,12 +107,35 @@ class FreezeLinkTest(FreezeTest):
         # coding-policy#460 review: the inspection used to run inside the
         # `except FileExistsError` block, where the sibling `except OSError`
         # never catches it, so a vanished or unreadable copy leaked a traceback.
+        # Only the frozen copy fails: the source brief is read through the
+        # same calls first, and must still read.
         freeze_paths(self.paths)
+        real_open, real_fstat, copies = os.open, os.fstat, set()
+
+        def is_copy(name):
+            return re.search(r"\.[0-9a-f]{16}\.md$", str(name)) is not None
+
         for error in (FileNotFoundError(2, "No such file or directory"), PermissionError(13, "Permission denied")):
-            with self.subTest(error=type(error).__name__), patch("foreman.assign.os.open", side_effect=error):
+            def failing_open(name, *args, error=error, **kwargs):
+                if is_copy(name):
+                    raise error
+                return real_open(name, *args, **kwargs)
+            with self.subTest(error=type(error).__name__), patch("foreman.assign.os.open", side_effect=failing_open):
                 with self.assertRaisesRegex(UsageError, "Cannot open frozen brief .*: {}. Restore".format(error.strerror)):
                     freeze_paths(self.paths)
-        with patch("foreman.assign.os.fstat", side_effect=OSError(5, "Input/output error")):
+
+        def tracking_open(name, *args, **kwargs):
+            descriptor = real_open(name, *args, **kwargs)
+            if is_copy(name):
+                copies.add(descriptor)
+            return descriptor
+
+        def failing_fstat(descriptor):
+            if descriptor in copies:
+                raise OSError(5, "Input/output error")
+            return real_fstat(descriptor)
+        with patch("foreman.assign.os.open", side_effect=tracking_open), \
+                patch("foreman.assign.os.fstat", side_effect=failing_fstat):
             with self.assertRaisesRegex(UsageError, "Cannot read frozen brief .*Input/output error"):
                 freeze_paths(self.paths)
 
@@ -169,6 +193,31 @@ class FrozenPathTest(unittest.TestCase):
         frozen = Path(freeze_paths({"brief": str(alias / "brief.md")})["brief"])
         self.assertEqual(frozen.parent, self.root / "source" / FROZEN_DIR)
         self.assertEqual(read_frozen(str(frozen)), b"brief in source\n")
+
+    def test_the_source_is_read_through_its_canonical_directory(self):
+        # The alias names source when resolved and other by the time of the
+        # read: the copy must hold the bytes of the directory it sits under.
+        alias = self.root / "alias"
+        alias.symlink_to(self.root / "other")
+        with patch("foreman.assign.os.path.realpath", return_value=str(self.root / "source")):
+            frozen = Path(freeze_paths({"brief": str(alias / "brief.md")})["brief"])
+        self.assertEqual(frozen.parent, self.root / "source" / FROZEN_DIR)
+        self.assertEqual(frozen.read_bytes(), b"brief in source\n")
+
+    def test_a_source_directory_turned_into_a_link_is_refused(self):
+        # Resolved while real, then swapped for a link before the read.
+        moved = self.root / "moved"
+        with patch("foreman.assign.os.path.realpath", return_value=str(self.root / "source")):
+            (self.root / "source").rename(moved)
+            (self.root / "source").symlink_to(moved)
+            with self.assertRaisesRegex(UsageError, "passes through {}, which became a link".format(self.root / "source")):
+                freeze_paths({"brief": str(self.root / "source" / "brief.md")})
+
+    def test_a_fifo_source_is_refused_without_hanging(self):
+        fifo = self.root / "source" / "fifo.md"
+        os.mkfifo(fifo)
+        with self.assertRaisesRegex(UsageError, "not a regular file. Restore readability"):
+            freeze_paths({"brief": str(fifo)})
 
     def test_a_relative_path_is_refused(self):
         from foreman.assign import read_frozen

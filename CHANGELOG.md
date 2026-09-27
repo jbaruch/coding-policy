@@ -12,12 +12,18 @@
   `O_NOFOLLOW` relative to the one before it, refusing a link anywhere on the
   path without a resolve-then-open race. `freeze_paths` freezes under the
   source directory's `realpath`, so paths it records carry no links (macOS
-  `/tmp` and `/var` included), and it reads every copy back, fresh or
+  `/tmp` and `/var` included). It resolves that directory before reading
+  the source and reads the source through the same walk, so an alias
+  retargeted mid-freeze cannot place one directory's bytes under another's
+  `.dispatched/`, and a FIFO planted as a brief is refused rather than hung
+  on. It reads every copy back, fresh or
   existing, through the same walk, so an ancestor retargeted mid-freeze is
   refused at dispatch. A row recorded by an older build through a linked
   directory is refused with a dispatch-again repair. Regression tests cover
-  a retargeted ancestor, a link deeper in the path, and a brief under an
-  aliased directory freezing canonically; all fail on `main`.
+  a retargeted ancestor, a link deeper in the path, a brief under an
+  aliased directory freezing canonically, an alias retargeted between
+  resolution and read, a source directory swapped for a link, and a FIFO
+  source; all fail or hang on `main`.
 
 ## 0.3.284 — 2026-09-27
 

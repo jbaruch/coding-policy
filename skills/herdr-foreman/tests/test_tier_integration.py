@@ -2,6 +2,7 @@
 
 import copy
 import json
+import os
 import sys
 import unittest
 from pathlib import Path
@@ -132,7 +133,7 @@ class TierIntegrationTest(CliCase):
         self.assertEqual(runner.calls, [])
 
     def test_unreadable_dispatch_input_names_recovery_and_sends_nothing(self):
-        original_read = Path.read_bytes
+        original_open = os.open
         for unreadable in (self.common, self.briefs["developer"]):
             with self.subTest(path=unreadable):
                 self.out.seek(0)
@@ -141,12 +142,14 @@ class TierIntegrationTest(CliCase):
                 self.err.truncate()
                 runner = FakeRunner().set("agent get claude", agent_json("claude", "idle", "w1:p2"))
 
-                def read_bytes(path):
-                    if path == unreadable:
-                        raise PermissionError(13, "Permission denied", str(path))
-                    return original_read(path)
+                # The freeze opens the brief by name under its directory's
+                # descriptor; a frozen copy's name carries a digest instead.
+                def opener(name, *args, unreadable=unreadable, **kwargs):
+                    if str(name) in (unreadable.name, str(unreadable)):
+                        raise PermissionError(13, "Permission denied", str(name))
+                    return original_open(name, *args, **kwargs)
 
-                with patch("foreman.assign.Path.read_bytes", autospec=True, side_effect=read_bytes):
+                with patch("foreman.assign.os.open", side_effect=opener):
                     rc, output, error = self.run_cli(self.apply_args(), client=HerdrClient("herdr", runner))
                 self.assertEqual(rc, 1)
                 self.assertEqual(output, "")
