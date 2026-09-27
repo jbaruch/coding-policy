@@ -14,6 +14,7 @@ from datetime import timezone
 from pathlib import Path
 from urllib.parse import urlsplit
 
+from . import runnable
 from .chronology import timestamp
 from .errors import StateError, UsageError
 from .state import save_state, state_lock
@@ -355,7 +356,8 @@ def show(path, at, name="latest"):
     rows = document["records"]
     selected = ([row for row in rows if row["kind"] == "stow"] if name == "latest"
                 else [row for row in rows if row["id"] == name])
-    _require(bool(selected), "No saved memory matches; use memory-list or memory-show --id latest with the same --state path.")
+    _require(bool(selected), "No saved memory matches; use `{}` or `{}` with the same --state path.".format(
+        runnable.command("memory-list"), runnable.command("memory-show --id latest")))
     return {"schema_version": SCHEMA_VERSION, "memory_path": str(location(path)), "checked_at": at,
             "record": _view(selected[-1], at), "history": [row for row in rows if selected[-1]["kind"] == "lesson"
                                                           and row["kind"] == "lesson" and row["lesson_id"] == selected[-1]["lesson_id"]]}
@@ -384,4 +386,5 @@ def run_command(args, state_path, now):
         return list_lessons(state_path, now, scopes=args.scopes, include_archived=args.include_archived)
     if args.command == "memory-show":
         return show(state_path, now, args.id)
-    raise UsageError("Unknown memory command; use memory-record, memory-stow, memory-list or memory-show.", {})
+    raise UsageError("Unknown memory command; use one of {}.".format(", ".join(
+        "`{}`".format(runnable.command(name)) for name in sorted(COMMANDS))), {})

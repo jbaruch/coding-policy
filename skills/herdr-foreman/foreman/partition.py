@@ -35,8 +35,10 @@ import fnmatch
 import hashlib
 import json
 import re
+import shlex
 from pathlib import Path
 
+from . import runnable
 from .errors import UsageError
 from .tiers import SEAT_SEPARATOR, SEATABLE_ROLES, SLICE_NAME
 from .triggers import git_runner, parse_name_status
@@ -195,27 +197,29 @@ def load_validated(path):
     """
     if not path:
         raise UsageError(
-            "Pass --partition naming the output of `foreman validate-partition`; a "
-            "multi-seat round seats from the checked result, never from the document.",
+            "Pass --partition naming the output of `{}`; a "
+            "multi-seat round seats from the checked result, never from the document.".format(
+                runnable.command("validate-partition")),
             {})
     try:
         document = json.loads(Path(path).read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
         raise UsageError(
             "Cannot read the validated partition at {}: {}. Pass the JSON "
-            "`validate-partition` wrote.".format(path, exc), {"path": str(path)}) from None
+            "`{}` wrote.".format(path, exc, runnable.command("validate-partition")), {"path": str(path)}) from None
     if not isinstance(document, dict) or "changed" not in document:
         raise UsageError(
             "The partition at {} carries no `changed` set, so it is the document rather "
-            "than a checked result: run `foreman validate-partition --repo <path> --base "
-            "<sha> [--head <sha>] --partition {}` and pass its output.".format(path, path),
+            "than a checked result: run `{}` and pass its output.".format(
+                path, runnable.command("validate-partition --repo <path> --base <sha> [--head <sha>] --partition {}".format(
+                    shlex.quote(str(path))))),
             {"path": str(path)})
     changed = document["changed"]
     if not isinstance(changed, list) or not changed or any(
             not isinstance(item, str) or not item.strip() for item in changed):
         raise UsageError(
             "The validated partition's `changed` must list the round's changed paths; "
-            "re-run `validate-partition` rather than editing its result.",
+            "re-run `{}` rather than editing its result.".format(runnable.command("validate-partition")),
             {"path": str(path)})
     # The document's own contract, then its OWNERSHIP re-derived against the
     # `changed` set it carries. Reading the result's shape and trusting its
@@ -226,8 +230,8 @@ def load_validated(path):
     if document.get("schema_version") != RESULT_SCHEMA_VERSION:
         raise UsageError(
             "The validated partition at {} is result schema {}; this build plans from schema {}, which records "
-            "the proof. Re-run `validate-partition` and plan from its output.".format(
-                path, document.get("schema_version"), RESULT_SCHEMA_VERSION), {"path": str(path)})
+            "the proof. Re-run `{}` and plan from its output.".format(
+                path, document.get("schema_version"), RESULT_SCHEMA_VERSION, runnable.command("validate-partition")), {"path": str(path)})
     proof = check_proof(document.get("proof"), "The validated partition at {}".format(path))
     inner = {key: value for key, value in document.items() if key not in ("changed", "proof")}
     inner["schema_version"] = PARTITION_SCHEMA_VERSION
@@ -268,8 +272,8 @@ def validate_resolved(changed, partition, source):
             parts.append("leaves slice(s) {} owning nothing".format(", ".join(empty)))
         raise UsageError(
             "The validated partition at {} does not cover its own `changed` set: it {}. "
-            "Re-run `validate-partition` rather than editing its result.".format(
-                source, "; and it ".join(parts)),
+            "Re-run `{}` rather than editing its result.".format(
+                source, "; and it ".join(parts), runnable.command("validate-partition")),
             {"unowned": unowned, "overlaps": overlaps, "stray": stray, "empty": empty})
     return partition
 
@@ -426,7 +430,8 @@ def check_proof(proof, where):
              and (proof["head"] is None or isinstance(proof["head"], str) and bool(FULL_SHA.fullmatch(proof["head"]))))
     if not valid:
         raise UsageError("{} carries no usable proof of what the partition was checked against; re-run "
-                         "`validate-partition` with this build and plan from its output.".format(where), {"where": where})
+                         "`{}` with this build and plan from its output.".format(where, runnable.command("validate-partition")),
+                         {"where": where})
     return proof
 
 
@@ -437,8 +442,9 @@ def check_slice_paths(slice_paths, where):
             or any(not isinstance(seat, str) or not isinstance(paths, list) or not paths
                    or any(not isinstance(path, str) or not path.strip() for path in paths)
                    for seat, paths in slice_paths.items())):
-        raise UsageError("{} has no usable slice_paths; plan the round with `plan --partition <validate-partition "
-                         "output>` rather than editing the plan.".format(where), {"where": where})
+        raise UsageError("{} has no usable slice_paths; plan the round with `{}` "
+                         "rather than editing the plan.".format(where, runnable.command("plan --partition <validate-partition output>")),
+                         {"where": where})
     return slice_paths
 
 
@@ -459,8 +465,8 @@ def verify(plan, repo, head, task_base, runner=None):
                          "so its boundary was edited after planning. Replan from the validate-partition result.", {})
     if proof["head"] is None:
         raise UsageError("The partition was validated against the working tree, not a pushed head, so no tip can be "
-                         "checked against it. Re-run validate-partition with --head at the pushed tip, replan, and "
-                         "re-dispatch the slices.", {})
+                         "checked against it. Re-run `{}` at the pushed tip, replan, and "
+                         "re-dispatch the slices.".format(runnable.command("validate-partition --head <sha>")), {})
     here = str(Path(repo).expanduser().resolve())
     if proof["repo"] != here:
         raise UsageError("The partition was proven in {}, not {}; verify it against the repository it covers.".format(
@@ -473,8 +479,8 @@ def verify(plan, repo, head, task_base, runner=None):
     tip = _revision(run, head)
     if tip != proof["head"]:
         raise UsageError("The partition was proven at {}, but the tip under review is {}. A new push can change the diff "
-                         "the slices cover: re-run validate-partition at the tip, replan, and review the slices again."
-                         .format(proof["head"], tip), {"proven": proof["head"], "tip": tip})
+                         "the slices cover: re-run `{}` at the tip, replan, and review the slices again."
+                         .format(proof["head"], tip, runnable.command("validate-partition")), {"proven": proof["head"], "tip": tip})
     changed = set(parse_name_status(run(["diff", "--no-renames", proof["base"] + ".." + tip, "--name-status", "-z"])))
     owners_of = {}
     for seat, paths in slice_paths.items():
@@ -485,8 +491,9 @@ def verify(plan, repo, head, task_base, runner=None):
     shared = sorted(path for path, seats in owners_of.items() if len(seats) > 1)
     if unowned or stale or shared:
         raise UsageError("The plan's slices do not cover exactly the diff {}..{}: {} unowned, {} no longer changed, {} "
-                         "owned twice. Re-run validate-partition at the tip and replan.".format(
-                             proof["base"][:12], tip[:12], len(unowned), len(stale), len(shared)),
+                         "owned twice. Re-run `{}` at the tip and replan.".format(
+                             proof["base"][:12], tip[:12], len(unowned), len(stale), len(shared),
+                             runnable.command("validate-partition")),
                          {"unowned": unowned, "stale": stale, "shared": shared})
     return {"schema_version": RESULT_SCHEMA_VERSION, "verified": True, "base": proof["base"], "head": tip,
             "seats": sorted(slice_paths), "changed": len(changed)}

@@ -7,6 +7,7 @@ from datetime import timezone
 from pathlib import Path
 from typing import NoReturn
 
+from . import runnable
 from .chronology import timestamp
 from .errors import StateError, UsageError
 from .state import save_state, state_lock
@@ -314,16 +315,16 @@ def require_dispatch_clear(path, task, at):
         return None
     first = gating[0]
     raise UsageError(
-        "Dispatch on task {} is gated by unanswered {} {}: {} Resolve it with attention-update and the evidence "
+        "Dispatch on task {} is gated by unanswered {} {}: {} Resolve it with `{}` and the evidence "
         "its kind requires, or defer it with recorded rationale, then rerun this command.".format(
-            task, first["kind"], first["id"], first["resolution_condition"]),
+            task, first["kind"], first["id"], first["resolution_condition"], runnable.command("attention-update")),
         {"task": task, "gating": gating})
 
 
 def show(path, name):
     document, entries, _progress_rows = load(path)
     if name not in entries:
-        _fail("No attention entry matches {}; use attention-list with the same --state path.".format(name))
+        _fail("No attention entry matches {}; use `{}` with the same --state path.".format(name, runnable.command("attention-list")))
     return {"schema_version": SCHEMA_VERSION, "entry": entries[name],
             "history": [event for event in document["events"] if event["action"] != "progress" and event["data"]["id"] == name]}
 

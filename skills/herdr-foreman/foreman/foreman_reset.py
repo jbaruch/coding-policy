@@ -49,6 +49,7 @@ from .errors import HerdrError, StateError, ForemanError, UsageError
 from .herdr import DEFAULT_SETTLE_TIMEOUT_MS
 from . import supervision
 from .chronology import timestamp
+from .runnable import command, launcher
 from .supervision_runtime import process_identity
 from .state import save_state, state_lock
 
@@ -97,9 +98,10 @@ def resume_prompt(stow, state, *, config=None, herdr_bin=None):
     return RESUME_TEMPLATE.format(tl="bash " + shlex.quote(launcher()), stow=shlex.quote(stow), flags=flags)
 
 
-OPERATOR_RECOVERY = ("Do not run foreman-reset again for this stow. The operator recovers the foreman under "
+OPERATOR_RECOVERY = ("Do not run `{}` again for this stow. The operator recovers the foreman under "
                      "rules/agent-team-operation.md Working Memory: clear the foreman's pane, then paste the "
-                     "resume prompt saved in this reset's record. The next round resets from a new stow.")
+                     "resume prompt saved in this reset's record. The next round resets from a new stow.").format(
+                         command("foreman-reset"))
 
 
 class ResetEnded(UsageError):
@@ -162,7 +164,8 @@ def _records(path):
     version = document.get("schema_version")
     if type(version) is int and version > RESET_SCHEMA_VERSION:
         raise ResetRecordNewer("Reset record {} is schema {}, newer than this build's {}. It is left untouched; update the "
-                               "coding-policy plugin, then run foreman-reset.".format(path, version, RESET_SCHEMA_VERSION),
+                               "coding-policy plugin, then run `{}`.".format(path, version, RESET_SCHEMA_VERSION,
+                                                                          command("foreman-reset")),
                                {"record": str(path), "schema_version": version})
     rows = document.get("resets")
     if (not _version(version) or not isinstance(rows, list) or not all(_valid_row(row) for row in rows)
@@ -352,16 +355,10 @@ def failure(exc, stow, state, **options):
     return {"error": exc.code, "message": message, "details": details, "resume_prompt": resume_prompt(stow, state, **options)}
 
 
-def launcher():
-    """The installed launcher that runs this package's commands."""
-    return str(Path(__file__).resolve().parents[1] / "foreman.sh")
-
-
 def reconcile_command(state_path, pane_id, stow, outcome):
     """The complete, runnable repair command for one reset."""
-    return "bash {} foreman-reset-reconcile --state {} --pane {} --stow {} --outcome {}".format(
-        shlex.quote(launcher()), shlex.quote(str(Path(state_path).expanduser().resolve())),
-        shlex.quote(pane_id), shlex.quote(stow), outcome)
+    return command("foreman-reset-reconcile --state {} --pane {} --stow {} --outcome {}".format(
+        shlex.quote(str(Path(state_path).expanduser().resolve())), shlex.quote(pane_id), shlex.quote(stow), outcome))
 
 
 TERMINAL_FAILURES = frozenset({"failed", "interrupted"})
@@ -594,7 +591,8 @@ def preflight(stow, supervision_data, caller_pane):
             stow["id"]), {"stow": stow["id"]})
     binding = supervision_data.get("binding")
     if binding is None:
-        raise UsageError("No foreman is bound to this state; run supervision-bind from the foreman's pane before resetting.", {})
+        raise UsageError("No foreman is bound to this state; run `{}` from the foreman's pane before resetting.".format(
+            command("supervision-bind")), {})
     pane = binding["identity"]["pane_id"]
     if caller_pane != pane:
         raise UsageError("foreman-reset runs from the bound foreman's own pane ({}); this call came from {}.".format(
@@ -608,8 +606,8 @@ def preflight(stow, supervision_data, caller_pane):
                          "Record the user's answer and resume that hold before resetting.".format(", ".join(map(str, waiting))),
                          {"holds": waiting})
     if events or (active and not _handoff_held(supervision_data)):
-        raise UsageError("The foreman cannot stop yet: {} unhandled event(s), {} active assignment(s) without a covering hold. Handle the events and save supervision-hold kind handoff (a user pause does not qualify) before resetting.".format(
-            len(events), len(active)), {"events": len(events), "active": active})
+        raise UsageError("The foreman cannot stop yet: {} unhandled event(s), {} active assignment(s) without a covering hold. Handle the events and save a handoff hold with `{}` (a user pause does not qualify) before resetting.".format(
+            len(events), len(active), command("supervision-hold")), {"events": len(events), "active": active})
     return {"pane_id": pane, "stow": stow["id"]}
 
 

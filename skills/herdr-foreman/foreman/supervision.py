@@ -16,6 +16,7 @@ import json
 from datetime import datetime, timedelta
 from pathlib import Path
 
+from . import runnable
 from .errors import StateError, UsageError
 from .state import default_state_path, save_state, state_lock
 
@@ -211,7 +212,8 @@ def transaction(state_path, mutate):
     with state_lock(path):
         data = load(state_path)
         if data["binding"] is None:
-            raise StateError("Supervision owner state is missing or unbound. Run supervision-bind for first use; restore a previously bound owner document before resuming its obligations.", {})
+            raise StateError("Supervision owner state is missing or unbound. Run `{}` for first use; restore a previously bound owner document before resuming its obligations.".format(
+                runnable.command("supervision-bind")), {})
         result = mutate(data)
         save_state(path, data)
         return result
@@ -239,14 +241,16 @@ def enroll(state_path, record, at):
     timestamp(at)
     def mutate(data):
         if data["binding"] is None:
-            raise UsageError("Bind this foreman's native session with supervision-bind before enrolling worker assignments.", {})
+            raise UsageError("Bind this foreman's native session with `{}` before enrolling worker assignments.".format(
+                runnable.command("supervision-bind")), {})
         previous = next((row for row in data["members"] if row["id"] == record["id"]), None)
         if previous:
             if previous["assignment"] != record:
                 raise UsageError("Enrollment ID already names different evidence; reconcile the original assignment before assigning a new ID.", {})
             return previous
         if any(row["active"] and row["assignment"]["agent"] == record["agent"] for row in data["members"]):
-            raise UsageError("This worker still has an active enrollment. Reconcile its outcome with supervision-resolve before replacing it.", {})
+            raise UsageError("This worker still has an active enrollment. Reconcile its outcome with `{}` before replacing it.".format(
+                    runnable.command("supervision-resolve")), {})
         row = {"schema_version": 1, "id": record["id"], "at": at, "assignment": record,
                "active": True, "observed": {}, "resolution": None, "refinements": []}
         data["members"].append(row)
@@ -322,7 +326,8 @@ def resolve(state_path, record, at):
     def mutate(data):
         member = next((row for row in data["members"] if row["id"] == record["id"]), None)
         if member is None:
-            raise UsageError("Unknown enrollment ID; use supervision-status to inspect active assignments.", {})
+            raise UsageError("Unknown enrollment ID; use `{}` to inspect active assignments.".format(
+                runnable.command("supervision-status")), {})
         if any(row["member"] == member["id"] for row in pending(data)):
             raise UsageError("Handle and acknowledge this assignment's pending observations before resolving its enrollment.", {})
         if not member["active"]:

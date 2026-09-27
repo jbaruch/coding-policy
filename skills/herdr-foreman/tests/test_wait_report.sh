@@ -568,6 +568,11 @@ ${base}"
     FAKE_CALLS="$calls" FAKE_GET_COUNTER="$gets" FAKE_READ_COUNTER="$reads"
   if [[ $RC -eq 5 ]] && printf '%s' "$OUT" | jq -e '.found == false and .state == "idle" and .reason == "terminal_provider_refusal"' >/dev/null; then
     pass; else fail "terminal refusal: RC=$RC OUT=$OUT ERR=$ERRTEXT"; fi
+  # The record hint names the runnable launcher beside this script (#532).
+  local launcher_hint
+  launcher_hint="bash $(printf '%q' "$(dirname "$SCRIPT")/foreman.sh") record-refusal"
+  if [[ "$ERRTEXT" == *"\`${launcher_hint}\`"* ]]; then
+    pass; else fail "terminal refusal must name the runnable launcher: ERR=$ERRTEXT"; fi
   if [[ "$(cat "$gets")" == 2 && "$(cat "$reads")" == 2 ]]; then
     pass; else fail "terminal refusal needs independent confirmation reads"; fi
   local write_rc=0

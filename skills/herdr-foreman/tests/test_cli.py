@@ -27,7 +27,7 @@ from pathlib import Path
 
 from types import SimpleNamespace
 
-from foreman import attention, cli
+from foreman import attention, cli, runnable
 from foreman.report_delivery import marker_columns
 from foreman.cli import build_parser, main
 from foreman.errors import UsageError
@@ -358,7 +358,7 @@ class PlanCommandTest(CliCase):
         code, out, err = self.run_cli(self.base() + ["plan"])
         self.assertEqual(code, 1)
         self.assertEqual(out, "")
-        self.assertIn("foreman measure", json.loads(err)["message"])
+        self.assertIn("`{}`".format(runnable.command("measure")), json.loads(err)["message"])
 
     def test_missing_snapshot_file_is_an_actionable_error(self):
         code, _, err = self.run_cli(self.base() + ["plan", "--snapshot", str(self.tmp / "no.json")])

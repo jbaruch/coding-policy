@@ -1,5 +1,22 @@
 # Changelog
 
+### Fixed
+
+- **Foreman error and help hints name the runnable launcher (#532).** About a
+  hundred hints across `skills/herdr-foreman/foreman/` told the reader to run
+  a subcommand as bare `foreman measure`, `foreman state`, or a bare
+  `supervision-bind` / `validate-partition`. No installed plugin puts a
+  `foreman` executable on `PATH`, and Tessl installs strip the launcher's
+  execute bit, so none of them ran as written. `launcher()` moved out of
+  `foreman_reset.py` into the new `foreman/runnable.py`, whose `command()`
+  renders `bash <quoted foreman.sh> <subcommand>`; every hint, the resume
+  prompt and the reset-reconcile command now go through it.
+  `wait-report.sh`'s terminal-refusal warning names
+  `bash <quoted foreman.sh> record-refusal` the same way.
+  `tests/test_runnable.py` walks every string literal in the package
+  (docstrings and argparse `help=` text excepted) and fails on any bare
+  subcommand reference, so a new hint cannot regress to the bare form.
+
 ## 0.3.287 — 2026-09-27
 
 ### Fixed
