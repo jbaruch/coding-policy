@@ -397,8 +397,10 @@ script's top-of-file contract.
 - **Exit 2** — JSON is present; at least one repository's prune failed or a
   path could not be read. Every other repository still ran, unless the
   root changed mid-sweep: then its error line names the repositories left
-  unpruned. Relay `report` (its failure and error lines name each one),
-  repair what they name, then run the sweep again.
+  unpruned.
+  - Relay `report`; its failure and error lines name each one.
+  - Repair what they name.
+  - Run the sweep again.
 - **Exit 1** — no JSON; a precondition is unmet. Report the stderr
   diagnostic, repair what it names, then run the sweep again.
 
