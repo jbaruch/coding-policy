@@ -438,6 +438,17 @@ class PlannedSurfacesTest(TempCase):
         self.assertEqual(payload["unaddressed"], [])
         self.assertTrue(all(row["fired"] is False for row in payload["triggers"]))
 
+    def test_a_round_that_writes_nothing_never_lists_untracked_files(self):
+        # coding-policy#499: untracked files are no surface of a round that
+        # writes nothing, so they are never enumerated or read.
+        triggers.run_command(
+            namespace(repo=self.tmp, roles="investigator",
+                      planned=self.write(writes_repository=False)),
+            runner=self.runner())
+        self.assertFalse(any("--others" in call for call in self.calls))
+        # The tracked-diff check still runs.
+        self.assertTrue(any("--name-status" in call for call in self.calls))
+
     def test_every_read_only_responsibility_may_declare_it(self):
         for role in sorted(triggers.READ_ONLY_ROLES):
             with self.subTest(role=role):
@@ -772,6 +783,34 @@ class DetectTriggersCommandTest(TempCase):
         code, out, err = self.run_cli("--roles", "investigator", "--planned", str(planned))
         self.assertEqual(code, 0, err)
         self.assertEqual(json.loads(out)["fired"], [])
+
+    def test_an_unreadable_untracked_file_does_not_refuse_a_round_that_writes_nothing(self):
+        # coding-policy#499: a dangling symlink is listed as untracked and
+        # cannot be read. It is unrelated workspace state, so an investigation
+        # proceeds; a writing round still refuses it.
+        (self.tmp / "scratch").symlink_to(self.tmp / "missing-target")
+        planned = self.tmp.parent / (self.tmp.name + "-planned-499.json")
+        planned.write_text(json.dumps({"schema_version": 1, "added": [], "changed": [],
+                                       "package_lines": {}, "cli_surface": [],
+                                       "writes_repository": False}))
+        self.addCleanup(planned.unlink)
+        code, out, err = self.run_cli("--roles", "investigator", "--planned", str(planned))
+        self.assertEqual(code, 0, err)
+        self.assertEqual(json.loads(out)["fired"], [])
+        code, _out, err = self.run_cli()
+        self.assertNotEqual(code, 0)
+        self.assertIn("Cannot read untracked file scratch", err)
+
+    def test_a_tracked_diff_still_refuses_a_round_that_writes_nothing(self):
+        (self.tmp / "README.md").write_text("start\nmore\n")
+        planned = self.tmp.parent / (self.tmp.name + "-planned-tracked.json")
+        planned.write_text(json.dumps({"schema_version": 1, "added": [], "changed": [],
+                                       "package_lines": {}, "cli_surface": [],
+                                       "writes_repository": False}))
+        self.addCleanup(planned.unlink)
+        code, _out, err = self.run_cli("--roles", "investigator", "--planned", str(planned))
+        self.assertNotEqual(code, 0)
+        self.assertIn("README.md", err)
 
     def test_an_untracked_spec_file_fires_ux_product(self):
         (self.tmp / "src" / "cli").mkdir(parents=True)
