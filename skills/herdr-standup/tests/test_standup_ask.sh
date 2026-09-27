@@ -18,7 +18,7 @@
 #   6. Relative path  -> exit 1 before any herdr call.
 #  6b. Over-long path -> exit 1; the coarse length bound, before Herdr.
 #  6e. Control char   -> exit 1 before Herdr.
-#  6f. DEL, UTF-8 C1   -> exit 1 before Herdr, in a UTF-8 locale too.
+#  6f. DEL, C1, U+2028/9 -> exit 1 before Herdr, in a UTF-8 locale too.
 #  6g. Non-ASCII path -> a letter such as U+00E9 is asked normally.
 #  6c. Bad limit      -> a non-integer override is exit 1, not an abort.
 #  6d. `0100` is 100  -> a leading zero is decimal, never octal, downstream.
@@ -165,7 +165,7 @@ main() {
 
   # 6f. DEL and UTF-8 C1 controls are the same precondition, whatever the locale.
   local ctl
-  for ctl in $'\x7f' $'\xc2\x85' $'\xc2\x9b'; do
+  for ctl in $'\x7f' $'\xc2\x85' $'\xc2\x9b' $'\xe2\x80\xa8' $'\xe2\x80\xa9'; do
     RUN_SEQ=$((RUN_SEQ+1))
     : > "$TMP/argv6f" || die "could not create $TMP/argv6f"
     OUT="$(env HERDR_ENV=1 HERDR_BIN="$FAKE" FAKE_ARGV_FILE="$TMP/argv6f" LC_ALL=en_US.UTF-8 \

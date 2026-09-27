@@ -25,8 +25,8 @@
   2 on to Step 3's wait for a question never asked; those workers now go to
   Step 4 with the diagnostic relayed. `marker-fit` reads no foreman home, so
   it takes no home guard and never refuses on a home awaiting migration, and
-  it refuses any Unicode `Cc` control character in the path; `standup-ask.sh`
-  refuses a control-character path itself as exit 1.
+  it refuses any Unicode `Cc` control or U+2028/U+2029 separator in the path;
+  `standup-ask.sh` refuses the same set itself as exit 1, before Herdr.
 
 ## 0.3.290 — 2026-09-27
 

@@ -81,12 +81,15 @@ last standup, say so in DONE. Do not start any new work: answer, write the \
 file, and stop."
 }
 
-# True when the text holds a Unicode Cc control: C0 and DEL through the C
-# locale's [[:cntrl:]], C1 (U+0080..U+009F) through its UTF-8 lead byte 0xC2.
-# Bytewise under LC_ALL=C, so the answer never depends on the caller's locale.
+# True when the text holds a character that breaks a one-row marker: a
+# Unicode Cc control (C0 and DEL through the C locale's [[:cntrl:]], C1
+# U+0080..U+009F by its UTF-8 bytes C2 80..9F) or the line and paragraph
+# separators U+2028/U+2029 (E2 80 A8/A9). Bytewise under LC_ALL=C, so the
+# answer never depends on the caller's locale. Mirrors `cmd_marker_fit`.
 has_control() { # <text>
   local LC_ALL=C
-  [[ "$1" == *[[:cntrl:]]* || "$1" == *$'\xc2'[$'\x80'-$'\x9f']* ]]
+  [[ "$1" == *[[:cntrl:]]* || "$1" == *$'\xc2'[$'\x80'-$'\x9f']* \
+     || "$1" == *$'\xe2\x80'[$'\xa8'$'\xa9']* ]]
 }
 
 main() {
