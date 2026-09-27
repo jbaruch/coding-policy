@@ -102,6 +102,9 @@
 #  68. Interrupted expiry   -> ref gone, orphan note left; the next run
 #                             removes the orphan.
 #  69. Dry/live agreement   -> both judge origin as it is now.
+#  70. Symlinked .trash     -> the candidate is kept, nothing archived.
+#  71. Force-push           -> a merge dropped before the removal keeps it.
+#  72. Credential URL       -> a failed remote command never relays the URL.
 #
 # Run: bash skills/herdr-foreman/tests/test_prune_worktrees.sh
 set -uo pipefail
@@ -371,13 +374,13 @@ main() {
   git -C "$SEED" symbolic-ref HEAD refs/heads/vanished || die "seed symbolic-ref failed"
   git -C "$BARE" symbolic-ref HEAD refs/heads/vanished || die "bare HEAD failed"
   git -C "$SHARED" fetch -q origin || die "fetch failed"
-  # origin's default is now `vanished`; a git shim corrupts its remote-tracking
-  # ref the moment the script reaches merge-base, after the run's own fetch.
+  # origin's default is now `vanished`; a git shim makes merge-base itself fail
+  # (exit 128), the tool failure this case is about.
   mkdir -p "$TMP/shim" || die "mkdir shim failed"
   cat > "$TMP/shim/git" <<SHIM || die "shim write failed"
 #!/usr/bin/env bash
 set -euo pipefail
-case "\$*" in *merge-base*) printf 'not-a-sha\n' > "$SHARED/.git/refs/remotes/origin/vanished" ;; esac
+case "\$*" in *merge-base*) echo "fatal: simulated merge-base failure" >&2; exit 128 ;; esac
 exec "$(command -v git)" "\$@"
 SHIM
   chmod +x "$TMP/shim/git" || die "chmod shim failed"
@@ -1001,10 +1004,10 @@ SHIM
   git -C "$SHARED" worktree add -q --detach "$pg" origin/main 2>/dev/null || die "proofgone worktree add failed"
   age_wt "$pg"
   mkdir -p "$TMP/shim61" || die "mkdir shim61 failed"
-  # The second read of origin's tips (the one just before the removal)
-  # answers that origin holds no branch at all.
+  # The second read of origin's branch tips (`ls-remote --heads`, the one just
+  # before the removal) answers that origin holds no branch at all.
   # shellcheck disable=SC2016  # The shim's "$@" and $a must expand in the shim, not here.
-  printf '#!/usr/bin/env bash\nset -euo pipefail\nfor a in "$@"; do if [[ "$a" == ls-remote ]]; then printf x >> %q; if [[ "$(cat %q)" == xx ]]; then exit 0; fi; fi; done\nexec %q "$@"\n' \
+  printf '#!/usr/bin/env bash\nset -euo pipefail\nfor a in "$@"; do if [[ "$a" == --heads ]]; then printf x >> %q; if [[ "$(cat %q)" == xx ]]; then exit 0; fi; fi; done\nexec %q "$@"\n' \
     "$TMP/shim61/n" "$TMP/shim61/n" "$real_git" > "$TMP/shim61/git" || die "shim61 write failed"
   chmod +x "$TMP/shim61/git" || die "chmod shim61 failed"
   idle_run PATH="$TMP/shim61:$PATH"
@@ -1139,6 +1142,53 @@ SHIM
   echo "69. a HEAD held only by an origin branch deleted since the last fetch is kept by both dry and live runs"
   if [[ "$dry_reason" == detached && "$(kept_reason "$ag")" == detached ]] && listed "$SHARED" "$ag"; then
     pass; else fail "dry/live agreement: dry=$dry_reason out=$OUT err=$ERRTEXT"; fi
+
+  # --- 70. a symlinked .trash keeps the worktree; nothing is archived.
+  local root70="$TMP/root70"
+  mkdir -p "$root70" "$TMP/elsewhere70" || die "mkdir root70 failed"
+  ln -s "$TMP/elsewhere70" "$root70/.trash" || die "symlink .trash failed"
+  mk_repo symtrash
+  local st="$root70/symtrash-wt"
+  add_wt "$SHARED" feat/symtrash "$st"; commit_in "$st" s.txt
+  age_wt "$st"
+  RUN_SEQ=$((RUN_SEQ+1))
+  OUT="$(env WORKTREE_ROOT="$root70" PRUNE_NOW="$IDLE_NOW" bash "$SCRIPT" "$SHARED" 2>"$TMP/err.$RUN_SEQ")"; RC=$?
+  ERRTEXT="$(cat "$TMP/err.$RUN_SEQ")"
+  echo "70. a symlinked .trash keeps an archive candidate and writes no archive"
+  if (( RC == 0 )) && [[ "$(kept_reason "$st")" == trash-unsafe ]] && listed "$SHARED" "$st" \
+    && [[ -z "$(git -C "$SHARED" for-each-ref refs/archive/)" ]] && [[ -z "$(ls -A "$TMP/elsewhere70")" ]]; then
+    pass; else fail "symlinked trash: rc=$RC out=$OUT err=$ERRTEXT"; fi
+
+  # --- 71. a force-push that drops the merge between judgment and removal keeps it.
+  mk_repo forcepush
+  local fp="$ROOT/forcepush-wt" fp_base
+  fp_base="$(git -C "$SHARED" rev-parse origin/main)" || die "rev-parse base failed"
+  add_wt "$SHARED" review/fp "$fp"; commit_in "$fp" fp.txt
+  git -C "$fp" push -q origin HEAD:main 2>/dev/null || die "push to main failed"
+  git -C "$SHARED" fetch -q origin || die "fetch after merge failed"
+  age_wt "$fp"
+  mkdir -p "$TMP/shim71" || die "mkdir shim71 failed"
+  # The second read of origin's main (just before the removal) answers with the
+  # pre-merge commit, as after a force-push that dropped the merge.
+  # shellcheck disable=SC2016  # The shim's "$@" and $a must expand in the shim, not here.
+  printf '#!/usr/bin/env bash\nset -euo pipefail\nif [[ "$*" == *ls-remote*refs/heads/main* ]]; then printf x >> %q; if [[ "$(cat %q)" == xx ]]; then printf "%%s\\trefs/heads/main\\n" %q; exit 0; fi; fi\nexec %q "$@"\n' \
+    "$TMP/shim71/n" "$TMP/shim71/n" "$fp_base" "$real_git" > "$TMP/shim71/git" || die "shim71 write failed"
+  chmod +x "$TMP/shim71/git" || die "chmod shim71 failed"
+  idle_run PATH="$TMP/shim71:$PATH"
+  echo "71. a merge dropped by a force-push before the removal keeps the worktree and its branch"
+  if [[ "$(kept_reason "$fp")" == changed ]] && listed "$SHARED" "$fp" && has_branch "$SHARED" review/fp \
+    && [[ "$ERRTEXT" == *"origin no longer holds"* ]]; then
+    pass; else fail "force-push: out=$OUT err=$ERRTEXT"; fi
+
+  # --- 72. a failing remote command never relays the remote URL.
+  mk_repo secretremote
+  # git strips user:password@ from its own errors but prints the rest of the
+  # URL, so the token sits in the path, where it survives into stderr.
+  git -C "$SHARED" remote set-url origin "http://127.0.0.1:9/s3cr3t-token/repo.git" || die "set-url failed"
+  run "$SHARED"
+  echo "72. a failed fetch reports its exit code and repair, never the credential-bearing URL"
+  if (( RC == 1 )) && [[ "$ERRTEXT" == *"exited"* && "$ERRTEXT" == *"to see why"* ]] && [[ "$ERRTEXT" != *s3cr3t-token* ]]; then
+    pass; else fail "secret redaction: rc=$RC err=$ERRTEXT"; fi
 
   # --- 14. usage / not a repo.
   run

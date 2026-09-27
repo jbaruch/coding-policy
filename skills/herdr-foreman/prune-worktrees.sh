@@ -12,7 +12,8 @@
 # Decision predicate — a worktree under the worktree root, other than the
 # shared checkout, not locked and not on origin's default branch, is:
 #   * REMOVED (its branch deleted) when clean, IDLE for IDLE_HOURS, and its
-#     branch is an ancestor of origin's default branch (fully merged);
+#     branch is an ancestor of the commit origin's default branch points at
+#     right now (`git ls-remote`, ORIGIN_DEFAULT; re-read before the removal);
 #   * REMOVED when clean, IDLE for IDLE_HOURS, and its HEAD is an ancestor of
 #     a branch tip origin holds right now (detached included): the tips come
 #     from `git ls-remote --heads origin` (ORIGIN_TIPS), never from possibly
@@ -36,6 +37,9 @@
 # checkout is KEPT: a gitlink found from the index (never .gitmodules) whose
 # checkout changed (submodule-dirty) or is populated (submodule), or an
 # untracked directory with its own .git (nested-repo).
+# A git command that talks to origin (fetch, ls-remote, set-head) that fails
+# is reported by exit code and the command to rerun, never by its own message,
+# which can carry the remote URL with credentials (`network_failure`).
 # The removals above are plain `git worktree remove`, never forced: git
 # refuses a tree that turned dirty, which is that path's atomic guard. The
 # removal proof (merged, or origin holds HEAD) is re-derived immediately
@@ -145,7 +149,8 @@
 #           faithfully), in-use (a process works
 #           inside it), locked (with its lock_reason), merged-not-idle,
 #           archive-pending (an earlier archive of this path waits for its
-#           trash; carries archive_ref), nested-repo, outside-root, submodule,
+#           trash; carries archive_ref), trash-unsafe (the root's .trash is a
+#           symlink or not a directory; nothing archived), nested-repo, outside-root, submodule,
 #           submodule-dirty,
 #           prunable (its directory is gone; a live run's metadata prune
 #           removes it), unmerged. detached, dirty and unmerged mean not idle
@@ -171,6 +176,17 @@ ERRFILE=""
 ROWS=""
 
 warn() { printf 'prune-worktrees: %s\n' "$1" >&2; }
+
+# After a git command that talks to origin fails: replace its stderr in
+# ERRFILE with the exit code and the command to rerun. Its own message can
+# carry the remote URL, credentials included, so it is never relayed.
+network_failure() { # <exit> <shared> <git args...>
+  local rc="$1" shared="$2"
+  shift 2
+  # shellcheck disable=SC2016  # The backticks are literal text in the message, not a command substitution.
+  printf '`git %s` exited %s; run `git -C %s %s` to see why (its output is not relayed: it can carry the remote URL with credentials)\n' \
+    "$*" "$rc" "$shared" "$*" > "$ERRFILE"
+}
 
 cleanup() {
   local f
@@ -213,7 +229,8 @@ default_branch_of() { # <shared> <dry-run 0|1>
     local sym
     sym="$(git -C "$1" ls-remote --symref origin HEAD 2>"$ERRFILE")" || rc=$?
     if (( rc != 0 )); then
-      warn "\`git ls-remote --symref origin HEAD\` failed (exit ${rc}): $(tr '\n' ' ' < "$ERRFILE")"
+      network_failure "$rc" "$1" ls-remote --symref origin HEAD
+      warn "$(cat "$ERRFILE")"
       return 1
     fi
     db="$(printf '%s\n' "$sym" | sed -n 's#^ref: refs/heads/\(.*\)[[:space:]]HEAD$#\1#p' | head -n 1)"
@@ -263,11 +280,35 @@ default_branch_of() { # <shared> <dry-run 0|1>
 # anything else for an invalid ref or repository error; collapsing both into
 # "unmerged" would hide the failure behind a kept row
 # (rules/error-handling.md Shell Error Handling).
+#: The commit origin's default branch points at, as origin reported it when
+#: this run started (`origin_default_tip`). Merged-ness is judged against it,
+#: never a local remote-tracking ref, so dry and live runs see the same origin.
+ORIGIN_DEFAULT=""
+
+# Echo the commit origin's <default> branch points at right now, read with
+# ls-remote; return 1 when it cannot be read, 3 when origin names a commit
+# this repository does not hold (origin moved since the fetch).
+origin_default_tip() { # <shared> <default>
+  local out rc=0 sha
+  out="$(git -C "$1" ls-remote origin "refs/heads/$2" 2>"$ERRFILE")" || rc=$?
+  if (( rc != 0 )); then
+    network_failure "$rc" "$1" ls-remote origin "refs/heads/$2"
+    return 1
+  fi
+  sha="${out%%[[:space:]]*}"
+  if [[ -z "$sha" ]]; then printf 'origin has no branch %s\n' "$2" > "$ERRFILE"; return 1; fi
+  if ! git -C "$1" cat-file -e "${sha}^{commit}" 2>"$ERRFILE"; then
+    printf 'origin %s points at %s, which this repository does not hold\n' "$2" "$sha" > "$ERRFILE"
+    return 3
+  fi
+  printf '%s' "$sha"
+}
+
 ancestry() { # <shared> <commit> <default>
   local rc=0
-  # The default side is fully qualified: a tag or a local branch named like it
-  # would otherwise shadow it. The candidate side is already a commit id.
-  git -C "$1" merge-base --is-ancestor "$2" "refs/remotes/origin/$3" 2>"$ERRFILE" || rc=$?
+  # Against the commit origin reported, not a ref name: a tag or a local
+  # branch named like the default can never stand in for it.
+  git -C "$1" merge-base --is-ancestor "$2" "$ORIGIN_DEFAULT" 2>"$ERRFILE" || rc=$?
   case "$rc" in
     0) printf 'merged' ;;
     1) printf 'unmerged' ;;
@@ -560,7 +601,10 @@ read_origin_tips() { # <shared>
   local listing
   if [[ -z "$ORIGIN_TIPS" ]] && ! ORIGIN_TIPS="$(mktemp 2>"$ERRFILE")"; then ORIGIN_TIPS=""; return 1; fi
   if ! listing="$(mktemp 2>"$ERRFILE")"; then return 1; fi
-  if ! git -C "$1" ls-remote --heads origin >"$listing" 2>"$ERRFILE"; then
+  local rc=0
+  git -C "$1" ls-remote --heads origin >"$listing" 2>"$ERRFILE" || rc=$?
+  if (( rc != 0 )); then
+    network_failure "$rc" "$1" ls-remote --heads origin
     if ! rm -f "$listing"; then warn "could not remove temp file ${listing} — remove it by hand"; fi
     return 1
   fi
@@ -605,10 +649,22 @@ reachable_remotely() { # <shared> <commit>
 # still merged into origin's default (<mode> merged) or <head> still held by an
 # origin ref (<mode> reachable), 1 when the proof is gone, 2 on a failure.
 proof_holds() { # <shared> <mode> <tip> <head> <default>
-  local verdict
   if [[ "$2" == merged ]]; then
-    verdict="$(ancestry "$1" "$3" "$5")" || return 2
-    [[ "$verdict" == merged ]]
+    # Origin's default as it is now: a force-push since the run started can
+    # drop the merge.
+    local now_tip trc=0
+    now_tip="$(origin_default_tip "$1" "$5")" || trc=$?
+    case "$trc" in
+      0) ;;
+      3) return 1 ;;
+      *) return 2 ;;
+    esac
+    git -C "$1" merge-base --is-ancestor "$3" "$now_tip" 2>"$ERRFILE" || trc=$?
+    case "$trc" in
+      0) return 0 ;;
+      1) return 1 ;;
+      *) return 2 ;;
+    esac
   else
     # Origin as it is now, not as it was when the run started.
     read_origin_tips "$1" || return 2
@@ -856,6 +912,13 @@ decide_worktree() { # <shared> <abs_root> <default> <dry-run 0|1> <path> <branch
   if (( age < ARCHIVE_IDLE_HOURS )); then
     row kept "$path" "$branch" "$legacy"; return 0
   fi
+  # The trash must be a real directory under the root before anything is
+  # written: a symlinked or non-directory .trash would carry the move
+  # elsewhere while the record still claims the root.
+  if [[ -L "$abs_root/.trash" || ( -e "$abs_root/.trash" && ! -d "$abs_root/.trash" ) ]]; then
+    warn "kept ${path}: ${abs_root}/.trash is a symlink or not a directory — make it a plain directory so archives can be moved there"
+    row kept "$path" "$branch" trash-unsafe; return 0
+  fi
   local names ref trash
   if ! names="$(archive_names "$abs_root" "$path")"; then
     row failed "$path" "$branch" "cannot name the archive, so the worktree was kept: $(tr '\n' ' ' < "$ERRFILE")"; return 0
@@ -888,7 +951,9 @@ decide_worktree() { # <shared> <abs_root> <default> <dry-run 0|1> <path> <branch
   # Never a delete: an atomic rename into the trash. A writer that got in after
   # the recheck lands in the moved copy, which the expiry pass removes with
   # the ref.
-  if ! mkdir -p "$abs_root/.trash" 2>"$ERRFILE" \
+  # No -p: it would follow a symlink swapped in since the check above.
+  if { [[ ! -d "$abs_root/.trash" ]] && ! mkdir "$abs_root/.trash" 2>"$ERRFILE"; } \
+    || [[ -L "$abs_root/.trash" || ! -d "$abs_root/.trash" ]] \
     || ! git -C "$shared" worktree move "$path" "$trash" 2>"$ERRFILE"; then
     row archived "$path" "$branch" "" "$head" "$ref"
     row failed "$path" "$branch" "moving it to ${trash} failed, so it stayed in place: $(tr '\n' ' ' < "$ERRFILE") — its archive ${ref} was kept"; return 0
@@ -1350,12 +1415,18 @@ main() {
   # remote's default branch moved, would delete work origin no longer holds.
   local -a fetch_args=(fetch --quiet origin)
   if (( ! dry )); then fetch_args=(fetch --quiet --prune origin); fi
-  if ! git -C "$shared" "${fetch_args[@]}" 2>"$ERRFILE"; then
-    warn "\`git -C ${shared} ${fetch_args[*]}\` failed: $(tr '\n' ' ' < "$ERRFILE") — check connectivity; refusing to judge merged-ness from stale refs"
+  local frc=0
+  git -C "$shared" "${fetch_args[@]}" 2>"$ERRFILE" || frc=$?
+  if (( frc != 0 )); then
+    network_failure "$frc" "$shared" "${fetch_args[@]}"
+    warn "$(cat "$ERRFILE") — check connectivity; refusing to judge merged-ness from stale refs"
     return 1
   fi
-  if (( ! dry )) && ! git -C "$shared" remote set-head origin --auto >/dev/null 2>"$ERRFILE"; then
-    warn "\`git -C ${shared} remote set-head origin --auto\` failed: $(tr '\n' ' ' < "$ERRFILE") — cannot confirm origin's current default branch"
+  local src=0
+  if (( ! dry )); then git -C "$shared" remote set-head origin --auto >/dev/null 2>"$ERRFILE" || src=$?; fi
+  if (( src != 0 )); then
+    network_failure "$src" "$shared" remote set-head origin --auto
+    warn "$(cat "$ERRFILE") — cannot confirm origin's current default branch"
     return 1
   fi
   if ! read_origin_tips "$shared"; then
@@ -1365,6 +1436,10 @@ main() {
   local db
   if ! db="$(default_branch_of "$shared" "$dry")"; then
     warn "cannot resolve origin's default branch — run \`git -C ${shared} remote set-head origin --auto\`"
+    return 1
+  fi
+  if ! ORIGIN_DEFAULT="$(origin_default_tip "$shared" "$db")"; then
+    warn "cannot read origin's current ${db}: $(cat "$ERRFILE") — refusing to judge merged-ness"
     return 1
   fi
 

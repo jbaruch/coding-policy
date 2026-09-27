@@ -30,6 +30,15 @@
     whose checkout changed (`submodule-dirty`) or is populated
     (`submodule`), or an untracked directory with its own `.git`
     (`nested-repo`), which `add -A` would reduce to a bare gitlink.
+  - Merged-ness is judged against the commit origin's default branch points
+    at right now, read with `git ls-remote`. The pre-removal proof re-reads
+    it, so a force-push that drops the merge keeps the worktree.
+  - A failed fetch, `ls-remote` or `remote set-head` is reported by its exit
+    code and the command to rerun, never by its own message. git strips
+    `user:password@` from its errors but prints the rest of the URL, so a
+    token in the path would leak.
+  - A symlinked or non-directory `.trash` keeps every archive candidate
+    (`trash-unsafe`); nothing is archived or moved outside the root.
   - Reachability counts only the branch tips origin holds right now, read
     with `git ls-remote --heads origin`. A stale local ref, whether of
     another remote or of an origin branch deleted since the last fetch,

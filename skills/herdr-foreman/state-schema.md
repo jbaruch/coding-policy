@@ -892,6 +892,9 @@ Archive commit and ref:
   path, so every archive is its own commit; tree is every tracked and untracked
   non-ignored file as it stood. Ignored files are not kept. A worktree holding
   a submodule or an embedded repository is never archived
+- The root's `.trash` must be a plain directory: a symlinked or non-directory
+  `.trash` keeps every archive candidate (`trash-unsafe`) and nothing is
+  archived
 - The trash worktree is the original, moved by `git worktree move` to
   `<root>/.trash/<ref basename>` and locked with the reason
   `prune-worktrees archive <ref>`; it stays registered with git, lock and all,

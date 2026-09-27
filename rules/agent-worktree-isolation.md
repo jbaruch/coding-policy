@@ -22,11 +22,7 @@ alwaysApply: true
 - A worktree's lifecycle ends when its branch merges or the worktree is abandoned
 - A merged worktree is removed at that point, by the post-merge order below
 - Abandoned means idle past the windows in `skills/herdr-foreman/prune-worktrees.sh` (top-of-file docstring)
-- An abandoned worktree whose work a branch on origin holds is removed at that point
-- An abandoned worktree whose work no branch on origin holds is archived under `refs/archive/worktrees/`
-- An archived worktree is moved into the worktree root's `.trash/`
-- An archived worktree whose move fails stays in place, reported with its archive ref
-- A trash worktree is removed with its archive ref at archive expiry, only once every expiry check in that script passes
+- An abandoned worktree leaves through the foreman's sweep (`rules/agent-team-operation.md` Writers and Checkouts)
 - Leave no orphans in `git worktree list`
 - Use `git worktree remove <path>`; never `rm -rf` the directory
 - When the worktree's branch lands via `skills/release/SKILL.md` Step 7, the post-merge order is mandatory: `cd` back to the base checkout → fast-forward base `main` → `git worktree remove <worktree-path>` → `git branch -d <branch>`. Teardown precedes branch delete

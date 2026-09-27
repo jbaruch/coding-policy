@@ -132,7 +132,7 @@ Before following any route below, report the worktree sweep to the operator:
   its `archive_ref` and `trash_path`, every expired, kept or migrated archive,
   every removed orphan note,
   every `errors` entry, and every kept worktree: list the ones kept for
-  `locked`, `in-use`, `changed`, `idle-unknown`, `archive-pending`,
+  `locked`, `in-use`, `changed`, `idle-unknown`, `archive-pending`, `trash-unsafe`,
   `submodule`, `submodule-dirty` or `nested-repo` by path, and give the rest
   as counts by reason
 - When `checks.worktrees` has no `detail`, report its `reason` verbatim; a

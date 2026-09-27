@@ -294,7 +294,9 @@ description: Running a multi-agent team — task-based specialist composition, c
 - The sweep archives an idle dirty or unpushed worktree under `refs/archive/worktrees/`
 - The sweep moves an archived worktree into the root's `.trash/` once its archive ref resolves
 - The sweep locks each trash worktree with its own lock reason
-- A failed move keeps the archived worktree in place and reports its archive ref
+- A failed move keeps the archived worktree in place
+- The sweep reports a failed move with its archive ref
+- A symlinked or non-directory `.trash` keeps every archive candidate, with nothing archived
 - The sweep never archives a worktree again while its earlier archive awaits a trash worktree
 - The sweep never deletes an archived worktree before its archive expires
 - A failed archive keeps the worktree
@@ -308,7 +310,8 @@ description: Running a multi-agent team — task-based specialist composition, c
 - Expiry deletes the archive ref after the trash worktree and the branch, and its record after the ref
 - A failed expiry step before the ref deletion keeps the archive ref and its record
 - A later live run removes a record left on a commit no archive ref points at
-- An archive record the sweep cannot read or validate is kept and reported
+- An archive record the sweep cannot read or validate is kept
+- The sweep reports an archive record it cannot read or validate
 - The foreman reports the sweep's archives, trash moves, expiries, kept archives, kept worktrees and errors to the operator at Step 2, on every route
 - The foreman never removes a worktree by hand
 - Narrow exception for the merged task's own worktree.
