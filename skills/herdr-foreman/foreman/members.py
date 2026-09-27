@@ -124,7 +124,11 @@ def assessed_event(path, member, state_path):
     if header["task"] != member["task"]:
         raise UsageError("Task ledger {} records task {!r}, not this enrollment's {!r}; pass the ledger for {}.".format(
             path, header["task"], member["task"], member["task"]), {"ledger": str(path)})
-    bound = str(Path(header["dispatch_state"]).resolve())
+    try:
+        bound = str(Path(header["dispatch_state"]).resolve())
+    # A symlink loop raises RuntimeError before Python 3.13 and OSError from it on.
+    except (OSError, RuntimeError) as exc:
+        raise _unusable(path, "its dispatch_state {!r} does not resolve: {}".format(header["dispatch_state"], exc)) from None
     if bound != str(Path(state_path).expanduser().resolve()):
         raise _unusable(path, "it is bound to dispatch state {}, not {}".format(header["dispatch_state"], state_path))
     matching = [row for row in events if row["subject"] == "assignment" and row["dispatch_id"] == member["id"]

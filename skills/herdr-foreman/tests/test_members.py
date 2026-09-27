@@ -141,6 +141,15 @@ class CloseMemberTest(MembersCase):
                 self.assertTrue(store.pending(data))
                 self.assertTrue(next(row for row in data["members"] if row["id"] == "dispatch-a")["active"])
 
+    def test_a_dispatch_state_in_a_symlink_loop_closes_nothing(self):
+        self.emit()
+        (self.root / "loop-a").symlink_to(self.root / "loop-b")
+        (self.root / "loop-b").symlink_to(self.root / "loop-a")
+        self.write_ledger("accepted", state=str(self.root / "loop-a" / "state.json"))
+        with self.assertRaisesRegex(UsageError, "does not resolve"):
+            members.close(self.path, "dispatch-a", self.ledger, LATER)
+        self.assertTrue(store.pending(store.load(self.path)))
+
     def test_a_ledger_line_cannot_forge_the_section_heading(self):
         self.emit()
         self.write_ledger("accepted", fields={"_heading": "renamed-section", "_section": "event-1"})
