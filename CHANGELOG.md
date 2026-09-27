@@ -1,7 +1,5 @@
 # Changelog
 
-## 0.3.288 — 2026-09-27
-
 ### Fixed
 
 - **A frozen-brief path with a symlinked ancestor is no longer read back
@@ -32,6 +30,10 @@
   write and a failed close each followed by a clean retry, a brief path
   containing braces, and a FIFO source. Carrying the verified bytes through
   the dispatch-identity and prompt reads that follow the freeze is #565.
+
+## 0.3.288 — 2026-09-27
+
+### Fixed
 
 - **The ACR acceptance helper's output writes are descriptor-relative end to
   end (#558).** Follow-ups from #550's review, in
