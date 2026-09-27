@@ -4,7 +4,7 @@
 # SKILL.md Steps 1-9 precede the first dispatch, and each one was a separate
 # foreman turn that shipped the foreman's whole accumulated context to run a script
 # and read its exit code. The checks are deterministic -- Herdr reachable, the
-# roster measured, authority verified, a cadence due, worktrees pruned -- so
+# roster measured, authority verified, a cadence due, worktrees swept -- so
 # rules/script-delegation.md puts them here, and its Precheck Gating shape says
 # what to emit: one payload saying whether the agent is needed and what it
 # needs (#445 §1).
@@ -31,7 +31,24 @@
 # preflight could not answer.
 #
 # `--no-measure` skips the headroom snapshot, which is the one check that
-# writes. Everything else here is read-only.
+# writes. Every other check is read-only except the worktree sweep, which
+# removes worktrees and deletes local branches under its own contract.
+#
+# `checks.worktrees` (the sweep, sweep-worktrees.sh):
+#   ok         no detail when the worktree root does not exist; otherwise the
+#              sweep JSON as detail
+#   undecided  the sweep decided nothing (exit 1): reason, no detail; or this
+#              checkout's own prune decided nothing: reason, sweep JSON detail
+#   failed     this checkout's prune failed or returned no readable result,
+#              or an error names this checkout
+#              or no repository: reason, sweep JSON detail; the sweep's JSON
+#              was unreadable or it exited other than 0/1/2: reason, no detail
+#   degraded   only another repository failed: sweep JSON detail; not blocking
+# The sweep runs under bounded-run.sh for SWEEP_BUDGET_SEC: it fetches every
+# repository it finds, and a dead remote would otherwise hold the round. A run
+# past the budget is failed (reason names the budget, no detail).
+# A detail file that cannot be read turns any status into blocked (reason
+# names the file).
 
 # `-e` is dropped under rules/error-handling.md's aggregate-reporting carve-out:
 # each check below is independent, every exit code is captured explicitly, and
@@ -41,6 +58,9 @@ set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd && printf x)"
 HERE="${HERE%x}"
 HERE="${HERE%$'\n'}"
+
+#: Wall-clock seconds the worktree sweep may take across every repository.
+SWEEP_BUDGET_SEC=600
 
 SCRATCH=""
 # An EXIT trap's final status becomes the script's, so cleanup ends on zero and
@@ -209,15 +229,56 @@ PY
     record gates failed "resolve-gates.sh exited ${rc}; the briefs carry no gate pointers and every worker searches" 0 ""
   fi
 
-  # 7. Worktree hygiene. Pruned every round, before provisioning.
-  bash "${HERE}/prune-worktrees.sh" "$checkout" > "${scratch}/prune.json" 2>"${scratch}/prune.err"
-  rc=$?
-  cat "${scratch}/prune.err" >&2
-  case "$rc" in
-    0) record worktrees ok "" 0 "${scratch}/prune.json" ;;
-    1) record worktrees undecided "prune-worktrees.sh decided nothing; fix its diagnostic and re-run before provisioning" 0 "" ;;
-    *) record worktrees failed "prune-worktrees.sh exited ${rc}; git refused a check or a removal" 0 "" ;;
-  esac
+  # 7. Worktree hygiene. Every repository with a worktree directory under
+  #    the root is swept every round, before provisioning. Only this checkout's own prune
+  #    blocks the round; another repository's failure is reported as degraded.
+  local wroot="${WORKTREE_ROOT:-${HOME}/.worktrees}" own
+  if [ ! -d "$wroot" ]; then
+    record worktrees ok "" 0 ""
+  else
+    bash "${HERE}/bounded-run.sh" "$SWEEP_BUDGET_SEC" bash "${HERE}/sweep-worktrees.sh" "$wroot" \
+      > "${scratch}/sweep.json" 2>"${scratch}/sweep.err"
+    rc=$?
+    cat "${scratch}/sweep.err" >&2
+    case "$rc" in
+      0) record worktrees ok "" 0 "${scratch}/sweep.json" ;;
+      1) record worktrees undecided "sweep-worktrees.sh decided nothing; fix its diagnostic and re-run before provisioning" 0 "" ;;
+      2)
+        # Whose failure it is: this checkout's prune (undecided / failed), an
+        # error no repository could be named for (unassociated), or another
+        # repository's alone (degraded). Only the last lets the round proceed.
+        if ! own="$(python3 - "${scratch}/sweep.json" "$checkout" <<'PY'
+import json, os, sys
+with open(sys.argv[1], encoding="utf-8") as handle:
+    sweep = json.load(handle)
+mine = os.path.realpath(sys.argv[2])
+entry = next((r for r in sweep["repos"] if os.path.realpath(r["shared"]) == mine), None)
+errors = sweep.get("errors", [])
+if entry is not None and entry["exit"] == 1:
+    print("undecided")
+elif (entry is not None and (entry["exit"] != 0 or "result" not in entry)) \
+        or any(e.get("repo") and os.path.realpath(e["repo"]) == mine for e in errors):
+    # A result that could not be read is a failure, whatever the exit said.
+    print("failed")
+elif any(not e.get("repo") for e in errors):
+    print("unassociated")
+else:
+    print("degraded")
+PY
+)"; then
+          record worktrees failed "sweep-worktrees.sh exited 2 and its JSON could not be read" 0 ""
+        else
+          case "$own" in
+            undecided) record worktrees undecided "prune-worktrees.sh decided nothing for ${checkout}; fix its diagnostic and re-run before provisioning" 0 "${scratch}/sweep.json" ;;
+            failed) record worktrees failed "the sweep reported a failure for ${checkout}; git refused a check or a removal" 0 "${scratch}/sweep.json" ;;
+            unassociated) record worktrees failed "the sweep could not read a worktree under ${wroot} and could not name its repository; inspect the errors entry before provisioning" 0 "${scratch}/sweep.json" ;;
+            *) record worktrees degraded "" 0 "${scratch}/sweep.json" ;;
+          esac
+        fi ;;
+      124) record worktrees failed "sweep-worktrees.sh ran past its ${SWEEP_BUDGET_SEC}s budget and was stopped; run it by hand to see which repository's origin it waits on" 0 "" ;;
+      *) record worktrees failed "sweep-worktrees.sh exited ${rc}" 0 "" ;;
+    esac
+  fi
 
   local payload
   payload="$(emit "$results")" || die "cannot assemble the preflight payload"
