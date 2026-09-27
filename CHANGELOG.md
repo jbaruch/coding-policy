@@ -13,8 +13,11 @@
   notes and workflow filenames into every worker's Markdown `GATES` block
   unchecked: a backtick closed a path's code span, a newline injected lines
   into every brief, and a NUL made `realpath` raise outside the documented
-  exit-2 path. A control character (C0, DEL or C1) or a lone surrogate (which
-  JSON escapes can carry and which crashed path resolution) anywhere, or a
+  exit-2 path. Review kept finding one more character (C1 controls, lone
+  surrogates, then the U+2028/U+2029 separators), so the refusal is a class,
+  not a list: any character whose Unicode category is control, format (bidi
+  overrides included), surrogate, line or paragraph separator, private-use or
+  unassigned (`UNRENDERABLE_CATEGORIES`) anywhere, or a
   backtick in a path or workflow filename, is now refused with exit 2 before
   anything resolves or renders, each refusal naming the repair for its field;
   a backtick in `notes`, which render as plain text, stays accepted. The

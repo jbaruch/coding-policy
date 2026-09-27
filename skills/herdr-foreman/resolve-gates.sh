@@ -63,23 +63,30 @@ main() {
   [ -d "$checkout" ] || die "'${checkout}' is not a directory -- pass the repository checkout"
 
   python3 - "$checkout" <<'PY'
-import json, os, stat, sys
+import json, os, stat, sys, unicodedata
 
 checkout = sys.argv[1]
 
 path = os.path.join(checkout, ".herdr", "gates.json")
 
 
+#: Unicode general categories no rendered value may carry: controls (Cc),
+#: format characters such as bidi overrides (Cf), surrogates (Cs), line and
+#: paragraph separators (Zl, Zp), private-use (Co) and unassigned (Cn) code
+#: points. A class, not a list of characters, so a new separator is covered.
+UNRENDERABLE_CATEGORIES = frozenset({"Cc", "Cf", "Cs", "Zl", "Zp", "Co", "Cn"})
+
+
 def refuse_unrenderable(value, label, code_span, remedy):
     """Refuse text the GATES block cannot carry intact.
 
-    Every brief renders these values into Markdown. A control character -- a
-    newline, a NUL, an escape -- injects lines into every worker's brief or
-    breaks path resolution, and so does a lone surrogate JSON can smuggle in;
-    a backtick closes the code span a path renders in.
+    Every brief renders these values into Markdown, one value per line. A
+    character in UNRENDERABLE_CATEGORIES breaks a line, reorders or hides
+    text, or fails path resolution; a backtick closes the code span a path
+    renders in.
     """
     bad = sorted({char for char in value
-                  if ord(char) < 0x20 or 0x7f <= ord(char) <= 0x9f or 0xd800 <= ord(char) <= 0xdfff
+                  if unicodedata.category(char) in UNRENDERABLE_CATEGORIES
                   or (code_span and char == "`")})
     if bad:
         sys.stderr.write("resolve-gates: {} {!r} carries {}, which the briefs' Markdown GATES block "
@@ -119,7 +126,7 @@ if probe is not None and stat.S_ISDIR(probe.st_mode):
 workflows.sort()
 for entry in workflows:
     refuse_unrenderable(entry, "workflow file", code_span=True,
-                        remedy="Rename the workflow file without control characters or backticks.")
+                        remedy="Rename the workflow file to printable text without backticks.")
 
 try:
     with open(path, encoding="utf-8") as handle:
@@ -159,7 +166,7 @@ if document is not None:
         raise SystemExit(2)
     if notes is not None:
         refuse_unrenderable(notes, "{}'s notes".format(path), code_span=False,
-                            remedy="Rewrite notes as one line without control characters.")
+                            remedy="Rewrite notes as one line of printable text.")
     declared = True
     # A declared path is a pointer a worker follows, so it must stay inside the
     # checkout: an absolute path, a `..` or a symlink out of the tree is refused.

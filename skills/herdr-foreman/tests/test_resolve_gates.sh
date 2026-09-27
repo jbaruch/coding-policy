@@ -16,10 +16,11 @@
 #   6. Bad value types       -> exit 2, named.
 #   7. Workflows             -> .yml and .yaml, sorted, relative; absent dir is [].
 #   8. Usage / bad checkout  -> exit 2, no JSON.
-#   9. Unrenderable text     -> a control character in a path, a note or a
-#                               workflow filename, or a backtick in a path or
-#                               workflow filename: exit 2. A backtick in a
-#                               note stays accepted.
+#   9. Unrenderable text     -> a control, format, separator, surrogate,
+#                               private-use or unassigned character in a path,
+#                               a note or a workflow filename, or a backtick
+#                               in a path or workflow filename: exit 2. A
+#                               backtick in a note stays accepted.
 #
 # No case asserts a filename this script recognises, because it recognises none.
 # An earlier draft matched a hardcoded list of names, which is the enumerated
@@ -130,6 +131,11 @@ JSON
                 '{"schema_version": 1, "runners": ["scripts/esc\u001b.sh"]}' \
                 '{"schema_version": 1, "runners": ["scripts/c1\u0085.sh"]}' \
                 '{"schema_version": 1, "runners": ["scripts/sur\ud800.sh"]}' \
+                '{"schema_version": 1, "runners": ["scripts/ls\u2028.sh"]}' \
+                '{"schema_version": 1, "instructions": ["ps\u2029.md"]}' \
+                '{"schema_version": 1, "runners": ["scripts/bidi\u202e.sh"]}' \
+                '{"schema_version": 1, "notes": "one\u2028- injected"}' \
+                '{"schema_version": 1, "notes": "one\u2029two"}' \
                 '{"schema_version": 1, "notes": "line one\n- injected"}'; do
     printf '%s\n' "$unsafe" > "$TMP/render/.herdr/gates.json" || die "write unsafe declaration"
     run "$TMP/render"
@@ -153,6 +159,12 @@ JSON
   run "$TMP/wfbad"
   if [[ $RC -eq 2 && -z "$OUT" ]] && printf '%s' "$ERRTEXT" | grep -q 'cannot render intact'; then
     pass; else fail "a backtick workflow filename must be refused, got RC=$RC OUT=$OUT"; fi
+
+  mkdir -p "$TMP/wfls/.github/workflows" || die "mkdir wfls"
+  printf 'x\n' > "$TMP/wfls/.github/workflows/$(printf 'a\342\200\250b.yml')" || die "write separator workflow"
+  run "$TMP/wfls"
+  if [[ $RC -eq 2 && -z "$OUT" ]] && printf '%s' "$ERRTEXT" | grep -q 'cannot render intact'; then
+    pass; else fail "a line-separator workflow filename must be refused, got RC=$RC OUT=$OUT"; fi
 
   mkdir -p "$TMP/wfnl/.github/workflows" || die "mkdir wfnl"
   printf 'x\n' > "$TMP/wfnl/.github/workflows/$(printf 'a\nb.yml')" || die "write newline workflow"
@@ -198,7 +210,7 @@ JSON
   printf '%s\n' '{"schema_version": 1, "notes": "one\ntwo"}' > "$TMP/render/.herdr/gates.json" \
     || die "write notes declaration"
   run "$TMP/render"
-  if [[ $RC -eq 2 ]] && printf '%s' "$ERRTEXT" | grep -q 'Rewrite notes as one line'; then
+  if [[ $RC -eq 2 ]] && printf '%s' "$ERRTEXT" | grep -q 'Rewrite notes as one line of printable text'; then
     pass; else fail "a notes refusal names the notes repair, got ERR=$ERRTEXT"; fi
   printf '%s\n' '{"schema_version": 1, "runners": ["a\tb.sh"]}' > "$TMP/render/.herdr/gates.json" \
     || die "write runner declaration"
