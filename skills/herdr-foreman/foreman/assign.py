@@ -313,13 +313,16 @@ def _require_frozen_copy(target, digest):
 def read_frozen(path):
     """The bytes a dispatch recorded at `path`, refused unless they are an intact frozen copy.
 
-    Intact: under `FROZEN_DIR`, an unlinked regular file, and holding the
-    content its name's digest names, so the bytes read are the bytes sent.
+    Intact: an absolute path with no `..` component, directly under
+    `FROZEN_DIR`, an unlinked regular file, and holding the content its name's
+    digest names, so the bytes read are the bytes sent. A `..` would let a
+    lexical `.dispatched` parent name a file in some other directory (#534).
     """
     target = Path(path)
-    if target.parent.name == FROZEN_DIR:
+    anchored = target.is_absolute() and ".." not in target.parts and target.parent.name == FROZEN_DIR
+    if anchored:
         _require_frozen_dir(target.parent)
-    data = _read_unlinked_regular(target) if target.parent.name == FROZEN_DIR else None
+    data = _read_unlinked_regular(target) if anchored else None
     if data is None or hashlib.sha256(data).hexdigest()[:16] not in target.name.split("."):
         raise UsageError("Dispatched brief {} is not an intact frozen copy, so what the worker read cannot be "
                          "shown. Dispatch again with this build.".format(target), {"path": str(target)})
