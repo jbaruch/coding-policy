@@ -1590,5 +1590,64 @@ class RecoveryTests(unittest.TestCase):
             validate_store(corrupt, self.history)
 
 
+
+class JudgeModeReservationTests(unittest.TestCase):
+    """A judge dispatch carries its mode from reservation onward (#495)."""
+
+    def setUp(self):
+        self.store = empty_state()["recovery"]
+
+    def judge(self, **extra):
+        return {"id": "judge-1", "task": TASK, "role": "judge", "agent": "claude", "fix_round": None,
+                "fingerprint": "d" * 64, "plan": None, "work": None, **extra}
+
+    def test_a_new_judge_reservation_without_a_mode_is_refused(self):
+        for record in (self.judge(), self.judge(judge_mode=None)):
+            with self.subTest(record=record):
+                with self.assertRaisesRegex(UsageError, "declares its mode"):
+                    reserve(self.store, record, AT)
+                self.assertEqual(self.store["dispatches"], [])
+
+    def test_a_judge_reservation_with_its_mode_is_a_version_three_dispatch(self):
+        item = reserve(self.store, self.judge(judge_mode="diagnosis"), AT)
+        self.assertEqual((item["schema_version"], item["judge_mode"]), (3, "diagnosis"))
+
+    def test_a_stored_mode_less_judge_row_still_reads(self):
+        # Rows recorded before the mode existed stay legacy history, never refused.
+        self.store["dispatches"].append({**self.judge(), "at": AT, "schema_version": 1,
+                                         "status": "sending", "result": None, "report": None,
+                                         "context_before_send": {"cleared": True}})
+        validate_store(self.store, [])
+
+    def test_sending_refuses_a_context_naming_another_mode(self):
+        reserve(self.store, self.judge(judge_mode="diagnosis"), AT)
+        for context in ({"cleared": True}, {"cleared": True, "judge_mode": "adjudication"}):
+            with self.subTest(context=context):
+                with self.assertRaisesRegex(UsageError, "different judge mode"):
+                    mark_sending(self.store, "judge-1", AT, context)
+                self.assertEqual(self.store["dispatches"][0]["status"], "reserved")
+        mark_sending(self.store, "judge-1", AT, {"cleared": True, "judge_mode": "diagnosis"})
+        self.assertEqual(self.store["dispatches"][0]["status"], "sending")
+
+    def test_a_pending_judge_context_is_checked_against_its_row(self):
+        reserve(self.store, self.judge(judge_mode="diagnosis"), AT)
+        mark_sending(self.store, "judge-1", AT, {"cleared": True, "judge_mode": "diagnosis"})
+        validate_store(self.store, [])
+        for mode in ("adjudication", None):
+            with self.subTest(mode=mode):
+                corrupt = copy.deepcopy(self.store)
+                corrupt["dispatches"][0]["context_before_send"]["judge_mode"] = mode
+                with self.assertRaisesRegex(UsageError, "different judge mode"):
+                    validate_store(corrupt, [])
+
+    def test_a_non_judge_context_carrying_a_mode_is_refused(self):
+        reserve(self.store, {**self.judge(), "id": "review-1", "role": "reviewer"}, AT)
+        mark_sending(self.store, "review-1", AT, {"cleared": True})
+        corrupt = copy.deepcopy(self.store)
+        corrupt["dispatches"][0]["context_before_send"]["judge_mode"] = "diagnosis"
+        with self.assertRaisesRegex(UsageError, "different judge mode"):
+            validate_store(corrupt, [])
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -1281,6 +1281,12 @@ def _validate_dispatch_metadata(record):
 
 def reserve(store, record, at):
     version = _dispatch_version(record)
+    # A stored judge row with no mode is legacy history `_dispatch_version`
+    # still reads; a NEW reservation without one would write that legacy
+    # shape today, bypassing the mode `assign.apply` requires (#495).
+    if canonical_role(record.get("role")) == "judge" and record.get("judge_mode") is None:
+        raise UsageError("A judge dispatch declares its mode, one of {}, before it is reserved; "
+                         "pass judge_mode.".format(" | ".join(JUDGE_MODES)), {"dispatch": record.get("id")})
     if version >= SPECIALIST_DISPATCH_VERSION and store.get("schema_version") != RECOVERY_STORE_VERSION:
         raise UsageError("Composition dispatch metadata needs the owner-migrated recovery store; load the current state before reserving this assignment.", {})
     # A seat in the dispatch role is what store version 10 added. Appending one
@@ -1328,6 +1334,9 @@ def reserve(store, record, at):
 
 def mark_sending(store, identifier, at, context):
     record = _item(store["dispatches"], identifier, "dispatch")
+    if context.get("judge_mode") != record.get("judge_mode"):
+        raise UsageError("The pre-send context names a different judge mode than its dispatch was reserved for; "
+                         "re-run apply with the reserved mode.", {"dispatch": identifier})
     record["status"] = "sending"
     record["context_before_send"] = context
     _event(store, at, "dispatch_sending", record["task"], {"dispatch": identifier, "context": context})
@@ -1946,6 +1955,12 @@ def validate_store(store, assignments):
             require_seatable(row["role"])
             if row["status"] not in DISPATCH_STATUSES:
                 raise UsageError("Unknown dispatch status; recover through the owner without dropping the attempt.", {})
+            # Reconcile reads a pending judge's mode from this context, so it is
+            # checked before the dispatch applies, not only after (#495).
+            context = row.get("context_before_send")
+            if isinstance(context, dict) and context.get("judge_mode") != row.get("judge_mode"):
+                raise UsageError("The pre-send context names a different judge mode than its dispatch; "
+                                 "restore the mode the judge was sent for.", {})
             if row["status"] in PENDING_STATUSES:
                 if row["agent"] in pending_workers or row["role"] in {"developer", "release"} and row["task"] in pending_tasks:
                     raise UsageError("Concurrent pending dispatches overlap a worker or implementation task; preserve and reconcile their outcomes.", {})
