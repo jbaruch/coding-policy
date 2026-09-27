@@ -13,11 +13,17 @@
   `git rev-parse` role probes failing, the session may be a worker, so the hook
   neither fetches nor fast-forwards and reports "sync not verified" with the
   diagnostic command — only a standalone session or a proven main checkout
-  fetches. `hooks/check-acr-latest.sh` already returns for every Herdr session
-  before its sync-proof fetch, so it needs no change.
+  fetches. Under tessl (`SESSION_START_MODE=portable`) the environment is
+  stripped, so a linked worktree may be a worker's: it gets the same no-fetch,
+  sync-not-verified path. `HERDR_ENV` now counts when set at all, empty
+  included (rules/agent-team-operation.md Two Modes), here and in
+  `hooks/check-acr-latest.sh` and `hooks/stop-handoff-hygiene.sh`, which
+  tested for a non-empty value. `hooks/check-acr-latest.sh` already returns
+  for every Herdr session before its sync-proof fetch.
   `hooks/tests/test_check_git_sync.sh` asserts a worker session leaves
   `refs/remotes/origin/*` unchanged while origin has moved, the foreman still
-  fetches, and a git shim failing the role probes leaves the refs unchanged.
+  fetches, and the refs stay unchanged for a git shim failing the role probes,
+  an empty `HERDR_ENV`, and a portable linked worktree.
 
 ## 0.3.282 — 2026-09-27
 

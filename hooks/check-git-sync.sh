@@ -24,11 +24,11 @@
 #   - Acts when the answer is mechanical: a default branch strictly behind
 #     origin after a fresh fetch is fast-forwarded (git refuses every unsafe
 #     case); diverged and unverified sessions are reported only.
-#   - A Herdr worker session (HERDR_ENV set, linked worktree) never fetches: the
+#   - A Herdr worker session (HERDR_ENV set, any value, linked worktree) never fetches: the
 #     fetch writes remote-tracking refs shared with the foreman's checkout. It
-#     reports drift from the refs as last fetched. With HERDR_ENV set and the
-#     role probe failing, the session may be a worker: no fetch, and a
-#     sync-unverified notice naming the diagnostic command.
+#     reports drift from the refs as last fetched. A failed role probe (HERDR_ENV
+#     set or portable mode) or a portable linked worktree may be a worker: no
+#     fetch, and a sync-unverified notice naming the cause.
 #   - Never blocks (always exits 0), never exits 2.
 #
 # Contract:
@@ -100,30 +100,47 @@ emit_notice() { # <notice-text>
 # linked worktree. In a linked worktree `--git-dir` and `--git-common-dir`
 # resolve differently; in the main checkout they are the same.
 #
-# Tri-state, so an indeterminate probe never reads as "the foreman":
+# HERDR_ENV counts when set at all, empty included (rules/agent-team-operation.md
+# Two Modes). Under tessl (SESSION_START_MODE=portable) the environment is
+# stripped, so an unset HERDR_ENV proves nothing there and a linked worktree
+# may be a worker's.
+#
+# Tri-state, so an indeterminate session never reads as "the foreman":
 #   0 = a Herdr worker (HERDR_ENV set, linked worktree),
-#   1 = the foreman or a standalone agent (HERDR_ENV unset, or a proven main
-#       checkout) — the only sessions that may fetch or fast-forward,
-#   2 = unknown (HERDR_ENV set, role probe failed; warned) — treated as a
-#       possible worker: no fetch, no fast-forward.
+#   1 = the foreman or a standalone agent (HERDR_ENV unset outside portable
+#       mode, or a proven main checkout) — the only sessions that may fetch,
+#   2 = unknown — a failed role probe with HERDR_ENV set or in portable mode,
+#       or a portable linked worktree; treated as a possible worker: no fetch,
+#       no fast-forward. ROLE_WHY names the cause for the notice.
 herdr_role() {
-  [[ -n "${HERDR_ENV:-}" ]] || return 1
+  ROLE_WHY=""
+  local portable=0
+  if [[ -z "${HERDR_ENV+x}" ]]; then
+    [[ "${SESSION_START_MODE:-}" == portable ]] || return 1
+    portable=1
+  fi
 
   local git_dir common_dir rc=0
   git_dir="$(git rev-parse --absolute-git-dir 2>&1)" || rc=$?
   if (( rc != 0 )); then
     warn "git rev-parse --absolute-git-dir failed (exit ${rc}: ${git_dir//$'\n'/ }) — cannot tell a Herdr worker from the foreman; not fetching"
+    ROLE_WHY="this hook could not tell a Herdr worker from the foreman (see the warning above). Run \`git rev-parse --absolute-git-dir --path-format=absolute --git-common-dir\` to diagnose."
     return 2
   fi
   rc=0
   common_dir="$(git rev-parse --path-format=absolute --git-common-dir 2>&1)" || rc=$?
   if (( rc != 0 )); then
     warn "git rev-parse --git-common-dir failed (exit ${rc}: ${common_dir//$'\n'/ }) — cannot tell a Herdr worker from the foreman; not fetching"
+    ROLE_WHY="this hook could not tell a Herdr worker from the foreman (see the warning above). Run \`git rev-parse --absolute-git-dir --path-format=absolute --git-common-dir\` to diagnose."
     return 2
   fi
 
-  if [[ "$git_dir" != "$common_dir" ]]; then return 0; fi
-  return 1
+  [[ "$git_dir" != "$common_dir" ]] || return 1
+  if (( portable )); then
+    ROLE_WHY="this agent runs SessionStart through tessl, which hides the session's environment, and this linked worktree may be a Herdr worker's."
+    return 2
+  fi
+  return 0
 }
 
 # Count the local default branch's drift from its remote-tracking ref, as the
@@ -152,7 +169,7 @@ main() {
   local THROTTLE_HOURS="${SYNC_THROTTLE_HOURS:-0}"
   local FETCH_TIMEOUT="${SYNC_FETCH_TIMEOUT:-10}"
   local STATE_DIR="${SYNC_STATE_DIR:-${TMPDIR:-/tmp}/coding-policy-sync}"
-  local rc db inside cand now top repo_key stamp sv ts should_fetch preserve_future fetch_failed ahead behind role
+  local rc db inside cand now top repo_key stamp sv ts should_fetch preserve_future fetch_failed ahead behind role ROLE_WHY
   local -a fetch
 
   # git is required to produce a signal; its absence is an expected environment
@@ -226,7 +243,7 @@ main() {
   role=0
   herdr_role || role=$?
   if (( role == 2 )); then
-    emit_notice "Session-start status — git: \`${db}\` sync not verified — HERDR_ENV is set but this hook could not tell a Herdr worker from the foreman (see the warning above), so it neither fetched nor fast-forwarded. Run \`git rev-parse --absolute-git-dir --path-format=absolute --git-common-dir\` to diagnose. If this is a Herdr worker session, do not sync the shared checkout (rules/agent-team-operation.md Writers and Checkouts); if it is the foreman, run \`git fetch origin\`, then \`git status\` (rules/sync-before-work.md)."
+    emit_notice "Session-start status — git: \`${db}\` sync not verified and not fetched or fast-forwarded here — ${ROLE_WHY} If this is a Herdr worker session, do not sync the shared checkout (rules/agent-team-operation.md Writers and Checkouts); if it is the foreman, run \`git fetch origin\`, then \`git status\` (rules/sync-before-work.md)."
     return 0
   fi
   if (( role == 0 )); then

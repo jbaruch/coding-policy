@@ -30,6 +30,10 @@
 #                       unchanged while origin has moved; the foreman fetches.
 #  11. Role unknown -> HERDR_ENV set and the role probes fail (git shim): no
 #                       fetch (refs unchanged) and a sync-not-verified notice.
+#  12. Empty HERDR_ENV -> set-but-empty still marks Herdr: a linked worktree
+#                       does not fetch.
+#  13. Portable worktree -> SESSION_START_MODE=portable in a linked worktree
+#                       (env stripped by tessl): no fetch, sync not verified.
 #   9. Future stamp  -> a schema_version > 1 record is not throttled on and is
 #                       preserved (not downgraded to version 1).
 #
@@ -334,6 +338,42 @@ main() {
   if [[ $RC -eq 0 ]] && printf '%s' "$OUT" | jq -e '.additionalContext | test("sync not verified") and test("could not tell a Herdr worker") and test("git rev-parse --absolute-git-dir") and (test("fast-forwarded local") | not)' >/dev/null 2>&1 \
     && [[ "$main11_before" == "$main11_after" ]]; then
     pass; else fail "role unknown: expected a no-fetch sync-not-verified notice, got RC=$RC OUT=$OUT"; fi
+
+  # 12. HERDR_ENV set but empty is still a Herdr session (rules/agent-team-operation.md
+  #     Two Modes): a linked worktree is a worker and never fetches.
+  mk_origin o12
+  clone_from "$BARE" "$TMP/r12"
+  git -C "$TMP/r12" worktree add -q "$TMP/r12-wt" -b feat/worker >/dev/null 2>&1 \
+    || die "r12 worktree add failed"
+  commit_push "$SEED" "c2"
+  local refs12_before refs12_after
+  refs12_before="$(git -C "$TMP/r12" for-each-ref refs/remotes/origin)" || die "r12 for-each-ref (before) failed"
+  [[ -n "$refs12_before" ]] || die "r12 has no refs/remotes/origin refs to compare"
+  run "$TMP/r12-wt" "$TMP/s12" HERDR_ENV=
+  refs12_after="$(git -C "$TMP/r12" for-each-ref refs/remotes/origin)" || die "r12 for-each-ref (after) failed"
+  if [[ "$refs12_before" == "$refs12_after" ]]; then
+    pass; else fail "empty HERDR_ENV: refs/remotes/origin changed (before=$refs12_before after=$refs12_after)"; fi
+  if [[ $RC -eq 0 ]] && printf '%s' "$OUT" | jq -e '.additionalContext | test("Herdr worker session") and test("Do not sync")' >/dev/null 2>&1; then
+    pass; else fail "empty HERDR_ENV: expected the worker notice, got RC=$RC OUT=$OUT"; fi
+
+  # 13. Under tessl the environment is stripped, so a linked worktree may be a
+  #     worker's: no fetch, no fast-forward, and a sync-not-verified notice.
+  mk_origin o13
+  clone_from "$BARE" "$TMP/r13"
+  git -C "$TMP/r13" worktree add -q "$TMP/r13-wt" -b feat/maybe-worker >/dev/null 2>&1 \
+    || die "r13 worktree add failed"
+  commit_push "$SEED" "c2"
+  local refs13_before refs13_after main13_before main13_after
+  refs13_before="$(git -C "$TMP/r13" for-each-ref refs/remotes/origin)" || die "r13 for-each-ref (before) failed"
+  [[ -n "$refs13_before" ]] || die "r13 has no refs/remotes/origin refs to compare"
+  main13_before="$(git -C "$TMP/r13" rev-parse --verify --quiet 'main^{commit}')" || die "cannot resolve main in r13"
+  run "$TMP/r13-wt" "$TMP/s13" SESSION_START_MODE=portable
+  refs13_after="$(git -C "$TMP/r13" for-each-ref refs/remotes/origin)" || die "r13 for-each-ref (after) failed"
+  main13_after="$(git -C "$TMP/r13" rev-parse --verify --quiet 'main^{commit}')" || die "cannot resolve main in r13 after the run"
+  if [[ "$refs13_before" == "$refs13_after" && "$main13_before" == "$main13_after" ]]; then
+    pass; else fail "portable worktree: refs or main changed (refs before=$refs13_before after=$refs13_after)"; fi
+  if [[ $RC -eq 0 ]] && printf '%s' "$OUT" | jq -e '.additionalContext | test("sync not verified") and test("tessl") and test("Herdr worker")' >/dev/null 2>&1; then
+    pass; else fail "portable worktree: expected a sync-not-verified notice, got RC=$RC OUT=$OUT"; fi
 
   echo "─────────────────────────────────────────────" >&2
   if [[ $FAIL -gt 0 ]]; then echo "FAILED: ${FAIL} failed, ${PASS} passed" >&2; exit 1; fi
