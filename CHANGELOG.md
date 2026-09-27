@@ -23,7 +23,10 @@
   by Copilot on #516). The policy review also caught that
   `skills/herdr-standup/SKILL.md` Step 2 sent a worker whose ask exited 1 or
   2 on to Step 3's wait for a question never asked; those workers now go to
-  Step 4 with the diagnostic relayed.
+  Step 4 with the diagnostic relayed. `marker-fit` reads no foreman home, so
+  it takes no home guard and never refuses on a home awaiting migration, and
+  it refuses any Unicode `Cc` control character in the path; `standup-ask.sh`
+  refuses a control-character path itself as exit 1.
 
 ## 0.3.289 — 2026-09-27
 
