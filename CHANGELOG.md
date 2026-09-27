@@ -143,6 +143,12 @@
     Checkouts and the `stop-handoff-hygiene` report text now describe the
     sweep instead of "never removes a dirty, unmerged, locked or detached
     worktree".
+  - Test hygiene: both suites run every fixture command through `quiet`, which
+    stops the harness with the command's stderr and the command to rerun; no
+    `2>/dev/null` is left in either. A background process is started with a
+    readiness handshake (it writes its cwd after the `cd`; the harness waits,
+    bounded by `SLEEPER_READY_TRIES`, and confirms the cwd with `lsof`).
+    Every case builds its own repositories and worktree root.
   - `rules/agent-worktree-isolation.md` Cleanup splits by mode (Two Modes):
     outside a Herdr team round an agent removes its own abandoned worktree
     with `git worktree remove`; in a team round an abandoned worktree leaves

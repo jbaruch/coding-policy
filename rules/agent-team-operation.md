@@ -310,7 +310,8 @@ description: Running a multi-agent team — task-based specialist composition, c
 - Expiry removes the archive's trash worktree only once it is present, idle, unused, unchanged since the archive, and locked by the sweep alone
 - Unchanged covers the trash's ignored files, and no submodule or embedded repository appearing in it
 - A missing trash worktree keeps its archive
-- Expiry deletes the archive ref after the trash worktree and the branch, and its record after the ref
+- Expiry deletes the archive ref after the trash worktree and the branch
+- Expiry deletes the archive record after the archive ref
 - A failed expiry step before the ref deletion keeps the archive ref and its record
 - A later live run removes a record left on a commit no archive ref points at
 - An archive record the sweep cannot read or validate is kept

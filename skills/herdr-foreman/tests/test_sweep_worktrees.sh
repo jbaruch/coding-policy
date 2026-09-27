@@ -50,6 +50,23 @@ fail() { FAIL=$((FAIL+1)); echo "  ✗ FAIL: $1" >&2; }
 
 G=(git -c user.name=t -c user.email=t@t)
 
+# Run a fixture command, stderr captured: on failure the harness stops with
+# the command's own words and the command to rerun, never a silent exit.
+quiet() { # <what> <command...>
+  local what="$1" rc=0; shift
+  "$@" 2>"$TMP/quiet.err" || rc=$?
+  if (( rc != 0 )); then
+    die "${what} (exit ${rc}): $(tr '\n' ' ' < "$TMP/quiet.err") — rerun \`$*\` by hand to see the whole failure"
+  fi
+}
+
+# Give the calling case its own two repositories, rebinding main's alpha and
+# beta, so no case reads another's fixtures.
+fresh_pair() { # <case-tag>
+  mk_repo "alpha$1"; alpha="$SHARED"
+  mk_repo "beta$1"; beta="$SHARED"
+}
+
 mk_repo() { # <prefix> [no-origin] -> sets SHARED
   local prefix="$1" bare="$TMP/$1.git" seed="$TMP/$1-seed"
   SHARED="$TMP/$1-shared"
@@ -61,12 +78,12 @@ mk_repo() { # <prefix> [no-origin] -> sets SHARED
     return 0
   fi
   "${G[@]}" init -q --bare -b main "$bare" || die "git init --bare failed for $prefix"
-  "${G[@]}" clone -q "$bare" "$seed" 2>/dev/null || die "git clone seed failed"
+  quiet "git clone seed failed" "${G[@]}" clone -q "$bare" "$seed"
   printf 'x\n' > "$seed/f" || die "seed write failed"
   "${G[@]}" -C "$seed" add f || die "git add failed"
   "${G[@]}" -C "$seed" commit -q -m c1 || die "git commit failed"
   "${G[@]}" -C "$seed" push -q origin main || die "git push failed"
-  "${G[@]}" clone -q "$bare" "$SHARED" 2>/dev/null || die "git clone shared failed"
+  quiet "git clone shared failed" "${G[@]}" clone -q "$bare" "$SHARED"
   "${G[@]}" -C "$SHARED" remote set-head origin --auto >/dev/null || die "remote set-head failed"
 }
 
@@ -102,9 +119,9 @@ main() {
   local droot="$TMP/worktrees-dry"
   mkdir -p "$droot" || die "mkdir dry root failed"
   mk_repo dalpha; local dalpha="$SHARED"
-  "${G[@]}" -C "$dalpha" worktree add -q -b review/a "$droot/dalpha-merged" origin/main 2>/dev/null || die "dalpha worktree failed"
+  quiet "dalpha worktree failed" "${G[@]}" -C "$dalpha" worktree add -q -b review/a "$droot/dalpha-merged" origin/main
   mk_repo dbeta; local dbeta="$SHARED"
-  "${G[@]}" -C "$dbeta" worktree add -q -b review/b "$droot/dbeta-merged" origin/main 2>/dev/null || die "dbeta worktree failed"
+  quiet "dbeta worktree failed" "${G[@]}" -C "$dbeta" worktree add -q -b review/b "$droot/dbeta-merged" origin/main
   run "$droot" --dry-run
   echo "4. a dry run reports every repository's decisions and removes nothing"
   if (( RC == 0 )) && [[ "$(q 'len(d["repos"])')" == 2 ]] \
@@ -116,12 +133,12 @@ main() {
   local root="$TMP/worktrees"
   mkdir -p "$root" || die "mkdir root failed"
   mk_repo alpha; local alpha="$SHARED"
-  "${G[@]}" -C "$alpha" worktree add -q -b review/a "$root/alpha-merged" origin/main 2>/dev/null || die "alpha worktree failed"
+  quiet "alpha worktree failed" "${G[@]}" -C "$alpha" worktree add -q -b review/a "$root/alpha-merged" origin/main
   mk_repo beta; local beta="$SHARED"
-  "${G[@]}" -C "$beta" worktree add -q -b review/b "$root/beta-merged" origin/main 2>/dev/null || die "beta worktree failed"
+  quiet "beta worktree failed" "${G[@]}" -C "$beta" worktree add -q -b review/b "$root/beta-merged" origin/main
   mkdir -p "$root/plain" || die "mkdir plain failed"
   printf 'x\n' > "$root/afile" || die "write afile failed"
-  "${G[@]}" clone -q "$TMP/alpha.git" "$root/a-clone" 2>/dev/null || die "clone under root failed"
+  quiet "clone under root failed" "${G[@]}" clone -q "$TMP/alpha.git" "$root/a-clone"
   run "$root"
   echo "1. each repository is pruned once and its merged worktree removed"
   if (( RC == 0 )) && [[ "$(q '",".join(sorted(r["shared"] for r in d["repos"]))')" == "$alpha,$beta" ]] \
@@ -132,11 +149,12 @@ main() {
     pass; else fail "skipped: out=$OUT"; fi
 
   # --- 3. no origin, on its own root.
+  fresh_pair 3
   local nroot="$TMP/worktrees-noorigin"
   mkdir -p "$nroot" || die "mkdir no-origin root failed"
   mk_repo gamma no-origin; local gamma="$SHARED"
-  "${G[@]}" -C "$gamma" worktree add -q -b review/g "$nroot/gamma-wt" 2>/dev/null || die "gamma worktree failed"
-  "${G[@]}" -C "$alpha" worktree add -q -b review/a2 "$nroot/alpha-again" origin/main 2>/dev/null || die "alpha second worktree failed"
+  quiet "gamma worktree failed" "${G[@]}" -C "$gamma" worktree add -q -b review/g "$nroot/gamma-wt"
+  quiet "alpha second worktree failed" "${G[@]}" -C "$alpha" worktree add -q -b review/a2 "$nroot/alpha-again" origin/main
   run "$nroot"
   echo "3. a repository without origin reports an error; the others still ran"
   if (( RC == 2 )) && [[ "$(q 'next(r.get("error","") for r in d["repos"] if r["shared"].endswith("gamma-shared"))')" == *"no origin"* ]] \
@@ -144,12 +162,13 @@ main() {
     pass; else fail "no origin: rc=$RC out=$OUT err=$ERRTEXT"; fi
 
   # --- 6-8 on a fresh root.
+  fresh_pair 6
   local root2="$TMP/worktrees2"
   mkdir -p "$root2/group/sub" || die "mkdir nested failed"
-  "${G[@]}" -C "$beta" worktree add -q -b review/nested "$root2/group/sub/beta-nested" origin/main 2>/dev/null || die "nested worktree failed"
+  quiet "nested worktree failed" "${G[@]}" -C "$beta" worktree add -q -b review/nested "$root2/group/sub/beta-nested" origin/main
   mkdir -p "$root2/stale" || die "mkdir stale failed"
   printf 'gitdir: %s\n' "$TMP/vanished/gitdir" > "$root2/stale/.git" || die "write stale .git failed"
-  "${G[@]}" -C "$alpha" worktree add -q -b review/unreadable "$root2/unreadable" origin/main 2>/dev/null || die "unreadable worktree failed"
+  quiet "unreadable worktree failed" "${G[@]}" -C "$alpha" worktree add -q -b review/unreadable "$root2/unreadable" origin/main
   local ugitdir
   ugitdir="$(git -C "$root2/unreadable" rev-parse --absolute-git-dir)" || die "rev-parse unreadable gitdir failed"
   printf '%s\n' "$TMP/no-such-common" > "$ugitdir/commondir" || die "corrupt commondir failed"
@@ -166,13 +185,14 @@ main() {
     pass; else fail "unreadable: rc=$RC out=$OUT err=$ERRTEXT"; fi
 
   # --- 9-10 on a third root.
+  fresh_pair 9
   local root3="$TMP/worktrees3" deep="$TMP/worktrees3/a/b/c/d/e/f/beta-deep"
   mkdir -p "$(dirname "$deep")" "$root3/.trash" "$TMP/elsewhere" || die "mkdir root3 failed"
-  "${G[@]}" -C "$beta" worktree add -q -b review/deep "$deep" origin/main 2>/dev/null || die "deep worktree failed"
-  "${G[@]}" -C "$beta" worktree add -q -b review/trashed "$root3/.trash/beta-trashed" origin/main 2>/dev/null || die "trash worktree failed"
-  "${G[@]}" -C "$alpha" worktree add -q -b review/linked "$TMP/elsewhere/alpha-linked" origin/main 2>/dev/null || die "linked worktree failed"
+  quiet "deep worktree failed" "${G[@]}" -C "$beta" worktree add -q -b review/deep "$deep" origin/main
+  quiet "trash worktree failed" "${G[@]}" -C "$beta" worktree add -q -b review/trashed "$root3/.trash/beta-trashed" origin/main
+  quiet "linked worktree failed" "${G[@]}" -C "$alpha" worktree add -q -b review/linked "$TMP/elsewhere/alpha-linked" origin/main
   ln -s "$TMP/elsewhere" "$root3/link" || die "symlink failed"
-  "${G[@]}" -C "$alpha" worktree add -q -b review/badhead "$root3/badhead" origin/main 2>/dev/null || die "badhead worktree failed"
+  quiet "badhead worktree failed" "${G[@]}" -C "$alpha" worktree add -q -b review/badhead "$root3/badhead" origin/main
   local bgitdir
   bgitdir="$(git -C "$root3/badhead" rev-parse --absolute-git-dir)" || die "rev-parse badhead gitdir failed"
   printf 'garbage\n' > "$bgitdir/HEAD" || die "corrupt HEAD failed"
@@ -189,7 +209,7 @@ main() {
   local root4="$TMP/worktrees4" tw="$TMP/worktrees4/delta-wt"
   mkdir -p "$root4" || die "mkdir root4 failed"
   mk_repo delta; local delta="$SHARED"
-  "${G[@]}" -C "$delta" worktree add -q -b feat/delta "$tw" origin/main 2>/dev/null || die "delta worktree failed"
+  quiet "delta worktree failed" "${G[@]}" -C "$delta" worktree add -q -b feat/delta "$tw" origin/main
   printf 'd\n' > "$tw/d.txt" || die "delta write failed"
   "${G[@]}" -C "$tw" add d.txt || die "delta add failed"
   "${G[@]}" -C "$tw" commit -q -m d || die "delta commit failed"
@@ -211,13 +231,16 @@ main() {
     pass; else fail "trash only: rc=$RC out=$OUT err=$ERRTEXT"; fi
 
   # --- 12. a prune exiting 0 with unreadable JSON fails the sweep.
+  fresh_pair 12
   local shadow="$TMP/shadow12"
   mkdir -p "$shadow" || die "mkdir shadow failed"
   cp "$SCRIPT" "$shadow/" || die "copy sweep failed"
   printf '#!/usr/bin/env bash\nset -euo pipefail\nprintf "not json\\n"\n' > "$shadow/prune-worktrees.sh" || die "stub prune failed"
-  "${G[@]}" -C "$alpha" worktree add -q -b review/twelve "$root4/alpha-twelve" origin/main 2>/dev/null || die "alpha twelve failed"
+  local root12="$TMP/worktrees12"
+  mkdir -p "$root12" || die "mkdir root12 failed"
+  quiet "alpha twelve failed" "${G[@]}" -C "$alpha" worktree add -q -b review/twelve "$root12/alpha-twelve" origin/main
   RUN_SEQ=$((RUN_SEQ+1))
-  OUT="$(bash "$shadow/sweep-worktrees.sh" "$root4" 2>"$TMP/err.$RUN_SEQ")"; RC=$?
+  OUT="$(bash "$shadow/sweep-worktrees.sh" "$root12" 2>"$TMP/err.$RUN_SEQ")"; RC=$?
   ERRTEXT="$(cat "$TMP/err.$RUN_SEQ")"
   echo "12. a prune exiting 0 without readable JSON fails the sweep"
   if (( RC == 2 )) && [[ "$(q '"error" in d["repos"][0] and "result" not in d["repos"][0]')" == True ]] \
@@ -238,9 +261,10 @@ main() {
     pass; else fail "no git: rc=$RC out=$OUT err=$ERRTEXT"; fi
 
   # --- 14. symlinked .trash, and a symlinked entry inside a real .trash.
+  fresh_pair 14
   local root5="$TMP/worktrees5" root6="$TMP/worktrees6" outside="$TMP/outside-trash"
   mkdir -p "$root5" "$root6/.trash" "$outside" || die "mkdir root5/6 failed"
-  "${G[@]}" -C "$alpha" worktree add -q -b review/outside "$outside/alpha-out" origin/main 2>/dev/null || die "outside worktree failed"
+  quiet "outside worktree failed" "${G[@]}" -C "$alpha" worktree add -q -b review/outside "$outside/alpha-out" origin/main
   ln -s "$outside" "$root5/.trash" || die "symlink .trash failed"
   ln -s "$outside/alpha-out" "$root6/.trash/alpha-out" || die "symlink trash entry failed"
   local repos5 repos6
@@ -254,10 +278,10 @@ main() {
   local root15="$TMP/worktrees15"
   mkdir -p "$root15" || die "mkdir root15 failed"
   mk_repo epsilon; local eps="$SHARED"
-  "${G[@]}" -C "$eps" worktree add -q -b review/e1 "$root15/eps-merged" origin/main 2>/dev/null || die "eps merged failed"
-  "${G[@]}" -C "$eps" worktree add -q -b review/e2 "$root15/eps-held" origin/main 2>/dev/null || die "eps held failed"
+  quiet "eps merged failed" "${G[@]}" -C "$eps" worktree add -q -b review/e1 "$root15/eps-merged" origin/main
+  quiet "eps held failed" "${G[@]}" -C "$eps" worktree add -q -b review/e2 "$root15/eps-held" origin/main
   "${G[@]}" -C "$eps" worktree lock --reason "operator hold" "$root15/eps-held" || die "lock failed"
-  "${G[@]}" -C "$eps" worktree add -q -b feat/e3 "$root15/eps-local" origin/main 2>/dev/null || die "eps local failed"
+  quiet "eps local failed" "${G[@]}" -C "$eps" worktree add -q -b feat/e3 "$root15/eps-local" origin/main
   printf 'e\n' > "$root15/eps-local/e.txt" || die "eps write failed"
   "${G[@]}" -C "$root15/eps-local" add e.txt || die "eps add failed"
   "${G[@]}" -C "$root15/eps-local" commit -q -m e || die "eps commit failed"
@@ -269,6 +293,7 @@ main() {
     pass; else fail "report: rc=$RC report=$(q 'd["report"]') want=$want"; fi
 
   # --- 16-17. unreadable root, unreadable directory under a root (skipped as root).
+  fresh_pair 16
   if [[ "$(id -u)" == 0 ]]; then
     echo "16-17. skipped: root reads every directory"
   else
@@ -280,7 +305,7 @@ main() {
     echo "16. an unreadable root is exit 1 with no JSON and a repair message"
     if (( RC == 1 )) && [[ -z "$OUT" ]] && [[ "$ERRTEXT" == *"missing or unreadable"* ]] && [[ "$ERRTEXT" != *Traceback* ]]; then
       pass; else fail "unreadable root: rc=$RC out=$OUT err=$ERRTEXT"; fi
-    "${G[@]}" -C "$alpha" worktree add -q -b review/seventeen "$root17/alpha-17" origin/main 2>/dev/null || die "alpha-17 failed"
+    quiet "alpha-17 failed" "${G[@]}" -C "$alpha" worktree add -q -b review/seventeen "$root17/alpha-17" origin/main
     chmod 000 "$root17/locked-away" || die "chmod locked-away failed"
     run "$root17"
     chmod 755 "$root17/locked-away" || die "restore locked-away failed"
@@ -291,6 +316,7 @@ main() {
   fi
 
   # --- 18. a worktree whose path is not valid UTF-8.
+  fresh_pair 18
   local root18="$TMP/worktrees18" bad
   bad="$root18/bad$(printf '\377')wt"
   mkdir -p "$root18" || die "mkdir root18 failed"
@@ -298,7 +324,7 @@ main() {
     echo "18. skipped: this filesystem refuses a non-UTF-8 name ($(cat "$TMP/mk18.err"))"
   else
     rmdir "$bad" || die "rmdir probe failed"
-    "${G[@]}" -C "$alpha" worktree add -q -b review/badname "$bad" origin/main 2>/dev/null || die "non-UTF-8 worktree add failed"
+    quiet "non-UTF-8 worktree add failed" "${G[@]}" -C "$alpha" worktree add -q -b review/badname "$bad" origin/main
     run "$root18"
     echo "18. a non-UTF-8 worktree path yields valid JSON, the worktree kept as idle-unknown"
     if (( RC == 0 )) && [[ "$ERRTEXT" != *Traceback* ]] \
@@ -308,9 +334,10 @@ main() {
   fi
 
   # --- 19. a symlinked .git, in a trash entry and in a walked directory.
+  fresh_pair 19
   local root19="$TMP/worktrees19" ext="$TMP/outside19"
   mkdir -p "$root19/.trash/entry" "$root19/linked" "$ext" || die "mkdir root19 failed"
-  "${G[@]}" -C "$alpha" worktree add -q -b review/nineteen "$ext/alpha-19" origin/main 2>/dev/null || die "outside worktree failed"
+  quiet "outside worktree failed" "${G[@]}" -C "$alpha" worktree add -q -b review/nineteen "$ext/alpha-19" origin/main
   ln -s "$ext/alpha-19/.git" "$root19/.trash/entry/.git" || die "symlink trash .git failed"
   ln -s "$ext/alpha-19/.git" "$root19/linked/.git" || die "symlink walked .git failed"
   run "$root19"

@@ -118,31 +118,45 @@ set -uo pipefail
 
 die() { echo "fatal: $*" >&2; exit 2; }
 cleanup() {
-  if [[ -n "${SLEEPER:-}" ]] && kill -0 "$SLEEPER" 2>/dev/null; then kill "$SLEEPER" || echo "warn: could not stop sleeper $SLEEPER" >&2; fi
+  # `ps -p` exits 1 for a pid that is gone and prints nothing on stderr.
+  if [[ -n "${SLEEPER:-}" ]] && ps -p "$SLEEPER" >/dev/null; then kill "$SLEEPER" || echo "warn: could not stop sleeper $SLEEPER" >&2; fi
   [[ -n "${TMP:-}" ]] && ! rm -rf "$TMP" && echo "warn: could not remove $TMP" >&2
   return 0
 }
 pass() { PASS=$((PASS+1)); }
 fail() { FAIL=$((FAIL+1)); echo "  ✗ FAIL: $1" >&2; }
 
+# Run a fixture command, stderr captured: on failure the harness stops with
+# the command's own words and the command to rerun, never a silent exit.
+quiet() { # <what> <command...>
+  local what="$1" rc=0; shift
+  "$@" 2>"$TMP/quiet.err" || rc=$?
+  if (( rc != 0 )); then
+    die "${what} (exit ${rc}): $(tr '\n' ' ' < "$TMP/quiet.err") — rerun \`$*\` by hand to see the whole failure"
+  fi
+}
+
 mk_repo() { # <prefix> -> sets SHARED, SEED, BARE
   local prefix="$1"
   BARE="$TMP/${prefix}.git"
   SEED="$TMP/${prefix}-seed"
   git init -q --bare -b main "$BARE"            || die "git init --bare failed"
-  git clone -q "$BARE" "$SEED" 2>/dev/null      || die "git clone failed"
+  quiet "git clone failed" git clone -q "$BARE" "$SEED"
   printf 'x\n' > "$SEED/f"                      || die "seed write failed"
   git -C "$SEED" -c user.name=t -c user.email=t@t add f  || die "git add failed"
   git -C "$SEED" -c user.name=t -c user.email=t@t commit -q -m c1 || die "git commit failed"
   git -C "$SEED" push -q origin main            || die "git push failed"
   SHARED="$TMP/${prefix}-shared"
-  git clone -q "$BARE" "$SHARED" 2>/dev/null    || die "git clone (shared) failed"
-  git -C "$SHARED" remote set-head origin --auto >/dev/null 2>&1 \
-    || die "git remote set-head failed"
+  quiet "git clone (shared) failed" git clone -q "$BARE" "$SHARED"
+  quiet "git remote set-head failed" git -C "$SHARED" remote set-head origin --auto >/dev/null
+  # Every case gets its own worktree root: no case sees another's worktrees,
+  # trash or archives.
+  ROOT="$TMP/root-${prefix}"
+  mkdir -p "$ROOT" || die "cannot create the worktree root $ROOT"
 }
 
 add_wt() { # <shared> <branch> <path>  (cut at main)
-  git -C "$1" worktree add -q -b "$2" "$3" origin/main 2>/dev/null || die "worktree add $2 failed"
+  quiet "worktree add $2 failed" git -C "$1" worktree add -q -b "$2" "$3" origin/main
 }
 
 commit_in() { # <worktree> <file>
@@ -261,6 +275,35 @@ has_note() { # <shared> <commit> -> 0 a note exists, 1 none; any other failure a
   esac
 }
 
+#: How many 0.1s polls the harness waits for a sleeper to report ready.
+SLEEPER_READY_TRIES=100
+
+# Start a background process whose cwd is <dir>, and return only once it is
+# provably there: the child writes its physical cwd to a ready file after the
+# cd, then execs sleep; the harness waits for that file (bounded) and confirms
+# the pid's cwd with lsof (or the ready file itself, for a path lsof escapes).
+start_sleeper() { # <dir>
+  local want ready="$TMP/sleeper.ready" i got
+  want="$(cd "$1" && pwd -P && printf x)" || die "cannot resolve the sleeper's directory $1"
+  want="${want%x}"; want="${want%$'\n'}"
+  rm -f "$ready" "$ready.tmp" || die "cannot clear the sleeper's ready file $ready"
+  (cd "$1" && pwd -P > "$ready.tmp" && mv "$ready.tmp" "$ready" && exec sleep 300) &
+  SLEEPER=$!
+  for (( i = 0; i < SLEEPER_READY_TRIES; i++ )); do
+    [[ -s "$ready" ]] && break
+    sleep 0.1
+  done
+  [[ -s "$ready" ]] || die "the sleeper for $1 never reported ready after ${SLEEPER_READY_TRIES} polls — check that the directory is enterable"
+  got="$(cat "$ready" && printf x)" || die "cannot read the sleeper's ready file $ready"
+  got="${got%x}"; got="${got%$'\n'}"
+  [[ "$got" == "$want" ]] || die "the sleeper reported cwd '$got', not '$want'"
+  if LC_ALL=C python3 -c 'import sys; sys.exit(0 if all(0x20 <= b <= 0x7e for b in sys.argv[1].encode("utf-8", "surrogateescape")) and "\\" not in sys.argv[1] else 1)' "$want"; then
+    local listed
+    listed="$(lsof -a -p "$SLEEPER" -d cwd -Fn 2>"$TMP/lsof.err")" || die "lsof could not read the sleeper's cwd: $(cat "$TMP/lsof.err") — install lsof"
+    [[ "$listed" == *$'\n'"n${want}"* ]] || die "lsof shows the sleeper's cwd is not $want: $listed"
+  fi
+}
+
 # Stop the background sleeper: SIGTERM, then its exit status must be 143
 # (128 + SIGTERM); anything else means the fixture did not behave as assumed.
 stop_sleeper() {
@@ -287,6 +330,7 @@ main() {
   export GIT_CONFIG_GLOBAL="$TMP/gitconfig" GIT_CONFIG_NOSYSTEM=1
   ROOT="$TMP/worktrees"
   mkdir -p "$ROOT" || die "mkdir root failed"
+  real_git="$(command -v git)" || die "git not found on PATH — install git to run these tests"
 
   # --- 1, 3, 4, 5, 6, 7, 9, 10 share one repo: one run decides them all.
   mk_repo one
@@ -295,12 +339,12 @@ main() {
   add_wt "$SHARED" test/untracked "$ROOT/one-untracked"; printf 'z\n' > "$ROOT/one-untracked/scratch" || die "write failed"
   git -C "$SHARED" config status.showUntrackedFiles no || die "config failed"
   add_wt "$SHARED" test/modified "$ROOT/one-modified"; printf 'changed\n' > "$ROOT/one-modified/f" || die "write failed"
-  git -C "$SHARED" worktree add -q --detach "$ROOT/one-detached" origin/main 2>/dev/null || die "detached add failed"
+  quiet "detached add failed" git -C "$SHARED" worktree add -q --detach "$ROOT/one-detached" origin/main
   commit_in "$ROOT/one-detached" d
   add_wt "$SHARED" test/locked "$ROOT/one-locked"; git -C "$SHARED" worktree lock "$ROOT/one-locked" || die "lock failed"
   git -C "$SHARED" branch --no-track merged-no-wt origin/main || die "branch failed"
   git -C "$SHARED" branch --no-track unmerged-no-wt origin/main || die "branch failed"
-  git -C "$SHARED" worktree add -q "$TMP/one-scratch" unmerged-no-wt 2>/dev/null || die "scratch add failed"
+  quiet "scratch add failed" git -C "$SHARED" worktree add -q "$TMP/one-scratch" unmerged-no-wt
   commit_in "$TMP/one-scratch" w
   git -C "$SHARED" worktree remove "$TMP/one-scratch" || die "scratch remove failed"
 
@@ -335,7 +379,7 @@ main() {
 
   # --- 8. outside the root.
   mk_repo eight
-  git -C "$SHARED" worktree add -q -b review/outside "$TMP/eight-outside" origin/main 2>/dev/null || die "outside add failed"
+  quiet "outside add failed" git -C "$SHARED" worktree add -q -b review/outside "$TMP/eight-outside" origin/main
   run "$SHARED"
   echo "8. a worktree outside the root is kept and reported"
   if (( RC == 0 )) && [[ "$(kept_reason "$TMP/eight-outside")" == outside-root ]] && [[ -d "$TMP/eight-outside" ]] && has_branch "$SHARED" review/outside; then pass; else fail "rc=$RC out=$OUT"; fi
@@ -421,7 +465,7 @@ SHIM
   mk_repo nineteen
   add_wt "$SHARED" review/shadow "$ROOT/nineteen-shadow"; commit_in "$ROOT/nineteen-shadow" s
   git -C "$SHARED" tag review/shadow origin/main || die "tag failed"
-  git -C "$SHARED" branch --no-track origin/main origin/main 2>/dev/null || die "shadow branch failed"
+  quiet "shadow branch failed" git -C "$SHARED" branch --no-track origin/main origin/main
   run "$SHARED"
   echo "19. ancestry is judged on fully qualified refs: a same-name tag or an origin/main local branch cannot shadow"
   if (( RC == 0 )) && [[ "$(kept_reason "$ROOT/nineteen-shadow")" == unmerged ]] && [[ -d "$ROOT/nineteen-shadow" ]] && has_branch "$SHARED" review/shadow; then pass; else fail "rc=$RC out=$OUT err=$ERRTEXT"; fi
@@ -516,8 +560,8 @@ SHIM
 
   # --- 25. a tracked branch's config goes with it.
   mk_repo twentyfive
-  git -C "$SHARED" worktree add -q --track -b review/tracked "$ROOT/twentyfive-tracked" origin/main 2>/dev/null \
-    || die "fixture could not create a tracking worktree"
+  quiet "fixture could not create a tracking worktree" \
+    git -C "$SHARED" worktree add -q --track -b review/tracked "$ROOT/twentyfive-tracked" origin/main
   git -C "$SHARED" config --get-regexp '^branch\.review/tracked\.' >/dev/null || die "fixture branch has no tracking config"
   run "$SHARED"
   echo "25. a deleted branch leaves no stale branch.<name> config behind"
@@ -658,8 +702,8 @@ SHIM
   mk_repo thirtytwo
   nl_parent="$ROOT/thirtytwo-p"$'\n'
   mkdir -p "$nl_parent" || die "mkdir newline parent failed"
-  git -C "$SHARED" worktree add -q -b review/nlparent "$nl_parent/wt" origin/main 2>/dev/null \
-    || die "fixture could not create a worktree under a newline-bearing parent"
+  quiet "fixture could not create a worktree under a newline-bearing parent" \
+    git -C "$SHARED" worktree add -q -b review/nlparent "$nl_parent/wt" origin/main
   rm -rf "$nl_parent/wt" || die "rm failed"
   run "$SHARED"
   echo "32. absence is confirmed through a parent whose name ends in a newline"
@@ -680,8 +724,8 @@ case "\$*" in
   *"config --get-regexp"*)
     if [[ ! -e "$TMP/shim34/seen" ]]; then
       : > "$TMP/shim34/seen"
-      if ! "$(command -v git)" -C "$SHARED" worktree add -q --track -b review/recreated "$ROOT/thirtyfour-live" origin/main >/dev/null 2>&1; then
-        echo "shim34: fixture could not recreate review/recreated" >&2
+      if ! "$(command -v git)" -C "$SHARED" worktree add -q --track -b review/recreated "$ROOT/thirtyfour-live" origin/main >/dev/null 2>"$TMP/shim34/add.err"; then
+        echo "shim34: fixture could not recreate review/recreated: \$(cat "$TMP/shim34/add.err")" >&2
       fi
     fi ;;
 esac
@@ -701,19 +745,18 @@ SHIM
   # --- 35-38: one live run over idle worktrees of every kind.
   mk_repo idle
   local det="$ROOT/idle-detached" pushed="$ROOT/idle-pushed" busy="$ROOT/idle-busy" stale="$ROOT/idle-stale" held="$ROOT/idle-held"
-  git -C "$SHARED" worktree add -q --detach "$det" origin/main 2>/dev/null || die "detached worktree add failed"
+  quiet "detached worktree add failed" git -C "$SHARED" worktree add -q --detach "$det" origin/main
   add_wt "$SHARED" review/pushed "$pushed"; commit_in "$pushed" p.txt
-  git -C "$pushed" push -q origin review/pushed 2>/dev/null || die "push review/pushed failed"
+  quiet "push review/pushed failed" git -C "$pushed" push -q origin review/pushed
   git -C "$SHARED" fetch -q origin || die "fetch after push failed"
-  git -C "$SHARED" worktree add -q --detach "$busy" origin/main 2>/dev/null || die "busy worktree add failed"
+  quiet "busy worktree add failed" git -C "$SHARED" worktree add -q --detach "$busy" origin/main
   add_wt "$SHARED" feat/stale "$stale"; commit_in "$stale" s.txt
   printf 'untracked work\n' > "$stale/notes.txt" || die "untracked write failed"
-  git -C "$SHARED" worktree add -q --detach "$held" origin/main 2>/dev/null || die "held worktree add failed"
+  quiet "held worktree add failed" git -C "$SHARED" worktree add -q --detach "$held" origin/main
   git -C "$SHARED" worktree lock --reason "Active Herdr reviewer" "$held" || die "worktree lock failed"
   local stale_tip
   stale_tip="$(git -C "$stale" rev-parse HEAD)" || die "rev-parse stale HEAD failed"
-  (cd "$busy" && exec sleep 300) &
-  SLEEPER=$!
+  start_sleeper "$busy"
   local wt; for wt in "$det" "$pushed" "$busy" "$stale" "$held"; do age_wt "$wt"; done
   idle_run
   stop_sleeper
@@ -746,7 +789,7 @@ SHIM
   # --- 39-40: fresh activity, and idle past removal but short of archiving.
   mk_repo fresh
   local fresh_det="$ROOT/fresh-detached" mid="$ROOT/fresh-mid"
-  git -C "$SHARED" worktree add -q --detach "$fresh_det" origin/main 2>/dev/null || die "fresh worktree add failed"
+  quiet "fresh worktree add failed" git -C "$SHARED" worktree add -q --detach "$fresh_det" origin/main
   add_wt "$SHARED" feat/mid "$mid"; commit_in "$mid" m.txt
   age_wt "$mid"
   idle_run PRUNE_ARCHIVE_IDLE_HOURS=100000
@@ -761,7 +804,7 @@ SHIM
   # --- 41. no process probe: nothing is judged idle.
   mk_repo noprobe
   local np="$ROOT/noprobe-detached"
-  git -C "$SHARED" worktree add -q --detach "$np" origin/main 2>/dev/null || die "noprobe worktree add failed"
+  quiet "noprobe worktree add failed" git -C "$SHARED" worktree add -q --detach "$np" origin/main
   age_wt "$np"
   idle_run PRUNE_LSOF="$TMP/no-such-lsof"
   echo "41. a missing process probe keeps an idle worktree as idle-unknown"
@@ -774,7 +817,6 @@ SHIM
   add_wt "$SHARED" feat/archfail "$af"; commit_in "$af" a.txt
   age_wt "$af"
   mkdir -p "$TMP/shim42" || die "mkdir shim42 failed"
-  local real_git; real_git="$(command -v git)" || die "git not found"
   # shellcheck disable=SC2016  # The shim's "$@" and $a must expand in the shim, not here.
   printf '#!/usr/bin/env bash\nset -euo pipefail\nfor a in "$@"; do if [[ "$a" == commit-tree ]]; then echo "commit-tree refused" >&2; exit 1; fi; done\nexec %q "$@"\n' "$real_git" > "$TMP/shim42/git" \
     || die "shim42 write failed"
@@ -788,7 +830,7 @@ SHIM
   # --- 43. dry run previews both new removals and changes nothing.
   mk_repo dryidle
   local dd="$ROOT/dryidle-detached" ds="$ROOT/dryidle-stale"
-  git -C "$SHARED" worktree add -q --detach "$dd" origin/main 2>/dev/null || die "dryidle worktree add failed"
+  quiet "dryidle worktree add failed" git -C "$SHARED" worktree add -q --detach "$dd" origin/main
   add_wt "$SHARED" feat/drystale "$ds"; commit_in "$ds" d.txt
   age_wt "$dd"; age_wt "$ds"
   IDLE_ARGS=(--dry-run)
@@ -806,8 +848,7 @@ SHIM
   add_wt "$SHARED" review/mfresh "$mfresh"
   add_wt "$SHARED" review/mbusy "$mbusy"
   age_wt "$mbusy"
-  (cd "$mbusy" && exec sleep 300) &
-  SLEEPER=$!
+  start_sleeper "$mbusy"
   idle_run
   stop_sleeper
   echo "44. a clean merged worktree with fresh activity is kept"
@@ -832,7 +873,7 @@ SHIM
   # --- 47. a process arriving between the judgment and the removal keeps it.
   mk_repo race
   local rw="$ROOT/race-detached"
-  git -C "$SHARED" worktree add -q --detach "$rw" origin/main 2>/dev/null || die "race worktree add failed"
+  quiet "race worktree add failed" git -C "$SHARED" worktree add -q --detach "$rw" origin/main
   age_wt "$rw"
   lsof_turns_busy "$TMP/lsof47" 2 "$rw"
   idle_run PRUNE_LSOF="$TMP/lsof47/lsof"
@@ -911,7 +952,7 @@ SHIM
   g_new="$(archive_one gnew feat/gnew)"; g_bad="$(archive_one gbad feat/gbad)"; g_chg="$(archive_one gchg feat/gchg)"
   g_lck="$(archive_one glck feat/glck)"; g_busy="$(archive_one gbusy feat/gbusy)"
   other="$ROOT/gates-other"
-  git -C "$SHARED" worktree add -q --detach "$other" origin/main 2>/dev/null || die "other worktree add failed"
+  quiet "other worktree add failed" git -C "$SHARED" worktree add -q --detach "$other" origin/main
   local t; for t in "${g_new#* }" "${g_bad#* }" "${g_chg#* }" "${g_lck#* }" "${g_busy#* }"; do age_trash "$t"; done
   # 53: a newer schema.
   set_record "$SHARED" "${g_new%% *}" "$(record_of "$SHARED" "${g_new%% *}" | python3 -c 'import json,sys; r=json.load(sys.stdin); r["schema_version"]=2; print(json.dumps(r))')"
@@ -923,8 +964,7 @@ SHIM
   git -C "$SHARED" worktree unlock "${g_lck#* }" || die "unlock sweep's trash lock failed"
   git -C "$SHARED" worktree lock --reason "operator hold" "${g_lck#* }" || die "lock trash failed"
   # 57: a process inside.
-  (cd "${g_busy#* }" && exec sleep 300) &
-  SLEEPER=$!
+  start_sleeper "${g_busy#* }"
   later_run
   stop_sleeper
   echo "53. a newer-schema record is kept and reported"
@@ -953,11 +993,10 @@ SHIM
   # --- 59. a path lsof cannot report faithfully is never judged idle.
   mk_repo newline
   local nlwt="$ROOT/nl"$'\n'"wt" nlbusy="$ROOT/nlb"$'\n'"busy"
-  git -C "$SHARED" worktree add -q --detach "$nlwt" origin/main 2>/dev/null || die "newline worktree add failed"
-  git -C "$SHARED" worktree add -q --detach "$nlbusy" origin/main 2>/dev/null || die "newline busy worktree add failed"
+  quiet "newline worktree add failed" git -C "$SHARED" worktree add -q --detach "$nlwt" origin/main
+  quiet "newline busy worktree add failed" git -C "$SHARED" worktree add -q --detach "$nlbusy" origin/main
   age_wt "$nlwt"; age_wt "$nlbusy"
-  (cd "$nlbusy" && exec sleep 300) &
-  SLEEPER=$!
+  start_sleeper "$nlbusy"
   idle_run
   stop_sleeper
   echo "59. worktrees whose path holds a newline are kept as idle-unknown, a process inside or not"
@@ -969,13 +1008,13 @@ SHIM
   mk_repo submod
   local sub_origin="$TMP/sublib.git" sw="$ROOT/submod-wt"
   git init -q --bare -b main "$sub_origin" || die "sub origin init failed"
-  git clone -q "$sub_origin" "$TMP/sublib-seed" 2>/dev/null || die "sub seed clone failed"
+  quiet "sub seed clone failed" git clone -q "$sub_origin" "$TMP/sublib-seed"
   printf 's\n' > "$TMP/sublib-seed/s" || die "sub seed write failed"
   git -C "$TMP/sublib-seed" -c user.name=t -c user.email=t@t add s || die "sub add failed"
   git -C "$TMP/sublib-seed" -c user.name=t -c user.email=t@t commit -q -m s1 || die "sub commit failed"
-  git -C "$TMP/sublib-seed" push -q origin main 2>/dev/null || die "sub push failed"
+  quiet "sub push failed" git -C "$TMP/sublib-seed" push -q origin main
   add_wt "$SHARED" feat/submod "$sw"
-  git -C "$sw" -c protocol.file.allow=always submodule --quiet add "$sub_origin" lib 2>/dev/null || die "submodule add failed"
+  quiet "submodule add failed" git -C "$sw" -c protocol.file.allow=always submodule --quiet add "$sub_origin" lib
   git -C "$sw" -c user.name=t -c user.email=t@t commit -q -m "add lib" || die "submodule commit failed"
   printf 'nested edit\n' >> "$sw/lib/s" || die "nested edit failed"
   age_wt "$sw"
@@ -1002,9 +1041,9 @@ SHIM
   local orw="$ROOT/otherremote-wt"
   git init -q --bare -b main "$TMP/upstream.git" || die "upstream init failed"
   git -C "$SHARED" remote add upstream "$TMP/upstream.git" || die "remote add failed"
-  git -C "$SHARED" worktree add -q --detach "$orw" origin/main 2>/dev/null || die "otherremote worktree add failed"
+  quiet "otherremote worktree add failed" git -C "$SHARED" worktree add -q --detach "$orw" origin/main
   commit_in "$orw" u.txt
-  git -C "$orw" push -q upstream HEAD:refs/heads/side 2>/dev/null || die "push upstream failed"
+  quiet "push upstream failed" git -C "$orw" push -q upstream HEAD:refs/heads/side
   git -C "$SHARED" fetch -q upstream || die "fetch upstream failed"
   age_wt "$orw"
   idle_run PRUNE_ARCHIVE_IDLE_HOURS=100000
@@ -1015,7 +1054,7 @@ SHIM
   # --- 61. the reachability proof is re-derived just before the removal.
   mk_repo proofgone
   local pg="$ROOT/proofgone-wt"
-  git -C "$SHARED" worktree add -q --detach "$pg" origin/main 2>/dev/null || die "proofgone worktree add failed"
+  quiet "proofgone worktree add failed" git -C "$SHARED" worktree add -q --detach "$pg" origin/main
   age_wt "$pg"
   mkdir -p "$TMP/shim61" || die "mkdir shim61 failed"
   # The second read of origin's branch tips (`ls-remote --heads`, the one just
@@ -1031,9 +1070,15 @@ SHIM
 
   # --- 62. a dirty gitlink is found without .gitmodules; an embedded repository keeps a worktree.
   mk_repo gitlink
-  local gl="$ROOT/gitlink-wt" nr="$ROOT/gitlink-nested"
+  local gl="$ROOT/gitlink-wt" nr="$ROOT/gitlink-nested" sub62="$TMP/sublib62.git"
+  git init -q --bare -b main "$sub62" || die "sub62 origin init failed"
+  quiet "sub62 seed clone failed" git clone -q "$sub62" "$TMP/sublib62-seed"
+  printf 's\n' > "$TMP/sublib62-seed/s" || die "sub62 seed write failed"
+  git -C "$TMP/sublib62-seed" -c user.name=t -c user.email=t@t add s || die "sub62 add failed"
+  git -C "$TMP/sublib62-seed" -c user.name=t -c user.email=t@t commit -q -m s1 || die "sub62 commit failed"
+  quiet "sub62 push failed" git -C "$TMP/sublib62-seed" push -q origin main
   add_wt "$SHARED" feat/gitlink "$gl"
-  git -C "$gl" -c protocol.file.allow=always submodule --quiet add "$sub_origin" lib 2>/dev/null || die "submodule add failed"
+  quiet "submodule add failed" git -C "$gl" -c protocol.file.allow=always submodule --quiet add "$sub62" lib
   git -C "$gl" -c user.name=t -c user.email=t@t commit -q -m "add lib" || die "submodule commit failed"
   rm "$gl/.gitmodules" || die "rm .gitmodules failed"
   printf 'nested edit\n' >> "$gl/lib/s" || die "nested edit failed"
@@ -1085,8 +1130,8 @@ SHIM
   local twin_c tw1="$ROOT/twin-a/wt" tw2="$ROOT/twin-b/wt"
   twin_c="$(git -C "$SHARED" -c user.name=t -c user.email=t@t commit-tree "origin/main^{tree}" -p origin/main -m local)" || die "commit-tree failed"
   mkdir -p "$ROOT/twin-a" "$ROOT/twin-b" || die "mkdir twins failed"
-  git -C "$SHARED" worktree add -q --detach "$tw1" "$twin_c" 2>/dev/null || die "twin a add failed"
-  git -C "$SHARED" worktree add -q --detach "$tw2" "$twin_c" 2>/dev/null || die "twin b add failed"
+  quiet "twin a add failed" git -C "$SHARED" worktree add -q --detach "$tw1" "$twin_c"
+  quiet "twin b add failed" git -C "$SHARED" worktree add -q --detach "$tw2" "$twin_c"
   age_wt "$tw1"; age_wt "$tw2"
   idle_run
   echo "64. two same-parent, same-tree archives in one second get two commits and two records"
@@ -1159,11 +1204,11 @@ SHIM
   # --- 69. dry run and live run agree after origin deletes a branch.
   mk_repo agree
   local ag="$ROOT/agree-wt"
-  git -C "$SHARED" worktree add -q --detach "$ag" origin/main 2>/dev/null || die "agree worktree add failed"
+  quiet "agree worktree add failed" git -C "$SHARED" worktree add -q --detach "$ag" origin/main
   commit_in "$ag" gone.txt
-  git -C "$ag" push -q origin HEAD:refs/heads/side 2>/dev/null || die "push side failed"
+  quiet "push side failed" git -C "$ag" push -q origin HEAD:refs/heads/side
   git -C "$SHARED" fetch -q origin || die "fetch side failed"
-  git -C "$SEED" push -q origin --delete side 2>/dev/null || die "delete side on origin failed"
+  quiet "delete side on origin failed" git -C "$SEED" push -q origin --delete side
   age_wt "$ag"
   IDLE_ARGS=(--dry-run)
   idle_run PRUNE_ARCHIVE_IDLE_HOURS=100000
@@ -1195,7 +1240,7 @@ SHIM
   local fp="$ROOT/forcepush-wt" fp_base
   fp_base="$(git -C "$SHARED" rev-parse origin/main)" || die "rev-parse base failed"
   add_wt "$SHARED" review/fp "$fp"; commit_in "$fp" fp.txt
-  git -C "$fp" push -q origin HEAD:main 2>/dev/null || die "push to main failed"
+  quiet "push to main failed" git -C "$fp" push -q origin HEAD:main
   git -C "$SHARED" fetch -q origin || die "fetch after merge failed"
   age_wt "$fp"
   mkdir -p "$TMP/shim71" || die "mkdir shim71 failed"

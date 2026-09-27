@@ -380,8 +380,10 @@ removed, archived and kept with their reasons, archives expired, branches
 deleted, `failed`) or its `error`, plus the root's `skipped` and `errors`
 entries. Exit 2 means at least one repository's entry carries a non-zero
 `exit` or an `error`, or the `errors` array is non-empty: inspect both `repos`
-and `errors`, and report each failing entry. Exit 1 decided nothing (no JSON).
-The removal and archive predicates live in
+and `errors`, and report each failing entry. Exit 1 decided nothing (no
+JSON): report its stderr diagnostic, repair what it names, and run the sweep
+again. Never provision a worktree until the sweep exits 0 or 2. The removal
+and archive predicates live in
 `skills/herdr-foreman/prune-worktrees.sh` (top-of-file docstring).
 
 Then run once per writing worker and every worktree named in a brief:

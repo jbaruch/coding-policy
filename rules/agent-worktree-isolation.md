@@ -19,8 +19,9 @@ alwaysApply: true
 
 ## Cleanup
 
-- A worktree's lifecycle ends when its branch merges or the worktree is abandoned
+- A worktree's active checkout ends when its branch merges or the worktree is abandoned
 - A merged worktree is removed at that point, by the post-merge order below
+- An archived worktree stays registered under the worktree root's `.trash/` until its archive expires
 - Outside a Herdr team round, the agent removes its own abandoned worktree with `git worktree remove`
 - In a Herdr team round (`rules/agent-team-operation.md` Two Modes), an abandoned worktree leaves only through the foreman's sweep
 - Abandoned in a Herdr team round means idle past the windows in `skills/herdr-foreman/prune-worktrees.sh` (top-of-file docstring)
