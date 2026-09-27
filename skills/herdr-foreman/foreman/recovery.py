@@ -1283,12 +1283,6 @@ def _validate_dispatch_metadata(record):
 
 def reserve(store, record, at):
     version = _dispatch_version(record)
-    # A stored judge row with no mode is legacy history `_dispatch_version`
-    # still reads; a NEW reservation without one would write that legacy
-    # shape today, bypassing the mode `assign.apply` requires (#495).
-    if canonical_role(record.get("role")) == "judge" and record.get("judge_mode") is None:
-        raise UsageError("A judge dispatch declares its mode, one of {}, before it is reserved; "
-                         "pass judge_mode.".format(" | ".join(JUDGE_MODES)), {"dispatch": record.get("id")})
     if version >= SPECIALIST_DISPATCH_VERSION and store.get("schema_version") != RECOVERY_STORE_VERSION:
         raise UsageError("Composition dispatch metadata needs the owner-migrated recovery store; load the current state before reserving this assignment.", {})
     # A seat in the dispatch role is what store version 10 added. Appending one
@@ -1307,6 +1301,12 @@ def reserve(store, record, at):
     if pending:
         raise UsageError("Task has an unresolved dispatch {}; reconcile it before another assignment.".format(pending[0]["id"]), {})
     prior = next((row for row in store["dispatches"] if row["id"] == record["id"]), None)
+    # A stored judge row with no mode is legacy history `_dispatch_version`
+    # still reads, and its retry keeps that shape; a NEW reservation without
+    # one would write it today, bypassing the mode `assign.apply` requires (#495).
+    if prior is None and canonical_role(record.get("role")) == "judge" and record.get("judge_mode") is None:
+        raise UsageError("A judge dispatch declares its mode, one of {}, before it is reserved; "
+                         "pass judge_mode.".format(" | ".join(JUDGE_MODES)), {"dispatch": record.get("id")})
     if prior:
         if prior["status"] != "not_sent" or prior["fingerprint"] != record["fingerprint"]:
             raise UsageError("Dispatch already exists; inspect its recorded result instead of sending again.", {})
@@ -1334,9 +1334,19 @@ def reserve(store, record, at):
     return item
 
 
+def _context_mode_matches(record, context):
+    """A mode-bearing dispatch's context carries that mode; any other carries no key."""
+    if record.get("judge_mode") is None:
+        return "judge_mode" not in context
+    return context.get("judge_mode") == record["judge_mode"]
+
+
 def mark_sending(store, identifier, at, context):
     record = _item(store["dispatches"], identifier, "dispatch")
-    if context.get("judge_mode") != record.get("judge_mode"):
+    if not isinstance(context, dict):
+        raise UsageError("A pre-send context is an object of clear and session evidence; "
+                         "re-run apply so it records one.", {"dispatch": identifier})
+    if not _context_mode_matches(record, context):
         raise UsageError("The pre-send context names a different judge mode than its dispatch was reserved for; "
                          "re-run apply with the reserved mode.", {"dispatch": identifier})
     record["status"] = "sending"
@@ -1966,7 +1976,7 @@ def validate_store(store, assignments):
                     and not isinstance(context, dict)):
                 raise UsageError("A sent judge dispatch lost the pre-send context carrying its mode; "
                                  "restore the original context_before_send.", {})
-            if isinstance(context, dict) and context.get("judge_mode") != row.get("judge_mode"):
+            if isinstance(context, dict) and not _context_mode_matches(row, context):
                 raise UsageError("The pre-send context names a different judge mode than its dispatch; "
                                  "restore the mode the judge was sent for.", {})
             if row["status"] in PENDING_STATUSES:

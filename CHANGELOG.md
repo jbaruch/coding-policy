@@ -8,11 +8,14 @@
   still accepted a judge record whose `judge_mode` was absent or null, so a
   direct caller could write a new version-1 judge row. `reserve` now refuses
   that for new reservations; stored mode-less rows still read as legacy
-  history. The store validator compared a version-3 dispatch's mode with its
+  history, and a retry of such a stored `not_sent` row keeps its shape. The
+  store validator compared a version-3 dispatch's mode with its
   ledger row and saved result only once the dispatch was `applied`, while
   `reconcile` recovers an interrupted judge's mode from
-  `context_before_send`. `mark_sending` now refuses a pre-send context naming
-  a different mode than the dispatch, and the validator checks every
+  `context_before_send`. `mark_sending` now refuses a pre-send context that
+  is not an object or names a different mode than the dispatch; a dispatch
+  with no mode must carry no `judge_mode` key at all, null included. The
+  validator checks every
   dispatch's `context_before_send.judge_mode` against the row, pending or
   applied, and refuses a version-3 dispatch past `reserved` whose
   `context_before_send` is missing or not an object, since reconcile would

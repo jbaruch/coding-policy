@@ -1657,6 +1657,32 @@ class JudgeModeReservationTests(unittest.TestCase):
                     with self.assertRaisesRegex(UsageError, "lost the pre-send context"):
                         validate_store(corrupt, [])
 
+    def test_a_stored_mode_less_judge_row_can_still_be_retried(self):
+        # A legacy row that never reached a worker keeps its own retry path.
+        self.store["dispatches"].append({**self.judge(), "at": AT, "schema_version": 1,
+                                         "status": "not_sent", "result": None, "report": None})
+        item = reserve(self.store, self.judge(), AT)
+        self.assertEqual((item["status"], item["schema_version"]), ("reserved", 1))
+        self.assertNotIn("judge_mode", item)
+
+    def test_sending_refuses_a_context_that_is_not_an_object(self):
+        reserve(self.store, self.judge(judge_mode="diagnosis"), AT)
+        for context in (None, "diagnosis", ["diagnosis"]):
+            with self.subTest(context=context):
+                with self.assertRaisesRegex(UsageError, "pre-send context is an object"):
+                    mark_sending(self.store, "judge-1", AT, context)
+                self.assertEqual(self.store["dispatches"][0]["status"], "reserved")
+
+    def test_a_non_judge_context_carries_no_mode_key_at_all(self):
+        reserve(self.store, {**self.judge(), "id": "review-1", "role": "reviewer"}, AT)
+        with self.assertRaisesRegex(UsageError, "different judge mode"):
+            mark_sending(self.store, "review-1", AT, {"cleared": True, "judge_mode": None})
+        mark_sending(self.store, "review-1", AT, {"cleared": True})
+        corrupt = copy.deepcopy(self.store)
+        corrupt["dispatches"][0]["context_before_send"]["judge_mode"] = None
+        with self.assertRaisesRegex(UsageError, "different judge mode"):
+            validate_store(corrupt, [])
+
     def test_a_non_judge_context_carrying_a_mode_is_refused(self):
         reserve(self.store, {**self.judge(), "id": "review-1", "role": "reviewer"}, AT)
         mark_sending(self.store, "review-1", AT, {"cleared": True})
