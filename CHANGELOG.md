@@ -38,6 +38,19 @@
   from PR #528's review. `herdr-foreman` Step 11's `check-member` follow-up
   paragraph, which merged several directives, is now one bullet per directive.
 
+### Tests
+
+- **The cross-task check on a diagnosis's `approach_change` has a regression
+  case (#497).** `validate_store` in `skills/herdr-foreman/foreman/recovery.py`
+  refuses a diagnosis citing another task's approach through either `approach`
+  or `approach_change`, but `test_recovery.py` covered only `approach`. The new
+  case gives the task's own approach operator provenance, so no diagnosed
+  approach cites the diagnosis back and the back-reference check cannot catch
+  the edit first, then points `approach_change` at a second task's approach and
+  requires the refusal naming that task. Dropping `approach_change` from the
+  loop turns the case red with no error raised at all, confirming the
+  diagnosis-side check is the only guard for that shape. No production change.
+
 ## 0.3.293 — 2026-09-27
 
 ### Changed
