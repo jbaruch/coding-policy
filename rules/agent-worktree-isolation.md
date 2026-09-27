@@ -20,6 +20,7 @@ alwaysApply: true
 ## Cleanup
 
 - A worktree's lifecycle ends when its branch merges or the worktree is abandoned
+- An idle clean worktree whose HEAD origin holds counts as abandoned
 - Outside a Herdr team round, the agent removes its own worktree after the merge
 - When the worktree's branch lands via `skills/release/SKILL.md` Step 7, the post-merge order is mandatory: `cd` back to the base checkout → fast-forward base `main` → `git worktree remove <worktree-path>` → `git branch -d <branch>`. Teardown precedes branch delete
 - Use `git worktree remove <path>`; never `rm -rf` the directory
