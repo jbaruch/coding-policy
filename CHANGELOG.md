@@ -1,7 +1,5 @@
 # Changelog
 
-## 0.3.289 — 2026-09-27
-
 ### Fixed
 
 - **`standup-ask.sh` measures the worker's live pane before asking (#515).**
@@ -26,6 +24,10 @@
   `skills/herdr-standup/SKILL.md` Step 2 sent a worker whose ask exited 1 or
   2 on to Step 3's wait for a question never asked; those workers now go to
   Step 4 with the diagnostic relayed.
+
+## 0.3.289 — 2026-09-27
+
+### Fixed
 
 - **`foreman detect-triggers` no longer reads untracked files on a round that
   writes nothing (#499).** `run_command` in
