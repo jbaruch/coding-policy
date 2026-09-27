@@ -454,6 +454,20 @@ def measured_pressure(headroom):
     return value if math.isfinite(value) else None
 
 
+def _escalated(agent, tier, chosen_round):
+    """The tier and row high-risk work runs at, or None when no review row exists.
+
+    High risk also excludes a lower build/fix model, not only low effort.
+    """
+    if tier["model"] not in TOP_MODELS[agent.kind]:
+        if "review" not in agent.tiers:
+            return None
+        tier, chosen_round = dict(agent.tiers["review"]), "review"
+    if agent.kind in {"claude", "codex"} and tier["effort"] not in {"xhigh", "max"}:
+        tier = {**tier, "effort": "xhigh"}
+    return tier, chosen_round
+
+
 def select_tier(agent, role, round_type=None, context=None, fix_round=None, headroom=None):
     """Resolve one candidate from configuration; no per-call model override.
 
@@ -526,24 +540,23 @@ def select_tier(agent, role, round_type=None, context=None, fix_round=None, head
     # a cheaper pair was the only thing headroom could buy before, and a seat's
     # own round was always resolved at full price (#477).
     pressure = measured_pressure(headroom)
-    de_escalated = bool(
-        needs_xhigh and pressure is not None and pressure <= PRESSURE_HEADROOM_PCT
-        and round_type not in JUDGMENT_ROUNDS and chosen_round not in JUDGMENT_ROUNDS
-    )
-    if de_escalated:
-        # The configured row is the floor and it still runs. What is declined is
-        # the discretionary step ABOVE it, which is the only part of the
-        # selection the operator did not write down.
-        needs_xhigh = False
+    de_escalated = False
     if needs_xhigh:
-        # High risk also excludes a lower build/fix model, not only low effort.
-        if tier["model"] not in TOP_MODELS[agent.kind]:
-            if "review" not in agent.tiers:
-                raise MissingTierError("Agent {} has no review tier for high-risk work; add and qualify its review row before assigning it this round.".format(agent.name), {})
-            tier = dict(agent.tiers["review"])
-            chosen_round = "review"
-        if agent.kind in {"claude", "codex"} and tier["effort"] not in {"xhigh", "max"}:
-            tier["effort"] = "xhigh"
+        escalated = _escalated(agent, tier, chosen_round)
+        # A row already at the top model and effort, or a kind with no effort
+        # above its configured one, has no step to decline. Recording one would
+        # report a downgrade that never happened (#490).
+        changes = escalated is None or escalated != (tier, chosen_round)
+        if (changes and pressure is not None and pressure <= PRESSURE_HEADROOM_PCT
+                and round_type not in JUDGMENT_ROUNDS and chosen_round not in JUDGMENT_ROUNDS):
+            # The configured row is the floor and it still runs. What is
+            # declined is the discretionary step ABOVE it, which is the only
+            # part of the selection the operator did not write down.
+            de_escalated = True
+        elif escalated is None:
+            raise MissingTierError("Agent {} has no review tier for high-risk work; add and qualify its review row before assigning it this round.".format(agent.name), {})
+        else:
+            tier, chosen_round = escalated
     return {
         **tier, "round": round_type, "tier_row": chosen_round, "kind": agent.kind,
         "pressure_headroom": pressure, "de_escalated": de_escalated,
