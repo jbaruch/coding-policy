@@ -41,7 +41,9 @@ EOF
   printf '#!/usr/bin/env bash\nexit 0\n' > "$bin/tessl"
   cat > "$bin/codex" <<'EOF'
 #!/usr/bin/env bash
-# Write the canned structured result to the --output-last-message path.
+# Record argv one arg per line (so the test can assert the model pin), then
+# write the canned structured result to the --output-last-message path.
+if [ -n "${CODEX_ARGV_LOG:-}" ]; then printf '%s\n' "$@" > "$CODEX_ARGV_LOG"; fi
 out=""
 while [ $# -gt 0 ]; do [ "$1" = "--output-last-message" ] && out="${2:-}"; shift; done
 [ -n "$out" ] && printf '{"summary":"Policy loaded: 21 rule files from jbaruch/coding-policy.","findings":[]}' > "$out"
@@ -80,6 +82,40 @@ t_happy() {
   ok "happy path routes to the poster with owner/repo/pr"
 }
 
+# The reviewer's model pin. Renewing the pin in fleet-review-one.sh means
+# renewing it here too — a dropped or misspelled flag must fail this suite.
+PIN_MODEL="gpt-5.6-sol"
+PIN_EFFORT='model_reasoning_effort="high"'
+
+# has_pair <argv-log> <flag> <value>: true when <flag> is immediately followed
+# by <value> in the recorded argv (one arg per line).
+has_pair() {
+  local log="$1" flag="$2" value="$3" prev="" arg
+  while IFS= read -r arg; do
+    [[ "$prev" == "$flag" && "$arg" == "$value" ]] && return 0
+    prev="$arg"
+  done < "$log"
+  return 1
+}
+
+# --- codex runs on the pinned model at the pinned effort ---
+t_model_pin() {
+  local env_line; env_line=$(make_env) || exit 2   # propagate make_env setup failure (aggregate carve-out)
+  read -r BIN CENTRAL CODEXH <<< "$env_line"
+  local log="$CODEXH/argv.log" rc=0 model_ok=1 effort_ok=1
+  PATH="$BIN:$PATH" GH_TOKEN=tok CENTRAL_DIR="$CENTRAL" CODEX_HOME="$CODEXH" CODEX_ARGV_LOG="$log" \
+    bash "$SCRIPT" jbaruch repo-a 7 main >/dev/null 2>&1 || rc=$?
+  if [[ -f "$log" ]]; then
+    has_pair "$log" --model "$PIN_MODEL" && model_ok=0
+    has_pair "$log" -c "$PIN_EFFORT" && effort_ok=0
+  fi
+  rmwarn "$BIN" "$CENTRAL" "$CODEXH"
+  [[ $rc -eq 0 ]]        || { bad "model_pin: exit 0 (rc=$rc)"; return; }
+  [[ $model_ok -eq 0 ]]  || { bad "model_pin: codex argv carries --model $PIN_MODEL"; return; }
+  [[ $effort_ok -eq 0 ]] || { bad "model_pin: codex argv carries -c $PIN_EFFORT"; return; }
+  ok "codex runs with --model $PIN_MODEL and -c $PIN_EFFORT"
+}
+
 # --- wrong arg count -> exit 2 ---
 t_bad_args() {
   local rc=0; bash "$SCRIPT" only three args >/dev/null 2>&1 || rc=$?
@@ -111,6 +147,7 @@ t_missing_token() {
 
 echo "== fleet-review-one.sh tests =="
 t_happy
+t_model_pin
 t_bad_args
 t_missing_driver
 t_missing_token
