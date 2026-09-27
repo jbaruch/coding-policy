@@ -535,6 +535,47 @@ class ResetCommandTest(CliCase):
         self.assertEqual(json.loads(foreman_reset.record_path(self.state).read_text())["resets"][-1]["scheduled_at"], RESET_AT)
         self.assertTrue(Path(spawned[0][spawned[0].index("--state") + 1]).is_absolute())
 
+    def schedule_with_env(self, environ, extra=()):
+        """Schedule a reset under `environ`; return the deliverer argv and the recorded options."""
+        spawned = []
+        env = {"HERDR_PANE_ID": PANE, "HERDR_ENV": "1", **environ}
+        with patch("foreman.cli.memory.show", return_value={"record": READY}), \
+             patch("foreman.cli.supervision.load", return_value=supervision_data()[0]), \
+             patch.dict("os.environ", env), \
+             patch("foreman.cli._spawn_detached", side_effect=lambda argv, sink: spawned.append(argv) or 4242), \
+             patch("foreman.foreman_reset.process_identity", side_effect=lambda pid: {"pid": pid, "identity": "child"}):
+            if "FOREMAN_HERDR_BIN" not in environ:
+                os.environ.pop("FOREMAN_HERDR_BIN", None)
+            code, _, err = self.run_cli(self.base() + list(extra) + ["foreman-reset", "--now", RESET_AT])
+        self.assertEqual(code, 0, err)
+        options = json.loads(foreman_reset.record_path(self.state).read_text())["resets"][-1]["options"]
+        return spawned[0], options
+
+    def test_a_relative_foreman_herdr_bin_reaches_the_deliverer_resolved(self):
+        # The deliverer runs from the package directory, so the relative value
+        # it would inherit from the environment names another file there (#533).
+        argv, options = self.schedule_with_env({"FOREMAN_HERDR_BIN": "bin/herdr"})
+        resolved = str(Path("bin/herdr").resolve())
+        self.assertEqual(argv[argv.index("--herdr-bin") + 1], resolved)
+        self.assertEqual(options["herdr_bin"], resolved)
+
+    def test_the_herdr_bin_flag_wins_over_foreman_herdr_bin(self):
+        argv, options = self.schedule_with_env({"FOREMAN_HERDR_BIN": "bin/other"}, ["--herdr-bin", "bin/herdr"])
+        resolved = str(Path("bin/herdr").resolve())
+        self.assertEqual((argv[argv.index("--herdr-bin") + 1], options["herdr_bin"]), (resolved, resolved))
+
+    def test_a_bare_foreman_herdr_bin_name_stays_a_path_lookup(self):
+        argv, options = self.schedule_with_env({"FOREMAN_HERDR_BIN": "herdr-dev"})
+        self.assertEqual((argv[argv.index("--herdr-bin") + 1], options["herdr_bin"]), ("herdr-dev", "herdr-dev"))
+
+    def test_no_herdr_bin_setting_passes_no_flag(self):
+        for environ in ({}, {"FOREMAN_HERDR_BIN": ""}):
+            with self.subTest(environ=environ):
+                foreman_reset.record_path(self.state).unlink(missing_ok=True)
+                argv, options = self.schedule_with_env(environ)
+                self.assertNotIn("--herdr-bin", argv)
+                self.assertNotIn("herdr_bin", options)
+
     def test_a_retry_replays_before_preconditions_that_the_reset_itself_changed(self):
         # A live pid: this test process stands in for the running deliverer.
         foreman_reset.schedule(self.state, {"pane_id": PANE, "stow": "round-7"}, "2026-09-24T10:00:00+00:00", os.getpid)
