@@ -1,7 +1,5 @@
 # Changelog
 
-## 0.3.290 — 2026-09-27
-
 ### Fixed
 
 - **Foreman error and help hints name the runnable launcher (#532).** About a
@@ -18,6 +16,10 @@
   `tests/test_runnable.py` walks every string literal in the package
   (docstrings and argparse `help=` text excepted) and fails on any bare
   subcommand reference, so a new hint cannot regress to the bare form.
+
+## 0.3.290 — 2026-09-27
+
+### Fixed
 
 - **`evaluate.sh` reads the default corpus under the home guard (#537).**
   `skills/herdr-foreman/classify/evaluate.sh` checked the default state home
