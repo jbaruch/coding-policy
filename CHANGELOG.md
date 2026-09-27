@@ -1,5 +1,23 @@
 # Changelog
 
+### Fixed
+
+- **`close-member` validates the task ledger's field formats, not just their
+  presence (#530).** `members.ledger_events` checked that every schema-1 field
+  was present and non-empty, so an event with `at: not-a-timestamp` or
+  `head_revision: not-a-sha` still authorized closing an enrollment. It now
+  refuses, closing nothing, unless `at` is a timezone-qualified ISO-8601
+  timestamp, `head_revision` is a full lowercase SHA or the literal `unknown` /
+  `not_applicable`, the frontmatter `base_revision` is a full SHA,
+  `dispatch_state` is an absolute path (a `~/` path no longer passes), each
+  event's `id` matches its `## ` section heading, and no id names two events.
+  The refusal's repair hint changed with it: it used to say "append a correct
+  event", which can never fix a malformed earlier event in an append-only log
+  that is validated whole, so it now points at the documented recovery, a
+  recovered ledger at a new path (`state-schema.md`, Task Ledger). Deferred
+  from PR #528's review. `herdr-foreman` Step 11's `check-member` follow-up
+  paragraph, which merged several directives, is now one bullet per directive.
+
 ## 0.3.287 — 2026-09-27
 
 ### Fixed

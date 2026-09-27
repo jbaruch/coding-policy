@@ -18,12 +18,15 @@ the matching dispatch's send time. Only the worker's checkout is supplied by
 the caller, since no owner record keeps it.
 """
 
+import os
 import re
 import subprocess
 from pathlib import Path
 
 from . import supervision
+from .chronology import timestamp
 from .errors import StateError, UsageError
+from .recovery import SHA_RE
 from .state import load_state_checked
 
 #: Ledger decisions that record an assessment (references/task-ledger.md);
@@ -34,13 +37,18 @@ LEDGER_SCHEMA_VERSION = "1"
 FRONT_FIELDS = ("schema_version", "task", "base_revision", "dispatch_state")
 EVENT_FIELDS = ("schema_version", "id", "at", "subject", "dispatch_id", "worker", "role", "report", "observed",
                 "decision", "head_revision", "evidence", "assessment")
+#: `head_revision` values that stand in for a SHA (state-schema.md, Task Ledger).
+HEAD_PLACEHOLDERS = frozenset({"unknown", "not_applicable"})
 FIELD = re.compile(r"^- ([a-z_]+): (.*)$")
 FRONT_FIELD = re.compile(r"^([a-z_]+): (.*)$")
 
 
 def _unusable(path, why):
-    return UsageError("Task ledger {} is not usable here: {}. Fix the ledger by appending a correct event, or pass "
-                      "the ledger this task's authorization records; nothing was closed.".format(path, why),
+    # Appending cannot repair a malformed earlier event: the ledger is append-only
+    # and every event is validated, so the recovery is a new ledger file.
+    return UsageError("Task ledger {} is not usable here: {}. Keep this file, record a recovered ledger at a new path "
+                      "after reconciling its sources (state-schema.md, Task Ledger) and pass that path, or pass the "
+                      "ledger this task's authorization records; nothing was closed.".format(path, why),
                       {"ledger": str(path)})
 
 
@@ -65,6 +73,10 @@ def ledger_events(path):
     if header["schema_version"] != LEDGER_SCHEMA_VERSION:
         raise _unusable(path, "it is schema {}, and this build reads schema {}".format(
             header["schema_version"], LEDGER_SCHEMA_VERSION))
+    if SHA_RE.fullmatch(header["base_revision"]) is None:
+        raise _unusable(path, "its base_revision {!r} is not a full lowercase commit SHA".format(header["base_revision"]))
+    if not os.path.isabs(header["dispatch_state"]):
+        raise _unusable(path, "its dispatch_state {!r} is not an absolute path".format(header["dispatch_state"]))
     events, current = [], None
     for line in text[front.end():].splitlines():
         if line.startswith("## "):
@@ -80,7 +92,28 @@ def ledger_events(path):
             raise _unusable(path, "event {} lacks {}".format(event["_section"], ", ".join(absent)))
         if event["schema_version"] != LEDGER_SCHEMA_VERSION:
             raise _unusable(path, "event {} is schema {}".format(event["_section"], event["schema_version"]))
+        _check_formats(path, event)
+    ids = [event["id"] for event in events]
+    repeated = sorted({value for value in ids if ids.count(value) > 1})
+    if repeated:
+        raise _unusable(path, "event id {} names more than one event".format(", ".join(repeated)))
     return header, events
+
+
+def _check_formats(path, event):
+    """Refuse an event whose identity, time or revision is not in its schema-1 format."""
+    section = event["_section"]
+    if event["id"] != section:
+        raise _unusable(path, "event {} carries id {!r}, not its section heading".format(section, event["id"]))
+    try:
+        timestamp(event["at"], "at")
+    except UsageError:
+        raise _unusable(path, "event {} has at {!r}, not a timezone-qualified ISO-8601 timestamp".format(
+            section, event["at"])) from None
+    head = event["head_revision"]
+    if head not in HEAD_PLACEHOLDERS and SHA_RE.fullmatch(head) is None:
+        raise _unusable(path, "event {} has head_revision {!r}, not a full lowercase commit SHA, unknown or "
+                        "not_applicable".format(section, head))
 
 
 def assessed_event(path, member, state_path):
@@ -89,7 +122,7 @@ def assessed_event(path, member, state_path):
     if header["task"] != member["task"]:
         raise UsageError("Task ledger {} records task {!r}, not this enrollment's {!r}; pass the ledger for {}.".format(
             path, header["task"], member["task"], member["task"]), {"ledger": str(path)})
-    bound = str(Path(header["dispatch_state"]).expanduser().resolve())
+    bound = str(Path(header["dispatch_state"]).resolve())
     if bound != str(Path(state_path).expanduser().resolve()):
         raise _unusable(path, "it is bound to dispatch state {}, not {}".format(header["dispatch_state"], state_path))
     matching = [row for row in events if row["subject"] == "assignment" and row["dispatch_id"] == member["id"]

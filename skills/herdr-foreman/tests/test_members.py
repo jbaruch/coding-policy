@@ -7,6 +7,7 @@ _ROOT = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
 if _ROOT not in _sys.path:
     _sys.path.insert(0, _ROOT)
 
+import re
 import subprocess
 import tempfile
 import unittest
@@ -22,11 +23,11 @@ AT = "2026-09-01T12:00:00+00:00"
 LATER = "2026-09-01T12:05:00+00:00"
 
 
-def ledger_text(task, events, state: "str | Path" = "/state.json", version="1"):
-    lines = ["---", "schema_version: " + version, "task: " + task, "base_revision: " + "a" * 40,
+def ledger_text(task, events, state: "str | Path" = "/state.json", version="1", base="a" * 40):
+    lines = ["---", "schema_version: " + version, "task: " + task, "base_revision: " + base,
              "dispatch_state: " + str(state), "---", "", "# Task Ledger", ""]
     for event in events:
-        lines.append("## " + event["id"])
+        lines.append("## " + event.pop("_heading", event["id"]))
         lines.append("")
         for key, value in event.items():
             lines.append("- {}: {}".format(key, value))
@@ -48,7 +49,7 @@ class MembersCase(unittest.TestCase):
         self.ledger = self.root / "TASK-LEDGER.md"
 
     def write_ledger(self, *decisions, task="task-a", report=None, dispatch="dispatch-a", state=None, version="1",
-                     drop=None):
+                     drop=None, base="a" * 40, fields=None):
         events = [{"schema_version": 1, "id": "event-{}".format(index), "at": AT, "subject": "assignment",
                    "dispatch_id": dispatch, "worker": "codex-a", "role": "reviewer", "report": report or self.report,
                    "observed": "report delivered", "decision": decision, "head_revision": "unknown",
@@ -57,7 +58,9 @@ class MembersCase(unittest.TestCase):
         if drop is not None:
             for event in events:
                 event.pop(drop, None)
-        self.ledger.write_text(ledger_text(task, events, state or self.path, version))
+        for event in events:
+            event.update(fields or {})
+        self.ledger.write_text(ledger_text(task, events, state or self.path, version, base))
 
     def emit(self):
         store.transaction(self.path, lambda data: store.append_event(data, AT, "dispatch-a", "report", {"observation_only": True}))
@@ -115,6 +118,43 @@ class CloseMemberTest(MembersCase):
                 with self.assertRaisesRegex(UsageError, why):
                     members.close(self.path, "dispatch-a", self.ledger, LATER)
                 self.assertTrue(store.pending(store.load(self.path)))
+
+    def test_a_malformed_field_format_closes_nothing(self):
+        self.emit()
+        sha = "a" * 40
+        cases = (({"at": "not-a-timestamp"}, sha, None, "has at 'not-a-timestamp'"),
+                 ({"at": "2026-09-01T12:00:00"}, sha, None, "not a timezone-qualified"),
+                 ({"head_revision": "not-a-sha"}, sha, None, "has head_revision 'not-a-sha'"),
+                 ({"head_revision": "abc1234"}, sha, None, "has head_revision 'abc1234'"),
+                 ({"head_revision": "A" * 40}, sha, None, "not a full lowercase commit SHA"),
+                 ({"_heading": "renamed-section"}, sha, None, "carries id 'event-1', not its section heading"),
+                 ({}, "abc1234", None, "base_revision 'abc1234'"),
+                 ({}, sha, "relative/state.json", "dispatch_state 'relative/state.json' is not an absolute"),
+                 ({}, sha, "~/state.json", "dispatch_state '~/state.json' is not an absolute"))
+        for fields, base, state, why in cases:
+            with self.subTest(why=why):
+                self.write_ledger("accepted", fields=fields, base=base, state=state)
+                with self.assertRaisesRegex(UsageError, re.escape(why)):
+                    members.close(self.path, "dispatch-a", self.ledger, LATER)
+                data = store.load(self.path)
+                self.assertTrue(store.pending(data))
+                self.assertTrue(next(row for row in data["members"] if row["id"] == "dispatch-a")["active"])
+
+    def test_a_repeated_event_id_closes_nothing(self):
+        self.emit()
+        self.write_ledger("reported", "accepted", fields={"id": "event-1", "_heading": "event-1"})
+        with self.assertRaisesRegex(UsageError, "event id event-1 names more than one event"):
+            members.close(self.path, "dispatch-a", self.ledger, LATER)
+        self.assertTrue(store.pending(store.load(self.path)))
+
+    def test_well_formed_field_formats_are_accepted(self):
+        self.emit()
+        for head in ("b" * 40, "c" * 64, "unknown", "not_applicable"):
+            with self.subTest(head=head):
+                self.write_ledger("accepted", fields={"head_revision": head, "at": "2026-09-01T12:00:00Z"})
+                self.assertEqual(members.ledger_events(self.ledger)[1][0]["head_revision"], head)
+        result = members.close(self.path, "dispatch-a", self.ledger, LATER)
+        self.assertEqual(result["decision"], "accepted")
 
     def test_an_event_for_another_report_does_not_count(self):
         self.write_ledger("accepted", report=str(self.root / "other.md"))
