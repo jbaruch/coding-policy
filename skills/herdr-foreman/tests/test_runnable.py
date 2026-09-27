@@ -93,8 +93,10 @@ class CommandTest(unittest.TestCase):
         from foreman.errors import UsageError
         with self.assertRaises(UsageError) as caught:
             _dispatched_seat_briefs({"task_context": {"task": "other"}}, {}, [], "repo task 322; rm -rf x")
-        hint = re.search(r"`(bash [^`]+)`", caught.exception.message).group(1)
-        self.assertEqual(shlex.split(hint)[-2:], ["--task", "repo task 322; rm -rf x"])
+        found = re.search(r"`(bash [^`]+)`", caught.exception.message)
+        self.assertIsNotNone(found, caught.exception.message)
+        assert found is not None  # narrows the Optional for pyright; the assertion above reports the message
+        self.assertEqual(shlex.split(found.group(1))[-2:], ["--task", "repo task 322; rm -rf x"])
 
     def test_command_names_the_quoted_launcher_beside_the_package(self):
         with patch.object(runnable, "launcher", return_value="/opt/my plugins/foreman.sh"):
