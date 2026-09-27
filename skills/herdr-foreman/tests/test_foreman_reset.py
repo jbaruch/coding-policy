@@ -23,6 +23,8 @@ from foreman.errors import HerdrError, StateError, UsageError
 from tests.test_cli import CliCase
 
 PANE = "w9:p1"
+#: The foreman's native session as supervision-bind stores it.
+SESSION = {"kind": "id", "value": "11111111-1111-4111-8111-111111111111"}
 READY = {"id": "round-7", "kind": "stow", "reset_ready": True}
 
 
@@ -32,7 +34,7 @@ def supervision_data(*, active=False, events=False, held=False, hold_kind="hando
     member = {"id": "d1", "active": active, "refinements": [],
               "assignment": {"id": "d1", "agent": "worker", "task": "t", "report": "/r.md", "pane_id": "w2:p1",
                              "native_session": None}}
-    data = {"binding": {"identity": {"pane_id": PANE}}, "members": [member],
+    data = {"binding": {"identity": {"pane_id": PANE, **SESSION}}, "members": [member],
             "events": [{"id": "e1", "seq": 1, "member": "d1"}] if events else [], "acknowledgements": [], "holds": []}
     if held:
         data["holds"].append({"kind": hold_kind, "resumed_at": None, "through": len(data["events"]),
@@ -140,8 +142,15 @@ class ResumePromptRunsTest(unittest.TestCase):
 
 
 class FakeClient:
-    def __init__(self, statuses, kind="claude"):
+    def __init__(self, statuses, kind="claude", sessions=None):
         self.statuses, self.kind, self.waits = list(statuses), kind, []
+        # The native session each `pane get` reports, last one repeating.
+        self.sessions = list(sessions or [SESSION["value"]])
+
+    def pane_get(self, pane_id):
+        value = self.sessions.pop(0) if len(self.sessions) > 1 else self.sessions[0]
+        return {"pane_id": pane_id, "agent_session": {"source": "herdr:" + self.kind, "agent": self.kind,
+                                                      "kind": "id", "value": value}}
 
     def agent_list(self):
         status = self.statuses.pop(0) if len(self.statuses) > 1 else self.statuses[0]
@@ -164,12 +173,17 @@ class HandoffHoldTest(unittest.TestCase):
 
 
 class DeliverTest(unittest.TestCase):
-    def run_deliver(self, client, *, screen_changed=True, landed=True, started=None, budget=30, still_ready=lambda: True):
+    def run_deliver(self, client, *, screen_changed=True, landed=True, started=None, budget=30, still_ready=lambda: True,
+                    native_session=SESSION, enters=1):
         calls = []
         ticks = iter(range(0, 10000, 5))
 
         def command(c, agent, pane, text, **kw):
+            # Typed text, then each Enter, the way herdr.send_slash_command guards them.
             kw["before_input"]()
+            for _ in range(enters):
+                kw["before_input"]()
+                kw["after_submit"]()
             calls.append(("command", agent.name, pane, text))
             return {"screen_changed": screen_changed}
 
@@ -183,7 +197,7 @@ class DeliverTest(unittest.TestCase):
             result = foreman_reset.deliver(client, [worker("codex-a", "codex"), worker("claude-a", "claude")], PANE, "round-7",
                                            "/state/s.json",
                                            still_ready=still_ready, sleep=lambda seconds: None, clock=lambda: next(ticks),
-                                           budget_sec=budget, poll_sec=5)
+                                           budget_sec=budget, poll_sec=5, native_session=native_session)
         return result, calls
 
     def test_waits_for_idle_then_clears_and_sends_the_resume_prompt(self):
@@ -288,6 +302,55 @@ class DeliverTest(unittest.TestCase):
         with self.assertRaisesRegex(HerdrError, "(?s)no agent name.*Do not run foreman-reset again"):
             self.run_deliver(Unnamed(["idle"]))
 
+    def test_a_same_name_same_kind_replacement_session_gets_no_keystroke(self):
+        # #523: the operator replaced the foreman while the deliverer waited.
+        client = FakeClient(["idle"], sessions=["22222222-2222-4222-8222-222222222222"])
+        with self.assertRaisesRegex(foreman_reset.SessionChanged,
+                                    "(?s)no longer holds the native session.*Do not run foreman-reset again") as caught:
+            self.run_deliver(client)
+        self.assertNotIsInstance(caught.exception, foreman_reset.DeliveryInterrupted)
+        self.assertEqual(client.waits, [])
+        # The failed row records why, not a generic Herdr failure.
+        record = foreman_reset.failure(caught.exception, "round-7", "/s.json")
+        self.assertEqual((record["error"], record["details"]["reason"]), ("reset_session_changed", "native_session_changed"))
+        self.assertIn("no longer holds the native session", record["message"])
+
+    def test_a_replacement_between_the_clear_keystrokes_is_interrupted_and_says_why(self):
+        # The text guard sees the bound session; the Enter guard sees another.
+        client = FakeClient(["idle"], sessions=[SESSION["value"], "22222222-2222-4222-8222-222222222222"])
+        with self.assertRaisesRegex(foreman_reset.DeliveryInterrupted, "no longer holds the native session") as caught:
+            self.run_deliver(client)
+        record = foreman_reset.failure(caught.exception, "round-7", "/s.json")
+        self.assertEqual(record["details"]["reason"], "native_session_changed")
+
+    def test_the_session_the_clear_starts_does_not_stop_the_resume_prompt(self):
+        # Two Enters: the first submits /clear, which starts a new native session.
+        client = FakeClient(["idle"], sessions=[SESSION["value"], SESSION["value"], "33333333-3333-4333-8333-333333333333"])
+        result, calls = self.run_deliver(client, enters=2)
+        self.assertEqual([call[0] for call in calls], ["command", "message"])
+        self.assertTrue(result["cleared"])
+
+    def test_a_reset_that_recorded_no_session_types_nothing(self):
+        with self.assertRaisesRegex(foreman_reset.SessionChanged, "recorded none"):
+            self.run_deliver(FakeClient(["idle"]), native_session=None)
+
+    def test_a_transcript_path_session_matches_its_canonical_binding(self):
+        class PathClient(FakeClient):
+            def pane_get(self, pane_id):
+                return {"pane_id": pane_id, "agent_session": {"kind": "path", "value": "/tmp/../tmp/t.jsonl"}}
+        bound = {"kind": "path", "value": str(Path("/tmp/t.jsonl").resolve())}
+        self.assertEqual(foreman_reset.pane_session(PathClient(["idle"]), PANE), bound)
+        result, _ = self.run_deliver(PathClient(["idle"]), native_session=bound)
+        self.assertTrue(result["cleared"])
+
+    def test_a_pane_reporting_no_session_or_another_pane_is_no_match(self):
+        class Bare(FakeClient):
+            def pane_get(self, pane_id):
+                return {"pane_id": "w2:p1", "agent_session": {"kind": "id", "value": SESSION["value"]}}
+        self.assertIsNone(foreman_reset.pane_session(Bare(["idle"]), PANE))
+        with self.assertRaises(foreman_reset.SessionChanged):
+            self.run_deliver(Bare(["idle"]))
+
     def test_mechanics_copy_does_not_rename_the_template(self):
         template = worker("claude-a", "claude")
         foreman = foreman_reset.mechanics([template], "claude", "foreman")
@@ -309,12 +372,12 @@ class RecordTest(unittest.TestCase):
 
     def schedule(self, at, live):
         return foreman_reset.schedule(self.state, self.plan, at, self.start, alive=lambda process: live,
-                                      probe=lambda pid: {"pid": pid, "identity": "proc-%d" % pid})
+                                      probe=lambda pid: {"pid": pid, "identity": "proc-%d" % pid}, native_session=SESSION)
 
     def me(self, pid=1001):
         return {"pid": pid, "identity": "proc-%d" % pid}
 
-    DELIVERED = {"schema_version": 1, "pane_id": PANE, "stow": "round-7", "agent": "foreman", "cleared": True,
+    DELIVERED = {"schema_version": foreman_reset.RESET_SCHEMA_VERSION, "pane_id": PANE, "stow": "round-7", "agent": "foreman", "cleared": True,
                  "resume": {"landed": True, "started": True}}
     FAILURE = {"error": "herdr_error", "message": "boom", "details": {}, "resume_prompt": "resume"}
 
@@ -354,7 +417,7 @@ class RecordTest(unittest.TestCase):
     def test_a_reused_pid_is_not_the_recorded_deliverer(self):
         original = {"pid": 1001, "identity": "original"}
         foreman_reset.schedule(self.state, self.plan, "2026-09-24T10:00:00+00:00", lambda: 1001,
-                               probe=lambda pid: original)
+                               probe=lambda pid: original, native_session=SESSION)
         with patch("foreman.foreman_reset.process_identity", return_value=original):
             live = foreman_reset.replay(self.state, self.plan)
         self.assertIsNotNone(live)
@@ -369,7 +432,7 @@ class RecordTest(unittest.TestCase):
         def broken():
             raise StateError("spawn failed", {})
         with self.assertRaisesRegex(foreman_reset.ResetEnded, "(?s)spawn failed.*Do not run foreman-reset again") as caught:
-            foreman_reset.schedule(self.state, self.plan, "2026-09-24T10:00:00+00:00", broken)
+            foreman_reset.schedule(self.state, self.plan, "2026-09-24T10:00:00+00:00", broken, native_session=SESSION)
         row = json.loads(foreman_reset.record_path(self.state).read_text())["resets"][-1]
         self.assertEqual((row["status"], row["process"]), ("failed", None))
         self.assertIn("memory-show", row["result"]["resume_prompt"])
@@ -377,7 +440,7 @@ class RecordTest(unittest.TestCase):
 
     def test_a_deliverer_gone_before_identification_fails_the_row(self):
         with self.assertRaisesRegex(foreman_reset.ResetEnded, "exited before it could be identified"):
-            foreman_reset.schedule(self.state, self.plan, "2026-09-24T10:00:00+00:00", self.start, probe=lambda pid: None)
+            foreman_reset.schedule(self.state, self.plan, "2026-09-24T10:00:00+00:00", self.start, probe=lambda pid: None, native_session=SESSION)
         row = json.loads(foreman_reset.record_path(self.state).read_text())["resets"][-1]
         self.assertEqual((row["status"], row["process"]), ("failed", None))
 
@@ -475,7 +538,7 @@ class RecordTest(unittest.TestCase):
 
     def test_a_newer_record_reads_as_no_prior_reset_and_refuses_writes_untouched(self):
         path = foreman_reset.record_path(self.state)
-        newer = json.dumps({"schema_version": 2, "resets": [{"shape": "from the future"}]})
+        newer = json.dumps({"schema_version": foreman_reset.RESET_SCHEMA_VERSION + 1, "resets": [{"shape": "from the future"}]})
         path.write_text(newer)
         self.assertIsNone(foreman_reset.replay(self.state, self.plan))
         with self.assertRaises(foreman_reset.ResetRecordNewer) as caught:
@@ -495,6 +558,64 @@ class RecordTest(unittest.TestCase):
                     foreman_reset.replay(self.state, self.plan)
                 self.assertEqual(caught.exception.code, "reset_record_unusable")
                 self.assertEqual(path.read_text(), json.dumps(document))
+
+    def test_a_schema_1_record_migrates_with_no_session_and_keeps_every_outcome(self):
+        path = foreman_reset.record_path(self.state)
+        def v1(stow, status, result, process):
+            return {"schema_version": 1, "pane_id": PANE, "stow": stow, "status": status,
+                    "scheduled_at": "2026-09-24T10:00:00+00:00", "options": {}, "process": process, "result": result}
+        delivered = {**self.DELIVERED, "schema_version": 1}
+        path.write_text(json.dumps({"schema_version": 1, "resets": [
+            v1("round-7", "delivered", delivered, self.me()), v1("round-6", "failed", self.FAILURE, None)]}))
+        # Reads take the migrated shape; a delivered reset still replays.
+        replayed = foreman_reset.replay(self.state, self.plan, alive=lambda process: False)
+        assert replayed is not None, "a migrated delivered reset replays"
+        self.assertEqual((replayed["schema_version"], replayed["native_session"]), (2, None))
+        self.assertEqual([item["stow"] for item in foreman_reset.outstanding(self.state)], ["round-6"])
+        # The next write persists the upgrade alongside the new row.
+        foreman_reset.schedule(self.state, {"pane_id": PANE, "stow": "round-8"}, "2026-09-24T11:00:00+00:00", self.start,
+                               probe=lambda pid: {"pid": pid, "identity": "proc-%d" % pid}, native_session=SESSION)
+        document = json.loads(path.read_text())
+        self.assertEqual(document["schema_version"], 2)
+        self.assertEqual([(row["stow"], row["schema_version"], row["native_session"]) for row in document["resets"]],
+                         [("round-7", 2, None), ("round-6", 2, None), ("round-8", 2, SESSION)])
+        self.assertEqual(document["resets"][0]["result"]["schema_version"], 2)
+
+    def test_a_malformed_schema_1_record_is_unusable_and_untouched(self):
+        path = foreman_reset.record_path(self.state)
+        bad = json.dumps({"schema_version": 1, "resets": [{"schema_version": 1, "pane_id": PANE, "stow": "round-7",
+                                                           "status": "failed", "scheduled_at": "2026-09-24T10:00:00+00:00",
+                                                           "options": {}, "process": None, "result": self.FAILURE,
+                                                           "native_session": SESSION}]})
+        path.write_text(bad)
+        with self.assertRaises(foreman_reset.ResetRecordUnusable):
+            foreman_reset.replay(self.state, self.plan)
+        self.assertEqual(path.read_text(), bad)
+
+    def test_a_reset_without_a_bound_session_is_not_scheduled(self):
+        for session in (None, {"kind": "id"}, {"kind": "tty", "value": "x"}, {"kind": "id", "value": ""}):
+            with self.subTest(session=session):
+                with self.assertRaisesRegex(UsageError, "no bound native session"):
+                    foreman_reset.schedule(self.state, self.plan, "2026-09-24T10:00:00+00:00", self.start,
+                                           native_session=session)
+                self.assertFalse(foreman_reset.record_path(self.state).exists())
+                self.assertEqual(self.starts, 0)
+
+    def test_the_claimed_row_carries_the_bound_session(self):
+        self.schedule("2026-09-24T10:00:00+00:00", True)
+        claimed = foreman_reset.claim(self.state, self.plan, self.me())
+        assert claimed is not None, "the started deliverer claims its reset"
+        self.assertEqual((claimed["status"], claimed["native_session"]), ("delivering", SESSION))
+
+    def test_a_malformed_row_session_is_refused(self):
+        for session in ({"kind": "id"}, {"kind": "id", "value": 7}, {"kind": "id", "value": "x", "extra": 1}):
+            with self.subTest(session=session):
+                row = {"schema_version": 2, "pane_id": PANE, "stow": "round-7", "status": "failed",
+                       "scheduled_at": "2026-09-24T10:00:00+00:00", "options": {}, "process": None,
+                       "result": self.FAILURE, "native_session": session}
+                foreman_reset.record_path(self.state).write_text(json.dumps({"schema_version": 2, "resets": [row]}))
+                with self.assertRaises(foreman_reset.ResetRecordUnusable):
+                    foreman_reset.replay(self.state, self.plan)
 
     def test_a_malformed_record_row_is_refused(self):
         foreman_reset.record_path(self.state).write_text(json.dumps(
@@ -534,6 +655,39 @@ class ResetCommandTest(CliCase):
         self.assertTrue(Path(spawned[0][spawned[0].index("--config") + 1]).is_absolute())
         self.assertEqual(json.loads(foreman_reset.record_path(self.state).read_text())["resets"][-1]["scheduled_at"], RESET_AT)
         self.assertTrue(Path(spawned[0][spawned[0].index("--state") + 1]).is_absolute())
+        # The row carries the session bound at supervision-bind, for the deliverer's guard.
+        self.assertEqual(json.loads(foreman_reset.record_path(self.state).read_text())["resets"][-1]["native_session"],
+                         SESSION)
+
+    def test_a_binding_without_a_native_session_schedules_nothing(self):
+        data = supervision_data()[0]
+        data["binding"]["identity"] = {"pane_id": PANE}
+        with patch("foreman.cli.memory.show", return_value={"record": READY}), \
+             patch("foreman.cli.supervision.load", return_value=data), \
+             patch.dict("os.environ", {"HERDR_PANE_ID": PANE, "HERDR_ENV": "1"}), \
+             patch("foreman.cli._spawn_detached", side_effect=AssertionError("must not spawn")):
+            code, _, err = self.run_cli(self.base() + ["foreman-reset", "--now", RESET_AT])
+        self.assertEqual(code, 1)
+        self.assertIn("names no native session", err)
+        self.assertFalse(foreman_reset.record_path(self.state).exists())
+
+    def test_the_deliverer_types_nothing_into_a_replacement_session_and_the_row_says_why(self):
+        foreman_reset.schedule(self.state, {"pane_id": PANE, "stow": "round-7"}, RESET_AT, os.getpid, native_session=SESSION)
+        client = FakeClient(["idle"], sessions=["22222222-2222-4222-8222-222222222222"])
+        real = foreman_reset.deliver
+        with patch("foreman.cli.memory.show", return_value={"record": READY}), \
+             patch("foreman.cli.load_config", return_value=[worker("claude-a", "claude")]), \
+             patch("foreman.foreman_reset.deliver", side_effect=lambda *a, **kw: real(*a, sleep=lambda s: None, **kw)), \
+             patch("foreman.foreman_reset.send_command", side_effect=lambda *a, **kw: kw["before_input"]()), \
+             patch("foreman.foreman_reset.send_message", side_effect=AssertionError("must not type")):
+            code, _, err = self.run_cli(self.base() + ["foreman-reset-deliver", "--pane", PANE, "--stow", "round-7"],
+                                        client=client)
+        self.assertEqual(code, 1)
+        self.assertEqual(json.loads(err)["error"], "reset_ended")
+        row = json.loads(foreman_reset.record_path(self.state).read_text())["resets"][-1]
+        self.assertEqual((row["status"], row["result"]["error"], row["result"]["details"]["reason"]),
+                         ("failed", "reset_session_changed", "native_session_changed"))
+        self.assertEqual(client.waits, [])
 
     def schedule_with_env(self, environ, extra=()):
         """Schedule a reset under `environ`; return the deliverer argv and the recorded options."""
@@ -578,7 +732,7 @@ class ResetCommandTest(CliCase):
 
     def test_a_retry_replays_before_preconditions_that_the_reset_itself_changed(self):
         # A live pid: this test process stands in for the running deliverer.
-        foreman_reset.schedule(self.state, {"pane_id": PANE, "stow": "round-7"}, "2026-09-24T10:00:00+00:00", os.getpid)
+        foreman_reset.schedule(self.state, {"pane_id": PANE, "stow": "round-7"}, "2026-09-24T10:00:00+00:00", os.getpid, native_session=SESSION)
         with patch("foreman.cli.memory.show", return_value={"record": {"id": "round-7", "kind": "stow", "reset_ready": False}}), \
              patch("foreman.cli.supervision.load", return_value=supervision_data(active=True)[0]), \
              patch.dict("os.environ", {"HERDR_PANE_ID": PANE, "HERDR_ENV": "1"}), \
@@ -588,7 +742,7 @@ class ResetCommandTest(CliCase):
         self.assertTrue(json.loads(out)["replayed"])
 
     def test_a_replay_still_refuses_a_caller_outside_the_foreman_pane(self):
-        foreman_reset.schedule(self.state, {"pane_id": PANE, "stow": "round-7"}, "2026-09-24T10:00:00+00:00", os.getpid)
+        foreman_reset.schedule(self.state, {"pane_id": PANE, "stow": "round-7"}, "2026-09-24T10:00:00+00:00", os.getpid, native_session=SESSION)
         with patch("foreman.cli.memory.show", return_value={"record": READY}), \
              patch("foreman.cli.supervision.load", return_value=supervision_data()[0]), \
              patch.dict("os.environ", {"HERDR_PANE_ID": "w2:p1", "HERDR_ENV": "1"}):
@@ -598,10 +752,10 @@ class ResetCommandTest(CliCase):
         self.assertIn("own pane", err)
 
     def test_the_deliverer_claims_its_reset_while_the_parent_holds_the_state_lock(self):
-        foreman_reset.schedule(self.state, {"pane_id": PANE, "stow": "round-7"}, "2026-09-24T10:00:00+00:00", os.getpid)
+        foreman_reset.schedule(self.state, {"pane_id": PANE, "stow": "round-7"}, "2026-09-24T10:00:00+00:00", os.getpid, native_session=SESSION)
         with state_lock(retrospective.canonical_state(self.state)), \
              patch("foreman.foreman_reset.deliver", return_value={
-                 "schema_version": 1, "pane_id": PANE, "stow": "round-7", "agent": "foreman", "cleared": True,
+                 "schema_version": foreman_reset.RESET_SCHEMA_VERSION, "pane_id": PANE, "stow": "round-7", "agent": "foreman", "cleared": True,
                  "resume": {"landed": True, "started": True}}):
             code, out, err = self.run_cli(self.base() + ["foreman-reset-deliver", "--pane", PANE, "--stow", "round-7"],
                                           client=object())
@@ -610,7 +764,7 @@ class ResetCommandTest(CliCase):
         self.assertEqual(rows[-1]["status"], "delivered")
 
     def test_a_setup_failure_after_the_claim_fails_the_reset_instead_of_stranding_it(self):
-        foreman_reset.schedule(self.state, {"pane_id": PANE, "stow": "round-7"}, "2026-09-24T10:00:00+00:00", os.getpid)
+        foreman_reset.schedule(self.state, {"pane_id": PANE, "stow": "round-7"}, "2026-09-24T10:00:00+00:00", os.getpid, native_session=SESSION)
         with patch("foreman.cli.load_config", side_effect=StateError("config unreadable", {})):
             code, _, err = self.run_cli(self.base() + ["foreman-reset-deliver", "--pane", PANE, "--stow", "round-7"],
                                         client=object())
@@ -628,7 +782,7 @@ class ResetCommandTest(CliCase):
         self.assertEqual(outstanding[0]["resume_prompt"], rows[-1]["result"]["resume_prompt"])
 
     def test_an_unrecordable_failure_is_not_reset_ended_and_still_surfaces(self):
-        foreman_reset.schedule(self.state, {"pane_id": PANE, "stow": "round-7"}, "2026-09-24T10:00:00+00:00", os.getpid)
+        foreman_reset.schedule(self.state, {"pane_id": PANE, "stow": "round-7"}, "2026-09-24T10:00:00+00:00", os.getpid, native_session=SESSION)
         with patch("foreman.cli.load_config", side_effect=StateError("config unreadable", {})), \
              patch("foreman.foreman_reset.finish", side_effect=foreman_reset.ResetRecordUnusable("record gone", {})):
             code, _, err = self.run_cli(self.base() + ["foreman-reset-deliver", "--pane", PANE, "--stow", "round-7"],
@@ -641,8 +795,8 @@ class ResetCommandTest(CliCase):
         self.assertIn("outcome is unknown", outstanding[0]["needed"])
 
     def test_a_delivery_the_record_cannot_confirm_says_the_foreman_resumed(self):
-        foreman_reset.schedule(self.state, {"pane_id": PANE, "stow": "round-7"}, "2026-09-24T10:00:00+00:00", os.getpid)
-        delivered = {"schema_version": 1, "pane_id": PANE, "stow": "round-7", "agent": "foreman", "cleared": True,
+        foreman_reset.schedule(self.state, {"pane_id": PANE, "stow": "round-7"}, "2026-09-24T10:00:00+00:00", os.getpid, native_session=SESSION)
+        delivered = {"schema_version": foreman_reset.RESET_SCHEMA_VERSION, "pane_id": PANE, "stow": "round-7", "agent": "foreman", "cleared": True,
                      "resume": {"landed": True, "started": True}}
         with patch("foreman.foreman_reset.deliver", return_value=delivered), \
              patch("foreman.foreman_reset.finish", side_effect=foreman_reset.ResetRecordUnusable("record gone", {})):
@@ -656,7 +810,7 @@ class ResetCommandTest(CliCase):
     def test_catch_up_surfaces_an_outstanding_reset_ahead_of_the_queue(self):
         from foreman import attention_view
         plan = {"pane_id": PANE, "stow": "round-7"}
-        foreman_reset.schedule(self.state, plan, "2026-09-24T10:00:00+00:00", os.getpid)
+        foreman_reset.schedule(self.state, plan, "2026-09-24T10:00:00+00:00", os.getpid, native_session=SESSION)
         foreman_reset.claim(self.state, plan, supervision_runtime.process_identity(os.getpid()))
         foreman_reset.finish(self.state, plan, "failed",
                              {"error": "herdr_error", "message": "boom", "details": {}, "resume_prompt": "paste me"})
@@ -668,14 +822,14 @@ class ResetCommandTest(CliCase):
     def test_a_later_delivered_reset_supersedes_an_older_failure(self):
         first, second = {"pane_id": PANE, "stow": "round-7"}, {"pane_id": PANE, "stow": "round-8"}
         me = supervision_runtime.process_identity(os.getpid())
-        foreman_reset.schedule(self.state, first, "2026-09-24T10:00:00+00:00", os.getpid)
+        foreman_reset.schedule(self.state, first, "2026-09-24T10:00:00+00:00", os.getpid, native_session=SESSION)
         foreman_reset.claim(self.state, first, me)
         foreman_reset.finish(self.state, first, "failed",
                              {"error": "herdr_error", "message": "boom", "details": {}, "resume_prompt": "p"})
-        foreman_reset.schedule(self.state, second, "2026-09-24T11:00:00+00:00", os.getpid)
+        foreman_reset.schedule(self.state, second, "2026-09-24T11:00:00+00:00", os.getpid, native_session=SESSION)
         foreman_reset.claim(self.state, second, me)
         foreman_reset.finish(self.state, second, "delivered", {
-            "schema_version": 1, "pane_id": PANE, "stow": "round-8", "agent": "foreman", "cleared": True,
+            "schema_version": foreman_reset.RESET_SCHEMA_VERSION, "pane_id": PANE, "stow": "round-8", "agent": "foreman", "cleared": True,
             "resume": {"landed": True, "started": True}})
         self.assertEqual(foreman_reset.outstanding(self.state), [])
 
@@ -685,7 +839,7 @@ class ResetCommandTest(CliCase):
             with self.subTest(outcome=outcome):
                 foreman_reset.record_path(self.state).unlink(missing_ok=True)
                 foreman_reset.schedule(self.state, plan, "2026-09-24T10:00:00+00:00", os.getpid,
-                                       options={"config": "/c/cfg.json"})
+                                       options={"config": "/c/cfg.json"}, native_session=SESSION)
                 foreman_reset.claim(self.state, plan, supervision_runtime.process_identity(os.getpid()))
                 row = foreman_reset.reconcile(self.state, plan, outcome, "2026-09-24T11:00:00+00:00",
                                               alive=lambda process: False)
@@ -698,7 +852,7 @@ class ResetCommandTest(CliCase):
 
     def test_reconcile_refuses_a_live_or_finished_reset(self):
         plan = {"pane_id": PANE, "stow": "round-7"}
-        foreman_reset.schedule(self.state, plan, "2026-09-24T10:00:00+00:00", os.getpid)
+        foreman_reset.schedule(self.state, plan, "2026-09-24T10:00:00+00:00", os.getpid, native_session=SESSION)
         with self.assertRaisesRegex(UsageError, "still has its deliverer running"):
             foreman_reset.reconcile(self.state, plan, "failed", "2026-09-24T11:00:00+00:00", alive=lambda process: True)
         first = foreman_reset.reconcile(self.state, plan, "failed", "2026-09-24T11:00:00+00:00", alive=lambda process: False)
@@ -711,7 +865,7 @@ class ResetCommandTest(CliCase):
 
     def test_an_interrupted_reset_the_operator_saw_resume_reconciles_as_delivered(self):
         plan = {"pane_id": PANE, "stow": "round-7"}
-        foreman_reset.schedule(self.state, plan, "2026-09-24T10:00:00+00:00", os.getpid)
+        foreman_reset.schedule(self.state, plan, "2026-09-24T10:00:00+00:00", os.getpid, native_session=SESSION)
         foreman_reset.claim(self.state, plan, supervision_runtime.process_identity(os.getpid()))
         foreman_reset.finish(self.state, plan, "interrupted",
                              {"error": "herdr_error", "message": "x", "details": {}, "resume_prompt": "p"})
@@ -726,7 +880,7 @@ class ResetCommandTest(CliCase):
 
     def test_reconcile_as_delivered_replays_and_refuses_a_later_failure(self):
         plan = {"pane_id": PANE, "stow": "round-7"}
-        foreman_reset.schedule(self.state, plan, "2026-09-24T10:00:00+00:00", os.getpid)
+        foreman_reset.schedule(self.state, plan, "2026-09-24T10:00:00+00:00", os.getpid, native_session=SESSION)
         # Never claimed, so nothing was typed: a scheduled row cannot be delivered.
         with self.assertRaisesRegex(UsageError, "nothing to reconcile"):
             foreman_reset.reconcile(self.state, plan, "delivered", "2026-09-24T10:30:00+00:00", alive=lambda process: False)
@@ -739,12 +893,12 @@ class ResetCommandTest(CliCase):
 
     def test_a_reconciled_reset_replays_on_retry_and_starts_nothing(self):
         plan = {"pane_id": PANE, "stow": "round-7"}
-        foreman_reset.schedule(self.state, plan, "2026-09-24T10:00:00+00:00", os.getpid)
+        foreman_reset.schedule(self.state, plan, "2026-09-24T10:00:00+00:00", os.getpid, native_session=SESSION)
         foreman_reset.claim(self.state, plan, supervision_runtime.process_identity(os.getpid()))
         foreman_reset.reconcile(self.state, plan, "delivered", "2026-09-24T11:00:00+00:00", alive=lambda process: False)
         started = []
         again = foreman_reset.schedule(self.state, plan, "2026-09-24T12:00:00+00:00", lambda: started.append(1),
-                                       alive=lambda process: False)
+                                       alive=lambda process: False, native_session=SESSION)
         self.assertEqual((again["status"], again["replayed"], started), ("reconciled", True, []))
         replayed = foreman_reset.replay(self.state, plan, alive=lambda process: False)
         assert replayed is not None, "a reconciled reset replays"
@@ -752,7 +906,7 @@ class ResetCommandTest(CliCase):
 
     def test_outstanding_names_the_reconcile_command(self):
         plan = {"pane_id": PANE, "stow": "round-7"}
-        foreman_reset.schedule(self.state, plan, "2026-09-24T10:00:00+00:00", os.getpid)
+        foreman_reset.schedule(self.state, plan, "2026-09-24T10:00:00+00:00", os.getpid, native_session=SESSION)
         needed = foreman_reset.outstanding(self.state, alive=lambda process: False)[0]["needed"]
         self.assertIn("foreman-reset-reconcile --state {} --pane {} --stow round-7 --outcome failed".format(
             self.state.resolve(), PANE), needed)
@@ -832,7 +986,7 @@ class ResetCommandTest(CliCase):
     def test_the_resume_prompt_on_recovery_keeps_the_settings_the_reset_was_scheduled_with(self):
         plan = {"pane_id": PANE, "stow": "round-7"}
         foreman_reset.schedule(self.state, plan, "2026-09-24T10:00:00+00:00", os.getpid,
-                               options={"config": "/c/cfg.json", "herdr_bin": "/opt/herdr"})
+                               options={"config": "/c/cfg.json", "herdr_bin": "/opt/herdr"}, native_session=SESSION)
         with self.assertRaises(foreman_reset.ResetEnded) as caught:
             foreman_reset.replay(self.state, plan, alive=lambda process: False)
         self.assertIn("--config /c/cfg.json --herdr-bin /opt/herdr", caught.exception.details["resume_prompt"])
@@ -854,7 +1008,7 @@ class ResetCommandTest(CliCase):
                 self.assertTrue(unusable({**row, field: value}))
 
     def test_a_deliverer_that_cannot_identify_itself_exits_with_the_recovery(self):
-        foreman_reset.schedule(self.state, {"pane_id": PANE, "stow": "round-7"}, "2026-09-24T10:00:00+00:00", os.getpid)
+        foreman_reset.schedule(self.state, {"pane_id": PANE, "stow": "round-7"}, "2026-09-24T10:00:00+00:00", os.getpid, native_session=SESSION)
         with patch("foreman.cli.supervision_runtime.process_identity", side_effect=StateError("ps timed out", {})):
             code, _, err = self.run_cli(self.base() + ["foreman-reset-deliver", "--pane", PANE, "--stow", "round-7"],
                                         client=object())
@@ -869,7 +1023,7 @@ class ResetCommandTest(CliCase):
 
     def test_fail_unclaimed_leaves_a_row_another_process_moved(self):
         plan = {"pane_id": PANE, "stow": "round-7"}
-        foreman_reset.schedule(self.state, plan, "2026-09-24T10:00:00+00:00", os.getpid)
+        foreman_reset.schedule(self.state, plan, "2026-09-24T10:00:00+00:00", os.getpid, native_session=SESSION)
         foreman_reset.claim(self.state, plan, supervision_runtime.process_identity(os.getpid()))
         outcome = {"error": "state_error", "message": "x", "details": {}, "resume_prompt": "p"}
         self.assertEqual(foreman_reset.fail_unclaimed(self.state, plan, outcome), "delivering")

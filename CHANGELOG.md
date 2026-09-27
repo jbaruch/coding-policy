@@ -1,5 +1,32 @@
 # Changelog
 
+### Fixed
+
+- **The foreman reset deliverer types only into the foreman's bound native
+  session (#523).** `foreman-reset-deliver` waits up to `IDLE_BUDGET_SEC` for
+  the foreman's pane to idle, and before every keystroke it re-checked only
+  the pane's agent name, runtime kind and idle status. An operator who
+  replaced the foreman process in that pane during the wait with another
+  session of the same name and kind passed the guard, and the old reset's
+  `/clear` and resume prompt landed in the new session. `foreman-reset` now
+  records the native session bound at `supervision-bind` on the reset row
+  (`native_session`), and refuses to schedule when the binding names none.
+  The deliverer's guard reads `herdr pane get` (the source `supervision-bind`
+  reads) and refuses unless the pane still holds that session, for every
+  keystroke up to the clear command's first submit: the row finishes
+  `failed` before any keystroke, `interrupted` after one, with error
+  `reset_session_changed` and `details.reason` `native_session_changed`.
+  The clear itself starts a new native session by design, so the keystrokes
+  after it keep the name, kind and idle checks alone. The reset record moves
+  to schema 2 (`skills/herdr-foreman/state-schema.md` Foreman Reset Record);
+  the owner migrates a schema-1 record on read, giving each row
+  `native_session: null`, and a deliverer that claims such a row refuses
+  before any keystroke. Regression tests cover a same-name, same-kind
+  replacement (no keystroke, row records why), a replacement between the
+  clear's keystrokes, the post-clear session change, the migration, and the
+  CLI end to end; the unfixed deliverer typed `/clear` and the resume prompt
+  into the replacement session.
+
 ## 0.3.290 — 2026-09-27
 
 ### Fixed
