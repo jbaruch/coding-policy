@@ -121,8 +121,9 @@ except Expired:
     if group_alive():
         signal_group(signal.SIGKILL)
     child.wait()
+    # Only the executable is named: an argument can carry a credential.
     sys.stderr.write("bounded-run: {} ran past its {}s budget and was stopped — run it by hand to see where it waits\n".format(
-        " ".join(command), budget))
+        os.path.basename(command[0]), budget))
     sys.exit(124)
 signal.alarm(0)
 # A command killed by a signal exits 128 + that signal, as a shell reports it.
