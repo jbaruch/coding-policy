@@ -483,12 +483,16 @@ checkpoint's `exit` and delivery JSON as `wait`:
   wait's own exit, 2 included); resolve the diagnostic stderr names, then run
   it again
 
-Read delivered reports in full. Pass the worker's checkout as `--worktree`
-when it has one. An exit 1 then carries either `reason: checkpoint_pending` or a `stall` object; act on a
-stall under `rules/agent-team-operation.md` Stalled Workers and record the
-obligation through `references/attention.md`. Preserve the blocked/refusal and native-recovery paths in the
-following references; never re-dispatch over uncertainty or resend a refused
-brief to its provider.
+Then act on the checkpoint:
+
+- Read delivered reports in full
+- Pass the worker's checkout as `--worktree` when it has one
+- With `--worktree`, an exit 1 carries either `reason: checkpoint_pending` or a `stall` object
+- Act on a stall under `rules/agent-team-operation.md` Stalled Workers
+- Record a stall's obligation through `references/attention.md`
+- Preserve the blocked/refusal and native-recovery paths in the references below
+- Never re-dispatch over uncertainty
+- Never resend a refused brief to its provider
 
 ```text
 skills/herdr-foreman/references/supervision.md
