@@ -14,7 +14,7 @@ set -uo pipefail
 SCRIPT="$(cd "$(dirname "$0")/.." && pwd)/migrate.sh"
 [[ -x "$SCRIPT" ]] || { echo "fatal: migrate.sh not executable at $SCRIPT" >&2; exit 2; }
 
-# shellcheck disable=SC1090
+# shellcheck disable=SC1090  # ShellCheck cannot resolve the dynamically constructed source path.
 source "$SCRIPT" || true
 set +e
 

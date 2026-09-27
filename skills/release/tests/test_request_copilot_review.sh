@@ -35,7 +35,7 @@ SCRIPT="$(cd "$(dirname "$0")/.." && pwd)/request-copilot-review.sh"
 # nuked by what is effectively the script's idiomatic no-op-when-sourced
 # path. After sourcing, also flip errexit back off so per-test
 # assertions returning non-zero don't abort the driver.
-# shellcheck disable=SC1090
+# shellcheck disable=SC1090  # ShellCheck cannot resolve the dynamically constructed source path.
 source "$SCRIPT" || true
 set +e
 
