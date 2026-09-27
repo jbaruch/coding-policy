@@ -85,7 +85,10 @@ def marker_fit(client, agent, report):
 
     For a sender that bypasses `apply` (the standup): the pane and the TUI kind
     come from Herdr's own agent record, the width from the live layout. An
-    unrecognised kind is measured at the widest prefix and reserve.
+    unrecognised kind is measured at the widest prefix and reserve. The
+    record's `agent_status` rides along (`unknown` when absent), so a caller
+    that read readiness earlier can refuse a worker that has since started a
+    turn.
     """
     info = client.agent_get(agent)
     pane_id = info.get("pane_id")
@@ -95,7 +98,8 @@ def marker_fit(client, agent, report):
     kind = info.get("agent") if isinstance(info.get("agent"), str) else ""
     width = client.pane_width(pane_id)
     needed = marker_columns(kind, report)
-    return {"agent": agent, "pane_id": pane_id, "kind": kind, "report": report,
+    status = info.get("agent_status") if isinstance(info.get("agent_status"), str) else "unknown"
+    return {"agent": agent, "pane_id": pane_id, "kind": kind, "agent_status": status, "report": report,
             "pane_width": width, "needed": needed, "fits": needed <= width}
 
 

@@ -28,6 +28,8 @@
 #  10. Narrow pane    -> exit 4, nothing sent, the verdict names the width
 #                        and the columns the marker needs (#515).
 #  11. Exact fit      -> a pane exactly as wide as that need is asked.
+#  11b. Turn started  -> idle at the first read, working at the measurement:
+#                        exit 3, nothing sent.
 #  12. Measure fails  -> a failed `foreman marker-fit` is exit 2, nothing sent.
 #  13. No foreman.sh  -> exit 1 before any herdr call.
 #
@@ -50,8 +52,15 @@ case "${1:-} ${2:-}" in
   "agent get")
     [[ -n "${FAKE_GET_ERR:-}" ]] && { printf '{"error":{"code":"agent_not_found"}}\n' >&2; exit 1; }
     [[ -n "${FAKE_GET_BAD:-}" ]] && { printf '{"id":"cli:agent:get","result":{}}\n'; exit 0; }
+    status="${FAKE_STATUS:-idle}"
+    # FAKE_STATUS_LATER answers every read after the first: a worker that
+    # starts a turn between the readiness read and the measurement.
+    if [[ -n "${FAKE_STATUS_LATER:-}" ]]; then
+      if [[ -e "$FAKE_GET_SEEN" ]]; then status="$FAKE_STATUS_LATER"; fi
+      : > "$FAKE_GET_SEEN" || exit 3
+    fi
     printf '{"id":"cli:agent:get","result":{"type":"agent_info","agent":{"agent":"claude","agent_status":"%s","pane_id":"w2:p1","name":"%s"}}}\n' \
-      "${FAKE_STATUS:-idle}" "${3:-worker}"
+      "$status" "${3:-worker}"
     exit 0
     ;;
   "pane layout")
@@ -224,6 +233,13 @@ main() {
   run FAKE_STATUS=idle FAKE_WIDTH="$((needed - 1))"
   if [[ $RC -eq 4 ]] && ! printf '%s' "$ARGVTEXT" | grep -q "agent prompt"; then
     pass; else fail "one short: expected a $((needed - 1))-column pane to be refused, got RC=$RC OUT=$OUT"; fi
+
+  # 11b. A worker that starts a turn while its pane is measured is not asked.
+  run FAKE_STATUS=idle FAKE_STATUS_LATER=working FAKE_GET_SEEN="$TMP/get-seen.$((RUN_SEQ+1))"
+  if [[ $RC -eq 3 ]] && printf '%s' "$OUT" | jq -e '.sent == false and .state == "working"' >/dev/null 2>&1 \
+     && ! printf '%s' "$ARGVTEXT" | grep -q "agent prompt" \
+     && [[ "$(printf '%s\n' "$ARGVTEXT" | grep -c "agent get")" -eq 2 ]]; then
+    pass; else fail "idle then working: expected exit 3 with nothing sent, got RC=$RC OUT=$OUT ARGV=$ARGVTEXT ERR=$ERRTEXT"; fi
 
   # 12. A measurement that fails is a tool failure, never a send.
   run FAKE_STATUS=idle FAKE_LAYOUT_ERR=1

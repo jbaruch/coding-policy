@@ -24,7 +24,8 @@
 #             `herdr`, `jq` or the sibling foreman.sh absent),
 #           2 a herdr failure, an unreadable `agent get` payload, or a failed
 #             or unreadable `foreman marker-fit` measurement,
-#           3 the worker is not idle or done — nothing was sent. A standup
+#           3 the worker is not idle or done at the first read or at the
+#             measurement — nothing was sent. A standup
 #             never interrupts a turn (`rules/agent-team-operation.md`
 #             Dispatch Safety),
 #           4 the worker's live pane is too narrow for its `REPORT: <path>`
@@ -181,16 +182,26 @@ main() {
   fi
   rc=0
   verdict="$(printf '%s' "$fit" | jq -r '
-    if (.fits | type) != "boolean" or (.pane_width | type) != "number" or (.needed | type) != "number" then
-      error("marker-fit payload lacks fits, pane_width or needed")
+    if (.fits | type) != "boolean" or (.pane_width | type) != "number" or (.needed | type) != "number"
+       or (.agent_status | type) != "string" or (.agent_status | test("^[a-z_]+$") | not) then
+      error("marker-fit payload lacks fits, pane_width, needed or agent_status")
     else
-      "\(.fits) \(.pane_width) \(.needed)"
+      "\(.fits) \(.pane_width) \(.needed) \(.agent_status)"
     end' 2>"$ERRFILE")" || rc=$?
   if (( rc != 0 )); then
     warn "could not read the \`foreman marker-fit\` verdict (jq exit ${rc}): $(tr '\n' ' ' < "$ERRFILE") — nothing was sent"
     return 2
   fi
-  read -r fits width needed <<<"$verdict"
+  local fresh
+  read -r fits width needed fresh <<<"$verdict"
+  # The measurement read the worker again. A turn that started since the
+  # first read wins over the ask, exactly as a busy first read does.
+  if [[ " $READY_STATES " != *" $fresh "* ]]; then
+    warn "${AGENT} became '${fresh}' while its pane was measured — not asking. Fill its row from the round log."
+    jq -n --arg a "$AGENT" --arg p "$REPORT_PATH" --arg s "$fresh" \
+      '{agent: $a, report_path: $p, state: $s, sent: false}'
+    return 3
+  fi
   if [[ "$fits" != "true" ]]; then
     warn "${AGENT}'s pane is ${width} columns; its \`REPORT: <path>\` line needs ${needed}, so it would wrap and the wait could never confirm it. Nothing was sent — widen the pane or use a shorter reports directory, then ask again."
     jq -n --arg a "$AGENT" --arg p "$REPORT_PATH" --arg s "$state" \

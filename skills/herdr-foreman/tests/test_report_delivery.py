@@ -81,10 +81,12 @@ class MarkerFitTests(unittest.TestCase):
 
     REPORT = "/Users/me/.local/state/fleet/standup/2026-09-27/worker-with-a-long-name.md"
 
-    def runner(self, kind, width, pane=PANE):
+    def runner(self, kind, width, pane=PANE, status: "str | None" = "idle"):
         runner = FakeRunner()
-        runner.set("agent get worker", json.dumps({"result": {"agent": {
-            "agent": kind, "agent_status": "idle", "pane_id": pane, "name": "worker"}}}))
+        record = {"agent": kind, "pane_id": pane, "name": "worker"}
+        if status is not None:
+            record["agent_status"] = status
+        runner.set("agent get worker", json.dumps({"result": {"agent": record}}))
         runner.set("pane layout --pane " + pane, pane_layout(pane, width))
         return runner
 
@@ -113,7 +115,8 @@ class MarkerFitTests(unittest.TestCase):
         needed = delivery.marker_columns("grok", self.REPORT)
         code, out, _ = self.run_cli(self.runner("grok", needed - 1))
         self.assertEqual(code, 0)
-        self.assertEqual(json.loads(out), {"agent": "worker", "pane_id": PANE, "kind": "grok", "report": self.REPORT,
+        self.assertEqual(json.loads(out), {"agent": "worker", "pane_id": PANE, "kind": "grok", "agent_status": "idle",
+                                           "report": self.REPORT,
                                            "pane_width": needed - 1, "needed": needed, "fits": False})
 
     def test_a_pane_exactly_as_wide_as_needed_fits(self):
@@ -146,6 +149,12 @@ class MarkerFitTests(unittest.TestCase):
         self.assertEqual((code, out), (1, ""))
         self.assertIn("absolute", errors)
         self.assertEqual(runner.calls, [])
+
+    def test_the_fresh_status_rides_along_and_an_absent_one_is_unknown(self):
+        _, working, _ = self.run_cli(self.runner("codex", 200, status="working"))
+        _, absent, _ = self.run_cli(self.runner("codex", 200, status=None))
+        self.assertEqual(json.loads(working)["agent_status"], "working")
+        self.assertEqual(json.loads(absent)["agent_status"], "unknown")
 
     def test_every_control_character_is_refused_before_herdr(self):
         for char in ("\t", "\x7f", "\x85", "\x9b", " ", " "):
