@@ -187,6 +187,13 @@ JSON
       pass; else fail "an unprobeable workflows directory is a tool error, got RC=$RC OUT=$OUT ERR=$ERRTEXT"; fi
   fi
 
+  # A `.github` that is a file holds no workflows directory: absent, not an error.
+  mkdir -p "$TMP/ghfile" || die "mkdir ghfile"
+  printf 'x\n' > "$TMP/ghfile/.github" || die "write .github file"
+  run "$TMP/ghfile"
+  if [[ $RC -eq 0 ]] && [[ "$(list "$OUT" workflows)" == "" ]]; then
+    pass; else fail "a .github file means no workflows, got RC=$RC OUT=$OUT ERR=$ERRTEXT"; fi
+
   # Each refusal names the repair for the field it refused.
   printf '%s\n' '{"schema_version": 1, "notes": "one\ntwo"}' > "$TMP/render/.herdr/gates.json" \
     || die "write notes declaration"

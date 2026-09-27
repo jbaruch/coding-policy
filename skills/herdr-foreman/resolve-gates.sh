@@ -98,10 +98,11 @@ workflows = []
 workflow_dir = os.path.join(checkout, ".github", "workflows")
 # A symlinked workflows directory is not the platform's location: its files
 # live elsewhere, possibly outside the checkout, so it lists nothing. Only an
-# absent path means no workflows; any other failure to probe it is a tool error.
+# absent path -- no entry, or a `.github` that is a file -- means no workflows;
+# any other failure to probe it is a tool error.
 try:
     probe = os.lstat(workflow_dir)
-except FileNotFoundError:
+except (FileNotFoundError, NotADirectoryError):
     probe = None
 except OSError as exc:
     sys.stderr.write("resolve-gates: cannot inspect {}: {} -- check its permissions.\n".format(workflow_dir, exc))
