@@ -154,10 +154,21 @@ def write_new(path: Path, value: bytes) -> None:
     if path.exists() or path.is_symlink():
         require(not path.is_symlink() and path.is_file() and path.read_bytes() == value,
                 "Output already exists with different content; refuse to overwrite it")
-        return
-    with path.open("xb") as handle:
-        handle.write(value)
+    else:
+        with path.open("xb") as handle:
+            handle.write(value)
+    # Re-apply on the idempotent path too: an interrupted run can leave a permissive mode.
     path.chmod(0o600)
+    require(stat.S_IMODE(path.stat().st_mode) == 0o600,
+            "Output file mode is not 0600; inspect the run root's filesystem and ownership")
+
+
+def write_private(path: Path, value: bytes) -> None:
+    """write_new for credential material: the file is 0600 and its directory 0700, on every run."""
+    write_new(path, value)
+    path.parent.chmod(0o700)
+    require(stat.S_IMODE(path.parent.stat().st_mode) == 0o700,
+            "Credential directory mode is not 0700; inspect the run root's filesystem and ownership")
 
 
 def fresh_private(path: Path) -> None:
@@ -344,16 +355,27 @@ def run_proof(acr_root: Path, root: Path) -> None:
     prove_runtime(acr_root, events, result.returncode, root / "evidence/credential-boundary.json")
 
 
+# Floor shared with codex-review/mask-secrets.sh, which masks only strings this long;
+# a shorter credential would be neither masked in logs nor a reliable scan oracle.
+MIN_SECRET = 16
+
+
 def secret_values(document: Any) -> list[str]:
-    """The credential strings an auth.json carries: account-session tokens, an API key, or both."""
+    """The credential strings an auth.json carries: account-session tokens, an API key, or both.
+
+    Every non-empty credential string is returned; one shorter than MIN_SECRET refuses.
+    """
     values = []
     if type(document) is dict:
         tokens = document.get("tokens")
         if type(tokens) is dict:
-            values += [v for v in tokens.values() if type(v) is str and len(v) >= 16]
+            values += [v for v in tokens.values() if type(v) is str and v]
         key = document.get("OPENAI_API_KEY")
-        if type(key) is str and len(key) >= 16:
+        if type(key) is str and key:
             values.append(key)
+    require(all(len(v) >= MIN_SECRET for v in values),
+            f"auth.json carries a credential shorter than {MIN_SECRET} characters, which masking skips; "
+            "regenerate it with `codex login` or supply the full OPENAI_API_KEY")
     return values
 
 
@@ -379,8 +401,8 @@ def seed(root: Path) -> None:
     require(bool(secret_values(document)), f"{SEED_SECRET} must be an auth.json with session tokens or an OPENAI_API_KEY")
     auth = root / "seed/auth.json"
     data = encoded(document)
-    write_new(auth, data)
-    write_new(root / "central/seed-oracle.json", data)
+    write_private(auth, data)
+    write_private(root / "central/seed-oracle.json", data)
     # Existing central masking helper; it emits only Actions mask commands.
     subprocess.run(["bash", str(Path(__file__).resolve().parents[1] / "codex-review/mask-secrets.sh"), str(auth)], check=True)
 

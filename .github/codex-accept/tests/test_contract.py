@@ -1285,6 +1285,43 @@ class ExportTests(unittest.TestCase):
                 c.seed(self.root)
         self.assertEqual((self.root / "seed/auth.json").read_bytes(), auth)
 
+    def test_seed_rerun_restores_private_modes(self):
+        auth = self.root / "seed/auth.json"
+        oracle = self.root / "central/seed-oracle.json"
+        for path in (auth, oracle):
+            path.chmod(0o644)
+            path.parent.chmod(0o755)
+        original_run = c.subprocess.run
+        quiet = mock.patch.object(c.subprocess, "run", side_effect=lambda *a, **kw: original_run(*a, **kw, capture_output=True))
+        with quiet, mock.patch.dict(os.environ, {"CODEX_AUTH_JSON": json.dumps({"tokens": {"access_token": SEED}})}):
+            c.seed(self.root)
+        for path in (auth, oracle):
+            self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+            self.assertEqual(path.parent.stat().st_mode & 0o777, 0o700)
+
+    def test_short_credential_refuses_instead_of_escaping_mask_and_scan(self):
+        short = "sk-short-12"
+        for document in ({"tokens": {"access_token": SEED, "refresh_token": short}}, {"OPENAI_API_KEY": short}):
+            with self.subTest(document=document):
+                with self.assertRaisesRegex(c.Refusal, "shorter than 16 characters"):
+                    c.secret_values(document)
+                auth = self.base / "short-auth.json"; auth.write_bytes(c.encoded(document))
+                with self.assertRaisesRegex(c.Refusal, "shorter than 16 characters"):
+                    c.credentials(auth, SUITE)
+                with mock.patch.dict(os.environ, {"CODEX_AUTH_JSON": json.dumps(document)}):
+                    with self.assertRaisesRegex(c.Refusal, "shorter than 16 characters"):
+                        c.seed(self.root)
+
+    def test_every_credential_at_the_floor_is_scanned(self):
+        values = {"access_token": "a" * 16, "refresh_token": "r" * 16, "id_token": "i" * 16}
+        auth = self.base / "floor-auth.json"
+        auth.write_bytes(c.encoded({"tokens": values, "OPENAI_API_KEY": "k" * 16}))
+        known = c.credentials(auth, SUITE)
+        for value in [*values.values(), "k" * 16]:
+            self.assertIn(value.encode(), known)
+            with self.assertRaisesRegex(c.Refusal, "Credential material"):
+                c.scan(b"leaked " + value.encode(), known)
+
     def test_missing_seed_secret_names_it_and_the_recovery(self):
         env = {k: v for k, v in os.environ.items() if k != "CODEX_AUTH_JSON"}
         with tempfile.TemporaryDirectory() as name, mock.patch.dict(os.environ, env, clear=True):

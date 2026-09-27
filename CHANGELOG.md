@@ -1,5 +1,22 @@
 # Changelog
 
+### Fixed
+
+- **The ACR acceptance helper no longer lets a short credential or a loosened
+  file mode slip past it (#544).** `secret_values()` in
+  `.github/codex-accept/contract.py` silently dropped token and
+  `OPENAI_API_KEY` strings under 16 characters, so such a credential was
+  neither masked nor scanned. It now returns every non-empty credential and
+  refuses, with a `codex login` recovery, when one is shorter than the 16-char
+  floor `codex-review/mask-secrets.sh` masks at, since that helper would leave
+  it unmasked in logs. `write_new`'s idempotent path accepted an existing
+  identical file without touching its mode, so an interrupted run could leave
+  `seed/auth.json` or `central/seed-oracle.json` group- or world-readable; it
+  now re-applies and verifies `0600` on every run, and `seed` re-applies and
+  verifies `0700` on both credential directories. Regression tests cover a
+  short token, a short API key, credentials at the floor, and a loosened mode
+  restored by a re-run of `seed`.
+
 ## 0.3.280 — 2026-09-27
 
 ### Changed
