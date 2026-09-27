@@ -51,6 +51,7 @@ import os
 from contextlib import ExitStack, contextmanager
 from pathlib import Path
 
+from . import runnable
 from .errors import StateError, UsageError
 from .state import save_state
 
@@ -106,8 +107,8 @@ def guard(exclusive, environ=None):
         try:
             root.mkdir(parents=True, exist_ok=True)
         except OSError as exc:
-            raise StateError("Cannot create the state root {}: {}. Restore access to it, then run migrate-home "
-                             "again; nothing was moved.".format(root, exc), {"root": str(root)}) from None
+            raise StateError("Cannot create the state root {}: {}. Restore access to it, then run `{}` "
+                             "again; nothing was moved.".format(root, exc, runnable.command("migrate-home")), {"root": str(root)}) from None
     try:
         handle = path.open("a", encoding="utf-8")
     except OSError as exc:
@@ -119,7 +120,7 @@ def guard(exclusive, environ=None):
         except BlockingIOError:
             if exclusive:
                 raise UsageError("A foreman command is running (it holds {}). Stop every foreman and let running "
-                                 "commands finish, then run migrate-home again; nothing was moved.".format(path),
+                                 "commands finish, then run `{}` again; nothing was moved.".format(path, runnable.command("migrate-home")),
                                  {"guard": str(path)}) from None
             raise UsageError("migrate-home is moving the foreman homes (it holds {}). Wait for it to finish, then run "
                              "this command again; nothing was read or written.".format(path), {"guard": str(path)}) from None
@@ -137,8 +138,8 @@ def require_current(kinds, environ=None):
         state = status(root)
         if state == "legacy":
             old, new = pair(root)
-            raise StateError("The {} home is still at {}. Stop every foreman, then run `foreman migrate-home` to move it "
-                             "to {}; nothing was read or written.".format(kind, old, new), {"legacy": str(old), "current": str(new)})
+            raise StateError("The {} home is still at {}. Stop every foreman, then run `{}` to move it "
+                             "to {}; nothing was read or written.".format(kind, old, runnable.command("migrate-home"), new), {"legacy": str(old), "current": str(new)})
         if state in ("split", "blocked"):
             raise StateError(_refusal(kind, root, state), {"legacy": str(pair(root)[0]), "current": str(pair(root)[1])})
 
@@ -146,9 +147,9 @@ def require_current(kinds, environ=None):
 def _refusal(kind, root, state):
     old, new = pair(root)
     if state == "blocked":
-        return "The legacy {} home {} is not a directory; move it aside, then run migrate-home.".format(kind, old)
+        return "The legacy {} home {} is not a directory; move it aside, then run `{}`.".format(kind, old, runnable.command("migrate-home"))
     return ("Both {} and {} exist as separate {} homes. They are never merged; keep the one holding the live "
-            "records, move the other aside, then run migrate-home.".format(old, new, kind))
+            "records, move the other aside, then run `{}`.".format(old, new, kind, runnable.command("migrate-home")))
 
 
 def _held_locks(directory):
@@ -161,11 +162,12 @@ def _held_locks(directory):
         except BlockingIOError:
             stack.close()
             raise UsageError("A foreman command holds {}. Stop every foreman and let running commands finish, then "
-                             "run migrate-home again; nothing was moved.".format(lock_path), {"lock": str(lock_path)}) from None
+                             "run `{}` again; nothing was moved.".format(lock_path, runnable.command("migrate-home")),
+                             {"lock": str(lock_path)}) from None
         except OSError as exc:
             stack.close()
-            raise StateError("Cannot lock {}: {}. Restore access to the state home, then run migrate-home again; "
-                             "nothing was moved.".format(lock_path, exc), {"lock": str(lock_path)}) from None
+            raise StateError("Cannot lock {}: {}. Restore access to the state home, then run `{}` again; "
+                             "nothing was moved.".format(lock_path, exc, runnable.command("migrate-home")), {"lock": str(lock_path)}) from None
     return stack
 
 
@@ -198,8 +200,8 @@ def _rewrite_home(home, old_state, new_state):
         try:
             document = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
-            raise StateError("Cannot read {} while moving the state home: {}. Restore the file, then run migrate-home "
-                             "again; files already rewritten stay valid.".format(path, exc), {"path": str(path)}) from None
+            raise StateError("Cannot read {} while moving the state home: {}. Restore the file, then run `{}` "
+                             "again; files already rewritten stay valid.".format(path, exc, runnable.command("migrate-home")), {"path": str(path)}) from None
         document, count = _rewrite_identity(document, old_state, new_state)
         if count:
             save_state(path, document)
@@ -223,7 +225,7 @@ def _move(kind, root, rewrite):
                 os.rename(old, new)
             except OSError as exc:
                 raise StateError("Cannot move the {} home {} to {}: {}. Nothing was moved; restore access to {}, then "
-                                 "run migrate-home again.".format(kind, old, new, exc, root),
+                                 "run `{}` again.".format(kind, old, new, exc, root, runnable.command("migrate-home")),
                                  {"legacy": str(old), "current": str(new)}) from None
             moved = True
         if not old.is_symlink():
@@ -232,7 +234,7 @@ def _move(kind, root, rewrite):
             except OSError as exc:
                 raise StateError("The {} home moved to {}, but linking {} to it failed: {}. Quoted history under the "
                                  "old path does not resolve until the link exists; restore access to {}, then run "
-                                 "migrate-home again to finish.".format(kind, new, old, exc, root),
+                                 "`{}` again to finish.".format(kind, new, old, exc, root, runnable.command("migrate-home")),
                                  {"legacy": str(old), "current": str(new), "moved": moved}) from None
         rewritten = []
         if rewrite:

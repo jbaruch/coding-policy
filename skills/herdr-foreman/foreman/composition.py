@@ -6,6 +6,7 @@ operator's capability declarations establish candidate eligibility; neither
 those declarations nor dispatch history certify expertise or completed work.
 """
 
+from . import runnable
 from .config import CAPABILITY_ID, parse_capabilities
 from .errors import UsageError
 from .tiers import ROLE_ROUNDS, SEAT_SEPARATOR, canonical_role
@@ -204,11 +205,12 @@ def seat_holds(roles, task, reservations, busy):
         for name in sorted(set(reservations) | set(busy)):
             reasons = []
             if name in busy:
-                reasons.append("busy on the active enrollment for task {}; resolve it with `foreman supervision-resolve` once its outcome is recorded".format(busy[name]))
+                reasons.append("busy on the active enrollment for task {}; resolve it with `{}` once its outcome is recorded".format(
+                    busy[name], runnable.command("supervision-resolve")))
             held = reservations.get(name)
             if held is not None and (held != task or base not in RESERVED_OWN_TASK_ROLES):
                 reasons.append("reserved as developer for {} through its early fixes; "
-                               "run `foreman close-task --record FILE` once that task merges or is abandoned".format(held))
+                               "run `{}` once that task merges or is abandoned".format(held, runnable.command("close-task --record FILE")))
             if reasons:
                 excluded[role].append(name)
                 rationale.append("{} excludes {}: {}.".format(role, name, "; ".join(reasons)))

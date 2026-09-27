@@ -34,6 +34,7 @@ and nothing may remove an entry (#483 decision 2). Files are listed with
 `present` so a missing report surfaces instead of vanishing. Read-only.
 """
 
+from . import runnable
 from .chronology import latest_assignment, timestamp
 from .foreman_queue import waiting
 from .errors import UsageError
@@ -147,8 +148,8 @@ def build(state, reports, attention_entries, busy_tasks, decision, *, task=None,
         if pending:
             # An unknown send outcome is reconciled before anything reads the
             # round as complete (Dispatch Safety).
-            raise UsageError("Task {!r} has dispatches with an unknown send outcome: {}. Reconcile each with `foreman reconcile` before this decision.".format(
-                task, ", ".join(pending)), {"task": task, "pending": pending})
+            raise UsageError("Task {!r} has dispatches with an unknown send outcome: {}. Reconcile each with `{}` before this decision.".format(
+                task, ", ".join(pending), runnable.command("reconcile")), {"task": task, "pending": pending})
     start = _round_start(assignments, task) if task is not None else None
     if decision in ("brief", "gate", "diagnose"):
         selected = _task_dispatches(store, assignments, task, since=None if decision == "diagnose" else start)

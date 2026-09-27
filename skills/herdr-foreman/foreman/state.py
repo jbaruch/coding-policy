@@ -68,16 +68,16 @@ Reading follows one rule per direction:
 """
 
 import json
-import math
 import os
 import tempfile
 import fcntl
 from contextlib import contextmanager
 from pathlib import Path
 
+from . import runnable
 from .diagnostics import stderr_warn as _warn
 from .errors import ConfigError, HerdrError, StateError, UsageError
-from .tiers import SEAT_SEPARATOR, canonical_role, parse_launch_args, parse_tiers, verify_argv
+from .tiers import SEAT_SEPARATOR, canonical_role, measured_pressure, parse_launch_args, parse_tiers, verify_argv
 from .recovery import JUDGE_MODES, empty_recovery, migrate_store, validate_store
 
 #: The version this build writes for the document and assignment rows.
@@ -490,9 +490,10 @@ def _validate(payload, path):
                     or not isinstance(proof.get("pane_id"), str) or not proof["pane_id"]):
                 raise _NoUsableState("an assignment row has invalid tier evidence")
             pressure = tier.get("pressure_headroom")
+            # The same reader tier selection uses: `math.isfinite` raises
+            # OverflowError on an int too large for a float (#490).
             if (type(tier.get("de_escalated")) is not bool
-                    or pressure is not None and (isinstance(pressure, bool) or not isinstance(pressure, (int, float))
-                                                 or not math.isfinite(pressure))):
+                    or pressure is not None and measured_pressure(pressure) is None):
                 raise _NoUsableState("an assignment row's tier lacks its pressure fields")
             if "qualification" in tier:
                 raise _NoUsableState("an assignment row's tier carries the retired qualification summary")
@@ -614,7 +615,8 @@ def load_state_checked(path, warn=None, *, persist_migration=True):
         return empty_state(), False
 
     if migrated and not persist_migration:
-        raise StateError("This read-only preview needs an owner migration. Run `foreman state` with the same --state path, then retry the preview; the original file is unchanged.", {"path": str(path)})
+        raise StateError("This read-only preview needs an owner migration. Run `{}` with the same --state path, then retry the preview; the original file is unchanged.".format(
+            runnable.command("state")), {"path": str(path)})
     if migrated:
         try:
             save_state(path, state)

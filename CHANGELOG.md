@@ -32,6 +32,246 @@
   name ends in a newline — for the Stop hook, the plugin root too — and each
   fixture fails against the old code.
 
+## 0.3.298 — 2026-09-27
+
+### Fixed
+
+- **Four edges in the tier-pressure fields #477 added (#490).** Deferred
+  Copilot advisories from #489's last review, all latent until a worker has a
+  `tiers` table. `select_tier` recorded `de_escalated` whenever scarcity met
+  risk evidence, including on rows with nothing above them to decline: a Grok
+  row (no effort above `high`), or a Claude or Codex row already on its top
+  model at `xhigh` or `max`. It now computes the escalated tier first and
+  records a de-escalation only when that tier differs from the configured
+  one; a row whose escalation needs a missing `review` row still declines
+  under scarcity rather than refusing. The pinned judge's plan entry now
+  carries `pressure_headroom: null` and `de_escalated: false`, so every
+  schema-9 tier entry has one shape. `plan --snapshot` records
+  `snapshot_ref.source` as an absolute path: `apply` re-reads that
+  file, and a relative name resolved against apply's own working directory
+  read as unmeasured, refusing a legitimately de-escalated plan as stale. The
+  ledger's pressure check reads stored headroom through `measured_pressure`,
+  so an integer too large for a float (`10**1000`) marks the state unusable
+  instead of raising `OverflowError` out of `math.isfinite`.
+
+## 0.3.297 — 2026-09-27
+
+### Tests
+
+- **Empty `HERDR_ENV` regression tests for the ACR and stop hooks (#557).**
+  #552 made every hook treat `HERDR_ENV` as set when present with any value,
+  empty included, but only `check-git-sync.sh` had an empty-value case. A
+  refactor to `${HERDR_ENV:+x}` would have passed the suite while a worker
+  with `HERDR_ENV=` installed ACR updates and got told to remove worktrees.
+  `hooks/tests/test_check_acr_latest.sh` case 6c and
+  `hooks/tests/test_stop_handoff_hygiene.sh` cases 4c/4d now run with
+  `HERDR_ENV=`; each fails against that refactor. The stop-hook harness also
+  unsets the host's `HERDR_ENV`, so a run from inside a Herdr pane no longer
+  flips the non-Herdr cases.
+
+## 0.3.296 — 2026-09-27
+
+### Fixed
+
+- **Foreman error and help hints name the runnable launcher (#532).** About a
+  hundred hints across `skills/herdr-foreman/foreman/` told the reader to run
+  a subcommand as bare `foreman measure`, `foreman state`, or a bare
+  `supervision-bind` / `validate-partition`. No installed plugin puts a
+  `foreman` executable on `PATH`, and Tessl installs strip the launcher's
+  execute bit, so none of them ran as written. `launcher()` moved out of
+  `foreman_reset.py` into the new `foreman/runnable.py`, whose `command()`
+  renders `bash <quoted foreman.sh> <subcommand>`; every hint, the resume
+  prompt and the reset-reconcile command now go through it.
+  `wait-report.sh`'s terminal-refusal warning names
+  `bash <quoted foreman.sh> record-refusal` the same way.
+  `tests/test_runnable.py` walks every string literal in the package
+  (docstrings, argparse `help=` text and subcommand names used as dispatch
+  data excepted) and fails on a bare subcommand reference: any bare
+  hyphenated name such as `retry supervision-bind` or `reload memory-list`,
+  and a one-word name such as `plan` or `state` when it is backticked,
+  prefixed with `foreman `, or follows an imperative verb. A new hint cannot
+  regress to the bare form.
+
+## 0.3.295 — 2026-09-27
+
+### Fixed
+
+- **`standup-ask.sh` measures the worker's live pane before asking (#515).**
+  The script capped the report path at 100 characters and claimed the
+  worker's `REPORT: <path>` line then fit one pane row; #513 showed a
+  106-column Grok pane wraps any marker path over ~93 characters, and a
+  wrapped marker is one the wait can never confirm. `teamlead apply` (now
+  `foreman apply`) already measured the target pane, but the standup sends
+  through `herdr agent prompt` and never reached that gate. A new read-only
+  `foreman marker-fit --agent --report` subcommand reads the worker's pane and
+  TUI kind from `herdr agent get`, its width from `herdr pane layout`, and
+  applies the same `marker_columns` rule in
+  `skills/herdr-foreman/foreman/report_delivery.py`, so the fit rule is never
+  restated in bash. `standup-ask.sh` calls it after the readiness check and
+  refuses with the new exit 4 — nothing sent, the JSON naming `pane_width`
+  and `needed` — when the marker would wrap; a failed measurement is exit 2.
+  The 100-character cap stays as a coarse bound. Folded in from the issue
+  thread: the over-cap warning in `skills/herdr-foreman/compose-briefs.sh` no
+  longer promises that staying under the cap makes the marker fit one pane
+  row; it names the live pane-width check in `foreman apply` instead (raised
+  by Copilot on #516). The policy review also caught that
+  `skills/herdr-standup/SKILL.md` Step 2 sent a worker whose ask exited 1 or
+  2 on to Step 3's wait for a question never asked; those workers now go to
+  Step 4 with the diagnostic relayed. `marker-fit` reads no foreman home, so
+  it takes no home guard and never refuses on a home awaiting migration, and
+  it refuses any Unicode `Cc` control or U+2028/U+2029 separator in the path;
+  `standup-ask.sh` refuses the same set itself as exit 1, before Herdr. The
+  measurement re-reads the worker, and a worker that started a turn since the
+  readiness read is refused as exit 3, never prompted.
+
+## 0.3.294 — 2026-09-27
+
+### Tests
+
+- **The cross-task check on a diagnosis's `approach_change` has a regression
+  case (#497).** `validate_store` in `skills/herdr-foreman/foreman/recovery.py`
+  refuses a diagnosis citing another task's approach through either `approach`
+  or `approach_change`, but `test_recovery.py` covered only `approach`. The new
+  case gives the task's own approach operator provenance, so no diagnosed
+  approach cites the diagnosis back and the back-reference check cannot catch
+  the edit first, then points `approach_change` at a second task's approach and
+  requires the refusal naming that task. Dropping `approach_change` from the
+  loop turns the case red with no error raised at all, confirming the
+  diagnosis-side check is the only guard for that shape. No production change.
+
+## 0.3.293 — 2026-09-27
+
+### Changed
+
+- **Spent worktrees and branches are removed automatically; work that exists
+  nowhere else is reported, never touched (#535).** `~/.worktrees` held 94
+  entries across 14 repositories, and the round's prune would have removed 2
+  of them: only branches merged into origin's default were removable, and a
+  round pruned only the repository in front of it.
+  - The design first shipped an archive half for the rest: an idle dirty or
+    unpushed worktree was snapshotted into `refs/archive/worktrees/`, recorded
+    in a git note, moved into the root's `.trash/` and expired after a window.
+    Twelve review rounds kept finding new races in it, because it existed to
+    delete work that exists nowhere else safely against concurrent writers,
+    which cannot be proven. The operator's decision after that design review:
+    automatic deletion of such work is destructive, so it is reported and
+    never touched. The archive refs, notes, `schema_version` migrations,
+    orphan-note pass, `.trash/` moves, expiry windows, ignored-file inventory
+    and trash locks are gone, and `skills/herdr-foreman/state-schema.md` holds
+    no worktree record.
+  - Deleted, because origin restores it: an idle clean worktree whose HEAD a
+    branch on origin holds, detached included (`prune-worktrees.sh`, plain
+    non-forced `git worktree remove`); a local branch with no worktree whose
+    tip origin holds or which origin's default merged (compare-and-delete
+    `update-ref -d`); a branch on origin merged into the default with no open
+    pull request (new `prune-remote-branches.sh`, `git push --delete` under
+    `--force-with-lease`). Every proof is re-read from origin with
+    `git ls-remote` immediately before the deletion, in dry and live runs
+    alike, which branch origin's HEAD names included; on origin the branch's
+    protection and open pull requests are re-read too, before a stale branch
+    is listed as well as before a deletion. The remote pass is its own script: it needs the network and `gh`,
+    which the worktree pass does not (`rules/script-delegation.md`).
+  - Reported, for the operator's decision: an idle dirty worktree (changed
+    files, age, `git -C <path> status`), an idle worktree holding commits no
+    origin branch holds (count, age, `git -C <path> push -u origin HEAD`), an
+    idle local branch with unpushed commits, and a branch on origin unmerged,
+    with no pull request, whose last commit is past the window (commits
+    ahead, age, author, the `gh pr create` command and a delete leased to
+    the tip judged). A branch
+    with an open pull request, or a protected one, is never touched or
+    listed. Without a working `gh` nothing on origin is deleted and the
+    result says it could not check.
+  - Kept silently: a worktree in use (`lsof`), not yet idle, locked, or
+    holding a submodule or an embedded repository. An `lsof` listing with an
+    unreadable cwd of a live process still keeps every worktree; a warning
+    about a mount lsof could not stat, or the record of a process that exited
+    mid-listing, no longer does. A stale Time Machine SMB mount made every
+    worktree `idle-unknown` on the maintainer's machine.
+  - `hooks/check-leftover-worktrees.sh` now cleans the session's own
+    repository at session start: it runs both owner scripts live, removes
+    silently, and lists only the reported items above, plus one "could not
+    check" line when either script fails, times out or cannot reach `gh`.
+    It deletes nothing in a Herdr worker session. Under tessl, which strips
+    the environment a worker check needs, a linked worktree runs neither
+    script (it may be a worker's) and a main checkout runs both
+    `--dry-run`, the rule `check-git-sync` applies. Both scripts
+    share a 40-second budget through the new
+    `skills/herdr-foreman/bounded-run.sh`; `timeout` is absent from a stock
+    macOS. The round preflight runs the sweep under the same runner with a
+    600-second budget; a sweep past it blocks the round. The runner's stdout
+    is the wrapped command's own, which `rules/script-delegation.md` Script
+    Requirements now allows through a narrow carve-out naming
+    `bounded-run.sh`. A missing git or python3 still reaches the session as
+    a fixed "could not check" status. The runner keeps SIGALRM blocked
+    until the command is launched and the alarm armed, so an expiry at any
+    point stops the process group and exits 124. The grace period ends in
+    SIGKILL for any group member still running, even once the direct child
+    has exited. The session-start hook validates each owner's documented
+    result shape; a malformed result is a "could not check" line, and the
+    stop hook carries its findings as NUL-framed records. Both hooks read the
+    worktree inventory NUL-framed, so a shared checkout whose path ends in
+    a newline reaches the owner scripts whole. It no longer reads
+    `skills/release/check-leftovers.sh`, which still gates the release.
+  - `hooks/stop-handoff-hygiene.sh` drops its own leftover-branch and
+    orphaned-worktree predicate and reads `prune-worktrees.sh --dry-run`
+    instead: what the owner script would remove blocks once, naming the
+    command that removes it; what it keeps for the operator is reported.
+  - `skills/herdr-foreman/sweep-worktrees.sh` runs the worktree pass across
+    every repository with a worktree directory under the root, for the round
+    preflight; its `report` names each kept dirty or unpushed item with its
+    age and command, and SKILL Step 2 relays it verbatim. A `.git` file
+    counts only when its repository registers a worktree at that path; a
+    copied or stale one is an error and never runs a prune. The root is
+    re-read after discovery; one replaced or unreadable by then prunes
+    nothing and exits 1. A dry run takes the same pre-removal recheck as a
+    live run.
+  - Rules: `rules/agent-worktree-isolation.md` Cleanup states the lifecycle
+    and the session-start cleanup; `rules/agent-team-operation.md` Writers
+    and Checkouts keeps the sweep and the Step 15 merged-task exception and
+    references Cleanup for the predicates; `rules/hook-action-reporting.md`
+    Act on What It Names raises each listed item with the user, one question
+    at a time, and forbids acting on one unasked.
+
+## 0.3.292 — 2026-09-27
+
+### Fixed
+
+- **A frozen-brief path with a symlinked ancestor is no longer read back
+  (#554).** #534 made `assign.read_frozen` refuse relative paths and `..`
+  components, but an ancestor could still be a link:
+  `/tmp/alias/.dispatched/brief.<digest>.md` was accepted, so retargeting
+  `alias` after dispatch made `verify-partition` and recovery read another
+  source's intact frozen copy. `read_frozen` now reaches the file through a
+  descriptor walk from `/` that opens every directory component with
+  `O_NOFOLLOW` relative to the one before it, refusing a link anywhere on the
+  path without a resolve-then-open race. Each directory opens search-only
+  (`O_PATH` on Linux, `O_SEARCH` on Darwin), so an execute-only ancestor
+  that an ordinary path lookup passes is walked too. `freeze_paths` freezes under the
+  source directory's `realpath`, so paths it records carry no links (macOS
+  `/tmp` and `/var` included). It opens that directory once through the same
+  walk and holds the descriptor through both the source read and the copy's
+  creation (`.dispatched/`, then the file with `O_CREAT | O_EXCL |
+  O_NOFOLLOW`), so an alias retargeted, an ancestor swapped for a link, or
+  the directory replaced by another real one mid-freeze can never file one
+  directory's bytes under another's `.dispatched/`. A FIFO planted as a brief
+  is refused rather than hung on. A write or `close` that fails removes the
+  file it created, so a re-run succeeds instead of meeting a partial copy it
+  may never rewrite. A failed `close` on a read-only or directory descriptor
+  warns on stderr and never raises: nothing was written through it, and
+  raising from a `finally` would turn the freeze into a traceback or bury
+  the error already being reported. Every copy, fresh or existing, is read back through the
+  path walk the gate uses. A row recorded by an older build through a linked
+  directory is refused with a dispatch-again repair. Regression tests cover
+  a retargeted ancestor, a link deeper in the path, a brief under an
+  aliased directory freezing canonically, an alias retargeted between
+  resolution and read, a source directory swapped for a link before the read
+  and before the write, a source directory replaced after the read, a failed
+  write and a failed close each followed by a clean retry, a failed
+  read-only close warning without masking the primary error, an
+  execute-only ancestor, a brief path
+  containing braces, and a FIFO source. Carrying the verified bytes through
+  the dispatch-identity and prompt reads that follow the freeze is #565.
+
 ## 0.3.290 — 2026-09-27
 
 ### Fixed

@@ -15,9 +15,18 @@
 # Covers:
 #   1. Loop guard      -> stop_hook_active:true allows even with leftovers.
 #   2. Clean repo      -> allow (no stdout), exit 0.
-#   3. Gone branch     -> block; reason names the branch + `git branch -d`.
-#   4. Orphaned wt     -> block; reason names the worktree + `git worktree remove`,
-#                         and does NOT also list it as a leftover branch.
+#   3. Spent branch    -> block; reason names the branch and the owner script.
+#   4. Spent worktree  -> block; reason names the worktree and the owner script.
+#      4a. Dirty, unpushed, locked, not yet idle -> never blocking; the idle
+#          dirty and unpushed ones are reported on stderr.
+#      4b. Owner script failure (no origin) -> warn, block nothing.
+#      4c. Herdr worker session -> no worktree finding; diagnostics still gate.
+#          An empty HERDR_ENV still marks the worker.
+#      4d. The foreman's session -> blocks, naming the round's sweep, never
+#          prune-worktrees.sh (case 4 names prune-worktrees.sh outside Herdr).
+#          An empty HERDR_ENV still marks the foreman.
+#      4e. A shared checkout whose name ends in a newline -> still blocks.
+#      4f. A finding naming a newline-bearing path -> reported whole.
 #   5. Dirty tree only -> allow (report-only, not a block).
 #   6. Diag finding    -> block; changed uncommitted .sh with a failing engine.
 #   7. Diag clean      -> changed uncommitted .sh, engines clean -> no diag block.
@@ -39,7 +48,7 @@ mk_origin() {
   local prefix="$1"
   BARE="$TMP/${prefix}.git"; SEED="$TMP/${prefix}-seed"
   g init -q --bare -b main "$BARE"                || die "mk_origin: init bare failed"
-  g clone -q "$BARE" "$SEED" 2>/dev/null          || die "mk_origin: clone seed failed"
+  g clone -q "$BARE" "$SEED" 2>"$TMP/clone.err"  || die "mk_origin: clone seed failed: $(cat "$TMP/clone.err")"
   g -C "$SEED" symbolic-ref HEAD refs/heads/main  || die "mk_origin: symbolic-ref failed"
   printf 'c1\n' > "$SEED/f"                        || die "mk_origin: write f failed"
   g -C "$SEED" add f                              || die "mk_origin: add failed"
@@ -98,21 +107,59 @@ mk_python_probe() { # <path>
   chmod +x "$1" || die "could not enable interpreter fixture"
 }
 
-# run_hook <repo> <stop-json> [path] -> OUT, RC
+#: The owner script judges idleness at this instant (2020-01-10T00:00:00Z);
+#: an aged fixture is touched to AGED_MTIME, nine days before it.
+PRUNE_NOW=1578614400
+AGED_MTIME=202001010000
+
+# run_hook <repo> <stop-json> [path] [VAR=value...] -> OUT, RC, ERRTEXT
 run_hook() {
   local repo="$1" json="$2" pathspec="${3:-$PATH}"
-  OUT="$(cd "$repo" && printf '%s' "$json" | PATH="$pathspec" bash "$HOOK" 2>/dev/null)"
+  shift 2
+  (( $# )) && shift
+  OUT="$(cd "$repo" && printf '%s' "$json" | env -u HERDR_ENV PATH="$pathspec" WORKTREE_ROOT="$TMP/wt" \
+    PRUNE_NOW="$PRUNE_NOW" PRUNE_IDLE_HOURS=24 STOP_PRUNE_BUDGET_SEC=3600 "$@" bash "$HOOK" 2>"$TMP/hook.err")"
   RC=$?
+  ERRTEXT="$(cat "$TMP/hook.err")"
+}
+
+# Touch a worktree's files and its gitdir's activity files to AGED_MTIME.
+age_wt() { # <worktree>
+  local gitdir f
+  gitdir="$(git -C "$1" rev-parse --absolute-git-dir)" || die "rev-parse --absolute-git-dir failed in $1"
+  for f in "$gitdir/HEAD" "$gitdir/index" "$gitdir/logs/HEAD"; do
+    if [[ -e "$f" ]]; then touch -t "$AGED_MTIME" "$f" || die "touch $f failed"; fi
+  done
+  find "$1" -path "$1/.git" -prune -o -exec touch -h -t "$AGED_MTIME" {} + || die "touch the files of $1 failed"
 }
 
 FAIL=0; PASS=0
 pass() { PASS=$((PASS+1)); }
 fail() { FAIL=$((FAIL+1)); echo "  ✗ FAIL: $1" >&2; }
-reason_has() { printf '%s' "$OUT" | jq -e --arg re "$1" '.reason | test($re)' >/dev/null 2>&1; }
+reason_has() { printf '%s' "$OUT" | jq -e --arg re "$1" '.reason | test($re)' >/dev/null; }
+
+# The process probe every run uses: a stand-in for lsof that prints one
+# NUL-framed cwd record per "<pid> <cwd>" line of $FAKE_LSOF_CWDS and nothing
+# else, so the host's own process table never reaches a test. A case that
+# needs a process inside a worktree registers it there; a case exercising the
+# probe's failure modes names its own stand-in through PRUNE_LSOF.
+write_fake_lsof() { # <path>
+  mkdir -p "$(dirname "$1")" || die "mkdir for the fake lsof failed"
+  cat > "$1" <<'SH' || die "write the fake lsof failed"
+#!/usr/bin/env bash
+set -euo pipefail
+list="${FAKE_LSOF_CWDS:-}"
+if [[ -z "$list" || ! -s "$list" ]]; then exit 0; fi
+while IFS=' ' read -r pid cwd; do
+  printf 'p%s\0\nfcwd\0n%s\0\n' "$pid" "$cwd"
+done < "$list"
+SH
+  chmod +x "$1" || die "chmod the fake lsof failed"
+}
 
 main() {
-  command -v jq  >/dev/null 2>&1 || die "jq required for these tests"
-  command -v git >/dev/null 2>&1 || die "git required for these tests"
+  command -v jq  >/dev/null || die "jq required for these tests"
+  command -v git >/dev/null || die "git required for these tests"
   [[ -f "$HOOK" && -r "$HOOK" ]] || die "hook not found/readable at $HOOK"
 
   TMP="$(mktemp -d -t stop-hygiene-test.XXXXXX)" || die "mktemp failed"
@@ -121,6 +168,11 @@ main() {
   export HOME="$TMP/home"; mkdir -p "$HOME" || die "could not create isolated HOME"
   export GIT_CONFIG_NOSYSTEM=1
   export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t
+  # Every commit and reflog entry is dated nine days before PRUNE_NOW.
+  export GIT_AUTHOR_DATE="2020-01-01T00:00:00Z" GIT_COMMITTER_DATE="2020-01-01T00:00:00Z"
+  mkdir -p "$TMP/wt" || die "could not create the worktree root"
+  write_fake_lsof "$TMP/fake-lsof/lsof"
+  export PRUNE_LSOF="$TMP/fake-lsof/lsof" FAKE_LSOF_CWDS="$TMP/fake-lsof/cwds"
 
   FAIL=0; PASS=0
 
@@ -137,152 +189,121 @@ main() {
   run_hook "$TMP/r2" '{"stop_hook_active":false}'
   if [[ $RC -eq 0 && -z "$OUT" ]]; then pass; else fail "clean: expected allow/silence, got RC=$RC OUT=$OUT"; fi
 
-  # 3. gone branch -> block naming the branch + delete command.
+  # 3. a merged branch the owner script would delete -> block naming it and
+  #    the owner script.
   mk_origin o3; clone_from "$BARE" "$TMP/r3"
   g -C "$TMP/r3" switch -qc feat/bar || die "r3 branch failed"
   make_gone_branch "$TMP/r3" feat/bar
   g -C "$TMP/r3" switch -q main || die "r3 switch main failed"
   run_hook "$TMP/r3" '{"stop_hook_active":false}'
-  if [[ $RC -eq 0 ]] && reason_has "feat/bar" && reason_has "git branch -d" \
-     && [[ "$(printf '%s' "$OUT" | jq -r '.decision')" == "block" ]]; then
-    pass; else fail "gone branch: expected block naming feat/bar, got RC=$RC OUT=$OUT"; fi
+  if [[ $RC -eq 0 ]] && reason_has "branch feat/bar" && reason_has "prune-worktrees.sh" \
+     && [[ "$(printf '%s' "$OUT" | jq -r '.decision')" == "block" ]] && g -C "$TMP/r3" show-ref -q --verify refs/heads/feat/bar; then
+    pass; else fail "spent branch: expected a block naming feat/bar, nothing deleted, got RC=$RC OUT=$OUT ERR=$ERRTEXT"; fi
 
-  # 4. orphaned worktree -> block naming the worktree, not as a leftover branch.
+  # 4. an idle clean worktree origin holds -> block naming it; the hook
+  #    removes nothing itself.
   mk_origin o4; clone_from "$BARE" "$TMP/r4"
-  g -C "$TMP/r4" worktree add -q "$TMP/r4-wt" -b feat/wt || die "r4 worktree add failed"
-  make_gone_branch "$TMP/r4-wt" feat/wt
-  g -C "$TMP/r4" fetch -q --prune || die "r4 prune failed"
+  g -C "$TMP/r4" worktree add -q "$TMP/wt/r4-wt" -b feat/wt || die "r4 worktree add failed"
+  age_wt "$TMP/wt/r4-wt"
   run_hook "$TMP/r4" '{"stop_hook_active":false}'
-  if [[ $RC -eq 0 ]] && reason_has "Orphaned worktrees" && reason_has "worktree remove" \
-     && ! reason_has "Leftover local branches"; then
-    pass; else fail "orphaned worktree: expected worktree block only, got RC=$RC OUT=$OUT"; fi
+  if [[ $RC -eq 0 ]] && reason_has "worktree .*r4-wt \\(feat/wt\\)" && reason_has "prune-worktrees.sh" && ! reason_has "sweep-worktrees.sh" \
+     && [[ -d "$TMP/wt/r4-wt" ]]; then
+    pass; else fail "spent worktree: expected a block naming r4-wt, got RC=$RC OUT=$OUT ERR=$ERRTEXT"; fi
 
-  # 4a-i. A never-pushed worktree, clean and holding nothing main lacks: the
-  # majority shape of the herdr flow, and invisible to the upstream test (#433).
+  # 4a. work that exists nowhere else never blocks: an idle dirty and an idle
+  #     unpushed worktree are reported; a locked one and one inside the idle
+  #     window are neither.
   mk_origin o4a; clone_from "$BARE" "$TMP/r4a"
-  g -C "$TMP/r4a" worktree add -q "$TMP/r4a-review" -b review/never-pushed || die "r4a worktree add failed"
+  g -C "$TMP/r4a" worktree add -q "$TMP/wt/r4a-dirty" -b review/dirty || die "r4a dirty add failed"
+  printf 'notes\n' > "$TMP/wt/r4a-dirty/notes.txt" || die "r4a write failed"
+  age_wt "$TMP/wt/r4a-dirty"
+  g -C "$TMP/r4a" worktree add -q "$TMP/wt/r4a-ahead" -b feat/ahead || die "r4a ahead add failed"
+  printf 'new\n' > "$TMP/wt/r4a-ahead/g" || die "r4a write g failed"
+  g -C "$TMP/wt/r4a-ahead" add g || die "r4a add failed"
+  g -C "$TMP/wt/r4a-ahead" commit -q -m ahead || die "r4a commit failed"
+  age_wt "$TMP/wt/r4a-ahead"
+  g -C "$TMP/r4a" worktree add -q "$TMP/wt/r4a-locked" -b review/locked || die "r4a locked add failed"
+  age_wt "$TMP/wt/r4a-locked"
+  g -C "$TMP/r4a" worktree lock "$TMP/wt/r4a-locked" || die "r4a lock failed"
+  g -C "$TMP/r4a" worktree add -q "$TMP/wt/r4a-fresh" -b review/fresh || die "r4a fresh add failed"
   run_hook "$TMP/r4a" '{"stop_hook_active":false}'
-  if [[ $RC -eq 0 ]] && reason_has "Orphaned worktrees" && reason_has "r4a-review"; then
-    pass; else fail "never-pushed worktree: expected an orphaned report, got RC=$RC OUT=$OUT"; fi
+  if [[ $RC -eq 0 && -z "$OUT" ]] \
+     && [[ "$ERRTEXT" == *"r4a-dirty (review/dirty), dirty"* && "$ERRTEXT" == *"r4a-ahead (feat/ahead), unpushed"* ]] \
+     && [[ "$ERRTEXT" != *r4a-locked* && "$ERRTEXT" != *r4a-fresh* ]]; then
+    pass; else fail "operator's work: expected reports only, got RC=$RC OUT=$OUT ERR=$ERRTEXT"; fi
 
-  # 4a-ii. A DETACHED worktree at a commit main already has. No branch name
-  # could ever have matched it — and the foreman never removes one
-  # (rules/agent-team-operation.md Writers and Checkouts), so it is surfaced on
-  # stderr and never listed under "remove them".
+  # 4b. an owner script that cannot decide (no origin) blocks nothing and
+  #     says why.
   mk_origin o4b; clone_from "$BARE" "$TMP/r4b"
-  g -C "$TMP/r4b" worktree add -q --detach "$TMP/r4b-detached" || die "r4b detached add failed"
-  ERRFILE="$TMP/r4b.err"
-  OUT="$(cd "$TMP/r4b" && printf '%s' '{"stop_hook_active":false}' | bash "$HOOK" 2>"$ERRFILE")"; RC=$?
-  ERRTEXT="$(cat "$ERRFILE")"
-  if [[ $RC -eq 0 ]] && [[ "$ERRTEXT" == *"r4b-detached"* ]] \
-     && [[ "$ERRTEXT" == *"never removes a detached worktree"* ]] \
-     && ! reason_has "r4b-detached"; then
-    pass; else fail "detached worktree: expected a report, not a removal instruction, got RC=$RC OUT=$OUT ERR=$ERRTEXT"; fi
+  g -C "$TMP/r4b" worktree add -q "$TMP/wt/r4b-wt" -b review/nobase || die "r4b worktree add failed"
+  age_wt "$TMP/wt/r4b-wt"
+  g -C "$TMP/r4b" remote remove origin || die "r4b remote remove failed"
+  run_hook "$TMP/r4b" '{"stop_hook_active":false}'
+  if [[ $RC -eq 0 && -z "$OUT" && "$ERRTEXT" == *"worktree check could not run"* ]]; then
+    pass; else fail "owner failure: expected a warning and no block, got RC=$RC OUT=$OUT ERR=$ERRTEXT"; fi
 
-  # 4a-ii-b. A LOCKED worktree is reported to the operator and never listed
-  # under "remove them": Writers and Checkouts requires both.
-  mk_origin o4f; clone_from "$BARE" "$TMP/r4f"
-  g -C "$TMP/r4f" worktree add -q "$TMP/r4f-locked" -b review/locked || die "r4f worktree add failed"
-  g -C "$TMP/r4f" worktree lock "$TMP/r4f-locked" || die "r4f lock failed"
-  OUT="$(cd "$TMP/r4f" && printf '%s' '{"stop_hook_active":false}' | bash "$HOOK" 2>"$TMP/r4f.err")"; RC=$?
-  if [[ $RC -eq 0 ]] && ! reason_has "r4f-locked" \
-     && [[ "$(cat "$TMP/r4f.err")" == *"r4f-locked"* ]] \
-     && [[ "$(cat "$TMP/r4f.err")" == *"locked"* ]]; then
-    pass; else fail "locked worktree must be reported, never listed for removal: RC=$RC OUT=$OUT ERR=$(cat "$TMP/r4f.err")"; fi
-
-  # 4a-ii-c. A gone upstream is a reason to look, never a licence: a tree with
-  # unmerged commits is reported, not listed for removal, even then.
-  mk_origin o4g; clone_from "$BARE" "$TMP/r4g"
-  g -C "$TMP/r4g" worktree add -q "$TMP/r4g-wt" -b feat/gone-ahead || die "r4g worktree add failed"
-  make_gone_branch "$TMP/r4g-wt" feat/gone-ahead
-  printf 'ahead\n' > "$TMP/r4g-wt/h" || die "r4g write failed"
-  g -C "$TMP/r4g-wt" add h || die "r4g add failed"
-  g -C "$TMP/r4g-wt" commit -q -m ahead || die "r4g commit failed"
-  g -C "$TMP/r4g" fetch -q --prune || die "r4g prune failed"
-  OUT="$(cd "$TMP/r4g" && printf '%s' '{"stop_hook_active":false}' | bash "$HOOK" 2>"$TMP/r4g.err")"; RC=$?
-  if [[ $RC -eq 0 ]] && ! reason_has "r4g-wt" && [[ "$(cat "$TMP/r4g.err")" == *"r4g-wt"* ]]; then
-    pass; else fail "a gone upstream with unmerged work must be reported, not removed: RC=$RC OUT=$OUT ERR=$(cat "$TMP/r4g.err")"; fi
-
-  # 4a-iii. Real unmerged work is NOT reported, on a branch or detached.
-  mk_origin o4c; clone_from "$BARE" "$TMP/r4c"
-  g -C "$TMP/r4c" worktree add -q "$TMP/r4c-work" -b feat/ahead || die "r4c worktree add failed"
-  printf 'new\n' > "$TMP/r4c-work/g" || die "r4c write failed"
-  g -C "$TMP/r4c-work" add g || die "r4c add failed"
-  g -C "$TMP/r4c-work" commit -q -m ahead || die "r4c commit failed"
-  OUT="$(cd "$TMP/r4c" && printf '%s' '{"stop_hook_active":false}' | bash "$HOOK" 2>"$TMP/r4c.err")"; RC=$?
-  if [[ $RC -eq 0 ]] && ! reason_has "r4c-work" \
-     && [[ "$(cat "$TMP/r4c.err")" == *"r4c-work"* ]] && [[ "$(cat "$TMP/r4c.err")" == *"unmerged"* ]]; then
-    pass; else fail "unmerged worktree: report, never remove: RC=$RC OUT=$OUT ERR=$(cat "$TMP/r4c.err")"; fi
-
-  # 4a-iv. A dirty worktree is not reported either, even when its commits are
-  # all in main: the uncommitted work is the thing that would be lost.
-  mk_origin o4d; clone_from "$BARE" "$TMP/r4d"
-  g -C "$TMP/r4d" worktree add -q "$TMP/r4d-dirty" -b review/dirty || die "r4d worktree add failed"
-  printf 'uncommitted\n' > "$TMP/r4d-dirty/scratch.txt" || die "r4d write failed"
-  g -C "$TMP/r4d-dirty" add scratch.txt || die "r4d add failed"
-  OUT="$(cd "$TMP/r4d" && printf '%s' '{"stop_hook_active":false}' | bash "$HOOK" 2>"$TMP/r4d.err")"; RC=$?
-  if [[ $RC -eq 0 ]] && ! reason_has "r4d-dirty" \
-     && [[ "$(cat "$TMP/r4d.err")" == *"r4d-dirty"* ]] && [[ "$(cat "$TMP/r4d.err")" == *"dirty"* ]]; then
-    pass; else fail "dirty worktree: report, never remove: RC=$RC OUT=$OUT ERR=$(cat "$TMP/r4d.err")"; fi
-
-  # 4a-v. A worktree the check cannot read is never reported removable: the
-  # guard fails closed rather than passing a tree it never inspected.
-  mk_origin o4e; clone_from "$BARE" "$TMP/r4e"
-  g -C "$TMP/r4e" worktree add -q "$TMP/r4e-gone" -b review/vanished || die "r4e worktree add failed"
-  rm -rf "$TMP/r4e-gone" || die "r4e rm failed"
-  OUT="$(cd "$TMP/r4e" && printf '%s' '{"stop_hook_active":false}' | bash "$HOOK" 2>"$TMP/r4e.err")"; RC=$?
-  if [[ $RC -eq 0 ]] && ! reason_has "r4e-gone" && [[ "$(cat "$TMP/r4e.err")" == *"r4e-gone"* ]]; then
-    pass; else fail "unreadable worktree: report, never remove: RC=$RC OUT=$OUT ERR=$(cat "$TMP/r4e.err")"; fi
-
-  # 4a-ii-d. With no default branch to judge containment against, what IS
-  # observable still reaches the operator, and nothing is listed for removal.
-  mk_origin o4h; clone_from "$BARE" "$TMP/r4h"
-  g -C "$TMP/r4h" worktree add -q "$TMP/r4h-wt" -b review/nobase || die "r4h worktree add failed"
-  g -C "$TMP/r4h" remote remove origin || die "r4h remote remove failed"
-  OUT="$(cd "$TMP/r4h" && printf '%s' '{"stop_hook_active":false}' | bash "$HOOK" 2>"$TMP/r4h.err")"; RC=$?
-  if [[ $RC -eq 0 ]] && ! reason_has "r4h-wt" \
-     && [[ "$(cat "$TMP/r4h.err")" == *"r4h-wt"* ]] \
-     && [[ "$(cat "$TMP/r4h.err")" == *"containment unknown"* ]]; then
-    pass; else fail "no default branch: report what is observable, remove nothing: RC=$RC OUT=$OUT ERR=$(cat "$TMP/r4h.err")"; fi
-
-  # 4a-ii-e. With no base AND an unreadable tree, the failure is named rather
-  # than passing as clean.
-  mk_origin o4i; clone_from "$BARE" "$TMP/r4i"
-  g -C "$TMP/r4i" worktree add -q "$TMP/r4i-wt" -b review/nobase-gone || die "r4i worktree add failed"
-  g -C "$TMP/r4i" remote remove origin || die "r4i remote remove failed"
-  rm -rf "$TMP/r4i-wt" || die "r4i rm failed"
-  OUT="$(cd "$TMP/r4i" && printf '%s' '{"stop_hook_active":false}' | bash "$HOOK" 2>"$TMP/r4i.err")"; RC=$?
-  if [[ $RC -eq 0 ]] && ! reason_has "r4i-wt" \
-     && [[ "$(cat "$TMP/r4i.err")" == *"r4i-wt"* ]] \
-     && [[ "$(cat "$TMP/r4i.err")" == *"missing"* ]]; then
-    pass; else fail "no base + missing tree: name the failure: RC=$RC OUT=$OUT ERR=$(cat "$TMP/r4i.err")"; fi
-
-  # 4b. The same orphaned worktree, seen from INSIDE a linked worktree with
-  # HERDR_ENV set: that is a worker session, and removing a worktree is the
-  # foreman's job (rules/agent-team-operation.md). Blocking here would force the
-  # worker to either disobey the rule or fail to hand off.
-  OUT="$(cd "$TMP/r4-wt" && printf '%s' '{"stop_hook_active":false}' \
-    | HERDR_ENV=1 bash "$HOOK" 2>/dev/null)"; RC=$?
+  # 4c. The spent worktree of case 4, seen from INSIDE a linked worktree with
+  # HERDR_ENV set: a worker session. Removal is the foreman's, so no worktree
+  # finding; the worker's own changed files still gate.
+  g -C "$TMP/r4" worktree add -q "$TMP/wt/r4-worker" -b review/worker || die "r4 worker add failed"
+  run_hook "$TMP/wt/r4-worker" '{"stop_hook_active":false}' "$PATH" HERDR_ENV=1
   if [[ $RC -eq 0 && -z "$OUT" ]]; then
     pass; else fail "worker session: expected silence, got RC=$RC OUT=$OUT"; fi
-
-  # 4b-ii. A worker's OWN changed files still gate: only branch/worktree
-  # cleanup is suppressed, never the diagnostics its handoff depends on.
   # shellcheck disable=SC2016  # The literal `$x` IS the fixture: the hook's
   # own shellcheck run has to find something to report.
-  printf 'if [ $x = 1 ]; then :; fi\n' > "$TMP/r4-wt/bad.sh" || die "r4-wt bad.sh failed"
-  OUT="$(cd "$TMP/r4-wt" && printf '%s' '{"stop_hook_active":false}' \
-    | HERDR_ENV=1 bash "$HOOK" 2>/dev/null)"; RC=$?
-  if [[ $RC -eq 0 ]] && reason_has "shellcheck findings" && ! reason_has "Orphaned worktrees"; then
+  printf 'if [ $x = 1 ]; then :; fi\n' > "$TMP/wt/r4-worker/bad.sh" || die "r4-worker bad.sh failed"
+  run_hook "$TMP/wt/r4-worker" '{"stop_hook_active":false}' "$PATH" HERDR_ENV=1
+  if [[ $RC -eq 0 ]] && reason_has "shellcheck findings" && ! reason_has "prune-worktrees"; then
     pass; else fail "worker diagnostics: expected a diagnostics block without the worktree finding, got RC=$RC OUT=$OUT"; fi
-  rm -f "$TMP/r4-wt/bad.sh" || die "r4-wt cleanup failed"
+  rm -f "$TMP/wt/r4-worker/bad.sh" || die "r4-worker cleanup failed"
 
-  # 4c. The foreman's own session (main checkout) still blocks with HERDR_ENV set:
-  # the suppression keys on being in a linked worktree, not on Herdr alone.
-  OUT="$(cd "$TMP/r4" && printf '%s' '{"stop_hook_active":false}' \
-    | HERDR_ENV=1 bash "$HOOK" 2>/dev/null)"; RC=$?
-  if [[ $RC -eq 0 ]] && reason_has "Orphaned worktrees"; then
-    pass; else fail "foreman session: expected the worktree block, got RC=$RC OUT=$OUT"; fi
+  # HERDR_ENV set but empty is still a Herdr session (rules/agent-team-operation.md
+  # Two Modes): the worker's worktree finding stays suppressed.
+  run_hook "$TMP/wt/r4-worker" '{"stop_hook_active":false}' "$PATH" HERDR_ENV=
+  if [[ $RC -eq 0 && -z "$OUT" ]]; then
+    pass; else fail "empty HERDR_ENV worker session: expected silence, got RC=$RC OUT=$OUT ERR=$ERRTEXT"; fi
+
+  # 4e. A shared checkout whose name ends in a newline still reaches the
+  #     owner script whole: the inventory is read NUL-framed.
+  local nl=$'\n'
+  if mkdir "$TMP/r4e-nl${nl}" 2>"$TMP/nl.err"; then
+    rmdir "$TMP/r4e-nl${nl}" || die "rmdir the newline probe failed"
+    mk_origin o4e; clone_from "$BARE" "$TMP/r4e-nl${nl}"
+    g -C "$TMP/r4e-nl${nl}" worktree add -q "$TMP/wt/r4e-wt" -b review/nl || die "r4e worktree add failed"
+    age_wt "$TMP/wt/r4e-wt"
+    run_hook "$TMP/r4e-nl${nl}" '{"stop_hook_active":false}'
+    if [[ $RC -eq 0 ]] && reason_has "r4e-wt"; then
+      pass; else fail "newline-ending shared checkout: expected the worktree block, got RC=$RC OUT=$OUT ERR=$ERRTEXT"; fi
+  else
+    echo "4e. skipped: this filesystem refuses a name ending in a newline ($(cat "$TMP/nl.err"))" >&2
+  fi
+
+  # 4f. A finding whose text carries a newline-bearing path arrives whole: an
+  #     unpushed branch's push command names a shared checkout whose name
+  #     ends in a newline.
+  if mkdir "$TMP/r4f-nl${nl}" 2>"$TMP/nl.err"; then
+    rmdir "$TMP/r4f-nl${nl}" || die "rmdir the newline probe failed"
+    mk_origin o4f; clone_from "$BARE" "$TMP/r4f-nl${nl}"
+    g -C "$TMP/r4f-nl${nl}" switch -qc feat/nl-local || die "r4f branch failed"
+    printf 'local\n' > "$TMP/r4f-nl${nl}/l" || die "r4f write failed"
+    g -C "$TMP/r4f-nl${nl}" add l || die "r4f add failed"
+    g -C "$TMP/r4f-nl${nl}" commit -q -m local || die "r4f commit failed"
+    g -C "$TMP/r4f-nl${nl}" switch -q main || die "r4f switch main failed"
+    run_hook "$TMP/r4f-nl${nl}" '{"stop_hook_active":false}'
+    if [[ $RC -eq 0 && -z "$OUT" ]] && [[ "$ERRTEXT" == *"Branch left for the operator: feat/nl-local"*"r4f-nl${nl}' push -u origin feat/nl-local"* ]]; then
+      pass; else fail "newline-bearing finding: expected the whole push command, got RC=$RC OUT=$OUT ERR=$ERRTEXT"; fi
+  else
+    echo "4f. skipped: this filesystem refuses a name ending in a newline ($(cat "$TMP/nl.err"))" >&2
+  fi
+
+  # 4d. The foreman's own session (main checkout) still blocks with HERDR_ENV
+  # set: the suppression keys on being in a linked worktree, not on Herdr alone.
+  run_hook "$TMP/r4" '{"stop_hook_active":false}' "$PATH" HERDR_ENV=1
+  if [[ $RC -eq 0 ]] && reason_has "r4-wt" && reason_has "sweep-worktrees.sh" && ! reason_has "prune-worktrees.sh"; then
+    pass; else fail "foreman session: expected the worktree block naming the sweep, got RC=$RC OUT=$OUT ERR=$ERRTEXT"; fi
+  run_hook "$TMP/r4" '{"stop_hook_active":false}' "$PATH" HERDR_ENV=
+  if [[ $RC -eq 0 ]] && reason_has "r4-wt" && reason_has "sweep-worktrees.sh" && ! reason_has "prune-worktrees.sh"; then
+    pass; else fail "empty HERDR_ENV foreman session: expected the worktree block naming the sweep, got RC=$RC OUT=$OUT ERR=$ERRTEXT"; fi
 
   # 5. dirty tree only -> allow (report-only).
   mk_origin o5; clone_from "$BARE" "$TMP/r5"
