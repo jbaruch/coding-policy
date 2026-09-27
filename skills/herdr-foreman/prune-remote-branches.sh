@@ -71,7 +71,7 @@ cleanup() {
 # One NUL-delimited decision row: <kind> <branch> <a> <b> <c> <d>.
 row() {
   printf '%s\0%s\0%s\0%s\0%s\0%s\0' "$1" "$2" "${3:-}" "${4:-}" "${5:-}" "${6:-}" >> "$ROWS"
-  if [[ "$1" == failed ]]; then warn "${2}: ${3}"; fi
+  if [[ "$1" == failed ]]; then warn "${2}: ${3} — inspect it by hand; nothing else was skipped on its account"; fi
 }
 
 # A command that talks to origin failed: keep only its exit code and the
@@ -150,7 +150,7 @@ main() {
   shared="$(git -C "$shared" rev-parse --show-toplevel && printf x)"
   shared="${shared%x}"; shared="${shared%$'\n'}"
   if ! git -C "$shared" remote get-url origin >/dev/null 2>"$ERRFILE"; then
-    warn "${shared} has no origin remote ($(tr '\n' ' ' < "$ERRFILE")) — nothing to judge"; return 1
+    warn "${shared} has no origin remote ($(tr '\n' ' ' < "$ERRFILE")) — nothing to judge; add one with \`git -C ${shared} remote add origin <url>\`, then re-run"; return 1
   fi
   # Origin's branches are listed before the fetch, so the fetch brings in
   # every commit the listing names.

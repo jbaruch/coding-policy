@@ -41,11 +41,12 @@
 # non-ignored file is at least N hours old (a worktree holding more such files
 # than ACTIVITY_FILE_LIMIT is never idle). Every read runs with
 # --no-optional-locks, so judging never rewrites the index.
-# Immediately before each removal, the path is re-proven to resolve to itself,
-# HEAD, branch tip, status, age and a fresh process probe are re-read, and the
-# removal proof is re-derived from origin as it is now, which branch origin's
-# HEAD names included; any change keeps the worktree (reason changed). IDLE_HOURS and ACTIVITY_FILE_LIMIT are constants
-# beside the functions that use them.
+# Immediately before each removal (and before a dry run's preview of one),
+# the path is re-proven to resolve to itself, HEAD, branch tip, status, age
+# and a fresh process probe are re-read, and the removal proof is re-derived
+# from origin as it is now, which branch origin's HEAD names included; any
+# change keeps the worktree (reason changed). IDLE_HOURS and
+# ACTIVITY_FILE_LIMIT are constants beside the functions that use them.
 # A git command that talks to origin (fetch, ls-remote, set-head) that fails
 # is reported by exit code and the command to rerun, never by its own message,
 # which can carry the remote URL with credentials (`network_failure`).
@@ -169,7 +170,7 @@ ref_exists() { # <shared> <ref>
   git -C "$1" show-ref --verify --quiet "$2" 2>"$ERRFILE" || rc=$?
   case "$rc" in
     0|1) return "$rc" ;;
-    *) warn "\`git show-ref --verify ${2}\` failed (exit ${rc}): $(tr '\n' ' ' < "$ERRFILE")"; return 2 ;;
+    *) warn "\`git show-ref --verify ${2}\` failed (exit ${rc}): $(tr '\n' ' ' < "$ERRFILE") — run it in ${1} to see why, then re-run"; return 2 ;;
   esac
 }
 
@@ -215,7 +216,7 @@ default_branch_of() { # <shared> <dry-run 0|1>
            *) return 1 ;;
          esac ;;
       1) ;;  # origin/HEAD is simply absent: fall back to the conventional names
-      *) warn "\`git symbolic-ref refs/remotes/origin/HEAD\` failed (exit ${rc}): $(tr '\n' ' ' < "$ERRFILE")"; return 1 ;;
+      *) warn "\`git symbolic-ref refs/remotes/origin/HEAD\` failed (exit ${rc}): $(tr '\n' ' ' < "$ERRFILE") — run \`git -C ${1} remote set-head origin --auto\`, then re-run"; return 1 ;;
     esac
   fi
   local cand
@@ -443,12 +444,12 @@ in_use() { # <real-path>
     if ! command -v "$lsof_bin" >/dev/null; then
       warn "${lsof_bin} not found on PATH — cannot tell whether a worktree is in use, so none is judged idle; install lsof"
     elif ! uid="$(id -u)"; then
-      warn "id -u failed — cannot scope the process probe, so no worktree is judged idle"
+      warn "id -u failed — cannot scope the process probe, so no worktree is judged idle; run \`id -u\` to see why, then re-run"
     elif [[ -z "$CWD_FILE" ]] && ! CWD_FILE="$(mktemp)"; then
       CWD_FILE=""
-      warn "mktemp failed — cannot hold the process probe, so no worktree is judged idle"
+      warn "mktemp failed — cannot hold the process probe, so no worktree is judged idle; make ${TMPDIR:-/tmp} writable, then re-run"
     elif ! "$lsof_bin" -a -u "$uid" -d cwd -F pn0 >"$CWD_FILE" 2>"$ERRFILE"; then
-      warn "\`${lsof_bin} -a -u ${uid} -d cwd -F pn0\` failed: $(tr '\n' ' ' < "$ERRFILE") — no worktree is judged idle"
+      warn "\`${lsof_bin} -a -u ${uid} -d cwd -F pn0\` failed: $(tr '\n' ' ' < "$ERRFILE") — no worktree is judged idle; run it by hand to see why, then re-run"
     elif ! complete_cwd_listing "$CWD_FILE" "$ERRFILE"; then
       # Exit 0 is not a complete answer: a warning other than a mount lsof
       # could not stat, or a live process without a readable cwd name, leaves
@@ -854,7 +855,9 @@ decide_worktree() { # <shared> <abs_root> <default> <dry-run 0|1> <path> <branch
     fi
     row kept "$path" "$branch" unpushed "$head" "${ahead} ${age}"; return 0
   fi
-  if (( ! dry )) && ! recheck "$shared" "$path" "$branch" "$state" "$IDLE_HOURS"; then
+  # The same read-only recheck for a preview as for a removal: a dry run
+  # promises only what the live run would do.
+  if ! recheck "$shared" "$path" "$branch" "$state" "$IDLE_HOURS"; then
     row kept "$path" "$branch" changed; warn "kept ${path}: ${RECHECK_WHY}"; return 0
   fi
   # The proof is remote state a concurrent fetch can change: re-derive it last.
@@ -1017,7 +1020,7 @@ main() {
   abs_shared="$(git -C "$shared" rev-parse --show-toplevel && printf x)"
   abs_shared="${abs_shared%x}"; abs_shared="${abs_shared%$'\n'}"
   if ! git -C "$shared" remote get-url origin >/dev/null 2>"$ERRFILE"; then
-    warn "${shared} has no origin remote — merged-ness is judged against origin's default branch"
+    warn "${shared} has no origin remote — merged-ness is judged against origin's default branch; add one with \`git -C ${shared} remote add origin <url>\`, then re-run"
     return 1
   fi
   local root="${WORKTREE_ROOT:-${HOME}/.worktrees}" abs_root
@@ -1043,11 +1046,11 @@ main() {
   if (( ! dry )); then git -C "$shared" remote set-head origin --auto >/dev/null 2>"$ERRFILE" || src=$?; fi
   if (( src != 0 )); then
     network_failure "$src" "$shared" remote set-head origin --auto
-    warn "$(cat "$ERRFILE") — cannot confirm origin's current default branch"
+    warn "$(cat "$ERRFILE") — cannot confirm origin's current default branch; fix access to origin, then re-run"
     return 1
   fi
   if ! read_origin_tips "$shared"; then
-    warn "cannot read origin's current branch tips: $(tr '\n' ' ' < "$ERRFILE") — refusing to judge reachability from stale refs"
+    warn "cannot read origin's current branch tips: $(tr '\n' ' ' < "$ERRFILE") — refusing to judge reachability from stale refs; fix access to origin, then re-run"
     return 1
   fi
   local db
@@ -1056,7 +1059,7 @@ main() {
     return 1
   fi
   if ! ORIGIN_DEFAULT="$(origin_default_tip "$shared" "$db")"; then
-    warn "cannot read origin's current ${db}: $(cat "$ERRFILE") — refusing to judge merged-ness"
+    warn "cannot read origin's current ${db}: $(cat "$ERRFILE") — refusing to judge merged-ness; fix access to origin, then re-run"
     return 1
   fi
 
@@ -1077,7 +1080,7 @@ main() {
     if grep -qiE 'unknown option|usage: git worktree' "$ERRFILE"; then
       warn "\`git worktree list --porcelain -z\` is unavailable (git < 2.36): a worktree path cannot be listed unambiguously — upgrade git to 2.36 or newer; nothing was decided"
     else
-      warn "\`git worktree list --porcelain -z\` failed: $(tr '\n' ' ' < "$ERRFILE") — cannot inventory worktrees"
+      warn "\`git worktree list --porcelain -z\` failed: $(tr '\n' ' ' < "$ERRFILE") — cannot inventory worktrees; run it in ${shared} to see why, then re-run"
     fi
     rm -f "$inventory" "$branches"
     return 1
@@ -1085,7 +1088,7 @@ main() {
   # Full refnames: `%(refname:short)` renders a local branch named like a
   # remote-tracking ref (origin/main) as heads/origin/main.
   if ! git -C "$shared" for-each-ref --format='%(refname)' refs/heads/ >"$branches" 2>"$ERRFILE"; then
-    warn "\`git for-each-ref refs/heads/\` failed: $(tr '\n' ' ' < "$ERRFILE") — cannot inventory branches"
+    warn "\`git for-each-ref refs/heads/\` failed: $(tr '\n' ' ' < "$ERRFILE") — cannot inventory branches; run it in ${shared} to see why, then re-run"
     rm -f "$inventory" "$branches"
     return 1
   fi

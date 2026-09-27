@@ -11,6 +11,8 @@
 #                        command started is stopped with it.
 #  2b. Early expiry  -> an expiry before the launch is still exit 124, with no
 #                        traceback and nothing left running.
+#  2c. TERM-trapping  -> a command that exits on SIGTERM leaves no grandchild:
+#                        the grace-period SIGKILL reaches the whole group.
 #   3. Not startable  -> exit 125 with a diagnostic.
 #   4. Usage          -> a non-positive budget is exit 125.
 #
@@ -78,6 +80,24 @@ main() {
   if [[ -s "$TMP/early.pid" ]] && kill -0 "$(cat "$TMP/early.pid")" 2>"$TMP/kill.err"; then early_alive=1; fi
   if [[ $rc -eq 124 && $early_alive -eq 0 ]] && grep -q "budget" "$TMP/2b.err" && ! grep -q "Traceback" "$TMP/2b.err"; then pass
   else fail "early expiry: rc=$rc alive=$early_alive err=$(cat "$TMP/2b.err")"; fi
+
+  echo "2c. a command that exits on SIGTERM cannot leave a grandchild behind"
+  # The command traps TERM and exits; its grandchild ignores TERM, and holds
+  # the write end of held2, so the reader returns only once the grace-period
+  # SIGKILL has reached the group.
+  mkfifo "$TMP/started2" "$TMP/held2" || die "mkfifo failed"
+  cat "$TMP/held2" > "$TMP/held2.out" &
+  local reader2=$!
+  bash "$RUNNER" "$HOUR" bash -c 'exec 3>"$0"; trap "exit 0" TERM; (trap "" TERM; exec sleep 3600) & echo $! > "$1"; wait' \
+    "$TMP/held2" "$TMP/started2" 2>"$TMP/2c.err" &
+  local runner2=$! stubborn
+  read -r stubborn < "$TMP/started2" || die "the command never reported its grandchild"
+  kill -ALRM "$runner2" || die "cannot signal the runner $runner2"
+  rc=0
+  wait "$runner2" || rc=$?
+  wait "$reader2" || die "the FIFO reader failed"
+  if [[ $rc -eq 124 && -n "$stubborn" ]] && grep -q "budget" "$TMP/2c.err"; then pass
+  else fail "stubborn grandchild: rc=$rc grandchild=$stubborn err=$(cat "$TMP/2c.err")"; fi
 
   echo "3. a command that cannot start is exit 125 with a diagnostic"
   rc=0

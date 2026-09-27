@@ -34,6 +34,8 @@
 #   7. Portable mode        -> nothing deleted; the questionable list still
 #                              printed.
 #   8. No origin, no repo   -> silent.
+#  12. Malformed result     -> an owner result missing documented fields is a
+#                              could-not-check status.
 #  11. Newline path         -> a shared checkout whose name ends in a newline
 #                              is cleaned, never truncated.
 #  10. Missing tool         -> a missing git or python3 still prints the
@@ -394,6 +396,25 @@ main() {
      && [[ "$ctx_git" == "Session-start status — could not check this repository"*"git is not on PATH"* ]] \
      && [[ "$ctx_py" == "Session-start status — could not check this repository"*"python3 is not on PATH"* ]]; then pass
   else fail "c10: git=$ctx_git python3=$ctx_py"; fi
+
+  echo "12. an owner result missing its documented fields is a could-not-check status, never a clean one"
+  mk_case c12
+  local stage12="$CASE/stage"
+  mkdir -p "$stage12/hooks" "$stage12/skills/herdr-foreman" || die "mkdir stage failed"
+  cp "$HOOK" "$stage12/hooks/" || die "stage the hook failed"
+  cp "${HERE}/../../skills/herdr-foreman/bounded-run.sh" "$stage12/skills/herdr-foreman/" || die "stage the runner failed"
+  printf '#!/usr/bin/env bash\nprintf "{}\\n"\n' > "$stage12/skills/herdr-foreman/prune-worktrees.sh" || die "write the stand-in prune failed"
+  printf '#!/usr/bin/env bash\nprintf "{\\"deleted\\": [], \\"questionable\\": [{\\"branch\\": 7}], \\"kept\\": [], \\"failed\\": [], \\"could_not_check\\": null, \\"default_branch\\": \\"main\\"}\\n"\n' \
+    > "$stage12/skills/herdr-foreman/prune-remote-branches.sh" || die "write the stand-in remote pass failed"
+  local real_hook12="$HOOK"
+  HOOK="$stage12/hooks/$(basename "$real_hook12")"
+  run_hook "$SHARED"
+  HOOK="$real_hook12"
+  ctx="$(context)"
+  if [[ $RC -eq 0 ]] && [[ "$ctx" == "Session-start status — could not check this repository"* ]] \
+     && [[ "$ctx" == *"prune-worktrees.sh exited 0 with a result holding no worktrees_removed list"* ]] \
+     && [[ "$ctx" == *"prune-remote-branches.sh exited 0 with a result holding a malformed questionable entry"* ]]; then pass
+  else fail "c12: RC=$RC OUT=$OUT ERR=$ERR"; fi
 
   echo "11. a shared checkout whose name ends in a newline is cleaned, never truncated"
   local nl=$'\n'

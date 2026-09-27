@@ -45,7 +45,8 @@
 #   stderr: diagnostics, and each prune's stderr prefixed with its repository.
 #   exit  : 0 every repository decided cleanly,
 #           1 usage, python3, git or bash absent, or the root missing or
-#             unreadable (checked first, and again if it vanishes mid-run) —
+#             unreadable (checked first, and again after discovery, before
+#             any prune: a root replaced or unreadable by then prunes nothing) —
 #             no JSON, a repair message on stderr,
 #           2 at least one repository's prune exited non-zero or returned
 #             no readable JSON (its entry carries `error`), or `errors` is
@@ -82,7 +83,7 @@ main() {
     return 1
   fi
   local here
-  here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)" || { warn "cannot resolve the script directory"; return 1; }
+  here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)" || { warn "cannot resolve the script directory of ${BASH_SOURCE[0]} — restore read and search access to the plugin directory, or reinstall the plugin, then re-run"; return 1; }
   python3 - "$root" "$dry" "${here}/prune-worktrees.sh" <<'PY'
 import json
 import os
@@ -182,6 +183,16 @@ def discover(root):
     return found, empty_tops
 
 
+def root_gone(why):
+    sys.stderr.write("sweep-worktrees: the worktree root {} {} during the sweep — restore it, or pass the "
+                     "directory holding the worktrees, then re-run; nothing was pruned\n".format(root, why))
+    sys.exit(1)
+
+
+try:
+    root_id = os.stat(root)
+except OSError as exc:
+    root_gone("could not be read ({})".format(exc.strerror or exc))
 repos, skipped, errors = {}, [], []
 try:
     found, empty_tops = discover(root)
@@ -241,6 +252,15 @@ for entry in errors:
         entry["repo"] = os.path.realpath(entry["repo"])
     sys.stderr.write("sweep-worktrees: cannot read the worktree {} (exit {}): {} — inspect it by hand\n".format(
         entry["path"], entry["exit"], entry["error"]))
+# The root must still be the directory the walk read, and still listable:
+# a root replaced or made unreadable since then proves nothing it found.
+try:
+    now_id = os.stat(root)
+    os.listdir(root)
+except OSError as exc:
+    root_gone("became unreadable ({})".format(exc.strerror or exc))
+if not stat.S_ISDIR(now_id.st_mode) or (now_id.st_dev, now_id.st_ino) != (root_id.st_dev, root_id.st_ino):
+    root_gone("was replaced")
 results, failed = [], bool(errors)
 env = dict(os.environ, WORKTREE_ROOT=root)
 for shared in sorted(repos):

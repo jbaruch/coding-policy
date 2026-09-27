@@ -95,13 +95,13 @@ is_herdr_worker() {
   local git_dir common_dir rc=0
   git_dir="$(git rev-parse --absolute-git-dir 2>&1)" || rc=$?
   if (( rc != 0 )); then
-    warn "git rev-parse --absolute-git-dir failed (exit ${rc}: ${git_dir}) — cannot tell a Herdr worker from the foreman; treating this as the foreman"
+    warn "git rev-parse --absolute-git-dir failed (exit ${rc}: ${git_dir}) — cannot tell a Herdr worker from the foreman; treating this as the foreman — run it here to see why"
     return 1
   fi
   rc=0
   common_dir="$(git rev-parse --path-format=absolute --git-common-dir 2>&1)" || rc=$?
   if (( rc != 0 )); then
-    warn "git rev-parse --git-common-dir failed (exit ${rc}: ${common_dir}) — cannot tell a Herdr worker from the foreman; treating this as the foreman"
+    warn "git rev-parse --git-common-dir failed (exit ${rc}: ${common_dir}) — cannot tell a Herdr worker from the foreman; treating this as the foreman — run it here to see why"
     return 1
   fi
 
@@ -124,12 +124,12 @@ main() {
   # result of our prior block, allow it — never block twice (no loop).
   input="$(cat)" || input=""
   if ! active="$(printf '%s' "$input" | jq -r '.stop_hook_active // false' 2>&1)"; then
-    warn "could not parse Stop payload (${active}) — allowing stop"
+    warn "could not parse Stop payload (${active}) — allowing stop; report the payload shape as a bug in this hook"
     return 0
   fi
   [[ "$active" == "true" ]] && return 0
 
-  command -v git >/dev/null || { warn "git not found — allowing stop"; return 0; }
+  command -v git >/dev/null || { warn "git not found — allowing stop; install git so the handoff check can run"; return 0; }
 
   # Outside a work tree there is nothing to check. `--is-inside-work-tree` prints
   # true/false and exits 0 inside any repo; exit 128 is the expected "not a git
@@ -139,7 +139,7 @@ main() {
   rc=0
   inside="$(git rev-parse --is-inside-work-tree 2>&1)" || rc=$?
   if (( rc != 0 )); then
-    (( rc == 128 )) || warn "git rev-parse --is-inside-work-tree failed (exit ${rc}: ${inside}) — allowing stop"
+    (( rc == 128 )) || warn "git rev-parse --is-inside-work-tree failed (exit ${rc}: ${inside}) — allowing stop; run \`git status\` here to see why"
     return 0
   fi
   [[ "$inside" == "true" ]] || return 0
@@ -182,10 +182,10 @@ WT_SHARED=""
 # git or the parse fails.
 read_inventory() {
   local dir rc=0 parsed rest
-  dir="$(mktemp -d)" || { warn "mktemp failed — skipping the worktree check"; return 1; }
+  dir="$(mktemp -d)" || { warn "mktemp failed — skipping the worktree check; make ${TMPDIR:-/tmp} writable"; return 1; }
   git worktree list --porcelain -z >"${dir}/list" 2>"${dir}/err" || rc=$?
   if (( rc != 0 )); then
-    warn "\`git worktree list --porcelain -z\` failed (exit ${rc}): $(tr '\n' ' ' < "${dir}/err") — skipping the worktree check"
+    warn "\`git worktree list --porcelain -z\` failed (exit ${rc}): $(tr '\n' ' ' < "${dir}/err") — skipping the worktree check; run it here to see why"
     rm -rf "$dir" || warn "could not remove ${dir} — delete it by hand"
     return 1
   fi
@@ -201,7 +201,7 @@ sys.stdout.buffer.write(str(len(paths)).encode() + b"\n" + paths[0] + b"x")
 ' "${dir}/list")" || rc=$?
   rm -rf "$dir" || warn "could not remove ${dir} — delete it by hand"
   if (( rc != 0 )); then
-    warn "cannot name the shared checkout from \`git worktree list --porcelain -z\` (exit ${rc}) — skipping the worktree check"
+    warn "cannot name the shared checkout from \`git worktree list --porcelain -z\` (exit ${rc}) — skipping the worktree check; run it here to see what it prints"
     return 1
   fi
   WT_COUNT="${parsed%%$'\n'*}"
@@ -217,7 +217,7 @@ has_candidates() {
   local out rc=0
   (( WT_COUNT > 1 )) && return 0
   out="$(git for-each-ref --count=2 --format='%(refname)' refs/heads 2>&1)" || rc=$?
-  if (( rc != 0 )); then warn "\`git for-each-ref refs/heads\` failed (exit ${rc}): ${out}"; return 0; fi
+  if (( rc != 0 )); then warn "\`git for-each-ref refs/heads\` failed (exit ${rc}): ${out} — run it here to see why"; return 0; fi
   (( $(grep -c . <<<"$out") > 1 ))
 }
 
@@ -231,7 +231,7 @@ read_owner_decisions() {
   read_inventory || return 0
   has_candidates || return 0
   local here shared prune runner out err rc=0
-  here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)" || { warn "cannot resolve the hooks directory — skipping the worktree check"; return 0; }
+  here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)" || { warn "cannot resolve the hooks directory — skipping the worktree check; restore access to the plugin directory or reinstall the plugin"; return 0; }
   prune="${here}/../skills/herdr-foreman/prune-worktrees.sh"
   runner="${here}/../skills/herdr-foreman/bounded-run.sh"
   if [[ ! -f "$prune" || ! -r "$prune" || ! -f "$runner" || ! -r "$runner" ]]; then
@@ -239,7 +239,7 @@ read_owner_decisions() {
     return 0
   fi
   shared="$WT_SHARED"
-  err="$(mktemp)" || { warn "mktemp failed — skipping the worktree check"; return 0; }
+  err="$(mktemp)" || { warn "mktemp failed — skipping the worktree check; make ${TMPDIR:-/tmp} writable"; return 0; }
   out="$(GIT_TERMINAL_PROMPT=0 GIT_SSH_COMMAND="${GIT_SSH_COMMAND:-ssh -o BatchMode=yes}" \
     bash "$runner" "$PRUNE_BUDGET_SEC" bash "$prune" "$shared" --dry-run 2>"$err")" || rc=$?
   if (( rc != 0 && rc != 2 )) || [[ -z "$out" ]]; then
@@ -248,42 +248,54 @@ read_owner_decisions() {
     return 0
   fi
   rm -f "$err" || warn "could not remove ${err} — delete it by hand"
-  local findings frc=0 line kind program
+  local frc=0 text kind program records
+  # Findings cross from python3 as NUL-framed <kind> <text> records written
+  # to a file: a path holding a newline stays inside its record.
   program="$(cat <<'PY'
 import json
 import shlex
 import sys
 
-prune, shared = sys.argv[1], sys.argv[2]
+prune, shared, out = sys.argv[1], sys.argv[2], sys.argv[3]
 doc = json.load(sys.stdin)
+records = []
 removable = ["  - worktree {} ({})".format(r["path"], r.get("branch") or "detached") for r in doc["worktrees_removed"]]
 removable += ["  - branch {}".format(b) for b in doc["branches_deleted"]]
 if removable:
-    print("block\tSpent worktrees and branches origin already holds — remove them with `bash {} {}`:\n{}".format(
-        shlex.quote(prune), shlex.quote(shared), "\n".join(removable)).replace("\n", "\\n"))
+    records.append(("block", "Spent worktrees and branches origin already holds — remove them with `bash {} {}`:\n{}".format(
+        shlex.quote(prune), shlex.quote(shared), "\n".join(removable))))
 for k in doc["worktrees_kept"]:
     if k["reason"] in ("dirty", "unpushed"):
-        print("report\tWorktree left for the operator: {} ({}), {} — `{}`".format(
-            k["path"], k.get("branch") or "detached", k["reason"], k["command"]))
+        records.append(("report", "Worktree left for the operator: {} ({}), {} — `{}`".format(
+            k["path"], k.get("branch") or "detached", k["reason"], k["command"])))
 for b in doc["branches_kept"]:
     if b["reason"] == "unpushed":
-        print("report\tBranch left for the operator: {}, {} unpushed commit(s) — `{}`".format(
-            b["branch"], b["unpushed_commits"], b["command"]))
+        records.append(("report", "Branch left for the operator: {}, {} unpushed commit(s) — `{}`".format(
+            b["branch"], b["unpushed_commits"], b["command"])))
 for f in doc["failed"]:
-    print("report\tThe worktree check could not decide {}: {}".format(f["target"], f["error"]))
+    records.append(("report", "The worktree check could not decide {}: {}".format(f["target"], f["error"])))
+with open(out, "wb") as handle:
+    for kind, text in records:
+        handle.write(kind.encode() + b"\0" + text.encode("utf-8", "surrogateescape") + b"\0")
 PY
 )"
-  findings="$(python3 -c "$program" "$prune" "$shared" <<<"$out")" || frc=$?
-  if (( frc != 0 )); then
-    warn "the worktree check's JSON could not be read (python3 exited ${frc}) — nothing is blocked on it"
+  if ! records="$(mktemp)"; then
+    warn "mktemp failed — skipping the worktree check; make ${TMPDIR:-/tmp} writable"
     return 0
   fi
-  while IFS=$'\t' read -r kind line; do
+  python3 -c "$program" "$prune" "$shared" "$records" <<<"$out" || frc=$?
+  if (( frc != 0 )); then
+    warn "the worktree check's JSON could not be read (python3 exited ${frc}) — nothing is blocked on it; run \`bash ${prune} ${shared} --dry-run\` to see its output"
+    rm -f "$records" || warn "could not remove ${records} — delete it by hand"
+    return 0
+  fi
+  while IFS= read -r -d '' kind && IFS= read -r -d '' text; do
     case "$kind" in
-      block) blocking+=("${line//\\n/$'\n'}") ;;
-      report) reports+=("$line") ;;
+      block) blocking+=("$text") ;;
+      report) reports+=("$text") ;;
     esac
-  done <<<"$findings"
+  done < "$records"
+  rm -f "$records" || warn "could not remove ${records} — delete it by hand"
   return 0
 }
 
@@ -363,7 +375,7 @@ collect_changed_lintable() {
   # observable (a process substitution would hide it); warn on failure and fall
   # open to whatever was collected (rules/error-handling.md).
   local f tmp rc=0
-  tmp="$(mktemp)" || { warn "mktemp failed — skipping changed-set diagnostics"; return 0; }
+  tmp="$(mktemp)" || { warn "mktemp failed — skipping changed-set diagnostics; make ${TMPDIR:-/tmp} writable"; return 0; }
 
   rc=0
   if git rev-parse --verify -q HEAD >/dev/null; then
@@ -371,15 +383,15 @@ collect_changed_lintable() {
   else
     git diff --name-only -z --diff-filter=ACMR --cached -- '*.sh' '*.py' > "$tmp" || rc=$?
   fi
-  (( rc == 0 )) || warn "git diff failed (exit ${rc}) — changed-set diagnostics may be incomplete"
+  (( rc == 0 )) || warn "git diff failed (exit ${rc}) — changed-set diagnostics may be incomplete; run \`git diff --name-only HEAD\` to see why"
   while IFS= read -r -d '' f; do changed+=("$f"); done < "$tmp"
 
   rc=0
   git ls-files -z --others --exclude-standard -- '*.sh' '*.py' > "$tmp" || rc=$?
-  (( rc == 0 )) || warn "git ls-files failed (exit ${rc}) — untracked changes may be missed"
+  (( rc == 0 )) || warn "git ls-files failed (exit ${rc}) — untracked changes may be missed; run \`git ls-files --others --exclude-standard\` to see why"
   while IFS= read -r -d '' f; do changed+=("$f"); done < "$tmp"
 
-  rm -f "$tmp" || warn "could not remove temp file ${tmp}"
+  rm -f "$tmp" || warn "could not remove temp file ${tmp} — delete it by hand"
   return 0
 }
 
@@ -388,7 +400,7 @@ check_dirty_tree() {
   local status rc=0
   status="$(git status --porcelain)" || rc=$?
   if (( rc != 0 )); then
-    warn "git status failed (exit ${rc}) — skipping the dirty-tree report"
+    warn "git status failed (exit ${rc}) — skipping the dirty-tree report; run \`git status\` here to see why"
     return 0
   fi
   [[ -n "$status" ]] && reports+=("Working tree has uncommitted changes — commit, stash, or discard before handoff.")
@@ -405,7 +417,7 @@ emit_block() {
     for r in "${reports[@]}"; do reason+=$'\n\n'"${r}"; done
   fi
   jq -n --arg r "$reason" '{decision: "block", reason: $r}' ||
-    warn "could not emit the block decision as JSON — allowing stop"
+    warn "could not emit the block decision as JSON — allowing stop; check that jq runs, then retry the handoff"
   return 0
 }
 

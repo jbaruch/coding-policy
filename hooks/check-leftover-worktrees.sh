@@ -211,8 +211,63 @@ shared, prune, prune_rc, prune_out, remote, remote_rc, remote_out, flags = sys.a
 items, failures = [], []
 
 
+def is_int(value):
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def entries_ok(entries, fields):
+    """Every entry an object whose named fields hold the named types."""
+    return isinstance(entries, list) and all(
+        isinstance(e, dict) and all(check(e.get(k)) for k, check in fields.items()) for e in entries)
+
+
+STR = lambda v: isinstance(v, str)  # noqa: E731
+STR_OR_NONE = lambda v: v is None or isinstance(v, str)  # noqa: E731
+KEPT_BY_REASON = {
+    "dirty": {"path": STR, "age_hours": is_int, "dirty_files": is_int, "command": STR},
+    "unpushed": {"path": STR, "age_hours": is_int, "unpushed_commits": is_int, "command": STR},
+}
+
+
+def prune_schema_error(doc):
+    """What the prune-worktrees.sh result lacks, or None when it is whole."""
+    for key in ("worktrees_removed", "worktrees_kept", "branches_deleted", "branches_kept", "failed"):
+        if not isinstance(doc.get(key), list):
+            return "no {} list".format(key)
+    if not entries_ok(doc["worktrees_kept"], {"path": STR, "reason": STR}):
+        return "a malformed worktrees_kept entry"
+    for kept in doc["worktrees_kept"]:
+        if not entries_ok([kept], KEPT_BY_REASON.get(kept["reason"], {})):
+            return "a malformed {} worktree entry".format(kept["reason"])
+    if not entries_ok(doc["branches_kept"], {"branch": STR, "reason": STR}):
+        return "a malformed branches_kept entry"
+    unpushed = [b for b in doc["branches_kept"] if b["reason"] == "unpushed"]
+    if not entries_ok(unpushed, {"unpushed_commits": is_int, "age_hours": is_int, "command": STR}):
+        return "a malformed unpushed branch entry"
+    return None
+
+
+def remote_schema_error(doc):
+    """What the prune-remote-branches.sh result lacks, or None when it is whole."""
+    for key in ("deleted", "questionable", "kept", "failed"):
+        if not isinstance(doc.get(key), list):
+            return "no {} list".format(key)
+    if "could_not_check" not in doc or not STR_OR_NONE(doc["could_not_check"]):
+        return "no could_not_check field"
+    if not STR(doc.get("default_branch")):
+        return "no default_branch"
+    fields = {"branch": STR, "ahead": is_int, "age_hours": is_int, "author": STR, "open_pr": STR, "delete": STR}
+    if not entries_ok(doc["questionable"], fields):
+        return "a malformed questionable entry"
+    return None
+
+
+SCHEMA = {prune: prune_schema_error, remote: remote_schema_error}
+
+
 def load(path, rc, script):
-    """The script's JSON when it answered (exit 0, or 2 with its JSON)."""
+    """The script's JSON when it answered (exit 0, or 2 with its JSON) in its
+    documented shape; anything else is a failure, never a clean result."""
     rerun = "`bash {} {}{}`".format(shlex.quote(script), shlex.quote(shared), " " + flags if flags else "")
     name = script.rsplit("/", 1)[-1]
     if rc == "124":
@@ -225,6 +280,10 @@ def load(path, rc, script):
         doc = None
     if rc not in ("0", "2") or not isinstance(doc, dict):
         failures.append("{} exited {} (run {})".format(name, rc, rerun))
+        return None
+    why = SCHEMA[script](doc)
+    if why:
+        failures.append("{} exited {} with a result holding {} (run {})".format(name, rc, why, rerun))
         return None
     if doc.get("failed"):
         failures.append("{} could not decide {} item(s) (run {})".format(name, len(doc["failed"]), rerun))

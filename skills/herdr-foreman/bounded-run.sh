@@ -10,8 +10,9 @@
 # The budget is a SIGALRM the runner schedules for itself. When it arrives —
 # at the budget, or earlier from anyone who sends SIGALRM to the runner's pid
 # (how the tests end a budget without waiting on a clock) — the command's
-# whole process group gets SIGTERM, then SIGKILL after KILL_GRACE_SEC, so a
-# git or gh it spawned cannot outlive it. The runner execs python3, so its pid
+# whole process group gets SIGTERM, then SIGKILL after KILL_GRACE_SEC when
+# any member is still running, whether or not the direct child has exited, so
+# a git or gh it spawned cannot outlive it. The runner execs python3, so its pid
 # is this script's pid.
 #
 # Contract:
@@ -51,6 +52,10 @@ import os
 import signal
 import subprocess
 import sys
+import time
+
+#: Seconds between checks for a process group still alive inside the grace.
+GROUP_POLL_SEC = 0.05
 
 
 class Expired(Exception):
@@ -87,6 +92,16 @@ def signal_group(sig):
         pass
 
 
+def group_alive():
+    try:
+        os.killpg(child.pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
 try:
     signal.alarm(budget)
     signal.pthread_sigmask(signal.SIG_UNBLOCK, ALARM)
@@ -94,11 +109,18 @@ try:
 except Expired:
     signal.signal(signal.SIGALRM, signal.SIG_IGN)
     signal_group(signal.SIGTERM)
+    # The grace covers the whole group, not the direct child alone: a child
+    # that exits on SIGTERM can leave a grandchild that ignores it.
+    end = time.monotonic() + grace
     try:
         child.wait(timeout=grace)
     except subprocess.TimeoutExpired:
+        pass
+    while group_alive() and time.monotonic() < end:
+        time.sleep(GROUP_POLL_SEC)
+    if group_alive():
         signal_group(signal.SIGKILL)
-        child.wait()
+    child.wait()
     sys.stderr.write("bounded-run: {} ran past its {}s budget and was stopped — run it by hand to see where it waits\n".format(
         " ".join(command), budget))
     sys.exit(124)

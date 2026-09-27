@@ -73,7 +73,8 @@
 #  44-45. Merged path       -> fresh activity or a process inside keeps a clean
 #                             merged worktree.
 #  46. Fresh edit           -> a tracked file edited now keeps an old worktree.
-#  47. Changed at removal   -> a process arriving before the removal keeps it.
+#  47. Changed at removal   -> a process arriving before the removal keeps it,
+#                             in a dry run's preview too (47b).
 #  51. Dirty submodule      -> kept.
 #  59. Newline path         -> lsof cannot report it faithfully: never idle.
 #  60. Other remote         -> a ref of a remote other than origin proves nothing.
@@ -807,6 +808,19 @@ SHIM
   echo "47. a worktree that turns busy before its removal is kept"
   if (( RC == 0 )) && [[ "$(kept_reason "$rw")" == changed ]] && listed "$SHARED" "$rw" && [[ "$ERRTEXT" == *"process is now working inside"* ]]; then
     pass; else fail "changed at removal: rc=$RC out=$OUT err=$ERRTEXT"; fi
+
+  # --- 47b. the dry run takes the same recheck before previewing a removal.
+  mk_repo racedry
+  local rdw="$ROOT/racedry-detached"
+  quiet "racedry worktree add failed" git -C "$SHARED" worktree add -q --detach "$rdw" origin/main
+  age_wt "$rdw"
+  lsof_turns_busy "$TMP/lsof47b" 2 "$rdw"
+  IDLE_ARGS=(--dry-run)
+  idle_run PRUNE_LSOF="$TMP/lsof47b/lsof"
+  IDLE_ARGS=()
+  echo "47b. a dry run keeps a worktree that turns busy before the preview, as the live run would"
+  if (( RC == 0 )) && [[ "$(kept_reason "$rdw")" == changed ]] && [[ -z "$(removed_head "$rdw")" ]] && listed "$SHARED" "$rdw"; then
+    pass; else fail "dry-run recheck: rc=$RC out=$OUT err=$ERRTEXT"; fi
 
   # --- 59. a path lsof cannot report faithfully is never judged idle.
   mk_repo newline

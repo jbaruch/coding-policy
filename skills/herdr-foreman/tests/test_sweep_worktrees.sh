@@ -37,6 +37,8 @@
 #                           refuses such a name, as macOS APFS does).
 #  19. Symlinked .git    -> a directory whose .git is a symlink names no
 #                           repository; the walk reports it.
+#  22. Root replaced        -> a root swapped after discovery: exit 1, no
+#                             prune.
 #  21. Copied .git         -> a .git file whose repository does not register
 #                             the path is an errors entry; no prune runs.
 #  20. Unreadable path   -> a directory lstat cannot read, or a worktree whose
@@ -367,9 +369,32 @@ main() {
       pass; else fail "unreadable paths: rc=$RC out=$OUT err=$ERRTEXT"; fi
   fi
 
+  # --- 22. a root replaced after discovery prunes nothing.
+  fresh_pair 22
+  local root22="$TMP/worktrees22" shim22="$TMP/shim22" real_git
+  real_git="$(command -v git)" || die "git not found"
+  mkdir -p "$root22" "$shim22" || die "mkdir root22 failed"
+  quiet "alpha22 worktree failed" "${G[@]}" -C "$alpha" worktree add -q -b review/r22 "$root22/alpha-22" origin/main
+  # The sweep's first worktree-list read (after discovery, before any prune)
+  # swaps the root for an empty directory of the same name, then runs the
+  # real git. Without the recheck the prune would then run, find the moved
+  # worktree gone, and delete its merged branch.
+  # shellcheck disable=SC2016  # The $@ and $0 belong to the shim.
+  printf '#!/usr/bin/env bash\nset -euo pipefail\nif [[ "$*" == *"worktree list"* && ! -e %q ]]; then : > %q; mv %q %q; mkdir %q; fi\nexec %q "$@"\n' \
+    "$shim22/done" "$shim22/done" "$root22" "$root22.moved" "$root22" "$real_git" > "$shim22/git" || die "write the git shim failed"
+  chmod +x "$shim22/git" || die "chmod the git shim failed"
+  RUN_SEQ=$((RUN_SEQ+1))
+  OUT="$(PATH="$shim22:$PATH" PRUNE_IDLE_HOURS=0 bash "$SCRIPT" "$root22" 2>"$TMP/err.$RUN_SEQ")"; RC=$?
+  ERRTEXT="$(cat "$TMP/err.$RUN_SEQ")"
+  echo "22. a root replaced after discovery is exit 1, no JSON, and nothing is pruned"
+  if (( RC == 1 )) && [[ -z "$OUT" && "$ERRTEXT" == *"was replaced"*"nothing was pruned"* ]] \
+    && git -C "$alpha" show-ref --verify --quiet refs/heads/review/r22; then
+    pass; else fail "replaced root: rc=$RC out=$OUT err=$ERRTEXT"; fi
+
   # --- 21. a copied .git file naming an unrelated repository runs no prune.
   mk_repo gamma21; local gamma="$SHARED" root21="$TMP/worktrees21"
-  mkdir -p "$root21/copied" || die "mkdir root21 failed"
+  # The worktree's parent is made here, never left to git to create.
+  mkdir -p "$root21/copied" "$TMP/outside21" || die "mkdir root21 failed"
   quiet "gamma worktree failed" "${G[@]}" -C "$gamma" worktree add -q -b review/gamma "$TMP/outside21/gamma-wt" origin/main
   quiet "gamma branch failed" "${G[@]}" -C "$gamma" branch -q --no-track review/gamma-merged origin/main
   cp "$TMP/outside21/gamma-wt/.git" "$root21/copied/.git" || die "copy the .git file failed"

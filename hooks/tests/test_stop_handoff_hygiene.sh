@@ -23,6 +23,7 @@
 #      4c. Herdr worker session -> no worktree finding; diagnostics still gate.
 #      4d. The foreman's session -> blocks.
 #      4e. A shared checkout whose name ends in a newline -> still blocks.
+#      4f. A finding naming a newline-bearing path -> reported whole.
 #   5. Dirty tree only -> allow (report-only, not a block).
 #   6. Diag finding    -> block; changed uncommitted .sh with a failing engine.
 #   7. Diag clean      -> changed uncommitted .sh, engines clean -> no diag block.
@@ -266,6 +267,24 @@ main() {
       pass; else fail "newline-ending shared checkout: expected the worktree block, got RC=$RC OUT=$OUT ERR=$ERRTEXT"; fi
   else
     echo "4e. skipped: this filesystem refuses a name ending in a newline ($(cat "$TMP/nl.err"))" >&2
+  fi
+
+  # 4f. A finding whose text carries a newline-bearing path arrives whole: an
+  #     unpushed branch's push command names a shared checkout whose name
+  #     ends in a newline.
+  if mkdir "$TMP/r4f-nl${nl}" 2>"$TMP/nl.err"; then
+    rmdir "$TMP/r4f-nl${nl}" || die "rmdir the newline probe failed"
+    mk_origin o4f; clone_from "$BARE" "$TMP/r4f-nl${nl}"
+    g -C "$TMP/r4f-nl${nl}" switch -qc feat/nl-local || die "r4f branch failed"
+    printf 'local\n' > "$TMP/r4f-nl${nl}/l" || die "r4f write failed"
+    g -C "$TMP/r4f-nl${nl}" add l || die "r4f add failed"
+    g -C "$TMP/r4f-nl${nl}" commit -q -m local || die "r4f commit failed"
+    g -C "$TMP/r4f-nl${nl}" switch -q main || die "r4f switch main failed"
+    run_hook "$TMP/r4f-nl${nl}" '{"stop_hook_active":false}'
+    if [[ $RC -eq 0 && -z "$OUT" ]] && [[ "$ERRTEXT" == *"Branch left for the operator: feat/nl-local"*"r4f-nl${nl}' push -u origin feat/nl-local"* ]]; then
+      pass; else fail "newline-bearing finding: expected the whole push command, got RC=$RC OUT=$OUT ERR=$ERRTEXT"; fi
+  else
+    echo "4f. skipped: this filesystem refuses a name ending in a newline ($(cat "$TMP/nl.err"))" >&2
   fi
 
   # 4d. The foreman's own session (main checkout) still blocks with HERDR_ENV

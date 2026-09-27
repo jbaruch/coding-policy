@@ -61,7 +61,11 @@
     `bounded-run.sh`. A missing git or python3 still reaches the session as
     a fixed "could not check" status. The runner keeps SIGALRM blocked
     until the command is launched and the alarm armed, so an expiry at any
-    point stops the process group and exits 124. Both hooks read the
+    point stops the process group and exits 124. The grace period ends in
+    SIGKILL for any group member still running, even once the direct child
+    has exited. The session-start hook validates each owner's documented
+    result shape; a malformed result is a "could not check" line, and the
+    stop hook carries its findings as NUL-framed records. Both hooks read the
     worktree inventory NUL-framed, so a shared checkout whose path ends in
     a newline reaches the owner scripts whole. It no longer reads
     `skills/release/check-leftovers.sh`, which still gates the release.
@@ -74,7 +78,10 @@
     preflight; its `report` names each kept dirty or unpushed item with its
     age and command, and SKILL Step 2 relays it verbatim. A `.git` file
     counts only when its repository registers a worktree at that path; a
-    copied or stale one is an error and never runs a prune.
+    copied or stale one is an error and never runs a prune. The root is
+    re-read after discovery; one replaced or unreadable by then prunes
+    nothing and exits 1. A dry run takes the same pre-removal recheck as a
+    live run.
   - Rules: `rules/agent-worktree-isolation.md` Cleanup states the lifecycle
     and the session-start cleanup; `rules/agent-team-operation.md` Writers
     and Checkouts keeps the sweep and the Step 15 merged-task exception and
