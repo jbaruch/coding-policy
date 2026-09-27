@@ -16,6 +16,7 @@ regime: this codebase sits inside the distribution published benchmarks measure,
 and where a model failed here that failure is itself a `project` source.
 """
 
+import errno
 import json
 import os
 import re
@@ -131,14 +132,25 @@ def load(path, *, for_write=False):
     except OSError as exc:
         _fail("Cannot inspect the capability table at {}: {}. Restore search permission on its "
               "directory; the table is left untouched.".format(target, exc))
+    linked_message = ("The capability table at {} is a symlink, not the owner's file. It is left "
+                      "untouched: restore the regular file at that path, or remove the link to "
+                      "start an empty table.".format(target))
     if linked:
-        _fail("The capability table at {} is a symlink, not the owner's file. It is left "
-              "untouched: restore the regular file at that path, or remove the link to start an "
-              "empty table.".format(target))
+        _fail(linked_message)
+    # The read opens without following a link, so one swapped in after the
+    # probe is refused too, never read through.
     try:
-        document = json.loads(target.read_text(encoding="utf-8"))
+        descriptor = os.open(target, os.O_RDONLY | os.O_NOFOLLOW)
     except FileNotFoundError:
         return empty()
+    except OSError as exc:
+        if exc.errno == errno.ELOOP:
+            _fail(linked_message)
+        _fail("Cannot read the capability table at {}: {}. Restore a readable UTF-8 file, or "
+              "remove it to start an empty table.".format(target, exc))
+    try:
+        with os.fdopen(descriptor, encoding="utf-8") as handle:
+            document = json.loads(handle.read())
     except (OSError, UnicodeDecodeError) as exc:
         _fail("Cannot read the capability table at {}: {}. Restore a readable UTF-8 file, or "
               "remove it to start an empty table.".format(target, exc))

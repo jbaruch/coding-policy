@@ -8,6 +8,7 @@ import os as _os
 import sys as _sys
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 _ROOT = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
@@ -92,6 +93,25 @@ class CapabilityTableTest(unittest.TestCase):
         self.assertTrue(target.is_symlink())
         self.assertEqual(_os.readlink(target), str(missing))
         self.assertFalse(missing.exists())
+
+    def test_a_link_swapped_in_after_the_probe_is_never_read_through(self):
+        # The probe sees no link (as if the swap landed just after it); the
+        # read must still refuse to follow the link now at the table's path.
+        real = Path(self.tmp.name) / "elsewhere.json"
+        capabilities.record(real, {"entries": [entry()]}, AT)
+        target = capabilities.storage_path(self.state)
+        target.symlink_to(capabilities.storage_path(real))
+        genuine = _os.lstat
+
+        def probe_misses_the_swap(candidate, *args, **kwargs):
+            if str(candidate) == str(target):
+                raise FileNotFoundError(candidate)
+            return genuine(candidate, *args, **kwargs)
+
+        with mock.patch.object(capabilities.os, "lstat", probe_misses_the_swap):
+            with self.assertRaisesRegex(UsageError, "is a symlink"):
+                capabilities.load(self.state)
+        self.assertTrue(target.is_symlink())
 
     def test_a_live_table_link_is_refused_and_its_target_left_as_found(self):
         real = Path(self.tmp.name) / "elsewhere.json"
