@@ -151,6 +151,8 @@ def regular(path: Path, limit: int = MAX_TEXT) -> bytes:
 
 
 DIR_FLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+#: macOS system temporary-directory aliases: the only symlinks a helper path may cross.
+SYSTEM_ALIASES = {Path("/var"): Path("/private/var"), Path("/tmp"): Path("/private/tmp")}
 # O_NONBLOCK: a FIFO planted at an output path opens at once and fails the S_ISREG check instead of hanging.
 EXISTING_FLAGS = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK
 
@@ -245,11 +247,60 @@ def open_child(parent: int, name: str, private: bool) -> int:
             os.close(fd)
 
 
+def system_alias(entry: Path) -> bool:
+    """True when <entry> is macOS's own /var or /tmp link to its /private location."""
+    return (sys.platform == "darwin" and entry in SYSTEM_ALIASES and entry.is_symlink()
+            and entry.resolve() == SYSTEM_ALIASES[entry])
+
+
+def anchored(path: Path) -> Path:
+    """<path> made absolute, with a leading macOS /var or /tmp alias spelled as its /private target.
+
+    Lexical only: the result names the path open_anchor walks, and regular()'s ancestor check
+    stops tripping on the system alias.
+    """
+    absolute = path.absolute()
+    head = Path(*absolute.parts[:2])
+    if system_alias(head):
+        return SYSTEM_ALIASES[head].joinpath(*absolute.parts[2:])
+    return absolute
+
+
+def open_anchor(root: Path, kind: str) -> int:
+    """Open directory <root> by walking from / with O_NOFOLLOW at every component.
+
+    An operator-supplied path is trusted only as far as /: a symlinked or non-directory
+    ancestor refuses instead of redirecting the walk. anchored() rewrites the macOS /var and
+    /tmp aliases first, so the walk never follows those either.
+    """
+    fd = os.open("/", DIR_FLAGS)
+    opened = False
+    try:
+        for name in anchored(root).parts[1:]:
+            try:
+                child = os.open(name, DIR_FLAGS, dir_fd=fd)
+            except FileNotFoundError as exc:
+                raise Refusal(f"{kind} {root} does not exist; create it and re-run") from exc
+            except OSError as exc:
+                if exc.errno not in (errno.ELOOP, errno.ENOTDIR):
+                    raise
+                raise Refusal(f"{kind} {root} or its ancestor {name} is a symlink or not a directory; "
+                              "pass the real path of a fresh run root") from exc
+            os.close(fd)
+            fd = child
+        opened = True
+        return fd
+    finally:
+        if not opened:
+            os.close(fd)
+
+
 def write_under(root: Path, path: Path, value: bytes, private: bool) -> None:
     """Write <path> below the owned directory <root>, entirely descriptor-relative.
 
-    No component from <root> down is followed through a symlink. Missing directories are created
-    0700; with <private> every directory on the way is also forced to 0700.
+    No component from / down is followed through a symlink (open_anchor walks the ancestors of
+    <root>). Missing directories below <root> are created 0700; with <private> every directory
+    on the way is also forced to 0700.
     """
     # relative_to() is lexical: a ".." in <root> itself would be dropped from <parts> and
     # resolved by the kernel through whatever link precedes it, so both paths are checked.
@@ -258,14 +309,7 @@ def write_under(root: Path, path: Path, value: bytes, private: bool) -> None:
             "Output path must name a file below its root without .. components; pass a contained path")
     parts = path.relative_to(root).parts  # ValueError: a caller bug, never input
     require(parts, "Output path names the root directory itself; pass a file below it")
-    try:
-        fd = os.open(root, DIR_FLAGS)
-    except FileNotFoundError as exc:
-        raise Refusal(f"Output root {root} does not exist; create it and re-run") from exc
-    except OSError as exc:
-        if exc.errno not in (errno.ELOOP, errno.ENOTDIR):
-            raise
-        raise Refusal(f"Output root {root} is a symlink or not a directory; use a fresh run root") from exc
+    fd = open_anchor(root, "Output root")
     try:
         for name in parts[:-1]:
             child = open_child(fd, name, private)
@@ -964,7 +1008,10 @@ def extract_archive(data: bytes, destination: Path) -> None:
             total += item.file_size
         require(total <= MAX_ARCHIVE, "Uncompressed archive exceeds bound")
         if destination.exists() or destination.is_symlink():
-            require(not destination.is_symlink() and members(destination) == {item.filename: archive.read(item) for item in entries},
+            # Walk the whole path no-follow first: through a symlinked parent the comparison
+            # would accept matching content that lives outside the destination.
+            os.close(open_anchor(destination, "Download destination"))
+            require(members(anchored(destination)) == {item.filename: archive.read(item) for item in entries},
                     "Download destination holds different content; refuse to overwrite it")
             return
         # Anchor at the parent: the walk creates <destination> 0700 without following a symlink.
@@ -1016,9 +1063,7 @@ def run_root_path(root: Path) -> Path:
     for entry in (absolute, *absolute.parents):
         if entry.is_symlink():
             # macOS's system temporary-directory aliases are not user links.
-            aliases = {Path("/var"): Path("/private/var"), Path("/tmp"): Path("/private/tmp")}
-            require(sys.platform == "darwin" and entry in aliases and
-                    entry.resolve() == aliases[entry], "Unsafe symlink in run root; use its real temporary parent")
+            require(system_alias(entry), "Unsafe symlink in run root; use its real temporary parent")
     resolved = absolute.resolve()
     runner_temp = os.environ.get("RUNNER_TEMP")
     if runner_temp is not None:

@@ -1,5 +1,24 @@
 # Changelog
 
+### Fixed
+
+- **The ACR acceptance helper now walks its output roots from `/` (#566).**
+  `write_under` in `.github/codex-accept/contract.py` opened its anchor with
+  one `O_NOFOLLOW` open, which constrains only the anchor's last component: an
+  operator-supplied `--output`, `--artifact` or `--run-root` like
+  `link/sub/download` walked through `link` and wrote wherever it pointed. The
+  new `open_anchor` opens every component from `/` with `O_NOFOLLOW` and
+  refuses a symlinked or non-directory ancestor by name. The macOS `/var` and
+  `/tmp` system links stay usable: `anchored()` spells them as their
+  `/private/` targets before the walk, sharing one `system_alias` check with
+  `run_root_path`. `extract_archive`'s existing-destination branch now runs
+  the same walk before comparing members, so matching content prepopulated
+  behind a symlinked parent refuses instead of passing as an idempotent
+  re-run. Scope stays the documented threat model: the walk catches mistaken
+  or stale paths, and a hostile same-user process can still swap a component
+  between the walk and the later path-based `members()` read. Follow-up from
+  #563's review.
+
 ## 0.3.309 — 2026-09-28
 
 ### Added
