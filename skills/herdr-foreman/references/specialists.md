@@ -115,6 +115,11 @@ a diff nor a plan is refused.
 }
 ```
 
+Who writes it: the foreman copies the surfaces the operator's request names.
+When the request names none, the foreman does not infer them from the task; an
+`advisor` consultation, planned first as a `writes_repository: false` round,
+delivers this file as its deliverable.
+
 `added` and `changed` are repo-relative paths the round will create or edit.
 `package_lines` states the lines the round will change in a package, for the
 architect trigger's size. `cli_surface` names the declared CLI spec paths the
@@ -246,8 +251,10 @@ plan, apply, assessment, observation and follow-up.
 
 State the question the specialist must settle, why its answer matters now, the
 accepted behavior, scope, relevant prior decisions, available inputs, permitted
-actions and stopping condition. Define what the foreman will inspect to accept
-the result. Supply the source paths and revisions, useful project lessons, and
+actions and stopping condition. Quote the question from the operator's request,
+the report that raised it, or the trigger detection that fired it; the foreman
+frames no question from its own reading of task content. The acceptance
+criteria are the ones the report will mark `met` or `unmet`. Supply the source paths and revisions, useful project lessons, and
 the selected profile's applicable questions in the brief. The worker should
 not need an earlier conversation to reconstruct its assignment.
 
@@ -277,10 +284,15 @@ its genuine block is recorded; idle bench membership creates no monitoring job.
 ## Assess specialist work
 
 Confirm delivery through the normal report checkpoint and save its successful
-JSON output. Read the actual report in full. Inspect the requested artifact and
-source evidence, then assess the assignment outcome and what the worker
-contributed. A worker's contribution claim is an input to that judgment, not
-the judgment itself.
+JSON output. Read the actual report in full. The foreman runs on a cheap tier
+and does not re-assess a consultation's substance
+(`rules/agent-team-operation.md` Foreman Seat). The outcome is the report's own
+acceptance lines, each criterion `met` or `unmet` with its evidence; the
+contribution is the report's `CONTRIBUTION:` line, and a report without one
+records `design`. A criterion reported `unmet`, or a line missing, returns the
+consultation to its responsibility with the gap named. A dispute over whether a
+consultation met its criteria goes to an independent reviewer, and a contested
+verdict from that reviewer to the judge.
 
 Run the installed `skills/herdr-foreman/foreman.sh` with explicit `bash` and
 the plugin root resolved by the skill. This synopsis names its owner command:
@@ -304,9 +316,9 @@ the supervision member, the worker's report path, and the saved delivery path:
 }
 ```
 
-`outcome` and `summary` record the foreman's actual assessment and rationale.
-`contribution` is `none`, `design` or `implementation`; classify the substantive
-work rather than its current role. The delivery file must be the successful
+`outcome` and `summary` quote the report's acceptance lines and answer.
+`contribution` is `none`, `design` or `implementation`, as the report declares
+it; an undeclared contribution is `design`, never `none`. The delivery file must be the successful
 `wait-report.sh` JSON receipt for that worker and report, with `found: true`, or
 the unchanged owner `recover-report` result for that exact dispatch and report.
 For native delivery missed by the watcher, complete recovery under
@@ -350,8 +362,8 @@ context. Obtain another qualified worker for independent assessment of a
 contributor's work. Keep the ordinary reviewer and tester gates intact.
 
 An unassessed consultation is unresolved contribution history. Assess it before
-relying on that worker's independence. A `none` assessment records that the foreman
-verified no contributing work; a design or implementation contribution remains
+relying on that worker's independence. A `none` assessment records that the
+report declared no contributing work; a design or implementation contribution remains
 part of the task history across role, model and session changes. Obtain a
 different qualified worker for the independent gate when the subject includes
 that contribution.

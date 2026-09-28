@@ -1,15 +1,20 @@
 # Assignment Reasoning
 
 The foreman applies this reference at intake, when composing a bug-fix brief, and
-when assessing findings before a correction. The worker receives the relevant
-questions in its self-contained brief. Reasoning stays with the foreman and workers;
-the dispatch utility does not infer intent or causality from prose.
+when routing findings before a correction. The worker receives the relevant
+questions in its self-contained brief. The reasoning is the workers': the
+foreman runs on a cheap tier, records and routes, and never reasons through
+task content (`rules/agent-team-operation.md` Foreman Seat). The dispatch
+utility does not infer intent or causality from prose.
 
 ## Preserve the Accepted Behavior
 
-Record the operator's actual request and later decisions separately from the
-foreman's proposed implementation. Name the observable behavior or deliverable the
-task must provide, its acceptance criteria, and any explicit limits. Use the
+Record the operator's actual request and later decisions verbatim, separately
+from any worker's proposed implementation. The request's own words carry the
+observable behavior, acceptance criteria and explicit limits into every brief;
+the foreman writes no criterion of its own. A request whose criteria are
+unclear goes to an `advisor` consultation, whose report proposes them, and the
+proposal becomes an operator decision before implementation. Use the
 existing task identity and authorization record throughout corrections.
 
 Resolve ordinary implementation choices within that accepted behavior. A hard
@@ -21,7 +26,9 @@ the developer template's investigation branch. Its deliverable is a report;
 implementation, push, PR and release instructions do not apply to that branch.
 
 Gate investigation reports against the requested knowledge and evidence, including
-required independent checks. The implementation phases in Review Before PR apply
+required independent checks. An independent `reviewer` assesses the
+investigation report against the request and returns the verdict the foreman
+gates on. The implementation phases in Review Before PR apply
 only to authorized code changes. Preserve blocking-finding, correction-allowance,
 and judge rules for the investigation. A completed judge ruling (`uphold A`,
 `uphold B` or `amend`) returns the investigation to its knowledge-deliverable
@@ -31,9 +38,10 @@ through the investigator and re-adjudication path in
 
 ## Assess a Finding's Scope
 
-Read the full finding and identify the behavior that implementing it would commit
-the project to provide. Record the applicable acceptance criterion and classify
-the proposed change as one of:
+The reviewer or tester that raised a blocking finding classifies its scope in
+its report, citing the acceptance criterion and the behavior the fix would
+commit the project to provide. The foreman records that label and routes on
+it; it does not re-derive it. The labels:
 
 - **Required correction:** restores or completes accepted behavior, including
   necessary downstream tests and documentation. Continue within existing task
@@ -42,7 +50,12 @@ the proposed change as one of:
   accepted intent, such as a new guarantee, subsystem, supported environment, or
   continuing monitoring duty. Record it as a proposal for the operator.
 - **Unresolved interpretation:** the evidence does not settle the requested
-  behavior or whether the proposed fix is necessary. Name that uncertainty.
+  behavior or whether the proposed fix is necessary. Record it as an operator
+  decision naming that uncertainty.
+
+A blocking finding with no scope label goes back to its responsibility with the
+missing label named. A developer or foreman disputing a label is a contested
+verdict for the judge.
 
 A reviewer's label or confidence does not amend the accepted contract. Scope
 classification also does not dismiss a blocking finding: a contested verdict,
@@ -52,16 +65,18 @@ an expansion. An agreed correction still obeys the fix allowance and release
 gates; this reference adds no attempts or substitute judge trigger.
 
 When an operator decision is needed, save an attention item before presenting it.
-State the original requirement, proposed expansion, smallest compliant option,
-consequences of each choice, and a recommendation. Reuse a prior decision when
-its scope still covers the action. Continue independent authorized work while
-the affected task waits.
+Quote the original requirement, the proposed expansion, and the smallest
+compliant option, consequences and recommendation the reporting worker gave;
+the foreman adds no recommendation of its own. Reuse a prior decision when its
+scope still covers the action. Continue independent authorized work while the
+affected task waits.
 
-When successive findings concern the same underlying design, compare their
-causes and the actual progress before proposing another fix. Record whether
-the changes close distinct defects or keep compensating for an unresolved
-assumption. Put that evidence in the next brief, existing judge dispute, or
-operator proposal as applicable. Preserve the cumulative attempt count.
+When a report names findings recurring on the same underlying design, the
+foreman does not weigh the causes itself: it consults the `investigator`, whose
+report compares the causes and the actual progress and says whether the changes
+close distinct defects or keep compensating for an unresolved assumption. Put
+that report in the next brief, existing judge dispute, or operator proposal as
+applicable. Preserve the cumulative attempt count.
 
 ## Diagnose the User's Failure
 
@@ -82,10 +97,12 @@ both paths. Label facts, hypotheses, and unresolved uncertainties separately.
 
 ## Use the Evidence
 
-Before accepting a diagnosis, the foreman checks that its cause explains the
-reproduction and comparison evidence. A missing experiment is an explicit gap,
-not an invented pass. Obtain a focused investigation when the gap could change
-what should be fixed. Keep bounded research inside an already authorized bug
+A diagnosis is accepted on independent evidence, never on the foreman's reading:
+the tester verifies the reproduction fails before the fix and passes after it,
+and the reviewer checks that the stated cause explains the reproduction and
+comparison evidence. A missing experiment is an explicit gap, not an invented
+pass. A report naming a gap that could change what should be fixed routes to a
+focused `investigator` consultation. Keep bounded research inside an already authorized bug
 fix when it does not require a separate deliverable or decision.
 
 When implementation is authorized, turn the reproduction into an appropriate

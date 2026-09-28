@@ -536,8 +536,9 @@ Each schema-1 record contains `id`, `at`, `dispatch`, `assignment_index`, `task`
 path; delivery is saved successful `wait-report` JSON for that worker and path,
 or the exact owner-recorded `recover-report` output for that dispatch and the
 same report bytes.
-`contribution` classifies actual work as `none`, `design`, or `implementation`.
-Outcome and summary are the foreman's nonempty assessment, not task acceptance.
+`contribution` is the class the report declares, `none`, `design`, or
+`implementation`; an undeclared class records `design`. Outcome and summary
+quote the report's acceptance lines and answer, and are not task acceptance.
 
 The utility verifies the original confirmed dispatch, assignment and enrollment
 before appending. Exact ID/input retries preserve the original receipt, including

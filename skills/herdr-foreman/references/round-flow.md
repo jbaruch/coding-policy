@@ -95,8 +95,8 @@ assignment, or closes an investigation-only knowledge deliverable through Step 1
    reviewed tip for scoped re-checks; a new tip gets a new package.
 6. **Compose** — `compose-briefs.sh` renders the templates from one values
    file, refusing to write anything when a placeholder is unfilled or a
-   supplied key matches no template. The foreman decides the values; the script
-   decides nothing.
+   supplied key matches no template. The foreman supplies the values, copied
+   from the operator's request and the reports; the script decides nothing.
 7. **Provision** — `provision-worktree.sh` creates every worktree the briefs
    name, from the shared checkout. A worker never runs `git` there, so its
    checkout has to exist before the brief arrives.
@@ -107,8 +107,8 @@ assignment, or closes an investigation-only knowledge deliverable through Step 1
 9. **Observe** — `supervision-watch` observes every enrolled worker. Verify
    candidates with `wait-report.sh --once`, ledger outcomes, and acknowledge
    handled events under `references/supervision.md`.
-10. **Gate** — the foreman reads every report in full and decides: another round,
-   or the release hand-off.
+10. **Gate** — the foreman reads every report in full and gates on its verdict
+   lines and labels: another round, or the release hand-off.
 
 Before relying on consultation output, save the report delivery receipt and run
 `assess-specialist` under `references/specialists.md`. Record the accepted outcome

@@ -68,6 +68,50 @@ operator expressly requires YOLO for that retained developer.
 Recheck model availability and CLI flag spellings when upgrading a worker's
 CLI or changing a model pin.
 
+## Foreman Seat
+
+The foreman is a seat like every other: its tier is operator config, launched
+with its flags and proved from argv. The top-level `foreman` block names it:
+
+```json
+{
+  "agent": "foreman",
+  "kind": "claude",
+  "model": "sonnet-5",
+  "effort": "low",
+  "launch_args": ["--dangerously-skip-permissions"]
+}
+```
+
+`agent` is the Herdr name the foreman pane runs under; it is never also a
+configured worker or the pinned judge. `model` is an economical model: the
+parser refuses the kind's pinned top model and the judge's pinned model.
+`effort` is `low`, omitted only for a model that accepts no effort flag.
+`launch_args` are the operator's permission and UI options, under the same
+grammar as a worker's; the worker YOLO requirement does not apply to this
+seat. The refusals are `parse_foreman` in `skills/herdr-foreman/foreman/config.py`.
+
+Start the foreman from any shell, naming an empty Herdr shell pane:
+
+```text
+bash "$CP/skills/herdr-foreman/foreman.sh" start-foreman --pane <pane-id>
+```
+
+It starts the configured agent with exactly `launch_args` plus the tier's
+model and effort flags, and prints the launch-argv proof. A launch argv that
+differs refuses, and no foreman runs on an unproven tier.
+
+`foreman verify-foreman` proves the running foreman from its pane's live
+foreground argv — this Herdr pane by default, or `--pane <pane-id>`. Step 2's
+round preflight runs it as `checks.foreman_tier`; a missing `foreman` block or
+a differing argv blocks the round until the operator restarts the foreman with
+`start-foreman`. A context reset clears the pane's conversation and keeps its
+process, so the proven tier survives the reset.
+
+What the foreman does on that tier, and where each judgment it used to make
+now routes, is `rules/agent-team-operation.md` Foreman Seat and
+`skills/herdr-foreman/SKILL.md`.
+
 ## Planning and dispatch
 
 `plan --round ROLE=ROUND` selects a configured round type. Without it, the

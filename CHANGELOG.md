@@ -1,5 +1,53 @@
 # Changelog
 
+### Changed
+
+- **The Herdr foreman runs on a cheap model at low effort, and every judgment
+  it used to make routes to a worker (#601).** The operator's decision on #445:
+  the foreman is not "cheaper", it is cheap. `rules/agent-team-operation.md`
+  said the foreman ran on the strongest generally-available model at high
+  effort, which the #445 audit named as the cost driver: a strong model at high
+  effort spending its tokens on coordination. A new Foreman Seat section
+  replaces that bullet. The foreman dispatches, runs owner scripts, keeps its
+  records and gates on evidence (reviewer and tester reports, CI, oracle
+  verification, the report-verdict classifier gate); it never reasons through
+  task content and never substitutes its own reading for a missing report. The
+  pinned judge keeps the most capable model.
+
+  Walking `skills/herdr-foreman/SKILL.md` step by step found these points where
+  the foreman did judgment work itself, now routed to existing roles (none
+  added): unstated acceptance criteria (Step 1) and unnamed pre-implementation
+  surfaces (Step 5) go to an advisor consultation; which consultation a
+  question needs comes from the report or trigger that raised it; a review
+  partition is proposed in the developer's report and proved by
+  `validate-partition`; a bug brief's diagnosis belongs to the developer and
+  tester (Step 7); a consultation's outcome and contribution are its report's
+  own `met`/`unmet` and new `CONTRIBUTION:` lines, an undeclared contribution
+  recording `design` (Step 11); a stalled worker's recoverable partial work goes
+  to the investigator (Step 11); a finding's severity and scope are the labels
+  its reviewer or tester wrote, with new `required-correction` /
+  `contract-expansion` / `unresolved-interpretation` scope labels in both
+  templates (Step 12); a contested label, the foreman's own disagreement
+  included, goes to the judge; an investigation-only deliverable is assessed by
+  an independent reviewer; recurring findings go to the investigator. A report
+  missing a verdict or label returns to its responsibility instead of being
+  filled in. Step 12's classifier paragraph is untouched here; #531 owns it.
+
+  The foreman's tier is now operator config verified like every other seat. A
+  top-level `foreman` block in `config.json` names its agent, kind, model,
+  effort and launch options; `parse_foreman` refuses the kind's pinned top
+  model, the judge's model or agent, a worker's name, and any effort other than
+  `low`. New `foreman start-foreman --pane` launches exactly that tier and
+  proves it from the launch argv; new `foreman verify-foreman` proves a live
+  foreman pane from its foreground argv. The round preflight runs it as
+  `checks.foreman_tier`, and an unproven tier blocks the round, so an operator
+  upgrading must add the block (`config.example.json` ships sonnet-5 at low)
+  and restart the foreman once with `start-foreman`. A context reset keeps the
+  pane's process, so the proven tier survives it. Tests:
+  `skills/herdr-foreman/tests/test_foreman_seat.py` (config refusals, the
+  launched flags, launch- and live-argv proof, the CLI) and a new
+  `test_round_preflight.sh` case for the blocking check.
+
 ## 0.3.309 — 2026-09-28
 
 ### Added
