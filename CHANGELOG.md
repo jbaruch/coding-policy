@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.328 — 2026-09-28
+
 ### Fixed
 
 - **Three foreman-seat verification gaps from #616 close (Fixes #626).**
