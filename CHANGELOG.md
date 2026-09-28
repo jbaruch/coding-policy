@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.316 — 2026-09-28
+
 ### Changed
 
 - **The task ledger's field formats are now code constants the docs point at
