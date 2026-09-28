@@ -62,7 +62,7 @@ under the comment block above them. Tiered proof (`verify_argv`) stays exact
 and accepts no resume form.
 Do not clear a retained worker to repair a permission mismatch. Use the normal
 fresh-dispatch boundary once the current assignment is resolved, or the
-same-session restoration in `references/dispatch-recovery.md` when the
+same-session restoration in `skills/herdr-foreman/references/dispatch-recovery.md` when the
 operator expressly requires YOLO for that retained developer.
 
 Recheck model availability and CLI flag spellings when upgrading a worker's
@@ -70,8 +70,10 @@ CLI or changing a model pin.
 
 ## Foreman Seat
 
-The foreman is a seat like every other: no model or effort is pinned for it.
-The top-level `foreman` block declares it the way a worker is declared:
+The foreman is a seat like every other. The operator's tier table supplies
+its rows, as it does for every worker; no rule, plugin default or hardcoded
+value pins its model or effort. The top-level `foreman` block declares it the
+way a worker is declared:
 
 ```json
 {
@@ -94,12 +96,15 @@ YOLO requirement does not apply to this seat.
 The foreman's round type is `coordination` (`COORDINATION_ROUND` in
 `skills/herdr-foreman/foreman/tiers.py`), with its required capabilities in
 `ROUND_CAPABILITIES` in `skills/herdr-foreman/foreman/capabilities.py`.
-Selection reads the seat's tier table, the capability table and the measured
+`select_tier` resolves the seat's `coordination` row with the measured
 headroom of the seat's `window_group`, the usage window it shares with measured
-workers; the foreman's own pane is never usage-probed. It returns the selected
-row with its capability verdict and pressure headroom. It refuses when the table
-has no `coordination` row or the capability table records that row inadequate;
-a cheaper row never stands in for it. The selection is `_select_foreman_tier` and `_foreman_headroom` in
+workers; the foreman's own pane is never usage-probed. Under measured scarcity
+the round declines a discretionary escalation, as any non-judgment round does
+(`rules/agent-team-operation.md` Round Tiers), and never selects below the
+configured row. The capability table then assesses the selected row. Selection
+returns that row with its capability verdict and pressure headroom, and refuses
+when the table has no `coordination` row or the capability table records that
+row inadequate; a cheaper row never stands in for it. The selection is `_select_foreman_tier` and `_foreman_headroom` in
 `skills/herdr-foreman/foreman/cli.py`. The planner never seats the foreman on a
 worker: `plan --roles foreman` is refused.
 
@@ -117,14 +122,16 @@ launch-argv proof. A launch argv that differs refuses.
 
 `foreman verify-foreman` re-runs the selection and proves the running foreman
 from its pane's live foreground argv, this Herdr pane by default or
-`--pane <pane-id>`. Step 2's round preflight runs it as `checks.foreman_tier`:
+`--pane <pane-id>`. Step 2's round preflight runs it inside one composite check
+with `foreman measure`, `skills/herdr-foreman/foreman-tier-check.py`, and records
+its `checks.headroom` and `checks.foreman_tier` rows:
 
 - the running argv carries the selected tier — `ok`
 - it carries another tier, or the selection refuses — `failed`, and the round
   blocks until the operator restarts the foreman with `start-foreman`
 - config has no `foreman` block — `unconfigured`, a stderr warning with the
   configure command in `detail.warning`; the round proceeds
-- `checks.headroom` did not pass — the preflight runs only
+- `checks.headroom` did not pass — the composite runs only
   `verify-foreman --config-only`, which reads config presence without
   selecting or probing; a configured foreman records `failed` as a dependency
   on headroom, and an absent block is still `unconfigured`
@@ -155,7 +162,7 @@ Codex `consultation` and `test_plan` rows at `medium` are a starting point, not
 a measured result; record a measurement in the capability table before
 relying on it. Config schema 4 refuses a tier table without a `consultation`
 row; copy the example's row, never synthesize one from `build`. A schema-3
-table keeps the judgment defaults it was written against (`state-schema.md`).
+table keeps the judgment defaults it was written against (`skills/herdr-foreman/state-schema.md`).
 
 `--round-context FILE` reads a JSON object keyed by assigned role. A
 mechanical context has this shape:
@@ -362,7 +369,7 @@ about provider billing. Do not copy test evidence into a live configuration.
 Every plan records, per assignment, why it got its model and effort: the
 required capabilities, the selected pair, the capability-table evidence, each
 cheaper candidate with its verdict or an unknown cost, and the escalation
-conditions. The record shape is plan schema 13 in `state-schema.md`; it
+conditions. The record shape is plan schema 13 in `skills/herdr-foreman/state-schema.md`; it
 explains a selection and never changes one.
 
 `cost-report` reports each task's resource use through acceptance from the
@@ -370,7 +377,7 @@ state file alone, as JSON, each quantity separately. Token counts are not in
 any owner record and read `unknown`, listed under `unrecorded`. A shared or
 concurrently used window keeps `attribution: unknown`. The report makes no
 savings claim: a tier's quota or multiplier change is never read as a cost
-reduction. The output contract is in `state-schema.md` (Writer / Reader
+reduction. The output contract is in `skills/herdr-foreman/state-schema.md` (Writer / Reader
 Contract); what each field counts is `skills/herdr-foreman/foreman/cost_report.py`.
 
 ## What stands in for a validation battery
@@ -393,4 +400,4 @@ cover what one would catch:
 The pinned judge start path keeps its own launch proof. The operator owns
 billing inputs inside config.json; these readers never write or migrate that
 file. The state owner records launch proof in assignment rows; see
-`state-schema.md` for reader behavior.
+`skills/herdr-foreman/state-schema.md` for reader behavior.

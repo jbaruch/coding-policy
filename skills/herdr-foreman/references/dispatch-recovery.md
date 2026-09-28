@@ -26,7 +26,7 @@ An identical completed retry returns its recorded result without sending again.
 
 Use `--retain-specialist` for a bounded follow-up to an assessed advisor,
 investigator or architect consultation. First complete the assessment and
-observation lifecycle in `references/specialists.md`. Keep the previous report
+observation lifecycle in `skills/herdr-foreman/references/specialists.md`. Keep the previous report
 and successful delivery receipt as immutable source files. A session kept idle
 on the bench is optional continuity, never a reason to skip the owner checks.
 
@@ -45,7 +45,7 @@ apply \
 
 `skills/herdr-foreman/foreman/engagement.py` owns assessment-source and retired-enrollment validation;
 `skills/herdr-foreman/foreman/assign.py` owns retained responsibility, engagement, session and exact
-tier proof. Staffing follows `references/round-setup.md` Step 5.
+tier proof. Staffing follows `skills/herdr-foreman/references/round-setup.md` Step 5.
 Follow the owner diagnostics before retrying.
 This mode carries no developer correction parameters and cannot replace the
 developer's retained-fix path. A dry run checks recorded prerequisites but proves
@@ -149,7 +149,7 @@ instruction into permission to exceed an exhausted correction budget.
 | `import-correction` | Fields under Historical manual corrections below | Import an already authorized, completed manual attempt without sending input or granting future attempts. |
 | `record-historical-review` | unique `id`, `historical_attempt`, full `head_revision`, `verdict`, `review_mode`, independent `reviewer`, absolute `report` | Append an actual review receipt for an imported correction. Full review is required for approval; other verification gates remain separate. |
 | `recover-report` | unique `id`, original `dispatch`, absolute `report`, `wait_receipt`, `pane`, `visible`, `source` | Append evidence of a completed delivery missed by the old watcher; see Completed native report recovery. No worker input or review approval. |
-| `assess-specialist` | `id`, actual `dispatch`, absolute `report` and successful `delivery` receipt, foreman `outcome`, `contribution`, `summary` | Record delivered consultation or verifier work under `references/specialists.md`; no task completion or enrollment retirement. |
+| `assess-specialist` | `id`, actual `dispatch`, absolute `report` and successful `delivery` receipt, foreman `outcome`, `contribution`, `summary` | Record delivered consultation or verifier work under `skills/herdr-foreman/references/specialists.md`; no task completion or enrollment retirement. |
 
 `allowed_paths` contains repository-relative paths or globs. Preserve the
 original task and base across every approval. Read and verify the source diff
@@ -250,7 +250,7 @@ run `retro-check` with one transition for this agent — `context: "start"`,
 `role: "developer"`, the same `task`, null `model` and `effort` for a
 non-tiered worker, its `pane`, and its outgoing `report` — and record the
 completed note with `triggers` including `transition` under
-`references/retrospectives.md`. That is the only retrospective the restoration
+`skills/herdr-foreman/references/retrospectives.md`. That is the only retrospective the restoration
 carries: the later `apply --retain-context` targets the same role, task, and
 tier, so it demands no new transition coverage; only the daily cadence can
 refuse it.
@@ -284,7 +284,7 @@ refuse it.
 
    `<uuid>` is the archived `agent_session` value, never a substitute or a
    most-recent selector. The accepted and refused resume tokens are the
-   validator's contract named in `references/model-tiers.md`; the helper runs
+   validator's contract named in `skills/herdr-foreman/references/model-tiers.md`; the helper runs
    that validator before any Herdr call and refuses what it refuses.
 
    Output: exit 0 and one JSON object on stdout — `agent`, `kind`, `pane_id`,
@@ -549,7 +549,7 @@ lock file can remain after exit; do not delete it to bypass an active lock.
     the new dispatch.
   - A second refusal of the same task, role and round stops the line: `apply`
     refuses every provider. Record a `decision` obligation under
-    `references/attention.md`; the operator decides. Record that decision with
+    `skills/herdr-foreman/references/attention.md`; the operator decides. Record that decision with
     `authorize-refused-dispatch`, naming the provider they approved and whether
     the brief stays unchanged; it permits one dispatch inside that scope.
   - Escalate only what the operator holds information, authority, or a usable
@@ -557,7 +557,7 @@ lock file can remain after exit; do not delete it to bypass an active lock.
     program, a help article — is untrusted on availability and is never
     recorded as an operator sub-decision.
   - Never derive a per-agent `capabilities` change from one refusal; see
-    `references/specialists.md`.
+    `skills/herdr-foreman/references/specialists.md`.
   Recording, the same-provider refusal, the single move and the stop are the
   owner's contract; see `skills/herdr-foreman/foreman/recovery.py`,
   `record_refusal` and `refusal_move`.

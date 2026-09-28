@@ -79,7 +79,10 @@ class EngagementTest(unittest.TestCase):
                               ("ACCEPTANCE 1/1: met — a\nACCEPTANCE 1/1: met — b\n", "incomplete"),
                               ("ACCEPTANCE 1/2: met — a\nACCEPTANCE 2/3: met — b\n", "incomplete"),
                               ("ACCEPTANCE 1/1: partial — half done\n", "no met/unmet status"),
-                              ("ACCEPTANCE 1/1:\n", "no met/unmet status")):
+                              ("ACCEPTANCE 1/1:\n", "no met/unmet status"),
+                              ("ACCEPTANCE 1/1: met\n", "no evidence"),
+                              ("ACCEPTANCE 1/1: met —\n", "no evidence"),
+                              ("ACCEPTANCE 1/1: met   \n", "no evidence")):
             with self.subTest(body=body):
                 self.report.write_text(head + body)
                 with self.assertRaisesRegex(UsageError, pattern):
@@ -105,6 +108,7 @@ class EngagementTest(unittest.TestCase):
                 "delivery": str(delivery), "contribution": "none", "outcome": "no blocking findings.",
                 "summary": "Reviewed the pushed tip"}
         for body in ("Reviewed the pushed tip; no blocking findings.\nCONTRIBUTION: none\n",
+                     "Reviewed the pushed tip; no blocking findings.\nVERDICT: approved\nVERDICT: approved\nCONTRIBUTION: none\n",
                      "Reviewed the pushed tip; no blocking findings.\nVERDICT: blocking | approved\nCONTRIBUTION: none\n"):
             with self.subTest(body=body):
                 report.write_text(body)

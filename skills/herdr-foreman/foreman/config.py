@@ -72,7 +72,7 @@ class Agent:
         self.clear_prompt = clear_prompt
         self.close_keys = tuple(close_keys)
         # Footer signatures the idle probe matches when herdr's title-derived
-        # state says `working`. See foreman/probe.py.
+        # state says `working`. See skills/herdr-foreman/foreman/probe.py.
         self.idle_markers = tuple(idle_markers)
         self.working_markers = tuple(working_markers)
         # Keys that move a usage dialog to its next tab, when the report is

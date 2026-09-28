@@ -2,7 +2,8 @@
 name: herdr-foreman
 description: >
   Run Herdr rounds as a nonworking foreman on a selected, verified tier: assign,
-  supervise, accept or reject on evidence, and route every judgment to the crew.
+  supervise, accept or reject on evidence, and route every judgment to the crew
+  or the operator.
   Covers on-demand specialists, model tiers, bounded briefs,
   report verification, and release gates. Use for requests to dispatch the Herdr
   team, balance worker usage, collect reports, run or retrieve retrospectives,
@@ -23,8 +24,9 @@ or handoff covering every active assignment. Keep user attention visible under
 
 Follow `rules/agent-team-operation.md` for round constraints.
 
-You run on the selected tier for the foreman (`rules/agent-team-operation.md` Foreman
-Seat). Dispatch, run owner scripts, keep the owner records, and gate on the
+You run on the foreman's selected tier: the `coordination` row `select_tier`
+resolves from the operator's tier table with the seat's measured headroom
+(`rules/agent-team-operation.md` Foreman Seat). Dispatch, run owner scripts, keep the owner records, and gate on the
 evidence reports and scripts produce. Never reason through task content. Each
 judgment below routes to the worker or operator its row names, and you act on
 that report or recorded decision:
@@ -518,7 +520,7 @@ bash "$CP/skills/herdr-foreman/foreman.sh" apply \
   [--correction-plan <id> --work <work.json>] [--dispatch-id <stable-id>]
 ```
 
-Emits dispatch JSON under `state-schema.md`. Supply each role's fresh absolute
+Emits dispatch JSON under `skills/herdr-foreman/state-schema.md`. Supply each role's fresh absolute
 report path from its brief. Apply enrolls before input; unknown sends remain
 observation obligations. Apply refuses while an open decision or blocker on the
 task is unanswered; see the attention reference's Dispatch gate.
@@ -763,7 +765,7 @@ The reset foreman takes Step 17's Resume Route.
 
 The release is one more assignment, never a prompt into the developer's
 existing context. Return to Step 7 with the role `release` for
-the developer's agent (template `templates/brief-release.md`, the same
+the developer's agent (template `skills/herdr-foreman/templates/brief-release.md`, the same
 `WORKTREE` and `BRANCH`, a fresh `REPORT`), run Step 8 (it reports
 `already-provisioned`), dispatch through Step 10 so the context is cleared and
 the brief is fresh, and wait on the report in Step 11. A source-changing

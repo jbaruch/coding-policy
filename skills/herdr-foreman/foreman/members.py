@@ -30,7 +30,7 @@ from .errors import StateError, UsageError
 from .state import load_state_checked
 
 # Task-ledger schema 1 (#589). These constants ARE the ledger's field formats:
-# state-schema.md (Task Ledger) and references/task-ledger.md name them and
+# state-schema.md (Task Ledger) and skills/herdr-foreman/references/task-ledger.md name them and
 # restate none of them, so one edit here changes the contract and the validator.
 #: The schema version the frontmatter and every event carry.
 LEDGER_SCHEMA_VERSION = "1"
@@ -267,7 +267,7 @@ def wait_inputs(state_path, enrollment, warn=None):
     since = (dispatch.get("result") or {}).get("at") if dispatch and dispatch.get("status") == "applied" else None
     if since is None:
         raise UsageError("Dispatch {} has no applied send time in {}, so a checkpoint could never reach its stall "
-                         "outcome. Reconcile the dispatch through references/dispatch-recovery.md before checking "
+                         "outcome. Reconcile the dispatch through skills/herdr-foreman/references/dispatch-recovery.md before checking "
                          "its report.".format(enrollment, state_path), {"enrollment": enrollment})
     return {"agent": assignment["agent"], "report": assignment["report"],
             "base": task["base_revision"] if task else None, "since": since}

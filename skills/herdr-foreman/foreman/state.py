@@ -98,7 +98,7 @@ LEDGER_JUDGE_MODES = frozenset(JUDGE_MODES) | {"unknown"}
 #:     proves the work finished -- see `landed` and `started` on the apply
 #:     record for which one it was.
 #: `sent_but_not_started` -- the paste went out and NEITHER was observed (see
-#:     foreman/composer.py send_message).
+#:     skills/herdr-foreman/foreman/composer.py send_message).
 #: `unknown` -- written before rows carried a status.
 STATUS_APPLIED = "applied"
 STATUS_NOT_STARTED = "sent_but_not_started"

@@ -160,7 +160,7 @@ specialty; which role and which specialty answer each trigger are the
 `skills/herdr-foreman/foreman/triggers.py`, and the detection payload names
 the one it accepted. An advisor staffed for a fired `security` trigger is
 planned with round context `{"advisor": {"security_trigger": true}}`, which
-selects its judgment round (`references/model-tiers.md`).
+selects its judgment round (`skills/herdr-foreman/references/model-tiers.md`).
 
 A staffing decision answers a fired trigger instead, and the detector reads it:
 
@@ -265,7 +265,7 @@ gap to resolve or report; do not claim visual inspection, user research,
 assistive technology coverage or measurements that the worker cannot perform.
 Avoid activating adjacent specialist workflows solely from a changed filename.
 
-Compose each consultation with `templates/brief-specialist.md` through the
+Compose each consultation with `skills/herdr-foreman/templates/brief-specialist.md` through the
 composer; its canonical consultation roles select that shared template. Supply
 `TASK`, `SPECIALTY`, `RESPONSIBILITY`, `OBJECTIVE`, `ACCEPTANCE_CRITERIA`, `INPUTS`,
 `TOOLS_AND_SKILLS`, `SCOPE_LIMITS`, `CONTRIBUTION_HISTORY`, `KNOWLEDGE` and `REPORT`,
@@ -292,7 +292,7 @@ and does not re-assess a consultation's substance
 tester's is its single `VERDICT:` line. The contribution is the report's
 `CONTRIBUTION:` line, and a report without one records `design`. The owner
 refuses the assessment, and a warm follow-up on it, when a line is missing,
-duplicated or unresolved, or a criterion is `unmet`
+duplicated, unresolved or without evidence, or a criterion is `unmet`
 (`require_report_result` in `skills/herdr-foreman/foreman/engagement.py`); the
 consultation returns to its responsibility with the gap named. A dispute over whether a
 consultation met its criteria goes to an independent reviewer, and a contested
@@ -329,7 +329,7 @@ value that disagrees (`declared_contribution` in
 `wait-report.sh` JSON receipt for that worker and report, with `found: true`, or
 the unchanged owner `recover-report` result for that exact dispatch and report.
 For native delivery missed by the watcher, complete recovery under
-`references/dispatch-recovery.md` first and save its actual output. The assessment
+`skills/herdr-foreman/references/dispatch-recovery.md` first and save its actual output. The assessment
 owner checks recovered output against the saved recovery record; an edited or
 invented receipt does not establish delivery.
 Use an actual dispatch identity and matching report path; never invent history
@@ -380,7 +380,7 @@ history retains unknown scope, and architecture work remains a possible
 contribution until assessed against actual output. The owner never infers
 independence from a newer schema stamp. External authors and work without usable
 task provenance still need the foreman's explicit exclusions. Follow the planning
-contract in `references/round-setup.md` Step 5 rather than reclassifying history
+contract in `skills/herdr-foreman/references/round-setup.md` Step 5 rather than reclassifying history
 from a worker's current label.
 
 Keep a useful worker idle after its report when follow-up is likely and capacity

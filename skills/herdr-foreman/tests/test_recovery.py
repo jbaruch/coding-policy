@@ -1187,7 +1187,8 @@ class RecoveryTests(unittest.TestCase):
                 "reviewer": "independent-reviewer", "report": str(self.review), "changed_paths": ["src/parser.py"]}
         with self.assertRaisesRegex(UsageError, "states VERDICT blocking but the receipt records approved"):
             record_report(self.store, data, AT)
-        for body in ("no verdict line", "VERDICT: blocking | approved", "VERDICT: blocking\nVERDICT: approved"):
+        for body in ("no verdict line", "VERDICT: blocking | approved", "VERDICT: blocking\nVERDICT: approved",
+                     "VERDICT: approved\nVERDICT: approved"):
             with self.subTest(body=body):
                 self.review.write_text("Reviewed head: " + HEAD + "\n" + body + "\n")
                 with self.assertRaisesRegex(UsageError, "VERDICT"):

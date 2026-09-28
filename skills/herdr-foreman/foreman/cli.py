@@ -2009,9 +2009,12 @@ def _foreman_headroom(seat, snapshot):
 def _select_foreman_tier(args, seat, warn):
     """The tier the seat's coordination round resolves to, by the workers' own machinery.
 
-    `select_tier` reads the seat's tier table and its measured headroom; the
-    capability table refuses a row it records inadequate. No model or effort
-    is pinned for this seat anywhere else.
+    The operator's tier table supplies the seat's rows, as it does for every
+    worker. `select_tier` resolves the `coordination` row with the seat's
+    measured headroom, declining a discretionary escalation under scarcity as
+    any non-judgment round does; the capability table refuses a selected row it
+    records inadequate. No rule, plugin default or hardcoded value pins this
+    seat's model or effort.
     """
     state_path = _state_path(args)
     snapshot = latest_snapshot(load_state(state_path, warn=warn))

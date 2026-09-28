@@ -37,8 +37,11 @@ description: Running a multi-agent team — task-based specialist composition, c
 - The foreman does no heavy lifting
 - Every judgment on task content goes to the responsible worker, or to the operator where operator authority is required
 - The operator's `config.json` `foreman` block declares the seat like a worker: its agent, kind, launch options and an optional tier table
-- No rule, config field or default pins the foreman's model or effort
-- Tier selection resolves the foreman's `coordination` round through the machinery every seat uses: the tier table, the capability table and measured headroom
+- The operator's tier table supplies the foreman's rows, as it does for every worker
+- No rule, plugin default or hardcoded value pins the foreman's model or effort
+- `select_tier` resolves the foreman's `coordination` row with the foreman's measured headroom
+- Under measured scarcity the foreman's round declines a discretionary escalation, as any non-judgment round does under Round Tiers
+- The capability table refuses a selected row it records inadequate
 - The foreman's headroom is the measured headroom of the `window_group` its block declares
 - A foreman declaring no `window_group` reads as unmeasured
 - The foreman's agent is never a configured worker or the pinned judge's

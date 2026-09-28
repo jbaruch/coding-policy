@@ -99,7 +99,7 @@ never ranks the judge seat or gives its pinned worker another role.
 
 Plan schema 5 also carries `tiers` keyed by role and `rounds` with the foreman's
 round type and context inputs. Legacy non-tiered assignments have no tier
-metadata. The operator's tier table, supported flags, and billing evidence are documented in `references/model-tiers.md`.
+metadata. The operator's tier table, supported flags, and billing evidence are documented in `skills/herdr-foreman/references/model-tiers.md`.
 `task_context` is null for an unlabelled plan, otherwise an object containing
 `task`, cumulative `fix_round`, correction `plan` identity or null, and `work`
 bounds or null. Apply refuses different task context. Earlier plan shapes and
@@ -118,7 +118,7 @@ and stable `engagement`. The input envelope to `plan --requirements` is
 The plan stores normalized requirement objects directly, without that envelope.
 Absent requirements preserve legacy planning. New consultation responsibilities
 require explicit requirements; the parser and selection contract live in
-`references/specialists.md`. Apply rechecks current eligibility before an unsent
+`skills/herdr-foreman/references/specialists.md`. Apply rechecks current eligibility before an unsent
 dispatch. A completed exact retry returns its original receipt.
 
 Plan schema 11 adds `partition_proof` to a partitioned plan, copied unchanged

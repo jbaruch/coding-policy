@@ -307,7 +307,7 @@ def verify_worker_permissions(kind, argv):
     key so approval overrides cannot hide.
     """
     recovery = ("Inspect its foreground argv, then start a fresh worker with the documented YOLO flags "
-                "or restore a retained developer's own native session under references/dispatch-recovery.md before dispatch.")
+                "or restore a retained developer's own native session under skills/herdr-foreman/references/dispatch-recovery.md before dispatch.")
     if (kind not in YOLO_FLAGS or not isinstance(argv, list) or not argv
             or any(not isinstance(arg, str) for arg in argv) or PurePath(argv[0]).name != kind):
         raise HerdrError("Worker has no usable YOLO process proof. " + recovery, {})

@@ -47,7 +47,9 @@ UNDECLARED_CONTRIBUTION = "design"
 #: optionally bulleted or backquoted, evidence after the status. Criteria are
 #: numbered 1..N in the order the brief states them.
 ACCEPTANCE_LINE = re.compile(
-    r"^[ \t>*-]*`?ACCEPTANCE[ \t]+(\d+)/(\d+):[ \t]*([A-Za-z_-]*)", re.MULTILINE)
+    r"^[ \t>*-]*`?ACCEPTANCE[ \t]+(\d+)/(\d+):[ \t]*([A-Za-z_-]*)`?(.*)$", re.MULTILINE)
+#: The evidence that follows a status: a dash, then at least one non-space character.
+EVIDENCE = re.compile(r"^[ \t]*(?:—|–|-)[ \t]*\S")
 #: The resolved statuses an acceptance line may carry.
 ACCEPTANCE_STATUSES = frozenset({"met", "unmet"})
 #: The fields the foreman quotes from the bound report rather than writes.
@@ -102,20 +104,25 @@ def acceptance_results(body):
         raise UsageError(
             "The report carries no `ACCEPTANCE <k>/<N>: met|unmet` lines; return it to its responsibility for one "
             "line per acceptance criterion.", {"missing": "acceptance"})
-    totals = {int(total) for _index, total, _status in lines}
-    indices = [int(index) for index, _total, _status in lines]
+    totals = {int(total) for _index, total, _status, _rest in lines}
+    indices = [int(index) for index, _total, _status, _rest in lines]
     total = next(iter(totals))
     if len(totals) != 1 or total < 1 or sorted(indices) != list(range(1, total + 1)):
         raise UsageError(
             "The report's acceptance lines are incomplete or inconsistent (criteria {} of totals {}); return it to "
             "its responsibility for exactly one line per criterion 1..N.".format(
                 sorted(indices), sorted(totals)), {"indices": sorted(indices), "totals": sorted(totals)})
-    results = {int(index): status for index, _total, status in lines}
+    results = {int(index): status for index, _total, status, _rest in lines}
     unresolved = sorted(index for index, status in results.items() if status not in ACCEPTANCE_STATUSES)
     if unresolved:
         raise UsageError(
             "Acceptance criteria {} carry no met/unmet status; return the report to its responsibility with the gap "
             "named.".format(unresolved), {"unresolved": unresolved})
+    unevidenced = sorted(int(index) for index, _total, _status, rest in lines if not EVIDENCE.match(rest))
+    if unevidenced:
+        raise UsageError(
+            "Acceptance criteria {} carry no evidence after the status; return the report to its responsibility for "
+            "`ACCEPTANCE <k>/<N>: met|unmet — <evidence>`.".format(unevidenced), {"unevidenced": unevidenced})
     return results
 
 
@@ -132,7 +139,7 @@ def require_report_result(body, role):
                 "Acceptance criteria {} are reported unmet; return the consultation to its responsibility with them "
                 "named.".format(unmet), {"unmet": unmet})
         return
-    if len(report_verdicts(body)) != 1:
+    if len(report_verdicts(body)) != 1:  # one line, not one distinct value
         raise UsageError(
             "The {} report states no single `VERDICT: blocking | approved` line; return it to its responsibility "
             "with the gap named.".format(role), {"missing": "verdict"})

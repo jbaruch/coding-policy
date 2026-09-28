@@ -154,6 +154,28 @@
   `VERDICT:` line. Tests: `test_engagement.py`, `test_foreman_seat.py`,
   `test_round_preflight.sh`.
 
+  The following review found three more. The Foreman Seat claimed capability
+  and headroom choose the tier with no config field pinning it, while the
+  operator's `coordination` row is the pick and headroom only declines a
+  discretionary escalation; the rule, `references/model-tiers.md`, SKILL.md and
+  the `_select_foreman_tier` docstring now say exactly that: the operator's
+  tier table supplies the foreman's rows, no rule, plugin default or hardcoded
+  value pins its model or effort, `select_tier` resolves the `coordination` row
+  with measured headroom, and the capability table refuses an inadequate row.
+  No selector change: a cheaper row still never substitutes for coordination.
+  The preflight takes the aggregate-reporting carve-out, whose checks must be
+  independent, yet its foreman-tier check depended on the headroom check; a
+  new `skills/herdr-foreman/foreman-tier-check.py` runs the measurement and the
+  tier proof as one composite check, and the preflight records its
+  `headroom`/`foreman_tier` pair, failing both rows when the composite cannot
+  decide. Bare cross-references (`references/...`, `templates/...`,
+  `foreman/...`, `state-schema.md`) in this PR's files are now repo-relative.
+  Two Copilot findings folded in: `report_verdicts` collapsed duplicate
+  `VERDICT:` lines into one, so a report repeating its verdict passed the
+  exactly-one check, and an acceptance line with no evidence after the status
+  passed; both now refuse. Tests: `test_round_preflight.sh` (composite failure
+  and malformed result), `test_engagement.py`, `test_recovery.py`.
+
 ## 0.3.321 — 2026-09-28
 
 ### Fixed

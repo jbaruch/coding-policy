@@ -54,6 +54,7 @@ shadow() { # <dir> [roster-rc] [authority-rc] [prune-rc] [capability-due] [autho
   local dir="$1" roster="${2:-0}" authority="${3:-0}" prune="${4:-0}" due="${5:-false}" authorized="${6:-true}"
   mkdir -p "$dir" || die "mkdir $dir"
   cp "$REAL/round-preflight.sh" "$dir/" || die "copy the script under test"
+  cp "$REAL/foreman-tier-check.py" "$dir/" || die "copy the composite foreman-tier check"
   stub "$dir" roster.sh "$roster" '{"agents":[{"name":"grok"}]}'
   stub "$dir" verify-authority.sh "$authority" "{\"authorized\":${authorized}}"
   local sweep_out='{"repos":[],"skipped":[]}'
@@ -287,6 +288,26 @@ main() {
      && [[ "$(field "$OUT" 'd["checks"]["foreman_tier"].get("detail")')" == "null" ]] \
      && printf '%s' "$OUT" | grep -q 'not verified: the foreman'; then
     pass; else fail "a zero-exit unreadable measure leaves the foreman tier unverified, got RC=$RC OUT=$OUT"; fi
+
+  # The composite check is recorded as one result: a run that cannot decide
+  # fails both of its rows, never one row alone.
+  shadow "$TMP/compositefails"
+  printf '#!/usr/bin/env python3\nimport sys\nprint("foreman-tier-check: stand-in failure", file=sys.stderr)\nsys.exit(2)\n' \
+    > "$TMP/compositefails/foreman-tier-check.py" || die "write composite stub"
+  run "$TMP/compositefails"
+  if [[ $RC -eq 1 ]] && [[ "$(field "$OUT" 'd["checks"]["headroom"]["status"]')" == '"failed"' ]] \
+     && [[ "$(field "$OUT" 'd["checks"]["foreman_tier"]["status"]')" == '"failed"' ]] \
+     && printf '%s' "$OUT" | grep -q 'foreman-tier-check.py exited 2'; then
+    pass; else fail "a failed composite check fails both rows, got RC=$RC OUT=$OUT"; fi
+
+  # A composite result that is not the headroom/foreman_tier pair fails both.
+  shadow "$TMP/compositebad"
+  printf '#!/usr/bin/env python3\nprint("{\\"headroom\\": {\\"status\\": \\"ok\\"}}")\n' \
+    > "$TMP/compositebad/foreman-tier-check.py" || die "write composite stub"
+  run "$TMP/compositebad"
+  if [[ $RC -eq 1 ]] && [[ "$(field "$OUT" 'd["checks"]["foreman_tier"]["status"]')" == '"failed"' ]] \
+     && printf '%s' "$OUT" | grep -q 'without one readable headroom and foreman_tier result'; then
+    pass; else fail "an incomplete composite result fails both rows, got RC=$RC OUT=$OUT"; fi
 
   shadow "$TMP/usage"
   for args in "--checkout /tmp" "--repo o/r"; do

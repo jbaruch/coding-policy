@@ -65,8 +65,9 @@ Write `{{REPORT}}` with:
 - One line per acceptance criterion, numbered 1..N in the order the brief
   states them: `ACCEPTANCE <k>/<N>: met — <evidence>` or
   `ACCEPTANCE <k>/<N>: unmet — <evidence>`. The owner script parses these
-  lines; a missing, duplicated or unresolved line, or any `unmet`, returns the
-  report to you. The foreman does not re-assess the substance.
+  lines; a missing, duplicated or unresolved line, one without evidence, or any
+  `unmet`, returns the report to you. The foreman does not re-assess the
+  substance.
 - `CONTRIBUTION: none | design | implementation` — the class of the content you
   originated or materially shaped. The owner script reads this line from
   your report; an omitted line records as `design`.

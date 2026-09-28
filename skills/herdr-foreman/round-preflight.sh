@@ -34,14 +34,12 @@
 # writes. Every other check is read-only except the worktree sweep, which
 # removes worktrees and deletes local branches under its own contract.
 #
-# `checks.foreman_tier` (`foreman verify-foreman`): ok with the argv proof as
-# detail when this pane runs the foreman's selected tier;
-# unconfigured, not blocking, with the configure command as
-# `detail.warning` when config has no `foreman` block, whatever
-# `checks.headroom` reported; failed, and blocking,
-# when the live argv differs or the selection refuses; failed, and
-# blocking, for a configured foreman when `checks.headroom` did not pass, since the
-# selection reads that measurement. `--no-measure` reuses the latest snapshot.
+# `checks.headroom` and `checks.foreman_tier` are the two rows of ONE composite
+# check, foreman-tier-check.py, which owns the dependency between them; its
+# docstring states each row's statuses. An absent `foreman` block is
+# `unconfigured`, never blocking, whatever headroom reported. A composite run
+# that exits non-zero or returns no readable pair fails both rows.
+# `--no-measure` reuses the latest snapshot.
 #
 # `checks.worktrees` (the sweep, sweep-worktrees.sh):
 #   ok         no detail when the worktree root does not exist; otherwise the
@@ -134,6 +132,31 @@ main() {
   local results="${scratch}/checks.json"
   printf '{}' > "$results" || die "cannot write to ${scratch}"
 
+  merge_composite() { # <composite-json-file>; prints the foreman_tier status
+    python3 - "$results" "$1" <<'PY'
+import json, sys
+path, composite = sys.argv[1:3]
+with open(composite, encoding="utf-8") as handle:
+    rows = json.load(handle)
+if not isinstance(rows, dict) or set(rows) != {"headroom", "foreman_tier"}:
+    sys.exit("the composite result is not exactly a headroom and a foreman_tier row")
+merged = {}
+for name, row in rows.items():
+    if (not isinstance(row, dict) or not isinstance(row.get("status"), str)
+            or not set(row) <= {"status", "reason", "detail"}
+            or ("reason" in row and not isinstance(row["reason"], str))
+            or ("detail" in row and not isinstance(row["detail"], dict))):
+        sys.exit("the {} row is malformed".format(name))
+    merged[name] = {**row, "due": False}
+with open(path, encoding="utf-8") as handle:
+    checks = json.load(handle)
+checks.update(merged)
+with open(path, "w", encoding="utf-8") as handle:
+    json.dump(checks, handle)
+print(merged["foreman_tier"]["status"])
+PY
+  }
+
   record() { # <name> <status> <reason-or-empty> <due:0|1> <detail-file-or-empty> [command]
     # A check that could not be recorded would vanish from the aggregate and
     # let `ready` pass without it, so a failed write ends the preflight.
@@ -218,80 +241,32 @@ PY
     record authority failed "verify-authority.sh exited ${rc} for ${repo}; an unanswerable authority check is not permission" 0 ""
   fi
 
-  # 4. Headroom. The one check that writes, and the one the planner reads.
-  local measured=skipped
-  if [ "$measure" -eq 1 ]; then
-    bash "${HERE}/foreman.sh" "${common[@]+"${common[@]}"}" measure "${clock[@]+"${clock[@]}"}" \
-      > "${scratch}/measure.json" 2>"${scratch}/measure.err"
-    rc=$?
-    cat "${scratch}/measure.err" >&2
-    if [ "$rc" -eq 0 ]; then
-      record headroom ok "" 0 "${scratch}/measure.json" "foreman measure"
-      # A zero exit with unreadable output records headroom blocked, and the
-      # foreman's selection must not read a snapshot that check did not pass.
-      # An unreadable row reads as not passed.
-      local headroom_status=""
-      if ! headroom_status="$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); r=d.get("headroom") if isinstance(d, dict) else None; print(r.get("status", "") if isinstance(r, dict) else "")' "$results")"; then
-        headroom_status=""
-      fi
-      if [ "$headroom_status" = ok ]; then
-        measured=ok
-      else
-        measured=failed
-      fi
-    else
-      measured=failed
-      record headroom failed "foreman measure exited ${rc}; a seat cannot be ranked on an unmeasured roster" 0 ""
+  # 4. Headroom and the foreman's tier: ONE composite check. The tier is
+  #    selected on the headroom `foreman measure` writes, so the dependency
+  #    lives inside foreman-tier-check.py, never between two preflight checks.
+  #    Its single result carries a `headroom` and a `foreman_tier` row; an
+  #    absent `foreman` block is the `unconfigured` warning and never blocks.
+  local tier_args=("${common[@]+"${common[@]}"}" "${clock[@]+"${clock[@]}"}")
+  [ "$measure" -eq 1 ] || tier_args+=(--no-measure)
+  python3 "${HERE}/foreman-tier-check.py" "${tier_args[@]}" \
+    > "${scratch}/foreman-tier.json" 2>"${scratch}/foreman-tier.err"
+  rc=$?
+  cat "${scratch}/foreman-tier.err" >&2
+  if [ "$rc" -eq 0 ]; then
+    local tier_status
+    if ! tier_status="$(merge_composite "${scratch}/foreman-tier.json")"; then
+      tier_status=""
     fi
+    case "$tier_status" in
+      unconfigured)
+        echo "round-preflight: warning: the foreman seat is unconfigured; see checks.foreman_tier.detail.warning" >&2 ;;
+      "")
+        record headroom failed "foreman-tier-check.py exited 0 without one readable headroom and foreman_tier result; re-run it and read its diagnostic before planning" 0 ""
+        record foreman_tier failed "foreman-tier-check.py exited 0 without one readable headroom and foreman_tier result; the foreman's tier is unproven" 0 "" ;;
+    esac
   else
-    record headroom skipped "" 0 ""
-  fi
-
-  # 4b. The foreman's own tier, selected on the headroom check 4 measures, so
-  #     it runs only on that measurement: when headroom did not pass, a
-  #     configured foreman records a dependency failure here instead of
-  #     verifying against a stale or absent snapshot. Config presence is read
-  #     independently, so an absent `foreman` block still warns and never
-  #     blocks. Under --no-measure it reuses the latest snapshot. This pane's
-  #     live argv must carry the selected tier.
-  if [ "$measured" = failed ]; then
-    bash "${HERE}/foreman.sh" "${common[@]+"${common[@]}"}" verify-foreman --config-only \
-      > "${scratch}/foreman-config.json" 2>"${scratch}/foreman-config.err"
-    rc=$?
-    cat "${scratch}/foreman-config.err" >&2
-    local present=""
-    if [ "$rc" -eq 0 ]; then
-      if ! present="$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); d=d if isinstance(d, dict) else {}; v=d.get("configured"); print("1" if v is True else "0" if v is False else sys.exit("configured is not a boolean"))' "${scratch}/foreman-config.json")"; then
-        present=""
-      fi
-    fi
-    if [ "$present" = "0" ]; then
-      echo "round-preflight: warning: the foreman seat is unconfigured; see checks.foreman_tier.detail.warning" >&2
-      record foreman_tier unconfigured "" 0 "${scratch}/foreman-config.json" "foreman verify-foreman --config-only"
-    else
-      record foreman_tier failed "not verified: the foreman's tier is selected on the headroom foreman measure writes, and that check did not pass; fix checks.headroom, then re-run the preflight" 0 ""
-    fi
-  else
-    bash "${HERE}/foreman.sh" "${common[@]+"${common[@]}"}" verify-foreman \
-      > "${scratch}/foreman-tier.json" 2>"${scratch}/foreman-tier.err"
-    rc=$?
-    cat "${scratch}/foreman-tier.err" >&2
-    if [ "$rc" -eq 0 ]; then
-      local configured
-      if ! configured="$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); d=d if isinstance(d, dict) else {}; v=d.get("configured"); print("1" if v is True else "0" if v is False else sys.exit("configured is not a boolean"))' "${scratch}/foreman-tier.json")"; then
-        configured=""
-      fi
-      if [ "$configured" = "1" ]; then
-        record foreman_tier ok "" 0 "${scratch}/foreman-tier.json" "foreman verify-foreman"
-      elif [ "$configured" = "0" ]; then
-        echo "round-preflight: warning: the foreman seat is unconfigured; see checks.foreman_tier.detail.warning" >&2
-        record foreman_tier unconfigured "" 0 "${scratch}/foreman-tier.json" "foreman verify-foreman"
-      else
-        record foreman_tier failed "foreman verify-foreman exited 0 without a readable configured flag; the foreman's tier is unproven" 0 ""
-      fi
-    else
-      record foreman_tier failed "foreman verify-foreman exited ${rc}; this pane does not run the foreman's selected tier. Read its diagnostic, then restart the foreman with start-foreman from another shell (references/model-tiers.md Foreman Seat)" 0 ""
-    fi
+    record headroom failed "foreman-tier-check.py exited ${rc}; re-run it and read its diagnostic before planning" 0 ""
+    record foreman_tier failed "foreman-tier-check.py exited ${rc}; the foreman's tier is unproven" 0 ""
   fi
 
   # 5. Capability-table cadence. Due is not blocking: the foreman refreshes it
