@@ -1,5 +1,20 @@
 # Changelog
 
+### Fixed
+
+- **The Go module-cache predicate in `prune-report-caches.py` no longer
+  takes evidence with it (#628).** Once `cache/download` existed, every
+  top-level directory of a `go-mod-cache` counted as cache, so a
+  `findings/report.md` left beside it was deleted, breaking the
+  "non-cache content is kept" contract. Only `cache/` and module path roots
+  (a host with a dot, or a `name@version` entry) now qualify; any other
+  top-level entry leaves the whole directory in place. A recorded reports
+  directory that is a regular file (`ENOTDIR`) is now counted `missing`
+  instead of `symlink`, which stays for `ELOOP`. The two swap-race findings
+  from #624's review were declined: more descriptor hardening is not the
+  answer, a smaller report-instead-of-delete design is, if a real case
+  appears. Fixes #628.
+
 ## 0.3.325 — 2026-09-28
 
 ### Fixed

@@ -207,6 +207,7 @@ def _only(fd, files=frozenset(), dirs=frozenset(), any_dir=False, dir_name=None)
 #: Top-level entries each cache kind may hold; anything else (a report, a
 #: note, a log) means the directory is not a pure cache and it stays.
 GO_BUILD_FILES = frozenset({"README", "trim.txt", "testexpire.txt"})
+GO_MODULE_DIRS = frozenset({"cache"})
 PIP_ENTRIES = frozenset({"http", "http-v2", "wheels", "selfcheck"})
 PIP_FILES = frozenset({"selfcheck.json"})
 NPM_DIRS = frozenset({"_cacache", "_logs", "_npx", "_prebuilds"})
@@ -222,12 +223,23 @@ def _go_build(fd):
             and _only(fd, files=GO_BUILD_FILES, dir_name=lambda name: len(name) == 2 and set(name) <= HEX))
 
 
+def _go_module_root(name):
+    """Whether top-level directory `name` is a module path root: a host (a
+    dot anywhere but the first character, `golang.org`) or a dotless module
+    at a version (`name@version`)."""
+    return not name.startswith(".") and ("." in name or "@" in name)
+
+
 def _go_module(fd):
+    """`cache/download` exists, and every other top-level entry is the
+    `cache` directory or a directory `_go_module_root` accepts. A file, or a
+    directory with any other name (`findings/`), leaves the whole directory
+    in place."""
     if not _is_dir_at(fd, "cache"):
         return False
     cache = open_at(fd, "cache")
     try:
-        return _is_dir_at(cache, "download") and _only(fd, any_dir=True)
+        return _is_dir_at(cache, "download") and _only(fd, dirs=GO_MODULE_DIRS, dir_name=_go_module_root)
     finally:
         os.close(cache)
 
@@ -599,7 +611,10 @@ def prune_candidate(root_fd, real_root, real, candidate, recorded, cutoff, budge
         result["missing"] += 1
         return False
     except OSError as exc:
-        if exc.errno in (errno.ELOOP, errno.ENOTDIR):
+        if exc.errno == errno.ENOTDIR:
+            result["missing"] += 1
+            return False
+        if exc.errno == errno.ELOOP:
             result["skipped"].append({"path": real, "reason": "symlink"})
             return False
         raise
