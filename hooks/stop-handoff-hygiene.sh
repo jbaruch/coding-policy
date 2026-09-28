@@ -248,8 +248,18 @@ read_owner_decisions() {
   fi
   read_inventory || return 0
   has_candidates || return 0
-  local here shared prune runner out err rc=0
-  here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)" || { warn "cannot resolve the hooks directory — skipping the worktree check; restore access to the plugin directory or reinstall the plugin"; return 0; }
+  local src dir here shared prune runner out err rc=0
+  # Command substitution strips every trailing newline, so the hooks directory
+  # never passes through one bare: parameter expansion derives it, and a
+  # sentinel carries `pwd` across the strip (#487).
+  src="${BASH_SOURCE[0]}"
+  case "$src" in
+    */*) dir="${src%/*}" ;;
+    *) dir=. ;;
+  esac
+  here="$(cd -- "${dir:-/}" && pwd && printf x)" || { warn "cannot resolve the hooks directory — skipping the worktree check; restore access to the plugin directory or reinstall the plugin"; return 0; }
+  here="${here%x}"
+  here="${here%$'\n'}"
   prune="${here}/../skills/herdr-foreman/prune-worktrees.sh"
   runner="${here}/../skills/herdr-foreman/bounded-run.sh"
   if [[ ! -f "$prune" || ! -r "$prune" || ! -f "$runner" || ! -r "$runner" ]]; then

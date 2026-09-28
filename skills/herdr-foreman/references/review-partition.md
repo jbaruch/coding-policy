@@ -38,8 +38,11 @@ role; a single-seat round needs none.
 
 ## Validate before planning
 
-```bash
-foreman.sh validate-partition --repo <repo> --base <base> [--head <head>] \
+Synopsis only; the runnable command, through `bash` and the resolved plugin
+root, is `skills/herdr-foreman/SKILL.md` Step 5.
+
+```text
+foreman validate-partition --repo <repo> --base <base> [--head <head>] \
   --partition <partition.json>
 ```
 

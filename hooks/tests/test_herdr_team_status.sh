@@ -16,6 +16,7 @@
 #   3. Outside Herdr  -> silent no-op, exit 0 (the common case).
 #   4. herdr broken   -> silent on stdout, warning on stderr, exit 0.
 #   5. herdr absent   -> silent on stdout, warning on stderr, exit 0.
+#   6. Hooks directory name ends in a newline -> the roster is still found.
 #
 # Run: bash hooks/tests/test_herdr_team_status.sh
 set -uo pipefail
@@ -112,6 +113,19 @@ JSON
     bash "$SCRIPT" </dev/null 2>"$TMP/e5")"; RC=$?
   if [[ $RC -eq 0 && -z "$OUT" ]] && grep -q "roster read failed" "$TMP/e5"; then
     pass; else fail "herdr absent: expected exit 0 + warning, got RC=$RC OUT=$OUT"; fi
+
+  # 6. A hooks directory whose name ends in a newline still reaches its roster;
+  #    a `$(dirname ...)` capture would drop the newline (#487).
+  local stage="$TMP/stage" plain="$SCRIPT"
+  mkdir -p "$stage/"$'hooks\n' "$stage/skills/herdr-foreman" || die "could not create the newline-named stage"
+  cp "$plain" "$stage/"$'hooks\n'/ || die "could not stage the hook"
+  cp "$(dirname "$plain")/../skills/herdr-foreman/roster.sh" "$stage/skills/herdr-foreman/" \
+    || die "could not stage the roster script"
+  SCRIPT="$stage/"$'hooks\n'"/herdr-team-status.sh"
+  run "$full"
+  if [[ $RC -eq 0 ]] && printf '%s' "$OUT" | jq -e '.additionalContext | test("codex \\(codex\\) working")' >/dev/null 2>&1; then
+    pass; else fail "newline-named hooks dir: expected the team payload, got RC=$RC OUT=$OUT ERR=$ERRTEXT"; fi
+  SCRIPT="$plain"
 
   echo "─────────────────────────────────────────────" >&2
   if [[ $FAIL -gt 0 ]]; then echo "FAILED: ${FAIL} failed, ${PASS} passed" >&2; exit 1; fi

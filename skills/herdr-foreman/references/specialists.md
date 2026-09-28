@@ -88,9 +88,11 @@ an omitted field is not. Classification rules are in
 `skills/herdr-foreman/foreman/triggers.py`, in its module docstring and the
 `detect` and `cli_surface` docstrings.
 
-Run it before `plan`, with the roles and requirements that round intends:
+Run it before `plan`, with the roles and requirements that round intends. This
+is a synopsis; the runnable command, through `bash` and the resolved plugin
+root, is `skills/herdr-foreman/SKILL.md` Step 5:
 
-```bash
+```text
 foreman detect-triggers --repo <dir> --base <ref> [--head <ref>] \
   --roles <role[,role...]> [--requirements <file>] [--planned <file>] \
   [--decisions <file>]
