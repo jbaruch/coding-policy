@@ -283,6 +283,9 @@ def main(argv):
         options = flags(argv[2:], {"--model", "--as"})
         try:
             label = jev_label(argv[1], options.get("--model", report_gates.JEV_MODEL), shown=options.get("--as"))
+        except typesafe_client.InvalidRequest as exc:
+            # A refused request -- the report carries the key -- must not reach the fallback vendor.
+            fail("Jev refused the request, no fallback: {}".format(exc))
         except typesafe_client.TypeSafeError as exc:
             fail("Jev unavailable: {}".format(exc), UNAVAILABLE)
         print(json.dumps(label, sort_keys=True))

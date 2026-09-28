@@ -97,6 +97,32 @@ class RecordTest(GateCase):
             gates.require_clear(self.state, str(self.report), True)
 
 
+    def test_a_new_classification_of_the_same_bytes_records_a_fresh_gate(self):
+        self.record(label(self.report, HIGH))
+        gates.resolve(self.state, str(self.report), "clear", "B1 is advisory per the judge ruling", "operator", AT)
+        again = self.record(label(self.report, HIGH, question="r" * 64))
+        self.assertEqual((len(again["recorded"]), again["replayed"]), (1, []))
+        with self.assertRaisesRegex(UsageError, "cannot be accepted"):
+            gates.require_clear(self.state, str(self.report), True)
+
+    def test_a_live_sidecar_link_is_refused_and_left_in_place(self):
+        elsewhere = self.root / "elsewhere.json"
+        elsewhere.write_text(json.dumps({"schema_version": gates.SCHEMA_VERSION,
+                                         "state_path": str(self.state), "gates": []}))
+        gates.storage_path(self.state).symlink_to(elsewhere)
+        with self.assertRaisesRegex(StateError, "symlink"):
+            gates.require_clear(self.state, str(self.report), True)
+        self.assertTrue(gates.storage_path(self.state).is_symlink())
+
+    def test_a_non_canonical_report_path_is_a_malformed_record(self):
+        self.record(label(self.report, HIGH))
+        sidecar = gates.storage_path(self.state)
+        document = json.loads(sidecar.read_text())
+        document["gates"][0]["report"] = str(self.root / "sub" / ".." / "reviewer.md")
+        sidecar.write_text(json.dumps(document))
+        with self.assertRaisesRegex(StateError, "canonical"):
+            gates.require_clear(self.state, str(self.report), True)
+
 class ClearTest(GateCase):
     def test_a_block_refuses_acceptance_until_a_recorded_clear(self):
         self.record(label(self.report, HIGH))

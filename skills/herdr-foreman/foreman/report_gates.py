@@ -33,9 +33,11 @@ Sidecar (`<state>.report-gates.json`, schema in state-schema.md, Report Gates):
 """
 
 import copy
+import errno
 from contextlib import contextmanager
 import hashlib
 import json
+import os
 from datetime import timezone
 from pathlib import Path
 from typing import NoReturn
@@ -170,12 +172,23 @@ def load(path):
     """Read and validate only. Missing is first use; malformed never reads as empty."""
     target = storage_path(path)
     empty = {"schema_version": SCHEMA_VERSION, "state_path": str(canonical_state(path)), "gates": []}
+    linked = StateError("Report gate sidecar {} is a symlink, not the owner's file; restore the regular file at "
+                        "that path before gating.".format(target), {})
+    if target.is_symlink():
+        raise linked
+    # Opened without following a link, so one swapped in after the probe is refused too.
     try:
-        document = json.loads(target.read_text(encoding="utf-8"))
+        descriptor = os.open(target, os.O_RDONLY | os.O_NOFOLLOW)
     except FileNotFoundError:
-        if target.is_symlink():
-            raise StateError("Report gate sidecar {} is a dangling link; restore its target before gating.".format(target), {}) from None
         return empty
+    except OSError as exc:
+        if exc.errno == errno.ELOOP:
+            raise linked from None
+        raise StateError("Cannot read report gates {}: {}. Preserve its bytes and restore access; an unreadable "
+                         "gate record is never read as no gates.".format(target, exc), {}) from None
+    try:
+        with os.fdopen(descriptor, encoding="utf-8") as handle:
+            document = json.loads(handle.read())
     except (OSError, UnicodeDecodeError, ValueError) as exc:
         raise StateError("Cannot read report gates {}: {}. Preserve its bytes and restore access; an unreadable "
                          "gate record is never read as no gates.".format(target, exc), {}) from None
@@ -216,6 +229,8 @@ def _gate_problem(gate):
         return "unsupported schema_version"
     if not _nonempty(gate["report"]) or not Path(gate["report"]).is_absolute():
         return "report is not an absolute path"
+    if os.path.normpath(gate["report"]) != gate["report"]:
+        return "report is not a canonical path"
     if not _sha(gate["sha256"]):
         return "sha256 is not a lowercase sha256"
     if gate["level"] not in LEVELS:
@@ -318,8 +333,12 @@ def record(path, data, at):
             if decision["level"] is None:
                 ungated.append({"report": key, "reason": decision["reason"]})
                 continue
+            # A replay is the same bytes under the same classification; a new model,
+            # question, bands version or level records a fresh gate.
             prior = next((gate for gate in document["gates"]
-                          if gate["report"] == key and gate["sha256"] == label["sha256"]), None)
+                          if gate["report"] == key and gate["sha256"] == label["sha256"]
+                          and gate["level"] == decision["level"] and gate["model"] == label["model"]
+                          and gate["question"] == label.get("question") and gate["bands"] == BANDS_VERSION), None)
             if prior is not None:
                 replayed.append(copy.deepcopy(prior))
                 continue

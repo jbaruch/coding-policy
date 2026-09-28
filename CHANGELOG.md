@@ -105,6 +105,18 @@
   one open item it assigns to a separately assigned judge; the old prompt's
   scope clause was ambiguous about another seat's dispute (ambiguous
   criteria), which `open_items_out_of_scope` now asks literally.
+- **The gate owner and the Jev adapter close four holes Copilot found on
+  #617.** A report carrying the TypeSafe key made Jev refuse the request, and
+  the default chain treated that refusal as unavailability and sent the same
+  report to the Claude fallback; a refused request now fails closed with no
+  fallback. The report-gates sidecar followed a live symlink; it now refuses
+  one, live or dangling, and opens the file without following links, as the
+  capability table does. A saved gate whose report path is not canonical
+  (`/a/../b.md`) passed validation but never matched `require_clear`, so it
+  gated nothing; it is now a malformed record. A replay matched on report
+  bytes alone, so a reclassification under a new model, question or bands
+  version after a clear was swallowed as a replay; it now records a fresh
+  gate. `scoring.py calibrate` also keeps only the pinned Jev model's labels.
 
 ## 0.3.324 — 2026-09-28
 

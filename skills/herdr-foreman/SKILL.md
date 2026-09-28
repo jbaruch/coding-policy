@@ -622,7 +622,7 @@ bash "$CP/skills/herdr-foreman/foreman.sh" report-gate-record --labels <labels.j
 
 - Exit 0 prints `{"schema_version": 1, "recorded": [...], "replayed": [...], "no_gate": [...]}`
 - `recorded` holds each new gate with its `report`, `level` and `reason`
-- `replayed` holds a gate already on record for the same report bytes
+- `replayed` holds a gate already on record for the same report bytes and classification
 - `no_gate` names each report its label leaves ungated, with the reason
 - Exit 1 records nothing and names the cause on stderr
 - A report changed since classification is reclassified, then recorded again

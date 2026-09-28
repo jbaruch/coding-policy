@@ -231,5 +231,12 @@ class JevTest(Case):
         self.assertEqual(caught.exception.code, rv.UNAVAILABLE)
 
 
+    def test_a_report_carrying_the_key_never_takes_the_fallback(self):
+        self.report.write_text("leaked {}\n".format(KEY), encoding="utf-8")
+        with patch.dict("os.environ", {"TYPESAFE_API_KEY": KEY}), self.assertRaises(SystemExit) as caught:
+            rv.main(["jev", str(self.report)])
+        self.assertNotEqual(caught.exception.code, rv.UNAVAILABLE)
+        self.assertNotEqual(caught.exception.code, 0)
+
 if __name__ == "__main__":
     sys.exit(0 if unittest.main(exit=False).result.wasSuccessful() else 1)

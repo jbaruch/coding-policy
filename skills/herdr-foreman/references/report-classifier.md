@@ -63,7 +63,7 @@ calibrated. It restates no threshold; the constants live at the top of
 
 `foreman/report_gates.py` owns `<canonical selected state>.report-gates.json`:
 `{"schema_version": 1, "state_path", "gates": [...]}`. Each gate carries
-`schema_version`, `report` (resolved path), `sha256`, `level`, `reason`,
+`schema_version`, `report` (resolved, canonical path), `sha256`, `level`, `reason`,
 `probabilities`, `model`, `question`, `bands`, `at`, `status`
 (`open`|`cleared`|`reread`) and `resolution` (`null`, or `schema_version`, `at`, `action`, `by`
 (`worker`|`judge`|`operator`), `reason`, `evidence` (`null` for an operator, or
@@ -71,8 +71,10 @@ calibrated. It restates no threshold; the constants live at the top of
 take the sidecar's own lock. `close-member` and `record-report` hold that lock
 from their gate check through their commit, so a gate recorded meanwhile is
 refused rather than slipped in between. A missing file is first use;
-an unreadable or unsupported one refuses every reader, never reading as no
-gates. `close-member` and `record-report` read it and never write it.
+an unreadable or unsupported one, or a symlink at its path, refuses every
+reader, never reading as no gates. A replay is the same report bytes under the
+same `model`, `question`, `bands` and `level`; any other classification of
+those bytes records a new gate. `close-member` and `record-report` read it and never write it.
 
 ## Calibrating the Bands
 

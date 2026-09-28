@@ -124,7 +124,9 @@ def _band(p, yes_at, no_at):
 
 def calibrate(results):
     ids = report_verdict.question_ids()
-    rows = [row for row in results if row.get("agent") == "jev" and row.get("source") != "fixture"
+    # Only the pinned model's labels: its bands are what the gate installs.
+    rows = [row for row in results if row.get("agent") == "jev" and row.get("model") == report_gates.JEV_MODEL
+            and row.get("source") != "fixture"
             and all(isinstance((row.get("answers") or {}).get(qid, {}).get("p_yes"), (int, float)) for qid in ids)]
     if len(rows) < MIN_CALIBRATION_REPORTS:
         fail("{} usable held-out Jev labels; calibration needs at least {}. Run evaluate.sh --agent jev --since "

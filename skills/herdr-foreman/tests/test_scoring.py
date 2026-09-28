@@ -66,7 +66,8 @@ class CalibrateTest(unittest.TestCase):
         self.assertEqual(result["annotation"]["missed_blockers"], 0)
 
     def test_llm_and_fixture_labels_are_not_calibration_data(self):
-        rows = [{**jev("blocking", 0.99), "agent": "claude"}] * 40 + [{**jev("blocking", 0.99), "source": "fixture"}] * 40
+        rows = ([{**jev("blocking", 0.99), "agent": "claude"}] * 40 + [{**jev("blocking", 0.99), "source": "fixture"}] * 40
+                + [{**jev("blocking", 0.99), "model": "jev-other"}] * 40)
         with self.assertRaises(SystemExit):
             scoring.calibrate(rows)
 
