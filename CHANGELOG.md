@@ -12,8 +12,12 @@
   `cache/download/<module>/@v/`. A name that merely contains a dot or an `@`
   (`findings.v1/`, `report@draft/`) is not enough; any other top-level entry
   leaves the whole directory in place. A recorded reports
-  directory that is a regular file (`ENOTDIR`) is now counted `missing`
-  instead of `symlink`, which stays for `ELOOP`. The two swap-race findings
+  directory that fails to open with `ENOTDIR` is now classified by a
+  no-follow stat of the component that failed: a regular file (or other
+  non-directory) is `missing`, a symlink stays `symlink` (Linux reports
+  `ENOTDIR` for a symlink opened with `O_NOFOLLOW|O_DIRECTORY`, macOS
+  `ELOOP`), and a stat failure or a tree that reads whole again is `failed`,
+  never `missing`. The two swap-race findings
   from #624's review were declined: more descriptor hardening is not the
   answer, a smaller report-instead-of-delete design is, if a real case
   appears. Fixes #628.

@@ -50,10 +50,13 @@ Covers:
                             (`findings/`, `findings.v1/`, `report@draft/`)
                             stays whole; a genuine module-cache layout goes.
  23. Recorded file       -> a recorded reports directory that is a regular
-                            file is counted missing, never a symlink.
+                            file is counted missing, never a symlink; one
+                            that became a symlink and failed with ENOTDIR
+                            (Linux) is a symlink, never missing.
 """
 
 import argparse
+import errno
 import hashlib
 import importlib.util
 import io
@@ -316,6 +319,34 @@ class PruneReportCachesTests(unittest.TestCase):
         self.assertEqual(rc, 0, err)
         self.assertEqual((doc["reports_dirs"], doc["missing"], doc["skipped"]), (1, 1, []))
         self.assertTrue(candidate.is_file())
+
+    def test_symlink_failing_with_enotdir_is_a_symlink(self):
+        top = self.fx.reports(caches=("virtualenv",))
+        self.fx.save()
+        age(top)
+        outside = Path(os.path.realpath(self.temp.name)) / "outside"
+        module = load_script()
+        real_open_rel = module.open_rel
+        swapped = []
+
+        def swap_then_enotdir(base_fd, parts):
+            # Linux reports ENOTDIR (macOS ELOOP) for a symlink opened with
+            # O_NOFOLLOW|O_DIRECTORY; force the Linux shape on any platform.
+            if not swapped:
+                swapped.append(True)
+                os.rename(top, outside)
+                os.symlink(outside, top)
+                raise OSError(errno.ENOTDIR, "Not a directory")
+            return real_open_rel(base_fd, parts)
+
+        args = argparse.Namespace(dry_run=False, root=str(self.fx.root), state=str(self.fx.state), now=NOW,
+                                  budget_sec=None)
+        with mock.patch.object(module, "open_rel", swap_then_enotdir):
+            result = module.run(args)
+        self.assertEqual(result["missing"], 0)
+        self.assertEqual(result["skipped"], [{"path": str(top), "reason": "symlink"}])
+        self.assertEqual(result["caches"], [])
+        self.assertTrue((outside / CACHE_PATHS["virtualenv"] / "pyvenv.cfg").is_file())
 
     def test_module_cache_with_evidence_directory_stays_whole(self):
         top = self.fx.reports(caches=())

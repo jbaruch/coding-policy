@@ -614,6 +614,29 @@ def load_ledger(state_path, default):
         return None, None, exc.message
 
 
+def non_dir_kind(root_fd, parts):
+    """Why opening `parts` below `root_fd` failed with ENOTDIR: "symlink" when
+    the first non-directory component is a symlink, "missing" when it is any
+    other non-directory (Linux reports ENOTDIR for a symlink under
+    O_NOFOLLOW|O_DIRECTORY; macOS reports ELOOP). A stat failure propagates,
+    and every component reading as a directory raises ENOTDIR: both land in
+    `failed`, never `missing`."""
+    fd = os.dup(root_fd)
+    try:
+        for part in parts:
+            mode = os.stat(part, dir_fd=fd, follow_symlinks=False).st_mode
+            if stat.S_ISLNK(mode):
+                return "symlink"
+            if not stat.S_ISDIR(mode):
+                return "missing"
+            child = open_at(fd, part)
+            os.close(fd)
+            fd = child
+    finally:
+        os.close(fd)
+    raise OSError(errno.ENOTDIR, "every component is a directory again; the tree changed mid-run")
+
+
 def prune_candidate(root_fd, real_root, real, candidate, recorded, cutoff, budget, dry_run, state_path, result):
     """Survey one resolved candidate and remove its caches when idle.
 
@@ -631,7 +654,10 @@ def prune_candidate(root_fd, real_root, real, candidate, recorded, cutoff, budge
         return False
     except OSError as exc:
         if exc.errno == errno.ENOTDIR:
-            result["missing"] += 1
+            if non_dir_kind(root_fd, parts) == "symlink":
+                result["skipped"].append({"path": real, "reason": "symlink"})
+            else:
+                result["missing"] += 1
             return False
         if exc.errno == errno.ELOOP:
             result["skipped"].append({"path": real, "reason": "symlink"})
