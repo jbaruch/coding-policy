@@ -97,8 +97,9 @@ The foreman's round type is `coordination` (`COORDINATION_ROUND` in
 Selection reads the seat's tier table, the capability table and the measured
 headroom of the seat's `window_group`, the usage window it shares with measured
 workers; the foreman's own pane is never usage-probed. It returns the selected
-row with its capability verdict and pressure headroom, and refuses when no row
-is usable. Which row wins is `_select_foreman_tier` and `_foreman_headroom` in
+row with its capability verdict and pressure headroom. It refuses when the table
+has no `coordination` row or the capability table records that row inadequate;
+a cheaper row never stands in for it. The selection is `_select_foreman_tier` and `_foreman_headroom` in
 `skills/herdr-foreman/foreman/cli.py`. The planner never seats the foreman on a
 worker: `plan --roles foreman` is refused.
 

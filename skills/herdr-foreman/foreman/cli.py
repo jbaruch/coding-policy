@@ -50,8 +50,7 @@ from .measure import (
 from .planner import plan as build_plan
 from .planner import headroom_of
 from .tiers import (COORDINATION_ROUND, FOREMAN_ROLE, JUDGMENT_ROUNDS, MissingTierError,
-                    measured_pressure, parse_launch_args, parse_tiers, select_tier)
-from .billing import billing_window, effective_multiplier
+                    parse_launch_args, parse_tiers, select_tier)
 from . import cost_report, selection
 from .launch import start_foreman, start_worker, verify_foreman, verify_running
 from .state import (
@@ -2020,30 +2019,17 @@ def _select_foreman_tier(args, seat, warn):
             "The foreman seat has no tier table: add `foreman.tiers`, or configure a {} worker with one, so tier "
             "selection can choose its model and effort.".format(seat.kind), {"agent": seat.agent})
     needs = capabilities.required(FOREMAN_ROLE, COORDINATION_ROUND, JUDGMENT_ROUNDS)
-    table = capabilities.load(state_path)
-    # The cheapest row the capability table records adequate for coordination
-    # wins; a row it records inadequate is never a candidate.
-    for name, row in sorted(seat.tiers.items(), key=lambda item: (effective_multiplier(item[1]), item[0])):
-        try:
-            verdict = capabilities.assess(table, row["model"], row.get("effort"), needs)
-        except capabilities.InadequateCapability:
-            continue
-        if verdict == "adequate":
-            return {**row, "round": COORDINATION_ROUND, "tier_row": name, "kind": seat.kind,
-                    "pressure_headroom": measured_pressure(headroom), "de_escalated": False,
-                    "billing_window": billing_window(row), "effective_multiplier": effective_multiplier(row),
-                    "capability": verdict, "cheaper_adequate": None}
-    # No evidence yet: the configured `coordination` row runs, resolved the way
-    # every seat's round is; an inadequate verdict on it refuses.
+    # The configured coordination row is the floor (Round Tiers): select_tier
+    # resolves it with measured headroom, and no cheaper unrelated row ever
+    # substitutes for it. The capability table assesses the selected row; an
+    # inadequate verdict refuses the start.
     try:
         tier = select_tier(seat, FOREMAN_ROLE, headroom=headroom)
     except MissingTierError:
         raise UsageError(
-            "No row in the foreman's tier table is recorded adequate for {} ({}), and the table has no `{}` row to "
-            "fall back on. Add one, or record capability evidence through `{}`.".format(
-                COORDINATION_ROUND, ", ".join(needs), COORDINATION_ROUND, runnable.command("capability-record")),
-            {"agent": seat.agent}) from None
-    verdict = capabilities.assess(table, tier["model"], tier["effort"], needs)
+            "The foreman's tier table has no `{}` row. Add one naming the model and effort the foreman's "
+            "coordination round runs on.".format(COORDINATION_ROUND), {"agent": seat.agent}) from None
+    verdict = capabilities.assess(capabilities.load(state_path), tier["model"], tier["effort"], needs)
     return {**tier, "capability": verdict, "cheaper_adequate": None}
 
 

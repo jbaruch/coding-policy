@@ -195,13 +195,28 @@ class CommandTest(unittest.TestCase):
         self.assertEqual(code, 0, err)
         self.assertIsNone(json.loads(out)["tier"]["pressure_headroom"])
 
-    def test_the_cheapest_adequate_row_wins_and_is_what_launches(self):
+    def test_a_cheaper_adequate_row_never_replaces_the_coordination_row(self):
+        # Round Tiers: never below the configured row. An adequate cheaper
+        # row elsewhere in the table is not a candidate for this round.
+        self.write(payload(tiers={**copy.deepcopy(ROWS), "build": {"model": "claude-haiku-4-5"}}))
         self.record("claude-haiku-4-5", "default", "adequate")
+        self.record("sonnet-5", "medium", "adequate")
         client = Client()
         code, out, err = self.run_cli(["start-foreman", "--pane", "w1:p0"], client)
         self.assertEqual(code, 0, err)
-        self.assertEqual(client.starts[0][3][-2:], ["--model", "claude-haiku-4-5"])
-        self.assertEqual(json.loads(out)["tier"]["capability"], "adequate")
+        self.assertEqual(client.starts[0][3][-4:], ["--model", "sonnet-5", "--effort", "medium"])
+        tier = json.loads(out)["tier"]
+        self.assertEqual((tier["tier_row"], tier["capability"]), ("coordination", "adequate"))
+
+    def test_a_table_without_a_coordination_row_refuses_before_launch(self):
+        rows = {name: row for name, row in ROWS.items() if name != "coordination"}
+        self.write(payload(tiers=rows))
+        self.record("claude-haiku-4-5", "default", "adequate")
+        client = Client()
+        code, _, err = self.run_cli(["start-foreman", "--pane", "w1:p0"], client)
+        self.assertEqual(code, 1)
+        self.assertIn("coordination", json.loads(err)["message"])
+        self.assertEqual(client.starts, [])
 
     def test_an_inadequate_coordination_row_refuses_before_launch(self):
         self.record("sonnet-5", "medium", "inadequate")
@@ -218,8 +233,7 @@ class CommandTest(unittest.TestCase):
         self.assertTrue(json.loads(out)["argv_verified"])
 
     def test_verify_fails_when_the_running_tier_is_not_the_selected_one(self):
-        self.record("claude-haiku-4-5", "default", "adequate")
-        client = Client(live_argv=argv("sonnet-5", "medium"))
+        client = Client(live_argv=argv("claude-haiku-4-5"))
         code, out, _ = self.run_cli(["verify-foreman", "--pane", "w1:p0"], client)
         self.assertEqual(code, 1)
         self.assertEqual(out, "")
