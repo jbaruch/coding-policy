@@ -148,11 +148,13 @@ t_missing_token() {
   if [[ $rc -ne 0 ]]; then ok "missing GH_TOKEN -> non-zero"; else bad "missing_token: expected non-zero"; fi
 }
 
-echo "== fleet-review-one.sh tests =="
-t_happy
-t_model_pin
-t_bad_args
-t_missing_driver
-t_missing_token
-echo "== summary: ${pass} passed, ${fail} failed =="
-[[ "$fail" -eq 0 ]]
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+  echo "== fleet-review-one.sh tests =="
+  t_happy
+  t_model_pin
+  t_bad_args
+  t_missing_driver
+  t_missing_token
+  echo "== summary: ${pass} passed, ${fail} failed =="
+  [[ "$fail" -eq 0 ]]
+fi

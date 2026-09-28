@@ -59,7 +59,9 @@ has_pair() {
 # --- the self-review step runs codex on the pinned model at the pinned effort ---
 t_self_review_pin() {
   local script
-  script=$(extract_run "$WORKFLOW" "$STEP_NAME")
+  if ! script=$(extract_run "$WORKFLOW" "$STEP_NAME"); then
+    bad "self_review_pin: extracting '$STEP_NAME' from $WORKFLOW failed"; return
+  fi
   [[ "$script" == *"codex exec"* ]] || { bad "self_review_pin: step '$STEP_NAME' with a codex exec run block found in $WORKFLOW"; return; }
 
   local bin work
@@ -106,7 +108,9 @@ EOF
 # --- a missing step fails loudly rather than passing vacuously ---
 t_missing_step() {
   local script
-  script=$(extract_run "$WORKFLOW" "No such step")
+  if ! script=$(extract_run "$WORKFLOW" "No such step"); then
+    bad "missing_step: extracting from $WORKFLOW failed, so an empty result proves nothing"; return
+  fi
   if [[ -z "$script" ]]; then ok "missing step extracts nothing"; else bad "missing_step: expected empty extraction"; fi
 }
 
