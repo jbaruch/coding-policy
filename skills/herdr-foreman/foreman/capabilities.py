@@ -16,8 +16,11 @@ regime: this codebase sits inside the distribution published benchmarks measure,
 and where a model failed here that failure is itself a `project` source.
 """
 
+import errno
 import json
+import os
 import re
+import stat
 from datetime import date, timedelta, timezone
 from pathlib import Path
 from typing import NoReturn
@@ -110,16 +113,44 @@ def empty():
 def load(path, *, for_write=False):
     """The saved table, or an empty one. Readers never create the file.
 
+    A symlink at the table's path is refused, live or dangling, the way the
+    reset record refuses one.
+
     A table stamped with a newer schema than this build owns was written by a
     newer owner. A reader treats it as no usable prior state and says so; a
     writer refuses, so an older build never overwrites what it cannot read
     (rules/stateful-artifacts.md Migration Policy).
     """
     target = storage_path(path)
+    # A dangling link is not a missing table, and a live one is not the owner's
+    # file: a later `record` would replace the link through save_state's atomic
+    # rename and destroy the redirect. Either way the link is left as found.
     try:
-        document = json.loads(target.read_text(encoding="utf-8"))
+        linked = stat.S_ISLNK(os.lstat(target).st_mode)
+    except (FileNotFoundError, NotADirectoryError):
+        linked = False
+    except OSError as exc:
+        _fail("Cannot inspect the capability table at {}: {}. Restore search permission on its "
+              "directory; the table is left untouched.".format(target, exc))
+    linked_message = ("The capability table at {} is a symlink, not the owner's file. It is left "
+                      "untouched: restore the regular file at that path, or remove the link to "
+                      "start an empty table.".format(target))
+    if linked:
+        _fail(linked_message)
+    # The read opens without following a link, so one swapped in after the
+    # probe is refused too, never read through.
+    try:
+        descriptor = os.open(target, os.O_RDONLY | os.O_NOFOLLOW)
     except FileNotFoundError:
         return empty()
+    except OSError as exc:
+        if exc.errno == errno.ELOOP:
+            _fail(linked_message)
+        _fail("Cannot read the capability table at {}: {}. Restore a readable UTF-8 file, or "
+              "remove it to start an empty table.".format(target, exc))
+    try:
+        with os.fdopen(descriptor, encoding="utf-8") as handle:
+            document = json.loads(handle.read())
     except (OSError, UnicodeDecodeError) as exc:
         _fail("Cannot read the capability table at {}: {}. Restore a readable UTF-8 file, or "
               "remove it to start an empty table.".format(target, exc))

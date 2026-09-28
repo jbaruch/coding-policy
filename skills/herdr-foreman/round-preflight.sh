@@ -115,16 +115,16 @@ main() {
   local results="${scratch}/checks.json"
   printf '{}' > "$results" || die "cannot write to ${scratch}"
 
-  record() { # <name> <status> <reason-or-empty> <due:0|1> <detail-file-or-empty>
+  record() { # <name> <status> <reason-or-empty> <due:0|1> <detail-file-or-empty> [command]
     # A check that could not be recorded would vanish from the aggregate and
     # let `ready` pass without it, so a failed write ends the preflight.
     record_row "$@" || die "cannot record the ${1} check in ${results}"
   }
 
   record_row() {
-    python3 - "$results" "$1" "$2" "$3" "$4" "${5-}" <<'PY'
+    python3 - "$results" "$1" "$2" "$3" "$4" "${5-}" "${6-}" <<'PY'
 import json, sys
-path, name, status, reason, due, detail = sys.argv[1:7]
+path, name, status, reason, due, detail, command = sys.argv[1:8]
 with open(path, encoding="utf-8") as handle:
     checks = json.load(handle)
 row = {"status": status, "due": due == "1"}
@@ -132,13 +132,26 @@ if reason:
     row["reason"] = reason
 if detail:
     # A check whose evidence cannot be read has not passed, whatever its exit
-    # code said: it blocks, and the reason names the file.
+    # code said: it blocks, and the reason names the command to re-run. The
+    # detail file is scratch the EXIT trap removes, so it is never the pointer.
     try:
         with open(detail, encoding="utf-8") as handle:
-            row["detail"] = json.load(handle)
+            payload = json.load(handle)
     except (OSError, ValueError) as exc:
         row.update(status="blocked", detail=None,
-                   reason="cannot read this check's output at {}: {}".format(detail, exc))
+                   reason="`{}` wrote output that is not readable JSON ({}); re-run "
+                          "it, read its diagnostic, and repair it to emit one JSON object "
+                          "before planning".format(command, exc))
+    else:
+        # Every collaborator emits one JSON object. Valid JSON of another shape
+        # -- `[]`, `null`, a bare number -- is not that check's evidence.
+        if isinstance(payload, dict):
+            row["detail"] = payload
+        else:
+            row.update(status="blocked", detail=None,
+                       reason="`{}` wrote JSON {} where its contract emits one JSON "
+                              "object; re-run it, read its diagnostic, and repair it to emit "
+                              "an object before planning".format(command, type(payload).__name__))
 checks[name] = row
 with open(path, "w", encoding="utf-8") as handle:
     json.dump(checks, handle)
@@ -161,7 +174,7 @@ PY
   rc=$?
   cat "${scratch}/roster.err" >&2
   if [ "$rc" -eq 0 ]; then
-    record roster ok "" 0 "${scratch}/roster.json"
+    record roster ok "" 0 "${scratch}/roster.json" "roster.sh"
   else
     record roster failed "roster.sh exited ${rc}; re-run it and read its diagnostic before planning" 0 ""
   fi
@@ -172,14 +185,14 @@ PY
   cat "${scratch}/authority.err" >&2
   local authorized=""
   if [ "$rc" -eq 0 ]; then
-    if ! authorized="$(python3 -c 'import json,sys; v=json.load(open(sys.argv[1])).get("authorized"); print("1" if v is True else "0" if v is False else sys.exit("authorized is not a boolean"))' "${scratch}/authority.json")"; then
+    if ! authorized="$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); v=d.get("authorized") if isinstance(d, dict) else None; print("1" if v is True else "0" if v is False else sys.exit("authorized is not a boolean"))' "${scratch}/authority.json")"; then
       authorized=""
     fi
   fi
   if [ "$rc" -eq 0 ] && [ "$authorized" = "1" ]; then
-    record authority ok "" 0 "${scratch}/authority.json"
+    record authority ok "" 0 "${scratch}/authority.json" "verify-authority.sh ${repo}"
   elif [ "$rc" -eq 0 ] && [ "$authorized" = "0" ]; then
-    record authority denied "the operator does not own ${repo}; the round stays read-only unless the brief records per-action permission" 0 "${scratch}/authority.json"
+    record authority denied "the operator does not own ${repo}; the round stays read-only unless the brief records per-action permission" 0 "${scratch}/authority.json" "verify-authority.sh ${repo}"
   elif [ "$rc" -eq 0 ]; then
     record authority failed "verify-authority.sh exited 0 without a readable authorized verdict for ${repo}; an unanswerable authority check is not permission" 0 ""
   else
@@ -193,7 +206,7 @@ PY
     rc=$?
     cat "${scratch}/measure.err" >&2
     if [ "$rc" -eq 0 ]; then
-      record headroom ok "" 0 "${scratch}/measure.json"
+      record headroom ok "" 0 "${scratch}/measure.json" "foreman measure"
     else
       record headroom failed "foreman measure exited ${rc}; a seat cannot be ranked on an unmeasured roster" 0 ""
     fi
@@ -209,8 +222,8 @@ PY
   cat "${scratch}/capability.err" >&2
   if [ "$rc" -eq 0 ]; then
     local capability_due
-    if capability_due="$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print("1" if d["due"] is True else "0" if d["due"] is False else sys.exit("due is not a boolean"))' "${scratch}/capability.json")"; then
-      record capability ok "" "$capability_due" "${scratch}/capability.json"
+    if capability_due="$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); d=d if isinstance(d, dict) else {}; print("1" if d.get("due") is True else "0" if d.get("due") is False else sys.exit("due is not a boolean"))' "${scratch}/capability.json")"; then
+      record capability ok "" "$capability_due" "${scratch}/capability.json" "foreman capability-check"
     else
       record capability failed "foreman capability-check exited 0 without a readable due flag; the table's cadence is unknown" 0 ""
     fi
@@ -224,7 +237,7 @@ PY
   rc=$?
   cat "${scratch}/gates.err" >&2
   if [ "$rc" -eq 0 ]; then
-    record gates ok "" 0 "${scratch}/gates.json"
+    record gates ok "" 0 "${scratch}/gates.json" "resolve-gates.sh ${checkout}"
   else
     record gates failed "resolve-gates.sh exited ${rc}; the briefs carry no gate pointers and every worker searches" 0 ""
   fi
@@ -241,7 +254,7 @@ PY
     rc=$?
     cat "${scratch}/sweep.err" >&2
     case "$rc" in
-      0) record worktrees ok "" 0 "${scratch}/sweep.json" ;;
+      0) record worktrees ok "" 0 "${scratch}/sweep.json" "sweep-worktrees.sh ${wroot}" ;;
       1) record worktrees undecided "sweep-worktrees.sh decided nothing; fix its diagnostic and re-run before provisioning" 0 "" ;;
       2)
         # Whose failure it is: this checkout's prune (undecided / failed), an
@@ -269,10 +282,10 @@ PY
           record worktrees failed "sweep-worktrees.sh exited 2 and its JSON could not be read" 0 ""
         else
           case "$own" in
-            undecided) record worktrees undecided "prune-worktrees.sh decided nothing for ${checkout}; fix its diagnostic and re-run before provisioning" 0 "${scratch}/sweep.json" ;;
-            failed) record worktrees failed "the sweep reported a failure for ${checkout}; git refused a check or a removal" 0 "${scratch}/sweep.json" ;;
-            unassociated) record worktrees failed "the sweep could not read a worktree under ${wroot} and could not name its repository; inspect the errors entry before provisioning" 0 "${scratch}/sweep.json" ;;
-            *) record worktrees degraded "" 0 "${scratch}/sweep.json" ;;
+            undecided) record worktrees undecided "prune-worktrees.sh decided nothing for ${checkout}; fix its diagnostic and re-run before provisioning" 0 "${scratch}/sweep.json" "sweep-worktrees.sh ${wroot}" ;;
+            failed) record worktrees failed "the sweep reported a failure for ${checkout}; git refused a check or a removal" 0 "${scratch}/sweep.json" "sweep-worktrees.sh ${wroot}" ;;
+            unassociated) record worktrees failed "the sweep could not read a worktree under ${wroot} and could not name its repository; inspect the errors entry before provisioning" 0 "${scratch}/sweep.json" "sweep-worktrees.sh ${wroot}" ;;
+            *) record worktrees degraded "" 0 "${scratch}/sweep.json" "sweep-worktrees.sh ${wroot}" ;;
           esac
         fi ;;
       124) record worktrees failed "sweep-worktrees.sh ran past its ${SWEEP_BUDGET_SEC}s budget and was stopped; run it by hand to see which repository's origin it waits on" 0 "" ;;

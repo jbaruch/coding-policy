@@ -25,6 +25,7 @@
 #   9. Missing --repo/--checkout-> exit 2, usage error, no JSON verdict.
 #  10. Every check's payload    -> carried through under `checks.<name>.detail`.
 #  11. Gate pointers            -> resolved once, carried for the briefs.
+#  12. Non-object payload       -> exit 0 with `[]`/`null` blocks, never `ok`.
 
 set -uo pipefail
 
@@ -37,7 +38,7 @@ die() { echo "fatal: $*" >&2; exit 2; }
 REAL="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)" || die "cannot resolve the plugin dir"
 
 stub() { # <dir> <name> <exit> <stdout>
-  printf '#!/bin/sh\nprintf %s\nexit %s\n' "'$4'" "$3" > "$1/$2" || die "write stub $2"
+  printf '#!/usr/bin/env bash\nset -euo pipefail\nprintf %s\nexit %s\n' "'$4'" "$3" > "$1/$2" || die "write stub $2"
   chmod +x "$1/$2" || die "chmod stub $2"
 }
 
@@ -59,12 +60,12 @@ shadow() { # <dir> [roster-rc] [authority-rc] [prune-rc] [capability-due] [autho
   esac
   stub "$dir" sweep-worktrees.sh "$prune" "$sweep_out"
   if [[ "$prune" == timeout ]]; then
-    printf '#!/bin/sh\necho "bounded-run: stand-in budget spent" >&2\nexit 124\n' > "$dir/bounded-run.sh" || die "write runner stub"
+    printf '#!/usr/bin/env bash\nset -euo pipefail\necho "bounded-run: stand-in budget spent" >&2\nexit 124\n' > "$dir/bounded-run.sh" || die "write runner stub"
   else
     cp "$REAL/bounded-run.sh" "$dir/" || die "copy the bounded runner"
   fi
   stub "$dir" resolve-gates.sh 0 '{"instructions":["AGENTS.md"],"workflows":[],"runners":[]}'
-  printf '#!/bin/sh\ncase "$*" in\n  *capability-check*) printf %s; exit 0 ;;\n  *measure*) printf %s; exit 0 ;;\nesac\nexit 9\n' \
+  printf '#!/usr/bin/env bash\nset -euo pipefail\ncase "$*" in\n  *capability-check*) printf %s; exit 0 ;;\n  *measure*) printf %s; exit 0 ;;\nesac\nexit 9\n' \
     "'{\"due\":$due,\"entries\":0}'" "'{\"agents\":{}}'" > "$dir/foreman.sh" || die "write foreman stub"
   chmod +x "$dir/foreman.sh" || die "chmod foreman stub"
 }
@@ -167,6 +168,40 @@ main() {
   run "$TMP/prune-noresult"
   if [[ $RC -eq 1 ]] && [[ "$(field "$OUT" 'd["checks"]["worktrees"]["status"]')" == '"failed"' ]]; then
     pass; else fail "this checkout's unreadable prune result must block, got RC=$RC OUT=$OUT"; fi
+
+  # Exit 0 with valid JSON that is not an object is not the check's evidence.
+  for shape in '[]' 'null' '7'; do
+    shadow "$TMP/shape-$shape"
+    stub "$TMP/shape-$shape" roster.sh 0 "$shape"
+    stub "$TMP/shape-$shape" resolve-gates.sh 0 "$shape"
+    run "$TMP/shape-$shape"
+    # The backticks are literal Markdown in the reason, not command substitution.
+    # shellcheck disable=SC2016
+    if [[ $RC -eq 1 ]] && [[ "$(field "$OUT" 'd["ready"]')" == "false" ]] \
+       && [[ "$(field "$OUT" 'd["checks"]["roster"]["status"]')" == '"blocked"' ]] \
+       && [[ "$(field "$OUT" 'd["checks"]["gates"]["status"]')" == '"blocked"' ]] \
+       && [[ "$(field "$OUT" 'd["checks"]["roster"]["detail"]')" == "null" ]] \
+       && printf '%s' "$OUT" | grep -q '`roster.sh` wrote JSON' \
+       && printf '%s' "$OUT" | grep -q '`resolve-gates.sh /tmp` wrote JSON'; then
+      pass; else fail "a '$shape' payload on exit 0 must block, got RC=$RC OUT=$OUT"; fi
+  done
+
+  # The authority and capability verdicts parse a field out of the payload; a
+  # non-object there is an unreadable verdict, never a crash or a pass.
+  shadow "$TMP/shape-authority"
+  stub "$TMP/shape-authority" verify-authority.sh 0 '[]'
+  run "$TMP/shape-authority"
+  if [[ $RC -eq 1 ]] && [[ "$(field "$OUT" 'd["checks"]["authority"]["status"]')" == '"failed"' ]] \
+     && ! printf '%s' "$ERRTEXT" | grep -q 'Traceback'; then
+    pass; else fail "a non-object authority payload must fail cleanly, got RC=$RC OUT=$OUT ERR=$ERRTEXT"; fi
+
+  shadow "$TMP/shape-capability"
+  printf '#!/usr/bin/env bash\nset -euo pipefail\ncase "$*" in\n  *capability-check*) printf %s; exit 0 ;;\n  *measure*) printf %s; exit 0 ;;\nesac\nexit 9\n' \
+    "'[]'" "'{\"agents\":{}}'" > "$TMP/shape-capability/foreman.sh" || die "write foreman stub"
+  run "$TMP/shape-capability"
+  if [[ $RC -eq 1 ]] && [[ "$(field "$OUT" 'd["checks"]["capability"]["status"]')" == '"failed"' ]] \
+     && ! printf '%s' "$ERRTEXT" | grep -q 'Traceback'; then
+    pass; else fail "a non-object capability payload must fail cleanly, got RC=$RC OUT=$OUT ERR=$ERRTEXT"; fi
 
   echo "▶ what is due without blocking" >&2
 
