@@ -24,6 +24,12 @@ description: |
   Idempotent: if the top section already carries a `## ` heading there is
   nothing un-headed to stamp and the step is a no-op (no commit).
 
+  Before stamping, it fails the step when the push it is publishing parks a
+  new entry below the first `## ` heading: the stamp could not head it, and
+  the version would publish with no heading of its own (#581). The check is
+  `skills/release/check-changelog-placement.py --push-before`, measured
+  against `github.event.before`.
+
   Requirements (consumer must arrange):
     - `python3` on PATH (stdlib only — the script needs no packages).
     - `tessl` CLI on PATH (typically via `tesslio/setup-tessl@v2`) so the
@@ -31,6 +37,8 @@ description: |
       `latest:` explicitly.
     - The consumer repo checked out (`actions/checkout@v4`) with a writable
       working tree; the step runs against `$GITHUB_WORKSPACE`.
+    - History reaching `github.event.before` (`fetch-depth: 0`), so the
+      placement check can read the changelog the push landed on.
 
 inputs:
   changelog:
@@ -80,6 +88,7 @@ runs:
         DATE: ${{ inputs.date }}
         DO_COMMIT: ${{ inputs.commit }}
         COMMIT_MESSAGE: ${{ inputs.commit-message }}
+        BEFORE: ${{ github.event.before }}
       run: |
         set -eo pipefail
 
@@ -92,6 +101,20 @@ runs:
           echo "::error::stamp-changelog.py not found at $script — verify the pinned jbaruch/coding-policy/.github/actions/stamp-changelog@<ref> in this workflow points at a ref that carries skills/release/stamp-changelog.py, and bump the ref if it is stale." >&2
           exit 1
         fi
+
+        # Refuse to publish a push that parks a new entry below the first
+        # `## ` heading. The stamp below heads only what sits ABOVE that
+        # heading, so such a push would publish a version with no heading of
+        # its own and its entry filed under an older one (#581). The decision
+        # and the nothing-to-measure cases (workflow_dispatch, a first push,
+        # no changelog yet) live in the script's header. Same three-levels-up
+        # resolution as the stamp script.
+        placement="$GITHUB_ACTION_PATH/../../../skills/release/check-changelog-placement.py"
+        if [ ! -f "$placement" ]; then
+          echo "::error::check-changelog-placement.py not found at $placement — verify the pinned jbaruch/coding-policy/.github/actions/stamp-changelog@<ref> in this workflow points at a ref that carries skills/release/check-changelog-placement.py, and bump the ref if it is stale." >&2
+          exit 1
+        fi
+        python3 "$placement" --push-before "$BEFORE" --changelog "$CHANGELOG"
 
         # Append optional flags with explicit `if` blocks — clearer than
         # `&&` one-liners and unambiguous to read.
