@@ -17,7 +17,19 @@
 #         a value or the inability to produce one.
 set -euo pipefail
 
-here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Command substitution strips every trailing newline, so the script directory
+# never passes through one bare: parameter expansion derives it (#487), and a
+# sentinel carries `pwd` across the strip (#466).
+case "${BASH_SOURCE[0]}" in
+  */*) _here_src="${BASH_SOURCE[0]%/*}" ;;
+  *) _here_src=. ;;
+esac
+if ! here="$(cd -- "${_here_src:-/}" && pwd && printf x)"; then
+  echo "registry-baseline: cannot enter the script directory ${_here_src:-/} — restore read and search access to the plugin directory, or reinstall the plugin, then re-run" >&2
+  exit 2
+fi
+here="${here%x}"
+here="${here%$'\n'}"
 
 main() {
   if [ "$#" -ne 2 ]; then

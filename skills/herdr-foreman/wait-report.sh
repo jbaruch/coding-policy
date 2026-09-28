@@ -197,6 +197,25 @@ REFUSAL_PANE=""
 
 warn() { printf 'wait-report: %s\n' "$1" >&2; }
 
+# Sets SKILL_DIR to this script's directory, or warns and returns 1. Command
+# substitution strips every trailing newline, so the directory never passes
+# through one bare: parameter expansion derives it (#487), and a sentinel
+# carries `pwd` across the strip (#466).
+SKILL_DIR=""
+resolve_skill_dir() {
+  local src
+  case "${BASH_SOURCE[0]}" in
+    */*) src="${BASH_SOURCE[0]%/*}" ;;
+    *) src=. ;;
+  esac
+  if ! SKILL_DIR="$(cd -- "${src:-/}" && pwd && printf x)"; then
+    warn "cannot enter the script directory ${src:-/} — restore read and search access to the plugin directory, or reinstall the plugin, then re-run"
+    return 1
+  fi
+  SKILL_DIR="${SKILL_DIR%x}"
+  SKILL_DIR="${SKILL_DIR%$'\n'}"
+}
+
 cleanup() {
   if [[ -n "$ERRFILE" ]] && ! rm -f "$ERRFILE"; then
     warn "could not remove temp file ${ERRFILE} — remove it by hand"
@@ -282,10 +301,10 @@ marker_seen() { # <pane-id> <absolute-report-path>
   if report_marker_on_screen "$text" "$2"; then return 0; fi
   # UI decoration is accepted only when the completed native source proves
   # the authored final row was bare. The helper owns source/UI allowlists.
-  local result skill_dir
-  skill_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  local result
+  if ! resolve_skill_dir; then return 2; fi
   rc=0
-  result="$(printf '%s' "$text" | bash "$skill_dir/foreman.sh" probe-report \
+  result="$(printf '%s' "$text" | bash "$SKILL_DIR/foreman.sh" probe-report \
     --herdr-bin "$HERDR_BIN" --agent "$AGENT" --pane "$1" --report "$2" \
     --lines "$FOREMAN_PROBE_LINES")" || rc=$?
   if (( rc != 0 )); then
@@ -807,8 +826,8 @@ main() {
       if (( rc == 0 )); then
         now="$(date +%s)"
         emit "$REFUSAL_STATE" false "$(( now - start ))" "terminal_provider_refusal"
-        local launcher
-        launcher="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/foreman.sh"
+        if ! resolve_skill_dir; then return 2; fi
+        local launcher="${SKILL_DIR}/foreman.sh"
         warn "${AGENT}: report unavailable after a confirmed terminal provider refusal — save this JSON and record it with \`bash $(printf '%q' "$launcher") record-refusal\`; keep review/release gates unsatisfied, with no rephrasing, no resend to the same provider, and no synthesized report; one move of the unchanged brief to another provider goes through plan and apply (dispatch-recovery.md Wait outcomes)"
         return 5
       fi
