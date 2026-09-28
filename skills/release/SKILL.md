@@ -144,17 +144,30 @@ It returns the full `poll-pr-reviews.sh` snapshot plus a `watch` object — `{"r
   - Accepted: `Fixed in <sha>` (literal phrase; `Done` / `Accepted and fixed` do not satisfy)
   - Declined: `Declining — <reason with cited evidence>` (em dash `—`, not hyphen or period)
   - Advisory deferred: `Acknowledged — deferred to <follow-up ref>` (em dash `—`; names where it is tracked)
+- **Marginal blocking finding:** a nominated finding may go to a weighing instead of a fix (`rules/review-severity.md` Judge-Weighed Finding Carve-Out). Standalone, the operator is the judge: ask one decision question per gate naming every nomination, keep fixing while it is open, and treat no answer as `fix`. The ruling-file format, the standalone question and the reply literals for a ruled finding are in:
+
+  ```text
+  skills/release/REVIEW_DETAILS.md
+  ```
+
+- **Ruled policy review:** once a ruling covers every blocking finding, list or dismiss with the script below. Without `--ruling` it lists the blocking findings to name in the question; with it, it dismisses the review only when its predicate holds. Exit 0 dismissed, noop or listed; 1 predicate unmet, `.unmet` naming each failed condition; 2 usage or API error. The predicate is the script's — see `skills/release/dismiss-ruled-review.sh` header, not restated here (`rules/script-as-black-box.md`):
+
+  ```bash
+  CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"; [ -d "$CP" ] || case "$(git config --get remote.origin.url)" in git@github.com:jbaruch/coding-policy|git@github.com:jbaruch/coding-policy.git|https://github.com/jbaruch/coding-policy|https://github.com/jbaruch/coding-policy.git|ssh://git@github.com/jbaruch/coding-policy|ssh://git@github.com/jbaruch/coding-policy.git) CP=. ;; *) echo "coding-policy plugin not found: run tessl install jbaruch/coding-policy" >&2; exit 1 ;; esac
+  bash "$CP/skills/release/dismiss-ruled-review.sh" <owner> <repo> <pr-number> --ruling <ruling-file> [--followup <follow-up-url>]
+  ```
+
 - Push fixes to the same branch
 - **Re-request Copilot after every push** with Step 4's command block. Copilot does not re-post on its own.
 - The policy reviewer re-runs automatically on every push (coding-policy via `review-codex.yml` `pull_request: synchronize`; consumers via `review-trigger.yml` re-dispatching the fleet App). No manual re-request.
-- Repeat Step 5 until the policy reviewer carries no blocking finding — `APPROVED`, or `COMMENTED` with its body read and only advisories — and every thread has a reply.
+- Repeat Step 5 until the policy reviewer carries no blocking finding — `APPROVED`, `COMMENTED` with its body read and only advisories, or `RULED` after a ruled dismissal — and every thread has a reply.
 
 ## Step 7 — Merge + Cleanup
 
 Only proceed when:
 - Step 5's watcher returned `.watch.result` as `ready` — its exit-0 readiness conjunction (mergeable, CI `success`/`none`, both bots posted, the policy reviewer not `CHANGES_REQUESTED`); the field predicate is the watcher's, not restated here (`rules/script-as-black-box.md` — see `skills/release/watch-pr-reviews.sh` header). `ready` already requires each bot's `state` to have left `none`, so a reviewer that never ran cannot satisfy the gate vacuously, AND
 - Every non-empty `reviews.*.body` in the returned snapshot has been read in full — a `COMMENTED` state with zero inline comments is not a license to skip the body (see `rules/reviewer-feedback-reading.md`), AND
-- Every inline comment from Step 5's `inline_comments` count has a `Fixed in <sha>`, `Declining — <reason>`, or `Acknowledged — deferred to <follow-up ref>` reply per Step 6 (verify by listing the PR's review comments — the poll script tracks counts, not reply state, so the operator confirms thread closure). An advisory comment deferred with the `Acknowledged — deferred` reply closes its thread and never blocks the merge per `rules/review-severity.md`.
+- Every inline comment from Step 5's `inline_comments` count has a `Fixed in <sha>`, `Declining — <reason>`, or `Acknowledged — deferred to <follow-up ref>` reply per Step 6, a ruled finding's reply citing its ruling (verify by listing the PR's review comments — the poll script tracks counts, not reply state, so the operator confirms thread closure). An advisory comment deferred with the `Acknowledged — deferred` reply closes its thread and never blocks the merge per `rules/review-severity.md`.
 
 A `COMMENTED` review never gates the merge on its state alone — but its body must be read before merge, zero inline comments included. With inline comments, it is mergeable once every thread also has a reply. Advisory findings (the reviewer's `## Advisory findings` section, and every Copilot comment) do not block the merge — acknowledge them and defer per `rules/review-severity.md`; only a blocking finding gates.
 
@@ -167,7 +180,7 @@ CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"; [ -d "$
 bash "$CP/skills/release/dismiss-stale-reviews.sh" <owner> <repo> <pr-number>
 ```
 
-Run it once Step 5's poll shows every bot's latest verdict clean. It emits a JSON summary of what it dismissed and what it left active, exits non-zero on API failure, and is idempotent on re-run. Which reviews it dismisses and which it leaves is the script's decision contract — see `skills/release/dismiss-stale-reviews.sh` header, not restated here (`rules/script-as-black-box.md`).
+Run it once Step 5's poll shows every bot's latest verdict clean, a `RULED` policy state included. It emits a JSON summary of what it dismissed and what it left active, exits non-zero on API failure, and is idempotent on re-run. Which reviews it dismisses and which it leaves is the script's decision contract — see `skills/release/dismiss-stale-reviews.sh` header, not restated here (`rules/script-as-black-box.md`).
 
 **Name this repo's publication channels before merging.** The confirmation a release owes is keyed on the publication, never on the package — a package that publishes through more than one channel owes the duty once per publication, each confirmed against the channel that carried it (`rules/ci-safety.md` Always Watch CI). Read the repo's publish workflow and its manifest, and name every channel it publishes on. How each channel is recognized, the command for every gate below, each helper's exit-code contract, and a walkthrough of the Tessl-only, tag/asset-only and mixed cases:
 

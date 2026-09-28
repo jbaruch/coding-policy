@@ -1,5 +1,43 @@
 # Changelog
 
+### Added
+
+- **A judge can weigh a marginal blocking finding, and a ruling clears the
+  gating policy review (Part of #632, PR A of 2: release side).** Blocking
+  findings whose fix costs more than the failure they prevent had no exit
+  short of a `stop` diagnosis. #616 spent 12 fix rounds, and #624 and
+  #627/#617 churned on marginal findings the previous fix round had itself
+  introduced. The reviewer kept finding something one line deeper, and every
+  round was a full re-review.
+  - `rules/review-severity.md` gains the Judge-Weighed Finding Carve-Out. A
+    completed weighing ruling may rule a nominated blocking finding `defer`
+    (tracked in the task's follow-up issue) or `decline`, when the finding's
+    file is unchanged from the ruling's `HEAD:` and no floor applies: failing
+    checks, reachable security or data-loss defects, `no-secrets` and
+    `ci-safety` findings, unmet carve-out preconditions, and operator-stated
+    acceptance criteria are always `fix`. In standalone mode the operator is
+    the judge: the agent asks one non-blocking question per gate, keeps
+    fixing, reads no answer as `fix`, and records the answer verbatim as the
+    ruling file.
+  - `rules/ci-safety.md` gains the Judge-Ruled-Review Dismissal Carve-Out:
+    the policy reviewer's latest `CHANGES_REQUESTED` on the head is dismissed
+    only through `skills/release/dismiss-ruled-review.sh`, never by hand. The
+    Superseded-Bot-Review carve-out counts a ruled dismissal as an all-clear.
+  - New `skills/release/dismiss-ruled-review.sh` checks the ruling against
+    the review's `## Blocking findings`, carries a ruling across heads only
+    while the finding's path is unchanged per the compare API, refuses floor
+    rules and failing checks, requires `--followup` for a `defer`, and
+    dismisses with a `JUDGE-RULED:` message. Without `--ruling` it lists the
+    findings to weigh.
+  - `poll-pr-reviews.sh` reads a marker dismissal on the head as the new
+    `RULED` state, `watch-pr-reviews.sh` treats it as ready, and
+    `dismiss-stale-reviews.sh` counts it as an all-clear. The marker is
+    pinned equal across the three scripts by a test.
+  - Release skill Step 6 and `REVIEW_DETAILS.md` carry the standalone
+    question, the ruling file, the order of work and the reply literals
+    citing the ruling. PR B wires the Herdr judge seat, the churn signal and
+    the worker briefs.
+
 ## 0.3.328 — 2026-09-28
 
 ### Fixed
