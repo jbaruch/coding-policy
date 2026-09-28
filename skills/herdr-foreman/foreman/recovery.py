@@ -16,6 +16,7 @@ from pathlib import Path, PurePosixPath
 from . import runnable
 from .errors import UsageError
 from .chronology import assignment_after, latest_assignment, timestamp
+from .oracle import bound_oracle_problem
 from .tiers import SEAT_SEPARATOR, canonical_role, require_seatable
 
 
@@ -43,7 +44,12 @@ RECOVERY_SCHEMA_VERSION = 1
 #: Version 13 adds the `task_closed` event kind, which ends a task's developer
 #: reservation (#483). No collection is added; an older store carrying such an
 #: event is unowned newer data and is refused.
-RECOVERY_STORE_VERSION = 13
+#: Version 14 adds `oracle` to a mechanical round's dispatch: the oracle the
+#: round was licensed on, a `patch` or `fixture` oracle with the sha256 its plan
+#: pinned, so `verify-oracle` checks the oracle the round was sent with rather
+#: than the plan file as it reads now (#585). An older store carrying the field
+#: is unowned newer data and is refused.
+RECOVERY_STORE_VERSION = 14
 REFUSAL_FIELDS = frozenset({"brief_identity", "refusal", "refusal_move", "provider"})
 SPECIALIST_DISPATCH_VERSION = 2
 #: Dispatch record version 3: a judge dispatch carrying the mode it was sent
@@ -218,6 +224,8 @@ def _refuse_unowned_legacy(store, version):
             carriers += [part for part in (row.get("result"), row.get("context_before_send")) if isinstance(part, dict)]
         if version < 12 and any("judge_mode" in part for part in carriers):
             raise UsageError("Older recovery contains a judge mode this version never wrote; preserve it for owner recovery.", {})
+        if version < 14 and isinstance(row, dict) and "oracle" in row:
+            raise UsageError("Older recovery contains a dispatch-bound oracle this version never wrote; preserve it for owner recovery.", {})
         allowed = ALLOWED_AT_6 if version == 6 else REFUSAL_FIELDS if version >= 7 else frozenset()
         if not isinstance(row, dict) or REFUSAL_FIELDS.intersection(row) - allowed:
             raise UsageError("Older recovery contains unowned newer refusal records; preserve it for owner recovery.", {})
@@ -1216,14 +1224,28 @@ def validate_work(store, assignments, task, fix_round, plan_id=None, work=None, 
     return plan
 
 
-def dispatch_identity(task, role, agent, fix_round, paths_by_role, supplied=None, *, options=None):
+def briefing_bytes(path, contents=None):
+    """The bytes of briefing file `path`: the verified bytes `contents` carries for it, else a read by name.
+
+    A frozen dispatch carries the bytes its freeze verified, so an ancestor
+    swapped for a link after the freeze cannot change what the dispatch's
+    identity, its sent prompt or its checks read (#565). A path `contents`
+    does not name -- a replay's recorded source, a dry run -- is read by name
+    and may raise OSError.
+    """
+    if contents is not None and path in contents:
+        return contents[path]
+    return Path(path).read_bytes()
+
+
+def dispatch_identity(task, role, agent, fix_round, paths_by_role, supplied=None, *, options=None, contents=None):
     digest = hashlib.sha256()
     for value in (task, role, agent, fix_round, paths_by_role["common"], paths_by_role[role], options):
         digest.update(json.dumps(value, sort_keys=True).encode("utf-8"))
         digest.update(b"\0")
     for path in (paths_by_role["common"], paths_by_role[role]):
         try:
-            content = Path(path).read_bytes()
+            content = briefing_bytes(path, contents)
         except OSError as exc:
             raise UsageError("Cannot fingerprint brief {}: {}. Restore it before dispatch.".format(path, exc), {}) from None
         digest.update(len(content).to_bytes(8, "big"))
@@ -1425,19 +1447,19 @@ REFUSAL_STATES = frozenset({"idle", "done"})
 AUTHORIZED_BRIEFS = frozenset({"unchanged", "revised"})
 
 
-def brief_identity(paths_by_role, role, report):
+def brief_identity(paths_by_role, role, report, contents=None):
     """Digest the common and role brief bytes with the report path masked.
 
     A replacement brief carries a fresh report path and nothing else; masking
     every occurrence of `report` lets two dispatches of the unchanged brief
     share one identity while a reworded brief gets another. Without a bound
     report path the raw bytes are digested, so only a byte-identical brief
-    matches.
+    matches. `contents` is `briefing_bytes`'s map of verified frozen bytes.
     """
     digest = hashlib.sha256()
     for path in (paths_by_role["common"], paths_by_role[role]):
         try:
-            content = Path(path).read_bytes()
+            content = briefing_bytes(path, contents)
         except OSError as exc:
             raise UsageError("Cannot read brief {}: {}. Restore it before dispatch.".format(path, exc), {}) from None
         if report:
@@ -1972,6 +1994,11 @@ def validate_store(store, assignments):
         pending_tasks = set()
         for row in store["dispatches"]:
             _validate_dispatch_metadata(row)
+            if "oracle" in row:
+                problem = bound_oracle_problem(row["oracle"])
+                if problem is not None:
+                    raise UsageError("A dispatch's bound oracle is malformed: {}; restore the original dispatch "
+                                     "record.".format(problem), {"dispatch": row.get("id")})
             for key in ("id", "fingerprint", "role", "agent"):
                 text(row[key], key)
             require_seatable(row["role"])

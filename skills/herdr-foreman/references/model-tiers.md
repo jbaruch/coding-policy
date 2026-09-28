@@ -115,7 +115,9 @@ accepted, `verify-oracle` compares its whole result against the oracle the plan
 declared (SKILL.md Step 12). The result is the pushed diff for a `patch` oracle
 and the produced output otherwise. `plan` pins each `patch` or `fixture`
 file's sha256 in the plan's `oracle_pins`; an oracle file edited after planning
-is refused rather than compared. The comparison is the contract of
+is refused rather than compared. `apply` binds the oracle and its pin into the
+round's dispatch, and `verify-oracle --task` checks against that binding, so a
+plan edited after dispatch is refused too. The comparison is the contract of
 `skills/herdr-foreman/foreman/oracle.py`, `verify`.
 A context written for the retired predicate — task names, `spec_complete`,
 file and byte caps, the escape booleans — is refused by name, with its
@@ -152,7 +154,9 @@ arguments, including YOLO mode, instead of restarting it. If the process record 
 transport reads `ps` for that same foreground PID. Older Herdr builds that
 cannot supply the structured process record fail closed. A retained fix also
 needs the existing task/fix history and live native session identity; it keeps
-a compatible higher effort instead of restarting to lower effort.
+a compatible higher effort instead of restarting to lower effort. Its recorded
+`de_escalated` describes the tier it runs at: a kept effort that reaches the
+step the plan declined clears it, and a declined model switch keeps it set.
 
 Tiered assignment messages include the selected model, effort, and an input
 `prompt_hash`. The hash covers length-framed bytes of the original assignment
