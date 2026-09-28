@@ -17,9 +17,10 @@ Each quantity is reported separately and never summed into one cost:
 - `correction_rounds` -- the highest cumulative `fix_round` among the task's
   applied developer rows
 - `work` -- applied assignments per responsibility
-- `coordination` -- what dispatch cost around the work: rows that never
-  started, transport retries, unsent dispatches and recorded provider
-  refusals; the foreman's own tokens are `unknown`
+- `coordination` -- what dispatch cost around the work: rows known never to
+  have started, rows whose outcome is `unknown` (counted apart), transport
+  retries, unsent dispatches and recorded provider refusals; the foreman's own
+  tokens are `unknown`
 - `windows` -- headroom movement of each usage window a task worker drew on,
   between the last snapshot at or before the span's start and the first at or
   after its end
@@ -194,7 +195,11 @@ def _task_report(task, store, assignments, snapshots):
               and (end is None or timestamp(event.get("at"), "Event {} time".format(event.get("sequence"))) <= end)]
     coordination: dict[str, int | str] = {field: sum(1 for event in events if event.get("kind") == kind)
                                           for field, kind in COORDINATION_EVENTS.items()}
-    coordination["unstarted_assignments"] = sum(1 for _at, row in rows if row.get("status") != "applied")
+    # `unknown` is an unrecoverable outcome, not proof nothing started, so it
+    # is counted apart from the hand-offs known never to have started.
+    coordination["unstarted_assignments"] = sum(1 for _at, row in rows if row.get("status") in UNCOUNTED_STATUSES)
+    coordination["unknown_outcome_assignments"] = sum(
+        1 for _at, row in rows if row.get("status") not in UNCOUNTED_STATUSES and row.get("status") != "applied")
     coordination["foreman_tokens"] = UNKNOWN
     return {
         "task": task, "status": status,

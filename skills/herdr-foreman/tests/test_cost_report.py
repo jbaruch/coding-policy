@@ -60,8 +60,15 @@ class ReportTest(unittest.TestCase):
         self.assertEqual(entry["correction_rounds"], 2)
         self.assertEqual(entry["work"], {"developer": 2, "reviewer": 1})
         self.assertEqual(entry["coordination"], {"transport_retries": 1, "dispatches_not_sent": 0, "provider_refusals": 0,
-                                                 "unstarted_assignments": 1, "foreman_tokens": "unknown"})
+                                                 "unstarted_assignments": 1, "unknown_outcome_assignments": 0,
+                                                 "foreman_tokens": "unknown"})
         self.assertEqual(entry["tokens"], {"uncached_input": "unknown", "cached_input": "unknown", "output": "unknown"})
+
+    def test_an_unknown_outcome_is_not_counted_as_unstarted(self):
+        state = delivered(close=None)
+        add_assignment(state, REVIEW, "release", "codex", "unknown", task="t")
+        coordination = only(state)["coordination"]
+        self.assertEqual((coordination["unstarted_assignments"], coordination["unknown_outcome_assignments"]), (1, 1))
 
     def test_every_unrecorded_field_is_named(self):
         self.assertEqual(report(delivered())["unrecorded"], list(UNRECORDED))

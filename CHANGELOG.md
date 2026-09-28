@@ -22,7 +22,7 @@
   `foreman cost-report [--task T]` is read-only and joins the assignment
   ledger, recovery events and measure snapshots: status, elapsed time to
   closure, correction rounds, applied work per role, coordination overhead
-  (unstarted assignments, transport retries, unsent dispatches, provider
+  (unstarted assignments, unknown-outcome assignments counted apart, transport retries, unsent dispatches, provider
   refusals) and per-window headroom movement between the snapshots bracketing
   the task. Uncached input, cached input and output tokens, and the foreman's
   own tokens, are `unknown`: no owner record carries token counts, and the
