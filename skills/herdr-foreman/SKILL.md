@@ -1,12 +1,13 @@
 ---
 name: herdr-foreman
 description: >
-  Run Herdr rounds as a nonworking foreman: assign, supervise, accept or
-  reject, never do the crew's work. Covers on-demand specialists, model tiers, bounded briefs,
+  Run Herdr rounds as a nonworking foreman on a selected, verified tier:
+  assign, supervise, accept or reject, never do the crew's work. Covers on-demand specialists, model tiers, bounded briefs,
   report verification, and release gates. Use for requests to dispatch the Herdr
   team, balance worker usage, collect reports, run or retrieve retrospectives,
-  catch up on outstanding user attention, curate team lessons, or save and resume
-  foreman handoffs. Live rounds require HERDR_ENV; saved memory and attention work
+  catch up on outstanding user attention, curate team lessons, save and resume
+  foreman handoffs, or report a task's cost or resource use through acceptance.
+  Live rounds require HERDR_ENV; saved memory, attention and cost reports work
   offline. Other standalone tasks skip this skill.
 ---
 
@@ -20,6 +21,10 @@ or handoff covering every active assignment. Keep user attention visible under
 `references/attention.md`.
 
 Follow `rules/agent-team-operation.md` for round constraints.
+
+You run on the foreman's selected tier: the operator's `coordination` row,
+resolved through `select_tier` and checked against the capability table
+(`rules/agent-team-operation.md` Foreman Seat).
 
 Each command resolves `CP` to the local or home plugin, or to `.` in a
 coding-policy clone; anywhere else it stops with an install instruction. Repeat its resolver in every call. Prose `skills/...` paths are relative to that root.
@@ -83,7 +88,7 @@ user-attention blocker naming `foreman migrate-home` (`skills/herdr-foreman/stat
 Migration), and run nothing else until the operator has stopped every foreman
 and run it.
 
-Three request kinds are answered offline, need no live Herdr, and finish here
+Four request kinds are answered offline, need no live Herdr, and finish here
 after the requested operation. Each reference carries its own owner commands and
 their contracts. Use the recorded state override or default, report any non-zero
 diagnostic, and never fabricate missing history. They grant no new task
@@ -95,6 +100,19 @@ authority.
   `references/working-memory.md`.
 - **A saved retrospective** — `references/retrospectives.md`. Report the note's
   date, coverage, conclusions, and path.
+- **A task's cost or resource use** — run the read-only report, omitting
+  `--task` for every task:
+
+  ```bash
+  CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"; [ -d "$CP" ] || case "$(git config --get remote.origin.url)" in git@github.com:jbaruch/coding-policy|git@github.com:jbaruch/coding-policy.git|https://github.com/jbaruch/coding-policy|https://github.com/jbaruch/coding-policy.git|ssh://git@github.com/jbaruch/coding-policy|ssh://git@github.com/jbaruch/coding-policy.git) CP=. ;; *) echo "coding-policy plugin not found: run tessl install jbaruch/coding-policy" >&2; exit 1 ;; esac
+  bash "$CP/skills/herdr-foreman/foreman.sh" cost-report --task <task>
+  ```
+
+  It prints JSON with a `tasks` list and an `unrecorded` list. Relay each
+  quantity separately, and every `unknown` value as `unknown`. Never total the
+  quantities or claim a saving. A non-zero exit writes its diagnostic to stderr
+  for an unusable state file or an unknown task; report it and stop. The output
+  contract is `skills/herdr-foreman/state-schema.md` (Writer / Reader Contract).
 
 For every other request, read `HERDR_ENV` before running scripts.
 
@@ -156,8 +174,23 @@ bash "$CP/skills/herdr-foreman/foreman.sh" capability-show
 ```
 
 - **Exit 1** — report the `blocking` reasons verbatim. Each names the command
-  that produced it; re-run that one, not the preflight.
+  that produced it; re-run that one, not the preflight. A `foreman_tier` block
+  beside a failed `headroom` check waits on that measurement; fix it first.
+  Otherwise it means this pane does not run the foreman's selected tier:
+  record a user-attention blocker naming `start-foreman`
+  (`skills/herdr-foreman/references/model-tiers.md` Foreman Seat) and finish here.
 - **Exit 2** — report the diagnostic and finish here.
+
+On exit 0 or 1, a `checks.foreman_tier` status `unconfigured` blocks nothing:
+relay its `detail.warning` verbatim before routing.
+
+The blocker quotes the restart the operator runs from another shell, naming an
+empty Herdr shell pane; never run it from the foreman's own pane:
+
+```bash
+CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"; [ -d "$CP" ] || case "$(git config --get remote.origin.url)" in git@github.com:jbaruch/coding-policy|git@github.com:jbaruch/coding-policy.git|https://github.com/jbaruch/coding-policy|https://github.com/jbaruch/coding-policy.git|ssh://git@github.com/jbaruch/coding-policy|ssh://git@github.com/jbaruch/coding-policy.git) CP=. ;; *) echo "coding-policy plugin not found: run tessl install jbaruch/coding-policy" >&2; exit 1 ;; esac
+bash "$CP/skills/herdr-foreman/foreman.sh" start-foreman --pane <pane-id>
+```
 
 Which checks run, and which exit codes they fold into `blocking`, are the
 script's decision contract — see `skills/herdr-foreman/round-preflight.sh`, not

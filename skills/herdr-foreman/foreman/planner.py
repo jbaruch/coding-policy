@@ -94,7 +94,11 @@ from .tiers import SEAT_SEPARATOR, canonical_role
 #: Version 12 adds `oracle_pins`, each patch or fixture oracle's path and the
 #: sha256 of its bytes when the plan was written (#488). `verify-oracle`
 #: refuses an older plan's patch or fixture oracle, which pinned nothing; replan.
-PLAN_SCHEMA_VERSION = 12
+#: Version 13 adds `selection`, one record per assignment naming its required
+#: capabilities, selected model and effort, capability-table evidence, cheaper
+#: candidates and escalation conditions (#602, foreman/selection.py). Additive
+#: and explanatory: no reader acts on it, so an older plan reads unchanged.
+PLAN_SCHEMA_VERSION = 13
 
 #: What one round in each seat is expected to burn, in points of the agent's
 #: remaining headroom percentage. The ORDER is what the planner acts on:

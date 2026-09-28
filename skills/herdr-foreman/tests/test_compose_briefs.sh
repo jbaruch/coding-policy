@@ -377,6 +377,68 @@ JSON
      && printf '%s' "$ERRTEXT" | grep -q 'overlaps a generated brief'; then
     pass; else fail "report/brief overlap: RC=$RC OUT=$OUT ERR=$ERRTEXT"; fi
 
+  # 15b. A path the worker's `REPORT: <path>` line or a brief carries is
+  #      refused for every character foreman/renderable.py refuses, not only
+  #      C0 and DEL: a C1 control or U+2028/U+2029 splits the marker across
+  #      rows, and a bidi override reorders it (#578).
+  local sep sep_label sep_path
+  for sep in '\u0085' '\u009b' '\u2028' '\u2029' '\u202e' '\ue000' '\u0060'; do
+    sep_label="${sep:2}"
+    jq --argjson c "\"${sep}\"" '.roles.developer.REPORT = ("/r/dev" + $c + "x.md")' "$v1" > "$v15" \
+      || die "could not build the separator report fixture"
+    run "$TPL" "$v15" "$TMP/out15b"
+    if [[ $RC -eq 2 && -z "$OUT" && ! -e "$TMP/out15b" ]] \
+       && printf '%s' "$ERRTEXT" | grep -q "REPORT for role 'developer'"; then
+      pass; else fail "REPORT with U+${sep_label}: expected exit 2 and nothing written, got RC=$RC OUT=$OUT ERR=$ERRTEXT"; fi
+    # A real file whose name carries the character: the refusal is the
+    # character rule, never a missing file.
+    sep_path="$(jq -rn --argjson c "\"${sep}\"" --arg d "$TMP" '$d + "/pkg" + $c + ".diff"')" \
+      || die "could not build the separator package path"
+    printf 'diff\n' > "$sep_path" || die "could not write the separator package"
+    jq --arg p "$sep_path" '.roles.tester.REVIEW_PACKAGE = $p' "$v6b" > "$TMP/v15b-package.json" \
+      || die "could not build the separator package fixture"
+    run "$PKG" "$TMP/v15b-package.json" "$TMP/out15b"
+    if [[ $RC -eq 2 && -z "$OUT" && ! -e "$TMP/out15b" ]] \
+       && printf '%s' "$ERRTEXT" | grep -q "REVIEW_PACKAGE for role 'tester'"; then
+      pass; else fail "REVIEW_PACKAGE with U+${sep_label}: expected exit 2, got RC=$RC OUT=$OUT ERR=$ERRTEXT"; fi
+    jq --arg p "$sep_path" '.shared.POLICY_INDEX = $p' "$v6b" > "$TMP/v15b-policy.json" \
+      || die "could not build the separator policy fixture"
+    run "$PKG" "$TMP/v15b-policy.json" "$TMP/out15b"
+    if [[ $RC -eq 2 && -z "$OUT" && ! -e "$TMP/out15b" ]] \
+       && printf '%s' "$ERRTEXT" | grep -q "POLICY_INDEX must be a file path"; then
+      pass; else fail "POLICY_INDEX with U+${sep_label}: expected exit 2, got RC=$RC OUT=$OUT ERR=$ERRTEXT"; fi
+    rm -f "$sep_path" || die "could not remove the separator package"
+  done
+
+  # 15c. A check that cannot run is exit 3, never an accepted path.
+  local pyshim="$TMP/pyshim"
+  mkdir -p "$pyshim" || die "could not create the python3 shim dir"
+  printf '#!/usr/bin/env bash\nset -euo pipefail\nexit 7\n' > "$pyshim/python3" \
+    || die "could not write the python3 shim"
+  chmod +x "$pyshim/python3" || die "could not make the python3 shim executable"
+  RUN_SEQ=$((RUN_SEQ+1))
+  OUT="$(PATH="$pyshim:$PATH" bash "$SCRIPT" "$TPL" "$v1" "$TMP/out15c" 2>"$TMP/err.$RUN_SEQ")"
+  RC=$?
+  ERRTEXT="$(cat "$TMP/err.$RUN_SEQ")"
+  if [[ $RC -eq 3 && -z "$OUT" && ! -e "$TMP/out15c" ]] \
+     && printf '%s' "$ERRTEXT" | grep -q "renderable-text check failed"; then
+    pass; else fail "broken renderable check: expected exit 3 and nothing written, got RC=$RC OUT=$OUT ERR=$ERRTEXT"; fi
+
+  # 15d. A crash exiting 1 (python3's code for an uncaught exception, such as
+  #      a failed import) is a check that could not run, never a refusal.
+  local crashshim="$TMP/crashshim"
+  mkdir -p "$crashshim" || die "could not create the crash shim dir"
+  printf '#!/usr/bin/env bash\nset -euo pipefail\necho "ModuleNotFoundError: No module named foreman" >&2\nexit 1\n' \
+    > "$crashshim/python3" || die "could not write the crash shim"
+  chmod +x "$crashshim/python3" || die "could not make the crash shim executable"
+  RUN_SEQ=$((RUN_SEQ+1))
+  OUT="$(PATH="$crashshim:$PATH" bash "$SCRIPT" "$TPL" "$v1" "$TMP/out15d" 2>"$TMP/err.$RUN_SEQ")"
+  RC=$?
+  ERRTEXT="$(cat "$TMP/err.$RUN_SEQ")"
+  if [[ $RC -eq 3 && -z "$OUT" && ! -e "$TMP/out15d" ]] \
+     && printf '%s' "$ERRTEXT" | grep -q "renderable-text check failed"; then
+    pass; else fail "crashed renderable check: expected exit 3 and nothing written, got RC=$RC OUT=$OUT ERR=$ERRTEXT"; fi
+
   # 16. A review SEAT owes its role's review-package checks. The slice narrows
   #     what a reviewer reviews, never what its brief must carry (#434).
   local v16="$TMP/v16.json" o16="$TMP/out16"

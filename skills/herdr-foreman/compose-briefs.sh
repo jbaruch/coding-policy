@@ -19,7 +19,8 @@
 #           {"common":"<path>","briefs":{"<role>":"<path>", ...}}
 #   stderr: diagnostics only.
 #   exit  : 0 every file written with no placeholder left,
-#           1 precondition unmet (usage, missing dir/file/template, no jq),
+#           1 precondition unmet (usage, missing dir/file/template, no jq,
+#             no python3),
 #           2 validation failed — an unfilled placeholder, a supplied key no
 #             template uses, a value that is not text, an invalid/reused REPORT
 #             path, a REPORT longer than FOREMAN_REPORT_PATH_MAX_COLS, or a reviewer/tester
@@ -27,8 +28,11 @@
 #             or an unreadable POLICY_INDEX / RELEASE_SKILL artifact.
 #             Nothing is written on a
 #             validation failure,
-#           3 a tool this depends on failed (the placeholder scan itself). The
-#             answer is unknown, which is never reported as "no placeholders".
+#           3 a tool this depends on failed (the placeholder scan, or the
+#             renderable-text check in foreman/renderable.py). The answer is
+#             unknown, which is never reported as "no placeholders".
+#           A REPORT, POLICY_INDEX, RELEASE_SKILL or REVIEW_PACKAGE path, or a
+#           SLICE_PATHS glob, that foreman/renderable.py refuses is exit 2.
 #   env   : FOREMAN_REPORT_PATH_MAX_COLS overrides the REPORT length limit
 #           (tests, a fleet whose narrowest pane is wider); a non-integer or
 #           zero value is a precondition failure (exit 1).
@@ -50,6 +54,33 @@ PLACEHOLDER_RE='\{\{[A-Z0-9_]+\}\}'
 FOREMAN_REPORT_PATH_MAX_COLS="${FOREMAN_REPORT_PATH_MAX_COLS:-100}"
 
 warn() { printf 'compose-briefs: %s\n' "$1" >&2; }
+
+SKILL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Whether one JSON value (a string or an array of strings) stays intact on a
+# rendered line. The character rule is `foreman/renderable.py`, the one check
+# the report marker, the GATES block and every brief path share (#578).
+# Returns 0 renderable, 1 not, 3 when the check itself could not run. An exit
+# code alone is no verdict: python3 also exits 1 on an uncaught exception such
+# as a failed import, so a verdict counts only when stdout carries the
+# module's JSON object agreeing with the exit code.
+renderable_json() { # <json-value> [--code-span]
+  local rc=0 out verdict
+  out="$(printf '%s' "$1" | PYTHONPATH="${SKILL_DIR}${PYTHONPATH:+:${PYTHONPATH}}" \
+    python3 -m foreman.renderable ${2:+"$2"})" || rc=$?
+  case "$rc" in
+    0) verdict=true ;;
+    1) verdict=false ;;
+    *) verdict="" ;;
+  esac
+  if [[ -n "$verdict" ]] \
+     && printf '%s' "$out" | jq -e --argjson v "$verdict" \
+          'type == "object" and .renderable == $v' >/dev/null; then
+    return "$rc"
+  fi
+  warn "the renderable-text check failed (exit ${rc}, no verdict on stdout) — the value could not be checked; confirm python3 runs and ${SKILL_DIR}/foreman/renderable.py is installed"
+  return 3
+}
 
 #: The responsibilities a SEAT may fill, mirroring `tiers.SEATABLE_ROLES`.
 SEATABLE_ROLES="reviewer tester"
@@ -164,8 +195,16 @@ validate_review_package() { # <merged-values-json> <role-or-seat>
       return 2
     fi
   done
+  local package_json check_rc=0
+  package_json="$(printf '%s' "$1" | jq -c '.REVIEW_PACKAGE')" || return 2
+  renderable_json "$package_json" --code-span || check_rc=$?
+  if (( check_rc == 3 )); then return 3; fi
+  if (( check_rc != 0 )); then
+    warn "REVIEW_PACKAGE for role '${2}' must be a file path without control, format or line-separator characters or backticks (the brief renders it in a code span) — run review-package.sh for the recorded range and pass its output path"
+    return 2
+  fi
   package="$(printf '%s' "$1" | jq -r '.REVIEW_PACKAGE // ""')" || return 2
-  if [[ "$package" != /* || "$package" == *[[:cntrl:]]* \
+  if [[ "$package" != /* \
         || ! -f "$package" || ! -r "$package" || ! -s "$package" ]]; then
     warn "REVIEW_PACKAGE for role '${2}' must name an absolute readable non-empty file — run review-package.sh for the recorded range and pass its output path"
     return 2
@@ -206,6 +245,10 @@ main() {
 
   if ! command -v jq >/dev/null 2>&1; then
     warn "jq not found on PATH — install it (\`brew install jq\`) to compose briefs"
+    return 1
+  fi
+  if ! command -v python3 >/dev/null 2>&1; then
+    warn "python3 not found on PATH — install Python 3.11+ (\`brew install python@3.11\`) to compose briefs"
     return 1
   fi
   if [[ ! -d "$templates" ]]; then
@@ -307,7 +350,7 @@ main() {
   # Idempotency); the directory is created only once every check has passed.
   local -a out_paths=() out_bodies=() report_paths=()
   local merged rendered leftovers supplied known common_known unused key report rendered_scope slice_digest
-  local common_body scan_rc=0
+  local common_body scan_rc=0 check_rc=0
   validate_values "$shared" "the shared values" || return 2
   # Resolver-produced policy paths are explicit brief inputs. Custom templates
   # need not carry them; any supplied artifact must remain readable at compose.
@@ -315,12 +358,15 @@ main() {
   for policy_key in POLICY_INDEX RELEASE_SKILL; do
     policy_present="$(printf '%s' "$shared" | jq -r --arg k "$policy_key" 'has($k)')" || return 2
     if [[ "$policy_present" == true ]]; then
-      if ! printf '%s' "$shared" | jq -e --arg k "$policy_key" '.[$k] | if type == "string" then explode | all(. >= 32 and . != 127) else false end' >/dev/null; then
-        warn "${policy_key} must be a file path without control characters — use resolve-policy-paths.sh output"
+      check_rc=0
+      renderable_json "$(printf '%s' "$shared" | jq -c --arg k "$policy_key" '.[$k]')" --code-span || check_rc=$?
+      if (( check_rc == 3 )); then return 3; fi
+      if (( check_rc != 0 )); then
+        warn "${policy_key} must be a file path without control, format or line-separator characters or backticks (the brief renders it in a code span) — use resolve-policy-paths.sh output"
         return 2
       fi
       policy_path="$(printf '%s' "$shared" | jq -r --arg k "$policy_key" '.[$k]')" || return 2
-      if [[ "$policy_path" != /* || "$policy_path" == *[[:cntrl:]]* || ! -f "$policy_path" || ! -r "$policy_path" || ! -s "$policy_path" ]]; then
+      if [[ "$policy_path" != /* || ! -f "$policy_path" || ! -r "$policy_path" || ! -s "$policy_path" ]]; then
         warn "${policy_key} must name an absolute readable non-empty file — run resolve-policy-paths.sh and supply its output before composing"
         return 2
       fi
@@ -373,7 +419,14 @@ main() {
       # The globs are rendered verbatim into the worker's brief, so a backtick
       # or a control character could close the code span and append
       # instructions of its own. A path glob needs neither.
-      if ! printf '%s' "$values" | jq -e --arg r "$role" '.roles[$r].SLICE_PATHS | type == "array" and length > 0 and all(type == "string" and (. | gsub("\\s";"") | length) > 0 and (test("[\u0000-\u001f\u007f`]") | not))' >/dev/null; then
+      check_rc=0
+      if printf '%s' "$values" | jq -e --arg r "$role" '.roles[$r].SLICE_PATHS | type == "array" and length > 0 and all(type == "string" and (. | gsub("\\s";"") | length) > 0)' >/dev/null; then
+        renderable_json "$(printf '%s' "$values" | jq -c --arg r "$role" '.roles[$r].SLICE_PATHS')" --code-span || check_rc=$?
+        if (( check_rc == 3 )); then return 3; fi
+      else
+        check_rc=1
+      fi
+      if (( check_rc != 0 )); then
         warn "seat '${role}' needs SLICE_PATHS: the non-empty list of path globs its slice owns, copied from the partition validate-partition accepted, each a string without backticks or control characters. A slice name alone leaves the worker no boundary to respect"
         return 2
       fi
@@ -412,13 +465,17 @@ main() {
         ;;
     esac
     # Validate in JSON before command substitution can strip trailing newlines
-    # or discard a NUL byte from the path.
-    if ! printf '%s' "$merged" | jq -e '.REPORT | if type == "string" then explode | all(. >= 32 and . != 127) else false end' >/dev/null; then
-      warn "REPORT for role '${role}' must be a string without control characters — choose a fresh absolute file path on one line"
+    # or discard a NUL byte from the path. A U+2028 or C1 control splits the
+    # worker's `REPORT: <path>` marker across rows as surely as a newline.
+    check_rc=0
+    renderable_json "$(printf '%s' "$merged" | jq -c '.REPORT')" --code-span || check_rc=$?
+    if (( check_rc == 3 )); then return 3; fi
+    if (( check_rc != 0 )); then
+      warn "REPORT for role '${role}' must be a string without control, format or line-separator characters or backticks (the brief renders it in a code span) — choose a fresh absolute file path on one line"
       return 2
     fi
     report="$(printf '%s' "$merged" | jq -r '.REPORT // ""')"
-    if [[ "$report" != /* || "$report" == *[[:cntrl:]]* || "$report" == */ ]]; then
+    if [[ "$report" != /* || "$report" == */ ]]; then
       warn "REPORT for role '${role}' must be an absolute file path on one line — choose a fresh path for this attempt"
       return 2
     fi
@@ -465,7 +522,9 @@ main() {
       warn "values for role '${role}' carry keys no template uses: ${unused}— remove them or fix the name"
       return 2
     fi
-    validate_review_package "$merged" "$role" || return 2
+    check_rc=0
+    validate_review_package "$merged" "$role" || check_rc=$?
+    if (( check_rc != 0 )); then return "$check_rc"; fi
     out_paths+=("${outdir}/brief-${role}.md")
     out_bodies+=("$rendered")
   done <<< "$roles"

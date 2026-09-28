@@ -32,6 +32,24 @@ description: Running a multi-agent team — task-based specialist composition, c
 - A repository edit routes to the developer responsibility under Writers and Checkouts
 - A shortfall of eligible workers is a staffing decision to record under Team Composition, never authorization for the foreman to execute
 
+## Foreman Seat
+
+- The operator's `config.json` `foreman` block declares the seat like a worker: its agent, kind, launch options and an optional tier table
+- The operator's tier table supplies the foreman's rows, as it does for every worker
+- No rule, plugin default or hardcoded value pins the foreman's model or effort
+- The foreman's tier is the operator's `coordination` row, resolved through `select_tier`
+- The capability table refuses that row when it records it inadequate
+- No escalation applies to the coordination round
+- Measured headroom never changes the foreman's row
+- The foreman's headroom is the measured headroom of the `window_group` its block declares, recorded with the selection
+- A foreman declaring no `window_group` reads as unmeasured
+- The foreman's agent is never a configured worker or the pinned judge's
+- `foreman start-foreman` launches the selected tier and proves it from the launch argv
+- The round preflight proves the running foreman's argv carries the selected tier, after it measures headroom
+- A running tier other than the selected one blocks the round
+- An absent `foreman` block is a visible preflight warning naming the config file and the block to add, never a round block
+- The seat's config, selection and launch contracts are in `skills/herdr-foreman/references/model-tiers.md` Foreman Seat
+
 ## Team Composition
 
 - The foreman selects the responsibilities needed at each stage of the task
@@ -176,7 +194,8 @@ description: Running a multi-agent team — task-based specialist composition, c
 - The pinned judge worker never holds another seat
 - No exclusion bars the judge from a dispute involving its own model
 - A judge round the pinned worker's window cannot cover halts the round — no substitution, no fallback to another vendor's flagship, no degraded ruling
-- The foreman runs on the strongest generally-available model at high effort; the most capable model is reserved for the judge
+- The most capable model is reserved for the judge
+- The foreman's tier is selected under Foreman Seat, never pinned
 
 ## Round Tiers
 
@@ -287,7 +306,7 @@ description: Running a multi-agent team — task-based specialist composition, c
 - The worker acts on none of it
 - A worker's repository writes happen only in the worktree its brief names, under `~/.worktrees/`
 - The foreman sweeps every repository with a worktree directory under `~/.worktrees/` every round, before provisioning and after the merge
-- A vanished worktree's leftover registration is cleared by the `git worktree prune` the prune runs for each swept repository
+- A vanished worktree's leftover registration is cleared when the sweep prunes its repository
 - Such a registration is otherwise inert
 - The sweep runs through `skills/herdr-foreman/sweep-worktrees.sh`
 - The sweep removes worktrees and deletes local branches by the predicates `rules/agent-worktree-isolation.md` Cleanup names

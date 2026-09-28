@@ -106,6 +106,163 @@
   scope clause was ambiguous about another seat's dispute (ambiguous
   criteria), which `open_items_out_of_scope` now asks literally.
 
+## 0.3.324 — 2026-09-28
+
+### Changed
+
+- **The Herdr foreman's tier is selected and proven by the workers' own
+  machinery, never pinned (#601).** `rules/agent-team-operation.md` said the
+  foreman ran on the strongest generally-available model at high effort, the
+  cost driver the #445 audit named. On #616 the operator ruled not to pin the
+  foreman to a named model: tier selection already assesses what a round needs.
+  A new Foreman Seat section replaces that bullet. The operator's `config.json`
+  gains an optional top-level `foreman` block declaring the seat like a worker
+  (agent, kind, `window_group`, `launch_args`, optional tier table); a `model`
+  or `effort` field on it is refused, and its agent is never a configured
+  worker or the pinned judge. Config moves to schema 6; schemas 1–5 stay
+  readable with the seat unconfigured, and a block below schema 6 is refused
+  naming the version it needs. The seat's tier is the operator's
+  `coordination` row, resolved through `select_tier` and refused when the
+  capability table records it inadequate; a cheaper row never substitutes.
+  No escalation applies to the coordination round, so the measured headroom of
+  the seat's `window_group` is recorded with the selection and never changes
+  the row.
+  `foreman start-foreman --pane` launches the selected tier and proves it from
+  the launch argv; it refuses a pane whose foreground holds anything but its
+  shell, and a retry replays an already-running matching seat after proving its
+  live tier, refusing another pane, kind or tier. `foreman verify-foreman`
+  proves the running foreman from its live argv; `--config-only` reads only
+  whether the block exists. The round preflight runs the headroom measurement
+  and the tier proof as one composite check, `foreman-tier-check.py`, and
+  records its `checks.headroom` and `checks.foreman_tier` rows: a running tier
+  other than the selected one blocks the round, and an absent block is a
+  visible `unconfigured` warning, never a block, naming the resolved config
+  file, the `schema_version` 6 it needs and the minimal `foreman` block to add,
+  then `start-foreman` to launch it. The pinned judge keeps the
+  most capable model. The other half of #601, routing every judgment the
+  foreman makes to a worker, moved to #625 for a design-first redo. Tests:
+  `test_foreman_seat.py`, `test_round_preflight.sh`, `test_config.py`.
+
+## 0.3.323 — 2026-09-28
+
+### Fixed
+
+- **Every Herdr brief path and report marker now refuses the same characters,
+  from one shared check (#578).** `compose-briefs.sh` validated `REPORT`,
+  `POLICY_INDEX` and `RELEASE_SKILL` with a jq test for C0 controls and DEL
+  alone, so a report path carrying U+2028, U+2029, a private-use code point or
+  a bidi override composed cleanly and could split or reorder the worker's
+  `REPORT: <path>` marker; `REVIEW_PACKAGE` leaned on bash `[[:cntrl:]]`,
+  whose reach depends on the locale. `foreman apply --report` and
+  `foreman probe-report` refused only C0, `foreman marker-fit` (#568) refused
+  Cc plus U+2028/U+2029, and `resolve-gates.sh` (#580) kept its own
+  Unicode-category set: four rules for one question. New
+  `skills/herdr-foreman/foreman/renderable.py` owns the rule, the category set
+  #580 introduced (Cc, Cf, Cs, Zl, Zp, Co, Cn, plus a backtick inside a code
+  span), and every one of those callers now asks it: the Python entry points
+  import it, `resolve-gates.sh` imports it from its own skill directory, and
+  `compose-briefs.sh` runs `python3 -m foreman.renderable` with that directory
+  on `PYTHONPATH`, so nothing depends on an execute bit. Slice globs follow the
+  same rule in `validate-partition`, the apply-time plan check and the composer
+  (`partition.UNSAFE_GLOB` is gone). `compose-briefs.sh` now needs `python3`
+  (exit 1 without it) and exits 3 when the check cannot run, never treating an
+  unchecked path as accepted; a refusal counts only when the module's JSON
+  verdict reaches stdout, so a crash exiting 1 (a failed import) is exit 3,
+  not a misreported bad path. `resolve-gates.sh` exits 2 with a reinstall
+  instruction, never a traceback, when that module is missing, incomplete or
+  corrupt (an import, syntax or name error on load). Every template renders
+  `REPORT`, `REVIEW_PACKAGE`, `POLICY_INDEX` and `RELEASE_SKILL` inside a code
+  span, so the composer also refuses a backtick in them, as it already did in
+  slice globs. `marker-fit` is stricter than before: it also refuses format,
+  private-use and unassigned characters.
+
+## 0.3.321 — 2026-09-28
+
+### Fixed
+
+- **The worktree prune now treats an unlistable root as a changed root, and
+  its stale-registration prune can no longer drop the registrations of
+  worktrees a moved root still holds (#597).** Both are follow-ups to #588's
+  root-identity check in `skills/herdr-foreman/prune-worktrees.sh`. First,
+  the check read the root with `lstat` alone, so a root whose permissions
+  were revoked mid-run (same inode) still passed. It now also opens the
+  directory (`O_NOFOLLOW`), reads one entry through that descriptor, and
+  requires the `lstat` before, the descriptor's `fstat` and an `lstat` after
+  the listing to name one directory. A root that cannot be listed stops every
+  later destructive step like a replaced one. Second, `git worktree prune
+  --expire now` ran just after that check but was not atomic with it: a root
+  renamed inside the window had every worktree under it read as gone, and git
+  dropped their registrations. The run now locks every registration whose
+  directory was present at the inventory and is not already locked (`git
+  worktree lock --reason prune-worktrees:<pid>:<nonce>`), re-proves the root,
+  runs the prune (git never drops a locked entry), and unlocks exactly the
+  entries this run locked that still carry its reason, on every exit path
+  including an interrupt. An entry someone else locked is never unlocked. A
+  lock left by a killed run, whose pid is no longer alive, is released at the
+  start of the next live run; a lock held by a live pid is left alone. A lock
+  that cannot be taken stops the prune, so nothing is dropped. A stale
+  registration's branch reaches the branch pass only once a fresh registry
+  read shows the prune actually dropped it, so a path that reappeared before
+  the prune keeps both its registration and its branch.
+  Two rounds of review went through a hand-rolled alternative first: a
+  per-entry `git worktree remove` (which would delete a live worktree whose
+  path reappeared mid-run), then a metadata-only rename of git's admin entry
+  (which kept producing new edge cases: relative `gitdir` links, a lock taken
+  mid-detach, a failed delete after the detach). Locking and letting git
+  prune keeps git's own rules in charge, relative links included. A note
+  from that detour: `git worktree repair` cannot restore a registration whose
+  admin entry was deleted (verified on git 2.55: "unable to locate
+  repository"); such a worktree is re-registered with `git worktree add`.
+  Every unlocked stale registration is still dropped, outside the worktree
+  root too, so `rules/agent-team-operation.md` keeps promising that a
+  vanished worktree's registration is cleared when the sweep prunes its
+  repository. Tests 89 (root made unlistable after the first removal), 90
+  (root renamed at the prune), 91 (a lock that cannot be taken stops the
+  prune), 92 (a worktree with an unpushed commit moved back before the prune
+  keeps its files, commits and registration), 93 (a stale registration
+  outside the root is dropped), 94 (a relative `gitdir` registration is
+  dropped), 95 (an operator's lock survives, and the run leaves none of its
+  own) and 96 (a killed run's lock is released, a live one's is not) cover
+  it. Test 30's shim now empties the inventory, the second registry read of
+  a live run. The sweep's test 23 now swaps the root at the first
+  repository's branch deletion, its last destructive step.
+
+## 0.3.319 — 2026-09-28
+
+### Added
+
+- **Every foreman plan records why each assignment got its model and effort,
+  and a new `cost-report` command reports each task's resource use through
+  acceptance (#602).** Split out of #445. Plan schema 13 adds a `selection`
+  record per seat: the capabilities the round needs from the model (from the
+  capability table's vocabulary) and from the worker (the specialist
+  requirement), the selected model, effort, round and config row, the table's
+  verdict and source per needed capability, the row's billing window and
+  whether its cost is known, every cheaper row the role could run with its
+  own verdict and sources (under a judgment floor, flagged as barred by it),
+  and the escalation conditions from `tiers.escalation_conditions` with which
+  of them fired and whether headroom pressure may decline the discretionary
+  step. An untiered worker records `unknown` for every model-dependent field,
+  which today is most of the fleet (#476). Nothing reads the record to decide
+  anything; `apply` ignores it. `selection.cheaper_candidates` now also backs
+  the schema-10 `cheaper_adequate` field, so the two cannot disagree, and the
+  fix-round threshold for the review row is the named constant
+  `REVIEW_ROW_FIX_ROUND` instead of a literal 4.
+  `foreman cost-report [--task T]` is read-only and joins the assignment
+  ledger, recovery events and measure snapshots: status, elapsed time to
+  closure, correction rounds, applied work per role, coordination overhead
+  (unstarted assignments, unknown-outcome assignments counted apart, transport retries, unsent dispatches, provider
+  refusals) and per-window headroom movement between the snapshots bracketing
+  the task. Uncached input, cached input and output tokens, and the foreman's
+  own tokens, are `unknown`: no owner record carries token counts, and the
+  report lists them under `unrecorded`. A window shared with another worker, or
+  drawn on by another task during the span, keeps `attribution: unknown`; a
+  reset between readings makes the movement itself unknown. No savings claim
+  is made from a quota or multiplier change. Judgment floors and the pinned
+  judge are unchanged. The herdr-foreman skill's description now triggers on
+  cost and resource-use requests, and Step 1 routes them to `cost-report` as a
+  fourth offline action.
+
 ## 0.3.318 — 2026-09-28
 
 ### Fixed
@@ -379,6 +536,12 @@
   swap the frozen directory for a decoy between the freeze and the identity,
   and swap a brief between its receipt and the prompt-hash check.
 
+## 0.3.311 — 2026-09-28
+
+### Changed
+
+- **The Platform-Bound Untestable Carve-Out now accepts a finite behavior selector as its artifact inventory** (`rules/testing-standards.md`). The prior authority precondition required every exempt artifact by name. That forced shared platform plugins to maintain source-file allowlists in every consumer, so a new file or rename silently lost the exemption even when the platform boundary and validation procedure were unchanged. A consuming authority can still list artifacts explicitly, or it can list finite external-runtime interaction classes and attach the exemption only to each class's smallest invocation layer. The selector must let a reviewer map every changed code path to one class and one documented manual procedure; language, directory, file glob, app name, and a generic platform-specific label are insufficient alone. This keeps deterministic logic in CI while allowing durable rules for proprietary scheduler, lifecycle, event-delivery, and device-I/O behavior. Triggered by the policy conflict on `jbaruch/hubitat-dev` PR #152.
+
 ## 0.3.310 — 2026-09-28
 
 ### Fixed
@@ -396,10 +559,6 @@
   retained adjustment moved from `assign.apply` into `assign.retained_tier`,
   which also shares the new `tiers.EFFORT_RANK`. The tier system is dormant in
   production, so no recorded row changes.
-### Changed
-
-- **The Platform-Bound Untestable Carve-Out now accepts a finite behavior selector as its artifact inventory** (`rules/testing-standards.md`). The prior authority precondition required every exempt artifact by name. That forced shared platform plugins to maintain source-file allowlists in every consumer, so a new file or rename silently lost the exemption even when the platform boundary and validation procedure were unchanged. A consuming authority can still list artifacts explicitly, or it can list finite external-runtime interaction classes and attach the exemption only to each class's smallest invocation layer. The selector must let a reviewer map every changed code path to one class and one documented manual procedure; language, directory, file glob, app name, and a generic platform-specific label are insufficient alone. This keeps deterministic logic in CI while allowing durable rules for proprietary scheduler, lifecycle, event-delivery, and device-I/O behavior. Triggered by the policy conflict on `jbaruch/hubitat-dev` PR #152.
-
 ## 0.3.309 — 2026-09-28
 
 ### Added
