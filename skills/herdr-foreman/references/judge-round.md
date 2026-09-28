@@ -47,7 +47,7 @@ the earlier reading as affordability proof. Proceed immediately to step 3.
 Plan the pinned judge against step 2's fresh snapshot:
 
 ```bash
-CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"; [ -d "$CP" ] || CP=.
+CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"; [ -d "$CP" ] || case "$(git config --get remote.origin.url)" in *github.com[:/]jbaruch/coding-policy|*github.com[:/]jbaruch/coding-policy.git) CP=. ;; *) echo "coding-policy plugin not found: run tessl install jbaruch/coding-policy" >&2; exit 1 ;; esac
 bash "$CP/skills/herdr-foreman/foreman.sh" plan \
   --roles judge --judge-mode <adjudication|diagnosis> \
   --snapshot <step-2-measure-output> --task <task-id>
@@ -67,7 +67,7 @@ For an existing judge worker, proceed to step 5 with a clearing dispatch.
 For an empty shell pane, complete retrospective checks for the start and run:
 
 ```bash
-CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"; [ -d "$CP" ] || CP=.
+CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"; [ -d "$CP" ] || case "$(git config --get remote.origin.url)" in *github.com[:/]jbaruch/coding-policy|*github.com[:/]jbaruch/coding-policy.git) CP=. ;; *) echo "coding-policy plugin not found: run tessl install jbaruch/coding-policy" >&2; exit 1 ;; esac
 bash "$CP/skills/herdr-foreman/start-judge-worker.sh" \
   <step-3-plan-file> <pane> [claude|codex|grok] --task <task-id> [--state <state-file>]
 ```
@@ -84,7 +84,7 @@ in the plan. The header owns the contract.
 Use step 3's plan under SKILL.md Step 10's dispatch contract:
 
 ```bash
-CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"; [ -d "$CP" ] || CP=.
+CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"; [ -d "$CP" ] || case "$(git config --get remote.origin.url)" in *github.com[:/]jbaruch/coding-policy|*github.com[:/]jbaruch/coding-policy.git) CP=. ;; *) echo "coding-policy plugin not found: run tessl install jbaruch/coding-policy" >&2; exit 1 ;; esac
 bash "$CP/skills/herdr-foreman/foreman.sh" apply \
   --assignments <plan-file> \
   --brief judge=<round>-judge.md --report judge=<absolute-report-path> \

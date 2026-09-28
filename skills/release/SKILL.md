@@ -18,7 +18,7 @@ Structured workflow for shipping code: PR creation, automated policy review, mer
 
 Each command block resolves `CP` to the project-local plugin, falling back to
 `$HOME/.tessl/plugins/jbaruch/coding-policy`, then to `.` in a coding-policy
-clone. Run the resolver in every call. Prose `skills/...` paths are relative to
+clone, and stops with an install instruction anywhere else. Run the resolver in every call. Prose `skills/...` paths are relative to
 that plugin root.
 
 ## Step 1 — Verify Readiness
@@ -26,7 +26,7 @@ that plugin root.
 Nothing below runs until this exits 0:
 
 ```bash
-CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"; [ -d "$CP" ] || CP=.
+CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"; [ -d "$CP" ] || case "$(git config --get remote.origin.url)" in *github.com[:/]jbaruch/coding-policy|*github.com[:/]jbaruch/coding-policy.git) CP=. ;; *) echo "coding-policy plugin not found: run tessl install jbaruch/coding-policy" >&2; exit 1 ;; esac
 bash "$CP/skills/release/check-leftovers.sh"
 ```
 
@@ -69,7 +69,7 @@ Exit 0 clears the release. Exit 1 blocks it, with `blocking` naming each leftove
 - Check the link GitHub resolved from the body:
 
   ```bash
-  CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"; [ -d "$CP" ] || CP=.
+  CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"; [ -d "$CP" ] || case "$(git config --get remote.origin.url)" in *github.com[:/]jbaruch/coding-policy|*github.com[:/]jbaruch/coding-policy.git) CP=. ;; *) echo "coding-policy plugin not found: run tessl install jbaruch/coding-policy" >&2; exit 1 ;; esac
   python3 "$CP/skills/release/check-closing-issues.py" <owner> <repo> <pr-number>
   ```
 
@@ -110,7 +110,7 @@ skills/release/REVIEW_DETAILS.md
 **Also request Copilot.** Copilot is a deliberate second reviewer with a different lens — the policy reviewer enforces `rules/*.md` compliance, Copilot reads for correctness, bugs, security, and test gaps. The policy reviewer gates the merge only on **blocking** findings; advisory-only reviews post `COMMENT` and never gate, and Copilot is always advisory (read it, never gate on it) — see `rules/review-severity.md`:
 
 ```bash
-CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"; [ -d "$CP" ] || CP=.
+CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"; [ -d "$CP" ] || case "$(git config --get remote.origin.url)" in *github.com[:/]jbaruch/coding-policy|*github.com[:/]jbaruch/coding-policy.git) CP=. ;; *) echo "coding-policy plugin not found: run tessl install jbaruch/coding-policy" >&2; exit 1 ;; esac
 bash "$CP/skills/release/request-copilot-review.sh" <owner> <repo> <pr-number>
 ```
 
@@ -121,7 +121,7 @@ Proceed immediately to Step 5.
 Block until the PR reaches a merge-gate-relevant terminal state. The watcher polls `poll-pr-reviews.sh` at a script-owned interval up to a script-owned budget and watches exactly the fields the Step 7 merge gate reads — each gating bot's latest review state (resolved by bot login), CI status, and merge state. Do not hand-roll a poll loop, and do not wrap the watch in an invented wall-clock `timeout` (see `rules/ci-safety.md` "Always Watch CI"):
 
 ```bash
-CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"; [ -d "$CP" ] || CP=.
+CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"; [ -d "$CP" ] || case "$(git config --get remote.origin.url)" in *github.com[:/]jbaruch/coding-policy|*github.com[:/]jbaruch/coding-policy.git) CP=. ;; *) echo "coding-policy plugin not found: run tessl install jbaruch/coding-policy" >&2; exit 1 ;; esac
 bash "$CP/skills/release/watch-pr-reviews.sh" <owner> <repo> <pr-number>
 ```
 
@@ -163,7 +163,7 @@ Once these conditions hold, merge automatically per `rules/ship-on-green.md` —
 **Clear superseded review gates first.** This applies to coding-policy's OWN releases, where the policy reviewer posts as `github-actions[bot]`, which cannot `APPROVE` (GitHub returns HTTP 422), so a clean re-review lands as a `COMMENT` that does NOT supersede the bot's earlier `CHANGES_REQUESTED` — the stale request keeps `merge_state.status` at `BLOCKED`. On consumer repos the reviewer is the central fleet App `coding-policy-fleet-reviewer[bot]` (coding-policy#202), which CAN `APPROVE` and supersedes its own earlier `CHANGES_REQUESTED` directly — no dismissal needed there. Dismiss every superseded `github-actions[bot]` review before merging:
 
 ```bash
-CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"; [ -d "$CP" ] || CP=.
+CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"; [ -d "$CP" ] || case "$(git config --get remote.origin.url)" in *github.com[:/]jbaruch/coding-policy|*github.com[:/]jbaruch/coding-policy.git) CP=. ;; *) echo "coding-policy plugin not found: run tessl install jbaruch/coding-policy" >&2; exit 1 ;; esac
 bash "$CP/skills/release/dismiss-stale-reviews.sh" <owner> <repo> <pr-number>
 ```
 
@@ -223,7 +223,7 @@ After merge — per `rules/ci-safety.md`'s Always Watch CI duty extended through
 - Confirm every closing issue closed:
 
   ```bash
-  CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"; [ -d "$CP" ] || CP=.
+  CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"; [ -d "$CP" ] || case "$(git config --get remote.origin.url)" in *github.com[:/]jbaruch/coding-policy|*github.com[:/]jbaruch/coding-policy.git) CP=. ;; *) echo "coding-policy plugin not found: run tessl install jbaruch/coding-policy" >&2; exit 1 ;; esac
   python3 "$CP/skills/release/check-closing-issues.py" <owner> <repo> <pr-number> --merged
   ```
 

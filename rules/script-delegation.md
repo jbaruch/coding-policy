@@ -53,11 +53,13 @@ description: Deterministic operations → script, a fixed answer set read by mea
 - Applies only to command blocks in `skills/herdr-foreman/SKILL.md`, `skills/herdr-standup/SKILL.md`, `skills/herdr-foreman/references/round-setup.md`, `skills/herdr-foreman/references/judge-round.md`, `skills/release/SKILL.md`, `skills/release/PUBLICATION.md`, and `skills/adopt-fork-pr/SKILL.md`.
 - Preconditions (all required):
   1. The block initializes `CP` to the literal `.tessl/plugins/jbaruch/coding-policy`
-  2. Its only inline branches test the directory `CP` names, falling back to the same path under `$HOME`, then to `.` for a coding-policy clone
-  3. The block invokes only co-shipped scripts through quoted `$CP` paths with an explicit interpreter; each independent call repeats the bootstrap
-  4. Bootstrap performs no writes, network access, permission changes, sourcing, or evaluation of repository-controlled code
-  5. All work after root selection stays in the invoked script; no inline business logic, loops, or additional selection heuristics
-  6. `skills/herdr-foreman/tests/test_skill_invocations.sh` checks every covered block and executes fixtures for local precedence, global fallback, clone fallback, missing installs, spaces, and mode-0644 scripts
+  2. Its only inline branches test the directory `CP` names and fall back to the same path under `$HOME`
+  3. With neither install present, the block selects `.` only when `git config --get remote.origin.url` names `github.com` `jbaruch/coding-policy`
+  4. Any other origin, or none, exits non-zero with an instruction to run `tessl install jbaruch/coding-policy`
+  5. The block invokes only co-shipped scripts through quoted `$CP` paths with an explicit interpreter; each independent call repeats the bootstrap
+  6. Bootstrap performs no writes, network access, permission changes, sourcing, or evaluation of repository-controlled code
+  7. All work after root selection stays in the invoked script; no inline business logic, loops, or additional selection heuristics
+  8. `skills/herdr-foreman/tests/test_skill_invocations.sh` checks every covered block and executes fixtures for local precedence, global fallback, clone fallback, impostor refusal, missing installs, spaces, and mode-0644 scripts
 - Every other command block follows Scripts Are Real Files unchanged.
 
 ## Script Requirements

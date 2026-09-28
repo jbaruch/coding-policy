@@ -52,9 +52,12 @@ REFERENCES=(herdr-foreman/references/round-setup.md herdr-foreman/references/jud
 MODE_GATE_SKILL=herdr-foreman
 
 # The one resolver the bootstrap carve-out permits: project-local install,
-# then global install, then the current directory for a coding-policy clone.
+# then global install, then the current directory, taken only when the
+# clone's origin remote is github.com jbaruch/coding-policy. Committed content
+# cannot set .git/config, so a consumer shipping its own skills/<script> never
+# passes as the plugin; it gets an install instruction and a non-zero exit.
 # shellcheck disable=SC2016 # Match the documented shell source literally.
-BOOTSTRAP='CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"; [ -d "$CP" ] || CP=.'
+BOOTSTRAP='CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"; [ -d "$CP" ] || case "$(git config --get remote.origin.url)" in *github.com[:/]jbaruch/coding-policy|*github.com[:/]jbaruch/coding-policy.git) CP=. ;; *) echo "coding-policy plugin not found: run tessl install jbaruch/coding-policy" >&2; exit 1 ;; esac'
 
 die() { echo "fatal: $*" >&2; exit 2; }
 warn_cleanup() { echo "warn: could not remove $1" >&2; }
@@ -295,7 +298,8 @@ check_mode_gate() { # <skill-name> <skill-file>
 
 # Execute a documented block's resolver and invocation against packaged-mode
 # fixtures: a project-local install, a global install, a coding-policy clone
-# (the current directory), and none of them. Substitute a task-owned fixture
+# (the current directory), and none of them. A consumer holding its own copy of
+# the script, with a foreign origin or no repository at all, must refuse. Substitute a task-owned fixture
 # root for the HOME token without changing the process's HOME or touching the
 # user's installed plugin. The invocation runs without its documented
 # arguments: placeholders like `<owner>` are redirections to a shell.
@@ -323,6 +327,9 @@ check_install_shapes() { # <skill-file>
   local_root="$project/.tessl/plugins/jbaruch/coding-policy"
   global_root="$fixture/global with spaces/.tessl/plugins/jbaruch/coding-policy"
   self_root="$project"
+  git init -q "$project" || die "cannot create clone fixture"
+  git -C "$project" remote add origin git@github.com:jbaruch/coding-policy.git \
+    || die "cannot set clone fixture origin"
   for shape in local global self; do
     case "$shape" in
       local) body="$local_root/$script" ;;
@@ -350,10 +357,31 @@ check_install_shapes() { # <skill-file>
       self) mv "$project/skills" "$fixture/self-unused" || die "cannot stage missing install" ;;
     esac
   done
+  # A repository-controlled copy of the script is never run as the plugin.
+  local impostor origin
+  for origin in https://github.com/someone/impostor.git https://evil.example/jbaruch/coding-policy.git none; do
+    impostor="$fixture/impostor with spaces"
+    mkdir -p "$impostor/$(dirname "$script")" || die "cannot create impostor fixture"
+    if [[ "$origin" != none ]]; then
+      git init -q "$impostor" || die "cannot create impostor repository"
+      git -C "$impostor" remote add origin "$origin" || die "cannot set impostor origin"
+    fi
+    if [[ "$interp" == python3 ]]; then
+      printf 'print("impostor")\n' > "$impostor/$script" || die "cannot write impostor fixture"
+    else
+      printf 'printf "impostor\\n"\n' > "$impostor/$script" || die "cannot write impostor fixture"
+    fi
+    rc=0
+    output="$(cd "$impostor" && INVOCATION_FIXTURE_GLOBAL="$fixture/global with spaces" bash -c "$code" 2>&1)" || rc=$?
+    if (( rc != 0 )) && [[ "$output" != *impostor* && "$output" == *"tessl install jbaruch/coding-policy"* ]]; then pass
+    else fail "impostor ($origin) must refuse with the install instruction: rc=$rc output=$output"; fi
+    rm -rf "$impostor" || die "cannot reset impostor fixture"
+  done
   local bad_block
   for bad_block in \
     $'CP=.tessl/plugins/jbaruch/coding-policy\nbash "$CP/skills/herdr-foreman/roster.sh"' \
     $'CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"\nbash "$CP/skills/herdr-foreman/roster.sh"' \
+    $'CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"; [ -d "$CP" ] || CP=.\nbash "$CP/skills/herdr-foreman/roster.sh"' \
     $'bash .tessl/plugins/jbaruch/coding-policy/skills/herdr-foreman/roster.sh' \
     $'"$HOME/.tessl/plugins/jbaruch/coding-policy/skills/herdr-foreman/roster.sh"' \
     $'bash skills/release/check-leftovers.sh' \

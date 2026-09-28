@@ -10,17 +10,28 @@
   (`.tessl/plugins/jbaruch/coding-policy/`, which ACR's
   `.agents/skills/tessl__release` symlinks into), so every release step died
   on file-not-found. Each command block now opens with the resolver the Herdr
-  skills already used, extended by one fallback:
-  `CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"; [ -d "$CP" ] || CP=.`
-  and then runs `bash "$CP/skills/release/<script>"`. The third root is the
-  current directory, which coding-policy needs: it has no mount of itself, so
-  the two-root resolver could never find its own scripts there. The Herdr
-  blocks take the same three-root literal, so a foreman running in a
-  coding-policy clone now resolves too, and the bootstrap carve-out keeps one
-  permitted literal instead of two. The `.` root adds no new trust exposure:
-  it is reached only when neither install directory exists, and the
-  project-local mount it falls back from is already a repository-controlled
-  path.
+  skills already used, extended by one guarded fallback, and then runs
+  `bash "$CP/skills/release/<script>"`. The third root is the current
+  directory, which coding-policy needs: it has no mount of itself, so the
+  two-root resolver could never find its own scripts there. The Herdr blocks
+  take the same literal, so a foreman running in a coding-policy clone now
+  resolves too, and the bootstrap carve-out keeps one permitted literal
+  instead of two.
+
+  The first cut selected `.` unconditionally once both install directories
+  were absent, and the policy reviewer blocked it: a consumer with no install
+  but its own `skills/release/<script>` would have run that
+  repository-controlled file as the plugin. The `.` root is now taken only
+  when `git config --get remote.origin.url` names `github.com`
+  `jbaruch/coding-policy`; any other origin, or no repository, exits non-zero
+  with `run tessl install jbaruch/coding-policy`. The identity check reads the
+  origin remote rather than `.tessl-plugin/plugin.json` on purpose: the
+  manifest is committed content, so the same repository that planted the
+  script could plant a manifest naming coding-policy, while `.git/config` is
+  local clone state no commit can set. The check stays inline rather than in
+  a co-shipped resolver script: with no install present there is no trusted
+  path to invoke such a script from, and running the clone's own copy before
+  proving it is the clone is the defect being closed.
 
   `adopt-fork-pr` says it works in any repo, coding-policy included, but
   invoked `adopt.sh` by the local mount path alone, which a clone lacks and a
@@ -39,15 +50,20 @@
   Copilot re-request) became a resolved block and a pointer to Step 4's block.
 
   `rules/script-delegation.md`'s bootstrap carve-out (renamed from "Herdr's")
-  names the release files and `adopt-fork-pr`, and its root-selection
-  precondition now states the `.` fallback. `rules/skill-authoring.md` Script
+  names the release files and `adopt-fork-pr`, and its preconditions now
+  name the origin-remote identity check that guards the `.` fallback and the
+  install instruction on refusal. `rules/skill-authoring.md` Script
   References adds the resolved-`$CP` form for a skill that runs both in
   consumers and in a clone. `skills/herdr-foreman/tests/test_skill_invocations.sh`
   now checks the release and adopt-fork-pr blocks too: it reads blocks nested
   in list items, skips plain `git`/`gh` blocks that name no plugin script,
   rejects a repo-relative `bash skills/...` block and an inline-code
-  invocation, rejects the old two-root resolver, and executes each covered
-  skill's first invocation against local, global, clone and missing roots.
+  invocation, rejects the old two-root and unguarded three-root resolvers, and
+  executes each covered skill's first invocation against local, global,
+  clone and missing roots. Impostor fixtures hold the same script path with
+  no install: a foreign GitHub origin, a non-GitHub host serving a
+  `jbaruch/coding-policy` path, and no repository at all. Each must exit
+  non-zero with the install instruction and never run the planted script.
 
 ## 0.3.310 — 2026-09-28
 
