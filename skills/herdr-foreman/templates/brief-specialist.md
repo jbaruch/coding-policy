@@ -65,8 +65,8 @@ Write `{{REPORT}}` with:
 - Each acceptance criterion as `met` or `unmet`, with its evidence. The
   foreman accepts on these lines and does not re-assess the substance.
 - `CONTRIBUTION: none | design | implementation` — the class of the content you
-  originated or materially shaped. The foreman records it as declared; an
-  omitted line records as `design`.
+  originated or materially shaped. The owner script reads this line from
+  your report; an omitted line records as `design`.
 - Evidence inspected, source revisions, experiments and actual results.
 - Facts, recommendations, hypotheses and unresolved gaps distinguished.
 - For each finding, its severity, the accepted behavior it serves and the

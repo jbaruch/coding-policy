@@ -278,6 +278,8 @@ class SpecialistCliTest(fixture.CliCase):
 
     def test_assess_command_retrieves_real_receipts_without_worker_calls(self):
         self.seed_warm_consultation(assess=False, retire=False)
+        report = self.tmp / "prior-report.md"
+        report.write_text(report.read_text() + "\nCONTRIBUTION: none\n")
         data = {"id": "assessed-via-cli", "dispatch": "prior:advisor", "report": str(self.tmp / "prior-report.md"),
                 "delivery": str(self.tmp / "prior-delivery.json"), "outcome": "Delivered consultation",
                 "contribution": "none", "summary": "Read the report; no design contribution was made."}

@@ -63,6 +63,41 @@ class EngagementTest(unittest.TestCase):
         return supervision.resolve(self.path, {"id": self.dispatch["id"], "outcome": "Report assessed; consultation ended",
                                                "evidence": [str(self.report)]}, LATER)
 
+    def test_an_undeclared_contribution_records_design_from_the_report_bytes(self):
+        data = {key: value for key, value in self.data.items() if key != "contribution"}
+        result = self.assess(data)
+        self.assertEqual((result["contribution"], result["contribution_source"]), ("design", "report_undeclared"))
+
+    def test_a_caller_cannot_claim_none_for_a_report_that_declares_nothing(self):
+        with self.assertRaises(UsageError) as caught:
+            self.assess({**self.data, "contribution": "none"})
+        self.assertEqual(caught.exception.details["derived"], "design")
+        self.assertEqual(self.state["specialist_assessments"], [])
+
+    def test_a_declared_contribution_is_the_one_recorded(self):
+        self.report.write_text(self.report.read_text() + "CONTRIBUTION: none\n")
+        data = {key: value for key, value in self.data.items() if key != "contribution"}
+        result = self.assess(data)
+        self.assertEqual((result["contribution"], result["contribution_source"]), ("none", "report_declared"))
+
+    def test_conflicting_declarations_are_refused(self):
+        self.report.write_text(self.report.read_text() + "CONTRIBUTION: none\nCONTRIBUTION: design\n")
+        with self.assertRaises(UsageError):
+            self.assess({key: value for key, value in self.data.items() if key != "contribution"})
+        self.assertEqual(self.state["specialist_assessments"], [])
+
+    def test_a_schema_1_record_migrates_as_a_foreman_assessment(self):
+        record = self.assess()
+        legacy = {key: value for key, value in record.items() if key != "contribution_source"}
+        legacy.update(schema_version=1, contribution="none")
+        self.state["specialist_assessments"] = [legacy]
+        save_state(self.path, self.state)
+        loaded, usable = load_state_checked(self.path)
+        self.assertTrue(usable)
+        migrated = loaded["specialist_assessments"][0]
+        self.assertEqual((migrated["schema_version"], migrated["contribution_source"], migrated["contribution"]),
+                         (2, "foreman_assessment", "none"))
+
     def test_assessment_binds_actual_delivery_and_persists_without_accepting_task(self):
         before = copy.deepcopy(self.state["assignments"])
         result = self.assess()
@@ -82,7 +117,7 @@ class EngagementTest(unittest.TestCase):
         # The seat stays on the dispatch, so a slice's verdict reaches its
         # assessment through the responsibility it fills (#434).
         report = self.root / "slice-report.md"
-        report.write_text("Reviewed the api slice at the pushed tip; no blocking findings.\n")
+        report.write_text("Reviewed the api slice at the pushed tip; no blocking findings.\nCONTRIBUTION: none\n")
         delivery = self.root / "slice-delivery.json"
         delivery.write_text(json.dumps({"found": True, "agent": "slicer", "report_path": str(report)}))
         seat = {**self.dispatch, "id": "slice-1", "role": "reviewer#api", "agent": "slicer",
@@ -190,7 +225,7 @@ class EngagementTest(unittest.TestCase):
 
     def test_corrupt_assessment_preserves_owner_file_and_refuses_read(self):
         self.assess()
-        variants = ({"schema_version": 2}, {"assignment_index": 9}, {"assignment_index": False}, {"agent": "other-worker"},
+        variants = ({"schema_version": 3}, {"contribution_source": "worker_claim"}, {"assignment_index": 9}, {"assignment_index": False}, {"agent": "other-worker"},
                     {"task": "another-task"}, {"at": "2026-02-03T09:00:00Z"},
                     {"report_evidence": {**self.state["specialist_assessments"][0]["report_evidence"], "path": "/other.md"}})
         for change in variants:
@@ -287,7 +322,7 @@ class EngagementTest(unittest.TestCase):
         delivery = case.tmp / "recovered-delivery.json"
         delivery.write_text(json.dumps(recovered))
         data = {"id": "recovered-assessment", "dispatch": dispatch["id"], "report": str(case.report), "delivery": str(delivery),
-                "outcome": "Recovered report assessed", "contribution": "none", "summary": "Independent report read after native delivery recovery."}
+                "outcome": "Recovered report assessed", "summary": "Independent report read after native delivery recovery."}
         return state, path, data, recovered
 
     def test_exact_owner_recovered_delivery_can_be_assessed(self):

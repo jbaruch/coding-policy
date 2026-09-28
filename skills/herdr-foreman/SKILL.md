@@ -644,8 +644,9 @@ Each label carries a verdict from the answer set in
 `skills/herdr-foreman/classify/report-verdict.schema.json` and the sentence
 that decided it. Read the reports together and gate them in one turn,
 not one turn per report. A label is advisory. It never replaces the full read,
-and a report in `unannotated` is read exactly as it would have been. Look twice
-where a label disagrees with your own reading. Which vendor and model it uses, and its measured accuracy,
+and a report in `unannotated` is read exactly as it would have been. A label
+that disagrees with the report's own verdict line goes to the reviewer, or to
+the judge when contested; never settle it from your own reading. Which vendor and model it uses, and its measured accuracy,
 are the script's contract — see `skills/herdr-foreman/classify/classify-report.sh`.
 
 Read every report file in full, including a report whose worker exited cleanly.

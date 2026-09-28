@@ -418,7 +418,7 @@ def _validate(payload, path):
     instruction to the operator to delete their ledger.
     """
     from .composition import normalize_requirement
-    from .engagement import validate_assessments
+    from .engagement import migrate_assessments, validate_assessments
 
     if not isinstance(payload, dict):
         raise _NoUsableState("the document is not a JSON object")
@@ -541,6 +541,7 @@ def _validate(payload, path):
         store = payload.setdefault("recovery", empty_recovery())
         migrated = migrate_store(store) or migrated
         validate_store(store, rows)
+        migrated = migrate_assessments(payload) or migrated
         validate_assessments(payload)
     except UsageError as exc:
         raise _NoUsableState(str(exc)) from None

@@ -173,6 +173,28 @@ class CommandTest(unittest.TestCase):
         self.assertEqual((result["selection"]["agent"], result["selection"]["round"]), ("foreman", "coordination"))
         self.assertEqual(result["selection"]["required_capabilities"]["model"], ["mechanical-execution"])
 
+    def test_selection_reads_the_measured_headroom_of_the_foremans_window(self):
+        from foreman.state import SNAPSHOT_SCHEMA_VERSION, add_snapshot, empty_state, save_state
+        state = empty_state()
+        add_snapshot(state, {"schema_version": SNAPSHOT_SCHEMA_VERSION, "measured_at": AT, "failed_agents": [],
+                             "agents": {"claude": {"kind": "claude", "headroom_pct": 12.0,
+                                                   "window_group": "claude-max-weekly", "tier_billing": {}},
+                                        "codex": {"kind": "codex", "headroom_pct": 3.0,
+                                                  "window_group": "", "tier_billing": {}}}})
+        save_state(self.state, state)
+        self.write(payload(window_group="claude-max-weekly"))
+        client = Client()
+        code, out, err = self.run_cli(["start-foreman", "--pane", "w1:p0"], client)
+        self.assertEqual(code, 0, err)
+        # The shared window's reading, not an unrelated worker's.
+        self.assertEqual(json.loads(out)["tier"]["pressure_headroom"], 12.0)
+
+    def test_a_foreman_without_a_window_is_unmeasured(self):
+        client = Client()
+        code, out, err = self.run_cli(["start-foreman", "--pane", "w1:p0"], client)
+        self.assertEqual(code, 0, err)
+        self.assertIsNone(json.loads(out)["tier"]["pressure_headroom"])
+
     def test_the_cheapest_adequate_row_wins_and_is_what_launches(self):
         self.record("claude-haiku-4-5", "default", "adequate")
         client = Client()

@@ -77,6 +77,7 @@ The top-level `foreman` block declares it the way a worker is declared:
 {
   "agent": "foreman",
   "kind": "claude",
+  "window_group": "claude-max-weekly",
   "launch_args": ["--dangerously-skip-permissions"],
   "tiers": {"coordination": {"model": "<model>", "effort": "<effort>"}}
 }
@@ -92,12 +93,12 @@ YOLO requirement does not apply to this seat.
 
 The foreman's round type is `coordination` (`COORDINATION_ROUND` in
 `skills/herdr-foreman/foreman/tiers.py`), with its required capabilities in
-`ROUND_CAPABILITIES` in `skills/herdr-foreman/foreman/capabilities.py`. The
-cheapest row in the seat's table that the capability table records adequate
-for those capabilities wins; a row it records inadequate is never a candidate.
-Without such evidence the table's `coordination` row runs, resolved by
-`select_tier` with the seat's measured headroom, and an inadequate verdict on
-it refuses. The selection is `_select_foreman_tier` in
+`ROUND_CAPABILITIES` in `skills/herdr-foreman/foreman/capabilities.py`.
+Selection reads the seat's tier table, the capability table and the measured
+headroom of the seat's `window_group`, the usage window it shares with measured
+workers; the foreman's own pane is never usage-probed. It returns the selected
+row with its capability verdict and pressure headroom, and refuses when no row
+is usable. Which row wins is `_select_foreman_tier` and `_foreman_headroom` in
 `skills/herdr-foreman/foreman/cli.py`. The planner never seats the foreman on a
 worker: `plan --roles foreman` is refused.
 

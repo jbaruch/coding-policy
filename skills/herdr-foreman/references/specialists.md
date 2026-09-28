@@ -317,8 +317,10 @@ the supervision member, the worker's report path, and the saved delivery path:
 ```
 
 `outcome` and `summary` quote the report's acceptance lines and answer.
-`contribution` is `none`, `design` or `implementation`, as the report declares
-it; an undeclared contribution is `design`, never `none`. The delivery file must be the successful
+`contribution` is optional input: the owner derives it from the bound report's
+`CONTRIBUTION:` line, records `design` when there is none, and refuses a supplied
+value that disagrees (`declared_contribution` in
+`skills/herdr-foreman/foreman/engagement.py`). The delivery file must be the successful
 `wait-report.sh` JSON receipt for that worker and report, with `found: true`, or
 the unchanged owner `recover-report` result for that exact dispatch and report.
 For native delivery missed by the watcher, complete recovery under

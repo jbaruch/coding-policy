@@ -495,7 +495,7 @@ def load_judge(path):
     return parse_judge(_read_config(path), source=str(path))
 
 
-FOREMAN_FIELDS = frozenset({"agent", "kind", "tiers", "launch_args"})
+FOREMAN_FIELDS = frozenset({"agent", "kind", "tiers", "launch_args", "window_group"})
 
 FOREMAN_EXAMPLE = ('{"agent": "foreman", "kind": "claude", '
                    '"launch_args": ["--dangerously-skip-permissions"]}')
@@ -509,14 +509,17 @@ class Foreman:
     Which row runs is tier selection's decision, never a pin held here.
     """
 
-    __slots__ = ("agent", "kind", "tiers", "launch_args", "tier_source")
+    __slots__ = ("agent", "kind", "tiers", "launch_args", "tier_source", "window_group")
 
-    def __init__(self, agent, kind, tiers=None, launch_args=(), tier_source=""):
+    def __init__(self, agent, kind, tiers=None, launch_args=(), tier_source="", window_group=""):
         self.agent = agent
         self.kind = kind
         self.tiers = tiers or {}
         self.launch_args = tuple(launch_args)
         self.tier_source = tier_source
+        # The usage window the foreman shares with measured workers. The seat
+        # cannot `/usage`-probe its own pane, so its headroom is that window's.
+        self.window_group = window_group
 
     @property
     def name(self):
@@ -524,7 +527,7 @@ class Foreman:
 
     def as_dict(self):
         return {"agent": self.agent, "kind": self.kind, "launch_args": list(self.launch_args),
-                "tier_source": self.tier_source}
+                "tier_source": self.tier_source, "window_group": self.window_group}
 
 
 def parse_foreman(payload, source="<memory>"):
@@ -553,7 +556,7 @@ def parse_foreman(payload, source="<memory>"):
     unknown = sorted(set(raw) - FOREMAN_FIELDS)
     if unknown:
         raise ConfigError(
-            "Config at {}: `foreman` carries unknown field(s) {}; it takes agent, kind, tiers and launch_args, "
+            "Config at {}: `foreman` carries unknown field(s) {}; it takes agent, kind, tiers, launch_args and window_group, "
             "as in {}. The model and effort come from tier selection, never from this block.".format(
                 source, ", ".join(unknown), FOREMAN_EXAMPLE),
             {"source": source, "unknown": unknown})
@@ -592,7 +595,14 @@ def parse_foreman(payload, source="<memory>"):
                 tiers, tier_source = parse_tiers(entry["tiers"], kind), "agents.{}".format(entry.get("name"))
                 break
     launch_args = parse_launch_args(raw.get("launch_args", []), kind)
-    return Foreman(agent=agent, kind=kind, tiers=tiers, launch_args=launch_args, tier_source=tier_source)
+    window_group = raw.get("window_group", "")
+    if not isinstance(window_group, str):
+        raise ConfigError(
+            "Config at {}: `foreman.window_group` is {!r}; name the usage window the foreman shares with "
+            "measured workers as a string, or omit it.".format(source, window_group),
+            {"source": source, "window_group": window_group})
+    return Foreman(agent=agent, kind=kind, tiers=tiers, launch_args=launch_args, tier_source=tier_source,
+                   window_group=window_group)
 
 
 def load_foreman(path):

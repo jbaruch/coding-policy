@@ -1,12 +1,20 @@
-"""Foreman assessments of delivered specialist work, owned by foreman state.
+"""Assessments of delivered specialist work, owned by foreman state.
 
-Report delivery proves an artifact arrived. The foreman supplies its assessment
-and contribution classification; these receipts never accept the whole task.
+Report delivery proves an artifact arrived. The contribution class is the one
+the bound report declares on its `CONTRIBUTION:` line, derived here from the
+report bytes; a report declaring none records `design` (#601). The foreman
+quotes the report's acceptance lines as outcome and summary. These receipts
+never accept the whole task.
+
+Schema 2 adds `contribution_source`. A schema-1 record carried a foreman's own
+classification; the owner migration keeps its value and marks it
+`foreman_assessment`, so readers treat both versions alike.
 Reading history validates stored relationships without reopening old sources.
 Warm follow-up revalidates those sources and the retired fleet enrollment.
 """
 
 import json
+import re
 
 from . import runnable
 from .chronology import latest_assignment
@@ -16,20 +24,66 @@ from .tiers import canonical_role
 from . import supervision
 
 
-ASSESSMENT_SCHEMA_VERSION = 1
+ASSESSMENT_SCHEMA_VERSION = 2
 CONSULTATION_ROLES = frozenset({"advisor", "investigator", "architect"})
 ASSESSABLE_ROLES = CONSULTATION_ROLES | {"reviewer", "tester"}
 CONTRIBUTIONS = frozenset({"none", "design", "implementation"})
 INPUT_FIELDS = frozenset({"id", "dispatch", "report", "delivery", "outcome", "contribution", "summary"})
+#: `contribution` is optional input: the owner derives it from the report, and
+#: a supplied value must agree with the derivation.
+REQUIRED_INPUT = INPUT_FIELDS - {"contribution"}
+#: Where a record's contribution came from.
+CONTRIBUTION_SOURCES = frozenset({"report_declared", "report_undeclared", "foreman_assessment"})
+#: A whole line `CONTRIBUTION: <class>`, the shape every report template asks for.
+CONTRIBUTION_LINE = re.compile(r"^CONTRIBUTION:[ \t]*(\S+)[ \t]*$", re.MULTILINE)
+#: The class an undeclared contribution records: unresolved history is never `none`.
+UNDECLARED_CONTRIBUTION = "design"
+RECORD_FIELDS = INPUT_FIELDS | {"schema_version", "at", "assignment_index", "task", "role", "agent",
+                                "report_evidence", "delivery_evidence", "contribution_source"}
 
 
-def _input(data):
-    if not isinstance(data, dict) or set(data) != INPUT_FIELDS:
-        raise UsageError("Specialist assessment requires id, dispatch, report, delivery, outcome, contribution and summary; read the delivered report before classifying it.", {})
-    for key in INPUT_FIELDS:
+def declared_contribution(body):
+    """`(class, source)` from a report's `CONTRIBUTION:` lines.
+
+    None declared reads as `UNDECLARED_CONTRIBUTION`. Conflicting or unknown
+    declarations are refused: the report goes back to its responsibility.
+    """
+    values = CONTRIBUTION_LINE.findall(body)
+    if not values:
+        return UNDECLARED_CONTRIBUTION, "report_undeclared"
+    if len(set(values)) != 1 or values[0] not in CONTRIBUTIONS:
+        raise UsageError(
+            "The report's CONTRIBUTION lines read {}; a report declares exactly one of none, design or "
+            "implementation. Return it to its responsibility with the gap named.".format(", ".join(values)), {})
+    return values[0], "report_declared"
+
+
+def migrate_assessments(payload):
+    """Carry schema-1 records to schema 2 in place; True when any changed.
+
+    Only the owner calls this, on load. A schema-1 contribution was the
+    foreman's own classification and keeps that meaning explicitly.
+    """
+    records = payload.get("specialist_assessments")
+    if not isinstance(records, list):
+        return False
+    changed = False
+    for record in records:
+        if isinstance(record, dict) and record.get("schema_version") == 1 and "contribution_source" not in record:
+            record.update(schema_version=ASSESSMENT_SCHEMA_VERSION, contribution_source="foreman_assessment")
+            changed = True
+    return changed
+
+
+def _input(data, required=REQUIRED_INPUT):
+    if not isinstance(data, dict) or not required <= set(data) <= INPUT_FIELDS:
+        raise UsageError("Specialist assessment requires id, dispatch, report, delivery, outcome and summary, and "
+                         "accepts contribution; quote the delivered report's acceptance lines.", {})
+    for key in data:
         text(data[key], key)
-    if data["contribution"] not in CONTRIBUTIONS:
-        raise UsageError("Contribution must be none, design or implementation; record the worker's actual contribution, not its current seat label.", {})
+    if "contribution" in data and data["contribution"] not in CONTRIBUTIONS:
+        raise UsageError("Contribution must be none, design or implementation, as the report's CONTRIBUTION line "
+                         "declares it.", {})
 
 
 def _dispatch(state, identifier):
@@ -51,11 +105,12 @@ def validate_assessments(state):
     if not isinstance(records, list):
         raise UsageError("State requires a specialist_assessments array; restore the owner-written history.", {})
     ids = set()
-    expected = INPUT_FIELDS | {"schema_version", "at", "assignment_index", "task", "role", "agent", "report_evidence", "delivery_evidence"}
     for record in records:
-        if not isinstance(record, dict) or set(record) != expected or type(record.get("schema_version")) is not int or record["schema_version"] != ASSESSMENT_SCHEMA_VERSION:
+        if (not isinstance(record, dict) or set(record) != RECORD_FIELDS
+                or type(record.get("schema_version")) is not int or record["schema_version"] != ASSESSMENT_SCHEMA_VERSION
+                or record.get("contribution_source") not in CONTRIBUTION_SOURCES):
             raise UsageError("Unsupported or corrupt specialist assessment; preserve history and update the owner.", {})
-        _input({key: record[key] for key in INPUT_FIELDS})
+        _input({key: record[key] for key in INPUT_FIELDS}, required=INPUT_FIELDS)
         text(record["at"], "assessment time")
         supervision.timestamp(record["at"])
         if record["id"] in ids:
@@ -75,12 +130,16 @@ def validate_assessments(state):
 
 
 def record_assessment(state, state_path, data, at):
-    """Append a foreman assessment bound to a delivered enrollment's report bytes."""
+    """Append an assessment bound to a delivered enrollment's report bytes.
+
+    The contribution class is derived from those bytes; a supplied one that
+    disagrees is refused.
+    """
     _input(data)
     supervision.timestamp(at)
     prior = next((row for row in state["specialist_assessments"] if row["id"] == data["id"]), None)
     if prior is not None:
-        if any(prior[key] != data[key] for key in INPUT_FIELDS):
+        if any(prior[key] != data[key] for key in data):
             raise UsageError("Assessment identity already names different input; record a new assessment without rewriting prior evidence.", {})
         return prior
     dispatch, index = _dispatch(state, data["dispatch"])
@@ -91,7 +150,13 @@ def record_assessment(state, state_path, data, at):
     if member is None or member["assignment"]["report"] != data["report"] or member["assignment"]["agent"] != dispatch["agent"] or member["assignment"]["task"] != dispatch["task"]:
         raise UsageError("Assessment must name the report enrolled before this dispatch; inspect `{}` and preserve that report path.".format(
             runnable.command("supervision-status")), {})
-    report_evidence, _body = receipt(data["report"])
+    report_evidence, body = receipt(data["report"])
+    contribution, source = declared_contribution(body)
+    if "contribution" in data and data["contribution"] != contribution:
+        raise UsageError(
+            "The bound report records contribution {!r} ({}); the supplied {!r} disagrees. Omit it, or return the "
+            "report to its responsibility.".format(contribution, source.replace("_", " "), data["contribution"]),
+            {"derived": contribution, "supplied": data["contribution"]})
     delivery_evidence, delivered = receipt(data["delivery"])
     try:
         proof = json.loads(delivered)
@@ -110,6 +175,7 @@ def record_assessment(state, state_path, data, at):
     # the field without versioning it (rules/stateful-artifacts.md Migration
     # Policy). The seat stays on the dispatch this record cites (#434).
     result = {"schema_version": ASSESSMENT_SCHEMA_VERSION, "at": at, **data,
+              "contribution": contribution, "contribution_source": source,
               "assignment_index": index, "task": dispatch["task"],
               "role": canonical_role(dispatch["role"]), "agent": dispatch["agent"],
               "report_evidence": report_evidence, "delivery_evidence": delivery_evidence}

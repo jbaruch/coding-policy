@@ -14,6 +14,7 @@
   "foreman": {
     "agent": "foreman",
     "kind": "claude",
+    "window_group": "claude-max-weekly",
     "launch_args": [
       "--dangerously-skip-permissions"
     ]

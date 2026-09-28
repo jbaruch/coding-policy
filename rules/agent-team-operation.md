@@ -38,9 +38,11 @@ description: Running a multi-agent team — task-based specialist composition, c
 - The operator's `config.json` `foreman` block declares the seat like a worker: its agent, kind, launch options and an optional tier table
 - No rule, config field or default pins the foreman's model or effort
 - Tier selection resolves the foreman's `coordination` round through the machinery every seat uses: the tier table, the capability table and measured headroom
+- The foreman's headroom is the measured headroom of the `window_group` its block declares
+- A foreman declaring no `window_group` reads as unmeasured
 - The foreman's agent is never a configured worker or the pinned judge's
 - `foreman start-foreman` launches the selected tier and proves it from the launch argv
-- The round preflight proves the running foreman's argv carries the selected tier
+- The round preflight proves the running foreman's argv carries the selected tier, after it measures headroom
 - A running tier other than the selected one blocks the round
 - An absent `foreman` block is a visible preflight warning naming the configure command, never a round block
 - The foreman dispatches, runs owner scripts, keeps the foreman-owned records, and gates on evidence

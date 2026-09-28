@@ -63,6 +63,25 @@
   and mismatch, the unconfigured warning, the plan refusal) and two
   `test_round_preflight.sh` cases (mismatch blocks, unconfigured warns).
 
+  Review of #616 then found four gaps. The foreman's headroom lookup read its
+  own agent name from the snapshot, but `measure` probes configured workers
+  only, and the foreman cannot `/usage`-probe the pane it runs in, so the value
+  was always null. The `foreman` block now takes a `window_group`, and the
+  seat's headroom is the minimum measured reading across the workers in that
+  window, the way `plan` charges a shared window (`_foreman_headroom`); the
+  preflight now verifies the foreman after `measure`, not before. Step 12 still
+  told the foreman to look twice where a classifier label disagreed with its
+  own reading; that disagreement now goes to the reviewer or judge.
+  `assess-specialist` trusted a caller-supplied contribution class, so a
+  foreman could record `none` for a report that declared nothing; the owner
+  now derives it from the bound report's `CONTRIBUTION:` line
+  (`declared_contribution`), records `design` when there is none, and refuses
+  a disagreeing supplied value, with the line added to the reviewer and
+  tester report templates. That changed what the record's fields mean, so
+  specialist assessments move to record schema 2 with `contribution_source`;
+  the owner migrates a schema-1 record on load, keeping its values under
+  `foreman_assessment`.
+
 ## 0.3.319 — 2026-09-28
 
 ### Added

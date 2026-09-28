@@ -95,6 +95,9 @@ Write `{{REPORT}}` covering:
 - The criterion-to-test map, or the verification result per criterion.
 - Every gate command and its output summary.
 - Every finding with its severity label, and each blocking finding's scope label.
+- `CONTRIBUTION: none | design | implementation` — the class of any design or
+  implementation you originated. The owner script reads this line; an omitted
+  line records as `design`.
 - The patch path, when you produced one.
 
 Final chat message ends with exactly:

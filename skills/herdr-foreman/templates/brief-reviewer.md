@@ -72,6 +72,9 @@ Write `{{REPORT}}` covering:
 - The package path and its full BASE/HEAD commit IDs for Mode B.
 - The design note or review content in full, or a link plus its substance.
 - Every finding with its severity label, and each blocking finding's scope label.
+- `CONTRIBUTION: none | design | implementation` — the class of any design or
+  implementation you originated. The owner script reads this line; an omitted
+  line records as `design`.
 - What you deliberately did not flag, and why.
 
 Final chat message ends with exactly:

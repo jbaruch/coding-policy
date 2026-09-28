@@ -1985,6 +1985,26 @@ def _foreman_unconfigured(path):
                 path, runnable.command("start-foreman --pane <pane-id>")))
 
 
+def _foreman_headroom(seat, snapshot):
+    """The measured headroom of the usage window the foreman shares, or None.
+
+    `measure` probes each configured worker's own pane with its usage prompt;
+    the foreman cannot be probed from the pane it runs in. Its window is the
+    `window_group` it declares, and that window's headroom is the minimum
+    across the measured workers in it, the way `plan` charges a shared window.
+    No group, or no measured member, reads as unmeasured.
+    """
+    if not seat.window_group or not isinstance(snapshot, dict):
+        return None
+    agents = snapshot.get("agents")
+    if not isinstance(agents, dict):
+        return None
+    readings = [headroom_of(name, record, lambda _message: None) for name, record in agents.items()
+                if isinstance(record, dict) and record.get("window_group") == seat.window_group]
+    readings = [value for value in readings if value is not None]
+    return min(readings) if readings else None
+
+
 def _select_foreman_tier(args, seat, warn):
     """The tier the seat's coordination round resolves to, by the workers' own machinery.
 
@@ -1994,7 +2014,7 @@ def _select_foreman_tier(args, seat, warn):
     """
     state_path = _state_path(args)
     snapshot = latest_snapshot(load_state(state_path, warn=warn))
-    headroom = _snapshot_headroom(snapshot).get(seat.agent) if snapshot is not None else None
+    headroom = _foreman_headroom(seat, snapshot)
     if not seat.tiers:
         raise UsageError(
             "The foreman seat has no tier table: add `foreman.tiers`, or configure a {} worker with one, so tier "

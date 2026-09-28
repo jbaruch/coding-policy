@@ -195,30 +195,6 @@ PY
     record roster failed "roster.sh exited ${rc}; re-run it and read its diagnostic before planning" 0 ""
   fi
 
-  # 2b. The foreman's own tier. Tier selection picks it like every other
-  #     seat's; this pane's live argv must carry the tier selected. An absent
-  #     `foreman` block warns and does not block.
-  bash "${HERE}/foreman.sh" "${common[@]+"${common[@]}"}" verify-foreman \
-    > "${scratch}/foreman-tier.json" 2>"${scratch}/foreman-tier.err"
-  rc=$?
-  cat "${scratch}/foreman-tier.err" >&2
-  if [ "$rc" -eq 0 ]; then
-    local configured
-    if ! configured="$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); d=d if isinstance(d, dict) else {}; v=d.get("configured"); print("1" if v is True else "0" if v is False else sys.exit("configured is not a boolean"))' "${scratch}/foreman-tier.json")"; then
-      configured=""
-    fi
-    if [ "$configured" = "1" ]; then
-      record foreman_tier ok "" 0 "${scratch}/foreman-tier.json" "foreman verify-foreman"
-    elif [ "$configured" = "0" ]; then
-      echo "round-preflight: warning: the foreman seat is unconfigured; see checks.foreman_tier.detail.warning" >&2
-      record foreman_tier unconfigured "" 0 "${scratch}/foreman-tier.json" "foreman verify-foreman"
-    else
-      record foreman_tier failed "foreman verify-foreman exited 0 without a readable configured flag; the foreman's tier is unproven" 0 ""
-    fi
-  else
-    record foreman_tier failed "foreman verify-foreman exited ${rc}; this pane does not run the tier selection chose for the foreman. Read its diagnostic, then restart the foreman with start-foreman from another shell (references/model-tiers.md Foreman Seat)" 0 ""
-  fi
-
   # 3. Authority for this repo.
   bash "${HERE}/verify-authority.sh" "$repo" > "${scratch}/authority.json" 2>"${scratch}/authority.err"
   rc=$?
@@ -252,6 +228,30 @@ PY
     fi
   else
     record headroom skipped "" 0 ""
+  fi
+
+  # 4b. The foreman's own tier, after the headroom it is selected on. Tier selection picks it like every other
+  #     seat's; this pane's live argv must carry the tier selected. An absent
+  #     `foreman` block warns and does not block.
+  bash "${HERE}/foreman.sh" "${common[@]+"${common[@]}"}" verify-foreman \
+    > "${scratch}/foreman-tier.json" 2>"${scratch}/foreman-tier.err"
+  rc=$?
+  cat "${scratch}/foreman-tier.err" >&2
+  if [ "$rc" -eq 0 ]; then
+    local configured
+    if ! configured="$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); d=d if isinstance(d, dict) else {}; v=d.get("configured"); print("1" if v is True else "0" if v is False else sys.exit("configured is not a boolean"))' "${scratch}/foreman-tier.json")"; then
+      configured=""
+    fi
+    if [ "$configured" = "1" ]; then
+      record foreman_tier ok "" 0 "${scratch}/foreman-tier.json" "foreman verify-foreman"
+    elif [ "$configured" = "0" ]; then
+      echo "round-preflight: warning: the foreman seat is unconfigured; see checks.foreman_tier.detail.warning" >&2
+      record foreman_tier unconfigured "" 0 "${scratch}/foreman-tier.json" "foreman verify-foreman"
+    else
+      record foreman_tier failed "foreman verify-foreman exited 0 without a readable configured flag; the foreman's tier is unproven" 0 ""
+    fi
+  else
+    record foreman_tier failed "foreman verify-foreman exited ${rc}; this pane does not run the tier selection chose for the foreman. Read its diagnostic, then restart the foreman with start-foreman from another shell (references/model-tiers.md Foreman Seat)" 0 ""
   fi
 
   # 5. Capability-table cadence. Due is not blocking: the foreman refreshes it

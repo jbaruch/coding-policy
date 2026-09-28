@@ -88,7 +88,8 @@ class RecoveryCommandTests(fixture.CliCase):
             "result": {"schema_version": 1, "task": TASK, "role": "investigator", "agent": "grok",
                        "fix_round": None, "status": "applied"}, "report": None})
         state["specialist_assessments"].append({
-            "schema_version": 1, "at": "2026-02-03T14:00:00+00:00", "id": "inv-1", "dispatch": "investigator-dispatch",
+            "schema_version": 2, "contribution_source": "report_declared",
+            "at": "2026-02-03T14:00:00+00:00", "id": "inv-1", "dispatch": "investigator-dispatch",
             "assignment_index": index, "task": TASK, "role": "investigator",
             "agent": "grok", "report": self.investigation(), "delivery": "/reports/delivery.json",
             "outcome": "delivered", "contribution": "design", "summary": "The find-rate tracks review surface area.",
