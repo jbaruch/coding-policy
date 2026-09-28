@@ -17,21 +17,30 @@
   the base had never seen, and rewording a published entry (#503's second
   item) read the same way. The check now works on entry items (a top-level
   bullet, or a column-0 paragraph) and treats `## `/`### ` lines as
-  structure: an item the base carries anywhere is a move, and a changed item
-  under the same heading as a base item the branch dropped is an in-place
-  edit, paired one for one. Anything else parked under a published heading is
-  still refused. Replayed over the last 150 merges to `main`, it flags three:
-  #573 (this incident), #448 (#452's misfiling) and #325 (an `## Unreleased`
-  heading that blocked the stamp), and nothing else.
+  structure, so an item the base carries anywhere is a move. A reworded item
+  is accepted only when a commit declares it with a `Changelog-Edit:
+  <version>` trailer, and then pairs one for one with a base item dropped
+  from that heading. The first cut inferred edits from a same-heading
+  delete-plus-add, and the policy reviewer pointed out that deleting a
+  published entry and parking unrelated new work in its slot reads exactly
+  the same: text cannot tell the two apart, a declaration can, and a
+  misfiling merge never carries one. Anything else parked under a published
+  heading is still refused. Replayed over the last 150 merges to `main`, it
+  flags three: #573 (this incident), #448 (#452's misfiling) and #325 (an
+  `## Unreleased` heading that blocked the stamp), and nothing else.
 
   Prevention runs at publish time. The stamp-changelog action now runs the
-  check with a new `--push-before <github.event.before>` mode before
-  stamping, so a push that parks a new entry fails the publish instead of
-  shipping an unheaded version. A `workflow_dispatch` run, a first push, or a
-  changelog absent before the push has nothing to measure and passes with a
-  notice; a before-commit missing from the checkout is a tool error that
-  names `fetch-depth: 0`. The reusable publish workflow already checks out
-  full history.
+  check with a new `--since-last-publish` mode before stamping, so a push
+  that parks a new entry fails the publish instead of shipping an unheaded
+  version. The baseline is the last stamp or version-bump commit
+  `github-actions[bot]` wrote, not the push's before-commit. Measuring from
+  the before-commit (the first cut) left two holes the reviewers found: a
+  stopped publish leaves the misfiled merge on `main`, so the next push
+  would count it as already known and carry it through, and a manual
+  `workflow_dispatch` has no before-commit at all. A stopped publish writes
+  no bookkeeping commit, so both are now measured from the last real publish.
+  A shallow checkout is a tool error that names `fetch-depth: 0`; a history
+  with no bookkeeping commit yet has nothing to measure.
 
   Archive repairs in the same change: 0.3.291 gets its heading above #527;
   #523's entry moves from under 0.3.305 back to the 0.3.301 heading that
