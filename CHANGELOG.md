@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.326 — 2026-09-28
+
 ### Fixed
 
 - **The Go module-cache predicate in `prune-report-caches.py` no longer
