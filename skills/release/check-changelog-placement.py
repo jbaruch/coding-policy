@@ -10,28 +10,52 @@ BELOW a version heading added since. The entry is then already headed, the
 stamp finds nothing to do, and the work ships filed under someone else's
 version -- silently, because every step behaved as designed
 (jbaruch/coding-policy#452, where #384's entry published as 0.3.238 and landed
-under `## 0.3.236`).
+under `## 0.3.236`; #581, where 0.3.291 published with no heading at all).
 
-The rule is block-content IDENTITY, not a position and not a count: a branch
-must not park an entry block whose content the base does not already carry.
-Identity sidesteps diff
-attribution, which cannot answer "which entry is the new one" when two blocks
-read alike -- given two adjacent `### Added`, git marks the lower as added
-though the upper is the new entry. It also lets a deliberate archive repair
-through: moving an entry under the heading that published it parks a block the
-base already holds, while a genuinely new entry parked under a heading is
-content the base has never seen.
+Decision contract
+-----------------
+The unit is the ENTRY ITEM, not the `### ` block: a top-level bullet (a
+column-0 `- ` line), or a column-0 paragraph that follows a blank line or a
+heading, running to the next item or heading. `## ` and `### ` lines are
+structure, never content. A PARKED item is one below the file's first `## `
+heading; a file with no `## ` heading yet parks nothing (a first release).
 
-Occurrences are matched as a MULTISET, not a set: each parked block consumes
-one base occurrence, so a branch that parks a SECOND copy of an entry the base
-carries once is a new parked block rather than a member of a set that already
-contains it.
+An item parked on the branch is accepted when one of these holds, tried in
+order, each consuming what it matches so no evidence answers twice:
 
-Usage:
+1. MOVE -- its exact text is an item the base carries anywhere in the file.
+   Occurrences are matched as a MULTISET: a SECOND copy of an item the base
+   carries once has no occurrence left to answer, and is new content.
+   A heading-only repair -- inserting a missing `## <version> — <date>` plus
+   its `### <type>` lines above items the base already holds -- changes only
+   structure, so every item it touches is a move.
+2. IN-PLACE EDIT -- the base has a parked item under the SAME `## ` heading
+   (matched by heading text) that the branch no longer carries anywhere. The
+   edited item pairs with it one for one. Rewording a published entry is
+   this case. An edit and a move of the same item in one change is not: land
+   them separately.
+
+Every other parked item is NEW content parked where the stamp cannot reach,
+and the check refuses it. A merge only ever adds, so the misfiling this check
+exists for never pairs with a removed base item.
+
+Modes
+-----
     check-changelog-placement.py --base <ref> [--changelog CHANGELOG.md]
+        Measure the working-tree changelog against <ref> (a PR branch against
+        origin/main, or a push against the commit it landed on).
 
-Exit 0 when the branch parks no block whose content is new to the base. Exit 1
-when it parks one. Exit 2 on a usage or tool error (`git` unavailable, base ref unknown, unreadable file).
+    check-changelog-placement.py --push-before <sha> [--changelog CHANGELOG.md]
+        Measure a publish push against the commit it landed on, as the stamp
+        step does before publishing. Nothing to measure is a pass with a
+        stderr notice, not an error: an empty or all-zero <sha> (a
+        workflow_dispatch run, a first push to the ref), or a changelog absent
+        at <sha> (its first commit). A <sha> not present in the checkout is a
+        tool error.
+
+Exit 0 when nothing new is parked (or, under --push-before, nothing to
+measure). Exit 1 when a new item is parked. Exit 2 on a usage or tool error
+(`git` unavailable, base ref unknown, unreadable file).
 """
 import argparse
 import subprocess
@@ -43,17 +67,22 @@ H2 = "## "
 ENTRY = "### "
 
 
-def base_text(base: str, changelog: str) -> str:
-    """The changelog as it stands on `base`."""
+def git(*args: str) -> subprocess.CompletedProcess:
+    """Run `git`, turning an absent binary into a tool error, never a verdict."""
     try:
-        proc = subprocess.run(["git", "show", f"{base}:{changelog}"],
-                              capture_output=True, text=True)
+        return subprocess.run(["git", *args], capture_output=True, text=True)
     except OSError as exc:
         # An absent or unrunnable `git` is the absence of an answer, never the
         # misfiling verdict. Letting it raise exits 1, which is that verdict.
         raise RuntimeError(
             "cannot run `git` ({}); install it, or run this check from an "
             "environment where it is on PATH".format(exc)) from None
+
+
+def base_text(base: str, changelog: str) -> str:
+    """The changelog as it stands on `base`."""
+    try:
+        proc = git("show", f"{base}:{changelog}")
     except UnicodeError as exc:
         raise RuntimeError(
             "cannot decode {}:{} as UTF-8 ({}); re-save it as UTF-8".format(
@@ -68,65 +97,127 @@ def base_text(base: str, changelog: str) -> str:
     return proc.stdout
 
 
-def block_at(lines: list[str], index: int) -> str:
-    """The entry block starting at `index`, to the next entry or heading."""
-    end = len(lines)
-    for i in range(index + 1, len(lines)):
-        if lines[i].startswith(ENTRY) or lines[i].startswith(H2):
-            end = i
-            break
-    return "\n".join(lines[index:end]).rstrip()
+def push_base(before: str, changelog: str) -> str | None:
+    """The ref to measure a publish push against, or None when there is none.
+
+    None means nothing to measure, and says why on stderr.
+    """
+    if not before.strip("0"):
+        print("notice: no before-commit (workflow_dispatch, or a first push "
+              "to the ref); the placement check has nothing to measure",
+              file=sys.stderr)
+        return None
+    present = git("cat-file", "-e", f"{before}^{{commit}}")
+    if present.returncode != 0:
+        raise RuntimeError(
+            "before-commit {} is not in this checkout ({}). Check out with "
+            "full history (`actions/checkout` with `fetch-depth: 0`) so the "
+            "placement check can measure the push.".format(
+                before, present.stderr.strip() or "no diagnostic"))
+    listed = git("ls-tree", "--name-only", before, "--", changelog)
+    if listed.returncode != 0:
+        raise RuntimeError(
+            "`git ls-tree {} -- {}` failed (exit {}): {}. Repair the checkout "
+            "and re-run the publish.".format(
+                before, changelog, listed.returncode,
+                listed.stderr.strip() or "no diagnostic"))
+    if not listed.stdout.strip():
+        print("notice: {} does not exist at {}; the placement check has "
+              "nothing to measure".format(changelog, before), file=sys.stderr)
+        return None
+    return before
 
 
-def blocks(text: str) -> list[str]:
-    """Every entry block in `text`, in order."""
-    lines = text.splitlines()
-    return [block_at(lines, i) for i, ln in enumerate(lines) if ln.startswith(ENTRY)]
+def items(text: str) -> list[tuple[str | None, str]]:
+    """Every entry item in `text`, with the `## ` heading it sits under.
+
+    The heading is None above the first `## ` heading.
+    """
+    result = []
+    heading = None
+    current: list[str] = []
+    previous_blank = True
+
+    def close():
+        if current:
+            result.append((heading, "\n".join(current).rstrip()))
+            current.clear()
+
+    for line in text.splitlines():
+        if line.startswith(H2) or line.startswith(ENTRY):
+            close()
+            if line.startswith(H2):
+                heading = line.rstrip()
+            previous_blank = True
+            continue
+        if not line.strip():
+            if current:
+                current.append(line)
+            previous_blank = True
+            continue
+        starts_item = not line[0].isspace() and (
+            line.startswith("- ") or previous_blank)
+        if starts_item:
+            close()
+            # Content above the first `## ` that is not an entry -- the
+            # `# Changelog` title, an intro paragraph -- is still an item: it
+            # is never parked, and a moved copy of it is a move.
+        current.append(line)
+        previous_blank = False
+    close()
+    return result
 
 
 def parked(text: str) -> list[str]:
-    """The entry blocks sitting under a version heading.
+    """The entry items sitting under a version heading.
 
     Empty while the file carries no version heading at all, which is a first
     release rather than a misfiling.
     """
-    lines = text.splitlines()
-    first_h2 = next((i for i, ln in enumerate(lines) if ln.startswith(H2)), None)
-    if first_h2 is None:
-        return []
-    return [block_at(lines, i) for i, ln in enumerate(lines)
-            if i > first_h2 and ln.startswith(ENTRY)]
+    return [item for heading, item in items(text) if heading is not None]
 
 
 def newly_parked(original: str, text: str) -> list[str]:
-    """Parked blocks whose content is new to `original`.
+    """Parked items that are neither a move nor an in-place edit.
 
-    Identity, not a count. A net-count rule is satisfied by a branch that adds
-    a misfiled block while moving or dropping another parked one, and the
-    misfiling goes through. A block whose text already exists on the base is a
-    move — filing a past entry under the version that published it, say — and
-    a block that does not is new content parked where the stamp cannot reach.
-
-    Occurrences are consumed, not merely looked up: a set answers "is this text
-    anywhere on the base", so a branch parking two identical copies of a
-    one-occurrence block passes twice on the same evidence.
+    See the decision contract in the module docstring.
     """
-    known = Counter(blocks(original))
-    new_blocks = []
-    for block in parked(text):
-        if known[block]:
-            # One parked copy answers one base occurrence. A SECOND copy of the
-            # same entry has no occurrence left to answer, and is new content.
-            known[block] -= 1
+    known = Counter(item for _, item in items(original))
+    branch = items(text)
+    carried = Counter(item for _, item in branch)
+
+    # Parked base items the branch no longer carries anywhere, by heading:
+    # the only evidence an in-place edit can pair with.
+    removed: Counter = Counter()
+    for heading, item in items(original):
+        if heading is None:
+            continue
+        if carried[item]:
+            carried[item] -= 1
         else:
-            new_blocks.append(block)
-    return new_blocks
+            removed[heading] += 1
+
+    new_items = []
+    for heading, item in branch:
+        if heading is None:
+            continue
+        if known[item]:
+            known[item] -= 1
+        elif removed[heading]:
+            removed[heading] -= 1
+        else:
+            new_items.append(item)
+    return new_items
 
 
 def main(argv=None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--base", required=True,
-                        help="the ref this branch is measured against, e.g. origin/main")
+    parser = argparse.ArgumentParser(
+        description=(__doc__ or "").splitlines()[0])
+    mode = parser.add_mutually_exclusive_group(required=True)
+    mode.add_argument("--base",
+                      help="the ref this branch is measured against, e.g. origin/main")
+    mode.add_argument("--push-before", metavar="SHA",
+                      help="the commit a publish push landed on (github.event.before)")
     parser.add_argument("--changelog", default="CHANGELOG.md")
     args = parser.parse_args(argv)
 
@@ -144,7 +235,13 @@ def main(argv=None) -> int:
               "point --changelog at the file that is.".format(path, exc), file=sys.stderr)
         return 2
     try:
-        original = base_text(args.base, args.changelog)
+        if args.push_before is not None:
+            base = push_base(args.push_before, args.changelog)
+            if base is None:
+                return 0
+        else:
+            base = args.base
+        original = base_text(base, args.changelog)
     except RuntimeError as exc:
         print("error: {}".format(exc), file=sys.stderr)
         return 2
@@ -153,17 +250,27 @@ def main(argv=None) -> int:
     if not new_parked:
         return 0
     print(
-        "error: this branch parks {} entry block(s) under an already-published "
-        "version heading whose content is new to {}. The publish step stamps "
-        "only what sits ABOVE the first `## ` heading, so an entry below one "
-        "ships filed under a version that already shipped:".format(
-            len(new_parked), args.base), file=sys.stderr)
-    for block in new_parked:
-        print("  {}".format(block.splitlines()[0]), file=sys.stderr)
-    print(
-        "Rebase onto {} and move the new block above the topmost `## ` heading. "
-        "Moving an entry the base already carries between headings is fine: it "
-        "parks no content the base has not seen.".format(args.base), file=sys.stderr)
+        "error: {} parks {} entry item(s) under an already-published version "
+        "heading whose content is new to {}. The publish step stamps only what "
+        "sits ABOVE the first `## ` heading, so an entry below one ships filed "
+        "under a version that already shipped:".format(
+            "this push" if args.push_before is not None else "this branch",
+            len(new_parked), base), file=sys.stderr)
+    for item in new_parked:
+        print("  {}".format(item.splitlines()[0]), file=sys.stderr)
+    if args.push_before is not None:
+        print(
+            "The publish is stopped so no version ships without its entry. "
+            "Open a follow-up PR that moves the new item above the topmost "
+            "`## ` heading; its merge publishes it under a fresh version.",
+            file=sys.stderr)
+    else:
+        print(
+            "Rebase onto {} and move the new item above the topmost `## ` "
+            "heading. Moving an item the base already carries, adding the "
+            "`## `/`### ` heading lines a repair needs, and rewording an item "
+            "in place under its own heading are fine.".format(base),
+            file=sys.stderr)
     return 1
 
 

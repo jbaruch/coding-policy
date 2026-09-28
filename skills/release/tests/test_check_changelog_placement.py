@@ -65,6 +65,49 @@ MISFILED = """# Changelog
 """
 
 
+TWO_VERSIONS = """# Changelog
+
+## 0.3.9 — 2026-01-02
+
+### Added
+
+- **A second entry.** Published with it.
+
+## 0.3.8 — 2026-01-01
+
+### Added
+
+- **An older entry.** Published first.
+"""
+
+# The #581 shape: two releases' items under one heading.
+SHARED_HEADING = """# Changelog
+
+## 0.3.9 — 2026-01-02
+
+### Fixed
+
+- **The later release's entry.** Published as 0.3.10.
+
+- **This release's entry.** Published as 0.3.9.
+"""
+
+REPAIRED = """# Changelog
+
+## 0.3.10 — 2026-01-02
+
+### Fixed
+
+- **The later release's entry.** Published as 0.3.10.
+
+## 0.3.9 — 2026-01-02
+
+### Fixed
+
+- **This release's entry.** Published as 0.3.9.
+"""
+
+
 class ParkedIdentityTest(unittest.TestCase):
     def test_an_entry_above_the_first_heading_is_not_parked(self):
         # The published entry below the heading is parked, as it should be;
@@ -88,23 +131,59 @@ class ParkedIdentityTest(unittest.TestCase):
         self.assertEqual(len(flagged), 1)
         self.assertIn("A new entry.", flagged[0])
 
-    def test_a_swap_that_keeps_the_count_is_still_flagged(self):
+    def test_a_swap_across_headings_that_keeps_the_count_is_still_flagged(self):
         # The count rule this replaced was satisfied by adding one misfiled
-        # block while dropping another parked one.
-        swapped = """# Changelog
+        # item while dropping another parked one. Dropped under one heading
+        # and added under another is no in-place edit: nothing under the new
+        # item's heading went away for it to pair with.
+        swapped = TWO_VERSIONS.replace(
+            "- **A second entry.** Published with it.\n",
+            "- **A second entry.** Published with it.\n\n"
+            "- **A new entry.** Not yet stamped.\n").replace(
+            "\n- **An older entry.** Published first.\n", "")
+        self.assertEqual(len(check.parked(swapped)), len(check.parked(TWO_VERSIONS)))
+        self.assertEqual(len(check.newly_parked(TWO_VERSIONS, swapped)), 1)
 
-## 0.3.9 — 2026-01-02
+    def test_a_heading_only_repair_parks_nothing_new(self):
+        # #581: 0.3.291 published with no heading, its entry filed under
+        # 0.3.290. The repair adds `## 0.3.291` and a `### Fixed` above
+        # content the base already carries; only structure changes.
+        self.assertEqual(check.newly_parked(SHARED_HEADING, REPAIRED), [])
 
-### Added
+    def test_an_in_place_edit_under_its_own_heading_is_not_new(self):
+        # #503: rewording a published entry replaces the item's text under
+        # the same heading; the base item it replaces is gone.
+        edited = HEADED.replace("Already stamped.", "Reworded in place.")
+        self.assertEqual(check.newly_parked(HEADED, edited), [])
 
-- **A new entry.** Not yet stamped.
-"""
-        self.assertEqual(len(check.parked(swapped)), len(check.parked(HEADED)))
-        self.assertEqual(len(check.newly_parked(HEADED, swapped)), 1)
+    def test_an_edit_answers_one_removed_item_only(self):
+        # One rewritten item pairs with one removed item; a second new item
+        # under the same heading has nothing left to pair with.
+        edited = HEADED.replace(
+            "- **A published entry.** Already stamped.\n",
+            "- **A published entry.** Reworded in place.\n\n"
+            "- **A new entry.** Not yet stamped.\n")
+        flagged = check.newly_parked(HEADED, edited)
+        self.assertEqual(len(flagged), 1)
+
+    def test_an_edit_moved_to_another_heading_is_flagged(self):
+        # An edit pairs only under the heading the base item sat under.
+        moved = TWO_VERSIONS.replace(
+            "- **A second entry.** Published with it.\n\n", "").replace(
+            "- **An older entry.** Published first.\n",
+            "- **An older entry.** Published first.\n\n"
+            "- **A second entry.** Reworded and moved.\n")
+        self.assertEqual(len(check.newly_parked(TWO_VERSIONS, moved)), 1)
+
+    def test_a_column_zero_paragraph_is_its_own_item(self):
+        # Older entries are prose paragraphs, not bullets.
+        text = ("# Changelog\n\n## 0.3.9 — 2026-01-02\n\n### Added\n\n"
+                "First paragraph.\n\nSecond paragraph.\n")
+        self.assertEqual(check.parked(text), ["First paragraph.", "Second paragraph."])
 
 
-class RepositoryTest(unittest.TestCase):
-    """End to end over a real repository, so the diff half is exercised too."""
+class _RepoCase(unittest.TestCase):
+    """A real repository whose `main` carries HEADED."""
 
     def setUp(self):
         temporary = tempfile.TemporaryDirectory()
@@ -129,11 +208,20 @@ class RepositoryTest(unittest.TestCase):
             cwd=self.root, capture_output=True, text=True)
         return proc.returncode, proc.stderr
 
+    def rebase_on(self, text):
+        """Replace the base commit's changelog with `text`."""
+        self.changelog.write_text(text, encoding="utf-8")
+        self.git("commit", "-q", "-am", "base changelog")
+
     def commit_changelog(self, text):
         self.git("checkout", "-q", "-b", "work")
         self.changelog.write_text(text, encoding="utf-8")
         self.git("add", "CHANGELOG.md")
         self.git("commit", "-q", "-m", "entry")
+
+
+class RepositoryTest(_RepoCase):
+    """End to end over a real repository, so the diff half is exercised too."""
 
     def test_a_stampable_entry_passes(self):
         self.commit_changelog(STAMPABLE)
@@ -148,15 +236,43 @@ class RepositoryTest(unittest.TestCase):
         self.assertIn("Rebase onto main", err)
 
     def test_a_swap_that_keeps_the_count_is_refused(self):
-        # Adds a misfiled block and drops a parked one: the net count is
-        # unchanged, and identity still catches it.
-        swapped = HEADED.replace(
-            "- **A published entry.** Already stamped.\n",
-            "- **A new entry.** Not yet stamped.\n")
+        # Adds a misfiled item under one heading and drops a parked one from
+        # another: the net count is unchanged, and identity still catches it.
+        self.rebase_on(TWO_VERSIONS)
+        swapped = TWO_VERSIONS.replace(
+            "- **A second entry.** Published with it.\n",
+            "- **A second entry.** Published with it.\n\n"
+            "- **A new entry.** Not yet stamped.\n").replace(
+            "\n- **An older entry.** Published first.\n", "")
         self.commit_changelog(swapped)
         code, err = self.run_check()
         self.assertEqual(code, 1, err)
         self.assertIn("whose content is new to", err)
+
+    def test_a_heading_only_repair_is_allowed(self):
+        # #581: the repair inserts `## 0.3.10` and `### Fixed` above an item
+        # the base files under 0.3.9. The old block-identity check read the
+        # two split blocks as new content and refused it.
+        self.rebase_on(SHARED_HEADING)
+        self.commit_changelog(REPAIRED)
+        code, err = self.run_check()
+        self.assertEqual(code, 0, err)
+
+    def test_an_in_place_edit_of_a_published_entry_is_allowed(self):
+        # #503: rewording a published entry under its own heading.
+        self.commit_changelog(HEADED.replace("Already stamped.", "Reworded in place."))
+        code, err = self.run_check()
+        self.assertEqual(code, 0, err)
+
+    def test_an_edit_does_not_carry_a_new_item_through(self):
+        edited = HEADED.replace(
+            "- **A published entry.** Already stamped.\n",
+            "- **A published entry.** Reworded in place.\n\n"
+            "- **A new entry.** Not yet stamped.\n")
+        self.commit_changelog(edited)
+        code, err = self.run_check()
+        self.assertEqual(code, 1, err)
+        self.assertIn("A new entry.", err)
 
     def test_moving_an_entry_between_headings_is_allowed(self):
         # An archive repair -- filing a past entry under the version that
@@ -221,6 +337,81 @@ class RepositoryTest(unittest.TestCase):
             cwd=self.root, capture_output=True, text=True)
         self.assertEqual(proc.returncode, 2)
         self.assertIn("failed", proc.stderr)
+
+
+class PushModeTest(_RepoCase):
+    """`--push-before`: the stamp step's check on the push it publishes.
+
+    #581's merge published 0.3.291 while its entry sat under 0.3.290 and
+    nothing sat above the first `## ` heading, so the stamp found nothing to
+    head and the version shipped unheaded.
+    """
+
+    def git_out(self, *args):
+        return subprocess.run(["git", *args], cwd=self.root, check=True,
+                              capture_output=True, text=True).stdout.strip()
+
+    def run_push(self, before):
+        proc = subprocess.run(
+            [_sys.executable, _os.path.join(_ROOT, "check-changelog-placement.py"),
+             "--push-before", before],
+            cwd=self.root, capture_output=True, text=True)
+        return proc.returncode, proc.stderr
+
+    def push(self, text):
+        """Commit `text` on main; return the commit it landed on."""
+        before = self.git_out("rev-parse", "HEAD")
+        self.changelog.write_text(text, encoding="utf-8")
+        self.git("commit", "-q", "-am", "merge")
+        return before
+
+    def test_a_merge_parking_its_entry_under_a_published_heading_stops_the_publish(self):
+        # The #581 shape: the merged item lands inside the block the previous
+        # stamp headed, so nothing sits above the first `## ` heading.
+        before = self.push(HEADED.replace(
+            "### Added\n\n",
+            "### Added\n\n- **A new entry.** Not yet stamped.\n\n"))
+        code, err = self.run_push(before)
+        self.assertEqual(code, 1, err)
+        self.assertIn("this push parks", err)
+        self.assertIn("The publish is stopped", err)
+
+    def test_a_stampable_merge_publishes(self):
+        code, err = self.run_push(self.push(STAMPABLE))
+        self.assertEqual(code, 0, err)
+
+    def test_no_before_commit_has_nothing_to_measure(self):
+        # workflow_dispatch carries no before-commit; a first push to the ref
+        # carries the all-zero sentinel.
+        self.push(MISFILED)
+        for before in ("", "0" * 40):
+            code, err = self.run_push(before)
+            self.assertEqual(code, 0, err)
+            self.assertIn("nothing to measure", err)
+
+    def test_a_before_commit_missing_from_the_checkout_is_a_tool_error(self):
+        self.push(MISFILED)
+        code, err = self.run_push("1" * 40)
+        self.assertEqual(code, 2, err)
+        self.assertIn("fetch-depth: 0", err)
+
+    def test_a_changelog_absent_before_the_push_has_nothing_to_measure(self):
+        self.git("rm", "-q", "CHANGELOG.md")
+        self.git("commit", "-q", "-m", "drop")
+        before = self.git_out("rev-parse", "HEAD")
+        self.changelog.write_text(MISFILED, encoding="utf-8")
+        self.git("add", "CHANGELOG.md")
+        self.git("commit", "-q", "-m", "first changelog")
+        code, err = self.run_push(before)
+        self.assertEqual(code, 0, err)
+        self.assertIn("does not exist at", err)
+
+    def test_the_two_modes_are_exclusive(self):
+        proc = subprocess.run(
+            [_sys.executable, _os.path.join(_ROOT, "check-changelog-placement.py"),
+             "--base", "main", "--push-before", "0"],
+            cwd=self.root, capture_output=True, text=True)
+        self.assertEqual(proc.returncode, 2, proc.stderr)
 
 
 if __name__ == "__main__":
