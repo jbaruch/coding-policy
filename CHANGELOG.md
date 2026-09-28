@@ -29,6 +29,42 @@
   repository's `worktree prune`, a call that no longer happens; it now swaps
   at that repository's branch deletion, its last destructive step.
 
+## 0.3.319 — 2026-09-28
+
+### Added
+
+- **Every foreman plan records why each assignment got its model and effort,
+  and a new `cost-report` command reports each task's resource use through
+  acceptance (#602).** Split out of #445. Plan schema 13 adds a `selection`
+  record per seat: the capabilities the round needs from the model (from the
+  capability table's vocabulary) and from the worker (the specialist
+  requirement), the selected model, effort, round and config row, the table's
+  verdict and source per needed capability, the row's billing window and
+  whether its cost is known, every cheaper row the role could run with its
+  own verdict and sources (under a judgment floor, flagged as barred by it),
+  and the escalation conditions from `tiers.escalation_conditions` with which
+  of them fired and whether headroom pressure may decline the discretionary
+  step. An untiered worker records `unknown` for every model-dependent field,
+  which today is most of the fleet (#476). Nothing reads the record to decide
+  anything; `apply` ignores it. `selection.cheaper_candidates` now also backs
+  the schema-10 `cheaper_adequate` field, so the two cannot disagree, and the
+  fix-round threshold for the review row is the named constant
+  `REVIEW_ROW_FIX_ROUND` instead of a literal 4.
+  `foreman cost-report [--task T]` is read-only and joins the assignment
+  ledger, recovery events and measure snapshots: status, elapsed time to
+  closure, correction rounds, applied work per role, coordination overhead
+  (unstarted assignments, unknown-outcome assignments counted apart, transport retries, unsent dispatches, provider
+  refusals) and per-window headroom movement between the snapshots bracketing
+  the task. Uncached input, cached input and output tokens, and the foreman's
+  own tokens, are `unknown`: no owner record carries token counts, and the
+  report lists them under `unrecorded`. A window shared with another worker, or
+  drawn on by another task during the span, keeps `attribution: unknown`; a
+  reset between readings makes the movement itself unknown. No savings claim
+  is made from a quota or multiplier change. Judgment floors and the pinned
+  judge are unchanged. The herdr-foreman skill's description now triggers on
+  cost and resource-use requests, and Step 1 routes them to `cost-report` as a
+  fourth offline action.
+
 ## 0.3.318 — 2026-09-28
 
 ### Fixed
@@ -302,6 +338,12 @@
   swap the frozen directory for a decoy between the freeze and the identity,
   and swap a brief between its receipt and the prompt-hash check.
 
+## 0.3.311 — 2026-09-28
+
+### Changed
+
+- **The Platform-Bound Untestable Carve-Out now accepts a finite behavior selector as its artifact inventory** (`rules/testing-standards.md`). The prior authority precondition required every exempt artifact by name. That forced shared platform plugins to maintain source-file allowlists in every consumer, so a new file or rename silently lost the exemption even when the platform boundary and validation procedure were unchanged. A consuming authority can still list artifacts explicitly, or it can list finite external-runtime interaction classes and attach the exemption only to each class's smallest invocation layer. The selector must let a reviewer map every changed code path to one class and one documented manual procedure; language, directory, file glob, app name, and a generic platform-specific label are insufficient alone. This keeps deterministic logic in CI while allowing durable rules for proprietary scheduler, lifecycle, event-delivery, and device-I/O behavior. Triggered by the policy conflict on `jbaruch/hubitat-dev` PR #152.
+
 ## 0.3.310 — 2026-09-28
 
 ### Fixed
@@ -319,10 +361,6 @@
   retained adjustment moved from `assign.apply` into `assign.retained_tier`,
   which also shares the new `tiers.EFFORT_RANK`. The tier system is dormant in
   production, so no recorded row changes.
-### Changed
-
-- **The Platform-Bound Untestable Carve-Out now accepts a finite behavior selector as its artifact inventory** (`rules/testing-standards.md`). The prior authority precondition required every exempt artifact by name. That forced shared platform plugins to maintain source-file allowlists in every consumer, so a new file or rename silently lost the exemption even when the platform boundary and validation procedure were unchanged. A consuming authority can still list artifacts explicitly, or it can list finite external-runtime interaction classes and attach the exemption only to each class's smallest invocation layer. The selector must let a reviewer map every changed code path to one class and one documented manual procedure; language, directory, file glob, app name, and a generic platform-specific label are insufficient alone. This keeps deterministic logic in CI while allowing durable rules for proprietary scheduler, lifecycle, event-delivery, and device-I/O behavior. Triggered by the policy conflict on `jbaruch/hubitat-dev` PR #152.
-
 ## 0.3.309 — 2026-09-28
 
 ### Added
