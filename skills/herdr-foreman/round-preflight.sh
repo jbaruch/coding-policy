@@ -35,10 +35,12 @@
 # removes worktrees and deletes local branches under its own contract.
 #
 # `checks.foreman_tier` (`foreman verify-foreman`): ok with the argv proof as
-# detail when this pane runs the tier selection chose for the foreman;
+# detail when this pane runs the foreman's selected tier;
 # unconfigured, not blocking, with the configure command as
 # `detail.warning` when config has no `foreman` block; failed, and blocking,
-# when the live argv differs or the selection refuses.
+# when the live argv differs or the selection refuses; failed, and
+# blocking, without running when `checks.headroom` failed, since the
+# selection reads that measurement. `--no-measure` reuses the latest snapshot.
 #
 # `checks.worktrees` (the sweep, sweep-worktrees.sh):
 #   ok         no detail when the worktree root does not exist; otherwise the
@@ -216,42 +218,52 @@ PY
   fi
 
   # 4. Headroom. The one check that writes, and the one the planner reads.
+  local measured=skipped
   if [ "$measure" -eq 1 ]; then
     bash "${HERE}/foreman.sh" "${common[@]+"${common[@]}"}" measure "${clock[@]+"${clock[@]}"}" \
       > "${scratch}/measure.json" 2>"${scratch}/measure.err"
     rc=$?
     cat "${scratch}/measure.err" >&2
     if [ "$rc" -eq 0 ]; then
+      measured=ok
       record headroom ok "" 0 "${scratch}/measure.json" "foreman measure"
     else
+      measured=failed
       record headroom failed "foreman measure exited ${rc}; a seat cannot be ranked on an unmeasured roster" 0 ""
     fi
   else
     record headroom skipped "" 0 ""
   fi
 
-  # 4b. The foreman's own tier, after the headroom it is selected on. Tier selection picks it like every other
-  #     seat's; this pane's live argv must carry the tier selected. An absent
-  #     `foreman` block warns and does not block.
-  bash "${HERE}/foreman.sh" "${common[@]+"${common[@]}"}" verify-foreman \
-    > "${scratch}/foreman-tier.json" 2>"${scratch}/foreman-tier.err"
-  rc=$?
-  cat "${scratch}/foreman-tier.err" >&2
-  if [ "$rc" -eq 0 ]; then
-    local configured
-    if ! configured="$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); d=d if isinstance(d, dict) else {}; v=d.get("configured"); print("1" if v is True else "0" if v is False else sys.exit("configured is not a boolean"))' "${scratch}/foreman-tier.json")"; then
-      configured=""
-    fi
-    if [ "$configured" = "1" ]; then
-      record foreman_tier ok "" 0 "${scratch}/foreman-tier.json" "foreman verify-foreman"
-    elif [ "$configured" = "0" ]; then
-      echo "round-preflight: warning: the foreman seat is unconfigured; see checks.foreman_tier.detail.warning" >&2
-      record foreman_tier unconfigured "" 0 "${scratch}/foreman-tier.json" "foreman verify-foreman"
-    else
-      record foreman_tier failed "foreman verify-foreman exited 0 without a readable configured flag; the foreman's tier is unproven" 0 ""
-    fi
+  # 4b. The foreman's own tier, selected on the headroom check 4 measures, so
+  #     it runs only on that measurement: a failed measure records a
+  #     dependency failure here instead of verifying against a stale or absent
+  #     snapshot. Under --no-measure it reuses the latest snapshot. This pane's
+  #     live argv must carry the selected tier. An absent `foreman` block warns
+  #     and does not block.
+  if [ "$measured" = failed ]; then
+    record foreman_tier failed "not verified: the foreman's tier is selected on the headroom foreman measure writes, and that check failed; fix checks.headroom, then re-run the preflight" 0 ""
   else
-    record foreman_tier failed "foreman verify-foreman exited ${rc}; this pane does not run the tier selection chose for the foreman. Read its diagnostic, then restart the foreman with start-foreman from another shell (references/model-tiers.md Foreman Seat)" 0 ""
+    bash "${HERE}/foreman.sh" "${common[@]+"${common[@]}"}" verify-foreman \
+      > "${scratch}/foreman-tier.json" 2>"${scratch}/foreman-tier.err"
+    rc=$?
+    cat "${scratch}/foreman-tier.err" >&2
+    if [ "$rc" -eq 0 ]; then
+      local configured
+      if ! configured="$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); d=d if isinstance(d, dict) else {}; v=d.get("configured"); print("1" if v is True else "0" if v is False else sys.exit("configured is not a boolean"))' "${scratch}/foreman-tier.json")"; then
+        configured=""
+      fi
+      if [ "$configured" = "1" ]; then
+        record foreman_tier ok "" 0 "${scratch}/foreman-tier.json" "foreman verify-foreman"
+      elif [ "$configured" = "0" ]; then
+        echo "round-preflight: warning: the foreman seat is unconfigured; see checks.foreman_tier.detail.warning" >&2
+        record foreman_tier unconfigured "" 0 "${scratch}/foreman-tier.json" "foreman verify-foreman"
+      else
+        record foreman_tier failed "foreman verify-foreman exited 0 without a readable configured flag; the foreman's tier is unproven" 0 ""
+      fi
+    else
+      record foreman_tier failed "foreman verify-foreman exited ${rc}; this pane does not run the foreman's selected tier. Read its diagnostic, then restart the foreman with start-foreman from another shell (references/model-tiers.md Foreman Seat)" 0 ""
+    fi
   fi
 
   # 5. Capability-table cadence. Due is not blocking: the foreman refreshes it

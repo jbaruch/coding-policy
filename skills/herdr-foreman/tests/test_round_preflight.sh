@@ -21,7 +21,8 @@
 #   7. Prune exit 1 vs 2        -> distinct statuses, both blocking; a sweep
 #                                  past its budget (a stand-in runner's 124)
 #                                  blocks too.
-#   8. --no-measure             -> headroom skipped, still ready.
+#   8. --no-measure             -> headroom skipped, foreman still verified, ready.
+#      Measure fails            -> foreman tier a dependency failure, not verified.
 #   9. Missing --repo/--checkout-> exit 2, usage error, no JSON verdict.
 #  10. Every check's payload    -> carried through under `checks.<name>.detail`.
 #  11. Gate pointers            -> resolved once, carried for the briefs.
@@ -240,10 +241,26 @@ main() {
 
   echo "▶ options and usage" >&2
 
+  # --no-measure still verifies the foreman, on the latest saved snapshot.
   shadow "$TMP/nomeasure"
   run "$TMP/nomeasure" --no-measure
-  if [[ $RC -eq 0 ]] && [[ "$(field "$OUT" 'd["checks"]["headroom"]["status"]')" == '"skipped"' ]]; then
-    pass; else fail "--no-measure skips the one writing check, got RC=$RC OUT=$OUT"; fi
+  if [[ $RC -eq 0 ]] && [[ "$(field "$OUT" 'd["checks"]["headroom"]["status"]')" == '"skipped"' ]] \
+     && [[ "$(field "$OUT" 'd["checks"]["foreman_tier"]["status"]')" == '"ok"' ]]; then
+    pass; else fail "--no-measure skips the one writing check and still verifies the foreman, got RC=$RC OUT=$OUT"; fi
+
+  # The foreman's tier is selected on the measurement: a failed measure is a
+  # recorded dependency failure, never a verification against a stale snapshot.
+  shadow "$TMP/measurefails"
+  # The stub's `$*` and `$FOREMAN_TIER_*` expand when the stub runs, not here.
+  # shellcheck disable=SC2016
+  printf '#!/usr/bin/env bash\nset -euo pipefail\ncase "$*" in\n  *capability-check*) printf %s; exit 0 ;;\n  *measure*) echo "measure: probe failed" >&2; exit 3 ;;\n  *verify-foreman*) printf %%s "$FOREMAN_TIER_OUT"; exit "$FOREMAN_TIER_RC" ;;\nesac\nexit 9\n' \
+    "'{\"due\":false,\"entries\":0}'" > "$TMP/measurefails/foreman.sh" || die "write foreman stub"
+  run "$TMP/measurefails"
+  if [[ $RC -eq 1 ]] && [[ "$(field "$OUT" 'd["checks"]["headroom"]["status"]')" == '"failed"' ]] \
+     && [[ "$(field "$OUT" 'd["checks"]["foreman_tier"]["status"]')" == '"failed"' ]] \
+     && [[ "$(field "$OUT" 'd["checks"]["foreman_tier"].get("detail")')" == "null" ]] \
+     && printf '%s' "$OUT" | grep -q 'not verified: the foreman'; then
+    pass; else fail "a failed measure records the foreman tier as a dependency failure, got RC=$RC OUT=$OUT"; fi
 
   shadow "$TMP/usage"
   for args in "--checkout /tmp" "--repo o/r"; do
