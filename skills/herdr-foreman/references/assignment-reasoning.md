@@ -3,7 +3,7 @@
 The foreman applies this reference at intake, when composing a bug-fix brief, and
 when routing findings before a correction. The worker receives the relevant
 questions in its self-contained brief. The reasoning is the workers': the
-foreman runs on a cheap tier, records and routes, and never reasons through
+foreman does no heavy lifting: it records and routes, and never reasons through
 task content (`rules/agent-team-operation.md` Foreman Seat). The dispatch
 utility does not infer intent or causality from prose.
 

@@ -71,6 +71,8 @@ ROUND_CAPABILITIES = {
     "mechanical": ("mechanical-execution",),
     "release_mechanics": ("mechanical-execution",),
     "consultation": (),
+    # The foreman runs owner scripts and gates on recorded verdicts (#601).
+    "coordination": ("mechanical-execution",),
 }
 CONSULTATION_CAPABILITIES = {"investigator": "causal-investigation", "advisor": "advisory-synthesis"}
 RECORDED_ONLY = frozenset({"context-window-1m", "report-verdict-classification"})

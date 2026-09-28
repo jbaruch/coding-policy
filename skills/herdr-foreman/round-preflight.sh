@@ -35,8 +35,10 @@
 # removes worktrees and deletes local branches under its own contract.
 #
 # `checks.foreman_tier` (`foreman verify-foreman`): ok with the argv proof as
-# detail when this pane runs the config's `foreman` tier; failed, and blocking,
-# when the block is absent or the live argv differs.
+# detail when this pane runs the tier selection chose for the foreman;
+# unconfigured, not blocking, with the configure command as
+# `detail.warning` when config has no `foreman` block; failed, and blocking,
+# when the live argv differs or the selection refuses.
 #
 # `checks.worktrees` (the sweep, sweep-worktrees.sh):
 #   ok         no detail when the worktree root does not exist; otherwise the
@@ -183,16 +185,28 @@ PY
     record roster failed "roster.sh exited ${rc}; re-run it and read its diagnostic before planning" 0 ""
   fi
 
-  # 2b. The foreman's own tier. The seat is operator config verified like every
-  #     other seat: this pane's live argv must carry the configured cheap tier.
+  # 2b. The foreman's own tier. Tier selection picks it like every other
+  #     seat's; this pane's live argv must carry the tier selected. An absent
+  #     `foreman` block warns and does not block.
   bash "${HERE}/foreman.sh" "${common[@]+"${common[@]}"}" verify-foreman \
     > "${scratch}/foreman-tier.json" 2>"${scratch}/foreman-tier.err"
   rc=$?
   cat "${scratch}/foreman-tier.err" >&2
   if [ "$rc" -eq 0 ]; then
-    record foreman_tier ok "" 0 "${scratch}/foreman-tier.json" "foreman verify-foreman"
+    local configured
+    if ! configured="$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); d=d if isinstance(d, dict) else {}; v=d.get("configured"); print("1" if v is True else "0" if v is False else sys.exit("configured is not a boolean"))' "${scratch}/foreman-tier.json")"; then
+      configured=""
+    fi
+    if [ "$configured" = "1" ]; then
+      record foreman_tier ok "" 0 "${scratch}/foreman-tier.json" "foreman verify-foreman"
+    elif [ "$configured" = "0" ]; then
+      echo "round-preflight: warning: the foreman seat is unconfigured; see checks.foreman_tier.detail.warning" >&2
+      record foreman_tier unconfigured "" 0 "${scratch}/foreman-tier.json" "foreman verify-foreman"
+    else
+      record foreman_tier failed "foreman verify-foreman exited 0 without a readable configured flag; the foreman's tier is unproven" 0 ""
+    fi
   else
-    record foreman_tier failed "foreman verify-foreman exited ${rc}; this pane does not provably run the configured foreman tier. Read its diagnostic, then start the foreman with start-foreman from another shell (references/model-tiers.md Foreman Seat)" 0 ""
+    record foreman_tier failed "foreman verify-foreman exited ${rc}; this pane does not run the tier selection chose for the foreman. Read its diagnostic, then restart the foreman with start-foreman from another shell (references/model-tiers.md Foreman Seat)" 0 ""
   fi
 
   # 3. Authority for this repo.

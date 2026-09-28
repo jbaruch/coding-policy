@@ -2,13 +2,16 @@
 
 ### Changed
 
-- **The Herdr foreman runs on a cheap model at low effort, and every judgment
-  it used to make routes to a worker (#601).** The operator's decision on #445:
-  the foreman is not "cheaper", it is cheap. `rules/agent-team-operation.md`
-  said the foreman ran on the strongest generally-available model at high
-  effort, which the #445 audit named as the cost driver: a strong model at high
-  effort spending its tokens on coordination. A new Foreman Seat section
-  replaces that bullet. The foreman dispatches, runs owner scripts, keeps its
+- **The Herdr foreman does no heavy lifting, every judgment it used to make
+  routes to a worker, and its tier is selected like every other seat's
+  (#601).** The operator's decision on #445: all heavy lifting goes to
+  workers. `rules/agent-team-operation.md` said the foreman ran on the
+  strongest generally-available model at high effort, which the #445 audit
+  named as the cost driver: a strong model at high effort spending its tokens
+  on coordination. A new Foreman Seat section replaces that bullet, and names
+  no model or effort: on #616 the operator ruled "don't pin the foreman to a
+  named model, let the system figure it out", since tier selection already
+  assesses the needed effort. The foreman dispatches, runs owner scripts, keeps its
   records and gates on evidence (reviewer and tester reports, CI, oracle
   verification, the report-verdict classifier gate); it never reasons through
   task content and never substitutes its own reading for a missing report. The
@@ -33,20 +36,30 @@
   missing a verdict or label returns to its responsibility instead of being
   filled in. Step 12's classifier paragraph is untouched here; #531 owns it.
 
-  The foreman's tier is now operator config verified like every other seat. A
-  top-level `foreman` block in `config.json` names its agent, kind, model,
-  effort and launch options; `parse_foreman` refuses the kind's pinned top
-  model, the judge's model or agent, a worker's name, and any effort other than
-  `low`. New `foreman start-foreman --pane` launches exactly that tier and
-  proves it from the launch argv; new `foreman verify-foreman` proves a live
-  foreman pane from its foreground argv. The round preflight runs it as
-  `checks.foreman_tier`, and an unproven tier blocks the round, so an operator
-  upgrading must add the block (`config.example.json` ships sonnet-5 at low)
-  and restart the foreman once with `start-foreman`. A context reset keeps the
-  pane's process, so the proven tier survives it. Tests:
-  `skills/herdr-foreman/tests/test_foreman_seat.py` (config refusals, the
-  launched flags, launch- and live-argv proof, the CLI) and a new
-  `test_round_preflight.sh` case for the blocking check.
+  The foreman's tier now comes from the same selection machinery as every
+  seat's. A top-level `foreman` block in `config.json` declares the seat like a
+  worker: agent, kind, launch options and an optional tier table (without one,
+  the table of the first configured worker of its kind). A `model` or `effort`
+  field is refused; the agent may not be a worker's or the judge's. A new
+  `coordination` round type, needing `mechanical-execution` in
+  `ROUND_CAPABILITIES`, is the foreman's round: the cheapest row the capability
+  table records adequate for it wins, a row recorded inadequate is never a
+  candidate, and without evidence the table's `coordination` row runs through
+  `select_tier` with the seat's measured headroom. `config.example.json`
+  declares the foreman with no model and gives each worker table a
+  `coordination` row mirroring its `mechanical` one. `plan --roles foreman` is
+  refused. New `foreman start-foreman --pane` launches the selected tier and
+  proves it from the launch argv; new `foreman verify-foreman` re-runs the
+  selection and proves the running foreman's foreground argv carries it. The
+  round preflight runs it as `checks.foreman_tier`: a running tier other than
+  the selected one blocks the round, and an absent `foreman` block is an
+  `unconfigured` status with a stderr warning and the configure command, not a
+  block. A context reset keeps the pane's process, so the proven tier survives
+  it. Tests: `skills/herdr-foreman/tests/test_foreman_seat.py` (config
+  refusals, cheapest-adequate selection, the fallback row, an inadequate row
+  refused before launch, the selected tier is what launches, live-argv proof
+  and mismatch, the unconfigured warning, the plan refusal) and two
+  `test_round_preflight.sh` cases (mismatch blocks, unconfigured warns).
 
 ## 0.3.309 — 2026-09-28
 

@@ -14,8 +14,6 @@
   "foreman": {
     "agent": "foreman",
     "kind": "claude",
-    "model": "sonnet-5",
-    "effort": "low",
     "launch_args": [
       "--dangerously-skip-permissions"
     ]
@@ -116,6 +114,10 @@
           "model": "sonnet-5",
           "effort": "high",
           "multiplier": 1.0
+        },
+        "coordination": {
+          "model": "claude-haiku-4-5",
+          "multiplier": 1.0
         }
       },
       "launch_args": [
@@ -212,6 +214,11 @@
         "consultation": {
           "model": "gpt-5.6-sol",
           "effort": "medium",
+          "multiplier": 1.0
+        },
+        "coordination": {
+          "model": "gpt-5.3-codex-spark",
+          "effort": "low",
           "multiplier": 1.0
         }
       },
@@ -316,6 +323,11 @@
         "consultation": {
           "model": "grok-4.6",
           "effort": "medium",
+          "multiplier": 1.0
+        },
+        "coordination": {
+          "model": "grok-4.6",
+          "effort": "low",
           "multiplier": 1.0
         }
       },

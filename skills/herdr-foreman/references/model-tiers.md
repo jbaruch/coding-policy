@@ -70,26 +70,36 @@ CLI or changing a model pin.
 
 ## Foreman Seat
 
-The foreman is a seat like every other: its tier is operator config, launched
-with its flags and proved from argv. The top-level `foreman` block names it:
+The foreman is a seat like every other: no model or effort is pinned for it.
+The top-level `foreman` block declares it the way a worker is declared:
 
 ```json
 {
   "agent": "foreman",
   "kind": "claude",
-  "model": "sonnet-5",
-  "effort": "low",
-  "launch_args": ["--dangerously-skip-permissions"]
+  "launch_args": ["--dangerously-skip-permissions"],
+  "tiers": {"coordination": {"model": "<model>", "effort": "<effort>"}}
 }
 ```
 
 `agent` is the Herdr name the foreman pane runs under; it is never also a
-configured worker or the pinned judge. `model` is an economical model: the
-parser refuses the kind's pinned top model and the judge's pinned model.
-`effort` is `low`, omitted only for a model that accepts no effort flag.
-`launch_args` are the operator's permission and UI options, under the same
-grammar as a worker's; the worker YOLO requirement does not apply to this
-seat. The refusals are `parse_foreman` in `skills/herdr-foreman/foreman/config.py`.
+configured worker or the pinned judge. `tiers` is optional: without it the
+seat reads the tier table of the first configured worker of its kind. A
+`model` or `effort` field on the block is refused; the parser is
+`parse_foreman` in `skills/herdr-foreman/foreman/config.py`. `launch_args` are
+the operator's permission and UI options under a worker's grammar; the worker
+YOLO requirement does not apply to this seat.
+
+The foreman's round type is `coordination` (`COORDINATION_ROUND` in
+`skills/herdr-foreman/foreman/tiers.py`), with its required capabilities in
+`ROUND_CAPABILITIES` in `skills/herdr-foreman/foreman/capabilities.py`. The
+cheapest row in the seat's table that the capability table records adequate
+for those capabilities wins; a row it records inadequate is never a candidate.
+Without such evidence the table's `coordination` row runs, resolved by
+`select_tier` with the seat's measured headroom, and an inadequate verdict on
+it refuses. The selection is `_select_foreman_tier` in
+`skills/herdr-foreman/foreman/cli.py`. The planner never seats the foreman on a
+worker: `plan --roles foreman` is refused.
 
 Start the foreman from any shell, naming an empty Herdr shell pane:
 
@@ -97,16 +107,23 @@ Start the foreman from any shell, naming an empty Herdr shell pane:
 bash "$CP/skills/herdr-foreman/foreman.sh" start-foreman --pane <pane-id>
 ```
 
-It starts the configured agent with exactly `launch_args` plus the tier's
-model and effort flags, and prints the launch-argv proof. A launch argv that
-differs refuses, and no foreman runs on an unproven tier.
+It selects the tier, starts the configured agent with exactly `launch_args`
+plus that tier's model and effort flags, and prints the selection and the
+launch-argv proof. A launch argv that differs refuses.
 
-`foreman verify-foreman` proves the running foreman from its pane's live
-foreground argv — this Herdr pane by default, or `--pane <pane-id>`. Step 2's
-round preflight runs it as `checks.foreman_tier`; a missing `foreman` block or
-a differing argv blocks the round until the operator restarts the foreman with
-`start-foreman`. A context reset clears the pane's conversation and keeps its
-process, so the proven tier survives the reset.
+`foreman verify-foreman` re-runs the selection and proves the running foreman
+from its pane's live foreground argv, this Herdr pane by default or
+`--pane <pane-id>`. Step 2's round preflight runs it as `checks.foreman_tier`:
+
+- the running argv carries the selected tier — `ok`
+- it carries another tier, or the selection refuses — `failed`, and the round
+  blocks until the operator restarts the foreman with `start-foreman`
+- config has no `foreman` block — `unconfigured`, a stderr warning with the
+  configure command in `detail.warning`; the round proceeds
+
+A selection that moves, on new capability evidence or a table edit, reads as
+a mismatch at the next preflight; the restart picks the new tier. A context
+reset keeps the pane's process, so the proven tier survives it.
 
 What the foreman does on that tier, and where each judgment it used to make
 now routes, is `rules/agent-team-operation.md` Foreman Seat and

@@ -34,12 +34,15 @@ description: Running a multi-agent team — task-based specialist composition, c
 
 ## Foreman Seat
 
-- The foreman runs on an economical model at low effort
-- The operator's `config.json` `foreman` block names the foreman's agent, kind, model and effort
-- The config refuses a `foreman` block naming its kind's pinned top model, the judge's model or agent, or an effort other than `low`
-- `foreman start-foreman` launches the foreman on that tier and proves it from the launch argv
-- The round preflight proves the running foreman's tier from its pane's live argv
-- An unproven foreman tier blocks the round
+- The foreman does no heavy lifting; every judgment on task content goes to a worker
+- The operator's `config.json` `foreman` block declares the seat like a worker: its agent, kind, launch options and an optional tier table
+- No rule, config field or default pins the foreman's model or effort
+- Tier selection resolves the foreman's `coordination` round through the machinery every seat uses: the tier table, the capability table and measured headroom
+- The foreman's agent is never a configured worker or the pinned judge's
+- `foreman start-foreman` launches the selected tier and proves it from the launch argv
+- The round preflight proves the running foreman's argv carries the selected tier
+- A running tier other than the selected one blocks the round
+- An absent `foreman` block is a visible preflight warning naming the configure command, never a round block
 - The foreman dispatches, runs owner scripts, keeps the foreman-owned records, and gates on evidence
 - The foreman never reasons through task content
 - Acceptance rests on independent reviewer and tester reports, CI, oracle verification and the report-verdict classifier gate
@@ -206,7 +209,7 @@ description: Running a multi-agent team — task-based specialist composition, c
 - No exclusion bars the judge from a dispute involving its own model
 - A judge round the pinned worker's window cannot cover halts the round — no substitution, no fallback to another vendor's flagship, no degraded ruling
 - The most capable model is reserved for the judge
-- The foreman's tier follows Foreman Seat
+- The foreman's tier is selected under Foreman Seat, never pinned
 
 ## Round Tiers
 

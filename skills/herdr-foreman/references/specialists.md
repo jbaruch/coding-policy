@@ -284,7 +284,7 @@ its genuine block is recorded; idle bench membership creates no monitoring job.
 ## Assess specialist work
 
 Confirm delivery through the normal report checkpoint and save its successful
-JSON output. Read the actual report in full. The foreman runs on a cheap tier
+JSON output. Read the actual report in full. The foreman does no heavy lifting
 and does not re-assess a consultation's substance
 (`rules/agent-team-operation.md` Foreman Seat). The outcome is the report's own
 acceptance lines, each criterion `met` or `unmet` with its evidence; the

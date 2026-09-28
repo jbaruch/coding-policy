@@ -13,7 +13,7 @@ from pathlib import Path
 
 from .errors import ConfigError, ForemanError
 from .herdr import SLASH_DELIVERIES, SLASH_DELIVERY_PASTE
-from .tiers import NO_EFFORT_MODELS, TOP_MODELS, parse_launch_args, parse_tiers
+from .tiers import TOP_MODELS, parse_launch_args, parse_tiers
 
 CONFIG_SCHEMA_VERSION = 5
 READABLE_CONFIG_VERSIONS = frozenset({1, 2, 3, 4, 5})
@@ -197,7 +197,8 @@ def parse_config(payload, source="<memory>"):
     # untiered worker schema 5 forbids (#527).
     judge = parse_judge(payload, source=source)
     pinned_judge = judge.agent if judge is not None else None
-    foreman = parse_foreman(payload, source=source)
+    # Validates the foreman block with the rest of the file; it seats no worker.
+    parse_foreman(payload, source=source)
 
     agents = []
     seen = set()
@@ -352,11 +353,6 @@ def parse_config(payload, source="<memory>"):
                 **lists
             )
         )
-    if foreman is not None and foreman.agent in seen:
-        raise ConfigError(
-            "Config at {}: `foreman.agent` {!r} is also a configured worker; the foreman seat is never planned as "
-            "a worker. Give the foreman its own agent name.".format(source, foreman.agent),
-            {"source": source, "agent": foreman.agent})
     return agents
 
 
@@ -499,44 +495,46 @@ def load_judge(path):
     return parse_judge(_read_config(path), source=str(path))
 
 
-#: The only reasoning effort the foreman seat launches with. A model that
-#: accepts no effort flag (`tiers.NO_EFFORT_MODELS`) omits it instead.
-FOREMAN_EFFORT = "low"
+FOREMAN_FIELDS = frozenset({"agent", "kind", "tiers", "launch_args"})
 
-FOREMAN_FIELDS = frozenset({"agent", "kind", "model", "effort", "launch_args"})
-
-FOREMAN_EXAMPLE = ('{"agent": "foreman", "kind": "claude", "model": "sonnet-5", "effort": "low", '
+FOREMAN_EXAMPLE = ('{"agent": "foreman", "kind": "claude", '
                    '"launch_args": ["--dangerously-skip-permissions"]}')
 
 
 class Foreman:
-    """The foreman seat's launch tier. A plain value object, never mutated after load."""
+    """The foreman seat. A plain value object, never mutated after load.
 
-    __slots__ = ("agent", "kind", "model", "effort", "launch_args")
+    `tiers` is the seat's own tier table, or the table of the first configured
+    worker of the same kind when the block declares none (`parse_foreman`).
+    Which row runs is tier selection's decision, never a pin held here.
+    """
 
-    def __init__(self, agent, kind, model, effort=None, launch_args=()):
+    __slots__ = ("agent", "kind", "tiers", "launch_args", "tier_source")
+
+    def __init__(self, agent, kind, tiers=None, launch_args=(), tier_source=""):
         self.agent = agent
         self.kind = kind
-        self.model = model
-        self.effort = effort
+        self.tiers = tiers or {}
         self.launch_args = tuple(launch_args)
+        self.tier_source = tier_source
 
-    def tier(self):
-        return {"model": self.model, "effort": self.effort}
+    @property
+    def name(self):
+        return self.agent
 
     def as_dict(self):
-        return {"agent": self.agent, "kind": self.kind, "model": self.model, "effort": self.effort,
-                "launch_args": list(self.launch_args)}
+        return {"agent": self.agent, "kind": self.kind, "launch_args": list(self.launch_args),
+                "tier_source": self.tier_source}
 
 
 def parse_foreman(payload, source="<memory>"):
     """Validate the optional top-level `foreman` block, `None` when absent.
 
-    The foreman coordinates and gates on evidence; the crew does the judgment
-    work (rules/agent-team-operation.md Foreman Seat). Its tier is operator
-    config, refused here when it names the kind's pinned top model
-    (`tiers.TOP_MODELS`), the judge's pinned model or agent, or an effort
-    other than `FOREMAN_EFFORT`.
+    The block names the seat like a worker: its Herdr agent name, kind,
+    launch options and an optional tier table. Without a table the seat reads
+    the table of the first configured worker of its kind. The model and effort
+    are selected per round by `tiers.select_tier`, never pinned here. The
+    agent is never a configured worker or the pinned judge.
     """
     if not isinstance(payload, dict):
         raise ConfigError(
@@ -555,63 +553,60 @@ def parse_foreman(payload, source="<memory>"):
     unknown = sorted(set(raw) - FOREMAN_FIELDS)
     if unknown:
         raise ConfigError(
-            "Config at {}: `foreman` carries unknown field(s) {}; it takes agent, kind, model, effort and "
-            "launch_args, as in {}.".format(source, ", ".join(unknown), FOREMAN_EXAMPLE),
+            "Config at {}: `foreman` carries unknown field(s) {}; it takes agent, kind, tiers and launch_args, "
+            "as in {}. The model and effort come from tier selection, never from this block.".format(
+                source, ", ".join(unknown), FOREMAN_EXAMPLE),
             {"source": source, "unknown": unknown})
-    for field in ("agent", "kind", "model"):
+    for field in ("agent", "kind"):
         value = raw.get(field)
         if not isinstance(value, str) or not value:
             raise ConfigError(
                 "Config at {}: `foreman.{}` is {!r}; name it as a non-empty string, as in {}.".format(
                     source, field, value, FOREMAN_EXAMPLE),
                 {"source": source, "field": field, "value": value})
-    kind, model, effort = raw["kind"], raw["model"], raw.get("effort")
+    agent, kind = raw["agent"], raw["kind"]
     if kind not in TOP_MODELS:
         raise ConfigError(
             "Config at {}: `foreman.kind` is {!r}; the seat launches through the {} adapter.".format(
                 source, kind, " or ".join(sorted(TOP_MODELS))),
             {"source": source, "kind": kind})
-    row = {"model": model}
-    if effort is not None:
-        row["effort"] = effort
-    # The shared tier validator owns the model-id and per-kind effort grammar.
-    parse_tiers({"mechanical": row}, kind)
-    if model in TOP_MODELS[kind]:
-        raise ConfigError(
-            "Config at {}: `foreman.model` is {!r}, the pinned top {} model; the foreman runs on an economical "
-            "model. Name a cheaper one.".format(source, model, kind),
-            {"source": source, "model": model})
-    if model not in NO_EFFORT_MODELS and effort != FOREMAN_EFFORT:
-        raise ConfigError(
-            "Config at {}: `foreman.effort` is {!r}; the foreman seat launches at {!r}.".format(
-                source, effort, FOREMAN_EFFORT),
-            {"source": source, "effort": effort})
     judge = parse_judge(payload, source=source)
-    if judge is not None and (model == judge.model or raw["agent"] == judge.agent):
+    if judge is not None and agent == judge.agent:
         raise ConfigError(
-            "Config at {}: the foreman seat names the pinned judge's {}; the most capable model and its worker "
-            "stay reserved for the judge.".format(source, "model" if model == judge.model else "agent"),
-            {"source": source})
+            "Config at {}: `foreman.agent` is the pinned judge's worker {!r}; the judge holds no other seat. "
+            "Give the foreman its own agent name.".format(source, agent),
+            {"source": source, "agent": agent})
+    raw_workers = payload.get("agents")
+    workers = raw_workers if isinstance(raw_workers, list) else []
+    if any(isinstance(entry, dict) and entry.get("name") == agent for entry in workers):
+        raise ConfigError(
+            "Config at {}: `foreman.agent` {!r} is also a configured worker; the foreman seat is never planned as "
+            "a worker. Give the foreman its own agent name.".format(source, agent),
+            {"source": source, "agent": agent})
+    tiers = parse_tiers(raw.get("tiers"), kind)
+    tier_source = "foreman"
+    if not tiers:
+        tier_source = ""
+        for entry in workers:
+            if isinstance(entry, dict) and entry.get("kind") == kind and entry.get("tiers"):
+                tiers, tier_source = parse_tiers(entry["tiers"], kind), "agents.{}".format(entry.get("name"))
+                break
     launch_args = parse_launch_args(raw.get("launch_args", []), kind)
-    return Foreman(agent=raw["agent"], kind=kind, model=model, effort=effort, launch_args=launch_args)
+    return Foreman(agent=agent, kind=kind, tiers=tiers, launch_args=launch_args, tier_source=tier_source)
 
 
 def load_foreman(path):
-    """The validated `foreman` block from the config at `path`.
+    """The validated `foreman` block from the config at `path`, `None` when absent.
 
-    Unlike the judge, a missing config or an absent block is refused: the
-    foreman's tier is verified at every round start and has no default.
+    A missing config reads as no block, like `load_judge`; a config that
+    exists and is malformed still fails loudly.
     """
     path = Path(path)
+    if not path.exists():
+        return None
     payload = _read_config(path)
     parse_config(payload, source=str(path))
-    seat = parse_foreman(payload, source=str(path))
-    if seat is None:
-        raise ConfigError(
-            "Config at {} has no `foreman` block naming the foreman seat's agent, kind, model and effort. Copy "
-            "it from config.example.json.".format(path),
-            {"path": str(path)})
-    return seat
+    return parse_foreman(payload, source=str(path))
 
 
 def parse_role_costs(payload, source="<memory>"):

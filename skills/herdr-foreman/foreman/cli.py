@@ -49,8 +49,9 @@ from .measure import (
 )
 from .planner import plan as build_plan
 from .planner import headroom_of
-from .tiers import JUDGMENT_ROUNDS, ROLE_ROUNDS, MissingTierError, parse_launch_args, parse_tiers, select_tier
-from .billing import effective_multiplier
+from .tiers import (COORDINATION_ROUND, FOREMAN_ROLE, JUDGMENT_ROUNDS, ROLE_ROUNDS, MissingTierError,
+                    measured_pressure, parse_launch_args, parse_tiers, select_tier)
+from .billing import billing_window, effective_multiplier
 from .launch import start_foreman, start_worker, verify_foreman, verify_running
 from .state import (
     add_assignment,
@@ -888,6 +889,10 @@ def cmd_plan(args, client=None, warn=None, trace=None):
     # `canonical` is what every module reasoning about RESPONSIBILITY sees;
     # `roles` carries the seat identity and reaches the planner alone (#434).
     canonical = [require_seatable(role.strip()) for role in args.roles.split(",") if role.strip()]
+    if FOREMAN_ROLE in {canonical_role(role) for role in canonical}:
+        raise UsageError(
+            "The foreman seat is never planned onto a worker; its tier is selected and launched with `{}`.".format(
+                runnable.command("start-foreman --pane <pane-id>")), {"roles": canonical})
     # `--roles` names RESPONSIBILITIES. A seat comes from `--partition` alone,
     # which is the declared surface split `validate-partition` checks disjoint
     # and exhaustive; accepting a pre-seated name here would plan seats against
@@ -1954,14 +1959,65 @@ def cmd_start_judge(args, client=None, warn=None, trace=None):
             "pane": args.pane, "argv_verified": True, "verified": proof}, None
 
 
-def _foreman_seat_result(seat, pane, proof):
-    return {**seat.as_dict(), "pane": pane, "argv_verified": True, "verified": proof}
+def _foreman_unconfigured(path):
+    return ("Config at {} has no `foreman` block, so the foreman's tier is neither selected nor proven. Add one "
+            "naming its agent and kind (config.example.json), then start the foreman with `{}`.".format(
+                path, runnable.command("start-foreman --pane <pane-id>")))
+
+
+def _select_foreman_tier(args, seat, warn):
+    """The tier the seat's coordination round resolves to, by the workers' own machinery.
+
+    `select_tier` reads the seat's tier table and its measured headroom; the
+    capability table refuses a row it records inadequate. No model or effort
+    is pinned for this seat anywhere else.
+    """
+    state_path = _state_path(args)
+    snapshot = latest_snapshot(load_state(state_path, warn=warn))
+    headroom = _snapshot_headroom(snapshot).get(seat.agent) if snapshot is not None else None
+    if not seat.tiers:
+        raise UsageError(
+            "The foreman seat has no tier table: add `foreman.tiers`, or configure a {} worker with one, so tier "
+            "selection can choose its model and effort.".format(seat.kind), {"agent": seat.agent})
+    needs = capabilities.required(FOREMAN_ROLE, COORDINATION_ROUND, JUDGMENT_ROUNDS)
+    table = capabilities.load(state_path)
+    # The cheapest row the capability table records adequate for coordination
+    # wins; a row it records inadequate is never a candidate.
+    for name, row in sorted(seat.tiers.items(), key=lambda item: (effective_multiplier(item[1]), item[0])):
+        try:
+            verdict = capabilities.assess(table, row["model"], row.get("effort"), needs)
+        except capabilities.InadequateCapability:
+            continue
+        if verdict == "adequate":
+            return {**row, "round": COORDINATION_ROUND, "tier_row": name, "kind": seat.kind,
+                    "pressure_headroom": measured_pressure(headroom), "de_escalated": False,
+                    "billing_window": billing_window(row), "effective_multiplier": effective_multiplier(row),
+                    "capability": verdict, "cheaper_adequate": None}
+    # No evidence yet: the configured `coordination` row runs, resolved the way
+    # every seat's round is; an inadequate verdict on it refuses.
+    try:
+        tier = select_tier(seat, FOREMAN_ROLE, headroom=headroom)
+    except MissingTierError:
+        raise UsageError(
+            "No row in the foreman's tier table is recorded adequate for {} ({}), and the table has no `{}` row to "
+            "fall back on. Add one, or record capability evidence through `{}`.".format(
+                COORDINATION_ROUND, ", ".join(needs), COORDINATION_ROUND, runnable.command("capability-record")),
+            {"agent": seat.agent}) from None
+    verdict = capabilities.assess(table, tier["model"], tier["effort"], needs)
+    return {**tier, "capability": verdict, "cheaper_adequate": None}
+
+
+def _foreman_seat_result(seat, pane, tier, proof):
+    return {**seat.as_dict(), "configured": True, "pane": pane, "tier": tier, "argv_verified": True, "verified": proof}
 
 
 def cmd_start_foreman(args, client=None, warn=None, trace=None):
     seat = load_foreman(_config_path(args))
+    if seat is None:
+        raise UsageError(_foreman_unconfigured(_config_path(args)), {"config": str(_config_path(args))})
+    tier = _select_foreman_tier(args, seat, warn)
     client = client if client is not None else _client(args, trace=trace)
-    return _foreman_seat_result(seat, args.pane, start_foreman(client, seat, args.pane)), None
+    return _foreman_seat_result(seat, args.pane, tier, start_foreman(client, seat, args.pane, tier)), None
 
 
 def cmd_verify_foreman(args, client=None, warn=None, trace=None):
@@ -1973,8 +2029,13 @@ def cmd_verify_foreman(args, client=None, warn=None, trace=None):
         raise UsageError("verify-foreman reads the foreman's own pane; run it from the foreman's Herdr pane or pass "
                          "--pane <pane-id>.", {})
     seat = load_foreman(_config_path(args))
+    if seat is None:
+        # A visible warning, never a round block: the operator has not opted
+        # the seat into tier selection yet.
+        return {"configured": False, "pane": pane, "warning": _foreman_unconfigured(_config_path(args))}, None
+    tier = _select_foreman_tier(args, seat, warn)
     client = client if client is not None else _client(args, trace=trace)
-    return _foreman_seat_result(seat, pane, verify_foreman(client, seat, pane)), None
+    return _foreman_seat_result(seat, pane, tier, verify_foreman(client, seat, pane, tier)), None
 
 
 def cmd_capability(args, client=None, warn=None, trace=None):

@@ -93,19 +93,21 @@ def start_worker(client, agent, pane, tier, before_start=None, sleep=time.sleep)
     return _start_seat(client, agent.name, agent.kind, pane, tier, launch_args)
 
 
-def start_foreman(client, seat, pane):
-    """Start the configured foreman seat in a shell pane on its own tier.
+def start_foreman(client, seat, pane, tier):
+    """Start the foreman seat in a shell pane on the tier selection chose.
 
-    `seat` is a `config.Foreman`. Its launch options are the operator's
-    (`tiers.parse_launch_args`); the worker YOLO requirement does not apply.
+    `seat` is a `config.Foreman` and `tier` the row `tiers.select_tier`
+    resolved for its coordination round. Its launch options are the
+    operator's (`tiers.parse_launch_args`); the worker YOLO requirement does
+    not apply.
     """
-    return _start_seat(client, seat.agent, seat.kind, pane, seat.tier(), list(seat.launch_args))
+    return _start_seat(client, seat.agent, seat.kind, pane, tier, list(seat.launch_args))
 
 
-def verify_foreman(client, seat, pane):
-    """Prove the live foreman in `pane` runs the configured tier, from its foreground argv."""
+def verify_foreman(client, seat, pane, tier):
+    """Prove the live foreman in `pane` runs the selected tier, from its foreground argv."""
     process = foreground_agent(client, pane, seat.kind)
-    proof = verify_argv(seat.kind, seat.tier(), process["argv"], list(seat.launch_args))
+    proof = verify_argv(seat.kind, tier, process["argv"], list(seat.launch_args))
     return {**proof, "source": "process_argv", "pid": process["pid"], "pane_id": pane}
 
 

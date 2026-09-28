@@ -1,7 +1,7 @@
 ---
 name: herdr-foreman
 description: >
-  Run Herdr rounds as a nonworking foreman on a cheap, verified tier: assign,
+  Run Herdr rounds as a nonworking foreman on a selected, verified tier: assign,
   supervise, accept or reject on evidence, and route every judgment to the crew.
   Covers on-demand specialists, model tiers, bounded briefs,
   report verification, and release gates. Use for requests to dispatch the Herdr
@@ -22,7 +22,7 @@ or handoff covering every active assignment. Keep user attention visible under
 
 Follow `rules/agent-team-operation.md` for round constraints.
 
-You run on the cheap foreman tier (`rules/agent-team-operation.md` Foreman
+You run on the tier selection chose for the foreman (`rules/agent-team-operation.md` Foreman
 Seat). Dispatch, run owner scripts, keep the owner records, and gate on the
 evidence reports and scripts produce. Never reason through task content. Each
 judgment below routes to a worker, and you act on its report:
@@ -183,10 +183,13 @@ bash "$CP/skills/herdr-foreman/foreman.sh" capability-show
 
 - **Exit 1** — report the `blocking` reasons verbatim. Each names the command
   that produced it; re-run that one, not the preflight. A `foreman_tier` block
-  means this pane does not run the configured foreman tier: record a
-  user-attention blocker naming `start-foreman`
+  means this pane does not run the tier selection chose for the foreman:
+  record a user-attention blocker naming `start-foreman`
   (`references/model-tiers.md` Foreman Seat) and finish here.
 - **Exit 2** — report the diagnostic and finish here.
+
+On exit 0 or 1, a `checks.foreman_tier` status `unconfigured` blocks nothing:
+relay its `detail.warning` verbatim before routing.
 
 Which checks run, and which exit codes they fold into `blocking`, are the
 script's decision contract — see `skills/herdr-foreman/round-preflight.sh`, not

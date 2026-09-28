@@ -27,6 +27,7 @@
 #  11. Gate pointers            -> resolved once, carried for the briefs.
 #  12. Non-object payload       -> exit 0 with `[]`/`null` blocks, never `ok`.
 #  13. Foreman tier unproven    -> blocks, names `foreman verify-foreman`.
+#  14. Foreman unconfigured     -> warns on stderr, `unconfigured`, still ready.
 
 set -uo pipefail
 
@@ -92,7 +93,7 @@ main() {
   trap cleanup EXIT
   ERRFILE="$TMP/err"
   # What the stubbed `foreman verify-foreman` prints and exits with.
-  export FOREMAN_TIER_OUT='{"agent":"foreman","model":"sonnet-5","effort":"low","argv_verified":true}'
+  export FOREMAN_TIER_OUT='{"configured":true,"agent":"foreman","tier":{"effort":"low"},"argv_verified":true}'
   export FOREMAN_TIER_RC=0
 
   echo "▶ the aggregate verdict" >&2
@@ -101,7 +102,7 @@ main() {
   run "$TMP/clean"
   if [[ $RC -eq 0 ]] && [[ "$(field "$OUT" 'd["ready"]')" == "true" ]] \
      && [[ "$(field "$OUT" 'd["blocking"]')" == "[]" ]] \
-     && [[ "$(field "$OUT" 'd["checks"]["foreman_tier"]["detail"]["effort"]')" == '"low"' ]]; then
+     && [[ "$(field "$OUT" 'd["checks"]["foreman_tier"]["detail"]["tier"]["effort"]')" == '"low"' ]]; then
     pass; else fail "every check clean is ready, got RC=$RC OUT=$OUT"; fi
 
   # The foreman seat is verified like every other seat: a pane whose argv does
@@ -111,6 +112,14 @@ main() {
   if [[ $RC -eq 1 ]] && [[ "$(field "$OUT" 'd["checks"]["foreman_tier"]["status"]')" == '"failed"' ]] \
      && printf '%s' "$OUT" | grep -q 'foreman verify-foreman exited 1'; then
     pass; else fail "an unproven foreman tier blocks the round, got RC=$RC OUT=$OUT"; fi
+
+  # No `foreman` block is a visible warning, never a round block.
+  shadow "$TMP/noforeman"
+  FOREMAN_TIER_OUT='{"configured":false,"warning":"add a foreman block, then run start-foreman"}' run "$TMP/noforeman"
+  if [[ $RC -eq 0 ]] && [[ "$(field "$OUT" 'd["ready"]')" == "true" ]] \
+     && [[ "$(field "$OUT" 'd["checks"]["foreman_tier"]["status"]')" == '"unconfigured"' ]] \
+     && printf '%s' "$ERRTEXT" | grep -q 'foreman seat is unconfigured'; then
+    pass; else fail "an unconfigured foreman warns without blocking, got RC=$RC OUT=$OUT ERR=$ERRTEXT"; fi
 
   shadow "$TMP/roster"
   OUT="$(HERDR_ENV='' WORKTREE_ROOT="$TMP" bash "$TMP/roster/round-preflight.sh" --repo o/r --checkout /tmp 2>"$ERRFILE")"
