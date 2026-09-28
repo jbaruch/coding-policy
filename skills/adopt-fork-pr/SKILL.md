@@ -42,8 +42,13 @@ On **Just inspect**, report the diff and status, then finish here. On **Adopt fo
 
 ## Step 5 — Adopt the Branch
 
+The block resolves `CP` to the project-local plugin, falling back to
+`$HOME/.tessl/plugins/jbaruch/coding-policy`, then to `.` in a coding-policy
+clone, and stops with an install instruction anywhere else.
+
 ```bash
-bash .tessl/plugins/jbaruch/coding-policy/skills/adopt-fork-pr/adopt.sh <N>
+CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"; [ -d "$CP" ] || case "$(git config --get remote.origin.url)" in git@github.com:jbaruch/coding-policy|git@github.com:jbaruch/coding-policy.git|https://github.com/jbaruch/coding-policy|https://github.com/jbaruch/coding-policy.git|ssh://git@github.com/jbaruch/coding-policy|ssh://git@github.com/jbaruch/coding-policy.git) CP=. ;; *) echo "coding-policy plugin not found: run tessl install jbaruch/coding-policy" >&2; exit 1 ;; esac
+bash "$CP/skills/adopt-fork-pr/adopt.sh" <N>
 ```
 
 Contract: see `skills/adopt-fork-pr/adopt.sh` — top-of-file docstring carries the branch-naming rule, the verbatim new-PR-body and original-PR-comment templates, the idempotency states, and the exit codes. It checks out the fork head, pushes it to a base-repo branch preserving the original commits, opens a same-repo PR, and comments on the original fork PR linking the adopted one. Emits `{ "state", "adopted_branch", "new_pr_url", "original_pr", "author" }`.
