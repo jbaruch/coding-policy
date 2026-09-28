@@ -21,12 +21,17 @@
 #   7. Prune exit 1 vs 2        -> distinct statuses, both blocking; a sweep
 #                                  past its budget (a stand-in runner's 124)
 #                                  blocks too.
-#   8. --no-measure             -> headroom skipped, still ready.
+#   8. --no-measure             -> headroom skipped, foreman still verified, ready.
+#      Measure fails            -> foreman tier a dependency failure, not verified.
+#      Measure output unreadable-> headroom blocked, foreman tier not verified.
+#      No foreman block + failed measure -> unconfigured warning, not a block.
 #   9. Missing --repo/--checkout-> exit 2, usage error, no JSON verdict.
 #  10. Every check's payload    -> carried through under `checks.<name>.detail`.
 #  11. Gate pointers            -> resolved once, carried for the briefs.
 #  12. Non-object payload       -> exit 0 with `[]`/`null` blocks, never `ok`.
 #  13. Newline-named plugin dir -> the collaborators are still found.
+#  14. Foreman tier unproven    -> blocks, names `foreman verify-foreman`.
+#  15. Foreman unconfigured     -> warns on stderr, `unconfigured`, still ready.
 
 set -uo pipefail
 
@@ -49,6 +54,7 @@ shadow() { # <dir> [roster-rc] [authority-rc] [prune-rc] [capability-due] [autho
   local dir="$1" roster="${2:-0}" authority="${3:-0}" prune="${4:-0}" due="${5:-false}" authorized="${6:-true}"
   mkdir -p "$dir" || die "mkdir $dir"
   cp "$REAL/round-preflight.sh" "$dir/" || die "copy the script under test"
+  cp "$REAL/foreman-tier-check.py" "$dir/" || die "copy the composite foreman-tier check"
   stub "$dir" roster.sh "$roster" '{"agents":[{"name":"grok"}]}'
   stub "$dir" verify-authority.sh "$authority" "{\"authorized\":${authorized}}"
   local sweep_out='{"repos":[],"skipped":[]}'
@@ -66,7 +72,9 @@ shadow() { # <dir> [roster-rc] [authority-rc] [prune-rc] [capability-due] [autho
     cp "$REAL/bounded-run.sh" "$dir/" || die "copy the bounded runner"
   fi
   stub "$dir" resolve-gates.sh 0 '{"instructions":["AGENTS.md"],"workflows":[],"runners":[]}'
-  printf '#!/usr/bin/env bash\nset -euo pipefail\ncase "$*" in\n  *capability-check*) printf %s; exit 0 ;;\n  *measure*) printf %s; exit 0 ;;\nesac\nexit 9\n' \
+  # The stub's `$*` and `$FOREMAN_TIER_*` expand when the stub runs, not here.
+  # shellcheck disable=SC2016
+  printf '#!/usr/bin/env bash\nset -euo pipefail\ncase "$*" in\n  *capability-check*) printf %s; exit 0 ;;\n  *measure*) printf %s; exit 0 ;;\n  *verify-foreman*) printf %%s "$FOREMAN_TIER_OUT"; exit "$FOREMAN_TIER_RC" ;;\nesac\nexit 9\n' \
     "'{\"due\":$due,\"entries\":0}'" "'{\"agents\":{}}'" > "$dir/foreman.sh" || die "write foreman stub"
   chmod +x "$dir/foreman.sh" || die "chmod foreman stub"
 }
@@ -89,14 +97,34 @@ main() {
   TMP="$(mktemp -d "${TMPDIR:-/tmp}/preflight-tests.XXXXXX")" || die "mktemp"
   trap cleanup EXIT
   ERRFILE="$TMP/err"
+  # What the stubbed `foreman verify-foreman` prints and exits with.
+  export FOREMAN_TIER_OUT='{"configured":true,"agent":"foreman","tier":{"effort":"low"},"argv_verified":true}'
+  export FOREMAN_TIER_RC=0
 
   echo "▶ the aggregate verdict" >&2
 
   shadow "$TMP/clean"
   run "$TMP/clean"
   if [[ $RC -eq 0 ]] && [[ "$(field "$OUT" 'd["ready"]')" == "true" ]] \
-     && [[ "$(field "$OUT" 'd["blocking"]')" == "[]" ]]; then
+     && [[ "$(field "$OUT" 'd["blocking"]')" == "[]" ]] \
+     && [[ "$(field "$OUT" 'd["checks"]["foreman_tier"]["detail"]["tier"]["effort"]')" == '"low"' ]]; then
     pass; else fail "every check clean is ready, got RC=$RC OUT=$OUT"; fi
+
+  # The foreman seat is verified like every other seat: a pane whose argv does
+  # not carry the configured tier blocks the round and names the command.
+  shadow "$TMP/badforeman"
+  FOREMAN_TIER_RC=1 FOREMAN_TIER_OUT='' run "$TMP/badforeman"
+  if [[ $RC -eq 1 ]] && [[ "$(field "$OUT" 'd["checks"]["foreman_tier"]["status"]')" == '"failed"' ]] \
+     && printf '%s' "$OUT" | grep -q 'foreman verify-foreman exited 1'; then
+    pass; else fail "an unproven foreman tier blocks the round, got RC=$RC OUT=$OUT"; fi
+
+  # No `foreman` block is a visible warning, never a round block.
+  shadow "$TMP/noforeman"
+  FOREMAN_TIER_OUT='{"configured":false,"warning":"add a foreman block, then run start-foreman"}' run "$TMP/noforeman"
+  if [[ $RC -eq 0 ]] && [[ "$(field "$OUT" 'd["ready"]')" == "true" ]] \
+     && [[ "$(field "$OUT" 'd["checks"]["foreman_tier"]["status"]')" == '"unconfigured"' ]] \
+     && printf '%s' "$ERRTEXT" | grep -q 'foreman seat is unconfigured'; then
+    pass; else fail "an unconfigured foreman warns without blocking, got RC=$RC OUT=$OUT ERR=$ERRTEXT"; fi
 
   shadow "$TMP/roster"
   OUT="$(HERDR_ENV='' WORKTREE_ROOT="$TMP" bash "$TMP/roster/round-preflight.sh" --repo o/r --checkout /tmp 2>"$ERRFILE")"
@@ -197,7 +225,9 @@ main() {
     pass; else fail "a non-object authority payload must fail cleanly, got RC=$RC OUT=$OUT ERR=$ERRTEXT"; fi
 
   shadow "$TMP/shape-capability"
-  printf '#!/usr/bin/env bash\nset -euo pipefail\ncase "$*" in\n  *capability-check*) printf %s; exit 0 ;;\n  *measure*) printf %s; exit 0 ;;\nesac\nexit 9\n' \
+  # The stub's `$*` and `$FOREMAN_TIER_*` expand when the stub runs, not here.
+  # shellcheck disable=SC2016
+  printf '#!/usr/bin/env bash\nset -euo pipefail\ncase "$*" in\n  *capability-check*) printf %s; exit 0 ;;\n  *measure*) printf %s; exit 0 ;;\n  *verify-foreman*) printf %%s "$FOREMAN_TIER_OUT"; exit "$FOREMAN_TIER_RC" ;;\nesac\nexit 9\n' \
     "'[]'" "'{\"agents\":{}}'" > "$TMP/shape-capability/foreman.sh" || die "write foreman stub"
   run "$TMP/shape-capability"
   if [[ $RC -eq 1 ]] && [[ "$(field "$OUT" 'd["checks"]["capability"]["status"]')" == '"failed"' ]] \
@@ -214,10 +244,70 @@ main() {
 
   echo "▶ options and usage" >&2
 
+  # --no-measure still verifies the foreman, on the latest saved snapshot.
   shadow "$TMP/nomeasure"
   run "$TMP/nomeasure" --no-measure
-  if [[ $RC -eq 0 ]] && [[ "$(field "$OUT" 'd["checks"]["headroom"]["status"]')" == '"skipped"' ]]; then
-    pass; else fail "--no-measure skips the one writing check, got RC=$RC OUT=$OUT"; fi
+  if [[ $RC -eq 0 ]] && [[ "$(field "$OUT" 'd["checks"]["headroom"]["status"]')" == '"skipped"' ]] \
+     && [[ "$(field "$OUT" 'd["checks"]["foreman_tier"]["status"]')" == '"ok"' ]]; then
+    pass; else fail "--no-measure skips the one writing check and still verifies the foreman, got RC=$RC OUT=$OUT"; fi
+
+  # The foreman's tier is selected on the measurement: a failed measure is a
+  # recorded dependency failure, never a verification against a stale snapshot.
+  shadow "$TMP/measurefails"
+  # The stub's `$*` and `$FOREMAN_TIER_*` expand when the stub runs, not here.
+  # shellcheck disable=SC2016
+  printf '#!/usr/bin/env bash\nset -euo pipefail\ncase "$*" in\n  *capability-check*) printf %s; exit 0 ;;\n  *measure*) echo "measure: probe failed" >&2; exit 3 ;;\n  *verify-foreman*) printf %%s "$FOREMAN_TIER_OUT"; exit "$FOREMAN_TIER_RC" ;;\nesac\nexit 9\n' \
+    "'{\"due\":false,\"entries\":0}'" > "$TMP/measurefails/foreman.sh" || die "write foreman stub"
+  run "$TMP/measurefails"
+  if [[ $RC -eq 1 ]] && [[ "$(field "$OUT" 'd["checks"]["headroom"]["status"]')" == '"failed"' ]] \
+     && [[ "$(field "$OUT" 'd["checks"]["foreman_tier"]["status"]')" == '"failed"' ]] \
+     && [[ "$(field "$OUT" 'd["checks"]["foreman_tier"].get("detail")')" == "null" ]] \
+     && printf '%s' "$OUT" | grep -q 'not verified: the foreman'; then
+    pass; else fail "a failed measure records the foreman tier as a dependency failure, got RC=$RC OUT=$OUT"; fi
+
+  # An absent `foreman` block is detected apart from headroom: a failed
+  # measure still reports it as the unconfigured warning, never a block.
+  FOREMAN_TIER_OUT='{"configured":false,"warning":"add a foreman block, then run start-foreman"}' run "$TMP/measurefails"
+  if [[ $RC -eq 1 ]] && [[ "$(field "$OUT" 'd["checks"]["headroom"]["status"]')" == '"failed"' ]] \
+     && [[ "$(field "$OUT" 'd["checks"]["foreman_tier"]["status"]')" == '"unconfigured"' ]] \
+     && [[ "$(field "$OUT" 'd["checks"]["foreman_tier"].get("reason")')" == "null" ]] \
+     && ! printf '%s' "$OUT" | grep -q 'not verified: the foreman' \
+     && printf '%s' "$ERRTEXT" | grep -q 'foreman seat is unconfigured'; then
+    pass; else fail "an absent foreman block warns even when measure failed, got RC=$RC OUT=$OUT ERR=$ERRTEXT"; fi
+
+  # A measure that exits 0 with unreadable output records headroom blocked;
+  # the foreman's tier is still a dependency failure, never verified.
+  shadow "$TMP/measurebadjson"
+  # The stub's `$*` and `$FOREMAN_TIER_*` expand when the stub runs, not here.
+  # shellcheck disable=SC2016
+  printf '#!/usr/bin/env bash\nset -euo pipefail\ncase "$*" in\n  *capability-check*) printf %s; exit 0 ;;\n  *measure*) printf not-json; exit 0 ;;\n  *verify-foreman*) printf %%s "$FOREMAN_TIER_OUT"; exit "$FOREMAN_TIER_RC" ;;\nesac\nexit 9\n' \
+    "'{\"due\":false,\"entries\":0}'" > "$TMP/measurebadjson/foreman.sh" || die "write foreman stub"
+  run "$TMP/measurebadjson"
+  if [[ $RC -eq 1 ]] && [[ "$(field "$OUT" 'd["checks"]["headroom"]["status"]')" == '"blocked"' ]] \
+     && [[ "$(field "$OUT" 'd["checks"]["foreman_tier"]["status"]')" == '"failed"' ]] \
+     && [[ "$(field "$OUT" 'd["checks"]["foreman_tier"].get("detail")')" == "null" ]] \
+     && printf '%s' "$OUT" | grep -q 'not verified: the foreman'; then
+    pass; else fail "a zero-exit unreadable measure leaves the foreman tier unverified, got RC=$RC OUT=$OUT"; fi
+
+  # The composite check is recorded as one result: a run that cannot decide
+  # fails both of its rows, never one row alone.
+  shadow "$TMP/compositefails"
+  printf '#!/usr/bin/env python3\nimport sys\nprint("foreman-tier-check: stand-in failure", file=sys.stderr)\nsys.exit(2)\n' \
+    > "$TMP/compositefails/foreman-tier-check.py" || die "write composite stub"
+  run "$TMP/compositefails"
+  if [[ $RC -eq 1 ]] && [[ "$(field "$OUT" 'd["checks"]["headroom"]["status"]')" == '"failed"' ]] \
+     && [[ "$(field "$OUT" 'd["checks"]["foreman_tier"]["status"]')" == '"failed"' ]] \
+     && printf '%s' "$OUT" | grep -q 'foreman-tier-check.py exited 2'; then
+    pass; else fail "a failed composite check fails both rows, got RC=$RC OUT=$OUT"; fi
+
+  # A composite result that is not the headroom/foreman_tier pair fails both.
+  shadow "$TMP/compositebad"
+  printf '#!/usr/bin/env python3\nprint("{\\"headroom\\": {\\"status\\": \\"ok\\"}}")\n' \
+    > "$TMP/compositebad/foreman-tier-check.py" || die "write composite stub"
+  run "$TMP/compositebad"
+  if [[ $RC -eq 1 ]] && [[ "$(field "$OUT" 'd["checks"]["foreman_tier"]["status"]')" == '"failed"' ]] \
+     && printf '%s' "$OUT" | grep -q 'without one readable headroom and foreman_tier result'; then
+    pass; else fail "an incomplete composite result fails both rows, got RC=$RC OUT=$OUT"; fi
 
   shadow "$TMP/usage"
   for args in "--checkout /tmp" "--repo o/r"; do

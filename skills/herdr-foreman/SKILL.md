@@ -1,8 +1,8 @@
 ---
 name: herdr-foreman
 description: >
-  Run Herdr rounds as a nonworking foreman: assign, supervise, accept or
-  reject, never do the crew's work. Covers on-demand specialists, model tiers, bounded briefs,
+  Run Herdr rounds as a nonworking foreman on a selected, verified tier:
+  assign, supervise, accept or reject, never do the crew's work. Covers on-demand specialists, model tiers, bounded briefs,
   report verification, and release gates. Use for requests to dispatch the Herdr
   team, balance worker usage, collect reports, run or retrieve retrospectives,
   catch up on outstanding user attention, curate team lessons, save and resume
@@ -21,6 +21,10 @@ or handoff covering every active assignment. Keep user attention visible under
 `references/attention.md`.
 
 Follow `rules/agent-team-operation.md` for round constraints.
+
+You run on the foreman's selected tier: the operator's `coordination` row,
+resolved through `select_tier` and checked against the capability table
+(`rules/agent-team-operation.md` Foreman Seat).
 
 Each command resolves `CP` to the local or home plugin, or to `.` in a
 coding-policy clone; anywhere else it stops with an install instruction. Repeat its resolver in every call. Prose `skills/...` paths are relative to that root.
@@ -170,8 +174,23 @@ bash "$CP/skills/herdr-foreman/foreman.sh" capability-show
 ```
 
 - **Exit 1** — report the `blocking` reasons verbatim. Each names the command
-  that produced it; re-run that one, not the preflight.
+  that produced it; re-run that one, not the preflight. A `foreman_tier` block
+  beside a failed `headroom` check waits on that measurement; fix it first.
+  Otherwise it means this pane does not run the foreman's selected tier:
+  record a user-attention blocker naming `start-foreman`
+  (`skills/herdr-foreman/references/model-tiers.md` Foreman Seat) and finish here.
 - **Exit 2** — report the diagnostic and finish here.
+
+On exit 0 or 1, a `checks.foreman_tier` status `unconfigured` blocks nothing:
+relay its `detail.warning` verbatim before routing.
+
+The blocker quotes the restart the operator runs from another shell, naming an
+empty Herdr shell pane; never run it from the foreman's own pane:
+
+```bash
+CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"; [ -d "$CP" ] || case "$(git config --get remote.origin.url)" in git@github.com:jbaruch/coding-policy|git@github.com:jbaruch/coding-policy.git|https://github.com/jbaruch/coding-policy|https://github.com/jbaruch/coding-policy.git|ssh://git@github.com/jbaruch/coding-policy|ssh://git@github.com/jbaruch/coding-policy.git) CP=. ;; *) echo "coding-policy plugin not found: run tessl install jbaruch/coding-policy" >&2; exit 1 ;; esac
+bash "$CP/skills/herdr-foreman/foreman.sh" start-foreman --pane <pane-id>
+```
 
 Which checks run, and which exit codes they fold into `blocking`, are the
 script's decision contract — see `skills/herdr-foreman/round-preflight.sh`, not

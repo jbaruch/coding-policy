@@ -13,10 +13,12 @@ from pathlib import Path
 
 from .errors import ConfigError, ForemanError
 from .herdr import SLASH_DELIVERIES, SLASH_DELIVERY_PASTE
-from .tiers import parse_launch_args, parse_tiers
+from .tiers import TOP_MODELS, parse_launch_args, parse_tiers
 
-CONFIG_SCHEMA_VERSION = 5
-READABLE_CONFIG_VERSIONS = frozenset({1, 2, 3, 4, 5})
+CONFIG_SCHEMA_VERSION = 6
+READABLE_CONFIG_VERSIONS = frozenset({1, 2, 3, 4, 5, 6})
+#: The first config version that may declare the top-level `foreman` block.
+FOREMAN_CONFIG_VERSION = 6
 CAPABILITY_ID = re.compile(r"[a-z][a-z0-9_-]*\Z")
 
 REQUIRED_AGENT_FIELDS = ("name", "kind", "usage_prompt", "usage_marker", "usage_read_source", "clear_prompt")
@@ -197,6 +199,8 @@ def parse_config(payload, source="<memory>"):
     # untiered worker schema 5 forbids (#527).
     judge = parse_judge(payload, source=source)
     pinned_judge = judge.agent if judge is not None else None
+    # Validates the foreman block with the rest of the file; it seats no worker.
+    parse_foreman(payload, source=source)
 
     agents = []
     seen = set()
@@ -491,6 +495,139 @@ def load_judge(path):
     if not path.exists():
         return None
     return parse_judge(_read_config(path), source=str(path))
+
+
+FOREMAN_FIELDS = frozenset({"agent", "kind", "tiers", "launch_args", "window_group"})
+
+FOREMAN_EXAMPLE = ('{"agent": "foreman", "kind": "claude", '
+                   '"launch_args": ["--dangerously-skip-permissions"]}')
+
+
+class Foreman:
+    """The foreman seat. A plain value object, never mutated after load.
+
+    `tiers` is the seat's own tier table, or the table of the first configured
+    worker of the same kind when the block declares none (`parse_foreman`).
+    Which row runs is tier selection's decision, never a pin held here.
+    """
+
+    __slots__ = ("agent", "kind", "tiers", "launch_args", "tier_source", "window_group")
+
+    def __init__(self, agent, kind, tiers=None, launch_args=(), tier_source="", window_group=""):
+        self.agent = agent
+        self.kind = kind
+        self.tiers = tiers or {}
+        self.launch_args = tuple(launch_args)
+        self.tier_source = tier_source
+        # The usage window the foreman shares with measured workers. The seat
+        # cannot `/usage`-probe its own pane, so its headroom is that window's.
+        self.window_group = window_group
+
+    @property
+    def name(self):
+        return self.agent
+
+    def as_dict(self):
+        return {"agent": self.agent, "kind": self.kind, "launch_args": list(self.launch_args),
+                "tier_source": self.tier_source, "window_group": self.window_group}
+
+
+def parse_foreman(payload, source="<memory>"):
+    """Validate the optional top-level `foreman` block, `None` when absent.
+
+    The block names the seat like a worker: its Herdr agent name, kind,
+    launch options and an optional tier table. Without a table the seat reads
+    the table of the first configured worker of its kind. The model and effort
+    are selected per round by `tiers.select_tier`, never pinned here. The
+    agent is never a configured worker or the pinned judge.
+    """
+    if not isinstance(payload, dict):
+        raise ConfigError(
+            "Config at {} must be a JSON object with `schema_version` and "
+            "`agents` - see config.example.json.".format(source),
+            {"source": source},
+        )
+    raw = payload.get("foreman")
+    if raw is None:
+        # Schema 5 and below never carry the block: the seat reads as
+        # unconfigured, a warning and never a block. Nothing rewrites the file.
+        return None
+    version = payload.get("schema_version")
+    if isinstance(version, int) and not isinstance(version, bool) and version < FOREMAN_CONFIG_VERSION:
+        raise ConfigError(
+            "Config at {}: the `foreman` block needs config schema_version {}; this file says {}. Set "
+            "`schema_version` to {} in the operator-owned config without changing anything else.".format(
+                source, FOREMAN_CONFIG_VERSION, version, FOREMAN_CONFIG_VERSION),
+            {"source": source, "found": version, "expected": FOREMAN_CONFIG_VERSION})
+    if not isinstance(raw, dict):
+        raise ConfigError(
+            "Config at {}: `foreman` is a JSON {}, not an object naming the foreman seat - write it as {}, "
+            "or remove it.".format(source, type(raw).__name__, FOREMAN_EXAMPLE),
+            {"source": source, "foreman_type": type(raw).__name__})
+    unknown = sorted(set(raw) - FOREMAN_FIELDS)
+    if unknown:
+        raise ConfigError(
+            "Config at {}: `foreman` carries unknown field(s) {}; it takes agent, kind, tiers, launch_args and window_group, "
+            "as in {}. The model and effort come from tier selection, never from this block.".format(
+                source, ", ".join(unknown), FOREMAN_EXAMPLE),
+            {"source": source, "unknown": unknown})
+    for field in ("agent", "kind"):
+        value = raw.get(field)
+        if not isinstance(value, str) or not value:
+            raise ConfigError(
+                "Config at {}: `foreman.{}` is {!r}; name it as a non-empty string, as in {}.".format(
+                    source, field, value, FOREMAN_EXAMPLE),
+                {"source": source, "field": field, "value": value})
+    agent, kind = raw["agent"], raw["kind"]
+    if kind not in TOP_MODELS:
+        raise ConfigError(
+            "Config at {}: `foreman.kind` is {!r}; the seat launches through the {} adapter.".format(
+                source, kind, " or ".join(sorted(TOP_MODELS))),
+            {"source": source, "kind": kind})
+    judge = parse_judge(payload, source=source)
+    if judge is not None and agent == judge.agent:
+        raise ConfigError(
+            "Config at {}: `foreman.agent` is the pinned judge's worker {!r}; the judge holds no other seat. "
+            "Give the foreman its own agent name.".format(source, agent),
+            {"source": source, "agent": agent})
+    raw_workers = payload.get("agents")
+    workers = raw_workers if isinstance(raw_workers, list) else []
+    if any(isinstance(entry, dict) and entry.get("name") == agent for entry in workers):
+        raise ConfigError(
+            "Config at {}: `foreman.agent` {!r} is also a configured worker; the foreman seat is never planned as "
+            "a worker. Give the foreman its own agent name.".format(source, agent),
+            {"source": source, "agent": agent})
+    tiers = parse_tiers(raw.get("tiers"), kind)
+    tier_source = "foreman"
+    if not tiers:
+        tier_source = ""
+        for entry in workers:
+            if isinstance(entry, dict) and entry.get("kind") == kind and entry.get("tiers"):
+                tiers, tier_source = parse_tiers(entry["tiers"], kind), "agents.{}".format(entry.get("name"))
+                break
+    launch_args = parse_launch_args(raw.get("launch_args", []), kind)
+    window_group = raw.get("window_group", "")
+    if not isinstance(window_group, str):
+        raise ConfigError(
+            "Config at {}: `foreman.window_group` is {!r}; name the usage window the foreman shares with "
+            "measured workers as a string, or omit it.".format(source, window_group),
+            {"source": source, "window_group": window_group})
+    return Foreman(agent=agent, kind=kind, tiers=tiers, launch_args=launch_args, tier_source=tier_source,
+                   window_group=window_group)
+
+
+def load_foreman(path):
+    """The validated `foreman` block from the config at `path`, `None` when absent.
+
+    A missing config reads as no block, like `load_judge`; a config that
+    exists and is malformed still fails loudly.
+    """
+    path = Path(path)
+    if not path.exists():
+        return None
+    payload = _read_config(path)
+    parse_config(payload, source=str(path))
+    return parse_foreman(payload, source=str(path))
 
 
 def parse_role_costs(payload, source="<memory>"):

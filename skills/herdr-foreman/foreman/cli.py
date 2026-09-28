@@ -30,7 +30,7 @@ from .assign import apply as apply_assignments
 from .assign import APPLY_SCHEMA_VERSION, dry_run, freeze_decision, freeze_paths, read_frozen, native_context_session, normalize_assignments, resolve_paths, validate_fix_history
 from . import renderable
 from . import attention, capabilities, chronology, composition, engagement, foreman_queue, foreman_reset, historical, home, load_set, members, memory, oracle, partition, recovery, report_delivery, restoration, role_clear, retrospective, retrospective_runtime, supervision, supervision_gate, supervision_runtime, triggers
-from .config import default_config_path, load_config, load_judge, load_role_costs, select_agents
+from .config import FOREMAN_CONFIG_VERSION, default_config_path, load_config, load_foreman, load_judge, load_role_costs, select_agents
 from .errors import PlanError, StateError, ForemanError, UsageError
 from .herdr import (
     DEFAULT_MARKER_TIMEOUT_MS,
@@ -49,9 +49,10 @@ from .measure import (
 )
 from .planner import plan as build_plan
 from .planner import headroom_of
-from .tiers import JUDGMENT_ROUNDS, MissingTierError, parse_launch_args, parse_tiers, select_tier
+from .tiers import (COORDINATION_ROUND, FOREMAN_ROLE, JUDGMENT_ROUNDS, MissingTierError,
+                    parse_launch_args, parse_tiers, select_tier)
 from . import cost_report, selection
-from .launch import start_worker, verify_running
+from .launch import start_foreman, start_worker, verify_foreman, verify_running
 from .state import (
     add_assignment,
     add_snapshot,
@@ -126,6 +127,15 @@ def build_parser():
     judge_parser.add_argument("--judge-mode", choices=recovery.JUDGE_MODES,
                               help="What this judge seat is for; the plan's recorded mode when omitted.")
     judge_parser.add_argument("--now", metavar="ISO")
+
+    start_foreman = sub.add_parser("start-foreman", parents=[common],
+                                   help="Start the configured foreman seat in a shell pane and verify its launch argv.")
+    start_foreman.add_argument("--pane", required=True)
+    verify_foreman = sub.add_parser("verify-foreman", parents=[common],
+                                    help="Prove the live foreman pane runs the configured foreman tier. Read-only.")
+    verify_foreman.add_argument("--pane", help="The foreman's pane (default: this Herdr pane, $HERDR_PANE_ID).")
+    verify_foreman.add_argument("--config-only", action="store_true",
+                                help="Report only whether config declares a foreman block; no tier selection, no pane probe.")
 
     for command in ("retro-check", "retro-record"):
         retro_parser = sub.add_parser(command, parents=[common], help="Check or record a foreman-authored retrospective.")
@@ -862,6 +872,10 @@ def cmd_plan(args, client=None, warn=None, trace=None):
     # `canonical` is what every module reasoning about RESPONSIBILITY sees;
     # `roles` carries the seat identity and reaches the planner alone (#434).
     canonical = [require_seatable(role.strip()) for role in args.roles.split(",") if role.strip()]
+    if FOREMAN_ROLE in {canonical_role(role) for role in canonical}:
+        raise UsageError(
+            "The foreman seat is never planned onto a worker; its tier is selected and launched with `{}`.".format(
+                runnable.command("start-foreman --pane <pane-id>")), {"roles": canonical})
     # `--roles` names RESPONSIBILITIES. A seat comes from `--partition` alone,
     # which is the declared surface split `validate-partition` checks disjoint
     # and exhaustive; accepting a pre-seated name here would plan seats against
@@ -1966,6 +1980,114 @@ def cmd_start_judge(args, client=None, warn=None, trace=None):
             "pane": args.pane, "argv_verified": True, "verified": proof}, None
 
 
+#: The minimal `foreman` block the unconfigured warning tells the operator to add.
+FOREMAN_BLOCK_SNIPPET = ('"foreman": {"agent": "foreman", "kind": "claude", "window_group": "<window-group>", '
+                         '"tiers": {"coordination": {"model": "<model>", "effort": "<effort>"}}}')
+
+
+def _foreman_unconfigured(path):
+    return ("Config at {} has no `foreman` block, so the foreman's tier is neither selected nor proven. Edit that "
+            "file: set `schema_version` to {}, and add {}. Then launch the foreman with `{}`.".format(
+                path, FOREMAN_CONFIG_VERSION, FOREMAN_BLOCK_SNIPPET, runnable.command("start-foreman --pane <pane-id>")))
+
+
+def _foreman_headroom(seat, snapshot):
+    """The measured headroom of the usage window the foreman shares, or None.
+
+    `measure` probes each configured worker's own pane with its usage prompt;
+    the foreman cannot be probed from the pane it runs in. Its window is the
+    `window_group` it declares, and that window's headroom is the minimum
+    across the measured workers in it, the way `plan` charges a shared window.
+    No group, or no measured member, reads as unmeasured. The value is recorded
+    with the selection (`pressure_headroom`); it never changes the row.
+    """
+    if not seat.window_group or not isinstance(snapshot, dict):
+        return None
+    agents = snapshot.get("agents")
+    if not isinstance(agents, dict):
+        return None
+    readings = [headroom_of(name, record, lambda _message: None) for name, record in agents.items()
+                if isinstance(record, dict) and record.get("window_group") == seat.window_group]
+    readings = [value for value in readings if value is not None]
+    return min(readings) if readings else None
+
+
+def _select_foreman_tier(args, seat, warn):
+    """The tier the seat's coordination round resolves to, by the workers' own machinery.
+
+    The operator's tier table supplies the seat's rows, as it does for every
+    worker. The tier is the `coordination` row, resolved through `select_tier`;
+    the capability table refuses it when it records it inadequate. The
+    coordination round carries no escalation context, so no escalation applies
+    and measured headroom never changes the row. Headroom is passed only so the
+    selection records it. No rule, plugin default or hardcoded value pins this
+    seat's model or effort.
+    """
+    state_path = _state_path(args)
+    snapshot = latest_snapshot(load_state(state_path, warn=warn))
+    headroom = _foreman_headroom(seat, snapshot)
+    if not seat.tiers:
+        raise UsageError(
+            "The foreman seat has no tier table: add `foreman.tiers`, or configure a {} worker with one, so tier "
+            "selection can choose its model and effort.".format(seat.kind), {"agent": seat.agent})
+    needs = capabilities.required(FOREMAN_ROLE, COORDINATION_ROUND, JUDGMENT_ROUNDS)
+    # The configured coordination row is the tier: no escalation context, so
+    # select_tier returns that row and headroom is only recorded; no cheaper
+    # unrelated row ever substitutes for it. The capability table assesses the
+    # row; an inadequate verdict refuses the start.
+    try:
+        tier = select_tier(seat, FOREMAN_ROLE, headroom=headroom)
+    except MissingTierError:
+        raise UsageError(
+            "The foreman's tier table has no `{}` row. Add one naming the model and effort the foreman's "
+            "coordination round runs on.".format(COORDINATION_ROUND), {"agent": seat.agent}) from None
+    verdict = capabilities.assess(capabilities.load(state_path), tier["model"], tier["effort"], needs)
+    return {**tier, "capability": verdict, "cheaper_adequate": None}
+
+
+def _foreman_seat_result(args, seat, pane, tier, proof):
+    # The same selection record a planned seat carries (#602), for the one
+    # seat the planner never selects.
+    record = selection.records({FOREMAN_ROLE: seat.agent}, {FOREMAN_ROLE: tier}, {seat.agent: seat},
+                               None, None, None, capabilities.load(_state_path(args)))[FOREMAN_ROLE]
+    return {**seat.as_dict(), "configured": True, "pane": pane, "tier": tier, "selection": record,
+            "argv_verified": True, "verified": proof}
+
+
+def cmd_start_foreman(args, client=None, warn=None, trace=None):
+    seat = load_foreman(_config_path(args))
+    if seat is None:
+        raise UsageError(_foreman_unconfigured(_config_path(args)), {"config": str(_config_path(args))})
+    tier = _select_foreman_tier(args, seat, warn)
+    client = client if client is not None else _client(args, trace=trace)
+    return _foreman_seat_result(args, seat, args.pane, tier, start_foreman(client, seat, args.pane, tier)), None
+
+
+def cmd_verify_foreman(args, client=None, warn=None, trace=None):
+    if getattr(args, "config_only", False):
+        # The preflight's view when headroom did not pass: whether the seat is
+        # configured is independent of any measurement.
+        seat = load_foreman(_config_path(args))
+        if seat is None:
+            return {"configured": False, "warning": _foreman_unconfigured(_config_path(args))}, None
+        return {"configured": True, "agent": seat.agent}, None
+    pane = args.pane
+    if not pane:
+        # rules/agent-team-operation.md Two Modes: a team round is HERDR_ENV set, any value.
+        pane = os.environ.get("HERDR_PANE_ID") if "HERDR_ENV" in os.environ else None
+    if not pane:
+        raise UsageError("verify-foreman reads the foreman's own pane; run it from the foreman's Herdr pane or pass "
+                         "--pane <pane-id>.", {})
+    seat = load_foreman(_config_path(args))
+    if seat is None:
+        # A visible warning, never a round block: the operator has not opted
+        # the seat into tier selection yet.
+        return {"configured": False, "pane": pane, "warning": _foreman_unconfigured(_config_path(args))}, None
+    tier = _select_foreman_tier(args, seat, warn)
+    client = client if client is not None else _client(args, trace=trace)
+    return _foreman_seat_result(args, seat, pane, tier, verify_foreman(client, seat, pane, tier)), None
+
+
 def cmd_capability(args, client=None, warn=None, trace=None):
     """The capability table's cadence, its refresh, and a read of what it holds.
 
@@ -2211,6 +2333,8 @@ COMMANDS = {
     "verify-partition": cmd_verify_partition,
     "verify-oracle": cmd_verify_oracle,
     "start-judge": cmd_start_judge,
+    "start-foreman": cmd_start_foreman,
+    "verify-foreman": cmd_verify_foreman,
     "probe-report": cmd_probe_report,
     "marker-fit": cmd_marker_fit,
     **{command: cmd_retrospective for command in ("retro-check", "retro-record", "retro-list", "retro-show")},
@@ -2267,7 +2391,7 @@ def main(argv=None, stdout=None, stderr=None, client=None):
             home.require_current(defaults)
             # Commands that may migrate or write state share its canonical lock.
             # Dry runs, probes, and retrospective reads remain read-only.
-            readonly = args.command in {"probe-report", "marker-fit", "detect-triggers", "validate-partition", "verify-oracle", "retro-check", "retro-list", "retro-show", "capability-check", "capability-show", "supervision-gate", "load-set", "foreman-queue", "cost-report", "check-member"} or getattr(args, "dry_run", False)
+            readonly = args.command in {"probe-report", "marker-fit", "detect-triggers", "validate-partition", "verify-oracle", "retro-check", "retro-list", "retro-show", "capability-check", "capability-show", "supervision-gate", "load-set", "foreman-queue", "cost-report", "check-member", "verify-foreman"} or getattr(args, "dry_run", False)
             # The deliverer starts while `foreman-reset` still holds the state lock;
             # it serializes on the reset record's own lock instead. close-member
             # writes only through the supervision owner's own lock.

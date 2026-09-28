@@ -41,7 +41,13 @@ JUDGMENT_ROUNDS = frozenset({
 #: is pre-development preparation that passes nothing: neither is a gate, so
 #: neither carries the judgment floor (#518). A consultation that must settle
 #: something is planned on `reconciliation` or `architect` explicitly.
-ROUNDS = JUDGMENT_ROUNDS | {"build", "fix", "mechanical", "release_mechanics", "consultation", "test_plan"}
+#: `coordination` is the foreman seat's own round (#601). It carries no
+#: judgment floor, so the configured row and the capability table decide its
+#: model and effort.
+FOREMAN_ROLE = "foreman"
+COORDINATION_ROUND = "coordination"
+ROUNDS = JUDGMENT_ROUNDS | {"build", "fix", "mechanical", "release_mechanics", "consultation", "test_plan",
+                            COORDINATION_ROUND}
 #: Each seat's default is the cheapest round its contract allows. A release
 #: worker edits no source and its skill's own gates fail the round loudly, so
 #: it defaults to mechanics; `release_adjudication` is requested explicitly
@@ -51,6 +57,7 @@ DEFAULT_ROUNDS = {
     "release": "release_mechanics", "architect": "architect",
     "critic": "critic", "lead": "lead",
     "advisor": "consultation", "investigator": "consultation",
+    FOREMAN_ROLE: COORDINATION_ROUND,
 }
 #: The judgment round a consultation takes when its recorded evidence says it
 #: must settle something, and the default it took before `consultation`
@@ -147,6 +154,7 @@ ROLE_ROUNDS = {
     "critic": frozenset({"critic"}), "lead": frozenset({"lead"}),
     "advisor": frozenset({"consultation", "architect"}),
     "investigator": frozenset({"consultation", "reconciliation"}),
+    FOREMAN_ROLE: frozenset({COORDINATION_ROUND}),
 }
 #: A whole-result oracle: the expected result recorded in a form a later check
 #: compares against byte for byte. Its EXISTENCE is what licenses a round below
