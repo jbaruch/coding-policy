@@ -150,11 +150,26 @@ class ParkedIdentityTest(unittest.TestCase):
         # content the base already carries; only structure changes.
         self.assertEqual(check.newly_parked(SHARED_HEADING, REPAIRED), [])
 
-    def test_an_in_place_edit_under_its_own_heading_is_not_new(self):
+    def test_a_declared_in_place_edit_is_not_new(self):
         # #503: rewording a published entry replaces the item's text under
-        # the same heading; the base item it replaces is gone.
+        # the same heading, and a `Changelog-Edit:` trailer declares it.
         edited = HEADED.replace("Already stamped.", "Reworded in place.")
-        self.assertEqual(check.newly_parked(HEADED, edited), [])
+        self.assertEqual(check.newly_parked(HEADED, edited, {"0.3.9"}), [])
+
+    def test_an_undeclared_same_heading_replacement_is_flagged(self):
+        # Deleting a published item and adding unrelated work under the same
+        # heading reads exactly like a reword. Without the declaration it is
+        # new content parked where the stamp cannot reach.
+        replaced = HEADED.replace(
+            "- **A published entry.** Already stamped.\n",
+            "- **A new entry.** Not yet stamped.\n")
+        flagged = check.newly_parked(HEADED, replaced)
+        self.assertEqual(len(flagged), 1)
+        self.assertIn("A new entry.", flagged[0])
+
+    def test_a_declaration_for_another_version_does_not_cover_an_edit(self):
+        edited = HEADED.replace("Already stamped.", "Reworded in place.")
+        self.assertEqual(len(check.newly_parked(HEADED, edited, {"0.3.8"})), 1)
 
     def test_an_edit_answers_one_removed_item_only(self):
         # One rewritten item pairs with one removed item; a second new item
@@ -163,7 +178,7 @@ class ParkedIdentityTest(unittest.TestCase):
             "- **A published entry.** Already stamped.\n",
             "- **A published entry.** Reworded in place.\n\n"
             "- **A new entry.** Not yet stamped.\n")
-        flagged = check.newly_parked(HEADED, edited)
+        flagged = check.newly_parked(HEADED, edited, {"0.3.9"})
         self.assertEqual(len(flagged), 1)
 
     def test_an_edit_moved_to_another_heading_is_flagged(self):
@@ -173,7 +188,8 @@ class ParkedIdentityTest(unittest.TestCase):
             "- **An older entry.** Published first.\n",
             "- **An older entry.** Published first.\n\n"
             "- **A second entry.** Reworded and moved.\n")
-        self.assertEqual(len(check.newly_parked(TWO_VERSIONS, moved)), 1)
+        self.assertEqual(
+            len(check.newly_parked(TWO_VERSIONS, moved, {"0.3.8", "0.3.9"})), 1)
 
     def test_a_column_zero_paragraph_is_its_own_item(self):
         # Older entries are prose paragraphs, not bullets.
@@ -213,11 +229,11 @@ class _RepoCase(unittest.TestCase):
         self.changelog.write_text(text, encoding="utf-8")
         self.git("commit", "-q", "-am", "base changelog")
 
-    def commit_changelog(self, text):
+    def commit_changelog(self, text, message="entry"):
         self.git("checkout", "-q", "-b", "work")
         self.changelog.write_text(text, encoding="utf-8")
         self.git("add", "CHANGELOG.md")
-        self.git("commit", "-q", "-m", "entry")
+        self.git("commit", "-q", "-m", message)
 
 
 class RepositoryTest(_RepoCase):
@@ -232,7 +248,7 @@ class RepositoryTest(_RepoCase):
         self.commit_changelog(MISFILED)
         code, err = self.run_check()
         self.assertEqual(code, 1, err)
-        self.assertIn("whose content is new to", err)
+        self.assertIn("are new since", err)
         self.assertIn("Rebase onto main", err)
 
     def test_a_swap_that_keeps_the_count_is_refused(self):
@@ -247,7 +263,7 @@ class RepositoryTest(_RepoCase):
         self.commit_changelog(swapped)
         code, err = self.run_check()
         self.assertEqual(code, 1, err)
-        self.assertIn("whose content is new to", err)
+        self.assertIn("are new since", err)
 
     def test_a_heading_only_repair_is_allowed(self):
         # #581: the repair inserts `## 0.3.10` and `### Fixed` above an item
@@ -258,18 +274,27 @@ class RepositoryTest(_RepoCase):
         code, err = self.run_check()
         self.assertEqual(code, 0, err)
 
-    def test_an_in_place_edit_of_a_published_entry_is_allowed(self):
-        # #503: rewording a published entry under its own heading.
-        self.commit_changelog(HEADED.replace("Already stamped.", "Reworded in place."))
+    def test_a_declared_in_place_edit_of_a_published_entry_is_allowed(self):
+        # #503: rewording a published entry under its own heading, declared
+        # by a trailer on a commit in the range.
+        self.commit_changelog(
+            HEADED.replace("Already stamped.", "Reworded in place."),
+            "Reword the entry\n\nChangelog-Edit: 0.3.9\n")
         code, err = self.run_check()
         self.assertEqual(code, 0, err)
+
+    def test_an_undeclared_edit_is_refused_and_names_the_trailer(self):
+        self.commit_changelog(HEADED.replace("Already stamped.", "Reworded in place."))
+        code, err = self.run_check()
+        self.assertEqual(code, 1, err)
+        self.assertIn("Changelog-Edit: <version>", err)
 
     def test_an_edit_does_not_carry_a_new_item_through(self):
         edited = HEADED.replace(
             "- **A published entry.** Already stamped.\n",
             "- **A published entry.** Reworded in place.\n\n"
             "- **A new entry.** Not yet stamped.\n")
-        self.commit_changelog(edited)
+        self.commit_changelog(edited, "Reword\n\nChangelog-Edit: 0.3.9\n")
         code, err = self.run_check()
         self.assertEqual(code, 1, err)
         self.assertIn("A new entry.", err)
@@ -297,7 +322,7 @@ class RepositoryTest(_RepoCase):
         self.commit_changelog(duplicated)
         code, err = self.run_check()
         self.assertEqual(code, 1, err)
-        self.assertIn("whose content is new to", err)
+        self.assertIn("are new since", err)
 
     def test_a_branch_touching_no_entries_passes(self):
         self.git("checkout", "-q", "-b", "work")
@@ -339,80 +364,136 @@ class RepositoryTest(_RepoCase):
         self.assertIn("failed", proc.stderr)
 
 
-class PushModeTest(_RepoCase):
-    """`--push-before`: the stamp step's check on the push it publishes.
+class PublishModeTest(_RepoCase):
+    """`--since-last-publish`: the stamp step's check before it publishes.
 
     #581's merge published 0.3.291 while its entry sat under 0.3.290 and
     nothing sat above the first `## ` heading, so the stamp found nothing to
-    head and the version shipped unheaded.
+    head and the version shipped unheaded. The baseline is the last publish
+    bookkeeping commit, so a stopped publish stays stopped.
     """
 
-    def git_out(self, *args):
-        return subprocess.run(["git", *args], cwd=self.root, check=True,
-                              capture_output=True, text=True).stdout.strip()
+    def setUp(self):
+        super().setUp()
+        self.manifest = self.root / ".tessl-plugin" / "plugin.json"
+        self.manifest.parent.mkdir()
+        self.manifest.write_text('{"version": "0.3.8"}\n', encoding="utf-8")
+        self.git("add", ".tessl-plugin/plugin.json")
+        self.git("commit", "-q", "-m", "manifest")
+        self.bump("0.3.9")
 
-    def run_push(self, before):
+    def bump(self, version):
+        """The publish pipeline's version-bump commit, authored by the bot."""
+        self.manifest.write_text('{"version": "%s"}\n' % version, encoding="utf-8")
+        self.git("-c", "user.name=github-actions[bot]", "commit", "-q", "-am",
+                 "Bump to " + version)
+
+    def merge(self, text, message="merge"):
+        self.changelog.write_text(text, encoding="utf-8")
+        self.git("commit", "-q", "-am", message)
+
+    def run_publish(self):
         proc = subprocess.run(
             [_sys.executable, _os.path.join(_ROOT, "check-changelog-placement.py"),
-             "--push-before", before],
+             "--since-last-publish"],
             cwd=self.root, capture_output=True, text=True)
         return proc.returncode, proc.stderr
-
-    def push(self, text):
-        """Commit `text` on main; return the commit it landed on."""
-        before = self.git_out("rev-parse", "HEAD")
-        self.changelog.write_text(text, encoding="utf-8")
-        self.git("commit", "-q", "-am", "merge")
-        return before
 
     def test_a_merge_parking_its_entry_under_a_published_heading_stops_the_publish(self):
         # The #581 shape: the merged item lands inside the block the previous
         # stamp headed, so nothing sits above the first `## ` heading.
-        before = self.push(HEADED.replace(
+        self.merge(HEADED.replace(
             "### Added\n\n",
             "### Added\n\n- **A new entry.** Not yet stamped.\n\n"))
-        code, err = self.run_push(before)
+        code, err = self.run_publish()
         self.assertEqual(code, 1, err)
-        self.assertIn("this push parks", err)
         self.assertIn("The publish is stopped", err)
 
     def test_a_stampable_merge_publishes(self):
-        code, err = self.run_push(self.push(STAMPABLE))
+        self.merge(STAMPABLE)
+        code, err = self.run_publish()
         self.assertEqual(code, 0, err)
 
-    def test_no_before_commit_has_nothing_to_measure(self):
-        # workflow_dispatch carries no before-commit; a first push to the ref
-        # carries the all-zero sentinel.
-        self.push(MISFILED)
-        for before in ("", "0" * 40):
-            code, err = self.run_push(before)
-            self.assertEqual(code, 0, err)
-            self.assertIn("nothing to measure", err)
+    def test_a_later_push_cannot_carry_a_stopped_item_through(self):
+        # The stopped publish wrote no bookkeeping commit, so the next push
+        # (or a manual dispatch) is measured from the last real publish.
+        self.merge(MISFILED)
+        (self.root / "other.txt").write_text("x", encoding="utf-8")
+        self.git("add", "other.txt")
+        self.git("commit", "-q", "-m", "unrelated")
+        code, err = self.run_publish()
+        self.assertEqual(code, 1, err)
+        self.assertIn("A new entry.", err)
 
-    def test_a_before_commit_missing_from_the_checkout_is_a_tool_error(self):
-        self.push(MISFILED)
-        code, err = self.run_push("1" * 40)
-        self.assertEqual(code, 2, err)
-        self.assertIn("fetch-depth: 0", err)
+    def test_a_publish_after_the_last_bump_has_nothing_new(self):
+        # A manual dispatch right after a publish: HEAD is the bump commit.
+        code, err = self.run_publish()
+        self.assertEqual(code, 0, err)
 
-    def test_a_changelog_absent_before_the_push_has_nothing_to_measure(self):
+    def test_a_bot_commit_touching_other_files_is_not_a_baseline(self):
+        self.merge(MISFILED)
+        (self.root / "generated.txt").write_text("x", encoding="utf-8")
+        self.git("add", "generated.txt")
+        self.git("-c", "user.name=github-actions[bot]", "commit", "-q", "-m", "regen")
+        code, err = self.run_publish()
+        self.assertEqual(code, 1, err)
+
+    def test_a_declared_edit_publishes(self):
+        self.merge(HEADED.replace("Already stamped.", "Reworded in place."),
+                   "Reword\n\nChangelog-Edit: 0.3.9\n")
+        code, err = self.run_publish()
+        self.assertEqual(code, 0, err)
+
+    def test_no_publish_in_history_has_nothing_to_measure(self):
+        fresh = tempfile.TemporaryDirectory()
+        self.addCleanup(fresh.cleanup)
+        root = Path(fresh.name)
+        for args in (("init", "-q", "-b", "main"),
+                     ("config", "user.email", "t@example.com"),
+                     ("config", "user.name", "Test")):
+            subprocess.run(["git", *args], cwd=root, check=True, capture_output=True)
+        (root / "CHANGELOG.md").write_text(MISFILED, encoding="utf-8")
+        subprocess.run(["git", "add", "CHANGELOG.md"], cwd=root, check=True, capture_output=True)
+        subprocess.run(["git", "commit", "-q", "-m", "first"], cwd=root, check=True, capture_output=True)
+        proc = subprocess.run(
+            [_sys.executable, _os.path.join(_ROOT, "check-changelog-placement.py"),
+             "--since-last-publish"],
+            cwd=root, capture_output=True, text=True)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn("nothing to measure", proc.stderr)
+
+    def test_a_shallow_checkout_is_a_tool_error(self):
+        self.merge(MISFILED)
+        clone = tempfile.TemporaryDirectory()
+        self.addCleanup(clone.cleanup)
+        target = Path(clone.name) / "shallow"
+        subprocess.run(["git", "clone", "-q", "--depth", "1",
+                        "file://" + str(self.root), str(target)],
+                       check=True, capture_output=True)
+        proc = subprocess.run(
+            [_sys.executable, _os.path.join(_ROOT, "check-changelog-placement.py"),
+             "--since-last-publish"],
+            cwd=target, capture_output=True, text=True)
+        self.assertEqual(proc.returncode, 2, proc.stderr)
+        self.assertIn("fetch-depth: 0", proc.stderr)
+
+    def test_a_changelog_absent_at_the_last_publish_has_nothing_to_measure(self):
         self.git("rm", "-q", "CHANGELOG.md")
         self.git("commit", "-q", "-m", "drop")
-        before = self.git_out("rev-parse", "HEAD")
+        self.bump("0.3.10")
         self.changelog.write_text(MISFILED, encoding="utf-8")
         self.git("add", "CHANGELOG.md")
         self.git("commit", "-q", "-m", "first changelog")
-        code, err = self.run_push(before)
+        code, err = self.run_publish()
         self.assertEqual(code, 0, err)
-        self.assertIn("does not exist at", err)
+        self.assertIn("does not exist at the last publish", err)
 
     def test_the_two_modes_are_exclusive(self):
         proc = subprocess.run(
             [_sys.executable, _os.path.join(_ROOT, "check-changelog-placement.py"),
-             "--base", "main", "--push-before", "0"],
+             "--base", "main", "--since-last-publish"],
             cwd=self.root, capture_output=True, text=True)
         self.assertEqual(proc.returncode, 2, proc.stderr)
-
 
 if __name__ == "__main__":
     unittest.main()

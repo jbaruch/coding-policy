@@ -29,33 +29,42 @@ order, each consuming what it matches so no evidence answers twice:
    A heading-only repair -- inserting a missing `## <version> — <date>` plus
    its `### <type>` lines above items the base already holds -- changes only
    structure, so every item it touches is a move.
-2. IN-PLACE EDIT -- the base has a parked item under the SAME `## ` heading
-   (matched by heading text) that the branch no longer carries anywhere. The
-   edited item pairs with it one for one. Rewording a published entry is
-   this case. An edit and a move of the same item in one change is not: land
-   them separately.
+2. DECLARED IN-PLACE EDIT -- a commit in the measured range carries a
+   `Changelog-Edit: <version>` trailer naming the item's `## ` heading, and
+   the base has a parked item under that heading the branch no longer carries
+   anywhere. The edited item pairs with it one for one. Rewording a published
+   entry is this case. The trailer is the evidence: text alone cannot tell a
+   reworded entry from a deleted one replaced by unrelated new work, and a
+   misfiling merge carries no such declaration. An edit and a move of the
+   same item in one change is not accepted: land them separately.
 
 Every other parked item is NEW content parked where the stamp cannot reach,
-and the check refuses it. A merge only ever adds, so the misfiling this check
-exists for never pairs with a removed base item.
+and the check refuses it.
 
 Modes
 -----
     check-changelog-placement.py --base <ref> [--changelog CHANGELOG.md]
         Measure the working-tree changelog against <ref> (a PR branch against
-        origin/main, or a push against the commit it landed on).
+        origin/main, or a push against the commit it landed on). Trailers
+        are read from <ref>..HEAD.
 
-    check-changelog-placement.py --push-before <sha> [--changelog CHANGELOG.md]
-        Measure a publish push against the commit it landed on, as the stamp
-        step does before publishing. Nothing to measure is a pass with a
-        stderr notice, not an error: an empty or all-zero <sha> (a
-        workflow_dispatch run, a first push to the ref), or a changelog absent
-        at <sha> (its first commit). A <sha> not present in the checkout is a
-        tool error.
+    check-changelog-placement.py --since-last-publish [--changelog CHANGELOG.md]
+        Measure the working tree against the last commit the publish pipeline
+        recorded, as the stamp step does before publishing. That baseline is
+        the newest first-parent ancestor of HEAD (HEAD included) authored by
+        `github-actions[bot]` that changes only publish bookkeeping files: the
+        changelog, `.tessl-plugin/plugin.json`, `tile.json` (the stamp commit
+        and the version-bump commit). A publish the check stopped writes no
+        such commit, so a later push or a manual `workflow_dispatch` is still
+        measured from the last real publish and cannot carry a refused item
+        through. Trailers are read from <baseline>..HEAD. A shallow checkout
+        is a tool error. No bookkeeping commit in history (a repo's first
+        pipeline publish), or a changelog absent at the baseline, is a pass
+        with a stderr notice.
 
-Exit 0 when nothing new is parked (or, under --push-before, nothing to
-measure). Exit 1 when a new item is parked. Exit 2 on a usage or tool error
-(`git` unavailable, base ref unknown, unreadable file).
+Exit 0 when nothing new is parked (or nothing to measure). Exit 1 when a new
+item is parked. Exit 2 on a usage or tool error (`git` unavailable, base ref
+unknown, shallow history, unreadable file).
 """
 import argparse
 import subprocess
@@ -65,6 +74,9 @@ from pathlib import Path
 
 H2 = "## "
 ENTRY = "### "
+BOT = "github-actions[bot]"
+BOOKKEEPING = frozenset({".tessl-plugin/plugin.json", "tile.json"})
+EDIT_TRAILER = "Changelog-Edit"
 
 
 def git(*args: str) -> subprocess.CompletedProcess:
@@ -77,6 +89,18 @@ def git(*args: str) -> subprocess.CompletedProcess:
         raise RuntimeError(
             "cannot run `git` ({}); install it, or run this check from an "
             "environment where it is on PATH".format(exc)) from None
+
+
+def checked(*args: str) -> str:
+    """Stdout of a `git` call that must succeed."""
+    proc = git(*args)
+    if proc.returncode != 0:
+        raise RuntimeError(
+            "`git {}` failed (exit {}): {}. Repair the checkout, or correct "
+            "the ref, and re-run.".format(
+                " ".join(args), proc.returncode,
+                proc.stderr.strip() or "no diagnostic"))
+    return proc.stdout
 
 
 def base_text(base: str, changelog: str) -> str:
@@ -97,35 +121,40 @@ def base_text(base: str, changelog: str) -> str:
     return proc.stdout
 
 
-def push_base(before: str, changelog: str) -> str | None:
-    """The ref to measure a publish push against, or None when there is none.
+def last_publish(changelog: str) -> str | None:
+    """The newest publish-bookkeeping commit on HEAD's first-parent line.
 
-    None means nothing to measure, and says why on stderr.
+    None when history holds none. The predicate is in the module docstring.
     """
-    if not before.strip("0"):
-        print("notice: no before-commit (workflow_dispatch, or a first push "
-              "to the ref); the placement check has nothing to measure",
-              file=sys.stderr)
-        return None
-    present = git("cat-file", "-e", f"{before}^{{commit}}")
-    if present.returncode != 0:
+    if checked("rev-parse", "--is-shallow-repository").strip() == "true":
         raise RuntimeError(
-            "before-commit {} is not in this checkout ({}). Check out with "
-            "full history (`actions/checkout` with `fetch-depth: 0`) so the "
-            "placement check can measure the push.".format(
-                before, present.stderr.strip() or "no diagnostic"))
-    listed = git("ls-tree", "--name-only", before, "--", changelog)
-    if listed.returncode != 0:
-        raise RuntimeError(
-            "`git ls-tree {} -- {}` failed (exit {}): {}. Repair the checkout "
-            "and re-run the publish.".format(
-                before, changelog, listed.returncode,
-                listed.stderr.strip() or "no diagnostic"))
-    if not listed.stdout.strip():
-        print("notice: {} does not exist at {}; the placement check has "
-              "nothing to measure".format(changelog, before), file=sys.stderr)
-        return None
-    return before
+            "this checkout is shallow, so the last publish commit may be "
+            "missing from it. Check out with full history (`actions/checkout` "
+            "with `fetch-depth: 0`).")
+    allowed = BOOKKEEPING | {changelog}
+    log = checked("log", "--first-parent", "--format=%H%x09%an", "HEAD")
+    for line in log.splitlines():
+        sha, _, author = line.partition("\t")
+        if author != BOT:
+            continue
+        paths = checked("diff-tree", "--no-commit-id", "--name-only", "-r",
+                        "--root", sha).split()
+        if paths and set(paths) <= allowed:
+            return sha
+    return None
+
+
+def exists_at(ref: str, changelog: str) -> bool:
+    """Whether `changelog` exists in `ref`'s tree."""
+    return bool(checked("ls-tree", "--name-only", ref, "--", changelog).strip())
+
+
+def declared_edits(base: str) -> set[str]:
+    """Versions a `Changelog-Edit:` trailer in <base>..HEAD names."""
+    out = checked(
+        "log", "--format=%(trailers:key={},valueonly)".format(EDIT_TRAILER),
+        f"{base}..HEAD")
+    return {token.strip(",") for line in out.splitlines() for token in line.split()}
 
 
 def items(text: str) -> list[tuple[str | None, str]]:
@@ -177,17 +206,25 @@ def parked(text: str) -> list[str]:
     return [item for heading, item in items(text) if heading is not None]
 
 
-def newly_parked(original: str, text: str) -> list[str]:
-    """Parked items that are neither a move nor an in-place edit.
+def version_of(heading: str) -> str:
+    """The version token of a `## <version> — <date>` heading line."""
+    parts = heading.split()
+    return parts[1] if len(parts) > 1 else ""
 
-    See the decision contract in the module docstring.
+
+def newly_parked(original: str, text: str,
+                 editable: frozenset[str] | set[str] = frozenset()) -> list[str]:
+    """Parked items that are neither a move nor a declared in-place edit.
+
+    `editable` holds the versions a `Changelog-Edit:` trailer declared. See
+    the decision contract in the module docstring.
     """
     known = Counter(item for _, item in items(original))
     branch = items(text)
     carried = Counter(item for _, item in branch)
 
     # Parked base items the branch no longer carries anywhere, by heading:
-    # the only evidence an in-place edit can pair with.
+    # the only evidence a declared edit can pair with.
     removed: Counter = Counter()
     for heading, item in items(original):
         if heading is None:
@@ -203,7 +240,7 @@ def newly_parked(original: str, text: str) -> list[str]:
             continue
         if known[item]:
             known[item] -= 1
-        elif removed[heading]:
+        elif removed[heading] and version_of(heading) in editable:
             removed[heading] -= 1
         else:
             new_items.append(item)
@@ -216,8 +253,8 @@ def main(argv=None) -> int:
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument("--base",
                       help="the ref this branch is measured against, e.g. origin/main")
-    mode.add_argument("--push-before", metavar="SHA",
-                      help="the commit a publish push landed on (github.event.before)")
+    mode.add_argument("--since-last-publish", action="store_true",
+                      help="measure against the last publish-bookkeeping commit")
     parser.add_argument("--changelog", default="CHANGELOG.md")
     args = parser.parse_args(argv)
 
@@ -235,30 +272,37 @@ def main(argv=None) -> int:
               "point --changelog at the file that is.".format(path, exc), file=sys.stderr)
         return 2
     try:
-        if args.push_before is not None:
-            base = push_base(args.push_before, args.changelog)
+        if args.since_last_publish:
+            base = last_publish(args.changelog)
             if base is None:
+                print("notice: no publish-bookkeeping commit by {} in this "
+                      "history; the placement check has nothing to measure".format(BOT),
+                      file=sys.stderr)
+                return 0
+            if not exists_at(base, args.changelog):
+                print("notice: {} does not exist at the last publish {}; the "
+                      "placement check has nothing to measure".format(
+                          args.changelog, base), file=sys.stderr)
                 return 0
         else:
             base = args.base
         original = base_text(base, args.changelog)
+        editable = declared_edits(base)
     except RuntimeError as exc:
         print("error: {}".format(exc), file=sys.stderr)
         return 2
 
-    new_parked = newly_parked(original, text)
+    new_parked = newly_parked(original, text, editable)
     if not new_parked:
         return 0
     print(
-        "error: {} parks {} entry item(s) under an already-published version "
-        "heading whose content is new to {}. The publish step stamps only what "
-        "sits ABOVE the first `## ` heading, so an entry below one ships filed "
-        "under a version that already shipped:".format(
-            "this push" if args.push_before is not None else "this branch",
-            len(new_parked), base), file=sys.stderr)
+        "error: {} entry item(s) sit under an already-published version heading "
+        "and are new since {}. The publish step stamps only what sits ABOVE the "
+        "first `## ` heading, so an entry below one ships filed under a version "
+        "that already shipped:".format(len(new_parked), base), file=sys.stderr)
     for item in new_parked:
         print("  {}".format(item.splitlines()[0]), file=sys.stderr)
-    if args.push_before is not None:
+    if args.since_last_publish:
         print(
             "The publish is stopped so no version ships without its entry. "
             "Open a follow-up PR that moves the new item above the topmost "
@@ -267,9 +311,10 @@ def main(argv=None) -> int:
     else:
         print(
             "Rebase onto {} and move the new item above the topmost `## ` "
-            "heading. Moving an item the base already carries, adding the "
-            "`## `/`### ` heading lines a repair needs, and rewording an item "
-            "in place under its own heading are fine.".format(base),
+            "heading. Moving an item the base already carries and adding the "
+            "`## `/`### ` heading lines a repair needs are fine. To reword a "
+            "published item in place, add a `{}: <version>` trailer naming its "
+            "heading to a commit in the change.".format(base, EDIT_TRAILER),
             file=sys.stderr)
     return 1
 
