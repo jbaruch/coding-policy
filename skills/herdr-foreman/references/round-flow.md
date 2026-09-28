@@ -211,10 +211,12 @@ Inside that root, before any command that writes through the tool:
    fixture rather than above it.
 3. Prove the effective root the tool resolved, and compare it to the fixture.
    A root anywhere else stops the rehearsal.
-4. Record the state of each user-level file the rehearsal can reach, and read
-   it again afterwards. An unexpected change stops the rehearsal and is
-   reported; restore from that record rather than reinstalling the operator's
-   environment.
+4. Record a digest of each user-level file the rehearsal can reach, and read
+   it again afterwards; never copy a directory tree. Before the run, copy only
+   the single files the rehearsal is expected to change, and restore each of
+   those from its copy afterwards. An unexpected change stops the rehearsal
+   and goes to the operator in the report, unrestored; never reinstall the
+   operator's environment to recover it.
 
 Which files those are, and which manifest a given tool reads, belong to the
 tool's own documentation — not to this reference or a brief.

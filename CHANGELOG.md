@@ -1,5 +1,73 @@
 # Changelog
 
+### Fixed
+
+- **Herdr reports directories no longer grow into build caches (#622).** The
+  operator's `~/.local/state` reached about 250G across round reports
+  directories (`acr-delivery`, `acr-p1`, `acr-030`, `fleet-triage`). The
+  evidence in them (reports, logs, JSON receipts, diffs) was kilobytes; the
+  rest was tool state workers had pointed there: `go-cache`/`gocache`,
+  `go-mod-cache`/`gomodcache`/`modcache`, `pip-cache`, `npm-cache`, `venv`,
+  `__pycache__`, `node_modules`, and tester home guards that copied a whole
+  `~/.claude/plugins/cache` (1.4G) into `before/` and again into `after/` on
+  every run. `check-leftover-worktrees.sh` and `sweep-worktrees.sh` clean
+  worktrees and branches only, so nothing ever removed any of it.
+  - Cleanup: new owner script `skills/herdr-foreman/prune-report-caches.py`
+    finds reports directories from the foreman ledger (the `brief` and
+    `common` paths every dispatch row records, whose directory is the one
+    `compose-briefs.sh` wrote), never by scanning `~/.local/state`, where
+    other tools (cmux, gh, pnpm) keep their own state. The ledger is a hint:
+    a directory is touched only while one of its recorded briefs is still in
+    it, a frozen copy still hashing to the digest in its name, so a path
+    recreated by someone else after the round is skipped. A directory is pruned
+    only when no active supervision enrollment reports into it and nothing
+    below it changed for a day, so a live worker's build never loses its
+    cache mid-compile, even a worker quiet for longer than a day; an
+    unreadable supervision store stops the prune rather than guessing. Each
+    cache removal runs under the supervision store's owner lock after the
+    enrollments are re-read under it, so a worker cannot be enrolled into a
+    directory while its cache is going. Only real contention for that lock
+    skips a directory as `busy`; a lock that cannot be opened or a store
+    that turns unreadable mid-run stops the run with exit 3. A cache is removed only when both its
+    name and its content signature match (a Go build cache's README, a
+    module cache's `cache/download`, `pyvenv.cfg`, `_cacache`, only `.pyc`
+    files, and so on) and its top-level entries are the kind's own; a `venv`
+    holding a report next to `pyvenv.cfg`, or a `before/` holding a source
+    snapshot, stays whole. Symlinks are never followed, directories outside
+    the state root are skipped, and the ledger is read without migrating it.
+    Everything below the state root runs on descriptors: the root is opened
+    once and every directory under it is reached one `O_NOFOLLOW` component
+    at a time, never re-resolved by path, so a symlink swapped in for any
+    ancestor between the survey and the removal is never entered. Each cache
+    is classified, re-checked and emptied through one held descriptor, and
+    its name must still point at that directory before anything goes, so a
+    cache swapped for a same-named evidence directory is left alone. A cache is
+    removed in place with the entries its signature reads going last, so a
+    removal cut short by the hook's budget still looks like the same cache
+    and the next session finishes it; no rename, marker or other state
+    survives a run (an earlier tombstone-and-marker draft was itself a
+    stateful artifact an evidence directory could forge, and was dropped).
+  - New session-start hook `hooks/check-report-caches.sh` runs it live and
+    reports the reclaimed size: the fix is mechanical and the caches are
+    regenerable, so the hook acts rather than warns. It runs nothing in any
+    Herdr session, since a worker (a read-only one included) can sit in the
+    shared checkout and workers never delete; the operator's own sessions do
+    the pruning. Under tessl it dry-runs, and skips a linked worktree, as
+    `check-leftover-worktrees.sh` does. The owner script exits 3 when it
+    could not check (an unreadable ledger, supervision store or state root)
+    so that failure is never a silent success.
+  - Prevention: `rules/agent-team-operation.md` Writers and Checkouts and
+    the workers' `COMMON.md` keep build and package caches at the tool's
+    user-level default location.
+    The fixture-root carve-out's home guard now records digests, and copies
+    only the single files it must restore (preconditions 7 and 9), instead
+    of copying directory trees; an unexpected change, which has no copy,
+    stops the rehearsal and goes to the operator unrestored.
+    `references/round-flow.md` and `COMMON.md` carry the same contract. The rule states what the prune enforces (a directory matching
+    one enumerated cache kind by name, signature and top-level entries), not
+    a blanket "never removes evidence" it cannot prove for a file nested deep
+    inside a cache.
+
 ## 0.3.324 — 2026-09-28
 
 ### Changed
