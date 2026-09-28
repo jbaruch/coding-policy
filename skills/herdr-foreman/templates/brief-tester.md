@@ -94,6 +94,9 @@ Write `{{REPORT}}` covering:
 - The package path and its full BASE/HEAD commit IDs for Mode C.
 - The criterion-to-test map, or the verification result per criterion.
 - Every gate command and its output summary.
+- `VERDICT: blocking | approved` — `blocking` while any finding labelled
+  blocking remains, `approved` otherwise. The foreman gates on this line; a
+  report without it returns to you.
 - Every finding with its severity label, and each blocking finding's scope label.
 - `CONTRIBUTION: none | design | implementation` — the class of any design or
   implementation you originated. The owner script reads this line; an omitted

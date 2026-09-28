@@ -230,7 +230,7 @@ and treat the return to Step 4 as a round boundary: log the round and reset
 the stow, so the reset context returns to Step 4 with self-contained briefs
 carrying them. Preserve the developer for retained fixes; use a fresh context for the
 fresh-worker stage. Never reset the counter during re-planning. At a contested
-verdict or a foreman override, go to Step 13 first. At an exhausted allowance,
+verdict or a label the classifier gate contradicts, go to Step 13 first. At an exhausted allowance,
 record the checkpoint through the owner commands in
 `skills/herdr-foreman/references/dispatch-recovery.md`, report implementation
 as `awaiting_diagnosis`, consult the investigator with round context
@@ -299,10 +299,10 @@ It runs in two modes. Adjudication settles a dispute; diagnosis asks why a fix
 loop is not converging. Dispatch adjudication on exactly one of three triggers:
 
 - A contested reviewer or tester verdict — one worker's finding, another
-  worker's (or the foreman's) disagreement, neither side able to settle it by
-  re-reading the rule.
-- A foreman override of a blocking finding — the foreman about to waive a finding a
-  worker labelled blocking gets a second, independent read first.
+  worker's disagreement, neither side able to settle it by re-reading the rule.
+- A report label the classifier gate contradicts — the report's own verdict or
+  a blocking label disagrees with the classifier's reading, and the foreman,
+  holding no substance opinion, settles neither.
 - A bot finding the team disagrees with — the policy reviewer or Copilot flags
   something the developer and reviewer both think is wrong.
 

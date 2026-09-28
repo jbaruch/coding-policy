@@ -712,7 +712,7 @@ def require_investigation_before_judge(store, assignments, task, investigations,
     ends implementation and the ladder, and the one operator-requested ruling a
     checkpoint may cite is bounded per task, so there is nothing such a round
     could record. An adjudication is untouched on the same task -- the judge
-    still owes a contested reviewer or tester verdict, a foreman override, or a
+    still owes a contested reviewer or tester verdict, a contradicted label, or a
     disputed bot finding during the release of the clean scope. An operator
     plan authorized over the `stop` lifts the refusal, since the correction it
     authorizes is ordinary work.

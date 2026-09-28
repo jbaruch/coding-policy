@@ -59,7 +59,7 @@ verdict for the judge.
 
 A reviewer's label or confidence does not amend the accepted contract. Scope
 classification also does not dismiss a blocking finding: a contested verdict,
-foreman override, or bot disagreement follows the existing judge path in
+a label the classifier gate contradicts, or a bot disagreement follows the existing judge path in
 `rules/agent-team-operation.md`. The foreman cannot waive a finding by calling it
 an expansion. An agreed correction still obeys the fix allowance and release
 gates; this reference adds no attempts or substitute judge trigger.

@@ -80,7 +80,13 @@
   tester report templates. That changed what the record's fields mean, so
   specialist assessments move to record schema 2 with `contribution_source`;
   the owner migrates a schema-1 record on load, keeping its values under
-  `foreman_assessment`.
+  `foreman_assessment`. Three earlier findings closed in the same round: the
+  reviewer and tester report templates now require a `VERDICT: blocking |
+  approved` line, the one the foreman gates on (the classifier's answer set);
+  SKILL.md's cross-references use the repo-relative `skills/herdr-foreman/...`
+  form throughout; and the judge's second adjudication trigger is no longer a
+  "foreman override", which presumed a substance opinion the foreman no longer
+  holds, but a report label the classifier gate contradicts.
 
 ## 0.3.319 — 2026-09-28
 

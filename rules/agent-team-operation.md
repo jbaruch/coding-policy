@@ -50,12 +50,12 @@ description: Running a multi-agent team — task-based specialist composition, c
 - Acceptance rests on independent reviewer and tester reports, CI, oracle verification and the report-verdict classifier gate
 - The foreman gates on a report's verdict lines and labels, never on its own assessment of the substance
 - The foreman never substitutes its own reading for a missing or unusable report
-- A report missing a verdict line or a blocking finding's severity or scope label returns to its responsibility with the gap named
+- A reviewer or tester report missing its `VERDICT:` line, or a blocking finding's severity or scope label, returns to its responsibility with the gap named
 - A brief carries the operator's request verbatim and quotes the reports and findings it acts on
 - The foreman writes no acceptance criterion, diagnosis, correction proposal or recommendation of its own
 - Judgment the foreman would otherwise make routes to a worker:
   - A finding's severity and scope — the reviewer or tester that raised it
-  - A contested label, verdict or finding, the foreman's own disagreement included — the judge in adjudication mode
+  - A contested label or verdict — the judge in adjudication mode
   - An investigation-only deliverable against its request — an independent reviewer
   - A consultation's acceptance — its report's `met`/`unmet` lines, and a dispute over them to an independent reviewer
   - Pre-implementation surfaces or acceptance criteria the operator's request does not state — an advisor consultation
@@ -128,7 +128,7 @@ description: Running a multi-agent team — task-based specialist composition, c
 ## Judge Seat
 
 - The reserved `judge` seat runs on the most capable model available and holds no other responsibility
-- The foreman dispatches the judge in adjudication mode for one of three triggers: a contested reviewer or tester verdict, a foreman override of a blocking finding, or a bot finding the team disagrees with
+- The foreman dispatches the judge in adjudication mode for one of three triggers: a contested reviewer or tester verdict, a report label the classifier gate contradicts, or a bot finding the team disagrees with
 - The foreman dispatches the judge in diagnosis mode at an exhausted allowance with blocking work remaining, on the investigator's assessment
 - Every judge dispatch declares which mode it is for, at plan and at apply
 - An undeclared mode is refused, never defaulted

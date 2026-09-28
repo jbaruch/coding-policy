@@ -17,9 +17,9 @@ description: >
 Process steps in order. Do not skip ahead.
 
 Before any finish with enrolled work, reconcile the whole fleet under
-`references/supervision.md`. Continue observation or persist an authorized pause
+`skills/herdr-foreman/references/supervision.md`. Continue observation or persist an authorized pause
 or handoff covering every active assignment. Keep user attention visible under
-`references/attention.md`.
+`skills/herdr-foreman/references/attention.md`.
 
 Follow `rules/agent-team-operation.md` for round constraints.
 
@@ -34,16 +34,16 @@ judgment below routes to a worker, and you act on its report:
 | 5 | Planned surfaces the request does not name | `advisor` consultation on a `writes_repository: false` round |
 | 5 | Which consultation a question needs | The report, trigger detection or operator message that raised it |
 | 5 | A review partition | The developer's report; `validate-partition` proves it |
-| 7 | A bug's reproduction and diagnosis | Developer and tester, under `references/assignment-reasoning.md` |
+| 7 | A bug's reproduction and diagnosis | Developer and tester, under `skills/herdr-foreman/references/assignment-reasoning.md` |
 | 11 | A consultation's outcome and contribution | Its report's `met`/`unmet` and `CONTRIBUTION:` lines |
 | 11 | A stalled worker's recoverable partial work | `investigator` consultation |
 | 12 | A finding's severity and scope | The reviewer or tester that raised it |
-| 12 | A contested label or verdict, your own disagreement included | Judge, adjudication mode (Step 13) |
+| 12 | A contested label or verdict | Judge, adjudication mode (Step 13) |
 | 12 | An investigation-only deliverable | An independent reviewer |
 | 12 | Recurring findings or unclear causality | `investigator` consultation |
 | 12 | A non-converging fix loop | Investigator, then judge diagnosis (Step 13) |
 
-A report missing a verdict line or a blocking finding's label returns to its
+A reviewer or tester report missing its `VERDICT:` line or a blocking finding's label returns to its
 responsibility with the gap named; never fill it from your own reading. Mode
 routing, verbatim relays, owner records, and retrospectives and lessons drawn
 from the reports' handoff observations stay yours.
@@ -116,11 +116,11 @@ their contracts. Use the recorded state override or default, report any non-zero
 diagnostic, and never fabricate missing history. They grant no new task
 authority.
 
-- **Catch-up or saved attention** — `references/attention.md`. Read all
+- **Catch-up or saved attention** — `skills/herdr-foreman/references/attention.md`. Read all
   attention pages before claiming completeness.
 - **Lesson curation, saved foreman context, or a foreman handoff** —
-  `references/working-memory.md`.
-- **A saved retrospective** — `references/retrospectives.md`. Report the note's
+  `skills/herdr-foreman/references/working-memory.md`.
+- **A saved retrospective** — `skills/herdr-foreman/references/retrospectives.md`. Report the note's
   date, coverage, conclusions, and path.
 - **A task's cost or resource use** — run the read-only report, omitting
   `--task` for every task:
@@ -183,7 +183,7 @@ Before following any route below, report the worktree sweep to the operator:
   A resumed foreman proceeds to the stow's continuation step instead (Step 17
   Resume Route).
   When `due` names the capability table, dispatch the refresh consultation under
-  `references/model-tiers.md`, then record its report and show the result:
+  `skills/herdr-foreman/references/model-tiers.md`, then record its report and show the result:
 
 ```bash
 CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"; [ -d "$CP" ] || case "$(git config --get remote.origin.url)" in git@github.com:jbaruch/coding-policy|git@github.com:jbaruch/coding-policy.git|https://github.com/jbaruch/coding-policy|https://github.com/jbaruch/coding-policy.git|ssh://git@github.com/jbaruch/coding-policy|ssh://git@github.com/jbaruch/coding-policy.git) CP=. ;; *) echo "coding-policy plugin not found: run tessl install jbaruch/coding-policy" >&2; exit 1 ;; esac
@@ -199,7 +199,7 @@ bash "$CP/skills/herdr-foreman/foreman.sh" capability-show
   that produced it; re-run that one, not the preflight. A `foreman_tier` block
   means this pane does not run the tier selection chose for the foreman:
   record a user-attention blocker naming `start-foreman`
-  (`references/model-tiers.md` Foreman Seat) and finish here.
+  (`skills/herdr-foreman/references/model-tiers.md` Foreman Seat) and finish here.
 - **Exit 2** — report the diagnostic and finish here.
 
 On exit 0 or 1, a `checks.foreman_tier` status `unconfigured` blocks nothing:
@@ -230,16 +230,16 @@ Emits the caller and live workers with kind, pane, and state. An empty roster on
 exit 0 means unnamed panes: report them from `herdr agent list` with the
 correcting `herdr agent rename <pane-id> <name>` command.
 
-Record staffing gaps under `references/round-setup.md`. Leave unused specialist
+Record staffing gaps under `skills/herdr-foreman/references/round-setup.md`. Leave unused specialist
 profiles unlaunched. Never duplicate targets or fold verification onto a
-contributor. Start workers in YOLO mode under `references/model-tiers.md`;
+contributor. Start workers in YOLO mode under `skills/herdr-foreman/references/model-tiers.md`;
 preserve it on relaunch. Verify live permission flags before dispatch, including
 existing workers. Record task authorization and permitted actions under the
 round-setup reference. Create or resume the stable ledger under
-`references/task-ledger.md`; record its absolute path before dispatch. Apply the
+`skills/herdr-foreman/references/task-ledger.md`; record its absolute path before dispatch. Apply the
 round-setup accepted-behavior, resume and supervision binding requirements.
 
-Run `references/retrospectives.md` on resume, before planning, or for an
+Run `skills/herdr-foreman/references/retrospectives.md` on resume, before planning, or for an
 explicit retrospective request. For an explicit request, complete a new
 retrospective and finish here.
 
@@ -255,7 +255,7 @@ bash "$CP/skills/herdr-foreman/verify-authority.sh" <owner/repo>
 ```
 
 Record the emitted namespace ownership evidence using Step 3 of
-`references/round-setup.md`. For a non-owned repo, reuse explicit per-action
+`skills/herdr-foreman/references/round-setup.md`. For a non-owned repo, reuse explicit per-action
 operator permission; absent permission, remain read-only or finish here.
 On non-zero, report the diagnostic and finish here.
 
@@ -300,7 +300,7 @@ dispatched slices; check them against the validated partition. The order is a
 default; choose another when the round needs it.
 
 Seat the responsibilities the queue's `waiting_for`, the trigger detection
-below and the delivered reports name, under `references/specialists.md`. Add a
+below and the delivered reports name, under `skills/herdr-foreman/references/specialists.md`. Add a
 consultation only for a question a report or the operator raised, quoted as
 raised. Supply its requirements file for specialized work. Schedule consultation and
 verification as the task needs them. `plan` bars a developer reserved to
@@ -316,7 +316,7 @@ request, or delivered by an `advisor` consultation when the request names none.
 A round that writes no
 repository content — an investigation, an architecture or advisory consultation
 — declares `writes_repository: false` in that file instead
-(`references/specialists.md`). A round with work already written classifies
+(`skills/herdr-foreman/references/specialists.md`). A round with work already written classifies
 that work:
 
 ```bash
@@ -328,7 +328,7 @@ bash "$CP/skills/herdr-foreman/foreman.sh" detect-triggers \
 ```
 
 Exit 0 means every fired trigger is staffed or answered. On exit 1, read the
-stderr object: an absent declaration is written first (`references/specialists.md`),
+stderr object: an absent declaration is written first (`skills/herdr-foreman/references/specialists.md`),
 and an `unaddressed_trigger` is staffed in the roles below or answered by a
 recorded decision with its reason. Re-run the command with the updated
 declaration, roles, requirements and decisions after every such change, and
@@ -372,7 +372,7 @@ per slice as `<role>#<slice>`, and Step 10 dispatches each seat with its own
 brief. A judge seat declares its mode:
 `adjudication` rules on a contested verdict, `diagnosis` on the investigator's
 assessment at an exhausted allowance. Pass the same `--judge-mode` to `apply`.
-On exit 1, resolve the diagnostic before continuing. Apply the Step 5 constraints in `references/round-setup.md`:
+On exit 1, resolve the diagnostic before continuing. Apply the Step 5 constraints in `skills/herdr-foreman/references/round-setup.md`:
 exclude contributors from verification, reserve the developer through early fixes,
 preserve task identity and fix count, and reuse recorded correction bounds.
 Tier contracts:
@@ -396,7 +396,7 @@ bash "$CP/skills/herdr-foreman/review-package.sh" \
 ```
 
 Apply the Step 6 base, range, and rebuild requirements in
-`references/round-setup.md`. Success prints the absolute review-package path;
+`skills/herdr-foreman/references/round-setup.md`. Success prints the absolute review-package path;
 set it as `REVIEW_PACKAGE`. On non-zero, fix the diagnostic and retry before
 composing verification briefs. Other roles need no package.
 Proceed immediately to Step 7.
@@ -420,13 +420,13 @@ Emits common and role-brief paths. On non-zero, fix the diagnostic before
 dispatch. Validates composition inputs and review evidence before writing.
 Use a fresh absolute report path per role and attempt.
 
-Follow `references/round-setup.md` Step 7 for shared and role-specific values,
+Follow `skills/herdr-foreman/references/round-setup.md` Step 7 for shared and role-specific values,
 authority, review evidence and brief completeness.
 
 Values are copied, never composed: the operator's request verbatim, recorded
 paths and revisions, and the findings and questions quoted from the reports
 that raised them. A bug brief carries the questions in
-`references/assignment-reasoning.md` Diagnose the User's Failure for the
+`skills/herdr-foreman/references/assignment-reasoning.md` Diagnose the User's Failure for the
 developer and tester; add no diagnosis of your own.
 Proceed immediately to Step 8.
 
@@ -528,7 +528,7 @@ developer alone. Warm consultations use the recovery reference's
 `--retain-specialist` path. Reconcile unknown outcomes
 before retrying. Reuse existing correction authorization within its bounds.
 
-Follow the Dispatch Results contract in `references/round-flow.md` for busy,
+Follow the Dispatch Results contract in `skills/herdr-foreman/references/round-flow.md` for busy,
 uncertain, failed, and dry-run outcomes. Preserve all already enrolled work.
 
 Dispatch references:
@@ -597,7 +597,7 @@ Then act on the checkpoint:
 - Act on a stall under `rules/agent-team-operation.md` Stalled Workers
 - Recoverable partial work goes to an `investigator` consultation; never
   judge what the checkout holds yourself
-- Record a stall's obligation through `references/attention.md`
+- Record a stall's obligation through `skills/herdr-foreman/references/attention.md`
 - Preserve the blocked/refusal and native-recovery paths in the references below
 - Never re-dispatch over uncertainty
 - Never resend a refused brief to its provider
@@ -608,7 +608,7 @@ skills/herdr-foreman/references/dispatch-recovery.md
 ```
 
 Save a consultation's successful delivery receipt and record `assess-specialist`
-under `references/specialists.md` before retiring its enrollment. Its outcome
+under `skills/herdr-foreman/references/specialists.md` before retiring its enrollment. Its outcome
 and contribution are the report's own `met`/`unmet` and `CONTRIBUTION:` lines.
 
 Record each outcome in the task ledger and user-facing obligations in the
@@ -654,7 +654,7 @@ A `## BLOCKED` section can sit under a report that otherwise reads as finished.
 Gate on each finding's severity and scope labels as the reviewer or tester wrote
 them per `rules/review-severity.md`; classify none yourself. A blocking finding
 without its labels returns to its responsibility with the gap named. A label
-you disagree with goes to Step 13 as a foreman override, never overruled here.
+another report or the classifier gate contradicts goes to Step 13; never overrule it here.
 Before accepting a mechanical round, compare its whole result against the
 oracle its plan declared. `<result-file>` is the pushed diff for a `patch`
 oracle and the produced output otherwise:
@@ -693,10 +693,10 @@ bash "$CP/skills/herdr-foreman/foreman.sh" verify-partition \
 Record assignment acceptance or outstanding work in the task ledger against
 the inspected report and artifact evidence. Record the task's gate decision
 separately; a worker finishing its brief never completes the whole task.
-Route correction scope and bug evidence under `references/assignment-reasoning.md`:
+Route correction scope and bug evidence under `skills/herdr-foreman/references/assignment-reasoning.md`:
 a `contract-expansion` or `unresolved-interpretation` label becomes an operator
 decision, and a report naming recurring findings goes to the `investigator`.
-Persist user-facing obligations under `references/attention.md` before presenting
+Persist user-facing obligations under `skills/herdr-foreman/references/attention.md` before presenting
 them; record an actual answer or resolution separately from showing the item.
 
 Every return to Step 4 is a round boundary: run Step 16 to log the round and
@@ -717,8 +717,8 @@ Step 16. No implementation or release is inferred from the diagnostic result.
   contract and `rules/agent-team-operation.md` Fix Loops. Return to Step 4 for
   an authorized correction or Step 13 for a required judge ruling. At an
   exhausted approach allowance, record the checkpoint through
-  `references/dispatch-recovery.md`, consult the investigator under
-  `references/specialists.md` with round context `{"investigator":
+  `skills/herdr-foreman/references/dispatch-recovery.md`, consult the investigator under
+  `skills/herdr-foreman/references/specialists.md` with round context `{"investigator":
   {"diagnosis_input": true}}`, and take its assessed report to Step 13 for the
   diagnosis; no operator decision is awaited.
 - **Advisory findings only** — record them in the round log and fold them into

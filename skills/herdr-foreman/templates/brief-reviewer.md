@@ -71,6 +71,9 @@ Write `{{REPORT}}` covering:
 - Which mode and scope you ran, and the reviewed commit SHA.
 - The package path and its full BASE/HEAD commit IDs for Mode B.
 - The design note or review content in full, or a link plus its substance.
+- `VERDICT: blocking | approved` — `blocking` while any finding labelled
+  blocking remains, `approved` otherwise. The foreman gates on this line; a
+  report without it returns to you.
 - Every finding with its severity label, and each blocking finding's scope label.
 - `CONTRIBUTION: none | design | implementation` — the class of any design or
   implementation you originated. The owner script reads this line; an omitted
