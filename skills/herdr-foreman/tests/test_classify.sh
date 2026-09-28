@@ -29,6 +29,7 @@
 #                                 but the question.
 #  13. A round's batch          -> one call annotates every report; a failed
 #                                 annotation is reported, never fatal.
+#  14. A newline-named dir      -> every script still finds its siblings.
 
 set -uo pipefail
 
@@ -363,6 +364,34 @@ PY
   if [[ $RC -eq 1 ]] && [[ "$(field "$OUT" failed)" == "1" ]] \
      && [[ "$(field "$OUT" scored)" == "0" ]]; then
     pass; else fail "a failed classification exits 1 and is counted, got RC=$RC OUT=$OUT"; fi
+
+  echo "▶ a directory name ending in a newline" >&2
+
+  # A `$(dirname ...)` capture drops the newline, and the scripts then look for
+  # the prompt, schema and each other beside a directory that does not exist
+  # (#592).
+  local nl_dir="$TMP/nl-skill/classify"$'\n'
+  if mkdir -p "$nl_dir" 2>"$TMP/nl.err"; then
+    cp -R "$DIR"/. "$nl_dir/" || die "copy the classify dir into $nl_dir"
+    OUT="$(PATH="$TMP/ok:$PATH" bash "$nl_dir/classify-report.sh" "$report" --agent codex 2>"$ERRFILE")"
+    RC=$?
+    if [[ $RC -eq 0 ]] && [[ "$(field "$OUT" verdict)" == "blocking" ]]; then
+      pass; else fail "classify-report.sh in a newline-named dir, got RC=$RC OUT=$OUT ERR=$(cat "$ERRFILE")"; fi
+    OUT="$(PATH="$TMP/batch:$PATH" bash "$nl_dir/classify-reports.sh" "$report" "$second" 2>"$ERRFILE")"
+    RC=$?
+    if [[ $RC -eq 0 ]] && printf '%s' "$OUT" | python3 -c '
+import json, sys
+d = json.load(sys.stdin)
+assert len(d["labels"]) == 2 and d["unannotated"] == [], d
+'; then
+      pass; else fail "classify-reports.sh in a newline-named dir, got RC=$RC OUT=$OUT ERR=$(cat "$ERRFILE")"; fi
+    OUT="$(bash "$nl_dir/evaluate.sh" --corpus-only --state "$state" 2>"$ERRFILE")"
+    RC=$?
+    if [[ $RC -eq 0 ]] && [[ "$(field "$OUT" corpus)" == "1" ]]; then
+      pass; else fail "evaluate.sh in a newline-named dir, got RC=$RC OUT=$OUT ERR=$(cat "$ERRFILE")"; fi
+  else
+    echo "  skipped: this filesystem refuses a name ending in a newline ($(cat "$TMP/nl.err"))" >&2
+  fi
 
   echo "─────────────────────────────────────────────" >&2
   if [[ $FAIL -gt 0 ]]; then echo "FAILED: ${FAIL} failed, ${PASS} passed" >&2; exit 1; fi

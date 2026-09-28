@@ -1,5 +1,31 @@
 # Changelog
 
+### Fixed
+
+- **Every shipped skill script now finds its siblings when its directory's
+  name ends in a newline (#592).** #487 moved the hooks off
+  `$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)`, but sixteen skill scripts
+  across release, herdr-standup and herdr-foreman kept the shape. Command
+  substitution strips every trailing newline, so the `dirname` capture
+  truncated such a directory before `cd` saw it, and the script looked for
+  its siblings somewhere that does not exist. The four scripts that already
+  carried the `pwd` sentinel from #466 still routed through the nested
+  capture. Each script now takes the hooks' form: parameter expansion
+  derives the directory from `${BASH_SOURCE[0]}` (`.` when the path has no
+  slash), `cd -- "$dir" && pwd && printf x` carries `pwd`'s output across the
+  strip, and a `cd` failure ends with a diagnostic naming the directory and
+  the repair, in the script's own exit-code contract.
+  `confirm-publish-landed.sh` reports it as a fail-safe gate result, and
+  `wait-report.sh` resolves through one `resolve_skill_dir` function for its
+  two call sites. The derivation stays inline, not in a shared sourced
+  helper: a helper would need the same parameter-expansion bootstrap at every
+  site just to locate itself, and a copy per skill directory. New
+  `test_script_dir_newline.sh` suites in release, herdr-standup and
+  herdr-foreman, plus a newline case in the wait-report, round-preflight and
+  classify suites, stage each script under a directory ending in a newline
+  beside stand-ins that record being reached; every case fails against the
+  old code.
+
 ## 0.3.312 — 2026-09-28
 
 ### Fixed
