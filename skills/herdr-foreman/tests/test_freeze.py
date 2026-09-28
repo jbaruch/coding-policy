@@ -375,6 +375,84 @@ class FrozenPathTest(unittest.TestCase):
             read_frozen(relative)
 
 
+class FrozenBytesCarriedTest(unittest.TestCase):
+    """Readers after the freeze take the bytes it verified, never the path again (#565)."""
+
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory(prefix="foreman-carry-")
+        self.addCleanup(temporary.cleanup)
+        self.root = Path(temporary.name).resolve()
+        source = self.root / "source"
+        source.mkdir()
+        (source / "COMMON.md").write_text("common rules\n")
+        (source / "developer.md").write_text("Fix it.\nREPORT: /reports/developer.md\n")
+        self.frozen = freeze_paths({"common": str(source / "COMMON.md"), "developer": str(source / "developer.md")})
+        self.verified = {path: Path(path).read_bytes() for path in self.frozen.values()}
+        # The copies' directory swapped for a link to a decoy holding other
+        # bytes under the same content-addressed names.
+        decoy = self.root / "decoy"
+        decoy.mkdir()
+        for path in self.frozen.values():
+            (decoy / Path(path).name).write_bytes(b"Swapped after the freeze.\nREPORT: /reports/decoy.md\n")
+        self.directory = source / FROZEN_DIR
+        self.held = self.root / "held"
+        self.directory.rename(self.held)
+        self.directory.symlink_to(decoy)
+
+    def restore(self):
+        """Put the verified copies back, so a read by name yields what the freeze verified."""
+        self.directory.unlink()
+        self.held.rename(self.directory)
+
+    def test_the_freeze_carries_the_bytes_it_verified(self):
+        self.assertEqual(self.frozen.contents, self.verified)
+        for path, data in self.verified.items():
+            self.assertNotEqual(Path(path).read_bytes(), data)
+
+    def test_the_dispatch_identity_is_computed_from_the_verified_bytes(self):
+        from foreman.recovery import dispatch_identity
+        carried = dispatch_identity("task", "developer", "grok", None, self.frozen, options={},
+                                    contents=self.frozen.contents)
+        self.restore()
+        self.assertEqual(carried, dispatch_identity("task", "developer", "grok", None, self.frozen, options={}))
+
+    def test_the_brief_identity_is_computed_from_the_verified_bytes(self):
+        from foreman.recovery import brief_identity
+        carried = brief_identity(self.frozen, "developer", "/reports/developer.md", self.frozen.contents)
+        self.restore()
+        self.assertEqual(carried, brief_identity(self.frozen, "developer", "/reports/developer.md"))
+
+    def test_the_sent_prompt_hash_is_computed_from_the_verified_bytes(self):
+        from foreman.assign import assignment_text, tiered_prompt
+        text = assignment_text("developer", self.frozen["common"], self.frozen["developer"])
+        tier = {"model": "fixture-model", "effort": "high"}
+        carried = tiered_prompt(text, tier, self.frozen["common"], self.frozen["developer"], self.frozen.contents)
+        self.restore()
+        self.assertEqual(carried, tiered_prompt(text, tier, self.frozen["common"], self.frozen["developer"]))
+
+    def test_the_report_markers_are_read_from_the_verified_bytes(self):
+        from foreman.assign import brief_markers
+        self.assertEqual(brief_markers(self.frozen["developer"], self.frozen.contents), ["/reports/developer.md"])
+
+    def test_the_slice_check_reads_the_verified_brief(self):
+        from foreman import cli
+        from tests.test_cli import bound_seat_plan, seat_brief_text
+        seat = "reviewer#api"
+        plan = bound_seat_plan({seat: "codex"})
+        brief = self.root / "source" / "reviewer-api.md"
+        brief.write_text(seat_brief_text(seat, plan), encoding="utf-8")
+        self.restore()
+        frozen = freeze_paths({seat: str(brief)})
+        decoy = self.root / "decoy"
+        (decoy / Path(frozen[seat]).name).write_text("# no scope block\n", encoding="utf-8")
+        self.directory.rename(self.held)
+        self.directory.symlink_to(decoy)
+        cli._require_bound_slices(plan, [seat], frozen, contents=frozen.contents)
+        # The control: a read by name follows the swap to the decoy.
+        with self.assertRaisesRegex(UsageError, "scope"):
+            cli._require_bound_slices(plan, [seat], frozen)
+
+
 class FreezeDecisionTest(unittest.TestCase):
     """The decision follows the replay answer per role, and never lets a new role skip the freeze."""
 

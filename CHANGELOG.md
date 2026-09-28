@@ -26,6 +26,49 @@
   beside stand-ins that record being reached; every case fails against the
   old code.
 
+## 0.3.312 — 2026-09-28
+
+### Fixed
+
+- **A frozen dispatch's identity and sent prompt now come from the bytes its
+  freeze verified (#565).** #554 (0.3.292) made `freeze_paths` write and verify
+  each frozen copy through a no-follow descriptor walk, but in the same `apply`
+  call the readers after it went back to the copies by pathname:
+  `recovery.dispatch_identity`, `recovery.brief_identity`,
+  `assign.tiered_prompt`, the REPORT-marker width check and the slice-boundary
+  check. A copy's ancestor directory swapped for a link in that interval was
+  followed there, so the recorded fingerprint and the prompt hash the worker
+  received could describe bytes other than the ones verified. `freeze_paths`
+  now returns a `FrozenPaths` carrying each copy's verified bytes, and every
+  one of those readers takes them through the new `recovery.briefing_bytes`;
+  replays and dry runs, which freeze nothing, still read their source paths.
+  `recover-report` gets the same treatment: its prompt-hash and fingerprint
+  checks use the bytes the brief's receipt recorded, instead of a second read
+  that could let the receipt bind bytes the hash never checked. Regressions
+  swap the frozen directory for a decoy between the freeze and the identity,
+  and swap a brief between its receipt and the prompt-hash check.
+
+## 0.3.310 — 2026-09-28
+
+### Fixed
+
+- **A retained fix round's `de_escalated` now describes the tier it runs at
+  (#591).** A retained-context developer fix keeps the preceding round's
+  verified effort, which can sit above the planned one, but the plan's
+  `de_escalated` flag was copied through unchanged. Under scarcity a plan
+  could record a declined effort escalation while the retained worker ran at
+  that very effort. The flag keeps the meaning #490 gave it in `tiers.py`: a
+  downgrade that actually took effect. New `tiers.still_de_escalated`
+  recomputes it against `_escalated`'s target: a kept effort that reaches the
+  declined step clears it, one still below keeps it, and a declined model
+  switch keeps it whatever the effort (retention never switches model). The
+  retained adjustment moved from `assign.apply` into `assign.retained_tier`,
+  which also shares the new `tiers.EFFORT_RANK`. The tier system is dormant in
+  production, so no recorded row changes.
+### Changed
+
+- **The Platform-Bound Untestable Carve-Out now accepts a finite behavior selector as its artifact inventory** (`rules/testing-standards.md`). The prior authority precondition required every exempt artifact by name. That forced shared platform plugins to maintain source-file allowlists in every consumer, so a new file or rename silently lost the exemption even when the platform boundary and validation procedure were unchanged. A consuming authority can still list artifacts explicitly, or it can list finite external-runtime interaction classes and attach the exemption only to each class's smallest invocation layer. The selector must let a reviewer map every changed code path to one class and one documented manual procedure; language, directory, file glob, app name, and a generic platform-specific label are insufficient alone. This keeps deterministic logic in CI while allowing durable rules for proprietary scheduler, lifecycle, event-delivery, and device-I/O behavior. Triggered by the policy conflict on `jbaruch/hubitat-dev` PR #152.
+
 ## 0.3.309 — 2026-09-28
 
 ### Added
