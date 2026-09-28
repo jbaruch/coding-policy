@@ -8,8 +8,8 @@
 # the decision predicate stays in `prune-worktrees.sh`
 # (`rules/script-as-black-box.md`). A repository is found through a
 # directory on disk, never through its registrations: a worktree whose
-# directory vanished leaves a registration this sweep cannot see. The
-# `git worktree prune` each swept repository's prune runs clears it, and
+# directory vanished leaves a registration this sweep cannot see. Each swept
+# repository's prune removes the registrations it confirms gone, and
 # until then it is inert, holding no files.
 #
 # Contract:
@@ -95,8 +95,20 @@ main() {
     warn "worktree root ${root} is missing or unreadable — pass the directory holding the worktrees"
     return 1
   fi
-  local here
-  here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)" || { warn "cannot resolve the script directory of ${BASH_SOURCE[0]} — restore read and search access to the plugin directory, or reinstall the plugin, then re-run"; return 1; }
+  local here here_src
+  # Command substitution strips every trailing newline, so the script directory
+  # never passes through one bare: parameter expansion derives it (#487), and a
+  # sentinel carries `pwd` across the strip (#466).
+  case "${BASH_SOURCE[0]}" in
+    */*) here_src="${BASH_SOURCE[0]%/*}" ;;
+    *) here_src=. ;;
+  esac
+  if ! here="$(cd -- "${here_src:-/}" && pwd && printf x)"; then
+    warn "cannot enter the script directory ${here_src:-/} — restore read and search access to the plugin directory, or reinstall the plugin, then re-run"
+    return 1
+  fi
+  here="${here%x}"
+  here="${here%$'\n'}"
   python3 - "$root" "$dry" "${here}/prune-worktrees.sh" <<'PY'
 import json
 import os

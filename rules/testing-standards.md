@@ -30,7 +30,13 @@ alwaysApply: true
 - Preconditions (all required):
   1. The deterministic, CI-runnable pieces are extracted and unit-tested — parsing, normalization, and data-shaping helpers split out of the automation wrapper. Only the genuinely-unhostable layer is exempt
   2. A manual validation procedure for the exempt layer is documented — what to run, what to observe, what counts as a pass
-  3. The consuming plugin's authority-of-record rule names this carve-out, each exempt artifact, and where its validation procedure lives
+  3. The consuming plugin's authority-of-record rule names this carve-out and where its validation procedures live
+  4. The authority defines the exempt artifact set through one of two forms:
+     - Explicit inventory — names each exempt artifact
+     - Behavior selector — lists a finite set of external-runtime interaction classes and limits exemption to the smallest invocation layer for a listed class
+  5. A behavior selector lets a reviewer map each changed code path to one listed interaction class and one documented validation procedure
+- A behavior selector may cover new or renamed code paths matching its listed interaction classes
+- Source language, directory, file glob, application name, and a generic platform-specific label do not qualify as behavior selectors on their own
 - "Hard to install in CI" does NOT qualify — install the tool and test it per `rules/ci-safety.md` Install, Don't Skip
 - Every other module still ships tests that run in CI
 

@@ -92,6 +92,23 @@ class StaleGrokDeliveryTests(unittest.TestCase):
         with self.assertRaisesRegex(UsageError, 'grok_dispatch_unbound'):
             self.recover()
 
+    def test_an_oracle_bound_dispatch_recovers_under_its_own_fingerprint(self):
+        # coding-policy#585: apply folds a bound oracle's pin into the
+        # fingerprint, so recovery rebuilds it from the dispatch's saved oracle.
+        self.dispatch['oracle'] = {'kind': 'patch', 'path': '/oracle/exact.patch', 'sha256': 'b' * 64}
+        _, self.dispatch['fingerprint'] = recovery.dispatch_identity(
+            self.dispatch['task'], 'judge', 'worker', None,
+            {'common': self.dispatch['common'], 'judge': self.dispatch['brief']},
+            options={'task': self.dispatch['task'], 'fix_round': None, 'plan': None,
+                     'work': None, 'rounds': {}, 'retain_context': False, 'no_clear': False,
+                     'oracle_pin': 'b' * 64})
+        record = self.recover()
+        self.assertEqual(record['basis'], 'archived_grok_clear_source')
+        # A pin the dispatch was not sent with cannot reproduce its identity.
+        self.dispatch['oracle']['sha256'] = 'c' * 64
+        with self.assertRaisesRegex(UsageError, 'grok_dispatch_unbound'):
+            self.recover()
+
     def test_public_owner_recovery_replays_without_worker_input_or_byte_rewrites(self):
         ledger_path, record_path = self.case.tmp / 'state.json', self.case.tmp / 'record.json'
         # Exercise the owner migration as well as writing a schema-2 receipt.

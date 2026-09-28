@@ -30,23 +30,10 @@ assessment. Record missing reports and unknown send outcomes before continuing
 another worker. Append blocker, judge, release, cleanup, and handoff decisions
 when they happen; Step 16 finalizes the log rather than creating it from memory.
 
-Use these separate vocabularies:
-
-| Subject | Decision | Meaning |
-| --- | --- | --- |
-| assignment | `pending` | Dispatch is planned or confirmed; no report has been assessed |
-| assignment | `reported` | Delivery was confirmed; the foreman has not yet accepted the work |
-| assignment | `accepted` | The foreman read the report and verified that the assignment's acceptance criteria hold |
-| assignment | `needs_work` | Evidence shows unmet criteria or invalidates a prior acceptance |
-| assignment | `blocked` | A specific unresolved dependency or decision prevents the assignment from proceeding |
-| assignment | `unavailable` | A report is missing or unavailable under the wait/recovery contract |
-| assignment | `unknown` | Dispatch or outcome evidence is insufficient; reconcile before retrying |
-| task | `in_progress` | Required task work remains |
-| task | `awaiting_diagnosis` | An exhausted allowance awaits the judge's remedy |
-| task | `diagnosed_stop` | A `stop` remedy ships what is clean and tracks the remainder |
-| task | `waiting_for_operator` | A named required operator decision remains outstanding |
-| task | `ready_for_release` | Step 12's current-tip verification gate holds; release remains outstanding |
-| task | `completed` | All task acceptance criteria and required release/cleanup obligations are verified |
+Pick each event's `decision` from its subject's vocabulary in
+`DECISION_MEANINGS` at the top of `skills/herdr-foreman/foreman/members.py`,
+which also gives each decision's meaning. Task and assignment decisions are
+separate vocabularies.
 
 Record Herdr's label under `observed`, with its source. Record worker claims as
 claims there too. Neither is the foreman's `decision`. `found: true` confirms report
@@ -69,33 +56,33 @@ into a working or blocked worker.
 ## Blank Document and Event
 
 Fill this as a reasoning document; placeholder values are not evidence.
-Append one uniquely named event section per decision. For task events use
-`not_applicable` for `dispatch_id`, `worker` and `role`; `report` stays an
-absolute path or `unknown`. Use `unknown` for unavailable evidence.
+Append one uniquely named event section per decision. Each placeholder names
+the `skills/herdr-foreman/foreman/members.py` constant that fixes its format;
+write the constant's value, never its name.
 
 ```markdown
 ---
-schema_version: 1
+schema_version: <LEDGER_SCHEMA_VERSION>
 task: <stable task identifier>
-base_revision: <full original SHA>
-dispatch_state: <absolute utility state.json path>
+base_revision: <original commit, matching LEDGER_SHA>
+dispatch_state: <absolute path of the utility state.json>
 ---
 
 # Task Ledger
 
 ## <unique event id>
 
-- schema_version: 1
+- schema_version: <LEDGER_SCHEMA_VERSION>
 - id: <same unique event id>
-- at: <timezone-qualified observation time>
-- subject: <assignment or task>
-- dispatch_id: <actual dispatch id or not_applicable>
-- worker: <worker name or not_applicable>
-- role: <role or not_applicable>
-- report: <absolute path or unknown>
+- at: <observation time, timezone-qualified>
+- subject: <one of SUBJECTS>
+- dispatch_id: <actual dispatch id, or NOT_APPLICABLE per ASSIGNMENT_IDENTITY>
+- worker: <worker name, or NOT_APPLICABLE per ASSIGNMENT_IDENTITY>
+- role: <role, or NOT_APPLICABLE per ASSIGNMENT_IDENTITY>
+- report: <absolute path, or one of REPORT_PLACEHOLDERS>
 - observed: <source and its actual observation>
-- decision: <foreman assessment from the table>
-- head_revision: <full inspected SHA, unknown, or not_applicable>
-- evidence: <paths/content/digests, refs, gate URLs/results, or unknown>
+- decision: <one of DECISION_MEANINGS[subject]>
+- head_revision: <inspected commit matching LEDGER_SHA, or one of HEAD_PLACEHOLDERS>
+- evidence: <paths/content/digests, refs, gate URLs/results, or UNKNOWN>
 - assessment: <reason, remaining criteria, next action>
 ```

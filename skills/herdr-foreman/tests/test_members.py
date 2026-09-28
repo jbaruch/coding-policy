@@ -356,5 +356,56 @@ class CheckMemberCliTest(MembersCase):
         self.assertIn("agent not found", err)
 
 
+class LedgerDocsPointAtTheConstants(unittest.TestCase):
+    """The ledger docs name members.py's format constants and restate none of them (#589)."""
+
+    SKILL = Path(_ROOT)
+    # All-caps prose words the docs use that are not constants.
+    ACRONYMS = {"API", "BLOCKED", "JSON", "SHA", "VCS"}
+    CONSTANT = re.compile(r"(?<![\w.-])([A-Z][A-Z_]{2,})(?![\w.-])")
+
+    def docs(self):
+        schema = (self.SKILL / "state-schema.md").read_text(encoding="utf-8")
+        schema = schema[schema.index("## Task Ledger"):schema.index("\n## ", schema.index("## Task Ledger") + 1)]
+        return {"state-schema.md": schema,
+                "references/task-ledger.md": (self.SKILL / "references" / "task-ledger.md").read_text(encoding="utf-8")}
+
+    def test_every_constant_the_docs_name_exists(self):
+        for name, text in self.docs().items():
+            cited = set(self.CONSTANT.findall(text)) - self.ACRONYMS
+            with self.subTest(doc=name):
+                self.assertTrue(cited)
+                self.assertEqual(sorted(c for c in cited if not hasattr(members, c)), [])
+
+    def test_the_template_carries_exactly_the_schema_fields(self):
+        text = self.docs()["references/task-ledger.md"]
+        template = text[text.index("```markdown"):]
+        match = re.search(r"^---\n(.*?)\n---$", template, re.M | re.S)
+        assert match is not None, "the blank template lost its frontmatter"
+        front = match.group(1)
+        self.assertEqual(tuple(line.split(":")[0] for line in front.splitlines()), members.FRONT_FIELDS)
+        self.assertEqual(tuple(re.findall(r"^- ([a-z_]+): ", template, re.M)), members.EVENT_FIELDS)
+
+    def test_the_schema_table_covers_exactly_the_event_fields(self):
+        rows = re.findall(r"^\| (`[a-z_]+`(?:, `[a-z_]+`)*) \|", self.docs()["state-schema.md"], re.M)
+        fields = [field for row in rows for field in re.findall(r"`([a-z_]+)`", row)]
+        self.assertEqual(sorted(fields), sorted(members.EVENT_FIELDS))
+
+    def test_no_doc_line_restates_a_vocabulary(self):
+        literals = set().union(*members.DECISIONS.values())
+        # Narrative may use one decision by name; a vocabulary table or list names several.
+        for name, text in self.docs().items():
+            with self.subTest(doc=name):
+                self.assertLess(len({v for v in literals if "`{}`".format(v) in text}), 2)
+
+    def test_the_constants_agree_with_each_other(self):
+        self.assertLessEqual(members.ASSESSED, members.DECISIONS["assignment"])
+        self.assertEqual(set(members.SUBJECTS), set(members.DECISIONS))
+        self.assertLessEqual(set(members.FREE_TEXT_FIELDS) | set(members.ASSIGNMENT_IDENTITY),
+                             set(members.EVENT_FIELDS))
+        self.assertLessEqual(members.REPORT_PLACEHOLDERS | members.HEAD_PLACEHOLDERS,
+                             {members.UNKNOWN, members.NOT_APPLICABLE})
+
+
 if __name__ == "__main__":
     unittest.main()

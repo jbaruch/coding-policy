@@ -489,6 +489,37 @@ class NativeDeliveryTests(unittest.TestCase):
         self.assertEqual(cli.main(args, stdout=io.StringIO(), stderr=io.StringIO()), 1)
         self.assertEqual(ledger_path.read_bytes(), before_replay)
 
+    def test_the_prompt_hash_is_checked_against_the_receipted_brief(self):
+        # coding-policy#565: the brief's receipt and the prompt-hash check read
+        # one set of bytes. A brief swapped back to the dispatched bytes
+        # between the two reads would otherwise record a receipt for bytes the
+        # hash never checked.
+        from foreman.assign import tiered_prompt
+        document, data = self.recovery_fixture()
+        dispatch = document["recovery"]["dispatches"][0]
+        tier = {"model": "fixture-model", "effort": "high"}
+        prompt, prompt_hash = tiered_prompt(assignment_text("judge", dispatch["common"], dispatch["brief"]),
+                                            tier, dispatch["common"], dispatch["brief"])
+        dispatch["result"]["tier"] = {**tier, "prompt_hash": prompt_hash}
+        rows = [json.loads(line) for line in Path(data["source"]).read_text().splitlines()]
+        rows[2]["payload"]["content"][0]["text"] = prompt
+        Path(data["source"]).write_text(encode(rows))
+        delivery.recover(copy.deepcopy(document["recovery"]), copy.deepcopy(document["assignments"]), data, AT)
+        brief = Path(dispatch["brief"])
+        dispatched = brief.read_bytes()
+        brief.write_bytes(b"Reworded after the dispatch.\n" + self.marker.encode("utf-8") + b"\n")
+        real_receipt = recovery.receipt
+
+        def receipt_then_restore(path):
+            result = real_receipt(path)
+            if path == dispatch["brief"]:
+                brief.write_bytes(dispatched)
+            return result
+        with patch.object(recovery, "receipt", side_effect=receipt_then_restore):
+            with self.assertRaisesRegex(UsageError, "differ from the dispatch's recorded prompt hash"):
+                delivery.recover(document["recovery"], document["assignments"], data, AT)
+        self.assertEqual(document["recovery"]["delivery_recoveries"], [])
+
     def metadata_recovery_fixture(self):
         document, data = self.recovery_fixture()
         rows = [json.loads(line) for line in Path(data["source"]).read_text().splitlines()]

@@ -49,8 +49,8 @@ from .measure import (
 )
 from .planner import plan as build_plan
 from .planner import headroom_of
-from .tiers import JUDGMENT_ROUNDS, ROLE_ROUNDS, MissingTierError, parse_launch_args, parse_tiers, select_tier
-from .billing import effective_multiplier
+from .tiers import JUDGMENT_ROUNDS, MissingTierError, parse_launch_args, parse_tiers, select_tier
+from . import cost_report, selection
 from .launch import start_worker, verify_running
 from .state import (
     add_assignment,
@@ -410,6 +410,9 @@ def build_parser():
     check_member.add_argument("--worktree", help="The worker's own checkout, when it has one.")
     sub.add_parser("migrate-home", parents=[common], help="Move the state and config homes from teamlead to foreman, once per machine, with every foreman stopped.")
     sub.add_parser("foreman-queue", parents=[common], help="List open tasks waiting for their next seat, oldest first, derived from the owner records.")
+    cost_parser = sub.add_parser("cost-report", parents=[common],
+                                 help="Report each task's resource use through acceptance from the owner records. Read-only.")
+    cost_parser.add_argument("--task", help="Report this task alone.")
     load_parser = sub.add_parser("load-set", parents=[common], help="List the durable records one foreman decision must load, derived from the owner records.")
     load_parser.add_argument("--decision", required=True, choices=load_set.DECISIONS)
     load_target = load_parser.add_mutually_exclusive_group(required=True)
@@ -644,28 +647,6 @@ def _build_plan_with_refusals(build, refusals, *args, **kwargs):
 PLAN_ONLY_TIER_FIELDS = frozenset({"capability", "cheaper_adequate"})
 
 
-def _cheaper_adequate(agent, role, tier, needs, table):
-    """A configured row cheaper than `tier` that the table records adequate for the same needs, or None.
-
-    Recorded, never selected: the operator owns the table and the config, and
-    this only explains why a cheaper candidate was not used (#520).
-    """
-    cost = tier["effective_multiplier"]
-    allowed = ROLE_ROUNDS.get(canonical_role(role), frozenset())
-    for name, row in sorted(agent.tiers.items()):
-        if name not in allowed:
-            # A row this role can never run explains nothing about its choice.
-            continue
-        if (row["model"], row.get("effort")) == (tier["model"], tier.get("effort")) or effective_multiplier(row) >= cost:
-            continue
-        try:
-            if capabilities.assess(table, row["model"], row.get("effort"), needs) == "adequate":
-                return {"model": row["model"], "effort": row.get("effort"), "tier_row": name,
-                        "sources": capabilities.evidence(table, row["model"], row.get("effort"), needs)}
-        except capabilities.InadequateCapability:
-            continue
-    return None
-
 
 def _candidate_tiers(roles, agents, rounds, fix_round=None, judge=None, excludes=None, headroom=None, table=None, refusals=None):
     """Each role's candidate tiers; `refusals` collects a capability refusal per skipped candidate."""
@@ -721,7 +702,7 @@ def _candidate_tiers(roles, agents, rounds, fix_round=None, judge=None, excludes
             )}
             candidates[role][agent.name].update(
                 capability=verdict,
-                cheaper_adequate=_cheaper_adequate(agent, role, tier, needs, table))
+                cheaper_adequate=selection.cheaper_adequate(agent, role, tier, needs, table))
     return candidates
 
 
@@ -969,9 +950,10 @@ def cmd_plan(args, client=None, warn=None, trace=None):
     # what keeps its recomputed tiers equal to the planned ones (#477).
     measured_headroom = _snapshot_headroom(snapshot)
     capability_refusals = []
+    table = capabilities.load(_state_path(args))
     tier_candidates = _candidate_tiers(canonical, agents, rounds, args.fix_round, judge,
                                       excludes={role: names for role, names in excludes.items() if role in set(canonical)},
-                                      headroom=measured_headroom, table=capabilities.load(_state_path(args)),
+                                      headroom=measured_headroom, table=table,
                                       refusals=capability_refusals)
     constraints = {**constraints, "rationale": constraints["rationale"] + [
         "{} was not considered for {}: {}".format(row["agent"], row["role"], row["message"]) for row in capability_refusals]}
@@ -1015,6 +997,11 @@ def cmd_plan(args, client=None, warn=None, trace=None):
         )
     result["task_context"] = ({"task": args.task, "fix_round": args.fix_round,
                                "plan": args.correction_plan, "work": work} if args.task else None)
+    # Why each seat got its model and effort, from the same tiers, table and
+    # round inputs the selection read; explanation only, never re-read at apply (#602).
+    result["selection"] = selection.records(
+        result["assignments"], result.get("tiers"), {agent.name: agent for agent in agents},
+        requirements, rounds, args.fix_round, table)
     # A patch or fixture oracle is a path; pin the bytes behind it now, so
     # `verify-oracle` checks the round against the file it was licensed on (#488).
     pins = oracle.pin_oracles(result.get("rounds"))
@@ -1038,20 +1025,20 @@ def cmd_plan(args, client=None, warn=None, trace=None):
     return result, None
 
 
-def _refusal_moves(store, agents_by_name, assignments, roles, args, paths, reports):
+def _refusal_moves(store, agents_by_name, assignments, roles, args, paths, reports, contents=None):
     """Return the refusal move each fresh role carries; see recovery.refusal_move."""
     moves = {}
     for role in roles:
         name = assignments[role]
         if name in agents_by_name:
             move = recovery.refusal_move(store, args.task, role, args.fix_round, agents_by_name[name].kind,
-                                         recovery.brief_identity(paths, role, reports.get(role)), reports.get(role))
+                                         recovery.brief_identity(paths, role, reports.get(role), contents), reports.get(role))
             if move is not None:
                 moves[role] = move
     return moves
 
 
-def _require_bound_slices(document, seated, briefs, bodies=None):
+def _require_bound_slices(document, seated, briefs, bodies=None, contents=None):
     """Refuse a seated dispatch whose boundary is not the one that was checked.
 
     `plan` stamps `slice_digest` over the map `validate-partition` accepted and
@@ -1124,8 +1111,10 @@ def _require_bound_slices(document, seated, briefs, bodies=None):
                 {"role": role})
         brief = briefs.get(role)
         try:
-            # `bodies` carries text already read and verified from a frozen copy.
-            body = bodies[role] if bodies is not None else (Path(brief).read_text(encoding="utf-8") if brief else "")
+            # `bodies` carries text already read and verified from a frozen
+            # copy; `contents` the bytes the dispatch's freeze verified (#565).
+            body = (bodies[role] if bodies is not None
+                    else recovery.briefing_bytes(brief, contents).decode("utf-8") if brief else "")
         except (OSError, UnicodeError) as exc:
             raise UsageError(
                 "Cannot read the brief for seat {!r} at {}: {}. Restore a readable UTF-8 brief "
@@ -1202,13 +1191,28 @@ def cmd_apply(args, client=None, warn=None, trace=None):
         judge_mode = recovery.require_judge_mode(
             _judge_mode_for(args, document if isinstance(document, dict) else None))
 
+    # The oracle each mechanical round is licensed on, pin included, bound into
+    # its dispatch: `verify-oracle` reads it back from the ledger, never from
+    # the mutable plan alone (#585).
+    oracles = oracle.dispatch_oracles(document, list(assignments)) if "assignments" in document else {}
+
     def options_for(role):
         options = {**task_context, "rounds": rounds, "retain_context": args.retain_context, "no_clear": args.no_clear}
         if requirements:
             options["requirements"] = requirements
         if args.retain_specialist:
             options["retain_specialist"] = True
+        # The rounds already carry the oracle's kind, path or value; the pin is
+        # the one input they lack. Absent on every other round, so their
+        # identities are unchanged.
+        if "sha256" in oracles.get(role, {}):
+            options["oracle_pin"] = oracles[role]["sha256"]
         return options
+
+    # The bytes each frozen copy was verified to hold, once the freeze below
+    # runs: every later read of a frozen path takes these, never the path
+    # again, so an ancestor swapped after the freeze changes nothing sent (#565).
+    contents = None
 
     def identity(role, name, paths_now):
         """The dispatch identity these inputs resolve to: its id and fingerprint."""
@@ -1216,7 +1220,7 @@ def cmd_apply(args, client=None, warn=None, trace=None):
         if canonical_role(role) == "judge":
             options["judge_mode"] = judge_mode
         identifier, fingerprint = recovery.dispatch_identity(
-            args.task, role, name, args.fix_round, paths_now, args.dispatch_id, options=options)
+            args.task, role, name, args.fix_round, paths_now, args.dispatch_id, options=options, contents=contents)
         if supervised:
             # Keep legacy retry IDs, while new bound dispatch fingerprints
             # also bind the explicit report path. Existing legacy receipts
@@ -1235,7 +1239,7 @@ def cmd_apply(args, client=None, warn=None, trace=None):
         if canonical_role(role) != "judge":
             return set()
         _legacy_id, legacy = recovery.dispatch_identity(
-            args.task, role, name, args.fix_round, paths_now, None, options=options_for(role))
+            args.task, role, name, args.fix_round, paths_now, None, options=options_for(role), contents=contents)
         return {legacy, supervision.report_bound_fingerprint(legacy, reports[role])} if role in reports else {legacy}
 
     # A new dispatch reads frozen copies everywhere: every check below, its
@@ -1254,12 +1258,13 @@ def cmd_apply(args, client=None, warn=None, trace=None):
     decision = "frozen" if args.dry_run or not args.task else freeze_decision(assignments, is_replay)
     if decision == "frozen" and not args.dry_run:
         paths = freeze_paths(paths)
+        contents = paths.contents
     if seated or any(key in document for key in ("slice_paths", "slice_digest", "seat_digests")):
         # Keyed on the metadata, not only on the seats: a saved plan stripped
         # of every seat would otherwise skip the check entirely and dispatch a
         # full-surface role while still carrying the boundary it was planned
         # against. After the briefs resolve, since the check reads each brief.
-        _require_bound_slices(document, seated, paths)
+        _require_bound_slices(document, seated, paths, contents=contents)
     replayed = []
     dispatches = {}
     # Check retry identities before next-attempt validation: a completed retry
@@ -1299,7 +1304,7 @@ def cmd_apply(args, client=None, warn=None, trace=None):
             # writes nothing. A batch of replays alone returns its saved
             # receipts unconsulted.
             attention.require_dispatch_clear(state_path, args.task, at)
-            moves = _refusal_moves(store, agents_by_name, assignments, fresh, args, paths, reports)
+            moves = _refusal_moves(store, agents_by_name, assignments, fresh, args, paths, reports, contents)
         for role, name, identifier, fingerprint, prior in resolved:
             if supervised:
                 saved_result = prior["result"] if prior and prior["status"] == "applied" else {}
@@ -1312,7 +1317,7 @@ def cmd_apply(args, client=None, warn=None, trace=None):
                 dispatches[role] = {"id": identifier, "fingerprint": fingerprint, "role": role, "agent": name,
                                     "task": args.task, "fix_round": args.fix_round,
                                     "plan": args.correction_plan, "work": work,
-                                    "brief_identity": recovery.brief_identity(paths, role, reports.get(role)),
+                                    "brief_identity": recovery.brief_identity(paths, role, reports.get(role), contents),
                                     "provider": agents_by_name[name].kind}
                 if role in moves:
                     dispatches[role]["refusal_move"] = moves[role]
@@ -1320,6 +1325,8 @@ def cmd_apply(args, client=None, warn=None, trace=None):
                     dispatches[role]["requirements"] = requirements[role]
                 if canonical_role(role) == "judge":
                     dispatches[role]["judge_mode"] = judge_mode
+                if role in oracles:
+                    dispatches[role]["oracle"] = oracles[role]
                 if canonical_role(role) == "reviewer":
                     dispatches[role]["reviewer_scope"] = "design" if rounds.get(role, {}).get("type") in {"architect", "reconciliation"} else "verification"
         if len(replayed) == len(assignments):
@@ -1488,6 +1495,7 @@ def cmd_apply(args, client=None, warn=None, trace=None):
             tiers=tiers,
             reserved=reserved,
             reports=reports,
+            contents=contents,
             retrospective_guard=retrospective_runtime.Guard(state_path, state, client, agents_by_name, at,
                                                           task=args.task, retain=args.retain_context or args.retain_specialist, no_clear=args.no_clear),
         )
@@ -1705,6 +1713,17 @@ def cmd_foreman_queue(args, client=None, warn=None, trace=None):
                          {"path": str(state_path)})
     busy = {row["assignment"]["task"] for row in supervision.load(state_path)["members"] if row["active"]}
     return foreman_queue.waiting(state["recovery"], state["assignments"], busy), None
+
+
+def cmd_cost_report(args, client=None, warn=None, trace=None):
+    state_path = _state_path(args)
+    # An unusable ledger is not an empty one: reporting no tasks would read as
+    # no resource spent.
+    state, usable = load_state_checked(state_path, warn=warn, persist_migration=False)
+    if not usable:
+        raise StateError("State file {} is unusable, so no task's resource use can be derived; repair or migrate it with `{}` first.".format(
+            state_path, runnable.command("state")), {"path": str(state_path)})
+    return cost_report.report(state, args.task), None
 
 
 def cmd_load_set(args, client=None, warn=None, trace=None):
@@ -2115,7 +2134,12 @@ def cmd_validate_partition(args, client=None, warn=None, trace=None):
 
 
 def cmd_verify_oracle(args, client=None, warn=None, trace=None):
-    return oracle.run_command(args)
+    """The oracle gate for a mechanical round, against the oracle its dispatch bound (#585)."""
+    state, usable = load_state_checked(_state_path(args), warn, persist_migration=False)
+    if not usable:
+        raise StateError("The dispatch state is unusable, so the oracle the round was sent with cannot be read; "
+                         "restore it before verifying.", {})
+    return oracle.run_command(args, state["recovery"]["dispatches"])
 
 
 def cmd_probe_report(args, client=None, warn=None, trace=None):
@@ -2174,6 +2198,7 @@ COMMANDS = {
     "state": cmd_state,
     "status": cmd_status,
     "foreman-queue": cmd_foreman_queue,
+    "cost-report": cmd_cost_report,
     "foreman-reset": cmd_foreman_reset,
     "foreman-reset-deliver": cmd_foreman_reset_deliver,
     "foreman-reset-reconcile": cmd_foreman_reset_reconcile,
@@ -2242,7 +2267,7 @@ def main(argv=None, stdout=None, stderr=None, client=None):
             home.require_current(defaults)
             # Commands that may migrate or write state share its canonical lock.
             # Dry runs, probes, and retrospective reads remain read-only.
-            readonly = args.command in {"probe-report", "marker-fit", "detect-triggers", "validate-partition", "verify-oracle", "retro-check", "retro-list", "retro-show", "capability-check", "capability-show", "supervision-gate", "load-set", "foreman-queue", "check-member"} or getattr(args, "dry_run", False)
+            readonly = args.command in {"probe-report", "marker-fit", "detect-triggers", "validate-partition", "verify-oracle", "retro-check", "retro-list", "retro-show", "capability-check", "capability-show", "supervision-gate", "load-set", "foreman-queue", "cost-report", "check-member"} or getattr(args, "dry_run", False)
             # The deliverer starts while `foreman-reset` still holds the state lock;
             # it serializes on the reset record's own lock instead. close-member
             # writes only through the supervision owner's own lock.
