@@ -224,7 +224,7 @@ literal, never a guess:
 | Field | Meaning |
 | --- | --- |
 | `schema_version` | `LEDGER_SCHEMA_VERSION` on every event |
-| `id`, `at` | Unique event identity and observation time |
+| `id`, `at` | Unique event identity and observation time, in the timezone-qualified form `chronology.timestamp` accepts |
 | `subject` | Whether the event judges the whole task or one assignment |
 | `dispatch_id`, `worker`, `role` | Actual utility dispatch identity and assigned worker/role; `ASSIGNMENT_IDENTITY` governs task events |
 | `report` | Report path, or a `REPORT_PLACEHOLDERS` literal before it is known |
