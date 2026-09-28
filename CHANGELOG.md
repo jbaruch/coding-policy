@@ -7,8 +7,11 @@
   top-level directory of a `go-mod-cache` counted as cache, so a
   `findings/report.md` left beside it was deleted, breaking the
   "non-cache content is kept" contract. Only `cache/` and module path roots
-  (a host with a dot, or a `name@version` entry) now qualify; any other
-  top-level entry leaves the whole directory in place. A recorded reports
+  the download cache backs now qualify: a dotted host with
+  `cache/download/<host>/`, or a `<module>@<version>` entry with
+  `cache/download/<module>/@v/`. A name that merely contains a dot or an `@`
+  (`findings.v1/`, `report@draft/`) is not enough; any other top-level entry
+  leaves the whole directory in place. A recorded reports
   directory that is a regular file (`ENOTDIR`) is now counted `missing`
   instead of `symlink`, which stays for `ELOOP`. The two swap-race findings
   from #624's review were declined: more descriptor hardening is not the

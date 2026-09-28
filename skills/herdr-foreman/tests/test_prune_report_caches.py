@@ -46,8 +46,9 @@ Covers:
  21. Store breaks mid-run-> a supervision store unreadable at removal time
                             stops the run as could_not_check, exit 3.
  22. Evidence beside a module cache -> a `go-mod-cache` holding
-                            `cache/download` and a `findings/` directory stays
-                            whole; a genuine module-cache layout goes.
+                            `cache/download` and an evidence directory
+                            (`findings/`, `findings.v1/`, `report@draft/`)
+                            stays whole; a genuine module-cache layout goes.
  23. Recorded file       -> a recorded reports directory that is a regular
                             file is counted missing, never a symlink.
 """
@@ -318,11 +319,15 @@ class PruneReportCachesTests(unittest.TestCase):
 
     def test_module_cache_with_evidence_directory_stays_whole(self):
         top = self.fx.reports(caches=())
-        mixed = top / "mixed" / "go-mod-cache"
-        write(mixed / "cache" / "download" / "golang.org" / "x" / "list")
-        write(mixed / "findings" / "report.md", "evidence")
+        evidence = ("findings", "findings.v1", "report@draft")
+        mixed = {}
+        for name in evidence:
+            mixed[name] = top / "mixed" / name / "go-mod-cache"
+            write(mixed[name] / "cache" / "download" / "golang.org" / "x" / "list")
+            write(mixed[name] / name / "report.md", "evidence")
         genuine = top / "developer-evidence" / "go-mod-cache"
-        write(genuine / "cache" / "download" / "golang.org" / "x" / "list")
+        write(genuine / "cache" / "download" / "golang.org" / "x" / "mod" / "@v" / "v0.1.0.zip")
+        write(genuine / "cache" / "download" / "dotless" / "@v" / "v1.2.3.zip")
         write(genuine / "golang.org" / "x" / "mod@v0.1.0" / "go.mod")
         write(genuine / "dotless@v1.2.3" / "go.mod")
         self.fx.save()
@@ -331,8 +336,9 @@ class PruneReportCachesTests(unittest.TestCase):
         self.assertEqual(rc, 0, err)
         self.assertEqual([(c["path"], c["kind"]) for c in doc["caches"]], [(str(genuine), "go-module-cache")])
         self.assertFalse(os.path.lexists(genuine))
-        self.assertTrue((mixed / "findings" / "report.md").is_file())
-        self.assertTrue((mixed / "cache" / "download" / "golang.org" / "x" / "list").is_file())
+        for name, path in mixed.items():
+            self.assertTrue((path / name / "report.md").is_file(), name)
+            self.assertTrue((path / "cache" / "download" / "golang.org" / "x" / "list").is_file(), name)
 
     def test_read_only_module_cache_is_removed(self):
         top = self.fx.reports(caches=("go-module-cache",))

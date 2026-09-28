@@ -223,23 +223,42 @@ def _go_build(fd):
             and _only(fd, files=GO_BUILD_FILES, dir_name=lambda name: len(name) == 2 and set(name) <= HEX))
 
 
-def _go_module_root(name):
-    """Whether top-level directory `name` is a module path root: a host (a
-    dot anywhere but the first character, `golang.org`) or a dotless module
-    at a version (`name@version`)."""
-    return not name.startswith(".") and ("." in name or "@" in name)
+def _go_module_root(download_fd, name):
+    """Whether top-level directory `name` is a module path root the download
+    cache backs: a host (a dot anywhere but the first character,
+    `golang.org`) with `cache/download/<name>/` present, or a dotless module
+    at a version (`<module>@<version>`) with `cache/download/<module>/@v/`
+    present."""
+    if name.startswith("."):
+        return False
+    if "@" in name:
+        module = name.split("@", 1)[0]
+        if not module or not _is_dir_at(download_fd, module):
+            return False
+        module_fd = open_at(download_fd, module)
+        try:
+            return _is_dir_at(module_fd, "@v")
+        finally:
+            os.close(module_fd)
+    return "." in name and _is_dir_at(download_fd, name)
 
 
 def _go_module(fd):
     """`cache/download` exists, and every other top-level entry is the
-    `cache` directory or a directory `_go_module_root` accepts. A file, or a
-    directory with any other name (`findings/`), leaves the whole directory
-    in place."""
+    `cache` directory or a directory `_go_module_root` accepts. A file, or
+    any other directory (`findings/`, `findings.v1/`, `report@draft/`),
+    leaves the whole directory in place."""
     if not _is_dir_at(fd, "cache"):
         return False
     cache = open_at(fd, "cache")
     try:
-        return _is_dir_at(cache, "download") and _only(fd, dirs=GO_MODULE_DIRS, dir_name=_go_module_root)
+        if not _is_dir_at(cache, "download"):
+            return False
+        download = open_at(cache, "download")
+        try:
+            return _only(fd, dirs=GO_MODULE_DIRS, dir_name=lambda name: _go_module_root(download, name))
+        finally:
+            os.close(download)
     finally:
         os.close(cache)
 
