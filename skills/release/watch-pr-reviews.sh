@@ -25,7 +25,11 @@
 #                                      the policy reviewer is not
 #                                      CHANGES_REQUESTED. Copilot may be
 #                                      CHANGES_REQUESTED and this still reaches
-#                                      ready (Copilot is always advisory).
+#                                      ready (Copilot is always advisory). A
+#                                      policy state of RULED (dismissed by
+#                                      dismiss-ruled-review.sh, see
+#                                      poll-pr-reviews.sh) counts as posted
+#                                      and not CHANGES_REQUESTED.
 #   rc 0, result "changes_requested" — the policy reviewer's latest verdict is
 #                                      CHANGES_REQUESTED (a blocking finding is
 #                                      present — advisory-only reviews post

@@ -28,6 +28,22 @@ alwaysApply: true
 - A hand dismissal meeting both preconditions is equally sanctioned — merging after it is not a `Never Skip Tests` violation; the gate was satisfied and cleaned up, not skipped
 - Every other dismissal still gates: a bot `CHANGES_REQUESTED` no all-clear superseded, or any human reviewer's change request, blocks the merge until resolved through review
 
+## Judge-Ruled-Review Dismissal Carve-Out
+
+- Narrow exception for dismissing the policy reviewer's latest `CHANGES_REQUESTED` on the PR head
+- Applies when a weighing ruling rules every blocking finding in that review `defer` or `decline` under `rules/review-severity.md` Judge-Weighed Finding Carve-Out
+- Preconditions (all required):
+  1. The dismissal runs through `skills/release/dismiss-ruled-review.sh` — coverage predicate and rule-id floors in its header
+  2. No check on the head is failing
+  3. The script posted the ruled findings to the task's follow-up issue before dismissing
+  4. The dismissal message carries the script's `JUDGE-RULED:` marker
+- A hand dismissal of a gating policy review is not sanctioned
+- A hand dismissal carrying the marker violates this carve-out
+- The release scripts trust the marker and never detect a hand-written one
+- After a ruled dismissal, `skills/release/dismiss-stale-reviews.sh` sweeps the same policy identity's earlier `CHANGES_REQUESTED` reviews, the fleet reviewer included
+- Merging after a ruled dismissal is not a `Never Skip Tests` violation
+- Every other policy-review `CHANGES_REQUESTED` blocks the merge until resolved through review
+
 ## Publish-Pipeline Loop-Prevention Carve-Out
 
 - Narrow exception for `[skip ci]` on a commit the publish workflow pushes to the protected branch

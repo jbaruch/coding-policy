@@ -16,7 +16,7 @@
 #     "head_sha": "<PR head commit SHA>",
 #     "ci":   {"status": "pending|success|failure|none", "checks": [...]},
 #     "reviews": {
-#       "codex":   {"state": "APPROVED|CHANGES_REQUESTED|COMMENTED|none",
+#       "codex":   {"state": "APPROVED|CHANGES_REQUESTED|COMMENTED|RULED|none",
 #                   "submitted_at": "ISO-8601|null", "body": "text|null",
 #                   "commit_id": "<SHA the review is bound to>|null",
 #                   "stale": bool, "requested": bool},
@@ -40,6 +40,16 @@
 # none, stale true). Binding both symptoms to head fixes them together: a
 # stale CHANGES_REQUESTED no longer false-reds a fix no reviewer has seen, and
 # a stale COMMENTED/APPROVED no longer false-readies unreviewed code (#186).
+#
+# `RULED` (policy reviewer only): the latest policy review is on the head and
+# was dismissed by skills/release/dismiss-ruled-review.sh — its dismissal
+# message starts with RULED_MARKER, meaning a weighing ruling covers every
+# blocking finding in it (rules/ci-safety.md Judge-Ruled-Review Dismissal
+# Carve-Out). Any other dismissal reads "none".
+# `RULED` trusts the `JUDGE-RULED:` dismissal message and never detects a
+# hand-written one; only dismiss-ruled-review.sh is sanctioned to write it, and
+# a hand dismissal carrying the marker violates rules/ci-safety.md
+# Judge-Ruled-Review Dismissal Carve-Out.
 #
 # `requested` reports exactly one fact: a review request for that login is still
 # pending on the PR. It separates two states a bare `state: "none"` conflates
@@ -161,9 +171,37 @@ latest_review_by() {
         # dismissed/pending review satisfy the ready gate. Collapse anything
         # outside {APPROVED, CHANGES_REQUESTED, COMMENTED} to "none" (absent),
         # keeping submitted_at/body/commit_id visible for diagnosis.
+        # A DISMISSED latest keeps its id under `_dismissed_review_id` so
+        # resolve_ruled_dismissal can read its dismissal message; main strips
+        # the field before output.
         | if . == null then {state: "none", submitted_at: null, body: null, commit_id: null}
           else {state: (if (.state | IN("APPROVED", "CHANGES_REQUESTED", "COMMENTED")) then .state else "none" end),
-                submitted_at, body, commit_id} end'
+                submitted_at, body, commit_id}
+               + (if .state == "DISMISSED" then {_dismissed_review_id: .id} else {} end) end'
+}
+
+# A policy review dismissed through dismiss-ruled-review.sh reads RULED: its
+# `review_dismissed` timeline event carries a message starting RULED_MARKER.
+# Any other dismissal stays "none". Head binding is resolve_review_against_head's
+# job — a RULED review on an older commit collapses to "none" there.
+# skills/release/tests/test_dismiss_ruled_review.sh feeds the message
+# dismiss-ruled-review.sh sends through this resolver end to end.
+RULED_MARKER="JUDGE-RULED:"
+
+resolve_ruled_dismissal() {
+  local owner="$1" repo="$2" pr="$3" review="$4" review_id
+  review_id=$(printf '%s' "$review" | jq -r '._dismissed_review_id // empty')
+  if [[ -z "$review_id" ]]; then
+    printf '%s' "$review" | jq 'del(._dismissed_review_id)'
+    return 0
+  fi
+  slurp_api_array "repos/${owner}/${repo}/issues/${pr}/timeline?per_page=100" "timeline event" \
+    | jq --argjson review "$review" --argjson id "$review_id" --arg marker "$RULED_MARKER" '
+        [.[] | select(.event == "review_dismissed")
+             | select(.dismissed_review.review_id == $id)
+             | (.dismissed_review.dismissal_message // "")]
+        | (if any(.[]; startswith($marker)) then ($review | .state = "RULED") else $review end)
+        | del(._dismissed_review_id)'
 }
 
 # Resolve a latest_review_by result against the PR head SHA. A review's verdict
@@ -321,6 +359,10 @@ main() {
     || { echo "error: failed to fetch Codex review state" >&2; exit 1; }
   copilot_review=$(latest_review_by "$owner" "$repo" "$pr_number" "$COPILOT_REVIEW_LOGIN") \
     || { echo "error: failed to fetch Copilot review state" >&2; exit 1; }
+  # Only the policy reviewer's review is ever ruled-dismissed.
+  codex_review=$(resolve_ruled_dismissal "$owner" "$repo" "$pr_number" "$codex_review") \
+    || { echo "error: failed to read the dismissal of the policy review on ${owner}/${repo}#${pr_number} — inspect 'gh api --paginate repos/${owner}/${repo}/issues/${pr_number}/timeline', then retry" >&2; exit 1; }
+  copilot_review=$(printf '%s' "$copilot_review" | jq 'del(._dismissed_review_id)')
   # Resolve each verdict against head — stale reviews collapse to "none".
   codex_review=$(resolve_review_against_head   "$codex_review"   "$head_sha")
   copilot_review=$(resolve_review_against_head "$copilot_review" "$head_sha")

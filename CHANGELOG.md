@@ -1,5 +1,60 @@
 # Changelog
 
+### Added
+
+- **The operator can weigh a marginal blocking finding, and the ruling clears
+  the gating policy review (Part of #632, PR A of 2: release side, standalone
+  only).** Blocking findings whose fix costs more than the failure they
+  prevent had no exit short of a `stop` diagnosis. #616 spent 12 fix rounds,
+  and #624 and #627/#617 churned on marginal findings the previous fix round
+  had itself introduced. The reviewer kept finding something one line deeper,
+  and every round was a full re-review.
+  - `rules/review-severity.md` gains the Judge-Weighed Finding Carve-Out, in
+    standalone mode only; PR B adds the Herdr judge seat. The agent nominates
+    a finding on lines the previous fix push added, or one it backs with a
+    cited reachability claim, in one non-blocking question per gate. It keeps
+    fixing meanwhile, and no answer means `fix`. The operator's verbatim
+    answer becomes the ruling file. A `defer` or `decline` ruling lets the
+    finding ship only while its file is unchanged from the ruling's `HEAD:`,
+    under no floor, and entered in the task's follow-up issue, `decline`
+    labelled won't-fix, so no outcome goes untracked. The operator rules
+    `fix` on every floor; the script refuses the rule-id floors and failing
+    checks, and classifies no judgment floor.
+  - `rules/ci-safety.md` gains the Judge-Ruled-Review Dismissal Carve-Out:
+    the policy reviewer's latest `CHANGES_REQUESTED` on the head is dismissed
+    only through `skills/release/dismiss-ruled-review.sh`, never by hand, and
+    the stale sweep then clears that identity's earlier requests, the fleet
+    reviewer included.
+  - New `skills/release/dismiss-ruled-review.sh`. The ruling file is a
+    versioned artifact (`schema_version: 1`, owned by the release skill, read only by
+    this script), and a ruling without a non-empty `ANSWER:` line is refused.
+    FINDING lines pair one-to-one with the review's blocking findings on path,
+    line and rule; duplicate and unmatched lines are refused. A ruling carries
+    to a later head only while the path is unchanged per the compare API. The
+    script posts the ruled findings to the follow-up issue itself
+    (`--followup-issue`), reusing only a comment identical to the generated
+    entry, and dismisses only after that post, with a `JUDGE-RULED:` message.
+    The follow-up entry exists by construction, never by an unverified URL.
+    A review carrying two blocking findings with the same path, line and rule
+    is refused, since no ruling line could pair with each. Without `--ruling`
+    it lists the findings to weigh.
+  - `RULED` trusts the `JUDGE-RULED:` dismissal-message prefix; poll does not
+    re-verify the ruling. The threat model (standing decision from #566)
+    excludes a hostile same-user maintainer, and anyone able to dismiss a
+    review can already merge the PR, so extra evidence would guard nothing.
+    The trust is stated in the poll script header and in ci-safety: a hand
+    dismissal carrying the marker violates the carve-out, and the release
+    scripts trust the marker and never detect a hand-written one.
+  - `poll-pr-reviews.sh` reads a marker dismissal on the head as the new
+    `RULED` state, `watch-pr-reviews.sh` treats it as ready, and
+    `dismiss-stale-reviews.sh` counts it as an all-clear. The fleet App stays
+    out of `GATING_BOTS` and is swept only after a ruled dismissal. A test
+    feeds the dismissal message the writer actually sends through the poller
+    (reads `RULED`) and the stale sweep (clears the older request).
+  - Release skill Step 6 and `REVIEW_DETAILS.md` carry the question template,
+    the ruling file pointer, the order of work and the reply literals citing
+    the ruling.
+
 ## 0.3.329 — 2026-09-28
 
 ### Changed

@@ -22,9 +22,15 @@
 #     currently requesting changes, nothing to dismiss.
 #   - latest review state == COMMENTED or APPROVED (a fresh all-clear) =>
 #     dismiss every EARLIER review from that bot still in CHANGES_REQUESTED.
-#   - any other latest state (DISMISSED, PENDING) => no-op; a dismissed or
-#     pending latest review is NOT an all-clear, so an earlier active
-#     CHANGES_REQUESTED that no all-clear superseded must stay put.
+#   - latest review DISMISSED by dismiss-ruled-review.sh (its
+#     `review_dismissed` timeline message starts with RULED_MARKER) => a
+#     ruled all-clear; dismiss every EARLIER CHANGES_REQUESTED as above.
+#   - any other latest state (an unmarked DISMISSED, PENDING) => no-op; it is
+#     NOT an all-clear, so an earlier active CHANGES_REQUESTED that no
+#     all-clear superseded must stay put.
+# RULED_ONLY_BOTS (the fleet App) take only the ruled-dismissal branch: their
+# earlier CHANGES_REQUESTED reviews are swept after a ruled dismissal of their
+# latest, and every other state is a no-op.
 # Reviews already in DISMISSED state are skipped, so re-running is a no-op
 # (idempotent per rules/file-hygiene.md).
 #
@@ -48,6 +54,20 @@ set -euo pipefail
 # `github-actionsb`) and silently miss the review.
 GATING_BOTS=("github-actions[bot]" "copilot-pull-request-reviewer[bot]")
 
+# Policy identities swept ONLY after a ruled dismissal of their latest review
+# (rules/ci-safety.md Judge-Ruled-Review Dismissal Carve-Out). The fleet App can
+# APPROVE, so it stays out of GATING_BOTS; dismiss-ruled-review.sh can still
+# dismiss its latest CHANGES_REQUESTED, and its earlier ones are swept here.
+RULED_ONLY_BOTS=("coding-policy-fleet-reviewer[bot]")
+
+is_ruled_only_bot() {
+  local login="$1" bot
+  for bot in "${RULED_ONLY_BOTS[@]}"; do
+    [[ "$login" == "$bot" ]] && return 0
+  done
+  return 1
+}
+
 # Fixed dismissal message — a dismissal records who/why on the PR timeline.
 DISMISS_MESSAGE="Superseded by a later all-clear review from the same bot — dismissed by the release skill so the stale request stops gating the merge."
 
@@ -65,6 +85,21 @@ reviews_by() {
   gh api --paginate "repos/${owner}/${repo}/pulls/${pr}/reviews?per_page=100" \
     | jq -s --arg login "$login" \
         '(add // []) | [.[] | select(.user.login == $login) | {id, state, commit_id, submitted_at}]'
+}
+
+# Marker a ruled dismissal's message starts with. The message
+# dismiss-ruled-review.sh sends is fed through this script end to end by
+# skills/release/tests/test_dismiss_ruled_review.sh.
+RULED_MARKER="JUDGE-RULED:"
+
+# Prints true when <review-id>'s dismissal message starts with RULED_MARKER.
+is_ruled_dismissal() {
+  local owner="$1" repo="$2" pr="$3" review_id="$4"
+  gh api --paginate "repos/${owner}/${repo}/issues/${pr}/timeline?per_page=100" \
+    | jq -s --argjson id "$review_id" --arg marker "$RULED_MARKER" \
+        '(add // []) | any(.[]; type == "object" and .event == "review_dismissed"
+           and .dismissed_review.review_id == $id
+           and ((.dismissed_review.dismissal_message // "") | startswith($marker)))'
 }
 
 dismiss_review() {
@@ -89,7 +124,7 @@ main() {
   local dismissed="[]" left_active="[]"
   local login reviews latest_state stale
 
-  for login in "${GATING_BOTS[@]}"; do
+  for login in "${GATING_BOTS[@]}" "${RULED_ONLY_BOTS[@]}"; do
     reviews=$(reviews_by "$owner" "$repo" "$pr" "$login") \
       || { echo "error: failed to fetch reviews for ${login} on ${owner}/${repo}#${pr} — run 'gh auth status' to verify auth, then retry" >&2; exit 1; }
 
@@ -97,6 +132,11 @@ main() {
     [[ "$(jq 'length' <<<"$reviews")" == "0" ]] && continue
 
     latest_state=$(jq -r '.[-1].state' <<<"$reviews")
+
+    # A ruled-only bot is swept after a ruled dismissal and nothing else.
+    if is_ruled_only_bot "$login" && [[ "$latest_state" != "DISMISSED" ]]; then
+      continue
+    fi
 
     # The bot's current verdict is still CHANGES_REQUESTED: leave it gating.
     if [[ "$latest_state" == "CHANGES_REQUESTED" ]]; then
@@ -106,10 +146,16 @@ main() {
     fi
 
     # Dismissal requires a fresh all-clear from the same bot. Only COMMENTED
-    # (a bot cannot APPROVE — HTTP 422) or APPROVED counts. A latest state
-    # of DISMISSED or PENDING is NOT an all-clear, so an earlier active
-    # CHANGES_REQUESTED that no all-clear superseded must stay put.
-    if [[ "$latest_state" != "COMMENTED" && "$latest_state" != "APPROVED" ]]; then
+    # (a bot cannot APPROVE — HTTP 422), APPROVED, or a ruled dismissal
+    # counts. An unmarked DISMISSED or a PENDING latest state is NOT an
+    # all-clear, so an earlier active CHANGES_REQUESTED that no all-clear
+    # superseded must stay put.
+    if [[ "$latest_state" == "DISMISSED" ]]; then
+      local ruled
+      ruled=$(is_ruled_dismissal "$owner" "$repo" "$pr" "$(jq '.[-1].id' <<<"$reviews")") \
+        || { echo "error: failed to read the dismissal of the latest ${login} review on ${owner}/${repo}#${pr} — inspect 'gh api --paginate repos/${owner}/${repo}/issues/${pr}/timeline', then retry" >&2; exit 1; }
+      [[ "$ruled" == "true" ]] || continue
+    elif [[ "$latest_state" != "COMMENTED" && "$latest_state" != "APPROVED" ]]; then
       continue
     fi
 
