@@ -21,8 +21,11 @@
   same rule in `validate-partition`, the apply-time plan check and the composer
   (`partition.UNSAFE_GLOB` is gone). `compose-briefs.sh` now needs `python3`
   (exit 1 without it) and exits 3 when the check cannot run, never treating an
-  unchecked path as accepted. `marker-fit` is stricter than before: it also
-  refuses format, private-use and unassigned characters.
+  unchecked path as accepted. Every template renders `REPORT`,
+  `REVIEW_PACKAGE`, `POLICY_INDEX` and `RELEASE_SKILL` inside a code span, so
+  the composer also refuses a backtick in them, as it already did in slice
+  globs. `marker-fit` is stricter than before: it also refuses format,
+  private-use and unassigned characters.
 
 ## 0.3.309 — 2026-09-28
 

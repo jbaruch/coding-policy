@@ -382,7 +382,7 @@ JSON
   #      C0 and DEL: a C1 control or U+2028/U+2029 splits the marker across
   #      rows, and a bidi override reorders it (#578).
   local sep sep_label sep_path
-  for sep in '\u0085' '\u009b' ' ' ' ' '‮' ''; do
+  for sep in '\u0085' '\u009b' '\u2028' '\u2029' '\u202e' '\ue000' '\u0060'; do
     sep_label="${sep:2}"
     jq --argjson c "\"${sep}\"" '.roles.developer.REPORT = ("/r/dev" + $c + "x.md")' "$v1" > "$v15" \
       || die "could not build the separator report fixture"

@@ -189,10 +189,10 @@ validate_review_package() { # <merged-values-json> <role-or-seat>
   done
   local package_json check_rc=0
   package_json="$(printf '%s' "$1" | jq -c '.REVIEW_PACKAGE')" || return 2
-  renderable_json "$package_json" || check_rc=$?
+  renderable_json "$package_json" --code-span || check_rc=$?
   if (( check_rc == 3 )); then return 3; fi
   if (( check_rc != 0 )); then
-    warn "REVIEW_PACKAGE for role '${2}' must be a file path without control, format or line-separator characters — run review-package.sh for the recorded range and pass its output path"
+    warn "REVIEW_PACKAGE for role '${2}' must be a file path without control, format or line-separator characters or backticks (the brief renders it in a code span) — run review-package.sh for the recorded range and pass its output path"
     return 2
   fi
   package="$(printf '%s' "$1" | jq -r '.REVIEW_PACKAGE // ""')" || return 2
@@ -351,10 +351,10 @@ main() {
     policy_present="$(printf '%s' "$shared" | jq -r --arg k "$policy_key" 'has($k)')" || return 2
     if [[ "$policy_present" == true ]]; then
       check_rc=0
-      renderable_json "$(printf '%s' "$shared" | jq -c --arg k "$policy_key" '.[$k]')" || check_rc=$?
+      renderable_json "$(printf '%s' "$shared" | jq -c --arg k "$policy_key" '.[$k]')" --code-span || check_rc=$?
       if (( check_rc == 3 )); then return 3; fi
       if (( check_rc != 0 )); then
-        warn "${policy_key} must be a file path without control, format or line-separator characters — use resolve-policy-paths.sh output"
+        warn "${policy_key} must be a file path without control, format or line-separator characters or backticks (the brief renders it in a code span) — use resolve-policy-paths.sh output"
         return 2
       fi
       policy_path="$(printf '%s' "$shared" | jq -r --arg k "$policy_key" '.[$k]')" || return 2
@@ -460,10 +460,10 @@ main() {
     # or discard a NUL byte from the path. A U+2028 or C1 control splits the
     # worker's `REPORT: <path>` marker across rows as surely as a newline.
     check_rc=0
-    renderable_json "$(printf '%s' "$merged" | jq -c '.REPORT')" || check_rc=$?
+    renderable_json "$(printf '%s' "$merged" | jq -c '.REPORT')" --code-span || check_rc=$?
     if (( check_rc == 3 )); then return 3; fi
     if (( check_rc != 0 )); then
-      warn "REPORT for role '${role}' must be a string without control, format or line-separator characters — choose a fresh absolute file path on one line"
+      warn "REPORT for role '${role}' must be a string without control, format or line-separator characters or backticks (the brief renders it in a code span) — choose a fresh absolute file path on one line"
       return 2
     fi
     report="$(printf '%s' "$merged" | jq -r '.REPORT // ""')"

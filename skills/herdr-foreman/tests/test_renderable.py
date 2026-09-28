@@ -15,8 +15,8 @@ from foreman import renderable
 
 #: One character from each category the check refuses, plus the C1 controls
 #: and separators #568 and #578 named.
-REFUSED = ("\x00", "\n", "\t", "\x1b", "\x7f", "\x85", "\x9b", " ", " ",
-           "‮", "​", "", "\U0010ffff", "\ud800")
+REFUSED = ("\x00", "\n", "\t", "\x1b", "\x7f", "\x85", "\x9b", "\u2028", "\u2029",
+           "\u202e", "\u200b", "\ue000", "\U0010ffff", "\ud800")
 
 
 def run_command(stdin, *args):
@@ -52,9 +52,9 @@ class RenderableTests(unittest.TestCase):
         self.assertEqual(json.loads(result.stdout), {"renderable": True, "offenders": []})
 
     def test_command_names_each_offender_across_an_array(self):
-        result = run_command(json.dumps(["/r/a .md", "/r/b\x85.md", "/r/c.md"]))
+        result = run_command(json.dumps(["/r/a\u2028.md", "/r/b\x85.md", "/r/c.md"]))
         self.assertEqual(result.returncode, 1, result.stderr)
-        self.assertEqual(json.loads(result.stdout), {"renderable": False, "offenders": ["\x85", " "]})
+        self.assertEqual(json.loads(result.stdout), {"renderable": False, "offenders": ["\x85", "\u2028"]})
 
     def test_command_reads_a_nul_from_json_escapes(self):
         result = run_command('"/r/a\\u0000b.md"')
@@ -84,8 +84,8 @@ class RenderableTests(unittest.TestCase):
 
     def test_main_is_callable_in_process(self):
         out, err = io.StringIO(), io.StringIO()
-        self.assertEqual(renderable.main([], io.StringIO('"/r .md"'), out, err), 1)
-        self.assertEqual(json.loads(out.getvalue())["offenders"], [" "])
+        self.assertEqual(renderable.main([], io.StringIO('"/r\u2029.md"'), out, err), 1)
+        self.assertEqual(json.loads(out.getvalue())["offenders"], ["\u2029"])
 
 
 if __name__ == "__main__":
