@@ -178,7 +178,14 @@ try:
 except OSError as exc:
     sys.stderr.write("cannot list {}: {}\n".format(sys.argv[1], exc.strerror or exc))
     sys.exit(1)
-if (opened.st_dev, opened.st_ino) != (info.st_dev, info.st_ino):
+try:
+    # The path is read once more after the listing: a swap while the
+    # descriptor was being read must not pass either.
+    after = os.lstat(sys.argv[1])
+except OSError as exc:
+    sys.stderr.write("cannot read {}: {}\n".format(sys.argv[1], exc.strerror or exc))
+    sys.exit(1)
+if not ((opened.st_dev, opened.st_ino) == (info.st_dev, info.st_ino) == (after.st_dev, after.st_ino)):
     sys.stderr.write("{} changed while it was being read\n".format(sys.argv[1]))
     sys.exit(1)
 print("{}:{}".format(info.st_dev, info.st_ino))' "$1" 2>"$ERRFILE"
@@ -207,8 +214,10 @@ root_holds() { # <target> <branch|"">
 # identity check would lose every registration under it; `git worktree remove`
 # on a path that reappeared would delete that live worktree without judging
 # it. The entry is found by its `gitdir` file, detached by an atomic rename
-# out of worktrees/, checked to be the directory it was, and the path is
-# re-read after the detach: a path present again gets its entry renamed back.
+# out of worktrees/, checked to be the directory it was, and the path and the
+# lock are re-read after the detach: a path present again, or an entry locked
+# meanwhile, gets its entry renamed back. A relative `gitdir` link resolves
+# against the admin entry, as git resolves it.
 # Only an entry detached while its path was absent is deleted. A directory
 # moved back after that finds its `.git` file pointing at no repository:
 # its files and its branch's commits are intact, and `git worktree repair`
@@ -231,7 +240,7 @@ import os, shutil, stat, sys
 
 common, path = sys.argv[1], sys.argv[2]
 admin_root = os.path.join(common, "worktrees")
-want = os.path.join(path, ".git")
+want = os.path.realpath(os.path.join(path, ".git"))
 
 
 def fail(message):
@@ -259,7 +268,10 @@ def read_gitdir(entry):
     finally:
         os.close(fd)
     data = data.decode("utf-8", "surrogateescape")
-    return data[:-1] if data.endswith("\n") else data
+    data = data[:-1] if data.endswith("\n") else data
+    # A relative link (`worktree.useRelativePaths`, `--relative-paths`) is
+    # relative to the admin entry itself.
+    return os.path.realpath(os.path.join(entry, data))
 
 
 try:
@@ -287,7 +299,8 @@ if len(matches) != 1:
     fail("{} admin entries in {} name {}".format(len(matches), admin_root, want))
 ident, entry, info = matches[0]
 if os.path.lexists(os.path.join(entry, "locked")):
-    fail("{} was locked after the inventory".format(entry))
+    sys.stderr.write("{} was locked after the inventory".format(entry))
+    sys.exit(3)  # GONE_KEPT_PRESENT
 state = path_state()
 if state != "gone":
     sys.stderr.write("{} is {}".format(path, state))
@@ -305,7 +318,9 @@ except OSError as exc:
     fail("detached {} to {} but cannot read it back: {} — move it back by hand".format(
         entry, trash, exc.strerror or exc))
 state = path_state()
-if (moved.st_dev, moved.st_ino) != (info.st_dev, info.st_ino) or state != "gone":
+# A lock taken after the check above travelled with the entry: it is kept.
+locked = os.path.lexists(os.path.join(trash, "locked"))
+if (moved.st_dev, moved.st_ino) != (info.st_dev, info.st_ino) or state != "gone" or locked:
     try:
         os.rename(trash, entry)
     except OSError as exc:
@@ -313,6 +328,9 @@ if (moved.st_dev, moved.st_ino) != (info.st_dev, info.st_ino) or state != "gone"
             entry, exc.strerror or exc, trash, entry))
     if state != "gone":
         sys.stderr.write("{} is {}".format(path, state))
+        sys.exit(3)  # GONE_KEPT_PRESENT
+    if locked:
+        sys.stderr.write("{} was locked during the cleanup".format(entry))
         sys.exit(3)  # GONE_KEPT_PRESENT
     fail("{} was replaced during the cleanup".format(entry))
 try:
@@ -324,7 +342,7 @@ PY
   case "$rc" in
     0) return 0 ;;
     "$GONE_KEPT_PRESENT")
-      row failed "$3" "$4" "no longer confirmed gone ($(tr '\n' ' ' < "$ERRFILE")), so its registration was left in place — re-run the sweep to judge it again"
+      row failed "$3" "$4" "no longer a stale registration ($(tr '\n' ' ' < "$ERRFILE")), so it was left in place — re-run the sweep to judge it again"
       return 1 ;;
     *)
       row failed "$3" "$4" "removing its stale registration failed: $(tr '\n' ' ' < "$ERRFILE") — the entry remains; fix the cause named here, then re-run the sweep"

@@ -22,8 +22,11 @@
   metadata-only (`release_gone`): it finds the entry's admin directory under
   `<common-dir>/worktrees/` by its `gitdir` file, detaches it with an atomic
   rename out of `worktrees/`, confirms the renamed directory is the one it
-  read, re-reads the worktree path, and renames the entry back if the path is
-  present again. Only an entry detached while its path was absent is
+  read, re-reads the worktree path and the lock marker, and renames the entry
+  back if the path is present again or the entry was locked meanwhile. A
+  relative `gitdir` link (`worktree.useRelativePaths`, `--relative-paths`)
+  resolves against the admin entry, as git resolves it (test 94). The root
+  probe also re-reads the root's path after listing it. Only an entry detached while its path was absent is
   deleted; the worktree path itself is never touched. A directory moved back
   after that point finds its `.git` file pointing at no repository; its files
   and branch commits survive, but `git worktree repair` cannot restore the

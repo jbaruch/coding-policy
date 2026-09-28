@@ -76,6 +76,9 @@
 #                             registration; exit 2.
 #  93. Stale outside root  -> a vanished registration outside the root is
 #                             dropped too.
+#  94. Relative link       -> a vanished registration git recorded with a
+#                             relative gitdir is dropped (skipped on a git
+#                             without --relative-paths).
 #  34. Recreated config   -> a branch.<name> section recreated after the
 #                             deletion is left untouched.
 #  35. Reachable, idle      -> a clean worktree whose HEAD an origin branch
@@ -1304,7 +1307,7 @@ SHIM
   ERRTEXT="$(cat "$TMP/err.$RUN_SEQ")"
   echo "92. a worktree moved back before the cleanup keeps its files, commits and registration"
   if (( RC == 2 )) && [[ -e "$shim92/done" ]] && [[ -f "$ROOT/back92/kept92" ]] \
-    && listed "$SHARED" "$ROOT/back92" && [[ "$OUT" == *"no longer confirmed gone"* ]] \
+    && listed "$SHARED" "$ROOT/back92" && [[ "$OUT" == *"no longer a stale registration"* ]] \
     && [[ "$(git -C "$SHARED" rev-parse refs/heads/review/back92)" == "$tip92" ]] \
     && [[ "$(git -C "$ROOT/back92" rev-parse HEAD)" == "$tip92" ]]; then
     pass; else fail "path reappears: rc=$RC out=$OUT err=$ERRTEXT"; fi
@@ -1317,6 +1320,23 @@ SHIM
   echo "93. a vanished registration outside the worktree root is dropped"
   if (( RC == 0 )) && [[ "$(kept_reason "$TMP/outside93")" == prunable ]] && ! listed "$SHARED" "$TMP/outside93"; then
     pass; else fail "stale outside root: rc=$RC out=$OUT err=$ERRTEXT"; fi
+
+  # --- 94. a relative-path registration is found and dropped.
+  mk_repo ninetyfour
+  local rel94_rc=0
+  git -C "$SHARED" worktree add -q --relative-paths -b review/rel94 "$ROOT/rel94" origin/main >"$TMP/rel94.out" 2>&1 || rel94_rc=$?
+  if (( rel94_rc != 0 )) && grep -q -- '--relative-paths' "$TMP/rel94.out"; then
+    echo "94. skipped: this git has no --relative-paths ($(tr '\n' ' ' < "$TMP/rel94.out"))"
+  elif (( rel94_rc != 0 )); then
+    die "worktree add --relative-paths failed: $(cat "$TMP/rel94.out")"
+  else
+    grep -q '^\.\.' "$SHARED/.git/worktrees/rel94/gitdir" || die "fixture gitdir is not relative: $(cat "$SHARED/.git/worktrees/rel94/gitdir")"
+    rm -rf "$ROOT/rel94" || die "rm rel94 failed"
+    run "$SHARED"
+    echo "94. a vanished registration with a relative gitdir is dropped"
+    if (( RC == 0 )) && [[ "$(kept_reason "$ROOT/rel94")" == prunable ]] && ! listed "$SHARED" "$ROOT/rel94"; then
+      pass; else fail "relative gitdir: rc=$RC out=$OUT err=$ERRTEXT"; fi
+  fi
 
   # --- 14. usage / not a repo.
   run
