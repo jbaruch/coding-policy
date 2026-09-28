@@ -46,6 +46,38 @@ description: Review findings carry a severity — blocking gates the merge, advi
 - The operator overrides a `stop` like any ruling, by authorizing a plan over it
 - Every other blocking finding is fixed before merge
 
+## Judge-Weighed Finding Carve-Out
+
+- Narrow exception for merging with a blocking finding a weighing ruled `defer` or `decline`
+- Applies when fixing the finding costs more than the failure it prevents
+- A weighing asks whether fixing a finding is worth its cost, never whether the finding is real
+- A finding is nominated only when it sits on lines the previous fix push added, or a report marks it `MARGINAL:` with a cited reachability claim
+- One weighing carries every nomination for one gate
+- The ruling is a file in the format `skills/release/dismiss-ruled-review.sh` header names, first line `RULING: weighed`
+- In a Herdr team round the pinned judge writes the ruling (see `rules/agent-team-operation.md` Judge Seat)
+- In standalone mode the operator is the judge
+- The agent asks the operator one decision question per gate, naming every nominated finding
+- The question never blocks the round
+- The agent keeps fixing until the answer arrives
+- No answer means `fix`
+- The agent records the answer verbatim as the ruling file
+- Preconditions (all required):
+  1. A completed weighing ruling rules the finding `defer` or `decline`
+  2. In standalone mode, the ruling quotes the operator's answer verbatim
+  3. The ruling names the finding at its `HEAD:`, and the finding's file is unchanged from that commit to the head
+  4. The finding is under no floor
+  5. A `defer` finding is entered in the task's follow-up issue, citing the ruling
+  6. Every other release gate holds
+- Floors, each ruled `fix`:
+  - a failing test, lint, diagnostic or required check
+  - a security or data-loss defect reachable by normal inputs
+  - a `no-secrets` or `ci-safety` finding
+  - a carve-out's unmet precondition
+  - an unmet acceptance criterion the operator stated
+- A ruling never skips, disables or removes a test
+- A gating policy review the ruling covers is dismissed per `rules/ci-safety.md` Judge-Ruled-Review Dismissal Carve-Out
+- Every other blocking finding is fixed before merge
+
 ## Split Reading From Acting
 
 - Read every finding in full first — severity never licenses skipping a body (see `rules/reviewer-feedback-reading.md`)
