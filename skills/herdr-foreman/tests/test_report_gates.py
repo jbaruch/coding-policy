@@ -197,12 +197,51 @@ class ClearTest(LedgerCase):
         with self.assertRaisesRegex(UsageError, "cannot be accepted until the block is cleared"):
             gates.require_clear(self.state, str(self.report), True)
         self.dispatch("d-review-2", "reviewer", "codex-b", self.reread, AT, observed=AFTER)
-        with self.assertRaisesRegex(UsageError, "a re-read does not clear it"):
+        with self.assertRaisesRegex(UsageError, "no open reread gate; its open block gate is resolved only by"):
             gates.resolve(self.state, str(self.report), "reread", "read it", AFTER, self.view(), evidence=str(self.reread))
         result = self.clear(evidence=str(self.reread))
         resolution = result["resolved"][0]["resolution"]
         self.assertEqual((resolution["by"], resolution["evidence"]["dispatch"]), ("worker", "d-review-2"))
         gates.require_clear(self.state, str(self.report), True)
+
+    def test_a_clear_never_discharges_a_reread(self):
+        self.record(label(self.report, MEDIUM))
+        self.decision("decide-b1")
+        ruling = self.root / "judge.md"
+        ruling.write_text("RULING: uphold B\n")
+        self.dispatch("d-judge", "judge", JUDGE, ruling, AT, judge_mode="adjudication", observed=AFTER)
+        for options in ({"decision": "decide-b1"}, {"evidence": str(ruling)}):
+            with self.subTest(options=options), self.assertRaisesRegex(
+                    UsageError, "no open block gate; its open reread gate is resolved only by"):
+                self.clear(**options)
+        self.assertEqual([gate["level"] for gate in gates.status(self.state)["open"]], ["reread"])
+
+    def test_each_command_resolves_only_its_own_level(self):
+        self.record(label(self.report, HIGH))
+        self.record(label(self.report, MEDIUM, question="r" * 64))
+        self.assertEqual(sorted(gate["level"] for gate in gates.status(self.state)["open"]), ["block", "reread"])
+        self.decision("decide-b1")
+        cleared = self.clear(decision="decide-b1")["resolved"]
+        self.assertEqual([gate["level"] for gate in cleared], ["block"])
+        self.assertEqual([gate["level"] for gate in gates.status(self.state)["open"]], ["reread"])
+        with self.assertRaisesRegex(UsageError, "open re-read gate"):
+            gates.require_clear(self.state, str(self.report), True)
+        self.dispatch("d-review-2", "reviewer", "codex-b", self.reread, AT, observed=AFTER)
+        reread = gates.resolve(self.state, str(self.report), "reread", "Read in full; B1 is real.", AFTER,
+                               self.view(), evidence=str(self.reread))["resolved"]
+        self.assertEqual([gate["level"] for gate in reread], ["reread"])
+        self.assertEqual(gates.status(self.state)["open"], [])
+        gates.require_clear(self.state, str(self.report), True)
+
+    def test_a_reread_first_leaves_the_block_standing(self):
+        self.record(label(self.report, HIGH))
+        self.record(label(self.report, MEDIUM, question="r" * 64))
+        self.dispatch("d-review-2", "reviewer", "codex-b", self.reread, AT, observed=AFTER)
+        gates.resolve(self.state, str(self.report), "reread", "Read in full.", AFTER, self.view(),
+                      evidence=str(self.reread))
+        self.assertEqual([gate["level"] for gate in gates.status(self.state)["open"]], ["block"])
+        with self.assertRaisesRegex(UsageError, "cannot be accepted"):
+            gates.require_clear(self.state, str(self.report), True)
 
     def test_the_adjudicating_judge_clears(self):
         self.record(label(self.report, HIGH))
@@ -355,6 +394,9 @@ class ShapeTest(LedgerCase):
             "extra field": lambda gate: gate.update(note="x"),
             "open with a resolution": lambda gate: gate.update(resolution={}),
             "cleared without a resolution": lambda gate: gate.update(status="cleared"),
+            "resolution crosses levels": lambda gate: gate.update(status="reread", resolution={
+                "schema_version": 1, "at": AT, "action": "reread", "by": "worker", "reason": "r",
+                "evidence": {"path": "/r.md", "sha256": "a" * 64, "dispatch": "d"}}),
             "resolution action disagrees": lambda gate: gate.update(status="cleared", resolution={
                 "schema_version": 1, "at": AT, "action": "reread", "by": "worker", "reason": "r",
                 "evidence": {"path": "/r.md", "sha256": "a" * 64}}),

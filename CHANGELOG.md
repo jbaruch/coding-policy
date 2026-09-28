@@ -133,7 +133,12 @@
   (`/a/../b.md`, or a path through a symlinked directory) passed validation
   but never matched `require_clear`, so it gated nothing; validation now
   requires the stored path to equal its own `realpath`, and a path that cannot
-  be resolved is malformed too (Copilot, then the policy review, on #617). A replay matched on report
+  be resolved is malformed too (Copilot, then the policy review, on #617).
+  A clear resolved every open gate on the report, so a judge or operator clear
+  discharged a `reread` without the worker's re-read; each command now
+  resolves only its own level, refuses with the other command's name when none
+  of its level is open, and the sidecar validator refuses a resolution whose
+  action does not match its gate's level (policy review on #617). A replay matched on report
   bytes alone, so a reclassification under a new model, question or bands
   version after a clear was swallowed as a replay; it now records a fresh
   gate. `skills/herdr-foreman/classify/scoring.py calibrate` also keeps only the pinned Jev model's labels.

@@ -78,6 +78,10 @@ cannot be resolved until the enrollment is restored.
 - Operator — `--decision` names an attention `decision` on the same task,
   resolved with the operator's `user_answer` after the gate was recorded. Its
   answer summary is the recorded reason; `--reason` is refused.
+- `report-gate-clear` resolves only `block` gates and `report-gate-reread` only
+  `reread` gates. A command with no open gate of its level refuses and names
+  the other command; a report carrying both stays unaccepted until both are
+  resolved.
 - Anything else records nothing and names what is missing. The foreman
   records a resolution and never decides one.
 - A gate never approves, accepts or skips a check. A recorded clear or re-read

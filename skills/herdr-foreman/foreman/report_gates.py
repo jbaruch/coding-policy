@@ -86,6 +86,8 @@ GATE_QUESTIONS = (OPEN, *DISPOSALS)
 LEVELS = ("block", "reread")
 #: Who may clear a block, as `resolve` derives it from the owners' records.
 CLEARERS = ("worker", "judge", "operator")
+#: The one gate level each resolution action resolves.
+ACTION_LEVEL = {"clear": "block", "reread": "reread"}
 #: Who clears by citing a delivered report rather than an operator decision.
 REPORT_CLEARERS = ("worker", "judge")
 #: Who performs a mandatory re-read: a worker in the gated report's role.
@@ -265,6 +267,8 @@ def _gate_problem(gate):
         return "unsupported resolution schema_version"
     if RESOLVED_STATUS.get(resolution["action"]) != gate["status"]:
         return "the resolution action and the gate's status disagree"
+    if ACTION_LEVEL.get(resolution["action"]) != gate["level"]:
+        return "the resolution action does not resolve the gate's level"
     if resolution["by"] not in (CLEARERS if resolution["action"] == "clear" else REREADERS):
         return "resolution names who may not resolve it"
     if not _nonempty(resolution["reason"]) or not _nonempty(resolution["at"]):
@@ -486,12 +490,17 @@ def resolve(path, report, action, reason, at, view, evidence=None, decision=None
         _fail("An operator clear quotes the decision's recorded answer; drop --reason.")
     with state_lock(storage_path(path)):
         document = load(path)
-        pending = [gate for gate in document["gates"] if gate["report"] == key and gate["status"] == "open"]
+        open_gates_here = [gate for gate in document["gates"] if gate["report"] == key and gate["status"] == "open"]
+        # Each command resolves its own level only: a clear never discharges a
+        # re-read, and a re-read never clears a block.
+        pending = [gate for gate in open_gates_here if gate["level"] == ACTION_LEVEL[action]]
         if not pending:
+            if open_gates_here:
+                other = "reread" if action == "clear" else "block"
+                _fail("Report {} has no open {} gate; its open {} gate is resolved only by `{}`.".format(
+                    key, ACTION_LEVEL[action], other,
+                    runnable.command(REREAD_COMMAND if other == "reread" else CLEAR_COMMAND)))
             _fail("Report {} has no open gate; `{}` lists what is open.".format(key, runnable.command("report-gate-status")))
-        if action == "reread" and any(gate["level"] == "block" for gate in pending):
-            _fail("Report {} carries a block gate; a re-read does not clear it. Record the reason it does not block "
-                  "with `{}`.".format(key, runnable.command(CLEAR_COMMAND)))
         owner = _owner(view, key)
         since = max(timestamp(gate["at"], "Gate") for gate in pending)
         if decision is not None:
