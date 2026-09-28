@@ -1,5 +1,91 @@
 # Changelog
 
+### Fixed
+
+- **`close-member` validates the task ledger's field formats, not just their
+  presence (#530).** `members.ledger_events` checked that every schema-1 field
+  was present and non-empty, so an event with `at: not-a-timestamp` or
+  `head_revision: not-a-sha` still authorized closing an enrollment. It now
+  refuses, closing nothing, unless `at` is a timezone-qualified ISO-8601
+  timestamp, `head_revision` is a full SHA (either case) or the literal `unknown` /
+  `not_applicable`, the frontmatter `base_revision` is a full SHA,
+  `dispatch_state` is an absolute path to an existing file that resolves (a
+  `~/` path, a NUL byte, a missing file or a symlink loop now refuses instead
+  of passing or raising), each event's
+  `id` matches its `## ` section heading, no id names two events, and no
+  ledger line can overwrite the parser's record of that heading. Every other
+  field with a documented format is checked in every event, not only the
+  event being closed: `subject` is `task` or `assignment`, `decision` comes
+  from that subject's vocabulary in `references/task-ledger.md`,
+  `dispatch_id` / `worker` / `role` are `not_applicable` on a task event and
+  never on an assignment event, and `report` is an absolute path or
+  `unknown` on every event, as the schema-1 table always said (the template's
+  "use `not_applicable` for the assignment fields" now names `dispatch_id`,
+  `worker` and `role` so it no longer reads as covering `report`; accepting
+  `not_applicable` there would have been a shape change needing a schema
+  bump). A schema field repeated
+  inside one event, or in the frontmatter, is refused: the parser kept the
+  last value, so a second well-formed line could hide a malformed first one.
+  Only the free-text `observed`, `evidence` and `assessment` fields are
+  checked for presence alone, and `state-schema.md` now says exactly that.
+  Validating the whole ledger rather than narrowing the contract was the
+  safer choice: `close-member` acts on `subject`, `dispatch_id`, `worker`,
+  `report` and `decision` directly, so a ledger whose other events break the
+  format is not one the foreman wrote correctly, and closing on it would
+  trust a record the owner cannot vouch for.
+  The refusal's repair hint changed with it: it used to say "append a correct
+  event", which can never fix a malformed earlier event in an append-only log
+  that is validated whole, so it now points at the documented recovery, a
+  recovered ledger at a new path (`state-schema.md`, Task Ledger). Deferred
+  from PR #528's review. `herdr-foreman` Step 11's `check-member` follow-up
+  paragraph, which merged several directives, is now one bullet per directive.
+
+- **The foreman reset deliverer types only into the foreman's bound native
+  session (#523).** `foreman-reset-deliver` waits up to `IDLE_BUDGET_SEC` for
+  the foreman's pane to idle, and before every keystroke it re-checked only
+  the pane's agent name, runtime kind and idle status. An operator who
+  replaced the foreman process in that pane during the wait with another
+  session of the same name and kind passed the guard, and the old reset's
+  `/clear` and resume prompt landed in the new session. `foreman-reset` now
+  records the native session bound at `supervision-bind` on the reset row
+  (`native_session`), and refuses to schedule when the binding names none.
+  The deliverer's guard reads `herdr pane get` (the source `supervision-bind`
+  reads, held to its proof: a claude or codex session its own Herdr
+  integration reports) and refuses unless the pane still holds that session, for every
+  keystroke of the clear command, extra Enters included, until the composer
+  confirms it consumed: the row finishes `failed` before any keystroke,
+  `interrupted` after one, both with error `reset_session_changed` and
+  `details.reason` `native_session_changed`. No single Enter proves the clear
+  submitted (Codex's first of two Enters only accepts autocomplete, and
+  `send_command` may add extra Enters), so a replacement between any of them
+  is still caught. A transcript path that cannot be resolved (a link loop,
+  an embedded NUL) matches no session instead of escaping as an unrecorded
+  error.
+  The clear itself starts a new native session by design, so after it the
+  deliverer waits up to `CLEAR_SESSION_BUDGET_SEC` for Herdr to report that
+  new session, pins it, and every resume-prompt keystroke must find the
+  pinned session; a replacement after the clear is refused the same way, and
+  a new session counts as the clear's only while the pane's foreground
+  processes are the ones the first keystroke found, compared by pid, start
+  time and command line (the clear keeps its process; a replacement is a new
+  one, or a reused pid or an exec in place that changes them), and
+  a clear that starts no new session stops the reset
+  (`clear_session_unchanged`). The reset record moves
+  to schema 2 (`skills/herdr-foreman/state-schema.md` Foreman Reset Record);
+  the owner migrates a schema-1 record on read and rewrites it at once,
+  catch-up's read included, giving each row `native_session: null`; a
+  deliverer that claims such a row refuses before any keystroke. A
+  schema-1-build deliverer still running at the upgrade cannot record its
+  outcome, and catch-up names the reconcile command for its row once it
+  exits. Regression tests cover a same-name, same-kind
+  replacement (no keystroke, row records why), a replacement between the
+  clear's text and Enter and between Codex's two Enters, the post-clear
+  session change for typed and pasted clears, a replacement before an extra
+  Enter, a replacement after the clear, a clear that starts no new session,
+  an unresolvable transcript path, the migration rewrite, and the
+  CLI end to end; the unfixed deliverer typed `/clear` and the resume prompt
+  into the replacement session.
+
 ## 0.3.304 — 2026-09-28
 
 ### Fixed
@@ -62,54 +148,6 @@
   each gap and fail against the old code.
 
 ## 0.3.301 — 2026-09-27
-
-### Fixed
-
-- **The foreman reset deliverer types only into the foreman's bound native
-  session (#523).** `foreman-reset-deliver` waits up to `IDLE_BUDGET_SEC` for
-  the foreman's pane to idle, and before every keystroke it re-checked only
-  the pane's agent name, runtime kind and idle status. An operator who
-  replaced the foreman process in that pane during the wait with another
-  session of the same name and kind passed the guard, and the old reset's
-  `/clear` and resume prompt landed in the new session. `foreman-reset` now
-  records the native session bound at `supervision-bind` on the reset row
-  (`native_session`), and refuses to schedule when the binding names none.
-  The deliverer's guard reads `herdr pane get` (the source `supervision-bind`
-  reads, held to its proof: a claude or codex session its own Herdr
-  integration reports) and refuses unless the pane still holds that session, for every
-  keystroke of the clear command, extra Enters included, until the composer
-  confirms it consumed: the row finishes `failed` before any keystroke,
-  `interrupted` after one, both with error `reset_session_changed` and
-  `details.reason` `native_session_changed`. No single Enter proves the clear
-  submitted (Codex's first of two Enters only accepts autocomplete, and
-  `send_command` may add extra Enters), so a replacement between any of them
-  is still caught. A transcript path that cannot be resolved (a link loop,
-  an embedded NUL) matches no session instead of escaping as an unrecorded
-  error.
-  The clear itself starts a new native session by design, so after it the
-  deliverer waits up to `CLEAR_SESSION_BUDGET_SEC` for Herdr to report that
-  new session, pins it, and every resume-prompt keystroke must find the
-  pinned session; a replacement after the clear is refused the same way, and
-  a new session counts as the clear's only while the pane's foreground
-  processes are the ones the first keystroke found, compared by pid, start
-  time and command line (the clear keeps its process; a replacement is a new
-  one, or a reused pid or an exec in place that changes them), and
-  a clear that starts no new session stops the reset
-  (`clear_session_unchanged`). The reset record moves
-  to schema 2 (`skills/herdr-foreman/state-schema.md` Foreman Reset Record);
-  the owner migrates a schema-1 record on read and rewrites it at once,
-  catch-up's read included, giving each row `native_session: null`; a
-  deliverer that claims such a row refuses before any keystroke. A
-  schema-1-build deliverer still running at the upgrade cannot record its
-  outcome, and catch-up names the reconcile command for its row once it
-  exits. Regression tests cover a same-name, same-kind
-  replacement (no keystroke, row records why), a replacement between the
-  clear's text and Enter and between Codex's two Enters, the post-clear
-  session change for typed and pasted clears, a replacement before an extra
-  Enter, a replacement after the clear, a clear that starts no new session,
-  an unresolvable transcript path, the migration rewrite, and the
-  CLI end to end; the unfixed deliverer typed `/clear` and the resume prompt
-  into the replacement session.
 
 ## 0.3.300 — 2026-09-27
 
