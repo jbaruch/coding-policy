@@ -46,9 +46,10 @@
 # message starts with RULED_MARKER, meaning a weighing ruling covers every
 # blocking finding in it (rules/ci-safety.md Judge-Ruled-Review Dismissal
 # Carve-Out). Any other dismissal reads "none".
-# `RULED` trusts the `JUDGE-RULED:` dismissal message; only
-# dismiss-ruled-review.sh writes it; a hand dismissal is not sanctioned
-# (rules/ci-safety.md Judge-Ruled-Review Dismissal Carve-Out).
+# `RULED` trusts the `JUDGE-RULED:` dismissal message and never detects a
+# hand-written one; only dismiss-ruled-review.sh is sanctioned to write it, and
+# a hand dismissal carrying the marker violates rules/ci-safety.md
+# Judge-Ruled-Review Dismissal Carve-Out.
 #
 # `requested` reports exactly one fact: a review request for that login is still
 # pending on the PR. It separates two states a bare `state: "none"` conflates
@@ -182,9 +183,9 @@ latest_review_by() {
 # A policy review dismissed through dismiss-ruled-review.sh reads RULED: its
 # `review_dismissed` timeline event carries a message starting RULED_MARKER.
 # Any other dismissal stays "none". Head binding is resolve_review_against_head's
-# job — a RULED review on an older commit collapses to "none" there. The marker
-# is pinned equal to dismiss-ruled-review.sh's by
-# skills/release/tests/test_dismiss_ruled_review.sh.
+# job — a RULED review on an older commit collapses to "none" there.
+# skills/release/tests/test_dismiss_ruled_review.sh feeds the message
+# dismiss-ruled-review.sh sends through this resolver end to end.
 RULED_MARKER="JUDGE-RULED:"
 
 resolve_ruled_dismissal() {

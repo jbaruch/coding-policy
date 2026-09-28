@@ -459,12 +459,62 @@ t_usage_errors_exit_2() {
   assert_eq "stdout empty" "" "$OUT"
 }
 
-t_marker_pinned_across_scripts() {
-  local s marker
-  for s in dismiss-ruled-review.sh poll-pr-reviews.sh dismiss-stale-reviews.sh; do
-    marker=$(grep -E '^RULED_MARKER=' "${RELEASE_DIR}/${s}")
-    assert_eq "marker in ${s}" 'RULED_MARKER="JUDGE-RULED:"' "$marker" || return 1
-  done
+# End to end on the marker: the dismissal message this script actually sends
+# is what poll-pr-reviews.sh must read as RULED and dismiss-stale-reviews.sh
+# must accept as an all-clear. Each consumer runs in its own process against a
+# PATH-stubbed gh serving the review list and a timeline carrying that message.
+READER_STUB="${TMPDIR_TEST}/reader-stub"
+mkdir -p "$READER_STUB" || { echo "fatal: cannot create $READER_STUB" >&2; exit 2; }
+cat > "${READER_STUB}/gh" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+args="$*"
+case "$1" in
+  pr)
+    case "$2" in
+      view)   printf '{"mergeStateStatus":"CLEAN","mergeable":"MERGEABLE","headRefOid":"%s"}\n' "$STUB_HEAD" ;;
+      checks) echo '[]' ;;
+      *) echo "reader stub: unsupported: $args" >&2; exit 2 ;;
+    esac ;;
+  api)
+    if [[ "$2" == "graphql" ]]; then echo '[]'; exit 0; fi
+    if [[ "$args" == *"-X PUT"* ]]; then echo "$args" >> "$STUB_LOG"; echo '{}'; exit 0; fi
+    case "$args" in
+      *timeline*) cat "$STUB_TIMELINE" ;;
+      *reviews*)  cat "$STUB_REVIEWS" ;;
+      *comments*) echo '[]' ;;
+      *) echo "reader stub: unsupported: $args" >&2; exit 2 ;;
+    esac ;;
+  *) echo "reader stub: unsupported: $args" >&2; exit 2 ;;
+esac
+SH
+chmod +x "${READER_STUB}/gh"
+
+t_sent_marker_reads_ruled_and_sweeps() {
+  set_review CHANGES_REQUESTED "$HEAD_SHA" "$BODY_TWO"
+  write_ruling "$HEAD_SHA" "$DECLINE_ONE" "$DECLINE_TWO"
+  invoke_ruled
+  assert_eq "writer exit" "0" "$RC" || return 1
+  local sent; sent=$(sed -n 's/^dismiss //p' "$EVENTS")
+  [[ -n "$sent" ]] || { echo "    FAIL: no dismissal message captured" >&2; return 1; }
+  jq -cn --arg head "$HEAD_SHA" \
+    '[{"id":7,"user":{"login":"github-actions[bot]"},"state":"CHANGES_REQUESTED","commit_id":"0000","submitted_at":"2026-01-01T00:00:00Z","body":"older"},
+      {"id":8,"user":{"login":"github-actions[bot]"},"state":"DISMISSED","commit_id":$head,"submitted_at":"2026-01-02T00:00:00Z","body":"ruled"}]' \
+    > "${TMPDIR_TEST}/reader-reviews.json"
+  jq -cn --arg m "$sent" '[{"event":"review_dismissed","dismissed_review":{"review_id":8,"state":"changes_requested","dismissal_message":$m}}]' \
+    > "${TMPDIR_TEST}/reader-timeline.json"
+  : > "${TMPDIR_TEST}/reader-log"
+  local stub_env=(STUB_HEAD="$HEAD_SHA" STUB_REVIEWS="${TMPDIR_TEST}/reader-reviews.json"
+                  STUB_TIMELINE="${TMPDIR_TEST}/reader-timeline.json" STUB_LOG="${TMPDIR_TEST}/reader-log"
+                  PATH="${READER_STUB}:${PATH}")
+  local snap swept
+  snap=$(env "${stub_env[@]}" bash "${RELEASE_DIR}/poll-pr-reviews.sh" owner repo 5) \
+    || { echo "    FAIL: poll exited non-zero" >&2; return 1; }
+  assert_eq "poll reads RULED" "RULED" "$(jq -r '.reviews.codex.state' <<<"$snap")" || return 1
+  swept=$(env "${stub_env[@]}" bash "${RELEASE_DIR}/dismiss-stale-reviews.sh" owner repo 5) \
+    || { echo "    FAIL: dismiss-stale exited non-zero" >&2; return 1; }
+  assert_eq "older CR swept" "7" "$(jq -r '.dismissed | map(.review_id) | join(",")' <<<"$swept")" || return 1
+  grep -q "reviews/7/dismissals" "${TMPDIR_TEST}/reader-log" || { echo "    FAIL: sweep PUT not sent" >&2; return 1; }
 }
 
 echo "test_dismiss_ruled_review.sh"
@@ -494,7 +544,7 @@ run "a missing or other schema_version refuses"             t_schema_missing_or_
 run "a malformed ruling refuses"                    t_malformed_ruling_refuses
 run "list mode emits the blocking findings"         t_list_mode_emits_findings
 run "usage errors exit 2"                           t_usage_errors_exit_2
-run "the marker is pinned across three scripts"     t_marker_pinned_across_scripts
+run "the sent marker reads RULED and sweeps"        t_sent_marker_reads_ruled_and_sweeps
 
 echo
 echo "passed: ${PASS_COUNT}, failed: ${FAIL_COUNT}"

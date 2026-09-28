@@ -62,9 +62,9 @@
 # that comment exists is the review dismissed, with the message
 #   <RULED_MARKER> <digest> covers <n> blocking findings at <head>; tracked in #<issue>
 # poll-pr-reviews.sh reads a dismissal carrying RULED_MARKER as state RULED, and
-# dismiss-stale-reviews.sh counts it as an all-clear. The marker constant is
-# pinned equal across the three scripts by
-# skills/release/tests/test_dismiss_ruled_review.sh.
+# dismiss-stale-reviews.sh counts it as an all-clear.
+# skills/release/tests/test_dismiss_ruled_review.sh feeds the message this
+# script sends to both readers and asserts they accept it.
 #
 # Out: one JSON object on stdout (exit 0 or 1):
 #   {"pr_number": N, "head_sha": "...", "result": "dismissed|noop|findings|unmet",

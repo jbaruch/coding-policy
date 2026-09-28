@@ -157,6 +157,8 @@ It returns the full `poll-pr-reviews.sh` snapshot plus a `watch` object — `{"r
   ```
 
 - **Ruled policy review:** list or dismiss with the script below
+  - The follow-up issue is in the PR's own repository; the script takes an issue number on that repository
+  - In a repository the operator does not own, ask first per `rules/external-repo-contributions.md`
   - Without `--ruling` it lists the blocking findings to name in the question
   - With `--ruling` it posts the ruled findings to the follow-up issue, then dismisses the review, only when its predicate holds
   - Exit 0 dismissed, noop or listed; 1 predicate unmet, `.unmet` naming each failed condition; 2 usage or API error
@@ -170,7 +172,7 @@ It returns the full `poll-pr-reviews.sh` snapshot plus a `watch` object — `{"r
 - Push fixes to the same branch
 - **Re-request Copilot after every push** with Step 4's command block. Copilot does not re-post on its own.
 - The policy reviewer re-runs automatically on every push (coding-policy via `review-codex.yml` `pull_request: synchronize`; consumers via `review-trigger.yml` re-dispatching the fleet App). No manual re-request.
-- Repeat Step 5 until the policy reviewer carries no blocking finding — `APPROVED`, `COMMENTED` with its body read and only advisories, or `RULED` after a ruled dismissal — and every thread has a reply.
+- Repeat Step 5 until the policy reviewer carries no blocking finding — `APPROVED`, `COMMENTED` with its body read and only advisories, or `RULED` after a ruled dismissal — and every thread has a reply. Proceed immediately to Step 7.
 
 ## Step 7 — Merge + Cleanup
 

@@ -87,8 +87,9 @@ reviews_by() {
         '(add // []) | [.[] | select(.user.login == $login) | {id, state, commit_id, submitted_at}]'
 }
 
-# Marker a ruled dismissal's message starts with — pinned equal to
-# dismiss-ruled-review.sh's by skills/release/tests/test_dismiss_ruled_review.sh.
+# Marker a ruled dismissal's message starts with. The message
+# dismiss-ruled-review.sh sends is fed through this script end to end by
+# skills/release/tests/test_dismiss_ruled_review.sh.
 RULED_MARKER="JUDGE-RULED:"
 
 # Prints true when <review-id>'s dismissal message starts with RULED_MARKER.

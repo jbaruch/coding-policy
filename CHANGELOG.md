@@ -42,13 +42,15 @@
     re-verify the ruling. The threat model (standing decision from #566)
     excludes a hostile same-user maintainer, and anyone able to dismiss a
     review can already merge the PR, so extra evidence would guard nothing.
-    The trust is stated in the poll script header, and ci-safety names a hand
-    dismissal carrying the marker a violation, never a ruled dismissal.
+    The trust is stated in the poll script header and in ci-safety: a hand
+    dismissal carrying the marker violates the carve-out, and the release
+    scripts trust the marker and never detect a hand-written one.
   - `poll-pr-reviews.sh` reads a marker dismissal on the head as the new
     `RULED` state, `watch-pr-reviews.sh` treats it as ready, and
     `dismiss-stale-reviews.sh` counts it as an all-clear. The fleet App stays
-    out of `GATING_BOTS` and is swept only after a ruled dismissal. The marker
-    is pinned equal across the three scripts by a test.
+    out of `GATING_BOTS` and is swept only after a ruled dismissal. A test
+    feeds the dismissal message the writer actually sends through the poller
+    (reads `RULED`) and the stale sweep (clears the older request).
   - Release skill Step 6 and `REVIEW_DETAILS.md` carry the question template,
     the ruling file pointer, the order of work and the reply literals citing
     the ruling.
