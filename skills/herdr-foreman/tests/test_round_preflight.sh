@@ -98,7 +98,9 @@ main() {
   trap cleanup EXIT
   ERRFILE="$TMP/err"
   # What the stubbed `foreman verify-foreman` prints and exits with.
-  export FOREMAN_TIER_OUT='{"configured":true,"agent":"foreman","tier":{"effort":"low"},"argv_verified":true}'
+  # The shape `foreman verify-foreman` emits: the selected tier and its
+  # process-argv proof.
+  export FOREMAN_TIER_OUT='{"configured":true,"agent":"foreman","tier":{"model":"sonnet-5","effort":"low"},"argv_verified":true,"verified":{"source":"process_argv","argv":["claude","--model","sonnet-5","--effort","low"],"model":"sonnet-5","effort":"low","pid":400,"pane_id":"w1:p0"}}'
   export FOREMAN_TIER_RC=0
 
   echo "▶ the aggregate verdict" >&2
@@ -289,53 +291,45 @@ main() {
      && printf '%s' "$OUT" | grep -q 'not verified: the foreman'; then
     pass; else fail "a zero-exit unreadable measure leaves the foreman tier unverified, got RC=$RC OUT=$OUT"; fi
 
-  # The composite check is recorded as one result: a run that cannot decide
-  # fails both of its rows, never one row alone.
-  shadow "$TMP/compositefails"
-  printf '#!/usr/bin/env python3\nimport sys\nprint("foreman-tier-check: stand-in failure", file=sys.stderr)\nsys.exit(2)\n' \
-    > "$TMP/compositefails/foreman-tier-check.py" || die "write composite stub"
-  run "$TMP/compositefails"
-  if [[ $RC -eq 1 ]] && [[ "$(field "$OUT" 'd["checks"]["headroom"]["status"]')" == '"failed"' ]] \
-     && [[ "$(field "$OUT" 'd["checks"]["foreman_tier"]["status"]')" == '"failed"' ]] \
-     && printf '%s' "$OUT" | grep -q 'foreman-tier-check.py exited 2'; then
-    pass; else fail "a failed composite check fails both rows, got RC=$RC OUT=$OUT"; fi
-
-  # A composite result that is not the headroom/foreman_tier pair fails both.
-  shadow "$TMP/compositebad"
-  printf '#!/usr/bin/env python3\nprint("{\\"headroom\\": {\\"status\\": \\"ok\\"}}")\n' \
-    > "$TMP/compositebad/foreman-tier-check.py" || die "write composite stub"
-  run "$TMP/compositebad"
-  if [[ $RC -eq 1 ]] && [[ "$(field "$OUT" 'd["checks"]["foreman_tier"]["status"]')" == '"failed"' ]] \
-     && printf '%s' "$OUT" | grep -q 'without one readable headroom and foreman_tier result'; then
-    pass; else fail "an incomplete composite result fails both rows, got RC=$RC OUT=$OUT"; fi
-
-  # A row whose status is unknown, or that lacks the evidence its status
-  # carries, is malformed: both rows fail, never a ready round (#626).
-  local case_no=0 bad
-  local measured='"detail": {"agents": {}}'
-  local proven='"detail": {"configured": true, "argv_verified": true}'
-  for bad in \
-    "{\"headroom\": {\"status\": \"ok\", $measured}, \"foreman_tier\": {\"status\": \"not-a-valid-status\"}}" \
-    "{\"headroom\": {\"status\": \"ok\", $measured}, \"foreman_tier\": {\"status\": \"failed\"}}" \
-    "{\"headroom\": {\"status\": \"blocked\", \"reason\": \" \"}, \"foreman_tier\": {\"status\": \"ok\", $proven}}" \
-    "{\"headroom\": {\"status\": \"unconfigured\"}, \"foreman_tier\": {\"status\": \"ok\", $proven}}" \
-    "{\"headroom\": {\"status\": \"ok\"}, \"foreman_tier\": {\"status\": \"ok\", $proven}}" \
-    "{\"headroom\": {\"status\": \"ok\", \"detail\": {}}, \"foreman_tier\": {\"status\": \"ok\", $proven}}" \
-    "{\"headroom\": {\"status\": \"ok\", $measured}, \"foreman_tier\": {\"status\": \"ok\"}}" \
-    "{\"headroom\": {\"status\": \"ok\", $measured}, \"foreman_tier\": {\"status\": \"ok\", \"detail\": {\"configured\": true}}}" \
-    "{\"headroom\": {\"status\": \"skipped\"}, \"foreman_tier\": {\"status\": \"unconfigured\"}}" \
-    "{\"headroom\": {\"status\": \"skipped\"}, \"foreman_tier\": {\"status\": \"unconfigured\", \"detail\": {\"configured\": false, \"warning\": \"  \"}}}"; do
+  # foreman-tier-check.py owns the verdict: the preflight records its rows on
+  # exit 0 or 1, and fails both rows on any other exit, unreadable output, or
+  # rows that contradict the exit code (#626).
+  local case_no=0 spec code json want
+  local ok_rows='{"headroom": {"status": "ok", "detail": {"agents": {}}}, "foreman_tier": {"status": "ok", "detail": {}}}'
+  local failed_rows='{"headroom": {"status": "ok", "detail": {"agents": {}}}, "foreman_tier": {"status": "failed", "reason": "stand-in: the tier is unproven"}}'
+  for spec in \
+    "1|$failed_rows|recorded" \
+    "0|$ok_rows|ready" \
+    "2|$ok_rows|both-failed" \
+    "7|$ok_rows|both-failed" \
+    "0|not json|both-failed" \
+    '0|{"headroom": {"status": "ok"}}|both-failed' \
+    "0|$failed_rows|both-failed" \
+    "1|$ok_rows|both-failed"; do
     case_no=$((case_no + 1))
-    shadow "$TMP/compositestatus$case_no"
-    printf '%s\n' "$bad" > "$TMP/compositestatus$case_no/composite.json" || die "write composite fixture"
-    printf '#!/usr/bin/env python3\nimport pathlib\nprint((pathlib.Path(__file__).parent / "composite.json").read_text(), end="")\n' \
-      > "$TMP/compositestatus$case_no/foreman-tier-check.py" || die "write composite stub"
-    run "$TMP/compositestatus$case_no"
-    if [[ $RC -eq 1 ]] && [[ "$(field "$OUT" 'd["ready"]')" == "false" ]] \
-       && [[ "$(field "$OUT" 'd["checks"]["headroom"]["status"]')" == '"failed"' ]] \
-       && [[ "$(field "$OUT" 'd["checks"]["foreman_tier"]["status"]')" == '"failed"' ]] \
-       && printf '%s' "$OUT" | grep -q 'without one readable headroom and foreman_tier result'; then
-      pass; else fail "a malformed composite row ($bad) fails both rows, got RC=$RC OUT=$OUT"; fi
+    code="${spec%%|*}"; json="${spec#*|}"; want="${json##*|}"; json="${json%|*}"
+    shadow "$TMP/composite$case_no"
+    printf '%s' "$json" > "$TMP/composite$case_no/composite.out" || die "write composite fixture"
+    printf '#!/usr/bin/env python3\nimport pathlib, sys\nprint((pathlib.Path(__file__).parent / "composite.out").read_text())\nsys.exit(%s)\n' "$code" \
+      > "$TMP/composite$case_no/foreman-tier-check.py" || die "write composite stub"
+    run "$TMP/composite$case_no"
+    case "$want" in
+      ready)
+        if [[ $RC -eq 0 ]] && [[ "$(field "$OUT" 'd["ready"]')" == "true" ]] \
+           && [[ "$(field "$OUT" 'd["checks"]["foreman_tier"]["status"]')" == '"ok"' ]]; then
+          pass; else fail "composite exit $code is ready, got RC=$RC OUT=$OUT"; fi ;;
+      recorded)
+        if [[ $RC -eq 1 ]] && [[ "$(field "$OUT" 'd["ready"]')" == "false" ]] \
+           && [[ "$(field "$OUT" 'd["checks"]["headroom"]["status"]')" == '"ok"' ]] \
+           && [[ "$(field "$OUT" 'd["checks"]["foreman_tier"]["reason"]')" == '"stand-in: the tier is unproven"' ]]; then
+          pass; else fail "composite exit 1 records its rows, not ready, got RC=$RC OUT=$OUT"; fi ;;
+      both-failed)
+        if [[ $RC -eq 1 ]] && [[ "$(field "$OUT" 'd["ready"]')" == "false" ]] \
+           && [[ "$(field "$OUT" 'd["checks"]["headroom"]["status"]')" == '"failed"' ]] \
+           && [[ "$(field "$OUT" 'd["checks"]["foreman_tier"]["status"]')" == '"failed"' ]] \
+           && printf '%s' "$OUT" | grep -q "foreman-tier-check.py exited $code without a readable verdict"; then
+          pass; else fail "composite exit $code with ($json) fails both rows, got RC=$RC OUT=$OUT"; fi ;;
+    esac
   done
 
   shadow "$TMP/usage"

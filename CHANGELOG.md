@@ -8,13 +8,18 @@
   - `round-preflight.sh` merged any composite row whose `status` was a string,
     and `ready` reads only `reason`, so a row like
     `foreman_tier.status = "not-a-valid-status"`, or `failed` with no reason,
-    reported a ready round. So did an `ok` row with no proof detail, or an
-    `unconfigured` row with no warning. `merge_composite` now checks each row
-    against one table, `SHAPES`, of what `foreman-tier-check.py` emits per
-    status: a headroom `ok` carries the measure snapshot, a `foreman_tier`
-    `ok` the verified argv proof, `unconfigured` a non-empty `detail.warning`,
-    and `failed` or `blocked` a non-empty reason. Any other shape fails both
-    rows.
+    reported a ready round. So did a `foreman_tier` `ok` row carrying no
+    process-argv proof, or an `unconfigured` row with no warning. Two rounds of
+    growing a bash re-validator of the Python evidence left the gap one field
+    deeper each time, so one owner now decides: `foreman-tier-check.py`
+    requires, for `foreman_tier` `ok`, the verify-foreman result's `verified`
+    proof (source `process_argv`, a non-empty argv, the proven model and
+    effort equal to the selected tier's) and a non-empty warning for
+    `unconfigured`; anything short becomes `failed` with a reason. It exits
+    with the verdict: 0 ready, 1 not ready, 2 could not run. The preflight
+    records the rows on 0 or 1 and fails both rows on any other exit,
+    unreadable output, or rows that contradict the exit code; its evidence
+    checks are gone.
   - `verify_foreman` proved the argv of one foreground process of the seat's
     kind, so `verify-foreman --pane` passed against another Claude or Codex
     pane running the same tier. It now requires Herdr to bind the seat's agent

@@ -36,10 +36,11 @@
 #
 # `checks.headroom` and `checks.foreman_tier` are the two rows of ONE composite
 # check, foreman-tier-check.py, which owns the dependency between them; its
-# docstring states each row's statuses. An absent `foreman` block is
-# `unconfigured`, never blocking, whatever headroom reported. A composite run
-# that exits non-zero or returns no readable pair fails both rows, as does any
-# row whose shape is not one `merge_composite`'s SHAPES table allows.
+# docstring states each row's statuses, the evidence each needs, and the
+# verdict exit code this gates on. An absent `foreman` block is
+# `unconfigured`, never blocking, whatever headroom reported. Exit 0 or 1
+# records the rows as emitted; any other exit, unreadable output, or rows that
+# contradict the exit code fail both rows.
 # `--no-measure` reuses the latest snapshot.
 #
 # `checks.worktrees` (the sweep, sweep-worktrees.sh):
@@ -133,49 +134,27 @@ main() {
   local results="${scratch}/checks.json"
   printf '{}' > "$results" || die "cannot write to ${scratch}"
 
-  merge_composite() { # <composite-json-file>; prints the foreman_tier status
-    python3 - "$results" "$1" <<'PY'
+  merge_composite() { # <composite-json-file> <exit:0|1>; prints the foreman_tier status
+    # foreman-tier-check.py owns the verdict and the evidence each row needs
+    # (its docstring). This only parses what to record, and fails closed when
+    # the rows contradict the exit code it gates on.
+    python3 - "$results" "$1" "$2" <<'PY'
 import json, sys
-path, composite = sys.argv[1:3]
+path, composite, code = sys.argv[1:4]
 with open(composite, encoding="utf-8") as handle:
     rows = json.load(handle)
 if not isinstance(rows, dict) or set(rows) != {"headroom", "foreman_tier"}:
     sys.exit("the composite result is not exactly a headroom and a foreman_tier row")
-# SHAPES is the one table of what foreman-tier-check.py emits per row and
-# status: whether a non-empty `reason` is carried, and the evidence `detail`
-# must hold (None: no detail). `ready` reads only `reason`, so a row missing
-# the evidence its status names would pass the round without it.
-def _measured(detail):  # the `foreman measure` snapshot
-    return isinstance(detail.get("agents"), dict)
-def _tier_proven(detail):  # the verify-foreman argv proof
-    return detail.get("configured") is True and detail.get("argv_verified") is True
-def _warned(detail):  # the unconfigured seat's visible warning
-    warning = detail.get("warning")
-    return detail.get("configured") is False and isinstance(warning, str) and bool(warning.strip())
-SHAPES = {
-    ("headroom", "ok"): (False, _measured),
-    ("headroom", "skipped"): (False, None),
-    ("headroom", "failed"): (True, None),
-    ("headroom", "blocked"): (True, None),
-    ("foreman_tier", "ok"): (False, _tier_proven),
-    ("foreman_tier", "unconfigured"): (False, _warned),
-    ("foreman_tier", "failed"): (True, None),
-}
-def well_formed(name, row):
-    shape = SHAPES.get((name, row.get("status"))) if isinstance(row, dict) else None
-    if shape is None:
-        return False
-    needs_reason, evidence = shape
-    if set(row) != {"status"} | ({"reason"} if needs_reason else set()) | ({"detail"} if evidence else set()):
-        return False
-    if needs_reason and not (isinstance(row["reason"], str) and row["reason"].strip()):
-        return False
-    return evidence is None or (isinstance(row["detail"], dict) and evidence(row["detail"]))
-merged = {}
 for name, row in rows.items():
-    if not well_formed(name, row):
+    if (not isinstance(row, dict) or not isinstance(row.get("status"), str)
+            or not set(row) <= {"status", "reason", "detail"}
+            or ("reason" in row and not (isinstance(row["reason"], str) and row["reason"].strip()))
+            or ("detail" in row and not isinstance(row["detail"], dict))):
         sys.exit("the {} row is malformed".format(name))
-    merged[name] = {**row, "due": False}
+blocking = any("reason" in row for row in rows.values())
+if blocking != (code == "1"):
+    sys.exit("the rows contradict the verdict exit {}".format(code))
+merged = {name: {**row, "due": False} for name, row in rows.items()}
 with open(path, encoding="utf-8") as handle:
     checks = json.load(handle)
 checks.update(merged)
@@ -280,22 +259,20 @@ PY
     > "${scratch}/foreman-tier.json" 2>"${scratch}/foreman-tier.err"
   rc=$?
   cat "${scratch}/foreman-tier.err" >&2
-  if [ "$rc" -eq 0 ]; then
-    local tier_status
-    if ! tier_status="$(merge_composite "${scratch}/foreman-tier.json")"; then
-      tier_status=""
-    fi
-    case "$tier_status" in
-      unconfigured)
-        echo "round-preflight: warning: the foreman seat is unconfigured; see checks.foreman_tier.detail.warning" >&2 ;;
-      "")
-        record headroom failed "foreman-tier-check.py exited 0 without one readable headroom and foreman_tier result; re-run it and read its diagnostic before planning" 0 ""
-        record foreman_tier failed "foreman-tier-check.py exited 0 without one readable headroom and foreman_tier result; the foreman's tier is unproven" 0 "" ;;
-    esac
-  else
-    record headroom failed "foreman-tier-check.py exited ${rc}; re-run it and read its diagnostic before planning" 0 ""
-    record foreman_tier failed "foreman-tier-check.py exited ${rc}; the foreman's tier is unproven" 0 ""
-  fi
+  local tier_status=""
+  case "$rc" in
+    0|1)
+      if ! tier_status="$(merge_composite "${scratch}/foreman-tier.json" "$rc")"; then
+        tier_status=""
+      fi ;;
+  esac
+  case "$tier_status" in
+    unconfigured)
+      echo "round-preflight: warning: the foreman seat is unconfigured; see checks.foreman_tier.detail.warning" >&2 ;;
+    "")
+      record headroom failed "foreman-tier-check.py exited ${rc} without a readable verdict; re-run it and read its diagnostic before planning" 0 ""
+      record foreman_tier failed "foreman-tier-check.py exited ${rc} without a readable verdict; the foreman's tier is unproven" 0 "" ;;
+  esac
 
   # 5. Capability-table cadence. Due is not blocking: the foreman refreshes it
   #    before planning, and a fleet that dispatched nothing never comes due.
