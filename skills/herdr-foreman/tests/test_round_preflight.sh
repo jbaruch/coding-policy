@@ -26,6 +26,7 @@
 #  10. Every check's payload    -> carried through under `checks.<name>.detail`.
 #  11. Gate pointers            -> resolved once, carried for the briefs.
 #  12. Non-object payload       -> exit 0 with `[]`/`null` blocks, never `ok`.
+#  13. Foreman tier unproven    -> blocks, names `foreman verify-foreman`.
 
 set -uo pipefail
 
@@ -65,7 +66,9 @@ shadow() { # <dir> [roster-rc] [authority-rc] [prune-rc] [capability-due] [autho
     cp "$REAL/bounded-run.sh" "$dir/" || die "copy the bounded runner"
   fi
   stub "$dir" resolve-gates.sh 0 '{"instructions":["AGENTS.md"],"workflows":[],"runners":[]}'
-  printf '#!/usr/bin/env bash\nset -euo pipefail\ncase "$*" in\n  *capability-check*) printf %s; exit 0 ;;\n  *measure*) printf %s; exit 0 ;;\nesac\nexit 9\n' \
+  # The stub's `$*` and `$FOREMAN_TIER_*` expand when the stub runs, not here.
+  # shellcheck disable=SC2016
+  printf '#!/usr/bin/env bash\nset -euo pipefail\ncase "$*" in\n  *capability-check*) printf %s; exit 0 ;;\n  *measure*) printf %s; exit 0 ;;\n  *verify-foreman*) printf %%s "$FOREMAN_TIER_OUT"; exit "$FOREMAN_TIER_RC" ;;\nesac\nexit 9\n' \
     "'{\"due\":$due,\"entries\":0}'" "'{\"agents\":{}}'" > "$dir/foreman.sh" || die "write foreman stub"
   chmod +x "$dir/foreman.sh" || die "chmod foreman stub"
 }
@@ -88,14 +91,26 @@ main() {
   TMP="$(mktemp -d "${TMPDIR:-/tmp}/preflight-tests.XXXXXX")" || die "mktemp"
   trap cleanup EXIT
   ERRFILE="$TMP/err"
+  # What the stubbed `foreman verify-foreman` prints and exits with.
+  export FOREMAN_TIER_OUT='{"agent":"foreman","model":"sonnet-5","effort":"low","argv_verified":true}'
+  export FOREMAN_TIER_RC=0
 
   echo "▶ the aggregate verdict" >&2
 
   shadow "$TMP/clean"
   run "$TMP/clean"
   if [[ $RC -eq 0 ]] && [[ "$(field "$OUT" 'd["ready"]')" == "true" ]] \
-     && [[ "$(field "$OUT" 'd["blocking"]')" == "[]" ]]; then
+     && [[ "$(field "$OUT" 'd["blocking"]')" == "[]" ]] \
+     && [[ "$(field "$OUT" 'd["checks"]["foreman_tier"]["detail"]["effort"]')" == '"low"' ]]; then
     pass; else fail "every check clean is ready, got RC=$RC OUT=$OUT"; fi
+
+  # The foreman seat is verified like every other seat: a pane whose argv does
+  # not carry the configured tier blocks the round and names the command.
+  shadow "$TMP/badforeman"
+  FOREMAN_TIER_RC=1 FOREMAN_TIER_OUT='' run "$TMP/badforeman"
+  if [[ $RC -eq 1 ]] && [[ "$(field "$OUT" 'd["checks"]["foreman_tier"]["status"]')" == '"failed"' ]] \
+     && printf '%s' "$OUT" | grep -q 'foreman verify-foreman exited 1'; then
+    pass; else fail "an unproven foreman tier blocks the round, got RC=$RC OUT=$OUT"; fi
 
   shadow "$TMP/roster"
   OUT="$(HERDR_ENV='' WORKTREE_ROOT="$TMP" bash "$TMP/roster/round-preflight.sh" --repo o/r --checkout /tmp 2>"$ERRFILE")"
@@ -196,7 +211,9 @@ main() {
     pass; else fail "a non-object authority payload must fail cleanly, got RC=$RC OUT=$OUT ERR=$ERRTEXT"; fi
 
   shadow "$TMP/shape-capability"
-  printf '#!/usr/bin/env bash\nset -euo pipefail\ncase "$*" in\n  *capability-check*) printf %s; exit 0 ;;\n  *measure*) printf %s; exit 0 ;;\nesac\nexit 9\n' \
+  # The stub's `$*` and `$FOREMAN_TIER_*` expand when the stub runs, not here.
+  # shellcheck disable=SC2016
+  printf '#!/usr/bin/env bash\nset -euo pipefail\ncase "$*" in\n  *capability-check*) printf %s; exit 0 ;;\n  *measure*) printf %s; exit 0 ;;\n  *verify-foreman*) printf %%s "$FOREMAN_TIER_OUT"; exit "$FOREMAN_TIER_RC" ;;\nesac\nexit 9\n' \
     "'[]'" "'{\"agents\":{}}'" > "$TMP/shape-capability/foreman.sh" || die "write foreman stub"
   run "$TMP/shape-capability"
   if [[ $RC -eq 1 ]] && [[ "$(field "$OUT" 'd["checks"]["capability"]["status"]')" == '"failed"' ]] \

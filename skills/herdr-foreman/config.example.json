@@ -11,6 +11,15 @@
     "model": "claude-fable-5-1",
     "effort": "max"
   },
+  "foreman": {
+    "agent": "foreman",
+    "kind": "claude",
+    "model": "sonnet-5",
+    "effort": "low",
+    "launch_args": [
+      "--dangerously-skip-permissions"
+    ]
+  },
   "agents": [
     {
       "name": "claude",

@@ -30,7 +30,7 @@ from . import __version__
 from .assign import apply as apply_assignments
 from .assign import APPLY_SCHEMA_VERSION, dry_run, freeze_decision, freeze_paths, read_frozen, native_context_session, normalize_assignments, resolve_paths, validate_fix_history
 from . import attention, capabilities, chronology, composition, engagement, foreman_queue, foreman_reset, historical, home, load_set, members, memory, oracle, partition, recovery, report_delivery, restoration, role_clear, retrospective, retrospective_runtime, supervision, supervision_gate, supervision_runtime, triggers
-from .config import default_config_path, load_config, load_judge, load_role_costs, select_agents
+from .config import default_config_path, load_config, load_foreman, load_judge, load_role_costs, select_agents
 from .errors import PlanError, StateError, ForemanError, UsageError
 from .herdr import (
     DEFAULT_MARKER_TIMEOUT_MS,
@@ -51,7 +51,7 @@ from .planner import plan as build_plan
 from .planner import headroom_of
 from .tiers import JUDGMENT_ROUNDS, ROLE_ROUNDS, MissingTierError, parse_launch_args, parse_tiers, select_tier
 from .billing import effective_multiplier
-from .launch import start_worker, verify_running
+from .launch import start_foreman, start_worker, verify_foreman, verify_running
 from .state import (
     add_assignment,
     add_snapshot,
@@ -126,6 +126,13 @@ def build_parser():
     judge_parser.add_argument("--judge-mode", choices=recovery.JUDGE_MODES,
                               help="What this judge seat is for; the plan's recorded mode when omitted.")
     judge_parser.add_argument("--now", metavar="ISO")
+
+    start_foreman = sub.add_parser("start-foreman", parents=[common],
+                                   help="Start the configured foreman seat in a shell pane and verify its launch argv.")
+    start_foreman.add_argument("--pane", required=True)
+    verify_foreman = sub.add_parser("verify-foreman", parents=[common],
+                                    help="Prove the live foreman pane runs the configured foreman tier. Read-only.")
+    verify_foreman.add_argument("--pane", help="The foreman's pane (default: this Herdr pane, $HERDR_PANE_ID).")
 
     for command in ("retro-check", "retro-record"):
         retro_parser = sub.add_parser(command, parents=[common], help="Check or record a foreman-authored retrospective.")
@@ -1947,6 +1954,29 @@ def cmd_start_judge(args, client=None, warn=None, trace=None):
             "pane": args.pane, "argv_verified": True, "verified": proof}, None
 
 
+def _foreman_seat_result(seat, pane, proof):
+    return {**seat.as_dict(), "pane": pane, "argv_verified": True, "verified": proof}
+
+
+def cmd_start_foreman(args, client=None, warn=None, trace=None):
+    seat = load_foreman(_config_path(args))
+    client = client if client is not None else _client(args, trace=trace)
+    return _foreman_seat_result(seat, args.pane, start_foreman(client, seat, args.pane)), None
+
+
+def cmd_verify_foreman(args, client=None, warn=None, trace=None):
+    pane = args.pane
+    if not pane:
+        # rules/agent-team-operation.md Two Modes: a team round is HERDR_ENV set, any value.
+        pane = os.environ.get("HERDR_PANE_ID") if "HERDR_ENV" in os.environ else None
+    if not pane:
+        raise UsageError("verify-foreman reads the foreman's own pane; run it from the foreman's Herdr pane or pass "
+                         "--pane <pane-id>.", {})
+    seat = load_foreman(_config_path(args))
+    client = client if client is not None else _client(args, trace=trace)
+    return _foreman_seat_result(seat, pane, verify_foreman(client, seat, pane)), None
+
+
 def cmd_capability(args, client=None, warn=None, trace=None):
     """The capability table's cadence, its refresh, and a read of what it holds.
 
@@ -2187,6 +2217,8 @@ COMMANDS = {
     "verify-partition": cmd_verify_partition,
     "verify-oracle": cmd_verify_oracle,
     "start-judge": cmd_start_judge,
+    "start-foreman": cmd_start_foreman,
+    "verify-foreman": cmd_verify_foreman,
     "probe-report": cmd_probe_report,
     "marker-fit": cmd_marker_fit,
     **{command: cmd_retrospective for command in ("retro-check", "retro-record", "retro-list", "retro-show")},
@@ -2243,7 +2275,7 @@ def main(argv=None, stdout=None, stderr=None, client=None):
             home.require_current(defaults)
             # Commands that may migrate or write state share its canonical lock.
             # Dry runs, probes, and retrospective reads remain read-only.
-            readonly = args.command in {"probe-report", "marker-fit", "detect-triggers", "validate-partition", "verify-oracle", "retro-check", "retro-list", "retro-show", "capability-check", "capability-show", "supervision-gate", "load-set", "foreman-queue", "check-member"} or getattr(args, "dry_run", False)
+            readonly = args.command in {"probe-report", "marker-fit", "detect-triggers", "validate-partition", "verify-oracle", "retro-check", "retro-list", "retro-show", "capability-check", "capability-show", "supervision-gate", "load-set", "foreman-queue", "check-member", "verify-foreman"} or getattr(args, "dry_run", False)
             # The deliverer starts while `foreman-reset` still holds the state lock;
             # it serializes on the reset record's own lock instead. close-member
             # writes only through the supervision owner's own lock.

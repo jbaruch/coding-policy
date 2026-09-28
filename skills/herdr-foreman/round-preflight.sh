@@ -34,6 +34,10 @@
 # writes. Every other check is read-only except the worktree sweep, which
 # removes worktrees and deletes local branches under its own contract.
 #
+# `checks.foreman_tier` (`foreman verify-foreman`): ok with the argv proof as
+# detail when this pane runs the config's `foreman` tier; failed, and blocking,
+# when the block is absent or the live argv differs.
+#
 # `checks.worktrees` (the sweep, sweep-worktrees.sh):
 #   ok         no detail when the worktree root does not exist; otherwise the
 #              sweep JSON as detail
@@ -177,6 +181,18 @@ PY
     record roster ok "" 0 "${scratch}/roster.json" "roster.sh"
   else
     record roster failed "roster.sh exited ${rc}; re-run it and read its diagnostic before planning" 0 ""
+  fi
+
+  # 2b. The foreman's own tier. The seat is operator config verified like every
+  #     other seat: this pane's live argv must carry the configured cheap tier.
+  bash "${HERE}/foreman.sh" "${common[@]+"${common[@]}"}" verify-foreman \
+    > "${scratch}/foreman-tier.json" 2>"${scratch}/foreman-tier.err"
+  rc=$?
+  cat "${scratch}/foreman-tier.err" >&2
+  if [ "$rc" -eq 0 ]; then
+    record foreman_tier ok "" 0 "${scratch}/foreman-tier.json" "foreman verify-foreman"
+  else
+    record foreman_tier failed "foreman verify-foreman exited ${rc}; this pane does not provably run the configured foreman tier. Read its diagnostic, then start the foreman with start-foreman from another shell (references/model-tiers.md Foreman Seat)" 0 ""
   fi
 
   # 3. Authority for this repo.
