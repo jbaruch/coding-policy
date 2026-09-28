@@ -207,6 +207,7 @@ def _only(fd, files=frozenset(), dirs=frozenset(), any_dir=False, dir_name=None)
 #: Top-level entries each cache kind may hold; anything else (a report, a
 #: note, a log) means the directory is not a pure cache and it stays.
 GO_BUILD_FILES = frozenset({"README", "trim.txt", "testexpire.txt"})
+GO_MODULE_DIRS = frozenset({"cache"})
 PIP_ENTRIES = frozenset({"http", "http-v2", "wheels", "selfcheck"})
 PIP_FILES = frozenset({"selfcheck.json"})
 NPM_DIRS = frozenset({"_cacache", "_logs", "_npx", "_prebuilds"})
@@ -222,12 +223,42 @@ def _go_build(fd):
             and _only(fd, files=GO_BUILD_FILES, dir_name=lambda name: len(name) == 2 and set(name) <= HEX))
 
 
+def _go_module_root(download_fd, name):
+    """Whether top-level directory `name` is a module path root the download
+    cache backs: a host (a dot anywhere but the first character,
+    `golang.org`) with `cache/download/<name>/` present, or a dotless module
+    at a version (`<module>@<version>`) with `cache/download/<module>/@v/`
+    present."""
+    if name.startswith("."):
+        return False
+    if "@" in name:
+        module = name.split("@", 1)[0]
+        if not module or not _is_dir_at(download_fd, module):
+            return False
+        module_fd = open_at(download_fd, module)
+        try:
+            return _is_dir_at(module_fd, "@v")
+        finally:
+            os.close(module_fd)
+    return "." in name and _is_dir_at(download_fd, name)
+
+
 def _go_module(fd):
+    """`cache/download` exists, and every other top-level entry is the
+    `cache` directory or a directory `_go_module_root` accepts. A file, or
+    any other directory (`findings/`, `findings.v1/`, `report@draft/`),
+    leaves the whole directory in place."""
     if not _is_dir_at(fd, "cache"):
         return False
     cache = open_at(fd, "cache")
     try:
-        return _is_dir_at(cache, "download") and _only(fd, any_dir=True)
+        if not _is_dir_at(cache, "download"):
+            return False
+        download = open_at(cache, "download")
+        try:
+            return _only(fd, dirs=GO_MODULE_DIRS, dir_name=lambda name: _go_module_root(download, name))
+        finally:
+            os.close(download)
     finally:
         os.close(cache)
 
@@ -583,6 +614,29 @@ def load_ledger(state_path, default):
         return None, None, exc.message
 
 
+def non_dir_kind(root_fd, parts):
+    """Why opening `parts` below `root_fd` failed with ENOTDIR: "symlink" when
+    the first non-directory component is a symlink, "missing" when it is any
+    other non-directory (Linux reports ENOTDIR for a symlink under
+    O_NOFOLLOW|O_DIRECTORY; macOS reports ELOOP). A stat failure propagates,
+    and every component reading as a directory raises ENOTDIR: both land in
+    `failed`, never `missing`."""
+    fd = os.dup(root_fd)
+    try:
+        for part in parts:
+            mode = os.stat(part, dir_fd=fd, follow_symlinks=False).st_mode
+            if stat.S_ISLNK(mode):
+                return "symlink"
+            if not stat.S_ISDIR(mode):
+                return "missing"
+            child = open_at(fd, part)
+            os.close(fd)
+            fd = child
+    finally:
+        os.close(fd)
+    raise OSError(errno.ENOTDIR, "every component is a directory again; the tree changed mid-run")
+
+
 def prune_candidate(root_fd, real_root, real, candidate, recorded, cutoff, budget, dry_run, state_path, result):
     """Survey one resolved candidate and remove its caches when idle.
 
@@ -599,7 +653,13 @@ def prune_candidate(root_fd, real_root, real, candidate, recorded, cutoff, budge
         result["missing"] += 1
         return False
     except OSError as exc:
-        if exc.errno in (errno.ELOOP, errno.ENOTDIR):
+        if exc.errno == errno.ENOTDIR:
+            if non_dir_kind(root_fd, parts) == "symlink":
+                result["skipped"].append({"path": real, "reason": "symlink"})
+            else:
+                result["missing"] += 1
+            return False
+        if exc.errno == errno.ELOOP:
             result["skipped"].append({"path": real, "reason": "symlink"})
             return False
         raise
