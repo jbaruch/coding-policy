@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.324 — 2026-09-28
+
 ### Changed
 
 - **The Herdr foreman's tier is selected and proven by the workers' own
