@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.319 — 2026-09-28
+
 ### Added
 
 - **Every foreman plan records why each assignment got its model and effort,
