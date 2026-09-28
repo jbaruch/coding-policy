@@ -98,6 +98,14 @@ class ReportTest(unittest.TestCase):
         window = [row for row in report(state, task="t")["tasks"][0]["windows"] if row["pool"] == "codex"][0]
         self.assertEqual((window["attribution"], window["reason"]), ("unknown", "concurrent_work"))
 
+    def test_another_tasks_unstarted_hand_off_is_not_concurrent_work(self):
+        state = delivered()
+        add_assignment(state, FIX, "reviewer", "codex", "sent_but_not_started", task="other")
+        add_snapshot(state, snapshot(BEFORE, codex=(90, "Sep 30", "")))
+        add_snapshot(state, snapshot(AFTER, codex=(80, "Sep 30", "")))
+        window = [row for row in report(state, task="t")["tasks"][0]["windows"] if row["pool"] == "codex"][0]
+        self.assertEqual((window["attribution"], window["reason"]), ("task", None))
+
     def test_a_reset_between_readings_makes_the_movement_unknown(self):
         state = delivered()
         add_snapshot(state, snapshot(BEFORE, codex=(20, "Sep 23", "")))

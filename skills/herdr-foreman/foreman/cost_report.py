@@ -26,7 +26,7 @@ Each quantity is reported separately and never summed into one cost:
 
 A window's movement is attributed to the task only when nothing else is known
 to have drawn on it: an unshared window, and no other task's assignment on it
-during the span. Otherwise `attribution` is `unknown`, whatever it moved. A
+during the span, a hand-off that never started excepted. Otherwise `attribution` is `unknown`, whatever it moved. A
 reset between the two readings (a changed reset text, or remaining headroom
 that rose) makes the movement itself `unknown`. Consumers the ledger never
 records -- the foreman, the operator's own sessions -- are invisible here, so
@@ -38,6 +38,7 @@ from datetime import timezone
 from .chronology import timestamp
 from .errors import UsageError
 from .recovery import task_closure
+from .state import UNCOUNTED_STATUSES
 from .tiers import canonical_role, measured_pressure
 
 REPORT_SCHEMA_VERSION = 1
@@ -120,8 +121,11 @@ def _windows(task, agents_used, snapshots, assignments, start, end):
         entry["agents"].append(agent)
     out = []
     for pool, entry in sorted(pools.items()):
+        # A hand-off nobody started drew on no window; one whose outcome is
+        # `unknown` may have, so it still counts (the ledger's deny-list).
         concurrent = any(
             row.get("agent") in entry["members"] and row.get("task") != task
+            and row.get("status") not in UNCOUNTED_STATUSES
             and start <= timestamp(row.get("at"), "Assignment {} chronology".format(index)) <= end
             for index, row in enumerate(assignments))
         readings = None
