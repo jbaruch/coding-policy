@@ -67,7 +67,7 @@ def read_json(path):
     try:
         return json.loads(Path(path).read_text(encoding="utf-8"))
     except (OSError, UnicodeDecodeError, ValueError) as exc:
-        fail("cannot read {}: {}".format(path, exc))
+        fail("cannot read {}: {}; pass a readable UTF-8 JSON file (evaluate.sh --results output), then rerun".format(path, exc))
 
 
 def truths(row):

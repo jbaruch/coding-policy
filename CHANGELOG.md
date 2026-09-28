@@ -138,7 +138,13 @@
   discharged a `reread` without the worker's re-read; each command now
   resolves only its own level, refuses with the other command's name when none
   of its level is open, and the sidecar validator refuses a resolution whose
-  action does not match its gate's level (policy review on #617). A replay matched on report
+  action does not match its gate's level (policy review on #617).
+  SKILL.md Step 11 recorded each assessed outcome and ran `close-member`
+  before Step 12 classified the reports, so a report could be accepted before
+  any gate existed; Step 11 now only observes and acknowledges, and Step 12
+  records the gates first, then acceptance and `close-member` (policy review
+  on #617). The classifier's temp-file, questions-file and output-path
+  diagnostics now name the recovery and say to rerun. A replay matched on report
   bytes alone, so a reclassification under a new model, question or bands
   version after a clear was swallowed as a replay; it now records a fresh
   gate. `skills/herdr-foreman/classify/scoring.py calibrate` also keeps only the pinned Jev model's labels.

@@ -146,10 +146,10 @@ main() {
   esac
   [ -n "$agent" ] || agent="$DEFAULT_AGENT"
   local verdict="${HERE}/report_verdict.py"
-  [ -r "$verdict" ] || die "missing the question owner at ${verdict}"
+  [ -r "$verdict" ] || die "missing the question owner at ${verdict}; reinstall the plugin (tessl install jbaruch/coding-policy), then rerun"
 
   local work
-  work="$(mktemp -d "${TMPDIR:-/tmp}/classify-report.XXXXXX")" || die "cannot create a temporary directory"
+  work="$(mktemp -d "${TMPDIR:-/tmp}/classify-report.XXXXXX")" || die "cannot create a temporary directory; repair write access to \${TMPDIR:-/tmp} (or point TMPDIR at a writable directory), then rerun"
   SCRATCH="$work"
   local answer="${work}/answer.json" log="${work}/run.log" room="${work}/room" snapshot="${work}/report"
   # One read of the report: every adapter, the evidence check and the label's
@@ -165,14 +165,14 @@ main() {
     fi
   else
     local pinned
-    pinned="$(model_for "$agent")" || die "no pinned model for '${agent}'"
+    pinned="$(model_for "$agent")" || die "no pinned model for '${agent}'; pass --model <id>, or reinstall the plugin, then rerun"
     [ -n "$model" ] || model="$pinned"
-    command -v "$agent" >/dev/null || die "${agent} is not on PATH"
+    command -v "$agent" >/dev/null || die "${agent} is not on PATH; install its CLI or pick another --agent, then rerun"
     local schema="${work}/schema.json" question="${work}/question.txt"
-    python3 "$verdict" schema "$schema" || die "cannot write the answer schema to ${schema}"
+    python3 "$verdict" schema "$schema" || die "cannot write the answer schema to ${schema}; repair write access to \${TMPDIR:-/tmp} (or point TMPDIR at a writable directory), then rerun"
     python3 "$verdict" frame "$snapshot" "$question" > "${work}/frame.json" \
-      || die "cannot frame ${report} as data; read it in full"
-    mkdir "$room" || die "cannot create the empty working directory"
+      || die "cannot frame ${report} as data; read it in full, or restore the questions file and the plugin, then rerun"
+    mkdir "$room" || die "cannot create the empty working directory; repair write access to \${TMPDIR:-/tmp} (or point TMPDIR at a writable directory), then rerun"
     if ! ( cd "$room" && "ask_${agent}" "$model" "$schema" "$answer" "$log" < "$question" ); then
       cat "$log" >&2
       die "the ${agent} call failed; a failed call is never a verdict"
@@ -184,7 +184,7 @@ main() {
 
   printf '%s\n' "$payload"
   if [ -n "$out" ]; then
-    printf '%s\n' "$payload" > "$out" || die "cannot write the label to ${out}"
+    printf '%s\n' "$payload" > "$out" || die "cannot write the label to ${out}; pass a writable --out path, then rerun"
   fi
   return 0
 }

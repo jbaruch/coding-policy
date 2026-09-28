@@ -120,7 +120,7 @@ def main(argv):
     try:
         rows = write(argv[0])
     except OSError as exc:
-        sys.stderr.write("adversarial: cannot write the reports into {}: {}\n".format(argv[0], exc))
+        sys.stderr.write("adversarial: cannot write the reports into {}: {}; pass an existing writable directory, then rerun\n".format(argv[0], exc))
         return 2
     print(json.dumps({"schema_version": SCHEMA_VERSION, "fixtures": rows}, sort_keys=True))
     return 0

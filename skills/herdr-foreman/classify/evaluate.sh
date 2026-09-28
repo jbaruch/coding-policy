@@ -172,16 +172,16 @@ main() {
   [ "$all" -eq 0 ] || [ -z "$since" ] || die "--since and --all contradict each other; pass one"
   local changed
   changed="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["changed"])' "${HERE}/report-questions.json")" \
-    || die "cannot read the questions' change date from ${HERE}/report-questions.json"
+    || die "cannot read the questions' change date from ${HERE}/report-questions.json; restore that file (reinstall the plugin: tessl install jbaruch/coding-policy), then rerun"
   if [ "$all" -eq 0 ] && [ -z "$since" ]; then since="$changed"; fi
   local work
-  work="$(mktemp -d "${TMPDIR:-/tmp}/classify-eval.XXXXXX")" || die "cannot create a temporary directory"
+  work="$(mktemp -d "${TMPDIR:-/tmp}/classify-eval.XXXXXX")" || die "cannot create a temporary directory; repair write access to \${TMPDIR:-/tmp} (or point TMPDIR at a writable directory), then rerun"
   SCRATCH="$work"
 
   local split="${work}/split.json"
   python3 -c 'import json,sys; since, changed = sys.argv[2], sys.argv[3]
 json.dump({"since": since or None, "changed": changed, "held_out": bool(since) and since >= changed}, open(sys.argv[1], "w"))' \
-    "$split" "$since" "$changed" || die "cannot record the split in ${work}"
+    "$split" "$since" "$changed" || die "cannot record the split in ${work}; repair write access to \${TMPDIR:-/tmp} (or point TMPDIR at a writable directory), then rerun"
   if [ -z "$since" ] || [[ "$since" < "$changed" ]]; then
     echo "evaluate: not held out -- the questions changed on ${changed}, and reports before it may be what they were written against" >&2
   fi
@@ -191,14 +191,14 @@ json.dump({"since": since or None, "changed": changed, "held_out": bool(since) a
   corpus "$state" "$limit" "$since" "$state_root" "$skill_dir" > "$selected" \
     || die "cannot build the labelled corpus from ${source}; fix the cause reported above, or pass --state with a readable state file"
   if [ "$fixtures" -eq 1 ]; then
-    mkdir "${work}/fixtures" || die "cannot create ${work}/fixtures"
+    mkdir "${work}/fixtures" || die "cannot create ${work}/fixtures; repair write access to \${TMPDIR:-/tmp} (or point TMPDIR at a writable directory), then rerun"
     python3 "${HERE}/adversarial.py" "${work}/fixtures" > "${work}/fixtures.json" \
       || die "cannot build the adversarial reports; see the diagnostic above"
-    with_fixtures "$selected" "${work}/fixtures.json" || die "cannot add the adversarial reports to ${selected}"
+    with_fixtures "$selected" "${work}/fixtures.json" || die "cannot add the adversarial reports to ${selected}; repair write access to \${TMPDIR:-/tmp} (or point TMPDIR at a writable directory), then rerun"
   fi
   local total
   total="$(python3 -c 'import json,sys; print(len(json.load(open(sys.argv[1]))))' "$selected")" \
-    || die "cannot read the corpus it just built at ${selected}"
+    || die "cannot read the corpus it just built at ${selected}; repair write access to \${TMPDIR:-/tmp} (or point TMPDIR at a writable directory), then rerun"
   case "$total" in ''|*[!0-9]*) die "the corpus count '${total}' is not a number; inspect ${selected}" ;; esac
   if [ "$total" -eq 0 ]; then
     if [ -n "$since" ]; then
@@ -210,16 +210,16 @@ json.dump({"since": since or None, "changed": changed, "held_out": bool(since) a
   if [ "$corpus_only" -eq 1 ]; then
     python3 -c 'import json,sys,collections; rows=json.load(open(sys.argv[1])); split=json.load(open(sys.argv[2]))
 print(json.dumps({"schema_version":2,"scored":0,"split":split,"corpus":sum(r["source"]=="corpus" for r in rows),"fixtures":sum(r["source"]=="fixture" for r in rows),"recorded":dict(collections.Counter(r["recorded"] for r in rows if r["source"]=="corpus")),"reports":rows}, sort_keys=True))' "$selected" "$split" \
-      || die "cannot summarize the corpus at ${selected}"
+      || die "cannot summarize the corpus at ${selected}; repair write access to \${TMPDIR:-/tmp} (or point TMPDIR at a writable directory), then rerun"
     return 0
   fi
 
   echo "evaluate: scoring ${total} report(s) on ${agent}; this spends one model call each" >&2
   local results="${work}/results.json" failures=0 index=0 report
-  printf '[]' > "$results" || die "cannot write to ${work}"
+  printf '[]' > "$results" || die "cannot write to ${work}; repair write access to \${TMPDIR:-/tmp} (or point TMPDIR at a writable directory), then rerun"
   for ((index = 0; index < total; index++)); do
     report="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))[int(sys.argv[2])]["report"])' "$selected" "$index")" \
-      || die "cannot read row ${index} of ${selected}"
+      || die "cannot read row ${index} of ${selected}; repair write access to \${TMPDIR:-/tmp} (or point TMPDIR at a writable directory), then rerun"
     echo "  [$((index + 1))/${total}] ${report}" >&2
     local answer="${work}/answer-${index}.json"
     if bash "${HERE}/classify-report.sh" "$report" --agent "$agent" ${model:+--model "$model"} --out "$answer" >/dev/null 2>"${work}/err-${index}"; then
@@ -239,7 +239,7 @@ rows.append(label)
 with open(results, "w", encoding="utf-8") as handle:
     json.dump(rows, handle)
 PY
-      then die "cannot record the label for ${report} in ${results}"; fi
+      then die "cannot record the label for ${report} in ${results}; repair write access to \${TMPDIR:-/tmp} (or point TMPDIR at a writable directory), then rerun"; fi
     else
       failures=$((failures + 1))
       cat "${work}/err-${index}" >&2
@@ -251,13 +251,13 @@ PY
   # as a whole one.
   local labelled
   labelled="$(python3 -c 'import json,sys; print(len(json.load(open(sys.argv[1]))))' "$results")" \
-    || die "cannot count the labels in ${results}"
+    || die "cannot count the labels in ${results}; repair write access to \${TMPDIR:-/tmp} (or point TMPDIR at a writable directory), then rerun"
   if [ $((labelled + failures)) -ne "$total" ]; then
     die "scored ${labelled} and failed ${failures} of ${total} selected reports; the run lost reports, so no score is reported"
   fi
 
   if [ -n "$keep" ]; then
-    cp "$results" "$keep" || die "cannot keep the labels at ${keep}"
+    cp "$results" "$keep" || die "cannot keep the labels at ${keep}; pass a writable --results path, then rerun"
   fi
   python3 "${HERE}/scoring.py" score "$results" "$failures" "$agent" "${model:-pinned}" "$split" \
     || die "cannot assemble the accuracy report from ${results}"

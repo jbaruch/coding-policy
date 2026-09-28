@@ -576,21 +576,10 @@ skills/herdr-foreman/references/dispatch-recovery.md
 Save a consultation's successful delivery receipt and record `assess-specialist`
 under `references/specialists.md` before retiring its enrollment.
 
-Record each outcome in the task ledger and user-facing obligations in the
-attention queue. Acknowledge only handled event IDs through the saved snapshot;
-schedule pending rechecks. Once the ledger records an assignment's assessed
-outcome, close its enrollment in one call:
-
-```bash
-CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"; [ -d "$CP" ] || case "$(git config --get remote.origin.url)" in git@github.com:jbaruch/coding-policy|git@github.com:jbaruch/coding-policy.git|https://github.com/jbaruch/coding-policy|https://github.com/jbaruch/coding-policy.git|ssh://git@github.com/jbaruch/coding-policy|ssh://git@github.com/jbaruch/coding-policy.git) CP=. ;; *) echo "coding-policy plugin not found: run tessl install jbaruch/coding-policy" >&2; exit 1 ;; esac
-bash "$CP/skills/herdr-foreman/foreman.sh" close-member --enrollment <enrollment-id> \
-  --ledger <absolute-TASK-LEDGER.md>
-```
-
-It refuses until the ledger's latest event for that worker and report carries
-an assessed decision, then acknowledges the enrollment's pending events and
-resolves it, citing that ledger event; a repeat replays. Resolution stays
-separate from assignment acceptance and task completion. Complete due
+Record user-facing obligations in the attention queue. Acknowledge only handled
+event IDs through the saved snapshot; schedule pending rechecks. Record no
+assessed outcome and close no enrollment here: acceptance is recorded in
+Step 12, after the round's gates exist. Complete due
 retrospectives between checkpoints without interrupting workers. Resume the fleet
 watch while any observation obligation remains; one blocked worker never hides
 another worker's report. Proceed to Step 12 when the required reports are delivered
@@ -668,9 +657,23 @@ bash "$CP/skills/herdr-foreman/foreman.sh" verify-partition \
 - The new plan then takes Step 7 composition, Step 10 dispatch, Step 11
   observation, and this step's gate
 
-Record assignment acceptance or outstanding work in the task ledger against
-the inspected report and artifact evidence. Record the task's gate decision
-separately; a worker finishing its brief never completes the whole task.
+Only now, with every report's gates recorded, record assignment acceptance or
+outstanding work in the task ledger against the inspected report and artifact
+evidence. Record the task's gate decision separately; a worker finishing its
+brief never completes the whole task. Once the ledger records an assignment's
+assessed outcome, close its enrollment in one call:
+
+```bash
+CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"; [ -d "$CP" ] || case "$(git config --get remote.origin.url)" in git@github.com:jbaruch/coding-policy|git@github.com:jbaruch/coding-policy.git|https://github.com/jbaruch/coding-policy|https://github.com/jbaruch/coding-policy.git|ssh://git@github.com/jbaruch/coding-policy|ssh://git@github.com/jbaruch/coding-policy.git) CP=. ;; *) echo "coding-policy plugin not found: run tessl install jbaruch/coding-policy" >&2; exit 1 ;; esac
+bash "$CP/skills/herdr-foreman/foreman.sh" close-member --enrollment <enrollment-id> \
+  --ledger <absolute-TASK-LEDGER.md>
+```
+
+It refuses until the ledger's latest event for that worker and report carries
+an assessed decision, then acknowledges the enrollment's pending events and
+resolves it, citing that ledger event; a repeat replays. Resolution stays
+separate from assignment acceptance and task completion.
+Resume Step 11's fleet watch for any enrollment still observed.
 Assess correction scope and bug evidence under `references/assignment-reasoning.md`.
 Persist user-facing obligations under `references/attention.md` before presenting
 them; record an actual answer or resolution separately from showing the item.

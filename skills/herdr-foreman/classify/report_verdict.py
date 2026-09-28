@@ -92,14 +92,14 @@ def read_bytes(path):
     try:
         return Path(path).read_bytes()
     except OSError as exc:
-        fail("cannot read {}: {}".format(path, exc))
+        fail("cannot read {}: {}; restore a readable file there (reinstall the plugin for its own files), then rerun".format(path, exc))
 
 
 def questions():
     try:
         data = json.loads(QUESTIONS.read_text(encoding="utf-8"))
     except (OSError, UnicodeDecodeError, ValueError) as exc:
-        fail("cannot read the questions at {}: {}".format(QUESTIONS, exc))
+        fail("cannot read the questions at {}: {}; restore that file as UTF-8 JSON (reinstall the plugin: tessl install jbaruch/coding-policy), then rerun".format(QUESTIONS, exc))
     return data
 
 
@@ -262,14 +262,14 @@ def main(argv):
         try:
             Path(argv[1]).write_text(json.dumps(schema()), encoding="utf-8")
         except OSError as exc:
-            fail("cannot write the schema to {}: {}".format(argv[1], exc))
+            fail("cannot write the schema to {}: {}; pass a writable output path, then rerun".format(argv[1], exc))
         return 0
     if len(argv) == 3 and argv[0] == "frame":
         prompt = frame(argv[1])
         try:
             Path(argv[2]).write_text(prompt, encoding="utf-8")
         except OSError as exc:
-            fail("cannot write the framed question to {}: {}".format(argv[2], exc))
+            fail("cannot write the framed question to {}: {}; pass a writable output path, then rerun".format(argv[2], exc))
         data = read_bytes(argv[1])
         print(json.dumps({"schema_version": 1, "question": argv[2], "report_sha256": hashlib.sha256(data).hexdigest(),
                           "nonce": nonce(data), "bytes": len(prompt.encode("utf-8"))}, sort_keys=True))
