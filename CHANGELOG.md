@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.315 — 2026-09-28
+
 ### Fixed
 
 - **The ACR acceptance helper now walks its output roots from `/` (#566).**
