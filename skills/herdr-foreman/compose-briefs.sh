@@ -60,18 +60,26 @@ SKILL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # Whether one JSON value (a string or an array of strings) stays intact on a
 # rendered line. The character rule is `foreman/renderable.py`, the one check
 # the report marker, the GATES block and every brief path share (#578).
-# Returns 0 renderable, 1 not, 3 when the check itself could not run.
+# Returns 0 renderable, 1 not, 3 when the check itself could not run. An exit
+# code alone is no verdict: python3 also exits 1 on an uncaught exception such
+# as a failed import, so a verdict counts only when stdout carries the
+# module's JSON object agreeing with the exit code.
 renderable_json() { # <json-value> [--code-span]
-  local rc=0
-  printf '%s' "$1" | PYTHONPATH="${SKILL_DIR}${PYTHONPATH:+:${PYTHONPATH}}" \
-    python3 -m foreman.renderable ${2:+"$2"} >/dev/null || rc=$?
+  local rc=0 out verdict
+  out="$(printf '%s' "$1" | PYTHONPATH="${SKILL_DIR}${PYTHONPATH:+:${PYTHONPATH}}" \
+    python3 -m foreman.renderable ${2:+"$2"})" || rc=$?
   case "$rc" in
-    0|1) return "$rc" ;;
-    *)
-      warn "the renderable-text check failed (exit ${rc}) — the value could not be checked; confirm python3 runs and ${SKILL_DIR}/foreman/renderable.py is installed"
-      return 3
-      ;;
+    0) verdict=true ;;
+    1) verdict=false ;;
+    *) verdict="" ;;
   esac
+  if [[ -n "$verdict" ]] \
+     && printf '%s' "$out" | jq -e --argjson v "$verdict" \
+          'type == "object" and .renderable == $v' >/dev/null; then
+    return "$rc"
+  fi
+  warn "the renderable-text check failed (exit ${rc}, no verdict on stdout) — the value could not be checked; confirm python3 runs and ${SKILL_DIR}/foreman/renderable.py is installed"
+  return 3
 }
 
 #: The responsibilities a SEAT may fill, mirroring `tiers.SEATABLE_ROLES`.

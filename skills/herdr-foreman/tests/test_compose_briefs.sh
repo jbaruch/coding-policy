@@ -424,6 +424,21 @@ JSON
      && printf '%s' "$ERRTEXT" | grep -q "renderable-text check failed"; then
     pass; else fail "broken renderable check: expected exit 3 and nothing written, got RC=$RC OUT=$OUT ERR=$ERRTEXT"; fi
 
+  # 15d. A crash exiting 1 (python3's code for an uncaught exception, such as
+  #      a failed import) is a check that could not run, never a refusal.
+  local crashshim="$TMP/crashshim"
+  mkdir -p "$crashshim" || die "could not create the crash shim dir"
+  printf '#!/usr/bin/env bash\nset -euo pipefail\necho "ModuleNotFoundError: No module named foreman" >&2\nexit 1\n' \
+    > "$crashshim/python3" || die "could not write the crash shim"
+  chmod +x "$crashshim/python3" || die "could not make the crash shim executable"
+  RUN_SEQ=$((RUN_SEQ+1))
+  OUT="$(PATH="$crashshim:$PATH" bash "$SCRIPT" "$TPL" "$v1" "$TMP/out15d" 2>"$TMP/err.$RUN_SEQ")"
+  RC=$?
+  ERRTEXT="$(cat "$TMP/err.$RUN_SEQ")"
+  if [[ $RC -eq 3 && -z "$OUT" && ! -e "$TMP/out15d" ]] \
+     && printf '%s' "$ERRTEXT" | grep -q "renderable-text check failed"; then
+    pass; else fail "crashed renderable check: expected exit 3 and nothing written, got RC=$RC OUT=$OUT ERR=$ERRTEXT"; fi
+
   # 16. A review SEAT owes its role's review-package checks. The slice narrows
   #     what a reviewer reviews, never what its brief must carry (#434).
   local v16="$TMP/v16.json" o16="$TMP/out16"

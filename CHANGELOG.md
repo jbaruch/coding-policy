@@ -21,7 +21,9 @@
   same rule in `validate-partition`, the apply-time plan check and the composer
   (`partition.UNSAFE_GLOB` is gone). `compose-briefs.sh` now needs `python3`
   (exit 1 without it) and exits 3 when the check cannot run, never treating an
-  unchecked path as accepted. Every template renders `REPORT`,
+  unchecked path as accepted; a refusal counts only when the module's JSON
+  verdict reaches stdout, so a crash exiting 1 (a failed import) is exit 3,
+  not a misreported bad path. Every template renders `REPORT`,
   `REVIEW_PACKAGE`, `POLICY_INDEX` and `RELEASE_SKILL` inside a code span, so
   the composer also refuses a backtick in them, as it already did in slice
   globs. `marker-fit` is stricter than before: it also refuses format,
