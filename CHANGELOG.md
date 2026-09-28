@@ -1,5 +1,28 @@
 # Changelog
 
+### Changed
+
+- **The task ledger's field formats are now code constants the docs point at
+  (#589).** The formats lived in prose in three places — the
+  `state-schema.md` Task Ledger table, its reader-contract paragraph, and the
+  blank template in `references/task-ledger.md` — while
+  `members.ledger_events` validated against a hand-written reading of all
+  three. Every review round on #570 found another spot where they disagreed
+  (report `not_applicable`, SHA case, decision vocabulary, duplicate fields).
+  Per `rules/script-as-black-box.md`, the vocabulary now lives only in
+  `skills/herdr-foreman/foreman/members.py`: `DECISION_MEANINGS` carries each
+  subject's decisions with their meanings (the table moved out of
+  `task-ledger.md`), and `SUBJECTS`, `DECISIONS`, `UNKNOWN`, `NOT_APPLICABLE`,
+  `REPORT_PLACEHOLDERS`, `FREE_TEXT_FIELDS` join the existing field lists, SHA
+  pattern and placeholder sets. The schema section and the template name those
+  constants instead of restating them. Validation semantics are unchanged from
+  #570: `report` is an absolute path or `unknown` on every event, SHAs pass in
+  either case, a repeated schema field is refused, `dispatch_state` names an
+  existing file. New `LedgerDocsPointAtTheConstants` tests fail when a doc
+  cites a constant that does not exist, when the template's fields stop
+  matching `FRONT_FIELDS`/`EVENT_FIELDS`, when the schema table stops covering
+  exactly the event fields, or when a doc restates a decision vocabulary.
+
 ## 0.3.309 — 2026-09-28
 
 ### Added
