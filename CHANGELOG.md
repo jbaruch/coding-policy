@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.309 — 2026-09-28
+
 ### Added
 
 - **Tests now hold the policy reviewer to its pinned model and effort (#503).**
