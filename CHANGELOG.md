@@ -1,5 +1,45 @@
 # Changelog
 
+### Fixed
+
+- **Herdr reports directories no longer grow into build caches (#622).** The
+  operator's `~/.local/state` reached about 250G across round reports
+  directories (`acr-delivery`, `acr-p1`, `acr-030`, `fleet-triage`). The
+  evidence in them (reports, logs, JSON receipts, diffs) was kilobytes; the
+  rest was tool state workers had pointed there: `go-cache`/`gocache`,
+  `go-mod-cache`/`gomodcache`/`modcache`, `pip-cache`, `npm-cache`, `venv`,
+  `__pycache__`, `node_modules`, and tester home guards that copied a whole
+  `~/.claude/plugins/cache` (1.4G) into `before/` and again into `after/` on
+  every run. `check-leftover-worktrees.sh` and `sweep-worktrees.sh` clean
+  worktrees and branches only, so nothing ever removed any of it.
+  - Cleanup: new owner script `skills/herdr-foreman/prune-report-caches.py`
+    finds reports directories from the foreman ledger (the `brief` and
+    `common` paths every dispatch row records, whose directory is the one
+    `compose-briefs.sh` wrote), never by scanning `~/.local/state`, where
+    other tools (cmux, gh, pnpm) keep their own state. A directory is pruned
+    only when nothing below it changed for a day, so a live worker's build
+    never loses its cache mid-compile. A cache is removed only when both its
+    name and its content signature match (a Go build cache's README, a
+    module cache's `cache/download`, `pyvenv.cfg`, `_cacache`, only `.pyc`
+    files, and so on); a `venv` holding notes, or a `before/` holding a
+    source snapshot, stays. Symlinks are never followed, directories outside
+    the state root are skipped, and the ledger is read without migrating it.
+    A cache is renamed to a tombstone before removal, so a removal cut short
+    by the hook's budget is finished next session instead of leaving a
+    signature-less half-cache no run would recognize.
+  - New session-start hook `hooks/check-report-caches.sh` runs it live and
+    reports the reclaimed size: the fix is mechanical and the caches are
+    regenerable, so the hook acts rather than warns. It mirrors
+    `check-leftover-worktrees.sh`'s mode policy (nothing in a Herdr worker's
+    linked worktree, a dry run under tessl, nothing under tessl in a linked
+    worktree).
+  - Prevention: `rules/agent-team-operation.md` Writers and Checkouts and
+    the workers' `COMMON.md` keep build and package caches at the tool's
+    default location or in a scratch directory removed at assignment end.
+    The fixture-root carve-out's home guard now records digests, and copies
+    only the single files it must restore (preconditions 7 and 9), instead
+    of copying directory trees.
+
 ## 0.3.323 — 2026-09-28
 
 ### Fixed
