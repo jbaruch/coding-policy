@@ -7,21 +7,22 @@
 # reads them all with their verdicts in hand and gates them in one turn, instead
 # of spending a full-context turn per report (#482).
 #
-# An annotation is advisory. It never replaces the read, and a failed one never
-# blocks gating: the report lands in `unannotated` with the reason, and the foreman
-# reads it exactly as it always has. A disagreement between the annotation and
-# the foreman's own reading is the case worth a second look.
+# A label never replaces the read and never approves. A failed one never blocks
+# gating: the report lands in `unannotated` with the reason, and the foreman
+# reads it exactly as it always has. The only effect a label can have is the
+# gate `foreman report-gate-record` derives from it, which adds friction and
+# never removes it (foreman/report_gates.py).
 #
-# Usage: classify-reports.sh [--agent codex|claude|grok] <report>...
+# Usage: classify-reports.sh [--agent jev|codex|claude|grok] <report>...
 #
 # Output contract (rules/script-delegation.md -- structured stdout):
 #   stdout: one JSON object --
-#     {"schema_version": 1, "agent": "<kind>" | "default",
+#     {"schema_version": 2, "agent": "<kind>" | "default",
 #      "labels": [<classify-report.sh label>, ...],
 #      "unannotated": [{"report": "<path>", "reason": "<diagnostic>"}, ...]}
-#   `agent` is "default" when none was named and no label came back to show
-#   which kind the default resolved to; each unannotated reason names it.
-#   stderr: per-report progress.
+#   `agent` is the adapter requested, "default" for the Jev-then-Claude chain;
+#   each label names the adapter that answered and any fallback it took.
+#   stderr: per-report progress, and every fallback.
 #
 # Exit 0 whenever the arguments were valid, including when some or every
 # annotation failed -- those are reported, not fatal. Exit 2 on a usage error.
@@ -44,13 +45,13 @@ main() {
   local agent="" reports=()
   while [ $# -gt 0 ]; do
     case "$1" in
-      --agent) agent="${2-}"; shift 2 || die "--agent needs codex, claude or grok" ;;
-      -h|--help) sed -n '2,29p' "${BASH_SOURCE[0]}"; exit 0 ;;
+      --agent) agent="${2-}"; shift 2 || die "--agent needs jev, codex, claude or grok" ;;
+      -h|--help) sed -n '2,31p' "${BASH_SOURCE[0]}"; exit 0 ;;
       --*) die "unknown option '$1'" ;;
       *) reports+=("$1"); shift ;;
     esac
   done
-  [ "${#reports[@]}" -gt 0 ] || die "usage: classify-reports.sh [--agent codex|claude|grok] <report>..."
+  [ "${#reports[@]}" -gt 0 ] || die "usage: classify-reports.sh [--agent jev|codex|claude|grok] <report>..."
 
   local work
   work="$(mktemp -d "${TMPDIR:-/tmp}/classify-reports.XXXXXX")" || die "cannot create a temporary directory"
@@ -62,7 +63,8 @@ main() {
     echo "  [${index}/${#reports[@]}] ${report}" >&2
     if bash "${HERE}/classify-report.sh" "$report" ${agent:+--agent "$agent"} \
          --out "${work}/label-${index}.json" >/dev/null 2>"${work}/err-${index}"; then
-      :
+      # A label that fell back still says so: a fallback is never silent.
+      cat "${work}/err-${index}" >&2
     else
       printf '%s' "$report" > "${work}/failed-${index}"
       # Best-effort: the batch continues, and the failure is still visible.
@@ -85,7 +87,7 @@ for index in range(1, total + 1):
                  errors="replace").splitlines() if line.strip()]
         unannotated.append({"report": failed.read_text(encoding="utf-8"),
                             "reason": lines[-1] if lines else "no diagnostic"})
-print(json.dumps({"schema_version": 1, "agent": labels[0]["agent"] if labels else agent,
+print(json.dumps({"schema_version": 2, "agent": agent,
                   "labels": labels, "unannotated": unannotated}, sort_keys=True))
 PY
 }

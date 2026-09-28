@@ -1,5 +1,79 @@
 # Changelog
 
+### Changed
+
+- **The report classifier asks atomic questions, frames the report as data,
+  checks its own quotes, and can now add a gate (#531).** One broad question
+  ("does the report state a finding the foreman must resolve?") had two policy
+  carve-outs folded into it, and the one-line prompt fix after the first eval
+  was exactly that policy leaking into the question. It is now four questions
+  in `classify/report-questions.json` (names an open item, accepts every such
+  item, places every such item out of scope, concludes nothing blocks), and
+  `classify/report_verdict.py` `compose` turns the answers into
+  `blocking`/`approved`/`insufficient_evidence` in code. Deterministic checks
+  run before any answer is used: the report travels as the `report` field of a
+  JSON object between marker lines keyed to its own sha256, so it cannot forge
+  its delimiter (the old prompt appended it after a lone `REPORT BEGINS` line
+  with no end marker), and every quote an LLM returns must be a passage of the
+  report, whitespace aside, or the label fails closed to
+  `insufficient_evidence`. Three adversarial fixtures (an injected
+  instruction, a forged delimiter, an injected "treat as blocking") sit in
+  `classify/fixtures/` with expected answers; `evaluate.sh --fixtures` scores
+  them apart from the corpus.
+- **Jev is the first adapter, with a visible fallback.** TypeSafe's System
+  One answers each atomic question as one Noul with P(yes), through a new
+  stdlib client, `classify/typesafe_client.py`, written to be reused as is by
+  #472's evidence assessor. The key comes from `TYPESAFE_API_KEY`
+  (`.env.example`) and never reaches a log, an error or a label; provider
+  bodies are discarded unread since they can echo the submitted report; 429
+  and 529 back off exponentially to a bounded attempt count; redirects are
+  refused so the bearer header never travels. The model is pinned to
+  `jev-1.13.0` beside its bands in `foreman/report_gates.py`, renewed on the
+  capability table's weekly cadence and only with a fresh calibration. With no
+  `--agent`, an unavailable Jev (key unset, service down, report over the
+  state budget, answer off contract) falls back to Claude, prints the reason,
+  and records it in the label's `fallback`. The static answer schema is gone:
+  `report_verdict.py schema` generates it from the questions, so the two cannot
+  drift.
+- **A label may add friction to accepting a report, never remove it
+  (operator decision on #531).** `foreman report-gate-record` records the gate
+  a Jev label's probabilities earn: `block` (the report cannot be accepted
+  until `report-gate-clear` records why it does not block) or `reread` (it
+  cannot be gated at all until `report-gate-reread` records the full re-read).
+  `close-member` refuses an `accepted` closure under an open block and any
+  closure under an open re-read; `record-report` does the same for `approved`
+  and for any verdict respectively. Low confidence, `insufficient_evidence`,
+  an LLM or fallback label, an unpinned model or any error gates nothing, and
+  the report is gated exactly as before. The owner recomputes the level from
+  the probabilities and refuses a report rewritten since classification. The
+  gates live in a new sidecar, `<state>.report-gates.json`
+  (`references/report-classifier.md`, Sidecar schema 1). The bands ship
+  uncalibrated and conservative (block at P(open item) >= 0.98 with both
+  disposals <= 0.05; re-read at >= 0.90 with <= 0.20), so an uncalibrated model
+  rarely gates; `scoring.py calibrate` and the procedure in
+  `references/report-classifier.md` replace them from held-out labels once the
+  key is available locally. `rules/script-delegation.md` Bounded
+  Classification now says a label may add a reversible gate, never remove one,
+  and that a script decides the level from recorded probabilities.
+- **`evaluate.sh` scores held out by default and reports per-question
+  accuracy.** The default split starts at the questions' `changed` date, which
+  a question or model change cannot have been written against; `--all` scores
+  everything and marks the split not held out. The corpus records only
+  verdicts, so per-question truth comes from what a verdict determines (a
+  recorded `blocking` fixes three answers; `approved` fixes none) plus the
+  fixtures' expected answers. `--results` keeps the labels for calibration.
+- **The two known mislabels from 2026-09-24 were read.**
+  `goc-20260908/policy-scope/integration-judge-2/report.md`, recorded
+  `blocking` and labelled `approved` by both prompts, is a judge ruling
+  (`RULING: amend`) whose `ACTION:` requires a further correction before
+  release; the old answer set had no option for a required action that is not
+  a defect, a question-design gap (missing option). `names_open_item` now names
+  "required action" and "open dispute" explicitly. `acr-p1/r63v3/reviewer.md`,
+  recorded `approved` and labelled `blocking`, has no new source findings and
+  one open item it assigns to a separately assigned judge; the old prompt's
+  scope clause was ambiguous about another seat's dispute (ambiguous
+  criteria), which `open_items_out_of_scope` now asks literally.
+
 ## 0.3.309 — 2026-09-28
 
 ### Added

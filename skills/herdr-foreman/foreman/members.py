@@ -23,6 +23,7 @@ import re
 import subprocess
 from pathlib import Path
 
+from . import report_gates
 from . import runnable
 from . import supervision
 from .chronology import timestamp
@@ -200,6 +201,9 @@ def close(state_path, enrollment, ledger, at):
     member = _member(supervision.load(state_path), enrollment)
     assignment = supervision.expected_assignment(member)
     event = assessed_event(ledger, assignment, state_path)
+    # A classifier gate only adds friction: an open re-read refuses any
+    # closure, an open block refuses an accepted one (foreman/report_gates.py).
+    report_gates.require_clear(state_path, assignment["report"], event["decision"] == "accepted")
     outcome = "Task ledger event {}: {}".format(event.get("id", "unknown"), event["decision"])
     drained = supervision.drain(state_path)
     mine = [row for row in drained["events"] if row["member"] == enrollment]

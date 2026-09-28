@@ -565,20 +565,35 @@ or their unavailability and recovery are recorded.
 
 ## Step 12 — Gate the Round
 
-Annotate every delivered report in one call before reading any of them:
+Classify every delivered report in one call before reading any of them, save
+its stdout, then record the gates the labels earn:
 
 ```bash
 CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"
-bash "$CP/skills/herdr-foreman/classify/classify-reports.sh" <report>...
+bash "$CP/skills/herdr-foreman/classify/classify-reports.sh" <report>... > <labels.json>
 ```
 
-Each label carries a verdict from the answer set in
-`skills/herdr-foreman/classify/report-verdict.schema.json` and the sentence
-that decided it. Read the reports together and gate them in one turn,
-not one turn per report. A label is advisory. It never replaces the full read,
-and a report in `unannotated` is read exactly as it would have been. Look twice
-where a label disagrees with your own reading. Which vendor and model it uses, and its measured accuracy,
-are the script's contract — see `skills/herdr-foreman/classify/classify-report.sh`.
+```bash
+CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"
+bash "$CP/skills/herdr-foreman/foreman.sh" report-gate-record --labels <labels.json>
+```
+
+Each label carries a verdict (`blocking`, `approved` or
+`insufficient_evidence`), its per-question answers, and any fallback it took;
+relay every fallback line to the operator. A report in `unannotated` is read
+exactly as it would have been. Read the reports together and gate them in one
+turn, not one turn per report. A label never approves, accepts or skips a
+check; its only effect is a recorded gate, which adds friction:
+
+- `block` — the report is not accepted until `report-gate-clear` records why
+  it does not block
+- `reread` — the report is not gated until `report-gate-reread` records the
+  full re-read
+- no gate — the report is read and gated as before
+
+`close-member` and `record-report` refuse while a gate forbids the decision.
+Gate levels, bands, adapters and fallback are the owners' contract — see
+`skills/herdr-foreman/references/report-classifier.md`.
 
 Read every report file in full, including a report whose worker exited cleanly.
 A `## BLOCKED` section can sit under a report that otherwise reads as finished.

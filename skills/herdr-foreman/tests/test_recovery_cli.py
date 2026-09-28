@@ -7,6 +7,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
+import hashlib
 import io
 import json
 from pathlib import Path
@@ -14,7 +15,7 @@ import unittest
 from datetime import datetime, timedelta
 from unittest.mock import patch
 
-from foreman import runnable
+from foreman import report_gates, runnable
 from foreman.errors import UsageError
 from foreman.state import add_assignment, empty_state, save_state, state_lock
 from tests import test_cli as fixture
@@ -654,8 +655,25 @@ class RecoveryCommandTests(fixture.CliCase):
         self.assertEqual(self.runner.calls, [])
         review = self.tmp / "review-6.md"
         review.write_text("Reviewed head " + HEAD + "\nBlocking F1: an escaped quote is still mishandled.\n")
-        code, _, err = self.owner("record-report", {"dispatch": dispatch, "head_revision": HEAD, "verdict": "blocking",
-            "review_mode": "full", "reviewer": "codex", "report": str(review), "changed_paths": ["src/parser.py"]})
+        # A medium-confidence classifier label forces a recorded re-read before
+        # the review is gated at all, blocking verdict included.
+        labels = self.tmp / "labels.json"
+        labels.write_text(json.dumps({"labels": [{
+            "report": str(review), "sha256": hashlib.sha256(review.read_bytes()).hexdigest(), "agent": "jev",
+            "model": report_gates.JEV_MODEL, "verdict": "blocking", "fallback": None, "question": "q",
+            "answers": {"names_open_item": {"p_yes": 0.93}, "open_items_accepted": {"p_yes": 0.01},
+                        "open_items_out_of_scope": {"p_yes": 0.01}}}]}))
+        code, _, err = self.invoke(["report-gate-record", "--labels", str(labels), "--now", AT])
+        self.assertEqual(code, 0, err)
+        record = {"dispatch": dispatch, "head_revision": HEAD, "verdict": "blocking",
+                  "review_mode": "full", "reviewer": "codex", "report": str(review), "changed_paths": ["src/parser.py"]}
+        code, _, err = self.owner("record-report", record)
+        self.assertEqual(code, 1)
+        self.assertIn("open re-read gate", err)
+        code, _, err = self.invoke(["report-gate-reread", "--report", str(review), "--note", "Read in full; F1 stands.",
+                                    "--now", AT])
+        self.assertEqual(code, 0, err)
+        code, _, err = self.owner("record-report", record)
         self.assertEqual(code, 0, err)
         with patch("foreman.assign.send_message", side_effect=KeyboardInterrupt), self.assertRaises(KeyboardInterrupt):
             self.invoke(self.apply_args("developer", 7, *extra), self.fresh_client("fix-6", "fix-7-interrupted"))

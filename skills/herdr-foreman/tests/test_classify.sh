@@ -3,32 +3,39 @@
 #
 # The model is stubbed on PATH, never called: a classifier's output is
 # non-deterministic, and calling one live would put that into the suite
-# (rules/testing-standards.md Determinism, which names this case). What is under
-# test is everything around the call -- the answer contract, the failure paths,
-# and the scoring.
+# (rules/testing-standards.md Determinism, which names this case). Jev's HTTP
+# layer is stubbed in tests/test_report_verdict.py; here TYPESAFE_API_KEY is
+# unset, so every default run takes the visible fallback. What is under test
+# is everything around the call -- the answer contract, the fallback, the
+# failure paths, and the scoring.
 #
 # The harness drops `set -e` to aggregate results; every fixture command is
 # checked explicitly (rules/error-handling.md aggregate-reporting carve-out).
 #
 # Covers:
-#   1. A conforming answer      -> verdict, report hash, question hash, model.
+#   1. A conforming answer      -> composed verdict, report hash, question hash, model.
 #   2. A failed model call      -> exit 2, no stdout. Never a verdict.
-#   3. An off-enum answer       -> exit 2. The schema is not advisory.
+#   3. An off-schema answer     -> exit 2. The schema is not advisory.
 #   4. An empty answer          -> exit 2.
 #   5. An unreadable report     -> exit 2 before any model call.
-#   6. --model                  -> overrides the pin and travels with the label.
+#   6. --model                  -> overrides the pin, travels with the label, needs --agent.
 #   7. --out                    -> the same payload, byte for byte.
-#   8. Corpus building          -> recorded verdicts only, missing files dropped;
-#                                 the default home is read under the home guard.
-#   9. Scoring                  -> accuracy, confusion, disagreements.
-#  10. A failed classification  -> exit 1 with a partial score, never averaged
-#                                 over the ones that worked.
-#  11. Claude and Grok adapters -> each vendor's envelope unwrapped to the same
+#   8. A fabricated quote       -> insufficient_evidence, never the model's verdict.
+#   9. The default chain        -> Jev unavailable falls back to claude, says so, and
+#                                 the label records it; --agent jev never falls back.
+#  10. Claude and Grok adapters -> each vendor's envelope unwrapped to the same
 #                                 label; an errored or multi-answer run refused.
-#  12. The empty room           -> every adapter runs where it can read nothing
+#  11. The empty room           -> every adapter runs where it can read nothing
 #                                 but the question.
-#  13. A round's batch          -> one call annotates every report; a failed
+#  12. A round's batch          -> one call annotates every report; a failed
 #                                 annotation is reported, never fatal.
+#  13. Corpus building          -> recorded verdicts only, missing files dropped;
+#                                 held out by default; the default home is read
+#                                 under the home guard.
+#  14. Scoring                  -> accuracy, confusion, per-question accuracy,
+#                                 disagreements, fixtures reported apart.
+#  15. A failed classification  -> exit 1 with a partial score, never averaged
+#                                 over the ones that worked.
 
 set -uo pipefail
 
@@ -40,21 +47,39 @@ die() { echo "fatal: $*" >&2; exit 2; }
 
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../classify" && pwd)" || die "cannot resolve the classify dir"
 
-# A `codex` that writes whatever verdict the fixture asks for, into the file the
+BLOCKING='{"names_open_item":{"answer":"yes","evidence":"B1: the parser accepts a quoted completion marker."},"open_items_accepted":{"answer":"no","evidence":""},"open_items_out_of_scope":{"answer":"no","evidence":""},"concludes_nothing_blocks":{"answer":"no","evidence":""}}'
+APPROVED='{"names_open_item":{"answer":"no","evidence":""},"open_items_accepted":{"answer":"no","evidence":""},"open_items_out_of_scope":{"answer":"no","evidence":""},"concludes_nothing_blocks":{"answer":"yes","evidence":"No blocking findings."}}'
+INVENTED='{"names_open_item":{"answer":"yes","evidence":"B7: the release step deletes the tag."},"open_items_accepted":{"answer":"no","evidence":""},"open_items_out_of_scope":{"answer":"no","evidence":""},"concludes_nothing_blocks":{"answer":"no","evidence":""}}'
+
+# A `codex` that writes whatever answer the fixture asks for, into the file the
 # real one would write, and ignores everything else.
 stub_codex() { # <bin-dir> <exit> <answer-json>
   mkdir -p "$1" || die "mkdir $1"
   cat > "$1/codex" <<STUB || die "write codex stub"
-#!/bin/sh
+#!/usr/bin/env bash
+set -euo pipefail
 out=""
 while [ \$# -gt 0 ]; do
   case "\$1" in --output-last-message) out="\$2"; shift 2 ;; *) shift ;; esac
 done
 cat > /dev/null
-[ -n "\$out" ] && printf '%s' '$3' > "\$out"
+if [ -n "\$out" ]; then printf '%s' '$3' > "\$out"; fi
 exit $2
 STUB
   chmod +x "$1/codex" || die "chmod codex stub"
+}
+
+# A `claude` that answers with the given object, and records what it could see.
+stub_claude() { # <bin-dir> <answer-json>
+  mkdir -p "$1" || die "mkdir $1"
+  cat > "$1/claude" <<STUB || die "write claude stub"
+#!/usr/bin/env bash
+set -euo pipefail
+cat > /dev/null
+if [ -n "\${ROOM_PROBE:-}" ]; then ls -A > "\$ROOM_PROBE"; fi
+printf '%s' '[{"type":"system"},{"type":"result","is_error":false,"structured_output":$2}]'
+STUB
+  chmod +x "$1/claude" || die "chmod claude stub"
 }
 
 classify() { # <bin-dir> <report> [extra args...]
@@ -70,26 +95,30 @@ field() { printf '%s' "$1" | python3 -c 'import json,sys; print(json.load(sys.st
 cleanup() { if [ -n "${TMP:-}" ]; then rm -rf "$TMP"; fi; return 0; }
 
 main() {
+  # The suite never reaches TypeSafe, whatever the runner's environment holds.
+  unset TYPESAFE_API_KEY
   TMP="$(mktemp -d "${TMPDIR:-/tmp}/classify-tests.XXXXXX")" || die "mktemp"
   trap cleanup EXIT
   ERRFILE="$TMP/err"
 
-  local report="$TMP/report.md"
+  local report="$TMP/report.md" second="$TMP/second.md"
   printf '# Reviewer report\n\nB1: the parser accepts a quoted completion marker.\n' > "$report" \
     || die "write report fixture"
+  printf '# Tester report\n\nNo blocking findings.\n' > "$second" || die "write second report"
 
   echo "▶ the answer contract" >&2
 
-  stub_codex "$TMP/ok" 0 '{"verdict":"blocking","evidence":"B1: the parser accepts a quoted completion marker."}'
+  stub_codex "$TMP/ok" 0 "$BLOCKING"
   classify "$TMP/ok" "$report" --agent codex
   if [[ $RC -eq 0 ]] && [[ "$(field "$OUT" verdict)" == "blocking" ]] \
-     && [[ "$(field "$OUT" model)" == "gpt-5.6-sol" ]]; then
-    pass; else fail "a conforming answer returns its verdict and the pinned model, got RC=$RC OUT=$OUT"; fi
+     && [[ "$(field "$OUT" model)" == "gpt-5.6-sol" ]] \
+     && [[ "$(field "$OUT" evidence)" == "B1: the parser accepts a quoted completion marker." ]]; then
+    pass; else fail "a conforming answer composes its verdict with the pinned model, got RC=$RC OUT=$OUT ERR=$ERRTEXT"; fi
 
-  # The label carries what makes a later prompt edit or model bump attributable.
+  # The label carries what makes a later question edit or model bump attributable.
   local expected_report expected_question
   expected_report="$(shasum -a 256 "$report" | cut -d' ' -f1)"
-  expected_question="$(shasum -a 256 "$DIR/report-verdict.prompt.md" | cut -d' ' -f1)"
+  expected_question="$(cat "$DIR/report-verdict.prompt.md" <(printf '\0') "$DIR/report-questions.json" | shasum -a 256 | cut -d' ' -f1)"
   if [[ "$(field "$OUT" sha256)" == "$expected_report" ]] \
      && [[ "$(field "$OUT" question)" == "$expected_question" ]]; then
     pass; else fail "the label must carry the report and question hashes, got OUT=$OUT"; fi
@@ -98,9 +127,22 @@ main() {
   if [[ $RC -eq 0 ]] && [[ "$(field "$OUT" model)" == "some-other-model" ]]; then
     pass; else fail "--model overrides the pin and travels with the label, got RC=$RC OUT=$OUT"; fi
 
+  classify "$TMP/ok" "$report" --model "some-other-model"
+  if [[ $RC -eq 2 && -z "$OUT" ]] && printf '%s' "$ERRTEXT" | grep -q 'needs --agent'; then
+    pass; else fail "--model without --agent is a usage error, got RC=$RC OUT=$OUT"; fi
+
   classify "$TMP/ok" "$report" --agent codex --out "$TMP/label.json"
   if [[ $RC -eq 0 ]] && [[ "$(cat "$TMP/label.json")" == "$OUT" ]]; then
     pass; else fail "--out writes the same payload, got RC=$RC"; fi
+
+  echo "▶ deterministic checks before semantic ones" >&2
+
+  # A quote that is not in the report voids the verdict it claims to back.
+  stub_codex "$TMP/invented" 0 "$INVENTED"
+  classify "$TMP/invented" "$report" --agent codex
+  if [[ $RC -eq 0 ]] && [[ "$(field "$OUT" verdict)" == "insufficient_evidence" ]] \
+     && printf '%s' "$OUT" | grep -q '"evidence_verbatim": false'; then
+    pass; else fail "a fabricated quote fails closed to insufficient_evidence, got RC=$RC OUT=$OUT"; fi
 
   echo "▶ a failed call is never a verdict" >&2
 
@@ -109,16 +151,13 @@ main() {
   if [[ $RC -eq 2 && -z "$OUT" ]] && printf '%s' "$ERRTEXT" | grep -q 'never a verdict'; then
     pass; else fail "a failed model call exits 2 with no verdict, got RC=$RC OUT=$OUT"; fi
 
-  stub_codex "$TMP/offenum" 0 '{"verdict":"probably fine","evidence":"x"}'
-  classify "$TMP/offenum" "$report" --agent codex
-  if [[ $RC -eq 2 && -z "$OUT" ]]; then
-    pass; else fail "an answer outside the enum exits 2, got RC=$RC OUT=$OUT"; fi
-
-  # The whole schema is the contract, not the verdict alone: a label whose
-  # evidence is missing or not a string, or that carries an extra field, is
-  # no label at all.
-  for shape in '{"verdict":"approved"}' '{"verdict":"approved","evidence":7}' \
-               '{"verdict":"approved","evidence":"x","confidence":0.9}'; do
+  # The whole schema is the contract: a missing question, an answer off the
+  # enum, a missing evidence field or an extra field is no label at all.
+  local shape rest='"open_items_accepted":{"answer":"no","evidence":""},"open_items_out_of_scope":{"answer":"no","evidence":""},"concludes_nothing_blocks":{"answer":"no","evidence":""}'
+  for shape in '{"names_open_item":{"answer":"yes","evidence":"x"}}' \
+               '{"names_open_item":{"answer":"probably","evidence":""},'"$rest"'}' \
+               '{"names_open_item":{"answer":"no"},'"$rest"'}' \
+               '{"names_open_item":{"answer":"no","evidence":""},'"$rest"',"verdict":"approved"}'; do
     stub_codex "$TMP/shape" 0 "$shape"
     classify "$TMP/shape" "$report" --agent codex
     if [[ $RC -eq 2 && -z "$OUT" ]]; then
@@ -134,96 +173,90 @@ main() {
   if [[ $RC -eq 2 && -z "$OUT" ]] && printf '%s' "$ERRTEXT" | grep -q 'not a readable file'; then
     pass; else fail "an unreadable report exits 2 before any call, got RC=$RC OUT=$OUT"; fi
 
-  stub_codex "$TMP/abstain" 0 '{"verdict":"insufficient_evidence","evidence":""}'
+  stub_codex "$TMP/abstain" 0 '{"names_open_item":{"answer":"unclear","evidence":""},'"$rest"'}'
   classify "$TMP/abstain" "$report" --agent codex
   if [[ $RC -eq 0 ]] && [[ "$(field "$OUT" verdict)" == "insufficient_evidence" ]]; then
     pass; else fail "an honest abstention is an answer, not a failure, got RC=$RC OUT=$OUT"; fi
 
-  echo "▶ one adapter per kind" >&2
+  echo "▶ the default chain falls back visibly" >&2
 
-  # Claude wraps the answer in a stream of events; the last `result` holds it.
-  mkdir -p "$TMP/cl" || die "mkdir cl"
-  cat > "$TMP/cl/claude" <<'STUB' || die "write claude stub"
-#!/bin/sh
-cat > /dev/null
-ls -A > "$ROOM_PROBE"
-printf '%s' '[{"type":"system"},{"type":"result","is_error":false,"structured_output":{"verdict":"approved","evidence":"No blocking findings."}}]'
-STUB
-  chmod +x "$TMP/cl/claude" || die "chmod claude stub"
-  OUT="$(ROOM_PROBE="$TMP/cl-room" PATH="$TMP/cl:$PATH" bash "$DIR/classify-report.sh" "$report" --agent claude 2>"$ERRFILE")"
+  stub_claude "$TMP/cl" "$APPROVED"
+  OUT="$(ROOM_PROBE="$TMP/cl-room" PATH="$TMP/cl:$PATH" bash "$DIR/classify-report.sh" "$second" 2>"$ERRFILE")"
   RC=$?
+  ERRTEXT="$(cat "$ERRFILE")"
   if [[ $RC -eq 0 ]] && [[ "$(field "$OUT" verdict)" == "approved" ]] \
-     && [[ "$(field "$OUT" agent)" == "claude" ]] && [[ "$(field "$OUT" model)" == "claude-sonnet-5" ]]; then
-    pass; else fail "claude's envelope unwraps to a label with its pinned model, got RC=$RC OUT=$OUT"; fi
+     && [[ "$(field "$OUT" agent)" == "claude" ]] && [[ "$(field "$OUT" model)" == "claude-sonnet-5" ]] \
+     && printf '%s' "$ERRTEXT" | grep -q 'TYPESAFE_API_KEY is not set.*falling back to claude' \
+     && printf '%s' "$OUT" | grep -q '"from": "jev"' \
+     && printf '%s' "$OUT" | python3 -c 'import json,sys; assert json.load(sys.stdin)["gate"]["level"] is None'; then
+    pass; else fail "an unset key falls back to claude, says so, and never gates, got RC=$RC OUT=$OUT ERR=$ERRTEXT"; fi
   # The adapter ran somewhere it could read nothing but the question.
   if [[ -f "$TMP/cl-room" && ! -s "$TMP/cl-room" ]]; then
-    pass; else fail "the claude adapter must run in an empty directory, saw: $(cat "$TMP/cl-room" 2>/dev/null)"; fi
+    pass; else fail "the claude adapter must run in an empty directory, saw: $(cat "$TMP/cl-room")"; fi
+
+  classify "$TMP/cl" "$second" --agent jev
+  if [[ $RC -eq 2 && -z "$OUT" ]] && printf '%s' "$ERRTEXT" | grep -q 'Jev unavailable'; then
+    pass; else fail "--agent jev never falls back, got RC=$RC OUT=$OUT ERR=$ERRTEXT"; fi
+
+  echo "▶ one adapter per kind" >&2
 
   cat > "$TMP/cl/claude" <<'STUB' || die "write erroring claude stub"
-#!/bin/sh
+#!/usr/bin/env bash
+set -euo pipefail
 cat > /dev/null
 printf '%s' '[{"type":"result","is_error":true,"result":"usage limit reached"}]'
 STUB
-  OUT="$(PATH="$TMP/cl:$PATH" bash "$DIR/classify-report.sh" "$report" --agent claude 2>"$ERRFILE")"
-  RC=$?
-  ERRTEXT="$(cat "$ERRFILE")"
+  classify "$TMP/cl" "$report" --agent claude
   if [[ $RC -eq 2 && -z "$OUT" ]] && printf '%s' "$ERRTEXT" | grep -q 'never a verdict'; then
     pass; else fail "an errored claude run is never a verdict, got RC=$RC OUT=$OUT"; fi
 
   # Grok puts the answer in `text`, and one turn gives exactly one object.
   mkdir -p "$TMP/gk" || die "mkdir gk"
-  cat > "$TMP/gk/grok" <<'STUB' || die "write grok stub"
-#!/bin/sh
-ls -A > "$ROOM_PROBE"
-printf '%s' '{"text":"{\"verdict\":\"blocking\",\"evidence\":\"B1\"}","stopReason":"end_turn"}'
-STUB
+  python3 - "$TMP/gk/grok" "$BLOCKING" <<'PY' || die "write grok stub"
+import json, sys
+path, answer = sys.argv[1], sys.argv[2]
+envelope = json.dumps({"text": answer, "stopReason": "end_turn"})
+with open(path, "w", encoding="utf-8") as handle:
+    handle.write("#!/usr/bin/env bash\nset -euo pipefail\nls -A > \"$ROOM_PROBE\"\nprintf '%s' '{}'\n".format(envelope))
+PY
   chmod +x "$TMP/gk/grok" || die "chmod grok stub"
   OUT="$(ROOM_PROBE="$TMP/gk-room" PATH="$TMP/gk:$PATH" bash "$DIR/classify-report.sh" "$report" --agent grok 2>"$ERRFILE")"
   RC=$?
   if [[ $RC -eq 0 ]] && [[ "$(field "$OUT" verdict)" == "blocking" ]] && [[ "$(field "$OUT" agent)" == "grok" ]]; then
     pass; else fail "grok's envelope unwraps to a label, got RC=$RC OUT=$OUT"; fi
   if [[ -f "$TMP/gk-room" && ! -s "$TMP/gk-room" ]]; then
-    pass; else fail "the grok adapter must run in an empty directory, saw: $(cat "$TMP/gk-room" 2>/dev/null)"; fi
+    pass; else fail "the grok adapter must run in an empty directory, saw: $(cat "$TMP/gk-room")"; fi
 
   # A live probe before these adapters existed: free to roam, grok searched the
   # workspace and emitted four concatenated answers. Picking one out is not the
   # answer to the question asked.
   cat > "$TMP/gk/grok" <<'STUB' || die "write chatty grok stub"
-#!/bin/sh
-printf '%s' '{"text":"{\"verdict\":\"insufficient_evidence\",\"evidence\":\"a\"}{\"verdict\":\"blocking\",\"evidence\":\"b\"}"}'
+#!/usr/bin/env bash
+set -euo pipefail
+printf '%s' '{"text":"{\"a\":1}{\"b\":2}"}'
 STUB
-  OUT="$(PATH="$TMP/gk:$PATH" bash "$DIR/classify-report.sh" "$report" --agent grok 2>"$ERRFILE")"
-  RC=$?
-  ERRTEXT="$(cat "$ERRFILE")"
+  classify "$TMP/gk" "$report" --agent grok
   if [[ $RC -eq 2 && -z "$OUT" ]] && printf '%s' "$ERRTEXT" | grep -q 'more than one answer'; then
     pass; else fail "more than one grok answer is refused, got RC=$RC OUT=$OUT ERR=$ERRTEXT"; fi
 
-  OUT="$(bash "$DIR/classify-report.sh" "$report" --agent gemini 2>"$ERRFILE")"
-  RC=$?
+  classify "$TMP/gk" "$report" --agent gemini
   if [[ $RC -eq 2 && -z "$OUT" ]]; then
     pass; else fail "an unknown agent is a usage error, got RC=$RC OUT=$OUT"; fi
 
   echo "▶ a round's batch" >&2
 
-  # Claude is the default adapter: the only vendor measured adequate.
-  local second="$TMP/second.md"
-  printf '# Tester report\n\nNo blocking findings.\n' > "$second" || die "write second report"
-  mkdir -p "$TMP/batch" || die "mkdir batch"
-  cat > "$TMP/batch/claude" <<'STUB' || die "write batch claude stub"
-#!/bin/sh
-cat > /dev/null
-printf '%s' '[{"type":"result","is_error":false,"structured_output":{"verdict":"approved","evidence":"No blocking findings."}}]'
-STUB
-  chmod +x "$TMP/batch/claude" || die "chmod batch claude stub"
-  OUT="$(PATH="$TMP/batch:$PATH" bash "$DIR/classify-reports.sh" "$report" "$second" 2>"$ERRFILE")"
+  stub_claude "$TMP/batch" "$APPROVED"
+  OUT="$(PATH="$TMP/batch:$PATH" bash "$DIR/classify-reports.sh" "$second" "$second" 2>"$ERRFILE")"
   RC=$?
-  if [[ $RC -eq 0 ]] && printf '%s' "$OUT" | python3 -c '
+  ERRTEXT="$(cat "$ERRFILE")"
+  if [[ $RC -eq 0 ]] && printf '%s' "$ERRTEXT" | grep -q 'falling back to claude' && printf '%s' "$OUT" | python3 -c '
 import json, sys
 d = json.load(sys.stdin)
-assert d["agent"] == "claude", d
+assert d["agent"] == "default", d
 assert len(d["labels"]) == 2 and d["unannotated"] == [], d
+assert all(label["agent"] == "claude" and label["fallback"] for label in d["labels"]), d
 '; then
-    pass; else fail "one call annotates every report with the default adapter, got RC=$RC OUT=$OUT"; fi
+    pass; else fail "one call annotates every report, each fallback visible, got RC=$RC OUT=$OUT"; fi
 
   # An annotation that fails never blocks gating: the foreman reads that report as
   # it always has.
@@ -245,7 +278,7 @@ assert all("never a verdict" in row["reason"] for row in d["unannotated"]), d
   echo "▶ the labelled corpus" >&2
 
   local kept="$TMP/kept.md" state="$TMP/state.json"
-  printf 'kept\n' > "$kept" || die "write kept report"
+  cp "$report" "$kept" || die "write kept report"
   python3 - "$state" "$kept" <<'PY' || die "write state fixture"
 import json, sys
 state, kept = sys.argv[1], sys.argv[2]
@@ -261,28 +294,44 @@ dispatches = [
 with open(state, "w", encoding="utf-8") as handle:
     json.dump({"recovery": {"dispatches": dispatches}}, handle)
 PY
-  OUT="$(bash "$DIR/evaluate.sh" --corpus-only --state "$state" 2>"$ERRFILE")"
+  OUT="$(bash "$DIR/evaluate.sh" --corpus-only --state "$state" --all 2>"$ERRFILE")"
   RC=$?
   # The same path twice is one report: a corpus that counted it twice would
   # score the same bytes twice. A missing file and a dispatch with no recorded
   # verdict are both dropped.
-  if [[ $RC -eq 0 ]] && [[ "$(field "$OUT" corpus)" == "1" ]]; then
+  if [[ $RC -eq 0 ]] && [[ "$(field "$OUT" corpus)" == "1" ]] \
+     && printf '%s' "$OUT" | grep -q '"held_out": false'; then
     pass; else fail "the corpus keeps recorded verdicts with readable files only, got RC=$RC OUT=$OUT"; fi
 
-  # --since keeps only reports recorded on or after the date, so a prompt change
-  # can be measured on reports it was not written against.
+  # Held out by default: reports recorded before the questions changed are the
+  # ones they may have been written against.
+  OUT="$(bash "$DIR/evaluate.sh" --corpus-only --state "$state" 2>"$ERRFILE")"
+  RC=$?
+  ERRTEXT="$(cat "$ERRFILE")"
+  if [[ $RC -eq 2 && -z "$OUT" ]] && printf '%s' "$ERRTEXT" | grep -q 'on or after 2026-09-27'; then
+    pass; else fail "the default split is held out from the questions' change date, got RC=$RC ERR=$ERRTEXT"; fi
+
   OUT="$(bash "$DIR/evaluate.sh" --corpus-only --state "$state" --since 2026-09-03 2>"$ERRFILE")"
   RC=$?
-  if [[ $RC -eq 0 ]] && [[ "$(field "$OUT" corpus)" == "1" ]]; then
-    pass; else fail "--since keeps a report recorded on the date, got RC=$RC OUT=$OUT"; fi
+  ERRTEXT="$(cat "$ERRFILE")"
+  if [[ $RC -eq 0 ]] && [[ "$(field "$OUT" corpus)" == "1" ]] && printf '%s' "$ERRTEXT" | grep -q 'not held out'; then
+    pass; else fail "--since before the change date scores and says it is not held out, got RC=$RC OUT=$OUT"; fi
   OUT="$(bash "$DIR/evaluate.sh" --corpus-only --state "$state" --since 2026-09-04 2>"$ERRFILE")"
   RC=$?
   ERRTEXT="$(cat "$ERRFILE")"
   if [[ $RC -eq 2 && -z "$OUT" ]] && printf '%s' "$ERRTEXT" | grep -q 'on or after 2026-09-04'; then
     pass; else fail "--since past every report names the date, got RC=$RC ERR=$ERRTEXT"; fi
+  OUT="$(bash "$DIR/evaluate.sh" --corpus-only --state "$state" --since 2026-09-03 --all 2>"$ERRFILE")"
+  RC=$?
+  if [[ $RC -eq 2 && -z "$OUT" ]]; then
+    pass; else fail "--since with --all is a usage error, got RC=$RC OUT=$OUT"; fi
+  OUT="$(bash "$DIR/evaluate.sh" --corpus-only --state "$state" --all --fixtures 2>"$ERRFILE")"
+  RC=$?
+  if [[ $RC -eq 0 ]] && [[ "$(field "$OUT" fixtures)" == "3" ]]; then
+    pass; else fail "--fixtures adds the adversarial fixtures apart from the corpus, got RC=$RC OUT=$OUT"; fi
   # An unreadable state file is a usage error that names the recovery.
   printf '{not json' > "$TMP/broken-state.json" || die "write broken state fixture"
-  OUT="$(bash "$DIR/evaluate.sh" --corpus-only --state "$TMP/broken-state.json" 2>"$ERRFILE")"
+  OUT="$(bash "$DIR/evaluate.sh" --corpus-only --state "$TMP/broken-state.json" --all 2>"$ERRFILE")"
   RC=$?
   ERRTEXT="$(cat "$ERRFILE")"
   if [[ $RC -eq 2 && -z "$OUT" ]] && printf '%s' "$ERRTEXT" | grep -q 'readable UTF-8 JSON'; then
@@ -294,7 +343,7 @@ PY
   local xdg="$TMP/xdg"
   mkdir -p "$xdg/teamlead"
   cp "$state" "$xdg/teamlead/state.json"
-  OUT="$(XDG_STATE_HOME="$xdg" bash "$DIR/evaluate.sh" --corpus-only 2>"$ERRFILE")"
+  OUT="$(XDG_STATE_HOME="$xdg" bash "$DIR/evaluate.sh" --corpus-only --all 2>"$ERRFILE")"
   RC=$?
   ERRTEXT="$(cat "$ERRFILE")"
   if [[ $RC -eq 2 && -z "$OUT" ]] && printf '%s' "$ERRTEXT" | grep -q 'migrate-home'; then
@@ -307,7 +356,7 @@ PY
   printf 'x' > "$blocked/teamlead"
   local root
   for root in "$other" "$blocked"; do
-    OUT="$(XDG_STATE_HOME="$root" bash "$DIR/evaluate.sh" --corpus-only 2>"$ERRFILE")"
+    OUT="$(XDG_STATE_HOME="$root" bash "$DIR/evaluate.sh" --corpus-only --all 2>"$ERRFILE")"
     RC=$?
     ERRTEXT="$(cat "$ERRFILE")"
     if [[ $RC -eq 2 && -z "$OUT" ]] && printf '%s' "$ERRTEXT" | grep -q 'migrate-home'; then
@@ -315,7 +364,7 @@ PY
   done
   mv "$xdg/teamlead" "$xdg/foreman"
   ln -s "$xdg/foreman" "$xdg/teamlead"
-  OUT="$(XDG_STATE_HOME="$xdg" bash "$DIR/evaluate.sh" --corpus-only 2>"$ERRFILE")"
+  OUT="$(XDG_STATE_HOME="$xdg" bash "$DIR/evaluate.sh" --corpus-only --all 2>"$ERRFILE")"
   RC=$?
   if [[ $RC -eq 0 ]] && [[ "$(field "$OUT" corpus)" == "1" ]]; then
     pass; else fail "a migrated default home reads its corpus, got RC=$RC OUT=$OUT"; fi
@@ -330,7 +379,7 @@ xdg, evaluate, errfile = sys.argv[1:4]
 with open(os.path.join(xdg, ".foreman-home.lock"), "a", encoding="utf-8") as lock:
     fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
     with open(errfile, "w", encoding="utf-8") as err:
-        run = subprocess.run(["bash", evaluate, "--corpus-only"], env={**os.environ, "XDG_STATE_HOME": xdg},
+        run = subprocess.run(["bash", evaluate, "--corpus-only", "--all"], env={**os.environ, "XDG_STATE_HOME": xdg},
                              stdout=subprocess.PIPE, stderr=err, text=True, check=False)
 print("{}\t{}".format(run.returncode, len(run.stdout)))
 PY
@@ -341,23 +390,41 @@ PY
 
   echo "▶ scoring" >&2
 
-  stub_codex "$TMP/score" 0 '{"verdict":"blocking","evidence":"B1"}'
-  OUT="$(PATH="$TMP/score:$PATH" bash "$DIR/evaluate.sh" --agent codex --state "$state" 2>"$ERRFILE")"
+  OUT="$(PATH="$TMP/ok:$PATH" bash "$DIR/evaluate.sh" --agent codex --state "$state" --all 2>"$ERRFILE")"
   RC=$?
-  if [[ $RC -eq 0 ]] && [[ "$(field "$OUT" scored)" == "1" ]] \
-     && [[ "$(field "$OUT" accuracy)" == "1.0" ]]; then
-    pass; else fail "a correct prediction scores 1.0, got RC=$RC OUT=$OUT"; fi
+  if [[ $RC -eq 0 ]] && [[ "$(field "$OUT" scored)" == "1" ]] && [[ "$(field "$OUT" accuracy)" == "1.0" ]] \
+     && printf '%s' "$OUT" | python3 -c '
+import json, sys
+d = json.load(sys.stdin)
+assert d["per_question"]["names_open_item"] == {"determined": 1, "agree": 1, "unclear": 0, "accuracy": 1.0}, d
+assert d["per_question"]["concludes_nothing_blocks"]["accuracy"] is None, d
+assert d["split"]["held_out"] is False, d
+'; then
+    pass; else fail "a correct prediction scores 1.0 with per-question accuracy, got RC=$RC OUT=$OUT"; fi
 
-  stub_codex "$TMP/wrong" 0 '{"verdict":"approved","evidence":"nothing blocks"}'
-  OUT="$(PATH="$TMP/wrong:$PATH" bash "$DIR/evaluate.sh" --agent codex --state "$state" 2>"$ERRFILE")"
+  stub_codex "$TMP/wrong" 0 "$INVENTED"
+  OUT="$(PATH="$TMP/wrong:$PATH" bash "$DIR/evaluate.sh" --agent codex --state "$state" --all 2>"$ERRFILE")"
   RC=$?
   if [[ $RC -eq 0 ]] && [[ "$(field "$OUT" accuracy)" == "0.0" ]] \
      && printf '%s' "$OUT" | grep -q '"recorded": "blocking"' \
-     && printf '%s' "$OUT" | grep -q '"predicted": "approved"'; then
+     && printf '%s' "$OUT" | grep -q '"predicted": "insufficient_evidence"'; then
     pass; else fail "a disagreement is reported with both sides, got RC=$RC OUT=$OUT"; fi
 
+  # Fixtures are scored apart: a verdict the injected text flipped is named.
+  OUT="$(PATH="$TMP/ok:$PATH" bash "$DIR/evaluate.sh" --agent codex --state "$state" --all --fixtures \
+    --results "$TMP/results.json" 2>"$ERRFILE")"
+  RC=$?
+  if [[ $RC -eq 0 ]] && [[ -s "$TMP/results.json" ]] && printf '%s' "$OUT" | python3 -c '
+import json, sys
+d = json.load(sys.stdin)
+assert d["scored"] == 1 and d["fixtures"]["scored"] == 3, d
+# The stub quotes B1, which is in no fixture: every fixture fails closed.
+assert len(d["fixtures"]["flipped"]) == 3, d
+'; then
+    pass; else fail "fixtures are scored and reported apart, got RC=$RC OUT=$OUT ERR=$(cat "$ERRFILE")"; fi
+
   stub_codex "$TMP/broken" 1 ''
-  OUT="$(PATH="$TMP/broken:$PATH" bash "$DIR/evaluate.sh" --agent codex --state "$state" 2>"$ERRFILE")"
+  OUT="$(PATH="$TMP/broken:$PATH" bash "$DIR/evaluate.sh" --agent codex --state "$state" --all 2>"$ERRFILE")"
   RC=$?
   # A partial score, never an accuracy averaged over only the calls that worked.
   if [[ $RC -eq 1 ]] && [[ "$(field "$OUT" failed)" == "1" ]] \
