@@ -20,6 +20,10 @@ REVIEW = "2026-09-23T10:30:00+00:00"
 CLOSE = "2026-09-23T11:00:00+00:00"
 AFTER = "2026-09-23T12:00:00+00:00"
 LATE = "2026-09-23T13:00:00+00:00"
+#: Opaque reset texts: the report compares them for equality and never parses
+#: a date out of them, so equal and different values are all the tests need.
+RESET_A = "reset-window-a"
+RESET_B = "reset-window-b"
 
 
 def snapshot(at, **agents):
@@ -78,52 +82,52 @@ class ReportTest(unittest.TestCase):
 
     def test_an_unshared_idle_window_is_attributed_to_the_task(self):
         state = delivered()
-        add_snapshot(state, snapshot(BEFORE, codex=(90, "Sep 30", "")))
-        add_snapshot(state, snapshot(AFTER, codex=(80, "Sep 30", "")))
+        add_snapshot(state, snapshot(BEFORE, codex=(90, RESET_A, "")))
+        add_snapshot(state, snapshot(AFTER, codex=(80, RESET_A, "")))
         window = [row for row in only(state)["windows"] if row["pool"] == "codex"][0]
         self.assertEqual((window["consumed_pct"], window["attribution"], window["reason"]), (10, "task", None))
 
     def test_a_shared_window_keeps_its_movement_but_not_its_attribution(self):
         state = delivered()
-        add_snapshot(state, snapshot(BEFORE, codex=(90, "Sep 30", "openai"), spare=(90, "Sep 30", "openai")))
-        add_snapshot(state, snapshot(AFTER, codex=(70, "Sep 30", "openai"), spare=(70, "Sep 30", "openai")))
+        add_snapshot(state, snapshot(BEFORE, codex=(90, RESET_A, "openai"), spare=(90, RESET_A, "openai")))
+        add_snapshot(state, snapshot(AFTER, codex=(70, RESET_A, "openai"), spare=(70, RESET_A, "openai")))
         window = [row for row in only(state)["windows"] if row["pool"] == "openai"][0]
         self.assertEqual((window["consumed_pct"], window["attribution"], window["reason"]), (20, "unknown", "shared_window"))
 
     def test_another_tasks_work_on_the_window_leaves_attribution_unknown(self):
         state = delivered()
         add_assignment(state, FIX, "reviewer", "codex", task="other")
-        add_snapshot(state, snapshot(BEFORE, codex=(90, "Sep 30", "")))
-        add_snapshot(state, snapshot(AFTER, codex=(80, "Sep 30", "")))
+        add_snapshot(state, snapshot(BEFORE, codex=(90, RESET_A, "")))
+        add_snapshot(state, snapshot(AFTER, codex=(80, RESET_A, "")))
         window = [row for row in report(state, task="t")["tasks"][0]["windows"] if row["pool"] == "codex"][0]
         self.assertEqual((window["attribution"], window["reason"]), ("unknown", "concurrent_work"))
 
     def test_another_tasks_unstarted_hand_off_is_not_concurrent_work(self):
         state = delivered()
         add_assignment(state, FIX, "reviewer", "codex", "sent_but_not_started", task="other")
-        add_snapshot(state, snapshot(BEFORE, codex=(90, "Sep 30", "")))
-        add_snapshot(state, snapshot(AFTER, codex=(80, "Sep 30", "")))
+        add_snapshot(state, snapshot(BEFORE, codex=(90, RESET_A, "")))
+        add_snapshot(state, snapshot(AFTER, codex=(80, RESET_A, "")))
         window = [row for row in report(state, task="t")["tasks"][0]["windows"] if row["pool"] == "codex"][0]
         self.assertEqual((window["attribution"], window["reason"]), ("task", None))
 
     def test_a_reset_between_readings_makes_the_movement_unknown(self):
         state = delivered()
-        add_snapshot(state, snapshot(BEFORE, codex=(20, "Sep 23", "")))
-        add_snapshot(state, snapshot(AFTER, codex=(95, "Sep 30", "")))
+        add_snapshot(state, snapshot(BEFORE, codex=(20, RESET_B, "")))
+        add_snapshot(state, snapshot(AFTER, codex=(95, RESET_A, "")))
         window = [row for row in only(state)["windows"] if row["pool"] == "codex"][0]
         self.assertEqual((window["consumed_pct"], window["reason"]), ("unknown", "window_reset"))
 
     def test_a_garbage_reading_is_unmeasured_not_subtracted(self):
         state = delivered()
-        add_snapshot(state, snapshot(BEFORE, codex=(90, "Sep 30", "")))
-        add_snapshot(state, snapshot(AFTER, codex=(80, "Sep 30", "")))
+        add_snapshot(state, snapshot(BEFORE, codex=(90, RESET_A, "")))
+        add_snapshot(state, snapshot(AFTER, codex=(80, RESET_A, "")))
         state["snapshots"][-1]["agents"]["codex"]["windows"]["weekly"]["remaining_pct"] = "eighty"
         window = [row for row in only(state)["windows"] if row["pool"] == "codex"][0]
         self.assertEqual((window["consumed_pct"], window["after_pct"], window["reason"]), ("unknown", "unknown", "unmeasured"))
 
     def test_a_missing_bracketing_snapshot_is_named(self):
         state = delivered()
-        add_snapshot(state, snapshot(AFTER, codex=(80, "Sep 30", "")))
+        add_snapshot(state, snapshot(AFTER, codex=(80, RESET_A, "")))
         window = [row for row in only(state)["windows"] if row["pool"] == "codex"][0]
         self.assertEqual((window["consumed_pct"], window["reason"]), ("unknown", "no_snapshot_before"))
 
