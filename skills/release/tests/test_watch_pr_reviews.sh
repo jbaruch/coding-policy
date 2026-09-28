@@ -204,6 +204,17 @@ test_ready_first_poll() {
 }
 run "ready on first poll — no sleep" test_ready_first_poll
 
+# A policy review dismissed under a weighing ruling (RULED) plus green is ready.
+test_ruled_is_ready() {
+  reset_mocks
+  queue "$(snap MERGEABLE CLEAN success RULED COMMENTED)"
+  local out rc=0
+  out=$(main jbaruch coding-policy 42 2>&1) || rc=$?
+  assert_eq "exit code" "0" "$rc" || return 1
+  assert_eq "result" "ready" "$(result_of "$out")"
+}
+run "RULED policy review plus green is ready" test_ruled_is_ready
+
 # --- Test 2: deferred ready ---------------------------------------------------
 test_deferred_ready() {
   reset_mocks
