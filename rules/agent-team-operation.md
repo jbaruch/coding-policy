@@ -311,7 +311,7 @@ description: Running a multi-agent team — task-based specialist composition, c
 - A worker's report, plan, and patch artifacts go only under the reports directory its brief names
 - A worker writes nowhere else
 - Build and package caches are tool state, never artifacts (Go build and module caches, pip and npm caches, virtualenvs)
-- A worker keeps them at the tool's user-level default location, or in a scratch directory it removes when the assignment ends
+- A worker keeps them at the tool's user-level default location
 - A worker never places a build or package cache under the reports directory
 - A tool's writes to its own default cache location are outside the write limit above
 - The session-start hook `hooks/check-report-caches.sh` removes build and package caches from idle reports directories through `skills/herdr-foreman/prune-report-caches.py`

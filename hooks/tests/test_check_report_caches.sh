@@ -23,7 +23,8 @@
 #   7. Out of time          -> a stand-in runner reports the timeout; a
 #                              could-not-check line naming the budget.
 #   8. No python3           -> the fixed could-not-check JSON.
-#   9. Session start        -> session-start.sh lists this hook.
+#   9. Session start        -> session-start.sh runs this hook: its status
+#                              reaches the merged payload and the caches go.
 #  10. Bad budget override  -> a could-not-check line naming the variable;
 #                              nothing removed.
 #
@@ -160,8 +161,17 @@ main() {
   else fail "case 8: rc=$RC out=$OUT"; fi
 
   echo "9. session-start runs this hook"
-  if grep -q '^HOOKS=(.*check-report-caches' "${HERE}/../session-start.sh"; then pass
-  else fail "case 9: check-report-caches missing from session-start.sh HOOKS"; fi
+  case="$TMP/c9"; mkdir -p "$case" || die "mkdir failed"
+  top="$(build "$case")" || die "fixture build failed"
+  RC=0
+  OUT="$(cd "$plain" && env -u HERDR_ENV -u SESSION_START_MODE -u TESSL_AGENT -u SESSION_START_HOOKS \
+    XDG_STATE_HOME="$(python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "$case")/state" \
+    REPORT_CACHES_NOW="$NOW" bash "${HERE}/../session-start.sh" </dev/null 2>"$TMP/err")" || RC=$?
+  if [[ "$RC" == 0 && ! -e "$top/developer-evidence/venv" ]] && python3 -c '
+import json, sys
+ctx = json.loads(sys.argv[1])["hookSpecificOutput"]["additionalContext"]
+sys.exit(0 if "removed 8 regenerable build cache directories" in ctx else 1)' "$OUT"; then pass
+  else fail "case 9: rc=$RC out=$OUT"; fi
 
   echo "10. a bad budget override is a could-not-check line"
   case="$TMP/c10"; mkdir -p "$case" || die "mkdir failed"

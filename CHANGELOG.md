@@ -20,11 +20,14 @@
     only when no active supervision enrollment reports into it and nothing
     below it changed for a day, so a live worker's build never loses its
     cache mid-compile, even a worker quiet for longer than a day; an
-    unreadable supervision store stops the prune rather than guessing. A cache is removed only when both its
+    unreadable supervision store stops the prune rather than guessing. The
+    enrollments are re-read under the supervision store's owner lock right
+    before each rename, so a worker enrolled mid-prune keeps its directory. A cache is removed only when both its
     name and its content signature match (a Go build cache's README, a
     module cache's `cache/download`, `pyvenv.cfg`, `_cacache`, only `.pyc`
-    files, and so on); a `venv` holding notes, or a `before/` holding a
-    source snapshot, stays. Symlinks are never followed, directories outside
+    files, and so on) and its top-level entries are the kind's own; a `venv`
+    holding a report next to `pyvenv.cfg`, or a `before/` holding a source
+    snapshot, stays whole. Symlinks are never followed, directories outside
     the state root are skipped, and the ledger is read without migrating it.
     Everything below the state root runs on descriptors: the root is opened
     once and every directory under it is reached one `O_NOFOLLOW` component
@@ -47,7 +50,7 @@
     so that failure is never a silent success.
   - Prevention: `rules/agent-team-operation.md` Writers and Checkouts and
     the workers' `COMMON.md` keep build and package caches at the tool's
-    default location or in a scratch directory removed at assignment end.
+    user-level default location.
     The fixture-root carve-out's home guard now records digests, and copies
     only the single files it must restore (preconditions 7 and 9), instead
     of copying directory trees.

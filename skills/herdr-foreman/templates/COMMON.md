@@ -53,9 +53,8 @@ to know goes in the report.
   names.
 - Build and package caches never go under the reports directory: no
   `GOCACHE`, `GOMODCACHE`, `PIP_CACHE_DIR`, npm cache or virtualenv there.
-  Leave each tool at its own user-level default, or point it at a scratch
-  directory under `$TMPDIR` and remove that directory when you finish. The
-  reports directory holds evidence: reports, logs, receipts, diffs.
+  Leave each tool at its own user-level default. The reports directory holds
+  evidence: reports, logs, receipts, diffs.
 - If your brief names a fixture root, create it yourself under that exact name;
   a directory that already exists, or one reached through a symlink, is a stop,
   not a root to reuse. Fixtures go there and nothing else does.

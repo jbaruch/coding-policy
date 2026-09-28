@@ -41,13 +41,21 @@ Idleness — a candidate is idle when both hold:
     (`--now` injects the clock).
 A candidate that is not idle is skipped whole (`active_assignment` or
 `not_idle`), so a live worker's build cache is never pulled out mid-build. A
-candidate below another idle candidate is covered by that walk.
+candidate below another idle candidate is covered by that walk. Each live
+rename to a tombstone happens under the supervision store's owner lock
+(`foreman/state.py` `state_lock` on `supervision.store_path`) after the
+active enrollments are re-read under it; a lock held by a foreman command,
+or a store unreadable at that moment, skips the rest of the candidate as
+`busy` for the next run.
 
 Cache directories — inside an idle candidate, a directory is removed whole
 when its basename and its content signature both match one row of
-CACHE_KINDS (names and signatures there). The plugin-cache copy row matches a
-`plugins/cache` directory whose grandparent is one of PLUGIN_HOMES: a copy of
-an agent home's plugin cache taken by a home guard. Every other file and
+CACHE_KINDS (names and signatures there). A signature also limits the
+directory's top-level entries to the kind's own (the *_FILES / *_DIRS sets):
+a cache holding a report, a note or a log is not a pure cache and stays
+whole. The plugin-cache copy row matches a `plugins/cache` directory, holding
+directories alone, whose grandparent is one of PLUGIN_HOMES: a copy of an
+agent home's plugin cache taken by a home guard. Every other file and
 directory stays, evidence included. The signature is re-checked on the
 descriptor immediately before removal. Directories inside a removed cache are
 made owner-writable first (the Go module cache is read-only by design).
@@ -73,7 +81,7 @@ Contract:
              "caches": [{"path": str, "kind": str, "bytes": int}],
              "bytes": int,
              "skipped": [{"path": str,
-                          "reason": "not_idle"|"active_assignment"|
+                          "reason": "not_idle"|"active_assignment"|"busy"|
                                     "outside_root"|"symlink"}],
              "failed": [{"path": str, "error": str}],
              "incomplete": bool, "could_not_check": str|null}
@@ -172,8 +180,41 @@ def open_rel(base_fd, parts):
     return fd
 
 
+def _top(fd):
+    """{name: mode} of the entries directly inside, the kind marker left out."""
+    with os.scandir(fd) as entries:
+        return {entry.name: entry.stat(follow_symlinks=False).st_mode for entry in entries
+                if entry.name != TOMBSTONE_MARKER}
+
+
+def _only(fd, files=frozenset(), dirs=frozenset(), any_dir=False, dir_name=None):
+    """Every top-level entry is one of `files` (regular), one of `dirs`, or
+    any directory when `any_dir`, or a directory `dir_name` accepts."""
+    for name, mode in _top(fd).items():
+        if stat.S_ISREG(mode) and name in files:
+            continue
+        if stat.S_ISDIR(mode) and (name in dirs or any_dir or (dir_name is not None and dir_name(name))):
+            continue
+        return False
+    return True
+
+
+#: Top-level entries each cache kind may hold; anything else (a report, a
+#: note, a log) means the directory is not a pure cache and it stays.
+GO_BUILD_FILES = frozenset({"README", "trim.txt", "testexpire.txt"})
+PIP_ENTRIES = frozenset({"http", "http-v2", "wheels", "selfcheck"})
+PIP_FILES = frozenset({"selfcheck.json"})
+NPM_DIRS = frozenset({"_cacache", "_logs", "_npx", "_prebuilds"})
+NPM_FILES = frozenset({"_update-notifier-last-checked", "anonymous-cli-metrics.json"})
+VENV_DIRS = frozenset({"bin", "lib", "lib64", "include", "share", "etc", "Scripts", "Lib", "Include"})
+VENV_FILES = frozenset({"pyvenv.cfg", ".gitignore", "CACHEDIR.TAG", ".lock"})
+NODE_MODULES_FILES = frozenset({".package-lock.json", ".yarn-integrity", ".modules.yaml"})
+HEX = frozenset("0123456789abcdef")
+
+
 def _go_build(fd):
-    return _head_at(fd, "README", len(GO_BUILD_README)) == GO_BUILD_README
+    return (_head_at(fd, "README", len(GO_BUILD_README)) == GO_BUILD_README
+            and _only(fd, files=GO_BUILD_FILES, dir_name=lambda name: len(name) == 2 and set(name) <= HEX))
 
 
 def _go_module(fd):
@@ -181,25 +222,25 @@ def _go_module(fd):
         return False
     cache = open_at(fd, "cache")
     try:
-        return _is_dir_at(cache, "download")
+        return _is_dir_at(cache, "download") and _only(fd, any_dir=True)
     finally:
         os.close(cache)
 
 
 def _pip(fd):
-    return any(_is_dir_at(fd, name) for name in ("http", "http-v2", "wheels", "selfcheck"))
+    return any(_is_dir_at(fd, name) for name in PIP_ENTRIES) and _only(fd, files=PIP_FILES, dirs=PIP_ENTRIES)
 
 
 def _npm(fd):
-    return _is_dir_at(fd, "_cacache")
+    return _is_dir_at(fd, "_cacache") and _only(fd, files=NPM_FILES, dirs=NPM_DIRS)
 
 
 def _venv(fd):
-    return _is_file_at(fd, "pyvenv.cfg")
+    return _is_file_at(fd, "pyvenv.cfg") and _only(fd, files=VENV_FILES, dirs=VENV_DIRS)
 
 
 def _node_modules(fd):
-    return _is_file_at(fd, ".package-lock.json")
+    return _is_file_at(fd, ".package-lock.json") and _only(fd, files=NODE_MODULES_FILES, any_dir=True)
 
 
 def _bytecode(fd, top=True):
@@ -249,15 +290,16 @@ def marker_kind(fd):
 def classify_at(parent_fd, name, parts):
     """The kind of directory `name` in `parent_fd` (at `parts` below the
     candidate), or None."""
-    if len(parts) >= 3 and name == "cache" and parts[-2] == "plugins" and parts[-3] in PLUGIN_HOMES:
-        return PLUGIN_CACHE_COPY
     tomb = name.endswith(TOMBSTONE_SUFFIX)
-    if not tomb and not any(name in names for names, _signature in CACHE_KINDS.values()):
+    copy = len(parts) >= 3 and name == "cache" and parts[-2] == "plugins" and parts[-3] in PLUGIN_HOMES
+    if not tomb and not copy and not any(name in names for names, _signature in CACHE_KINDS.values()):
         return None
     fd = open_at(parent_fd, name)
     try:
         if tomb:
             return TOMBSTONE if marker_kind(fd) else None
+        if copy:
+            return PLUGIN_CACHE_COPY if _only(fd, any_dir=True) else None
         for kind, (names, signature) in CACHE_KINDS.items():
             if name in names and signature(fd):
                 return kind
@@ -376,10 +418,9 @@ def mark(cache_fd, kind):
         os.close(fd)
 
 
-def remove_cache(parent_fd, name, kind, dry_run):
-    """Mark, rename to a tombstone, then remove; bytes freed (or measured)."""
-    if dry_run or kind == TOMBSTONE:
-        return remove_at(parent_fd, name, dry_run, marker_last=True)
+def entomb(parent_fd, name, kind):
+    """Mark cache `name` with its kind and rename it to a tombstone; the
+    tombstone's name."""
     tomb = name + TOMBSTONE_SUFFIX
     if _lstat_at(parent_fd, tomb) is not None:
         raise FileExistsError(errno.EEXIST, "a leftover {} is in the way; remove it by hand".format(tomb))
@@ -396,11 +437,16 @@ def remove_cache(parent_fd, name, kind, dry_run):
             raise _changed()
     finally:
         os.close(cache_fd)
-    return remove_at(parent_fd, tomb, dry_run, marker_last=True)
+    return tomb
 
 
 def within(path, root):
     return path != root and path.startswith(root.rstrip(os.sep) + os.sep)
+
+
+def busy(real, active):
+    """Whether an active enrollment's report directory overlaps `real`."""
+    return any(dir_ == real or within(dir_, real) or within(real, dir_) for dir_ in active)
 
 
 def active_report_dirs(state_path):
@@ -431,9 +477,13 @@ def load_ledger(state_path, default):
         return None, None, exc.message
 
 
-def prune_candidate(root_fd, real_root, real, cutoff, budget, dry_run, result):
+def prune_candidate(root_fd, real_root, real, cutoff, budget, dry_run, state_path, result):
     """Survey one resolved candidate and remove its caches when idle.
 
+    Each live removal renames its cache to a tombstone while holding the
+    supervision store's owner lock, after re-reading the active enrollments
+    under it, so no enrollment lands between the check and the rename. A
+    locked or unreadable store stops the candidate (`busy`).
     Returns True when the candidate was idle (its walk covers descendants).
     """
     parts = tuple(os.path.relpath(real, real_root).split(os.sep))
@@ -461,7 +511,17 @@ def prune_candidate(root_fd, real_root, real, cutoff, budget, dry_run, result):
                     name = cache_parts[-1]
                     if not _is_dir_at(parent_fd, name) or classify_at(parent_fd, name, cache_parts) != kind:
                         continue
-                    size = remove_cache(parent_fd, name, kind, dry_run)
+                    if not dry_run and kind != TOMBSTONE:
+                        try:
+                            with ledger.state_lock(supervision.store_path(state_path)):
+                                if busy(real, active_report_dirs(state_path)):
+                                    result["skipped"].append({"path": real, "reason": "active_assignment"})
+                                    return True
+                                name = entomb(parent_fd, name, kind)
+                        except ForemanError:
+                            result["skipped"].append({"path": real, "reason": "busy"})
+                            return True
+                    size = remove_at(parent_fd, name, dry_run, marker_last=True)
                 finally:
                     os.close(parent_fd)
             except OSError as exc:
@@ -514,11 +574,11 @@ def run(args):
                 continue
             if any(within(real, done) for done in covered):
                 continue
-            if any(busy == real or within(busy, real) or within(real, busy) for busy in active):
+            if busy(real, active):
                 result["skipped"].append({"path": real, "reason": "active_assignment"})
                 continue
             try:
-                if prune_candidate(root_fd, real_root, real, cutoff, budget, args.dry_run, result):
+                if prune_candidate(root_fd, real_root, real, cutoff, budget, args.dry_run, state_path, result):
                     covered.append(real)
             except OSError as exc:
                 result["failed"].append({"path": real, "error": exc.strerror or str(exc)})

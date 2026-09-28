@@ -32,6 +32,13 @@ Covers:
  16. Swap race           -> a directory replaced by a symlink between the
                             survey and the removal is never entered; the
                             cache behind the link survives.
+ 17. Mixed directory     -> a directory with a cache's name and signature
+                            that also holds a report stays whole.
+ 18. Enrollment race     -> an enrollment landing after the survey keeps the
+                            directory: the check before each rename re-reads
+                            supervision under its lock.
+ 19. Locked supervision  -> a store lock held by a foreman command skips the
+                            directory as busy.
 """
 
 import argparse
@@ -66,6 +73,19 @@ CACHE_PATHS = {
     "node-modules": "developer-evidence/node_modules",
     "python-bytecode": "tester-data/home-guard/__pycache__",
     "plugin-cache-copy": "tester-data/home-guard/before/.claude/plugins/cache",
+}
+
+#: Evidence dropped into a directory that otherwise carries a cache's name and
+#: signature: each such directory must stay whole.
+MIXED = {
+    "go-build-cache": "mixed/go-cache",
+    "go-module-cache": "mixed/go-mod-cache",
+    "pip-cache": "mixed/pip-cache",
+    "npm-cache": "mixed/npm-cache",
+    "virtualenv": "mixed/venv",
+    "node-modules": "mixed/node_modules",
+    "python-bytecode": "mixed/__pycache__",
+    "plugin-cache-copy": "mixed/home/.claude/plugins/cache",
 }
 
 EVIDENCE = [
@@ -335,6 +355,56 @@ class PruneReportCachesTests(unittest.TestCase):
         self.assertTrue((outside / "venv" / "pyvenv.cfg").is_file())
         self.assertEqual(result["caches"], [])
         self.assertEqual([f["path"] for f in result["failed"]], [str(top / CACHE_PATHS["virtualenv"])])
+
+    def test_cache_holding_evidence_stays_whole(self):
+        top = self.fx.reports(caches=())
+        for kind, rel in MIXED.items():
+            build_cache(top / rel, kind)
+            write(top / rel / "findings.md", "evidence")
+        self.fx.save()
+        age(top)
+        rc, doc, err = run(self.fx)
+        self.assertEqual(rc, 0, err)
+        self.assertEqual(doc["caches"], [])
+        for rel in MIXED.values():
+            self.assertTrue((top / rel / "findings.md").is_file(), rel)
+
+    def bind(self):
+        who = supervision.identity("lead", str(self.fx.root), "fixture", pane_id="lead-pane")
+        supervision.bind(str(self.fx.state), who, AT, root=str(self.fx.root / "bindings"))
+
+    def test_enrollment_after_the_survey_keeps_the_directory(self):
+        top = self.fx.reports(caches=("virtualenv",))
+        self.fx.save()
+        self.bind()
+        age(top)
+        module = load_script()
+        surveyed = module.survey
+        state = str(self.fx.state)
+
+        def survey_then_enroll(cand_fd, cutoff, budget):
+            outcome = surveyed(cand_fd, cutoff, budget)
+            supervision.enroll(state, {"id": "d0", "agent": "w0", "task": "t0", "report": str(top / "developer.md"),
+                                       "pane_id": "w0-pane", "native_session": None}, AT)
+            return outcome
+
+        setattr(module, "survey", survey_then_enroll)
+        args = argparse.Namespace(dry_run=False, root=str(self.fx.root), state=state, now=NOW, budget_sec=None)
+        result = module.run(args)
+        self.assertEqual(result["caches"], [])
+        self.assertEqual(result["skipped"], [{"path": str(top), "reason": "active_assignment"}])
+        self.assertTrue((top / CACHE_PATHS["virtualenv"] / "pyvenv.cfg").is_file())
+
+    def test_locked_supervision_store_skips_as_busy(self):
+        top = self.fx.reports(caches=("virtualenv",))
+        self.fx.save()
+        self.bind()
+        age(top)
+        with ledger.state_lock(supervision.store_path(str(self.fx.state))):
+            rc, doc, err = run(self.fx)
+        self.assertEqual(rc, 0, err)
+        self.assertEqual(doc["skipped"], [{"path": str(top), "reason": "busy"}])
+        self.assertTrue((top / CACHE_PATHS["virtualenv"] / "pyvenv.cfg").is_file())
 
     def test_active_enrollment_keeps_the_directory(self):
         top = self.fx.reports()
