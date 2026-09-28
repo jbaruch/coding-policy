@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.317 — 2026-09-28
+
 ### Fixed
 
 - **A version can no longer publish without its own CHANGELOG heading, and
