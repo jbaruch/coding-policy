@@ -26,7 +26,9 @@
     unreadable supervision store stops the prune rather than guessing. Each
     cache removal runs under the supervision store's owner lock after the
     enrollments are re-read under it, so a worker cannot be enrolled into a
-    directory while its cache is going. A cache is removed only when both its
+    directory while its cache is going. Only real contention for that lock
+    skips a directory as `busy`; a lock that cannot be opened or a store
+    that turns unreadable mid-run stops the run with exit 3. A cache is removed only when both its
     name and its content signature match (a Go build cache's README, a
     module cache's `cache/download`, `pyvenv.cfg`, `_cacache`, only `.pyc`
     files, and so on) and its top-level entries are the kind's own; a `venv`
@@ -59,7 +61,11 @@
     user-level default location.
     The fixture-root carve-out's home guard now records digests, and copies
     only the single files it must restore (preconditions 7 and 9), instead
-    of copying directory trees.
+    of copying directory trees; `references/round-flow.md` carries the same
+    contract. The rule states what the prune enforces (a directory matching
+    one enumerated cache kind by name, signature and top-level entries), not
+    a blanket "never removes evidence" it cannot prove for a file nested deep
+    inside a cache.
 
 ## 0.3.323 — 2026-09-28
 

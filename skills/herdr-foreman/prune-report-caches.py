@@ -51,8 +51,9 @@ candidate below another idle candidate is covered by that walk. Each live
 cache removal runs start to finish under the supervision store's owner lock
 (`foreman/state.py` `state_lock` on `supervision.store_path`), after the
 active enrollments are re-read under it, so no enrollment lands while a
-cache is going; a lock held by a foreman command, or a store unreadable at
-that moment, skips the rest of the candidate as `busy` for the next run.
+cache is going. A lock held by a foreman command skips the rest of the
+candidate as `busy` for the next run; a lock that cannot be opened or taken,
+or a store unreadable at that moment, stops the run as `could_not_check`.
 
 Cache directories — inside an idle candidate, a directory is removed whole
 when its basename and its content signature both match one row of
@@ -96,8 +97,8 @@ Contract:
              "incomplete": bool, "could_not_check": str|null}
           `caches` lists what was removed (under --dry-run, what would be),
           `bytes` their allocated size. `could_not_check` names why the
-          ledger, the supervision store or ROOT could not be read; nothing
-          is removed then.
+          ledger, the supervision store or its lock, or ROOT could not be
+          read; the run stops there (caches listed before it stay listed).
   stderr: diagnostics.
   exit  : 0 done; 2 when any removal failed; 3 on could_not_check (the
           JSON is printed either way, and stderr names the cause); 1 on a
@@ -106,6 +107,7 @@ Contract:
 
 import argparse
 import errno
+import fcntl
 import hashlib
 import json
 import math
@@ -113,6 +115,7 @@ import os
 import stat
 import sys
 import time
+from contextlib import contextmanager
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -472,6 +475,41 @@ class Skip(Exception):
         self.reason = reason
 
 
+class CouldNotCheck(Exception):
+    """Stop the whole run: the supervision store cannot be locked or read."""
+
+
+@contextmanager
+def supervision_lock(state_path):
+    """Hold the supervision store's owner lock: the file and flock
+    `foreman/state.py` `state_lock` takes on `supervision.store_path`.
+
+    Contention (another foreman command holds it) is Skip("busy"); any other
+    failure to open or lock it is CouldNotCheck.
+    """
+    path = str(supervision.store_path(state_path)) + ".lock"
+    try:
+        handle = open(path, "a", encoding="utf-8")
+    except OSError as exc:
+        raise CouldNotCheck("the supervision lock {} cannot be opened: {}".format(path, exc.strerror)) from None
+    with handle:
+        try:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            raise Skip("busy") from None
+        except OSError as exc:
+            raise CouldNotCheck("the supervision lock {} cannot be taken: {}".format(path, exc.strerror)) from None
+        yield
+
+
+def locked_active(state_path):
+    """The active enrollments' report directories, read under the lock."""
+    try:
+        return active_report_dirs(state_path)
+    except ForemanError as exc:
+        raise CouldNotCheck(exc.message) from None
+
+
 def _still(parent_fd, name, fd):
     """Raise unless `name` in `parent_fd` is still the directory `fd` holds."""
     st = _lstat_at(parent_fd, name)
@@ -482,7 +520,7 @@ def _still(parent_fd, name, fd):
 def remove_cache(parent_fd, name, parts, kind, real, dry_run, state_path):
     """Bytes of the cache `name` in `parent_fd`, removed unless dry_run, or
     None when it no longer classifies as `kind`. Raises Skip for an active or
-    locked candidate."""
+    locked candidate, CouldNotCheck when supervision cannot be read."""
     st = _lstat_at(parent_fd, name)
     if st is None or not stat.S_ISDIR(st.st_mode):
         return None
@@ -494,19 +532,16 @@ def remove_cache(parent_fd, name, parts, kind, real, dry_run, state_path):
             return None
         if dry_run:
             return remove_children(fd, True) + st.st_blocks * 512
-        try:
-            with ledger.state_lock(supervision.store_path(state_path)):
-                if busy(real, active_report_dirs(state_path)):
-                    raise Skip("active_assignment")
-                _still(parent_fd, name, fd)
-                if kind_of(fd, name, parts) != kind:
-                    raise _changed()
-                freed = remove_children(fd, False, SIGNATURE_LAST.get(kind))
-                _still(parent_fd, name, fd)
-                os.rmdir(name, dir_fd=parent_fd)
-                return freed + st.st_blocks * 512
-        except ForemanError:
-            raise Skip("busy") from None
+        with supervision_lock(state_path):
+            if busy(real, locked_active(state_path)):
+                raise Skip("active_assignment")
+            _still(parent_fd, name, fd)
+            if kind_of(fd, name, parts) != kind:
+                raise _changed()
+            freed = remove_children(fd, False, SIGNATURE_LAST.get(kind))
+            _still(parent_fd, name, fd)
+            os.rmdir(name, dir_fd=parent_fd)
+            return freed + st.st_blocks * 512
     finally:
         os.close(fd)
 
@@ -651,6 +686,8 @@ def run(args):
                 result["failed"].append({"path": real, "error": exc.strerror or str(exc)})
     except OutOfBudget:
         result["incomplete"] = True
+    except CouldNotCheck as exc:
+        result["could_not_check"] = str(exc)
     finally:
         if root_fd is not None:
             os.close(root_fd)
@@ -686,7 +723,7 @@ def main(argv=None):
     result = run(args)
     print(json.dumps(result))
     if result["could_not_check"]:
-        print("prune-report-caches: nothing removed — {}; restore it, then re-run".format(
+        print("prune-report-caches: stopped before removing anything more — {}; restore it, then re-run".format(
             result["could_not_check"]), file=sys.stderr)
         return 3
     for failure in result["failed"]:

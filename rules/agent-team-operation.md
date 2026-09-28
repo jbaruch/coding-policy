@@ -310,13 +310,16 @@ description: Running a multi-agent team — task-based specialist composition, c
 - Every other worktree leaves only through the sweep or the session-start cleanup of `rules/agent-worktree-isolation.md` Cleanup
 - A worker's report, plan, and patch artifacts go only under the reports directory its brief names
 - A worker writes nowhere else
-- Build and package caches are tool state, never artifacts (Go build and module caches, pip and npm caches, virtualenvs)
-- A worker keeps them at the tool's user-level default location
-- A worker never places a build or package cache under the reports directory
-- A tool's writes to its own default cache location are outside the write limit above
+- Narrow exception for build and package caches.
+- Applies when a tool writes its own cache (Go build and module caches, pip and npm caches, virtualenvs)
+- Preconditions (all required):
+  1. The cache sits at the tool's user-level default location
+  2. The cache never lands under the reports directory
+- Every other write still follows the write limit above
 - The session-start hook `hooks/check-report-caches.sh` removes build and package caches from idle reports directories through `skills/herdr-foreman/prune-report-caches.py`
 - Its discovery, idleness and cache predicates live in that script's top-of-file docstring
-- It never removes an evidence file
+- It removes only a directory matching one enumerated cache kind by name, signature and top-level entries
+- It keeps every other file and directory
 - In a Herdr session, it runs nothing
 - Under tessl (portable mode), it reports from a dry run and deletes nothing
 - Under tessl, it skips a linked worktree

@@ -43,11 +43,14 @@ Covers:
  20. Replaced cache      -> a cache swapped for an evidence directory of the
                             same name after it was classified is never
                             touched: nothing removed, evidence intact.
+ 21. Store breaks mid-run-> a supervision store unreadable at removal time
+                            stops the run as could_not_check, exit 3.
 """
 
 import argparse
 import hashlib
 import importlib.util
+import io
 import json
 import os
 import stat
@@ -409,6 +412,30 @@ class PruneReportCachesTests(unittest.TestCase):
         self.assertTrue((venv / "findings.md").is_file())
         self.assertTrue((top / "moved-venv" / "pyvenv.cfg").is_file())
 
+    def test_store_unreadable_at_removal_stops_the_run(self):
+        top = self.fx.reports(caches=("virtualenv",))
+        self.fx.save()
+        self.bind()
+        age(top)
+        module = load_script()
+        surveyed = module.survey
+        store = Path(str(supervision.store_path(str(self.fx.state))))
+
+        def survey_then_corrupt(cand_fd, cutoff, budget):
+            outcome = surveyed(cand_fd, cutoff, budget)
+            store.write_text("{not json")
+            return outcome
+
+        setattr(module, "survey", survey_then_corrupt)
+        with mock.patch.object(sys, "argv", ["prune-report-caches.py", "--root", str(self.fx.root), "--state",
+                                             str(self.fx.state), "--now", str(NOW)]), \
+                mock.patch("sys.stdout", new=io.StringIO()) as out:
+            code = module.main()
+        doc = json.loads(out.getvalue())
+        self.assertEqual(code, 3)
+        self.assertIsNotNone(doc["could_not_check"])
+        self.assertTrue((top / CACHE_PATHS["virtualenv"] / "pyvenv.cfg").is_file())
+
     def test_cache_holding_evidence_stays_whole(self):
         top = self.fx.reports(caches=())
         for kind, rel in MIXED.items():
@@ -492,7 +519,7 @@ class PruneReportCachesTests(unittest.TestCase):
         age(top)
         rc, doc, err = run(self.fx)
         self.assertEqual(rc, 3, err)
-        self.assertIn("nothing removed", err)
+        self.assertIn("stopped before removing anything more", err)
         self.assertIsNotNone(doc["could_not_check"])
         self.assertEqual(doc["caches"], [])
         self.assertTrue((top / CACHE_PATHS["virtualenv"]).is_dir())
