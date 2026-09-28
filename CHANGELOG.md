@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.305 — 2026-09-28
+
 ### Fixed
 
 - **`close-member` validates the task ledger's field formats, not just their
