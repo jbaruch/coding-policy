@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.330 — 2026-09-28
+
 ### Added
 
 - **The operator can weigh a marginal blocking finding, and the ruling clears
