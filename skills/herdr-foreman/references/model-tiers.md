@@ -288,6 +288,22 @@ Herdr team session. The shipped example therefore uses unknown attribution;
 its deterministic tests are synthetic evidence of behavior, not observations
 about provider billing. Do not copy test evidence into a live configuration.
 
+## Selection records and cost through acceptance
+
+Every plan records, per assignment, why it got its model and effort: the
+required capabilities, the selected pair, the capability-table evidence, each
+cheaper candidate with its verdict or an unknown cost, and the escalation
+conditions. The record shape is plan schema 13 in `state-schema.md`; it
+explains a selection and never changes one.
+
+`cost-report` reports each task's resource use through acceptance from the
+state file alone, as JSON, each quantity separately. Token counts are not in
+any owner record and read `unknown`, listed under `unrecorded`. A shared or
+concurrently used window keeps `attribution: unknown`. The report makes no
+savings claim: a tier's quota or multiplier change is never read as a cost
+reduction. The output contract is in `state-schema.md` (Writer / Reader
+Contract); what each field counts is `skills/herdr-foreman/foreman/cost_report.py`.
+
 ## What stands in for a validation battery
 
 No per-model, per-effort, per-role battery gates a tier. Three things already

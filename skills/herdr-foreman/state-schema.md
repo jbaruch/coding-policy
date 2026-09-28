@@ -175,6 +175,28 @@ plan whose oracle or pin differs from the one the role's latest dispatch under
 A `digest` oracle carries its expected value already and takes no pin. An
 older plan pinned nothing; replan it before its round is gated.
 
+Plan schema 13 adds `selection`, one record per assigned seat explaining its
+model and effort (#602). Writer: `plan`, from the same tiers, capability
+table, requirements and round inputs the selection read. No reader acts on
+it: `apply` ignores the key, and an older plan without it reads unchanged.
+Each record carries its own `schema_version` (1) and these fields; a value the
+owner cannot establish is the literal `unknown`:
+
+| Field | Meaning |
+| ----- | ------- |
+| `agent`, `tiered` | The assigned worker, and whether a tier row selected its model |
+| `required_capabilities` | `model`: the capability-table names the round needs; `worker`: the requirement's `required_capabilities`, empty without one |
+| `model`, `effort`, `round`, `tier_row` | The selected pair, the requested round and the config row that ran it |
+| `capability`, `evidence` | The tier's verdict, and per needed capability the table's `verdict` and `source`, or `unknown` with a null source |
+| `cost` | `billing_window`, `effective_multiplier`, and `known` (false while the window is `unknown`) |
+| `cheaper` | `floor` (`pinned_judge`, `judgment_round` or null) and `candidates`: each cheaper row the role can run, with its `verdict`, `sources`, billing window and, under a judgment floor, `barred_by_floor` |
+| `escalation` | `conditions` (field, comparison, value, effect, `fired`) and `pressure` (the headroom at or below which a discretionary step is declined, null on a judgment round, and `de_escalated`) |
+
+An untiered worker records `unknown` for every model-dependent field. The
+record builder is `skills/herdr-foreman/foreman/selection.py` (`records`); the
+conditions and their thresholds are `escalation_conditions` in
+`skills/herdr-foreman/foreman/tiers.py`, not restated here.
+
 Plan schema 10 adds `capability` and `cheaper_adequate` to each entry in
 `tiers` (#520). Writer: `plan`, from the capability table beside the state.
 `capability` is `adequate` when every capability the round needs is recorded
@@ -627,6 +649,17 @@ informational plan name and never feeds headroom.
   implementation separately from active audit work. `apply --dry-run` reads
   current recovery bounds without writes; an older ledger requires an owner
   `state` command first. Dry-run never proves live continuity.
+  `cost-report [--task TASK]` reads the ledger, the recovery events and the
+  snapshots without writing or migrating, and refuses an unusable state file
+  rather than reporting no tasks. Its output is
+  `{"schema_version": 1, "unrecorded": [...], "tasks": [...]}`: per task its
+  `status` (`accepted`, `abandoned` or `open`), `started_at`, `ended_at`,
+  `elapsed_seconds`, `tokens`, `correction_rounds`, `work`, `coordination` and
+  `windows`, each reported separately. `unrecorded` names every field no owner
+  record carries. A window's movement carries `attribution: unknown` unless the
+  report's attribution predicate holds. What each field counts, and that
+  predicate, are the contract of `skills/herdr-foreman/foreman/cost_report.py`
+  (module docstring), not restated here.
 - **Seat vs responsibility** — a partitioned round plans several seats of one
   role (`reviewer#api`, `reviewer#core`). `assignments[].role` holds the
   RESPONSIBILITY (`reviewer`), so per-role history, independence and rotation

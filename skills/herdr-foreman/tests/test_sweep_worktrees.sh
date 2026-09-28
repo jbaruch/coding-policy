@@ -414,12 +414,12 @@ main() {
   mkdir -p "$root23" "$shim23" || die "mkdir root23 failed"
   quiet "alpha23 worktree failed" "${G[@]}" -C "$alpha" worktree add -q -b review/a23 "$root23/alpha-23" origin/main
   quiet "beta23 worktree failed" "${G[@]}" -C "$beta" worktree add -q -b review/b23 "$root23/beta-23" origin/main
-  # The first repository's metadata prune (a live run's, after its worktree
-  # decisions) swaps the root for an empty directory of the same name. The
-  # second repository's prune would then find its moved worktree gone and
-  # delete its merged branch.
+  # The first repository's branch deletion (its last destructive step, after
+  # its worktree removal) swaps the root for an empty directory of the same
+  # name. The second repository's prune would then find its moved worktree
+  # gone and delete its merged branch.
   # shellcheck disable=SC2016  # The $@ and $0 belong to the shim.
-  printf '#!/usr/bin/env bash\nset -euo pipefail\nif [[ "$*" == *"worktree prune"* && ! -e %q ]]; then : > %q; mv %q %q; mkdir %q; fi\nexec %q "$@"\n' \
+  printf '#!/usr/bin/env bash\nset -euo pipefail\nif [[ "$*" == *"update-ref -d"* && ! -e %q ]]; then : > %q; mv %q %q; mkdir %q; fi\nexec %q "$@"\n' \
     "$shim23/done" "$shim23/done" "$root23" "$root23.moved" "$root23" "$real_git" > "$shim23/git" || die "write the git shim failed"
   chmod +x "$shim23/git" || die "chmod the git shim failed"
   RUN_SEQ=$((RUN_SEQ+1))
