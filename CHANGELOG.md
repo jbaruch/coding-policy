@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.318 — 2026-09-28
+
 ### Fixed
 
 - **The release skill's commands now run in consumer repos, and every
