@@ -34,6 +34,145 @@
   cost and resource-use requests, and Step 1 routes them to `cost-report` as a
   fourth offline action.
 
+## 0.3.318 — 2026-09-28
+
+### Fixed
+
+- **The release skill's commands now run in consumer repos, and every
+  script-invoking skill resolves its plugin root the same way (#574).**
+  `skills/release/SKILL.md` and `skills/release/PUBLICATION.md` invoked their
+  scripts as `bash skills/release/<script>`, a path that exists only inside a
+  coding-policy clone. In a consumer the scripts live under the tessl mount
+  (`.tessl/plugins/jbaruch/coding-policy/`, which ACR's
+  `.agents/skills/tessl__release` symlinks into), so every release step died
+  on file-not-found. Each command block now opens with the resolver the Herdr
+  skills already used, extended by one guarded fallback, and then runs
+  `bash "$CP/skills/release/<script>"`. The third root is the current
+  directory, which coding-policy needs: it has no mount of itself, so the
+  two-root resolver could never find its own scripts there. The Herdr blocks
+  take the same literal, so a foreman running in a coding-policy clone now
+  resolves too, and the bootstrap carve-out keeps one permitted literal
+  instead of two.
+
+  The first cut selected `.` unconditionally once both install directories
+  were absent, and the policy reviewer blocked it: a consumer with no install
+  but its own `skills/release/<script>` would have run that
+  repository-controlled file as the plugin. The `.` root is now taken only
+  when `git config --get remote.origin.url` is, as a whole string, one of six
+  enumerated URLs: `git@github.com:jbaruch/coding-policy`,
+  `https://github.com/jbaruch/coding-policy` and
+  `ssh://git@github.com/jbaruch/coding-policy`, each with or without `.git`.
+  A second review round caught that the first guard's `*github.com[:/]...`
+  glob admitted look-alike hosts such as `evilgithub.com` and
+  `notgithub.com`; the enumerated set carries no wildcard. Any other origin,
+  or no repository, exits non-zero with
+  `run tessl install jbaruch/coding-policy`. The identity check reads the
+  origin remote rather than `.tessl-plugin/plugin.json` on purpose: the
+  manifest is committed content, so the same repository that planted the
+  script could plant a manifest naming coding-policy, while `.git/config` is
+  local clone state no commit can set. The check stays inline rather than in
+  a co-shipped resolver script: with no install present there is no trusted
+  path to invoke such a script from, and running the clone's own copy before
+  proving it is the clone is the defect being closed.
+
+  `adopt-fork-pr` says it works in any repo, coding-policy included, but
+  invoked `adopt.sh` by the local mount path alone, which a clone lacks and a
+  global install never populates. It takes the same resolver.
+  `onboard-repo` and `migrate-to-plugin` run only inside a consumer and keep
+  the plain mount path `rules/skill-authoring.md` prescribes for that case;
+  their global-install gap is tracked in #599.
+
+  PUBLICATION.md chained values between blocks through shell variables
+  (`PRE=$(...)`, `$tessl_run_id`, `$CURRENT`). Each block runs in a fresh
+  shell, so those never survived to the next block anyway; the reference now
+  names each carried value as a placeholder (`<pre>`, `<merge-sha>`,
+  `<tessl-run-id>`, `<tag-run-id>`, `<current>`) the agent records from the
+  previous command's output. Two inline-code invocations in SKILL.md (the
+  post-merge `check-closing-issues.py --merged` and the `review_unrequested`
+  Copilot re-request) became a resolved block and a pointer to Step 4's block.
+
+  `rules/script-delegation.md`'s bootstrap carve-out (renamed from "Herdr's")
+  names the release files and `adopt-fork-pr`, and its preconditions now
+  name the origin-remote identity check that guards the `.` fallback and the
+  install instruction on refusal. `rules/skill-authoring.md` Script
+  References adds the resolved-`$CP` form for a skill that runs both in
+  consumers and in a clone. `skills/herdr-foreman/tests/test_skill_invocations.sh`
+  now checks the release and adopt-fork-pr blocks too: it reads blocks nested
+  in list items, skips plain `git`/`gh` blocks that name no plugin script,
+  rejects a repo-relative `bash skills/...` block and an inline-code
+  invocation, rejects the old two-root and unguarded three-root resolvers, and
+  executes each covered skill's first invocation against local, global,
+  clone and missing roots, and resolves the clone under each of the six
+  accepted origins. Impostor fixtures hold the same script path with no
+  install: a foreign GitHub origin, a non-GitHub host serving a
+  `jbaruch/coding-policy` path, `evilgithub.com`, `notgithub.com`,
+  `github.com.evil.example`, an accepted URL with a trailing suffix, and no
+  repository at all. Each must exit
+  non-zero with the install instruction and never run the planted script.
+
+## 0.3.317 — 2026-09-28
+
+### Fixed
+
+- **A version can no longer publish without its own CHANGELOG heading, and
+  the archive can finally be repaired (#581, #503).** 0.3.291 shipped with
+  no heading: #573's branch had merged `main` between #537's merge and its
+  stamp, so at #573's own merge its entry landed inside the block the 0.3.290
+  stamp had just headed. Nothing sat above the first `## `, the stamp did its
+  documented no-op, and the version published filed under its predecessor.
+  The PR-time placement check would have caught it, but the branch had last
+  run CI before that stamp existed.
+
+  The repair was then refused by the very check meant to prevent the damage.
+  `check-changelog-placement.py` judged whole `### ` blocks by identity, so
+  splitting one block under a new `## 0.3.291` heading produced two blocks
+  the base had never seen, and rewording a published entry (#503's second
+  item) read the same way. The check now works on entry items (a top-level
+  bullet, or a column-0 paragraph) and treats `## `/`### ` lines as
+  structure, so an item the base carries anywhere is a move. A reworded item
+  is accepted only when a commit declares it with a `Changelog-Edit:
+  <version>` trailer, and then pairs one for one with a base item dropped
+  from that heading. The first cut inferred edits from a same-heading
+  delete-plus-add, and the policy reviewer pointed out that deleting a
+  published entry and parking unrelated new work in its slot reads exactly
+  the same: text cannot tell the two apart, a declaration can, and a
+  misfiling merge never carries one. Anything else parked under a published
+  heading is still refused. Replayed over the last 150 merges to `main`, it
+  flags three misfilings, #573 (this incident), #448 (#452's) and #325 (an
+  `## Unreleased` heading that blocked the stamp), plus two deliberate
+  rewrites of published entries (#357's consolidation, #247's prose pass)
+  that would now carry a trailer, and nothing else.
+
+  Prevention runs at publish time. The stamp-changelog action now runs the
+  check with a new `--since-last-publish` mode before stamping, so a push
+  that parks a new entry fails the publish instead of shipping an unheaded
+  version. The baseline is the last stamp or version-bump commit
+  `github-actions[bot]` wrote, not the push's before-commit. Measuring from
+  the before-commit (the first cut) left two holes the reviewers found: a
+  stopped publish leaves the misfiled merge on `main`, so the next push
+  would count it as already known and carry it through, and a manual
+  `workflow_dispatch` has no before-commit at all. A stopped publish writes
+  no bookkeeping commit, so both are now measured from the last real publish.
+  A shallow checkout is a tool error that names `fetch-depth: 0`; a history
+  with no bookkeeping commit yet has nothing to measure.
+
+  The checker now answers in one JSON verdict on stdout for every outcome,
+  usage errors included (`pass`, `nothing_to_measure`, `misfiled`, `error`),
+  with diagnostics on stderr. Two ways it could fail open or misreport went
+  with it: `git` output that is not UTF-8 raised past the error handler and
+  exited 1, the misfiling verdict, instead of 2; and the bookkeeping-commit
+  file list was split on whitespace, so a changelog path holding a space
+  never matched, no baseline was found, and the publish gate passed having
+  measured nothing. It reads NUL-delimited paths now.
+
+  Archive repairs in the same change: 0.3.291 gets its heading above #527;
+  #523's entry moves from under 0.3.305 back to the 0.3.301 heading that
+  published it, and the stray second `## 0.3.301` goes; the three stamps
+  from 2026-09-25 04:09Z to 05:36Z read the registry one version behind, so
+  their headings move up by one (0.3.269, 0.3.270, 0.3.271), ending the
+  duplicate `## 0.3.268`. The 0.3.258 entry is rewritten as an archive entry
+  instead of a restatement of #502's PR body.
+
 ## 0.3.316 — 2026-09-28
 
 ### Changed
@@ -341,8 +480,6 @@
     and the recheck already requires the same clean HEAD origin holds, so a
     replacement it could remove holds only what origin restores).
 
-## 0.3.301 — 2026-09-27
-
 ## 0.3.305 — 2026-09-28
 
 ### Fixed
@@ -384,52 +521,6 @@
   recovered ledger at a new path (`state-schema.md`, Task Ledger). Deferred
   from PR #528's review. `herdr-foreman` Step 11's `check-member` follow-up
   paragraph, which merged several directives, is now one bullet per directive.
-
-- **The foreman reset deliverer types only into the foreman's bound native
-  session (#523).** `foreman-reset-deliver` waits up to `IDLE_BUDGET_SEC` for
-  the foreman's pane to idle, and before every keystroke it re-checked only
-  the pane's agent name, runtime kind and idle status. An operator who
-  replaced the foreman process in that pane during the wait with another
-  session of the same name and kind passed the guard, and the old reset's
-  `/clear` and resume prompt landed in the new session. `foreman-reset` now
-  records the native session bound at `supervision-bind` on the reset row
-  (`native_session`), and refuses to schedule when the binding names none.
-  The deliverer's guard reads `herdr pane get` (the source `supervision-bind`
-  reads, held to its proof: a claude or codex session its own Herdr
-  integration reports) and refuses unless the pane still holds that session, for every
-  keystroke of the clear command, extra Enters included, until the composer
-  confirms it consumed: the row finishes `failed` before any keystroke,
-  `interrupted` after one, both with error `reset_session_changed` and
-  `details.reason` `native_session_changed`. No single Enter proves the clear
-  submitted (Codex's first of two Enters only accepts autocomplete, and
-  `send_command` may add extra Enters), so a replacement between any of them
-  is still caught. A transcript path that cannot be resolved (a link loop,
-  an embedded NUL) matches no session instead of escaping as an unrecorded
-  error.
-  The clear itself starts a new native session by design, so after it the
-  deliverer waits up to `CLEAR_SESSION_BUDGET_SEC` for Herdr to report that
-  new session, pins it, and every resume-prompt keystroke must find the
-  pinned session; a replacement after the clear is refused the same way, and
-  a new session counts as the clear's only while the pane's foreground
-  processes are the ones the first keystroke found, compared by pid, start
-  time and command line (the clear keeps its process; a replacement is a new
-  one, or a reused pid or an exec in place that changes them), and
-  a clear that starts no new session stops the reset
-  (`clear_session_unchanged`). The reset record moves
-  to schema 2 (`skills/herdr-foreman/state-schema.md` Foreman Reset Record);
-  the owner migrates a schema-1 record on read and rewrites it at once,
-  catch-up's read included, giving each row `native_session: null`; a
-  deliverer that claims such a row refuses before any keystroke. A
-  schema-1-build deliverer still running at the upgrade cannot record its
-  outcome, and catch-up names the reconcile command for its row once it
-  exits. Regression tests cover a same-name, same-kind
-  replacement (no keystroke, row records why), a replacement between the
-  clear's text and Enter and between Codex's two Enters, the post-clear
-  session change for typed and pasted clears, a replacement before an extra
-  Enter, a replacement after the clear, a clear that starts no new session,
-  an unresolvable transcript path, the migration rewrite, and the
-  CLI end to end; the unfixed deliverer typed `/clear` and the resume prompt
-  into the replacement session.
 
 ## 0.3.304 — 2026-09-28
 
@@ -493,6 +584,54 @@
   each gap and fail against the old code.
 
 ## 0.3.301 — 2026-09-27
+
+### Fixed
+
+- **The foreman reset deliverer types only into the foreman's bound native
+  session (#523).** `foreman-reset-deliver` waits up to `IDLE_BUDGET_SEC` for
+  the foreman's pane to idle, and before every keystroke it re-checked only
+  the pane's agent name, runtime kind and idle status. An operator who
+  replaced the foreman process in that pane during the wait with another
+  session of the same name and kind passed the guard, and the old reset's
+  `/clear` and resume prompt landed in the new session. `foreman-reset` now
+  records the native session bound at `supervision-bind` on the reset row
+  (`native_session`), and refuses to schedule when the binding names none.
+  The deliverer's guard reads `herdr pane get` (the source `supervision-bind`
+  reads, held to its proof: a claude or codex session its own Herdr
+  integration reports) and refuses unless the pane still holds that session, for every
+  keystroke of the clear command, extra Enters included, until the composer
+  confirms it consumed: the row finishes `failed` before any keystroke,
+  `interrupted` after one, both with error `reset_session_changed` and
+  `details.reason` `native_session_changed`. No single Enter proves the clear
+  submitted (Codex's first of two Enters only accepts autocomplete, and
+  `send_command` may add extra Enters), so a replacement between any of them
+  is still caught. A transcript path that cannot be resolved (a link loop,
+  an embedded NUL) matches no session instead of escaping as an unrecorded
+  error.
+  The clear itself starts a new native session by design, so after it the
+  deliverer waits up to `CLEAR_SESSION_BUDGET_SEC` for Herdr to report that
+  new session, pins it, and every resume-prompt keystroke must find the
+  pinned session; a replacement after the clear is refused the same way, and
+  a new session counts as the clear's only while the pane's foreground
+  processes are the ones the first keystroke found, compared by pid, start
+  time and command line (the clear keeps its process; a replacement is a new
+  one, or a reused pid or an exec in place that changes them), and
+  a clear that starts no new session stops the reset
+  (`clear_session_unchanged`). The reset record moves
+  to schema 2 (`skills/herdr-foreman/state-schema.md` Foreman Reset Record);
+  the owner migrates a schema-1 record on read and rewrites it at once,
+  catch-up's read included, giving each row `native_session: null`; a
+  deliverer that claims such a row refuses before any keystroke. A
+  schema-1-build deliverer still running at the upgrade cannot record its
+  outcome, and catch-up names the reconcile command for its row once it
+  exits. Regression tests cover a same-name, same-kind
+  replacement (no keystroke, row records why), a replacement between the
+  clear's text and Enter and between Codex's two Enters, the post-clear
+  session change for typed and pasted clears, a replacement before an extra
+  Enter, a replacement after the clear, a clear that starts no new session,
+  an unresolvable transcript path, the migration rewrite, and the
+  CLI end to end; the unfixed deliverer typed `/clear` and the resume prompt
+  into the replacement session.
 
 ## 0.3.300 — 2026-09-27
 
@@ -775,7 +914,7 @@
   containing braces, and a FIFO source. Carrying the verified bytes through
   the dispatch-identity and prompt reads that follow the freeze is #565.
 
-## 0.3.290 — 2026-09-27
+## 0.3.291 — 2026-09-27
 
 ### Fixed
 
@@ -789,6 +928,10 @@
   `parse_judge`: a block that does not parse exempts nobody and is refused with
   `parse_judge`'s own diagnostic. A fully specified judge block still exempts
   its worker.
+
+## 0.3.290 — 2026-09-27
+
+### Fixed
 
 - **`evaluate.sh` reads the default corpus under the home guard (#537).**
   `skills/herdr-foreman/classify/evaluate.sh` checked the default state home
@@ -1367,7 +1510,7 @@
   record written by a newer build reads as no prior reset and refuses
   writes, instead of being reported as corrupt.
 
-## 0.3.270 — 2026-09-25
+## 0.3.271 — 2026-09-25
 
 ### Added
 
@@ -1385,7 +1528,7 @@
   runs `wait-report.sh --once` with them, so none of those is looked up by
   hand. Both compose the existing owner functions and replay safely.
 
-## 0.3.269 — 2026-09-25
+## 0.3.270 — 2026-09-25
 
 ### Changed
 
@@ -1405,7 +1548,7 @@
   `apply`, after the launch (deferred from #525). The live operator tables
   are written from the example once this version is installed.
 
-## 0.3.268 — 2026-09-25
+## 0.3.269 — 2026-09-25
 
 ### Changed
 
@@ -1701,19 +1844,23 @@
 
 ### Changed
 
-- **The Codex policy reviewer is pinned to GPT-5.6-Sol at high effort.** Both
-  review paths, this repo's own `review-codex.yml` and the fleet reviewer's
-  `fleet-review-one.sh`, used to pass no model, so the review ran on whatever
-  default the pinned Codex CLI chose for the subscription, and it could
-  change under a CLI bump without anyone deciding it. They now pass
-  `--model gpt-5.6-sol` and `model_reasoning_effort="high"`. Sol's own default
-  effort is `low`, too shallow for reading a diff against 26 rule files.
+- **The Codex policy reviewer runs a model someone chose (#502).** The gating
+  reviewer had been whatever the pinned Codex CLI defaulted to for the
+  subscription, which meant a CLI bump could swap the model that decides
+  every merge in the fleet and nobody would notice until the verdicts changed
+  character. It is now GPT-5.6-Sol at high effort. The effort matters as much
+  as the model: Sol defaults to `low`, which is a skim, and a policy review is
+  a diff read against every rule file in the plugin.
 
-  No scanner tracks a model id, so the pin renews by hand, at each Codex CLI
-  bump and each weekly capability-table refresh, as a comment beside each call
-  site says. The two literals live at both call sites, not in a shared file:
-  both run with the Codex credential on disk, and on coding-policy's own
-  path, sourcing a file would run code from the PR under review.
+  The pin lives as two literals in each of the two reviewer paths
+  (`review-codex.yml` for this repo, `fleet-review-one.sh` for consumers),
+  deliberately duplicated. Both run with the Codex credential on disk, and on
+  this repo's own path a shared file would be read from the PR under review,
+  so "deduplicate it" would hand the PR author the reviewer's model choice.
+  No scanner tracks a model id; the pin renews by hand at each Codex CLI bump
+  and each weekly capability-table refresh. The first review run on the pin
+  (35880416605) logged `model gpt-5.6-sol` with `reasoning_effort high`.
+  Tests asserting both call sites arrived in 0.3.309 (#503).
 
 ## 0.3.257 — 2026-09-23
 
