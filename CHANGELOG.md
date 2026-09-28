@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.313 — 2026-09-28
+
 ### Fixed
 
 - **Every shipped skill script now finds its siblings when its directory's
