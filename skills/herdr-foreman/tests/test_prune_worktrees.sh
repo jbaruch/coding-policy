@@ -41,7 +41,7 @@
 #  21. Raced branch        -> a tip that moved after its ancestry check is kept.
 #  22. Half-done removal   -> a removal is reported even when its branch
 #                             deletion then fails.
-#  23. Deferred prunable   -> a prunable branch survives a skipped prune.
+#  23. Deferred prunable   -> a prunable branch survives a skipped metadata removal.
 #  24. Newline path        -> a record is not split by a newline in the path
 #                             (kept idle-unknown: the probe cannot match it).
 #  25. Branch config       -> a deleted branch's branch.<name> config goes too.
@@ -59,9 +59,15 @@
 #                             failure, never an unoccupied answer.
 #  87. Root replaced      -> a root swapped after the first removal stops
 #                             every later removal, branch deletion and the
-#                             metadata prune; exit 2.
+#                             metadata removal; exit 2.
 #  88. Caller's root id    -> a root other than PRUNE_ROOT_ID names decides
 #                             nothing; exit 1.
+#  89. Root unlistable     -> a root that loses its permissions mid-run is a
+#                             changed root (skipped as root, who lists
+#                             anything).
+#  90. Root moved at the   -> a root renamed between its last identity check
+#      metadata step          and the metadata removal keeps the registrations
+#                             of the worktrees it still holds.
 #  34. Recreated config   -> a branch.<name> section recreated after the
 #                             deletion is left untouched.
 #  35. Reachable, idle      -> a clean worktree whose HEAD an origin branch
@@ -492,7 +498,7 @@ SHIM
   echo "22. the JSON reports the removal that happened even when the branch deletion fails"
   if (( RC == 2 )) && [[ "$(removed_paths)" == *"$ROOT/twentytwo-halfway"* ]] && [[ ! -e "$ROOT/twentytwo-halfway" ]] && [[ "$OUT" == *'"failed": [{'*"deleting"* ]] && [[ "$OUT" == *"fixture refuses the deletion"* ]]; then pass; else fail "rc=$RC out=$OUT err=$ERRTEXT"; fi
 
-  # --- 23. a prunable branch is deferred when the metadata prune is skipped.
+  # --- 23. a prunable branch is deferred when the metadata removal is skipped.
   if [[ "$(id -u)" != 0 ]]; then
     mk_repo twentythree
     add_wt "$SHARED" review/vanished "$ROOT/twentythree-vanished"
@@ -501,7 +507,7 @@ SHIM
     chmod 000 "$ROOT/twentythree-sealed" || die "chmod failed"
     run "$SHARED"
     chmod 755 "$ROOT/twentythree-sealed" || die "chmod restore failed"
-    echo "23. a prunable branch is not deleted while its metadata survives a skipped prune"
+    echo "23. a prunable branch is not deleted while its metadata survives a skipped metadata removal"
     if (( RC == 2 )) && [[ "$(kept_reason "$ROOT/twentythree-vanished")" == prunable ]] && [[ "$(branches_deleted)" != *review/vanished* ]] && has_branch "$SHARED" review/vanished; then pass; else fail "rc=$RC out=$OUT err=$ERRTEXT"; fi
   fi
 
@@ -535,7 +541,7 @@ SHIM
   git -C "$SHARED" worktree lock "$ROOT/twentysix-lockedgone" || die "lock failed"
   rm -rf "$ROOT/twentysix-lockedgone" || die "rm failed"
   run "$SHARED"
-  echo "26. a locked entry git's prune preserves does not release its branch"
+  echo "26. a locked entry whose metadata stays does not release its branch"
   if (( RC == 0 )) && [[ "$(kept_reason "$ROOT/twentysix-lockedgone")" == locked ]] && [[ "$(branches_deleted)" != *review/lockedgone* ]] && has_branch "$SHARED" review/lockedgone; then pass; else fail "rc=$RC out=$OUT err=$ERRTEXT"; fi
 
   # --- 27. without -z there is no unambiguous inventory, so nothing is decided.
@@ -1152,7 +1158,7 @@ SH
   mkdir -p "$shim85" || die "mkdir shim85 failed"
   # The first `worktree remove` runs for real, then swaps the root for an
   # empty directory of the same name: the later worktree, the removed one's
-  # branch, the metadata prune and the branch pass all come after the swap.
+  # branch, the metadata removal and the branch pass all come after the swap.
   cat > "$shim85/git" <<SHIM || die "shim85 write failed"
 #!/usr/bin/env bash
 set -euo pipefail
@@ -1169,7 +1175,7 @@ SHIM
   RUN_SEQ=$((RUN_SEQ+1))
   OUT="$(env WORKTREE_ROOT="$ROOT" PRUNE_IDLE_HOURS=0 PATH="$shim85:$PATH" bash "$SCRIPT" "$SHARED" 2>"$TMP/err.$RUN_SEQ")"; RC=$?
   ERRTEXT="$(cat "$TMP/err.$RUN_SEQ")"
-  echo "87. a root replaced during the run stops every later removal, deletion and the metadata prune"
+  echo "87. a root replaced during the run stops every later removal, deletion and metadata removal"
   if (( RC == 2 )) && [[ -e "$shim85/done" ]] && [[ "$OUT" == *"worktree root was replaced"* ]] \
     && listed "$SHARED" "$ROOT/b85" && [[ -d "$root85.moved/b85" ]] \
     && has_branch "$SHARED" review/a85 && has_branch "$SHARED" review/b85 && has_branch "$SHARED" review/c85; then
@@ -1184,6 +1190,69 @@ SHIM
   echo "88. a root other than the one PRUNE_ROOT_ID names is exit 1, no JSON, nothing removed"
   if (( RC == 1 )) && [[ -z "$OUT" && -d "$ROOT/a86" && "$ERRTEXT" == *PRUNE_ROOT_ID* ]] && has_branch "$SHARED" review/a86; then
     pass; else fail "caller root id: rc=$RC out=$OUT err=$ERRTEXT"; fi
+
+  # --- 89. a root that becomes unlistable during the run is a changed root.
+  if [[ "$(id -u)" == 0 ]]; then
+    echo "89. skipped: root lists every directory"
+  else
+    mk_repo eightynine
+    add_wt "$SHARED" review/a89 "$ROOT/a89"
+    add_wt "$SHARED" review/b89 "$ROOT/b89"
+    local shim89="$TMP/shim89" root89="$ROOT"
+    mkdir -p "$shim89" || die "mkdir shim89 failed"
+    # The first `worktree remove` runs for real, then the root loses every
+    # permission: same directory, same inode, but nothing below it is readable.
+    cat > "$shim89/git" <<SHIM || die "shim89 write failed"
+#!/usr/bin/env bash
+set -euo pipefail
+if [[ "\$*" == *"worktree remove"* && ! -e "$shim89/done" ]]; then
+  "$real_git" "\$@"
+  : > "$shim89/done"
+  chmod 000 "$root89"
+  exit 0
+fi
+exec "$real_git" "\$@"
+SHIM
+    chmod +x "$shim89/git" || die "chmod shim89 failed"
+    RUN_SEQ=$((RUN_SEQ+1))
+    OUT="$(env WORKTREE_ROOT="$ROOT" PRUNE_IDLE_HOURS=0 PATH="$shim89:$PATH" bash "$SCRIPT" "$SHARED" 2>"$TMP/err.$RUN_SEQ")"; RC=$?
+    ERRTEXT="$(cat "$TMP/err.$RUN_SEQ")"
+    chmod 755 "$root89" || die "restore root89 failed"
+    echo "89. a root that becomes unlistable during the run stops every later destructive step"
+    if (( RC == 2 )) && [[ -e "$shim89/done" ]] && [[ "$OUT" == *"worktree root was replaced or became unreadable"* ]] \
+      && listed "$SHARED" "$ROOT/b89" && [[ -d "$ROOT/b89" ]] \
+      && has_branch "$SHARED" review/a89 && has_branch "$SHARED" review/b89; then
+      pass; else fail "root unlistable mid-run: rc=$RC out=$OUT err=$ERRTEXT"; fi
+  fi
+
+  # --- 90. a root renamed inside the metadata step keeps its live worktrees' entries.
+  mk_repo ninety
+  add_wt "$SHARED" review/gone90 "$ROOT/gone90"
+  rm -rf "$ROOT/gone90" || die "rm gone90 failed"
+  add_wt "$SHARED" review/live90 "$ROOT/live90"; commit_in "$ROOT/live90" live
+  local shim90="$TMP/shim90" moved90="$ROOT.moved90"
+  mkdir -p "$shim90" || die "mkdir shim90 failed"
+  # The metadata step's own git call (a whole-repository `worktree prune` or a
+  # per-entry `worktree remove`) runs just after the root's identity was
+  # re-proven; the shim renames the root first, inside that window.
+  cat > "$shim90/git" <<SHIM || die "shim90 write failed"
+#!/usr/bin/env bash
+set -euo pipefail
+if [[ ( "\$*" == *"worktree prune"* || "\$*" == *"worktree remove"* ) && ! -e "$shim90/done" ]]; then
+  : > "$shim90/done"
+  mv "$ROOT" "$moved90"
+fi
+exec "$real_git" "\$@"
+SHIM
+  chmod +x "$shim90/git" || die "chmod shim90 failed"
+  RUN_SEQ=$((RUN_SEQ+1))
+  OUT="$(env WORKTREE_ROOT="$ROOT" PRUNE_IDLE_HOURS=0 PATH="$shim90:$PATH" bash "$SCRIPT" "$SHARED" 2>"$TMP/err.$RUN_SEQ")"; RC=$?
+  ERRTEXT="$(cat "$TMP/err.$RUN_SEQ")"
+  if [[ -e "$moved90" ]]; then mv "$moved90" "$ROOT" || die "restore root after 90 failed"; fi
+  echo "90. a root renamed during the metadata step keeps the registration of every worktree it holds"
+  if [[ -e "$shim90/done" ]] && listed "$SHARED" "$ROOT/live90" && [[ -d "$ROOT/live90" ]] \
+    && ! listed "$SHARED" "$ROOT/gone90" && has_branch "$SHARED" review/live90; then
+    pass; else fail "root moved at the metadata step: rc=$RC out=$OUT err=$ERRTEXT"; fi
 
   # --- 14. usage / not a repo.
   run

@@ -8,8 +8,8 @@
 # the decision predicate stays in `prune-worktrees.sh`
 # (`rules/script-as-black-box.md`). A repository is found through a
 # directory on disk, never through its registrations: a worktree whose
-# directory vanished leaves a registration this sweep cannot see. The
-# `git worktree prune` each swept repository's prune runs clears it, and
+# directory vanished leaves a registration this sweep cannot see. Each swept
+# repository's prune removes the registrations it confirms gone, and
 # until then it is inert, holding no files.
 #
 # Contract:

@@ -72,14 +72,18 @@
 # branch instead of being force-deleted. `branch -d` would re-derive the
 # safety against the local default, which may lag origin's, and `branch -D`
 # would skip it entirely; neither is atomic with the check. Removal is `git worktree remove`,
-# never `rm -rf`. Stale worktree metadata is pruned (`git worktree prune
-# --expire now`) after every worktree decision and before the branch pass, so
-# a confirmed-gone entry's merged branch goes in the same run; the prune is
-# skipped when any worktree could not be entered, since git would read an
-# unreadable directory as gone and drop its entry. Nothing here pushes to
+# never `rm -rf`. Stale worktree metadata is removed after every worktree
+# decision and before the branch pass, so a confirmed-gone entry's merged
+# branch goes in the same run. Only the entries this run judged `prunable` are
+# touched, each with its own `git worktree remove` (which, for a missing
+# directory, deletes only the entry's administrative files), never
+# `git worktree prune`: that drops every entry whose directory it cannot see
+# at that instant, so a root renamed after the last identity check would lose
+# the registrations of the worktrees it still holds (#597). The removals are
+# skipped when any worktree could not be entered. Nothing here pushes to
 # origin; a dry run still fetches (without --prune), reads origin's default
 # branch with `ls-remote --symref` instead of rewriting origin/HEAD, and skips
-# the metadata prune, so its decisions are current and .git is otherwise
+# the metadata removals, so its decisions are current and .git is otherwise
 # untouched.
 #
 # Contract:
@@ -105,8 +109,8 @@
 #           incomplete listing, or cannot print this path faithfully), in-use
 #           (a process works inside it), locked (with its lock_reason),
 #           nested-repo, not-idle (activity within IDLE_HOURS), outside-root,
-#           prunable (its directory is gone; a live run's metadata prune
-#           removes it), submodule, submodule-dirty, unpushed (idle, commits
+#           prunable (its directory is gone; a live run removes its
+#           metadata), submodule, submodule-dirty, unpushed (idle, commits
 #           origin holds nowhere; with unpushed_commits, age_hours and
 #           command, and for a worktree its head too).
 #   stderr: diagnostics only.
@@ -118,8 +122,9 @@
 #           2 at least one check, removal or deletion failed; the rest still
 #             ran and `failed` names each one. The exception is a worktree
 #             root replaced or made unreadable mid-run: the root's identity
-#             (lstat <dev>:<ino>) is re-proven immediately before every
-#             worktree removal, branch deletion and the metadata prune, and
+#             (lstat <dev>:<ino>, and that it can be listed) is re-proven
+#             immediately before every worktree removal, branch deletion and
+#             metadata removal, and
 #             from the first mismatch on each of those steps is refused and
 #             recorded in `failed` (plus one row naming the root).
 #   env   : WORKTREE_ROOT overrides the worktree root (default
@@ -144,7 +149,7 @@ warn() { printf 'prune-worktrees: %s\n' "$1" >&2; }
 
 # Echo the <dev>:<ino> of the directory at <path> itself, read with lstat so
 # a symlink swapped in for it is not that directory. Returns 1 when <path> is
-# missing, unreadable or not a directory.
+# missing, not a directory, or cannot be listed.
 root_identity() { # <path>
   python3 -c '
 import os, stat, sys
@@ -155,6 +160,13 @@ except OSError as exc:
     sys.exit(1)
 if not stat.S_ISDIR(info.st_mode):
     sys.stderr.write("{} is not a directory\n".format(sys.argv[1]))
+    sys.exit(1)
+try:
+    # Opening it and reading one entry is enough to prove it is listable.
+    with os.scandir(sys.argv[1]) as entries:
+        next(entries, None)
+except OSError as exc:
+    sys.stderr.write("cannot list {}: {}\n".format(sys.argv[1], exc.strerror or exc))
     sys.exit(1)
 print("{}:{}".format(info.st_dev, info.st_ino))' "$1" 2>"$ERRFILE"
 }
@@ -173,6 +185,31 @@ root_holds() { # <target> <branch|"">
   fi
   row failed "$1" "$2" "not done: the worktree root changed during the run"
   return 1
+}
+
+# Remove the metadata of one worktree this run confirmed gone. `git worktree
+# remove` on a missing directory deletes only that entry's administrative
+# files, so the registration of a worktree still on disk is never touched,
+# wherever it has moved. `git worktree prune` would instead drop every entry
+# whose directory it cannot see at that instant: a root renamed after the last
+# identity check would lose the registrations of every worktree it holds
+# (#597). Returns 0 once the entry is gone (in a dry run, at once), 1 when it
+# was left registered.
+release_gone() { # <shared> <dry> <path> <branch|"">
+  if (( $2 )); then return 0; fi
+  root_holds "$3" "$4" || return 1
+  local parent
+  parent="$(dirname "$3" && printf 'x')"
+  parent="${parent%x}"; parent="${parent%$'\n'}"
+  if [[ -e "$3" || ! -d "$parent" || ! -x "$parent" ]]; then
+    row failed "$3" "$4" "no longer confirmed gone, so its metadata was left in place — re-run to judge it again"
+    return 1
+  fi
+  if ! git -C "$1" worktree remove "$3" 2>"$ERRFILE"; then
+    row failed "$3" "$4" "removing its stale metadata failed: $(tr '\n' ' ' < "$ERRFILE") — the entry remains"
+    return 1
+  fi
+  return 0
 }
 
 # After a git command that talks to origin fails: replace its stderr in
@@ -815,10 +852,9 @@ PY
 }
 
 # Decide one worktree; emits a row and performs the removal unless dry-run.
-#: Set by `decide_worktree` when, and only when, it decided `prunable`. Git
-#: keeps a locked entry's metadata through `worktree prune`, so a locked entry
-#: whose directory is gone stays checked out and its branch must not be
-#: released.
+#: Set by `decide_worktree` when, and only when, it decided `prunable`. A
+#: locked entry whose directory is gone is kept, its metadata stays, and it
+#: stays checked out, so its branch must not be released.
 DECIDED_PRUNABLE=0
 
 #: A worktree is judged only once idle this many hours: no git activity and
@@ -1161,7 +1197,7 @@ main() {
 
   # Walk `worktree list --porcelain`: blank-line-separated blocks.
   local path="" branch="" detached=0 locked=0 lock_reason="" line unenterable=0
-  local -a seen_branches=() prunable_branches=()
+  local -a seen_branches=() prunable_paths=() prunable_owners=()
   flush() {
     if [[ -n "$path" ]]; then
       local real="" rc=0 parent
@@ -1174,20 +1210,18 @@ main() {
       if [[ ! -e "$path" ]]; then
         # `-e` is false for a missing path and for one whose ancestor denies
         # traversal. Absence is confirmed only through a traversable parent;
-        # anything else is a failure that also inhibits the metadata prune.
+        # anything else is a failure that also inhibits the metadata removals.
         if [[ -d "$parent" && -x "$parent" ]]; then
-          # Confirmed gone: reported prunable. Its branch goes to the
-          # no-worktree pass only once the metadata prune actually releases
-          # it, so it is recorded here and released below.
+          # Confirmed gone: reported prunable. Its metadata is removed below,
+          # and its branch goes to the no-worktree pass only once that
+          # removal actually releases it.
           decide_worktree "$shared" "$abs_root" "$db" "$dry" "$path" "$branch" "$detached" "$locked" "$lock_reason"
-          if [[ -n "$branch" ]]; then
-            if (( DECIDED_PRUNABLE )); then
-              prunable_branches+=("$branch")
-            else
-              # Kept for a reason that outranks prunable (locked, detached,
-              # outside the root, the default branch): still checked out.
-              seen_branches+=("$branch")
-            fi
+          if (( DECIDED_PRUNABLE )); then
+            prunable_paths+=("$path"); prunable_owners+=("$branch")
+          elif [[ -n "$branch" ]]; then
+            # Kept for a reason that outranks prunable (locked, outside the
+            # root, the default branch): still checked out.
+            seen_branches+=("$branch")
           fi
           path=""; branch=""; detached=0; locked=0; lock_reason=""
           return 0
@@ -1235,33 +1269,26 @@ main() {
   done < "$inventory"
   flush
 
-  # Metadata prune between the passes: after every worktree decision, so git reads an unreadable worktree directory as gone
-  # a confirmed-gone entry is released before its branch is judged below;
-  # skipped when a worktree could not be entered, since git reads an unreadable
-  # directory as gone and would drop its entry.
+  # Stale metadata goes between the passes: after every worktree decision,
+  # so a confirmed-gone entry is released before its branch is judged below.
+  # Only the entries this run confirmed gone are touched, one at a time
+  # (`release_gone`). The removals are skipped when a worktree could not be
+  # entered: the operator restores access before the run changes git's records.
   # A prunable entry's branch is still checked out until its metadata goes,
-  # so it is released to the branch pass only when the prune ran clean. A dry
-  # run previews the live outcome, where the prune does run (#405).
-  local released=1
-  # An unenterable worktree stops the prune in a live run, so a dry run defers
-  # the same branches: a preview that promises a deletion the live run would
-  # not make is worse than no preview.
-  if (( unenterable )); then released=0; fi
-  if (( ! dry )); then
-    if (( unenterable )); then
-      warn "skipping \`git worktree prune\`: a worktree could not be entered; restore access and re-run"
-    elif ! root_holds "git worktree prune" ""; then
-      # A replaced root reads every worktree under it as gone.
-      released=0
-    elif ! git -C "$shared" worktree prune --expire now 2>"$ERRFILE"; then
-      # Recorded, not merely warned: the run continues, the exit stays non-zero.
-      row failed "git worktree prune" "" "failed: $(tr '\n' ' ' < "$ERRFILE") — stale metadata may remain"
-      released=0
+  # so it is released to the branch pass only once its own removal ran clean.
+  # A dry run previews the live outcome, where the removals do run (#405).
+  if (( unenterable && ! dry )); then
+    warn "skipping the stale-metadata removal: a worktree could not be entered; restore access and re-run"
+  fi
+  local i
+  for i in "${!prunable_paths[@]}"; do
+    # An unenterable worktree stops the removals in a live run, so a dry run
+    # defers the same branches: a preview that promises a deletion the live
+    # run would not make is worse than no preview.
+    if (( unenterable )) || ! release_gone "$shared" "$dry" "${prunable_paths[$i]}" "${prunable_owners[$i]}"; then
+      if [[ -n "${prunable_owners[$i]}" ]]; then seen_branches+=("${prunable_owners[$i]}"); fi
     fi
-  fi
-  if (( ! released )); then
-    seen_branches+=("${prunable_branches[@]+"${prunable_branches[@]}"}")
-  fi
+  done
 
   # Local branches with no worktree.
   local name skip

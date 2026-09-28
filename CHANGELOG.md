@@ -1,5 +1,32 @@
 # Changelog
 
+### Fixed
+
+- **The worktree prune now treats an unlistable root as a changed root, and
+  its metadata step can no longer drop the registrations of worktrees a moved
+  root still holds (#597).** Both are follow-ups to #588's root-identity
+  check in `skills/herdr-foreman/prune-worktrees.sh`. First, the check read
+  the root with `lstat` alone, so a root whose permissions were revoked
+  mid-run (same inode) still passed; it now also opens the directory and reads
+  one entry, and a root that cannot be listed stops every later destructive
+  step like a replaced one. Second, `git worktree prune --expire now` ran
+  just after that check but was not atomic with it: a root renamed inside the
+  window had every worktree under it read as gone, and git dropped their
+  registrations. The run no longer calls `git worktree prune`. It removes the
+  metadata of each entry it judged `prunable`, one `git worktree remove` per
+  entry (for a missing directory git deletes only that entry's administrative
+  files), after re-proving the root and re-confirming the directory is still
+  absent. A worktree still on disk is never touched, wherever it has moved.
+  The residual window is one entry already confirmed gone. Registrations the
+  run did not judge `prunable` (a vanished worktree outside the root, say) are
+  no longer cleared as a side effect. Tests 89 (root made unlistable after the
+  first removal) and 90 (root renamed at the metadata step) fail on the
+  previous code. `rules/agent-team-operation.md` and `sweep-worktrees.sh` no
+  longer name `git worktree prune` as the step that clears a vanished
+  worktree's registration. The sweep's test 23 swapped the root at the first
+  repository's `worktree prune`, a call that no longer happens; it now swaps
+  at that repository's branch deletion, its last destructive step.
+
 ## 0.3.309 — 2026-09-28
 
 ### Added
