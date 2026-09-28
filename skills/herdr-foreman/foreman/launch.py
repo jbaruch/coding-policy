@@ -23,7 +23,7 @@ from pathlib import PurePath
 from .composer import ensure_ready
 from .errors import AgentBusyError, HerdrError
 from .herdr import READY_STATES, error_code
-from .restoration import NAME_TAKEN, name_state
+from .restoration import NAME_RELEASED, NAME_TAKEN, name_state
 from .tiers import launch_flags, verify_argv, verify_worker_permissions, worker_launch_args
 
 SHELL_POLL_ATTEMPTS = 30
@@ -100,8 +100,27 @@ def start_foreman(client, seat, pane, tier):
     resolved for its coordination round. Its launch options are the
     operator's (`tiers.parse_launch_args`); the worker YOLO requirement does
     not apply.
+
+    A retry is safe: when Herdr already holds the seat's name on `pane` with
+    the seat's kind, nothing is started, the live foreground argv must carry
+    `tier`, and the proof returns with `replayed: true`. A name bound to
+    another pane or kind, or a live tier other than `tier`, refuses.
     """
-    return _start_seat(client, seat.agent, seat.kind, pane, tier, list(seat.launch_args))
+    try:
+        record = client.agent_get(seat.agent)
+    except HerdrError as exc:
+        if error_code(exc) != NAME_RELEASED:
+            raise
+        record = None
+    if record is None:
+        return {**_start_seat(client, seat.agent, seat.kind, pane, tier, list(seat.launch_args)), "replayed": False}
+    if record.get("pane_id") != pane or record.get("agent") != seat.kind:
+        raise HerdrError(
+            "The foreman name {!r} is already held by a {} agent in pane {!r}, not a {} agent in {!r}; nothing was "
+            "started. Stop that agent or name the pane it runs in, then retry.".format(
+                seat.agent, record.get("agent"), record.get("pane_id"), seat.kind, pane),
+            {"agent": seat.agent, "pane": pane, "bound_pane": record.get("pane_id"), "bound_kind": record.get("agent")})
+    return {**verify_foreman(client, seat, pane, tier), "replayed": True}
 
 
 def verify_foreman(client, seat, pane, tier):

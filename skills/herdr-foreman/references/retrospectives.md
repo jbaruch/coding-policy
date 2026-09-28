@@ -60,21 +60,27 @@ Use a title and five nonempty H2 sections named `Outcomes`, `Quality`,
 `Coordination`, `Seats and models`, and `Improvements`. The utility adds the saved
 note's schema metadata; the foreman supplies the synthesis under these headings.
 
-Address these five questions with evidence and the foreman's reasoning:
+Address these five questions with evidence. Every statement about a task's
+outcome or quality cites the worker report or gate evidence that states it, by
+quote or path; the foreman's own observations cover dispatch, timing, staffing,
+supervision and handoff (`rules/agent-team-operation.md` Foreman Seat):
 
 1. **Outcomes:** What did the team intend to achieve, what is verified, and what
    remains unresolved? Distinguish worker claims from accepted work and completed
    tasks. Cite task IDs, reports, full SHAs, and gate/run results where relevant.
 2. **Quality:** Which review or test findings prevented defects? Which defects or
-   misunderstood requirements escaped earlier checks? Separate observed facts
-   from plausible explanations.
+   misunderstood requirements escaped earlier checks? Cite the reviewer, tester
+   or investigator report that states each finding and each explanation; an
+   explanation no report states is recorded as an open question, never as the
+   foreman's own conclusion.
 3. **Coordination:** Where did unclear briefs, repeated work, waiting, context loss,
    or recovery consume time? What did the outgoing workers learn that a fresh
    worker needs to know?
 4. **Seats and models:** How well did the assignments fit the work? Use observed
    results, measured headroom, and available cost evidence; record absent data
    explicitly. A model name alone does not establish capacity or effectiveness.
-   Which specialist changed a decision or prevented rework? Who arrived too late,
+   Which specialist changed a decision or prevented rework, per the report that
+   records it? Who arrived too late,
    and which consultation consumed time without a useful result? Evaluate whether
    a retained session or durable handoff preserved the knowledge the next worker
    needed. Separate measured costs from impressions.
@@ -87,7 +93,8 @@ Do not pad a quiet interval with invented incidents or speculative failures.
 Record what the evidence supports, even when the result is a short no-change
 conclusion. Keep facts, explanations, and proposed actions distinct. A populated
 template alone is insufficient: the foreman checks that the notes contain useful
-lessons or an evidence-backed no-change conclusion before recording them.
+lessons or an evidence-backed no-change conclusion, and that every outcome and
+quality statement cites its report or gate, before recording them.
 
 Retrospective actions do not modify policy automatically, expand the task, grant
 more correction attempts, waive a release gate, or authorize an uncertain resend.
@@ -156,8 +163,8 @@ the exact output envelope; the state schema documents persisted fields.
    `transition` when any checked worker requires transition coverage.
    Daily notes cite a ledger, previous note, or other evidence source. An empty
    source list is usable only when transition coverage supplies concrete evidence.
-   Completion asserts the foreman has reviewed the substance; the boolean alone
-   never establishes it.
+   Completion asserts every outcome and quality statement cites its report or
+   gate evidence; the boolean alone never establishes it.
 5. Run `retro-record --record <metadata.json>`. The utility revalidates evidence,
    preserves the completed note, and records its digest and coverage. Inspect the
    returned saved path and identity, then reference them in the task ledger. A

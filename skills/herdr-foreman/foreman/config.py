@@ -15,8 +15,10 @@ from .errors import ConfigError, ForemanError
 from .herdr import SLASH_DELIVERIES, SLASH_DELIVERY_PASTE
 from .tiers import TOP_MODELS, parse_launch_args, parse_tiers
 
-CONFIG_SCHEMA_VERSION = 5
-READABLE_CONFIG_VERSIONS = frozenset({1, 2, 3, 4, 5})
+CONFIG_SCHEMA_VERSION = 6
+READABLE_CONFIG_VERSIONS = frozenset({1, 2, 3, 4, 5, 6})
+#: The first config version that may declare the top-level `foreman` block.
+FOREMAN_CONFIG_VERSION = 6
 CAPABILITY_ID = re.compile(r"[a-z][a-z0-9_-]*\Z")
 
 REQUIRED_AGENT_FIELDS = ("name", "kind", "usage_prompt", "usage_marker", "usage_read_source", "clear_prompt")
@@ -547,7 +549,16 @@ def parse_foreman(payload, source="<memory>"):
         )
     raw = payload.get("foreman")
     if raw is None:
+        # Schema 5 and below never carry the block: the seat reads as
+        # unconfigured, a warning and never a block. Nothing rewrites the file.
         return None
+    version = payload.get("schema_version")
+    if isinstance(version, int) and not isinstance(version, bool) and version < FOREMAN_CONFIG_VERSION:
+        raise ConfigError(
+            "Config at {}: the `foreman` block needs config schema_version {}; this file says {}. Set "
+            "`schema_version` to {} in the operator-owned config without changing anything else.".format(
+                source, FOREMAN_CONFIG_VERSION, version, FOREMAN_CONFIG_VERSION),
+            {"source": source, "found": version, "expected": FOREMAN_CONFIG_VERSION})
     if not isinstance(raw, dict):
         raise ConfigError(
             "Config at {}: `foreman` is a JSON {}, not an object naming the foreman seat - write it as {}, "

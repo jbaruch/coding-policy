@@ -400,12 +400,12 @@ def record(path, data, coverage, at):
     try:
         note_text = note_data.decode("utf-8")
     except UnicodeDecodeError:
-        raise UsageError("Retrospective note must be UTF-8 Markdown; save the foreman's substantive synthesis and retry.", {}) from None
+        raise UsageError("Retrospective note must be UTF-8 Markdown; save the foreman's synthesis, citing reports or gate evidence for outcomes and quality, and retry.", {}) from None
     for section in SECTIONS:
         match = re.search(r"^#{1,6} " + re.escape(section) + r"[ \t]*\r?$\n(.*?)(?=^#{1,6} |\Z)", note_text, re.M | re.S)
         body = re.sub(r"<!--.*?-->", "", match[1], flags=re.S).strip() if match else ""
         if not body or body.lower() in {"todo", "tbd", "n/a", "..."}:
-            raise UsageError("Retrospective note needs a nonempty {} section with the foreman's synthesis; headings or template placeholders do not complete it.".format(section), {})
+            raise UsageError("Retrospective note needs a nonempty {} section with the foreman's synthesis, citing reports or gate evidence for outcomes and quality; headings or template placeholders do not complete it.".format(section), {})
     validate_coverage(coverage)
     sources = [receipt(source) for source in data["sources"]]
     if not sources and not coverage:

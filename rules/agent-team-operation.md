@@ -51,6 +51,9 @@ description: Running a multi-agent team — task-based specialist composition, c
 - An absent `foreman` block is a visible preflight warning naming the configure command, never a round block
 - The foreman dispatches, runs owner scripts, keeps the foreman-owned records, and gates on evidence
 - The foreman never reasons through task content
+- Task content is the assigned work's deliverables, findings, outcomes and quality
+- The task ledger, retrospective notes and working memory cite worker reports or gate evidence, by quote or path, for every statement about task content
+- The foreman's own entries in those records are process observations of dispatch, timing, staffing, supervision and handoff
 - Acceptance rests on independent reviewer and tester reports, CI, oracle verification and the report-verdict classifier gate
 - The foreman gates on a report's verdict lines and labels, never on its own assessment of the substance
 - Recording a report's verdict, a validated partition or an operator's answer in a foreman-owned record is bookkeeping, never an assessment of task content

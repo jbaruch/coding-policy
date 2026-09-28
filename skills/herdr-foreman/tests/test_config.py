@@ -179,7 +179,7 @@ class ParseConfigTest(unittest.TestCase):
         self.assertEqual(by_name["grok"].dialog_next_tab_keys, ("tab",))
 
     def test_wrong_schema_version_is_rejected(self):
-        payload = dict(VALID, schema_version=6)
+        payload = dict(VALID, schema_version=7)
         with self.assertRaises(ConfigError) as caught:
             parse_config(payload)
         self.assertIn("schema_version", str(caught.exception))

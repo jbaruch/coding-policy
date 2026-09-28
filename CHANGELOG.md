@@ -176,6 +176,33 @@
   passed; both now refuse. Tests: `test_round_preflight.sh` (composite failure
   and malformed result), `test_engagement.py`, `test_recovery.py`.
 
+  The next review found three more. "The foreman never reasons through task
+  content" conflicted with the ledger allowing "the foreman's reasoning" and
+  retrospectives asking the foreman to judge outcome and quality. Per the
+  coordinator's decision the records stay foreman-owned: the Foreman Seat now
+  defines task content (the assigned work's deliverables, findings, outcomes and
+  quality), requires the task ledger, retrospective notes and working memory to
+  cite worker reports or gate evidence for it, and limits the foreman's own
+  entries to process observations of dispatch, timing, staffing, supervision
+  and handoff. `state-schema.md`, `references/retrospectives.md`,
+  `references/task-ledger.md`, `references/working-memory.md` and the
+  retrospective refusal messages say the same. The same audit found
+  `references/attention.md` telling the foreman to add "a recommendation
+  where useful"; an attention item's `recommendation` now quotes a worker report
+  named in its sources, and the `classify-report.sh` header no longer sends an
+  `insufficient_evidence` label back to the foreman's own reading. The
+  top-level `foreman` config block is a shape change: config moves to schema 6
+  (`CONFIG_SCHEMA_VERSION`, `FOREMAN_CONFIG_VERSION`), schemas 1–5 stay
+  readable with the seat unconfigured, a `foreman` block below schema 6 is
+  refused naming the version it needs, and the operator stays the file's only
+  writer. `start-foreman` always started the agent, so a retry after success
+  failed; it now reads Herdr's record for the seat's name, and when that name
+  already runs the seat's kind in the named pane it starts nothing, proves the
+  live tier from the foreground argv and returns `replayed: true`, refusing a
+  name held elsewhere, another kind or another tier. Tests:
+  `test_foreman_seat.py` (schema 5 and 6 reads, a block below 6, replay match
+  and mismatch), `test_config.py`.
+
 ## 0.3.323 — 2026-09-28
 
 ### Fixed

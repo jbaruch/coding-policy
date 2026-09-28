@@ -118,7 +118,12 @@ foreman start-foreman --pane <pane-id>
 
 It selects the tier, starts the configured agent with exactly `launch_args`
 plus that tier's model and effort flags, and prints the selection and the
-launch-argv proof. A launch argv that differs refuses.
+launch-argv proof. A launch argv that differs refuses. A retry is idempotent:
+when Herdr already holds the seat's name in that pane with the seat's kind,
+nothing starts, the live foreground argv must carry the selected tier, and the
+result carries `replayed: true`. A name held in another pane or by another kind,
+or a live tier other than the selected one, refuses (`start_foreman` in
+`skills/herdr-foreman/foreman/launch.py`).
 
 `foreman verify-foreman` re-runs the selection and proves the running foreman
 from its pane's live foreground argv, this Herdr pane by default or

@@ -68,6 +68,13 @@ named in the `judge` block (`skills/herdr-foreman/foreman/config.py`). A worker 
 no tier from selection, so every round it takes records `tier: null` and runs
 at whatever model is already live, unproven (#476). Under schema 4 and below
 an untiered worker still loads, with that behaviour.
+Config schema 6 adds the optional top-level `foreman` block
+(`parse_foreman` in `skills/herdr-foreman/foreman/config.py`). The operator owns
+the file and is its only writer; the utility reads it and never migrates it.
+Schemas 1–5 stay readable: they carry no `foreman` block, and the seat reads as
+unconfigured, the preflight warning that never blocks. A `foreman` block in a
+file below schema 6 is refused with the version it needs. Moving to schema 6 is
+the operator adding the block and bumping `schema_version`.
 Config schema 2 added per-agent `tiers` and `launch_args`.
 See `skills/herdr-foreman/references/model-tiers.md` for billing evidence. A missing config is refused with the exact `cp` command to run. The
 optional `idle_markers` / `working_markers` per-agent keys carry the footer
@@ -262,7 +269,9 @@ literal, never a guess:
 
 The task identity and base in the document apply to every event. Append a new
 decision when evidence changes; preserve earlier records. Event sections may
-contain prose under `assessment` for the foreman's reasoning. This is a human-readable
+contain prose under `assessment` that quotes or names the reports and gate
+evidence the decision rests on, plus the foreman's process observations of
+dispatch, timing, staffing, supervision and handoff. This is a human-readable
 decision log, not a new machine status API or an input to `foreman.sh apply`.
 
 - **Writer** — the foreman running `herdr-foreman` writes after dispatch, after
@@ -314,7 +323,7 @@ write it. The foreman supplies Markdown synthesis and source metadata through
 | File | Contract |
 | --- | --- |
 | `index.json` | Schema 1 object with canonical `state_path`, nullable `baseline_at`, append-only `records`, and recorded `transitions` |
-| `<id>.md` | Immutable UTF-8 completed note with schema 1 metadata and the foreman's substantive synthesis |
+| `<id>.md` | Immutable UTF-8 completed note with schema 1 metadata and the foreman's synthesis, citing reports or gate evidence for every outcome and quality statement |
 | `pending.json` | Schema 1 transaction journal with `previous_index` digest and proposed `record`; removed after the index commit |
 | `index.json.lock` | Utility lock; writers acquire it after the dispatch-state lock |
 
@@ -366,7 +375,8 @@ a proposed transition is independent of the daily due decision.
 
 - **Writer** — the utility validates recording metadata and required nonempty
   synthesis sections, reads source bytes, and atomically installs the completed
-  note before committing the index. The foreman judges the content's substance.
+  note before committing the index. The foreman supplies the synthesis; every
+  outcome and quality statement in it cites its report or gate evidence.
   Writes serialize under the sidecar lock. Identical retries preserve the existing
   record and its completion time; conflicting IDs or pending transactions fail
   with a diagnostic. A journal preserves interrupted recording for reconciliation.

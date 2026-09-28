@@ -42,12 +42,16 @@ ROWS = {
 
 WORKER = {"name": "claude", "kind": "claude", "usage_prompt": "/usage", "usage_marker": "Current week",
           "usage_read_source": "visible", "clear_prompt": "/clear"}
+#: The worker a schema-6 config needs: schema 5 and up require a tier table
+#: with a `consultation` row on every worker but the pinned judge.
+TIERED_WORKER = {**WORKER, "tiers": {"consultation": {"model": "sonnet-5", "effort": "high"},
+                                     "build": {"model": "sonnet-5", "effort": "medium"}}}
 
 
 def payload(**seat):
     block = {"agent": "foreman", "kind": "claude", "launch_args": ["--dangerously-skip-permissions"],
              "tiers": copy.deepcopy(ROWS), **seat}
-    return {"schema_version": 1, "agents": [dict(WORKER)],
+    return {"schema_version": 6, "agents": [copy.deepcopy(TIERED_WORKER)],
             "judge": {"agent": "judge", "model": "claude-fable-5-1", "effort": "max"},
             "foreman": {key: value for key, value in block.items() if value is not None}}
 
@@ -59,15 +63,27 @@ def argv(model, effort=None):
 class Client:
     """Herdr's agent.start and pane.process_info, recorded in memory."""
 
-    def __init__(self, reply_argv=None, live_argv=None):
+    def __init__(self, reply_argv=None, live_argv=None, held=None):
         self.starts = []
         self.reply_argv = reply_argv
         self.live_argv = live_argv
+        #: Herdr's name registry: name -> agent record, as agent.get answers.
+        self.held = dict(held or {})
+
+    def agent_get(self, name):
+        if name not in self.held:
+            raise HerdrError("agent get failed", {"stderr": json.dumps(
+                {"error": {"code": "agent_not_found", "message": "agent target not found"}})})
+        return dict(self.held[name])
 
     def agent_start(self, name, kind, pane, flags):
         self.starts.append((name, kind, pane, list(flags)))
         reply = self.reply_argv if self.reply_argv is not None else [kind] + list(flags)
-        return {"agent": {"name": name, "agent": kind, "pane_id": pane, "agent_status": "idle"}, "argv": reply}
+        record = {"name": name, "agent": kind, "pane_id": pane, "agent_status": "idle"}
+        self.held[name] = record
+        if self.live_argv is None:
+            self.live_argv = list(reply)
+        return {"agent": record, "argv": reply}
 
     def pane_process_info(self, pane):
         return {"pane_id": pane, "shell_pid": 100,
@@ -86,6 +102,23 @@ class ConfigTest(unittest.TestCase):
 
     def test_an_absent_block_parses_to_none(self):
         self.assertIsNone(parse_foreman({"schema_version": 1, "agents": [WORKER]}))
+
+    def test_a_schema_5_config_reads_with_the_seat_unconfigured(self):
+        five = {"schema_version": 5, "agents": [copy.deepcopy(TIERED_WORKER)]}
+        self.assertEqual(len(parse_config(five)), 1)
+        self.assertIsNone(parse_foreman(five))
+
+    def test_a_schema_6_config_reads_the_foreman_block(self):
+        self.assertEqual(len(parse_config(payload())), 1)
+        seat = parse_foreman(payload())
+        assert seat is not None
+        self.assertEqual(seat.agent, "foreman")
+
+    def test_a_foreman_block_below_schema_6_is_refused_with_the_version_it_needs(self):
+        for version in (1, 5):
+            with self.subTest(version=version), self.assertRaises(ConfigError) as caught:
+                parse_foreman({**payload(), "schema_version": version})
+            self.assertIn("schema_version 6", str(caught.exception))
 
     def test_a_model_or_effort_field_is_refused(self):
         for field in ({"model": "sonnet-5"}, {"effort": "low"}):
@@ -119,6 +152,26 @@ class LaunchTest(unittest.TestCase):
         assert seat is not None
         self.seat = seat
         self.tier = {"model": "sonnet-5", "effort": "medium"}
+
+    def test_a_retry_after_success_replays_the_verified_seat_without_starting(self):
+        client = Client()
+        first = start_foreman(client, self.seat, "w1:p0", self.tier)
+        self.assertFalse(first["replayed"])
+        again = start_foreman(client, self.seat, "w1:p0", self.tier)
+        self.assertTrue(again["replayed"])
+        self.assertEqual(again["source"], "process_argv")
+        self.assertEqual(len(client.starts), 1)
+
+    def test_a_retry_against_a_mismatched_seat_refuses_without_starting(self):
+        held = {"foreman": {"name": "foreman", "agent": "claude", "pane_id": "w1:p0", "agent_status": "idle"}}
+        for pane, record, live in (("w1:p0", held, argv("claude-haiku-4-5", "low")),
+                                   ("w9:p9", held, argv("sonnet-5", "medium")),
+                                   ("w1:p0", {"foreman": {**held["foreman"], "agent": "codex"}}, argv("sonnet-5", "medium"))):
+            with self.subTest(pane=pane, record=record["foreman"]["agent"]):
+                client = Client(live_argv=live, held=record)
+                with self.assertRaises(HerdrError):
+                    start_foreman(client, self.seat, pane, self.tier)
+                self.assertEqual(client.starts, [])
 
     def test_start_launches_the_tier_it_is_handed(self):
         client = Client()

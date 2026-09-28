@@ -55,7 +55,10 @@ into a working or blocked worker.
 
 ## Blank Document and Event
 
-Fill this as a reasoning document; placeholder values are not evidence.
+Fill this as an evidence log; placeholder values are not evidence. Every
+statement about the task's outcome or quality quotes or names the report or gate
+evidence that states it; the foreman's own prose covers process observations
+only (`rules/agent-team-operation.md` Foreman Seat).
 Append one uniquely named event section per decision. Each placeholder names
 the `skills/herdr-foreman/foreman/members.py` constant that fixes its format;
 write the constant's value, never its name.

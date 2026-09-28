@@ -1,5 +1,5 @@
 {
-  "schema_version": 5,
+  "schema_version": 6,
   "role_costs": {
     "developer": 12,
     "tester": 10,
