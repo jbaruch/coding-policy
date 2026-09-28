@@ -439,6 +439,10 @@ t_malformed_ruling_refuses() {
   invoke_ruled
   assert_eq "decline without reason exit" "1" "$RC" || return 1
   assert_unmet "unparseable FINDING" "the FINDING line" || return 1
+  write_ruling "${HEAD_SHA:0:12}" "$DECLINE_ONE" "$DECLINE_TWO"
+  invoke_ruled
+  assert_eq "short HEAD sha exit" "1" "$RC" || return 1
+  assert_unmet "HEAD: <40-hex sha>" "the HEAD line" || return 1
   assert_eq "no dismissal" "0" "$(dismissals)"
 }
 

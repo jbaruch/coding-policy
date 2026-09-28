@@ -22,7 +22,7 @@
 #   Format, schema_version 1 (lines in any order after the first; unknown lines ignored):
 #     RULING: weighed                       (first line, required)
 #     schema_version: 1                     (required)
-#     HEAD: <7-40 hex sha>                  (required, exactly one)
+#     HEAD: <40-hex sha>                    (required, exactly one, full sha)
 #     ANSWER: <operator's answer, verbatim> (required, non-empty; continuation
 #                                            lines indented two spaces)
 #     FINDING: <source> <path>:<line> <rule|-> — fix | defer — <follow-up entry> | decline — <reason>
@@ -122,7 +122,7 @@ FINDING_RE = re.compile(r"^- `(?P<path>.+):(?P<line>\d+)` — \*\*(?P<rule>[^*]+
 RULING_LINE_RE = re.compile(
     r"^FINDING: (?P<source>\S+) (?P<path>\S+):(?P<line>\d+) (?P<rule>\S+) — "
     r"(?P<verdict>fix|defer|decline)(?: — (?P<text>.+))?$")
-HEAD_RE = re.compile(r"^HEAD: (?P<sha>[0-9a-f]{7,40})$")
+HEAD_RE = re.compile(r"^HEAD: (?P<sha>[0-9a-f]{40})$")
 COMPARE_FILE_CAP = 300
 
 
@@ -238,7 +238,7 @@ if not ruling_lines or ruling_lines[0].strip() != "RULING: weighed":
 if schemas != [schema]:
     out["unmet"].append(f"the ruling carries no single 'schema_version: {schema}' line — rewrite it in the current format")
 if len(heads) != 1:
-    out["unmet"].append("the ruling carries no single 'HEAD: <sha>' line")
+    out["unmet"].append("the ruling carries no single 'HEAD: <40-hex sha>' line — write the full commit sha the findings were raised on")
 if len(answers) != 1 or not answers[0]:
     out["unmet"].append("the ruling carries no single non-empty 'ANSWER:' line quoting the operator verbatim")
 if malformed:
@@ -276,7 +276,7 @@ failing = sorted({c.get("name", "?") for c in checks if isinstance(c, dict) and 
 if failing:
     out["unmet"].append(f"failing check(s) on the head: {failing} — fix them")
 
-at_head = head.startswith(ruling_head)
+at_head = head == ruling_head
 changed = None
 if not at_head:
     compare_path = os.path.join(tmp, "compare.json")
