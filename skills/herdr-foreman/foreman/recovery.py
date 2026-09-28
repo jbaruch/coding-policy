@@ -1216,14 +1216,28 @@ def validate_work(store, assignments, task, fix_round, plan_id=None, work=None, 
     return plan
 
 
-def dispatch_identity(task, role, agent, fix_round, paths_by_role, supplied=None, *, options=None):
+def briefing_bytes(path, contents=None):
+    """The bytes of briefing file `path`: the verified bytes `contents` carries for it, else a read by name.
+
+    A frozen dispatch carries the bytes its freeze verified, so an ancestor
+    swapped for a link after the freeze cannot change what the dispatch's
+    identity, its sent prompt or its checks read (#565). A path `contents`
+    does not name -- a replay's recorded source, a dry run -- is read by name
+    and may raise OSError.
+    """
+    if contents is not None and path in contents:
+        return contents[path]
+    return Path(path).read_bytes()
+
+
+def dispatch_identity(task, role, agent, fix_round, paths_by_role, supplied=None, *, options=None, contents=None):
     digest = hashlib.sha256()
     for value in (task, role, agent, fix_round, paths_by_role["common"], paths_by_role[role], options):
         digest.update(json.dumps(value, sort_keys=True).encode("utf-8"))
         digest.update(b"\0")
     for path in (paths_by_role["common"], paths_by_role[role]):
         try:
-            content = Path(path).read_bytes()
+            content = briefing_bytes(path, contents)
         except OSError as exc:
             raise UsageError("Cannot fingerprint brief {}: {}. Restore it before dispatch.".format(path, exc), {}) from None
         digest.update(len(content).to_bytes(8, "big"))
@@ -1425,19 +1439,19 @@ REFUSAL_STATES = frozenset({"idle", "done"})
 AUTHORIZED_BRIEFS = frozenset({"unchanged", "revised"})
 
 
-def brief_identity(paths_by_role, role, report):
+def brief_identity(paths_by_role, role, report, contents=None):
     """Digest the common and role brief bytes with the report path masked.
 
     A replacement brief carries a fresh report path and nothing else; masking
     every occurrence of `report` lets two dispatches of the unchanged brief
     share one identity while a reworded brief gets another. Without a bound
     report path the raw bytes are digested, so only a byte-identical brief
-    matches.
+    matches. `contents` is `briefing_bytes`'s map of verified frozen bytes.
     """
     digest = hashlib.sha256()
     for path in (paths_by_role["common"], paths_by_role[role]):
         try:
-            content = Path(path).read_bytes()
+            content = briefing_bytes(path, contents)
         except OSError as exc:
             raise UsageError("Cannot read brief {}: {}. Restore it before dispatch.".format(path, exc), {}) from None
         if report:
