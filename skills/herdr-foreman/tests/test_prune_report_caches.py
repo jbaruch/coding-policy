@@ -350,11 +350,13 @@ class PruneReportCachesTests(unittest.TestCase):
 
     def test_module_cache_with_evidence_directory_stays_whole(self):
         top = self.fx.reports(caches=())
-        evidence = ("findings", "findings.v1", "report@draft")
+        evidence = ("findings", "findings.v1", "report@draft", "report@", "@v1.0.0")
         mixed = {}
         for name in evidence:
             mixed[name] = top / "mixed" / name / "go-mod-cache"
             write(mixed[name] / "cache" / "download" / "golang.org" / "x" / "list")
+            # Back an `@` name's module side, so only the version rule keeps it.
+            write(mixed[name] / "cache" / "download" / "report" / "@v" / "list")
             write(mixed[name] / name / "report.md", "evidence")
         genuine = top / "developer-evidence" / "go-mod-cache"
         write(genuine / "cache" / "download" / "golang.org" / "x" / "mod" / "@v" / "v0.1.0.zip")
