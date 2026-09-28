@@ -11,9 +11,12 @@ Levels:
   `block`  -- high confidence the report names an open item it does not
               dispose of. The report cannot be accepted (a ledger `accepted`
               decision closed through `close-member`, or an `approved`
-              `record-report`) until a recorded clear names its reason.
+              `record-report`) until a recorded clear names its reason, from
+              the worker role that owns the finding, the judge on a contested
+              one, or the operator.
   `reread` -- medium confidence. The report cannot be gated at all until a
-              recorded re-read.
+              recorded full re-read by the worker whose report it is.
+The foreman records resolutions; it never decides one.
   none     -- low confidence, `insufficient_evidence`, a fallback LLM label,
               an unpinned model, any error: no gate effect, and the report is
               read and gated exactly as without a classifier.
@@ -75,7 +78,13 @@ DISPOSALS = ("open_items_accepted", "open_items_out_of_scope")
 GATE_QUESTIONS = (OPEN, *DISPOSALS)
 
 LEVELS = ("block", "reread")
-CLEARERS = ("foreman", "operator")
+#: Who may clear a block: the worker role that owns the finding, the judge on
+#: a contested one, the operator. The foreman records it and never decides it.
+CLEARERS = ("worker", "judge", "operator")
+#: Who performs a mandatory re-read: the worker whose role owns the report.
+REREADERS = ("worker",)
+CLEAR_COMMAND = "report-gate-clear --report <path> --by worker|judge|operator --reason <why it does not block> [--evidence <report carrying the reason>]"
+REREAD_COMMAND = "report-gate-reread --report <path> --evidence <re-read report> --note <what it verified>"
 COMMANDS = {"report-gate-record", "report-gate-reread", "report-gate-clear", "report-gate-status"}
 
 
@@ -195,14 +204,14 @@ def require_clear(path, report, accepting):
     """
     for gate in open_gates(path, report):
         if gate["level"] == "reread":
-            raise UsageError("Report {} carries an open re-read gate ({}). Read it in full, then record that with `{}` "
-                             "before gating it.".format(gate["report"], gate["reason"], runnable.command(
-                                 "report-gate-reread --report <path> --note <what you verified>")),
+            raise UsageError("Report {} carries an open re-read gate ({}). Dispatch a full re-read to the worker whose "
+                             "report it is, then record it with `{}` before gating it.".format(
+                                 gate["report"], gate["reason"], runnable.command(REREAD_COMMAND)),
                              {"gate": copy.deepcopy(gate)})
         if gate["level"] == "block" and accepting:
             raise UsageError("Report {} carries an open block gate ({}); it cannot be accepted until the block is "
-                             "cleared with a recorded reason: `{}`.".format(gate["report"], gate["reason"], runnable.command(
-                                 "report-gate-clear --report <path> --by foreman|operator --reason <why it does not block>")),
+                             "cleared with a recorded reason from the worker that owns the finding, the judge or the "
+                             "operator: `{}`.".format(gate["report"], gate["reason"], runnable.command(CLEAR_COMMAND)),
                              {"gate": copy.deepcopy(gate)})
 
 
@@ -252,13 +261,34 @@ def record(path, data, at):
     return {"schema_version": SCHEMA_VERSION, "recorded": recorded, "replayed": replayed, "no_gate": ungated}
 
 
-def resolve(path, report, action, reason, by, at):
-    """Record a re-read or a clear against the report's open gates."""
+def _evidence(value, by):
+    """The report that carries a worker's or judge's reason, bound to its bytes."""
+    if value is None:
+        if by == "operator":
+            return None
+        _fail("A {} resolution cites the report that carries it; pass --evidence <report path>.".format(by))
+    path = _report_key(value)
+    return {"path": path, "sha256": _digest(path)}
+
+
+def resolve(path, report, action, reason, by, at, evidence=None):
+    """Record a re-read or a clear against the report's open gates.
+
+    A clear comes from the worker role that owns the finding, the judge on a
+    contested finding, or the operator. A re-read is a worker's full re-read,
+    dispatched to the role whose report it is. A worker or judge resolution
+    cites the report that carries it.
+    """
     at = _utc(at)
     key = _report_key(report)
     _text(reason, "The re-read note" if action == "reread" else "The clear reason")
-    if action == "clear" and by not in CLEARERS:
-        _fail("A clear names who cleared it: foreman or operator.")
+    if by not in (CLEARERS if action == "clear" else REREADERS):
+        _fail("A clear comes from the owning worker, the judge or the operator; a re-read from the worker whose "
+              "report it is. Pass --by {}.".format("|".join(CLEARERS if action == "clear" else REREADERS)))
+    cited = _evidence(evidence, by)
+    # A re-reader is never the operator, so a re-read always cites a report.
+    if action == "reread" and (cited is None or cited["path"] == key):
+        _fail("A re-read cites the re-reading worker's own report, not the gated report itself.")
     with state_lock(storage_path(path)):
         document = load(path)
         pending = [gate for gate in document["gates"] if gate["report"] == key and gate["status"] == "open"]
@@ -266,10 +296,10 @@ def resolve(path, report, action, reason, by, at):
             _fail("Report {} has no open gate; `{}` lists what is open.".format(key, runnable.command("report-gate-status")))
         if action == "reread" and any(gate["level"] == "block" for gate in pending):
             _fail("Report {} carries a block gate; a re-read does not clear it. Record the reason it does not block "
-                  "with `{}`.".format(key, runnable.command("report-gate-clear --report <path> --by foreman|operator --reason <why>")))
+                  "with `{}`.".format(key, runnable.command(CLEAR_COMMAND)))
         for gate in pending:
             gate["status"] = "cleared" if action == "clear" else "reread"
-            gate["resolution"] = {"at": at, "action": action, "by": by, "reason": reason}
+            gate["resolution"] = {"at": at, "action": action, "by": by, "reason": reason, "evidence": cited}
         save_state(storage_path(path), document)
     return {"schema_version": SCHEMA_VERSION, "resolved": copy.deepcopy(pending)}
 
@@ -293,12 +323,14 @@ def register_commands(sub, common):
                             help="Record the mandatory full re-read that clears a report's re-read gate.")
     parser.add_argument("--report", required=True)
     parser.add_argument("--note", required=True)
+    parser.add_argument("--evidence", required=True, help="The re-reading worker's report.")
     parser.add_argument("--now", metavar="ISO8601")
     parser = sub.add_parser("report-gate-clear", parents=[common],
                             help="Clear a report's gate with the recorded reason it does not block.")
     parser.add_argument("--report", required=True)
     parser.add_argument("--by", required=True, choices=CLEARERS)
     parser.add_argument("--reason", required=True)
+    parser.add_argument("--evidence", help="The report carrying the reason; required unless --by operator.")
     parser.add_argument("--now", metavar="ISO8601")
     parser = sub.add_parser("report-gate-status", parents=[common], help="List open and resolved report gates.")
     parser.add_argument("--report")
@@ -313,7 +345,7 @@ def run_command(args, state_path, now):
                              "unchanged.".format(args.labels, exc), {}) from None
         return record(state_path, data, args.now or now)
     if args.command == "report-gate-reread":
-        return resolve(state_path, args.report, "reread", args.note, "foreman", args.now or now)
+        return resolve(state_path, args.report, "reread", args.note, "worker", args.now or now, args.evidence)
     if args.command == "report-gate-clear":
-        return resolve(state_path, args.report, "clear", args.reason, args.by, args.now or now)
+        return resolve(state_path, args.report, "clear", args.reason, args.by, args.now or now, args.evidence)
     return status(state_path, args.report)

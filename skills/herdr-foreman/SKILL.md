@@ -586,10 +586,12 @@ turn, not one turn per report. A label never approves, accepts or skips a
 check; its only effect is a recorded gate, which adds friction:
 
 - `block` — the report is not accepted until `report-gate-clear` records why
-  it does not block
-- `reread` — the report is not gated until `report-gate-reread` records the
-  full re-read
-- no gate — the report is read and gated as before
+  it does not block, a reason from the worker role that owns the finding, the
+  judge in adjudication when it is contested, or the operator
+- `reread` — the report is not gated until a full re-read, dispatched to the
+  reviewer or the role whose report it is, is recorded with its report through
+  `report-gate-reread`
+- no gate — the report is gated as before
 
 `close-member` and `record-report` refuse while a gate forbids the decision.
 Gate levels, bands, adapters and fallback are the owners' contract — see

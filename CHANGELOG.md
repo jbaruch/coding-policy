@@ -38,8 +38,14 @@
 - **A label may add friction to accepting a report, never remove it
   (operator decision on #531).** `foreman report-gate-record` records the gate
   a Jev label's probabilities earn: `block` (the report cannot be accepted
-  until `report-gate-clear` records why it does not block) or `reread` (it
-  cannot be gated at all until `report-gate-reread` records the full re-read).
+  until `report-gate-clear` records why it does not block, a reason from the
+  worker role that owns the finding, the judge in adjudication, or the
+  operator) or `reread` (it cannot be gated at all until a full re-read,
+  dispatched to the reviewer or the role whose report it is, is recorded with
+  that worker's report through `report-gate-reread`). The foreman records
+  resolutions and decides none: a worker or judge resolution cites the report
+  carrying it, bound to its sha256, and a re-read never cites the gated report
+  itself.
   `close-member` refuses an `accepted` closure under an open block and any
   closure under an open re-read; `record-report` does the same for `approved`
   and for any verdict respectively. Low confidence, `insufficient_evidence`,
@@ -62,6 +68,11 @@
   verdicts, so per-question truth comes from what a verdict determines (a
   recorded `blocking` fixes three answers; `approved` fixes none) plus the
   fixtures' expected answers. `--results` keeps the labels for calibration.
+  Measured with `claude-sonnet-5` on the six reports recorded since the old
+  prompt's last change (2026-09-22): the old prompt and the atomic questions
+  both scored 6/6 with the same confusion, and both held all three
+  adversarial fixtures. Six reports confirm no regression, not an
+  improvement; the Jev bands wait for the key and a larger held-out set.
 - **The two known mislabels from 2026-09-24 were read.**
   `goc-20260908/policy-scope/integration-judge-2/report.md`, recorded
   `blocking` and labelled `approved` by both prompts, is a judge ruling

@@ -670,8 +670,10 @@ class RecoveryCommandTests(fixture.CliCase):
         code, _, err = self.owner("record-report", record)
         self.assertEqual(code, 1)
         self.assertIn("open re-read gate", err)
-        code, _, err = self.invoke(["report-gate-reread", "--report", str(review), "--note", "Read in full; F1 stands.",
-                                    "--now", AT])
+        reread = self.tmp / "review-6-reread.md"
+        reread.write_text("Re-read review-6.md in full; F1 stands.\n")
+        code, _, err = self.invoke(["report-gate-reread", "--report", str(review), "--evidence", str(reread),
+                                    "--note", "Reviewer re-read it in full; F1 stands.", "--now", AT])
         self.assertEqual(code, 0, err)
         code, _, err = self.owner("record-report", record)
         self.assertEqual(code, 0, err)

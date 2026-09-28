@@ -62,6 +62,8 @@ class GateCase(unittest.TestCase):
         self.state = self.root / "state.json"
         self.report = self.root / "reviewer.md"
         self.report.write_text("B1 blocking: the parser accepts a quoted marker.\n")
+        self.reread = self.root / "reviewer-reread.md"
+        self.reread.write_text("Re-read reviewer.md in full at the current tip; B1 stands as blocking.\n")
 
     def record(self, *labels):
         return gates.record(self.state, {"schema_version": 2, "agent": "default", "labels": list(labels),
@@ -101,7 +103,7 @@ class ClearTest(GateCase):
         with self.assertRaisesRegex(UsageError, "cannot be accepted until the block is cleared"):
             gates.require_clear(self.state, str(self.report), True)
         with self.assertRaisesRegex(UsageError, "a re-read does not clear it"):
-            gates.resolve(self.state, str(self.report), "reread", "read it", "foreman", AT)
+            gates.resolve(self.state, str(self.report), "reread", "read it", "worker", AT, str(self.reread))
         result = gates.resolve(self.state, str(self.report), "clear", "B1 is advisory per the judge ruling", "operator", AT)
         self.assertEqual(result["resolved"][0]["resolution"]["by"], "operator")
         gates.require_clear(self.state, str(self.report), True)
@@ -111,18 +113,24 @@ class ClearTest(GateCase):
         for accepting in (False, True):
             with self.subTest(accepting=accepting), self.assertRaisesRegex(UsageError, "open re-read gate"):
                 gates.require_clear(self.state, str(self.report), accepting)
-        gates.resolve(self.state, str(self.report), "reread", "Read in full; B1 is real.", "foreman", AT)
+        gates.resolve(self.state, str(self.report), "reread", "Read in full; B1 is real.", "worker", AT, str(self.reread))
         gates.require_clear(self.state, str(self.report), True)
+        resolution = gates.status(self.state)["resolved"][0]["resolution"]
+        self.assertEqual(resolution["evidence"]["path"], str(self.reread))
         self.assertEqual(gates.status(self.state)["open"], [])
 
-    def test_a_resolution_needs_an_open_gate_and_a_reason(self):
+    def test_a_resolution_needs_an_open_gate_a_reason_and_its_source(self):
         with self.assertRaisesRegex(UsageError, "no open gate"):
-            gates.resolve(self.state, str(self.report), "clear", "why", "foreman", AT)
+            gates.resolve(self.state, str(self.report), "clear", "why", "operator", AT)
         self.record(label(self.report, HIGH))
-        with self.assertRaises(UsageError):
-            gates.resolve(self.state, str(self.report), "clear", "  ", "foreman", AT)
-        with self.assertRaises(UsageError):
-            gates.resolve(self.state, str(self.report), "clear", "why", "classifier", AT)
+        refused = [("clear", "  ", "operator", None), ("clear", "why", "foreman", None),
+                   ("clear", "why", "classifier", None), ("clear", "why", "worker", None),
+                   ("clear", "why", "judge", str(self.root / "absent.md")), ("reread", "why", "operator", None),
+                   ("reread", "why", "worker", str(self.report))]
+        for action, reason, by, evidence in refused:
+            with self.subTest(action=action, by=by, evidence=evidence), self.assertRaises(UsageError):
+                gates.resolve(self.state, str(self.report), action, reason, by, AT, evidence)
+        self.assertEqual(len(gates.status(self.state)["open"]), 1)
 
     def test_the_cli_records_clears_and_lists(self):
         labels = self.root / "labels.json"
@@ -138,8 +146,9 @@ class ClearTest(GateCase):
         self.assertEqual(payload["recorded"][0]["level"], "block")
         code, payload, err = run("report-gate-status")
         self.assertEqual((code, len(payload["open"])), (0, 1), err)
-        code, payload, err = run("report-gate-clear", "--report", str(self.report), "--by", "foreman",
-                                 "--reason", "Accepted defect #12 per the stop diagnosis", "--now", AT)
+        code, payload, err = run("report-gate-clear", "--report", str(self.report), "--by", "worker",
+                                 "--evidence", str(self.reread), "--reason", "B1 is advisory: presentation only",
+                                 "--now", AT)
         self.assertEqual(code, 0, err)
         code, payload, err = run("report-gate-status")
         self.assertEqual((len(payload["open"]), len(payload["resolved"])), (0, 1))
@@ -156,7 +165,10 @@ class CloseMemberGateTest(MembersCase):
         self.write_ledger("accepted")
         with self.assertRaisesRegex(UsageError, "cannot be accepted"):
             members.close(self.path, "dispatch-a", self.ledger, LATER)
-        gates.resolve(self.path, self.report, "clear", "The finding is out of scope per ruling R2.", "foreman", LATER)
+        ruling = self.root / "judge.md"
+        ruling.write_text("RULING: uphold B -- B1 lies outside this task's scope.\n")
+        gates.resolve(self.path, self.report, "clear", "The finding is out of scope per ruling R2.", "judge", LATER,
+                      str(ruling))
         self.assertEqual(members.close(self.path, "dispatch-a", self.ledger, LATER)["decision"], "accepted")
 
     def test_a_block_never_refuses_a_needs_work_closure(self):

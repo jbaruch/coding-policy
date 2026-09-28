@@ -37,14 +37,21 @@ calibrated. It restates no threshold; the constants live at the top of
   probabilities and the pinned model; it never trusts the label's own `gate`.
   A report whose bytes changed since classification is refused: reclassify it.
 - `block` — the report cannot be accepted until
-  `foreman report-gate-clear --report <path> --by foreman|operator --reason <why>`
-  records why it does not block. `close-member` refuses an `accepted` ledger
-  decision and `record-report` refuses an `approved` verdict while it is open.
-  A `needs_work` or `blocked` decision is never refused by a block.
-- `reread` — the report cannot be gated at all until
-  `foreman report-gate-reread --report <path> --note <what you verified>`
-  records a full re-read. Both `close-member` and `record-report` refuse while
-  it is open.
+  `foreman report-gate-clear --report <path> --by worker|judge|operator --reason <why> [--evidence <report>]`
+  records why it does not block. The reason comes from the worker role that
+  owns the finding, from the judge in adjudication when the finding is
+  contested, or from the operator; a worker or judge clear cites the report
+  carrying it, bound to its sha256. The foreman records the clear and never
+  decides it. `close-member` refuses an `accepted` ledger decision and
+  `record-report` refuses an `approved` verdict while it is open. A
+  `needs_work` or `blocked` decision is never refused by a block.
+- `reread` — the report cannot be gated at all until a full re-read is
+  recorded with
+  `foreman report-gate-reread --report <path> --evidence <re-read report> --note <what it verified>`.
+  The re-read is dispatched to the reviewer, or to the role whose report it
+  is; the foreman does not perform it. The evidence is that worker's own
+  report, never the gated report. Both `close-member` and `record-report`
+  refuse while it is open.
 - No gate — low confidence, `insufficient_evidence`, a fallback or LLM label,
   an unpinned model, a failed call. The report is read and gated as it would
   be without a classifier.
@@ -58,8 +65,9 @@ calibrated. It restates no threshold; the constants live at the top of
 `{"schema_version": 1, "state_path", "gates": [...]}`. Each gate carries
 `schema_version`, `report` (resolved path), `sha256`, `level`, `reason`,
 `probabilities`, `model`, `question`, `bands`, `at`, `status`
-(`open`|`cleared`|`reread`) and `resolution` (`null`, or `at`, `action`, `by`,
-`reason`). Writes take the sidecar's own lock. A missing file is first use;
+(`open`|`cleared`|`reread`) and `resolution` (`null`, or `at`, `action`, `by`
+(`worker`|`judge`|`operator`), `reason`, `evidence` (`null` for an operator, or
+`path` and `sha256`)). Writes take the sidecar's own lock. A missing file is first use;
 an unreadable or unsupported one refuses every reader, never reading as no
 gates. `close-member` and `record-report` read it and never write it.
 
