@@ -66,19 +66,23 @@
 #                             changed root (skipped as root, who lists
 #                             anything).
 #  90. Root moved at the   -> a root renamed between its last identity check
-#      metadata step          and the metadata removal keeps the registrations
+#      metadata step          and the metadata prune keeps the registrations
 #                             of the worktrees it still holds.
-#  91. Metadata removal    -> a failed per-entry removal leaves the entry
-#      fails                  registered and its branch undeleted; exit 2
-#                             (skipped as root).
+#  91. Lock fails          -> a live entry that cannot be locked stops the
+#                             prune: the stale entry and its branch stay;
+#                             exit 2 (skipped as root).
 #  92. Path reappears      -> a worktree moved back between the absence check
-#                             and the cleanup keeps its files, commits and
-#                             registration; exit 2.
+#                             and the prune keeps its files, commits and
+#                             registration.
 #  93. Stale outside root  -> a vanished registration outside the root is
 #                             dropped too.
 #  94. Relative link       -> a vanished registration git recorded with a
 #                             relative gitdir is dropped (skipped on a git
 #                             without --relative-paths).
+#  95. Operator's lock     -> an entry someone else locked stays locked with
+#                             its reason; this run's own locks are all gone.
+#  96. Killed run's lock   -> a prune lock whose pid is dead is released at
+#                             the next run; one held by a live pid is not.
 #  34. Recreated config   -> a branch.<name> section recreated after the
 #                             deletion is left untouched.
 #  35. Reachable, idle      -> a clean worktree whose HEAD an origin branch
@@ -189,6 +193,30 @@ has_branch() { # <shared> <branch> -> 0 present, 1 absent; a git error aborts th
   git -C "$1" show-ref --verify --quiet "refs/heads/$2" || rc=$?
   case "$rc" in 0) return 0 ;; 1) return 1 ;; *) die "git show-ref failed (exit $rc) for $2 in $1" ;; esac
 }
+# Echo `unlocked`, or `locked:<reason>`, for the registered <path>; a missing
+# registration or a failed read aborts the harness.
+lock_of() { # <shared> <path>
+  local snap="$TMP/lock-of.snap"
+  git -C "$1" worktree list --porcelain -z >"$snap" || die "git worktree list failed in $1"
+  python3 - "$snap" "$2" <<'PY' || die "lock_of: $2 is not registered"
+import sys
+raw = open(sys.argv[1], "rb").read().decode("utf-8", "surrogateescape")
+state, found = None, False
+for field in raw.split("\0"):
+    if field.startswith("worktree "):
+        found = field[len("worktree "):] == sys.argv[2]
+        if found:
+            state = "unlocked"
+    elif found and field == "locked":
+        state = "locked:"
+    elif found and field.startswith("locked "):
+        state = "locked:" + field[len("locked "):]
+if state is None:
+    sys.exit(1)
+print(state)
+PY
+}
+
 listed() { # <shared> <path>  -> 0 listed, 1 not listed; a tool failure aborts the harness
   local inventory rc=0
   inventory="$(git -C "$1" worktree list --porcelain)" || die "git worktree list failed in $1"
@@ -610,13 +638,19 @@ SHIM
   add_wt "$SHARED" review/claimed "$ROOT/thirty-claimed"
   mkdir -p "$TMP/shim30" || die "mkdir shim failed"
   # The run's own inventory read comes back empty, so the branch reaches the
-  # branch pass as if no worktree held it; every later read is the real thing.
+  # branch pass as if no worktree held it; every other read is the real thing.
+  # A live run reads the registry once before the inventory, to release the
+  # locks of a killed run, so the inventory is the second `-z` read.
   cat > "$TMP/shim30/git" <<SHIM || die "shim write failed"
 #!/usr/bin/env bash
 set -euo pipefail
 case "\$*" in
   *"worktree list"*-z*)
-    if [[ ! -e "$TMP/shim30/seen" ]]; then : > "$TMP/shim30/seen"; exit 0; fi ;;
+    if [[ ! -e "$TMP/shim30/first" ]]; then
+      : > "$TMP/shim30/first"
+    elif [[ ! -e "$TMP/shim30/seen" ]]; then
+      : > "$TMP/shim30/seen"; exit 0
+    fi ;;
 esac
 exec "$(command -v git)" "\$@"
 SHIM
@@ -1266,22 +1300,23 @@ SHIM
     && ! listed "$SHARED" "$ROOT/gone90" && has_branch "$SHARED" review/live90; then
     pass; else fail "root moved at the metadata step: rc=$RC out=$OUT err=$ERRTEXT"; fi
 
-  # --- 91. a failed per-entry metadata removal keeps the entry and its branch.
+  # --- 91. a live entry that cannot be locked stops the prune.
   if [[ "$(id -u)" == 0 ]]; then
     echo "91. skipped: root writes into any directory"
   else
     mk_repo ninetyone
     add_wt "$SHARED" review/gone91 "$ROOT/gone91"
     rm -rf "$ROOT/gone91" || die "rm gone91 failed"
-    # The admin directory refuses writes: git still reads it, the drop fails.
-    chmod 555 "$SHARED/.git/worktrees" || die "chmod worktrees91 failed"
+    add_wt "$SHARED" review/live91 "$ROOT/live91"; commit_in "$ROOT/live91" live91
+    # Its admin entry refuses the lock file; git still reads it.
+    chmod 555 "$SHARED/.git/worktrees/live91" || die "chmod live91 admin failed"
     run "$SHARED"
-    chmod 755 "$SHARED/.git/worktrees" || die "restore worktrees91 failed"
-    echo "91. a failed metadata removal leaves the entry registered and its branch undeleted"
-    if (( RC == 2 )) && [[ "$OUT" == *"removing its stale registration failed"*"re-run the sweep"* ]] \
+    chmod 755 "$SHARED/.git/worktrees/live91" || die "restore live91 admin failed"
+    echo "91. a lock that cannot be taken stops the prune and drops nothing"
+    if (( RC == 2 )) && [[ "$OUT" == *"could not lock it"*"re-run"* ]] \
       && listed "$SHARED" "$ROOT/gone91" && has_branch "$SHARED" review/gone91 \
-      && [[ "$(branches_deleted)" != *review/gone91* ]]; then
-      pass; else fail "metadata removal fails: rc=$RC out=$OUT err=$ERRTEXT"; fi
+      && listed "$SHARED" "$ROOT/live91" && [[ "$(branches_deleted)" != *review/gone91* ]]; then
+      pass; else fail "lock fails: rc=$RC out=$OUT err=$ERRTEXT"; fi
   fi
 
   # --- 92. a worktree that reappears before the cleanup is never touched.
@@ -1295,7 +1330,7 @@ SHIM
   cat > "$shim92/git" <<SHIM || die "shim92 write failed"
 #!/usr/bin/env bash
 set -euo pipefail
-if [[ ( "\$*" == *"worktree remove"* || "\$*" == *"--git-common-dir"* ) && ! -e "$shim92/done" ]]; then
+if [[ ( "\$*" == *"worktree prune"* || "\$*" == *"worktree remove"* || "\$*" == *"--git-common-dir"* ) && ! -e "$shim92/done" ]]; then
   : > "$shim92/done"
   mv "$aside92" "$ROOT/back92"
 fi
@@ -1306,8 +1341,7 @@ SHIM
   OUT="$(env WORKTREE_ROOT="$ROOT" PRUNE_IDLE_HOURS=0 PATH="$shim92:$PATH" bash "$SCRIPT" "$SHARED" 2>"$TMP/err.$RUN_SEQ")"; RC=$?
   ERRTEXT="$(cat "$TMP/err.$RUN_SEQ")"
   echo "92. a worktree moved back before the cleanup keeps its files, commits and registration"
-  if (( RC == 2 )) && [[ -e "$shim92/done" ]] && [[ -f "$ROOT/back92/kept92" ]] \
-    && listed "$SHARED" "$ROOT/back92" && [[ "$OUT" == *"no longer a stale registration"* ]] \
+  if [[ -e "$shim92/done" ]] && [[ -f "$ROOT/back92/kept92" ]] && listed "$SHARED" "$ROOT/back92" \
     && [[ "$(git -C "$SHARED" rev-parse refs/heads/review/back92)" == "$tip92" ]] \
     && [[ "$(git -C "$ROOT/back92" rev-parse HEAD)" == "$tip92" ]]; then
     pass; else fail "path reappears: rc=$RC out=$OUT err=$ERRTEXT"; fi
@@ -1337,6 +1371,36 @@ SHIM
     if (( RC == 0 )) && [[ "$(kept_reason "$ROOT/rel94")" == prunable ]] && ! listed "$SHARED" "$ROOT/rel94"; then
       pass; else fail "relative gitdir: rc=$RC out=$OUT err=$ERRTEXT"; fi
   fi
+
+  # --- 95. an entry someone else locked keeps that lock; this run leaves none.
+  mk_repo ninetyfive
+  add_wt "$SHARED" review/held95 "$ROOT/held95"; commit_in "$ROOT/held95" held95
+  git -C "$SHARED" worktree lock --reason "operator hold" "$ROOT/held95" || die "lock held95 failed"
+  add_wt "$SHARED" review/other95 "$ROOT/other95"; commit_in "$ROOT/other95" other95
+  add_wt "$SHARED" review/gone95 "$ROOT/gone95"
+  rm -rf "$ROOT/gone95" || die "rm gone95 failed"
+  run "$SHARED"
+  echo "95. an operator's lock survives the run and the run leaves no lock of its own"
+  if (( RC == 0 )) && [[ "$(lock_of "$SHARED" "$ROOT/held95")" == "locked:operator hold" ]] \
+    && [[ "$(lock_of "$SHARED" "$ROOT/other95")" == unlocked ]] && ! listed "$SHARED" "$ROOT/gone95"; then
+    pass; else fail "operator lock: rc=$RC out=$OUT err=$ERRTEXT"; fi
+
+  # --- 96. a killed run's lock is released; a live run's is not.
+  mk_repo ninetysix
+  local dead96
+  bash -c 'exit 0' &
+  dead96=$!
+  wait "$dead96" || die "the short-lived process for 96 failed"
+  add_wt "$SHARED" review/left96 "$ROOT/left96"; commit_in "$ROOT/left96" left96
+  git -C "$SHARED" worktree lock --reason "prune-worktrees:${dead96}:crashed" "$ROOT/left96" || die "lock left96 failed"
+  add_wt "$SHARED" review/busy96 "$ROOT/busy96"; commit_in "$ROOT/busy96" busy96
+  git -C "$SHARED" worktree lock --reason "prune-worktrees:$$:running" "$ROOT/busy96" || die "lock busy96 failed"
+  run "$SHARED"
+  echo "96. a lock left by a killed prune is released; one held by a live prune stays"
+  if (( RC == 0 )) && [[ "$(lock_of "$SHARED" "$ROOT/left96")" == unlocked ]] \
+    && [[ "$(kept_reason "$ROOT/left96")" == unpushed ]] \
+    && [[ "$(lock_of "$SHARED" "$ROOT/busy96")" == "locked:prune-worktrees:$$:running" ]]; then
+    pass; else fail "stale lock: rc=$RC out=$OUT err=$ERRTEXT"; fi
 
   # --- 14. usage / not a repo.
   run

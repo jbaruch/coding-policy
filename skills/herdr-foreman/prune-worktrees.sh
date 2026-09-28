@@ -26,8 +26,9 @@
 #   * KEPT for every other reason below.
 # A registration whose directory is gone and that is not locked is reported
 # `prunable` wherever it lives, inside the root or outside it, the shared
-# checkout's default branch included; a live run drops the registration
-# (`release_gone`) and only then lets its branch reach the branch pass.
+# checkout's default branch included; a live run's `git worktree prune`
+# drops it, and only a registration the prune actually dropped lets its branch
+# reach the branch pass.
 # A worktree holding another repository's checkout is KEPT: a gitlink found
 # from the index (never .gitmodules) whose checkout changed (submodule-dirty)
 # or is populated (submodule), or any other .git anywhere below it, found by
@@ -76,14 +77,20 @@
 # branch instead of being force-deleted. `branch -d` would re-derive the
 # safety against the local default, which may lag origin's, and `branch -D`
 # would skip it entirely; neither is atomic with the check. Removal is `git worktree remove`,
-# never `rm -rf`. Stale registrations are dropped after every worktree
-# decision and before the branch pass, so a confirmed-gone entry's merged
-# branch goes in the same run. Every registration this run judged `prunable`
-# (its directory gone, not locked, inside the root or outside it) is dropped
-# on its own by `release_gone`, which touches only git's admin entry and never
-# the worktree path; never `git worktree prune`, which drops every entry whose
-# directory it cannot see at that instant (#597). The drops are skipped when
-# any worktree could not be entered. Nothing here pushes to
+# never `rm -rf`. Stale registrations are dropped by `git worktree prune
+# --expire now` after every worktree decision and before the branch pass, so
+# a confirmed-gone entry's merged branch goes in the same run. The prune drops
+# every entry whose directory it cannot see at that instant, so a root renamed
+# after the last identity check would take the registrations of every worktree
+# under it (#597). Before it runs, every registration whose directory was
+# present at the inventory and is not already locked is locked with the reason
+# `prune-worktrees:<pid>:<nonce>` (git's prune never drops a locked entry);
+# the root is re-proven; the prune runs; and exactly the entries this run
+# locked, still carrying its reason, are unlocked, on every exit path. An
+# entry someone else locked is never unlocked. A lock left by a run that was
+# killed (its pid no longer alive) is released at the start of the next live
+# run. A failed lock stops the prune; nothing is dropped. The prune is skipped
+# when any worktree could not be entered. Nothing here pushes to
 # origin; a dry run still fetches (without --prune), reads origin's default
 # branch with `ls-remote --symref` instead of rewriting origin/HEAD, and skips
 # the metadata removals, so its decisions are current and .git is otherwise
@@ -127,7 +134,7 @@
 #             root replaced or made unreadable mid-run: the root's identity
 #             (lstat <dev>:<ino>, and that it can be listed) is re-proven
 #             immediately before every worktree removal, branch deletion and
-#             metadata removal, and
+#             metadata prune, and
 #             from the first mismatch on each of those steps is refused and
 #             recorded in `failed` (plus one row naming the root).
 #   env   : WORKTREE_ROOT overrides the worktree root (default
@@ -207,147 +214,169 @@ root_holds() { # <target> <branch|"">
   return 1
 }
 
-# Drop git's registration of one worktree this run confirmed gone, touching
-# only git's own admin entry (<common-dir>/worktrees/<id>) and never the
-# worktree path (#597). `git worktree prune` would drop every entry whose
-# directory it cannot see at that instant, so a root renamed after the last
-# identity check would lose every registration under it; `git worktree remove`
-# on a path that reappeared would delete that live worktree without judging
-# it. The entry is found by its `gitdir` file, detached by an atomic rename
-# out of worktrees/, checked to be the directory it was, and the path and the
-# lock are re-read after the detach: a path present again, or an entry locked
-# meanwhile, gets its entry renamed back. A relative `gitdir` link resolves
-# against the admin entry, as git resolves it.
-# Only an entry detached while its path was absent is deleted. A directory
-# moved back after that finds its `.git` file pointing at no repository:
-# its files and its branch's commits are intact, and `git worktree repair`
-# cannot restore the entry (register it again with `git worktree add`).
-# Returns 0 once the entry is gone (in a dry run, at once), 1 when it was
-# left registered.
-#: Exit codes of the admin-entry helper below.
-GONE_KEPT_PRESENT=3
-release_gone() { # <shared> <dry> <path> <branch|"">
-  if (( $2 )); then return 0; fi
-  root_holds "$3" "$4" || return 1
-  local common rc=0
-  if ! common="$(git -C "$1" rev-parse --path-format=absolute --git-common-dir 2>"$ERRFILE" && printf 'x')"; then
-    row failed "$3" "$4" "cannot locate the repository's worktree admin directory: $(tr '\n' ' ' < "$ERRFILE") — its registration was left in place; run \`git -C ${1} rev-parse --git-common-dir\` to see why, then re-run the sweep"
+#: Lock reasons this script writes start with this prefix, then the pid of
+#: the run that wrote them and a per-run nonce.
+PRUNE_LOCK_PREFIX="prune-worktrees:"
+#: This run's lock reason, and the registered paths it locked.
+RUN_LOCK_REASON=""
+LOCKED_BY_RUN=()
+LOCK_SHARED=""
+
+# Answer one question about the registry snapshot <file> (`git worktree list
+# --porcelain -z`), printing NUL-separated registered paths:
+#   lockable <candidates>   candidates registered, unlocked, not the main one
+#   ours <reason> <paths>   paths locked with exactly <reason>
+#   stale                   paths locked by a dead run of this script
+#   registered <paths>      paths still registered
+registry_query() { # <mode> <snapshot> [args...]
+  python3 - "$PRUNE_LOCK_PREFIX" "$$" "$@" <<'PY'
+import os, sys
+
+prefix, mypid, mode, snapshot = sys.argv[1], int(sys.argv[2]), sys.argv[3], sys.argv[4]
+args = sys.argv[5:]
+
+
+def read_nul(path):
+    with open(path, "rb") as handle:
+        fields = handle.read().decode("utf-8", "surrogateescape").split("\0")
+    return [f for f in fields if f]
+
+
+records = []  # (path, locked, reason)
+with open(snapshot, "rb") as handle:
+    raw = handle.read().decode("utf-8", "surrogateescape")
+current = None
+for field in raw.split("\0"):
+    if field.startswith("worktree "):
+        current = [field[len("worktree "):], False, None]
+        records.append(current)
+    elif current is not None and field == "locked":
+        current[1] = True
+        current[2] = ""
+    elif current is not None and field.startswith("locked "):
+        current[1] = True
+        current[2] = field[len("locked "):]
+    elif field == "":
+        current = None
+
+
+def alive(pid):
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+out = []
+if mode == "lockable":
+    wanted = set(read_nul(args[0]))
+    out = [path for index, (path, locked, _) in enumerate(records)
+           if index > 0 and not locked and path in wanted]
+elif mode == "ours":
+    wanted = set(read_nul(args[1]))
+    out = [path for path, locked, reason in records if locked and reason == args[0] and path in wanted]
+elif mode == "stale":
+    for path, locked, reason in records:
+        if not locked or not reason or not reason.startswith(prefix):
+            continue
+        pid_text = reason[len(prefix):].split(":", 1)[0]
+        if pid_text.isdigit() and int(pid_text) != mypid and not alive(int(pid_text)):
+            out.append(path)
+elif mode == "registered":
+    wanted = set(read_nul(args[0]))
+    out = [path for path, _, _ in records if path in wanted]
+else:
+    sys.stderr.write("unknown registry query {}".format(mode))
+    sys.exit(1)
+sys.stdout.write("".join(path + "\0" for path in out))
+PY
+}
+
+# Write the registry snapshot of <shared> to <file>; 1 (ERRFILE set) on failure.
+registry_snapshot() { # <shared> <file>
+  git -C "$1" worktree list --porcelain -z >"$2" 2>"$ERRFILE"
+}
+
+# Read NUL-separated paths from <file> into the array REPLY_PATHS.
+REPLY_PATHS=()
+read_paths() { # <file>
+  REPLY_PATHS=()
+  local p
+  while IFS= read -r -d '' p; do REPLY_PATHS+=("$p"); done < "$1"
+}
+
+# Release the locks a killed run of this script left behind: locked with its
+# prefix by a pid that is no longer alive. Each one is reported when its
+# unlock fails.
+release_stale_locks() { # <shared>
+  local snap="${WORKDIR}/stale-snapshot" out="${WORKDIR}/stale-paths" p
+  if ! registry_snapshot "$1" "$snap"; then
+    row failed "git worktree list" "" "cannot read the worktree registry to release stale prune locks: $(tr '\n' ' ' < "$ERRFILE") — run \`git -C ${1} worktree list --porcelain\` to see why, then re-run"
+    return 0
+  fi
+  if ! registry_query stale "$snap" >"$out" 2>"$ERRFILE"; then
+    row failed "git worktree list" "" "cannot read the stale prune locks: $(tr '\n' ' ' < "$ERRFILE") — report this as a bug"
+    return 0
+  fi
+  read_paths "$out"
+  for p in "${REPLY_PATHS[@]+"${REPLY_PATHS[@]}"}"; do
+    if ! git -C "$1" worktree unlock "$p" 2>"$ERRFILE"; then
+      row failed "$p" "" "cannot release the lock a killed prune left on it: $(tr '\n' ' ' < "$ERRFILE") — run \`git -C ${1} worktree unlock ${p}\`"
+    fi
+  done
+  return 0
+}
+
+# Lock every candidate (registered paths present at the inventory) that is
+# still registered and unlocked, recording each in LOCKED_BY_RUN. 1 on the
+# first failure, which is reported; the caller then prunes nothing.
+lock_live_entries() { # <shared> <candidates-file>
+  local snap="${WORKDIR}/lock-snapshot" out="${WORKDIR}/lock-paths" p
+  LOCK_SHARED="$1"
+  if ! registry_snapshot "$1" "$snap"; then
+    row failed "git worktree prune" "" "not run: cannot read the worktree registry to lock the live entries: $(tr '\n' ' ' < "$ERRFILE") — run \`git -C ${1} worktree list --porcelain\` to see why, then re-run"
     return 1
   fi
-  common="${common%x}"; common="${common%$'\n'}"
-  python3 - "$common" "$3" 2>"$ERRFILE" <<'PY' || rc=$?
-import os, shutil, stat, sys
+  if ! registry_query lockable "$snap" "$2" >"$out" 2>"$ERRFILE"; then
+    row failed "git worktree prune" "" "not run: cannot read which entries to lock: $(tr '\n' ' ' < "$ERRFILE") — report this as a bug"
+    return 1
+  fi
+  read_paths "$out"
+  for p in "${REPLY_PATHS[@]+"${REPLY_PATHS[@]}"}"; do
+    if ! git -C "$1" worktree lock --reason "$RUN_LOCK_REASON" "$p" 2>"$ERRFILE"; then
+      row failed "$p" "" "could not lock it before the stale-registration prune, so nothing was pruned: $(tr '\n' ' ' < "$ERRFILE") — fix the cause, then re-run"
+      return 1
+    fi
+    LOCKED_BY_RUN+=("$p")
+  done
+  return 0
+}
 
-common, path = sys.argv[1], sys.argv[2]
-admin_root = os.path.join(common, "worktrees")
-want = os.path.realpath(os.path.join(path, ".git"))
-
-
-def fail(message):
-    sys.stderr.write(message)
-    sys.exit(1)
-
-
-def path_state():
-    """'gone' only when lstat says the path does not exist; any other read
-    failure is not proof of absence."""
-    try:
-        os.lstat(path)
-    except FileNotFoundError:
-        return "gone"
-    except OSError as exc:
-        return "unreadable ({})".format(exc.strerror or exc)
-    return "present"
-
-
-def read_gitdir(entry):
-    fd = os.open(os.path.join(entry, "gitdir"), os.O_RDONLY | os.O_NOFOLLOW)
-    try:
-        with os.fdopen(fd, "rb", closefd=False) as handle:
-            data = handle.read()
-    finally:
-        os.close(fd)
-    data = data.decode("utf-8", "surrogateescape")
-    data = data[:-1] if data.endswith("\n") else data
-    # A relative link (`worktree.useRelativePaths`, `--relative-paths`) is
-    # relative to the admin entry itself.
-    return os.path.realpath(os.path.join(entry, data))
-
-
-try:
-    ids = os.listdir(admin_root)
-except OSError as exc:
-    fail("cannot list {}: {}".format(admin_root, exc.strerror or exc))
-matches = []
-for ident in ids:
-    entry = os.path.join(admin_root, ident)
-    try:
-        info = os.lstat(entry)
-    except OSError as exc:
-        fail("cannot read {}: {}".format(entry, exc.strerror or exc))
-    if not stat.S_ISDIR(info.st_mode):
-        continue
-    try:
-        gitdir = read_gitdir(entry)
-    except FileNotFoundError:
-        continue
-    except OSError as exc:
-        fail("cannot read {}/gitdir: {}".format(entry, exc.strerror or exc))
-    if gitdir == want:
-        matches.append((ident, entry, info))
-if len(matches) != 1:
-    fail("{} admin entries in {} name {}".format(len(matches), admin_root, want))
-ident, entry, info = matches[0]
-if os.path.lexists(os.path.join(entry, "locked")):
-    sys.stderr.write("{} was locked after the inventory".format(entry))
-    sys.exit(3)  # GONE_KEPT_PRESENT
-state = path_state()
-if state != "gone":
-    sys.stderr.write("{} is {}".format(path, state))
-    sys.exit(3)  # GONE_KEPT_PRESENT
-trash = os.path.join(common, "prune-worktrees-detached-{}-{}".format(ident, os.getpid()))
-if os.path.lexists(trash):
-    fail("{} already exists".format(trash))
-try:
-    os.rename(entry, trash)
-except OSError as exc:
-    fail("cannot detach {}: {}".format(entry, exc.strerror or exc))
-try:
-    moved = os.lstat(trash)
-except OSError as exc:
-    fail("detached {} to {} but cannot read it back: {} — move it back by hand".format(
-        entry, trash, exc.strerror or exc))
-state = path_state()
-# A lock taken after the check above travelled with the entry: it is kept.
-locked = os.path.lexists(os.path.join(trash, "locked"))
-if (moved.st_dev, moved.st_ino) != (info.st_dev, info.st_ino) or state != "gone" or locked:
-    try:
-        os.rename(trash, entry)
-    except OSError as exc:
-        fail("{} changed during the cleanup and could not be put back: {} — move {} back to {} by hand".format(
-            entry, exc.strerror or exc, trash, entry))
-    if state != "gone":
-        sys.stderr.write("{} is {}".format(path, state))
-        sys.exit(3)  # GONE_KEPT_PRESENT
-    if locked:
-        sys.stderr.write("{} was locked during the cleanup".format(entry))
-        sys.exit(3)  # GONE_KEPT_PRESENT
-    fail("{} was replaced during the cleanup".format(entry))
-try:
-    shutil.rmtree(trash)
-except OSError as exc:
-    fail("the stale entry was detached but {} could not be deleted: {} — delete it by hand".format(
-        trash, exc.strerror or exc))
-PY
-  case "$rc" in
-    0) return 0 ;;
-    "$GONE_KEPT_PRESENT")
-      row failed "$3" "$4" "no longer a stale registration ($(tr '\n' ' ' < "$ERRFILE")), so it was left in place — re-run the sweep to judge it again"
-      return 1 ;;
-    *)
-      row failed "$3" "$4" "removing its stale registration failed: $(tr '\n' ' ' < "$ERRFILE") — the entry remains; fix the cause named here, then re-run the sweep"
-      return 1 ;;
-  esac
+# Unlock exactly the entries this run locked that still carry its reason; an
+# entry someone relocked with another reason is left alone. Safe to call
+# twice: the record is cleared once read.
+unlock_run_locks() {
+  (( ${#LOCKED_BY_RUN[@]} )) || return 0
+  local shared="$LOCK_SHARED" snap="${WORKDIR}/unlock-snapshot" mine="${WORKDIR}/unlock-mine" out="${WORKDIR}/unlock-paths" p
+  local -a pending=("${LOCKED_BY_RUN[@]}")
+  LOCKED_BY_RUN=()
+  printf '%s\0' "${pending[@]}" >"$mine"
+  if ! registry_snapshot "$shared" "$snap" || ! registry_query ours "$snap" "$RUN_LOCK_REASON" "$mine" >"$out" 2>>"$ERRFILE"; then
+    for p in "${pending[@]}"; do
+      row failed "$p" "" "cannot confirm this run's lock on it to release it: $(tr '\n' ' ' < "$ERRFILE") — check \`git -C ${shared} worktree list --porcelain\` and, if the lock reason is ${RUN_LOCK_REASON}, run \`git -C ${shared} worktree unlock ${p}\`"
+    done
+    return 0
+  fi
+  read_paths "$out"
+  for p in "${REPLY_PATHS[@]+"${REPLY_PATHS[@]}"}"; do
+    if ! git -C "$shared" worktree unlock "$p" 2>"$ERRFILE"; then
+      row failed "$p" "" "cannot release this run's lock on it: $(tr '\n' ' ' < "$ERRFILE") — run \`git -C ${shared} worktree unlock ${p}\`"
+    fi
+  done
+  return 0
 }
 
 # After a git command that talks to origin fails: replace its stderr in
@@ -363,6 +392,9 @@ network_failure() { # <exit> <shared> <git args...>
 
 cleanup() {
   local f
+  # An interrupted run still releases its own locks; the rows are gone with
+  # the run, so each failure reaches stderr through `row`.
+  if (( ${#LOCKED_BY_RUN[@]} )) && [[ -n "$WORKDIR" ]]; then unlock_run_locks; fi
   if [[ -n "$WORKDIR" ]] && ! rm -rf "$WORKDIR"; then
     warn "could not remove the temporary directory ${WORKDIR} — remove it by hand"
   fi
@@ -1240,7 +1272,10 @@ main() {
     return 1
   fi
   trap cleanup EXIT
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
   ERRFILE="${WORKDIR}/err"; ROWS="${WORKDIR}/rows"
+  RUN_LOCK_REASON="${PRUNE_LOCK_PREFIX}$$:${WORKDIR##*.}"
   : > "$ERRFILE"; : > "$ROWS"
   if [[ ! -d "$shared" ]] || ! git -C "$shared" rev-parse --is-inside-work-tree >/dev/null 2>"$ERRFILE"; then
     warn "'${shared}' is not a git work tree ($(tr '\n' ' ' < "$ERRFILE")) — pass the shared checkout's path"
@@ -1304,6 +1339,9 @@ main() {
     return 1
   fi
 
+  # A killed earlier run's locks would read as locked and keep its entries.
+  if (( ! dry )); then release_stale_locks "$shared"; fi
+
   # Take both inventories up front: a failure inside a process substitution
   # would not reach the loop, and an empty inventory would read as "nothing
   # to prune" with exit 0 (rules/file-hygiene.md I/O Conventions). Nothing has
@@ -1336,7 +1374,7 @@ main() {
 
   # Walk `worktree list --porcelain`: blank-line-separated blocks.
   local path="" branch="" detached=0 locked=0 lock_reason="" line unenterable=0
-  local -a seen_branches=() prunable_paths=() prunable_owners=()
+  local -a seen_branches=() prunable_paths=() prunable_owners=() live_paths=()
   flush() {
     if [[ -n "$path" ]]; then
       local real="" rc=0 parent
@@ -1349,11 +1387,10 @@ main() {
       if [[ ! -e "$path" ]]; then
         # `-e` is false for a missing path and for one whose ancestor denies
         # traversal. Absence is confirmed only through a traversable parent;
-        # anything else is a failure that also inhibits the metadata removals.
+        # anything else is a failure that also inhibits the metadata prune.
         if [[ -d "$parent" && -x "$parent" ]]; then
-          # Confirmed gone: reported prunable. Its metadata is removed below,
-          # and its branch goes to the no-worktree pass only once that
-          # removal actually releases it.
+          # Confirmed gone: reported prunable. The prune below drops it, and
+          # its branch goes to the no-worktree pass only once it is gone.
           decide_worktree "$shared" "$abs_root" "$db" "$dry" "$path" "$branch" "$detached" "$locked" "$lock_reason"
           if (( DECIDED_PRUNABLE )); then
             prunable_paths+=("$path"); prunable_owners+=("$branch")
@@ -1389,6 +1426,7 @@ main() {
         fi
       fi
       if [[ -n "$branch" ]]; then seen_branches+=("$branch"); fi
+      if (( ! locked )); then live_paths+=("$path"); fi
       if [[ "$real" != "$abs_shared" ]]; then
         decide_worktree "$shared" "$abs_root" "$db" "$dry" "$real" "$branch" "$detached" "$locked" "$lock_reason"
       fi
@@ -1407,25 +1445,55 @@ main() {
   done < "$inventory"
   flush
 
-  # Stale metadata goes between the passes: after every worktree decision,
+  # Stale registrations go between the passes: after every worktree decision,
   # so a confirmed-gone entry is released before its branch is judged below.
-  # Only the entries this run confirmed gone are touched, one at a time
-  # (`release_gone`). The removals are skipped when a worktree could not be
-  # entered: the operator restores access before the run changes git's records.
-  # A prunable entry's branch is still checked out until its metadata goes,
-  # so it is released to the branch pass only once its own removal ran clean.
-  # A dry run previews the live outcome, where the removals do run (#405).
-  if (( unenterable && ! dry )); then
-    warn "skipping the stale-metadata removal: a worktree could not be entered; restore access and re-run"
-  fi
-  local i
-  for i in "${!prunable_paths[@]}"; do
-    # An unenterable worktree stops the removals in a live run, so a dry run
-    # defers the same branches: a preview that promises a deletion the live
-    # run would not make is worse than no preview.
-    if (( unenterable )) || ! release_gone "$shared" "$dry" "${prunable_paths[$i]}" "${prunable_owners[$i]}"; then
-      if [[ -n "${prunable_owners[$i]}" ]]; then seen_branches+=("${prunable_owners[$i]}"); fi
+  # Skipped when a worktree could not be entered: the operator restores
+  # access before the run changes git's records. The live entries are locked
+  # for the prune's duration, so a root moved after its last check cannot
+  # take their registrations with it (#597).
+  # A prunable entry's branch is still checked out until its registration
+  # goes, so it reaches the branch pass only once the prune dropped it. A dry
+  # run previews the live outcome, where the prune does run (#405).
+  local released=1
+  if (( unenterable )); then released=0; fi
+  if (( ! dry )); then
+    local candidates="${WORKDIR}/lock-candidates"
+    : > "$candidates"
+    if (( ${#live_paths[@]} )); then printf '%s\0' "${live_paths[@]}" >"$candidates"; fi
+    if (( unenterable )); then
+      warn "skipping \`git worktree prune\`: a worktree could not be entered; restore access and re-run"
+    elif ! lock_live_entries "$shared" "$candidates"; then
+      released=0
+    elif ! root_holds "git worktree prune" ""; then
+      # A replaced root reads every unlocked worktree under it as gone.
+      released=0
+    elif ! git -C "$shared" worktree prune --expire now 2>"$ERRFILE"; then
+      row failed "git worktree prune" "" "failed: $(tr '\n' ' ' < "$ERRFILE") — stale registrations may remain; run \`git -C ${shared} worktree prune\` to see why, then re-run"
+      released=0
     fi
+    unlock_run_locks
+  fi
+  local i gone_left="${WORKDIR}/gone-left" snap="${WORKDIR}/after-snapshot" gone_file="${WORKDIR}/gone-paths"
+  local -a still=()
+  if (( released && ! dry && ${#prunable_paths[@]} )); then
+    # A path that reappeared before the prune keeps its registration.
+    printf '%s\0' "${prunable_paths[@]}" >"$gone_file"
+    if registry_snapshot "$shared" "$snap" && registry_query registered "$snap" "$gone_file" >"$gone_left" 2>"$ERRFILE"; then
+      read_paths "$gone_left"
+      still=("${REPLY_PATHS[@]+"${REPLY_PATHS[@]}"}")
+    else
+      row failed "git worktree list" "" "cannot confirm which stale registrations the prune dropped, so their branches were kept: $(tr '\n' ' ' < "$ERRFILE") — re-run"
+      released=0
+    fi
+  fi
+  local s_path kept
+  for i in "${!prunable_paths[@]}"; do
+    kept=0
+    if (( ! released )); then kept=1; fi
+    for s_path in "${still[@]+"${still[@]}"}"; do
+      if [[ "$s_path" == "${prunable_paths[$i]}" ]]; then kept=1; break; fi
+    done
+    if (( kept )) && [[ -n "${prunable_owners[$i]}" ]]; then seen_branches+=("${prunable_owners[$i]}"); fi
   done
 
   # Local branches with no worktree.
