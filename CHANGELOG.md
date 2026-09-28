@@ -22,9 +22,15 @@
   were absent, and the policy reviewer blocked it: a consumer with no install
   but its own `skills/release/<script>` would have run that
   repository-controlled file as the plugin. The `.` root is now taken only
-  when `git config --get remote.origin.url` names `github.com`
-  `jbaruch/coding-policy`; any other origin, or no repository, exits non-zero
-  with `run tessl install jbaruch/coding-policy`. The identity check reads the
+  when `git config --get remote.origin.url` is, as a whole string, one of six
+  enumerated URLs: `git@github.com:jbaruch/coding-policy`,
+  `https://github.com/jbaruch/coding-policy` and
+  `ssh://git@github.com/jbaruch/coding-policy`, each with or without `.git`.
+  A second review round caught that the first guard's `*github.com[:/]...`
+  glob admitted look-alike hosts such as `evilgithub.com` and
+  `notgithub.com`; the enumerated set carries no wildcard. Any other origin,
+  or no repository, exits non-zero with
+  `run tessl install jbaruch/coding-policy`. The identity check reads the
   origin remote rather than `.tessl-plugin/plugin.json` on purpose: the
   manifest is committed content, so the same repository that planted the
   script could plant a manifest naming coding-policy, while `.git/config` is
@@ -60,9 +66,12 @@
   rejects a repo-relative `bash skills/...` block and an inline-code
   invocation, rejects the old two-root and unguarded three-root resolvers, and
   executes each covered skill's first invocation against local, global,
-  clone and missing roots. Impostor fixtures hold the same script path with
-  no install: a foreign GitHub origin, a non-GitHub host serving a
-  `jbaruch/coding-policy` path, and no repository at all. Each must exit
+  clone and missing roots, and resolves the clone under each of the six
+  accepted origins. Impostor fixtures hold the same script path with no
+  install: a foreign GitHub origin, a non-GitHub host serving a
+  `jbaruch/coding-policy` path, `evilgithub.com`, `notgithub.com`,
+  `github.com.evil.example`, an accepted URL with a trailing suffix, and no
+  repository at all. Each must exit
   non-zero with the install instruction and never run the planted script.
 
 ## 0.3.316 — 2026-09-28

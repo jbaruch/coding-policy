@@ -53,11 +53,12 @@ MODE_GATE_SKILL=herdr-foreman
 
 # The one resolver the bootstrap carve-out permits: project-local install,
 # then global install, then the current directory, taken only when the
-# clone's origin remote is github.com jbaruch/coding-policy. Committed content
+# clone's origin remote is one of six enumerated github.com
+# jbaruch/coding-policy URLs, matched whole with no wildcard. Committed content
 # cannot set .git/config, so a consumer shipping its own skills/<script> never
 # passes as the plugin; it gets an install instruction and a non-zero exit.
 # shellcheck disable=SC2016 # Match the documented shell source literally.
-BOOTSTRAP='CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"; [ -d "$CP" ] || case "$(git config --get remote.origin.url)" in *github.com[:/]jbaruch/coding-policy|*github.com[:/]jbaruch/coding-policy.git) CP=. ;; *) echo "coding-policy plugin not found: run tessl install jbaruch/coding-policy" >&2; exit 1 ;; esac'
+BOOTSTRAP='CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"; [ -d "$CP" ] || case "$(git config --get remote.origin.url)" in git@github.com:jbaruch/coding-policy|git@github.com:jbaruch/coding-policy.git|https://github.com/jbaruch/coding-policy|https://github.com/jbaruch/coding-policy.git|ssh://git@github.com/jbaruch/coding-policy|ssh://git@github.com/jbaruch/coding-policy.git) CP=. ;; *) echo "coding-policy plugin not found: run tessl install jbaruch/coding-policy" >&2; exit 1 ;; esac'
 
 die() { echo "fatal: $*" >&2; exit 2; }
 warn_cleanup() { echo "warn: could not remove $1" >&2; }
@@ -330,6 +331,16 @@ check_install_shapes() { # <skill-file>
   git init -q "$project" || die "cannot create clone fixture"
   git -C "$project" remote add origin git@github.com:jbaruch/coding-policy.git \
     || die "cannot set clone fixture origin"
+  local accepted
+  for accepted in git@github.com:jbaruch/coding-policy https://github.com/jbaruch/coding-policy \
+    https://github.com/jbaruch/coding-policy.git ssh://git@github.com/jbaruch/coding-policy \
+    ssh://git@github.com/jbaruch/coding-policy.git git@github.com:jbaruch/coding-policy.git; do
+    git -C "$project" remote set-url origin "$accepted" || die "cannot set clone fixture origin"
+    rc=0
+    output="$(cd "$project" && INVOCATION_FIXTURE_GLOBAL="$fixture/absent" bash -c "$resolver"$'\n''printf "%s\n" "$CP"' 2>&1)" || rc=$?
+    if (( rc == 0 )) && [[ "$output" == "." ]]; then pass
+    else fail "accepted origin $accepted must resolve to the clone: rc=$rc output=$output"; fi
+  done
   for shape in local global self; do
     case "$shape" in
       local) body="$local_root/$script" ;;
@@ -359,7 +370,17 @@ check_install_shapes() { # <skill-file>
   done
   # A repository-controlled copy of the script is never run as the plugin.
   local impostor origin
-  for origin in https://github.com/someone/impostor.git https://evil.example/jbaruch/coding-policy.git none; do
+  # Foreign repos, look-alike hosts before or after github.com, and a URL
+  # that only embeds an accepted one: a leading or trailing wildcard in the
+  # match would admit each of these.
+  for origin in https://github.com/someone/impostor.git \
+    https://evil.example/jbaruch/coding-policy.git \
+    https://evilgithub.com/jbaruch/coding-policy \
+    ssh://git@notgithub.com/jbaruch/coding-policy.git \
+    https://github.com.evil.example/jbaruch/coding-policy.git \
+    git@evilgithub.com:jbaruch/coding-policy.git \
+    https://github.com/jbaruch/coding-policy.git.evil \
+    none; do
     impostor="$fixture/impostor with spaces"
     mkdir -p "$impostor/$(dirname "$script")" || die "cannot create impostor fixture"
     if [[ "$origin" != none ]]; then
