@@ -20,9 +20,10 @@
     only when no active supervision enrollment reports into it and nothing
     below it changed for a day, so a live worker's build never loses its
     cache mid-compile, even a worker quiet for longer than a day; an
-    unreadable supervision store stops the prune rather than guessing. The
-    enrollments are re-read under the supervision store's owner lock right
-    before each rename, so a worker enrolled mid-prune keeps its directory. A cache is removed only when both its
+    unreadable supervision store stops the prune rather than guessing. Each
+    cache removal runs under the supervision store's owner lock after the
+    enrollments are re-read under it, so a worker cannot be enrolled into a
+    directory while its cache is going. A cache is removed only when both its
     name and its content signature match (a Go build cache's README, a
     module cache's `cache/download`, `pyvenv.cfg`, `_cacache`, only `.pyc`
     files, and so on) and its top-level entries are the kind's own; a `venv`
@@ -32,13 +33,12 @@
     Everything below the state root runs on descriptors: the root is opened
     once and every directory under it is reached one `O_NOFOLLOW` component
     at a time, never re-resolved by path, so a symlink swapped in for any
-    ancestor between the survey and the removal is never entered. A cache
-    gets a marker naming its kind and is renamed to a tombstone before
-    removal, so a removal cut short by the hook's budget is finished next
-    session instead of leaving a signature-less half-cache no run would
-    recognize; a run cut short between marking and renaming leaves a marker
-    the next run reuses; a directory that only carries the tombstone suffix,
-    without a valid marker, is never touched.
+    ancestor between the survey and the removal is never entered. A cache is
+    removed in place with the entries its signature reads going last, so a
+    removal cut short by the hook's budget still looks like the same cache
+    and the next session finishes it; no rename, marker or other state
+    survives a run (an earlier tombstone-and-marker draft was itself a
+    stateful artifact an evidence directory could forge, and was dropped).
   - New session-start hook `hooks/check-report-caches.sh` runs it live and
     reports the reclaimed size: the fix is mechanical and the caches are
     regenerable, so the hook acts rather than warns. It runs nothing in any

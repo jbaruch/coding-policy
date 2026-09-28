@@ -42,11 +42,11 @@ Idleness — a candidate is idle when both hold:
 A candidate that is not idle is skipped whole (`active_assignment` or
 `not_idle`), so a live worker's build cache is never pulled out mid-build. A
 candidate below another idle candidate is covered by that walk. Each live
-rename to a tombstone happens under the supervision store's owner lock
-(`foreman/state.py` `state_lock` on `supervision.store_path`) after the
-active enrollments are re-read under it; a lock held by a foreman command,
-or a store unreadable at that moment, skips the rest of the candidate as
-`busy` for the next run.
+cache removal runs start to finish under the supervision store's owner lock
+(`foreman/state.py` `state_lock` on `supervision.store_path`), after the
+active enrollments are re-read under it, so no enrollment lands while a
+cache is going; a lock held by a foreman command, or a store unreadable at
+that moment, skips the rest of the candidate as `busy` for the next run.
 
 Cache directories — inside an idle candidate, a directory is removed whole
 when its basename and its content signature both match one row of
@@ -60,13 +60,12 @@ directory stays, evidence included. The signature is re-checked on the
 descriptor immediately before removal. Directories inside a removed cache are
 made owner-writable first (the Go module cache is read-only by design).
 
-Interrupted removal — before removal starts, a cache gets a TOMBSTONE_MARKER
-file naming its kind, then is renamed to its name plus TOMBSTONE_SUFFIX; the
-marker is removed last. A run finding a directory with that suffix AND a
-marker naming a known kind removes it as `interrupted-removal`. A run finding
-a cache still at its own name with a marker naming its kind (cut short
-between marking and renaming) reuses that marker. A suffixed directory
-without a valid marker is not a cache and stays.
+Interrupted removal — a cache is removed in place, its signature entries
+(SIGNATURE_LAST, nested per level) after everything else. A removal cut
+short leaves a directory that still carries its name, its signature and only
+its kind's own entries, so the next run recognizes it as the same kind and
+finishes it. Nothing is renamed and nothing is written: no marker or other
+state survives a run.
 
 Budget — `--budget-sec` stops starting new work once that many seconds have
 passed and reports `incomplete: true`; a re-run continues where it stopped.
@@ -122,13 +121,6 @@ GO_BUILD_README = b"This directory holds cached build artifacts from the Go buil
 #: Directory names a copied agent home carries its plugin cache under.
 PLUGIN_HOMES = frozenset({".claude", ".codex", "codex-home"})
 
-#: A cache is renamed to `<name>` + this suffix before its removal starts.
-TOMBSTONE_SUFFIX = ".prune-report-caches-removing"
-TOMBSTONE = "interrupted-removal"
-
-#: The file inside a marked cache or a tombstone naming the kind of cache it is.
-TOMBSTONE_MARKER = ".prune-report-caches-kind"
-
 DIR_FLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
 FILE_FLAGS = os.O_RDONLY | os.O_NOFOLLOW
 
@@ -181,10 +173,9 @@ def open_rel(base_fd, parts):
 
 
 def _top(fd):
-    """{name: mode} of the entries directly inside, the kind marker left out."""
+    """{name: mode} of the entries directly inside."""
     with os.scandir(fd) as entries:
-        return {entry.name: entry.stat(follow_symlinks=False).st_mode for entry in entries
-                if entry.name != TOMBSTONE_MARKER}
+        return {entry.name: entry.stat(follow_symlinks=False).st_mode for entry in entries}
 
 
 def _only(fd, files=frozenset(), dirs=frozenset(), any_dir=False, dir_name=None):
@@ -243,17 +234,15 @@ def _node_modules(fd):
     return _is_file_at(fd, ".package-lock.json") and _only(fd, files=NODE_MODULES_FILES, any_dir=True)
 
 
-def _bytecode(fd, top=True):
+def _bytecode(fd):
     """Only directories and `.pyc` regular files, all the way down."""
     with os.scandir(fd) as entries:
         listed = [(entry.name, entry.stat(follow_symlinks=False).st_mode) for entry in entries]
     for name, mode in listed:
-        if top and name == TOMBSTONE_MARKER:
-            continue
         if stat.S_ISDIR(mode):
             child = open_at(fd, name)
             try:
-                if not _bytecode(child, top=False):
+                if not _bytecode(child):
                     return False
             finally:
                 os.close(child)
@@ -275,29 +264,27 @@ CACHE_KINDS = {
 }
 
 PLUGIN_CACHE_COPY = "plugin-cache-copy"
-KNOWN_KINDS = frozenset(CACHE_KINDS) | {PLUGIN_CACHE_COPY}
 
-
-def marker_kind(fd):
-    """The known kind a TOMBSTONE_MARKER directly inside names, or None."""
-    head = _head_at(fd, TOMBSTONE_MARKER, 64)
-    if head is None:
-        return None
-    kind = head.decode("ascii", "replace").strip()
-    return kind if kind in KNOWN_KINDS else None
+#: kind -> the entries its signature reads, nested per directory level. They
+#: are removed after every sibling, so an interrupted removal still matches.
+SIGNATURE_LAST = {
+    "go-build-cache": {"README": {}},
+    "go-module-cache": {"cache": {"download": {}}},
+    "pip-cache": {name: {} for name in PIP_ENTRIES},
+    "npm-cache": {"_cacache": {}},
+    "virtualenv": {"pyvenv.cfg": {}},
+    "node-modules": {".package-lock.json": {}},
+}
 
 
 def classify_at(parent_fd, name, parts):
     """The kind of directory `name` in `parent_fd` (at `parts` below the
     candidate), or None."""
-    tomb = name.endswith(TOMBSTONE_SUFFIX)
     copy = len(parts) >= 3 and name == "cache" and parts[-2] == "plugins" and parts[-3] in PLUGIN_HOMES
-    if not tomb and not copy and not any(name in names for names, _signature in CACHE_KINDS.values()):
+    if not copy and not any(name in names for names, _signature in CACHE_KINDS.values()):
         return None
     fd = open_at(parent_fd, name)
     try:
-        if tomb:
-            return TOMBSTONE if marker_kind(fd) else None
         if copy:
             return PLUGIN_CACHE_COPY if _only(fd, any_dir=True) else None
         for kind, (names, signature) in CACHE_KINDS.items():
@@ -374,12 +361,14 @@ def _changed():
     return OSError(errno.EAGAIN, "changed while being removed; re-run to retry")
 
 
-def remove_at(dir_fd, name, dry_run, marker_last=False):
+def remove_at(dir_fd, name, dry_run, last=None):
     """Allocated bytes of entry `name` in directory `dir_fd`; removed unless dry_run.
 
     Never follows a symlink: a link is unlinked (or counted), never entered.
     A directory whose identity changed between `lstat` and open raises.
+    Children named in `last` (a SIGNATURE_LAST level) go after the others.
     """
+    last = last or {}
     freed = 0
     st = os.stat(name, dir_fd=dir_fd, follow_symlinks=False)
     if stat.S_ISDIR(st.st_mode):
@@ -390,10 +379,9 @@ def remove_at(dir_fd, name, dry_run, marker_last=False):
             if not dry_run and (st.st_mode & stat.S_IRWXU) != stat.S_IRWXU:
                 os.fchmod(fd, st.st_mode | stat.S_IRWXU)
             with os.scandir(fd) as entries:
-                children = sorted((entry.name for entry in entries),
-                                  key=lambda child: marker_last and child == TOMBSTONE_MARKER)
+                children = sorted((entry.name for entry in entries), key=lambda child: child in last)
             for child in children:
-                freed += remove_at(fd, child, dry_run)
+                freed += remove_at(fd, child, dry_run, last.get(child))
         finally:
             os.close(fd)
         if not dry_run:
@@ -401,43 +389,6 @@ def remove_at(dir_fd, name, dry_run, marker_last=False):
     elif not dry_run:
         os.unlink(name, dir_fd=dir_fd)
     return freed + st.st_blocks * 512
-
-
-def mark(cache_fd, kind):
-    """Write the kind marker, or accept one an interrupted run already wrote."""
-    try:
-        fd = os.open(TOMBSTONE_MARKER, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=cache_fd)
-    except FileExistsError:
-        if marker_kind(cache_fd) != kind:
-            raise FileExistsError(errno.EEXIST, "holds a {} that does not name {}; remove it by hand".format(
-                TOMBSTONE_MARKER, kind)) from None
-        return
-    try:
-        os.write(fd, kind.encode("ascii") + b"\n")
-    finally:
-        os.close(fd)
-
-
-def entomb(parent_fd, name, kind):
-    """Mark cache `name` with its kind and rename it to a tombstone; the
-    tombstone's name."""
-    tomb = name + TOMBSTONE_SUFFIX
-    if _lstat_at(parent_fd, tomb) is not None:
-        raise FileExistsError(errno.EEXIST, "a leftover {} is in the way; remove it by hand".format(tomb))
-    st = os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
-    cache_fd = open_at(parent_fd, name)
-    try:
-        if not _same(os.fstat(cache_fd), st):
-            raise _changed()
-        if (st.st_mode & stat.S_IRWXU) != stat.S_IRWXU:
-            os.fchmod(cache_fd, st.st_mode | stat.S_IRWXU)
-        mark(cache_fd, kind)
-        os.rename(name, tomb, src_dir_fd=parent_fd, dst_dir_fd=parent_fd)
-        if not _same(os.stat(tomb, dir_fd=parent_fd, follow_symlinks=False), st):
-            raise _changed()
-    finally:
-        os.close(cache_fd)
-    return tomb
 
 
 def within(path, root):
@@ -480,10 +431,10 @@ def load_ledger(state_path, default):
 def prune_candidate(root_fd, real_root, real, cutoff, budget, dry_run, state_path, result):
     """Survey one resolved candidate and remove its caches when idle.
 
-    Each live removal renames its cache to a tombstone while holding the
-    supervision store's owner lock, after re-reading the active enrollments
-    under it, so no enrollment lands between the check and the rename. A
-    locked or unreadable store stops the candidate (`busy`).
+    Each live removal runs under the supervision store's owner lock, after
+    re-reading the active enrollments under it, so no enrollment lands while
+    a cache is going. A locked or unreadable store stops the candidate
+    (`busy`).
     Returns True when the candidate was idle (its walk covers descendants).
     """
     parts = tuple(os.path.relpath(real, real_root).split(os.sep))
@@ -511,17 +462,18 @@ def prune_candidate(root_fd, real_root, real, cutoff, budget, dry_run, state_pat
                     name = cache_parts[-1]
                     if not _is_dir_at(parent_fd, name) or classify_at(parent_fd, name, cache_parts) != kind:
                         continue
-                    if not dry_run and kind != TOMBSTONE:
+                    if dry_run:
+                        size = remove_at(parent_fd, name, True)
+                    else:
                         try:
                             with ledger.state_lock(supervision.store_path(state_path)):
                                 if busy(real, active_report_dirs(state_path)):
                                     result["skipped"].append({"path": real, "reason": "active_assignment"})
                                     return True
-                                name = entomb(parent_fd, name, kind)
+                                size = remove_at(parent_fd, name, False, SIGNATURE_LAST.get(kind))
                         except ForemanError:
                             result["skipped"].append({"path": real, "reason": "busy"})
                             return True
-                    size = remove_at(parent_fd, name, dry_run, marker_last=True)
                 finally:
                     os.close(parent_fd)
             except OSError as exc:

@@ -18,8 +18,8 @@ Covers:
   5. Outside the root    -> a recorded directory outside the root is skipped.
   6. Missing directory   -> counted, never an error.
   7. Read-only cache     -> a Go module cache with read-only dirs is removed.
-  8. Interrupted removal -> a leftover tombstone carrying its kind marker is
-                            finished; a suffixed directory without one stays.
+  8. Interrupted removal -> a removal cut short leaves each cache's
+                            signature in place; the next run finishes it.
   9. Unusable ledger     -> could_not_check, nothing removed, exit 3.
  10. No ledger           -> nothing to do, exit 0.
  11. Out of budget       -> incomplete, nothing started after the budget.
@@ -27,17 +27,15 @@ Covers:
  13. Active assignment   -> an active supervision enrollment whose report is
                             in the directory keeps it whole, however old.
  14. Unusable supervision-> could_not_check, nothing removed, exit 3.
- 15. Marked, not renamed -> a cache a killed run marked but never renamed is
-                            removed on the next run, never stuck.
- 16. Swap race           -> a directory replaced by a symlink between the
+ 15. Swap race           -> a directory replaced by a symlink between the
                             survey and the removal is never entered; the
                             cache behind the link survives.
- 17. Mixed directory     -> a directory with a cache's name and signature
+ 16. Mixed directory     -> a directory with a cache's name and signature
                             that also holds a report stays whole.
- 18. Enrollment race     -> an enrollment landing after the survey keeps the
-                            directory: the check before each rename re-reads
+ 17. Enrollment race     -> an enrollment landing after the survey keeps the
+                            directory: the check before each removal re-reads
                             supervision under its lock.
- 19. Locked supervision  -> a store lock held by a foreman command skips the
+ 18. Locked supervision  -> a store lock held by a foreman command skips the
                             directory as busy.
 """
 
@@ -51,6 +49,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 HERE = Path(__file__).resolve().parent
 SCRIPT = HERE.parent / "prune-report-caches.py"
@@ -302,35 +301,33 @@ class PruneReportCachesTests(unittest.TestCase):
         self.assertFalse(os.path.lexists(cache))
         self.assertEqual([c["kind"] for c in doc["caches"]], ["go-module-cache"])
 
-    def test_leftover_tombstone_is_finished(self):
-        top = self.fx.reports(caches=())
-        tomb = top / "developer-evidence" / "venv.prune-report-caches-removing"
-        write(tomb / "lib" / "x.py")
-        write(tomb / ".prune-report-caches-kind", "virtualenv\n")
-        impostor = top / "notes.prune-report-caches-removing"
-        write(impostor / "findings.md")
-        forged = top / "forged.prune-report-caches-removing"
-        write(forged / ".prune-report-caches-kind", "evidence\n")
+    def test_interrupted_removal_is_finished_next_run(self):
+        top = self.fx.reports(caches=("go-module-cache", "virtualenv"))
         self.fx.save()
         age(top)
-        rc, doc, err = run(self.fx)
-        self.assertEqual(rc, 0, err)
-        self.assertFalse(os.path.lexists(tomb))
-        self.assertTrue((impostor / "findings.md").is_file())
-        self.assertTrue((forged / ".prune-report-caches-kind").is_file())
-        self.assertEqual([c["kind"] for c in doc["caches"]], ["interrupted-removal"])
+        module = load_script()
+        real_unlink = os.unlink
+        calls = []
 
-    def test_marked_cache_left_at_its_name_is_finished(self):
-        top = self.fx.reports(caches=("virtualenv", "python-bytecode"))
-        write(top / CACHE_PATHS["virtualenv"] / ".prune-report-caches-kind", "virtualenv\n")
-        write(top / CACHE_PATHS["python-bytecode"] / ".prune-report-caches-kind", "python-bytecode\n")
-        self.fx.save()
+        def unlink_then_fail(path, *args, **kwargs):
+            calls.append(path)
+            if len(calls) > 1:
+                raise PermissionError(1, "stand-in interruption")
+            return real_unlink(path, *args, **kwargs)
+
+        args = argparse.Namespace(dry_run=False, root=str(self.fx.root), state=str(self.fx.state), now=NOW,
+                                  budget_sec=None)
+        with mock.patch.object(module.os, "unlink", unlink_then_fail):
+            first = module.run(args)
+        self.assertEqual(len(first["failed"]), 2)
+        self.assertTrue((top / CACHE_PATHS["virtualenv"] / "pyvenv.cfg").is_file())
+        self.assertTrue((top / CACHE_PATHS["go-module-cache"] / "cache" / "download").is_dir())
         age(top)
         rc, doc, err = run(self.fx)
         self.assertEqual(rc, 0, err)
-        self.assertEqual(sorted(c["kind"] for c in doc["caches"]), ["python-bytecode", "virtualenv"])
+        self.assertEqual(sorted(c["kind"] for c in doc["caches"]), ["go-module-cache", "virtualenv"])
         self.assertFalse(os.path.lexists(top / CACHE_PATHS["virtualenv"]))
-        self.assertFalse(os.path.lexists(top / CACHE_PATHS["python-bytecode"]))
+        self.assertFalse(os.path.lexists(top / CACHE_PATHS["go-module-cache"]))
 
     def test_directory_swapped_for_a_symlink_is_never_entered(self):
         top = self.fx.reports(caches=("virtualenv",))
