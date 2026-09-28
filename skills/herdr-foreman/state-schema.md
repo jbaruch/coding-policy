@@ -162,6 +162,15 @@ from its caller. A version-7 plan carrying the retired context fields is
 refused by name at apply; one without them reads unchanged, and no oracle is
 ever inferred for it.
 
+Plan schema 12 adds `oracle_pins`, a `{role: {"path", "sha256"}}` map with
+one entry per `patch` or `fixture` oracle in the `rounds.<role>.context` of a
+`mechanical` round (#488). Writer: `plan`, which hashes each such oracle file
+as it writes the plan. Reader: `verify-oracle`, which refuses an oracle on a
+round that is not `mechanical`, a `patch` or `fixture` oracle with no pin for
+its role and path, and an oracle file whose bytes no longer hash to the pin.
+A `digest` oracle carries its expected value already and takes no pin. An
+older plan pinned nothing; replan it before its round is gated.
+
 Plan schema 10 adds `capability` and `cheaper_adequate` to each entry in
 `tiers` (#520). Writer: `plan`, from the capability table beside the state.
 `capability` is `adequate` when every capability the round needs is recorded
@@ -230,10 +239,22 @@ decision log, not a new machine status API or an input to `foreman.sh apply`.
 - **Readers** — a resumed foreman and `herdr-standup` read schema 1 without changing
   its meaning. `close-member` (`skills/herdr-foreman/foreman/members.py`)
   reads it too, and only through a validated schema-1 document: frontmatter
-  carrying every field above, `dispatch_state` resolving to the state the
-  command runs against, and every event carrying every field. Any other
-  version, a missing field or another state's ledger is refused and closes
-  nothing. It matches an event by `dispatch_id`, `worker` and `report`, and
+  carrying every field above, `dispatch_state` naming an existing file that
+  resolves to the state the command runs against, and every event carrying every field exactly once.
+  The frontmatter holds a full `base_revision` SHA and an absolute
+  `dispatch_state`. Every event field other than `observed`, `evidence` and
+  `assessment` holds the format the table names, in every event: an `id` matching its
+  section heading and naming no other event; a timezone-qualified `at`; a
+  `subject` of `task` or `assignment`; a `decision` from that subject's
+  vocabulary in `references/task-ledger.md`; `dispatch_id`, `worker` and
+  `role` as `not_applicable` on a task event and never on an assignment
+  event; a `report` that is an absolute path or `unknown`; and a full
+  `head_revision` SHA or its
+  `unknown`/`not_applicable` literal. `observed`, `evidence` and
+  `assessment` are free text and need only be present. Any other version,
+  a missing, repeated or malformed field or another state's ledger is
+  refused and closes nothing. An append never repairs a malformed event; record a
+  recovered ledger at a new path, as Migration below describes. It matches an event by `dispatch_id`, `worker` and `report`, and
   never writes the ledger. Workers never write it. Standup reads it without migration and
   labels unaccepted worker claims as reported; it grants no completion status.
 - **Authority** — decisions refer to inspected evidence. Revalidate sources

@@ -55,8 +55,16 @@
 #             no JSON, a repair message on stderr,
 #           2 at least one repository's prune exited non-zero or returned
 #             no readable JSON (its entry carries `error`), or `errors` is
-#             non-empty; every other repository still ran.
-#   env   : PRUNE_* variables pass through to prune-worktrees.sh.
+#             non-empty. Every other repository still ran, except after a
+#             root change: the root is re-proven before every later prune
+#             too, and one replaced or unreadable after a prune ran stops
+#             the rest, with an `errors` entry for the root naming the
+#             repositories not pruned. Each prune also gets the root's
+#             proven identity as PRUNE_ROOT_ID and re-proves it before its
+#             own destructive steps, so a root replaced while one runs ends
+#             that prune's removals too (its `failed` rows name each step).
+#   env   : PRUNE_* variables pass through to prune-worktrees.sh;
+#           PRUNE_ROOT_ID is set by the sweep, overriding any passed in.
 set -euo pipefail
 
 warn() { printf 'sweep-worktrees: %s\n' "$1" >&2; }
@@ -260,18 +268,42 @@ for entry in errors:
         entry["repo"] = os.path.realpath(entry["repo"])
     sys.stderr.write("sweep-worktrees: cannot read the worktree {} (exit {}): {} — inspect it by hand\n".format(
         entry["path"], entry["exit"], entry["error"]))
-# The root must still be the directory the walk read, and still listable:
-# a root replaced or made unreadable since then proves nothing it found.
-try:
-    now_id = os.stat(root)
-    os.listdir(root)
-except OSError as exc:
-    root_gone("became unreadable ({})".format(exc.strerror or exc))
-if not stat.S_ISDIR(now_id.st_mode) or (now_id.st_dev, now_id.st_ino) != (root_id.st_dev, root_id.st_ino):
-    root_gone("was replaced")
+def root_changed():
+    """Why the root is no longer the directory the walk read, or None: a root
+    replaced or made unreadable since then proves nothing it found."""
+    try:
+        now_id = os.stat(root)
+        os.listdir(root)
+    except OSError as exc:
+        return "became unreadable ({})".format(exc.strerror or exc)
+    if not stat.S_ISDIR(now_id.st_mode) or (now_id.st_dev, now_id.st_ino) != (root_id.st_dev, root_id.st_ino):
+        return "was replaced"
+    return None
+
+
+why_root = root_changed()
+if why_root:
+    root_gone(why_root)
 results, failed = [], bool(errors)
-env = dict(os.environ, WORKTREE_ROOT=root)
-for shared in sorted(repos):
+# The prune re-proves this identity before each of its own destructive steps,
+# so a root replaced while it runs stops it too.
+env = dict(os.environ, WORKTREE_ROOT=root, PRUNE_ROOT_ID="{}:{}".format(root_id.st_dev, root_id.st_ino))
+for index, shared in enumerate(sorted(repos)):
+    # Re-proven before every prune: before the first, a change prunes
+    # nothing; after an earlier prune, it stops the rest and that prune's
+    # result stands.
+    why_root = root_changed()
+    if why_root and index == 0:
+        root_gone(why_root)
+    if why_root:
+        left = sorted(repos)[index:]
+        errors.append({"path": root, "repo": None, "exit": None,
+                       "error": "the worktree root {} during the sweep; {} repositor{} not pruned: {}".format(
+                           why_root, len(left), "y was" if len(left) == 1 else "ies were", ", ".join(left))})
+        sys.stderr.write("sweep-worktrees: the worktree root {} {} during the sweep — {} not pruned; restore it, "
+                         "then re-run\n".format(root, why_root, ", ".join(left)))
+        failed = True
+        break
     run = Run(subprocess.run(["bash", prune, shared, *(["--dry-run"] if dry else [])],
                              capture_output=True, env=env))
     for line in run.stderr.splitlines():

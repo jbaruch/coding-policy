@@ -39,6 +39,10 @@
 #                           repository; the walk reports it.
 #  22. Root replaced        -> a root swapped after discovery: exit 1, no
 #                             prune.
+#  23. Root replaced later  -> a root swapped after one prune ran: exit 2,
+#                             an errors entry, no later prune.
+#  24. Replaced, no repos  -> a root swapped after a discovery that found no
+#                             repository: still exit 1, no JSON.
 #  21. Copied .git         -> a .git file whose repository does not register
 #                             the path is an errors entry; no prune runs.
 #  20. Unreadable path   -> a directory lstat cannot read, or a worktree whose
@@ -404,6 +408,30 @@ main() {
     && git -C "$alpha" show-ref --verify --quiet refs/heads/review/r22; then
     pass; else fail "replaced root: rc=$RC out=$OUT err=$ERRTEXT"; fi
 
+  # --- 23. a root replaced after one prune ran stops the rest.
+  fresh_pair 23
+  local root23="$TMP/worktrees23" shim23="$TMP/shim23"
+  mkdir -p "$root23" "$shim23" || die "mkdir root23 failed"
+  quiet "alpha23 worktree failed" "${G[@]}" -C "$alpha" worktree add -q -b review/a23 "$root23/alpha-23" origin/main
+  quiet "beta23 worktree failed" "${G[@]}" -C "$beta" worktree add -q -b review/b23 "$root23/beta-23" origin/main
+  # The first repository's metadata prune (a live run's, after its worktree
+  # decisions) swaps the root for an empty directory of the same name. The
+  # second repository's prune would then find its moved worktree gone and
+  # delete its merged branch.
+  # shellcheck disable=SC2016  # The $@ and $0 belong to the shim.
+  printf '#!/usr/bin/env bash\nset -euo pipefail\nif [[ "$*" == *"worktree prune"* && ! -e %q ]]; then : > %q; mv %q %q; mkdir %q; fi\nexec %q "$@"\n' \
+    "$shim23/done" "$shim23/done" "$root23" "$root23.moved" "$root23" "$real_git" > "$shim23/git" || die "write the git shim failed"
+  chmod +x "$shim23/git" || die "chmod the git shim failed"
+  RUN_SEQ=$((RUN_SEQ+1))
+  OUT="$(PATH="$shim23:$PATH" PRUNE_IDLE_HOURS=0 bash "$SCRIPT" "$root23" 2>"$TMP/err.$RUN_SEQ")"; RC=$?
+  ERRTEXT="$(cat "$TMP/err.$RUN_SEQ")"
+  echo "23. a root replaced after one prune ran is exit 2, and no later repository is pruned"
+  if (( RC == 2 )) && [[ -e "$shim23/done" ]] \
+    && [[ "$(q 'len(d["repos"])')" == 1 ]] \
+    && [[ "$(q '[e["error"] for e in d["errors"] if e["path"] == d["root"]][0]')" == *"was replaced during the sweep; 1 repository was not pruned"* ]] \
+    && git -C "$beta" show-ref --verify --quiet refs/heads/review/b23 && listed "$beta" "$root23/beta-23"; then
+    pass; else fail "root replaced mid-sweep: rc=$RC out=$OUT err=$ERRTEXT"; fi
+
   # --- 21. a copied .git file naming an unrelated repository runs no prune.
   mk_repo gamma21; local gamma="$SHARED" root21="$TMP/worktrees21"
   # The worktree's parent is made here, never left to git to create.
@@ -417,6 +445,23 @@ main() {
     && [[ "$(q '[(e["path"].rsplit("/",1)[1], e["repo"]) for e in d["errors"]]')" == "[('copied', None)]" ]] \
     && git -C "$gamma" show-ref --verify --quiet refs/heads/review/gamma-merged; then
     pass; else fail "copied .git: rc=$RC out=$OUT err=$ERRTEXT"; fi
+
+  # --- 24. a root replaced after a discovery that found no repository is
+  #     still exit 1: the check does not ride on the prune loop.
+  mk_repo delta24; local delta="$SHARED" root24="$TMP/worktrees24" shim24="$TMP/shim24"
+  mkdir -p "$root24/copied" "$TMP/outside24" "$shim24" || die "mkdir root24 failed"
+  quiet "delta worktree failed" "${G[@]}" -C "$delta" worktree add -q -b review/delta "$TMP/outside24/delta-wt" origin/main
+  cp "$TMP/outside24/delta-wt/.git" "$root24/copied/.git" || die "copy the .git file failed"
+  # shellcheck disable=SC2016  # The $@ and $0 belong to the shim.
+  printf '#!/usr/bin/env bash\nset -euo pipefail\nif [[ "$*" == *"worktree list"* && ! -e %q ]]; then : > %q; mv %q %q; mkdir %q; fi\nexec %q "$@"\n' \
+    "$shim24/done" "$shim24/done" "$root24" "$root24.moved" "$root24" "$real_git" > "$shim24/git" || die "write the git shim failed"
+  chmod +x "$shim24/git" || die "chmod the git shim failed"
+  RUN_SEQ=$((RUN_SEQ+1))
+  OUT="$(PATH="$shim24:$PATH" PRUNE_IDLE_HOURS=0 bash "$SCRIPT" "$root24" 2>"$TMP/err.$RUN_SEQ")"; RC=$?
+  ERRTEXT="$(cat "$TMP/err.$RUN_SEQ")"
+  echo "24. a root replaced after a discovery with no repository is exit 1, no JSON"
+  if (( RC == 1 )) && [[ -e "$shim24/done" && -z "$OUT" && "$ERRTEXT" == *"was replaced"* ]]; then
+    pass; else fail "replaced root, no repos: rc=$RC out=$OUT err=$ERRTEXT"; fi
 
   run
   echo "5a. no root is exit 1 with no JSON"

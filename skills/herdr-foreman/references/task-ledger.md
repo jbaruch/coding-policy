@@ -70,7 +70,8 @@ into a working or blocked worker.
 
 Fill this as a reasoning document; placeholder values are not evidence.
 Append one uniquely named event section per decision. For task events use
-`not_applicable` for the assignment fields. Use `unknown` for unavailable evidence.
+`not_applicable` for `dispatch_id`, `worker` and `role`; `report` stays an
+absolute path or `unknown`. Use `unknown` for unavailable evidence.
 
 ```markdown
 ---

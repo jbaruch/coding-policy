@@ -6,7 +6,14 @@ This is that check. It reads the oracle from the saved plan, never from the
 caller, so the round is judged against the oracle it was licensed on.
 
 `digest` compares the sha256 of the result file. `patch` and `fixture` compare
-the result file byte for byte against the file the oracle names.
+the result file's sha256 against the sha256 of the file the oracle names. Every
+file is hashed in bounded chunks, so an oversized result or oracle never loads
+whole into memory.
+
+A `patch` or `fixture` oracle is a path, and a path says nothing about the
+bytes behind it. `plan` pins each such file's sha256 in the plan's
+`oracle_pins` when it writes the plan; `verify-oracle` refuses an oracle file
+whose bytes no longer hash to that pin, and a plan that pinned nothing (#488).
 
 Exit 0 on a match. Exit 1 on a mismatch, with the verdict on stdout and
 `match: false`, or on a usage error, with no verdict. A mismatch is a blocking
@@ -15,50 +22,130 @@ finding on the round, never a warning.
 
 import hashlib
 import json
+import os
+import stat
 from pathlib import Path
 
+from . import runnable
 from .errors import UsageError
+from .tiers import ORACLE_DIGEST, ORACLE_KINDS, oracle_shape_problem
 
 COMMANDS = frozenset({"verify-oracle"})
 
 
-def _read_bytes(path, what):
+#: Bytes read per chunk while hashing. Bounds memory whatever the file's size.
+CHUNK_BYTES = 1 << 20
+
+
+RESULT_REMEDY = "Pass the file the round produced."
+ORACLE_REMEDY = "Restore the oracle file the round was licensed on, or declare a readable one and replan."
+
+
+def _sha256(path, what, remedy):
+    """The hex sha256 of a file, read in CHUNK_BYTES pieces; `remedy` tells the caller what to do on failure."""
+    digest = hashlib.sha256()
     try:
-        return Path(path).read_bytes()
+        # Opened non-blocking and checked before any read: a FIFO or a device
+        # swapped in for the file would block the gate, or never reach EOF.
+        descriptor = os.open(path, os.O_RDONLY | os.O_NONBLOCK)
+        with os.fdopen(descriptor, "rb") as handle:
+            if not stat.S_ISREG(os.fstat(handle.fileno()).st_mode):
+                raise UsageError("The {} at {!r} is not a regular file. {}".format(
+                    what, str(path), remedy), {"path": str(path)})
+            for chunk in iter(lambda: handle.read(CHUNK_BYTES), b""):
+                digest.update(chunk)
     except OSError as exc:
-        raise UsageError("Cannot read the {} at {}: {}. Pass the file the round produced.".format(
-            what, path, exc.strerror or exc), {"path": str(path)}) from None
+        raise UsageError("Cannot read the {} at {!r}: {}. {}".format(
+            what, str(path), exc.strerror or exc, remedy), {"path": str(path)}) from None
+    except (UnicodeEncodeError, ValueError) as exc:
+        # An embedded NUL (ValueError) or a character the filesystem encoding
+        # cannot carry, such as a lone surrogate (UnicodeEncodeError, itself a
+        # ValueError), never names a file.
+        raise UsageError("The {} path {!r} is not a usable file name: {}. {}".format(
+            what, str(path), exc, remedy), {"path": repr(str(path))}) from None
+    return digest.hexdigest()
 
 
 def plan_oracle(plan, role):
-    """The oracle a saved plan declared for one role, or a refusal naming why none applies."""
+    """The oracle a saved plan declared for one role, or a refusal naming why none applies.
+
+    The oracle's shape is checked here, before any file is read: a saved plan
+    is a file on disk, and a malformed one is a usage error, never a traceback.
+    """
     rounds = plan.get("rounds") if isinstance(plan, dict) else None
     entry = rounds.get(role) if isinstance(rounds, dict) else None
     context = entry.get("context") if isinstance(entry, dict) else None
     oracle = context.get("oracle") if isinstance(context, dict) else None
-    if not isinstance(oracle, dict):
+    if oracle is None:
         raise UsageError("The plan declares no oracle for {!r}; only a mechanical round is checked "
                          "against one.".format(role), {"role": role})
-    return oracle
+    round_type = entry.get("type") if isinstance(entry, dict) else None
+    if round_type != "mechanical":
+        # An oracle licenses only a mechanical round; one riding on any other
+        # round was never checked at plan time and is never pinned (#576).
+        raise UsageError("The plan's round for {!r} is {!r}, not mechanical; its oracle licensed "
+                         "nothing and is not checked. Gate the round on its own review.".format(
+                             role, round_type), {"role": role})
+    problem = oracle_shape_problem(oracle)
+    if problem is not None:
+        raise UsageError("The plan's oracle for {!r} is malformed: {}. Replan with a well-formed "
+                         "--round-context.".format(role, problem), {"role": role})
+    if oracle["kind"] == "digest":
+        return oracle
+    pins = plan.get("oracle_pins")
+    pin = pins.get(role) if isinstance(pins, dict) else None
+    if (not isinstance(pin, dict) or pin.get("path") != oracle["path"]
+            or not isinstance(pin.get("sha256"), str) or not ORACLE_DIGEST.match(pin["sha256"])):
+        raise UsageError("The plan pins no content for the {} oracle of {!r} at {}; replan with `{}` "
+                         "so the plan records the file's sha256.".format(
+                             oracle["kind"], role, oracle["path"], runnable.command("plan")),
+                         {"role": role, "path": oracle["path"]})
+    return {**oracle, "sha256": pin["sha256"]}
+
+
+def pin_oracles(rounds):
+    """Each role's patch or fixture oracle file, pinned to its sha256 as `plan` writes the plan.
+
+    Only a mechanical round's oracle is pinned: it is the only one that
+    licenses anything, and `mechanical_allowed` has already checked its file is
+    a readable regular file. A malformed oracle is left unpinned: the round's
+    tier check has already refused it, and `verify-oracle` refuses it again.
+    """
+    pins = {}
+    for role, entry in (rounds or {}).items():
+        if not isinstance(entry, dict) or entry.get("type") != "mechanical":
+            continue
+        context = entry.get("context")
+        oracle = context.get("oracle") if isinstance(context, dict) else None
+        if oracle is None or oracle_shape_problem(oracle) is not None or oracle["kind"] == "digest":
+            continue
+        pins[role] = {"path": oracle["path"],
+                      "sha256": _sha256(oracle["path"], "{} oracle".format(oracle["kind"]), ORACLE_REMEDY)}
+    return pins
 
 
 def verify(oracle, result_path):
-    """Compare the result file against the oracle. Returns the verdict document."""
+    """Compare the result file against the oracle. Returns the verdict document.
+
+    A `patch` or `fixture` oracle carries the `sha256` its plan pinned; an
+    oracle file that no longer hashes to it is refused, never compared.
+    """
     kind = oracle.get("kind")
-    actual = _read_bytes(result_path, "round result")
+    if kind not in ORACLE_KINDS:
+        raise UsageError("Oracle kind {!r} is not one of {}.".format(kind, ", ".join(ORACLE_KINDS)), {})
+    observed = _sha256(result_path, "round result", RESULT_REMEDY)
     if kind == "digest":
         expected = oracle.get("value")
-        observed = hashlib.sha256(actual).hexdigest()
         return {"schema_version": 1, "kind": kind, "match": observed == expected,
                 "expected": expected, "observed": observed, "result": str(result_path)}
-    if kind in ("patch", "fixture"):
-        path = oracle.get("path")
-        wanted = _read_bytes(path, "{} oracle".format(kind))
-        return {"schema_version": 1, "kind": kind, "match": actual == wanted,
-                "expected": hashlib.sha256(wanted).hexdigest(),
-                "observed": hashlib.sha256(actual).hexdigest(),
-                "oracle": path, "result": str(result_path)}
-    raise UsageError("Oracle kind {!r} is not one of digest, patch, fixture.".format(kind), {})
+    path = oracle.get("path")
+    expected = _sha256(path, "{} oracle".format(kind), ORACLE_REMEDY)
+    if expected != oracle.get("sha256"):
+        raise UsageError("The {} oracle at {} changed since the plan was written (pinned sha256 {}, now {}); "
+                         "restore the planned file or replan.".format(kind, path, oracle.get("sha256"), expected),
+                         {"path": str(path), "pinned": oracle.get("sha256"), "observed": expected})
+    return {"schema_version": 1, "kind": kind, "match": observed == expected,
+            "expected": expected, "observed": observed, "oracle": path, "result": str(result_path)}
 
 
 def register_commands(sub, common):

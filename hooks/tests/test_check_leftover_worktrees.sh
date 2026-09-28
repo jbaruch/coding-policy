@@ -46,6 +46,11 @@
 #                              stand-in runner reports the timeout; no case
 #                              waits on a clock, and every other run gets an
 #                              hour).
+#  14. Inventory failure    -> a git worktree list that fails after printing a
+#                              valid prefix is a could-not-check status naming
+#                              git's own exit, and runs neither owner script.
+#  15. SSH BatchMode        -> appended to a user-set GIT_SSH_COMMAND, and the
+#                              default when none is set.
 #
 # The harness drops `set -e` to aggregate results; every fixture command is
 # checked explicitly (rules/error-handling.md aggregate-reporting carve-out).
@@ -249,6 +254,19 @@ stage_plugin() { # <dir> [hooks-dir-name]
     "$1/skills/herdr-foreman/foreman/" || die "stage the result checks failed"
 }
 
+# A staged plugin with the real runner and owner scripts that record their
+# name and GIT_SSH_COMMAND to <calls>, then fail.
+stage_recording_plugin() { # <dir> <calls>
+  stage_plugin "$1"
+  cp "${HERE}/../../skills/herdr-foreman/bounded-run.sh" "$1/skills/herdr-foreman/" || die "stage the runner failed"
+  local owner
+  for owner in prune-worktrees.sh prune-remote-branches.sh; do
+    # shellcheck disable=SC2016  # GIT_SSH_COMMAND expands in the stand-in, not here.
+    printf '#!/usr/bin/env bash\nset -euo pipefail\nprintf "%%s %%s\\n" "%s" "${GIT_SSH_COMMAND:-}" >> %q\nexit 1\n' "$owner" "$2" \
+      > "$1/skills/herdr-foreman/$owner" || die "write the recording $owner failed"
+  done
+}
+
 main() {
   command -v python3 >/dev/null || die "python3 is required"
   TMP="$(mktemp -d)" || die "mktemp failed"
@@ -261,7 +279,7 @@ main() {
   export GIT_AUTHOR_NAME=Ada GIT_AUTHOR_EMAIL=ada@example.invalid
   export GIT_COMMITTER_NAME=Ada GIT_COMMITTER_EMAIL=ada@example.invalid
   export GIT_AUTHOR_DATE="$FIXTURE_DATE" GIT_COMMITTER_DATE="$FIXTURE_DATE"
-  unset HERDR_ENV SESSION_START_MODE
+  unset HERDR_ENV SESSION_START_MODE GIT_SSH_COMMAND
   local ctx
 
   echo "1. removable worktrees and branches go, and nothing is printed"
@@ -384,7 +402,7 @@ main() {
   stage_plugin "$stage"
   cp "${HERE}/../../skills/herdr-foreman/prune-worktrees.sh" "${HERE}/../../skills/herdr-foreman/prune-remote-branches.sh" \
     "$stage/skills/herdr-foreman/" || die "stage the owner scripts failed"
-  printf '#!/usr/bin/env bash\necho "bounded-run: stand-in budget spent" >&2\nexit 124\n' > "$stage/skills/herdr-foreman/bounded-run.sh" \
+  printf '#!/usr/bin/env bash\nset -euo pipefail\necho "bounded-run: stand-in budget spent" >&2\nexit 124\n' > "$stage/skills/herdr-foreman/bounded-run.sh" \
     || die "write the stand-in runner failed"
   local real_hook="$HOOK"
   HOOK="$stage/hooks/$(basename "$real_hook")"
@@ -420,7 +438,7 @@ main() {
   cp "${HERE}/../../skills/herdr-foreman/bounded-run.sh" "$stage13/skills/herdr-foreman/" || die "stage the runner failed"
   local owner
   for owner in prune-worktrees.sh prune-remote-branches.sh; do
-    printf '#!/usr/bin/env bash\nprintf "%%s\\n" "%s" >> %q\nexit 1\n' "$owner" "$calls13" > "$stage13/skills/herdr-foreman/$owner" \
+    printf '#!/usr/bin/env bash\nset -euo pipefail\nprintf "%%s\\n" "%s" >> %q\nexit 1\n' "$owner" "$calls13" > "$stage13/skills/herdr-foreman/$owner" \
       || die "write the recording $owner failed"
   done
   local refs_before refs_after
@@ -438,8 +456,8 @@ main() {
   local stage12="$CASE/stage"
   stage_plugin "$stage12"
   cp "${HERE}/../../skills/herdr-foreman/bounded-run.sh" "$stage12/skills/herdr-foreman/" || die "stage the runner failed"
-  printf '#!/usr/bin/env bash\nprintf "{}\\n"\n' > "$stage12/skills/herdr-foreman/prune-worktrees.sh" || die "write the stand-in prune failed"
-  printf '#!/usr/bin/env bash\nprintf "{\\"deleted\\": [], \\"questionable\\": [{\\"branch\\": 7}], \\"kept\\": [], \\"failed\\": [], \\"could_not_check\\": null, \\"default_branch\\": \\"main\\"}\\n"\n' \
+  printf '#!/usr/bin/env bash\nset -euo pipefail\nprintf "{}\\n"\n' > "$stage12/skills/herdr-foreman/prune-worktrees.sh" || die "write the stand-in prune failed"
+  printf '#!/usr/bin/env bash\nset -euo pipefail\nprintf "{\\"deleted\\": [], \\"questionable\\": [{\\"branch\\": 7}], \\"kept\\": [], \\"failed\\": [], \\"could_not_check\\": null, \\"default_branch\\": \\"main\\"}\\n"\n' \
     > "$stage12/skills/herdr-foreman/prune-remote-branches.sh" || die "write the stand-in remote pass failed"
   local real_hook12="$HOOK"
   HOOK="$stage12/hooks/$(basename "$real_hook12")"
@@ -469,27 +487,65 @@ main() {
     echo "11. skipped: this filesystem refuses a name ending in a newline ($(cat "$TMP/nl.err"))"
   fi
 
-  echo "14. a hooks directory whose name ends in a newline still reaches its owner scripts"
+  echo "14. a git worktree list that fails after a valid prefix runs neither owner script"
+  mk_case c14
+  local stage14="$CASE/stage14" calls14="$CASE/calls14" real_git
+  stage_recording_plugin "$stage14" "$calls14"
+  real_git="$(command -v git)" || die "git not found"
+  mkdir -p "$CASE/failing-git" || die "mkdir failing-git failed"
+  # Prints the real inventory, then fails: the prefix alone parses cleanly.
+  # shellcheck disable=SC2016  # The $@ belongs to the stand-in git.
+  printf '#!/usr/bin/env bash\nset -euo pipefail\nif [[ "${1:-}" == worktree && "${2:-}" == list ]]; then\n  %q "$@"\n  echo "fatal: stand-in failure after the listing" >&2\n  exit 1\nfi\nexec %q "$@"\n' \
+    "$real_git" "$real_git" > "$CASE/failing-git/git" || die "write the failing git failed"
+  chmod +x "$CASE/failing-git/git" || die "chmod the failing git failed"
+  local real_hook14="$HOOK"
+  HOOK="$stage14/hooks/$(basename "$real_hook14")"
+  RC=0
+  OUT="$(cd "$SHARED" && env PATH="$CASE/failing-git:$CASE/bin:$PATH" FAKE_GH_DIR="$CASE" LEFTOVER_BUDGET_SEC=3600 \
+    bash "$HOOK" </dev/null 2>"$CASE/hook.err")" || RC=$?
+  HOOK="$real_hook14"
+  ctx="$(context)"
+  if [[ $RC -eq 0 && ! -e "$calls14" ]] \
+     && [[ "$ctx" == "Session-start status — could not check this repository"*"git worktree list --porcelain -z"*"exited 1"* ]]; then pass
+  else fail "c14: RC=$RC OUT=$OUT ERR=$(cat "$CASE/hook.err") calls=$(if [[ -e "$calls14" ]]; then cat "$calls14"; fi)"; fi
+
+  echo "15. BatchMode reaches the owner scripts whether or not GIT_SSH_COMMAND is already set"
+  mk_case c15
+  local stage15="$CASE/stage15" calls15="$CASE/calls15" set_line unset_line
+  stage_recording_plugin "$stage15" "$calls15"
+  local real_hook15="$HOOK"
+  HOOK="$stage15/hooks/$(basename "$real_hook15")"
+  run_hook "$SHARED" GIT_SSH_COMMAND="ssh -i /keys/case15"
+  set_line="$(head -n 1 "$calls15")"
+  : > "$calls15" || die "clear calls15 failed"
+  run_hook "$SHARED"
+  unset_line="$(head -n 1 "$calls15")"
+  HOOK="$real_hook15"
+  if [[ "$set_line" == "prune-worktrees.sh ssh -i /keys/case15 -o BatchMode=yes" \
+     && "$unset_line" == "prune-worktrees.sh ssh -o BatchMode=yes" ]]; then pass
+  else fail "c15: set=$set_line unset=$unset_line ERR=$ERR"; fi
+
+  echo "16. a hooks directory whose name ends in a newline still reaches its owner scripts"
   # A `$(dirname ...)` capture drops the newline, and the hook then looks for
   # its owner scripts beside a directory that does not exist (#487).
-  if mkdir "$TMP/nl-probe14${nl}" 2>"$TMP/nl14.err"; then
-    rmdir "$TMP/nl-probe14${nl}" || die "rmdir the newline probe failed"
-    mk_case c14
+  if mkdir "$TMP/nl-probe16${nl}" 2>"$TMP/nl16.err"; then
+    rmdir "$TMP/nl-probe16${nl}" || die "rmdir the newline probe failed"
+    mk_case c16
     quiet "wt add" git -C "$SHARED" worktree add -q --detach "$ROOT/spent" origin/main
     age_wt "$ROOT/spent" "$AGED_MTIME"
-    local stage14="$CASE/stage14"
-    stage_plugin "$stage14" "hooks${nl}"
+    local stage16="$CASE/stage16"
+    stage_plugin "$stage16" "hooks${nl}"
     cp "${HERE}/../../skills/herdr-foreman/bounded-run.sh" "${HERE}/../../skills/herdr-foreman/prune-worktrees.sh" \
-      "${HERE}/../../skills/herdr-foreman/prune-remote-branches.sh" "$stage14/skills/herdr-foreman/" \
+      "${HERE}/../../skills/herdr-foreman/prune-remote-branches.sh" "$stage16/skills/herdr-foreman/" \
       || die "stage the owner scripts failed"
-    local real_hook14="$HOOK"
-    HOOK="$stage14/hooks${nl}/$(basename "$real_hook14")"
+    local real_hook16="$HOOK"
+    HOOK="$stage16/hooks${nl}/$(basename "$real_hook16")"
     run_hook "$SHARED"
-    HOOK="$real_hook14"
+    HOOK="$real_hook16"
     if [[ $RC -eq 0 && -z "$OUT" && ! -e "$ROOT/spent" ]]; then pass
-    else fail "c14: RC=$RC OUT=$OUT ERR=$ERR"; fi
+    else fail "c16: RC=$RC OUT=$OUT ERR=$ERR"; fi
   else
-    echo "14. skipped: this filesystem refuses a name ending in a newline ($(cat "$TMP/nl14.err"))"
+    echo "16. skipped: this filesystem refuses a name ending in a newline ($(cat "$TMP/nl16.err"))"
   fi
 
   echo
