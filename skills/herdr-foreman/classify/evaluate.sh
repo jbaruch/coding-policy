@@ -24,8 +24,8 @@
 #   --since DATE   score reports recorded on or after DATE (ISO). Defaults to
 #                  the questions' `changed` date.
 #   --all          score the whole corpus; the split is marked not held out.
-#   --fixtures     also score the adversarial fixtures in fixtures/, reported
-#                  apart from the corpus.
+#   --fixtures     also score the adversarial reports adversarial.py builds
+#                  into this run's temp dir, reported apart from the corpus.
 #   --results FILE keep every label with its recorded verdict, the input to
 #                  `scoring.py calibrate`.
 #   --corpus-only  build and print the labelled corpus, call no model, spend no
@@ -134,14 +134,13 @@ print(corpus)
 PY
 }
 
-with_fixtures() { # <corpus.json> <fixtures-dir>
+with_fixtures() { # <corpus.json> <built-fixtures.json>
   python3 - "$1" "$2" <<'PY'
 import json, pathlib, sys
-selected, fixtures = pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2])
+selected, built = pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2])
 rows = json.loads(selected.read_text(encoding="utf-8"))
-expected = json.loads((fixtures / "expected.json").read_text(encoding="utf-8"))
-for row in expected["fixtures"]:
-    rows.append({"report": str(fixtures / row["report"]), "recorded": row["verdict"], "at": "",
+for row in json.loads(built.read_text(encoding="utf-8"))["fixtures"]:
+    rows.append({"report": row["report"], "recorded": row["verdict"], "at": "",
                  "role": None, "task": None, "source": "fixture", "expected_answers": row["answers"]})
 selected.write_text(json.dumps(rows), encoding="utf-8")
 PY
@@ -192,7 +191,10 @@ json.dump({"since": since or None, "changed": changed, "held_out": bool(since) a
   corpus "$state" "$limit" "$since" "$state_root" "$skill_dir" > "$selected" \
     || die "cannot build the labelled corpus from ${source}; fix the cause reported above, or pass --state with a readable state file"
   if [ "$fixtures" -eq 1 ]; then
-    with_fixtures "$selected" "${HERE}/fixtures" || die "cannot add the fixtures in ${HERE}/fixtures"
+    mkdir "${work}/fixtures" || die "cannot create ${work}/fixtures"
+    python3 "${HERE}/adversarial.py" "${work}/fixtures" > "${work}/fixtures.json" \
+      || die "cannot build the adversarial reports; see the diagnostic above"
+    with_fixtures "$selected" "${work}/fixtures.json" || die "cannot add the adversarial reports to ${selected}"
   fi
   local total
   total="$(python3 -c 'import json,sys; print(len(json.load(open(sys.argv[1]))))' "$selected")" \

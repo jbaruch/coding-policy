@@ -65,7 +65,7 @@ calibrated. It restates no threshold; the constants live at the top of
 `{"schema_version": 1, "state_path", "gates": [...]}`. Each gate carries
 `schema_version`, `report` (resolved path), `sha256`, `level`, `reason`,
 `probabilities`, `model`, `question`, `bands`, `at`, `status`
-(`open`|`cleared`|`reread`) and `resolution` (`null`, or `at`, `action`, `by`
+(`open`|`cleared`|`reread`) and `resolution` (`null`, or `schema_version`, `at`, `action`, `by`
 (`worker`|`judge`|`operator`), `reason`, `evidence` (`null` for an operator, or
 `path` and `sha256`)). Every record is validated whole on every read. Writes
 take the sidecar's own lock. `close-member` and `record-report` hold that lock

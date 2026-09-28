@@ -195,7 +195,7 @@ def load(path):
 
 GATE_FIELDS = frozenset({"schema_version", "report", "sha256", "level", "reason", "probabilities", "model",
                          "question", "bands", "at", "status", "resolution"})
-RESOLUTION_FIELDS = frozenset({"at", "action", "by", "reason", "evidence"})
+RESOLUTION_FIELDS = frozenset({"schema_version", "at", "action", "by", "reason", "evidence"})
 #: The status each resolution action leaves.
 RESOLVED_STATUS = {"clear": "cleared", "reread": "reread"}
 
@@ -236,6 +236,8 @@ def _gate_problem(gate):
         return "unknown status"
     if not isinstance(resolution, dict) or set(resolution) != RESOLUTION_FIELDS:
         return "a resolved gate lacks its resolution"
+    if type(resolution["schema_version"]) is not int or resolution["schema_version"] != SCHEMA_VERSION:
+        return "unsupported resolution schema_version"
     if RESOLVED_STATUS.get(resolution["action"]) != gate["status"]:
         return "the resolution action and the gate's status disagree"
     if resolution["by"] not in (CLEARERS if resolution["action"] == "clear" else REREADERS):
@@ -371,7 +373,8 @@ def resolve(path, report, action, reason, by, at, evidence=None):
                   "with `{}`.".format(key, runnable.command(CLEAR_COMMAND)))
         for gate in pending:
             gate["status"] = "cleared" if action == "clear" else "reread"
-            gate["resolution"] = {"at": at, "action": action, "by": by, "reason": reason, "evidence": cited}
+            gate["resolution"] = {"schema_version": SCHEMA_VERSION, "at": at, "action": action, "by": by,
+                                  "reason": reason, "evidence": cited}
         save_state(storage_path(path), document)
     return {"schema_version": SCHEMA_VERSION, "resolved": copy.deepcopy(pending)}
 

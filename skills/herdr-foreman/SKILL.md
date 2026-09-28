@@ -565,25 +565,38 @@ or their unavailability and recovery are recorded.
 
 ## Step 12 — Gate the Round
 
-Classify every delivered report in one call before reading any of them, save
-its stdout, then record the gates the labels earn:
+Classify every delivered report in one call, and save its stdout:
 
 ```bash
 CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"
 bash "$CP/skills/herdr-foreman/classify/classify-reports.sh" <report>... > <labels.json>
 ```
 
+Each label carries a verdict (`blocking`, `approved` or
+`insufficient_evidence`), its per-question answers, and any fallback it took;
+relay every fallback line to the operator. A report in `unannotated` gets no
+label and is gated exactly as it would have been.
+
+Read every report file in full, including a report whose worker exited cleanly.
+A `## BLOCKED` section can sit under a report that otherwise reads as finished.
+Classify each finding blocking or advisory per `rules/review-severity.md`.
+Then record the gates the labels earn, before gating any report:
+
 ```bash
 CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"
 bash "$CP/skills/herdr-foreman/foreman.sh" report-gate-record --labels <labels.json>
 ```
 
-Each label carries a verdict (`blocking`, `approved` or
-`insufficient_evidence`), its per-question answers, and any fallback it took;
-relay every fallback line to the operator. A report in `unannotated` is read
-exactly as it would have been. Read the reports together and gate them in one
-turn, not one turn per report. A label never approves, accepts or skips a
-check; its only effect is a recorded gate, which adds friction:
+- Exit 0 prints `{"schema_version": 1, "recorded": [...], "replayed": [...], "no_gate": [...]}`
+- `recorded` holds each new gate with its `report`, `level` and `reason`
+- `replayed` holds a gate already on record for the same report bytes
+- `no_gate` names each report its label leaves ungated, with the reason
+- Exit 1 records nothing and names the cause on stderr
+- A report changed since classification is reclassified, then recorded again
+- An unreadable or malformed gate record is restored before any report is gated
+
+A label never approves, accepts or skips a check; its only effect is a
+recorded gate, which adds friction:
 
 - `block` — the report is not accepted until `report-gate-clear` records why
   it does not block, a reason from the worker role that owns the finding, the
@@ -596,10 +609,7 @@ check; its only effect is a recorded gate, which adds friction:
 `close-member` and `record-report` refuse while a gate forbids the decision.
 Gate levels, bands, adapters and fallback are the owners' contract — see
 `skills/herdr-foreman/references/report-classifier.md`.
-
-Read every report file in full, including a report whose worker exited cleanly.
-A `## BLOCKED` section can sit under a report that otherwise reads as finished.
-Classify each finding blocking or advisory per `rules/review-severity.md`.
+Gate the reports together in one turn, not one turn per report.
 Before accepting a mechanical round, compare its whole result against the
 oracle its plan declared. `<result-file>` is the pushed diff for a `patch`
 oracle and the produced output otherwise:

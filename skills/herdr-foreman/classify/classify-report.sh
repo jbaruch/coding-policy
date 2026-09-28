@@ -187,7 +187,8 @@ main() {
     command -v "$agent" >/dev/null || die "${agent} is not on PATH"
     local schema="${work}/schema.json" question="${work}/question.txt"
     python3 "$verdict" schema "$schema" || die "cannot write the answer schema to ${schema}"
-    python3 "$verdict" frame "$snapshot" > "$question" || die "cannot frame ${report} as data; read it in full"
+    python3 "$verdict" frame "$snapshot" "$question" > "${work}/frame.json" \
+      || die "cannot frame ${report} as data; read it in full"
     mkdir "$room" || die "cannot create the empty working directory"
     if ! ( cd "$room" && "ask_${agent}" "$model" "$schema" "$answer" "$log" < "$question" ); then
       cat "$log" >&2

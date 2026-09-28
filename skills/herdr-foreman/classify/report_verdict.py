@@ -20,9 +20,11 @@ Deterministic checks run before any semantic answer is used:
 Usage:
   report_verdict.py schema <out>
       Write the JSON schema LLM adapters constrain their answer to.
-  report_verdict.py frame <report>
-      Print the whole LLM question (prompt, questions, framed report). Exit 2
-      when the report contains its own delimiter.
+  report_verdict.py frame <report> <out>
+      Write the whole LLM question (prompt, questions, framed report) to <out>
+      and print a JSON receipt: {"schema_version": 1, "question": <out>,
+      "report_sha256", "nonce", "bytes"}. Exit 2 when the report contains its
+      own delimiter or <out> cannot be written.
   report_verdict.py label <answer> <report> <agent> <model> [--fallback <reason>] [--as <path>]
       Check an LLM answer and print the label. Exit 2 when the answer is off
       the schema.
@@ -262,8 +264,15 @@ def main(argv):
         except OSError as exc:
             fail("cannot write the schema to {}: {}".format(argv[1], exc))
         return 0
-    if len(argv) == 2 and argv[0] == "frame":
-        sys.stdout.write(frame(argv[1]))
+    if len(argv) == 3 and argv[0] == "frame":
+        prompt = frame(argv[1])
+        try:
+            Path(argv[2]).write_text(prompt, encoding="utf-8")
+        except OSError as exc:
+            fail("cannot write the framed question to {}: {}".format(argv[2], exc))
+        data = read_bytes(argv[1])
+        print(json.dumps({"schema_version": 1, "question": argv[2], "report_sha256": hashlib.sha256(data).hexdigest(),
+                          "nonce": nonce(data), "bytes": len(prompt.encode("utf-8"))}, sort_keys=True))
         return 0
     if argv and argv[0] == "label" and len(argv) >= 5:
         options = flags(argv[5:], {"--fallback", "--as"})
@@ -278,7 +287,7 @@ def main(argv):
             fail("Jev unavailable: {}".format(exc), UNAVAILABLE)
         print(json.dumps(label, sort_keys=True))
         return 0
-    fail("usage: report_verdict.py schema <out> | frame <report> | "
+    fail("usage: report_verdict.py schema <out> | frame <report> <out> | "
          "label <answer> <report> <agent> <model> [--fallback <reason>] [--as <path>] | "
          "jev <report> [--model <id>] [--as <path>]")
 

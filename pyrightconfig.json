@@ -6,6 +6,7 @@
     "scripts/tests/test_source_index.py",
     "skills/herdr-standup/standup-render.py",
     "skills/herdr-standup/tests/test_standup_render.py",
+    "skills/herdr-foreman/classify/adversarial.py",
     "skills/herdr-foreman/classify/extract-answer.py",
     "skills/herdr-foreman/classify/report_verdict.py",
     "skills/herdr-foreman/classify/scoring.py",

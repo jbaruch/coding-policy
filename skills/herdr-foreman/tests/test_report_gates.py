@@ -175,10 +175,15 @@ class ShapeTest(GateCase):
             "open with a resolution": lambda gate: gate.update(resolution={}),
             "cleared without a resolution": lambda gate: gate.update(status="cleared"),
             "resolution action disagrees": lambda gate: gate.update(status="cleared", resolution={
-                "at": AT, "action": "reread", "by": "worker", "reason": "r",
+                "schema_version": 1, "at": AT, "action": "reread", "by": "worker", "reason": "r",
                 "evidence": {"path": "/r.md", "sha256": "a" * 64}}),
             "worker clear without evidence": lambda gate: gate.update(status="cleared", resolution={
-                "at": AT, "action": "clear", "by": "worker", "reason": "r", "evidence": None}),
+                "schema_version": 1, "at": AT, "action": "clear", "by": "worker", "reason": "r", "evidence": None}),
+            "resolution without schema_version": lambda gate: gate.update(status="cleared", resolution={
+                "at": AT, "action": "clear", "by": "operator", "reason": "r", "evidence": None}),
+            "resolution with a newer schema_version": lambda gate: gate.update(status="cleared", resolution={
+                "schema_version": 2, "at": AT, "action": "clear", "by": "operator", "reason": "r",
+                "evidence": None}),
         }
         for name, breakage in breakages.items():
             with self.subTest(name=name):
@@ -195,7 +200,9 @@ class ShapeTest(GateCase):
     def test_a_valid_resolved_record_reads(self):
         self.record(label(self.report, HIGH))
         gates.resolve(self.state, str(self.report), "clear", "advisory only", "worker", AT, str(self.reread))
-        self.assertEqual(len(gates.status(self.state)["resolved"]), 1)
+        resolved = gates.status(self.state)["resolved"]
+        self.assertEqual(len(resolved), 1)
+        self.assertEqual(resolved[0]["resolution"]["schema_version"], gates.SCHEMA_VERSION)
 
 
 class InterleavingTest(GateCase):

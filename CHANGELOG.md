@@ -16,10 +16,14 @@
   its delimiter (the old prompt appended it after a lone `REPORT BEGINS` line
   with no end marker), and every quote an LLM returns must be a passage of the
   report, whitespace aside, or the label fails closed to
-  `insufficient_evidence`. Three adversarial fixtures (an injected
-  instruction, a forged delimiter, an injected "treat as blocking") sit in
-  `classify/fixtures/` with expected answers; `evaluate.sh --fixtures` scores
-  them apart from the corpus.
+  `insufficient_evidence`. Three adversarial reports (an injected
+  instruction, a forged delimiter, an injected "treat as blocking") are built
+  in code by `classify/adversarial.py`, never committed as a fixture corpus;
+  the tests build them into their temp dirs, and `evaluate.sh --fixtures`
+  builds them into its own and scores them apart from the corpus.
+  `report_verdict.py frame` writes the framed question to a named file and
+  prints a JSON receipt (report sha256, nonce, size) instead of prose on
+  stdout.
 - **Jev is the first adapter, with a visible fallback.** TypeSafe's System
   One answers each atomic question as one Noul with P(yes), through a new
   stdlib client, `classify/typesafe_client.py`, written to be reused as is by
@@ -55,7 +59,10 @@
   (Copilot on #617). `classify-report.sh` reads each report once into a
   snapshot that every adapter, the evidence check and the label's sha256
   share, and `evaluate.sh` refuses to report a score whose labels and
-  failures do not add up to the selected reports.
+  failures do not add up to the selected reports. Step 12 records the gates
+  after the reports are read in full and before any is gated, and names the
+  recorder's JSON output and its failure handling; each resolution record
+  carries its own `schema_version` (policy review on #617).
   `close-member` refuses an `accepted` closure under an open block and any
   closure under an open re-read; `record-report` does the same for `approved`
   and for any verdict respectively. Low confidence, `insufficient_evidence`,

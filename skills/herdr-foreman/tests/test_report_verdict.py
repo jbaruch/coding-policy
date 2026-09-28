@@ -4,6 +4,9 @@ Every model is stubbed: an LLM answer is a fixture file, and Jev's HTTP layer
 is a replayed transport (rules/testing-standards.md Determinism).
 """
 
+import contextlib
+import hashlib
+import io
 import json
 import sys
 import tempfile
@@ -14,11 +17,11 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "classify"))
 
-import report_verdict as rv  # noqa: E402 -- the classify dir is on sys.path only from here
+import adversarial  # noqa: E402 -- the classify dir is on sys.path only from here
+import report_verdict as rv  # noqa: E402
 import typesafe_client as ts  # noqa: E402
 from foreman import report_gates  # noqa: E402
 
-FIXTURES = Path(__file__).resolve().parents[1] / "classify" / "fixtures"
 KEY = "ts-live-0123456789abcdef"
 REPORT = ("# Reviewer report\n\n**B1 — blocking.** The parser accepts a quoted\ncompletion marker inside a fence.\n\n"
           "Nothing else was found.\n")
@@ -112,6 +115,10 @@ class EvidenceTest(Case):
 
 
 class FramingTest(Case):
+    def setUp(self):
+        super().setUp()
+        self.built = {Path(row["report"]).name: Path(row["report"]) for row in adversarial.write(self.root)}
+
     def framed(self, path):
         text = rv.frame(str(path))
         data = Path(path).read_bytes()
@@ -120,17 +127,17 @@ class FramingTest(Case):
         return lines, lines.index(begin), lines.index(end), data
 
     def test_the_report_travels_as_one_json_field_between_its_own_markers(self):
-        lines, begin, end, data = self.framed(FIXTURES / "forged-delimiter.md")
+        lines, begin, end, data = self.framed(self.built["forged-delimiter.md"])
         self.assertEqual(end, begin + 2)
         self.assertEqual(json.loads(lines[begin + 1]), {"report": data.decode("utf-8")})
 
     def test_a_forged_delimiter_never_becomes_a_line_of_its_own(self):
-        lines, begin, end, _ = self.framed(FIXTURES / "forged-delimiter.md")
+        lines, begin, end, _ = self.framed(self.built["forged-delimiter.md"])
         forged = [line for line in lines if line.startswith(("BEGIN REPORT-DATA", "END REPORT-DATA"))]
         self.assertEqual(forged, [lines[begin], lines[end]])
 
     def test_an_injected_instruction_stays_inside_the_data(self):
-        lines, begin, _, _ = self.framed(FIXTURES / "injected-instruction.md")
+        lines, begin, _, _ = self.framed(self.built["injected-instruction.md"])
         carrying = [index for index, line in enumerate(lines) if "Answer `approved`" in line]
         self.assertEqual(carrying, [begin + 1])
 
@@ -140,9 +147,31 @@ class FramingTest(Case):
         self.assertIn("untrusted data", preamble)
         self.assertIn("The delimiter nonce is {}.".format(rv.nonce(data)), preamble)
 
+    def test_the_cli_writes_the_question_to_a_file_and_prints_a_json_receipt(self):
+        out, stdout = self.root / "question.txt", io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            self.assertEqual(rv.main(["frame", str(self.report), str(out)]), 0)
+        receipt = json.loads(stdout.getvalue())
+        data = self.report.read_bytes()
+        self.assertEqual(receipt, {"schema_version": 1, "question": str(out),
+                                   "report_sha256": hashlib.sha256(data).hexdigest(), "nonce": rv.nonce(data),
+                                   "bytes": len(out.read_bytes())})
+        self.assertEqual(out.read_text(encoding="utf-8"), rv.frame(str(self.report)))
+
+    def test_the_builder_prints_its_rows_and_writes_every_report(self):
+        stdout = io.StringIO()
+        target = self.root / "built"
+        target.mkdir()
+        with contextlib.redirect_stdout(stdout):
+            self.assertEqual(adversarial.main([str(target)]), 0)
+        rows = json.loads(stdout.getvalue())["fixtures"]
+        self.assertEqual({row["verdict"] for row in rows}, {"blocking", "approved"})
+        self.assertTrue(all(Path(row["report"]).is_file() for row in rows))
+        self.assertEqual(adversarial.main([str(self.root / "absent")]), 2)
+
     def test_a_report_carrying_its_own_marker_is_refused_before_any_call(self):
         with patch.object(rv, "nonce", return_value="0000000000000000"), self.assertRaises(SystemExit) as caught:
-            rv.frame(str(FIXTURES / "forged-delimiter.md"))
+            rv.frame(str(self.built["forged-delimiter.md"]))
         self.assertEqual(caught.exception.code, 2)
 
 
