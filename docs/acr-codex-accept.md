@@ -159,7 +159,7 @@ members) is written descriptor-relative below its owning directory: each parent
 component is opened with `O_NOFOLLOW` (created 0700 when absent), the file is
 created exclusively or compared through an `O_NOFOLLOW | O_NONBLOCK`
 descriptor, and its link count is re-checked right before the 0600 `fchmod`.
-A `.` or `..` component, a symlinked parent, a FIFO or other non-regular file, a
+A `..` component, a symlinked parent, a FIFO or other non-regular file, a
 hard link, or different
 existing content refuses; keep that run root for inspection and re-run with a
 fresh one.
@@ -296,7 +296,8 @@ central/candidate/run/attempt IDs, `run_url`, `platform`,
 
 Bounds are 1,000 files, 8 MiB per text member, 64 MiB total text, 128 MiB per
 bundle, 100,000 Git objects, 512 MiB combined decoded objects. Duplicate JSON
-keys, unknown/missing schema fields, unexpected archive members, unsafe paths,
+keys, unknown/missing schema fields, unexpected archive members, unsafe paths
+(absolute, or with a `.`, `..` or empty component),
 symlinks, extra refs/objects and hash/size differences refuse. Bounds never
 truncate evidence into success. Event-parser and export byte limits apply after
 process capture; they do not kill a running child at a stdout/stderr byte limit.
