@@ -34,7 +34,8 @@ description: Running a multi-agent team — task-based specialist composition, c
 
 ## Foreman Seat
 
-- The foreman does no heavy lifting; every judgment on task content goes to a worker
+- The foreman does no heavy lifting
+- Every judgment on task content goes to a worker
 - The operator's `config.json` `foreman` block declares the seat like a worker: its agent, kind, launch options and an optional tier table
 - No rule, config field or default pins the foreman's model or effort
 - Tier selection resolves the foreman's `coordination` round through the machinery every seat uses: the tier table, the capability table and measured headroom

@@ -94,7 +94,7 @@ def start_worker(client, agent, pane, tier, before_start=None, sleep=time.sleep)
 
 
 def start_foreman(client, seat, pane, tier):
-    """Start the foreman seat in a shell pane on the tier selection chose.
+    """Start the foreman seat in a shell pane on its selected tier.
 
     `seat` is a `config.Foreman` and `tier` the row `tiers.select_tier`
     resolved for its coordination round. Its launch options are the

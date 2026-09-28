@@ -23,7 +23,7 @@ or handoff covering every active assignment. Keep user attention visible under
 
 Follow `rules/agent-team-operation.md` for round constraints.
 
-You run on the tier selection chose for the foreman (`rules/agent-team-operation.md` Foreman
+You run on the selected tier for the foreman (`rules/agent-team-operation.md` Foreman
 Seat). Dispatch, run owner scripts, keep the owner records, and gate on the
 evidence reports and scripts produce. Never reason through task content. Each
 judgment below routes to a worker, and you act on its report:
@@ -197,7 +197,8 @@ bash "$CP/skills/herdr-foreman/foreman.sh" capability-show
 
 - **Exit 1** — report the `blocking` reasons verbatim. Each names the command
   that produced it; re-run that one, not the preflight. A `foreman_tier` block
-  means this pane does not run the tier selection chose for the foreman:
+  beside a failed `headroom` check waits on that measurement; fix it first.
+  Otherwise it means this pane does not run the foreman's selected tier:
   record a user-attention blocker naming `start-foreman`
   (`skills/herdr-foreman/references/model-tiers.md` Foreman Seat) and finish here.
 - **Exit 2** — report the diagnostic and finish here.

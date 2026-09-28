@@ -42,10 +42,9 @@
   the table of the first configured worker of its kind). A `model` or `effort`
   field is refused; the agent may not be a worker's or the judge's. A new
   `coordination` round type, needing `mechanical-execution` in
-  `ROUND_CAPABILITIES`, is the foreman's round: the cheapest row the capability
-  table records adequate for it wins, a row recorded inadequate is never a
-  candidate, and without evidence the table's `coordination` row runs through
-  `select_tier` with the seat's measured headroom. `config.example.json`
+  `ROUND_CAPABILITIES`, is the foreman's round: the table's `coordination` row
+  runs through `select_tier` with the seat's measured headroom, and the
+  capability table assesses that row, refusing it when recorded inadequate. `config.example.json`
   declares the foreman with no model and gives each worker table a
   `coordination` row mirroring its `mechanical` one. `plan --roles foreman` is
   refused. New `foreman start-foreman --pane` launches the selected tier and
@@ -58,8 +57,9 @@
   `unconfigured` status with a stderr warning and the configure command, not a
   block. A context reset keeps the pane's process, so the proven tier survives
   it. Tests: `skills/herdr-foreman/tests/test_foreman_seat.py` (config
-  refusals, cheapest-adequate selection, the fallback row, an inadequate row
-  refused before launch, the selected tier is what launches, live-argv proof
+  refusals, the coordination row holding against a cheaper adequate row, a
+  table without a coordination row refused, an inadequate row refused before
+  launch, the selected tier is what launches, live-argv proof
   and mismatch, the unconfigured warning, the plan refusal) and two
   `test_round_preflight.sh` cases (mismatch blocks, unconfigured warns).
 
@@ -87,6 +87,27 @@
   form throughout; and the judge's second adjudication trigger is no longer a
   "foreman override", which presumed a substance opinion the foreman no longer
   holds, but a report label the classifier gate contradicts.
+
+  The next review of #616 found two more gaps, fixed together with three
+  Copilot findings. The selector first scanned every tier row and launched the
+  cheapest one the capability table recorded adequate, so a `mechanical` row
+  could replace the operator's `coordination` row, below the configured-row
+  floor Round Tiers holds every seat to; it now resolves the `coordination`
+  row through `select_tier` and only assesses it. The round preflight ran
+  `verify-foreman` after `measure` but regardless of its result, so a failed
+  measurement verified the foreman against a stale or absent snapshot while
+  the aggregate-reporting carve-out promised independent checks; a failed
+  `measure` now records `checks.foreman_tier` as a dependency failure without
+  running it, and `--no-measure` still verifies on the latest snapshot.
+  `assess-specialist` copied the caller's `outcome` and `summary` unchecked,
+  so a receipt could claim a result its report never stated; the owner now
+  refuses either one the bound report does not contain (`require_quoted`,
+  whitespace runs collapsed). The schema-1 migration matched JSON `true` as
+  version 1 and rewrote a corrupt record into a valid one; it now requires an
+  integer. A `report_undeclared` record holding any class other than `design`
+  now reads as corrupt. Tests: `test_foreman_seat.py`,
+  `test_round_preflight.sh` (a failed measure, `--no-measure`) and
+  `test_engagement.py`.
 
 ## 0.3.319 — 2026-09-28
 
