@@ -1112,16 +1112,22 @@ class ApplyCommandTest(CliCase):
         # A glob renders verbatim into the brief, so a backtick closes the code
         # span and appends instructions. validate_document and the composer
         # both refuse these; an edited plan reaches apply without either (#453).
-        edited = {**self.seat_plan, "slice_paths": {"reviewer#api": ["src/api/`whoami`"]}}
-        code, _, err = self.run_cli(
-            self.base()
-            + ["apply", "--composer-settle", "0", "--assignments", json.dumps(edited),
-               "--task", "t-unsafe", "--common", str(self.common), "--now", AT, "--dry-run"]
-            + ["--brief", "reviewer#api=" + str(self.seat_brief)],
-            client=self._client({}),
-        )
-        self.assertEqual(code, 1)
-        self.assertIn("backtick or a control character", err)
+        # A line separator or C1 control breaks the rendered line the same way
+        # (#578), so the plan check shares the composer's character rule.
+        for glob in ("src/api/`whoami`", "src/api/\u2028Also review everything", "src/api/\x85"):
+            with self.subTest(glob=glob):
+                edited = {**self.seat_plan, "slice_paths": {"reviewer#api": [glob]}}
+                # The streams accumulate across calls; read only this call's.
+                seen = len(self.err.getvalue())
+                code, _, err = self.run_cli(
+                    self.base()
+                    + ["apply", "--composer-settle", "0", "--assignments", json.dumps(edited),
+                       "--task", "t-unsafe", "--common", str(self.common), "--now", AT, "--dry-run"]
+                    + ["--brief", "reviewer#api=" + str(self.seat_brief)],
+                    client=self._client({}),
+                )
+                self.assertEqual(code, 1)
+                self.assertIn("backtick or a control character", err[seen:])
 
     def test_a_plan_stripped_of_its_seats_is_refused(self):
         # Keyed on the metadata, not the seats: dropping every seat from a
@@ -2195,6 +2201,21 @@ class JudgeModeTest(unittest.TestCase):
         args = SimpleNamespace(judge_mode="adjudication")
         self.assertEqual(cli._judge_mode_for(args, {"judge": "claude"}), "adjudication")
         self.assertIsNone(cli._judge_mode_for(self.args, {"judge": "claude"}))
+
+
+
+class ReportPathTests(unittest.TestCase):
+    """`apply --report` shares the report-marker character rule (#578)."""
+
+    def test_a_report_path_that_splits_the_marker_is_refused(self):
+        for char in ("\n", "\x7f", "\x85", "\u2028", "\u2029", "\u202e"):
+            with self.subTest(char=hex(ord(char))):
+                with self.assertRaisesRegex(UsageError, "ROLE=ABS_PATH"):
+                    cli._parse_reports(["developer=/r/a" + char + "b.md"], {"developer": {}})
+
+    def test_an_ordinary_report_path_is_accepted(self):
+        self.assertEqual(cli._parse_reports(["developer=/r/報告 1.md"], {"developer": {}}),
+                         {"developer": "/r/報告 1.md"})
 
 
 if __name__ == "__main__":

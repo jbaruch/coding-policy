@@ -157,12 +157,27 @@ class MarkerFitTests(unittest.TestCase):
         self.assertEqual(json.loads(absent)["agent_status"], "unknown")
 
     def test_every_control_character_is_refused_before_herdr(self):
-        for char in ("\t", "\x7f", "\x85", "\x9b", " ", " "):
+        for char in ("\t", "\x7f", "\x85", "\x9b", "\u2028", "\u2029", "\u202e", "\ue000"):
             with self.subTest(char=hex(ord(char))):
                 runner = self.runner("codex", 200)
                 code, out, errors = self.run_cli(runner, report="/r/a" + char + "b.md")
                 self.assertEqual((code, out), (1, ""))
                 self.assertIn("one-row", errors)
+                self.assertEqual(runner.calls, [])
+
+    def test_probe_report_refuses_the_same_characters_before_herdr(self):
+        # One rule for every report-path entry point (#578): probe-report
+        # formerly refused only C0 controls.
+        for char in ("\x7f", "\x85", "\u2028", "\u2029", "\u202e"):
+            with self.subTest(char=hex(ord(char))):
+                runner = self.runner("codex", 200)
+                output, errors = io.StringIO(), io.StringIO()
+                with patch.object(sys, "stdin", io.StringIO("visible")):
+                    code = cli.main(["probe-report", "--agent", "worker", "--pane", PANE,
+                                     "--report", "/r/a" + char + "b.md", "--lines", "40"],
+                                    stdout=output, stderr=errors, client=HerdrClient(runner=runner))
+                self.assertEqual((code, output.getvalue()), (1, ""))
+                self.assertIn("one-row report path", errors.getvalue())
                 self.assertEqual(runner.calls, [])
 
     def test_an_agent_record_without_a_pane_is_a_herdr_failure(self):

@@ -1,5 +1,36 @@
 # Changelog
 
+### Fixed
+
+- **Every Herdr brief path and report marker now refuses the same characters,
+  from one shared check (#578).** `compose-briefs.sh` validated `REPORT`,
+  `POLICY_INDEX` and `RELEASE_SKILL` with a jq test for C0 controls and DEL
+  alone, so a report path carrying U+2028, U+2029, a private-use code point or
+  a bidi override composed cleanly and could split or reorder the worker's
+  `REPORT: <path>` marker; `REVIEW_PACKAGE` leaned on bash `[[:cntrl:]]`,
+  whose reach depends on the locale. `foreman apply --report` and
+  `foreman probe-report` refused only C0, `foreman marker-fit` (#568) refused
+  Cc plus U+2028/U+2029, and `resolve-gates.sh` (#580) kept its own
+  Unicode-category set: four rules for one question. New
+  `skills/herdr-foreman/foreman/renderable.py` owns the rule, the category set
+  #580 introduced (Cc, Cf, Cs, Zl, Zp, Co, Cn, plus a backtick inside a code
+  span), and every one of those callers now asks it: the Python entry points
+  import it, `resolve-gates.sh` imports it from its own skill directory, and
+  `compose-briefs.sh` runs `python3 -m foreman.renderable` with that directory
+  on `PYTHONPATH`, so nothing depends on an execute bit. Slice globs follow the
+  same rule in `validate-partition`, the apply-time plan check and the composer
+  (`partition.UNSAFE_GLOB` is gone). `compose-briefs.sh` now needs `python3`
+  (exit 1 without it) and exits 3 when the check cannot run, never treating an
+  unchecked path as accepted; a refusal counts only when the module's JSON
+  verdict reaches stdout, so a crash exiting 1 (a failed import) is exit 3,
+  not a misreported bad path. `resolve-gates.sh` exits 2 with a reinstall
+  instruction, never a traceback, when that module is missing, incomplete or
+  corrupt (an import, syntax or name error on load). Every template renders
+  `REPORT`, `REVIEW_PACKAGE`, `POLICY_INDEX` and `RELEASE_SKILL` inside a code
+  span, so the composer also refuses a backtick in them, as it already did in
+  slice globs. `marker-fit` is stricter than before: it also refuses format,
+  private-use and unassigned characters.
+
 ## 0.3.321 — 2026-09-28
 
 ### Fixed
