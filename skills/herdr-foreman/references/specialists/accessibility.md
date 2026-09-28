@@ -22,7 +22,7 @@ accessibility skill. State which checks those tools can actually perform.
 - Does a finding reproduce in the affected environment? Distinguish a detected
   issue, a risk needing manual verification, and a check the tools cannot run.
 - Which fix restores an accepted requirement? Identify proposed additional
-  support separately for the operator's scope decision.
+  support separately for the foreman's scope decision.
 
 ## Deliverable
 

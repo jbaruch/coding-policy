@@ -115,11 +115,6 @@ a diff nor a plan is refused.
 }
 ```
 
-Who writes it: the foreman copies the surfaces the operator's request names.
-When the request names none, the foreman does not infer them from the task; an
-`advisor` consultation, planned first as a `writes_repository: false` round,
-delivers this file as its deliverable.
-
 `added` and `changed` are repo-relative paths the round will create or edit.
 `package_lines` states the lines the round will change in a package, for the
 architect trigger's size. `cli_surface` names the declared CLI spec paths the
@@ -160,7 +155,7 @@ specialty; which role and which specialty answer each trigger are the
 `skills/herdr-foreman/foreman/triggers.py`, and the detection payload names
 the one it accepted. An advisor staffed for a fired `security` trigger is
 planned with round context `{"advisor": {"security_trigger": true}}`, which
-selects its judgment round (`skills/herdr-foreman/references/model-tiers.md`).
+selects its judgment round (`references/model-tiers.md`).
 
 A staffing decision answers a fired trigger instead, and the detector reads it:
 
@@ -251,11 +246,8 @@ plan, apply, assessment, observation and follow-up.
 
 State the question the specialist must settle, why its answer matters now, the
 accepted behavior, scope, relevant prior decisions, available inputs, permitted
-actions and stopping condition. Quote the question from the operator's request,
-the report that raised it, or the trigger detection that fired it; the foreman
-frames no question from its own reading of task content. The acceptance
-criteria are the ones the report will mark `met` or `unmet`, one
-`ACCEPTANCE <k>/<N>:` line each, numbered in the order the brief states them. Supply the source paths and revisions, useful project lessons, and
+actions and stopping condition. Define what the foreman will inspect to accept
+the result. Supply the source paths and revisions, useful project lessons, and
 the selected profile's applicable questions in the brief. The worker should
 not need an earlier conversation to reconstruct its assignment.
 
@@ -265,7 +257,7 @@ gap to resolve or report; do not claim visual inspection, user research,
 assistive technology coverage or measurements that the worker cannot perform.
 Avoid activating adjacent specialist workflows solely from a changed filename.
 
-Compose each consultation with `skills/herdr-foreman/templates/brief-specialist.md` through the
+Compose each consultation with `templates/brief-specialist.md` through the
 composer; its canonical consultation roles select that shared template. Supply
 `TASK`, `SPECIALTY`, `RESPONSIBILITY`, `OBJECTIVE`, `ACCEPTANCE_CRITERIA`, `INPUTS`,
 `TOOLS_AND_SKILLS`, `SCOPE_LIMITS`, `CONTRIBUTION_HISTORY`, `KNOWLEDGE` and `REPORT`,
@@ -285,18 +277,10 @@ its genuine block is recorded; idle bench membership creates no monitoring job.
 ## Assess specialist work
 
 Confirm delivery through the normal report checkpoint and save its successful
-JSON output. Read the actual report in full. The foreman does no heavy lifting
-and does not re-assess a consultation's substance
-(`rules/agent-team-operation.md` Foreman Seat). The outcome is the report's own
-`ACCEPTANCE <k>/<N>: met|unmet` lines, one per criterion; a reviewer's or
-tester's is its single `VERDICT:` line. The contribution is the report's
-`CONTRIBUTION:` line, and a report without one records `design`. The owner
-refuses the assessment, and a warm follow-up on it, when a line is missing,
-duplicated, unresolved or without evidence, or a criterion is `unmet`
-(`require_report_result` in `skills/herdr-foreman/foreman/engagement.py`); the
-consultation returns to its responsibility with the gap named. A dispute over whether a
-consultation met its criteria goes to an independent reviewer, and a contested
-verdict from that reviewer to the judge.
+JSON output. Read the actual report in full. Inspect the requested artifact and
+source evidence, then assess the assignment outcome and what the worker
+contributed. A worker's contribution claim is an input to that judgment, not
+the judgment itself.
 
 Run the installed `skills/herdr-foreman/foreman.sh` with explicit `bash` and
 the plugin root resolved by the skill. This synopsis names its owner command:
@@ -320,19 +304,13 @@ the supervision member, the worker's report path, and the saved delivery path:
 }
 ```
 
-`outcome` and `summary` quote the report's acceptance lines and answer; the
-owner refuses either one the bound report does not contain.
-`contribution` is optional input: the owner derives it from the bound report's
-`CONTRIBUTION:` line, records `design` when there is none, and refuses a supplied
-value that disagrees (`declared_contribution` in
-`skills/herdr-foreman/foreman/engagement.py`). A declared `design` or
-`implementation` counts as a contribution; a `none` never clears a contributor
-exclusion, which the dispatch's recorded role, round and reviewer scope decide
-(`_contributor` in `skills/herdr-foreman/foreman/composition.py`). The delivery file must be the successful
+`outcome` and `summary` record the foreman's actual assessment and rationale.
+`contribution` is `none`, `design` or `implementation`; classify the substantive
+work rather than its current role. The delivery file must be the successful
 `wait-report.sh` JSON receipt for that worker and report, with `found: true`, or
 the unchanged owner `recover-report` result for that exact dispatch and report.
 For native delivery missed by the watcher, complete recovery under
-`skills/herdr-foreman/references/dispatch-recovery.md` first and save its actual output. The assessment
+`references/dispatch-recovery.md` first and save its actual output. The assessment
 owner checks recovered output against the saved recovery record; an edited or
 invented receipt does not establish delivery.
 Use an actual dispatch identity and matching report path; never invent history
@@ -372,8 +350,8 @@ context. Obtain another qualified worker for independent assessment of a
 contributor's work. Keep the ordinary reviewer and tester gates intact.
 
 An unassessed consultation is unresolved contribution history. Assess it before
-relying on that worker's independence. A `none` assessment records that the
-report declared no contributing work; a design or implementation contribution remains
+relying on that worker's independence. A `none` assessment records that the foreman
+verified no contributing work; a design or implementation contribution remains
 part of the task history across role, model and session changes. Obtain a
 different qualified worker for the independent gate when the subject includes
 that contribution.
@@ -383,7 +361,7 @@ history retains unknown scope, and architecture work remains a possible
 contribution until assessed against actual output. The owner never infers
 independence from a newer schema stamp. External authors and work without usable
 task provenance still need the foreman's explicit exclusions. Follow the planning
-contract in `skills/herdr-foreman/references/round-setup.md` Step 5 rather than reclassifying history
+contract in `references/round-setup.md` Step 5 rather than reclassifying history
 from a worker's current label.
 
 Keep a useful worker idle after its report when follow-up is likely and capacity

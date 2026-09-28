@@ -88,9 +88,6 @@ Write `{{REPORT}}` covering:
 - Open questions for the reviewer.
 - For a bug, the reproduction, working comparison, causal explanation,
   counterfactual result, and remaining uncertainty.
-- When this brief asks for one, a proposed review partition of your pushed
-  change in the `skills/herdr-foreman/references/review-partition.md` format. The foreman proves it
-  with `validate-partition` before any seat is planned on it.
 
 Final chat message ends with exactly:
 

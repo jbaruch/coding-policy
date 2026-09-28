@@ -61,22 +61,12 @@ reviewer and tester gates.
 
 Write `{{REPORT}}` with:
 
-- The assigned question and the answer or artifact.
-- One line per acceptance criterion, numbered 1..N in the order the brief
-  states them: `ACCEPTANCE <k>/<N>: met — <evidence>` or
-  `ACCEPTANCE <k>/<N>: unmet — <evidence>`. The owner script parses these
-  lines; a missing, duplicated or unresolved line, one without evidence, or any
-  `unmet`, returns the report to you. The foreman does not re-assess the
-  substance.
-- `CONTRIBUTION: none | design | implementation` — the class of the content you
-  originated or materially shaped. The owner script reads this line from
-  your report; an omitted line records as `design`. A `none` is your own word
-  and never clears you for independent verification of this task.
+- The assigned question and the answer or artifact, with acceptance evidence.
 - Evidence inspected, source revisions, experiments and actual results.
 - Facts, recommendations, hypotheses and unresolved gaps distinguished.
 - For each finding, its severity, the accepted behavior it serves and the
   observable effect of the proposed correction. Identify added obligations for
-  the operator's scope decision; a finding cannot authorize them.
+  the foreman's scope decision; a finding cannot authorize them.
 - Material contributions to the proposed solution, decisions needing user
   attention, and evidence-linked lesson candidates with their project scope.
 

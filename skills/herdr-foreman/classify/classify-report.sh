@@ -12,10 +12,9 @@
 # prose or it is nowhere.
 #
 # The answer set carries `insufficient_evidence`, and that value routes the
-# question back to the report's own `VERDICT:` line and labels, which the foreman
-# gates on; a report without them returns to its responsibility. This never
-# suppresses reading the report (#482): it annotates, so the foreman can gate
-# several reports in one turn instead of one turn each.
+# question back to the reasoning round -- here, the foreman reads the report as it
+# always has. This never suppresses that read (#482): it annotates, so the foreman
+# can gate several reports in one turn instead of one turn each.
 #
 # One adapter per kind the fleet already runs. A classifier pinned to one vendor
 # is useless exactly when that vendor's subscription is spent, which is the

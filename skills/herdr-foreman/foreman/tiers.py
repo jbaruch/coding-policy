@@ -41,9 +41,9 @@ JUDGMENT_ROUNDS = frozenset({
 #: is pre-development preparation that passes nothing: neither is a gate, so
 #: neither carries the judgment floor (#518). A consultation that must settle
 #: something is planned on `reconciliation` or `architect` explicitly.
-#: `coordination` is the foreman's own round: dispatch, owner scripts and
-#: evidence gates, never task content (#601). It carries no judgment floor, so
-#: the configured row and the capability table decide its model and effort.
+#: `coordination` is the foreman seat's own round (#601). It carries no
+#: judgment floor, so the configured row and the capability table decide its
+#: model and effort.
 FOREMAN_ROLE = "foreman"
 COORDINATION_ROUND = "coordination"
 ROUNDS = JUDGMENT_ROUNDS | {"build", "fix", "mechanical", "release_mechanics", "consultation", "test_plan",
@@ -307,7 +307,7 @@ def verify_worker_permissions(kind, argv):
     key so approval overrides cannot hide.
     """
     recovery = ("Inspect its foreground argv, then start a fresh worker with the documented YOLO flags "
-                "or restore a retained developer's own native session under skills/herdr-foreman/references/dispatch-recovery.md before dispatch.")
+                "or restore a retained developer's own native session under references/dispatch-recovery.md before dispatch.")
     if (kind not in YOLO_FLAGS or not isinstance(argv, list) or not argv
             or any(not isinstance(arg, str) for arg in argv) or PurePath(argv[0]).name != kind):
         raise HerdrError("Worker has no usable YOLO process proof. " + recovery, {})

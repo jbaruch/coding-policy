@@ -34,8 +34,6 @@ description: Running a multi-agent team — task-based specialist composition, c
 
 ## Foreman Seat
 
-- The foreman does no heavy lifting
-- Every judgment on task content goes to the responsible worker, or to the operator where operator authority is required
 - The operator's `config.json` `foreman` block declares the seat like a worker: its agent, kind, launch options and an optional tier table
 - The operator's tier table supplies the foreman's rows, as it does for every worker
 - No rule, plugin default or hardcoded value pins the foreman's model or effort
@@ -49,31 +47,7 @@ description: Running a multi-agent team — task-based specialist composition, c
 - The round preflight proves the running foreman's argv carries the selected tier, after it measures headroom
 - A running tier other than the selected one blocks the round
 - An absent `foreman` block is a visible preflight warning naming the configure command, never a round block
-- The foreman dispatches, runs owner scripts, keeps the foreman-owned records, and gates on evidence
-- The foreman never reasons through task content
-- Task content is the assigned work's deliverables, findings, outcomes and quality
-- The task ledger, retrospective notes and working memory cite worker reports or gate evidence, by quote or path, for every statement about task content
-- The foreman's own entries in those records are process observations of dispatch, timing, staffing, supervision and handoff
-- Acceptance rests on independent reviewer and tester reports, CI, oracle verification and the report-verdict classifier gate
-- The foreman gates on a report's verdict lines and labels, never on its own assessment of the substance
-- Recording a report's verdict, a validated partition or an operator's answer in a foreman-owned record is bookkeeping, never an assessment of task content
-- The foreman never substitutes its own reading for a missing or unusable report
-- A reviewer or tester report missing its `VERDICT:` line, or a blocking finding's severity or scope label, returns to its responsibility with the gap named
-- A brief carries the operator's request verbatim and quotes the reports and findings it acts on
-- The foreman writes no acceptance criterion, diagnosis, correction proposal or recommendation of its own
-- Judgment the foreman would otherwise make routes to the worker or operator each line names:
-  - A finding's severity and scope — the reviewer or tester that raised it
-  - A contested label or verdict — the judge in adjudication mode
-  - An investigation-only deliverable against its request — an independent reviewer
-  - A consultation's acceptance — its report's `met`/`unmet` lines
-  - A dispute over a consultation's `met`/`unmet` lines — an independent reviewer
-  - Pre-implementation surfaces or acceptance criteria the operator's request does not state — an advisor consultation
-  - An added obligation or changed scope — the operator, from the reporting worker's proposal
-  - A review partition — the developer's report proposes it and `foreman validate-partition` proves it
-  - A bug's reproduction and causal diagnosis — the developer and tester, verified by the tester and reviewer
-  - Recurring findings, unclear causality or a stalled worker's recoverable partial work — the investigator
-  - A non-converging fix loop — the investigator, then the judge in diagnosis mode
-- The routes and their gate contracts are in `skills/herdr-foreman/SKILL.md` and `skills/herdr-foreman/references/model-tiers.md` Foreman Seat
+- The seat's config, selection and launch contracts are in `skills/herdr-foreman/references/model-tiers.md` Foreman Seat
 
 ## Team Composition
 
@@ -122,9 +96,7 @@ description: Running a multi-agent team — task-based specialist composition, c
 - An available profile reserves no worker and creates no active assignment
 - Preserve useful specialist sessions for likely follow-up work
 - Persist specialist lessons through the existing scoped memory owner
-- Record delivered report evidence and the contribution the report declares before relying on a consultation outcome
-- A report declaring no contribution class records `design`
-- A worker's own `CONTRIBUTION: none` never clears a contributor exclusion
+- Record delivered report evidence and the foreman's contribution assessment before relying on a consultation outcome
 - Narrow exception for retaining an assessed consultation's context.
 - Preconditions (all required):
   1. The foreman requests `--retain-specialist` for one advisor, investigator or architect assignment
@@ -139,7 +111,7 @@ description: Running a multi-agent team — task-based specialist composition, c
 ## Judge Seat
 
 - The reserved `judge` seat runs on the most capable model available and holds no other responsibility
-- The foreman dispatches the judge in adjudication mode for one of three triggers: a contested reviewer or tester verdict, a report label the classifier gate contradicts, or a bot finding the team disagrees with
+- The foreman dispatches the judge in adjudication mode for one of three triggers: a contested reviewer or tester verdict, a foreman override of a blocking finding, or a bot finding the team disagrees with
 - The foreman dispatches the judge in diagnosis mode at an exhausted allowance with blocking work remaining, on the investigator's assessment
 - Every judge dispatch declares which mode it is for, at plan and at apply
 - An undeclared mode is refused, never defaulted
@@ -419,20 +391,19 @@ description: Running a multi-agent team — task-based specialist composition, c
 - Commits present and unpushed are completed work with a failed transport, recovered through `skills/herdr-foreman/references/dispatch-recovery.md`
 - Commits present and already pushed are completed work whose report did not arrive; they are recovery evidence, never a retryable dispatch
 - A stalled worker's output is unreviewed
-- Recoverable partial work goes to an investigator consultation, which reports what it holds
-- The foreman re-dispatches that work with the investigator's report attached, or records discarding it as an operator decision
+- Re-dispatch that work with the observed state described, or discard it
 - Never commit a stalled worker's partial work on the strength of the tree building or the conflict count reaching zero
 - A stall records a user-attention obligation through `skills/herdr-foreman/references/attention.md`
 - The classification and its evidence shape are `skills/herdr-foreman/wait-report.sh`'s `--worktree` contract
 
 ## Assignment Reasoning
 
-- Preserve the operator's accepted behavior verbatim, separately from any worker's implementation proposal
-- The reviewer or tester that raises a blocking finding labels its scope against that accepted behavior
+- Preserve the operator's accepted behavior separately from the foreman's implementation proposal
+- Classify proposed corrections against that accepted behavior before dispatch
 - Resolve required corrections within existing authority and correction allowances
-- Record a contract expansion or an unresolved interpretation as an operator decision before requesting it
+- Record a new contract obligation or unsettled operator choice before requesting its decision
 - Route contested findings through the existing judge triggers
-- A report naming a recurring causal theme routes to the investigator before another fix is dispatched
+- Reassess a repeated causal theme against observed progress before proposing another fix
 - Require bug briefs and diagnostic assessments to follow `skills/herdr-foreman/references/assignment-reasoning.md`
 
 ## Worker Launch Mode
@@ -579,7 +550,6 @@ description: Running a multi-agent team — task-based specialist composition, c
 - Exclude actual design and implementation contributors from independent verification of that task
 - A role, model or session change never erases contribution history
 - Treat unassessed possible contributions as unresolved independence evidence
-- A self-declared contribution class follows Specialist Consultations
 - Record legacy reviewer responsibilities as unknown until evidence establishes their contribution
 - Before a PR exists, the developer's own evidence is the branch CI its push triggered
 - On an open PR, the developer reads that evidence with `skills/release/poll-pr-reviews.sh`, never the pre-merge watch

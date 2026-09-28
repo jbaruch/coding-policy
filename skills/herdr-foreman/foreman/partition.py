@@ -14,8 +14,8 @@ clean slice in the result, and an overlap makes two verdicts answer for one
 file while neither owns it.
 
 This module decides that, and nothing else: it never chooses slices, never
-assigns workers, and never reads a report. The developer's report proposes the
-partition; the planner seats it; this says whether it can carry a verdict.
+assigns workers, and never reads a report. The foreman writes the partition; the
+planner seats it; this says whether it can carry a verdict.
 
 Contract:
 

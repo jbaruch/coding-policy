@@ -2,225 +2,35 @@
 
 ### Changed
 
-- **The Herdr foreman does no heavy lifting, every judgment it used to make
-  routes to a worker, and its tier is selected like every other seat's
-  (#601).** The operator's decision on #445: all heavy lifting goes to
-  workers. `rules/agent-team-operation.md` said the foreman ran on the
-  strongest generally-available model at high effort, which the #445 audit
-  named as the cost driver: a strong model at high effort spending its tokens
-  on coordination. A new Foreman Seat section replaces that bullet, and names
-  no model or effort: on #616 the operator ruled "don't pin the foreman to a
-  named model, let the system figure it out", since tier selection already
-  assesses the needed effort. The foreman dispatches, runs owner scripts, keeps its
-  records and gates on evidence (reviewer and tester reports, CI, oracle
-  verification, the report-verdict classifier gate); it never reasons through
-  task content and never substitutes its own reading for a missing report. The
-  pinned judge keeps the most capable model.
-
-  Walking `skills/herdr-foreman/SKILL.md` step by step found these points where
-  the foreman did judgment work itself, now routed to existing roles (none
-  added): unstated acceptance criteria (Step 1) and unnamed pre-implementation
-  surfaces (Step 5) go to an advisor consultation; which consultation a
-  question needs comes from the report or trigger that raised it; a review
-  partition is proposed in the developer's report and proved by
-  `validate-partition`; a bug brief's diagnosis belongs to the developer and
-  tester (Step 7); a consultation's outcome and contribution are its report's
-  own `met`/`unmet` and new `CONTRIBUTION:` lines, an undeclared contribution
-  recording `design` (Step 11); a stalled worker's recoverable partial work goes
-  to the investigator (Step 11); a finding's severity and scope are the labels
-  its reviewer or tester wrote, with new `required-correction` /
-  `contract-expansion` / `unresolved-interpretation` scope labels in both
-  templates (Step 12); a contested label, the foreman's own disagreement
-  included, goes to the judge; an investigation-only deliverable is assessed by
-  an independent reviewer; recurring findings go to the investigator. A report
-  missing a verdict or label returns to its responsibility instead of being
-  filled in. Step 12's classifier paragraph is untouched here; #531 owns it.
-
-  The foreman's tier now comes from the same selection machinery as every
-  seat's. A top-level `foreman` block in `config.json` declares the seat like a
-  worker: agent, kind, launch options and an optional tier table (without one,
-  the table of the first configured worker of its kind). A `model` or `effort`
-  field is refused; the agent may not be a worker's or the judge's. A new
-  `coordination` round type, needing `mechanical-execution` in
-  `ROUND_CAPABILITIES`, is the foreman's round: the table's `coordination` row
-  runs through `select_tier` with the seat's measured headroom, and the
-  capability table assesses that row, refusing it when recorded inadequate. `config.example.json`
-  declares the foreman with no model and gives each worker table a
-  `coordination` row mirroring its `mechanical` one. `plan --roles foreman` is
-  refused. New `foreman start-foreman --pane` launches the selected tier and
-  proves it from the launch argv; new `foreman verify-foreman` re-runs the
-  selection and proves the running foreman's foreground argv carries it. Both
-  also emit the #602 `selection` record for the seat, the one `plan` never
-  selects. The
-  round preflight runs it as `checks.foreman_tier`: a running tier other than
-  the selected one blocks the round, and an absent `foreman` block is an
-  `unconfigured` status with a stderr warning and the configure command, not a
-  block. A context reset keeps the pane's process, so the proven tier survives
-  it. Tests: `skills/herdr-foreman/tests/test_foreman_seat.py` (config
-  refusals, the coordination row holding against a cheaper adequate row, a
-  table without a coordination row refused, an inadequate row refused before
-  launch, the selected tier is what launches, live-argv proof
-  and mismatch, the unconfigured warning, the plan refusal) and two
-  `test_round_preflight.sh` cases (mismatch blocks, unconfigured warns).
-
-  Review of #616 then found four gaps. The foreman's headroom lookup read its
-  own agent name from the snapshot, but `measure` probes configured workers
-  only, and the foreman cannot `/usage`-probe the pane it runs in, so the value
-  was always null. The `foreman` block now takes a `window_group`, and the
-  seat's headroom is the minimum measured reading across the workers in that
-  window, the way `plan` charges a shared window (`_foreman_headroom`); the
-  preflight now verifies the foreman after `measure`, not before. Step 12 still
-  told the foreman to look twice where a classifier label disagreed with its
-  own reading; that disagreement now goes to the reviewer or judge.
-  `assess-specialist` trusted a caller-supplied contribution class, so a
-  foreman could record `none` for a report that declared nothing; the owner
-  now derives it from the bound report's `CONTRIBUTION:` line
-  (`declared_contribution`), records `design` when there is none, and refuses
-  a disagreeing supplied value, with the line added to the reviewer and
-  tester report templates. That changed what the record's fields mean, so
-  specialist assessments move to record schema 2 with `contribution_source`;
-  the owner migrates a schema-1 record on load, keeping its values under
-  `foreman_assessment`. Three earlier findings closed in the same round: the
-  reviewer and tester report templates now require a `VERDICT: blocking |
-  approved` line, the one the foreman gates on (the classifier's answer set);
-  SKILL.md's cross-references use the repo-relative `skills/herdr-foreman/...`
-  form throughout; and the judge's second adjudication trigger is no longer a
-  "foreman override", which presumed a substance opinion the foreman no longer
-  holds, but a report label the classifier gate contradicts.
-
-  The next review of #616 found two more gaps, fixed together with three
-  Copilot findings. The selector first scanned every tier row and launched the
-  cheapest one the capability table recorded adequate, so a `mechanical` row
-  could replace the operator's `coordination` row, below the configured-row
-  floor Round Tiers holds every seat to; it now resolves the `coordination`
-  row through `select_tier` and only assesses it. The round preflight ran
-  `verify-foreman` after `measure` but regardless of its result, so a failed
-  measurement verified the foreman against a stale or absent snapshot while
-  the aggregate-reporting carve-out promised independent checks; a failed
-  `measure` now records `checks.foreman_tier` as a dependency failure without
-  running it, and `--no-measure` still verifies on the latest snapshot.
-  `assess-specialist` copied the caller's `outcome` and `summary` unchecked,
-  so a receipt could claim a result its report never stated; the owner now
-  refuses either one the bound report does not contain (`require_quoted`,
-  whitespace runs collapsed). The schema-1 migration matched JSON `true` as
-  version 1 and rewrote a corrupt record into a valid one; it now requires an
-  integer. A `report_undeclared` record holding any class other than `design`
-  now reads as corrupt. Tests: `test_foreman_seat.py`,
-  `test_round_preflight.sh` (a failed measure, `--no-measure`) and
-  `test_engagement.py`.
-
-  The following policy review found Herdr surfaces still assigning the
-  foreman judgments the Foreman Seat routes elsewhere; the whole
-  `skills/herdr-foreman` tree was swept in one round. Scope decisions on added
-  obligations belong to the operator, not the foreman
-  (`templates/brief-specialist.md`, the accessibility and UX-product profiles,
-  and the `role_clear.py` / `recovery.py` refusals now say so);
-  `references/attention.md` no longer calls artifact acceptance and changed
-  scope "foreman judgments" but routes them to the reports' `met`/`unmet` lines,
-  the reviewer and tester verdicts, and the operator's recorded answer;
-  `partition.py` says the developer's report proposes the partition;
-  `members.py`'s `accepted` meaning and the ledger's `decision`/`assessment`
-  columns rest on the report verdicts and gate evidence rather than the
-  foreman's own verification; Step 16 completes a task on the Step 12 reports.
-  The rule gains two bullets: recording a report's verdict, a validated
-  partition or an operator's answer is bookkeeping, not an assessment of task
-  content (retrospective notes, attention priority and working-memory curation
-  stay foreman-owned records), and an added obligation or changed scope routes
-  to the operator. Two Copilot findings closed with it: `record-report` trusted
-  the caller's `verdict` field while the templates made the report's `VERDICT:`
-  line the gate, so a report could omit or contradict it; the owner now
-  refuses a receipt whose `verdict` differs from the single verdict the report
-  states (`report_verdicts` in `recovery.py`). The round preflight treated
-  `measure`'s zero exit as a measurement even when its output was unreadable
-  and the headroom check recorded `blocked`; `verify-foreman` now runs only
-  when the recorded headroom check passed. Tests: `test_recovery.py`,
-  `test_recovery_cli.py`, `test_round_preflight.sh`.
-
-  The next review found three more gaps. The Foreman Seat's opener said every
-  task-content judgment goes to a worker while its route list sent added
-  obligations to the operator; the opener, the route lead-in and SKILL.md's
-  routing table now route to the responsible worker, or to the operator where
-  operator authority is required. The preflight skipped `verify-foreman` when
-  headroom failed, so an absent `foreman` block read as a block instead of the
-  `unconfigured` warning; a new `verify-foreman --config-only` reads config
-  presence without selecting or probing, and the preflight uses it on that
-  path. `assess-specialist` accepted any report substring as the outcome, so a
-  report with no acceptance-status lines could be recorded as assessed and
-  satisfy a retained follow-up; the specialist brief now asks for one
-  `ACCEPTANCE <k>/<N>: met|unmet — <evidence>` line per criterion, and the
-  owner (`require_report_result` in `engagement.py`) refuses the assessment
-  and the warm follow-up when a line is missing, duplicated or unresolved, or
-  a criterion is `unmet`. A reviewer or tester assessment needs its single
-  `VERDICT:` line. Tests: `test_engagement.py`, `test_foreman_seat.py`,
-  `test_round_preflight.sh`.
-
-  The following review found three more. The Foreman Seat claimed capability
-  and headroom choose the tier with no config field pinning it, while the
-  operator's `coordination` row is the pick and headroom only declines a
-  discretionary escalation; the rule, `references/model-tiers.md`, SKILL.md and
-  the `_select_foreman_tier` docstring now say exactly that: the operator's
-  tier table supplies the foreman's rows, no rule, plugin default or hardcoded
-  value pins its model or effort, `select_tier` resolves the `coordination` row
-  with measured headroom, and the capability table refuses an inadequate row.
-  No selector change: a cheaper row still never substitutes for coordination.
-  The preflight takes the aggregate-reporting carve-out, whose checks must be
-  independent, yet its foreman-tier check depended on the headroom check; a
-  new `skills/herdr-foreman/foreman-tier-check.py` runs the measurement and the
-  tier proof as one composite check, and the preflight records its
-  `headroom`/`foreman_tier` pair, failing both rows when the composite cannot
-  decide. Bare cross-references (`references/...`, `templates/...`,
-  `foreman/...`, `state-schema.md`) in this PR's files are now repo-relative.
-  Two Copilot findings folded in: `report_verdicts` collapsed duplicate
-  `VERDICT:` lines into one, so a report repeating its verdict passed the
-  exactly-one check, and an acceptance line with no evidence after the status
-  passed; both now refuse. Tests: `test_round_preflight.sh` (composite failure
-  and malformed result), `test_engagement.py`, `test_recovery.py`.
-
-  The next review found three more. "The foreman never reasons through task
-  content" conflicted with the ledger allowing "the foreman's reasoning" and
-  retrospectives asking the foreman to judge outcome and quality. Per the
-  coordinator's decision the records stay foreman-owned: the Foreman Seat now
-  defines task content (the assigned work's deliverables, findings, outcomes and
-  quality), requires the task ledger, retrospective notes and working memory to
-  cite worker reports or gate evidence for it, and limits the foreman's own
-  entries to process observations of dispatch, timing, staffing, supervision
-  and handoff. `state-schema.md`, `references/retrospectives.md`,
-  `references/task-ledger.md`, `references/working-memory.md` and the
-  retrospective refusal messages say the same. The same audit found
-  `references/attention.md` telling the foreman to add "a recommendation
-  where useful"; an attention item's `recommendation` now quotes a worker report
-  named in its sources, and the `classify-report.sh` header no longer sends an
-  `insufficient_evidence` label back to the foreman's own reading. The
-  top-level `foreman` config block is a shape change: config moves to schema 6
-  (`CONFIG_SCHEMA_VERSION`, `FOREMAN_CONFIG_VERSION`), schemas 1–5 stay
-  readable with the seat unconfigured, a `foreman` block below schema 6 is
-  refused naming the version it needs, and the operator stays the file's only
-  writer. `start-foreman` always started the agent, so a retry after success
-  failed; it now reads Herdr's record for the seat's name, and when that name
-  already runs the seat's kind in the named pane it starts nothing, proves the
-  live tier from the foreground argv and returns `replayed: true`, refusing a
-  name held elsewhere, another kind or another tier. Tests:
-  `test_foreman_seat.py` (schema 5 and 6 reads, a block below 6, replay match
-  and mismatch), `test_config.py`.
-
-  The next review found that this PR let a worker self-clear into an
-  independent seat: `_contributor` in `composition.py` let an assessment's
-  `none` clear a contributor exclusion, safe while that class was the
-  foreman's own classification but not once this PR made it the worker's own
-  `CONTRIBUTION:` line. Nothing clears a possible contribution now. For
-  independence a worker's contribution is its self-declared `design` or
-  `implementation`, which always counts, and otherwise the classification
-  recorded on its dispatch before it ran (developer, `CONTRIBUTOR_ROLES`,
-  `CONTRIBUTOR_ROUNDS`, a reviewer scope other than `verification`). A `none`,
-  whether the worker's own or a migrated foreman classification, changes
-  nothing; evidence may add friction, never remove it.
-  `_require_independent_report`, which reads the same exclusions for review
-  receipts, follows. Specialist Consultations states the rule and Review Before
-  PR references it; the three report templates tell the worker its `none` never
-  clears it. The consultation-acceptance route is split into two bullets.
-  Tests: `test_composition.py` (a self-declared `none` stays excluded, a
-  declared `design` or `implementation` excludes even a verification reviewer,
-  a non-contributor dispatch is unaffected by a declared `none`).
+- **The Herdr foreman's tier is selected and proven by the workers' own
+  machinery, never pinned (#601).** `rules/agent-team-operation.md` said the
+  foreman ran on the strongest generally-available model at high effort, the
+  cost driver the #445 audit named. On #616 the operator ruled not to pin the
+  foreman to a named model: tier selection already assesses what a round needs.
+  A new Foreman Seat section replaces that bullet. The operator's `config.json`
+  gains an optional top-level `foreman` block declaring the seat like a worker
+  (agent, kind, `window_group`, `launch_args`, optional tier table); a `model`
+  or `effort` field on it is refused, and its agent is never a configured
+  worker or the pinned judge. Config moves to schema 6; schemas 1–5 stay
+  readable with the seat unconfigured, and a block below schema 6 is refused
+  naming the version it needs. The seat's round type is `coordination`:
+  `select_tier` resolves the operator's `coordination` row with the measured
+  headroom of the seat's `window_group`, declining a discretionary escalation
+  under scarcity like any non-judgment round and never substituting a cheaper
+  row, and the capability table refuses an inadequate selected row.
+  `foreman start-foreman --pane` launches the selected tier and proves it from
+  the launch argv; it refuses a pane whose foreground holds anything but its
+  shell, and a retry replays an already-running matching seat after proving its
+  live tier, refusing another pane, kind or tier. `foreman verify-foreman`
+  proves the running foreman from its live argv; `--config-only` reads only
+  whether the block exists. The round preflight runs the headroom measurement
+  and the tier proof as one composite check, `foreman-tier-check.py`, and
+  records its `checks.headroom` and `checks.foreman_tier` rows: a running tier
+  other than the selected one blocks the round, and an absent block is a
+  visible `unconfigured` warning, never a block. The pinned judge keeps the
+  most capable model. The other half of #601, routing every judgment the
+  foreman makes to a worker, moved to #625 for a design-first redo. Tests:
+  `test_foreman_seat.py`, `test_round_preflight.sh`, `test_config.py`.
 
 ## 0.3.323 — 2026-09-28
 

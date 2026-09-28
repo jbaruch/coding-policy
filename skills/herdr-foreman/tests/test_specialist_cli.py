@@ -234,14 +234,14 @@ class SpecialistCliTest(fixture.CliCase):
         result = {key: value for key, value in state["assignments"][0].items() if key != "reviewer_scope"}
         recovery.finish_dispatch(state["recovery"], record["id"], {**result, "pane_id": "w2:p1"}, 0, AT)
         prior_report = self.tmp / "prior-report.md"
-        prior_report.write_text("Proposed the interaction; implementation remains pending.\nACCEPTANCE 1/1: met — the interaction is proposed\n")
+        prior_report.write_text("Proposed the interaction; implementation remains pending.")
         delivery = self.tmp / "prior-delivery.json"
         delivery.write_text(json.dumps({"found": True, "agent": "claude", "report_path": str(prior_report)}))
         supervision.enroll(self.state, {"id": record["id"], "agent": "claude", "task": "task-1", "report": str(prior_report),
                                        "pane_id": "w2:p1", "native_session": native}, AT)
         if assess:
             engagement.record_assessment(state, self.state, {"id": "assessed", "dispatch": record["id"], "report": str(prior_report),
-                "delivery": str(delivery), "outcome": "Proposed the interaction", "contribution": "design", "summary": "implementation remains pending."}, AT)
+                "delivery": str(delivery), "outcome": "Consultation delivered", "contribution": "design", "summary": "Interaction proposal read and assessed."}, AT)
         if retire:
             supervision.resolve(self.state, {"id": record["id"], "outcome": "Consultation ended", "evidence": [str(prior_report)]}, AT)
         save_state(self.state, state)
@@ -278,11 +278,9 @@ class SpecialistCliTest(fixture.CliCase):
 
     def test_assess_command_retrieves_real_receipts_without_worker_calls(self):
         self.seed_warm_consultation(assess=False, retire=False)
-        report = self.tmp / "prior-report.md"
-        report.write_text(report.read_text() + "\nCONTRIBUTION: none\n")
         data = {"id": "assessed-via-cli", "dispatch": "prior:advisor", "report": str(self.tmp / "prior-report.md"),
-                "delivery": str(self.tmp / "prior-delivery.json"), "outcome": "Proposed the interaction",
-                "contribution": "none", "summary": "implementation remains pending."}
+                "delivery": str(self.tmp / "prior-delivery.json"), "outcome": "Delivered consultation",
+                "contribution": "none", "summary": "Read the report; no design contribution was made."}
         record = self.tmp / "assessment.json"
         record.write_text(json.dumps(data))
         code, out, err = self.invoke(["assess-specialist", "--record", str(record), "--now", AT], self._client({}))

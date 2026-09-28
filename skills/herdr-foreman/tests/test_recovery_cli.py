@@ -88,8 +88,7 @@ class RecoveryCommandTests(fixture.CliCase):
             "result": {"schema_version": 1, "task": TASK, "role": "investigator", "agent": "grok",
                        "fix_round": None, "status": "applied"}, "report": None})
         state["specialist_assessments"].append({
-            "schema_version": 2, "contribution_source": "report_declared",
-            "at": "2026-02-03T14:00:00+00:00", "id": "inv-1", "dispatch": "investigator-dispatch",
+            "schema_version": 1, "at": "2026-02-03T14:00:00+00:00", "id": "inv-1", "dispatch": "investigator-dispatch",
             "assignment_index": index, "task": TASK, "role": "investigator",
             "agent": "grok", "report": self.investigation(), "delivery": "/reports/delivery.json",
             "outcome": "delivered", "contribution": "design", "summary": "The find-rate tracks review surface area.",
@@ -732,7 +731,7 @@ class RecoveryCommandTests(fixture.CliCase):
         self.assertIn("actual blocking review", err)
         self.assertEqual(self.runner.calls, [])
         review = self.tmp / "review-6.md"
-        review.write_text("Reviewed head " + HEAD + "\nBlocking F1: an escaped quote is still mishandled.\nVERDICT: blocking\n")
+        review.write_text("Reviewed head " + HEAD + "\nBlocking F1: an escaped quote is still mishandled.\n")
         code, _, err = self.owner("record-report", {"dispatch": dispatch, "head_revision": HEAD, "verdict": "blocking",
             "review_mode": "full", "reviewer": "codex", "report": str(review), "changed_paths": ["src/parser.py"]})
         self.assertEqual(code, 0, err)

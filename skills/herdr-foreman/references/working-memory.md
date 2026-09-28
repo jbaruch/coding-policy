@@ -9,7 +9,7 @@ command emits JSON; report a non-zero command's diagnostic before continuing.
 
 ## Curate lessons
 
-After synthesizing a retrospective, inspect the current lessons. Add a lesson only when it changes a future decision or brief. State the behavior, its relevance scope, the evidence supporting it, when the foreman last verified that evidence, and when the lesson must be revalidated. Link the actual retrospective, report, review, or source document. A lesson about a task's outcome or quality cites the worker report or gate evidence that states it; the foreman's own lessons are process observations of dispatch, timing, staffing, supervision and handoff. Capture unevidenced hypotheses as unresolved stow knowledge with an explicit gap.
+After synthesizing a retrospective, inspect the current lessons. Add a lesson only when it changes a future decision or brief. State the behavior, its relevance scope, the evidence supporting it, when the foreman last verified that evidence, and when the lesson must be revalidated. Link the actual retrospective, report, review, or source document. Capture unevidenced hypotheses as unresolved stow knowledge with an explicit gap.
 
 Before planning a round or composing a brief, use `memory-list` with the relevant project, task and role scopes. Read the source and verify the lesson against current conditions before applying it. Include only applicable lessons in the brief, with their source links. A `same_bytes` observation says the local file matches its saved receipt; it does not confirm the claim or renew verification. HTTPS evidence is never fetched by these offline commands. Expired, changed or unavailable evidence requires investigation before use.
 

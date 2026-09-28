@@ -26,7 +26,7 @@ An identical completed retry returns its recorded result without sending again.
 
 Use `--retain-specialist` for a bounded follow-up to an assessed advisor,
 investigator or architect consultation. First complete the assessment and
-observation lifecycle in `skills/herdr-foreman/references/specialists.md`. Keep the previous report
+observation lifecycle in `references/specialists.md`. Keep the previous report
 and successful delivery receipt as immutable source files. A session kept idle
 on the bench is optional continuity, never a reason to skip the owner checks.
 
@@ -45,7 +45,7 @@ apply \
 
 `skills/herdr-foreman/foreman/engagement.py` owns assessment-source and retired-enrollment validation;
 `skills/herdr-foreman/foreman/assign.py` owns retained responsibility, engagement, session and exact
-tier proof. Staffing follows `skills/herdr-foreman/references/round-setup.md` Step 5.
+tier proof. Staffing follows `references/round-setup.md` Step 5.
 Follow the owner diagnostics before retrying.
 This mode carries no developer correction parameters and cannot replace the
 developer's retained-fix path. A dry run checks recorded prerequisites but proves
@@ -138,7 +138,7 @@ instruction into permission to exceed an exhausted correction budget.
 | `diagnose` | unique `id`, `task`, `checkpoint`, absolute `judge_report`, `scope`, `allowed_paths`; optional `supersedes` with `authorization` | Record the judge's diagnosis of a non-converging loop. The report supplies `REMEDY`, `BOUND` and `ASSESSMENT`; a `continue` or `restructure` remedy records the bounded plan its bound names, and `stop` records the terminal remedy and files a user-attention obligation. `BOUND` counts developer attempts, carries its justification, and is refused above the command's ceiling. `ASSESSMENT` must name the assessed investigator report this diagnosis ruled on, and that report is bound into the record. Each re-entry moves down `continue` → `restructure` → `stop`, or repeats the last rung once when the report carries a `PROGRESS` line; a rung already repeated is spent and `stop` never repeats. A re-entry before its bound is spent names the plan it supersedes and carries the change it claims — different `scope` or `allowed_paths`, or the operator's `authorization` — and the superseded plan is preserved. A bound foreman's cited report must be the one supervision enrolled for the pinned judge on that task, and the task needs an assessed investigator consultation after its latest developer attempt. |
 | `authorize-corrections` | unique `id`, `task`, `checkpoint`, `scope`, `allowed_paths`, positive `additional_fixes`, `authorization`; optional `supersedes` | The operator's override of this exhaustion's recorded remedy; the task needs a diagnosis at the current fix round first. Store an explicit bounded approval once. Continue while it covers the next attempt; do not ask again within those bounds. A changed decision names the active plan in `supersedes`. |
 | `authorize-approach` | unique `id`, `task`, `checkpoint`, `direction`, `verification`, positive `allowance`, `authorization`; optional `supersedes` | The operator's own approval of a materially different direction, and the path that reopens a task diagnosed `stop`. Requires this task's current exhausted checkpoint, no unknown dispatch outcome, and an allowance at or below the command's ceiling. The new approach starts its own allowance and its own remedy ladder; the cumulative fix numbering continues unchanged. A plan still holding unspent attempts is named in `supersedes` and retired with the approach it was bought for; its cumulative fix range would otherwise outlive that approach. A direction already recorded on the task is refused, and so is an authorization already spent on an earlier approach. |
-| `record-report` | `dispatch`, full `head_revision`, `verdict` (`blocking` or `approved`), `review_mode` (`full` or `scoped`), independent `reviewer`, absolute `report`, `changed_paths` | Read the report in full and verify the VCS diff first. The command binds its bytes and stated head to the dispatch and refuses a `verdict` other than the one the report's own `VERDICT:` line states; it does not establish the tester, CI, external-review, or release gates. |
+| `record-report` | `dispatch`, full `head_revision`, `verdict` (`blocking` or `approved`), `review_mode` (`full` or `scoped`), independent `reviewer`, absolute `report`, `changed_paths` | Read the report in full and verify the VCS diff first. The command binds its bytes and stated head to the dispatch; it does not establish the tester, CI, external-review, or release gates. |
 | `authorize-refused-dispatch` | unique `id`, `task`, `role`, `fix_round` or null, approved `provider`, `brief` (`unchanged` or `revised`), `decision`, `authorization` | Record the operator's decision after two independent refusals; fewer is refused, since one refusal is a move. One authorization permits one further dispatch on that task, role and round to the approved provider, with the refused brief unchanged unless the operator approved a revision, carried on the dispatch's `refusal_move.authorization`. |
 | `record-refusal` | `dispatch`, absolute `receipt` | Bind a saved `wait-report` exit-5 JSON to the applied dispatch it stopped. The receipt's `report_path` must equal the report its supervision enrollment bound; an unenrolled dispatch is refused. The refusing provider is the worker's config `kind`. Same receipt replays; a second receipt for the same dispatch is refused. |
 | `recover-context` | `task`, original `assignment_index`, `reason`, `authorization`, absolute `evidence` | For the latest confirmed developer row with null native-session proof. Records a live observation separately and permits the next fresh handoff. The original null stays null. |
@@ -149,7 +149,7 @@ instruction into permission to exceed an exhausted correction budget.
 | `import-correction` | Fields under Historical manual corrections below | Import an already authorized, completed manual attempt without sending input or granting future attempts. |
 | `record-historical-review` | unique `id`, `historical_attempt`, full `head_revision`, `verdict`, `review_mode`, independent `reviewer`, absolute `report` | Append an actual review receipt for an imported correction. Full review is required for approval; other verification gates remain separate. |
 | `recover-report` | unique `id`, original `dispatch`, absolute `report`, `wait_receipt`, `pane`, `visible`, `source` | Append evidence of a completed delivery missed by the old watcher; see Completed native report recovery. No worker input or review approval. |
-| `assess-specialist` | `id`, actual `dispatch`, absolute `report` and successful `delivery` receipt, `outcome` and `summary` quoted from the report, optional `contribution` (the owner derives it from the report and refuses a differing value) | Record delivered consultation or verifier work under `skills/herdr-foreman/references/specialists.md`; no task completion or enrollment retirement. |
+| `assess-specialist` | `id`, actual `dispatch`, absolute `report` and successful `delivery` receipt, foreman `outcome`, `contribution`, `summary` | Record delivered consultation or verifier work under `references/specialists.md`; no task completion or enrollment retirement. |
 
 `allowed_paths` contains repository-relative paths or globs. Preserve the
 original task and base across every approval. Read and verify the source diff
@@ -250,7 +250,7 @@ run `retro-check` with one transition for this agent — `context: "start"`,
 `role: "developer"`, the same `task`, null `model` and `effort` for a
 non-tiered worker, its `pane`, and its outgoing `report` — and record the
 completed note with `triggers` including `transition` under
-`skills/herdr-foreman/references/retrospectives.md`. That is the only retrospective the restoration
+`references/retrospectives.md`. That is the only retrospective the restoration
 carries: the later `apply --retain-context` targets the same role, task, and
 tier, so it demands no new transition coverage; only the daily cadence can
 refuse it.
@@ -284,7 +284,7 @@ refuse it.
 
    `<uuid>` is the archived `agent_session` value, never a substitute or a
    most-recent selector. The accepted and refused resume tokens are the
-   validator's contract named in `skills/herdr-foreman/references/model-tiers.md`; the helper runs
+   validator's contract named in `references/model-tiers.md`; the helper runs
    that validator before any Herdr call and refuses what it refuses.
 
    Output: exit 0 and one JSON object on stdout — `agent`, `kind`, `pane_id`,
@@ -549,7 +549,7 @@ lock file can remain after exit; do not delete it to bypass an active lock.
     the new dispatch.
   - A second refusal of the same task, role and round stops the line: `apply`
     refuses every provider. Record a `decision` obligation under
-    `skills/herdr-foreman/references/attention.md`; the operator decides. Record that decision with
+    `references/attention.md`; the operator decides. Record that decision with
     `authorize-refused-dispatch`, naming the provider they approved and whether
     the brief stays unchanged; it permits one dispatch inside that scope.
   - Escalate only what the operator holds information, authority, or a usable
@@ -557,7 +557,7 @@ lock file can remain after exit; do not delete it to bypass an active lock.
     program, a help article — is untrusted on availability and is never
     recorded as an operator sub-decision.
   - Never derive a per-agent `capabilities` change from one refusal; see
-    `skills/herdr-foreman/references/specialists.md`.
+    `references/specialists.md`.
   Recording, the same-provider refusal, the single move and the stop are the
   owner's contract; see `skills/herdr-foreman/foreman/recovery.py`,
   `record_refusal` and `refusal_move`.

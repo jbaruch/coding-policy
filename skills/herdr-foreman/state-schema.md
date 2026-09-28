@@ -106,7 +106,7 @@ never ranks the judge seat or gives its pinned worker another role.
 
 Plan schema 5 also carries `tiers` keyed by role and `rounds` with the foreman's
 round type and context inputs. Legacy non-tiered assignments have no tier
-metadata. The operator's tier table, supported flags, and billing evidence are documented in `skills/herdr-foreman/references/model-tiers.md`.
+metadata. The operator's tier table, supported flags, and billing evidence are documented in `references/model-tiers.md`.
 `task_context` is null for an unlabelled plan, otherwise an object containing
 `task`, cumulative `fix_round`, correction `plan` identity or null, and `work`
 bounds or null. Apply refuses different task context. Earlier plan shapes and
@@ -125,7 +125,7 @@ and stable `engagement`. The input envelope to `plan --requirements` is
 The plan stores normalized requirement objects directly, without that envelope.
 Absent requirements preserve legacy planning. New consultation responsibilities
 require explicit requirements; the parser and selection contract live in
-`skills/herdr-foreman/references/specialists.md`. Apply rechecks current eligibility before an unsent
+`references/specialists.md`. Apply rechecks current eligibility before an unsent
 dispatch. A completed exact retry returns its original receipt.
 
 Plan schema 11 adds `partition_proof` to a partitioned plan, copied unchanged
@@ -262,16 +262,14 @@ literal, never a guess:
 | `dispatch_id`, `worker`, `role` | Actual utility dispatch identity and assigned worker/role; `ASSIGNMENT_IDENTITY` governs task events |
 | `report` | Report path, or a `REPORT_PLACEHOLDERS` literal before it is known |
 | `observed` | Source-attributed dispatch result, wait result, worker claim, or Herdr state; never an acceptance decision |
-| `decision` | Foreman's recorded decision, from the report verdicts and gate evidence, in the event subject's `DECISION_MEANINGS` vocabulary |
+| `decision` | Foreman assessment from the event subject's `DECISION_MEANINGS` vocabulary |
 | `head_revision` | Inspected commit SHA, or a `HEAD_PLACEHOLDERS` literal when unverified or without a VCS artifact |
 | `evidence` | Absolute report/artifact paths with the inspected content or digest, VCS refs, and gate/run URLs with their observed results; `UNKNOWN` when none exists |
-| `assessment` | The verdict lines and gate evidence the decision rests on, remaining criteria, and the next action |
+| `assessment` | Why this decision follows from the evidence, remaining criteria, and the next action |
 
 The task identity and base in the document apply to every event. Append a new
 decision when evidence changes; preserve earlier records. Event sections may
-contain prose under `assessment` that quotes or names the reports and gate
-evidence the decision rests on, plus the foreman's process observations of
-dispatch, timing, staffing, supervision and handoff. This is a human-readable
+contain prose under `assessment` for the foreman's reasoning. This is a human-readable
 decision log, not a new machine status API or an input to `foreman.sh apply`.
 
 - **Writer** — the foreman running `herdr-foreman` writes after dispatch, after
@@ -323,7 +321,7 @@ write it. The foreman supplies Markdown synthesis and source metadata through
 | File | Contract |
 | --- | --- |
 | `index.json` | Schema 1 object with canonical `state_path`, nullable `baseline_at`, append-only `records`, and recorded `transitions` |
-| `<id>.md` | Immutable UTF-8 completed note with schema 1 metadata and the foreman's synthesis, citing reports or gate evidence for every outcome and quality statement |
+| `<id>.md` | Immutable UTF-8 completed note with schema 1 metadata and the foreman's substantive synthesis |
 | `pending.json` | Schema 1 transaction journal with `previous_index` digest and proposed `record`; removed after the index commit |
 | `index.json.lock` | Utility lock; writers acquire it after the dispatch-state lock |
 
@@ -375,8 +373,7 @@ a proposed transition is independent of the daily due decision.
 
 - **Writer** — the utility validates recording metadata and required nonempty
   synthesis sections, reads source bytes, and atomically installs the completed
-  note before committing the index. The foreman supplies the synthesis; every
-  outcome and quality statement in it cites its report or gate evidence.
+  note before committing the index. The foreman judges the content's substance.
   Writes serialize under the sidecar lock. Identical retries preserve the existing
   record and its completion time; conflicting IDs or pending transactions fail
   with a diagnostic. A journal preserves interrupted recording for reconciliation.
@@ -471,7 +468,7 @@ skills/herdr-foreman/references/retrospectives.md
 | `assignments[].requirements` | object or null | Normalized requirement object from the assigned role in the plan; null for legacy assignments |
 | `assignments[].reviewer_scope` | string or null | Reviewer participation recorded as `verification`, `design`, or `unknown`; null for other roles. Older reviewers migrate to `unknown` |
 | `assignments[].judge_mode` | string or null | The mode the judge seat was dispatched for: `adjudication`, `diagnosis`, or `unknown`; null for other roles. Older judge rows migrate to `unknown`, and a reconciled dispatch whose receipt predates the field records `unknown`. A live judge dispatch with no declared mode is refused, never defaulted |
-| `specialist_assessments` | array | Append-only assessments with original dispatch and byte receipts; each record has its own schema version, currently 2 |
+| `specialist_assessments` | array | Append-only foreman assessments with original dispatch and byte receipts; each record has its own schema version |
 
 `verified` contains `model`, `effort`, `argv`, `source` (`launch_argv` or
 `process_argv`), and `pane_id`; process proof also contains `pid`. Loading
@@ -564,27 +561,15 @@ identities remain unchanged.
 ### Specialist assessment records
 
 `assess-specialist` appends records to the main state's `specialist_assessments`.
-Each schema-2 record contains `id`, `at`, `dispatch`, `assignment_index`, `task`,
-`role`, `agent`, `report`, `delivery`, `outcome`, `contribution`,
-`contribution_source`, `summary`, `report_evidence`, and `delivery_evidence`. The evidence objects contain absolute
+Each schema-1 record contains `id`, `at`, `dispatch`, `assignment_index`, `task`,
+`role`, `agent`, `report`, `delivery`, `outcome`, `contribution`, `summary`,
+`report_evidence`, and `delivery_evidence`. The evidence objects contain absolute
 `path` and SHA-256 `sha256`. The report is the supervised assignment's enrolled
 path; delivery is saved successful `wait-report` JSON for that worker and path,
 or the exact owner-recorded `recover-report` output for that dispatch and the
 same report bytes.
-`contribution` is `none`, `design`, or `implementation`. In schema 2 the owner
-derives it from the bound report bytes (`declared_contribution` in
-`skills/herdr-foreman/foreman/engagement.py`): `contribution_source` is
-`report_declared` for a report's `CONTRIBUTION:` line and `report_undeclared`
-when there is none, which records `design`; a `report_undeclared` record
-holding any other class is corrupt. A supplied `contribution` must match the
-derivation or the record is refused. A declared `design` or `implementation`
-counts as a contribution for independence; a `none`, from any source, clears
-nothing, and the dispatch's recorded role, round and reviewer scope decide
-(`_contributor` in `skills/herdr-foreman/foreman/composition.py`). Outcome and summary quote the report's
-acceptance lines and answer, and are not task acceptance; the owner refuses
-either one the bound report does not contain (`require_quoted`), and a report
-whose own result lines are missing, unresolved or `unmet`
-(`require_report_result`).
+`contribution` classifies actual work as `none`, `design`, or `implementation`.
+Outcome and summary are the foreman's nonempty assessment, not task acceptance.
 
 The utility verifies the original confirmed dispatch, assignment and enrollment
 before appending. Exact ID/input retries preserve the original receipt, including
@@ -593,10 +578,7 @@ schema and relationships without reopening sources. Warm follow-ups revalidate
 report and delivery bytes and prior supervision disposition. Authored assessments
 remain contribution evidence even after a later assessment, role or model change.
 Missing, corrupt or unsupported assessment history follows the main state's
-preserve-and-refuse writer contract. A schema-1 record carried the foreman's own
-classification; the owner migrates an integer schema-1 record on load to schema 2 with its values kept
-and `contribution_source: foreman_assessment`, so readers treat both alike
-(`migrate_assessments`). A record newer than schema 2 is refused as newer data.
+preserve-and-refuse writer contract. This first version has no earlier format.
 
 Version 4 admits delivery record schema 2 alongside unchanged schema-1 receipts.
 The new record uses `basis: archived_grok_clear_source`, preserves `native_session`
@@ -629,8 +611,8 @@ blocking finding, and scoped review cannot approve a release.
 `work` contains `base_revision`, `scope`, repository-relative `paths`, and
 blocking `findings`. A review receipt contains `dispatch`, `head_revision`,
 `verdict`, `review_mode`, independent `reviewer`, `report`, `changed_paths`, and
-`evidence`. The foreman checks the recorded head and paths against the actual VCS diff before recording these fields;
-the command reads the report, checks its stated head and its `VERDICT:` line against `verdict`, and records its digest.
+`evidence`. The foreman verifies the actual VCS diff before recording these fields;
+the command reads the report, checks its stated head, and records its digest.
 The next approved correction rechecks the preceding blocking report's bytes.
 An approval receipt requires full review; tester and external gates remain
 separate requirements in the skill.

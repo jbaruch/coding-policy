@@ -107,12 +107,8 @@ def _contributor(row, assessment=None):
     base = canonical_role(row.get("role"))
     if base == "developer":
         return True
-    # A declared `design` or `implementation` always counts. A `none` changes
-    # nothing: it is the worker's word about itself, and nothing clears an
-    # exclusion. The owner-recorded dispatch below -- role, round and reviewer
-    # scope, fixed before the worker ran -- decides.
-    if assessment is not None and assessment["contribution"] != "none":
-        return True
+    if assessment is not None:
+        return assessment["contribution"] != "none"
     tier = row.get("tier")
     if tier is None and isinstance(row.get("result"), dict):
         tier = row["result"].get("tier")
@@ -138,8 +134,6 @@ def selection_constraints(roles, agents, requirements, history, task, dispatches
         roles, task,
     )
     by_assignment = {row["assignment_index"]: row for row in assessments}
-    # Only a declared contribution adds a contributor here; a declared `none`
-    # leaves `_contributor`'s owner-recorded classification in force.
     contributors = {row["agent"] for row in assessments
                     if task and row.get("task") == task and row["contribution"] in {"design", "implementation"}}
     for index, row in enumerate(history):

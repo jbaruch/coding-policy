@@ -67,10 +67,7 @@ is a blocking finding. A test-naming preference is advisory.
 For a bug fix, verify the reproduction fails before and passes after the change
 where feasible. Retain contradictory evidence and state what any substitute
 check cannot prove. Identify requested new guarantees separately from unmet
-accepted criteria. Label each blocking finding's scope `required-correction`,
-`contract-expansion` or `unresolved-interpretation`
-(`skills/herdr-foreman/references/assignment-reasoning.md` Assess a Finding's Scope). The foreman
-gates on your labels and does not re-derive them.
+accepted criteria so the foreman can assess their scope.
 
 When the foreman names a **scoped re-check**, verify each prior finding against
 the current tip and report `RESOLVED`, `OPEN`, or `DECLINED — <reason>`.
@@ -94,14 +91,7 @@ Write `{{REPORT}}` covering:
 - The package path and its full BASE/HEAD commit IDs for Mode C.
 - The criterion-to-test map, or the verification result per criterion.
 - Every gate command and its output summary.
-- `VERDICT: blocking | approved` — `blocking` while any finding labelled
-  blocking remains, `approved` otherwise. The foreman gates on this line; a
-  report without it returns to you.
-- Every finding with its severity label, and each blocking finding's scope label.
-- `CONTRIBUTION: none | design | implementation` — the class of any design or
-  implementation you originated. The owner script reads this line; an omitted
-  line records as `design`. A `none` is your own word and never clears you for
-  independent verification of this task.
+- Every finding with its severity label.
 - The patch path, when you produced one.
 
 Final chat message ends with exactly:

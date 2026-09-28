@@ -2,7 +2,7 @@
 
 The foreman owns a durable queue of user-facing obligations. Persist an obligation immediately when the foreman opens a question, requests a decision or review, identifies a user-relevant blocker or failure, or promises an update or follow-up. Save it before further housekeeping or a context handoff. Record actual answers, review outcomes, and completed deliveries immediately after receiving or making them. An unrelated user message never changes a queue entry.
 
-Before a catch-up, resumption, standup, or foreman handoff, read this queue. Present the most consequential actionable items ahead of reasoning, runtime status, and housekeeping. The foreman sets priority from impact and urgency; the utility does not infer importance from prose. Present concise context, consequences, available choices, and the recommendation a worker report gave, quoted with its source, where one exists; the foreman adds no recommendation of its own (`rules/agent-team-operation.md` Foreman Seat). Showing an item does not resolve it. A local preview is not evidence that the user saw it.
+Before a catch-up, resumption, standup, or foreman handoff, read this queue. Present the most consequential actionable items ahead of reasoning, runtime status, and housekeeping. The foreman sets priority from impact and urgency; the utility does not infer importance from prose. Present concise context, consequences, available choices, and a recommendation where useful. Showing an item does not resolve it. A local preview is not evidence that the user saw it.
 
 ## Commands and files
 
@@ -36,16 +36,15 @@ Example `entry.json`:
   "resolution_condition": "Record the user's choice about supporting older clients.",
   "priority": 80,
   "options": ["Keep the agreed API", "Expand support to older clients"],
-  "recommendation": "Review report: \"Keep the agreed API for this release.\"",
+  "recommendation": "Keep the agreed API for this release.",
   "sources": [
     {"schema_version": 1, "kind": "user_message", "ref": "conversation/task-42/message-8"},
-    {"schema_version": 1, "kind": "artifact", "ref": "/reports/task-42/review-3.md"},
     {"schema_version": 1, "kind": "task_ledger", "ref": "/reports/task-42/TASK-LEDGER.md"}
   ]
 }
 ```
 
-Required fields are `id`, `kind`, `title`, `context`, `consequence`, `resolution_condition`, and nonempty `sources`. Optional fields default to `task: null`, `priority: 50`, `options: []`, and `recommendation: null`. `recommendation` quotes a worker report named in `sources`, never the foreman's own advice. Kinds are `question`, `decision`, `review`, `blocker`, `failure`, `followup`, and `update`. Use stable obligation IDs tied to the task and the actual question or promise; do not create a new ID each time it is shown. IDs use letters, digits, dots, underscores, colons and hyphens, begin with a letter or digit, and contain at most 110 characters. The internal creation event ID is `record:<id>`.
+Required fields are `id`, `kind`, `title`, `context`, `consequence`, `resolution_condition`, and nonempty `sources`. Optional fields default to `task: null`, `priority: 50`, `options: []`, and `recommendation: null`. Kinds are `question`, `decision`, `review`, `blocker`, `failure`, `followup`, and `update`. Use stable obligation IDs tied to the task and the actual question or promise; do not create a new ID each time it is shown. IDs use letters, digits, dots, underscores, colons and hyphens, begin with a letter or digit, and contain at most 110 characters. The internal creation event ID is `record:<id>`.
 
 Priority is a foreman-assigned integer from 0 to 100; 100 is most consequential. `options` contains at most ten plain-text choices. `sources` contains 1–30 versioned `{schema_version: 1, kind, ref}` records; kinds are `user_message`, `task_ledger`, `retrospective`, `artifact`, and `other`. References may be absolute file paths, URLs, or durable conversation/message identifiers. Preserve enough quoted or summarized answer context in the lifecycle evidence to survive a lost conversation. Avoid secrets and unnecessary personal data. The utility stores references without dereferencing them.
 
@@ -98,4 +97,4 @@ The view includes future deferrals, explicitly recorded progress, optional close
 
 A progress input contains exactly `id`, `task`, `summary`, `assessment`, and `sources`. Assessment is `verified`, `reported`, or `unknown`; at least one source must be the associated `task_ledger`. Use `reported` for unaccepted worker claims. The utility records its UTC event time. The catch-up shows the timestamp with **Verified when recorded**, **Reported; acceptance unverified**, or **Acceptance unknown**. Even `verified` means verified when recorded; revalidate the actual task ledger and source evidence before claiming current acceptance. This cached summary never replaces the task ledger or treats Herdr lifecycle labels as acceptance. Give a changed fact a new progress ID; preserve the earlier claim and correction.
 
-The utility cannot infer which human words answer which question, whether an artifact meets acceptance criteria, or whether a changed scope is authorized. The foreman records the operator's answer against the obligation it answers, and a changed scope as authorized only on that answer. Whether an artifact meets its acceptance criteria comes from the reports' `met`/`unmet` lines and the independent reviewer and tester verdicts, never from the foreman's own reading (`rules/agent-team-operation.md` Foreman Seat). Deterministic responsibilities are storage, schema validation, lifecycle constraints, idempotency, ordering, deferral deadlines, bounded views, and preservation across resets.
+The utility cannot infer which human words answer which question, whether an artifact meets acceptance criteria, or whether a changed scope is authorized. Those are foreman judgments recorded with evidence. Deterministic responsibilities are storage, schema validation, lifecycle constraints, idempotency, ordering, deferral deadlines, bounded views, and preservation across resets.

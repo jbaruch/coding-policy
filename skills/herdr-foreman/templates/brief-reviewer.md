@@ -43,13 +43,9 @@ it without asking you a question.
 
 For each proposed correction, cite the accepted behavior it serves and describe
 the behavior the fix would add or restore. Identify a new guarantee or obligation
-explicitly; a severity label cannot authorize it. Label each blocking finding's
-scope `required-correction`, `contract-expansion` or `unresolved-interpretation`
-(`skills/herdr-foreman/references/assignment-reasoning.md` Assess a Finding's Scope). The foreman
-gates on your labels and does not re-derive them; it routes an expansion or an
-unresolved interpretation to the operator and a contested label to the judge.
-Compare repeated findings on the same causal theme with earlier attempts and
-their observed progress, and name a recurrence explicitly.
+explicitly; a severity label cannot authorize it. Compare repeated findings on
+the same causal theme with earlier attempts and their observed progress. The
+foreman resolves scope under the existing authorization and judge rules.
 
 When the foreman names a **scoped re-check**, verify each prior finding against
 the current tip and report `RESOLVED`, `OPEN`, or `DECLINED — <reason>`.
@@ -71,14 +67,7 @@ Write `{{REPORT}}` covering:
 - Which mode and scope you ran, and the reviewed commit SHA.
 - The package path and its full BASE/HEAD commit IDs for Mode B.
 - The design note or review content in full, or a link plus its substance.
-- `VERDICT: blocking | approved` — `blocking` while any finding labelled
-  blocking remains, `approved` otherwise. The foreman gates on this line; a
-  report without it returns to you.
-- Every finding with its severity label, and each blocking finding's scope label.
-- `CONTRIBUTION: none | design | implementation` — the class of any design or
-  implementation you originated. The owner script reads this line; an omitted
-  line records as `design`. A `none` is your own word and never clears you for
-  independent verification of this task.
+- Every finding with its severity label.
 - What you deliberately did not flag, and why.
 
 Final chat message ends with exactly:

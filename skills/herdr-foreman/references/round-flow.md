@@ -15,7 +15,7 @@ The shape of one task round, and what the foreman does between the steps of
 | judge | none | completed dispute ruling (binding), or a non-binding `insufficient` |
 
 Activate the responsibilities the next task decision needs. Add specialty
-requirements through `skills/herdr-foreman/references/specialists.md`; a profile on the bench needs
+requirements through `references/specialists.md`; a profile on the bench needs
 no worker or monitoring loop. One worker holds one assignment in a dispatch.
 Compatible expertise may share a responsibility. Consultations with the same
 canonical responsibility use separate dispatches, each with its own engagement.
@@ -67,7 +67,7 @@ not a review of the code that got written, and a test plan is not a test run.
 Phase 2 excludes actual design and implementation contributors from reviewer
 and tester. The owner applies recorded contribution history; use `--exclude`
 for relevant contributions outside it. Assess uncertain prior consultations
-under `skills/herdr-foreman/references/specialists.md`. The reviewer responsibility is verification
+under `references/specialists.md`. The reviewer responsibility is verification
 only; it no longer carries pre-development Mode A. Historical reviewer
 responsibility remains unknown until its actual contribution is established.
 
@@ -95,8 +95,8 @@ assignment, or closes an investigation-only knowledge deliverable through Step 1
    reviewed tip for scoped re-checks; a new tip gets a new package.
 6. **Compose** — `compose-briefs.sh` renders the templates from one values
    file, refusing to write anything when a placeholder is unfilled or a
-   supplied key matches no template. The foreman supplies the values, copied
-   from the operator's request and the reports; the script decides nothing.
+   supplied key matches no template. The foreman decides the values; the script
+   decides nothing.
 7. **Provision** — `provision-worktree.sh` creates every worktree the briefs
    name, from the shared checkout. A worker never runs `git` there, so its
    checkout has to exist before the brief arrives.
@@ -106,18 +106,18 @@ assignment, or closes an investigation-only knowledge deliverable through Step 1
    It re-reads live status and refuses to type into a busy worker.
 9. **Observe** — `supervision-watch` observes every enrolled worker. Verify
    candidates with `wait-report.sh --once`, ledger outcomes, and acknowledge
-   handled events under `skills/herdr-foreman/references/supervision.md`.
-10. **Gate** — the foreman reads every report in full and gates on its verdict
-   lines and labels: another round, or the release hand-off.
+   handled events under `references/supervision.md`.
+10. **Gate** — the foreman reads every report in full and decides: another round,
+   or the release hand-off.
 
 Before relying on consultation output, save the report delivery receipt and run
-`assess-specialist` under `skills/herdr-foreman/references/specialists.md`. Record the accepted outcome
+`assess-specialist` under `references/specialists.md`. Record the accepted outcome
 in the task ledger and resolve its supervision obligations separately. Keep
 useful sessions available for likely follow-up, while preserving scoped lessons
 outside the session. No idle specialist counts as active work.
 
 The foreman appends decisions throughout this flow to the persistent task ledger,
-including before pauses and handoffs. `skills/herdr-foreman/references/task-ledger.md` separates
+including before pauses and handoffs. `references/task-ledger.md` separates
 dispatch and report observations from assignment acceptance and task completion.
 All references to the round log here mean that ledger.
 
@@ -230,7 +230,7 @@ and treat the return to Step 4 as a round boundary: log the round and reset
 the stow, so the reset context returns to Step 4 with self-contained briefs
 carrying them. Preserve the developer for retained fixes; use a fresh context for the
 fresh-worker stage. Never reset the counter during re-planning. At a contested
-verdict or a label the classifier gate contradicts, go to Step 13 first. At an exhausted allowance,
+verdict or a foreman override, go to Step 13 first. At an exhausted allowance,
 record the checkpoint through the owner commands in
 `skills/herdr-foreman/references/dispatch-recovery.md`, report implementation
 as `awaiting_diagnosis`, consult the investigator with round context
@@ -299,10 +299,10 @@ It runs in two modes. Adjudication settles a dispute; diagnosis asks why a fix
 loop is not converging. Dispatch adjudication on exactly one of three triggers:
 
 - A contested reviewer or tester verdict — one worker's finding, another
-  worker's disagreement, neither side able to settle it by re-reading the rule.
-- A report label the classifier gate contradicts — the report's own verdict or
-  a blocking label disagrees with the classifier's reading, and the foreman,
-  holding no substance opinion, settles neither.
+  worker's (or the foreman's) disagreement, neither side able to settle it by
+  re-reading the rule.
+- A foreman override of a blocking finding — the foreman about to waive a finding a
+  worker labelled blocking gets a second, independent read first.
 - A bot finding the team disagrees with — the policy reviewer or Copilot flags
   something the developer and reviewer both think is wrong.
 
@@ -374,7 +374,7 @@ an approved new direction starts at `continue` rather than inheriting the rungs
 the approaches it replaced spent.
 
 `rules/agent-team-operation.md` Judge Seat carries the contract; the record
-shapes are the owner's, in `skills/herdr-foreman/references/dispatch-recovery.md`.
+shapes are the owner's, in `references/dispatch-recovery.md`.
 
 It is read-only without exception in either mode: no file edit, no mutating
 git or `gh` command, no GitHub post, no subagent dispatch.
@@ -437,7 +437,7 @@ and no degraded ruling.
 ## Dispatch Results
 
 Step 10 of `skills/herdr-foreman/SKILL.md` follows these outcomes. Before a
-finish, apply the whole-fleet pause/handoff contract in `skills/herdr-foreman/references/supervision.md`.
+finish, apply the whole-fleet pause/handoff contract in `references/supervision.md`.
 
 - **Exit 0** — proceed to Step 11.
 - **Busy target** — no dispatch occurred. Wait for readiness or replan; stay
@@ -456,7 +456,7 @@ finish, apply the whole-fleet pause/handoff contract in `skills/herdr-foreman/re
 ## Ruling Outcomes
 
 `skills/herdr-foreman/references/judge-round.md` step 7 follows these branches. Before a finish, preserve any user question and
-apply the whole-fleet pause/handoff contract in `skills/herdr-foreman/references/supervision.md`.
+apply the whole-fleet pause/handoff contract in `references/supervision.md`.
 
 A completed `RULING:` line binds the round. Only the operator overrides it. `insufficient` binds nothing.
 

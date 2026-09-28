@@ -40,7 +40,7 @@ def _bounds(store, task, fix_round, plan_id, work):
         raise UsageError("Role-clear correction base or scope differs from its authorization; preserve the original base and authorized scope.", {})
     ledger.paths(work["paths"], "role-clear correction paths")
     if any(not any(fnmatchcase(path, pattern) for pattern in bounds["allowed_paths"]) for path in work["paths"]):
-        raise UsageError("Role-clear correction paths exceed the authorized scope; obtain the operator's missing scope decision.", {})
+        raise UsageError("Role-clear correction paths exceed the authorized scope; obtain the missing scope decision.", {})
     if (not isinstance(work["findings"], list) or not work["findings"]
             or any(not isinstance(value, str) or not value.strip() for value in work["findings"])):
         raise UsageError("Name the actual blocking findings for this role-clear correction before continuing.", {})

@@ -5,7 +5,7 @@ composes the chain that ends an assignment's observation, and `check-member`
 the chain that checks whether its report landed. Each composes the existing
 owner functions; neither reimplements them.
 
-`close-member` enforces the order the chain requires: the foreman's recorded
+`close-member` enforces the order the chain requires: the foreman's assessed
 outcome must already be in the task ledger before any event is acknowledged
 or the enrollment resolved (rules/agent-team-operation.md Fleet Supervision:
 acknowledging an observation never accepts the assignment). The ledger stays
@@ -30,7 +30,7 @@ from .errors import StateError, UsageError
 from .state import load_state_checked
 
 # Task-ledger schema 1 (#589). These constants ARE the ledger's field formats:
-# state-schema.md (Task Ledger) and skills/herdr-foreman/references/task-ledger.md name them and
+# state-schema.md (Task Ledger) and references/task-ledger.md name them and
 # restate none of them, so one edit here changes the contract and the validator.
 #: The schema version the frontmatter and every event carry.
 LEDGER_SCHEMA_VERSION = "1"
@@ -59,7 +59,7 @@ DECISION_MEANINGS = {
     "assignment": {
         "pending": "Dispatch is planned or confirmed; no report has been assessed",
         "reported": "Delivery was confirmed; the foreman has not yet accepted the work",
-        "accepted": "The report's verdict lines and the independent gates it cites show the assignment's acceptance criteria hold",
+        "accepted": "The foreman read the report and verified that the assignment's acceptance criteria hold",
         "needs_work": "Evidence shows unmet criteria or invalidates a prior acceptance",
         "blocked": "A specific unresolved dependency or decision prevents the assignment from proceeding",
         "unavailable": "A report is missing or unavailable under the wait/recovery contract",
@@ -267,7 +267,7 @@ def wait_inputs(state_path, enrollment, warn=None):
     since = (dispatch.get("result") or {}).get("at") if dispatch and dispatch.get("status") == "applied" else None
     if since is None:
         raise UsageError("Dispatch {} has no applied send time in {}, so a checkpoint could never reach its stall "
-                         "outcome. Reconcile the dispatch through skills/herdr-foreman/references/dispatch-recovery.md before checking "
+                         "outcome. Reconcile the dispatch through references/dispatch-recovery.md before checking "
                          "its report.".format(enrollment, state_path), {"enrollment": enrollment})
     return {"agent": assignment["agent"], "report": assignment["report"],
             "base": task["base_revision"] if task else None, "since": since}

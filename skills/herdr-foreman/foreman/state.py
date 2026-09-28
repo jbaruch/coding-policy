@@ -98,7 +98,7 @@ LEDGER_JUDGE_MODES = frozenset(JUDGE_MODES) | {"unknown"}
 #:     proves the work finished -- see `landed` and `started` on the apply
 #:     record for which one it was.
 #: `sent_but_not_started` -- the paste went out and NEITHER was observed (see
-#:     skills/herdr-foreman/foreman/composer.py send_message).
+#:     foreman/composer.py send_message).
 #: `unknown` -- written before rows carried a status.
 STATUS_APPLIED = "applied"
 STATUS_NOT_STARTED = "sent_but_not_started"
@@ -418,7 +418,7 @@ def _validate(payload, path):
     instruction to the operator to delete their ledger.
     """
     from .composition import normalize_requirement
-    from .engagement import migrate_assessments, validate_assessments
+    from .engagement import validate_assessments
 
     if not isinstance(payload, dict):
         raise _NoUsableState("the document is not a JSON object")
@@ -541,7 +541,6 @@ def _validate(payload, path):
         store = payload.setdefault("recovery", empty_recovery())
         migrated = migrate_store(store) or migrated
         validate_store(store, rows)
-        migrated = migrate_assessments(payload) or migrated
         validate_assessments(payload)
     except UsageError as exc:
         raise _NoUsableState(str(exc)) from None

@@ -71,7 +71,7 @@ ROUND_CAPABILITIES = {
     "mechanical": ("mechanical-execution",),
     "release_mechanics": ("mechanical-execution",),
     "consultation": (),
-    # The foreman runs owner scripts and gates on recorded verdicts (#601).
+    # The foreman seat's own round (#601).
     "coordination": ("mechanical-execution",),
 }
 CONSULTATION_CAPABILITIES = {"investigator": "causal-investigation", "advisor": "advisory-synthesis"}
