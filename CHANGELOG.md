@@ -16,6 +16,117 @@
   `skills/release/check-changelog-placement.py` refuses any edit to a block
   under a published heading as new parked content, the same limit #581 hit.
 
+## 0.3.304 — 2026-09-28
+
+### Fixed
+
+- **codex-accept's `.` component checks now match what they claim (#572).**
+  `.github/codex-accept/contract.py` tested `.` against `PurePosixPath.parts`,
+  which pathlib never populates with `.`. For archive and inventory member
+  names (`safe_name`) the refusal is the intended contract, and one input
+  slipped through it: a bare `.` member normalizes to empty `parts` and was
+  accepted. `safe_name` now checks the raw `/`-separated components before
+  building the path, so `.`, `..` and empty components refuse in every
+  position. For helper outputs (`write_under`) a `Path` argument can never
+  carry a `.` component and `.` cannot leave the root, so the inert check is
+  dropped: only `..` refuses there, and the refusal message and
+  `docs/acr-codex-accept.md` say so. New tests pin both behaviors.
+
+## 0.3.303 — 2026-09-28
+
+### Fixed
+
+- **The unknown-supervision-command fallback names a runnable help command
+  (#590).** `foreman/supervision_runtime.py` told the reader to "run foreman
+  --help", but no install puts a `foreman` executable on `PATH`, so the hint
+  did not run as written. It now renders through `runnable.command("--help")`
+  like every other hint since #571. The #532 guard in
+  `tests/test_runnable.py` missed it because it only matched bare subcommand
+  names, never a bare `foreman --<flag>`; it now flags that shape too, and a
+  new test runs the rendered fallback command to exit 0. An audit of the
+  package found no other bare `foreman --...` strings.
+
+## 0.3.302 — 2026-09-27
+
+### Fixed
+
+- **`verify-oracle` checks a round against the oracle bytes its plan was
+  licensed on, refuses a malformed saved oracle cleanly, and hashes in
+  bounded chunks (#488).** Three gaps in
+  `skills/herdr-foreman/foreman/oracle.py`, all deferred from #486's review.
+  A `patch` or `fixture` oracle was only a path, so a file edited or replaced
+  after planning was compared as if it were the licensed one; `plan` now
+  records each such file's sha256 in a new `oracle_pins` map (plan schema 12),
+  and `verify-oracle` refuses an oracle file that no longer hashes to its pin,
+  and a plan that pinned nothing for it, rather than compare. The pin check and
+  the comparison share one read of the oracle file, so nothing can change
+  between them. A saved oracle such as `{"kind": "patch"}` with no path, or a
+  non-string path, reached `Path(None)` and raised a `TypeError` traceback;
+  `plan_oracle` now validates the shape before any file read, through
+  `oracle_shape_problem` in `skills/herdr-foreman/foreman/tiers.py`, which
+  `mechanical_allowed` also uses so the two checks cannot drift apart. Both
+  files were loaded whole with `read_bytes()`; they are now hashed in
+  `CHUNK_BYTES` pieces and compared by sha256, so memory stays bounded however
+  large the expected output. An unusable path, a NUL or a character the
+  filesystem encoding cannot carry, is a usage error naming the fix, and each
+  unreadable file names its own recovery. Only a `mechanical` round's oracle is
+  pinned and checked: an oracle riding on any other round licensed nothing,
+  so `plan` no longer reads it (a FIFO there hung `plan`) and `verify-oracle`
+  refuses to gate on it. Every file is opened non-blocking and refused unless
+  it is a regular file, so a FIFO or device swapped in for the result or the
+  pinned oracle after planning cannot hang the gate. Regression cases cover
+  each gap and fail against the old code.
+
+## 0.3.301 — 2026-09-27
+
+### Fixed
+
+- **The foreman reset deliverer types only into the foreman's bound native
+  session (#523).** `foreman-reset-deliver` waits up to `IDLE_BUDGET_SEC` for
+  the foreman's pane to idle, and before every keystroke it re-checked only
+  the pane's agent name, runtime kind and idle status. An operator who
+  replaced the foreman process in that pane during the wait with another
+  session of the same name and kind passed the guard, and the old reset's
+  `/clear` and resume prompt landed in the new session. `foreman-reset` now
+  records the native session bound at `supervision-bind` on the reset row
+  (`native_session`), and refuses to schedule when the binding names none.
+  The deliverer's guard reads `herdr pane get` (the source `supervision-bind`
+  reads, held to its proof: a claude or codex session its own Herdr
+  integration reports) and refuses unless the pane still holds that session, for every
+  keystroke of the clear command, extra Enters included, until the composer
+  confirms it consumed: the row finishes `failed` before any keystroke,
+  `interrupted` after one, both with error `reset_session_changed` and
+  `details.reason` `native_session_changed`. No single Enter proves the clear
+  submitted (Codex's first of two Enters only accepts autocomplete, and
+  `send_command` may add extra Enters), so a replacement between any of them
+  is still caught. A transcript path that cannot be resolved (a link loop,
+  an embedded NUL) matches no session instead of escaping as an unrecorded
+  error.
+  The clear itself starts a new native session by design, so after it the
+  deliverer waits up to `CLEAR_SESSION_BUDGET_SEC` for Herdr to report that
+  new session, pins it, and every resume-prompt keystroke must find the
+  pinned session; a replacement after the clear is refused the same way, and
+  a new session counts as the clear's only while the pane's foreground
+  processes are the ones the first keystroke found, compared by pid, start
+  time and command line (the clear keeps its process; a replacement is a new
+  one, or a reused pid or an exec in place that changes them), and
+  a clear that starts no new session stops the reset
+  (`clear_session_unchanged`). The reset record moves
+  to schema 2 (`skills/herdr-foreman/state-schema.md` Foreman Reset Record);
+  the owner migrates a schema-1 record on read and rewrites it at once,
+  catch-up's read included, giving each row `native_session: null`; a
+  deliverer that claims such a row refuses before any keystroke. A
+  schema-1-build deliverer still running at the upgrade cannot record its
+  outcome, and catch-up names the reconcile command for its row once it
+  exits. Regression tests cover a same-name, same-kind
+  replacement (no keystroke, row records why), a replacement between the
+  clear's text and Enter and between Codex's two Enters, the post-clear
+  session change for typed and pasted clears, a replacement before an extra
+  Enter, a replacement after the clear, a clear that starts no new session,
+  an unresolvable transcript path, the migration rewrite, and the
+  CLI end to end; the unfixed deliverer typed `/clear` and the resume prompt
+  into the replacement session.
+
 ## 0.3.300 — 2026-09-27
 
 ### Fixed

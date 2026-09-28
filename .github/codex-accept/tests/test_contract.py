@@ -1586,9 +1586,26 @@ class WriteTests(unittest.TestCase):
         (root / "inner").mkdir()
         for writer in (c.write_new, c.write_private):
             with self.subTest(writer=writer.__name__):
-                with self.assertRaisesRegex(c.Refusal, "without . or .. components"):
+                with self.assertRaisesRegex(c.Refusal, "without \\.\\. components"):
                     writer(root / "inner", root / "inner/../escaped.json", b"{}")
                 self.assertFalse((root / "escaped.json").exists())
+
+    def test_member_names_refuse_dot_and_empty_components(self):
+        # "." alone normalizes to an empty PurePosixPath.parts, so only a raw-component check sees it.
+        for value in (".", "./a", "a/.", "a/./b", "a//b", "a/", "..", "a/../b", "/a"):
+            with self.subTest(value=value):
+                with self.assertRaisesRegex(c.Refusal, "Unsafe member path"):
+                    c.safe_name(value)
+        self.assertEqual(c.safe_name("evidence/a.json"), "evidence/a.json")
+        self.assertEqual(c.safe_name(".hidden"), ".hidden")
+
+    def test_dot_components_in_an_output_path_stay_inside_the_root(self):
+        root, _ = self.dirs()
+        for writer in (c.write_new, c.write_private):
+            with self.subTest(writer=writer.__name__):
+                target = root / "./inner/./dot.json"  # pathlib drops "."; the write lands below <root>
+                writer(root, target, b"{}")
+                self.assertEqual((root / "inner/dot.json").read_bytes(), b"{}")
 
     def test_traversal_in_the_root_itself_refuses_without_writing_through_a_link(self):
         root, outside = self.dirs()
@@ -1597,7 +1614,7 @@ class WriteTests(unittest.TestCase):
         anchor = root / "link" / ".."  # The kernel resolves this to <outside>, not <root>.
         for writer in (c.write_new, c.write_private):
             with self.subTest(writer=writer.__name__):
-                with self.assertRaisesRegex(c.Refusal, "without . or .. components"):
+                with self.assertRaisesRegex(c.Refusal, "without \\.\\. components"):
                     writer(anchor, anchor / "escaped.json", b"{}")
                 self.assertEqual(sorted(p.name for p in outside.iterdir()), ["inner"])
 

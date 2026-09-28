@@ -133,9 +133,10 @@ def encoded(value: Any) -> bytes:
 def safe_name(value: Any) -> str:
     require(type(value) is str and value and "\\" not in value and
             not any(ord(c) < 32 for c in value), "Unsafe member name; refuse the artifact")
+    # Check the raw components: PurePosixPath drops "." and empty ones, so parts alone never sees them.
+    require(all(part not in ("..", ".", "") for part in value.split("/")), "Unsafe member path; refuse the artifact")
     path = PurePosixPath(value)
-    require(not path.is_absolute() and str(path) == value and
-            all(p not in ("..", ".", "") for p in path.parts), "Unsafe member path; refuse the artifact")
+    require(not path.is_absolute() and str(path) == value, "Unsafe member path; refuse the artifact")
     return value
 
 
@@ -252,8 +253,9 @@ def write_under(root: Path, path: Path, value: bytes, private: bool) -> None:
     """
     # relative_to() is lexical: a ".." in <root> itself would be dropped from <parts> and
     # resolved by the kernel through whatever link precedes it, so both paths are checked.
-    require(all(part not in (".", "..") for part in (*root.parts, *path.parts)),
-            "Output path must name a file below its root without . or .. components; pass a contained path")
+    # A Path never carries a "." component (pathlib drops it), and "." cannot leave the root.
+    require(all(part != ".." for part in (*root.parts, *path.parts)),
+            "Output path must name a file below its root without .. components; pass a contained path")
     parts = path.relative_to(root).parts  # ValueError: a caller bug, never input
     require(parts, "Output path names the root directory itself; pass a file below it")
     try:
