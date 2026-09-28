@@ -42,6 +42,8 @@
 #  21d. Zero as `00`    -> refused too; the count is compared in base 10.
 #  21e. `02` is two     -> a leading zero is decimal, never octal, downstream.
 #  21f. Bad budget      -> the seconds knobs are validated the same way.
+#  22b. Newline dir     -> a directory name ending in a newline still finds
+#                         the foreman.sh beside the script.
 #
 # Run: bash skills/herdr-foreman/tests/test_wait_report.sh
 set -uo pipefail
@@ -573,6 +575,39 @@ ${base}"
   launcher_hint="bash $(printf '%q' "$(dirname "$SCRIPT")/foreman.sh") record-refusal"
   if [[ "$ERRTEXT" == *"\`${launcher_hint}\`"* ]]; then
     pass; else fail "terminal refusal must name the runnable launcher: ERR=$ERRTEXT"; fi
+
+  # 22b. A copy whose directory name ends in a newline still finds the
+  #      foreman.sh beside it, for both the native probe and the refusal hint
+  #      (#592). A `$(dirname ...)` capture drops that newline.
+  local nl=$'\n' real_script="$SCRIPT" nl_dir nl_marker="$TMP/nl-foreman-calls"
+  nl_dir="$TMP/nl-skill${nl}"
+  if mkdir "$nl_dir" 2>"$TMP/nl.err"; then
+    cp "$real_script" "$nl_dir/wait-report.sh" || die "copy wait-report.sh into $nl_dir"
+    cat > "$nl_dir/foreman.sh" <<'STUB' || die "write the foreman.sh stub in $nl_dir"
+#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$1" >> "${NL_FOREMAN_CALLS:?}"
+printf '{"found":true}\n'
+STUB
+    SCRIPT="$nl_dir/wait-report.sh"
+    # A decorated row is never a bare marker, so delivery goes to the probe.
+    run "$report" FAKE_MARKER=found FAKE_STATUS=done FAKE_PANE_TEXT="│ REPORT: ${report} │" \
+      NL_FOREMAN_CALLS="$nl_marker"
+    if [[ $RC -eq 0 ]] && printf '%s' "$OUT" | jq -e '.found == true' >/dev/null \
+       && [[ -f "$nl_marker" ]] && grep -qx probe-report "$nl_marker"; then
+      pass; else fail "newline-named dir: expected the probe beside the script, got RC=$RC OUT=$OUT ERR=$ERRTEXT"; fi
+    run "$missing" FAKE_MARKER=timeout FAKE_STATUS=idle FAKE_PANE_TEXT="$refusal"
+    local nl_canon
+    nl_canon="$(cd -- "$nl_dir" && pwd && printf x)" || die "enter $nl_dir"
+    nl_canon="${nl_canon%x}"
+    nl_canon="${nl_canon%"$nl"}"
+    launcher_hint="bash $(printf '%q' "${nl_canon}/foreman.sh") record-refusal"
+    if [[ $RC -eq 5 && "$ERRTEXT" == *"\`${launcher_hint}\`"* ]]; then
+      pass; else fail "newline-named dir: refusal must name the launcher beside the script, got RC=$RC ERR=$ERRTEXT"; fi
+    SCRIPT="$real_script"
+  else
+    echo "22b. skipped: this filesystem refuses a name ending in a newline ($(cat "$TMP/nl.err"))" >&2
+  fi
   if [[ "$(cat "$gets")" == 2 && "$(cat "$reads")" == 2 ]]; then
     pass; else fail "terminal refusal needs independent confirmation reads"; fi
   local write_rc=0

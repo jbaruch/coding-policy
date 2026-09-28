@@ -493,6 +493,30 @@ def _escalated(agent, tier, chosen_round):
     return tier, chosen_round
 
 
+#: Effort order, lowest first. A missing effort ranks below every named one.
+EFFORT_RANK = {None: 0, "low": 1, "medium": 2, "high": 3, "xhigh": 4, "max": 5}
+
+
+def still_de_escalated(agent, planned, effort):
+    """Whether a tier running at `effort` still falls short of the step its plan declined.
+
+    `de_escalated` reports a downgrade that actually took effect. A retained
+    fix round keeps the preceding round's verified effort, which can reach the
+    effort the declined escalation wanted, while its model never switches.
+    The flag stays true only while the running tier is below the escalation's
+    target on model or effort (#591).
+    """
+    if not planned.get("de_escalated"):
+        return False
+    escalated = _escalated(agent, {"model": planned["model"], "effort": planned.get("effort")},
+                           planned.get("tier_row"))
+    if escalated is None:
+        return True
+    target = escalated[0]
+    return (target["model"] != planned["model"]
+            or EFFORT_RANK.get(target.get("effort"), 0) > EFFORT_RANK.get(effort, 0))
+
+
 def select_tier(agent, role, round_type=None, context=None, fix_round=None, headroom=None):
     """Resolve one candidate from configuration; no per-call model override.
 

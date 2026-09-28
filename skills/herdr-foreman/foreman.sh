@@ -20,8 +20,20 @@ set -euo pipefail
 PY_BIN="${PY_BIN:-python3}"
 
 main() {
-  local skill_dir
-  skill_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  local skill_dir skill_src
+  # Command substitution strips every trailing newline, so the script directory
+  # never passes through one bare: parameter expansion derives it (#487), and a
+  # sentinel carries `pwd` across the strip (#466).
+  case "${BASH_SOURCE[0]}" in
+    */*) skill_src="${BASH_SOURCE[0]%/*}" ;;
+    *) skill_src=. ;;
+  esac
+  if ! skill_dir="$(cd -- "${skill_src:-/}" && pwd && printf x)"; then
+    echo "foreman: cannot enter the script directory ${skill_src:-/} — restore read and search access to the plugin directory, or reinstall the plugin, then re-run" >&2
+    return 1
+  fi
+  skill_dir="${skill_dir%x}"
+  skill_dir="${skill_dir%$'\n'}"
 
   if ! command -v "$PY_BIN" >/dev/null 2>&1; then
     echo "foreman: '${PY_BIN}' not found on PATH — install Python 3.11+ (\`brew install python@3.11\`) or point PY_BIN at the interpreter" >&2
