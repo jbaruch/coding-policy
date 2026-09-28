@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.312 — 2026-09-28
+
 ### Fixed
 
 - **A frozen dispatch's identity and sent prompt now come from the bytes its
