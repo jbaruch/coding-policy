@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.308 — 2026-09-28
+
 ### Fixed
 
 - **The release publication contract and the plugin's hooks now run from an
