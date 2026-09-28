@@ -61,7 +61,7 @@ from .probe import PROBE_READ_LINES, PROBE_READ_SOURCE, resolve_status, stderr_w
 from .chronology import latest_assignment
 from .recovery import JUDGE_MODES, briefing_bytes, empty_recovery, fresh_transition, task_record, validate_work
 from .launch import restart_worker, verify_running, verify_running_permissions
-from .tiers import canonical_role, launch_flags, require_seatable, worker_launch_args
+from .tiers import EFFORT_RANK, canonical_role, launch_flags, require_seatable, still_de_escalated, worker_launch_args
 from .report_delivery import marker_columns
 from .composition import normalize_requirement, parse_requirements, seat_holds
 
@@ -673,6 +673,27 @@ def validate_fix_history(assignments, history, task, fix_round):
         )
 
 
+def retained_tier(agent, wanted, previous_tier):
+    """The tier a retained fix round runs at: the planned row at the kept effort.
+
+    A retained session never switches model or raises effort. It keeps the
+    preceding round's verified effort, and with it that round's cost fields.
+    `de_escalated` then reports the running tier, never the plan: a kept effort
+    can reach what the plan's declined escalation wanted (#591).
+    """
+    if (not isinstance(previous_tier, dict) or not previous_tier.get("verified")
+            or previous_tier.get("model") != wanted["model"]
+            or EFFORT_RANK.get(previous_tier.get("effort"), -1) < EFFORT_RANK.get(wanted.get("effort"), 0)):
+        raise UsageError("Retained context cannot switch model or raise effort. Recover the task through an explicit fresh-round decision without resetting its counter.", {})
+    tier = {**wanted, "effort": previous_tier.get("effort")}
+    if previous_tier.get("effort") != wanted.get("effort"):
+        for key, default in (("multiplier", 1.0), ("effective_multiplier", 1.0), ("billing_window", "unknown")):
+            tier[key] = previous_tier.get(key, default)
+        if "de_escalated" in wanted:
+            tier["de_escalated"] = still_de_escalated(agent, wanted, previous_tier.get("effort"))
+    return tier
+
+
 def validate_retained_history(assignments, history, task, fix_round):
     """Only the same agent's last confirmed task/role can retain context.
 
@@ -1019,17 +1040,7 @@ def apply(client, assignments, agents_by_name, paths, at, no_clear=False, settle
     tiers = dict(tiers or {})
     specialist_prior = validate_specialist_history(assignments, history, task, requirements, tiers) if retain_specialist else None
     if prior is not None and tiers.get("developer"):
-        previous_tier = prior.get("tier")
-        wanted = tiers["developer"]
-        effort_rank = {None: 0, "low": 1, "medium": 2, "high": 3, "xhigh": 4, "max": 5}
-        if (not isinstance(previous_tier, dict) or not previous_tier.get("verified")
-                or previous_tier.get("model") != wanted["model"]
-                or effort_rank.get(previous_tier.get("effort"), -1) < effort_rank.get(wanted.get("effort"), 0)):
-            raise UsageError("Retained context cannot switch model or raise effort. Recover the task through an explicit fresh-round decision without resetting its counter.", {})
-        tiers["developer"] = {**wanted, "effort": previous_tier.get("effort")}
-        if previous_tier.get("effort") != wanted.get("effort"):
-            for key, default in (("multiplier", 1.0), ("effective_multiplier", 1.0), ("billing_window", "unknown")):
-                tiers["developer"][key] = previous_tier.get(key, default)
+        tiers["developer"] = retained_tier(agents_by_name[assignments["developer"]], tiers["developer"], prior.get("tier"))
     skip_clear = no_clear or retain_context or retain_specialist
     clear_reason = "retained" if retain_context or retain_specialist else "hand" if no_clear else "automatic"
     # Resolve the sink once. Every helper below defaults it too, but this

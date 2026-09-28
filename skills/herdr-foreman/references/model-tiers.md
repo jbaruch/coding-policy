@@ -152,7 +152,9 @@ arguments, including YOLO mode, instead of restarting it. If the process record 
 transport reads `ps` for that same foreground PID. Older Herdr builds that
 cannot supply the structured process record fail closed. A retained fix also
 needs the existing task/fix history and live native session identity; it keeps
-a compatible higher effort instead of restarting to lower effort.
+a compatible higher effort instead of restarting to lower effort. Its recorded
+`de_escalated` describes the tier it runs at: a kept effort that reaches the
+step the plan declined clears it, and a declined model switch keeps it set.
 
 Tiered assignment messages include the selected model, effort, and an input
 `prompt_hash`. The hash covers length-framed bytes of the original assignment

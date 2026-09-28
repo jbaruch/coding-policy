@@ -20,6 +20,27 @@
   swap the frozen directory for a decoy between the freeze and the identity,
   and swap a brief between its receipt and the prompt-hash check.
 
+## 0.3.310 — 2026-09-28
+
+### Fixed
+
+- **A retained fix round's `de_escalated` now describes the tier it runs at
+  (#591).** A retained-context developer fix keeps the preceding round's
+  verified effort, which can sit above the planned one, but the plan's
+  `de_escalated` flag was copied through unchanged. Under scarcity a plan
+  could record a declined effort escalation while the retained worker ran at
+  that very effort. The flag keeps the meaning #490 gave it in `tiers.py`: a
+  downgrade that actually took effect. New `tiers.still_de_escalated`
+  recomputes it against `_escalated`'s target: a kept effort that reaches the
+  declined step clears it, one still below keeps it, and a declined model
+  switch keeps it whatever the effort (retention never switches model). The
+  retained adjustment moved from `assign.apply` into `assign.retained_tier`,
+  which also shares the new `tiers.EFFORT_RANK`. The tier system is dormant in
+  production, so no recorded row changes.
+### Changed
+
+- **The Platform-Bound Untestable Carve-Out now accepts a finite behavior selector as its artifact inventory** (`rules/testing-standards.md`). The prior authority precondition required every exempt artifact by name. That forced shared platform plugins to maintain source-file allowlists in every consumer, so a new file or rename silently lost the exemption even when the platform boundary and validation procedure were unchanged. A consuming authority can still list artifacts explicitly, or it can list finite external-runtime interaction classes and attach the exemption only to each class's smallest invocation layer. The selector must let a reviewer map every changed code path to one class and one documented manual procedure; language, directory, file glob, app name, and a generic platform-specific label are insufficient alone. This keeps deterministic logic in CI while allowing durable rules for proprietary scheduler, lifecycle, event-delivery, and device-I/O behavior. Triggered by the policy conflict on `jbaruch/hubitat-dev` PR #152.
+
 ## 0.3.309 — 2026-09-28
 
 ### Added
