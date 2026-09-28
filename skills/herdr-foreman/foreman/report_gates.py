@@ -431,7 +431,9 @@ def _delivered(view, owner, key, since, evidence, allowed):
         if row["path"] != path or row["sha256"] != digest or timestamp(row["at"], "Delivery") <= since:
             continue
         dispatch = view["dispatches"].get(row["dispatch"])
-        role = _resolver(view, owner, dispatch) if dispatch is not None else None
+        if dispatch is None:
+            continue
+        role = _resolver(view, owner, dispatch)
         if role in allowed:
             return role, {"path": path, "sha256": digest, "dispatch": dispatch["id"]}
     _fail("Report {} carries no delivery receipt that resolves this gate: it must be the current bytes of a report "
