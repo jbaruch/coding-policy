@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.323 — 2026-09-28
+
 ### Fixed
 
 - **Every Herdr brief path and report marker now refuses the same characters,
