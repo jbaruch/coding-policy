@@ -58,6 +58,27 @@ def foreground_agent(client, pane, kind):
     return matches[0]
 
 
+def holds_only_shell(info):
+    """True when a `pane_process_info` record's sole foreground process is its shell."""
+    shell = info.get("shell_pid") if isinstance(info, dict) else None
+    foreground = info.get("foreground_processes") if isinstance(info, dict) else None
+    return (isinstance(shell, int) and not isinstance(shell, bool) and shell > 0
+            and isinstance(foreground, list) and len(foreground) == 1
+            and isinstance(foreground[0], dict) and foreground[0].get("pid") == shell)
+
+
+def require_empty_shell(client, pane, info=None):
+    """Refuse a pane whose foreground holds anything but its shell.
+
+    `info` is an earlier `pane_process_info` read to judge; without one the
+    pane is read now.
+    """
+    if not holds_only_shell(client.pane_process_info(pane) if info is None else info):
+        raise HerdrError(
+            "Pane {} is occupied: its foreground holds something other than its shell. Name an empty Herdr shell "
+            "pane; nothing was started.".format(pane), {"pane": pane})
+
+
 def verify_running(client, agent, pane, tier):
     launch_args = worker_launch_args(agent.kind, agent.launch_args)
     process = foreground_agent(client, pane, agent.kind)
@@ -101,11 +122,14 @@ def start_foreman(client, seat, pane, tier):
     operator's (`tiers.parse_launch_args`); the worker YOLO requirement does
     not apply.
 
+    A fresh start needs a pane holding only its shell, read before the name
+    check and again immediately before the start; an occupied pane refuses.
     A retry is safe: when Herdr already holds the seat's name on `pane` with
     the seat's kind, nothing is started, the live foreground argv must carry
     `tier`, and the proof returns with `replayed: true`. A name bound to
     another pane or kind, or a live tier other than `tier`, refuses.
     """
+    occupant = client.pane_process_info(pane)
     try:
         record = client.agent_get(seat.agent)
     except HerdrError as exc:
@@ -113,6 +137,10 @@ def start_foreman(client, seat, pane, tier):
             raise
         record = None
     if record is None:
+        require_empty_shell(client, pane, occupant)
+        # Re-read immediately before the start: the pane may have been taken
+        # since the first read.
+        require_empty_shell(client, pane)
         return {**_start_seat(client, seat.agent, seat.kind, pane, tier, list(seat.launch_args)), "replayed": False}
     if record.get("pane_id") != pane or record.get("agent") != seat.kind:
         raise HerdrError(
@@ -188,12 +216,7 @@ def restart_worker(client, agent, pane, tier, sleep=time.sleep, before_transitio
         before_transition()
     client.terminate_process(process.get("pid"))
     for attempt in range(SHELL_POLL_ATTEMPTS):
-        current = client.pane_process_info(pane)
-        shell = current.get("shell_pid")
-        foreground = current.get("foreground_processes", [])
-        if (isinstance(shell, int) and not isinstance(shell, bool) and shell > 0
-                and isinstance(foreground, list) and len(foreground) == 1
-                and isinstance(foreground[0], dict) and foreground[0].get("pid") == shell):
+        if holds_only_shell(client.pane_process_info(pane)):
             return start_after_release(client, agent, pane, tier, sleep=sleep, before_start=before_start)
         if attempt + 1 < SHELL_POLL_ATTEMPTS:
             sleep(SHELL_POLL_INTERVAL)

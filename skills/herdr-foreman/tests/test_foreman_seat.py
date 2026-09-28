@@ -63,8 +63,12 @@ def argv(model, effort=None):
 class Client:
     """Herdr's agent.start and pane.process_info, recorded in memory."""
 
-    def __init__(self, reply_argv=None, live_argv=None, held=None):
+    def __init__(self, reply_argv=None, live_argv=None, held=None, occupied_from_read=None):
         self.starts = []
+        #: The pane reads so far, and the read from which a foreign process
+        #: holds the pane's foreground (None: never).
+        self.reads = 0
+        self.occupied_from_read = occupied_from_read
         self.reply_argv = reply_argv
         self.live_argv = live_argv
         #: Herdr's name registry: name -> agent record, as agent.get answers.
@@ -86,6 +90,14 @@ class Client:
         return {"agent": record, "argv": reply}
 
     def pane_process_info(self, pane):
+        self.reads += 1
+        if self.occupied_from_read is not None and self.reads >= self.occupied_from_read:
+            return {"pane_id": pane, "shell_pid": 100,
+                    "foreground_processes": [{"name": "vim", "pid": 500, "argv": ["vim"]}]}
+        if not any(record["pane_id"] == pane for record in self.held.values()) and self.live_argv is None:
+            # An empty shell pane: its shell is the sole foreground process.
+            return {"pane_id": pane, "shell_pid": 100,
+                    "foreground_processes": [{"name": "zsh", "pid": 100, "argv": ["-zsh"]}]}
         return {"pane_id": pane, "shell_pid": 100,
                 "foreground_processes": [{"name": "claude", "pid": 400, "argv": copy.deepcopy(self.live_argv)}]}
 
@@ -152,6 +164,14 @@ class LaunchTest(unittest.TestCase):
         assert seat is not None
         self.seat = seat
         self.tier = {"model": "sonnet-5", "effort": "medium"}
+
+    def test_an_occupied_pane_refuses_a_fresh_start(self):
+        for first in (1, 2):
+            with self.subTest(occupied_from_read=first):
+                client = Client(occupied_from_read=first)
+                with self.assertRaisesRegex(HerdrError, "occupied"):
+                    start_foreman(client, self.seat, "w1:p0", self.tier)
+                self.assertEqual(client.starts, [])
 
     def test_a_retry_after_success_replays_the_verified_seat_without_starting(self):
         client = Client()
