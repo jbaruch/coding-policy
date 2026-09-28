@@ -58,7 +58,19 @@ READY_STATES="idle done"
 # skills/herdr-foreman/foreman/report_delivery.py (`marker_columns`).
 STANDUP_REPORT_PATH_MAX_COLS="${STANDUP_REPORT_PATH_MAX_COLS:-100}"
 
-SKILL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Command substitution strips every trailing newline, so the script directory
+# never passes through one bare: parameter expansion derives it (#487), and a
+# sentinel carries `pwd` across the strip (#466).
+case "${BASH_SOURCE[0]}" in
+  */*) _skill_src="${BASH_SOURCE[0]%/*}" ;;
+  *) _skill_src=. ;;
+esac
+if ! SKILL_DIR="$(cd -- "${_skill_src:-/}" && pwd && printf x)"; then
+  echo "standup-ask: cannot enter the script directory ${_skill_src:-/} — restore read and search access to the plugin directory, or reinstall the plugin, then re-run" >&2
+  exit 1
+fi
+SKILL_DIR="${SKILL_DIR%x}"
+SKILL_DIR="${SKILL_DIR%$'\n'}"
 FOREMAN="${SKILL_DIR}/../herdr-foreman/foreman.sh"
 
 ERRFILE=""

@@ -15,6 +15,7 @@ from datetime import datetime, timedelta
 from unittest.mock import patch
 
 from foreman import runnable
+from foreman.assign import FrozenPaths
 from foreman.errors import UsageError
 from foreman.state import add_assignment, empty_state, save_state, state_lock
 from tests import test_cli as fixture
@@ -168,7 +169,7 @@ class RecoveryCommandTests(fixture.CliCase):
         # identity keeps its source paths. A correction reusing the same brief
         # files, even byte-identical, is new work and reads a frozen copy.
         self.register()
-        with patch("foreman.cli.freeze_paths", side_effect=lambda paths: paths):
+        with patch("foreman.cli.freeze_paths", side_effect=lambda paths: FrozenPaths(paths, {})):
             code, _, err = self.invoke(self.apply_args(), self.fresh_client("previous-task", "developer-0"))
         self.assertEqual(code, 0, err)
         legacy = self.saved()["recovery"]["dispatches"][-1]
@@ -190,7 +191,7 @@ class RecoveryCommandTests(fixture.CliCase):
     def legacy_developer_dispatch(self):
         """A developer dispatch recorded under its source paths, as before #460's freeze."""
         self.register()
-        with patch("foreman.cli.freeze_paths", side_effect=lambda paths: paths):
+        with patch("foreman.cli.freeze_paths", side_effect=lambda paths: FrozenPaths(paths, {})):
             code, _, err = self.invoke(self.apply_args(), self.fresh_client("previous-task", "developer-0"))
         self.assertEqual(code, 0, err)
 
@@ -353,6 +354,45 @@ class RecoveryCommandTests(fixture.CliCase):
         self.assertIn(str(frozen), "".join(self.runner.pasted_prompts()))
         self.briefs["judge"].write_text("rewritten after the send\n")
         self.assertEqual(frozen.read_bytes(), checked)
+
+    def test_an_ancestor_swapped_after_the_freeze_changes_nothing_dispatched(self):
+        # coding-policy#565: the freeze verified the copies; a directory
+        # swapped for a link before the identity and the prompt are computed
+        # must not change the bytes either is computed from.
+        import shutil
+        from foreman import assign, recovery as recovery_module
+        client = self.seat_judge()
+        real_freeze = assign.freeze_paths
+        swap = {}
+
+        def freeze_then_swap(paths):
+            frozen = real_freeze(paths)
+            directory = Path(frozen["judge"]).parent
+            decoy, held = directory.parent / "decoy", directory.parent / "held"
+            shutil.copytree(directory, decoy)
+            for copy in decoy.iterdir():
+                copy.write_bytes(b"# swapped after the freeze\n")
+            directory.rename(held)
+            directory.symlink_to(decoy)
+            swap.update(directory=directory, held=held)
+            return frozen
+        with patch("foreman.cli.freeze_paths", side_effect=freeze_then_swap):
+            code, _, err = self.invoke(self.judge_args("diagnosis"), client)
+        self.assertEqual(code, 0, err)
+        swap["directory"].unlink()
+        swap["held"].rename(swap["directory"])
+        row = self.saved()["recovery"]["dispatches"][-1]
+        paths = {"common": row["common"], "judge": row["brief"]}
+        options = {"task": TASK, "fix_round": None, "plan": None, "work": None, "rounds": {},
+                   "retain_context": False, "no_clear": True, "judge_mode": "diagnosis"}
+        _, fingerprint = recovery_module.dispatch_identity(TASK, "judge", "claude", None, paths, options=options)
+        self.assertEqual(row["fingerprint"], fingerprint)
+        self.assertEqual(row["brief_identity"], recovery_module.brief_identity(paths, "judge", None))
+        tier = row["result"]["tier"]
+        _, prompt_hash = assign.tiered_prompt(assign.assignment_text("judge", row["common"], row["brief"]),
+                                              tier, row["common"], row["brief"])
+        self.assertEqual(tier["prompt_hash"], prompt_hash)
+        self.assertIn("prompt_hash=" + prompt_hash, "".join(self.runner.pasted_prompts()))
 
     def test_a_judge_dispatch_from_before_the_mode_is_never_sent_twice(self):
         # coding-policy#494 review: the mode joined the fingerprint, so an

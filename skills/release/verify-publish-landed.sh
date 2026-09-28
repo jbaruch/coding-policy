@@ -75,7 +75,19 @@ fi
 # registry-version.sh installs no EXIT trap (its trap lives inside its own
 # main()), so this script's trap is untouched; its main() definition is
 # harmlessly overridden by this script's own main() defined below.
-_vpl_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Command substitution strips every trailing newline, so the script directory
+# never passes through one bare: parameter expansion derives it (#487), and a
+# sentinel carries `pwd` across the strip (#466).
+case "${BASH_SOURCE[0]}" in
+  */*) _vpl_src="${BASH_SOURCE[0]%/*}" ;;
+  *) _vpl_src=. ;;
+esac
+if ! _vpl_dir="$(cd -- "${_vpl_src:-/}" && pwd && printf x)"; then
+  echo "error: cannot enter the script directory ${_vpl_src:-/} — restore read and search access to the plugin directory, or reinstall the plugin, then re-run" >&2
+  exit 2
+fi
+_vpl_dir="${_vpl_dir%x}"
+_vpl_dir="${_vpl_dir%$'\n'}"
 # shellcheck source=skills/release/version-compare.sh
 if ! source "${_vpl_dir}/version-compare.sh"; then
   echo "error: cannot source ${_vpl_dir}/version-compare.sh — the release skill tree is incomplete; re-clone the repo or re-install the plugin, then re-run" >&2

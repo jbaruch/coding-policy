@@ -60,7 +60,19 @@ set -euo pipefail
 INTERVAL_SEC="${WATCH_PR_REVIEWS_INTERVAL_SEC:-15}"
 BUDGET_SEC="${WATCH_PR_REVIEWS_BUDGET_SEC:-900}"
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Command substitution strips every trailing newline, so the script directory
+# never passes through one bare: parameter expansion derives it (#487), and a
+# sentinel carries `pwd` across the strip (#466).
+case "${BASH_SOURCE[0]}" in
+  */*) _script_src="${BASH_SOURCE[0]%/*}" ;;
+  *) _script_src=. ;;
+esac
+if ! SCRIPT_DIR="$(cd -- "${_script_src:-/}" && pwd && printf x)"; then
+  echo "error: cannot enter the script directory ${_script_src:-/} — restore read and search access to the plugin directory, or reinstall the plugin, then re-run" >&2
+  exit 2
+fi
+SCRIPT_DIR="${SCRIPT_DIR%x}"
+SCRIPT_DIR="${SCRIPT_DIR%$'\n'}"
 POLL_CMD="${WATCH_PR_REVIEWS_POLL_CMD:-${SCRIPT_DIR}/poll-pr-reviews.sh}"
 
 if ! command -v jq >/dev/null 2>&1; then

@@ -551,7 +551,7 @@ def grok_clear_identity(body, prompt):
     return {"agent": "grok", "kind": "id", "value": identity}
 
 
-def stale_grok_source(dispatch, assignment, observed, body, prompt, plan_body, *, report):
+def stale_grok_source(dispatch, assignment, observed, body, prompt, plan_body, *, report, contents=None):
     source = grok_clear_identity(body, prompt)
     if source is None:
         raise UsageError("grok_source_ambiguous: require one original fresh native session and its single completed dispatched turn; preserve the negative receipt.", {})
@@ -586,7 +586,8 @@ def stale_grok_source(dispatch, assignment, observed, body, prompt, plan_body, *
     if plan.get("task_context") is not None and plan["task_context"] != task_context:
         raise UsageError("grok_dispatch_unbound: original plan names different task or correction bounds; restore its dispatch inputs.", {})
     _, fingerprint = ledger.dispatch_identity(dispatch["task"], dispatch["role"], dispatch["agent"],
-        dispatch["fix_round"], {"common": dispatch["common"], dispatch["role"]: dispatch["brief"]}, options=options)
+        dispatch["fix_round"], {"common": dispatch["common"], dispatch["role"]: dispatch["brief"]}, options=options,
+        contents=contents)
     # A legacy dispatch preserved the bare fingerprint; a bound round's dispatch
     # preserved it wrapped with the exact report path it was dispatched with.
     # The requested report must reproduce that binding; no other path can.
@@ -609,7 +610,11 @@ def recover(store, assignments, data, at):
     for key in ("report", "wait_receipt", "pane", "visible", "source"):
         receipts[key], bodies[key] = ledger.receipt(data[key])
     receipts["brief"], brief = ledger.receipt(dispatch.get("brief"))
-    receipts["common"], _common = ledger.receipt(dispatch.get("common"))
+    receipts["common"], common = ledger.receipt(dispatch.get("common"))
+    # The prompt hash and the fingerprint below are checked against the bytes
+    # these receipts bind, never a second read by name (#565). A receipt's
+    # body is strict UTF-8, so encoding it restores those bytes exactly.
+    contents = {dispatch["brief"]: brief.encode("utf-8"), dispatch["common"]: common.encode("utf-8")}
     if "REPORT: " + data["report"] not in brief.splitlines():
         raise UsageError("The original dispatch brief does not assign this report path; restore the matching brief and report.", {})
     negative = _json(bodies["wait_receipt"], "negative wait receipt")
@@ -628,7 +633,7 @@ def recover(store, assignments, data, at):
     prompt = assignment_text(dispatch["role"], dispatch["common"], dispatch["brief"])
     tier = dispatch["result"].get("tier")
     if tier is not None:
-        prompt, prompt_hash = tiered_prompt(prompt, tier, dispatch["common"], dispatch["brief"])
+        prompt, prompt_hash = tiered_prompt(prompt, tier, dispatch["common"], dispatch["brief"], contents)
         if tier.get("prompt_hash") != prompt_hash:
             raise UsageError("Original briefing bytes differ from the dispatch's recorded prompt hash; restore them before recovery.", {})
     if (negative.get("found") is not False or negative.get("agent") != dispatch["agent"]
@@ -644,7 +649,7 @@ def recover(store, assignments, data, at):
             raise UsageError("grok_dispatch_ambiguous: another dispatch used the same original prompt paths; preserve both outcomes instead of choosing a transcript.", {})
         receipts["plan"], plan_body = ledger.receipt(data["plan"])
         source_session = stale_grok_source(dispatch, assignment, identity, bodies["source"], prompt, plan_body,
-                                           report=data["report"])
+                                           report=data["report"], contents=contents)
     elif "plan" in data:
         if identity is None:
             raise UsageError("Archived pane JSON has no supported native session identity; restore the original pane get evidence.", {})

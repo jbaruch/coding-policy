@@ -1038,20 +1038,20 @@ def cmd_plan(args, client=None, warn=None, trace=None):
     return result, None
 
 
-def _refusal_moves(store, agents_by_name, assignments, roles, args, paths, reports):
+def _refusal_moves(store, agents_by_name, assignments, roles, args, paths, reports, contents=None):
     """Return the refusal move each fresh role carries; see recovery.refusal_move."""
     moves = {}
     for role in roles:
         name = assignments[role]
         if name in agents_by_name:
             move = recovery.refusal_move(store, args.task, role, args.fix_round, agents_by_name[name].kind,
-                                         recovery.brief_identity(paths, role, reports.get(role)), reports.get(role))
+                                         recovery.brief_identity(paths, role, reports.get(role), contents), reports.get(role))
             if move is not None:
                 moves[role] = move
     return moves
 
 
-def _require_bound_slices(document, seated, briefs, bodies=None):
+def _require_bound_slices(document, seated, briefs, bodies=None, contents=None):
     """Refuse a seated dispatch whose boundary is not the one that was checked.
 
     `plan` stamps `slice_digest` over the map `validate-partition` accepted and
@@ -1124,8 +1124,10 @@ def _require_bound_slices(document, seated, briefs, bodies=None):
                 {"role": role})
         brief = briefs.get(role)
         try:
-            # `bodies` carries text already read and verified from a frozen copy.
-            body = bodies[role] if bodies is not None else (Path(brief).read_text(encoding="utf-8") if brief else "")
+            # `bodies` carries text already read and verified from a frozen
+            # copy; `contents` the bytes the dispatch's freeze verified (#565).
+            body = (bodies[role] if bodies is not None
+                    else recovery.briefing_bytes(brief, contents).decode("utf-8") if brief else "")
         except (OSError, UnicodeError) as exc:
             raise UsageError(
                 "Cannot read the brief for seat {!r} at {}: {}. Restore a readable UTF-8 brief "
@@ -1220,13 +1222,18 @@ def cmd_apply(args, client=None, warn=None, trace=None):
             options["oracle_pin"] = oracles[role]["sha256"]
         return options
 
+    # The bytes each frozen copy was verified to hold, once the freeze below
+    # runs: every later read of a frozen path takes these, never the path
+    # again, so an ancestor swapped after the freeze changes nothing sent (#565).
+    contents = None
+
     def identity(role, name, paths_now):
         """The dispatch identity these inputs resolve to: its id and fingerprint."""
         options = options_for(role)
         if canonical_role(role) == "judge":
             options["judge_mode"] = judge_mode
         identifier, fingerprint = recovery.dispatch_identity(
-            args.task, role, name, args.fix_round, paths_now, args.dispatch_id, options=options)
+            args.task, role, name, args.fix_round, paths_now, args.dispatch_id, options=options, contents=contents)
         if supervised:
             # Keep legacy retry IDs, while new bound dispatch fingerprints
             # also bind the explicit report path. Existing legacy receipts
@@ -1245,7 +1252,7 @@ def cmd_apply(args, client=None, warn=None, trace=None):
         if canonical_role(role) != "judge":
             return set()
         _legacy_id, legacy = recovery.dispatch_identity(
-            args.task, role, name, args.fix_round, paths_now, None, options=options_for(role))
+            args.task, role, name, args.fix_round, paths_now, None, options=options_for(role), contents=contents)
         return {legacy, supervision.report_bound_fingerprint(legacy, reports[role])} if role in reports else {legacy}
 
     # A new dispatch reads frozen copies everywhere: every check below, its
@@ -1264,12 +1271,13 @@ def cmd_apply(args, client=None, warn=None, trace=None):
     decision = "frozen" if args.dry_run or not args.task else freeze_decision(assignments, is_replay)
     if decision == "frozen" and not args.dry_run:
         paths = freeze_paths(paths)
+        contents = paths.contents
     if seated or any(key in document for key in ("slice_paths", "slice_digest", "seat_digests")):
         # Keyed on the metadata, not only on the seats: a saved plan stripped
         # of every seat would otherwise skip the check entirely and dispatch a
         # full-surface role while still carrying the boundary it was planned
         # against. After the briefs resolve, since the check reads each brief.
-        _require_bound_slices(document, seated, paths)
+        _require_bound_slices(document, seated, paths, contents=contents)
     replayed = []
     dispatches = {}
     # Check retry identities before next-attempt validation: a completed retry
@@ -1309,7 +1317,7 @@ def cmd_apply(args, client=None, warn=None, trace=None):
             # writes nothing. A batch of replays alone returns its saved
             # receipts unconsulted.
             attention.require_dispatch_clear(state_path, args.task, at)
-            moves = _refusal_moves(store, agents_by_name, assignments, fresh, args, paths, reports)
+            moves = _refusal_moves(store, agents_by_name, assignments, fresh, args, paths, reports, contents)
         for role, name, identifier, fingerprint, prior in resolved:
             if supervised:
                 saved_result = prior["result"] if prior and prior["status"] == "applied" else {}
@@ -1322,7 +1330,7 @@ def cmd_apply(args, client=None, warn=None, trace=None):
                 dispatches[role] = {"id": identifier, "fingerprint": fingerprint, "role": role, "agent": name,
                                     "task": args.task, "fix_round": args.fix_round,
                                     "plan": args.correction_plan, "work": work,
-                                    "brief_identity": recovery.brief_identity(paths, role, reports.get(role)),
+                                    "brief_identity": recovery.brief_identity(paths, role, reports.get(role), contents),
                                     "provider": agents_by_name[name].kind}
                 if role in moves:
                     dispatches[role]["refusal_move"] = moves[role]
@@ -1500,6 +1508,7 @@ def cmd_apply(args, client=None, warn=None, trace=None):
             tiers=tiers,
             reserved=reserved,
             reports=reports,
+            contents=contents,
             retrospective_guard=retrospective_runtime.Guard(state_path, state, client, agents_by_name, at,
                                                           task=args.task, retain=args.retain_context or args.retain_specialist, no_clear=args.no_clear),
         )

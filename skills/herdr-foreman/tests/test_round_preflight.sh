@@ -26,6 +26,7 @@
 #  10. Every check's payload    -> carried through under `checks.<name>.detail`.
 #  11. Gate pointers            -> resolved once, carried for the briefs.
 #  12. Non-object payload       -> exit 0 with `[]`/`null` blocks, never `ok`.
+#  13. Newline-named plugin dir -> the collaborators are still found.
 
 set -uo pipefail
 
@@ -240,6 +241,19 @@ main() {
   # files; the foreman renders it into the briefs' shared GATES value.
   if [[ "$(field "$OUT" 'd["checks"]["gates"]["detail"]["instructions"]')" == '["AGENTS.md"]' ]]; then
     pass; else fail "gate pointers must reach the caller for the briefs, got OUT=$OUT"; fi
+
+  echo "▶ a directory name ending in a newline" >&2
+
+  # A `$(dirname ...)` capture drops the newline, and every collaborator is
+  # then looked for beside a directory that does not exist (#592).
+  if mkdir "$TMP/nl-probe"$'\n' 2>"$TMP/nl.err"; then
+    shadow "$TMP/nl"$'\n'
+    run "$TMP/nl"$'\n'
+    if [[ $RC -eq 0 ]] && [[ "$(field "$OUT" 'd["ready"]')" == "true" ]]; then
+      pass; else fail "a newline-named plugin dir still reaches its collaborators, got RC=$RC OUT=$OUT ERR=$ERRTEXT"; fi
+  else
+    echo "  skipped: this filesystem refuses a name ending in a newline ($(cat "$TMP/nl.err"))" >&2
+  fi
 
   echo "─────────────────────────────────────────────" >&2
   if [[ $FAIL -gt 0 ]]; then echo "FAILED: ${FAIL} failed, ${PASS} passed" >&2; exit 1; fi
