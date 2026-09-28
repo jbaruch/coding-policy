@@ -29,7 +29,7 @@ set -euo pipefail
 
 #: Run in this order. Each is a script in this directory emitting at most one
 #: {"additionalContext": ...} object and exiting 0.
-HOOKS=(check-git-sync check-tessl-latest check-acr-latest herdr-team-status check-leftover-worktrees)
+HOOKS=(check-git-sync check-tessl-latest check-acr-latest herdr-team-status check-leftover-worktrees check-report-caches)
 
 warn() { printf 'session-start: %s\n' "$1" >&2; }
 
