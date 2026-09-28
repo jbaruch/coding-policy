@@ -68,7 +68,7 @@ run() {
   MOCK_ISSUE_COMMENTS='[]'
   MOCK_COMMENT_RC=0
   if "$@"; then
-    PASS_COUNT=$((PASS_COUNT + 1)); echo "  pass: $name"
+    PASS_COUNT=$((PASS_COUNT + 1)); echo "  pass: $name" >&2
   else
     FAIL_COUNT=$((FAIL_COUNT + 1)); echo "  FAIL: $name" >&2
   fi
@@ -517,35 +517,41 @@ t_sent_marker_reads_ruled_and_sweeps() {
   grep -q "reviews/7/dismissals" "${TMPDIR_TEST}/reader-log" || { echo "    FAIL: sweep PUT not sent" >&2; return 1; }
 }
 
-echo "test_dismiss_ruled_review.sh"
-run "covered: follow-up comment posted, then dismissal" t_all_covered_posts_followup_then_dismisses
-run "an existing follow-up comment is reused"       t_existing_followup_comment_is_reused
-run "a partial comment citing the digest is not reused" t_partial_comment_citing_digest_is_not_reused
-run "a failed follow-up post dismisses nothing"     t_failed_followup_post_dismisses_nothing
-run "one uncovered finding refuses"                 t_one_uncovered_refuses
-run "a fix ruling leaves the finding uncovered"     t_fix_ruling_leaves_finding_uncovered
-run "a different line does not cover"               t_different_line_does_not_cover
-run "same path, different rule refuses"             t_same_path_different_rule_refuses
-run "a duplicate FINDING line refuses"              t_duplicate_finding_line_refuses
-run "an unmatched FINDING line refuses"             t_unmatched_finding_line_refuses
-run "duplicate findings in the review refuse"      t_duplicate_review_finding_refuses
-run "a floor rule refuses"                          t_floor_rule_refuses
-run "a failing check refuses"                       t_failing_check_refuses
-run "pending checks do not refuse"                  t_pending_checks_do_not_refuse
-run "a review not on the head is a noop"            t_not_on_head_is_noop
-run "a non-CHANGES_REQUESTED review is a noop"      t_not_changes_requested_is_noop
-run "an idempotent re-run is a noop"                t_idempotent_rerun_is_noop
-run "an unparseable body refuses"                   t_unparseable_body_refuses
-run "carry-over with the path unchanged dismisses"  t_carry_over_unchanged_path_dismisses
-run "carry-over with the path changed refuses"      t_carry_over_changed_path_refuses
-run "carry-over across a diverged compare refuses"  t_carry_over_diverged_refuses
-run "a missing or empty ANSWER refuses"             t_missing_answer_refuses
-run "a missing or other schema_version refuses"             t_schema_missing_or_other_refuses
-run "a malformed ruling refuses"                    t_malformed_ruling_refuses
-run "list mode emits the blocking findings"         t_list_mode_emits_findings
-run "usage errors exit 2"                           t_usage_errors_exit_2
-run "the sent marker reads RULED and sweeps"        t_sent_marker_reads_ruled_and_sweeps
+# `run_suite`, not `main`: the sourced script under test owns `main`.
+# Progress goes to stderr; stdout carries one JSON result.
+run_suite() {
+  echo "test_dismiss_ruled_review.sh" >&2
+  run "covered: follow-up comment posted, then dismissal" t_all_covered_posts_followup_then_dismisses
+  run "an existing follow-up comment is reused"       t_existing_followup_comment_is_reused
+  run "a partial comment citing the digest is not reused" t_partial_comment_citing_digest_is_not_reused
+  run "a failed follow-up post dismisses nothing"     t_failed_followup_post_dismisses_nothing
+  run "one uncovered finding refuses"                 t_one_uncovered_refuses
+  run "a fix ruling leaves the finding uncovered"     t_fix_ruling_leaves_finding_uncovered
+  run "a different line does not cover"               t_different_line_does_not_cover
+  run "same path, different rule refuses"             t_same_path_different_rule_refuses
+  run "a duplicate FINDING line refuses"              t_duplicate_finding_line_refuses
+  run "an unmatched FINDING line refuses"             t_unmatched_finding_line_refuses
+  run "duplicate findings in the review refuse"      t_duplicate_review_finding_refuses
+  run "a floor rule refuses"                          t_floor_rule_refuses
+  run "a failing check refuses"                       t_failing_check_refuses
+  run "pending checks do not refuse"                  t_pending_checks_do_not_refuse
+  run "a review not on the head is a noop"            t_not_on_head_is_noop
+  run "a non-CHANGES_REQUESTED review is a noop"      t_not_changes_requested_is_noop
+  run "an idempotent re-run is a noop"                t_idempotent_rerun_is_noop
+  run "an unparseable body refuses"                   t_unparseable_body_refuses
+  run "carry-over with the path unchanged dismisses"  t_carry_over_unchanged_path_dismisses
+  run "carry-over with the path changed refuses"      t_carry_over_changed_path_refuses
+  run "carry-over across a diverged compare refuses"  t_carry_over_diverged_refuses
+  run "a missing or empty ANSWER refuses"             t_missing_answer_refuses
+  run "a missing or other schema_version refuses"             t_schema_missing_or_other_refuses
+  run "a malformed ruling refuses"                    t_malformed_ruling_refuses
+  run "list mode emits the blocking findings"         t_list_mode_emits_findings
+  run "usage errors exit 2"                           t_usage_errors_exit_2
+  run "the sent marker reads RULED and sweeps"        t_sent_marker_reads_ruled_and_sweeps
+  printf '{"suite":"test_dismiss_ruled_review.sh","passed":%d,"failed":%d}\n' "$PASS_COUNT" "$FAIL_COUNT"
+  [[ $FAIL_COUNT -eq 0 ]]
+}
 
-echo
-echo "passed: ${PASS_COUNT}, failed: ${FAIL_COUNT}"
-[[ $FAIL_COUNT -eq 0 ]]
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+  run_suite
+fi
