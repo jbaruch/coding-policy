@@ -11,6 +11,14 @@
 # pasted `/usage` as chat, Codex swallowing the Enter behind its autocomplete)
 # belongs to commands, not messages.
 #
+# Residual gap (#585): Herdr has no readiness-guarded send. `herdr agent
+# prompt` itself rejects a worker already `blocked` (agent_blocked, exit 2
+# here) but submits to one that is `working`. The script reads the status
+# again immediately before the send and fails closed on anything but idle or
+# done, so the window is the gap between that `agent get` and the `agent
+# prompt` call. A turn that starts inside it still receives the question.
+# Closing it needs a check-and-prompt operation in Herdr itself.
+#
 # Contract:
 #   argv  : <agent-name> <report-path>
 #           report-path must be absolute; the worker writes its four lines there.
@@ -24,8 +32,9 @@
 #             `herdr`, `jq` or the sibling foreman.sh absent),
 #           2 a herdr failure, an unreadable `agent get` payload, or a failed
 #             or unreadable `foreman marker-fit` measurement,
-#           3 the worker is not idle or done at the first read or at the
-#             measurement — nothing was sent. A standup
+#           3 the worker is not idle or done at the first read, at the
+#             measurement, or at the last read just before the send — nothing
+#             was sent. A standup
 #             never interrupts a turn (`rules/agent-team-operation.md`
 #             Dispatch Safety),
 #           4 the worker's live pane is too narrow for its `REPORT: <path>`
@@ -105,6 +114,31 @@ has_control() { # <text>
      || "$1" == *$'\xe2\x80'[$'\xa8'$'\xa9']* ]]
 }
 
+# Read the worker's live status into READ_STATE. Returns 2 on a herdr failure
+# or an unreadable payload, with the diagnostic already on stderr.
+READ_STATE=""
+read_state() {
+  local raw rc=0
+  READ_STATE=""
+  raw="$("$HERDR_BIN" agent get "$AGENT" 2>"$ERRFILE")" || rc=$?
+  if (( rc != 0 )); then
+    warn "\`${HERDR_BIN} agent get ${AGENT}\` failed (exit ${rc}): $(tr '\n' ' ' < "$ERRFILE") — run \`${HERDR_BIN} agent list\` to see the live names"
+    return 2
+  fi
+  rc=0
+  READ_STATE="$(printf '%s' "$raw" | jq -r '
+    if (.result.agent | type) != "object" then
+      error("herdr agent get payload has no .result.agent object")
+    else
+      .result.agent.agent_status // "unknown"
+    end' 2>"$ERRFILE")" || rc=$?
+  if (( rc != 0 )); then
+    warn "could not read the state from the herdr agent get payload (jq exit ${rc}): $(tr '\n' ' ' < "$ERRFILE")"
+    return 2
+  fi
+  return 0
+}
+
 main() {
   if (( $# != 2 )); then
     warn "usage: standup-ask.sh <agent-name> <report-path>"
@@ -156,23 +190,11 @@ main() {
   ERRFILE="$(mktemp)"
   trap cleanup EXIT
 
-  local raw rc=0 state
-  raw="$("$HERDR_BIN" agent get "$AGENT" 2>"$ERRFILE")" || rc=$?
-  if (( rc != 0 )); then
-    warn "\`${HERDR_BIN} agent get ${AGENT}\` failed (exit ${rc}): $(tr '\n' ' ' < "$ERRFILE") — run \`${HERDR_BIN} agent list\` to see the live names"
+  local rc=0 state
+  if ! read_state; then
     return 2
   fi
-  rc=0
-  state="$(printf '%s' "$raw" | jq -r '
-    if (.result.agent | type) != "object" then
-      error("herdr agent get payload has no .result.agent object")
-    else
-      .result.agent.agent_status // "unknown"
-    end' 2>"$ERRFILE")" || rc=$?
-  if (( rc != 0 )); then
-    warn "could not read the state from the herdr agent get payload (jq exit ${rc}): $(tr '\n' ' ' < "$ERRFILE")"
-    return 2
-  fi
+  state="$READ_STATE"
 
   # A standup is worth less than somebody's turn. A worker that is not ready
   # keeps working, and the foreman fills its row from the round log instead.
@@ -220,6 +242,20 @@ main() {
       --argjson w "$width" --argjson n "$needed" \
       '{agent: $a, report_path: $p, state: $s, sent: false, pane_width: $w, needed: $n}'
     return 4
+  fi
+
+  # Last read, immediately before the send. Herdr has no check-and-prompt, so
+  # this narrows the window to the gap between two herdr calls; the header
+  # names what that gap still lets through. A failed read sends nothing.
+  if ! read_state; then
+    warn "nothing was sent"
+    return 2
+  fi
+  if [[ " $READY_STATES " != *" $READ_STATE "* ]]; then
+    warn "${AGENT} became '${READ_STATE}' just before the send — not asking. Fill its row from the round log."
+    jq -n --arg a "$AGENT" --arg p "$REPORT_PATH" --arg s "$READ_STATE" \
+      '{agent: $a, report_path: $p, state: $s, sent: false}'
+    return 3
   fi
 
   rc=0

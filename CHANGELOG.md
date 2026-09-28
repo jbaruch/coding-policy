@@ -1,5 +1,36 @@
 # Changelog
 
+### Fixed
+
+- **`verify-oracle` checks a mechanical round against the oracle its dispatch
+  was sent with, not the plan file as it reads at the gate (#585).** #576 pinned
+  each `patch` or `fixture` oracle file's sha256 in the plan's `oracle_pins`,
+  but the plan is a mutable file and the pins were not part of what `apply`
+  recorded: rewriting the oracle file and its pin together after dispatch let
+  `verify-oracle` accept bytes the round was never licensed on. `apply` now
+  binds each mechanical round's oracle, pin included, onto its dispatch record
+  as `oracle`, folds the pin into the dispatch fingerprint (so an edited plan
+  is new inputs under a recorded `--dispatch-id`, never a replay), and refuses
+  a pinned file that no longer hashes to its pin before anything is sent.
+  `verify-oracle` now takes a required `--task`, reads the role's latest
+  dispatch under it, and refuses unless that dispatch is applied, went to the
+  plan's worker under the plan's task context, and bound exactly the oracle
+  the plan declares. The same check closes the digest case: a `digest` value
+  edited after dispatch is refused too. Recovery store version 14 owns the
+  field; an older store carrying it is refused as newer data, and stale-Grok
+  delivery recovery rebuilds the fingerprint with the saved pin.
+- **`standup-ask.sh` reads the worker's status once more immediately before
+  sending the standup (#585).** Herdr has no check-and-prompt operation: the
+  script read readiness, measured the pane (which reads it again), then sent,
+  so a turn that started after the measurement still got the question. A last
+  `herdr agent get` right before `herdr agent prompt` now narrows the window to
+  the gap between those two calls, exits 3 with nothing sent on any state but
+  idle or done, and exits 2 with nothing sent when that read fails. The script
+  header names the residual gap: `herdr agent prompt` itself rejects an
+  already-`blocked` worker but submits to a `working` one, so a turn that
+  starts inside the remaining gap still receives the question until Herdr
+  offers a readiness-guarded send.
+
 ## 0.3.313 — 2026-09-28
 
 ### Fixed

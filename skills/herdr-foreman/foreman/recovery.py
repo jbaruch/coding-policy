@@ -16,6 +16,7 @@ from pathlib import Path, PurePosixPath
 from . import runnable
 from .errors import UsageError
 from .chronology import assignment_after, latest_assignment, timestamp
+from .oracle import bound_oracle_problem
 from .tiers import SEAT_SEPARATOR, canonical_role, require_seatable
 
 
@@ -43,7 +44,12 @@ RECOVERY_SCHEMA_VERSION = 1
 #: Version 13 adds the `task_closed` event kind, which ends a task's developer
 #: reservation (#483). No collection is added; an older store carrying such an
 #: event is unowned newer data and is refused.
-RECOVERY_STORE_VERSION = 13
+#: Version 14 adds `oracle` to a mechanical round's dispatch: the oracle the
+#: round was licensed on, a `patch` or `fixture` oracle with the sha256 its plan
+#: pinned, so `verify-oracle` checks the oracle the round was sent with rather
+#: than the plan file as it reads now (#585). An older store carrying the field
+#: is unowned newer data and is refused.
+RECOVERY_STORE_VERSION = 14
 REFUSAL_FIELDS = frozenset({"brief_identity", "refusal", "refusal_move", "provider"})
 SPECIALIST_DISPATCH_VERSION = 2
 #: Dispatch record version 3: a judge dispatch carrying the mode it was sent
@@ -218,6 +224,8 @@ def _refuse_unowned_legacy(store, version):
             carriers += [part for part in (row.get("result"), row.get("context_before_send")) if isinstance(part, dict)]
         if version < 12 and any("judge_mode" in part for part in carriers):
             raise UsageError("Older recovery contains a judge mode this version never wrote; preserve it for owner recovery.", {})
+        if version < 14 and isinstance(row, dict) and "oracle" in row:
+            raise UsageError("Older recovery contains a dispatch-bound oracle this version never wrote; preserve it for owner recovery.", {})
         allowed = ALLOWED_AT_6 if version == 6 else REFUSAL_FIELDS if version >= 7 else frozenset()
         if not isinstance(row, dict) or REFUSAL_FIELDS.intersection(row) - allowed:
             raise UsageError("Older recovery contains unowned newer refusal records; preserve it for owner recovery.", {})
@@ -1986,6 +1994,11 @@ def validate_store(store, assignments):
         pending_tasks = set()
         for row in store["dispatches"]:
             _validate_dispatch_metadata(row)
+            if "oracle" in row:
+                problem = bound_oracle_problem(row["oracle"])
+                if problem is not None:
+                    raise UsageError("A dispatch's bound oracle is malformed: {}; restore the original dispatch "
+                                     "record.".format(problem), {"dispatch": row.get("id")})
             for key in ("id", "fingerprint", "role", "agent"):
                 text(row[key], key)
             require_seatable(row["role"])
