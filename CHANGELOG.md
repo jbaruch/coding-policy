@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.310 — 2026-09-28
+
 ### Fixed
 
 - **A retained fix round's `de_escalated` now describes the tier it runs at
