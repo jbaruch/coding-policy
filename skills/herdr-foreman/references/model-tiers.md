@@ -115,7 +115,9 @@ accepted, `verify-oracle` compares its whole result against the oracle the plan
 declared (SKILL.md Step 12). The result is the pushed diff for a `patch` oracle
 and the produced output otherwise. `plan` pins each `patch` or `fixture`
 file's sha256 in the plan's `oracle_pins`; an oracle file edited after planning
-is refused rather than compared. The comparison is the contract of
+is refused rather than compared. `apply` binds the oracle and its pin into the
+round's dispatch, and `verify-oracle --task` checks against that binding, so a
+plan edited after dispatch is refused too. The comparison is the contract of
 `skills/herdr-foreman/foreman/oracle.py`, `verify`.
 A context written for the retired predicate — task names, `spec_complete`,
 file and byte caps, the escape booleans — is refused by name, with its
