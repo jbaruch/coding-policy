@@ -49,14 +49,15 @@ description: Deterministic operations → script, a fixed answer set read by mea
 - The skill references the script and runs it; the script does the work
 - Code blocks in SKILL.md are for showing the agent what command to run, not for embedding logic the agent should reproduce character-by-character
 
-- Narrow exception for Herdr's installed-plugin bootstrap.
-- Applies only to command blocks in `skills/herdr-foreman/SKILL.md`, `skills/herdr-standup/SKILL.md`, `skills/herdr-foreman/references/round-setup.md`, and `skills/herdr-foreman/references/judge-round.md`.
+- Narrow exception for the installed-plugin bootstrap.
+- Applies only to command blocks in `skills/herdr-foreman/SKILL.md`, `skills/herdr-standup/SKILL.md`, `skills/herdr-foreman/references/round-setup.md`, `skills/herdr-foreman/references/judge-round.md`, `skills/release/SKILL.md`, `skills/release/PUBLICATION.md`, and `skills/adopt-fork-pr/SKILL.md`.
 - Preconditions (all required):
-  1. The block initializes `CP` to the literal `.tessl/plugins/jbaruch/coding-policy`; its only inline branch tests that directory and falls back to the same path under `$HOME`
-  2. The block invokes only co-shipped scripts through quoted `$CP` paths with an explicit interpreter; each independent call repeats the bootstrap
-  3. Bootstrap performs no writes, network access, permission changes, sourcing, or evaluation of repository-controlled code
-  4. All work after root selection stays in the invoked script; no inline business logic, loops, or additional selection heuristics
-  5. `skills/herdr-foreman/tests/test_skill_invocations.sh` checks every covered block and executes fixtures for local precedence, global fallback, missing installs, spaces, and mode-0644 scripts
+  1. The block initializes `CP` to the literal `.tessl/plugins/jbaruch/coding-policy`
+  2. Its only inline branches test the directory `CP` names, falling back to the same path under `$HOME`, then to `.` for a coding-policy clone
+  3. The block invokes only co-shipped scripts through quoted `$CP` paths with an explicit interpreter; each independent call repeats the bootstrap
+  4. Bootstrap performs no writes, network access, permission changes, sourcing, or evaluation of repository-controlled code
+  5. All work after root selection stays in the invoked script; no inline business logic, loops, or additional selection heuristics
+  6. `skills/herdr-foreman/tests/test_skill_invocations.sh` checks every covered block and executes fixtures for local precedence, global fallback, clone fallback, missing installs, spaces, and mode-0644 scripts
 - Every other command block follows Scripts Are Real Files unchanged.
 
 ## Script Requirements

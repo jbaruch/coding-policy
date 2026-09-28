@@ -9,10 +9,15 @@
 #    from a clone and break only once installed.
 # 2. The `bash ` convention is present, so a rewrite that drops every
 #    invocation cannot pass check 1 vacuously.
-# 3. Every `$CP` use sits in a fenced block that resolved `CP=` first. The
-#    plugin root differs between a project-local and a global install, so each
+# 3. Every fenced bash block that names a plugin script (`$CP`, `skills/`, or
+#    `.tessl/plugins`) opens with the resolver, then one quoted `$CP` script
+#    invocation and its arguments. The plugin root differs between a
+#    project-local install, a global install and a coding-policy clone, so each
 #    block carries its own resolver — an agent's shell state does not survive
-#    between tool calls.
+#    between tool calls. A repo-relative `bash skills/...` fails this check: it
+#    resolves only inside a coding-policy clone (#574).
+# 3b. No inline code span invokes a plugin script with arguments, so an
+#    instruction cannot dodge check 3 by leaving its fence.
 #
 # Mode-gate conventions, checked against MODE_GATE_SKILL only:
 # 4. The first step gates on HERDR_ENV before any script, and the gate turns a
@@ -32,12 +37,24 @@ set -uo pipefail
 
 # Herdr skills whose SKILL.md invokes a plugin script. herdr-standup shipped
 # bare invocations while this suite resolved its target through its own
-# directory, so it only ever read herdr-foreman's SKILL.md.
-SKILLS=(herdr-foreman herdr-standup)
+# directory, so it only ever read herdr-foreman's SKILL.md. release ships to
+# every consumer and invoked its scripts by clone-relative path (#574);
+# adopt-fork-pr runs in any repo, this one included, and invoked its script
+# by a mount path a clone does not have.
+SKILLS=(herdr-foreman herdr-standup release adopt-fork-pr)
+
+# Reference files whose command blocks the bootstrap carve-out also covers.
+REFERENCES=(herdr-foreman/references/round-setup.md herdr-foreman/references/judge-round.md
+            release/PUBLICATION.md)
 
 # herdr-foreman alone carries the standalone/Herdr mode gate. herdr-standup
 # turns a non-Herdr agent away through roster.sh's exit 1, not by reading.
 MODE_GATE_SKILL=herdr-foreman
+
+# The one resolver the bootstrap carve-out permits: project-local install,
+# then global install, then the current directory for a coding-policy clone.
+# shellcheck disable=SC2016 # Match the documented shell source literally.
+BOOTSTRAP='CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"; [ -d "$CP" ] || CP=.'
 
 die() { echo "fatal: $*" >&2; exit 2; }
 warn_cleanup() { echo "warn: could not remove $1" >&2; }
@@ -97,28 +114,45 @@ check_invocations() { # <skill-name> <skill-file>
     *) die "grep failed counting invocations in ${skill} (exit ${rc})" ;;
   esac
 
-  # 3. Every fenced block that uses `$CP` defines it first. A block that
-  # inherits the resolver from an earlier block is broken on arrival: the
-  # agent runs each block as its own tool call, in a fresh shell.
+  # 3. Every fenced block that names a plugin script defines `CP` first. A
+  # block that inherits the resolver from an earlier block is broken on
+  # arrival: the agent runs each block as its own tool call, in a fresh shell.
   local unresolved
   rc=0
   # The bootstrap exception permits this exact directory choice only. Check
-  # every shell block, including its interpreter and continuation shape.
-  # shellcheck disable=SC2016 # Match the documented shell source literally.
-  local bootstrap='CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"'
-  unresolved="$(awk -v bootstrap="$bootstrap" '
-    /^```bash/ { inblock = 1; row = 0; next }
-    /^```/ { if (inblock && row < 2) print FNR ": incomplete bootstrap block"; inblock = 0; next }
-    !inblock || /^[[:space:]]*$/ { next }
-    {
-      row++
-      if (row == 1 && $0 != bootstrap) print FNR ": unsupported bootstrap: " $0
-      if (row == 2 && $0 !~ /^(bash|python3) "\$CP\/skills\/[^[:space:]]+\.(sh|py)"([[:space:]]|$)/)
-        print FNR ": expected quoted co-shipped script invocation: " $0
-      if (row > 2 && $0 !~ /^[[:space:]]+(-|<|\[|"\$CP\/)/)
-        print FNR ": expected script arguments only: " $0
-      if (row > 1 && (index($0, "$(") || index($0, "`") || index($0, ";") || index($0, "&&") || index($0, "||")))
-        print FNR ": inline evaluation is forbidden: " $0
+  # every such block, including its interpreter and continuation shape.
+  # A block nested in a list item is indented; its fence's indentation is
+  # stripped from every line so the literal comparison still holds. A block
+  # naming no plugin script (git, gh) is an ordinary command, outside the
+  # carve-out, and is skipped.
+  unresolved="$(awk -v bootstrap="$BOOTSTRAP" '
+    function check(   i, line, row) {
+      if (!(blk ~ /\$CP|skills\/|\.tessl\/plugins/)) return
+      row = 0
+      for (i = 1; i <= n; i++) {
+        line = lines[i]
+        if (line ~ /^[[:space:]]*$/) continue
+        row++
+        if (row == 1 && line != bootstrap) print nums[i] ": unsupported bootstrap: " line
+        if (row == 2 && line !~ /^(bash|python3) "\$CP\/skills\/[^[:space:]]+\.(sh|py)"([[:space:]]|$)/)
+          print nums[i] ": expected quoted co-shipped script invocation: " line
+        if (row > 2 && line !~ /^[[:space:]]+(-|<|\[|"\$CP\/)/)
+          print nums[i] ": expected script arguments only: " line
+        if (row > 1 && (index(line, "$(") || index(line, "`") || index(line, ";") || index(line, "&&") || index(line, "||")))
+          print nums[i] ": inline evaluation is forbidden: " line
+      }
+      if (row < 2) print start ": incomplete bootstrap block"
+    }
+    !inblock && /^[[:space:]]*```bash/ {
+      inblock = 1; n = 0; blk = ""; start = FNR
+      ind = $0; sub(/```.*/, "", ind); ind = length(ind)
+      next
+    }
+    inblock && /^[[:space:]]*```/ { check(); inblock = 0; next }
+    inblock {
+      line = $0
+      if (substr(line, 1, ind) ~ /^[[:space:]]*$/) line = substr(line, ind + 1)
+      lines[++n] = line; nums[n] = FNR; blk = blk "\n" line
     }
   ' "$skill")" || rc=$?
   if (( rc != 0 )); then
@@ -127,9 +161,24 @@ check_invocations() { # <skill-name> <skill-file>
   if [[ -z "$unresolved" ]]; then
     pass
   else
-    fail "${name}: \$CP used in a block that never resolved it — each block is its own shell:"
+    fail "${name}: plugin script named in a block that does not open with the resolver — each block is its own shell:"
     printf '%s\n' "$unresolved" >&2
   fi
+
+  # 3b. No inline code span runs a plugin script: an interpreter in front of a
+  # `skills/` path, or a `skills/` script followed by arguments.
+  local inline
+  rc=0
+  # shellcheck disable=SC2016 # Backticks are Markdown code spans matched literally.
+  inline="$(grep -nE '`(bash|python3) [^`]*skills/|`[^` ]*skills/[^` ]*\.(sh|py) [^`]+`' "$skill")" || rc=$?
+  case "$rc" in
+    1) pass ;;
+    0)
+      fail "${name}: inline code span invokes a plugin script — move it into a resolved command block:"
+      printf '%s\n' "$inline" >&2
+      ;;
+    *) die "grep failed scanning ${skill} for inline invocations (exit ${rc})" ;;
+  esac
 }
 
 check_mode_gate() { # <skill-name> <skill-file>
@@ -245,44 +294,69 @@ check_mode_gate() { # <skill-name> <skill-file>
 }
 
 # Execute a documented block's resolver and invocation against packaged-mode
-# fixtures. Substitute a task-owned fixture root for the HOME token without
-# changing the process's HOME or touching the user's installed plugin.
+# fixtures: a project-local install, a global install, a coding-policy clone
+# (the current directory), and none of them. Substitute a task-owned fixture
+# root for the HOME token without changing the process's HOME or touching the
+# user's installed plugin. The invocation runs without its documented
+# arguments: placeholders like `<owner>` are redirections to a shell.
 check_install_shapes() { # <skill-file>
-  local fixture resolver original_resolver invocation code output rc shape local_root global_root
+  local fixture resolver original_resolver invocation interp script code output rc shape
+  local project local_root global_root self_root body
   fixture="$(mktemp -d)" || die "cannot create install-shape fixture"
   INSTALL_FIXTURE="$fixture"
-  resolver="$(awk '/^CP=/{print; exit}' "$1")" || die "cannot read documented resolver"
-  invocation="$(awk '/^bash .*roster[.]sh/{print; exit}' "$1")" || die "cannot read roster invocation"
-  [[ -n "$resolver" && -n "$invocation" ]] || die "missing executable roster example"
+  resolver="$(awk '/^[[:space:]]*CP=/{sub(/^[[:space:]]+/, ""); print; exit}' "$1")" \
+    || die "cannot read documented resolver"
+  invocation="$(awk '/^[[:space:]]*(bash|python3) "\$CP\//{sub(/^[[:space:]]+/, ""); print; exit}' "$1")" \
+    || die "cannot read documented invocation"
+  [[ -n "$resolver" && -n "$invocation" ]] || die "missing executable command block in $1"
+  interp="${invocation%% *}"
+  # shellcheck disable=SC2016 # $CP is the documented literal the sed pattern matches.
+  script="$(printf '%s\n' "$invocation" | sed -E 's/^(bash|python3) "\$CP\/([^"]+)".*/\2/')" \
+    || die "cannot read the invoked script path"
+  [[ "$script" == skills/* ]] || die "unparseable invocation in $1: $invocation"
+  # shellcheck disable=SC2016 # $CP is expanded by the fixture shell, not here.
+  invocation="$interp \"\$CP/$script\""
   original_resolver="$resolver"
   resolver="${resolver//\$HOME/\$INVOCATION_FIXTURE_GLOBAL}"
   code="$resolver"$'\n'"$invocation"
-  local_root="$fixture/project with spaces/.tessl/plugins/jbaruch/coding-policy"
+  project="$fixture/project with spaces"
+  local_root="$project/.tessl/plugins/jbaruch/coding-policy"
   global_root="$fixture/global with spaces/.tessl/plugins/jbaruch/coding-policy"
-  mkdir -p "$local_root/skills/herdr-foreman" "$global_root/skills/herdr-foreman" \
-    || die "cannot create installed plugin fixtures"
-  printf 'printf "local\\n"\n' > "$local_root/skills/herdr-foreman/roster.sh" || die "cannot write local fixture"
-  printf 'printf "global\\n"\n' > "$global_root/skills/herdr-foreman/roster.sh" || die "cannot write global fixture"
-  chmod 0644 "$local_root/skills/herdr-foreman/roster.sh" "$global_root/skills/herdr-foreman/roster.sh" \
-    || die "cannot set published file modes"
-  for shape in local global missing; do
+  self_root="$project"
+  for shape in local global self; do
+    case "$shape" in
+      local) body="$local_root/$script" ;;
+      global) body="$global_root/$script" ;;
+      self) body="$self_root/$script" ;;
+    esac
+    mkdir -p "$(dirname "$body")" || die "cannot create $shape plugin fixture"
+    if [[ "$interp" == python3 ]]; then
+      printf 'print("%s")\n' "$shape" > "$body" || die "cannot write $shape fixture"
+    else
+      printf 'printf "%s\\n"\n' "$shape" > "$body" || die "cannot write $shape fixture"
+    fi
+    chmod 0644 "$body" || die "cannot set published file modes"
+  done
+  for shape in local global self missing; do
     rc=0
-    output="$(cd "$fixture/project with spaces" && INVOCATION_FIXTURE_GLOBAL="$fixture/global with spaces" bash -c "$code" 2>&1)" || rc=$?
+    output="$(cd "$project" && INVOCATION_FIXTURE_GLOBAL="$fixture/global with spaces" bash -c "$code" 2>&1)" || rc=$?
     if [[ "$shape" == missing ]]; then
       if (( rc != 0 )); then pass; else fail "missing installs must fail visibly"; fi
     elif (( rc == 0 )) && [[ "$output" == "$shape" ]]; then pass
-    else fail "$shape install invocation: rc=$rc output=$output"; fi
-    if [[ "$shape" == local ]]; then
-      mv "$local_root" "$fixture/local-unused" || die "cannot stage global-only install"
-    elif [[ "$shape" == global ]]; then
-      mv "$global_root" "$fixture/global-unused" || die "cannot stage missing install"
-    fi
+    else fail "$shape install invocation of $script: rc=$rc output=$output"; fi
+    case "$shape" in
+      local) mv "$local_root" "$fixture/local-unused" || die "cannot stage global-only install" ;;
+      global) mv "$global_root" "$fixture/global-unused" || die "cannot stage clone-only root" ;;
+      self) mv "$project/skills" "$fixture/self-unused" || die "cannot stage missing install" ;;
+    esac
   done
   local bad_block
   for bad_block in \
     $'CP=.tessl/plugins/jbaruch/coding-policy\nbash "$CP/skills/herdr-foreman/roster.sh"' \
+    $'CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"\nbash "$CP/skills/herdr-foreman/roster.sh"' \
     $'bash .tessl/plugins/jbaruch/coding-policy/skills/herdr-foreman/roster.sh' \
     $'"$HOME/.tessl/plugins/jbaruch/coding-policy/skills/herdr-foreman/roster.sh"' \
+    $'bash skills/release/check-leftovers.sh' \
     "$original_resolver"$'\n'"$invocation"$'\n  eval unsafe'; do
     # shellcheck disable=SC2016 # Backticks delimit Markdown, not shell commands.
     printf '```bash\n%s\n```\n' "$bad_block" > "$fixture/invalid.md" || die "cannot write invalid bootstrap fixture"
@@ -293,6 +367,16 @@ check_install_shapes() { # <skill-file>
       fail "bootstrap guard accepted a nonconforming command block"
     fi
   done
+  # An instruction moved out of its fence into an inline span is still caught.
+  # shellcheck disable=SC2016 # Backticks delimit Markdown, not shell commands.
+  printf -- '- Confirm: `python3 skills/release/check-closing-issues.py <owner> <repo> <pr> --merged`\n' \
+    > "$fixture/inline.md" || die "cannot write inline invocation fixture"
+  if bash -c 'source "$1"; check_invocations inline "$2"; (( FAIL > 0 ))' \
+    bash "${BASH_SOURCE[0]}" "$fixture/inline.md" > "$fixture/guard.log" 2>&1; then
+    pass
+  else
+    fail "inline-span guard accepted a repo-relative invocation"
+  fi
   cleanup
   [[ -z "$INSTALL_FIXTURE" ]] || die "install fixture cleanup failed; the exit trap will retry"
 }
@@ -336,8 +420,11 @@ main() {
     check_install_shapes "$skill"
   done
 
-  check_invocations round-setup "$skills_root/herdr-foreman/references/round-setup.md"
-  check_invocations judge-round "$skills_root/herdr-foreman/references/judge-round.md"
+  local ref
+  for ref in "${REFERENCES[@]}"; do
+    [[ -r "$skills_root/$ref" ]] || die "reference not found at $skills_root/$ref"
+    check_invocations "$ref" "$skills_root/$ref"
+  done
   check_cleanup_retry
 
   skill="${skills_root}/${MODE_GATE_SKILL}/SKILL.md"
