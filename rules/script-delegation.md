@@ -33,6 +33,10 @@ description: Deterministic operations → script, a fixed answer set read by mea
 - When it answers that, the question goes to the reasoning round instead
 - An unavailable classifier or an answer outside the list takes the same path, never a retry into another answer
 - The label never triggers an action that cannot be undone (see `rules/ship-on-green.md`)
+- A label may add a reversible gate
+- A reversible gate is a recorded obligation that a recorded clear removes
+- A label never removes a gate, approves, accepts, or skips a check
+- A gate's level is decided by a script from the label's recorded probabilities, never by the label's own claim
 
 ## The Regex Trap
 

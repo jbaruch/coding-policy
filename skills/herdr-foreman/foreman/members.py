@@ -23,6 +23,7 @@ import re
 import subprocess
 from pathlib import Path
 
+from . import report_gates
 from . import runnable
 from . import supervision
 from .chronology import timestamp
@@ -239,14 +240,19 @@ def close(state_path, enrollment, ledger, at):
     member = _member(supervision.load(state_path), enrollment)
     assignment = supervision.expected_assignment(member)
     event = assessed_event(ledger, assignment, state_path)
-    outcome = "Task ledger event {}: {}".format(event.get("id", "unknown"), event["decision"])
-    drained = supervision.drain(state_path)
-    mine = [row for row in drained["events"] if row["member"] == enrollment]
-    acknowledged = []
-    if mine:
-        acknowledged = supervision.acknowledge(state_path, {"through": drained["through"], "outcomes": [
-            {"event": row["id"], "outcome": outcome, "evidence": [ledger]} for row in mine]}, at)["acknowledged"]
-    resolved = supervision.resolve(state_path, {"id": enrollment, "outcome": outcome, "evidence": [ledger]}, at)
+    # A classifier gate only adds friction: an open re-read refuses any
+    # closure, an open block refuses an accepted one (foreman/report_gates.py).
+    # The gate lock is held through the closure, so no gate lands in between.
+    with report_gates.holding(state_path):
+        report_gates.require_clear(state_path, assignment["report"], event["decision"] == "accepted")
+        outcome = "Task ledger event {}: {}".format(event.get("id", "unknown"), event["decision"])
+        drained = supervision.drain(state_path)
+        mine = [row for row in drained["events"] if row["member"] == enrollment]
+        acknowledged = []
+        if mine:
+            acknowledged = supervision.acknowledge(state_path, {"through": drained["through"], "outcomes": [
+                {"event": row["id"], "outcome": outcome, "evidence": [ledger]} for row in mine]}, at)["acknowledged"]
+        resolved = supervision.resolve(state_path, {"id": enrollment, "outcome": outcome, "evidence": [ledger]}, at)
     return {"schema_version": 1, "enrollment": enrollment, "ledger_event": event.get("id"),
             "decision": event["decision"], "acknowledged": acknowledged, "resolved": resolved}
 

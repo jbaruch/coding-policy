@@ -29,7 +29,7 @@ from . import __version__
 from .assign import apply as apply_assignments
 from .assign import APPLY_SCHEMA_VERSION, dry_run, freeze_decision, freeze_paths, read_frozen, native_context_session, normalize_assignments, resolve_paths, validate_fix_history
 from . import renderable
-from . import attention, capabilities, chronology, composition, engagement, foreman_queue, foreman_reset, historical, home, load_set, members, memory, oracle, partition, recovery, report_delivery, restoration, role_clear, retrospective, retrospective_runtime, supervision, supervision_gate, supervision_runtime, triggers
+from . import attention, capabilities, chronology, composition, engagement, foreman_queue, foreman_reset, historical, home, load_set, members, memory, oracle, partition, recovery, report_delivery, report_gates, restoration, role_clear, retrospective, retrospective_runtime, supervision, supervision_gate, supervision_runtime, triggers
 from .config import FOREMAN_CONFIG_VERSION, default_config_path, load_config, load_foreman, load_judge, load_role_costs, select_agents
 from .errors import PlanError, StateError, ForemanError, UsageError
 from .herdr import (
@@ -161,6 +161,7 @@ def build_parser():
     retro_show.add_argument("--id", default="latest")
     memory.register_commands(sub, common)
     attention.register_commands(sub, common)
+    report_gates.register_commands(sub, common)
     supervision_runtime.register_commands(sub, common)
     restoration.register_commands(sub, common)
     partition.register_commands(sub, common)
@@ -1817,6 +1818,14 @@ def _record_stopped_task(state_path, diagnosis, at):
 
 def cmd_recovery(args, client=None, warn=None, trace=None):
     state_path = _state_path(args)
+    # A review receipt's gate check and its commit are one transaction: the
+    # report-gate lock is held from the check through the state save, so no
+    # gate can be recorded between them (foreman/report_gates.py `holding`).
+    with report_gates.holding(state_path) if args.command == "record-report" else nullcontext():
+        return _run_recovery(args, state_path, warn, client, trace)
+
+
+def _run_recovery(args, state_path, warn, client, trace):
     state = _load_state_for_write(state_path, warn)
     store, history = state["recovery"], state["assignments"]
     data, at = _read_record(args.record), args.now or now_iso()
@@ -1856,6 +1865,8 @@ def cmd_recovery(args, client=None, warn=None, trace=None):
             dispatch = next((item for item in store["dispatches"] if item["id"] == data.get("dispatch")), None)
             if dispatch is not None:
                 _require_independent_report(state, dispatch["task"], data.get("reviewer"))
+            if isinstance(data.get("report"), str) and data["report"]:
+                report_gates.require_clear(state_path, data["report"], data.get("verdict") == "approved")
         result = recovery.record_report(store, data, at)
     elif args.command == "authorize-refused-dispatch":
         result = recovery.authorize_refused_dispatch(store, data, at)
@@ -2293,6 +2304,16 @@ def cmd_memory(args, client=None, warn=None, trace=None):
     return memory.run_command(args, _state_path(args), args.now or now_iso()), None
 
 
+def cmd_report_gates(args, client=None, warn=None, trace=None):
+    judge = None
+    if args.command in {"report-gate-clear", "report-gate-reread"}:
+        # The pinned judge is who may clear in adjudication; the owner reads the
+        # role from the delivering dispatch, never from the caller.
+        pinned = load_judge(_config_path(args))
+        judge = pinned.agent if pinned else None
+    return report_gates.run_command(args, _state_path(args), now_iso(), judge), None
+
+
 def cmd_attention(args, client=None, warn=None, trace=None):
     return attention.run_command(args, _state_path(args), args.now or now_iso()), None
 
@@ -2349,6 +2370,7 @@ COMMANDS = {
     "supervision-gate": cmd_supervision_gate,
     **{command: cmd_memory for command in memory.COMMANDS},
     **{command: cmd_attention for command in attention.COMMANDS},
+    **{command: cmd_report_gates for command in report_gates.COMMANDS},
     **{command: cmd_supervision for command in SUPERVISION_COMMANDS},
     **{command: cmd_restoration for command in restoration.COMMANDS},
 }
@@ -2398,11 +2420,11 @@ def main(argv=None, stdout=None, stderr=None, client=None):
             home.require_current(defaults)
             # Commands that may migrate or write state share its canonical lock.
             # Dry runs, probes, and retrospective reads remain read-only.
-            readonly = args.command in {"probe-report", "marker-fit", "detect-triggers", "validate-partition", "verify-oracle", "retro-check", "retro-list", "retro-show", "capability-check", "capability-show", "supervision-gate", "load-set", "foreman-queue", "cost-report", "check-member", "verify-foreman"} or getattr(args, "dry_run", False)
+            readonly = args.command in {"probe-report", "marker-fit", "detect-triggers", "validate-partition", "verify-oracle", "retro-check", "retro-list", "retro-show", "capability-check", "capability-show", "supervision-gate", "load-set", "foreman-queue", "cost-report", "check-member", "verify-foreman", "report-gate-status"} or getattr(args, "dry_run", False)
             # The deliverer starts while `foreman-reset` still holds the state lock;
             # it serializes on the reset record's own lock instead. close-member
             # writes only through the supervision owner's own lock.
-            separate_owner = args.command in memory.COMMANDS | attention.COMMANDS | SUPERVISION_COMMANDS | restoration.COMMANDS | {"foreman-reset-deliver", "foreman-reset-reconcile", "close-member"}
+            separate_owner = args.command in memory.COMMANDS | attention.COMMANDS | report_gates.COMMANDS | SUPERVISION_COMMANDS | restoration.COMMANDS | {"foreman-reset-deliver", "foreman-reset-reconcile", "close-member"}
             lock = nullcontext() if readonly or separate_owner else state_lock(retrospective.canonical_state(_state_path(args)))
             with lock:
                 retro_lock = retrospective.lock(_state_path(args)) if not readonly and args.command in {"apply", "start-judge", "retro-record"} else nullcontext()
