@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.304 — 2026-09-28
+
 ### Fixed
 
 - **codex-accept's `.` component checks now match what they claim (#572).**
