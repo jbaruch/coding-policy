@@ -26,8 +26,10 @@
   the same: text cannot tell the two apart, a declaration can, and a
   misfiling merge never carries one. Anything else parked under a published
   heading is still refused. Replayed over the last 150 merges to `main`, it
-  flags three: #573 (this incident), #448 (#452's misfiling) and #325 (an
-  `## Unreleased` heading that blocked the stamp), and nothing else.
+  flags three misfilings, #573 (this incident), #448 (#452's) and #325 (an
+  `## Unreleased` heading that blocked the stamp), plus two deliberate
+  rewrites of published entries (#357's consolidation, #247's prose pass)
+  that would now carry a trailer, and nothing else.
 
   Prevention runs at publish time. The stamp-changelog action now runs the
   check with a new `--since-last-publish` mode before stamping, so a push
