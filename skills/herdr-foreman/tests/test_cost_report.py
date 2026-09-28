@@ -30,7 +30,7 @@ def snapshot(at, **agents):
         for name, (pct, resets, group) in agents.items()}}
 
 
-def delivered(close="merged"):
+def delivered(close: str | None = "merged"):
     state = empty_state()
     add_assignment(state, DEV, "developer", "codex", task="t")
     add_assignment(state, FIX, "developer", "codex", task="t", fix_round=2)
@@ -104,6 +104,14 @@ class ReportTest(unittest.TestCase):
         add_snapshot(state, snapshot(AFTER, codex=(95, "Sep 30", "")))
         window = [row for row in only(state)["windows"] if row["pool"] == "codex"][0]
         self.assertEqual((window["consumed_pct"], window["reason"]), ("unknown", "window_reset"))
+
+    def test_a_garbage_reading_is_unmeasured_not_subtracted(self):
+        state = delivered()
+        add_snapshot(state, snapshot(BEFORE, codex=(90, "Sep 30", "")))
+        add_snapshot(state, snapshot(AFTER, codex=(80, "Sep 30", "")))
+        state["snapshots"][-1]["agents"]["codex"]["windows"]["weekly"]["remaining_pct"] = "eighty"
+        window = [row for row in only(state)["windows"] if row["pool"] == "codex"][0]
+        self.assertEqual((window["consumed_pct"], window["after_pct"], window["reason"]), ("unknown", "unknown", "unmeasured"))
 
     def test_a_missing_bracketing_snapshot_is_named(self):
         state = delivered()

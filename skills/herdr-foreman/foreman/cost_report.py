@@ -38,7 +38,7 @@ from datetime import timezone
 from .chronology import timestamp
 from .errors import UsageError
 from .recovery import task_closure
-from .tiers import canonical_role
+from .tiers import canonical_role, measured_pressure
 
 REPORT_SCHEMA_VERSION = 1
 UNKNOWN = "unknown"
@@ -139,19 +139,23 @@ def _windows(task, agents_used, snapshots, assignments, start, end):
         b, a = readings
         for name in sorted(set(b) | set(a)):
             start_w, end_w = b.get(name), a.get(name)
-            before_pct = start_w.get("remaining_pct") if isinstance(start_w, dict) else None
-            after_pct = end_w.get("remaining_pct") if isinstance(end_w, dict) else None
+            # A snapshot is a file on disk; a hand-edited or truncated reading
+            # is unmeasured, never a number to subtract.
+            before_pct = measured_pressure(start_w.get("remaining_pct")) if isinstance(start_w, dict) else None
+            after_pct = measured_pressure(end_w.get("remaining_pct")) if isinstance(end_w, dict) else None
             reason = None
+            consumed = UNKNOWN
             if before_pct is None or after_pct is None:
                 reason = "unmeasured"
             elif (start_w.get("resets") is None or start_w.get("resets") != end_w.get("resets")
                   or after_pct > before_pct):
                 reason = "window_reset"
-            elif entry["shared"]:
-                reason = "shared_window"
-            elif concurrent:
-                reason = "concurrent_work"
-            consumed = UNKNOWN if reason in {"unmeasured", "window_reset"} else before_pct - after_pct
+            else:
+                consumed = before_pct - after_pct
+                if entry["shared"]:
+                    reason = "shared_window"
+                elif concurrent:
+                    reason = "concurrent_work"
             out.append({**base, "window": name,
                         "before_pct": UNKNOWN if before_pct is None else before_pct,
                         "after_pct": UNKNOWN if after_pct is None else after_pct,
@@ -184,8 +188,8 @@ def _task_report(task, store, assignments, snapshots):
         work[role] = work.get(role, 0) + 1
     events = [event for event in store["events"] if event.get("task") == task
               and (end is None or timestamp(event.get("at"), "Event {} time".format(event.get("sequence"))) <= end)]
-    coordination = {field: sum(1 for event in events if event.get("kind") == kind)
-                    for field, kind in COORDINATION_EVENTS.items()}
+    coordination: dict[str, int | str] = {field: sum(1 for event in events if event.get("kind") == kind)
+                                          for field, kind in COORDINATION_EVENTS.items()}
     coordination["unstarted_assignments"] = sum(1 for _at, row in rows if row.get("status") != "applied")
     coordination["foreman_tokens"] = UNKNOWN
     return {
