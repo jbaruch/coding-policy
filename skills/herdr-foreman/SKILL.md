@@ -576,21 +576,10 @@ skills/herdr-foreman/references/dispatch-recovery.md
 Save a consultation's successful delivery receipt and record `assess-specialist`
 under `references/specialists.md` before retiring its enrollment.
 
-Record each outcome in the task ledger and user-facing obligations in the
-attention queue. Acknowledge only handled event IDs through the saved snapshot;
-schedule pending rechecks. Once the ledger records an assignment's assessed
-outcome, close its enrollment in one call:
-
-```bash
-CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"; [ -d "$CP" ] || case "$(git config --get remote.origin.url)" in git@github.com:jbaruch/coding-policy|git@github.com:jbaruch/coding-policy.git|https://github.com/jbaruch/coding-policy|https://github.com/jbaruch/coding-policy.git|ssh://git@github.com/jbaruch/coding-policy|ssh://git@github.com/jbaruch/coding-policy.git) CP=. ;; *) echo "coding-policy plugin not found: run tessl install jbaruch/coding-policy" >&2; exit 1 ;; esac
-bash "$CP/skills/herdr-foreman/foreman.sh" close-member --enrollment <enrollment-id> \
-  --ledger <absolute-TASK-LEDGER.md>
-```
-
-It refuses until the ledger's latest event for that worker and report carries
-an assessed decision, then acknowledges the enrollment's pending events and
-resolves it, citing that ledger event; a repeat replays. Resolution stays
-separate from assignment acceptance and task completion. Complete due
+Record user-facing obligations in the attention queue. Acknowledge only handled
+event IDs through the saved snapshot; schedule pending rechecks. Record no
+assessed outcome and close no enrollment here.
+Step 12 records acceptance after the round's gates exist. Complete due
 retrospectives between checkpoints without interrupting workers. Resume the fleet
 watch while any observation obligation remains; one blocked worker never hides
 another worker's report. Proceed to Step 12 when the required reports are delivered
@@ -598,24 +587,42 @@ or their unavailability and recovery are recorded.
 
 ## Step 12 — Gate the Round
 
-Annotate every delivered report in one call before reading any of them:
+Classify every delivered report in one call, and save its stdout:
 
 ```bash
 CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"; [ -d "$CP" ] || case "$(git config --get remote.origin.url)" in git@github.com:jbaruch/coding-policy|git@github.com:jbaruch/coding-policy.git|https://github.com/jbaruch/coding-policy|https://github.com/jbaruch/coding-policy.git|ssh://git@github.com/jbaruch/coding-policy|ssh://git@github.com/jbaruch/coding-policy.git) CP=. ;; *) echo "coding-policy plugin not found: run tessl install jbaruch/coding-policy" >&2; exit 1 ;; esac
-bash "$CP/skills/herdr-foreman/classify/classify-reports.sh" <report>...
+bash "$CP/skills/herdr-foreman/classify/classify-reports.sh" <report>... > <labels.json>
 ```
 
-Each label carries a verdict from the answer set in
-`skills/herdr-foreman/classify/report-verdict.schema.json` and the sentence
-that decided it. Read the reports together and gate them in one turn,
-not one turn per report. A label is advisory. It never replaces the full read,
-and a report in `unannotated` is read exactly as it would have been. Look twice
-where a label disagrees with your own reading. Which vendor and model it uses, and its measured accuracy,
-are the script's contract — see `skills/herdr-foreman/classify/classify-report.sh`.
+On exit 2 (usage error), fix the arguments stderr names and rerun before using
+`<labels.json>`. A report in the output's `unannotated` list gets no gate and is
+gated exactly as it would have been.
 
 Read every report file in full, including a report whose worker exited cleanly.
 A `## BLOCKED` section can sit under a report that otherwise reads as finished.
 Classify each finding blocking or advisory per `rules/review-severity.md`.
+Then record the gates the labels earn, before gating any report:
+
+```bash
+CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"; [ -d "$CP" ] || case "$(git config --get remote.origin.url)" in git@github.com:jbaruch/coding-policy|git@github.com:jbaruch/coding-policy.git|https://github.com/jbaruch/coding-policy|https://github.com/jbaruch/coding-policy.git|ssh://git@github.com/jbaruch/coding-policy|ssh://git@github.com/jbaruch/coding-policy.git) CP=. ;; *) echo "coding-policy plugin not found: run tessl install jbaruch/coding-policy" >&2; exit 1 ;; esac
+bash "$CP/skills/herdr-foreman/foreman.sh" report-gate-record --labels <labels.json>
+```
+
+- Exit 0 prints one JSON object: `recorded`, `replayed` and `no_gate` lists
+- Exit 1: nothing is recorded; resolve the cause stderr names before gating any report
+- `close-member` and `record-report` refuse while a gate forbids the decision
+- A `block` gate clears only through `report-gate-clear`
+- A `reread` gate clears only through `report-gate-reread`
+- A label never approves, accepts or skips a check
+
+Output fields, gate levels and the evidence each resolution cites are the
+owners' contract:
+
+```text
+skills/herdr-foreman/references/report-classifier.md
+```
+
+Gate the reports together in one turn, not one turn per report.
 Before accepting a mechanical round, compare its whole result against the
 oracle its plan declared. `<result-file>` is the pushed diff for a `patch`
 oracle and the produced output otherwise:
@@ -651,9 +658,23 @@ bash "$CP/skills/herdr-foreman/foreman.sh" verify-partition \
 - The new plan then takes Step 7 composition, Step 10 dispatch, Step 11
   observation, and this step's gate
 
-Record assignment acceptance or outstanding work in the task ledger against
-the inspected report and artifact evidence. Record the task's gate decision
-separately; a worker finishing its brief never completes the whole task.
+Only now, with every report's gates recorded, record assignment acceptance or
+outstanding work in the task ledger against the inspected report and artifact
+evidence. Record the task's gate decision separately; a worker finishing its
+brief never completes the whole task. Once the ledger records an assignment's
+assessed outcome, close its enrollment in one call:
+
+```bash
+CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"; [ -d "$CP" ] || case "$(git config --get remote.origin.url)" in git@github.com:jbaruch/coding-policy|git@github.com:jbaruch/coding-policy.git|https://github.com/jbaruch/coding-policy|https://github.com/jbaruch/coding-policy.git|ssh://git@github.com/jbaruch/coding-policy|ssh://git@github.com/jbaruch/coding-policy.git) CP=. ;; *) echo "coding-policy plugin not found: run tessl install jbaruch/coding-policy" >&2; exit 1 ;; esac
+bash "$CP/skills/herdr-foreman/foreman.sh" close-member --enrollment <enrollment-id> \
+  --ledger <absolute-TASK-LEDGER.md>
+```
+
+It refuses until the ledger's latest event for that worker and report carries
+an assessed decision, then acknowledges the enrollment's pending events and
+resolves it, citing that ledger event; a repeat replays. Resolution stays
+separate from assignment acceptance and task completion.
+Resume Step 11's fleet watch for any enrollment still observed.
 Assess correction scope and bug evidence under `references/assignment-reasoning.md`.
 Persist user-facing obligations under `references/attention.md` before presenting
 them; record an actual answer or resolution separately from showing the item.

@@ -13,38 +13,51 @@
 #
 # The answer set carries `insufficient_evidence`, and that value routes the
 # question back to the reasoning round -- here, the foreman reads the report as it
-# always has. This never suppresses that read (#482): it annotates, so the foreman
-# can gate several reports in one turn instead of one turn each.
+# always has. A label never suppresses that read and never approves anything:
+# the only effect one can have is a gate that adds friction
+# (foreman/report_gates.py).
 #
-# One adapter per kind the fleet already runs. A classifier pinned to one vendor
-# is useless exactly when that vendor's subscription is spent, which is the
-# condition the fleet spends most of its time managing. All three constrain the
-# answer to the schema -- `codex exec --output-schema`, `claude --json-schema`,
-# `grok --json-schema` -- and every adapter's answer then passes the same enum
-# check, which is the actual guarantee.
+# The question is split into atomic questions (report-questions.json) and the
+# verdict is composed from their answers in code, so no model weighs the policy
+# that combines them. Deterministic checks run first: the report is framed as
+# untrusted data, and every quote an LLM returns must be a passage of the
+# report or the label is `insufficient_evidence` (report_verdict.py).
 #
-# Every adapter runs from an empty directory, with no tools, for one turn. The
-# classifier judges the report's own text: an adapter left free to search the
-# workspace read this repository's tests and answered from them.
+# Adapters:
+#   jev    -- the default. TypeSafe System One, one Noul per atomic question,
+#             P(yes) each. Needs TYPESAFE_API_KEY. The only adapter whose label
+#             can gate. A Jev that is unavailable (key unset, service down,
+#             report too large, answer off contract) or that refuses the
+#             request produces no label: the script exits non-zero and the
+#             report takes the reasoning path, a full read. No other
+#             classifier is asked (rules/script-delegation.md Bounded
+#             Classification).
+#   codex, claude, grok -- named with --agent only, for measurement
+#             (evaluate.sh). Their labels never gate.
+# Each LLM adapter constrains its answer to the generated schema --
+# `codex exec --output-schema`, `claude --json-schema`, `grok --json-schema` --
+# and every answer then passes the same check in report_verdict.py, which is
+# the actual guarantee. Every LLM adapter runs from an empty directory, with no
+# tools, for one turn: an adapter left free to search the workspace read this
+# repository's tests and answered from them.
 #
-# Usage: classify-report.sh <report-path> [--agent codex|claude|grok]
+# Usage: classify-report.sh <report-path> [--agent jev|codex|claude|grok]
 #                           [--model <id>] [--out <file>]
 #
 # Output contract (rules/script-delegation.md -- structured stdout):
-#   stdout: one JSON object --
-#     {"schema_version": 1, "report": "<path>", "sha256": "<of the report>",
-#      "question": "<sha256 of the prompt>", "agent": "<kind>", "model": "<id>",
-#      "verdict": "blocking"|"approved"|"insufficient_evidence",
-#      "evidence": "<the deciding sentence, verbatim>"}
-#   The report hash, question hash and model id travel with every label, so a
-#   prompt edit or a model bump is attributable (rules/dependency-management.md
-#   Freshness: a pinned model version is a pinned dependency no scanner tracks).
+#   stdout: one label, the JSON object report_verdict.py documents: verdict
+#     `blocking`|`approved`|`insufficient_evidence`, the deciding passage in
+#     `evidence` (empty for Jev, which quotes nothing), one answer per atomic
+#     question with P(yes) for Jev, and the `gate` the owner would
+#     record. The report hash, question hash and model id travel with every
+#     label, so a question edit or a model bump is attributable
+#     (rules/dependency-management.md Freshness).
 #   stderr: diagnostics.
 #
 # Exit 0 on a label, including `insufficient_evidence` -- an honest abstention
-# is an answer. Exit 2 on a usage error, an unreadable report, or a model call
-# that produced nothing conforming to the schema. A failed call never becomes a
-# verdict.
+# is an answer. Exit 2 on a usage error, an unreadable report, a report that
+# contains its own delimiter, an unavailable or refusing Jev, or a call that
+# produced nothing conforming. A failed call is never a verdict.
 #
 # Calling this costs model quota. `evaluate.sh` runs it over the labelled corpus
 # and reports accuracy; nothing calls it automatically, and no test calls it live
@@ -66,19 +79,17 @@ fi
 HERE="${HERE%x}"
 HERE="${HERE%$'\n'}"
 
-#: The pinned model per kind. A bump is a dependency bump: change it here, and
-#: every label recorded afterwards carries the new id. These are classification
-#: pins, not the fleet's frontier seats: reading one report for one verdict does
-#: not need the most expensive model a vendor sells.
-#: The default is the vendor measured adequate for this job: against 90
-#: lead-labelled reports claude-sonnet-5 caught 63 of 63 real blockers, grok-4.6
-#: caught 62, and codex was unmeasured (its subscription was exhausted).
+#: The pinned LLM model per kind. A bump is a dependency bump: change it here,
+#: and every label recorded afterwards carries the new id. These are
+#: classification pins, not the fleet's frontier seats. The Jev pin lives with
+#: its bands in foreman/report_gates.py (`JEV_MODEL`): bands are per model
+#: version.
 #: Renewal: these pins come due with the capability table, on `INTERVAL` in
 #: skills/herdr-foreman/foreman/capabilities.py (weekly). At each refresh,
 #: compare every pin against the table's current rows; a bump lands only after
 #: `evaluate.sh --since <last bump>` scores the new model on reports it has not
 #: seen, and the CHANGELOG records both numbers.
-DEFAULT_AGENT="claude"
+DEFAULT_AGENT="jev"
 model_for() { # <kind>
   case "$1" in
     codex) echo "gpt-5.6-sol" ;;
@@ -117,47 +128,63 @@ ask_grok() { # <model> <schema> <answer> <log>
 }
 
 main() {
-  local report="" out="" agent="$DEFAULT_AGENT" model=""
-  [ $# -gt 0 ] || die "usage: classify-report.sh <report-path> [--agent codex|claude|grok] [--model <id>] [--out <file>]"
+  local report="" out="" agent="" model=""
+  [ $# -gt 0 ] || die "usage: classify-report.sh <report-path> [--agent jev|codex|claude|grok] [--model <id>] [--out <file>]"
   report="$1"; shift
   while [ $# -gt 0 ]; do
     case "$1" in
-      --agent) agent="${2-}"; shift 2 || die "--agent needs codex, claude or grok" ;;
+      --agent) agent="${2-}"; shift 2 || die "--agent needs jev, codex, claude or grok" ;;
       --model) model="${2-}"; shift 2 || die "--model needs an id" ;;
       --out) out="${2-}"; shift 2 || die "--out needs a file" ;;
       *) die "unknown argument '$1'" ;;
     esac
   done
   [ -f "$report" ] && [ -r "$report" ] || die "'${report}' is not a readable file"
-  local pinned
-  pinned="$(model_for "$agent")" || die "--agent '${agent}' is not one of codex, claude, grok"
-  [ -n "$model" ] || model="$pinned"
-
-  local schema="${HERE}/report-verdict.schema.json" prompt="${HERE}/report-verdict.prompt.md"
-  [ -r "$schema" ] || die "missing answer schema at ${schema}"
-  [ -r "$prompt" ] || die "missing question at ${prompt}"
-  command -v "$agent" >/dev/null || die "${agent} is not on PATH"
+  case "$agent" in
+    ''|jev|codex|claude|grok) ;;
+    *) die "--agent '${agent}' is not one of jev, codex, claude, grok" ;;
+  esac
+  [ -n "$agent" ] || agent="$DEFAULT_AGENT"
+  local verdict="${HERE}/report_verdict.py"
+  [ -r "$verdict" ] || die "missing the question owner at ${verdict}; reinstall the plugin (tessl install jbaruch/coding-policy), then rerun"
 
   local work
-  work="$(mktemp -d "${TMPDIR:-/tmp}/classify-report.XXXXXX")" || die "cannot create a temporary directory"
+  work="$(mktemp -d "${TMPDIR:-/tmp}/classify-report.XXXXXX")" || die "cannot create a temporary directory; repair write access to \${TMPDIR:-/tmp} (or point TMPDIR at a writable directory), then rerun"
   SCRATCH="$work"
-  local answer="${work}/answer.json" log="${work}/run.log" room="${work}/room"
-  mkdir "$room" || die "cannot create the empty working directory"
+  local answer="${work}/answer.json" log="${work}/run.log" room="${work}/room" snapshot="${work}/report"
+  # One read of the report: every adapter, the evidence check and the label's
+  # sha256 see these bytes, so a report rewritten mid-run is never half-read.
+  cp -- "$report" "$snapshot" || die "cannot snapshot ${report}; restore read access and re-run"
+  local payload=""
 
-  if ! ( cd "$room" && { cat "$prompt"; printf '\n\n----- REPORT BEGINS -----\n'; cat "$report"; } \
-           | "ask_${agent}" "$model" "$schema" "$answer" "$log" ); then
-    cat "$log" >&2
-    die "the ${agent} call failed; a failed call is never a verdict"
+  if [ "$agent" = "jev" ]; then
+    if ! payload="$(python3 "$verdict" jev "$snapshot" --as "$report" ${model:+--model "$model"} 2>"$log")"; then
+      local why
+      why="$(tail -n 1 "$log")"
+      die "no Jev label (${why#report_verdict: }); read ${report} in full -- a failed call is never a verdict"
+    fi
+  else
+    local pinned
+    pinned="$(model_for "$agent")" || die "no pinned model for '${agent}'; pass --model <id>, or reinstall the plugin, then rerun"
+    [ -n "$model" ] || model="$pinned"
+    command -v "$agent" >/dev/null || die "${agent} is not on PATH; install its CLI or pick another --agent, then rerun"
+    local schema="${work}/schema.json" question="${work}/question.txt"
+    python3 "$verdict" schema "$schema" || die "cannot write the answer schema to ${schema}; repair write access to \${TMPDIR:-/tmp} (or point TMPDIR at a writable directory), then rerun"
+    python3 "$verdict" frame "$snapshot" "$question" > "${work}/frame.json" \
+      || die "cannot frame ${report} as data; read it in full, or restore the questions file and the plugin, then rerun"
+    mkdir "$room" || die "cannot create the empty working directory; repair write access to \${TMPDIR:-/tmp} (or point TMPDIR at a writable directory), then rerun"
+    if ! ( cd "$room" && "ask_${agent}" "$model" "$schema" "$answer" "$log" < "$question" ); then
+      cat "$log" >&2
+      die "the ${agent} call failed; a failed call is never a verdict"
+    fi
+    [ -s "$answer" ] || { cat "$log" >&2; die "${agent} wrote no schema-conforming answer"; }
+    payload="$(python3 "$verdict" label "$answer" "$snapshot" "$agent" "$model" --as "$report")" \
+      || die "the ${agent} answer did not conform to the schema"
   fi
-  [ -s "$answer" ] || { cat "$log" >&2; die "${agent} wrote no schema-conforming answer"; }
-
-  local payload
-  payload="$(python3 "${HERE}/extract-answer.py" label "$answer" "$report" "$prompt" "$agent" "$model")" \
-    || die "the ${agent} answer did not conform to the schema"
 
   printf '%s\n' "$payload"
   if [ -n "$out" ]; then
-    printf '%s\n' "$payload" > "$out" || die "cannot write the label to ${out}"
+    printf '%s\n' "$payload" > "$out" || die "cannot write the label to ${out}; pass a writable --out path, then rerun"
   fi
   return 0
 }

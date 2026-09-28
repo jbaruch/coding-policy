@@ -3,28 +3,41 @@
 #
 # The labels are not invented for this: the foreman recorded a verdict against
 # every delivered report at the time it gated the round, and those verdicts sit
-# in the recovery store. 90 reports, 63 `blocking`, 27 `approved`. Written by a
-# different agent, on a different day, for a different purpose -- which is what
-# makes them usable as ground truth for a classifier written afterwards.
+# in the recovery store. Written by a different agent, on a different day, for a
+# different purpose -- which is what makes them usable as ground truth for a
+# classifier written afterwards.
 #
-# Only 7 of the 90 carry a `## BLOCKED` heading. A grep would score about 8% on
-# recall, which is the measurement that says this destination is a classifier
-# and not a script.
+# Only 7 of the first 90 carry a `## BLOCKED` heading. A grep would score about
+# 8% on recall, which is the measurement that says this destination is a
+# classifier and not a script.
 #
-# Usage: evaluate.sh [--agent codex|claude|grok] [--limit N] [--model <id>]
-#                    [--state FILE] [--corpus-only]
+# Held out by default: a question or model change is scored only on reports
+# recorded on or after the date the questions last changed (`changed` in
+# report-questions.json), which the change cannot have been written against.
 #
+# Usage: evaluate.sh [--agent jev|codex|claude|grok] [--limit N] [--model <id>]
+#                    [--state FILE] [--since DATE | --all] [--fixtures]
+#                    [--results FILE] [--corpus-only]
+#
+#   --agent        the adapter scored, passed through explicitly so every
+#                  label comes from that one adapter. Default claude.
+#   --since DATE   score reports recorded on or after DATE (ISO). Defaults to
+#                  the questions' `changed` date.
+#   --all          score the whole corpus; the split is marked not held out.
+#   --fixtures     also score the adversarial reports adversarial.py builds
+#                  into this run's temp dir, reported apart from the corpus.
+#   --results FILE keep every label with its recorded verdict and date, the
+#                  input to `scoring.py calibrate`.
 #   --corpus-only  build and print the labelled corpus, call no model, spend no
 #                  quota. Use it to see what would be scored.
 #   --limit N      score the N most recent reports instead of all of them.
-#   --since DATE   score only reports recorded on or after DATE (ISO). Use it to
-#                  measure a prompt change on reports it was not written against.
 #
 # Output contract (rules/script-delegation.md -- structured stdout):
-#   stdout: one JSON object --
-#     {"schema_version": 1, "agent": "<kind>", "model": "<id>", "scored": N,
-#      "accuracy": <float>, "confusion": {"<recorded>__<predicted>": N},
-#      "disagreements": [{"report", "recorded", "predicted", "evidence"}, ...]}
+#   stdout: one JSON object, `scoring.py score`'s report --
+#     {"schema_version": 2, "agent", "model", "split": {"since", "changed",
+#      "held_out"}, "scored", "failed", "accuracy", "confusion",
+#      "per_question": {<id>: {"determined", "agree", "unclear", "accuracy"}},
+#      "fixtures": {"scored", "per_question", "flipped"}, "disagreements"}
 #   `disagreements` is the useful half: a label the classifier and the foreman
 #   disagree on is either a classifier error or a report whose verdict was
 #   never legible from its own text, and only reading it says which.
@@ -98,7 +111,7 @@ def build(data):
             continue
         seen.add(path)
         rows.append({"report": str(path), "recorded": verdict, "at": dispatch.get("at", ""),
-                     "role": dispatch.get("role"), "task": dispatch.get("task")})
+                     "role": dispatch.get("role"), "task": dispatch.get("task"), "source": "corpus"})
     rows.sort(key=lambda row: row["at"], reverse=True)
     return json.dumps(rows[:limit] if limit > 0 else rows)
 
@@ -121,97 +134,133 @@ print(corpus)
 PY
 }
 
+with_fixtures() { # <corpus.json> <built-fixtures.json>
+  python3 - "$1" "$2" <<'PY'
+import json, pathlib, sys
+selected, built = pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2])
+rows = json.loads(selected.read_text(encoding="utf-8"))
+for row in json.loads(built.read_text(encoding="utf-8"))["fixtures"]:
+    rows.append({"report": row["report"], "recorded": row["verdict"], "at": "",
+                 "role": None, "task": None, "source": "fixture", "expected_answers": row["answers"]})
+selected.write_text(json.dumps(rows), encoding="utf-8")
+PY
+}
+
 main() {
   local state_root="${XDG_STATE_HOME:-${HOME}/.local/state}"
   # HERE is absolute, so its parent comes from parameter expansion too (#487).
   local skill_dir="${HERE%/*}"
   skill_dir="${skill_dir:-/}"
-  local limit=0 since="" model="" agent="claude" state="" corpus_only=0
+  local limit=0 since="" all=0 model="" agent="claude" state="" corpus_only=0 fixtures=0 keep=""
   while [ $# -gt 0 ]; do
     case "$1" in
       --limit) limit="${2-}"; shift 2 || die "--limit needs a count" ;;
       --since) since="${2-}"; shift 2 || die "--since needs an ISO date" ;;
+      --all) all=1; shift ;;
       --model) model="${2-}"; shift 2 || die "--model needs an id" ;;
-      --agent) agent="${2-}"; shift 2 || die "--agent needs codex, claude or grok" ;;
+      --agent) agent="${2-}"; shift 2 || die "--agent needs jev, codex, claude or grok" ;;
       --state) state="${2-}"; shift 2 || die "--state needs a file" ;;
+      --fixtures) fixtures=1; shift ;;
+      --results) keep="${2-}"; shift 2 || die "--results needs a file" ;;
       --corpus-only) corpus_only=1; shift ;;
-      -h|--help) sed -n '2,33p' "${BASH_SOURCE[0]}"; exit 0 ;;
+      -h|--help) sed -n '2,50p' "${BASH_SOURCE[0]}"; exit 0 ;;
       *) die "unknown argument '$1' -- see --help" ;;
     esac
   done
   case "$limit" in ''|*[!0-9]*) die "--limit takes a non-negative integer" ;; esac
+  case "$agent" in jev|codex|claude|grok) ;; *) die "--agent '${agent}' is not one of jev, codex, claude, grok" ;; esac
+  [ "$all" -eq 0 ] || [ -z "$since" ] || die "--since and --all contradict each other; pass one"
+  local changed
+  changed="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["changed"])' "${HERE}/report-questions.json")" \
+    || die "cannot read the questions' change date from ${HERE}/report-questions.json; restore that file (reinstall the plugin: tessl install jbaruch/coding-policy), then rerun"
+  if [ "$all" -eq 0 ] && [ -z "$since" ]; then since="$changed"; fi
   local work
-  work="$(mktemp -d "${TMPDIR:-/tmp}/classify-eval.XXXXXX")" || die "cannot create a temporary directory"
+  work="$(mktemp -d "${TMPDIR:-/tmp}/classify-eval.XXXXXX")" || die "cannot create a temporary directory; repair write access to \${TMPDIR:-/tmp} (or point TMPDIR at a writable directory), then rerun"
   SCRATCH="$work"
+
+  local split="${work}/split.json"
+  python3 -c 'import json,sys; since, changed = sys.argv[2], sys.argv[3]
+json.dump({"since": since or None, "changed": changed, "held_out": bool(since) and since >= changed}, open(sys.argv[1], "w"))' \
+    "$split" "$since" "$changed" || die "cannot record the split in ${work}; repair write access to \${TMPDIR:-/tmp} (or point TMPDIR at a writable directory), then rerun"
+  if [ -z "$since" ] || [[ "$since" < "$changed" ]]; then
+    echo "evaluate: not held out -- the questions changed on ${changed}, and reports before it may be what they were written against" >&2
+  fi
 
   local selected="${work}/corpus.json"
   local source="${state:-the default home under ${state_root}}"
   corpus "$state" "$limit" "$since" "$state_root" "$skill_dir" > "$selected" \
     || die "cannot build the labelled corpus from ${source}; fix the cause reported above, or pass --state with a readable state file"
+  if [ "$fixtures" -eq 1 ]; then
+    mkdir "${work}/fixtures" || die "cannot create ${work}/fixtures; repair write access to \${TMPDIR:-/tmp} (or point TMPDIR at a writable directory), then rerun"
+    python3 "${HERE}/adversarial.py" "${work}/fixtures" > "${work}/fixtures.json" \
+      || die "cannot build the adversarial reports; see the diagnostic above"
+    with_fixtures "$selected" "${work}/fixtures.json" || die "cannot add the adversarial reports to ${selected}; repair write access to \${TMPDIR:-/tmp} (or point TMPDIR at a writable directory), then rerun"
+  fi
   local total
   total="$(python3 -c 'import json,sys; print(len(json.load(open(sys.argv[1]))))' "$selected")" \
-    || die "cannot read the corpus it just built at ${selected}"
+    || die "cannot read the corpus it just built at ${selected}; repair write access to \${TMPDIR:-/tmp} (or point TMPDIR at a writable directory), then rerun"
+  case "$total" in ''|*[!0-9]*) die "the corpus count '${total}' is not a number; inspect ${selected}" ;; esac
   if [ "$total" -eq 0 ]; then
     if [ -n "$since" ]; then
-      die "no labelled report was recorded on or after ${since}; run more rounds, or pass an earlier date"
+      die "no labelled report was recorded on or after ${since}; run more rounds, pass an earlier --since, or --all for a score that is not held out"
     fi
     die "the corpus is empty: no delivered report carries a recorded verdict"
   fi
 
   if [ "$corpus_only" -eq 1 ]; then
-    python3 -c 'import json,sys; rows=json.load(open(sys.argv[1])); import collections; print(json.dumps({"schema_version":1,"scored":0,"corpus":len(rows),"recorded":dict(collections.Counter(r["recorded"] for r in rows)),"reports":rows}, sort_keys=True))' "$selected" \
-      || die "cannot summarize the corpus at ${selected}"
+    python3 -c 'import json,sys,collections; rows=json.load(open(sys.argv[1])); split=json.load(open(sys.argv[2]))
+print(json.dumps({"schema_version":2,"scored":0,"split":split,"corpus":sum(r["source"]=="corpus" for r in rows),"fixtures":sum(r["source"]=="fixture" for r in rows),"recorded":dict(collections.Counter(r["recorded"] for r in rows if r["source"]=="corpus")),"reports":rows}, sort_keys=True))' "$selected" "$split" \
+      || die "cannot summarize the corpus at ${selected}; repair write access to \${TMPDIR:-/tmp} (or point TMPDIR at a writable directory), then rerun"
     return 0
   fi
 
   echo "evaluate: scoring ${total} report(s) on ${agent}; this spends one model call each" >&2
-  local results="${work}/results.json" failures=0 index=0 report recorded answer
-  printf '[]' > "$results" || die "cannot write to ${work}"
-  local queue="${work}/queue.tsv"
-  python3 -c 'import json,sys
-for row in json.load(open(sys.argv[1])):
-    print(row["report"] + "\t" + row["recorded"])' "$selected" > "$queue" \
-    || die "cannot list the corpus at ${selected}"
-  while IFS=$'\t' read -r report recorded; do
-    index=$((index + 1))
-    echo "  [${index}/${total}] ${report}" >&2
-    answer="${work}/answer-${index}.json"
+  local results="${work}/results.json" failures=0 index=0 report
+  printf '[]' > "$results" || die "cannot write to ${work}; repair write access to \${TMPDIR:-/tmp} (or point TMPDIR at a writable directory), then rerun"
+  for ((index = 0; index < total; index++)); do
+    report="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))[int(sys.argv[2])]["report"])' "$selected" "$index")" \
+      || die "cannot read row ${index} of ${selected}; repair write access to \${TMPDIR:-/tmp} (or point TMPDIR at a writable directory), then rerun"
+    echo "  [$((index + 1))/${total}] ${report}" >&2
+    local answer="${work}/answer-${index}.json"
     if bash "${HERE}/classify-report.sh" "$report" --agent "$agent" ${model:+--model "$model"} --out "$answer" >/dev/null 2>"${work}/err-${index}"; then
-      if ! python3 - "$results" "$answer" "$recorded" <<'PY'
+      if ! python3 - "$results" "$answer" "$selected" "$index" <<'PY'
 import json, sys
-results, answer, recorded = sys.argv[1:4]
+results, answer, selected, index = sys.argv[1], sys.argv[2], sys.argv[3], int(sys.argv[4])
 with open(results, encoding="utf-8") as handle:
     rows = json.load(handle)
 with open(answer, encoding="utf-8") as handle:
     label = json.load(handle)
-rows.append({**label, "recorded": recorded})
+with open(selected, encoding="utf-8") as handle:
+    row = json.load(handle)[index]
+label.update(recorded=row["recorded"], recorded_at=row["at"], source=row["source"])
+if "expected_answers" in row:
+    label["expected_answers"] = row["expected_answers"]
+rows.append(label)
 with open(results, "w", encoding="utf-8") as handle:
     json.dump(rows, handle)
 PY
-      then die "cannot record the label for ${report} in ${results}"; fi
+      then die "cannot record the label for ${report} in ${results}; repair write access to \${TMPDIR:-/tmp} (or point TMPDIR at a writable directory), then rerun"; fi
     else
       failures=$((failures + 1))
       cat "${work}/err-${index}" >&2
     fi
-  done < "$queue"
+  done
 
-  if ! python3 - "$results" "$failures" "${model:-pinned}" "$agent" <<'PY'
-import collections, json, sys
-results, failures, model, agent = sys.argv[1], int(sys.argv[2]), sys.argv[3], sys.argv[4]
-with open(results, encoding="utf-8") as handle:
-    rows = json.load(handle)
-confusion = collections.Counter("{}__{}".format(r["recorded"], r["verdict"]) for r in rows)
-agree = sum(n for key, n in confusion.items() if key.split("__")[0] == key.split("__")[1])
-print(json.dumps({"schema_version": 1, "agent": agent, "model": rows[0]["model"] if rows else model,
-                  "scored": len(rows), "failed": failures,
-                  "accuracy": round(agree / len(rows), 4) if rows else None,
-                  "confusion": dict(confusion),
-                  "disagreements": [{"report": r["report"], "recorded": r["recorded"],
-                                     "predicted": r["verdict"], "evidence": r.get("evidence", "")}
-                                    for r in rows if r["recorded"] != r["verdict"]]},
-                 sort_keys=True))
-PY
-  then die "cannot assemble the accuracy report from ${results}"; fi
+  # Every selected report is either a recorded label or a counted failure; a
+  # shortfall means the loop lost rows, and a partial score is never reported
+  # as a whole one.
+  local labelled
+  labelled="$(python3 -c 'import json,sys; print(len(json.load(open(sys.argv[1]))))' "$results")" \
+    || die "cannot count the labels in ${results}; repair write access to \${TMPDIR:-/tmp} (or point TMPDIR at a writable directory), then rerun"
+  if [ $((labelled + failures)) -ne "$total" ]; then
+    die "scored ${labelled} and failed ${failures} of ${total} selected reports; the run lost reports, so no score is reported"
+  fi
+
+  if [ -n "$keep" ]; then
+    cp "$results" "$keep" || die "cannot keep the labels at ${keep}; pass a writable --results path, then rerun"
+  fi
+  python3 "${HERE}/scoring.py" score "$results" "$failures" "$agent" "${model:-pinned}" "$split" \
+    || die "cannot assemble the accuracy report from ${results}"
   [ "$failures" -eq 0 ] || return 1
   return 0
 }

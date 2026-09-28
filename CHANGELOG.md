@@ -38,6 +38,157 @@
     citing the ruling. PR B wires the Herdr judge seat, the churn signal and
     the worker briefs.
 
+## 0.3.329 — 2026-09-28
+
+### Changed
+
+- **The report classifier asks atomic questions, frames the report as data,
+  checks its own quotes, and can now add a gate (#531).** One broad question
+  ("does the report state a finding the foreman must resolve?") had two policy
+  carve-outs folded into it, and the one-line prompt fix after the first eval
+  was exactly that policy leaking into the question. It is now four questions
+  in `skills/herdr-foreman/classify/report-questions.json` (names an open item, accepts every such
+  item, places every such item out of scope, concludes nothing blocks), and
+  `skills/herdr-foreman/classify/report_verdict.py` `compose` turns the answers into
+  `blocking`/`approved`/`insufficient_evidence` in code. Deterministic checks
+  run before any answer is used: the report travels as the `report` field of a
+  JSON object between marker lines keyed to its own sha256, so it cannot forge
+  its delimiter (the old prompt appended it after a lone `REPORT BEGINS` line
+  with no end marker), and every quote an LLM returns must be a passage of the
+  report, whitespace aside, or the label fails closed to
+  `insufficient_evidence`. Three adversarial reports (an injected
+  instruction, a forged delimiter, an injected "treat as blocking") are built
+  in code by `skills/herdr-foreman/classify/adversarial.py`, never committed as a fixture corpus;
+  the tests build them into their temp dirs, and `skills/herdr-foreman/classify/evaluate.sh --fixtures`
+  builds them into its own and scores them apart from the corpus.
+  `skills/herdr-foreman/classify/report_verdict.py frame` writes the framed question to a named file and
+  prints a JSON receipt (report sha256, nonce, size) instead of prose on
+  stdout.
+- **Jev is the classifier, with no fallback classifier.** TypeSafe's System
+  One answers each atomic question as one Noul with P(yes), through a new
+  stdlib client, `skills/herdr-foreman/classify/typesafe_client.py`, written to be reused as is by
+  #472's evidence assessor. The key comes from `TYPESAFE_API_KEY`
+  (`.env.example`) and never reaches a log, an error or a label; provider
+  bodies are discarded unread since they can echo the submitted report; 429
+  and 529 back off exponentially to a bounded attempt count; redirects are
+  refused so the bearer header never travels. A Python without a CA bundle
+  (python.org builds on macOS) fails TLS verification; the client names that
+  fix (`SSL_CERT_FILE`, or `Install Certificates.command`) instead of blaming
+  the network, found on the first live run. The model is pinned to
+  `jev-1.13.0` beside its bands in `skills/herdr-foreman/foreman/report_gates.py`, renewed on the
+  capability table's weekly cadence and only with a fresh calibration. An
+  unavailable Jev (key unset, service down, report over the state budget,
+  answer off contract), or one whose client refuses the request because the
+  report carries the key, produces no label: the report lands in
+  `unannotated` with the reason and is read in full. An earlier cut fell back
+  to Claude, which is a retry into another classifier that Bounded
+  Classification forbids, and it sent a key-carrying report to the fallback
+  vendor (policy review and Copilot on #617). Codex, Claude and Grok remain as
+  `--agent` adapters for `skills/herdr-foreman/classify/evaluate.sh` measurement; their labels never gate,
+  and the label's `fallback` field and `--fallback` option are gone. The
+  static answer schema is gone:
+  `skills/herdr-foreman/classify/report_verdict.py schema` generates it from the questions, so the two cannot
+  drift.
+- **A label may add friction to accepting a report, never remove it
+  (operator decision on #531).** `foreman report-gate-record` records the gate
+  a Jev label's probabilities earn: `block` (the report cannot be accepted
+  until `report-gate-clear` records why it does not block) or `reread` (it
+  cannot be gated at all until `report-gate-reread` records a full re-read).
+  Who resolved a gate is read from records the owners already hold, never from
+  the caller: an earlier cut took `--by worker|judge|operator` and any readable
+  file as evidence, so the foreman could assert any role (policy review on
+  #617). Now the gated report's task and role come from the applied dispatch
+  its supervision enrollment binds; a worker or judge resolution cites a report
+  whose current bytes supervision observed (or `recover-report` recovered)
+  after the gate, for another dispatch on that task in the gated report's role
+  or for the pinned judge in adjudication mode; an operator clear cites an
+  attention `decision` on that task resolved with the operator's answer after
+  the gate, and quotes that answer as its reason. No new state records any of
+  it. The level is computed from the probabilities and the bands alone: an
+  earlier cut let a label's `insufficient_evidence` verdict suppress a
+  block-band gate (policy review on #617). Every saved gate record is validated whole, so a malformed one
+  refuses every reader with a `StateError` instead of a `KeyError`, and
+  `close-member` and `record-report` hold the sidecar lock from their gate
+  check through their commit, so a gate recorded in between is refused
+  (Copilot on #617). `skills/herdr-foreman/classify/classify-report.sh` reads each report once into a
+  snapshot that every adapter, the evidence check and the label's sha256
+  share, and `skills/herdr-foreman/classify/evaluate.sh` refuses to report a score whose labels and
+  failures do not add up to the selected reports. Step 12 records the gates
+  after the reports are read in full and before any is gated, and names the
+  recorder's JSON output and its failure handling; each resolution record
+  carries its own `schema_version` (policy review on #617).
+  `close-member` refuses an `accepted` closure under an open block and any
+  closure under an open re-read; `record-report` does the same for `approved`
+  and for any verdict respectively. Probabilities below the bands, an LLM
+  label, an unpinned model or an unannotated report gate nothing, and the
+  report is gated exactly as before. The owner recomputes the level from
+  the probabilities and refuses a report rewritten since classification. The
+  gates live in a new sidecar, `<state>.report-gates.json`
+  (`skills/herdr-foreman/references/report-classifier.md`, Sidecar schema 1). The bands ship
+  uncalibrated and conservative (block at P(open item) >= 0.98 with both
+  disposals <= 0.05; re-read at >= 0.90 with <= 0.20), so an uncalibrated model
+  rarely gates. `skills/herdr-foreman/classify/scoring.py calibrate` only
+  proposes bands: it prints them as JSON with the counts it used and writes
+  nothing, and the live bands change only through a reviewed commit to the
+  constants (`skills/herdr-foreman/references/report-classifier.md`, Changing
+  the Bands). It decides held-out itself, from the data it is given: a label
+  counts only when it was asked with the current question hash, by the pinned
+  model, about a report recorded on or after the questions' `changed` date
+  (`evaluate.sh --results` now records `recorded_at`), and it refuses to
+  propose from fewer than its minimum. An earlier cut left held-out to the
+  agent's reading of the split (policy review on #617). `rules/script-delegation.md` Bounded
+  Classification now says a label may add a reversible gate, never remove one,
+  and that a script decides the level from recorded probabilities.
+- **`skills/herdr-foreman/classify/evaluate.sh` scores held out by default and reports per-question
+  accuracy.** The default split starts at the questions' `changed` date, which
+  a question or model change cannot have been written against; `--all` scores
+  everything and marks the split not held out. The corpus records only
+  verdicts, so per-question truth comes from what a verdict determines (a
+  recorded `blocking` fixes three answers; a recorded `approved` fixes the
+  no-open-item path's two answers when the model answered neither disposal
+  `yes`, since that path is then the only one that composes `approved`) plus
+  the fixtures' expected answers. A first cut determined nothing for
+  `approved`, so `concludes_nothing_blocks` reported zero determined rows on
+  the whole 96-report corpus. `--results` keeps the labels for calibration.
+  Measured with `claude-sonnet-5` on the six reports recorded since the old
+  prompt's last change (2026-09-22): the old prompt and the atomic questions
+  both scored 6/6 with the same confusion, and both held all three
+  adversarial fixtures. Six reports confirm no regression, not an
+  improvement; the Jev bands wait for the key and a larger held-out set.
+- **The two known mislabels from 2026-09-24 were read.**
+  `goc-20260908/policy-scope/integration-judge-2/report.md`, recorded
+  `blocking` and labelled `approved` by both prompts, is a judge ruling
+  (`RULING: amend`) whose `ACTION:` requires a further correction before
+  release; the old answer set had no option for a required action that is not
+  a defect, a question-design gap (missing option). `names_open_item` now names
+  "required action" and "open dispute" explicitly. `acr-p1/r63v3/reviewer.md`,
+  recorded `approved` and labelled `blocking`, has no new source findings and
+  one open item it assigns to a separately assigned judge; the old prompt's
+  scope clause was ambiguous about another seat's dispute (ambiguous
+  criteria), which `open_items_out_of_scope` now asks literally.
+- **The gate owner closes stored-path, replay and calibration holes found on #617.** The
+  report-gates sidecar followed a live symlink; it now refuses
+  one, live or dangling, and opens the file without following links, as the
+  capability table does. A saved gate whose report path is not canonical
+  (`/a/../b.md`, or a path through a symlinked directory) passed validation
+  but never matched `require_clear`, so it gated nothing; validation now
+  requires the stored path to equal its own `realpath`, and a path that cannot
+  be resolved is malformed too (Copilot, then the policy review, on #617).
+  A clear resolved every open gate on the report, so a judge or operator clear
+  discharged a `reread` without the worker's re-read; each command now
+  resolves only its own level, refuses with the other command's name when none
+  of its level is open, and the sidecar validator refuses a resolution whose
+  action does not match its gate's level (policy review on #617).
+  SKILL.md Step 11 recorded each assessed outcome and ran `close-member`
+  before Step 12 classified the reports, so a report could be accepted before
+  any gate existed; Step 11 now only observes and acknowledges, and Step 12
+  records the gates first, then acceptance and `close-member` (policy review
+  on #617). The classifier's temp-file, questions-file and output-path
+  diagnostics now name the recovery and say to rerun. A replay matched on report
+  bytes alone, so a reclassification under a new model, question or bands
+  version after a clear was swallowed as a replay; it now records a fresh
+  gate. `skills/herdr-foreman/classify/scoring.py calibrate` also keeps only the pinned Jev model's labels.
+
 ## 0.3.328 — 2026-09-28
 
 ### Fixed

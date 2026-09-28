@@ -1,0 +1,564 @@
+"""Report gates: a classifier label may add friction to accepting a report, never remove it.
+
+The report classifier (`classify/`) answers atomic questions about a worker
+report. Only a Jev label carries a probability per question, and only such a
+label can gate. This module owns everything deterministic about that gate: the
+pinned Jev model the bands belong to, the band constants, the decision from
+probabilities to a gate level, and the sidecar record of every gate and its
+resolution.
+
+Levels:
+  `block`  -- high confidence the report names an open item it does not
+              dispose of. The report cannot be accepted (a ledger `accepted`
+              decision closed through `close-member`, or an `approved`
+              `record-report`) until a recorded clear names its reason.
+  `reread` -- medium confidence. The report cannot be gated at all until a
+              recorded full re-read.
+Who resolved a gate is read from the owners' records, never from the caller
+(`resolve`): a delivered report of the gated report's role or the pinned
+adjudicating judge on the same task, or the operator's resolved attention
+decision. The foreman records resolutions; it never decides one.
+  none     -- probabilities below the bands, an LLM label, an unpinned model,
+              a report the classifier did not annotate, any error: no gate
+              effect, and the report is read and gated exactly as without a
+              classifier. The label's composed verdict never decides a level.
+A gate never approves, accepts, or skips a check. A recorded clear or re-read
+undoes it (rules/script-delegation.md Bounded Classification).
+
+Band calibration: `BANDS_VERSION` names the calibration the constants came
+from. They ship uncalibrated and deliberately conservative, so an
+uncalibrated model rarely gates. `classify/scoring.py calibrate` proposes new
+values and writes nothing; they change only by a reviewed commit here
+(skills/herdr-foreman/references/report-classifier.md, Changing the Bands).
+
+Sidecar (`<state>.report-gates.json`, schema in state-schema.md, Report Gates):
+  {"schema_version": 1, "state_path": "<canonical state>", "gates": [<gate>...]}
+"""
+
+import copy
+import errno
+from contextlib import contextmanager
+import hashlib
+import json
+import os
+from datetime import timezone
+from pathlib import Path
+from typing import NoReturn
+
+from . import attention, runnable, supervision
+from .chronology import timestamp
+from .errors import StateError, UsageError
+from .state import load_state_checked, save_state, state_lock
+
+SCHEMA_VERSION = 1
+
+#: The Jev model version the bands below belong to, and the one the report
+#: classifier pins. Bands are per model version, so the two move together.
+#: Renewal: with the classifier's other pins, on the capability table's
+#: cadence (`INTERVAL` in foreman/capabilities.py, weekly). Compare against
+#: https://docs.typesafe.ai/models; a bump lands only with a fresh calibration
+#: (references/report-classifier.md) on reports the new model has not seen.
+JEV_MODEL = "jev-1.13.0"
+
+#: Which calibration produced the constants below. `uncalibrated` until the
+#: procedure in references/report-classifier.md runs on live held-out data.
+BANDS_VERSION = "uncalibrated-2026-09-27"
+
+#: Annotation bands: P(yes) at or above YES_AT reads `yes`, at or below NO_AT
+#: reads `no`, anything between reads `unclear`.
+YES_AT = 0.7
+NO_AT = 0.3
+
+#: Gate bands. `block` needs P(open item) at or above BLOCK_OPEN_AT with both
+#: disposals (accepted, out of scope) at or below BLOCK_DISPOSED_AT; `reread`
+#: needs REREAD_OPEN_AT and REREAD_DISPOSED_AT. Conservative while
+#: uncalibrated: an uncalibrated model should rarely gate.
+BLOCK_OPEN_AT = 0.98
+BLOCK_DISPOSED_AT = 0.05
+REREAD_OPEN_AT = 0.90
+REREAD_DISPOSED_AT = 0.20
+
+#: The atomic question ids the gate reads (classify/report-questions.json).
+OPEN = "names_open_item"
+DISPOSALS = ("open_items_accepted", "open_items_out_of_scope")
+GATE_QUESTIONS = (OPEN, *DISPOSALS)
+
+LEVELS = ("block", "reread")
+#: Who may clear a block, as `resolve` derives it from the owners' records.
+CLEARERS = ("worker", "judge", "operator")
+#: The one gate level each resolution action resolves.
+ACTION_LEVEL = {"clear": "block", "reread": "reread"}
+#: Who clears by citing a delivered report rather than an operator decision.
+REPORT_CLEARERS = ("worker", "judge")
+#: Who performs a mandatory re-read: a worker in the gated report's role.
+REREADERS = ("worker",)
+CLEAR_COMMAND = "report-gate-clear --report <path> (--evidence <delivered worker or judge report> --reason <why it does not block> | --decision <resolved attention decision>)"
+REREAD_COMMAND = "report-gate-reread --report <path> --evidence <re-read report> --note <what it verified>"
+COMMANDS = {"report-gate-record", "report-gate-reread", "report-gate-clear", "report-gate-status"}
+
+
+def _fail(message) -> NoReturn:
+    raise UsageError(message, {})
+
+
+def canonical_state(path):
+    return Path(path).expanduser().resolve()
+
+
+def storage_path(path):
+    return Path(str(canonical_state(path)) + ".report-gates.json")
+
+
+def band(p_yes):
+    """The annotation answer for one probability."""
+    if p_yes >= YES_AT:
+        return "yes"
+    if p_yes <= NO_AT:
+        return "no"
+    return "unclear"
+
+
+def decide(label):
+    """The gate level a label earns, with the reason; never trusts the label's own claims."""
+    def none(reason):
+        return {"level": None, "reason": reason}
+    if not isinstance(label, dict):
+        return none("not a label")
+    # The level comes from the recorded probabilities and the bands alone; the
+    # label's composed verdict is recorded data, never an input here.
+    if label.get("agent") != "jev":
+        return none("only a Jev label carries probabilities; an LLM label never gates")
+    if label.get("model") != JEV_MODEL:
+        return none("label model {!r} is not the pinned {}; its probabilities are outside the bands".format(
+            label.get("model"), JEV_MODEL))
+    answers = label.get("answers")
+    if not isinstance(answers, dict):
+        return none("label carries no answers")
+    p = {}
+    for qid in GATE_QUESTIONS:
+        row = answers.get(qid)
+        value = row.get("p_yes") if isinstance(row, dict) else None
+        if not isinstance(value, (int, float)) or isinstance(value, bool) or not 0 <= value <= 1:
+            return none("label carries no probability for {}".format(qid))
+        p[qid] = float(value)
+    disposed = max(p[qid] for qid in DISPOSALS)
+    if p[OPEN] >= BLOCK_OPEN_AT and disposed <= BLOCK_DISPOSED_AT:
+        return {"level": "block", "reason": "high confidence the report names an open item it does not dispose of",
+                "probabilities": p}
+    if p[OPEN] >= REREAD_OPEN_AT and disposed <= REREAD_DISPOSED_AT:
+        return {"level": "reread", "reason": "medium confidence the report names an open item it does not dispose of",
+                "probabilities": p}
+    return none("below the gate bands")
+
+
+def _utc(value):
+    return timestamp(value, "Report gate timestamp").astimezone(timezone.utc).isoformat()
+
+
+def _report_key(path):
+    if not isinstance(path, str) or not path:
+        _fail("Name the report by its path.")
+    return str(Path(path).expanduser().resolve())
+
+
+def _digest(path):
+    try:
+        return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+    except OSError as exc:
+        _fail("Cannot read report {}: {}. Restore it, then classify it again.".format(path, exc))
+
+
+def _text(value, label):
+    if not isinstance(value, str) or not value.strip() or len(value) > 4000:
+        _fail("{} needs 1-4000 characters naming what you verified.".format(label))
+    return value
+
+
+def load(path):
+    """Read and validate only. Missing is first use; malformed never reads as empty."""
+    target = storage_path(path)
+    empty = {"schema_version": SCHEMA_VERSION, "state_path": str(canonical_state(path)), "gates": []}
+    linked = StateError("Report gate sidecar {} is a symlink, not the owner's file; restore the regular file at "
+                        "that path before gating.".format(target), {})
+    if target.is_symlink():
+        raise linked
+    # Opened without following a link, so one swapped in after the probe is refused too.
+    try:
+        descriptor = os.open(target, os.O_RDONLY | os.O_NOFOLLOW)
+    except FileNotFoundError:
+        return empty
+    except OSError as exc:
+        if exc.errno == errno.ELOOP:
+            raise linked from None
+        raise StateError("Cannot read report gates {}: {}. Preserve its bytes and restore access; an unreadable "
+                         "gate record is never read as no gates.".format(target, exc), {}) from None
+    try:
+        with os.fdopen(descriptor, encoding="utf-8") as handle:
+            document = json.loads(handle.read())
+    except (OSError, UnicodeDecodeError, ValueError) as exc:
+        raise StateError("Cannot read report gates {}: {}. Preserve its bytes and restore access; an unreadable "
+                         "gate record is never read as no gates.".format(target, exc), {}) from None
+    if (not isinstance(document, dict) or set(document) != {"schema_version", "state_path", "gates"}
+            or type(document["schema_version"]) is not int or document["schema_version"] != SCHEMA_VERSION
+            or document["state_path"] != str(canonical_state(path)) or not isinstance(document["gates"], list)):
+        raise StateError("Report gates {} has an unsupported schema or state identity; preserve it and update "
+                         "the owner, never replace it with an empty record.".format(target), {})
+    for index, gate in enumerate(document["gates"]):
+        problem = _gate_problem(gate)
+        if problem:
+            raise StateError("Report gates {} record {} is malformed ({}); preserve the file and restore or repair "
+                             "that record; a malformed gate is never read as no gate.".format(target, index, problem),
+                             {"record": index})
+    return document
+
+
+GATE_FIELDS = frozenset({"schema_version", "report", "sha256", "level", "reason", "probabilities", "model",
+                         "question", "bands", "at", "status", "resolution"})
+RESOLUTION_FIELDS = frozenset({"schema_version", "at", "action", "by", "reason", "evidence"})
+#: The status each resolution action leaves.
+RESOLVED_STATUS = {"clear": "cleared", "reread": "reread"}
+
+
+def _sha(value):
+    return isinstance(value, str) and len(value) == 64 and all(char in "0123456789abcdef" for char in value)
+
+
+def _nonempty(value):
+    return isinstance(value, str) and bool(value.strip())
+
+
+def _gate_problem(gate):
+    """What is wrong with one saved gate record, or None."""
+    if not isinstance(gate, dict) or set(gate) != GATE_FIELDS:
+        return "fields other than {}".format(", ".join(sorted(GATE_FIELDS)))
+    if type(gate["schema_version"]) is not int or gate["schema_version"] != SCHEMA_VERSION:
+        return "unsupported schema_version"
+    if not _nonempty(gate["report"]) or not Path(gate["report"]).is_absolute():
+        return "report is not an absolute path"
+    # The stored path must be what `_report_key` would store: every symlink
+    # resolved, so `open_gates` can match it.
+    try:
+        canonical = os.path.realpath(gate["report"])
+    except (OSError, ValueError):
+        return "report path cannot be resolved"
+    if canonical != gate["report"]:
+        return "report is not a canonical path"
+    if not _sha(gate["sha256"]):
+        return "sha256 is not a lowercase sha256"
+    if gate["level"] not in LEVELS:
+        return "unknown level"
+    if not all(_nonempty(gate[key]) for key in ("reason", "model", "bands", "at")):
+        return "reason, model, bands or at is empty"
+    if gate["question"] is not None and not isinstance(gate["question"], str):
+        return "question is not a string"
+    probabilities = gate["probabilities"]
+    if (not isinstance(probabilities, dict) or set(probabilities) != set(GATE_QUESTIONS)
+            or any(isinstance(p, bool) or not isinstance(p, (int, float)) or not 0 <= p <= 1
+                   for p in probabilities.values())):
+        return "probabilities do not cover the gate questions in [0, 1]"
+    resolution = gate["resolution"]
+    if gate["status"] == "open":
+        return None if resolution is None else "an open gate carries a resolution"
+    if gate["status"] not in RESOLVED_STATUS.values():
+        return "unknown status"
+    if not isinstance(resolution, dict) or set(resolution) != RESOLUTION_FIELDS:
+        return "a resolved gate lacks its resolution"
+    if type(resolution["schema_version"]) is not int or resolution["schema_version"] != SCHEMA_VERSION:
+        return "unsupported resolution schema_version"
+    if RESOLVED_STATUS.get(resolution["action"]) != gate["status"]:
+        return "the resolution action and the gate's status disagree"
+    if ACTION_LEVEL.get(resolution["action"]) != gate["level"]:
+        return "the resolution action does not resolve the gate's level"
+    if resolution["by"] not in (CLEARERS if resolution["action"] == "clear" else REREADERS):
+        return "resolution names who may not resolve it"
+    if not _nonempty(resolution["reason"]) or not _nonempty(resolution["at"]):
+        return "resolution reason or at is empty"
+    evidence = resolution["evidence"]
+    if resolution["by"] == "operator":
+        if not isinstance(evidence, dict) or set(evidence) != {"attention"} or not _nonempty(evidence["attention"]):
+            return "an operator resolution cites no attention decision"
+        return None
+    if (not isinstance(evidence, dict) or set(evidence) != {"path", "sha256", "dispatch"}
+            or not _nonempty(evidence["path"]) or not _sha(evidence["sha256"]) or not _nonempty(evidence["dispatch"])):
+        return "a worker or judge resolution cites no delivered report and dispatch"
+    return None
+
+
+@contextmanager
+def holding(path):
+    """Hold the sidecar lock across a gate check and the decision it guards.
+
+    A caller checking `require_clear` and then committing an acceptance holds
+    this for both, so no gate can be recorded in between. Writers take the
+    same non-blocking lock and refuse while it is held.
+    """
+    with state_lock(storage_path(path)):
+        yield
+
+
+def open_gates(path, report):
+    key = _report_key(report)
+    return [gate for gate in load(path)["gates"] if gate["report"] == key and gate["status"] == "open"]
+
+
+def require_clear(path, report, accepting):
+    """Refuse gating a report whose open gate forbids it.
+
+    An open `reread` refuses any gating decision until the re-read is
+    recorded; an open `block` refuses acceptance until a recorded clear.
+    """
+    for gate in open_gates(path, report):
+        if gate["level"] == "reread":
+            raise UsageError("Report {} carries an open re-read gate ({}). Dispatch a full re-read to the worker whose "
+                             "report it is, then record it with `{}` before gating it.".format(
+                                 gate["report"], gate["reason"], runnable.command(REREAD_COMMAND)),
+                             {"gate": copy.deepcopy(gate)})
+        if gate["level"] == "block" and accepting:
+            raise UsageError("Report {} carries an open block gate ({}); it cannot be accepted until the block is "
+                             "cleared with a recorded reason from the worker that owns the finding, the judge or the "
+                             "operator: `{}`.".format(gate["report"], gate["reason"], runnable.command(CLEAR_COMMAND)),
+                             {"gate": copy.deepcopy(gate)})
+
+
+def _labels(data):
+    labels = data.get("labels") if isinstance(data, dict) and "labels" in data else [data]
+    if not isinstance(labels, list):
+        _fail("The labels file holds one classify-report.sh label or a classify-reports.sh batch.")
+    for label in labels:
+        if (not isinstance(label, dict) or not isinstance(label.get("report"), str)
+                or not isinstance(label.get("sha256"), str)):
+            _fail("Every label needs its report path and sha256; pass classify-report(s).sh output unchanged.")
+    return labels
+
+
+def record(path, data, at):
+    """Record the gates a batch of labels earns; identical report bytes replay."""
+    at = _utc(at)
+    labels = _labels(data)
+    # Every label is checked before anything is written: a report rewritten
+    # since it was classified is reclassified, never gated on stale bytes.
+    for label in labels:
+        if _digest(label["report"]) != label["sha256"]:
+            _fail("Report {} changed since it was classified; run classify-report(s).sh on it again.".format(label["report"]))
+    recorded, replayed, ungated = [], [], []
+    with state_lock(storage_path(path)):
+        document = load(path)
+        for label in labels:
+            key = _report_key(label["report"])
+            decision = decide(label)
+            if decision["level"] is None:
+                ungated.append({"report": key, "reason": decision["reason"]})
+                continue
+            # A replay is the same bytes under the same classification; a new model,
+            # question, bands version or level records a fresh gate.
+            prior = next((gate for gate in document["gates"]
+                          if gate["report"] == key and gate["sha256"] == label["sha256"]
+                          and gate["level"] == decision["level"] and gate["model"] == label["model"]
+                          and gate["question"] == label.get("question") and gate["bands"] == BANDS_VERSION), None)
+            if prior is not None:
+                replayed.append(copy.deepcopy(prior))
+                continue
+            gate = {"schema_version": SCHEMA_VERSION, "report": key, "sha256": label["sha256"],
+                    "level": decision["level"], "reason": decision["reason"],
+                    "probabilities": decision["probabilities"], "model": label["model"],
+                    "question": label.get("question"), "bands": BANDS_VERSION, "at": at,
+                    "status": "open", "resolution": None}
+            document["gates"].append(gate)
+            recorded.append(copy.deepcopy(gate))
+        if recorded:
+            save_state(storage_path(path), document)
+    return {"schema_version": SCHEMA_VERSION, "recorded": recorded, "replayed": replayed, "no_gate": ungated}
+
+
+def _recovery_store(state_path):
+    """The task ledger's recovery store, read without migrating or writing it."""
+    state, usable = load_state_checked(state_path, persist_migration=False)
+    if not usable:
+        raise StateError("State file {} is unusable, so no gate resolution can be bound to a delivered report; "
+                         "restore it before resolving a gate.".format(state_path), {"path": str(state_path)})
+    return state["recovery"]
+
+
+def ledger_view(state_path, judge_agent):
+    """What the owners already record about who delivered which report, and when.
+
+    Deliveries are supervision's `report_observed` events and the recovery
+    store's `delivery_recoveries`; roles and tasks are the recovery store's
+    dispatches; operator decisions are the attention sidecar's entries.
+    `judge_agent` is the pinned judge from config.json, or None.
+    """
+    store = _recovery_store(state_path)
+    data = supervision.load(state_path)
+    _document, entries, _progress = attention.load(state_path)
+    deliveries = []
+    for event in data["events"]:
+        detail = event.get("data")
+        if (event.get("kind") == "report_observed" and isinstance(detail, dict) and detail.get("present") is True
+                and _nonempty(detail.get("path")) and _sha(detail.get("sha256"))):
+            deliveries.append({"dispatch": event["member"], "path": _report_key(detail["path"]),
+                               "sha256": detail["sha256"], "at": event["at"]})
+    for row in store["delivery_recoveries"]:
+        saved = row["receipts"]["report"]
+        deliveries.append({"dispatch": row["dispatch"], "path": _report_key(saved["path"]),
+                           "sha256": saved["sha256"], "at": row["at"]})
+    return {"dispatches": {row["id"]: row for row in store["dispatches"]},
+            "enrolled": {row["id"]: _report_key(row["assignment"]["report"]) for row in data["members"]},
+            "deliveries": deliveries, "decisions": entries, "judge": judge_agent}
+
+
+def _owner(view, key):
+    """The applied dispatch whose supervision enrollment binds the gated report."""
+    rows = [view["dispatches"][name] for name, report in sorted(view["enrolled"].items())
+            if report == key and name in view["dispatches"] and view["dispatches"][name].get("status") == "applied"]
+    if not rows:
+        _fail("Report {} is bound to no applied dispatch's supervision enrollment, so no resolution can be tied to "
+              "its task and role. Restore that dispatch's enrollment (`{}`), then retry.".format(
+                  key, runnable.command("supervision-status")))
+    if len({(row["task"], row["role"]) for row in rows}) > 1:
+        _fail("Report {} is enrolled for more than one task or role; reconcile the enrollments before resolving "
+              "its gate.".format(key))
+    return rows[0]
+
+
+def _resolver(view, owner, dispatch):
+    """The resolving role a delivered report's dispatch holds, or None."""
+    if dispatch.get("status") != "applied" or dispatch.get("task") != owner["task"]:
+        return None
+    if (view["judge"] is not None and dispatch.get("agent") == view["judge"] and dispatch.get("role") == "judge"
+            and dispatch.get("judge_mode") == "adjudication"):
+        return "judge"
+    if dispatch.get("role") == owner["role"] and dispatch["id"] != owner["id"]:
+        return "worker"
+    return None
+
+
+def _delivered(view, owner, key, since, evidence, allowed):
+    """The resolving role and receipt for a cited report, from a delivery the owners recorded."""
+    path = _report_key(evidence)
+    if path == key:
+        _fail("A resolution cites the resolving worker's own report, not the gated report itself.")
+    digest = _digest(path)
+    for row in view["deliveries"]:
+        if row["path"] != path or row["sha256"] != digest or timestamp(row["at"], "Delivery") <= since:
+            continue
+        dispatch = view["dispatches"].get(row["dispatch"])
+        if dispatch is None:
+            continue
+        role = _resolver(view, owner, dispatch)
+        if role in allowed:
+            return role, {"path": path, "sha256": digest, "dispatch": dispatch["id"]}
+    _fail("Report {} carries no delivery receipt that resolves this gate: it must be the current bytes of a report "
+          "supervision observed (or `{}` recovered) after the gate was recorded, for an applied dispatch on task {} "
+          "held by {}. Dispatch that re-read or ruling and cite its delivered report.".format(
+              path, runnable.command("recover-report"), owner["task"], " or ".join(
+                  {"worker": "the {} role".format(owner["role"]),
+                   "judge": "the pinned judge in adjudication mode"}[role] for role in allowed)))
+
+
+def _decided(view, owner, since, name):
+    """The operator's recorded answer on a resolved attention decision for the task."""
+    entry = view["decisions"].get(name) if isinstance(name, str) else None
+    resolution = entry.get("resolution") if entry is not None else None
+    if (entry is None or entry["kind"] != "decision" or entry["status"] != "resolved" or entry["task"] != owner["task"]
+            or not isinstance(resolution, dict) or resolution.get("kind") != "user_answer"
+            or timestamp(entry["updated_at"], "Decision") <= since):
+        _fail("An operator clear cites an attention decision on task {} resolved with the operator's answer after "
+              "the gate was recorded. Record it with `{}`, resolve it with the user's answer, then pass "
+              "--decision <its id>.".format(owner["task"], runnable.command("attention-record")))
+    return resolution["summary"]
+
+
+def resolve(path, report, action, reason, at, view, evidence=None, decision=None):
+    """Record a re-read or a clear against the report's open gates.
+
+    Who resolves is read from the owners' records, never from the caller: a
+    worker or judge resolution cites a report delivered for a dispatch on the
+    gated report's task after the gate -- the gated report's own role (a
+    worker), or the pinned judge in adjudication mode. An operator clear cites
+    a resolved attention decision for that task, whose answer is the reason.
+    """
+    at = _utc(at)
+    key = _report_key(report)
+    if action == "reread" and (evidence is None or decision is not None):
+        _fail("A re-read cites the re-reading worker's delivered report; pass --evidence <report>.")
+    if action == "clear" and (evidence is None) == (decision is None):
+        _fail("A clear cites either the worker's or judge's delivered report (--evidence) or the operator's "
+              "resolved decision (--decision), exactly one.")
+    if evidence is not None:
+        _text(reason, "The re-read note" if action == "reread" else "The clear reason")
+    elif reason is not None:
+        _fail("An operator clear quotes the decision's recorded answer; drop --reason.")
+    with state_lock(storage_path(path)):
+        document = load(path)
+        open_gates_here = [gate for gate in document["gates"] if gate["report"] == key and gate["status"] == "open"]
+        # Each command resolves its own level only: a clear never discharges a
+        # re-read, and a re-read never clears a block.
+        pending = [gate for gate in open_gates_here if gate["level"] == ACTION_LEVEL[action]]
+        if not pending:
+            if open_gates_here:
+                other = "reread" if action == "clear" else "block"
+                _fail("Report {} has no open {} gate; its open {} gate is resolved only by `{}`.".format(
+                    key, ACTION_LEVEL[action], other,
+                    runnable.command(REREAD_COMMAND if other == "reread" else CLEAR_COMMAND)))
+            _fail("Report {} has no open gate; `{}` lists what is open.".format(key, runnable.command("report-gate-status")))
+        owner = _owner(view, key)
+        since = max(timestamp(gate["at"], "Gate") for gate in pending)
+        if decision is not None:
+            by, reason, cited = "operator", _decided(view, owner, since, decision), {"attention": decision}
+        else:
+            by, cited = _delivered(view, owner, key, since, evidence, REREADERS if action == "reread" else REPORT_CLEARERS)
+        for gate in pending:
+            gate["status"] = "cleared" if action == "clear" else "reread"
+            gate["resolution"] = {"schema_version": SCHEMA_VERSION, "at": at, "action": action, "by": by,
+                                  "reason": reason, "evidence": cited}
+        save_state(storage_path(path), document)
+    return {"schema_version": SCHEMA_VERSION, "resolved": copy.deepcopy(pending)}
+
+
+def status(path, report=None):
+    gates = load(path)["gates"]
+    if report is not None:
+        key = _report_key(report)
+        gates = [gate for gate in gates if gate["report"] == key]
+    return {"schema_version": SCHEMA_VERSION, "bands": BANDS_VERSION, "model": JEV_MODEL,
+            "open": [copy.deepcopy(gate) for gate in gates if gate["status"] == "open"],
+            "resolved": [copy.deepcopy(gate) for gate in gates if gate["status"] != "open"]}
+
+
+def register_commands(sub, common):
+    parser = sub.add_parser("report-gate-record", parents=[common],
+                            help="Record the gates a round's classifier labels earn.")
+    parser.add_argument("--labels", required=True, help="classify-reports.sh (or classify-report.sh) output file.")
+    parser.add_argument("--now", metavar="ISO8601")
+    parser = sub.add_parser("report-gate-reread", parents=[common],
+                            help="Record the mandatory full re-read that clears a report's re-read gate.")
+    parser.add_argument("--report", required=True)
+    parser.add_argument("--note", required=True)
+    parser.add_argument("--evidence", required=True, help="The re-reading worker's report.")
+    parser.add_argument("--now", metavar="ISO8601")
+    parser = sub.add_parser("report-gate-clear", parents=[common],
+                            help="Clear a report's gate with the recorded reason it does not block.")
+    parser.add_argument("--report", required=True)
+    parser.add_argument("--reason", help="Why it does not block; required with --evidence.")
+    parser.add_argument("--evidence", help="The owning worker's or adjudicating judge's delivered report.")
+    parser.add_argument("--decision", help="The operator's resolved attention decision on the task.")
+    parser.add_argument("--now", metavar="ISO8601")
+    parser = sub.add_parser("report-gate-status", parents=[common], help="List open and resolved report gates.")
+    parser.add_argument("--report")
+
+
+def run_command(args, state_path, now, judge_agent=None):
+    if args.command == "report-gate-record":
+        try:
+            data = json.loads(Path(args.labels).expanduser().read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, ValueError) as exc:
+            raise UsageError("Cannot read labels {}: {}. Save classify-reports.sh stdout to a file and pass it "
+                             "unchanged.".format(args.labels, exc), {}) from None
+        return record(state_path, data, args.now or now)
+    if args.command == "report-gate-reread":
+        return resolve(state_path, args.report, "reread", args.note, args.now or now,
+                       ledger_view(state_path, judge_agent), evidence=args.evidence)
+    if args.command == "report-gate-clear":
+        return resolve(state_path, args.report, "clear", args.reason, args.now or now,
+                       ledger_view(state_path, judge_agent), evidence=args.evidence, decision=args.decision)
+    return status(state_path, args.report)

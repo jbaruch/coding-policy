@@ -6,7 +6,11 @@
     "scripts/tests/test_source_index.py",
     "skills/herdr-standup/standup-render.py",
     "skills/herdr-standup/tests/test_standup_render.py",
+    "skills/herdr-foreman/classify/adversarial.py",
     "skills/herdr-foreman/classify/extract-answer.py",
+    "skills/herdr-foreman/classify/report_verdict.py",
+    "skills/herdr-foreman/classify/scoring.py",
+    "skills/herdr-foreman/classify/typesafe_client.py",
     "skills/herdr-foreman/prune-report-caches.py",
     "skills/herdr-foreman/foreman-tier-check.py",
     "skills/herdr-foreman/foreman/__init__.py",
@@ -45,6 +49,7 @@
     "skills/herdr-foreman/foreman/recovery.py",
     "skills/herdr-foreman/foreman/renderable.py",
     "skills/herdr-foreman/foreman/report_delivery.py",
+    "skills/herdr-foreman/foreman/report_gates.py",
     "skills/herdr-foreman/foreman/restoration.py",
     "skills/herdr-foreman/foreman/retrospective.py",
     "skills/herdr-foreman/foreman/retrospective_runtime.py",
@@ -95,6 +100,10 @@
     "skills/herdr-foreman/tests/test_partition.py",
     "skills/herdr-foreman/tests/test_planner.py",
     "skills/herdr-foreman/tests/test_probe.py",
+    "skills/herdr-foreman/tests/test_report_gates.py",
+    "skills/herdr-foreman/tests/test_report_verdict.py",
+    "skills/herdr-foreman/tests/test_scoring.py",
+    "skills/herdr-foreman/tests/test_typesafe_client.py",
     "skills/herdr-foreman/tests/tier_fixture.py",
     "skills/herdr-foreman/tests/test_recovery.py",
     "skills/herdr-foreman/tests/test_recovery_cli.py",
@@ -138,7 +147,8 @@
     {
       "root": "skills/herdr-foreman",
       "extraPaths": [
-        "skills/herdr-foreman"
+        "skills/herdr-foreman",
+        "skills/herdr-foreman/classify"
       ]
     },
     {

@@ -7,6 +7,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
+import hashlib
 import io
 import json
 from pathlib import Path
@@ -14,7 +15,7 @@ import unittest
 from datetime import datetime, timedelta
 from unittest.mock import patch
 
-from foreman import runnable
+from foreman import report_gates, runnable
 from foreman.assign import FrozenPaths
 from foreman.errors import UsageError
 from foreman.state import add_assignment, empty_state, save_state, state_lock
@@ -715,6 +716,42 @@ class RecoveryCommandTests(fixture.CliCase):
             "supersedes": "diag-cap:plan"})
         self.assertEqual(code, 1)
         self.assertIn("pinned judge", err)
+
+    def test_an_open_reread_gate_refuses_recording_the_review(self):
+        self.seed_cap()
+        extra = ["--correction-plan", "two-fixes", "--work", str(self.work)]
+        code, _, err = self.invoke(["plan", "--roles", "developer", "--snapshot", str(self.snapshot),
+                                    "--task", TASK, "--fix-round", "6", "--now", AT, *extra])
+        self.assertEqual(code, 0, err)
+        code, out, err = self.invoke(self.apply_args("developer", 6, *extra), self.fresh_client("fix-5", "fix-6"))
+        self.assertEqual(code, 0, err)
+        dispatch = json.loads(out)["applied"][0]["dispatch_id"]
+        review = self.tmp / "review-6.md"
+        review.write_text("Reviewed head " + HEAD + "\nBlocking F1: an escaped quote is still mishandled.\n")
+        # A medium-confidence classifier label forces a recorded re-read before
+        # the review is gated at all, blocking verdict included.
+        labels = self.tmp / "labels.json"
+        labels.write_text(json.dumps({"labels": [{
+            "report": str(review), "sha256": hashlib.sha256(review.read_bytes()).hexdigest(), "agent": "jev",
+            "model": report_gates.JEV_MODEL, "verdict": "blocking", "question": "q",
+            "answers": {"names_open_item": {"p_yes": 0.93}, "open_items_accepted": {"p_yes": 0.01},
+                        "open_items_out_of_scope": {"p_yes": 0.01}}}]}))
+        code, _, err = self.invoke(["report-gate-record", "--labels", str(labels), "--now", AT])
+        self.assertEqual(code, 0, err)
+        record = {"dispatch": dispatch, "head_revision": HEAD, "verdict": "blocking",
+                  "review_mode": "full", "reviewer": "codex", "report": str(review), "changed_paths": ["src/parser.py"]}
+        code, _, err = self.owner("record-report", record)
+        self.assertEqual(code, 1)
+        self.assertIn("open re-read gate", err)
+        # A re-read the ledger never saw delivered clears nothing.
+        reread = self.tmp / "review-6-reread.md"
+        reread.write_text("Re-read review-6.md in full; F1 stands.\n")
+        code, _, err = self.invoke(["report-gate-reread", "--report", str(review), "--evidence", str(reread),
+                                    "--note", "Reviewer re-read it in full; F1 stands.", "--now", AT])
+        self.assertEqual(code, 1)
+        code, _, err = self.owner("record-report", record)
+        self.assertEqual(code, 1)
+        self.assertIn("open re-read gate", err)
 
     def test_two_extra_fixes_use_one_approval_with_actual_blocking_review_between(self):
         self.seed_cap()
