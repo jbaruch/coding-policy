@@ -96,7 +96,19 @@
 set -euo pipefail
 
 # Directory of this script — used to locate the sibling registry-version.sh.
-_sp_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Command substitution strips every trailing newline, so the script directory
+# never passes through one bare: parameter expansion derives it (#487), and a
+# sentinel carries `pwd` across the strip (#466).
+case "${BASH_SOURCE[0]}" in
+  */*) _sp_src="${BASH_SOURCE[0]%/*}" ;;
+  *) _sp_src=. ;;
+esac
+if ! _sp_dir="$(cd -- "${_sp_src:-/}" && pwd && printf x)"; then
+  echo "error: cannot enter the script directory ${_sp_src:-/} — restore read and search access to the plugin directory, or reinstall the plugin, then re-run" >&2
+  exit 1
+fi
+_sp_dir="${_sp_dir%x}"
+_sp_dir="${_sp_dir%$'\n'}"
 
 # The out-of-credits signature. tessl's real out-of-credits tail is a multi-line
 # block, observed live (fifty-tabs-of-fares 0.16.3, jbaruch-travel-policy 0.7.59):

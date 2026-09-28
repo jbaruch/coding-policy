@@ -72,7 +72,20 @@
 
 set -euo pipefail
 
-_cpl_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Command substitution strips every trailing newline, so the script directory
+# never passes through one bare: parameter expansion derives it (#487), and a
+# sentinel carries `pwd` across the strip (#466). main() turns a failure into a
+# fail-safe gate result.
+case "${BASH_SOURCE[0]}" in
+  */*) _cpl_src="${BASH_SOURCE[0]%/*}" ;;
+  *) _cpl_src=. ;;
+esac
+if _cpl_dir="$(cd -- "${_cpl_src:-/}" && pwd && printf x)"; then
+  _cpl_dir="${_cpl_dir%x}"
+  _cpl_dir="${_cpl_dir%$'\n'}"
+else
+  _cpl_dir=""
+fi
 
 # JSON string escaper for the human `reason` and the string fields. Escapes the
 # JSON-mandatory backslash and double-quote plus the common control chars, so a
@@ -115,6 +128,10 @@ main() {
   # version-compare.sh (version_gt) tests the registry advance; registry-version
   # .sh reads the current latest. A missing helper is a fail-safe FAIL: we
   # cannot confirm the artifact landed.
+  if [[ -z "$_cpl_dir" ]]; then
+    emit_and_exit "fail" false "" "$baseline" null \
+      "confirm-publish-landed: cannot enter the script directory ${_cpl_src:-/} — restore read and search access to the plugin directory, or reinstall the plugin. Treating as NOT confirmed (fail-safe)." 1
+  fi
   # shellcheck source=skills/release/version-compare.sh
   if ! source "${_cpl_dir}/version-compare.sh"; then
     emit_and_exit "fail" false "" "$baseline" null \

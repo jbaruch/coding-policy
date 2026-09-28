@@ -590,11 +590,12 @@ oracle and the produced output otherwise:
 ```bash
 CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"
 bash "$CP/skills/herdr-foreman/foreman.sh" verify-oracle \
-  --plan <plan-file> --role <role> --result <result-file>
+  --plan <plan-file> --role <role> --result <result-file> --task <task>
 ```
 
 Exit 0 is a match. Exit 1 with `"match": false` is a blocking finding on the
-round; exit 1 with no verdict is a usage error to resolve before gating.
+round; exit 1 with no verdict is a usage error to resolve before gating,
+including a plan whose oracle differs from the one the round's dispatch bound.
 Before accepting a partitioned responsibility's pass, confirm its plan, as
 dispatched, still covers exactly the task's diff at the tip under review:
 

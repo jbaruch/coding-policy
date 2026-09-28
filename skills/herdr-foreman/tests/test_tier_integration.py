@@ -71,41 +71,104 @@ class TierIntegrationTest(CliCase):
         self.assertEqual(rc, 0, error)
         self.assertNotIn("Plan tiers differ", error)
 
-    def test_plan_pins_the_oracle_file_and_verify_refuses_it_edited(self):
-        # coding-policy#488: the licence is the bytes the oracle file held when
-        # the plan was written, not whatever the path holds at the gate.
-        self.settings["agents"][0]["tiers"]["mechanical"] = tier_row()
-        self.write_config()
-        expected = self.tmp / "exact.patch"
-        expected.write_bytes(b"+licensed\n")
-        context = self.tmp / "round-context.json"
-        context.write_text(json.dumps({"developer": {"oracle": {"kind": "patch", "path": str(expected)}}}))
-        rc, output, error = self.run_cli(["plan", *self.base(), "--roles", "developer",
-                                          "--snapshot", str(self.snapshot), "--round", "developer=mechanical",
-                                          "--round-context", str(context), "--now", AT])
-        self.assertEqual(rc, 0, error)
-        document = json.loads(output)
-        self.assertEqual(document["oracle_pins"], {"developer": {
-            "path": str(expected), "sha256": hashlib.sha256(b"+licensed\n").hexdigest()}})
-        plan_file = self.tmp / "plan.json"
-        plan_file.write_text(output)
-        result = self.tmp / "result.diff"
-        result.write_bytes(b"+licensed\n")
-        verify = ["verify-oracle", "--plan", str(plan_file), "--role", "developer", "--result", str(result)]
-        self.out.seek(0)
-        self.out.truncate()
-        rc, output, error = self.run_cli(verify)
-        self.assertEqual(rc, 0, error)
-        self.assertTrue(json.loads(output)["match"])
-        expected.write_bytes(b"+rewritten\n")
-        result.write_bytes(b"+rewritten\n")
+    def fresh_dispatch_runner(self):
+        """A fake Herdr through which a cleared, tier-verified claude dispatch succeeds."""
+        runner = FakeRunner()
+        info = json.loads(agent_json("claude", "idle", "w1:p2"))["result"]["agent"]
+        info["terminal_id"] = "term-2"
+        runner.set("agent get claude", json.dumps({"result": {"agent": info}}))
+        process = {"pane_id": "w1:p2", "shell_pid": 100,
+                   "foreground_processes": [{"name": "claude", "pid": 200, "argv": ["claude"]}]}
+        shell = {**process, "foreground_processes": [{"name": "bash", "pid": 100}]}
+        argv = ["claude", "--dangerously-skip-permissions", "--model", "sonnet-5", "--effort", "high"]
+        started = {**process, "foreground_processes": [{"name": "claude", "pid": 300, "argv": argv}]}
+        runner.responses["pane process-info"] = ScriptedReads([
+            json.dumps({"result": {"process_info": item}}) for item in (process, process, shell, started)])
+        runner.set("-TERM 200")
+        runner.set("agent start", json.dumps({"result": {"agent": info, "argv": argv}}))
+        runner.responses["agent read"] = composer_reads("claude", ("ready", "ready", "> New assignment from the team lead."))
+        runner.set("agent prompt", ok_json())
+        runner.set("agent wait", ok_json())
+        runner.set("pane rename", ok_json())
+        return runner
+
+    def reset_streams(self):
         self.out.seek(0)
         self.out.truncate()
         self.err.seek(0)
         self.err.truncate()
+
+    def test_plan_pins_the_oracle_apply_binds_it_and_verify_refuses_edits(self):
+        # coding-policy#488: the licence is the bytes the oracle file held when
+        # the plan was written, not whatever the path holds at the gate.
+        # coding-policy#585: and it is the pin the round was DISPATCHED with,
+        # not whatever the plan file says at the gate.
+        task = "owner/repo#585"
+        self.settings["agents"][0]["tiers"]["mechanical"] = tier_row()
+        self.write_config()
+        record = self.tmp / "task.json"
+        record.write_text(json.dumps({"task": task, "base_revision": "a" * 40, "scope": "Apply the exact patch",
+                                      "allowed_paths": ["src/*"], "authorization": {
+                                          "source": "fixture operator message", "quote": "Approve this task."}}))
+        rc, _output, error = self.run_cli(["task", *self.base(), "--record", str(record), "--now", AT])
+        self.assertEqual(rc, 0, error)
+        expected = self.tmp / "exact.patch"
+        expected.write_bytes(b"+licensed\n")
+        context = self.tmp / "round-context.json"
+        context.write_text(json.dumps({"developer": {"oracle": {"kind": "patch", "path": str(expected)}}}))
+        self.reset_streams()
+        rc, output, error = self.run_cli(["plan", *self.base(), "--roles", "developer",
+                                          "--snapshot", str(self.snapshot), "--round", "developer=mechanical",
+                                          "--round-context", str(context), "--task", task, "--now", AT])
+        self.assertEqual(rc, 0, error)
+        document = json.loads(output)
+        pin = hashlib.sha256(b"+licensed\n").hexdigest()
+        self.assertEqual(document["oracle_pins"], {"developer": {"path": str(expected), "sha256": pin}})
+        plan_file = self.tmp / "plan.json"
+        plan_file.write_text(output)
+        apply = self.apply_args(document) + ["--task", task, "--dispatch-id", "oracle-round"]
+        self.reset_streams()
+        rc, _output, error = self.run_cli(apply, client=HerdrClient("herdr", self.fresh_dispatch_runner()))
+        self.assertEqual(rc, 0, error)
+        stored, usable = load_state_checked(self.state)
+        self.assertTrue(usable)
+        self.assertEqual(stored["recovery"]["dispatches"][-1]["oracle"],
+                         {"kind": "patch", "path": str(expected), "sha256": pin})
+
+        result = self.tmp / "result.diff"
+        result.write_bytes(b"+licensed\n")
+        verify = ["verify-oracle", *self.base(), "--plan", str(plan_file), "--role", "developer",
+                  "--result", str(result), "--task", task]
+        self.reset_streams()
+        rc, output, error = self.run_cli(verify)
+        self.assertEqual(rc, 0, error)
+        self.assertTrue(json.loads(output)["match"])
+
+        # The file alone rewritten: its bytes no longer hash to the pin.
+        expected.write_bytes(b"+rewritten\n")
+        result.write_bytes(b"+rewritten\n")
+        self.reset_streams()
         rc, output, error = self.run_cli(verify)
         self.assertEqual((rc, output), (1, ""))
         self.assertIn("changed since the plan was written", error)
+
+        # The plan's pin rewritten to match: the plan alone checks clean, the
+        # dispatch still holds the pin the round was sent with.
+        edited = json.loads(plan_file.read_text())
+        edited["oracle_pins"]["developer"]["sha256"] = hashlib.sha256(b"+rewritten\n").hexdigest()
+        plan_file.write_text(json.dumps(edited))
+        self.reset_streams()
+        rc, output, error = self.run_cli(verify)
+        self.assertEqual((rc, output), (1, ""))
+        self.assertIn("edited after dispatch", error)
+
+        # The pin is part of the dispatch identity: the edited plan is new
+        # inputs under the recorded id, never a replay of it.
+        self.reset_streams()
+        rc, _output, error = self.run_cli(self.apply_args(edited) + ["--task", task, "--dispatch-id", "oracle-round"],
+                                          client=HerdrClient("herdr", FakeRunner()))
+        self.assertEqual(rc, 1)
+        self.assertIn("already names different inputs", error)
 
     def test_a_retired_qualification_field_is_refused_with_the_allowed_fields(self):
         self.settings["agents"][0]["tiers"]["build"]["qualification"] = []
