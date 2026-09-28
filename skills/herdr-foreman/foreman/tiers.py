@@ -414,27 +414,49 @@ def mechanical_allowed(context):
     not fire (#480).
     """
     oracle = context.get("oracle")
-    if not isinstance(oracle, dict) or set(oracle) - {"kind", "value", "path"}:
+    if oracle_shape_problem(oracle) is not None:
         return False
+    if oracle["kind"] == "digest":
+        return True
+    # The file, not a claim about it. A declared oracle nobody wrote is the
+    # silent failure this gate exists to refuse.
+    candidate = Path(oracle["path"])
+    return candidate.is_file() and os.access(candidate, os.R_OK)
+
+
+def oracle_shape_problem(oracle):
+    """Why a declared oracle is malformed, or None when its shape is sound.
+
+    Shape only, never the file: `mechanical_allowed` and `verify-oracle` both
+    refuse a malformed oracle before anything is read from disk (#488).
+    """
+    if not isinstance(oracle, dict):
+        return "the oracle is not a JSON object"
+    stray = set(oracle) - {"kind", "value", "path"}
+    if stray:
+        return "the oracle carries unknown keys {}".format(", ".join(sorted(map(str, stray))))
     kind = oracle.get("kind")
-    if not isinstance(kind, str):
-        return False
+    if not isinstance(kind, str) or kind not in ORACLE_KINDS:
+        return "the oracle kind {!r} is not one of {}".format(kind, ", ".join(ORACLE_KINDS))
     if kind == "digest":
         value = oracle.get("value")
-        return isinstance(value, str) and bool(ORACLE_DIGEST.match(value)) and "path" not in oracle
-    if kind in {"patch", "fixture"}:
-        path = oracle.get("path")
-        if not isinstance(path, str) or not path.strip() or "value" in oracle:
-            return False
-        # A plan is replayed at apply, possibly from another directory. A
-        # relative path would resolve to a different file, or none.
-        if not Path(path).is_absolute():
-            return False
-        # The file, not a claim about it. A declared oracle nobody wrote is the
-        # silent failure this gate exists to refuse.
-        candidate = Path(path)
-        return candidate.is_file() and os.access(candidate, os.R_OK)
-    return False
+        if "path" in oracle:
+            return "a digest oracle carries a path"
+        if not isinstance(value, str) or not ORACLE_DIGEST.match(value):
+            return "a digest oracle's value is not a lowercase sha256"
+        return None
+    path = oracle.get("path")
+    if "value" in oracle:
+        return "a {} oracle carries a digest value".format(kind)
+    if not isinstance(path, str) or not path.strip():
+        return "a {} oracle names no path".format(kind)
+    if "\0" in path:
+        return "a {} oracle's path carries a NUL byte".format(kind)
+    # A plan is replayed at apply, possibly from another directory. A
+    # relative path would resolve to a different file, or none.
+    if not Path(path).is_absolute():
+        return "a {} oracle's path {!r} is not absolute".format(kind, path)
+    return None
 
 
 def measured_pressure(headroom):
