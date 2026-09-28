@@ -124,12 +124,17 @@ by another kind, or a live tier other than the selected one, refuses
 
 `foreman verify-foreman` re-runs the selection and proves the running foreman
 from its pane's live foreground argv, this Herdr pane by default or
-`--pane <pane-id>`. Step 2's round preflight runs it inside one composite check
+`--pane <pane-id>`. The pane must be the one Herdr binds to the seat's agent
+name, with the seat's kind; any other pane refuses, whatever tier it runs. It
+reads state without the lock and never persists a migration: an older state
+file refuses with the owner command to run. Step 2's round preflight runs it inside one composite check
 with `foreman measure`, `skills/herdr-foreman/foreman-tier-check.py`, and records
 its `checks.headroom` and `checks.foreman_tier` rows:
 
-- the running argv carries the selected tier — `ok`
-- it carries another tier, or the selection refuses — `failed`, and the round
+- the result carries the pane's process-argv proof of the selected model and
+  effort — `ok`
+- it carries another tier or no such proof, the pane is not the seat's, or the
+  selection refuses — `failed`, and the round
   blocks until the operator restarts the foreman with `start-foreman`
 - config has no `foreman` block — `unconfigured`, a stderr warning; its
   `detail.warning` names the resolved config file, the `schema_version` 6 it
@@ -139,6 +144,11 @@ its `checks.headroom` and `checks.foreman_tier` rows:
   `verify-foreman --config-only`, which reads config presence without
   selecting or probing; a configured foreman records `failed` as a dependency
   on headroom, and an absent block is still `unconfigured`
+
+The composite owns the verdict and exits with it: 0 ready, 1 not ready with
+each blocking reason in its rows, 2 could not run (the exit contract is in the
+script's docstring). The preflight records the rows on 0 or 1. Any other exit,
+unreadable output, or rows that contradict the exit code fail both rows.
 
 A selection that moves, on a capability-table verdict or a table edit, reads as
 a mismatch at the next preflight; the restart picks the new tier. A context

@@ -20,6 +20,7 @@ retried a bounded number of times, each time re-proving the pane and the name.
 import time
 from pathlib import PurePath
 
+from . import runnable
 from .composer import ensure_ready
 from .errors import AgentBusyError, HerdrError
 from .herdr import READY_STATES, error_code
@@ -152,7 +153,32 @@ def start_foreman(client, seat, pane, tier):
 
 
 def verify_foreman(client, seat, pane, tier):
-    """Prove the live foreman in `pane` runs the selected tier, from its foreground argv."""
+    """Prove the live foreman in `pane` runs the selected tier, from its foreground argv.
+
+    The pane must be the one Herdr binds to the seat's agent name, with the
+    seat's kind: another agent's pane running the same tier proves nothing
+    about the foreman.
+    """
+    try:
+        record = client.agent_get(seat.agent)
+    except HerdrError as exc:
+        if error_code(exc) != NAME_RELEASED:
+            raise
+        raise HerdrError(
+            "Herdr holds no agent named {!r}, so pane {!r} is not the foreman's seat. Start the foreman from "
+            "another shell with `{}`, then re-run the preflight.".format(
+                seat.agent, pane, runnable.command("start-foreman --pane <empty-shell-pane>")),
+            {"agent": seat.agent, "pane": pane}) from exc
+    if not isinstance(record, dict) or record.get("pane_id") != pane or record.get("agent") != seat.kind:
+        bound_pane = record.get("pane_id") if isinstance(record, dict) else None
+        bound_kind = record.get("agent") if isinstance(record, dict) else None
+        raise HerdrError(
+            "The foreman name {!r} is bound to a {} agent in pane {!r}, not a {} agent in {!r}; this pane is not "
+            "the foreman's seat. Run the foreman from its own seat, or stop the agent holding that name and "
+            "start the foreman with `{}`.".format(
+                seat.agent, bound_kind, bound_pane, seat.kind, pane,
+                runnable.command("start-foreman --pane <empty-shell-pane>")),
+            {"agent": seat.agent, "pane": pane, "bound_pane": bound_pane, "bound_kind": bound_kind})
     process = foreground_agent(client, pane, seat.kind)
     proof = verify_argv(seat.kind, tier, process["argv"], list(seat.launch_args))
     return {**proof, "source": "process_argv", "pid": process["pid"], "pane_id": pane}
