@@ -28,11 +28,25 @@ class ScoreTest(unittest.TestCase):
             row["verdict"] = "blocking" if row["recorded"] == "blocking" else "approved"
         report = scoring.score(rows, 0, "jev", "pinned", {"since": "2026-09-27", "changed": "2026-09-27", "held_out": True})
         self.assertEqual((report["scored"], report["accuracy"]), (2, 1.0))
-        # Only the blocking row determines per-question truth in the corpus.
-        self.assertEqual(report["per_question"]["names_open_item"]["determined"], 1)
-        self.assertIsNone(report["per_question"]["concludes_nothing_blocks"]["accuracy"])
+        # The blocking row fixes the open-item answers; the approved row, with
+        # neither disposal answered yes, fixes its no-open-item path.
+        self.assertEqual(report["per_question"]["names_open_item"]["determined"], 2)
+        self.assertEqual(report["per_question"]["concludes_nothing_blocks"],
+                         {"determined": 1, "agree": 1, "unclear": 0, "accuracy": 1.0})
         self.assertEqual(report["fixtures"]["per_question"]["concludes_nothing_blocks"]["accuracy"], 1.0)
         self.assertEqual(report["fixtures"]["flipped"], [])
+
+    def test_an_approval_through_a_disposal_fixes_no_answer(self):
+        row = jev("approved", 0.99, p_disposed=0.9)
+        row["verdict"] = "approved"
+        table = scoring.per_question([row])
+        self.assertEqual([table[qid]["determined"] for qid in IDS], [0, 0, 0, 0])
+
+    def test_a_wrong_conclusion_on_an_approval_is_scored_wrong(self):
+        row = jev("approved", 0.1, p_concludes=0.1)
+        row["verdict"] = "insufficient_evidence"
+        self.assertEqual(scoring.per_question([row])["concludes_nothing_blocks"],
+                         {"determined": 1, "agree": 0, "unclear": 0, "accuracy": 0.0})
 
 
 class CalibrateTest(unittest.TestCase):

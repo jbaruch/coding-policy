@@ -25,6 +25,7 @@ test suite reaches the network (rules/testing-standards.md Determinism).
 import json
 import math
 import os
+import ssl
 import time
 import urllib.error
 import urllib.request
@@ -38,6 +39,11 @@ RETRY_STATUSES = frozenset({429, 529})
 MAX_ATTEMPTS = 4
 BACKOFF_BASE_SECONDS = 1.0
 QUESTION_TYPES = frozenset({"noul", "choice"})
+#: A Python without a CA bundle (python.org builds on macOS) cannot verify
+#: TypeSafe's certificate; that is a local setup fault, not a network one.
+CERTIFICATE_HINT = ("this Python cannot verify TypeSafe's TLS certificate: it has no CA bundle. Set SSL_CERT_FILE "
+                    "to a CA bundle (macOS: /etc/ssl/cert.pem) or run Python's 'Install Certificates.command', "
+                    "then retry")
 
 #: (url, body, headers, timeout) -> (status, response body bytes)
 Transport = Callable[[str, bytes, Mapping[str, str], float], "tuple[int, bytes]"]
@@ -92,7 +98,13 @@ def urllib_transport(url: str, body: bytes, headers: Mapping[str, str], timeout:
     except urllib.error.HTTPError as exc:
         # The body is discarded unread: it may echo the submitted state.
         return exc.code, b""
-    except (urllib.error.URLError, TimeoutError, OSError):
+    except ssl.SSLCertVerificationError:
+        raise Unavailable(CERTIFICATE_HINT) from None
+    except urllib.error.URLError as exc:
+        if isinstance(exc.reason, ssl.SSLCertVerificationError):
+            raise Unavailable(CERTIFICATE_HINT) from None
+        raise Unavailable("cannot reach TypeSafe at {}; check the network and retry later".format(url)) from None
+    except (TimeoutError, OSError):
         raise Unavailable("cannot reach TypeSafe at {}; check the network and retry later".format(url)) from None
 
 

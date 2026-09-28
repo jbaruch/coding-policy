@@ -3,9 +3,12 @@
 import http.client
 import io
 import json
+import ssl
 import sys
 import unittest
+import urllib.error
 import urllib.request
+from unittest import mock
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "classify"))
@@ -120,6 +123,26 @@ class FailureTest(unittest.TestCase):
             "confidence": 0.7}}}
         with self.assertRaises(ts.InvalidResponse):
             ask(Transport((200, reply)), CHOICE)
+
+    def test_a_missing_ca_bundle_names_its_fix_not_the_network(self):
+        verify = ssl.SSLCertVerificationError(1, "certificate verify failed: unable to get local issuer certificate")
+        for raised in (urllib.error.URLError(verify), verify):
+            opener = mock.Mock()
+            opener.open.side_effect = raised
+            with self.subTest(raised=type(raised).__name__), \
+                    mock.patch.object(ts.urllib.request, "build_opener", return_value=opener), \
+                    self.assertRaises(ts.Unavailable) as caught:
+                ts.system_one("s", NOUL, MODEL, key=KEY)
+            self.assertIn("SSL_CERT_FILE", str(caught.exception))
+            self.assertNotIn("check the network", str(caught.exception))
+            self.assertNotIn(KEY, str(caught.exception))
+
+    def test_an_unreachable_host_is_a_network_failure(self):
+        opener = mock.Mock()
+        opener.open.side_effect = urllib.error.URLError(OSError("nodename nor servname provided"))
+        with mock.patch.object(ts.urllib.request, "build_opener", return_value=opener), \
+                self.assertRaisesRegex(ts.Unavailable, "check the network"):
+            ts.system_one("s", NOUL, MODEL, key=KEY)
 
     def test_redirects_are_never_followed(self):
         request = urllib.request.Request(ts.ENDPOINT, headers={"Authorization": "Bearer " + KEY})

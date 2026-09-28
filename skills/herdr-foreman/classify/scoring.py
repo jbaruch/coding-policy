@@ -15,8 +15,9 @@ Usage:
 
 Per-question accuracy needs a truth per question, and the corpus records only
 the verdict. A recorded `blocking` determines three answers (an open item is
-named, not accepted, not out of scope); a recorded `approved` determines none,
-since two different answer paths compose it. A fixture's expected answers
+named, not accepted, not out of scope). A recorded `approved` composes from
+two answer paths; it determines the no-open-item path's two answers when the
+model answered neither disposal `yes` (`truths`). A fixture's expected answers
 determine the rest. A question with no determined row reports accuracy null.
 """
 
@@ -36,6 +37,7 @@ from foreman import report_gates  # noqa: E402
 #: Truths a recorded verdict determines, per question.
 IMPLIED = {"blocking": {"names_open_item": "yes", "open_items_accepted": "no", "open_items_out_of_scope": "no"},
            "approved": {}}
+DISPOSALS = ("open_items_accepted", "open_items_out_of_scope")
 #: Fewer held-out labels than this calibrate nothing: a band fitted on a
 #: handful of reports is noise with a decimal point.
 MIN_CALIBRATION_REPORTS = 30
@@ -60,12 +62,30 @@ def read_json(path):
         fail("cannot read {}: {}".format(path, exc))
 
 
+def truths(row):
+    """The per-question answers a row's recorded verdict or fixture determines.
+
+    A recorded `approved` composes from two paths: no open item and a
+    conclusion that nothing blocks, or an open item that is disposed of. When
+    the model's own answers rule the second path out -- it answered neither
+    disposal `yes` -- the first path is the only one left, and it fixes both
+    of its answers. A `yes` disposal leaves the path open and fixes nothing.
+    """
+    implied = dict(IMPLIED.get(row["recorded"], {}))
+    if row["recorded"] == "approved":
+        answers = row.get("answers") or {}
+        if all((answers.get(qid) or {}).get("answer") == "no" for qid in DISPOSALS):
+            implied.update(names_open_item="no", concludes_nothing_blocks="yes")
+    implied.update(row.get("expected_answers") or {})
+    return implied
+
+
 def per_question(rows):
     table = {}
     for qid in report_verdict.question_ids():
         determined = agree = unclear = 0
         for row in rows:
-            truth = (row.get("expected_answers") or {}).get(qid) or IMPLIED.get(row["recorded"], {}).get(qid)
+            truth = truths(row).get(qid)
             if truth is None:
                 continue
             determined += 1

@@ -27,7 +27,10 @@
   (`.env.example`) and never reaches a log, an error or a label; provider
   bodies are discarded unread since they can echo the submitted report; 429
   and 529 back off exponentially to a bounded attempt count; redirects are
-  refused so the bearer header never travels. The model is pinned to
+  refused so the bearer header never travels. A Python without a CA bundle
+  (python.org builds on macOS) fails TLS verification; the client names that
+  fix (`SSL_CERT_FILE`, or `Install Certificates.command`) instead of blaming
+  the network, found on the first live run. The model is pinned to
   `jev-1.13.0` beside its bands in `foreman/report_gates.py`, renewed on the
   capability table's weekly cadence and only with a fresh calibration. With no
   `--agent`, an unavailable Jev (key unset, service down, report over the
@@ -66,8 +69,12 @@
   a question or model change cannot have been written against; `--all` scores
   everything and marks the split not held out. The corpus records only
   verdicts, so per-question truth comes from what a verdict determines (a
-  recorded `blocking` fixes three answers; `approved` fixes none) plus the
-  fixtures' expected answers. `--results` keeps the labels for calibration.
+  recorded `blocking` fixes three answers; a recorded `approved` fixes the
+  no-open-item path's two answers when the model answered neither disposal
+  `yes`, since that path is then the only one that composes `approved`) plus
+  the fixtures' expected answers. A first cut determined nothing for
+  `approved`, so `concludes_nothing_blocks` reported zero determined rows on
+  the whole 96-report corpus. `--results` keeps the labels for calibration.
   Measured with `claude-sonnet-5` on the six reports recorded since the old
   prompt's last change (2026-09-22): the old prompt and the atomic questions
   both scored 6/6 with the same confusion, and both held all three
