@@ -606,9 +606,9 @@ bash "$CP/skills/herdr-foreman/classify/classify-reports.sh" <report>... > <labe
 ```
 
 Each label carries a verdict (`blocking`, `approved` or
-`insufficient_evidence`), its per-question answers, and any fallback it took;
-relay every fallback line to the operator. A report in `unannotated` gets no
-label and is gated exactly as it would have been.
+`insufficient_evidence`) and its per-question answers. A report Jev could not
+label is in `unannotated` with the reason; it gets no gate and is gated exactly
+as it would have been.
 
 Read every report file in full, including a report whose worker exited cleanly.
 A `## BLOCKED` section can sit under a report that otherwise reads as finished.
@@ -632,16 +632,28 @@ A label never approves, accepts or skips a check; its only effect is a
 recorded gate, which adds friction:
 
 - `block` — the report is not accepted until `report-gate-clear` records why
-  it does not block, a reason from the worker role that owns the finding, the
-  judge in adjudication when it is contested, or the operator
-- `reread` — the report is not gated until a full re-read, dispatched to the
-  reviewer or the role whose report it is, is recorded with its report through
-  `report-gate-reread`
+  it does not block
+- `reread` — the report is not gated until `report-gate-reread` records a full
+  re-read by a worker in the role whose report it is
 - no gate — the report is gated as before
 
+A resolution cites evidence the owners already recorded; the caller never
+names who resolved it:
+
+- `--evidence <report>` — a report supervision observed after the gate, for an
+  applied dispatch on the same task in the gated report's role, or for the
+  pinned judge in adjudication mode (clear only); pass `--reason` with it
+- `--decision <attention id>` — a `decision` on the same task, resolved with the
+  operator's answer after the gate; its answer is the recorded reason
+- Exit 1 records nothing and names the missing evidence on stderr
+
 `close-member` and `record-report` refuse while a gate forbids the decision.
-Gate levels, bands, adapters and fallback are the owners' contract — see
-`skills/herdr-foreman/references/report-classifier.md`.
+Gate levels, bands, adapters and resolution evidence are the owners' contract:
+
+```text
+skills/herdr-foreman/references/report-classifier.md
+```
+
 Gate the reports together in one turn, not one turn per report.
 Before accepting a mechanical round, compare its whole result against the
 oracle its plan declared. `<result-file>` is the pushed diff for a `patch`

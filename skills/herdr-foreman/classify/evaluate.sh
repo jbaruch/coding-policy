@@ -19,8 +19,8 @@
 #                    [--state FILE] [--since DATE | --all] [--fixtures]
 #                    [--results FILE] [--corpus-only]
 #
-#   --agent        the adapter scored; always explicit, so no run mixes a
-#                  fallback's labels into another adapter's score. Default claude.
+#   --agent        the adapter scored, passed through explicitly so every
+#                  label comes from that one adapter. Default claude.
 #   --since DATE   score reports recorded on or after DATE (ISO). Defaults to
 #                  the questions' `changed` date.
 #   --all          score the whole corpus; the split is marked not held out.

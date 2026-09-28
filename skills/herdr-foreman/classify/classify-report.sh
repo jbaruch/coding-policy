@@ -23,15 +23,17 @@
 # untrusted data, and every quote an LLM returns must be a passage of the
 # report or the label is `insufficient_evidence` (report_verdict.py).
 #
-# Adapters, in the order the default chain tries them:
-#   jev    -- TypeSafe System One, one Noul per atomic question, P(yes) each.
-#             Needs TYPESAFE_API_KEY. The only adapter whose label can gate.
-#   claude -- the fallback. With no --agent, a Jev that is unavailable (key
-#             unset, service down, report too large, answer off contract)
-#             falls back here, says so on stderr, and records the reason in the
-#             label's `fallback`. A fallback label never gates.
-#   codex, grok -- named with --agent only. A classifier pinned to one vendor
-#             is useless exactly when that vendor's subscription is spent.
+# Adapters:
+#   jev    -- the default. TypeSafe System One, one Noul per atomic question,
+#             P(yes) each. Needs TYPESAFE_API_KEY. The only adapter whose label
+#             can gate. A Jev that is unavailable (key unset, service down,
+#             report too large, answer off contract) or that refuses the
+#             request produces no label: the script exits non-zero and the
+#             report takes the reasoning path, a full read. No other
+#             classifier is asked (rules/script-delegation.md Bounded
+#             Classification).
+#   codex, claude, grok -- named with --agent only, for measurement
+#             (evaluate.sh). Their labels never gate.
 # Each LLM adapter constrains its answer to the generated schema --
 # `codex exec --output-schema`, `claude --json-schema`, `grok --json-schema` --
 # and every answer then passes the same check in report_verdict.py, which is
@@ -41,22 +43,21 @@
 #
 # Usage: classify-report.sh <report-path> [--agent jev|codex|claude|grok]
 #                           [--model <id>] [--out <file>]
-#   --model needs --agent: the default chain spans two vendors.
 #
 # Output contract (rules/script-delegation.md -- structured stdout):
 #   stdout: one label, the JSON object report_verdict.py documents: verdict
 #     `blocking`|`approved`|`insufficient_evidence`, the deciding passage in
 #     `evidence` (empty for Jev, which quotes nothing), one answer per atomic
-#     question with P(yes) for Jev, `fallback`, and the `gate` the owner would
+#     question with P(yes) for Jev, and the `gate` the owner would
 #     record. The report hash, question hash and model id travel with every
 #     label, so a question edit or a model bump is attributable
 #     (rules/dependency-management.md Freshness).
-#   stderr: diagnostics, and one line for every fallback.
+#   stderr: diagnostics.
 #
 # Exit 0 on a label, including `insufficient_evidence` -- an honest abstention
 # is an answer. Exit 2 on a usage error, an unreadable report, a report that
-# contains its own delimiter, or a call that produced nothing conforming. A
-# failed call is never a verdict.
+# contains its own delimiter, an unavailable or refusing Jev, or a call that
+# produced nothing conforming. A failed call is never a verdict.
 #
 # Calling this costs model quota. `evaluate.sh` runs it over the labelled corpus
 # and reports accuracy; nothing calls it automatically, and no test calls it live
@@ -83,16 +84,12 @@ HERE="${HERE%$'\n'}"
 #: classification pins, not the fleet's frontier seats. The Jev pin lives with
 #: its bands in foreman/report_gates.py (`JEV_MODEL`): bands are per model
 #: version.
-#: The fallback is the vendor measured adequate for this job: against 90
-#: lead-labelled reports claude-sonnet-5 caught 63 of 63 real blockers, grok-4.6
-#: caught 62, and codex was unmeasured (its subscription was exhausted).
 #: Renewal: these pins come due with the capability table, on `INTERVAL` in
 #: skills/herdr-foreman/foreman/capabilities.py (weekly). At each refresh,
 #: compare every pin against the table's current rows; a bump lands only after
 #: `evaluate.sh --since <last bump>` scores the new model on reports it has not
 #: seen, and the CHANGELOG records both numbers.
 DEFAULT_AGENT="jev"
-FALLBACK_AGENT="claude"
 model_for() { # <kind>
   case "$1" in
     codex) echo "gpt-5.6-sol" ;;
@@ -147,9 +144,7 @@ main() {
     ''|jev|codex|claude|grok) ;;
     *) die "--agent '${agent}' is not one of jev, codex, claude, grok" ;;
   esac
-  if [ -n "$model" ] && [ -z "$agent" ]; then
-    die "--model needs --agent: the default chain (${DEFAULT_AGENT}, then ${FALLBACK_AGENT}) spans two vendors"
-  fi
+  [ -n "$agent" ] || agent="$DEFAULT_AGENT"
   local verdict="${HERE}/report_verdict.py"
   [ -r "$verdict" ] || die "missing the question owner at ${verdict}"
 
@@ -160,27 +155,15 @@ main() {
   # One read of the report: every adapter, the evidence check and the label's
   # sha256 see these bytes, so a report rewritten mid-run is never half-read.
   cp -- "$report" "$snapshot" || die "cannot snapshot ${report}; restore read access and re-run"
-  local payload="" fallback="" rc=0
+  local payload=""
 
-  if [ -z "$agent" ] || [ "$agent" = "jev" ]; then
-    if payload="$(python3 "$verdict" jev "$snapshot" --as "$report" ${model:+--model "$model"} 2>"$log")"; then
-      :
-    else
-      rc=$?
-      if [ "$rc" -eq 3 ] && [ -z "$agent" ]; then
-        fallback="$(tail -n 1 "$log")"
-        fallback="${fallback#report_verdict: }"
-        echo "classify-report: ${fallback}; falling back to ${FALLBACK_AGENT}, whose label never gates" >&2
-        agent="$FALLBACK_AGENT"
-        payload=""
-      else
-        cat "$log" >&2
-        die "the jev call failed; a failed call is never a verdict"
-      fi
+  if [ "$agent" = "jev" ]; then
+    if ! payload="$(python3 "$verdict" jev "$snapshot" --as "$report" ${model:+--model "$model"} 2>"$log")"; then
+      local why
+      why="$(tail -n 1 "$log")"
+      die "no Jev label (${why#report_verdict: }); read ${report} in full -- a failed call is never a verdict"
     fi
-  fi
-
-  if [ -z "$payload" ]; then
+  else
     local pinned
     pinned="$(model_for "$agent")" || die "no pinned model for '${agent}'"
     [ -n "$model" ] || model="$pinned"
@@ -195,7 +178,7 @@ main() {
       die "the ${agent} call failed; a failed call is never a verdict"
     fi
     [ -s "$answer" ] || { cat "$log" >&2; die "${agent} wrote no schema-conforming answer"; }
-    payload="$(python3 "$verdict" label "$answer" "$snapshot" "$agent" "$model" --as "$report" ${fallback:+--fallback "$fallback"})" \
+    payload="$(python3 "$verdict" label "$answer" "$snapshot" "$agent" "$model" --as "$report")" \
       || die "the ${agent} answer did not conform to the schema"
   fi
 

@@ -11,15 +11,17 @@ Levels:
   `block`  -- high confidence the report names an open item it does not
               dispose of. The report cannot be accepted (a ledger `accepted`
               decision closed through `close-member`, or an `approved`
-              `record-report`) until a recorded clear names its reason, from
-              the worker role that owns the finding, the judge on a contested
-              one, or the operator.
+              `record-report`) until a recorded clear names its reason.
   `reread` -- medium confidence. The report cannot be gated at all until a
-              recorded full re-read by the worker whose report it is.
-The foreman records resolutions; it never decides one.
-  none     -- low confidence, `insufficient_evidence`, a fallback LLM label,
-              an unpinned model, any error: no gate effect, and the report is
-              read and gated exactly as without a classifier.
+              recorded full re-read.
+Who resolved a gate is read from the owners' records, never from the caller
+(`resolve`): a delivered report of the gated report's role or the pinned
+adjudicating judge on the same task, or the operator's resolved attention
+decision. The foreman records resolutions; it never decides one.
+  none     -- probabilities below the bands, an LLM label, an unpinned model,
+              a report the classifier did not annotate, any error: no gate
+              effect, and the report is read and gated exactly as without a
+              classifier. The label's composed verdict never decides a level.
 A gate never approves, accepts, or skips a check. A recorded clear or re-read
 undoes it (rules/script-delegation.md Bounded Classification).
 
@@ -42,10 +44,10 @@ from datetime import timezone
 from pathlib import Path
 from typing import NoReturn
 
-from . import runnable
+from . import attention, runnable, supervision
 from .chronology import timestamp
 from .errors import StateError, UsageError
-from .state import save_state, state_lock
+from .state import load_state_checked, save_state, state_lock
 
 SCHEMA_VERSION = 1
 
@@ -81,12 +83,13 @@ DISPOSALS = ("open_items_accepted", "open_items_out_of_scope")
 GATE_QUESTIONS = (OPEN, *DISPOSALS)
 
 LEVELS = ("block", "reread")
-#: Who may clear a block: the worker role that owns the finding, the judge on
-#: a contested one, the operator. The foreman records it and never decides it.
+#: Who may clear a block, as `resolve` derives it from the owners' records.
 CLEARERS = ("worker", "judge", "operator")
-#: Who performs a mandatory re-read: the worker whose role owns the report.
+#: Who clears by citing a delivered report rather than an operator decision.
+REPORT_CLEARERS = ("worker", "judge")
+#: Who performs a mandatory re-read: a worker in the gated report's role.
 REREADERS = ("worker",)
-CLEAR_COMMAND = "report-gate-clear --report <path> --by worker|judge|operator --reason <why it does not block> [--evidence <report carrying the reason>]"
+CLEAR_COMMAND = "report-gate-clear --report <path> (--evidence <delivered worker or judge report> --reason <why it does not block> | --decision <resolved attention decision>)"
 REREAD_COMMAND = "report-gate-reread --report <path> --evidence <re-read report> --note <what it verified>"
 COMMANDS = {"report-gate-record", "report-gate-reread", "report-gate-clear", "report-gate-status"}
 
@@ -118,13 +121,13 @@ def decide(label):
         return {"level": None, "reason": reason}
     if not isinstance(label, dict):
         return none("not a label")
-    if label.get("agent") != "jev" or label.get("fallback"):
-        return none("only a Jev label carries probabilities; an LLM or fallback label never gates")
+    # The level comes from the recorded probabilities and the bands alone; the
+    # label's composed verdict is recorded data, never an input here.
+    if label.get("agent") != "jev":
+        return none("only a Jev label carries probabilities; an LLM label never gates")
     if label.get("model") != JEV_MODEL:
         return none("label model {!r} is not the pinned {}; its probabilities are outside the bands".format(
             label.get("model"), JEV_MODEL))
-    if label.get("verdict") == "insufficient_evidence":
-        return none("insufficient_evidence never gates")
     answers = label.get("answers")
     if not isinstance(answers, dict):
         return none("label carries no answers")
@@ -260,11 +263,13 @@ def _gate_problem(gate):
     if not _nonempty(resolution["reason"]) or not _nonempty(resolution["at"]):
         return "resolution reason or at is empty"
     evidence = resolution["evidence"]
-    if evidence is None:
-        return None if resolution["by"] == "operator" else "a worker or judge resolution cites no report"
-    if (not isinstance(evidence, dict) or set(evidence) != {"path", "sha256"} or not _nonempty(evidence["path"])
-            or not _sha(evidence["sha256"])):
-        return "resolution evidence is not a path and sha256"
+    if resolution["by"] == "operator":
+        if not isinstance(evidence, dict) or set(evidence) != {"attention"} or not _nonempty(evidence["attention"]):
+            return "an operator resolution cites no attention decision"
+        return None
+    if (not isinstance(evidence, dict) or set(evidence) != {"path", "sha256", "dispatch"}
+            or not _nonempty(evidence["path"]) or not _sha(evidence["sha256"]) or not _nonempty(evidence["dispatch"])):
+        return "a worker or judge resolution cites no delivered report and dispatch"
     return None
 
 
@@ -354,34 +359,122 @@ def record(path, data, at):
     return {"schema_version": SCHEMA_VERSION, "recorded": recorded, "replayed": replayed, "no_gate": ungated}
 
 
-def _evidence(value, by):
-    """The report that carries a worker's or judge's reason, bound to its bytes."""
-    if value is None:
-        if by == "operator":
-            return None
-        _fail("A {} resolution cites the report that carries it; pass --evidence <report path>.".format(by))
-    path = _report_key(value)
-    return {"path": path, "sha256": _digest(path)}
+def _recovery_store(state_path):
+    """The task ledger's recovery store, read without migrating or writing it."""
+    state, usable = load_state_checked(state_path, persist_migration=False)
+    if not usable:
+        raise StateError("State file {} is unusable, so no gate resolution can be bound to a delivered report; "
+                         "restore it before resolving a gate.".format(state_path), {"path": str(state_path)})
+    return state["recovery"]
 
 
-def resolve(path, report, action, reason, by, at, evidence=None):
+def ledger_view(state_path, judge_agent):
+    """What the owners already record about who delivered which report, and when.
+
+    Deliveries are supervision's `report_observed` events and the recovery
+    store's `delivery_recoveries`; roles and tasks are the recovery store's
+    dispatches; operator decisions are the attention sidecar's entries.
+    `judge_agent` is the pinned judge from config.json, or None.
+    """
+    store = _recovery_store(state_path)
+    data = supervision.load(state_path)
+    _document, entries, _progress = attention.load(state_path)
+    deliveries = []
+    for event in data["events"]:
+        detail = event.get("data")
+        if (event.get("kind") == "report_observed" and isinstance(detail, dict) and detail.get("present") is True
+                and _nonempty(detail.get("path")) and _sha(detail.get("sha256"))):
+            deliveries.append({"dispatch": event["member"], "path": _report_key(detail["path"]),
+                               "sha256": detail["sha256"], "at": event["at"]})
+    for row in store["delivery_recoveries"]:
+        saved = row["receipts"]["report"]
+        deliveries.append({"dispatch": row["dispatch"], "path": _report_key(saved["path"]),
+                           "sha256": saved["sha256"], "at": row["at"]})
+    return {"dispatches": {row["id"]: row for row in store["dispatches"]},
+            "enrolled": {row["id"]: _report_key(row["assignment"]["report"]) for row in data["members"]},
+            "deliveries": deliveries, "decisions": entries, "judge": judge_agent}
+
+
+def _owner(view, key):
+    """The applied dispatch whose supervision enrollment binds the gated report."""
+    rows = [view["dispatches"][name] for name, report in sorted(view["enrolled"].items())
+            if report == key and name in view["dispatches"] and view["dispatches"][name].get("status") == "applied"]
+    if not rows:
+        _fail("Report {} is bound to no applied dispatch's supervision enrollment, so no resolution can be tied to "
+              "its task and role. Restore that dispatch's enrollment (`{}`), then retry.".format(
+                  key, runnable.command("supervision-status")))
+    if len({(row["task"], row["role"]) for row in rows}) > 1:
+        _fail("Report {} is enrolled for more than one task or role; reconcile the enrollments before resolving "
+              "its gate.".format(key))
+    return rows[0]
+
+
+def _resolver(view, owner, dispatch):
+    """The resolving role a delivered report's dispatch holds, or None."""
+    if dispatch.get("status") != "applied" or dispatch.get("task") != owner["task"]:
+        return None
+    if (view["judge"] is not None and dispatch.get("agent") == view["judge"] and dispatch.get("role") == "judge"
+            and dispatch.get("judge_mode") == "adjudication"):
+        return "judge"
+    if dispatch.get("role") == owner["role"] and dispatch["id"] != owner["id"]:
+        return "worker"
+    return None
+
+
+def _delivered(view, owner, key, since, evidence, allowed):
+    """The resolving role and receipt for a cited report, from a delivery the owners recorded."""
+    path = _report_key(evidence)
+    if path == key:
+        _fail("A resolution cites the resolving worker's own report, not the gated report itself.")
+    digest = _digest(path)
+    for row in view["deliveries"]:
+        if row["path"] != path or row["sha256"] != digest or timestamp(row["at"], "Delivery") <= since:
+            continue
+        dispatch = view["dispatches"].get(row["dispatch"])
+        role = _resolver(view, owner, dispatch) if dispatch is not None else None
+        if role in allowed:
+            return role, {"path": path, "sha256": digest, "dispatch": dispatch["id"]}
+    _fail("Report {} carries no delivery receipt that resolves this gate: it must be the current bytes of a report "
+          "supervision observed (or `{}` recovered) after the gate was recorded, for an applied dispatch on task {} "
+          "held by {}. Dispatch that re-read or ruling and cite its delivered report.".format(
+              path, runnable.command("recover-report"), owner["task"], " or ".join(
+                  {"worker": "the {} role".format(owner["role"]),
+                   "judge": "the pinned judge in adjudication mode"}[role] for role in allowed)))
+
+
+def _decided(view, owner, since, name):
+    """The operator's recorded answer on a resolved attention decision for the task."""
+    entry = view["decisions"].get(name) if isinstance(name, str) else None
+    resolution = entry.get("resolution") if entry is not None else None
+    if (entry is None or entry["kind"] != "decision" or entry["status"] != "resolved" or entry["task"] != owner["task"]
+            or not isinstance(resolution, dict) or resolution.get("kind") != "user_answer"
+            or timestamp(entry["updated_at"], "Decision") <= since):
+        _fail("An operator clear cites an attention decision on task {} resolved with the operator's answer after "
+              "the gate was recorded. Record it with `{}`, resolve it with the user's answer, then pass "
+              "--decision <its id>.".format(owner["task"], runnable.command("attention-record")))
+    return resolution["summary"]
+
+
+def resolve(path, report, action, reason, at, view, evidence=None, decision=None):
     """Record a re-read or a clear against the report's open gates.
 
-    A clear comes from the worker role that owns the finding, the judge on a
-    contested finding, or the operator. A re-read is a worker's full re-read,
-    dispatched to the role whose report it is. A worker or judge resolution
-    cites the report that carries it.
+    Who resolves is read from the owners' records, never from the caller: a
+    worker or judge resolution cites a report delivered for a dispatch on the
+    gated report's task after the gate -- the gated report's own role (a
+    worker), or the pinned judge in adjudication mode. An operator clear cites
+    a resolved attention decision for that task, whose answer is the reason.
     """
     at = _utc(at)
     key = _report_key(report)
-    _text(reason, "The re-read note" if action == "reread" else "The clear reason")
-    if by not in (CLEARERS if action == "clear" else REREADERS):
-        _fail("A clear comes from the owning worker, the judge or the operator; a re-read from the worker whose "
-              "report it is. Pass --by {}.".format("|".join(CLEARERS if action == "clear" else REREADERS)))
-    cited = _evidence(evidence, by)
-    # A re-reader is never the operator, so a re-read always cites a report.
-    if action == "reread" and (cited is None or cited["path"] == key):
-        _fail("A re-read cites the re-reading worker's own report, not the gated report itself.")
+    if action == "reread" and (evidence is None or decision is not None):
+        _fail("A re-read cites the re-reading worker's delivered report; pass --evidence <report>.")
+    if action == "clear" and (evidence is None) == (decision is None):
+        _fail("A clear cites either the worker's or judge's delivered report (--evidence) or the operator's "
+              "resolved decision (--decision), exactly one.")
+    if evidence is not None:
+        _text(reason, "The re-read note" if action == "reread" else "The clear reason")
+    elif reason is not None:
+        _fail("An operator clear quotes the decision's recorded answer; drop --reason.")
     with state_lock(storage_path(path)):
         document = load(path)
         pending = [gate for gate in document["gates"] if gate["report"] == key and gate["status"] == "open"]
@@ -390,6 +483,12 @@ def resolve(path, report, action, reason, by, at, evidence=None):
         if action == "reread" and any(gate["level"] == "block" for gate in pending):
             _fail("Report {} carries a block gate; a re-read does not clear it. Record the reason it does not block "
                   "with `{}`.".format(key, runnable.command(CLEAR_COMMAND)))
+        owner = _owner(view, key)
+        since = max(timestamp(gate["at"], "Gate") for gate in pending)
+        if decision is not None:
+            by, reason, cited = "operator", _decided(view, owner, since, decision), {"attention": decision}
+        else:
+            by, cited = _delivered(view, owner, key, since, evidence, REREADERS if action == "reread" else REPORT_CLEARERS)
         for gate in pending:
             gate["status"] = "cleared" if action == "clear" else "reread"
             gate["resolution"] = {"schema_version": SCHEMA_VERSION, "at": at, "action": action, "by": by,
@@ -422,15 +521,15 @@ def register_commands(sub, common):
     parser = sub.add_parser("report-gate-clear", parents=[common],
                             help="Clear a report's gate with the recorded reason it does not block.")
     parser.add_argument("--report", required=True)
-    parser.add_argument("--by", required=True, choices=CLEARERS)
-    parser.add_argument("--reason", required=True)
-    parser.add_argument("--evidence", help="The report carrying the reason; required unless --by operator.")
+    parser.add_argument("--reason", help="Why it does not block; required with --evidence.")
+    parser.add_argument("--evidence", help="The owning worker's or adjudicating judge's delivered report.")
+    parser.add_argument("--decision", help="The operator's resolved attention decision on the task.")
     parser.add_argument("--now", metavar="ISO8601")
     parser = sub.add_parser("report-gate-status", parents=[common], help="List open and resolved report gates.")
     parser.add_argument("--report")
 
 
-def run_command(args, state_path, now):
+def run_command(args, state_path, now, judge_agent=None):
     if args.command == "report-gate-record":
         try:
             data = json.loads(Path(args.labels).expanduser().read_text(encoding="utf-8"))
@@ -439,7 +538,9 @@ def run_command(args, state_path, now):
                              "unchanged.".format(args.labels, exc), {}) from None
         return record(state_path, data, args.now or now)
     if args.command == "report-gate-reread":
-        return resolve(state_path, args.report, "reread", args.note, "worker", args.now or now, args.evidence)
+        return resolve(state_path, args.report, "reread", args.note, args.now or now,
+                       ledger_view(state_path, judge_agent), evidence=args.evidence)
     if args.command == "report-gate-clear":
-        return resolve(state_path, args.report, "clear", args.reason, args.by, args.now or now, args.evidence)
+        return resolve(state_path, args.report, "clear", args.reason, args.now or now,
+                       ledger_view(state_path, judge_agent), evidence=args.evidence, decision=args.decision)
     return status(state_path, args.report)

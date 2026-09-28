@@ -21,40 +21,56 @@ calibrated. It restates no threshold; the constants live at the top of
   `changed` date in `report-questions.json` with it, so `evaluate.sh` scores
   the change only on reports recorded afterwards.
 
-## Adapters and Fallback
+## Adapters
 
-- Jev (TypeSafe System One) answers each question as one Noul with P(yes). It
-  needs `TYPESAFE_API_KEY` (`.env.example`). The client is
+- Jev (TypeSafe System One) is the default and answers each question as one
+  Noul with P(yes). It needs `TYPESAFE_API_KEY` (`.env.example`). The client is
   `classify/typesafe_client.py`, shared with the evidence assessor (#472).
-- With no `--agent`, an unavailable Jev falls back to Claude. The fallback is
-  printed on stderr and recorded in the label's `fallback`.
-- An LLM label carries no probabilities. It annotates and never gates.
+- An unavailable Jev, or one whose client refuses the request (the report
+  carries the key), produces no label. The report lands in `unannotated` and
+  takes the reasoning path, a full read. No other classifier is asked.
+- `--agent codex|claude|grok` runs an LLM adapter for measurement
+  (`evaluate.sh`). An LLM label carries no probabilities and never gates.
 
 ## Report Gates
 
 - `foreman report-gate-record --labels <classify-reports output>` records the
-  gate each label earns. The owner recomputes the level from the label's
-  probabilities and the pinned model; it never trusts the label's own `gate`.
+  gate each label earns. The owner computes the level from the label's
+  probabilities, the pinned model and the bands alone; the label's own
+  `verdict` and `gate` are never inputs.
   A report whose bytes changed since classification is refused: reclassify it.
 - `block` — the report cannot be accepted until
-  `foreman report-gate-clear --report <path> --by worker|judge|operator --reason <why> [--evidence <report>]`
-  records why it does not block. The reason comes from the worker role that
-  owns the finding, from the judge in adjudication when the finding is
-  contested, or from the operator; a worker or judge clear cites the report
-  carrying it, bound to its sha256. The foreman records the clear and never
-  decides it. `close-member` refuses an `accepted` ledger decision and
-  `record-report` refuses an `approved` verdict while it is open. A
-  `needs_work` or `blocked` decision is never refused by a block.
+  `foreman report-gate-clear --report <path> (--evidence <report> --reason <why> | --decision <attention id>)`
+  records why it does not block. `close-member` refuses an `accepted` ledger
+  decision and `record-report` refuses an `approved` verdict while it is open.
+  A `needs_work` or `blocked` decision is never refused by a block.
 - `reread` — the report cannot be gated at all until a full re-read is
   recorded with
   `foreman report-gate-reread --report <path> --evidence <re-read report> --note <what it verified>`.
-  The re-read is dispatched to the reviewer, or to the role whose report it
-  is; the foreman does not perform it. The evidence is that worker's own
-  report, never the gated report. Both `close-member` and `record-report`
-  refuse while it is open.
-- No gate — low confidence, `insufficient_evidence`, a fallback or LLM label,
-  an unpinned model, a failed call. The report is read and gated as it would
-  be without a classifier.
+  Both `close-member` and `record-report` refuse while it is open.
+- No gate — probabilities below the bands, an LLM label, an unpinned model, an
+  unannotated report. The report is read and gated as it would be without a
+  classifier.
+
+### Who Resolves a Gate
+
+The owner reads who resolved a gate from records it already holds, never
+from the caller. The gated report's task and role come from the applied
+dispatch whose supervision enrollment binds it; a report no enrollment binds
+cannot be resolved until the enrollment is restored.
+
+- Worker — `--evidence` names a report whose current bytes supervision
+  observed (`report_observed`) or `recover-report` recovered after the gate
+  was recorded, for another applied dispatch on the same task in the gated
+  report's role. It clears a block or records a re-read.
+- Judge — the same delivery evidence, for an applied dispatch of the pinned
+  judge (`config.json` `judge`) in adjudication mode on the same task. It
+  clears a block; it never records a re-read.
+- Operator — `--decision` names an attention `decision` on the same task,
+  resolved with the operator's `user_answer` after the gate was recorded. Its
+  answer summary is the recorded reason; `--reason` is refused.
+- Anything else records nothing and names what is missing. The foreman
+  records a resolution and never decides one.
 - A gate never approves, accepts or skips a check. A recorded clear or re-read
   undoes it.
 - `foreman report-gate-status [--report <path>]` lists open and resolved gates.
@@ -66,8 +82,8 @@ calibrated. It restates no threshold; the constants live at the top of
 `schema_version`, `report` (resolved, canonical path), `sha256`, `level`, `reason`,
 `probabilities`, `model`, `question`, `bands`, `at`, `status`
 (`open`|`cleared`|`reread`) and `resolution` (`null`, or `schema_version`, `at`, `action`, `by`
-(`worker`|`judge`|`operator`), `reason`, `evidence` (`null` for an operator, or
-`path` and `sha256`)). Every record is validated whole on every read. Writes
+(`worker`|`judge`|`operator`), `reason`, `evidence` (`attention` for an
+operator, or `path`, `sha256` and `dispatch`)). Every record is validated whole on every read. Writes
 take the sidecar's own lock. `close-member` and `record-report` hold that lock
 from their gate check through their commit, so a gate recorded meanwhile is
 refused rather than slipped in between. A missing file is first use;

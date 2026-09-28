@@ -40,10 +40,10 @@ class Case(unittest.TestCase):
         self.report = self.root / "report.md"
         self.report.write_text(REPORT, encoding="utf-8")
 
-    def llm(self, reply, fallback=None):
+    def llm(self, reply):
         path = self.root / "answer.json"
         path.write_text(json.dumps(reply), encoding="utf-8")
-        return rv.llm_label(str(path), str(self.report), "claude", "claude-sonnet-5", fallback)
+        return rv.llm_label(str(path), str(self.report), "claude", "claude-sonnet-5")
 
     def reply(self, **rows):
         base = {qid: {"answer": "no", "evidence": ""} for qid in IDS}
@@ -106,10 +106,9 @@ class EvidenceTest(Case):
                 self.llm(reply)
             self.assertEqual(caught.exception.code, 2)
 
-    def test_an_llm_label_records_its_fallback_and_never_gates(self):
-        label = self.llm(self.reply(names_open_item={"answer": "yes", "evidence": "The parser accepts a quoted"}),
-                         fallback="Jev unavailable: TYPESAFE_API_KEY is not set")
-        self.assertEqual(label["fallback"], {"from": "jev", "reason": "Jev unavailable: TYPESAFE_API_KEY is not set"})
+    def test_an_llm_label_never_gates(self):
+        label = self.llm(self.reply(names_open_item={"answer": "yes", "evidence": "The parser accepts a quoted"}))
+        self.assertNotIn("fallback", label)
         self.assertIsNone(label["gate"]["level"])
         self.assertTrue(all(row["p_yes"] is None for row in label["answers"].values()))
 
@@ -230,13 +229,12 @@ class JevTest(Case):
             rv.main(["jev", str(self.report)])
         self.assertEqual(caught.exception.code, rv.UNAVAILABLE)
 
-
-    def test_a_report_carrying_the_key_never_takes_the_fallback(self):
+    def test_a_report_carrying_the_key_is_refused_and_labels_nothing(self):
         self.report.write_text("leaked {}\n".format(KEY), encoding="utf-8")
         with patch.dict("os.environ", {"TYPESAFE_API_KEY": KEY}), self.assertRaises(SystemExit) as caught:
             rv.main(["jev", str(self.report)])
-        self.assertNotEqual(caught.exception.code, rv.UNAVAILABLE)
-        self.assertNotEqual(caught.exception.code, 0)
+        self.assertEqual(caught.exception.code, 2)
+
 
 if __name__ == "__main__":
     sys.exit(0 if unittest.main(exit=False).result.wasSuccessful() else 1)

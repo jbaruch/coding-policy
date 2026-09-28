@@ -5,9 +5,9 @@
 # non-deterministic, and calling one live would put that into the suite
 # (rules/testing-standards.md Determinism, which names this case). Jev's HTTP
 # layer is stubbed in tests/test_report_verdict.py; here TYPESAFE_API_KEY is
-# unset, so every default run takes the visible fallback. What is under test
-# is everything around the call -- the answer contract, the fallback, the
-# failure paths, and the scoring.
+# unset, so every default run labels nothing and leaves the report for a full
+# read. What is under test is everything around the call -- the answer
+# contract, the unannotated path, the failure paths, and the scoring.
 #
 # The harness drops `set -e` to aggregate results; every fixture command is
 # checked explicitly (rules/error-handling.md aggregate-reporting carve-out).
@@ -18,11 +18,11 @@
 #   3. An off-schema answer     -> exit 2. The schema is not advisory.
 #   4. An empty answer          -> exit 2.
 #   5. An unreadable report     -> exit 2 before any model call.
-#   6. --model                  -> overrides the pin, travels with the label, needs --agent.
+#   6. --model                  -> overrides the pin and travels with the label.
 #   7. --out                    -> the same payload, byte for byte.
 #   8. A fabricated quote       -> insufficient_evidence, never the model's verdict.
-#   9. The default chain        -> Jev unavailable falls back to claude, says so, and
-#                                 the label records it; --agent jev never falls back.
+#   9. The default adapter      -> Jev unavailable labels nothing and asks no
+#                                 other classifier; the report is read in full.
 #  10. Claude and Grok adapters -> each vendor's envelope unwrapped to the same
 #                                 label; an errored or multi-answer run refused.
 #  11. The empty room           -> every adapter runs where it can read nothing
@@ -129,8 +129,8 @@ main() {
     pass; else fail "--model overrides the pin and travels with the label, got RC=$RC OUT=$OUT"; fi
 
   classify "$TMP/ok" "$report" --model "some-other-model"
-  if [[ $RC -eq 2 && -z "$OUT" ]] && printf '%s' "$ERRTEXT" | grep -q 'needs --agent'; then
-    pass; else fail "--model without --agent is a usage error, got RC=$RC OUT=$OUT"; fi
+  if [[ $RC -eq 2 && -z "$OUT" ]] && printf '%s' "$ERRTEXT" | grep -q 'no Jev label'; then
+    pass; else fail "--model without --agent names a Jev model and asks nothing else, got RC=$RC OUT=$OUT"; fi
 
   classify "$TMP/ok" "$report" --agent codex --out "$TMP/label.json"
   if [[ $RC -eq 0 ]] && [[ "$(cat "$TMP/label.json")" == "$OUT" ]]; then
@@ -202,25 +202,25 @@ STUB
   if [[ $RC -eq 0 ]] && [[ "$(field "$OUT" verdict)" == "insufficient_evidence" ]]; then
     pass; else fail "an honest abstention is an answer, not a failure, got RC=$RC OUT=$OUT"; fi
 
-  echo "▶ the default chain falls back visibly" >&2
+  echo "▶ the default adapter asks no other classifier" >&2
 
   stub_claude "$TMP/cl" "$APPROVED"
-  OUT="$(ROOM_PROBE="$TMP/cl-room" PATH="$TMP/cl:$PATH" bash "$DIR/classify-report.sh" "$second" 2>"$ERRFILE")"
+  OUT="$(ROOM_PROBE="$TMP/cl-default-room" PATH="$TMP/cl:$PATH" bash "$DIR/classify-report.sh" "$second" 2>"$ERRFILE")"
   RC=$?
   ERRTEXT="$(cat "$ERRFILE")"
-  if [[ $RC -eq 0 ]] && [[ "$(field "$OUT" verdict)" == "approved" ]] \
-     && [[ "$(field "$OUT" agent)" == "claude" ]] && [[ "$(field "$OUT" model)" == "claude-sonnet-5" ]] \
-     && printf '%s' "$ERRTEXT" | grep -q 'TYPESAFE_API_KEY is not set.*falling back to claude' \
-     && printf '%s' "$OUT" | grep -q '"from": "jev"' \
+  if [[ $RC -eq 2 && -z "$OUT" && ! -e "$TMP/cl-default-room" ]] \
+     && printf '%s' "$ERRTEXT" | grep -q 'no Jev label (Jev unavailable: TYPESAFE_API_KEY is not set' \
+     && printf '%s' "$ERRTEXT" | grep -q 'in full'; then
+    pass; else fail "an unset key labels nothing and never calls claude, got RC=$RC OUT=$OUT ERR=$ERRTEXT"; fi
+
+  OUT="$(ROOM_PROBE="$TMP/cl-room" PATH="$TMP/cl:$PATH" bash "$DIR/classify-report.sh" "$second" --agent claude 2>"$ERRFILE")"
+  RC=$?
+  if [[ $RC -eq 0 ]] && [[ "$(field "$OUT" agent)" == "claude" ]] && [[ "$(field "$OUT" model)" == "claude-sonnet-5" ]] \
      && printf '%s' "$OUT" | python3 -c 'import json,sys; assert json.load(sys.stdin)["gate"]["level"] is None'; then
-    pass; else fail "an unset key falls back to claude, says so, and never gates, got RC=$RC OUT=$OUT ERR=$ERRTEXT"; fi
+    pass; else fail "an explicit claude label never gates, got RC=$RC OUT=$OUT"; fi
   # The adapter ran somewhere it could read nothing but the question.
   if [[ -f "$TMP/cl-room" && ! -s "$TMP/cl-room" ]]; then
     pass; else fail "the claude adapter must run in an empty directory, saw: $(cat "$TMP/cl-room")"; fi
-
-  classify "$TMP/cl" "$second" --agent jev
-  if [[ $RC -eq 2 && -z "$OUT" ]] && printf '%s' "$ERRTEXT" | grep -q 'Jev unavailable'; then
-    pass; else fail "--agent jev never falls back, got RC=$RC OUT=$OUT ERR=$ERRTEXT"; fi
 
   echo "▶ one adapter per kind" >&2
 
@@ -270,17 +270,27 @@ STUB
   echo "▶ a round's batch" >&2
 
   stub_claude "$TMP/batch" "$APPROVED"
-  OUT="$(PATH="$TMP/batch:$PATH" bash "$DIR/classify-reports.sh" "$second" "$second" 2>"$ERRFILE")"
+  OUT="$(PATH="$TMP/batch:$PATH" bash "$DIR/classify-reports.sh" --agent claude "$second" "$second" 2>"$ERRFILE")"
   RC=$?
-  ERRTEXT="$(cat "$ERRFILE")"
-  if [[ $RC -eq 0 ]] && printf '%s' "$ERRTEXT" | grep -q 'falling back to claude' && printf '%s' "$OUT" | python3 -c '
+  if [[ $RC -eq 0 ]] && printf '%s' "$OUT" | python3 -c '
 import json, sys
 d = json.load(sys.stdin)
-assert d["agent"] == "default", d
+assert d["agent"] == "claude", d
 assert len(d["labels"]) == 2 and d["unannotated"] == [], d
-assert all(label["agent"] == "claude" and label["fallback"] for label in d["labels"]), d
+assert all(label["agent"] == "claude" for label in d["labels"]), d
 '; then
-    pass; else fail "one call annotates every report, each fallback visible, got RC=$RC OUT=$OUT"; fi
+    pass; else fail "one call annotates every report, got RC=$RC OUT=$OUT"; fi
+
+  # The default batch with Jev unavailable: every report unannotated, read in full.
+  OUT="$(ROOM_PROBE="$TMP/batch-room" PATH="$TMP/batch:$PATH" bash "$DIR/classify-reports.sh" "$second" 2>"$ERRFILE")"
+  RC=$?
+  if [[ $RC -eq 0 && ! -e "$TMP/batch-room" ]] && printf '%s' "$OUT" | python3 -c '
+import json, sys
+d = json.load(sys.stdin)
+assert d["agent"] == "default" and d["labels"] == [], d
+assert len(d["unannotated"]) == 1 and "TYPESAFE_API_KEY is not set" in d["unannotated"][0]["reason"], d
+'; then
+    pass; else fail "an unavailable Jev leaves the batch unannotated, got RC=$RC OUT=$OUT"; fi
 
   # An annotation that fails never blocks gating: the foreman reads that report as
   # it always has.
@@ -468,7 +478,7 @@ assert len(d["fixtures"]["flipped"]) == 3, d
     RC=$?
     if [[ $RC -eq 0 ]] && [[ "$(field "$OUT" verdict)" == "blocking" ]]; then
       pass; else fail "classify-report.sh in a newline-named dir, got RC=$RC OUT=$OUT ERR=$(cat "$ERRFILE")"; fi
-    OUT="$(PATH="$TMP/batch:$PATH" bash "$nl_dir/classify-reports.sh" "$second" "$second" 2>"$ERRFILE")"
+    OUT="$(PATH="$TMP/batch:$PATH" bash "$nl_dir/classify-reports.sh" --agent claude "$second" "$second" 2>"$ERRFILE")"
     RC=$?
     if [[ $RC -eq 0 ]] && printf '%s' "$OUT" | python3 -c '
 import json, sys

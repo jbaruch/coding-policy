@@ -24,7 +24,7 @@
   `report_verdict.py frame` writes the framed question to a named file and
   prints a JSON receipt (report sha256, nonce, size) instead of prose on
   stdout.
-- **Jev is the first adapter, with a visible fallback.** TypeSafe's System
+- **Jev is the classifier, with no fallback classifier.** TypeSafe's System
   One answers each atomic question as one Noul with P(yes), through a new
   stdlib client, `classify/typesafe_client.py`, written to be reused as is by
   #472's evidence assessor. The key comes from `TYPESAFE_API_KEY`
@@ -36,23 +36,37 @@
   fix (`SSL_CERT_FILE`, or `Install Certificates.command`) instead of blaming
   the network, found on the first live run. The model is pinned to
   `jev-1.13.0` beside its bands in `foreman/report_gates.py`, renewed on the
-  capability table's weekly cadence and only with a fresh calibration. With no
-  `--agent`, an unavailable Jev (key unset, service down, report over the
-  state budget, answer off contract) falls back to Claude, prints the reason,
-  and records it in the label's `fallback`. The static answer schema is gone:
+  capability table's weekly cadence and only with a fresh calibration. An
+  unavailable Jev (key unset, service down, report over the state budget,
+  answer off contract), or one whose client refuses the request because the
+  report carries the key, produces no label: the report lands in
+  `unannotated` with the reason and is read in full. An earlier cut fell back
+  to Claude, which is a retry into another classifier that Bounded
+  Classification forbids, and it sent a key-carrying report to the fallback
+  vendor (policy review and Copilot on #617). Codex, Claude and Grok remain as
+  `--agent` adapters for `evaluate.sh` measurement; their labels never gate,
+  and the label's `fallback` field and `--fallback` option are gone. The
+  static answer schema is gone:
   `report_verdict.py schema` generates it from the questions, so the two cannot
   drift.
 - **A label may add friction to accepting a report, never remove it
   (operator decision on #531).** `foreman report-gate-record` records the gate
   a Jev label's probabilities earn: `block` (the report cannot be accepted
-  until `report-gate-clear` records why it does not block, a reason from the
-  worker role that owns the finding, the judge in adjudication, or the
-  operator) or `reread` (it cannot be gated at all until a full re-read,
-  dispatched to the reviewer or the role whose report it is, is recorded with
-  that worker's report through `report-gate-reread`). The foreman records
-  resolutions and decides none: a worker or judge resolution cites the report
-  carrying it, bound to its sha256, and a re-read never cites the gated report
-  itself. Every saved gate record is validated whole, so a malformed one
+  until `report-gate-clear` records why it does not block) or `reread` (it
+  cannot be gated at all until `report-gate-reread` records a full re-read).
+  Who resolved a gate is read from records the owners already hold, never from
+  the caller: an earlier cut took `--by worker|judge|operator` and any readable
+  file as evidence, so the foreman could assert any role (policy review on
+  #617). Now the gated report's task and role come from the applied dispatch
+  its supervision enrollment binds; a worker or judge resolution cites a report
+  whose current bytes supervision observed (or `recover-report` recovered)
+  after the gate, for another dispatch on that task in the gated report's role
+  or for the pinned judge in adjudication mode; an operator clear cites an
+  attention `decision` on that task resolved with the operator's answer after
+  the gate, and quotes that answer as its reason. No new state records any of
+  it. The level is computed from the probabilities and the bands alone: an
+  earlier cut let a label's `insufficient_evidence` verdict suppress a
+  block-band gate (policy review on #617). Every saved gate record is validated whole, so a malformed one
   refuses every reader with a `StateError` instead of a `KeyError`, and
   `close-member` and `record-report` hold the sidecar lock from their gate
   check through their commit, so a gate recorded in between is refused
@@ -65,9 +79,9 @@
   carries its own `schema_version` (policy review on #617).
   `close-member` refuses an `accepted` closure under an open block and any
   closure under an open re-read; `record-report` does the same for `approved`
-  and for any verdict respectively. Low confidence, `insufficient_evidence`,
-  an LLM or fallback label, an unpinned model or any error gates nothing, and
-  the report is gated exactly as before. The owner recomputes the level from
+  and for any verdict respectively. Probabilities below the bands, an LLM
+  label, an unpinned model or an unannotated report gate nothing, and the
+  report is gated exactly as before. The owner recomputes the level from
   the probabilities and refuses a report rewritten since classification. The
   gates live in a new sidecar, `<state>.report-gates.json`
   (`references/report-classifier.md`, Sidecar schema 1). The bands ship
@@ -105,11 +119,8 @@
   one open item it assigns to a separately assigned judge; the old prompt's
   scope clause was ambiguous about another seat's dispute (ambiguous
   criteria), which `open_items_out_of_scope` now asks literally.
-- **The gate owner and the Jev adapter close four holes Copilot found on
-  #617.** A report carrying the TypeSafe key made Jev refuse the request, and
-  the default chain treated that refusal as unavailability and sent the same
-  report to the Claude fallback; a refused request now fails closed with no
-  fallback. The report-gates sidecar followed a live symlink; it now refuses
+- **The gate owner closes three holes Copilot found on #617.** The
+  report-gates sidecar followed a live symlink; it now refuses
   one, live or dangling, and opens the file without following links, as the
   capability table does. A saved gate whose report path is not canonical
   (`/a/../b.md`) passed validation but never matched `require_clear`, so it

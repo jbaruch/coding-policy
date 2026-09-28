@@ -2298,7 +2298,13 @@ def cmd_memory(args, client=None, warn=None, trace=None):
 
 
 def cmd_report_gates(args, client=None, warn=None, trace=None):
-    return report_gates.run_command(args, _state_path(args), now_iso()), None
+    judge = None
+    if args.command in {"report-gate-clear", "report-gate-reread"}:
+        # The pinned judge is who may clear in adjudication; the owner reads the
+        # role from the delivering dispatch, never from the caller.
+        pinned = load_judge(_config_path(args))
+        judge = pinned.agent if pinned else None
+    return report_gates.run_command(args, _state_path(args), now_iso(), judge), None
 
 
 def cmd_attention(args, client=None, warn=None, trace=None):

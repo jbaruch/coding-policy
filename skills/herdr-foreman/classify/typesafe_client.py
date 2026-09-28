@@ -128,7 +128,7 @@ def _probability(value: Any) -> bool:
 
 def validate(response: Any, questions: Mapping[str, Any], model: str) -> dict:
     """The response, checked against the questions asked and the pinned model."""
-    bad = "TypeSafe answered outside its documented contract ({}); keep the fallback and check https://docs.typesafe.ai/api"
+    bad = "TypeSafe answered outside its documented contract ({}); read the report in full and check https://docs.typesafe.ai/api"
     if not isinstance(response, dict):
         raise InvalidResponse(bad.format("not an object"))
     if response.get("model") != model:
@@ -180,11 +180,11 @@ def system_one(state: Any, questions: Mapping[str, Any], model: str, *, key: str
         if status != 200:
             raise Unavailable("TypeSafe failed with HTTP {}; retry later".format(status))
         if len(data) > MAX_RESPONSE_BYTES:
-            raise InvalidResponse("TypeSafe's response exceeded {} bytes; keep the fallback".format(MAX_RESPONSE_BYTES))
+            raise InvalidResponse("TypeSafe's response exceeded {} bytes; read the report in full".format(MAX_RESPONSE_BYTES))
         try:
             parsed = json.loads(data)
         except (UnicodeError, ValueError):
-            raise InvalidResponse("TypeSafe returned a body that is not JSON; keep the fallback") from None
+            raise InvalidResponse("TypeSafe returned a body that is not JSON; read the report in full") from None
         return validate(parsed, questions, model)
     raise Unavailable("TypeSafe made no attempt; MAX_ATTEMPTS must be at least 1")
 

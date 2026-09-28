@@ -25,20 +25,22 @@ Usage:
       and print a JSON receipt: {"schema_version": 1, "question": <out>,
       "report_sha256", "nonce", "bytes"}. Exit 2 when the report contains its
       own delimiter or <out> cannot be written.
-  report_verdict.py label <answer> <report> <agent> <model> [--fallback <reason>] [--as <path>]
+  report_verdict.py label <answer> <report> <agent> <model> [--as <path>]
       Check an LLM answer and print the label. Exit 2 when the answer is off
       the schema.
   report_verdict.py jev <report> [--model <id>] [--as <path>]
       Ask Jev (TypeSafe System One, one Noul per question) and print the label.
       Exit 3 when Jev is unavailable -- key unset, service down, report over
-      the state budget, answer off contract -- with the reason as the last
-      stderr line; the caller decides whether to fall back.
+      the state budget, answer off contract -- and exit 2 when the client
+      refuses the request (the report carries the key), each with the reason
+      as the last stderr line. Either way no label exists and the report stays
+      unannotated: no other classifier is asked.
 
 Label (stdout, one JSON object):
   {"schema_version": 2, "report", "sha256", "question", "questions_version",
    "agent", "model", "verdict", "evidence", "reason",
    "answers": {<id>: {"answer": "yes"|"no"|"unclear", "evidence", "p_yes"}},
-   "checks": {"evidence_verbatim": true|false|null}, "bands", "fallback",
+   "checks": {"evidence_verbatim": true|false|null}, "bands",
    "gate": {"level": "block"|"reread"|null, "reason"}}
 `p_yes` and `bands` are set for Jev only; `gate` is what foreman/report_gates.py
 decides for this label, and the owner recomputes it when recording.
@@ -75,7 +77,7 @@ VERDICTS = ("blocking", "approved", "insufficient_evidence")
 #: A quote shorter than this proves nothing: "B1" is a substring of most reports.
 MIN_EVIDENCE_CHARS = 8
 #: Jev reads 32k tokens of state plus the longest question; a report past this
-#: is not sent, and the caller falls back (https://docs.typesafe.ai/models).
+#: is not sent and stays unannotated (https://docs.typesafe.ai/models).
 JEV_MAX_REPORT_BYTES = 96_000
 MARKER = "REPORT-DATA"
 UNAVAILABLE = 3
@@ -182,7 +184,7 @@ def base_label(data, shown, agent, model):
     return {"schema_version": SCHEMA_VERSION, "report": shown,
             "sha256": hashlib.sha256(data).hexdigest(),
             "question": question_hash(), "questions_version": questions()["version"],
-            "agent": agent, "model": model, "bands": None, "fallback": None}
+            "agent": agent, "model": model, "bands": None}
 
 
 def finish(label, answers, checks, verdict, reason, deciding):
@@ -193,7 +195,7 @@ def finish(label, answers, checks, verdict, reason, deciding):
     return label
 
 
-def llm_label(answer_path, report_path, agent, model, fallback=None, shown=None):
+def llm_label(answer_path, report_path, agent, model, shown=None):
     try:
         answer = json.loads(Path(answer_path).read_text(encoding="utf-8"))
     except (OSError, UnicodeDecodeError, ValueError) as exc:
@@ -208,8 +210,6 @@ def llm_label(answer_path, report_path, agent, model, fallback=None, shown=None)
             fail("the answer to {} is outside the schema".format(qid))
     data = read_bytes(report_path)
     label = base_label(data, shown or report_path, agent, model)
-    if fallback:
-        label["fallback"] = {"from": "jev", "reason": fallback}
     text = data.decode("utf-8", errors="replace")
     answers = {qid: {"answer": answer[qid]["answer"], "evidence": answer[qid]["evidence"], "p_yes": None} for qid in ids}
     for qid in ids:
@@ -275,23 +275,22 @@ def main(argv):
                           "nonce": nonce(data), "bytes": len(prompt.encode("utf-8"))}, sort_keys=True))
         return 0
     if argv and argv[0] == "label" and len(argv) >= 5:
-        options = flags(argv[5:], {"--fallback", "--as"})
-        print(json.dumps(llm_label(argv[1], argv[2], argv[3], argv[4], options.get("--fallback"),
-                                   options.get("--as")), sort_keys=True))
+        options = flags(argv[5:], {"--as"})
+        print(json.dumps(llm_label(argv[1], argv[2], argv[3], argv[4], options.get("--as")), sort_keys=True))
         return 0
     if argv and argv[0] == "jev" and len(argv) >= 2:
         options = flags(argv[2:], {"--model", "--as"})
         try:
             label = jev_label(argv[1], options.get("--model", report_gates.JEV_MODEL), shown=options.get("--as"))
         except typesafe_client.InvalidRequest as exc:
-            # A refused request -- the report carries the key -- must not reach the fallback vendor.
-            fail("Jev refused the request, no fallback: {}".format(exc))
+            # A refused request -- the report carries the key -- is never sent anywhere.
+            fail("Jev refused the request: {}".format(exc))
         except typesafe_client.TypeSafeError as exc:
             fail("Jev unavailable: {}".format(exc), UNAVAILABLE)
         print(json.dumps(label, sort_keys=True))
         return 0
     fail("usage: report_verdict.py schema <out> | frame <report> <out> | "
-         "label <answer> <report> <agent> <model> [--fallback <reason>] [--as <path>] | "
+         "label <answer> <report> <agent> <model> [--as <path>] | "
          "jev <report> [--model <id>] [--as <path>]")
 
 

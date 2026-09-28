@@ -20,9 +20,10 @@
 #     {"schema_version": 2, "agent": "<kind>" | "default",
 #      "labels": [<classify-report.sh label>, ...],
 #      "unannotated": [{"report": "<path>", "reason": "<diagnostic>"}, ...]}
-#   `agent` is the adapter requested, "default" for the Jev-then-Claude chain;
-#   each label names the adapter that answered and any fallback it took.
-#   stderr: per-report progress, and every fallback.
+#   `agent` is the adapter requested, "default" for Jev; each label names the
+#   adapter that answered. A report Jev could not label is in `unannotated`
+#   with the reason, and is read in full.
+#   stderr: per-report progress and every unannotated report.
 #
 # Exit 0 whenever the arguments were valid, including when some or every
 # annotation failed -- those are reported, not fatal. Exit 2 on a usage error.
@@ -73,7 +74,6 @@ main() {
     echo "  [${index}/${#reports[@]}] ${report}" >&2
     if bash "${HERE}/classify-report.sh" "$report" ${agent:+--agent "$agent"} \
          --out "${work}/label-${index}.json" >/dev/null 2>"${work}/err-${index}"; then
-      # A label that fell back still says so: a fallback is never silent.
       cat "${work}/err-${index}" >&2
     else
       printf '%s' "$report" > "${work}/failed-${index}"
