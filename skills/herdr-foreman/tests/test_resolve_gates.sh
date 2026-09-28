@@ -21,6 +21,10 @@
 #                               a note or a workflow filename, or a backtick
 #                               in a path or workflow filename: exit 2. A
 #                               backtick in a note stays accepted.
+#  10. Broken install       -> foreman/renderable.py missing, lacking
+#                               `offenders`, syntactically invalid or cut off
+#                               mid-identifier: exit 2 naming the reinstall,
+#                               never a traceback.
 #
 # No case asserts a filename this script recognises, because it recognises none.
 # An earlier draft matched a hardcoded list of names, which is the enumerated
@@ -251,6 +255,34 @@ JSON
   run "$TMP/does-not-exist"
   if [[ $RC -eq 2 && -z "$OUT" ]] && printf '%s' "$ERRTEXT" | grep -q 'not a directory'; then
     pass; else fail "an absent checkout is a tool error, got RC=$RC OUT=$OUT"; fi
+
+  echo "▶ a broken install" >&2
+
+  # A copy of the script in a skill directory whose shared check is missing,
+  # then one whose module lacks the function: exit 2 naming the reinstall.
+  # A truncated module (syntax error) and one cut off mid-identifier (name
+  # error) are the same damaged install.
+  mkdir -p "$TMP/nomod" "$TMP/plain" || die "mkdir broken install"
+  cp "$SCRIPT" "$TMP/nomod/resolve-gates.sh" || die "copy script (nomod)"
+  local broken
+  for broken in badmod syntaxmod namemod; do
+    mkdir -p "$TMP/$broken/foreman" || die "mkdir $broken"
+    cp "$SCRIPT" "$TMP/$broken/resolve-gates.sh" || die "copy script ($broken)"
+    : > "$TMP/$broken/foreman/__init__.py" || die "write $broken package"
+  done
+  printf 'UNRENDERABLE_CATEGORIES = frozenset()\n' > "$TMP/badmod/foreman/renderable.py" || die "write badmod module"
+  printf 'UNRENDERABLE_CATEGORIES = frozenset({"Cc",\n' > "$TMP/syntaxmod/foreman/renderable.py" || die "write syntaxmod module"
+  printf 'import unicodedata\nUNRENDERABLE_CATEGORIES = frozen\n' > "$TMP/namemod/foreman/renderable.py" || die "write namemod module"
+  for broken in nomod badmod syntaxmod namemod; do
+    OUT="$(bash "$TMP/$broken/resolve-gates.sh" "$TMP/plain" 2>"$ERRFILE")"
+    RC=$?
+    ERRTEXT="$(cat "$ERRFILE")"
+    if [[ $RC -eq 2 && -z "$OUT" ]] \
+       && printf '%s' "$ERRTEXT" | grep -q '^resolve-gates: cannot load the shared renderable-text check' \
+       && printf '%s' "$ERRTEXT" | grep -q 'tessl install jbaruch/coding-policy' \
+       && ! printf '%s' "$ERRTEXT" | grep -q 'Traceback'; then
+      pass; else fail "an unimportable shared check ($broken) is exit 2 naming the reinstall, got RC=$RC OUT=$OUT ERR=$ERRTEXT"; fi
+  done
 
   echo "─────────────────────────────────────────────" >&2
   if [[ $FAIL -gt 0 ]]; then echo "FAILED: ${FAIL} failed, ${PASS} passed" >&2; exit 1; fi

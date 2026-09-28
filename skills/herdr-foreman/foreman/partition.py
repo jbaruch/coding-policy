@@ -40,6 +40,7 @@ from pathlib import Path
 
 from . import runnable
 from .errors import UsageError
+from .renderable import renderable
 from .tiers import SEAT_SEPARATOR, SEATABLE_ROLES, SLICE_NAME
 from .triggers import git_runner, parse_name_status
 
@@ -56,9 +57,13 @@ FULL_SHA = re.compile(r"[0-9a-f]{40}(?:[0-9a-f]{24})?")
 
 COMMANDS = frozenset({"validate-partition"})
 
-#: Characters a path glob never needs, and that a seat's rendered brief cannot
-#: carry safely.
-UNSAFE_GLOB = re.compile(r"[`\x00-\x1f\x7f]")
+def unsafe_glob(glob):
+    """True when a seat's rendered brief cannot carry `glob` safely.
+
+    The glob renders inside a code span, so a backtick is refused alongside
+    the characters `renderable.UNRENDERABLE_CATEGORIES` names.
+    """
+    return not renderable(glob, code_span=True)
 
 #: The responsibilities a partition seats, which are the seatable roles
 #: `tiers.SEATABLE_ROLES` names.
@@ -110,7 +115,7 @@ def validate_document(document, path):
         # or a control character could close the code span and append
         # instructions of its own. Refused here so an accepted partition always
         # composes, rather than failing a round later (#434).
-        if any(UNSAFE_GLOB.search(item) for item in patterns):
+        if any(unsafe_glob(item) for item in patterns):
             raise UsageError(
                 "Slice {!r} has a path glob carrying a backtick or a control character; a glob needs "
                 "neither, and each one is rendered into its seat's brief.".format(entry["name"]),

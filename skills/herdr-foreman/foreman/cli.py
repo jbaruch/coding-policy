@@ -19,7 +19,6 @@ import subprocess
 import sys
 from typing import NoReturn
 import time
-import unicodedata
 from contextlib import nullcontext
 from datetime import datetime, timezone
 from pathlib import Path
@@ -29,6 +28,7 @@ from . import runnable
 from . import __version__
 from .assign import apply as apply_assignments
 from .assign import APPLY_SCHEMA_VERSION, dry_run, freeze_decision, freeze_paths, read_frozen, native_context_session, normalize_assignments, resolve_paths, validate_fix_history
+from . import renderable
 from . import attention, capabilities, chronology, composition, engagement, foreman_queue, foreman_reset, historical, home, load_set, members, memory, oracle, partition, recovery, report_delivery, restoration, role_clear, retrospective, retrospective_runtime, supervision, supervision_gate, supervision_runtime, triggers
 from .config import default_config_path, load_config, load_foreman, load_judge, load_role_costs, select_agents
 from .errors import PlanError, StateError, ForemanError, UsageError
@@ -477,7 +477,7 @@ def _parse_reports(pairs, assignments):
         role, separator, path = pair.partition("=")
         if (not separator or role not in assignments or role in reports or not path
                 or not Path(path).is_absolute() or path.endswith("/")
-                or any(ord(char) < 32 for char in path)):
+                or not renderable.renderable(path)):
             raise UsageError("--report requires one ROLE=ABS_PATH for each assigned role; no duplicates, unknown roles, relative paths, or directory paths.", {})
         if any(Path(existing).resolve() == Path(path).resolve() for existing in reports.values()):
             raise UsageError("Each dispatched role needs a distinct report file; shared report paths would overwrite worker evidence.", {})
@@ -1090,7 +1090,7 @@ def _require_bound_slices(document, seated, briefs, bodies=None, contents=None):
     # `validate_document` and the composer both refuse these; a hand-written
     # plan reaches the renderer without passing either.
     unsafe = sorted(seat for seat, globs in slice_paths.items()
-                    if any(partition.UNSAFE_GLOB.search(glob) for glob in globs))
+                    if any(partition.unsafe_glob(glob) for glob in globs))
     if unsafe:
         raise UsageError(
             "The plan's slice_paths gives {} a glob carrying a backtick or a control "
@@ -2258,7 +2258,7 @@ def cmd_verify_oracle(args, client=None, warn=None, trace=None):
 
 
 def cmd_probe_report(args, client=None, warn=None, trace=None):
-    if not Path(args.report).is_absolute() or any(ord(char) < 32 for char in args.report) or args.lines < 1:
+    if not Path(args.report).is_absolute() or not renderable.renderable(args.report) or args.lines < 1:
         raise UsageError("Report probing needs an absolute one-row report path and positive --lines.", {})
     client = client if client is not None else _client(args, trace=trace)
     return report_delivery.probe(client, args.agent, args.pane, args.report, sys.stdin.read().rstrip("\n"), args.lines), None
@@ -2266,10 +2266,9 @@ def cmd_probe_report(args, client=None, warn=None, trace=None):
 
 def cmd_marker_fit(args, client=None, warn=None, trace=None):
     """Read-only width verdict; a marker that would wrap is `fits: false`, never an error."""
-    # Category Cc covers C0, DEL and C1; U+2028/U+2029 are the separators
-    # str.splitlines() also breaks on. None of them stays on one marker row.
-    if not Path(args.report).is_absolute() or any(
-            unicodedata.category(char) == "Cc" or char in "  " for char in args.report):
+    # The shared rule (#578): controls, format characters and the U+2028/U+2029
+    # separators never stay on one marker row.
+    if not Path(args.report).is_absolute() or not renderable.renderable(args.report):
         raise UsageError("marker-fit needs an absolute one-row --report path; pass the exact path the worker "
                          "will print after `REPORT: `.", {"report": args.report})
     client = client if client is not None else _client(args, trace=trace)
