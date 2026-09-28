@@ -44,6 +44,15 @@
   A shallow checkout is a tool error that names `fetch-depth: 0`; a history
   with no bookkeeping commit yet has nothing to measure.
 
+  The checker now answers in one JSON verdict on stdout for every outcome,
+  usage errors included (`pass`, `nothing_to_measure`, `misfiled`, `error`),
+  with diagnostics on stderr. Two ways it could fail open or misreport went
+  with it: `git` output that is not UTF-8 raised past the error handler and
+  exited 1, the misfiling verdict, instead of 2; and the bookkeeping-commit
+  file list was split on whitespace, so a changelog path holding a space
+  never matched, no baseline was found, and the publish gate passed having
+  measured nothing. It reads NUL-delimited paths now.
+
   Archive repairs in the same change: 0.3.291 gets its heading above #527;
   #523's entry moves from under 0.3.305 back to the 0.3.301 heading that
   published it, and the stray second `## 0.3.301` goes; the three stamps

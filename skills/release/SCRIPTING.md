@@ -45,7 +45,7 @@ Contract:
 
 The workflow step must run BEFORE the publish step (`smart-publish`) so the stamped heading and the assigned version stay in lockstep.
 
-Before stamping, the stamp-changelog action runs `skills/release/check-changelog-placement.py --since-last-publish` and fails the step on a non-zero exit, so a push that parks a new entry under a published heading stops before it publishes, and stays stopped until a follow-up moves the entry. Rewording a published entry in place needs a `Changelog-Edit: <version>` commit trailer. Its modes, decision contract and exit codes live in that script's module docstring; the PR-time form (`--base`) runs in `.github/workflows/tests.yml`.
+Before stamping, the stamp-changelog action runs `skills/release/check-changelog-placement.py --since-last-publish` and fails the step on a non-zero exit, so a push that parks a new entry under a published heading stops before it publishes, and stays stopped until a follow-up moves the entry. Rewording a published entry in place needs a `Changelog-Edit: <version>` commit trailer. The script writes one JSON verdict to stdout on every outcome and its diagnostics to stderr; the callers gate on the exit code. Its modes, decision contract and exit codes live in that script's module docstring; the PR-time form (`--base`) runs in `.github/workflows/tests.yml`.
 
 ## Enrolling a repo in the publish pipeline (not an agent step)
 

@@ -62,11 +62,21 @@ Modes
         pipeline publish), or a changelog absent at the baseline, is a pass
         with a stderr notice.
 
-Exit 0 when nothing new is parked (or nothing to measure). Exit 1 when a new
-item is parked. Exit 2 on a usage or tool error (`git` unavailable, base ref
-unknown, shallow history, unreadable file).
+Output
+------
+stdout carries exactly one JSON object on every outcome, usage errors
+included; human diagnostics go to stderr:
+
+    {"verdict": "pass" | "nothing_to_measure" | "misfiled" | "error",
+     "base": <ref or null>, "new_items": [<first line of each>],
+     "reason": <string or null>}
+
+Exit 0 on `pass` and `nothing_to_measure`. Exit 1 on `misfiled`. Exit 2 on
+`error`: a usage or tool error (`git` unavailable or emitting undecodable
+output, base ref unknown, shallow history, unreadable file).
 """
 import argparse
+import json
 import subprocess
 import sys
 from collections import Counter
@@ -80,15 +90,24 @@ EDIT_TRAILER = "Changelog-Edit"
 
 
 def git(*args: str) -> subprocess.CompletedProcess:
-    """Run `git`, turning an absent binary into a tool error, never a verdict."""
+    """Run `git`, turning every failure to answer into a tool error.
+
+    An absent binary and output that is not UTF-8 are the absence of an
+    answer, never the misfiling verdict. Letting either raise exits 1, which
+    is that verdict.
+    """
     try:
-        return subprocess.run(["git", *args], capture_output=True, text=True)
+        return subprocess.run(["git", *args], capture_output=True, text=True,
+                              encoding="utf-8")
     except OSError as exc:
-        # An absent or unrunnable `git` is the absence of an answer, never the
-        # misfiling verdict. Letting it raise exits 1, which is that verdict.
         raise RuntimeError(
             "cannot run `git` ({}); install it, or run this check from an "
             "environment where it is on PATH".format(exc)) from None
+    except UnicodeError as exc:
+        raise RuntimeError(
+            "`git {}` produced output that is not UTF-8 ({}); re-save the "
+            "changelog as UTF-8, or rewrite the commit message carrying the "
+            "undecodable bytes".format(" ".join(args), exc)) from None
 
 
 def checked(*args: str) -> str:
@@ -105,12 +124,7 @@ def checked(*args: str) -> str:
 
 def base_text(base: str, changelog: str) -> str:
     """The changelog as it stands on `base`."""
-    try:
-        proc = git("show", f"{base}:{changelog}")
-    except UnicodeError as exc:
-        raise RuntimeError(
-            "cannot decode {}:{} as UTF-8 ({}); re-save it as UTF-8".format(
-                base, changelog, exc)) from None
+    proc = git("show", f"{base}:{changelog}")
     if proc.returncode != 0:
         raise RuntimeError(
             "`git show {}:{}` failed (exit {}): {}. Fetch the base ref "
@@ -137,8 +151,11 @@ def last_publish(changelog: str) -> str | None:
         sha, _, author = line.partition("\t")
         if author != BOT:
             continue
-        paths = checked("diff-tree", "--no-commit-id", "--name-only", "-r",
-                        "--root", sha).split()
+        # NUL-delimited: a path holding spaces or newlines is one record,
+        # never several, so a bookkeeping commit is never misread as not one.
+        out = checked("diff-tree", "-z", "--no-commit-id", "--name-only", "-r",
+                      "--root", sha)
+        paths = [path for path in out.split("\0") if path]
         if paths and set(paths) <= allowed:
             return sha
     return None
@@ -146,7 +163,8 @@ def last_publish(changelog: str) -> str | None:
 
 def exists_at(ref: str, changelog: str) -> bool:
     """Whether `changelog` exists in `ref`'s tree."""
-    return bool(checked("ls-tree", "--name-only", ref, "--", changelog).strip())
+    return any(checked("ls-tree", "-z", "--name-only", ref, "--",
+                       changelog).split("\0"))
 
 
 def declared_edits(base: str) -> set[str]:
@@ -247,9 +265,37 @@ def newly_parked(original: str, text: str,
     return new_items
 
 
+def emit(verdict: str, base: str | None = None,
+         new_items: list[str] | None = None, reason: str | None = None) -> None:
+    """The one JSON verdict line on stdout."""
+    print(json.dumps({"verdict": verdict, "base": base,
+                      "new_items": new_items or [], "reason": reason}))
+
+
+class Parser(argparse.ArgumentParser):
+    """A usage error still answers in JSON on stdout, exit 2."""
+
+    def error(self, message):
+        self.print_usage(sys.stderr)
+        print("error: {}".format(message), file=sys.stderr)
+        emit("error", reason=message)
+        sys.exit(2)
+
+
+def fail(message: str, base: str | None = None) -> int:
+    print("error: {}".format(message), file=sys.stderr)
+    emit("error", base=base, reason=message)
+    return 2
+
+
+def nothing(message: str, base: str | None = None) -> int:
+    print("notice: {}".format(message), file=sys.stderr)
+    emit("nothing_to_measure", base=base, reason=message)
+    return 0
+
+
 def main(argv=None) -> int:
-    parser = argparse.ArgumentParser(
-        description=(__doc__ or "").splitlines()[0])
+    parser = Parser(description=(__doc__ or "").splitlines()[0])
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument("--base",
                       help="the ref this branch is measured against, e.g. origin/main")
@@ -262,60 +308,54 @@ def main(argv=None) -> int:
     try:
         text = path.read_text(encoding="utf-8")
     except OSError as exc:
-        print("error: cannot read {}: {}. Correct --changelog, or restore the "
-              "file and its read permission.".format(path, exc), file=sys.stderr)
-        return 2
+        return fail("cannot read {}: {}. Correct --changelog, or restore the "
+                    "file and its read permission.".format(path, exc))
     except UnicodeError as exc:
-        # Not an OSError. Letting it escape exits 1 — the misfiling verdict —
+        # Not an OSError. Letting it escape exits 1, the misfiling verdict,
         # so a file this tool cannot decode would read as a finding.
-        print("error: cannot decode {} as UTF-8: {}. Re-save it as UTF-8, or "
-              "point --changelog at the file that is.".format(path, exc), file=sys.stderr)
-        return 2
+        return fail("cannot decode {} as UTF-8: {}. Re-save it as UTF-8, or "
+                    "point --changelog at the file that is.".format(path, exc))
+    base = args.base
     try:
         if args.since_last_publish:
             base = last_publish(args.changelog)
             if base is None:
-                print("notice: no publish-bookkeeping commit by {} in this "
-                      "history; the placement check has nothing to measure".format(BOT),
-                      file=sys.stderr)
-                return 0
+                return nothing("no publish-bookkeeping commit by {} in this "
+                               "history; the placement check has nothing to "
+                               "measure".format(BOT))
             if not exists_at(base, args.changelog):
-                print("notice: {} does not exist at the last publish {}; the "
-                      "placement check has nothing to measure".format(
-                          args.changelog, base), file=sys.stderr)
-                return 0
-        else:
-            base = args.base
+                return nothing("{} does not exist at the last publish {}; the "
+                               "placement check has nothing to measure".format(
+                                   args.changelog, base), base)
         original = base_text(base, args.changelog)
         editable = declared_edits(base)
     except RuntimeError as exc:
-        print("error: {}".format(exc), file=sys.stderr)
-        return 2
+        return fail(str(exc), base)
 
     new_parked = newly_parked(original, text, editable)
     if not new_parked:
+        emit("pass", base=base)
         return 0
+    firsts = [item.splitlines()[0] for item in new_parked]
     print(
         "error: {} entry item(s) sit under an already-published version heading "
         "and are new since {}. The publish step stamps only what sits ABOVE the "
         "first `## ` heading, so an entry below one ships filed under a version "
         "that already shipped:".format(len(new_parked), base), file=sys.stderr)
-    for item in new_parked:
-        print("  {}".format(item.splitlines()[0]), file=sys.stderr)
+    for first in firsts:
+        print("  {}".format(first), file=sys.stderr)
     if args.since_last_publish:
-        print(
-            "The publish is stopped so no version ships without its entry. "
-            "Open a follow-up PR that moves the new item above the topmost "
-            "`## ` heading; its merge publishes it under a fresh version.",
-            file=sys.stderr)
+        hint = ("The publish is stopped so no version ships without its entry. "
+                "Open a follow-up PR that moves the new item above the topmost "
+                "`## ` heading; its merge publishes it under a fresh version.")
     else:
-        print(
-            "Rebase onto {} and move the new item above the topmost `## ` "
-            "heading. Moving an item the base already carries and adding the "
-            "`## `/`### ` heading lines a repair needs are fine. To reword a "
-            "published item in place, add a `{}: <version>` trailer naming its "
-            "heading to a commit in the change.".format(base, EDIT_TRAILER),
-            file=sys.stderr)
+        hint = ("Rebase onto {} and move the new item above the topmost `## ` "
+                "heading. Moving an item the base already carries and adding the "
+                "`## `/`### ` heading lines a repair needs are fine. To reword a "
+                "published item in place, add a `{}: <version>` trailer naming its "
+                "heading to a commit in the change.".format(base, EDIT_TRAILER))
+    print(hint, file=sys.stderr)
+    emit("misfiled", base=base, new_items=firsts, reason=hint)
     return 1
 
 

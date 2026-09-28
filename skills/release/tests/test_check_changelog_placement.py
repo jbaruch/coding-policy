@@ -16,6 +16,7 @@ if _ROOT not in _sys.path:
     _sys.path.insert(0, _ROOT)
 
 import importlib.util
+import json
 import subprocess
 import tempfile
 import unittest
@@ -63,6 +64,23 @@ MISFILED = """# Changelog
 
 - **A published entry.** Already stamped.
 """
+
+
+VERDICT_EXIT = {"pass": 0, "nothing_to_measure": 0, "misfiled": 1, "error": 2}
+
+
+def run_script(cmd, **kwargs):
+    """Run the checker and hold it to its stdout contract on every outcome.
+
+    Exactly one JSON object on stdout, whose verdict agrees with the exit
+    code; human diagnostics stay on stderr.
+    """
+    proc = subprocess.run(cmd, **kwargs)
+    payload = json.loads(proc.stdout)
+    assert set(payload) == {"verdict", "base", "new_items", "reason"}, payload
+    assert VERDICT_EXIT[payload["verdict"]] == proc.returncode, (payload, proc.returncode)
+    proc.payload = payload
+    return proc
 
 
 TWO_VERSIONS = """# Changelog
@@ -218,7 +236,7 @@ class _RepoCase(unittest.TestCase):
                        capture_output=True, text=True)
 
     def run_check(self):
-        proc = subprocess.run(
+        proc = run_script(
             [_sys.executable, _os.path.join(_ROOT, "check-changelog-placement.py"),
              "--base", "main"],
             cwd=self.root, capture_output=True, text=True)
@@ -338,7 +356,7 @@ class RepositoryTest(_RepoCase):
         # answer, so it must exit 2.
         self.commit_changelog(MISFILED)
         env = dict(_os.environ, PATH=str(self.root / "no-tools"))
-        proc = subprocess.run(
+        proc = run_script(
             [_sys.executable, _os.path.join(_ROOT, "check-changelog-placement.py"),
              "--base", "main"],
             cwd=self.root, capture_output=True, text=True, env=env)
@@ -354,9 +372,49 @@ class RepositoryTest(_RepoCase):
         self.assertEqual(code, 2, err)
         self.assertIn("cannot decode", err)
 
+    def commit_undecodable_path(self, author="Test"):
+        """Commit a file whose path bytes are not UTF-8; return its sha.
+
+        Staged straight into the index so no filesystem has to accept the
+        name. `diff-tree -z` then emits those bytes raw.
+        """
+        blob = subprocess.run(["git", "hash-object", "-w", "--stdin"],
+                              cwd=self.root, input=b"x", check=True,
+                              capture_output=True).stdout.strip()
+        subprocess.run(["git", "update-index", "--add", "--cacheinfo",
+                        b"100644," + blob + b",bad-\xff-name"],
+                       cwd=self.root, check=True, capture_output=True)
+        self.git("-c", "user.name=" + author, "commit", "-q", "-m", "odd path")
+        return subprocess.run(["git", "rev-parse", "HEAD"], cwd=self.root,
+                              check=True, capture_output=True,
+                              text=True).stdout.strip()
+
+    def test_checked_turns_undecodable_output_into_a_tool_error(self):
+        sha = self.commit_undecodable_path()
+        cwd = _os.getcwd()
+        _os.chdir(self.root)
+        self.addCleanup(_os.chdir, cwd)
+        with self.assertRaises(RuntimeError) as caught:
+            check.checked("diff-tree", "-z", "--no-commit-id", "--name-only",
+                          "-r", "--root", sha)
+        self.assertIn("not UTF-8", str(caught.exception))
+
+    def test_undecodable_git_output_is_a_tool_error_not_a_verdict(self):
+        # A bot commit whose path is not UTF-8 reaches last_publish() through
+        # checked(). An uncaught UnicodeDecodeError exits 1, the misfiling
+        # verdict, for output the tool cannot read.
+        self.commit_undecodable_path(author="github-actions[bot]")
+        proc = run_script(
+            [_sys.executable, _os.path.join(_ROOT, "check-changelog-placement.py"),
+             "--since-last-publish"],
+            cwd=self.root, capture_output=True, text=True)
+        self.assertEqual(proc.returncode, 2, proc.stderr)
+        self.assertIn("not UTF-8", proc.stderr)
+        self.assertEqual(proc.payload["verdict"], "error")
+
     def test_an_unknown_base_is_a_tool_error_not_a_verdict(self):
         self.commit_changelog(STAMPABLE)
-        proc = subprocess.run(
+        proc = run_script(
             [_sys.executable, _os.path.join(_ROOT, "check-changelog-placement.py"),
              "--base", "no-such-ref"],
             cwd=self.root, capture_output=True, text=True)
@@ -393,10 +451,11 @@ class PublishModeTest(_RepoCase):
         self.git("commit", "-q", "-am", message)
 
     def run_publish(self):
-        proc = subprocess.run(
+        proc = run_script(
             [_sys.executable, _os.path.join(_ROOT, "check-changelog-placement.py"),
              "--since-last-publish"],
             cwd=self.root, capture_output=True, text=True)
+        self.last = proc.payload
         return proc.returncode, proc.stderr
 
     def test_a_merge_parking_its_entry_under_a_published_heading_stops_the_publish(self):
@@ -408,6 +467,8 @@ class PublishModeTest(_RepoCase):
         code, err = self.run_publish()
         self.assertEqual(code, 1, err)
         self.assertIn("The publish is stopped", err)
+        self.assertEqual(self.last["new_items"],
+                         ["- **A new entry.** Not yet stamped."])
 
     def test_a_stampable_merge_publishes(self):
         self.merge(STAMPABLE)
@@ -444,6 +505,27 @@ class PublishModeTest(_RepoCase):
         code, err = self.run_publish()
         self.assertEqual(code, 0, err)
 
+    def test_a_changelog_path_with_spaces_is_still_measured(self):
+        # `diff-tree --name-only` split on whitespace broke this path into
+        # pieces, no bookkeeping commit matched, and the gate passed having
+        # measured nothing.
+        nested = self.root / "docs" / "My CHANGELOG.md"
+        nested.parent.mkdir()
+        nested.write_text(HEADED, encoding="utf-8")
+        self.git("add", "docs/My CHANGELOG.md")
+        self.git("commit", "-q", "-m", "move changelog")
+        nested.write_text(HEADED + "\n", encoding="utf-8")
+        self.git("-c", "user.name=github-actions[bot]", "commit", "-q", "-am",
+                 "Stamp")
+        nested.write_text(MISFILED, encoding="utf-8")
+        self.git("commit", "-q", "-am", "merge")
+        proc = run_script(
+            [_sys.executable, _os.path.join(_ROOT, "check-changelog-placement.py"),
+             "--since-last-publish", "--changelog", "docs/My CHANGELOG.md"],
+            cwd=self.root, capture_output=True, text=True)
+        self.assertEqual(proc.returncode, 1, proc.stderr)
+        self.assertEqual(proc.payload["verdict"], "misfiled")
+
     def test_no_publish_in_history_has_nothing_to_measure(self):
         fresh = tempfile.TemporaryDirectory()
         self.addCleanup(fresh.cleanup)
@@ -455,7 +537,7 @@ class PublishModeTest(_RepoCase):
         (root / "CHANGELOG.md").write_text(MISFILED, encoding="utf-8")
         subprocess.run(["git", "add", "CHANGELOG.md"], cwd=root, check=True, capture_output=True)
         subprocess.run(["git", "commit", "-q", "-m", "first"], cwd=root, check=True, capture_output=True)
-        proc = subprocess.run(
+        proc = run_script(
             [_sys.executable, _os.path.join(_ROOT, "check-changelog-placement.py"),
              "--since-last-publish"],
             cwd=root, capture_output=True, text=True)
@@ -470,7 +552,7 @@ class PublishModeTest(_RepoCase):
         subprocess.run(["git", "clone", "-q", "--depth", "1",
                         "file://" + str(self.root), str(target)],
                        check=True, capture_output=True)
-        proc = subprocess.run(
+        proc = run_script(
             [_sys.executable, _os.path.join(_ROOT, "check-changelog-placement.py"),
              "--since-last-publish"],
             cwd=target, capture_output=True, text=True)
@@ -489,7 +571,7 @@ class PublishModeTest(_RepoCase):
         self.assertIn("does not exist at the last publish", err)
 
     def test_the_two_modes_are_exclusive(self):
-        proc = subprocess.run(
+        proc = run_script(
             [_sys.executable, _os.path.join(_ROOT, "check-changelog-placement.py"),
              "--base", "main", "--since-last-publish"],
             cwd=self.root, capture_output=True, text=True)
