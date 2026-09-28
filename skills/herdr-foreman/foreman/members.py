@@ -18,12 +18,14 @@ the matching dispatch's send time. Only the worker's checkout is supplied by
 the caller, since no owner record keeps it.
 """
 
+import os
 import re
 import subprocess
 from pathlib import Path
 
 from . import runnable
 from . import supervision
+from .chronology import timestamp
 from .errors import StateError, UsageError
 from .state import load_state_checked
 
@@ -35,13 +37,30 @@ LEDGER_SCHEMA_VERSION = "1"
 FRONT_FIELDS = ("schema_version", "task", "base_revision", "dispatch_state")
 EVENT_FIELDS = ("schema_version", "id", "at", "subject", "dispatch_id", "worker", "role", "report", "observed",
                 "decision", "head_revision", "evidence", "assessment")
-FIELD = re.compile(r"^- ([a-z_]+): (.*)$")
+#: A full SHA-1 or SHA-256 commit id in either case: schema 1 promises a "full SHA"
+#: and never a case, so an uppercase id a writer copied is still schema 1.
+LEDGER_SHA = re.compile(r"[0-9a-fA-F]{40}(?:[0-9a-fA-F]{24})?")
+#: `head_revision` values that stand in for a SHA (state-schema.md, Task Ledger).
+HEAD_PLACEHOLDERS = frozenset({"unknown", "not_applicable"})
+#: Each subject's decision vocabulary (references/task-ledger.md, Record Decisions as They Happen).
+DECISIONS = {"assignment": ASSESSED | {"pending", "reported", "unknown"},
+             "task": frozenset({"in_progress", "awaiting_diagnosis", "diagnosed_stop", "waiting_for_operator",
+                                "ready_for_release", "completed"})}
+#: The assignment identity a task event carries as `not_applicable`, and an assignment event never does.
+ASSIGNMENT_IDENTITY = ("dispatch_id", "worker", "role")
+# `observed`, `evidence` and `assessment` are free text; the schema promises
+# no format for them beyond presence, so none is checked.
+#: A field name starts with a letter, so no ledger line can set the parser's own `_section` key.
+FIELD = re.compile(r"^- ([a-z][a-z_]*): (.*)$")
 FRONT_FIELD = re.compile(r"^([a-z_]+): (.*)$")
 
 
 def _unusable(path, why):
-    return UsageError("Task ledger {} is not usable here: {}. Fix the ledger by appending a correct event, or pass "
-                      "the ledger this task's authorization records; nothing was closed.".format(path, why),
+    # Appending cannot repair a malformed earlier event: the ledger is append-only
+    # and every event is validated, so the recovery is a new ledger file.
+    return UsageError("Task ledger {} is not usable here: {}. Keep this file, record a recovered ledger at a new path "
+                      "after reconciling its sources (state-schema.md, Task Ledger) and pass that path, or pass the "
+                      "ledger this task's authorization records; nothing was closed.".format(path, why),
                       {"ledger": str(path)})
 
 
@@ -59,6 +78,8 @@ def ledger_events(path):
     for line in front.group(1).splitlines():
         match = FRONT_FIELD.match(line)
         if match:
+            if match.group(1) in FRONT_FIELDS and match.group(1) in header:
+                raise _unusable(path, "its frontmatter repeats {}".format(match.group(1)))
             header[match.group(1)] = match.group(2).strip()
     missing = [key for key in FRONT_FIELDS if not header.get(key)]
     if missing:
@@ -66,6 +87,10 @@ def ledger_events(path):
     if header["schema_version"] != LEDGER_SCHEMA_VERSION:
         raise _unusable(path, "it is schema {}, and this build reads schema {}".format(
             header["schema_version"], LEDGER_SCHEMA_VERSION))
+    if LEDGER_SHA.fullmatch(header["base_revision"]) is None:
+        raise _unusable(path, "its base_revision {!r} is not a full hexadecimal commit SHA".format(header["base_revision"]))
+    if not os.path.isabs(header["dispatch_state"]) or "\0" in header["dispatch_state"]:
+        raise _unusable(path, "its dispatch_state {!r} is not an absolute path free of NUL bytes".format(header["dispatch_state"]))
     events, current = [], None
     for line in text[front.end():].splitlines():
         if line.startswith("## "):
@@ -74,6 +99,11 @@ def ledger_events(path):
             continue
         match = FIELD.match(line)
         if current is not None and match:
+            # A repeated schema field would let a later line replace a malformed
+            # value before validation reads it. Prose bullets under `assessment`
+            # may repeat names the schema does not use.
+            if match.group(1) in EVENT_FIELDS and match.group(1) in current:
+                raise _unusable(path, "event {} repeats {}".format(current["_section"], match.group(1)))
             current[match.group(1)] = match.group(2).strip()
     for event in events:
         absent = [key for key in EVENT_FIELDS if not event.get(key)]
@@ -81,7 +111,57 @@ def ledger_events(path):
             raise _unusable(path, "event {} lacks {}".format(event["_section"], ", ".join(absent)))
         if event["schema_version"] != LEDGER_SCHEMA_VERSION:
             raise _unusable(path, "event {} is schema {}".format(event["_section"], event["schema_version"]))
+        _check_formats(path, event)
+    seen, repeated = set(), set()
+    for event in events:
+        (repeated if event["id"] in seen else seen).add(event["id"])
+    if repeated:
+        raise _unusable(path, "event id {} names more than one event".format(", ".join(sorted(repeated))))
     return header, events
+
+
+def _check_formats(path, event):
+    """Refuse an event whose non-prose fields are not in their schema-1 formats."""
+    section = event["_section"]
+    if event["id"] != section:
+        raise _unusable(path, "event {} carries id {!r}, not its section heading".format(section, event["id"]))
+    try:
+        timestamp(event["at"], "at")
+    except UsageError:
+        raise _unusable(path, "event {} has at {!r}, not a timezone-qualified ISO-8601 timestamp".format(
+            section, event["at"])) from None
+    head = event["head_revision"]
+    if head not in HEAD_PLACEHOLDERS and LEDGER_SHA.fullmatch(head) is None:
+        raise _unusable(path, "event {} has head_revision {!r}, not a full hexadecimal commit SHA, unknown or "
+                        "not_applicable".format(section, head))
+    subject = event["subject"]
+    if subject not in DECISIONS:
+        raise _unusable(path, "event {} has subject {!r}, not task or assignment".format(section, subject))
+    if event["decision"] not in DECISIONS[subject]:
+        raise _unusable(path, "event {} has decision {!r}, not one of the {} decisions ({})".format(
+            section, event["decision"], subject, ", ".join(sorted(DECISIONS[subject]))))
+    for key in ASSIGNMENT_IDENTITY:
+        if (event[key] == "not_applicable") != (subject == "task"):
+            raise _unusable(path, "event {} has {} {!r}; a task event carries not_applicable and an assignment "
+                            "event its actual value".format(section, key, event[key]))
+    report = event["report"]
+    if report != "unknown" and (not os.path.isabs(report) or "\0" in report):
+        raise _unusable(path, "event {} has report {!r}, not an absolute path or unknown".format(section, report))
+
+
+def _resolve_bound(path, dispatch_state):
+    """The ledger's dispatch_state resolved the same way on every supported Python, or a refusal.
+
+    Non-strict `resolve` stopped raising on a symlink loop in Python 3.13, so
+    resolve strictly: a loop raises RuntimeError before 3.13 and OSError from
+    it on. A path that does not exist is refused too: the ledger must bind a
+    utility state that exists on disk, never one a string comparison merely
+    matches. Every failure is one refusal, so nothing is resolved twice.
+    """
+    try:
+        return str(Path(dispatch_state).resolve(strict=True))
+    except (OSError, RuntimeError) as exc:
+        raise _unusable(path, "its dispatch_state {!r} does not resolve: {}".format(dispatch_state, exc)) from None
 
 
 def assessed_event(path, member, state_path):
@@ -90,7 +170,7 @@ def assessed_event(path, member, state_path):
     if header["task"] != member["task"]:
         raise UsageError("Task ledger {} records task {!r}, not this enrollment's {!r}; pass the ledger for {}.".format(
             path, header["task"], member["task"], member["task"]), {"ledger": str(path)})
-    bound = str(Path(header["dispatch_state"]).expanduser().resolve())
+    bound = _resolve_bound(path, header["dispatch_state"])
     if bound != str(Path(state_path).expanduser().resolve()):
         raise _unusable(path, "it is bound to dispatch state {}, not {}".format(header["dispatch_state"], state_path))
     matching = [row for row in events if row["subject"] == "assignment" and row["dispatch_id"] == member["id"]

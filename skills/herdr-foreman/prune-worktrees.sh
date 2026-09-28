@@ -113,11 +113,19 @@
 #   exit  : 0 every decision applied (or previewed),
 #           1 precondition unmet (usage, git or python3 absent, not a repo,
 #             no origin, fetch failed, default branch unresolvable, worktree
-#             or branch inventory unreadable) — no JSON, nothing decided,
+#             or branch inventory unreadable, the worktree root unreadable
+#             or not the one PRUNE_ROOT_ID names) — no JSON, nothing decided,
 #           2 at least one check, removal or deletion failed; the rest still
-#             ran and `failed` names each one.
+#             ran and `failed` names each one. The exception is a worktree
+#             root replaced or made unreadable mid-run: the root's identity
+#             (lstat <dev>:<ino>) is re-proven immediately before every
+#             worktree removal, branch deletion and the metadata prune, and
+#             from the first mismatch on each of those steps is refused and
+#             recorded in `failed` (plus one row naming the root).
 #   env   : WORKTREE_ROOT overrides the worktree root (default
 #           $HOME/.worktrees); the tests point it at a temp dir.
+#           PRUNE_ROOT_ID (<dev>:<ino>) is the root identity a caller
+#           already proved; without it the run proves its own at the start.
 #           PRUNE_IDLE_HOURS / PRUNE_ACTIVITY_FILE_LIMIT override the
 #           constants, PRUNE_NOW (epoch seconds) the clock, PRUNE_LSOF the probe.
 set -euo pipefail
@@ -125,8 +133,47 @@ set -euo pipefail
 WORKDIR=""
 ERRFILE=""
 ROWS=""
+#: The worktree root this run inventoried: its resolved path and its
+#: <dev>:<ino>. Empty when no root existed at the start.
+ROOT_PATH=""
+ROOT_ID=""
+#: Set once the root is found changed; nothing destructive runs after it.
+ROOT_MOVED=0
 
 warn() { printf 'prune-worktrees: %s\n' "$1" >&2; }
+
+# Echo the <dev>:<ino> of the directory at <path> itself, read with lstat so
+# a symlink swapped in for it is not that directory. Returns 1 when <path> is
+# missing, unreadable or not a directory.
+root_identity() { # <path>
+  python3 -c '
+import os, stat, sys
+try:
+    info = os.lstat(sys.argv[1])
+except OSError as exc:
+    sys.stderr.write("cannot read {}: {}\n".format(sys.argv[1], exc.strerror or exc))
+    sys.exit(1)
+if not stat.S_ISDIR(info.st_mode):
+    sys.stderr.write("{} is not a directory\n".format(sys.argv[1]))
+    sys.exit(1)
+print("{}:{}".format(info.st_dev, info.st_ino))' "$1" 2>"$ERRFILE"
+}
+
+# Immediately before every destructive step: 0 while the worktree root is
+# still the directory this run inventoried. Otherwise the step is recorded as
+# not done (the first time, with one row naming the root) and 1 is returned;
+# once the root has changed, every later step is refused the same way.
+root_holds() { # <target> <branch|"">
+  [[ -n "$ROOT_ID" ]] || return 0
+  if (( ! ROOT_MOVED )); then
+    local now
+    if now="$(root_identity "$ROOT_PATH")" && [[ "$now" == "$ROOT_ID" ]]; then return 0; fi
+    ROOT_MOVED=1
+    row failed "$ROOT_PATH" "" "the worktree root was replaced or became unreadable during the run, so nothing further was removed, deleted or pruned — restore it, then re-run"
+  fi
+  row failed "$1" "$2" "not done: the worktree root changed during the run"
+  return 1
+}
 
 # After a git command that talks to origin fails: replace its stderr in
 # ERRFILE with the exit code and the command to rerun. Its own message can
@@ -888,6 +935,7 @@ remove_worktree() { # <shared> <dry> <path> <branch> <tip> <mode> <head> <defaul
   if (( dry )); then
     row removed "$path" "$branch" "" "$tip"; return 0
   fi
+  root_holds "$path" "$branch" || return 0
   if ! git -C "$shared" worktree remove "$path" 2>"$ERRFILE"; then
     row failed "$path" "$branch" "git worktree remove failed: $(tr '\n' ' ' < "$ERRFILE")"; return 0
   fi
@@ -902,6 +950,7 @@ remove_worktree() { # <shared> <dry> <path> <branch> <tip> <mode> <head> <defaul
     1) row failed "$branch" "$branch" "origin stopped holding ${tip} after its worktree was removed, so ${branch} was kept; push it or delete it by hand"; return 0 ;;
     *) row failed "$branch" "$branch" "cannot re-verify that origin holds ${tip} after its worktree was removed, so ${branch} was kept: $(tr '\n' ' ' < "$ERRFILE")"; return 0 ;;
   esac
+  root_holds "$branch" "$branch" || return 0
   delete_branch "$shared" "$branch" "$tip" || rc=$?
   report_branch_delete "$branch" "$tip" "$rc"
   return 0
@@ -971,6 +1020,7 @@ decide_branch() { # <shared> <default> <dry-run 0|1> <branch>
   if (( dry )); then
     row branch-deleted "$branch" "$branch" ""; return 0
   fi
+  root_holds "$branch" "$branch" || return 0
   delete_branch "$shared" "$branch" "$tip" || rc=$?
   case "$rc" in
     0) row branch-deleted "$branch" "$branch" "" ;;
@@ -1036,6 +1086,15 @@ main() {
     abs_root="$root"
   else
     abs_root="$(cd "$root" && pwd -P)"
+    if ! ROOT_ID="$(root_identity "$abs_root")"; then
+      warn "cannot read the worktree root: $(tr '\n' ' ' < "$ERRFILE") — restore it, then re-run; nothing was decided"
+      return 1
+    fi
+    ROOT_PATH="$abs_root"
+  fi
+  if [[ -n "${PRUNE_ROOT_ID:-}" && "$ROOT_ID" != "$PRUNE_ROOT_ID" ]]; then
+    warn "the worktree root ${root} is no longer the directory the caller proved (PRUNE_ROOT_ID ${PRUNE_ROOT_ID}, now ${ROOT_ID:-absent}) — restore it, then re-run; nothing was decided"
+    return 1
   fi
   # Merged-ness is only as good as the refs it is judged against: a stale
   # origin/<default> after a force-push, or a cached origin/HEAD after the
@@ -1191,6 +1250,9 @@ main() {
   if (( ! dry )); then
     if (( unenterable )); then
       warn "skipping \`git worktree prune\`: a worktree could not be entered; restore access and re-run"
+    elif ! root_holds "git worktree prune" ""; then
+      # A replaced root reads every worktree under it as gone.
+      released=0
     elif ! git -C "$shared" worktree prune --expire now 2>"$ERRFILE"; then
       # Recorded, not merely warned: the run continues, the exit stays non-zero.
       row failed "git worktree prune" "" "failed: $(tr '\n' ' ' < "$ERRFILE") — stale metadata may remain"

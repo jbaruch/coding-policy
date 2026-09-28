@@ -16,6 +16,195 @@
   `skills/release/check-changelog-placement.py` refuses any edit to a block
   under a published heading as new parked content, the same limit #581 hit.
 
+## 0.3.307 — 2026-09-28
+
+### Fixed
+
+- **Four hardening edges from #491's final review (#493).**
+  `round-preflight.sh` recorded a collaborator that exited 0 with valid JSON
+  of the wrong shape (`[]`, `null`, a bare number) as an `ok` check; every
+  collaborator's contract is one JSON object, so any other shape now blocks
+  the round with a reason naming the collaborator command to re-run (the
+  output file is scratch the exit trap removes), and the inline authority and
+  capability-cadence parses read a non-object as an unreadable verdict rather
+  than crashing with a traceback. `resolve-gates.sh` rendered declared paths,
+  notes and workflow filenames into every worker's Markdown `GATES` block
+  unchecked: a backtick closed a path's code span, a newline injected lines
+  into every brief, and a NUL made `realpath` raise outside the documented
+  exit-2 path. Review kept finding one more character (C1 controls, lone
+  surrogates, then the U+2028/U+2029 separators), so the refusal is a class,
+  not a list: any character whose Unicode category is control, format (bidi
+  overrides included), surrogate, line or paragraph separator, private-use or
+  unassigned (`UNRENDERABLE_CATEGORIES`) anywhere, or a
+  backtick in a path or workflow filename, is now refused with exit 2 before
+  anything resolves or renders, each refusal naming the repair for its field;
+  a backtick in `notes`, which render as plain text, stays accepted. The
+  workflow listing moved from a newline-split `find` into the same Python pass
+  so a filename with a newline cannot split into two entries; a symlinked
+  `.github/workflows` directory lists nothing, as `find -type f` never
+  descended through it, and a workflows path that exists but cannot be probed
+  exits 2 instead of reading as no workflows (a `.github` that is a file
+  still reads as none). `capabilities.load` read a
+  dangling `<state>.capabilities.json` link as a missing table, and `record`
+  then replaced the link through `save_state`'s atomic rename, destroying the
+  redirect; a symlinked table, live or dangling, is now refused and left as
+  found, as the reset record already refuses one. The rename is the shared
+  hazard, so the owner fix is in `state.save_state`: it refuses a symlink at
+  the target path for every owner file (attention, memory, supervision,
+  retrospectives and the ledger included), live or dangling, instead of
+  replacing the link and leaving its target stale; a symlinked parent
+  directory is still followed. Both probe with `lstat` rather than
+  `Path.is_symlink`, which raises on an unsearchable ancestor; that failure
+  is a structured error naming the path, never a traceback. The fourth
+  edge, the pyright include list
+  re-sorted inside functional commit 418bab3, is already merged and needs no
+  change; it stays recorded so the next edit to that list lands its formatting
+  in a commit of its own.
+
+## 0.3.306 — 2026-09-28
+
+### Fixed
+
+- **Cleanup hardening left over from the #543 review (#583).** Copilot
+  advisories on the worktree/branch cleanup redesign, each judged against the
+  standing decision that only what origin restores is deleted.
+  - `hooks/check-leftover-worktrees.sh` and `hooks/stop-handoff-hygiene.sh`
+    appended `-o BatchMode=yes` only when `GIT_SSH_COMMAND` was unset, so a
+    user-set SSH command could stop at a passphrase prompt and hold the hook
+    until its budget. BatchMode is now appended to whatever command is set,
+    as `hooks/check-acr-latest.sh` already did.
+  - `skills/herdr-foreman/bounded-run.sh` cancelled its alarm after leaving
+    the protected block, so an expiry landing as the command exited raised
+    outside the handler: a Python traceback and exit 1 instead of 124. The
+    alarm is now blocked and cancelled inside the handler's reach, and an
+    expiry the restored mask holds pending is read with `signal.sigpending()`
+    and still exits 124. A new test seam,
+    `BOUNDED_RUN_TEST_EXPIRE_AFTER_EXIT=1|masked`, delivers each expiry.
+  - `skills/herdr-foreman/sweep-worktrees.sh` proved the root's identity once,
+    before the first prune. A root replaced after one repository's prune ran
+    let the next prune read its moved worktrees as gone, drop their
+    registrations and delete their branches. The root is now re-proven before
+    every prune, and once after discovery whether or not it found a
+    repository; a change after the first prune stops the rest with an `errors`
+    entry naming the repositories not pruned (exit 2), and the prunes that
+    already ran keep their results.
+  - A root replaced while one prune is running (#593): `prune-worktrees.sh`
+    now proves the root's identity (lstat `<dev>:<ino>`) at its start, or
+    takes the one the sweep proved through the new `PRUNE_ROOT_ID`, and
+    re-proves it immediately before every `git worktree remove`, every
+    branch deletion and the `git worktree prune`. From the first mismatch on,
+    each of those steps is refused and listed in `failed` (exit 2), so a
+    moved dirty or unpushed worktree keeps its registration and its branch.
+    A `PRUNE_ROOT_ID` that no longer matches at the start is exit 1, nothing
+    decided. The session-start and Stop hooks, which call the prune
+    directly, get the same guard from the start-of-run proof.
+  - `hooks/check-leftover-worktrees.sh` now captures `git worktree list` to a
+    file and checks git's exit before parsing, as the Stop hook does. The
+    review claimed the pipe masked a git failure after a valid prefix; under
+    `set -o pipefail` it did not (the pipeline returned git's exit), so this
+    is consistency and a clearer message naming git's own exit, not a fix of
+    a masked failure.
+  - Declined, with replies on the review threads: leasing origin's default
+    branch in `prune-remote-branches.sh`'s delete (git sends no command for an
+    unchanged ref, so a lease on it is a client-side re-read of the same
+    advertisement the gate just read, never a server-side compare, and losing
+    containment needs a force-push of the default, which drops the same
+    commits from the default itself); and a worktree identity check in
+    `prune-worktrees.sh`'s recheck (`git worktree remove` already refuses a
+    directory whose `.git` file does not point back at the registered gitdir,
+    and the recheck already requires the same clean HEAD origin holds, so a
+    replacement it could remove holds only what origin restores).
+
+## 0.3.301 — 2026-09-27
+
+## 0.3.305 — 2026-09-28
+
+### Fixed
+
+- **`close-member` validates the task ledger's field formats, not just their
+  presence (#530).** `members.ledger_events` checked that every schema-1 field
+  was present and non-empty, so an event with `at: not-a-timestamp` or
+  `head_revision: not-a-sha` still authorized closing an enrollment. It now
+  refuses, closing nothing, unless `at` is a timezone-qualified ISO-8601
+  timestamp, `head_revision` is a full SHA (either case) or the literal `unknown` /
+  `not_applicable`, the frontmatter `base_revision` is a full SHA,
+  `dispatch_state` is an absolute path to an existing file that resolves (a
+  `~/` path, a NUL byte, a missing file or a symlink loop now refuses instead
+  of passing or raising), each event's
+  `id` matches its `## ` section heading, no id names two events, and no
+  ledger line can overwrite the parser's record of that heading. Every other
+  field with a documented format is checked in every event, not only the
+  event being closed: `subject` is `task` or `assignment`, `decision` comes
+  from that subject's vocabulary in `references/task-ledger.md`,
+  `dispatch_id` / `worker` / `role` are `not_applicable` on a task event and
+  never on an assignment event, and `report` is an absolute path or
+  `unknown` on every event, as the schema-1 table always said (the template's
+  "use `not_applicable` for the assignment fields" now names `dispatch_id`,
+  `worker` and `role` so it no longer reads as covering `report`; accepting
+  `not_applicable` there would have been a shape change needing a schema
+  bump). A schema field repeated
+  inside one event, or in the frontmatter, is refused: the parser kept the
+  last value, so a second well-formed line could hide a malformed first one.
+  Only the free-text `observed`, `evidence` and `assessment` fields are
+  checked for presence alone, and `state-schema.md` now says exactly that.
+  Validating the whole ledger rather than narrowing the contract was the
+  safer choice: `close-member` acts on `subject`, `dispatch_id`, `worker`,
+  `report` and `decision` directly, so a ledger whose other events break the
+  format is not one the foreman wrote correctly, and closing on it would
+  trust a record the owner cannot vouch for.
+  The refusal's repair hint changed with it: it used to say "append a correct
+  event", which can never fix a malformed earlier event in an append-only log
+  that is validated whole, so it now points at the documented recovery, a
+  recovered ledger at a new path (`state-schema.md`, Task Ledger). Deferred
+  from PR #528's review. `herdr-foreman` Step 11's `check-member` follow-up
+  paragraph, which merged several directives, is now one bullet per directive.
+
+- **The foreman reset deliverer types only into the foreman's bound native
+  session (#523).** `foreman-reset-deliver` waits up to `IDLE_BUDGET_SEC` for
+  the foreman's pane to idle, and before every keystroke it re-checked only
+  the pane's agent name, runtime kind and idle status. An operator who
+  replaced the foreman process in that pane during the wait with another
+  session of the same name and kind passed the guard, and the old reset's
+  `/clear` and resume prompt landed in the new session. `foreman-reset` now
+  records the native session bound at `supervision-bind` on the reset row
+  (`native_session`), and refuses to schedule when the binding names none.
+  The deliverer's guard reads `herdr pane get` (the source `supervision-bind`
+  reads, held to its proof: a claude or codex session its own Herdr
+  integration reports) and refuses unless the pane still holds that session, for every
+  keystroke of the clear command, extra Enters included, until the composer
+  confirms it consumed: the row finishes `failed` before any keystroke,
+  `interrupted` after one, both with error `reset_session_changed` and
+  `details.reason` `native_session_changed`. No single Enter proves the clear
+  submitted (Codex's first of two Enters only accepts autocomplete, and
+  `send_command` may add extra Enters), so a replacement between any of them
+  is still caught. A transcript path that cannot be resolved (a link loop,
+  an embedded NUL) matches no session instead of escaping as an unrecorded
+  error.
+  The clear itself starts a new native session by design, so after it the
+  deliverer waits up to `CLEAR_SESSION_BUDGET_SEC` for Herdr to report that
+  new session, pins it, and every resume-prompt keystroke must find the
+  pinned session; a replacement after the clear is refused the same way, and
+  a new session counts as the clear's only while the pane's foreground
+  processes are the ones the first keystroke found, compared by pid, start
+  time and command line (the clear keeps its process; a replacement is a new
+  one, or a reused pid or an exec in place that changes them), and
+  a clear that starts no new session stops the reset
+  (`clear_session_unchanged`). The reset record moves
+  to schema 2 (`skills/herdr-foreman/state-schema.md` Foreman Reset Record);
+  the owner migrates a schema-1 record on read and rewrites it at once,
+  catch-up's read included, giving each row `native_session: null`; a
+  deliverer that claims such a row refuses before any keystroke. A
+  schema-1-build deliverer still running at the upgrade cannot record its
+  outcome, and catch-up names the reconcile command for its row once it
+  exits. Regression tests cover a same-name, same-kind
+  replacement (no keystroke, row records why), a replacement between the
+  clear's text and Enter and between Codex's two Enters, the post-clear
+  session change for typed and pasted clears, a replacement before an extra
+  Enter, a replacement after the clear, a clear that starts no new session,
+  an unresolvable transcript path, the migration rewrite, and the
+  CLI end to end; the unfixed deliverer typed `/clear` and the resume prompt
+  into the replacement session.
+
 ## 0.3.304 — 2026-09-28
 
 ### Fixed
@@ -78,54 +267,6 @@
   each gap and fail against the old code.
 
 ## 0.3.301 — 2026-09-27
-
-### Fixed
-
-- **The foreman reset deliverer types only into the foreman's bound native
-  session (#523).** `foreman-reset-deliver` waits up to `IDLE_BUDGET_SEC` for
-  the foreman's pane to idle, and before every keystroke it re-checked only
-  the pane's agent name, runtime kind and idle status. An operator who
-  replaced the foreman process in that pane during the wait with another
-  session of the same name and kind passed the guard, and the old reset's
-  `/clear` and resume prompt landed in the new session. `foreman-reset` now
-  records the native session bound at `supervision-bind` on the reset row
-  (`native_session`), and refuses to schedule when the binding names none.
-  The deliverer's guard reads `herdr pane get` (the source `supervision-bind`
-  reads, held to its proof: a claude or codex session its own Herdr
-  integration reports) and refuses unless the pane still holds that session, for every
-  keystroke of the clear command, extra Enters included, until the composer
-  confirms it consumed: the row finishes `failed` before any keystroke,
-  `interrupted` after one, both with error `reset_session_changed` and
-  `details.reason` `native_session_changed`. No single Enter proves the clear
-  submitted (Codex's first of two Enters only accepts autocomplete, and
-  `send_command` may add extra Enters), so a replacement between any of them
-  is still caught. A transcript path that cannot be resolved (a link loop,
-  an embedded NUL) matches no session instead of escaping as an unrecorded
-  error.
-  The clear itself starts a new native session by design, so after it the
-  deliverer waits up to `CLEAR_SESSION_BUDGET_SEC` for Herdr to report that
-  new session, pins it, and every resume-prompt keystroke must find the
-  pinned session; a replacement after the clear is refused the same way, and
-  a new session counts as the clear's only while the pane's foreground
-  processes are the ones the first keystroke found, compared by pid, start
-  time and command line (the clear keeps its process; a replacement is a new
-  one, or a reused pid or an exec in place that changes them), and
-  a clear that starts no new session stops the reset
-  (`clear_session_unchanged`). The reset record moves
-  to schema 2 (`skills/herdr-foreman/state-schema.md` Foreman Reset Record);
-  the owner migrates a schema-1 record on read and rewrites it at once,
-  catch-up's read included, giving each row `native_session: null`; a
-  deliverer that claims such a row refuses before any keystroke. A
-  schema-1-build deliverer still running at the upgrade cannot record its
-  outcome, and catch-up names the reconcile command for its row once it
-  exits. Regression tests cover a same-name, same-kind
-  replacement (no keystroke, row records why), a replacement between the
-  clear's text and Enter and between Codex's two Enters, the post-clear
-  session change for typed and pasted clears, a replacement before an extra
-  Enter, a replacement after the clear, a clear that starts no new session,
-  an unresolvable transcript path, the migration rewrite, and the
-  CLI end to end; the unfixed deliverer typed `/clear` and the resume prompt
-  into the replacement session.
 
 ## 0.3.300 — 2026-09-27
 

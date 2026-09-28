@@ -7,6 +7,9 @@ _ROOT = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
 if _ROOT not in _sys.path:
     _sys.path.insert(0, _ROOT)
 
+import errno
+import json
+import re
 import subprocess
 import tempfile
 import unittest
@@ -22,11 +25,11 @@ AT = "2026-09-01T12:00:00+00:00"
 LATER = "2026-09-01T12:05:00+00:00"
 
 
-def ledger_text(task, events, state: "str | Path" = "/state.json", version="1"):
-    lines = ["---", "schema_version: " + version, "task: " + task, "base_revision: " + "a" * 40,
+def ledger_text(task, events, state: "str | Path" = "/state.json", version="1", base="a" * 40):
+    lines = ["---", "schema_version: " + version, "task: " + task, "base_revision: " + base,
              "dispatch_state: " + str(state), "---", "", "# Task Ledger", ""]
     for event in events:
-        lines.append("## " + event["id"])
+        lines.append("## " + event.pop("_heading", event["id"]))
         lines.append("")
         for key, value in event.items():
             lines.append("- {}: {}".format(key, value))
@@ -46,9 +49,12 @@ class MembersCase(unittest.TestCase):
         store.enroll(self.path, {"id": "dispatch-a", "agent": "codex-a", "task": "task-a", "report": self.report,
                                  "pane_id": "pane-a", "native_session": None}, AT)
         self.ledger = self.root / "TASK-LEDGER.md"
+        # The ledger binds the utility dispatch state; it exists wherever a
+        # dispatch was recorded, and close-member refuses a missing one.
+        self.path.write_text(json.dumps(empty_state()))
 
     def write_ledger(self, *decisions, task="task-a", report=None, dispatch="dispatch-a", state=None, version="1",
-                     drop=None):
+                     drop=None, base="a" * 40, fields=None):
         events = [{"schema_version": 1, "id": "event-{}".format(index), "at": AT, "subject": "assignment",
                    "dispatch_id": dispatch, "worker": "codex-a", "role": "reviewer", "report": report or self.report,
                    "observed": "report delivered", "decision": decision, "head_revision": "unknown",
@@ -57,7 +63,9 @@ class MembersCase(unittest.TestCase):
         if drop is not None:
             for event in events:
                 event.pop(drop, None)
-        self.ledger.write_text(ledger_text(task, events, state or self.path, version))
+        for event in events:
+            event.update(fields or {})
+        self.ledger.write_text(ledger_text(task, events, state or self.path, version, base))
 
     def emit(self):
         store.transaction(self.path, lambda data: store.append_event(data, AT, "dispatch-a", "report", {"observation_only": True}))
@@ -108,13 +116,174 @@ class CloseMemberTest(MembersCase):
 
     def test_an_unusable_ledger_closes_nothing(self):
         self.emit()
-        for kwargs, why in (({"state": "/elsewhere/state.json"}, "bound to dispatch state"),
+        other = self.root / "other-state.json"
+        other.write_text("{}")
+        for kwargs, why in (({"state": str(other)}, "bound to dispatch state"),
+                            ({"state": "/elsewhere/state.json"}, "does not resolve"),
                             ({"version": "2"}, "is schema 2"), ({"drop": "evidence"}, "lacks evidence")):
             with self.subTest(why=why):
                 self.write_ledger("accepted", **kwargs)
                 with self.assertRaisesRegex(UsageError, why):
                     members.close(self.path, "dispatch-a", self.ledger, LATER)
                 self.assertTrue(store.pending(store.load(self.path)))
+
+    def test_a_malformed_field_format_closes_nothing(self):
+        self.emit()
+        sha = "a" * 40
+        cases = (({"at": "not-a-timestamp"}, sha, None, "has at 'not-a-timestamp'"),
+                 ({"at": "2026-09-01T12:00:00"}, sha, None, "not a timezone-qualified"),
+                 ({"head_revision": "not-a-sha"}, sha, None, "has head_revision 'not-a-sha'"),
+                 ({"head_revision": "abc1234"}, sha, None, "has head_revision 'abc1234'"),
+                 ({"head_revision": "g" * 40}, sha, None, "not a full hexadecimal commit SHA"),
+                 ({}, "g" * 40, None, "base_revision '{}' is not a full hexadecimal".format("g" * 40)),
+                 ({"_heading": "renamed-section"}, sha, None, "carries id 'event-1', not its section heading"),
+                 ({}, "abc1234", None, "base_revision 'abc1234'"),
+                 ({}, sha, "relative/state.json", "dispatch_state 'relative/state.json' is not an absolute"),
+                 ({}, sha, "~/state.json", "dispatch_state '~/state.json' is not an absolute"),
+                 ({}, sha, "/nul\0state.json", "dispatch_state '/nul\\x00state.json' is not an absolute"),
+                 ({"subject": "round"}, sha, None, "has subject 'round', not task or assignment"),
+                 ({"decision": "approved"}, sha, None, "has decision 'approved', not one of the assignment"),
+                 ({"decision": "completed"}, sha, None, "has decision 'completed', not one of the assignment"),
+                 ({"worker": "not_applicable"}, sha, None, "has worker 'not_applicable'"),
+                 ({"report": "reviewer.md"}, sha, None, "has report 'reviewer.md', not an absolute path or unknown"),
+                 ({"report": "not_applicable"}, sha, None, "has report 'not_applicable', not an absolute path"),
+                 ({"subject": "task", "decision": "in_progress", "dispatch_id": "not_applicable",
+                   "worker": "not_applicable", "role": "not_applicable", "report": "not_applicable"}, sha, None,
+                  "has report 'not_applicable', not an absolute path or unknown"))
+        for fields, base, state, why in cases:
+            with self.subTest(why=why):
+                self.write_ledger("accepted", fields=fields, base=base, state=state)
+                with self.assertRaisesRegex(UsageError, re.escape(why)):
+                    members.close(self.path, "dispatch-a", self.ledger, LATER)
+                data = store.load(self.path)
+                self.assertTrue(store.pending(data))
+                self.assertTrue(next(row for row in data["members"] if row["id"] == "dispatch-a")["active"])
+
+    def test_a_dispatch_state_in_a_symlink_loop_closes_nothing(self):
+        self.emit()
+        (self.root / "loop-a").symlink_to(self.root / "loop-b")
+        (self.root / "loop-b").symlink_to(self.root / "loop-a")
+        self.write_ledger("accepted", state=str(self.root / "loop-a" / "state.json"))
+        with self.assertRaisesRegex(UsageError, "does not resolve"):
+            members.close(self.path, "dispatch-a", self.ledger, LATER)
+        self.assertTrue(store.pending(store.load(self.path)))
+
+    def test_a_symlink_loop_is_refused_under_the_python_3_13_resolve_contract(self):
+        # From 3.13, non-strict resolve returns a looping path without raising
+        # and only strict resolve reports ELOOP; model that on any interpreter.
+        self.emit()
+        looping = str(self.root / "loop" / "state.json")
+        self.write_ledger("accepted", state=looping)
+        real = Path.resolve
+
+        def resolve(path, strict=False):
+            if str(path) == looping:
+                if strict:
+                    raise OSError(errno.ELOOP, "Too many levels of symbolic links", looping)
+                return path
+            return real(path, strict=strict)
+
+        with patch.object(Path, "resolve", resolve), self.assertRaisesRegex(UsageError, "does not resolve"):
+            members.close(self.path, "dispatch-a", self.ledger, LATER)
+        self.assertTrue(store.pending(store.load(self.path)))
+
+    def test_a_missing_dispatch_state_refuses_without_a_second_resolve(self):
+        # On 3.11/3.12 a missing component followed by `..` and a loop makes a
+        # strict resolve raise FileNotFoundError and a non-strict one raise
+        # RuntimeError; either way the refusal must stay the usable-ledger one.
+        self.emit()
+        missing = str(self.root / "gone" / ".." / "loop" / "state.json")
+        self.write_ledger("accepted", state=missing)
+        real = Path.resolve
+
+        def resolve(path, strict=False):
+            if str(path) == missing:
+                if strict:
+                    raise FileNotFoundError(errno.ENOENT, "No such file or directory", missing)
+                raise RuntimeError("Symlink loop from {!r}".format(missing))
+            return real(path, strict=strict)
+
+        with patch.object(Path, "resolve", resolve), self.assertRaisesRegex(UsageError, "does not resolve"):
+            members.close(self.path, "dispatch-a", self.ledger, LATER)
+        self.assertTrue(store.pending(store.load(self.path)))
+
+    def test_a_missing_dispatch_state_never_matches_by_string(self):
+        # An already-normalized missing path equals the state path as a
+        # string; the ledger must still bind a state that exists.
+        self.emit()
+        self.write_ledger("accepted", state=str(self.path))
+        real = Path.resolve
+        bound = str(self.path)
+
+        def resolve(path, strict=False):
+            if strict and str(path) == bound:
+                raise FileNotFoundError(errno.ENOENT, "No such file or directory", bound)
+            return real(path, strict=strict)
+
+        with patch.object(Path, "resolve", resolve), self.assertRaisesRegex(UsageError, "does not resolve"):
+            members.close(self.path, "dispatch-a", self.ledger, LATER)
+        self.assertTrue(store.pending(store.load(self.path)))
+
+    def test_a_ledger_line_cannot_forge_the_section_heading(self):
+        self.emit()
+        self.write_ledger("accepted", fields={"_heading": "renamed-section", "_section": "event-1"})
+        with self.assertRaisesRegex(UsageError, "event renamed-section carries id 'event-1'"):
+            members.close(self.path, "dispatch-a", self.ledger, LATER)
+        self.assertTrue(store.pending(store.load(self.path)))
+
+    def test_an_unrelated_malformed_event_still_closes_nothing(self):
+        self.emit()
+        self.write_ledger("accepted")
+        task_event = ("## task-1\n\n- schema_version: 1\n- id: task-1\n- at: {}\n- subject: task\n"
+                      "- dispatch_id: dispatch-a\n- worker: not_applicable\n- role: not_applicable\n"
+                      "- report: unknown\n- observed: round started\n- decision: in_progress\n"
+                      "- head_revision: not_applicable\n- evidence: unknown\n- assessment: open\n").format(AT)
+        self.ledger.write_text(self.ledger.read_text() + "\n" + task_event)
+        with self.assertRaisesRegex(UsageError, "event task-1 has dispatch_id 'dispatch-a'"):
+            members.close(self.path, "dispatch-a", self.ledger, LATER)
+        self.assertTrue(store.pending(store.load(self.path)))
+
+    def test_a_repeated_field_cannot_replace_a_malformed_value(self):
+        self.emit()
+        self.write_ledger("accepted", fields={"at": "not-a-timestamp"})
+        text = self.ledger.read_text().replace("- at: not-a-timestamp\n", "- at: not-a-timestamp\n- at: {}\n".format(AT))
+        self.ledger.write_text(text)
+        with self.assertRaisesRegex(UsageError, "event event-1 repeats at"):
+            members.close(self.path, "dispatch-a", self.ledger, LATER)
+        self.write_ledger("accepted")
+        text = self.ledger.read_text().replace("schema_version: 1\ntask:", "schema_version: 1\nbase_revision: bad\ntask:", 1)
+        self.ledger.write_text(text)
+        with self.assertRaisesRegex(UsageError, "frontmatter repeats base_revision"):
+            members.close(self.path, "dispatch-a", self.ledger, LATER)
+        self.assertTrue(store.pending(store.load(self.path)))
+
+    def test_a_task_event_and_prose_bullets_are_accepted(self):
+        self.emit()
+        self.write_ledger("accepted")
+        task_event = ("## task-1\n\n- schema_version: 1\n- id: task-1\n- at: {}\n- subject: task\n"
+                      "- dispatch_id: not_applicable\n- worker: not_applicable\n- role: not_applicable\n"
+                      "- report: unknown\n- observed: round started\n- decision: in_progress\n"
+                      "- head_revision: not_applicable\n- evidence: unknown\n- assessment: open\n"
+                      "- note: a prose bullet\n- note: another prose bullet\n").format(AT)
+        self.ledger.write_text(self.ledger.read_text() + "\n" + task_event)
+        self.assertEqual(members.close(self.path, "dispatch-a", self.ledger, LATER)["decision"], "accepted")
+
+    def test_a_repeated_event_id_closes_nothing(self):
+        self.emit()
+        self.write_ledger("reported", "accepted", fields={"id": "event-1", "_heading": "event-1"})
+        with self.assertRaisesRegex(UsageError, "event id event-1 names more than one event"):
+            members.close(self.path, "dispatch-a", self.ledger, LATER)
+        self.assertTrue(store.pending(store.load(self.path)))
+
+    def test_well_formed_field_formats_are_accepted(self):
+        self.emit()
+        for head in ("b" * 40, "c" * 64, "A" * 40, "unknown", "not_applicable"):
+            with self.subTest(head=head):
+                self.write_ledger("accepted", fields={"head_revision": head, "at": "2026-09-01T12:00:00Z"},
+                                  base="D" * 40)
+                self.assertEqual(members.ledger_events(self.ledger)[1][0]["head_revision"], head)
+        result = members.close(self.path, "dispatch-a", self.ledger, LATER)
+        self.assertEqual(result["decision"], "accepted")
 
     def test_an_event_for_another_report_does_not_count(self):
         self.write_ledger("accepted", report=str(self.root / "other.md"))

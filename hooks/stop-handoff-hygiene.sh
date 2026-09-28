@@ -258,7 +258,7 @@ read_owner_decisions() {
   fi
   shared="$WT_SHARED"
   err="$(mktemp)" || { warn "mktemp failed — skipping the worktree check; make ${TMPDIR:-/tmp} writable"; return 0; }
-  out="$(GIT_TERMINAL_PROMPT=0 GIT_SSH_COMMAND="${GIT_SSH_COMMAND:-ssh -o BatchMode=yes}" \
+  out="$(GIT_TERMINAL_PROMPT=0 GIT_SSH_COMMAND="${GIT_SSH_COMMAND:-ssh} -o BatchMode=yes" \
     bash "$runner" "$PRUNE_BUDGET_SEC" bash "$prune" "$shared" --dry-run 2>"$err")" || rc=$?
   if (( rc != 0 && rc != 2 )) || [[ -z "$out" ]]; then
     warn "the worktree check could not run (\`bash ${prune} ${shared} --dry-run\` exited ${rc}: $(tr '\n' ' ' < "$err")) — nothing is blocked on it"

@@ -69,6 +69,7 @@ Reading follows one rule per direction:
 
 import json
 import os
+import stat
 import tempfile
 import fcntl
 from contextlib import contextmanager
@@ -632,8 +633,34 @@ def load_state_checked(path, warn=None, *, persist_migration=True):
 
 
 def save_state(path, state):
-    """Write `state` atomically, creating the parent directory when needed."""
+    """Write `state` atomically, creating the parent directory when needed.
+
+    The atomic rename replaces whatever sits at `path`. On a symlink that is
+    the link itself: the redirect is destroyed and its target keeps the old
+    bytes. So a symlinked owner file is refused, live or dangling, and left
+    exactly as found. A symlinked parent directory is followed as usual.
+    """
     path = Path(path)
+    # `Path.is_symlink` swallows only a missing entry; a probe that cannot
+    # search an ancestor raises. That is an environment to fix, never a pass.
+    try:
+        linked = stat.S_ISLNK(os.lstat(path).st_mode)
+    except (FileNotFoundError, NotADirectoryError):
+        linked = False
+    except OSError as exc:
+        raise StateError(
+            "Cannot inspect the state file {}: {} - restore search permission on its "
+            "directory or pass --state at a readable location; nothing was "
+            "written.".format(path, exc),
+            {"path": str(path)},
+        ) from None
+    if linked:
+        raise StateError(
+            "State file {} is a symlink; writing would replace the link and leave its "
+            "target stale. The link is left untouched: replace it with the owner's "
+            "regular file, or pass --state at the real location.".format(path),
+            {"path": str(path)},
+        )
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
     except (PermissionError, FileExistsError, NotADirectoryError) as exc:
