@@ -38,7 +38,7 @@ die() { echo "fatal: $*" >&2; exit 2; }
 REAL="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)" || die "cannot resolve the plugin dir"
 
 stub() { # <dir> <name> <exit> <stdout>
-  printf '#!/bin/sh\nprintf %s\nexit %s\n' "'$4'" "$3" > "$1/$2" || die "write stub $2"
+  printf '#!/usr/bin/env bash\nset -euo pipefail\nprintf %s\nexit %s\n' "'$4'" "$3" > "$1/$2" || die "write stub $2"
   chmod +x "$1/$2" || die "chmod stub $2"
 }
 
@@ -60,12 +60,12 @@ shadow() { # <dir> [roster-rc] [authority-rc] [prune-rc] [capability-due] [autho
   esac
   stub "$dir" sweep-worktrees.sh "$prune" "$sweep_out"
   if [[ "$prune" == timeout ]]; then
-    printf '#!/bin/sh\necho "bounded-run: stand-in budget spent" >&2\nexit 124\n' > "$dir/bounded-run.sh" || die "write runner stub"
+    printf '#!/usr/bin/env bash\nset -euo pipefail\necho "bounded-run: stand-in budget spent" >&2\nexit 124\n' > "$dir/bounded-run.sh" || die "write runner stub"
   else
     cp "$REAL/bounded-run.sh" "$dir/" || die "copy the bounded runner"
   fi
   stub "$dir" resolve-gates.sh 0 '{"instructions":["AGENTS.md"],"workflows":[],"runners":[]}'
-  printf '#!/bin/sh\ncase "$*" in\n  *capability-check*) printf %s; exit 0 ;;\n  *measure*) printf %s; exit 0 ;;\nesac\nexit 9\n' \
+  printf '#!/usr/bin/env bash\nset -euo pipefail\ncase "$*" in\n  *capability-check*) printf %s; exit 0 ;;\n  *measure*) printf %s; exit 0 ;;\nesac\nexit 9\n' \
     "'{\"due\":$due,\"entries\":0}'" "'{\"agents\":{}}'" > "$dir/foreman.sh" || die "write foreman stub"
   chmod +x "$dir/foreman.sh" || die "chmod foreman stub"
 }
@@ -196,7 +196,7 @@ main() {
     pass; else fail "a non-object authority payload must fail cleanly, got RC=$RC OUT=$OUT ERR=$ERRTEXT"; fi
 
   shadow "$TMP/shape-capability"
-  printf '#!/bin/sh\ncase "$*" in\n  *capability-check*) printf %s; exit 0 ;;\n  *measure*) printf %s; exit 0 ;;\nesac\nexit 9\n' \
+  printf '#!/usr/bin/env bash\nset -euo pipefail\ncase "$*" in\n  *capability-check*) printf %s; exit 0 ;;\n  *measure*) printf %s; exit 0 ;;\nesac\nexit 9\n' \
     "'[]'" "'{\"agents\":{}}'" > "$TMP/shape-capability/foreman.sh" || die "write foreman stub"
   run "$TMP/shape-capability"
   if [[ $RC -eq 1 ]] && [[ "$(field "$OUT" 'd["checks"]["capability"]["status"]')" == '"failed"' ]] \
