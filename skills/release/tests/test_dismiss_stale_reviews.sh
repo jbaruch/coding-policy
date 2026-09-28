@@ -37,7 +37,7 @@ run() {
   export DISMISS_LOG
   if "$@"; then
     PASS_COUNT=$((PASS_COUNT + 1))
-    echo "  pass: $name"
+    echo "  pass: $name" >&2
   else
     FAIL_COUNT=$((FAIL_COUNT + 1))
     echo "  FAIL: $name" >&2
@@ -262,19 +262,25 @@ t_login_is_glob_safe_against_cwd_files() {
 
 # --- runner ---
 
-echo "test_dismiss_stale_reviews.sh"
-run "stale CR then COMMENT is dismissed"        t_stale_cr_then_comment_is_dismissed
-run "latest CR is left active"                  t_latest_cr_is_left_active
-run "already-dismissed is skipped"              t_already_dismissed_is_skipped
-run "per-bot independence"                      t_per_bot_independence
-run "no reviews is a no-op"                     t_no_reviews_is_noop
-run "latest DISMISSED leaves earlier active CR" t_latest_dismissed_leaves_earlier_active_cr
-run "latest ruled dismissal sweeps earlier CR"  t_latest_ruled_dismissal_sweeps_earlier_cr
-run "unmarked dismissal is not an all-clear"    t_latest_unmarked_dismissal_is_not_all_clear
-run "fleet reviewer swept only after ruling"    t_fleet_reviewer_swept_only_after_ruled_dismissal
-run "multiple stale CRs all dismissed"          t_multiple_stale_crs_all_dismissed
-run "login is glob-safe against cwd files"      t_login_is_glob_safe_against_cwd_files
+# `run_suite`, not `main`: the sourced script under test owns `main`.
+# Progress goes to stderr; stdout carries one JSON result.
+run_suite() {
+  echo "test_dismiss_stale_reviews.sh" >&2
+  run "stale CR then COMMENT is dismissed"        t_stale_cr_then_comment_is_dismissed
+  run "latest CR is left active"                  t_latest_cr_is_left_active
+  run "already-dismissed is skipped"              t_already_dismissed_is_skipped
+  run "per-bot independence"                      t_per_bot_independence
+  run "no reviews is a no-op"                     t_no_reviews_is_noop
+  run "latest DISMISSED leaves earlier active CR" t_latest_dismissed_leaves_earlier_active_cr
+  run "latest ruled dismissal sweeps earlier CR"  t_latest_ruled_dismissal_sweeps_earlier_cr
+  run "unmarked dismissal is not an all-clear"    t_latest_unmarked_dismissal_is_not_all_clear
+  run "fleet reviewer swept only after ruling"    t_fleet_reviewer_swept_only_after_ruled_dismissal
+  run "multiple stale CRs all dismissed"          t_multiple_stale_crs_all_dismissed
+  run "login is glob-safe against cwd files"      t_login_is_glob_safe_against_cwd_files
+  printf '{"suite":"test_dismiss_stale_reviews.sh","passed":%d,"failed":%d}\n' "$PASS_COUNT" "$FAIL_COUNT"
+  [[ $FAIL_COUNT -eq 0 ]]
+}
 
-echo
-echo "passed: ${PASS_COUNT}, failed: ${FAIL_COUNT}"
-[[ $FAIL_COUNT -eq 0 ]]
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+  run_suite
+fi

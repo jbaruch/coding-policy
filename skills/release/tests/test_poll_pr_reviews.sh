@@ -46,7 +46,7 @@ run() {
   local name="$1"; shift
   if "$@"; then
     PASS_COUNT=$((PASS_COUNT + 1))
-    echo "  pass: $name"
+    echo "  pass: $name" >&2
   else
     FAIL_COUNT=$((FAIL_COUNT + 1))
     echo "  FAIL: $name" >&2
@@ -173,7 +173,6 @@ t_main_marks_a_pending_lane_requested() {
   assert_eq "copilot state"     "none" "$(echo "$out" | jq -r '.reviews.copilot.state')" || return 1
   assert_eq "copilot requested" "true" "$(echo "$out" | jq -r '.reviews.copilot.requested')"
 }
-
 
 t_fetch_merge_state_clean_returns_mergeable_envelope() {
   MOCK_MERGE_STATE=clean
@@ -627,53 +626,59 @@ t_ci_status_fail_with_cancel_is_failure() {
 
 # --- driver ---
 
-echo "== poll-pr-reviews.sh tests =="
-run "fetch_merge_state returns {CLEAN, MERGEABLE} for a clean PR"     t_fetch_merge_state_clean_returns_mergeable_envelope
-run "fetch_merge_state returns {DIRTY, CONFLICTING} on conflict"      t_fetch_merge_state_dirty_returns_conflicting_envelope
-run "fetch_merge_state propagates UNKNOWN/UNKNOWN while computing"    t_fetch_merge_state_unknown_returns_unknown_envelope
-run "main surfaces merge_state as a top-level field"                  t_main_surfaces_merge_state_as_top_level_field
-run "main propagates DIRTY merge_state end-to-end"                    t_main_propagates_dirty_state
-run "latest_review_by picks newest review on page 2 (issue #83)"      t_latest_review_by_picks_from_last_page
-run "latest_review_by returns 'none' for empty reviews"               t_latest_review_by_returns_none_when_no_reviews
-run "latest_review_by surfaces the review body text"                  t_latest_review_by_surfaces_body_text
-run "latest_review_by ignores other logins across pages"              t_latest_review_by_filters_other_logins_across_pages
-run "toplevel_comments_by sums counts across pages (issue #83)"       t_toplevel_comments_by_sums_across_pages
-run "toplevel_comments_by returns 0 for empty comments"               t_toplevel_comments_by_returns_zero_for_no_comments
-run "toplevel_comments_by counts the 'Copilot' comment login"         t_toplevel_comments_by_counts_copilot_login
-run "toplevel_comments_by matches either Copilot login"               t_toplevel_comments_by_matches_either_copilot_login
-run "toplevel_comments_by excludes replies and foreign logins"        t_toplevel_comments_by_excludes_replies_and_other_logins
-run "main counts Copilot comments in the snapshot"                    t_main_counts_copilot_comments_in_snapshot
-run "toplevel_comments_by survives a non-object element (#300)"       t_toplevel_comments_by_survives_non_object_element
-run "toplevel_comments_by warns about the dropped element (#300)"     t_toplevel_comments_by_warns_on_non_object_element
-run "latest_review_by survives a non-object element (#300)"           t_latest_review_by_survives_non_object_element
-run "main returns a snapshot despite a non-object element (#300)"     t_main_survives_non_object_comment_element
-run "latest_review_by resolves the fleet App login (#202)"            t_latest_review_by_resolves_fleet_app_login
-run "latest_review_by picks newest policy verdict across logins"      t_latest_review_by_policy_reviewer_picks_newest_across_logins
-run "latest_review_by never masks an active block with a later clean" t_latest_review_by_changes_requested_not_masked_by_later_other_login
-run "latest_review_by picks latest by time, not array position"       t_latest_review_by_picks_max_by_time_not_array_position
-run "latest_review_by normalizes DISMISSED to none"                   t_latest_review_by_normalizes_dismissed_to_none
-run "latest_review_by normalizes PENDING to none"                     t_latest_review_by_normalizes_pending_to_none
-run "main surfaces the fleet App review as .reviews.codex"            t_main_surfaces_fleet_app_review_as_codex
-run "toplevel_comments_by counts the fleet App comment login"         t_toplevel_comments_by_counts_fleet_app_login
-run "resolve_review_against_head: fresh verdict passes through"       t_resolve_against_head_fresh_passes_through
-run "resolve_review_against_head: stale verdict collapses to none"    t_resolve_against_head_stale_collapses_to_none
-run "resolve_review_against_head: absent stays none, not stale"       t_resolve_against_head_none_stays_none_not_stale
-run "main collapses a stale review to none (#186 false ready)"        t_main_stale_review_collapses_to_none
-run "main surfaces a fresh (head-bound) review's state"               t_main_fresh_review_surfaces_state
-run "main reads a marked dismissal on head as RULED"                  t_main_marked_dismissal_reads_ruled
-run "main reads an unmarked dismissal as none"                        t_main_unmarked_dismissal_reads_none
-run "main collapses a ruled dismissal on an old head to none"         t_main_marked_dismissal_on_old_head_is_stale
-run "main surfaces head_sha as a top-level field"                     t_main_surfaces_head_sha_top_level
-run "main fails loudly on an empty headRefOid"                        t_main_no_head_sha_fails
-run "ci.status: success next to a cancelled twin is success (#182)"   t_ci_status_cancel_with_success_is_success
-run "ci.status: only-cancels reads pending (#182)"                    t_ci_status_only_cancels_is_pending
-run "ci.status: a real fail next to a cancel still fails (#182)"      t_ci_status_fail_with_cancel_is_failure
+# `run_suite`, not `main`: the sourced script under test owns `main`.
+# Progress goes to stderr; stdout carries one JSON result.
+run_suite() {
+  echo "== poll-pr-reviews.sh tests ==" >&2
+  run "fetch_merge_state returns {CLEAN, MERGEABLE} for a clean PR"     t_fetch_merge_state_clean_returns_mergeable_envelope
+  run "fetch_merge_state returns {DIRTY, CONFLICTING} on conflict"      t_fetch_merge_state_dirty_returns_conflicting_envelope
+  run "fetch_merge_state propagates UNKNOWN/UNKNOWN while computing"    t_fetch_merge_state_unknown_returns_unknown_envelope
+  run "main surfaces merge_state as a top-level field"                  t_main_surfaces_merge_state_as_top_level_field
+  run "main propagates DIRTY merge_state end-to-end"                    t_main_propagates_dirty_state
+  run "latest_review_by picks newest review on page 2 (issue #83)"      t_latest_review_by_picks_from_last_page
+  run "latest_review_by returns 'none' for empty reviews"               t_latest_review_by_returns_none_when_no_reviews
+  run "latest_review_by surfaces the review body text"                  t_latest_review_by_surfaces_body_text
+  run "latest_review_by ignores other logins across pages"              t_latest_review_by_filters_other_logins_across_pages
+  run "toplevel_comments_by sums counts across pages (issue #83)"       t_toplevel_comments_by_sums_across_pages
+  run "toplevel_comments_by returns 0 for empty comments"               t_toplevel_comments_by_returns_zero_for_no_comments
+  run "toplevel_comments_by counts the 'Copilot' comment login"         t_toplevel_comments_by_counts_copilot_login
+  run "toplevel_comments_by matches either Copilot login"               t_toplevel_comments_by_matches_either_copilot_login
+  run "toplevel_comments_by excludes replies and foreign logins"        t_toplevel_comments_by_excludes_replies_and_other_logins
+  run "main counts Copilot comments in the snapshot"                    t_main_counts_copilot_comments_in_snapshot
+  run "toplevel_comments_by survives a non-object element (#300)"       t_toplevel_comments_by_survives_non_object_element
+  run "toplevel_comments_by warns about the dropped element (#300)"     t_toplevel_comments_by_warns_on_non_object_element
+  run "latest_review_by survives a non-object element (#300)"           t_latest_review_by_survives_non_object_element
+  run "main returns a snapshot despite a non-object element (#300)"     t_main_survives_non_object_comment_element
+  run "latest_review_by resolves the fleet App login (#202)"            t_latest_review_by_resolves_fleet_app_login
+  run "latest_review_by picks newest policy verdict across logins"      t_latest_review_by_policy_reviewer_picks_newest_across_logins
+  run "latest_review_by never masks an active block with a later clean" t_latest_review_by_changes_requested_not_masked_by_later_other_login
+  run "latest_review_by picks latest by time, not array position"       t_latest_review_by_picks_max_by_time_not_array_position
+  run "latest_review_by normalizes DISMISSED to none"                   t_latest_review_by_normalizes_dismissed_to_none
+  run "latest_review_by normalizes PENDING to none"                     t_latest_review_by_normalizes_pending_to_none
+  run "main surfaces the fleet App review as .reviews.codex"            t_main_surfaces_fleet_app_review_as_codex
+  run "toplevel_comments_by counts the fleet App comment login"         t_toplevel_comments_by_counts_fleet_app_login
+  run "resolve_review_against_head: fresh verdict passes through"       t_resolve_against_head_fresh_passes_through
+  run "resolve_review_against_head: stale verdict collapses to none"    t_resolve_against_head_stale_collapses_to_none
+  run "resolve_review_against_head: absent stays none, not stale"       t_resolve_against_head_none_stays_none_not_stale
+  run "main collapses a stale review to none (#186 false ready)"        t_main_stale_review_collapses_to_none
+  run "main surfaces a fresh (head-bound) review's state"               t_main_fresh_review_surfaces_state
+  run "main reads a marked dismissal on head as RULED"                  t_main_marked_dismissal_reads_ruled
+  run "main reads an unmarked dismissal as none"                        t_main_unmarked_dismissal_reads_none
+  run "main collapses a ruled dismissal on an old head to none"         t_main_marked_dismissal_on_old_head_is_stale
+  run "main surfaces head_sha as a top-level field"                     t_main_surfaces_head_sha_top_level
+  run "main fails loudly on an empty headRefOid"                        t_main_no_head_sha_fails
+  run "ci.status: success next to a cancelled twin is success (#182)"   t_ci_status_cancel_with_success_is_success
+  run "ci.status: only-cancels reads pending (#182)"                    t_ci_status_only_cancels_is_pending
+  run "ci.status: a real fail next to a cancel still fails (#182)"      t_ci_status_fail_with_cancel_is_failure
+  run "requested_among: a pending bot request matches (#369)"           t_requested_among_matches_a_pending_bot
+  run "requested_among: no pending request reads false (#369)"          t_requested_among_is_false_when_nobody_asked
+  run "requested_among: another reviewer's request is not this one"     t_requested_among_ignores_another_reviewer
+  run "main marks a lane nobody requested (#369)"                       t_main_marks_an_unrequested_lane
+  run "main marks a requested-and-pending lane (#369)"                  t_main_marks_a_pending_lane_requested
+  printf '{"suite":"test_poll_pr_reviews.sh","passed":%d,"failed":%d}\n' "$PASS_COUNT" "$FAIL_COUNT"
+  [[ $FAIL_COUNT -eq 0 ]]
+}
 
-run "requested_among: a pending bot request matches (#369)"           t_requested_among_matches_a_pending_bot
-run "requested_among: no pending request reads false (#369)"          t_requested_among_is_false_when_nobody_asked
-run "requested_among: another reviewer's request is not this one"     t_requested_among_ignores_another_reviewer
-run "main marks a lane nobody requested (#369)"                       t_main_marks_an_unrequested_lane
-run "main marks a requested-and-pending lane (#369)"                  t_main_marks_a_pending_lane_requested
-
-echo "== summary: ${PASS_COUNT} passed, ${FAIL_COUNT} failed =="
-[[ "$FAIL_COUNT" -eq 0 ]]
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+  run_suite
+fi

@@ -80,7 +80,7 @@ assert_eq() {
 run() {
   local name="$1"; shift
   if "$@"; then
-    PASS_COUNT=$((PASS_COUNT + 1)); echo "  pass: $name"
+    PASS_COUNT=$((PASS_COUNT + 1)); echo "  pass: $name" >&2
   else
     FAIL_COUNT=$((FAIL_COUNT + 1)); echo "  FAIL: $name" >&2
   fi
@@ -160,7 +160,6 @@ test_unrequested_copilot_is_immediate() {
     *) echo "    expected the diagnostic to name the request command" >&2; return 1 ;;
   esac
 }
-run "an unrequested Copilot lane is diagnosed without waiting" test_unrequested_copilot_is_immediate
 
 # A requested-but-silent lane is what the budget exists for, and still waits.
 test_requested_copilot_still_waits() {
@@ -173,7 +172,6 @@ test_requested_copilot_still_waits() {
   assert_eq "result" "ready" "$(result_of "$out")" || return 1
   assert_eq "poll count" "2" "$(calls)" || return 1
 }
-run "a requested Copilot lane still waits for its verdict" test_requested_copilot_still_waits
 
 # A snapshot from an older poll-pr-reviews.sh carries no `requested` field; the
 # watcher must keep waiting rather than read its absence as "nobody asked".
@@ -189,7 +187,6 @@ test_missing_requested_field_still_waits() {
   assert_eq "exit code" "0" "$rc" || return 1
   assert_eq "result" "ready" "$(result_of "$out")" || return 1
 }
-run "a snapshot without the requested field keeps waiting" test_missing_requested_field_still_waits
 
 # --- Test 1: ready on first poll ---------------------------------------------
 test_ready_first_poll() {
@@ -202,7 +199,6 @@ test_ready_first_poll() {
   assert_eq "poll count" "1" "$(calls)" || return 1
   assert_eq "sleep count" "0" "$(sleeps)" || return 1
 }
-run "ready on first poll — no sleep" test_ready_first_poll
 
 # A policy review dismissed under a weighing ruling (RULED) plus green is ready.
 test_ruled_is_ready() {
@@ -213,7 +209,6 @@ test_ruled_is_ready() {
   assert_eq "exit code" "0" "$rc" || return 1
   assert_eq "result" "ready" "$(result_of "$out")"
 }
-run "RULED policy review plus green is ready" test_ruled_is_ready
 
 # --- Test 2: deferred ready ---------------------------------------------------
 test_deferred_ready() {
@@ -228,7 +223,6 @@ test_deferred_ready() {
   assert_eq "poll count" "2" "$(calls)" || return 1
   assert_eq "sleep count" "1" "$(sleeps)" || return 1
 }
-run "deferred ready polls until both bots post" test_deferred_ready
 
 # --- Test 3: both bots required (a lone verdict is not ready) -----------------
 test_both_bots_required() {
@@ -240,7 +234,6 @@ test_both_bots_required() {
   assert_eq "exit code (budget)" "1" "$rc" || return 1
   assert_eq "result" "pending_at_budget" "$(result_of "$out")" || return 1
 }
-run "lone codex verdict is not ready — waits for both bots" test_both_bots_required
 
 # --- Test 4: zero inline comments is still ready ------------------------------
 test_zero_comments_ready() {
@@ -252,7 +245,6 @@ test_zero_comments_ready() {
   assert_eq "result" "ready" "$(result_of "$out")" || return 1
   assert_eq "poll count" "1" "$(calls)" || return 1
 }
-run "zero inline comments is a complete review — ready" test_zero_comments_ready
 
 # --- Test 5: ci none accepted as ready ---------------------------------------
 test_ci_none_ready() {
@@ -263,7 +255,6 @@ test_ci_none_ready() {
   assert_eq "exit code" "0" "$rc" || return 1
   assert_eq "result" "ready" "$(result_of "$out")" || return 1
 }
-run "ci 'none' (no checks) counts as ready" test_ci_none_ready
 
 # --- Test 6: changes_requested is terminal -----------------------------------
 test_changes_requested() {
@@ -275,7 +266,6 @@ test_changes_requested() {
   assert_eq "result" "changes_requested" "$(result_of "$out")" || return 1
   assert_eq "poll count" "1" "$(calls)" || return 1
 }
-run "changes_requested is a terminal verdict" test_changes_requested
 
 # --- Test 6b: Copilot is always advisory — its CHANGES_REQUESTED does NOT gate -
 test_copilot_advisory_not_terminal() {
@@ -288,7 +278,6 @@ test_copilot_advisory_not_terminal() {
   assert_eq "exit code" "0" "$rc" || return 1
   assert_eq "result" "ready" "$(result_of "$out")" || return 1
 }
-run "Copilot CHANGES_REQUESTED does not gate — advisory only" test_copilot_advisory_not_terminal
 
 # --- Test 7: ci_failure is terminal ------------------------------------------
 test_ci_failure() {
@@ -299,7 +288,6 @@ test_ci_failure() {
   assert_eq "exit code" "0" "$rc" || return 1
   assert_eq "result" "ci_failure" "$(result_of "$out")" || return 1
 }
-run "ci failure is terminal (before waiting on reviews)" test_ci_failure
 
 # --- Test 8: dirty is terminal -----------------------------------------------
 test_dirty() {
@@ -311,7 +299,6 @@ test_dirty() {
   assert_eq "result" "dirty" "$(result_of "$out")" || return 1
   assert_eq "poll count" "1" "$(calls)" || return 1
 }
-run "conflicting branch surfaces as dirty" test_dirty
 
 # --- Test 9: pending_at_budget preserves the snapshot ------------------------
 test_pending_at_budget() {
@@ -325,7 +312,6 @@ test_pending_at_budget() {
   assert_eq "snapshot preserved (codex)" "none" "$(echo "$out" | jq -r '.reviews.codex.state')" || return 1
   assert_eq "snapshot preserved (ci)" "pending" "$(echo "$out" | jq -r '.ci.status')" || return 1
 }
-run "pending forever exits 1 with the snapshot intact" test_pending_at_budget
 
 # --- Test 10: arg-count validation -------------------------------------------
 test_arg_validation() {
@@ -335,7 +321,6 @@ test_arg_validation() {
   assert_eq "exit code" "2" "$rc" || return 1
   echo "$err" | grep -q "usage:" || { echo "    FAIL: missing usage line, got: ${err}" >&2; return 1; }
 }
-run "missing arg exits 2 with usage" test_arg_validation
 
 # --- Test 11: env-var validation ---------------------------------------------
 test_interval_zero_rejected() {
@@ -346,7 +331,6 @@ test_interval_zero_rejected() {
   assert_eq "exit code" "2" "$rc" || return 1
   echo "$err" | grep -q "WATCH_PR_REVIEWS_INTERVAL_SEC" || { echo "    FAIL: should name INTERVAL var, got: ${err}" >&2; return 1; }
 }
-run "INTERVAL_SEC=0 rejected with named diagnostic" test_interval_zero_rejected
 
 test_interval_gt_budget_rejected() {
   reset_mocks
@@ -359,7 +343,6 @@ test_interval_gt_budget_rejected() {
   assert_eq "exit code" "2" "$rc" || return 1
   echo "$err" | grep -q "cannot exceed" || { echo "    FAIL: should explain interval-vs-budget, got: ${err}" >&2; return 1; }
 }
-run "INTERVAL_SEC > BUDGET_SEC rejected" test_interval_gt_budget_rejected
 
 # --- Test 12: poll failure surfaces as rc 2 ----------------------------------
 test_poll_failure() {
@@ -370,7 +353,6 @@ test_poll_failure() {
   assert_eq "exit code" "2" "$rc" || return 1
   echo "$err" | grep -q "poll-pr-reviews.sh failed" || { echo "    FAIL: should name poll failure, got: ${err}" >&2; return 1; }
 }
-run "poll-pr-reviews.sh failure exits 2" test_poll_failure
 
 # --- Test 13: non-JSON snapshot surfaces as rc 2 -----------------------------
 test_non_json() {
@@ -381,8 +363,34 @@ test_non_json() {
   assert_eq "exit code" "2" "$rc" || return 1
   echo "$err" | grep -q "non-JSON" || { echo "    FAIL: should flag non-JSON, got: ${err}" >&2; return 1; }
 }
-run "non-JSON snapshot exits 2" test_non_json
 
-echo
-echo "results: ${PASS_COUNT} pass, ${FAIL_COUNT} fail"
-exit "$FAIL_COUNT"
+# `run_suite`, not `main`: the sourced script under test owns `main`.
+# Progress goes to stderr; stdout carries one JSON result.
+run_suite() {
+  echo "test_watch_pr_reviews.sh" >&2
+  run "an unrequested Copilot lane is diagnosed without waiting" test_unrequested_copilot_is_immediate
+  run "a requested Copilot lane still waits for its verdict" test_requested_copilot_still_waits
+  run "a snapshot without the requested field keeps waiting" test_missing_requested_field_still_waits
+  run "ready on first poll — no sleep" test_ready_first_poll
+  run "RULED policy review plus green is ready" test_ruled_is_ready
+  run "deferred ready polls until both bots post" test_deferred_ready
+  run "lone codex verdict is not ready — waits for both bots" test_both_bots_required
+  run "zero inline comments is a complete review — ready" test_zero_comments_ready
+  run "ci 'none' (no checks) counts as ready" test_ci_none_ready
+  run "changes_requested is a terminal verdict" test_changes_requested
+  run "Copilot CHANGES_REQUESTED does not gate — advisory only" test_copilot_advisory_not_terminal
+  run "ci failure is terminal (before waiting on reviews)" test_ci_failure
+  run "conflicting branch surfaces as dirty" test_dirty
+  run "pending forever exits 1 with the snapshot intact" test_pending_at_budget
+  run "missing arg exits 2 with usage" test_arg_validation
+  run "INTERVAL_SEC=0 rejected with named diagnostic" test_interval_zero_rejected
+  run "INTERVAL_SEC > BUDGET_SEC rejected" test_interval_gt_budget_rejected
+  run "poll-pr-reviews.sh failure exits 2" test_poll_failure
+  run "non-JSON snapshot exits 2" test_non_json
+  printf '{"suite":"test_watch_pr_reviews.sh","passed":%d,"failed":%d}\n' "$PASS_COUNT" "$FAIL_COUNT"
+  [[ $FAIL_COUNT -eq 0 ]]
+}
+
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+  run_suite
+fi
