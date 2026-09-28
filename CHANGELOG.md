@@ -1,5 +1,21 @@
 # Changelog
 
+### Fixed
+
+- **A retained fix round's `de_escalated` now describes the tier it runs at
+  (#591).** A retained-context developer fix keeps the preceding round's
+  verified effort, which can sit above the planned one, but the plan's
+  `de_escalated` flag was copied through unchanged. Under scarcity a plan
+  could record a declined effort escalation while the retained worker ran at
+  that very effort. The flag keeps the meaning #490 gave it in `tiers.py`: a
+  downgrade that actually took effect. New `tiers.still_de_escalated`
+  recomputes it against `_escalated`'s target: a kept effort that reaches the
+  declined step clears it, one still below keeps it, and a declined model
+  switch keeps it whatever the effort (retention never switches model). The
+  retained adjustment moved from `assign.apply` into `assign.retained_tier`,
+  which also shares the new `tiers.EFFORT_RANK`. The tier system is dormant in
+  production, so no recorded row changes.
+
 ## 0.3.309 — 2026-09-28
 
 ### Added
