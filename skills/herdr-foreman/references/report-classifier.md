@@ -20,8 +20,12 @@ are the owners' contracts.
 - The questions live in `skills/herdr-foreman/classify/report-questions.json`.
   Changing one changes every label's `question` hash; update the file's
   `changed` date with it.
-- Exit behaviour and the deterministic checks that refuse a report before any
-  call are in the `skills/herdr-foreman/classify/classify-report.sh` header.
+- Step 12 runs the batch, `skills/herdr-foreman/classify/classify-reports.sh`.
+  Its exit contract is in that script's header. A failed classification lands
+  in `unannotated` and is never fatal. Exit 2 is a usage error, and its output
+  is never used as labels.
+- The deterministic checks that refuse one report before any call are in the
+  `skills/herdr-foreman/classify/classify-report.sh` header.
 
 ## Adapters
 

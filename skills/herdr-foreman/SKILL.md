@@ -578,8 +578,8 @@ under `references/specialists.md` before retiring its enrollment.
 
 Record user-facing obligations in the attention queue. Acknowledge only handled
 event IDs through the saved snapshot; schedule pending rechecks. Record no
-assessed outcome and close no enrollment here: acceptance is recorded in
-Step 12, after the round's gates exist. Complete due
+assessed outcome and close no enrollment here.
+Step 12 records acceptance after the round's gates exist. Complete due
 retrospectives between checkpoints without interrupting workers. Resume the fleet
 watch while any observation obligation remains; one blocked worker never hides
 another worker's report. Proceed to Step 12 when the required reports are delivered
@@ -594,8 +594,9 @@ CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"; [ -d "$
 bash "$CP/skills/herdr-foreman/classify/classify-reports.sh" <report>... > <labels.json>
 ```
 
-A report in the output's `unannotated` list gets no gate and is gated exactly as
-it would have been.
+On exit 2 (usage error), fix the arguments stderr names and rerun before using
+`<labels.json>`. A report in the output's `unannotated` list gets no gate and is
+gated exactly as it would have been.
 
 Read every report file in full, including a report whose worker exited cleanly.
 A `## BLOCKED` section can sit under a report that otherwise reads as finished.
