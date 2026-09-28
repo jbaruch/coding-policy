@@ -101,10 +101,12 @@ it refuses. The selection is `_select_foreman_tier` in
 `skills/herdr-foreman/foreman/cli.py`. The planner never seats the foreman on a
 worker: `plan --roles foreman` is refused.
 
-Start the foreman from any shell, naming an empty Herdr shell pane:
+Start the foreman from any shell, naming an empty Herdr shell pane. This is a
+synopsis; the runnable command, through `bash` and the resolved plugin root,
+is `skills/herdr-foreman/SKILL.md` Step 2:
 
 ```text
-bash "$CP/skills/herdr-foreman/foreman.sh" start-foreman --pane <pane-id>
+foreman start-foreman --pane <pane-id>
 ```
 
 It selects the tier, starts the configured agent with exactly `launch_args`
