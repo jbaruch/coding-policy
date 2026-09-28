@@ -6,8 +6,9 @@ description: >
   Covers on-demand specialists, model tiers, bounded briefs,
   report verification, and release gates. Use for requests to dispatch the Herdr
   team, balance worker usage, collect reports, run or retrieve retrospectives,
-  catch up on outstanding user attention, curate team lessons, or save and resume
-  foreman handoffs. Live rounds require HERDR_ENV; saved memory and attention work
+  catch up on outstanding user attention, curate team lessons, save and resume
+  foreman handoffs, or report a task's cost or resource use through acceptance.
+  Live rounds require HERDR_ENV; saved memory, attention and cost reports work
   offline. Other standalone tasks skip this skill.
 ---
 
@@ -109,7 +110,7 @@ user-attention blocker naming `foreman migrate-home` (`skills/herdr-foreman/stat
 Migration), and run nothing else until the operator has stopped every foreman
 and run it.
 
-Three request kinds are answered offline, need no live Herdr, and finish here
+Four request kinds are answered offline, need no live Herdr, and finish here
 after the requested operation. Each reference carries its own owner commands and
 their contracts. Use the recorded state override or default, report any non-zero
 diagnostic, and never fabricate missing history. They grant no new task
@@ -121,6 +122,19 @@ authority.
   `references/working-memory.md`.
 - **A saved retrospective** — `references/retrospectives.md`. Report the note's
   date, coverage, conclusions, and path.
+- **A task's cost or resource use** — run the read-only report, omitting
+  `--task` for every task:
+
+  ```bash
+  CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"; [ -d "$CP" ] || case "$(git config --get remote.origin.url)" in git@github.com:jbaruch/coding-policy|git@github.com:jbaruch/coding-policy.git|https://github.com/jbaruch/coding-policy|https://github.com/jbaruch/coding-policy.git|ssh://git@github.com/jbaruch/coding-policy|ssh://git@github.com/jbaruch/coding-policy.git) CP=. ;; *) echo "coding-policy plugin not found: run tessl install jbaruch/coding-policy" >&2; exit 1 ;; esac
+  bash "$CP/skills/herdr-foreman/foreman.sh" cost-report --task <task>
+  ```
+
+  It prints JSON with a `tasks` list and an `unrecorded` list. Relay each
+  quantity separately, and every `unknown` value as `unknown`. Never total the
+  quantities or claim a saving. A non-zero exit writes its diagnostic to stderr
+  for an unusable state file or an unknown task; report it and stop. The output
+  contract is `skills/herdr-foreman/state-schema.md` (Writer / Reader Contract).
 
 For every other request, read `HERDR_ENV` before running scripts.
 

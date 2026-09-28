@@ -49,9 +49,10 @@ from .measure import (
 )
 from .planner import plan as build_plan
 from .planner import headroom_of
-from .tiers import (COORDINATION_ROUND, FOREMAN_ROLE, JUDGMENT_ROUNDS, ROLE_ROUNDS, MissingTierError,
+from .tiers import (COORDINATION_ROUND, FOREMAN_ROLE, JUDGMENT_ROUNDS, MissingTierError,
                     measured_pressure, parse_launch_args, parse_tiers, select_tier)
 from .billing import billing_window, effective_multiplier
+from . import cost_report, selection
 from .launch import start_foreman, start_worker, verify_foreman, verify_running
 from .state import (
     add_assignment,
@@ -418,6 +419,9 @@ def build_parser():
     check_member.add_argument("--worktree", help="The worker's own checkout, when it has one.")
     sub.add_parser("migrate-home", parents=[common], help="Move the state and config homes from teamlead to foreman, once per machine, with every foreman stopped.")
     sub.add_parser("foreman-queue", parents=[common], help="List open tasks waiting for their next seat, oldest first, derived from the owner records.")
+    cost_parser = sub.add_parser("cost-report", parents=[common],
+                                 help="Report each task's resource use through acceptance from the owner records. Read-only.")
+    cost_parser.add_argument("--task", help="Report this task alone.")
     load_parser = sub.add_parser("load-set", parents=[common], help="List the durable records one foreman decision must load, derived from the owner records.")
     load_parser.add_argument("--decision", required=True, choices=load_set.DECISIONS)
     load_target = load_parser.add_mutually_exclusive_group(required=True)
@@ -652,28 +656,6 @@ def _build_plan_with_refusals(build, refusals, *args, **kwargs):
 PLAN_ONLY_TIER_FIELDS = frozenset({"capability", "cheaper_adequate"})
 
 
-def _cheaper_adequate(agent, role, tier, needs, table):
-    """A configured row cheaper than `tier` that the table records adequate for the same needs, or None.
-
-    Recorded, never selected: the operator owns the table and the config, and
-    this only explains why a cheaper candidate was not used (#520).
-    """
-    cost = tier["effective_multiplier"]
-    allowed = ROLE_ROUNDS.get(canonical_role(role), frozenset())
-    for name, row in sorted(agent.tiers.items()):
-        if name not in allowed:
-            # A row this role can never run explains nothing about its choice.
-            continue
-        if (row["model"], row.get("effort")) == (tier["model"], tier.get("effort")) or effective_multiplier(row) >= cost:
-            continue
-        try:
-            if capabilities.assess(table, row["model"], row.get("effort"), needs) == "adequate":
-                return {"model": row["model"], "effort": row.get("effort"), "tier_row": name,
-                        "sources": capabilities.evidence(table, row["model"], row.get("effort"), needs)}
-        except capabilities.InadequateCapability:
-            continue
-    return None
-
 
 def _candidate_tiers(roles, agents, rounds, fix_round=None, judge=None, excludes=None, headroom=None, table=None, refusals=None):
     """Each role's candidate tiers; `refusals` collects a capability refusal per skipped candidate."""
@@ -729,7 +711,7 @@ def _candidate_tiers(roles, agents, rounds, fix_round=None, judge=None, excludes
             )}
             candidates[role][agent.name].update(
                 capability=verdict,
-                cheaper_adequate=_cheaper_adequate(agent, role, tier, needs, table))
+                cheaper_adequate=selection.cheaper_adequate(agent, role, tier, needs, table))
     return candidates
 
 
@@ -981,9 +963,10 @@ def cmd_plan(args, client=None, warn=None, trace=None):
     # what keeps its recomputed tiers equal to the planned ones (#477).
     measured_headroom = _snapshot_headroom(snapshot)
     capability_refusals = []
+    table = capabilities.load(_state_path(args))
     tier_candidates = _candidate_tiers(canonical, agents, rounds, args.fix_round, judge,
                                       excludes={role: names for role, names in excludes.items() if role in set(canonical)},
-                                      headroom=measured_headroom, table=capabilities.load(_state_path(args)),
+                                      headroom=measured_headroom, table=table,
                                       refusals=capability_refusals)
     constraints = {**constraints, "rationale": constraints["rationale"] + [
         "{} was not considered for {}: {}".format(row["agent"], row["role"], row["message"]) for row in capability_refusals]}
@@ -1027,6 +1010,11 @@ def cmd_plan(args, client=None, warn=None, trace=None):
         )
     result["task_context"] = ({"task": args.task, "fix_round": args.fix_round,
                                "plan": args.correction_plan, "work": work} if args.task else None)
+    # Why each seat got its model and effort, from the same tiers, table and
+    # round inputs the selection read; explanation only, never re-read at apply (#602).
+    result["selection"] = selection.records(
+        result["assignments"], result.get("tiers"), {agent.name: agent for agent in agents},
+        requirements, rounds, args.fix_round, table)
     # A patch or fixture oracle is a path; pin the bytes behind it now, so
     # `verify-oracle` checks the round against the file it was licensed on (#488).
     pins = oracle.pin_oracles(result.get("rounds"))
@@ -1740,6 +1728,17 @@ def cmd_foreman_queue(args, client=None, warn=None, trace=None):
     return foreman_queue.waiting(state["recovery"], state["assignments"], busy), None
 
 
+def cmd_cost_report(args, client=None, warn=None, trace=None):
+    state_path = _state_path(args)
+    # An unusable ledger is not an empty one: reporting no tasks would read as
+    # no resource spent.
+    state, usable = load_state_checked(state_path, warn=warn, persist_migration=False)
+    if not usable:
+        raise StateError("State file {} is unusable, so no task's resource use can be derived; repair or migrate it with `{}` first.".format(
+            state_path, runnable.command("state")), {"path": str(state_path)})
+    return cost_report.report(state, args.task), None
+
+
 def cmd_load_set(args, client=None, warn=None, trace=None):
     if (args.decision == "wake") != (args.enrollment is not None):
         raise UsageError("Pass --enrollment for wake and --task for every other decision.", {"decision": args.decision})
@@ -2028,8 +2027,13 @@ def _select_foreman_tier(args, seat, warn):
     return {**tier, "capability": verdict, "cheaper_adequate": None}
 
 
-def _foreman_seat_result(seat, pane, tier, proof):
-    return {**seat.as_dict(), "configured": True, "pane": pane, "tier": tier, "argv_verified": True, "verified": proof}
+def _foreman_seat_result(args, seat, pane, tier, proof):
+    # The same selection record a planned seat carries (#602), for the one
+    # seat the planner never selects.
+    record = selection.records({FOREMAN_ROLE: seat.agent}, {FOREMAN_ROLE: tier}, {seat.agent: seat},
+                               None, None, None, capabilities.load(_state_path(args)))[FOREMAN_ROLE]
+    return {**seat.as_dict(), "configured": True, "pane": pane, "tier": tier, "selection": record,
+            "argv_verified": True, "verified": proof}
 
 
 def cmd_start_foreman(args, client=None, warn=None, trace=None):
@@ -2038,7 +2042,7 @@ def cmd_start_foreman(args, client=None, warn=None, trace=None):
         raise UsageError(_foreman_unconfigured(_config_path(args)), {"config": str(_config_path(args))})
     tier = _select_foreman_tier(args, seat, warn)
     client = client if client is not None else _client(args, trace=trace)
-    return _foreman_seat_result(seat, args.pane, tier, start_foreman(client, seat, args.pane, tier)), None
+    return _foreman_seat_result(args, seat, args.pane, tier, start_foreman(client, seat, args.pane, tier)), None
 
 
 def cmd_verify_foreman(args, client=None, warn=None, trace=None):
@@ -2056,7 +2060,7 @@ def cmd_verify_foreman(args, client=None, warn=None, trace=None):
         return {"configured": False, "pane": pane, "warning": _foreman_unconfigured(_config_path(args))}, None
     tier = _select_foreman_tier(args, seat, warn)
     client = client if client is not None else _client(args, trace=trace)
-    return _foreman_seat_result(seat, pane, tier, verify_foreman(client, seat, pane, tier)), None
+    return _foreman_seat_result(args, seat, pane, tier, verify_foreman(client, seat, pane, tier)), None
 
 
 def cmd_capability(args, client=None, warn=None, trace=None):
@@ -2292,6 +2296,7 @@ COMMANDS = {
     "state": cmd_state,
     "status": cmd_status,
     "foreman-queue": cmd_foreman_queue,
+    "cost-report": cmd_cost_report,
     "foreman-reset": cmd_foreman_reset,
     "foreman-reset-deliver": cmd_foreman_reset_deliver,
     "foreman-reset-reconcile": cmd_foreman_reset_reconcile,
@@ -2362,7 +2367,7 @@ def main(argv=None, stdout=None, stderr=None, client=None):
             home.require_current(defaults)
             # Commands that may migrate or write state share its canonical lock.
             # Dry runs, probes, and retrospective reads remain read-only.
-            readonly = args.command in {"probe-report", "marker-fit", "detect-triggers", "validate-partition", "verify-oracle", "retro-check", "retro-list", "retro-show", "capability-check", "capability-show", "supervision-gate", "load-set", "foreman-queue", "check-member", "verify-foreman"} or getattr(args, "dry_run", False)
+            readonly = args.command in {"probe-report", "marker-fit", "detect-triggers", "validate-partition", "verify-oracle", "retro-check", "retro-list", "retro-show", "capability-check", "capability-show", "supervision-gate", "load-set", "foreman-queue", "cost-report", "check-member", "verify-foreman"} or getattr(args, "dry_run", False)
             # The deliverer starts while `foreman-reset` still holds the state lock;
             # it serializes on the reset record's own lock instead. close-member
             # writes only through the supervision owner's own lock.

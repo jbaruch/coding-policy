@@ -176,6 +176,9 @@ ORACLE_DIGEST = re.compile(r"[0-9a-f]{64}\Z")
 XHIGH_MIN_RISKS = 2
 XHIGH_CONTEXT_BYTES = 250000
 BUILD_FAILED_GATES = 2
+#: The cumulative fix round from which every round resolves on the `review`
+#: row: fix rounds 4 and later go to a freshly cleared worker at full strength.
+REVIEW_ROW_FIX_ROUND = 4
 #: Measured remaining headroom, in percent, at or below which a DISCRETIONARY
 #: escalation is declined on a non-judgment round. The audited fleet spent a
 #: weekly Codex window at roughly 0.75 points per round, so twenty points is
@@ -572,7 +575,7 @@ def select_tier(agent, role, round_type=None, context=None, fix_round=None, head
     chosen_round = round_type
     if round_type == "build" and _nonnegative_int(context, "failed_gates") >= BUILD_FAILED_GATES:
         chosen_round = "review"
-    if fix_round is not None and fix_round >= 4:
+    if fix_round is not None and fix_round >= REVIEW_ROW_FIX_ROUND:
         chosen_round = "review"
     if chosen_round not in agent.tiers:
         raise MissingTierError("Agent {} has no {!r} tier; add the required row before planning.".format(agent.name, chosen_round), {})
@@ -616,6 +619,53 @@ def select_tier(agent, role, round_type=None, context=None, fix_round=None, head
         "pressure_headroom": pressure, "de_escalated": de_escalated,
         "billing_window": billing_window(tier), "effective_multiplier": effective_multiplier(tier),
     }
+
+
+def escalation_conditions(role, tier, context=None, fix_round=None):
+    """What moves this seat to a stronger row or effort, and whether each condition fired.
+
+    Plan data explaining `select_tier`, never a second selection: every
+    condition that fired is already in `tier`. Each condition names the
+    round-context `field` (or `fix_round`), the comparison, the `effect`, and
+    `fired`. `pressure` states whether measured headroom may decline the
+    discretionary effort step, and whether it did. The pinned judge escalates
+    on nothing: its model and effort are pinned (#602).
+    """
+    if role == "judge" or tier.get("round") == "judge":
+        return {"conditions": [], "pressure": {"declines_at_or_below_pct": None, "de_escalated": False}}
+    context = context or {}
+    base = canonical_role(role)
+    round_type = tier["round"]
+    conditions = []
+    if round_type == "build":
+        conditions.append({"field": "failed_gates", "op": ">=", "value": BUILD_FAILED_GATES,
+                           "effect": {"tier_row": "review"},
+                           "fired": _nonnegative_int(context, "failed_gates") >= BUILD_FAILED_GATES})
+    conditions.append({"field": "fix_round", "op": ">=", "value": REVIEW_ROW_FIX_ROUND,
+                       "effect": {"tier_row": "review"},
+                       "fired": fix_round is not None and fix_round >= REVIEW_ROW_FIX_ROUND})
+    if base in CONSULTATION_ESCALATION:
+        for flag in ESCALATION_EVIDENCE[base]:
+            conditions.append({"field": flag, "op": "==", "value": True,
+                               "effect": {"round": CONSULTATION_ESCALATION[base]},
+                               "fired": context.get(flag) is True})
+    # `_escalated`: a non-top row moves to the `review` row's top model, and
+    # only the kinds with an effort above `high` raise it.
+    raise_effort = {"model": "top"}
+    if tier.get("kind") in {"claude", "codex"}:
+        raise_effort["effort"] = "xhigh"
+    conditions.extend([
+        {"field": "risk_flags", "op": "distinct>=", "value": XHIGH_MIN_RISKS, "effect": raise_effort,
+         "fired": len(set(context.get("risk_flags") or [])) >= XHIGH_MIN_RISKS},
+        {"field": "input_bytes", "op": ">", "value": XHIGH_CONTEXT_BYTES, "effect": raise_effort,
+         "fired": _nonnegative_int(context, "input_bytes") > XHIGH_CONTEXT_BYTES},
+        {"field": "prior_high_miss", "op": "==", "value": True, "effect": raise_effort,
+         "fired": context.get("prior_high_miss") is True},
+    ])
+    judgment = round_type in JUDGMENT_ROUNDS or tier.get("tier_row") in JUDGMENT_ROUNDS
+    return {"conditions": conditions,
+            "pressure": {"declines_at_or_below_pct": None if judgment else PRESSURE_HEADROOM_PCT,
+                         "de_escalated": bool(tier.get("de_escalated"))}}
 
 
 def launch_flags(kind, tier):

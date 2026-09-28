@@ -167,7 +167,11 @@ class CommandTest(unittest.TestCase):
         code, out, err = self.run_cli(["start-foreman", "--pane", "w1:p0"], client)
         self.assertEqual(code, 0, err)
         self.assertEqual(client.starts[0][3][-4:], ["--model", "sonnet-5", "--effort", "medium"])
-        self.assertEqual(json.loads(out)["tier"]["tier_row"], "coordination")
+        result = json.loads(out)
+        self.assertEqual(result["tier"]["tier_row"], "coordination")
+        # The seat carries the same selection record a planned seat does (#602).
+        self.assertEqual((result["selection"]["agent"], result["selection"]["round"]), ("foreman", "coordination"))
+        self.assertEqual(result["selection"]["required_capabilities"]["model"], ["mechanical-execution"])
 
     def test_the_cheapest_adequate_row_wins_and_is_what_launches(self):
         self.record("claude-haiku-4-5", "default", "adequate")
