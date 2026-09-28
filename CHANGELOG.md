@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.325 — 2026-09-28
+
 ### Fixed
 
 - **Herdr reports directories no longer grow into build caches (#622).** The
