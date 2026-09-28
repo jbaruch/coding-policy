@@ -149,7 +149,7 @@ instruction into permission to exceed an exhausted correction budget.
 | `import-correction` | Fields under Historical manual corrections below | Import an already authorized, completed manual attempt without sending input or granting future attempts. |
 | `record-historical-review` | unique `id`, `historical_attempt`, full `head_revision`, `verdict`, `review_mode`, independent `reviewer`, absolute `report` | Append an actual review receipt for an imported correction. Full review is required for approval; other verification gates remain separate. |
 | `recover-report` | unique `id`, original `dispatch`, absolute `report`, `wait_receipt`, `pane`, `visible`, `source` | Append evidence of a completed delivery missed by the old watcher; see Completed native report recovery. No worker input or review approval. |
-| `assess-specialist` | `id`, actual `dispatch`, absolute `report` and successful `delivery` receipt, foreman `outcome`, `contribution`, `summary` | Record delivered consultation or verifier work under `skills/herdr-foreman/references/specialists.md`; no task completion or enrollment retirement. |
+| `assess-specialist` | `id`, actual `dispatch`, absolute `report` and successful `delivery` receipt, `outcome` and `summary` quoted from the report, optional `contribution` (the owner derives it from the report and refuses a differing value) | Record delivered consultation or verifier work under `skills/herdr-foreman/references/specialists.md`; no task completion or enrollment retirement. |
 
 `allowed_paths` contains repository-relative paths or globs. Preserve the
 original task and base across every approval. Read and verify the source diff
