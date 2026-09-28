@@ -17,16 +17,21 @@
     `common` paths every dispatch row records, whose directory is the one
     `compose-briefs.sh` wrote), never by scanning `~/.local/state`, where
     other tools (cmux, gh, pnpm) keep their own state. A directory is pruned
-    only when nothing below it changed for a day, so a live worker's build
-    never loses its cache mid-compile. A cache is removed only when both its
+    only when no active supervision enrollment reports into it and nothing
+    below it changed for a day, so a live worker's build never loses its
+    cache mid-compile, even a worker quiet for longer than a day; an
+    unreadable supervision store stops the prune rather than guessing. A cache is removed only when both its
     name and its content signature match (a Go build cache's README, a
     module cache's `cache/download`, `pyvenv.cfg`, `_cacache`, only `.pyc`
     files, and so on); a `venv` holding notes, or a `before/` holding a
     source snapshot, stays. Symlinks are never followed, directories outside
     the state root are skipped, and the ledger is read without migrating it.
-    A cache is renamed to a tombstone before removal, so a removal cut short
+    Removal walks by directory descriptor with `O_NOFOLLOW`, so a link
+    swapped in mid-run is never entered. A cache gets a marker naming its
+    kind and is renamed to a tombstone before removal, so a removal cut short
     by the hook's budget is finished next session instead of leaving a
-    signature-less half-cache no run would recognize.
+    signature-less half-cache no run would recognize; a directory that only
+    carries the tombstone suffix, without that marker, is never touched.
   - New session-start hook `hooks/check-report-caches.sh` runs it live and
     reports the reclaimed size: the fix is mechanical and the caches are
     regenerable, so the hook acts rather than warns. It mirrors

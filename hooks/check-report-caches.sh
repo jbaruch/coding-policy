@@ -138,6 +138,12 @@ main() {
   }
   trap discard RETURN
 
+  case "$BUDGET_SEC" in
+    '' | *[!0-9]* | 0*)
+      warn "REPORT_CACHES_BUDGET_SEC must be a positive whole number of seconds — unset it or set one, e.g. 30"
+      static_cannot_check "REPORT_CACHES_BUDGET_SEC is not a positive whole number of seconds; unset it or set one, e.g. 30."
+      return 0 ;;
+  esac
   local soft=$(( BUDGET_SEC - SOFT_MARGIN_SEC ))
   (( soft > 0 )) || soft=1
   local -a args=(--budget-sec "$soft")

@@ -18,11 +18,15 @@ Covers:
   5. Outside the root    -> a recorded directory outside the root is skipped.
   6. Missing directory   -> counted, never an error.
   7. Read-only cache     -> a Go module cache with read-only dirs is removed.
-  8. Interrupted removal -> a leftover tombstone is finished.
+  8. Interrupted removal -> a leftover tombstone carrying its kind marker is
+                            finished; a suffixed directory without one stays.
   9. Unusable ledger     -> could_not_check, nothing removed, exit 0.
  10. No ledger           -> nothing to do, exit 0.
  11. Out of budget       -> incomplete, nothing started after the budget.
- 12. Usage error         -> a non-positive budget exits 1.
+ 12. Usage error         -> a non-positive or non-finite budget exits 1.
+ 13. Active assignment   -> an active supervision enrollment whose report is
+                            in the directory keeps it whole, however old.
+ 14. Unusable supervision-> could_not_check, nothing removed.
 """
 
 import argparse
@@ -41,6 +45,7 @@ SCRIPT = HERE.parent / "prune-report-caches.py"
 sys.path.insert(0, str(HERE.parent))
 
 from foreman import state as ledger
+from foreman import supervision
 
 FIXTURE_TIME = 1577836800.0  # 2020-01-01T00:00:00Z
 NOW = FIXTURE_TIME + 25 * 3600
@@ -274,13 +279,47 @@ class PruneReportCachesTests(unittest.TestCase):
 
     def test_leftover_tombstone_is_finished(self):
         top = self.fx.reports(caches=())
-        write(top / "developer-evidence" / "venv.prune-report-caches-removing" / "lib" / "x.py")
+        tomb = top / "developer-evidence" / "venv.prune-report-caches-removing"
+        write(tomb / "lib" / "x.py")
+        write(tomb / ".prune-report-caches-kind", "virtualenv\n")
+        impostor = top / "notes.prune-report-caches-removing"
+        write(impostor / "findings.md")
+        forged = top / "forged.prune-report-caches-removing"
+        write(forged / ".prune-report-caches-kind", "evidence\n")
         self.fx.save()
         age(top)
         rc, doc, err = run(self.fx)
         self.assertEqual(rc, 0, err)
-        self.assertFalse(os.path.lexists(top / "developer-evidence" / "venv.prune-report-caches-removing"))
+        self.assertFalse(os.path.lexists(tomb))
+        self.assertTrue((impostor / "findings.md").is_file())
+        self.assertTrue((forged / ".prune-report-caches-kind").is_file())
         self.assertEqual([c["kind"] for c in doc["caches"]], ["interrupted-removal"])
+
+    def test_active_enrollment_keeps_the_directory(self):
+        top = self.fx.reports()
+        self.fx.save()
+        who = supervision.identity("lead", str(self.fx.root), "fixture", pane_id="lead-pane")
+        supervision.bind(str(self.fx.state), who, AT, root=str(self.fx.root / "bindings"))
+        supervision.enroll(str(self.fx.state), {"id": "d0", "agent": "w0", "task": "t0",
+                                                "report": str(top / "developer.md"), "pane_id": "w0-pane",
+                                                "native_session": None}, AT)
+        age(top)
+        rc, doc, err = run(self.fx)
+        self.assertEqual(rc, 0, err)
+        self.assertEqual(doc["caches"], [])
+        self.assertEqual(doc["skipped"], [{"path": str(top), "reason": "active_assignment"}])
+        self.assertTrue((top / CACHE_PATHS["virtualenv"]).is_dir())
+
+    def test_unusable_supervision_store_removes_nothing(self):
+        top = self.fx.reports()
+        self.fx.save()
+        Path(str(self.fx.state) + ".supervision.json").write_text("{not json")
+        age(top)
+        rc, doc, err = run(self.fx)
+        self.assertEqual(rc, 0, err)
+        self.assertIsNotNone(doc["could_not_check"])
+        self.assertEqual(doc["caches"], [])
+        self.assertTrue((top / CACHE_PATHS["virtualenv"]).is_dir())
 
     def test_unusable_ledger_removes_nothing(self):
         top = self.fx.reports()
@@ -318,10 +357,12 @@ class PruneReportCachesTests(unittest.TestCase):
         for rel in CACHE_PATHS.values():
             self.assertTrue((top / rel).is_dir(), rel)
 
-    def test_non_positive_budget_is_a_usage_error(self):
-        done = run_raw(self.fx, "--budget-sec", "0")
-        self.assertEqual(done.returncode, 1)
-        self.assertEqual(done.stdout, "")
+    def test_bad_budget_is_a_usage_error(self):
+        for value in ("0", "-1", "nan", "inf"):
+            with self.subTest(budget=value):
+                done = run_raw(self.fx, "--budget-sec", value)
+                self.assertEqual(done.returncode, 1)
+                self.assertEqual(done.stdout, "")
 
 
 if __name__ == "__main__":

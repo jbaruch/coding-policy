@@ -12,7 +12,7 @@
 #
 # Covers:
 #   1. Idle caches          -> removed; one status naming the count.
-#   2. Nothing to remove    -> silent.
+#   2. Nothing to remove    -> a directory holding evidence alone: silent.
 #   3. Portable mode        -> nothing removed; the status names the command.
 #   4. Worker session       -> HERDR_ENV in a linked worktree: nothing removed,
 #                              nothing printed.
@@ -22,6 +22,10 @@
 #                              could-not-check line naming the budget.
 #   8. No python3           -> the fixed could-not-check JSON.
 #   9. Session start        -> session-start.sh lists this hook.
+#  10. Bad budget override  -> a could-not-check line naming the variable;
+#                              nothing removed.
+#
+# Every case builds its own fixture; no case reads state another left.
 #
 # The harness drops `set -e` to aggregate results; every fixture command is
 # checked explicitly (rules/error-handling.md aggregate-reporting carve-out).
@@ -48,14 +52,15 @@ cleanup() {
 }
 
 # Build a state root under <case>: a ledger naming one reports directory full
-# of caches and evidence, all idle. Prints the reports directory.
-build() { # <case> [corrupt]
+# of caches and evidence (evidence alone with `nocache`), all idle. Prints the
+# reports directory.
+build() { # <case> [corrupt|nocache]
   python3 - "$SUITE_DIR" "$1" "${2:-}" <<'PY'
 import sys
 sys.path.insert(0, sys.argv[1])
 from test_prune_report_caches import Fixture, age
 fx = Fixture(sys.argv[2])
-top = fx.reports()
+top = fx.reports(caches=()) if sys.argv[3] == "nocache" else fx.reports()
 fx.save()
 if sys.argv[3] == "corrupt":
     fx.state.write_text("{not json")
@@ -90,9 +95,11 @@ main() {
       && [[ "$(context "$OUT")" == "Session-start status — removed 8 regenerable build cache directories"* ]]; then pass
   else fail "case 1: rc=$RC out=$OUT err=$(cat "$TMP/err")"; fi
 
-  echo "2. a second run has nothing to report"
+  echo "2. evidence alone has nothing to report"
+  case="$TMP/c2"; mkdir -p "$case" || die "mkdir failed"
+  top="$(build "$case" nocache)" || die "fixture build failed"
   run_hook "$case" "$plain"
-  if [[ "$RC" == 0 && -z "$OUT" ]]; then pass; else fail "case 2: rc=$RC out=$OUT"; fi
+  if [[ "$RC" == 0 && -z "$OUT" && -f "$top/report.md" ]]; then pass; else fail "case 2: rc=$RC out=$OUT"; fi
 
   echo "3. portable mode removes nothing and names the command"
   case="$TMP/c3"; mkdir -p "$case" || die "mkdir failed"
@@ -116,6 +123,8 @@ main() {
   else fail "case 4: rc=$RC out=$OUT"; fi
 
   echo "5. portable mode in a linked worktree deletes nothing"
+  case="$TMP/c5"; mkdir -p "$case" || die "mkdir failed"
+  top="$(build "$case")" || die "fixture build failed"
   run_hook "$case" "$wt" SESSION_START_MODE=portable
   if [[ "$RC" == 0 && -z "$OUT" && -d "$top/developer-evidence/venv" ]]; then pass
   else fail "case 5: rc=$RC out=$OUT"; fi
@@ -151,6 +160,14 @@ main() {
   echo "9. session-start runs this hook"
   if grep -q '^HOOKS=(.*check-report-caches' "${HERE}/../session-start.sh"; then pass
   else fail "case 9: check-report-caches missing from session-start.sh HOOKS"; fi
+
+  echo "10. a bad budget override is a could-not-check line"
+  case="$TMP/c10"; mkdir -p "$case" || die "mkdir failed"
+  top="$(build "$case")" || die "fixture build failed"
+  run_hook "$case" "$plain" REPORT_CACHES_BUDGET_SEC=soon
+  if [[ "$RC" == 0 && -d "$top/developer-evidence/venv" ]] \
+      && [[ "$(context "$OUT")" == *"REPORT_CACHES_BUDGET_SEC is not a positive whole number"* ]]; then pass
+  else fail "case 10: rc=$RC out=$OUT"; fi
 
   echo ""
   echo "passed: $PASS, failed: $FAIL"
