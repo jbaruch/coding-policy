@@ -33,6 +33,7 @@ Sidecar (`<state>.report-gates.json`, schema in state-schema.md, Report Gates):
 """
 
 import copy
+from contextlib import contextmanager
 import hashlib
 import json
 from datetime import timezone
@@ -183,12 +184,83 @@ def load(path):
             or document["state_path"] != str(canonical_state(path)) or not isinstance(document["gates"], list)):
         raise StateError("Report gates {} has an unsupported schema or state identity; preserve it and update "
                          "the owner, never replace it with an empty record.".format(target), {})
-    for gate in document["gates"]:
-        if (not isinstance(gate, dict) or gate.get("schema_version") != SCHEMA_VERSION
-                or gate.get("level") not in LEVELS or gate.get("status") not in {"open", "cleared", "reread"}):
-            raise StateError("Report gates {} holds a record this owner cannot read; preserve it and update the "
-                             "owner.".format(target), {})
+    for index, gate in enumerate(document["gates"]):
+        problem = _gate_problem(gate)
+        if problem:
+            raise StateError("Report gates {} record {} is malformed ({}); preserve the file and restore or repair "
+                             "that record; a malformed gate is never read as no gate.".format(target, index, problem),
+                             {"record": index})
     return document
+
+
+GATE_FIELDS = frozenset({"schema_version", "report", "sha256", "level", "reason", "probabilities", "model",
+                         "question", "bands", "at", "status", "resolution"})
+RESOLUTION_FIELDS = frozenset({"at", "action", "by", "reason", "evidence"})
+#: The status each resolution action leaves.
+RESOLVED_STATUS = {"clear": "cleared", "reread": "reread"}
+
+
+def _sha(value):
+    return isinstance(value, str) and len(value) == 64 and all(char in "0123456789abcdef" for char in value)
+
+
+def _nonempty(value):
+    return isinstance(value, str) and bool(value.strip())
+
+
+def _gate_problem(gate):
+    """What is wrong with one saved gate record, or None."""
+    if not isinstance(gate, dict) or set(gate) != GATE_FIELDS:
+        return "fields other than {}".format(", ".join(sorted(GATE_FIELDS)))
+    if type(gate["schema_version"]) is not int or gate["schema_version"] != SCHEMA_VERSION:
+        return "unsupported schema_version"
+    if not _nonempty(gate["report"]) or not Path(gate["report"]).is_absolute():
+        return "report is not an absolute path"
+    if not _sha(gate["sha256"]):
+        return "sha256 is not a lowercase sha256"
+    if gate["level"] not in LEVELS:
+        return "unknown level"
+    if not all(_nonempty(gate[key]) for key in ("reason", "model", "bands", "at")):
+        return "reason, model, bands or at is empty"
+    if gate["question"] is not None and not isinstance(gate["question"], str):
+        return "question is not a string"
+    probabilities = gate["probabilities"]
+    if (not isinstance(probabilities, dict) or set(probabilities) != set(GATE_QUESTIONS)
+            or any(isinstance(p, bool) or not isinstance(p, (int, float)) or not 0 <= p <= 1
+                   for p in probabilities.values())):
+        return "probabilities do not cover the gate questions in [0, 1]"
+    resolution = gate["resolution"]
+    if gate["status"] == "open":
+        return None if resolution is None else "an open gate carries a resolution"
+    if gate["status"] not in RESOLVED_STATUS.values():
+        return "unknown status"
+    if not isinstance(resolution, dict) or set(resolution) != RESOLUTION_FIELDS:
+        return "a resolved gate lacks its resolution"
+    if RESOLVED_STATUS.get(resolution["action"]) != gate["status"]:
+        return "the resolution action and the gate's status disagree"
+    if resolution["by"] not in (CLEARERS if resolution["action"] == "clear" else REREADERS):
+        return "resolution names who may not resolve it"
+    if not _nonempty(resolution["reason"]) or not _nonempty(resolution["at"]):
+        return "resolution reason or at is empty"
+    evidence = resolution["evidence"]
+    if evidence is None:
+        return None if resolution["by"] == "operator" else "a worker or judge resolution cites no report"
+    if (not isinstance(evidence, dict) or set(evidence) != {"path", "sha256"} or not _nonempty(evidence["path"])
+            or not _sha(evidence["sha256"])):
+        return "resolution evidence is not a path and sha256"
+    return None
+
+
+@contextmanager
+def holding(path):
+    """Hold the sidecar lock across a gate check and the decision it guards.
+
+    A caller checking `require_clear` and then committing an acceptance holds
+    this for both, so no gate can be recorded in between. Writers take the
+    same non-blocking lock and refuse while it is held.
+    """
+    with state_lock(storage_path(path)):
+        yield
 
 
 def open_gates(path, report):

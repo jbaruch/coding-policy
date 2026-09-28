@@ -48,7 +48,14 @@
   that worker's report through `report-gate-reread`). The foreman records
   resolutions and decides none: a worker or judge resolution cites the report
   carrying it, bound to its sha256, and a re-read never cites the gated report
-  itself.
+  itself. Every saved gate record is validated whole, so a malformed one
+  refuses every reader with a `StateError` instead of a `KeyError`, and
+  `close-member` and `record-report` hold the sidecar lock from their gate
+  check through their commit, so a gate recorded in between is refused
+  (Copilot on #617). `classify-report.sh` reads each report once into a
+  snapshot that every adapter, the evidence check and the label's sha256
+  share, and `evaluate.sh` refuses to report a score whose labels and
+  failures do not add up to the selected reports.
   `close-member` refuses an `accepted` closure under an open block and any
   closure under an open re-read; `record-report` does the same for `approved`
   and for any verdict respectively. Low confidence, `insufficient_evidence`,

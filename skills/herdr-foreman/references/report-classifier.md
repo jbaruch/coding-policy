@@ -67,7 +67,10 @@ calibrated. It restates no threshold; the constants live at the top of
 `probabilities`, `model`, `question`, `bands`, `at`, `status`
 (`open`|`cleared`|`reread`) and `resolution` (`null`, or `at`, `action`, `by`
 (`worker`|`judge`|`operator`), `reason`, `evidence` (`null` for an operator, or
-`path` and `sha256`)). Writes take the sidecar's own lock. A missing file is first use;
+`path` and `sha256`)). Every record is validated whole on every read. Writes
+take the sidecar's own lock. `close-member` and `record-report` hold that lock
+from their gate check through their commit, so a gate recorded meanwhile is
+refused rather than slipped in between. A missing file is first use;
 an unreadable or unsupported one refuses every reader, never reading as no
 gates. `close-member` and `record-report` read it and never write it.
 

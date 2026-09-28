@@ -197,6 +197,7 @@ json.dump({"since": since or None, "changed": changed, "held_out": bool(since) a
   local total
   total="$(python3 -c 'import json,sys; print(len(json.load(open(sys.argv[1]))))' "$selected")" \
     || die "cannot read the corpus it just built at ${selected}"
+  case "$total" in ''|*[!0-9]*) die "the corpus count '${total}' is not a number; inspect ${selected}" ;; esac
   if [ "$total" -eq 0 ]; then
     if [ -n "$since" ]; then
       die "no labelled report was recorded on or after ${since}; run more rounds, pass an earlier --since, or --all for a score that is not held out"
@@ -214,7 +215,7 @@ print(json.dumps({"schema_version":2,"scored":0,"split":split,"corpus":sum(r["so
   echo "evaluate: scoring ${total} report(s) on ${agent}; this spends one model call each" >&2
   local results="${work}/results.json" failures=0 index=0 report
   printf '[]' > "$results" || die "cannot write to ${work}"
-  while IFS= read -r index; do
+  for ((index = 0; index < total; index++)); do
     report="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))[int(sys.argv[2])]["report"])' "$selected" "$index")" \
       || die "cannot read row ${index} of ${selected}"
     echo "  [$((index + 1))/${total}] ${report}" >&2
@@ -241,7 +242,17 @@ PY
       failures=$((failures + 1))
       cat "${work}/err-${index}" >&2
     fi
-  done < <(seq 0 $((total - 1)))
+  done
+
+  # Every selected report is either a recorded label or a counted failure; a
+  # shortfall means the loop lost rows, and a partial score is never reported
+  # as a whole one.
+  local labelled
+  labelled="$(python3 -c 'import json,sys; print(len(json.load(open(sys.argv[1]))))' "$results")" \
+    || die "cannot count the labels in ${results}"
+  if [ $((labelled + failures)) -ne "$total" ]; then
+    die "scored ${labelled} and failed ${failures} of ${total} selected reports; the run lost reports, so no score is reported"
+  fi
 
   if [ -n "$keep" ]; then
     cp "$results" "$keep" || die "cannot keep the labels at ${keep}"

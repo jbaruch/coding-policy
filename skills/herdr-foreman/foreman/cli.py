@@ -1794,6 +1794,14 @@ def _record_stopped_task(state_path, diagnosis, at):
 
 def cmd_recovery(args, client=None, warn=None, trace=None):
     state_path = _state_path(args)
+    # A review receipt's gate check and its commit are one transaction: the
+    # report-gate lock is held from the check through the state save, so no
+    # gate can be recorded between them (foreman/report_gates.py `holding`).
+    with report_gates.holding(state_path) if args.command == "record-report" else nullcontext():
+        return _run_recovery(args, state_path, warn, client, trace)
+
+
+def _run_recovery(args, state_path, warn, client, trace):
     state = _load_state_for_write(state_path, warn)
     store, history = state["recovery"], state["assignments"]
     data, at = _read_record(args.record), args.now or now_iso()

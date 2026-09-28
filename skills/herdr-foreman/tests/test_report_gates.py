@@ -7,6 +7,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -154,6 +155,75 @@ class ClearTest(GateCase):
         self.assertEqual((len(payload["open"]), len(payload["resolved"])), (0, 1))
 
 
+class ShapeTest(GateCase):
+    """A saved gate record is validated whole; a malformed one refuses every reader."""
+
+    def saved(self):
+        self.record(label(self.report, HIGH))
+        return json.loads(gates.storage_path(self.state).read_text())
+
+    def test_every_malformed_record_is_a_state_error(self):
+        breakages = {
+            "missing report": lambda gate: gate.pop("report"),
+            "relative report": lambda gate: gate.update(report="reviewer.md"),
+            "bad sha256": lambda gate: gate.update(sha256="xyz"),
+            "unknown level": lambda gate: gate.update(level="warn"),
+            "empty reason": lambda gate: gate.update(reason=""),
+            "probability out of range": lambda gate: gate["probabilities"].update(names_open_item=1.5),
+            "missing probability": lambda gate: gate["probabilities"].pop("open_items_accepted"),
+            "extra field": lambda gate: gate.update(note="x"),
+            "open with a resolution": lambda gate: gate.update(resolution={}),
+            "cleared without a resolution": lambda gate: gate.update(status="cleared"),
+            "resolution action disagrees": lambda gate: gate.update(status="cleared", resolution={
+                "at": AT, "action": "reread", "by": "worker", "reason": "r",
+                "evidence": {"path": "/r.md", "sha256": "a" * 64}}),
+            "worker clear without evidence": lambda gate: gate.update(status="cleared", resolution={
+                "at": AT, "action": "clear", "by": "worker", "reason": "r", "evidence": None}),
+        }
+        for name, breakage in breakages.items():
+            with self.subTest(name=name):
+                document = self.saved()
+                breakage(document["gates"][0])
+                gates.storage_path(self.state).write_text(json.dumps(document))
+                for read in (lambda: gates.require_clear(self.state, str(self.report), False),
+                             lambda: gates.status(self.state),
+                             lambda: gates.resolve(self.state, str(self.report), "clear", "why", "operator", AT)):
+                    with self.assertRaisesRegex(StateError, "record 0 is malformed"):
+                        read()
+                gates.storage_path(self.state).unlink()
+
+    def test_a_valid_resolved_record_reads(self):
+        self.record(label(self.report, HIGH))
+        gates.resolve(self.state, str(self.report), "clear", "advisory only", "worker", AT, str(self.reread))
+        self.assertEqual(len(gates.status(self.state)["resolved"]), 1)
+
+
+class InterleavingTest(GateCase):
+    """A gate recorded while an acceptance is being committed is refused, never slipped in."""
+
+    def test_record_report_holds_the_gate_lock_through_its_commit(self):
+        attempts = []
+
+        def racing(args, state_path, warn, client, trace):
+            # A second process records a gate between the check and the commit.
+            try:
+                gates.record(state_path, {"labels": [label(self.report, HIGH)]}, AT)
+                attempts.append("recorded")
+            except StateError as exc:
+                attempts.append(exc.message)
+            return {}, None
+
+        receipt = self.root / "receipt.json"
+        receipt.write_text("{}")
+        with mock.patch.object(cli, "_run_recovery", side_effect=racing):
+            code = cli.main(["record-report", "--record", str(receipt), "--state", str(self.state), "--now", AT],
+                            stdout=io.StringIO(), stderr=io.StringIO())
+        self.assertEqual(code, 0)
+        self.assertEqual(len(attempts), 1)
+        self.assertIn("Another foreman command owns", attempts[0])
+        self.assertEqual(gates.status(self.state)["open"], [])
+
+
 class CloseMemberGateTest(MembersCase):
     def gate(self, probabilities):
         Path(self.report).write_text("B1 blocking: the parser accepts a quoted marker.\n")
@@ -176,6 +246,27 @@ class CloseMemberGateTest(MembersCase):
         self.gate(HIGH)
         self.write_ledger("needs_work")
         self.assertEqual(members.close(self.path, "dispatch-a", self.ledger, LATER)["decision"], "needs_work")
+
+    def test_a_gate_recorded_mid_closure_is_refused(self):
+        self.emit()
+        Path(self.report).write_text("B1 blocking: the parser accepts a quoted marker.\n")
+        self.write_ledger("accepted")
+        attempts = []
+        real_resolve = members.supervision.resolve
+
+        def racing(*args, **kwargs):
+            try:
+                gates.record(self.path, {"labels": [label(self.report, HIGH)]}, LATER)
+                attempts.append("recorded")
+            except StateError as exc:
+                attempts.append(exc.message)
+            return real_resolve(*args, **kwargs)
+
+        with mock.patch.object(members.supervision, "resolve", side_effect=racing):
+            self.assertEqual(members.close(self.path, "dispatch-a", self.ledger, LATER)["decision"], "accepted")
+        self.assertEqual(len(attempts), 1)
+        self.assertIn("Another foreman command owns", attempts[0])
+        self.assertEqual(gates.status(self.path)["open"], [])
 
     def test_an_open_reread_refuses_every_closure(self):
         self.emit()

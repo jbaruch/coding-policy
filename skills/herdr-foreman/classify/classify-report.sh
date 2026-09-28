@@ -156,11 +156,14 @@ main() {
   local work
   work="$(mktemp -d "${TMPDIR:-/tmp}/classify-report.XXXXXX")" || die "cannot create a temporary directory"
   SCRATCH="$work"
-  local answer="${work}/answer.json" log="${work}/run.log" room="${work}/room"
+  local answer="${work}/answer.json" log="${work}/run.log" room="${work}/room" snapshot="${work}/report"
+  # One read of the report: every adapter, the evidence check and the label's
+  # sha256 see these bytes, so a report rewritten mid-run is never half-read.
+  cp -- "$report" "$snapshot" || die "cannot snapshot ${report}; restore read access and re-run"
   local payload="" fallback="" rc=0
 
   if [ -z "$agent" ] || [ "$agent" = "jev" ]; then
-    if payload="$(python3 "$verdict" jev "$report" ${model:+--model "$model"} 2>"$log")"; then
+    if payload="$(python3 "$verdict" jev "$snapshot" --as "$report" ${model:+--model "$model"} 2>"$log")"; then
       :
     else
       rc=$?
@@ -184,14 +187,14 @@ main() {
     command -v "$agent" >/dev/null || die "${agent} is not on PATH"
     local schema="${work}/schema.json" question="${work}/question.txt"
     python3 "$verdict" schema "$schema" || die "cannot write the answer schema to ${schema}"
-    python3 "$verdict" frame "$report" > "$question" || die "cannot frame ${report} as data; read it in full"
+    python3 "$verdict" frame "$snapshot" > "$question" || die "cannot frame ${report} as data; read it in full"
     mkdir "$room" || die "cannot create the empty working directory"
     if ! ( cd "$room" && "ask_${agent}" "$model" "$schema" "$answer" "$log" < "$question" ); then
       cat "$log" >&2
       die "the ${agent} call failed; a failed call is never a verdict"
     fi
     [ -s "$answer" ] || { cat "$log" >&2; die "${agent} wrote no schema-conforming answer"; }
-    payload="$(python3 "$verdict" label "$answer" "$report" "$agent" "$model" ${fallback:+--fallback "$fallback"})" \
+    payload="$(python3 "$verdict" label "$answer" "$snapshot" "$agent" "$model" --as "$report" ${fallback:+--fallback "$fallback"})" \
       || die "the ${agent} answer did not conform to the schema"
   fi
 

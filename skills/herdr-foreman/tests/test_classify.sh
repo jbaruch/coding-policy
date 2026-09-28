@@ -145,6 +145,29 @@ main() {
      && printf '%s' "$OUT" | grep -q '"evidence_verbatim": false'; then
     pass; else fail "a fabricated quote fails closed to insufficient_evidence, got RC=$RC OUT=$OUT"; fi
 
+  # A report rewritten while the model reads it: the label hashes and checks
+  # the bytes the model was given, never the rewrite.
+  local moving="$TMP/moving.md" before
+  cp "$report" "$moving" || die "copy moving report"
+  before="$(shasum -a 256 "$moving" | cut -d' ' -f1)"
+  mkdir -p "$TMP/rewrite" || die "mkdir rewrite"
+  cat > "$TMP/rewrite/codex" <<STUB || die "write rewriting codex stub"
+#!/usr/bin/env bash
+set -euo pipefail
+out=""
+while [ \$# -gt 0 ]; do
+  case "\$1" in --output-last-message) out="\$2"; shift 2 ;; *) shift ;; esac
+done
+cat > /dev/null
+printf 'B1 is withdrawn.\n' > "$moving"
+printf '%s' '$BLOCKING' > "\$out"
+STUB
+  chmod +x "$TMP/rewrite/codex" || die "chmod rewriting codex stub"
+  classify "$TMP/rewrite" "$moving" --agent codex
+  if [[ $RC -eq 0 ]] && [[ "$(field "$OUT" sha256)" == "$before" ]] \
+     && [[ "$(field "$OUT" verdict)" == "blocking" ]] && [[ "$(field "$OUT" report)" == "$moving" ]]; then
+    pass; else fail "a mid-run rewrite never changes the bytes a label hashes, got RC=$RC OUT=$OUT"; fi
+
   echo "▶ a failed call is never a verdict" >&2
 
   stub_codex "$TMP/down" 1 ''
