@@ -65,6 +65,140 @@
   `jbaruch/coding-policy` path, and no repository at all. Each must exit
   non-zero with the install instruction and never run the planted script.
 
+## 0.3.316 — 2026-09-28
+
+### Changed
+
+- **The task ledger's field formats are now code constants the docs point at
+  (#589).** The formats lived in prose in three places — the
+  `state-schema.md` Task Ledger table, its reader-contract paragraph, and the
+  blank template in `references/task-ledger.md` — while
+  `members.ledger_events` validated against a hand-written reading of all
+  three. Every review round on #570 found another spot where they disagreed
+  (report `not_applicable`, SHA case, decision vocabulary, duplicate fields).
+  Per `rules/script-as-black-box.md`, the vocabulary now lives only in
+  `skills/herdr-foreman/foreman/members.py`: `DECISION_MEANINGS` carries each
+  subject's decisions with their meanings (the table moved out of
+  `task-ledger.md`), and `SUBJECTS`, `DECISIONS`, `UNKNOWN`, `NOT_APPLICABLE`,
+  `REPORT_PLACEHOLDERS`, `FREE_TEXT_FIELDS` join the existing field lists, SHA
+  pattern and placeholder sets. The schema section and the template name those
+  constants instead of restating them. Validation semantics are unchanged from
+  #570: `report` is an absolute path or `unknown` on every event, SHAs pass in
+  either case, a repeated schema field is refused, `dispatch_state` names an
+  existing file. New `LedgerDocsPointAtTheConstants` tests fail when a doc
+  cites a constant that does not exist, when the template's fields stop
+  matching `FRONT_FIELDS`/`EVENT_FIELDS`, when the schema table stops covering
+  exactly the event fields, or when a doc restates a decision vocabulary.
+
+## 0.3.315 — 2026-09-28
+
+### Fixed
+
+- **The ACR acceptance helper now walks its output roots from `/` (#566).**
+  `write_under` in `.github/codex-accept/contract.py` opened its anchor with
+  one `O_NOFOLLOW` open, which constrains only the anchor's last component: an
+  operator-supplied `--output`, `--artifact` or `--run-root` like
+  `link/sub/download` walked through `link` and wrote wherever it pointed. The
+  new `open_anchor` opens every component from `/` with `O_NOFOLLOW` and
+  refuses a symlinked or non-directory ancestor by name. The macOS `/var` and
+  `/tmp` system links stay usable: `anchored()` spells them as their
+  `/private/` targets before the walk, sharing one `system_alias` check with
+  `run_root_path`. `extract_archive`'s existing-destination branch now runs
+  the same walk before comparing members, so matching content prepopulated
+  behind a symlinked parent refuses instead of passing as an idempotent
+  re-run. `seal()`'s `--output`, which never reached `write_under`, now walks
+  its parent the same way, holds it open and publishes the export with a
+  descriptor-relative `rename`, and its existing-destination branch walks the
+  destination before verifying it. `open_anchor` refuses a `..` component
+  itself, so the existing-destination branches keep the no-traversal
+  invariant `write_under` already enforced. Scope stays the documented threat model: the walk catches mistaken
+  or stale paths, and a hostile same-user process can still swap a component
+  between the walk and the later path-based `members()` read. Follow-up from
+  #563's review.
+
+## 0.3.314 — 2026-09-28
+
+### Fixed
+
+- **`verify-oracle` checks a mechanical round against the oracle its dispatch
+  was sent with, not the plan file as it reads at the gate (#585).** #576 pinned
+  each `patch` or `fixture` oracle file's sha256 in the plan's `oracle_pins`,
+  but the plan is a mutable file and the pins were not part of what `apply`
+  recorded: rewriting the oracle file and its pin together after dispatch let
+  `verify-oracle` accept bytes the round was never licensed on. `apply` now
+  binds each mechanical round's oracle, pin included, onto its dispatch record
+  as `oracle`, folds the pin into the dispatch fingerprint (so an edited plan
+  is new inputs under a recorded `--dispatch-id`, never a replay), and refuses
+  a pinned file that no longer hashes to its pin before anything is sent.
+  `verify-oracle` now takes a required `--task`, reads the role's latest
+  dispatch under it, and refuses unless that dispatch is applied, went to the
+  plan's worker under the plan's task context, and bound exactly the oracle
+  the plan declares. The same check closes the digest case: a `digest` value
+  edited after dispatch is refused too. Recovery store version 14 owns the
+  field; an older store carrying it is refused as newer data, and stale-Grok
+  delivery recovery rebuilds the fingerprint with the saved pin.
+- **`standup-ask.sh` reads the worker's status once more immediately before
+  sending the standup (#585).** Herdr has no check-and-prompt operation: the
+  script read readiness, measured the pane (which reads it again), then sent,
+  so a turn that started after the measurement still got the question. A last
+  `herdr agent get` right before `herdr agent prompt` now narrows the window to
+  the gap between those two calls, exits 3 with nothing sent on any state but
+  idle or done, and exits 2 with nothing sent when that read fails. The script
+  header names the residual gap: `herdr agent prompt` itself rejects an
+  already-`blocked` worker but submits to a `working` one, so a turn that
+  starts inside the remaining gap still receives the question until Herdr
+  offers a readiness-guarded send.
+
+## 0.3.313 — 2026-09-28
+
+### Fixed
+
+- **Every shipped skill script now finds its siblings when its directory's
+  name ends in a newline (#592).** #487 moved the hooks off
+  `$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)`, but sixteen skill scripts
+  across release, herdr-standup and herdr-foreman kept the shape. Command
+  substitution strips every trailing newline, so the `dirname` capture
+  truncated such a directory before `cd` saw it, and the script looked for
+  its siblings somewhere that does not exist. The four scripts that already
+  carried the `pwd` sentinel from #466 still routed through the nested
+  capture. Each script now takes the hooks' form: parameter expansion
+  derives the directory from `${BASH_SOURCE[0]}` (`.` when the path has no
+  slash), `cd -- "$dir" && pwd && printf x` carries `pwd`'s output across the
+  strip, and a `cd` failure ends with a diagnostic naming the directory and
+  the repair, in the script's own exit-code contract.
+  `confirm-publish-landed.sh` reports it as a fail-safe gate result, and
+  `wait-report.sh` resolves through one `resolve_skill_dir` function for its
+  two call sites. The derivation stays inline, not in a shared sourced
+  helper: a helper would need the same parameter-expansion bootstrap at every
+  site just to locate itself, and a copy per skill directory. New
+  `test_script_dir_newline.sh` suites in release, herdr-standup and
+  herdr-foreman, plus a newline case in the wait-report, round-preflight and
+  classify suites, stage each script under a directory ending in a newline
+  beside stand-ins that record being reached; every case fails against the
+  old code.
+
+## 0.3.312 — 2026-09-28
+
+### Fixed
+
+- **A frozen dispatch's identity and sent prompt now come from the bytes its
+  freeze verified (#565).** #554 (0.3.292) made `freeze_paths` write and verify
+  each frozen copy through a no-follow descriptor walk, but in the same `apply`
+  call the readers after it went back to the copies by pathname:
+  `recovery.dispatch_identity`, `recovery.brief_identity`,
+  `assign.tiered_prompt`, the REPORT-marker width check and the slice-boundary
+  check. A copy's ancestor directory swapped for a link in that interval was
+  followed there, so the recorded fingerprint and the prompt hash the worker
+  received could describe bytes other than the ones verified. `freeze_paths`
+  now returns a `FrozenPaths` carrying each copy's verified bytes, and every
+  one of those readers takes them through the new `recovery.briefing_bytes`;
+  replays and dry runs, which freeze nothing, still read their source paths.
+  `recover-report` gets the same treatment: its prompt-hash and fingerprint
+  checks use the bytes the brief's receipt recorded, instead of a second read
+  that could let the receipt bind bytes the hash never checked. Regressions
+  swap the frozen directory for a decoy between the freeze and the identity,
+  and swap a brief between its receipt and the prompt-hash check.
+
 ## 0.3.310 — 2026-09-28
 
 ### Fixed
