@@ -4,6 +4,8 @@
 # or `decline` (rules/review-severity.md Judge-Weighed Finding Carve-Out;
 # rules/ci-safety.md Judge-Ruled-Review Dismissal Carve-Out). This script is the
 # only sanctioned path for that dismissal; a hand dismissal is not.
+# Standalone mode only: with HERDR_ENV set (a Herdr team round, any value) it
+# exits 2 and does nothing; a team round follows the Judge Seat workflow.
 #
 # Usage: dismiss-ruled-review.sh <owner> <repo> <pr-number> [--ruling <file> --followup-issue <number>]
 #   Without --ruling: list mode. Emits the blocking findings of the latest
@@ -377,6 +379,10 @@ PY
 }
 
 main() {
+  if [[ -n "${HERDR_ENV+x}" ]]; then
+    echo "error: dismiss-ruled-review.sh runs in standalone mode only; HERDR_ENV is set, so this is a Herdr team round, which follows the Judge Seat workflow (rules/agent-team-operation.md)" >&2
+    exit 2
+  fi
   [[ $# -ge 3 ]] || usage
   local owner="$1" repo="$2" pr="$3" ruling="" issue=""
   shift 3

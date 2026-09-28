@@ -27,6 +27,8 @@ command -v jq >/dev/null 2>&1 || { echo "fatal: jq is required to run these test
 source "$SCRIPT"
 set +e
 
+# The script under test refuses a Herdr team round; tests run as standalone.
+unset HERDR_ENV
 TMPDIR_TEST=$(mktemp -d -t dismiss-ruled-test.XXXXXX) || { echo "fatal: mktemp -d failed" >&2; exit 2; }
 cleanup_tmp() {
   if ! rm -rf "$TMPDIR_TEST"; then
@@ -61,7 +63,9 @@ assert_unmet() { # <substring> <label>
 
 run() {
   local name="$1"; shift
-  : > "$EVENTS"; : > "$COMPARE_LOG"; rm -f "$COMMENT_BODY"
+  : > "$EVENTS" || { echo "fatal: cannot reset ${EVENTS} — check ${TMPDIR_TEST} is writable, then rerun" >&2; exit 2; }
+  : > "$COMPARE_LOG" || { echo "fatal: cannot reset ${COMPARE_LOG} — check ${TMPDIR_TEST} is writable, then rerun" >&2; exit 2; }
+  rm -f "$COMMENT_BODY" || { echo "fatal: cannot remove ${COMMENT_BODY} — check ${TMPDIR_TEST} is writable, then rerun" >&2; exit 2; }
   MOCK_CHECKS='[{"name":"tests","bucket":"pass"}]'
   MOCK_CHECKS_RC=0
   MOCK_COMPARE='{"status":"ahead","files":[]}'
@@ -457,6 +461,8 @@ t_usage_errors_exit_2() {
   invoke --ruling "${TMPDIR_TEST}/does-not-exist" --followup-issue "$ISSUE"
   assert_eq "unreadable ruling" "2" "$RC" || return 1
   assert_eq "stdout empty" "" "$OUT"
+  RC=0; ( HERDR_ENV=1 main owner repo 5 ) >/dev/null 2>&1 || RC=$?
+  assert_eq "Herdr team round refused" "2" "$RC" || return 1
 }
 
 # End to end on the marker: the dismissal message this script actually sends
