@@ -49,7 +49,7 @@ The question never blocks. Keep working the fix loop; a finding the operator has
 
 ### The ruling file
 
-Write the operator's answer into a ruling file. Its format, `SCHEMA` version, required `ANSWER:` line and writer/reader contract are in the `skills/release/dismiss-ruled-review.sh` header. Keep the file for the life of the PR; the dismissal message pins its sha256 digest.
+Write the operator's answer into a ruling file. Its format, `schema_version`, required `ANSWER:` line and writer/reader contract are in the `skills/release/dismiss-ruled-review.sh` header. Keep the file for the life of the PR; the dismissal message pins its sha256 digest.
 
 ### Order of work
 

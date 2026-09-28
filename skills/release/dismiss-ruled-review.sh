@@ -15,11 +15,11 @@
 # Ruling file — a state artifact reused across pushes of one PR.
 #   Owner/writer: the release skill (skills/release/SKILL.md Step 6). The agent
 #     writes it from the operator's answer, one file per gate.
-#   Reader: this script, the only one. It refuses a missing SCHEMA line or any
+#   Reader: this script, the only one. It refuses a missing schema_version line or any
 #     version other than RULING_SCHEMA (exit 1); it never migrates.
-#   Format, SCHEMA 1 (lines in any order after the first; unknown lines ignored):
+#   Format, schema_version 1 (lines in any order after the first; unknown lines ignored):
 #     RULING: weighed                       (first line, required)
-#     SCHEMA: 1                             (required)
+#     schema_version: 1                     (required)
 #     HEAD: <7-40 hex sha>                  (required, exactly one)
 #     ANSWER: <operator's answer, verbatim> (required, non-empty; continuation
 #                                            lines indented two spaces)
@@ -31,7 +31,7 @@
 # Predicate (dismissal mode) — every condition must hold, else nothing is
 # posted or dismissed and the script exits 1:
 #   1. The ruling's first line is exactly `RULING: weighed`; it carries
-#      `SCHEMA: <RULING_SCHEMA>`, exactly one `HEAD:` line, a non-empty
+#      `schema_version: <RULING_SCHEMA>`, exactly one `HEAD:` line, a non-empty
 #      `ANSWER:` line and at least one FINDING line; every FINDING line parses;
 #      every defer/decline line carries its text.
 #   2. The latest policy review (POLICY_REVIEW_LOGINS; per-login latest by
@@ -55,7 +55,9 @@
 # Once the predicate holds, the script posts one comment on the follow-up issue
 # listing every ruled finding (defer, or decline labelled won't-fix) and citing
 # `judge ruling <digest>`, where <digest> is sha256(ruling file)[:16]. A comment
-# already citing that digest on the issue is reused, not reposted. Only after
+# whose body equals that generated entry (whitespace-trimmed) is reused; any
+# other comment, even one citing the digest, is not, and the entry is posted.
+# Only after
 # that comment exists is the review dismissed, with the message
 #   <RULED_MARKER> <digest> covers <n> blocking findings at <head>; tracked in #<issue>
 # poll-pr-reviews.sh reads a dismissal carrying RULED_MARKER as state RULED, and
@@ -212,7 +214,7 @@ with open(ruling_path, "rb") as fh:
     ruling_bytes = fh.read()
 ruling_lines = ruling_bytes.decode("utf-8", errors="replace").splitlines()
 heads = [m["sha"] for m in (HEAD_RE.match(ln.strip()) for ln in ruling_lines) if m]
-schemas = [ln[len("SCHEMA:"):].strip() for ln in ruling_lines if ln.startswith("SCHEMA:")]
+schemas = [ln[len("schema_version:"):].strip() for ln in ruling_lines if ln.startswith("schema_version:")]
 answers = [ln[len("ANSWER:"):].strip() for ln in ruling_lines if ln.startswith("ANSWER:")]
 entries, malformed = {}, []
 duplicates = []
@@ -231,7 +233,7 @@ for ln in ruling_lines:
 if not ruling_lines or ruling_lines[0].strip() != "RULING: weighed":
     out["unmet"].append("the ruling's first line is not 'RULING: weighed'")
 if schemas != [schema]:
-    out["unmet"].append(f"the ruling carries no single 'SCHEMA: {schema}' line — rewrite it in the current format")
+    out["unmet"].append(f"the ruling carries no single 'schema_version: {schema}' line — rewrite it in the current format")
 if len(heads) != 1:
     out["unmet"].append("the ruling carries no single 'HEAD: <sha>' line")
 if len(answers) != 1 or not answers[0]:
@@ -328,18 +330,40 @@ fetch_checks() {
   return 1
 }
 
-# Post the follow-up comment unless one citing the same ruling digest exists.
+# Post the follow-up comment unless an earlier run already posted the same
+# generated body, byte for byte after trimming — any other comment, even one
+# citing the digest, is not reused.
 ensure_followup_comment() {
-  local owner="$1" repo="$2" issue="$3" tmp="$4" digest rc=0
-  digest=$(cat "${tmp}/digest")
+  local owner="$1" repo="$2" issue="$3" tmp="$4" rc=0
   gh api --paginate "repos/${owner}/${repo}/issues/${issue}/comments?per_page=100" > "${tmp}/issue_comments.json" \
     || { echo "error: failed to read comments on ${owner}/${repo}#${issue} — verify the follow-up issue number and 'gh auth status', then retry" >&2; return 1; }
-  grep -qF "judge ruling ${digest}" "${tmp}/issue_comments.json" || rc=$?
+  python3 - "${tmp}/issue_comments.json" "${tmp}/followup.md" <<'PY' || rc=$?
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as fh:
+    text = fh.read()
+with open(sys.argv[2], encoding="utf-8") as fh:
+    want = fh.read().strip()
+decoder, i, comments = json.JSONDecoder(), 0, []
+try:
+    while True:
+        while i < len(text) and text[i].isspace():
+            i += 1
+        if i >= len(text):
+            break
+        page, i = decoder.raw_decode(text, i)
+        comments.extend(page if isinstance(page, list) else [])
+except ValueError as exc:
+    print(f"error: the issue comments response is not JSON ({exc})", file=sys.stderr)
+    sys.exit(2)
+sys.exit(0 if any(isinstance(c, dict) and (c.get("body") or "").strip() == want for c in comments) else 1)
+PY
   case "$rc" in
-    0) echo "dismiss-ruled-review: follow-up comment for ruling ${digest} already on ${owner}/${repo}#${issue} — reusing it" >&2 ;;
+    0) echo "dismiss-ruled-review: the generated follow-up entry is already on ${owner}/${repo}#${issue} — reusing it" >&2 ;;
     1) gh api "repos/${owner}/${repo}/issues/${issue}/comments" -F body=@"${tmp}/followup.md" >/dev/null \
          || { echo "error: failed to post the follow-up comment on ${owner}/${repo}#${issue} — nothing was dismissed; fix access and re-run" >&2; return 1; } ;;
-    *) echo "error: could not search the comments of ${owner}/${repo}#${issue} (grep rc=${rc}) — re-run" >&2; return 1 ;;
+    *) echo "error: could not read the comments of ${owner}/${repo}#${issue} (rc=${rc}) — re-run" >&2; return 1 ;;
   esac
 }
 

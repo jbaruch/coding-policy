@@ -26,14 +26,14 @@
     the stale sweep then clears that identity's earlier requests, the fleet
     reviewer included.
   - New `skills/release/dismiss-ruled-review.sh`. The ruling file is a
-    versioned artifact (`SCHEMA: 1`, owned by the release skill, read only by
+    versioned artifact (`schema_version: 1`, owned by the release skill, read only by
     this script), and a ruling without a non-empty `ANSWER:` line is refused.
     FINDING lines pair one-to-one with the review's blocking findings on path,
     line and rule; duplicate and unmatched lines are refused. A ruling carries
     to a later head only while the path is unchanged per the compare API. The
     script posts the ruled findings to the follow-up issue itself
-    (`--followup-issue`), reusing a comment that already cites the ruling
-    digest, and dismisses only after that post, with a `JUDGE-RULED:` message.
+    (`--followup-issue`), reusing only a comment identical to the generated
+    entry, and dismisses only after that post, with a `JUDGE-RULED:` message.
     The follow-up entry exists by construction, never by an unverified URL.
     Without `--ruling` it lists the findings to weigh.
   - `poll-pr-reviews.sh` reads a marker dismissal on the head as the new

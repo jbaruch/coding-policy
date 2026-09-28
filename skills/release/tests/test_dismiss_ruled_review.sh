@@ -111,12 +111,12 @@ set_review() {
       {"id":8,"user":{"login":"github-actions[bot]"},"state":$state,"commit_id":$commit,"submitted_at":"2026-01-02T00:00:00Z","body":$body}]')
 }
 
-# A complete SCHEMA 1 ruling. Args: <head> <finding-line>...
+# A complete schema_version 1 ruling. Args: <head> <finding-line>...
 write_ruling() {
   local head="$1"; shift
   {
     echo "RULING: weighed"
-    echo "SCHEMA: 1"
+    echo "schema_version: 1"
     echo "HEAD: ${head}"
     echo "ANSWER: decline the error-handling one, the harness sets it; b.md is presentation only"
     printf '%s\n' "$@"
@@ -202,10 +202,23 @@ t_all_covered_posts_followup_then_dismisses() {
 t_existing_followup_comment_is_reused() {
   set_review CHANGES_REQUESTED "$HEAD_SHA" "$BODY_TWO"
   write_ruling "$HEAD_SHA" "$DECLINE_ONE" "$DECLINE_TWO"
-  MOCK_ISSUE_COMMENTS=$(jq -cn --arg b "Follow-up entries ..., judge ruling $(digest_of_ruling):" '[{"id":1,"body":$b}]')
+  invoke_ruled   # first run posts the generated entry; capture it
+  assert_eq "first run exit" "0" "$RC" || return 1
+  MOCK_ISSUE_COMMENTS=$(jq -cn --rawfile b "$COMMENT_BODY" '[{"id":1,"body":("\n" + $b + "\n")}]')
+  : > "$EVENTS"
   invoke_ruled
   assert_eq "exit" "0" "$RC" || return 1
   assert_eq "no second comment" "0" "$(comments)" || return 1
+  assert_eq "one dismissal" "1" "$(dismissals)"
+}
+
+t_partial_comment_citing_digest_is_not_reused() {
+  set_review CHANGES_REQUESTED "$HEAD_SHA" "$BODY_TWO"
+  write_ruling "$HEAD_SHA" "$DECLINE_ONE" "$DECLINE_TWO"
+  MOCK_ISSUE_COMMENTS=$(jq -cn --arg b "judge ruling $(digest_of_ruling) — nothing listed" '[{"id":1,"body":$b}]')
+  invoke_ruled
+  assert_eq "exit" "0" "$RC" || return 1
+  assert_eq "comment then dismissal" "comment" "$(head -1 "$EVENTS")" || return 1
   assert_eq "one dismissal" "1" "$(dismissals)"
 }
 
@@ -387,14 +400,14 @@ t_missing_answer_refuses() {
 t_schema_missing_or_other_refuses() {
   set_review CHANGES_REQUESTED "$HEAD_SHA" "$BODY_TWO"
   write_ruling "$HEAD_SHA" "$DECLINE_ONE" "$DECLINE_TWO"
-  grep -v '^SCHEMA:' "$RULING" > "${RULING}.tmp" && mv "${RULING}.tmp" "$RULING"
+  grep -v '^schema_version:' "$RULING" > "${RULING}.tmp" && mv "${RULING}.tmp" "$RULING"
   invoke_ruled
-  assert_eq "exit without SCHEMA" "1" "$RC" || return 1
-  assert_unmet "SCHEMA: 1" "the schema" || return 1
+  assert_eq "exit without schema_version" "1" "$RC" || return 1
+  assert_unmet "schema_version: 1" "the schema" || return 1
   write_ruling "$HEAD_SHA" "$DECLINE_ONE" "$DECLINE_TWO"
-  sed 's/^SCHEMA: 1$/SCHEMA: 2/' "$RULING" > "${RULING}.tmp" && mv "${RULING}.tmp" "$RULING"
+  sed 's/^schema_version: 1$/schema_version: 2/' "$RULING" > "${RULING}.tmp" && mv "${RULING}.tmp" "$RULING"
   invoke_ruled
-  assert_eq "exit with SCHEMA 2" "1" "$RC" || return 1
+  assert_eq "exit with schema_version 2" "1" "$RC" || return 1
   assert_eq "no dismissal" "0" "$(dismissals)"
 }
 
@@ -444,6 +457,7 @@ t_marker_pinned_across_scripts() {
 echo "test_dismiss_ruled_review.sh"
 run "covered: follow-up comment posted, then dismissal" t_all_covered_posts_followup_then_dismisses
 run "an existing follow-up comment is reused"       t_existing_followup_comment_is_reused
+run "a partial comment citing the digest is not reused" t_partial_comment_citing_digest_is_not_reused
 run "a failed follow-up post dismisses nothing"     t_failed_followup_post_dismisses_nothing
 run "one uncovered finding refuses"                 t_one_uncovered_refuses
 run "a fix ruling leaves the finding uncovered"     t_fix_ruling_leaves_finding_uncovered
@@ -462,7 +476,7 @@ run "carry-over with the path unchanged dismisses"  t_carry_over_unchanged_path_
 run "carry-over with the path changed refuses"      t_carry_over_changed_path_refuses
 run "carry-over across a diverged compare refuses"  t_carry_over_diverged_refuses
 run "a missing or empty ANSWER refuses"             t_missing_answer_refuses
-run "a missing or other SCHEMA refuses"             t_schema_missing_or_other_refuses
+run "a missing or other schema_version refuses"             t_schema_missing_or_other_refuses
 run "a malformed ruling refuses"                    t_malformed_ruling_refuses
 run "list mode emits the blocking findings"         t_list_mode_emits_findings
 run "usage errors exit 2"                           t_usage_errors_exit_2
