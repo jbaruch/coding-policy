@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.303 — 2026-09-28
+
 ### Fixed
 
 - **The unknown-supervision-command fallback names a runnable help command
