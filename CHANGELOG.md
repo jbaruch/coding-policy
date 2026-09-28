@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.321 — 2026-09-28
+
 ### Fixed
 
 - **The worktree prune now treats an unlistable root as a changed root, and
