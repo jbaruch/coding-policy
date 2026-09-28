@@ -1,5 +1,21 @@
 # Changelog
 
+### Added
+
+- **Tests now hold the policy reviewer to its pinned model and effort (#503).**
+  The 0.3.258 pin (`--model gpt-5.6-sol`, `model_reasoning_effort="high"`)
+  had no test behind it: the fleet reviewer's codex stub read only
+  `--output-last-message`, so dropping or misspelling either flag left the
+  suite green and the review silently fell back to the CLI's default model.
+  `test_fleet_review_one.sh` now records the argv codex receives and asserts
+  both flag-value pairs. New `test_review_codex_pin.sh` covers the self-review
+  path in `review-codex.yml`: it extracts the "Run Codex policy review" step's
+  `run:` block, runs it with git and codex faked on PATH, and asserts the same
+  pairs. Renewing the pin now means renewing it in both tests too. The issue's
+  second item, rewording the 0.3.258 entry, stays open:
+  `skills/release/check-changelog-placement.py` refuses any edit to a block
+  under a published heading as new parked content, the same limit #581 hit.
+
 ## 0.3.308 — 2026-09-28
 
 ### Fixed
