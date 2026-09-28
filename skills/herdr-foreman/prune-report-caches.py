@@ -112,6 +112,7 @@ import hashlib
 import json
 import math
 import os
+import re
 import stat
 import sys
 import time
@@ -216,6 +217,8 @@ VENV_DIRS = frozenset({"bin", "lib", "lib64", "include", "share", "etc", "Script
 VENV_FILES = frozenset({"pyvenv.cfg", ".gitignore", "CACHEDIR.TAG", ".lock"})
 NODE_MODULES_FILES = frozenset({".package-lock.json", ".yarn-integrity", ".modules.yaml"})
 HEX = frozenset("0123456789abcdef")
+#: A Go module version segment: `v`, a digit, then no further `@`.
+GO_VERSION = re.compile(r"v[0-9][^@]*\Z")
 
 
 def _go_build(fd):
@@ -227,13 +230,13 @@ def _go_module_root(download_fd, name):
     """Whether top-level directory `name` is a module path root the download
     cache backs: a host (a dot anywhere but the first character,
     `golang.org`) with `cache/download/<name>/` present, or a dotless module
-    at a version (`<module>@<version>`) with `cache/download/<module>/@v/`
-    present."""
+    at a Go version (`<module>@v<digit>...`, both sides non-empty) with
+    `cache/download/<module>/@v/` present."""
     if name.startswith("."):
         return False
     if "@" in name:
-        module = name.split("@", 1)[0]
-        if not module or not _is_dir_at(download_fd, module):
+        module, version = name.split("@", 1)
+        if not module or not GO_VERSION.match(version) or not _is_dir_at(download_fd, module):
             return False
         module_fd = open_at(download_fd, module)
         try:
