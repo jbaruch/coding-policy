@@ -54,7 +54,47 @@
 
 ## 0.3.301 — 2026-09-27
 
+## 0.3.305 — 2026-09-28
+
 ### Fixed
+
+- **`close-member` validates the task ledger's field formats, not just their
+  presence (#530).** `members.ledger_events` checked that every schema-1 field
+  was present and non-empty, so an event with `at: not-a-timestamp` or
+  `head_revision: not-a-sha` still authorized closing an enrollment. It now
+  refuses, closing nothing, unless `at` is a timezone-qualified ISO-8601
+  timestamp, `head_revision` is a full SHA (either case) or the literal `unknown` /
+  `not_applicable`, the frontmatter `base_revision` is a full SHA,
+  `dispatch_state` is an absolute path to an existing file that resolves (a
+  `~/` path, a NUL byte, a missing file or a symlink loop now refuses instead
+  of passing or raising), each event's
+  `id` matches its `## ` section heading, no id names two events, and no
+  ledger line can overwrite the parser's record of that heading. Every other
+  field with a documented format is checked in every event, not only the
+  event being closed: `subject` is `task` or `assignment`, `decision` comes
+  from that subject's vocabulary in `references/task-ledger.md`,
+  `dispatch_id` / `worker` / `role` are `not_applicable` on a task event and
+  never on an assignment event, and `report` is an absolute path or
+  `unknown` on every event, as the schema-1 table always said (the template's
+  "use `not_applicable` for the assignment fields" now names `dispatch_id`,
+  `worker` and `role` so it no longer reads as covering `report`; accepting
+  `not_applicable` there would have been a shape change needing a schema
+  bump). A schema field repeated
+  inside one event, or in the frontmatter, is refused: the parser kept the
+  last value, so a second well-formed line could hide a malformed first one.
+  Only the free-text `observed`, `evidence` and `assessment` fields are
+  checked for presence alone, and `state-schema.md` now says exactly that.
+  Validating the whole ledger rather than narrowing the contract was the
+  safer choice: `close-member` acts on `subject`, `dispatch_id`, `worker`,
+  `report` and `decision` directly, so a ledger whose other events break the
+  format is not one the foreman wrote correctly, and closing on it would
+  trust a record the owner cannot vouch for.
+  The refusal's repair hint changed with it: it used to say "append a correct
+  event", which can never fix a malformed earlier event in an append-only log
+  that is validated whole, so it now points at the documented recovery, a
+  recovered ledger at a new path (`state-schema.md`, Task Ledger). Deferred
+  from PR #528's review. `herdr-foreman` Step 11's `check-member` follow-up
+  paragraph, which merged several directives, is now one bullet per directive.
 
 - **The foreman reset deliverer types only into the foreman's bound native
   session (#523).** `foreman-reset-deliver` waits up to `IDLE_BUDGET_SEC` for
@@ -101,6 +141,69 @@
   an unresolvable transcript path, the migration rewrite, and the
   CLI end to end; the unfixed deliverer typed `/clear` and the resume prompt
   into the replacement session.
+
+## 0.3.304 — 2026-09-28
+
+### Fixed
+
+- **codex-accept's `.` component checks now match what they claim (#572).**
+  `.github/codex-accept/contract.py` tested `.` against `PurePosixPath.parts`,
+  which pathlib never populates with `.`. For archive and inventory member
+  names (`safe_name`) the refusal is the intended contract, and one input
+  slipped through it: a bare `.` member normalizes to empty `parts` and was
+  accepted. `safe_name` now checks the raw `/`-separated components before
+  building the path, so `.`, `..` and empty components refuse in every
+  position. For helper outputs (`write_under`) a `Path` argument can never
+  carry a `.` component and `.` cannot leave the root, so the inert check is
+  dropped: only `..` refuses there, and the refusal message and
+  `docs/acr-codex-accept.md` say so. New tests pin both behaviors.
+
+## 0.3.303 — 2026-09-28
+
+### Fixed
+
+- **The unknown-supervision-command fallback names a runnable help command
+  (#590).** `foreman/supervision_runtime.py` told the reader to "run foreman
+  --help", but no install puts a `foreman` executable on `PATH`, so the hint
+  did not run as written. It now renders through `runnable.command("--help")`
+  like every other hint since #571. The #532 guard in
+  `tests/test_runnable.py` missed it because it only matched bare subcommand
+  names, never a bare `foreman --<flag>`; it now flags that shape too, and a
+  new test runs the rendered fallback command to exit 0. An audit of the
+  package found no other bare `foreman --...` strings.
+
+## 0.3.302 — 2026-09-27
+
+### Fixed
+
+- **`verify-oracle` checks a round against the oracle bytes its plan was
+  licensed on, refuses a malformed saved oracle cleanly, and hashes in
+  bounded chunks (#488).** Three gaps in
+  `skills/herdr-foreman/foreman/oracle.py`, all deferred from #486's review.
+  A `patch` or `fixture` oracle was only a path, so a file edited or replaced
+  after planning was compared as if it were the licensed one; `plan` now
+  records each such file's sha256 in a new `oracle_pins` map (plan schema 12),
+  and `verify-oracle` refuses an oracle file that no longer hashes to its pin,
+  and a plan that pinned nothing for it, rather than compare. The pin check and
+  the comparison share one read of the oracle file, so nothing can change
+  between them. A saved oracle such as `{"kind": "patch"}` with no path, or a
+  non-string path, reached `Path(None)` and raised a `TypeError` traceback;
+  `plan_oracle` now validates the shape before any file read, through
+  `oracle_shape_problem` in `skills/herdr-foreman/foreman/tiers.py`, which
+  `mechanical_allowed` also uses so the two checks cannot drift apart. Both
+  files were loaded whole with `read_bytes()`; they are now hashed in
+  `CHUNK_BYTES` pieces and compared by sha256, so memory stays bounded however
+  large the expected output. An unusable path, a NUL or a character the
+  filesystem encoding cannot carry, is a usage error naming the fix, and each
+  unreadable file names its own recovery. Only a `mechanical` round's oracle is
+  pinned and checked: an oracle riding on any other round licensed nothing,
+  so `plan` no longer reads it (a FIFO there hung `plan`) and `verify-oracle`
+  refuses to gate on it. Every file is opened non-blocking and refused unless
+  it is a regular file, so a FIFO or device swapped in for the result or the
+  pinned oracle after planning cannot hang the gate. Regression cases cover
+  each gap and fail against the old code.
+
+## 0.3.301 — 2026-09-27
 
 ## 0.3.300 — 2026-09-27
 
