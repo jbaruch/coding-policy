@@ -1,5 +1,19 @@
 # Changelog
 
+### Fixed
+
+- **codex-accept's `.` component checks now match what they claim (#572).**
+  `.github/codex-accept/contract.py` tested `.` against `PurePosixPath.parts`,
+  which pathlib never populates with `.`. For archive and inventory member
+  names (`safe_name`) the refusal is the intended contract, and one input
+  slipped through it: a bare `.` member normalizes to empty `parts` and was
+  accepted. `safe_name` now checks the raw `/`-separated components before
+  building the path, so `.`, `..` and empty components refuse in every
+  position. For helper outputs (`write_under`) a `Path` argument can never
+  carry a `.` component and `.` cannot leave the root, so the inert check is
+  dropped: only `..` refuses there, and the refusal message and
+  `docs/acr-codex-accept.md` say so. New tests pin both behaviors.
+
 ## 0.3.303 — 2026-09-28
 
 ### Fixed
