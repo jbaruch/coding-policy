@@ -1,5 +1,5 @@
 {
-  "schema_version": 5,
+  "schema_version": 6,
   "role_costs": {
     "developer": 12,
     "tester": 10,
@@ -10,6 +10,14 @@
     "agent": "judge",
     "model": "claude-fable-5-1",
     "effort": "max"
+  },
+  "foreman": {
+    "agent": "foreman",
+    "kind": "claude",
+    "window_group": "claude-max-weekly",
+    "launch_args": [
+      "--dangerously-skip-permissions"
+    ]
   },
   "agents": [
     {
@@ -107,6 +115,10 @@
           "model": "sonnet-5",
           "effort": "high",
           "multiplier": 1.0
+        },
+        "coordination": {
+          "model": "claude-haiku-4-5",
+          "multiplier": 1.0
         }
       },
       "launch_args": [
@@ -203,6 +215,11 @@
         "consultation": {
           "model": "gpt-5.6-sol",
           "effort": "medium",
+          "multiplier": 1.0
+        },
+        "coordination": {
+          "model": "gpt-5.3-codex-spark",
+          "effort": "low",
           "multiplier": 1.0
         }
       },
@@ -307,6 +324,11 @@
         "consultation": {
           "model": "grok-4.6",
           "effort": "medium",
+          "multiplier": 1.0
+        },
+        "coordination": {
+          "model": "grok-4.6",
+          "effort": "low",
           "multiplier": 1.0
         }
       },

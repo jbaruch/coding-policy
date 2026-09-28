@@ -71,6 +71,8 @@ ROUND_CAPABILITIES = {
     "mechanical": ("mechanical-execution",),
     "release_mechanics": ("mechanical-execution",),
     "consultation": (),
+    # The foreman seat's own round (#601).
+    "coordination": ("mechanical-execution",),
 }
 CONSULTATION_CAPABILITIES = {"investigator": "causal-investigation", "advisor": "advisory-synthesis"}
 RECORDED_ONLY = frozenset({"context-window-1m", "report-verdict-classification"})

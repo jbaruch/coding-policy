@@ -23,7 +23,7 @@ from pathlib import PurePath
 from .composer import ensure_ready
 from .errors import AgentBusyError, HerdrError
 from .herdr import READY_STATES, error_code
-from .restoration import NAME_TAKEN, name_state
+from .restoration import NAME_RELEASED, NAME_TAKEN, name_state
 from .tiers import launch_flags, verify_argv, verify_worker_permissions, worker_launch_args
 
 SHELL_POLL_ATTEMPTS = 30
@@ -58,6 +58,27 @@ def foreground_agent(client, pane, kind):
     return matches[0]
 
 
+def holds_only_shell(info):
+    """True when a `pane_process_info` record's sole foreground process is its shell."""
+    shell = info.get("shell_pid") if isinstance(info, dict) else None
+    foreground = info.get("foreground_processes") if isinstance(info, dict) else None
+    return (isinstance(shell, int) and not isinstance(shell, bool) and shell > 0
+            and isinstance(foreground, list) and len(foreground) == 1
+            and isinstance(foreground[0], dict) and foreground[0].get("pid") == shell)
+
+
+def require_empty_shell(client, pane, info=None):
+    """Refuse a pane whose foreground holds anything but its shell.
+
+    `info` is an earlier `pane_process_info` read to judge; without one the
+    pane is read now.
+    """
+    if not holds_only_shell(client.pane_process_info(pane) if info is None else info):
+        raise HerdrError(
+            "Pane {} is occupied: its foreground holds something other than its shell. Name an empty Herdr shell "
+            "pane; nothing was started.".format(pane), {"pane": pane})
+
+
 def verify_running(client, agent, pane, tier):
     launch_args = worker_launch_args(agent.kind, agent.launch_args)
     process = foreground_agent(client, pane, agent.kind)
@@ -71,20 +92,70 @@ def verify_running_permissions(client, agent, pane):
     verify_worker_permissions(agent.kind, process["argv"])
 
 
-def start_worker(client, agent, pane, tier, before_start=None, sleep=time.sleep):
-    launch_args = worker_launch_args(agent.kind, agent.launch_args)
-    flags = launch_args + launch_flags(agent.kind, tier)
-    if before_start is not None:
-        before_start()
-    result = client.agent_start(agent.name, agent.kind, pane, flags)
+def _start_seat(client, name, kind, pane, tier, launch_args):
+    """Start one named seat on `tier` and prove its launch argv."""
+    result = client.agent_start(name, kind, pane, list(launch_args) + launch_flags(kind, tier))
     info = result.get("agent") if isinstance(result, dict) else None
     if not isinstance(info, dict) or (
-        info.get("pane_id") != pane or info.get("name") != agent.name
-        or info.get("agent") != agent.kind or info.get("agent_status") not in READY_STATES
+        info.get("pane_id") != pane or info.get("name") != name
+        or info.get("agent") != kind or info.get("agent_status") not in READY_STATES
     ):
         raise HerdrError("Started worker identity or readiness differs from the requested pane and kind; no brief was sent.", {})
-    proof = verify_argv(agent.kind, tier, result.get("argv"), launch_args)
+    proof = verify_argv(kind, tier, result.get("argv"), launch_args)
     return {**proof, "pane_id": pane}
+
+
+def start_worker(client, agent, pane, tier, before_start=None, sleep=time.sleep):
+    launch_args = worker_launch_args(agent.kind, agent.launch_args)
+    # An unsupported kind refuses here, before the retrospective hook runs.
+    launch_flags(agent.kind, tier)
+    if before_start is not None:
+        before_start()
+    return _start_seat(client, agent.name, agent.kind, pane, tier, launch_args)
+
+
+def start_foreman(client, seat, pane, tier):
+    """Start the foreman seat in a shell pane on its selected tier.
+
+    `seat` is a `config.Foreman` and `tier` the row `tiers.select_tier`
+    resolved for its coordination round. Its launch options are the
+    operator's (`tiers.parse_launch_args`); the worker YOLO requirement does
+    not apply.
+
+    A fresh start needs a pane holding only its shell, read before the name
+    check and again immediately before the start; an occupied pane refuses.
+    A retry is safe: when Herdr already holds the seat's name on `pane` with
+    the seat's kind, nothing is started, the live foreground argv must carry
+    `tier`, and the proof returns with `replayed: true`. A name bound to
+    another pane or kind, or a live tier other than `tier`, refuses.
+    """
+    occupant = client.pane_process_info(pane)
+    try:
+        record = client.agent_get(seat.agent)
+    except HerdrError as exc:
+        if error_code(exc) != NAME_RELEASED:
+            raise
+        record = None
+    if record is None:
+        require_empty_shell(client, pane, occupant)
+        # Re-read immediately before the start: the pane may have been taken
+        # since the first read.
+        require_empty_shell(client, pane)
+        return {**_start_seat(client, seat.agent, seat.kind, pane, tier, list(seat.launch_args)), "replayed": False}
+    if record.get("pane_id") != pane or record.get("agent") != seat.kind:
+        raise HerdrError(
+            "The foreman name {!r} is already held by a {} agent in pane {!r}, not a {} agent in {!r}; nothing was "
+            "started. Stop that agent or name the pane it runs in, then retry.".format(
+                seat.agent, record.get("agent"), record.get("pane_id"), seat.kind, pane),
+            {"agent": seat.agent, "pane": pane, "bound_pane": record.get("pane_id"), "bound_kind": record.get("agent")})
+    return {**verify_foreman(client, seat, pane, tier), "replayed": True}
+
+
+def verify_foreman(client, seat, pane, tier):
+    """Prove the live foreman in `pane` runs the selected tier, from its foreground argv."""
+    process = foreground_agent(client, pane, seat.kind)
+    proof = verify_argv(seat.kind, tier, process["argv"], list(seat.launch_args))
+    return {**proof, "source": "process_argv", "pid": process["pid"], "pane_id": pane}
 
 
 def await_name_release(client, name, pane, sleep=time.sleep):
@@ -145,12 +216,7 @@ def restart_worker(client, agent, pane, tier, sleep=time.sleep, before_transitio
         before_transition()
     client.terminate_process(process.get("pid"))
     for attempt in range(SHELL_POLL_ATTEMPTS):
-        current = client.pane_process_info(pane)
-        shell = current.get("shell_pid")
-        foreground = current.get("foreground_processes", [])
-        if (isinstance(shell, int) and not isinstance(shell, bool) and shell > 0
-                and isinstance(foreground, list) and len(foreground) == 1
-                and isinstance(foreground[0], dict) and foreground[0].get("pid") == shell):
+        if holds_only_shell(client.pane_process_info(pane)):
             return start_after_release(client, agent, pane, tier, sleep=sleep, before_start=before_start)
         if attempt + 1 < SHELL_POLL_ATTEMPTS:
             sleep(SHELL_POLL_INTERVAL)

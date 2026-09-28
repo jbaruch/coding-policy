@@ -68,6 +68,13 @@ named in the `judge` block (`skills/herdr-foreman/foreman/config.py`). A worker 
 no tier from selection, so every round it takes records `tier: null` and runs
 at whatever model is already live, unproven (#476). Under schema 4 and below
 an untiered worker still loads, with that behaviour.
+Config schema 6 adds the optional top-level `foreman` block
+(`parse_foreman` in `skills/herdr-foreman/foreman/config.py`). The operator owns
+the file and is its only writer; the utility reads it and never migrates it.
+Schemas 1–5 stay readable: they carry no `foreman` block, and the seat reads as
+unconfigured, the preflight warning that never blocks. A `foreman` block in a
+file below schema 6 is refused with the version it needs. Moving to schema 6 is
+the operator adding the block and bumping `schema_version`.
 Config schema 2 added per-agent `tiers` and `launch_args`.
 See `skills/herdr-foreman/references/model-tiers.md` for billing evidence. A missing config is refused with the exact `cp` command to run. The
 optional `idle_markers` / `working_markers` per-agent keys carry the footer
