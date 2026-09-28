@@ -34,13 +34,15 @@ make_env() (
 
   cat > "$bin/git" <<'EOF'
 #!/usr/bin/env bash
+set -euo pipefail
 # clone <flags..> <url> <dest>: create an empty checkout at dest; everything else is a no-op.
 if [ "${1:-}" = "clone" ]; then dest="${!#}"; mkdir -p "$dest/.git"; fi
 exit 0
 EOF
-  printf '#!/usr/bin/env bash\nexit 0\n' > "$bin/tessl"
+  printf '#!/usr/bin/env bash\nset -euo pipefail\nexit 0\n' > "$bin/tessl"
   cat > "$bin/codex" <<'EOF'
 #!/usr/bin/env bash
+set -euo pipefail
 # Record argv one arg per line (so the test can assert the model pin), then
 # write the canned structured result to the --output-last-message path.
 if [ -n "${CODEX_ARGV_LOG:-}" ]; then printf '%s\n' "$@" > "$CODEX_ARGV_LOG"; fi
@@ -55,9 +57,10 @@ EOF
   mkdir -p "$central/.github/codex-review"
   echo '{}'     > "$central/.github/codex-review/fleet-schema.json"
   echo 'prompt' > "$central/.github/codex-review/fleet-prompt.md"
-  printf '#!/usr/bin/env bash\nexit 0\n' > "$central/.github/codex-review/assert-no-secret-leak.sh"
+  printf '#!/usr/bin/env bash\nset -euo pipefail\nexit 0\n' > "$central/.github/codex-review/assert-no-secret-leak.sh"
   cat > "$central/.github/codex-review/post-review.sh" <<'EOF'
 #!/usr/bin/env bash
+set -euo pipefail
 # args: <owner> <repo> <pr> <result-json> — echo them back so the test can assert routing.
 printf '{"state":"posted","owner":"%s","repo":"%s","pr":"%s"}\n' "$1" "$2" "$3"
 EOF

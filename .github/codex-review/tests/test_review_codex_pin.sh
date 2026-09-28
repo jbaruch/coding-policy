@@ -69,9 +69,10 @@ t_self_review_pin() {
   # (rules/error-handling.md aggregate carve-out, setup-step check).
   if ! (
     set -e
-    printf '#!/usr/bin/env bash\nexit 0\n' > "$bin/git"
+    printf '#!/usr/bin/env bash\nset -euo pipefail\nexit 0\n' > "$bin/git"
     cat > "$bin/codex" <<'EOF'
 #!/usr/bin/env bash
+set -euo pipefail
 # Record argv one arg per line, then drain the prompt on stdin.
 printf '%s\n' "$@" > "$CODEX_ARGV_LOG"
 cat > /dev/null
