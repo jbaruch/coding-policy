@@ -201,6 +201,29 @@ t_latest_unmarked_dismissal_is_not_all_clear() {
   assert_eq "dismissed empty" "0" "$(jq '.dismissed | length' <<<"$out")"
 }
 
+# The fleet App is swept after a ruled dismissal of its latest review, and
+# only then: an APPROVED latest leaves its earlier CR to GitHub's own supersession.
+t_fleet_reviewer_swept_only_after_ruled_dismissal() {
+  MOCK_REVIEWS_BODY='[
+    {"id":101,"state":"CHANGES_REQUESTED","commit_id":"aaa","submitted_at":"2026-01-01T00:00:00Z","user":{"login":"coding-policy-fleet-reviewer[bot]"}},
+    {"id":102,"state":"DISMISSED","commit_id":"bbb","submitted_at":"2026-01-02T00:00:00Z","user":{"login":"coding-policy-fleet-reviewer[bot]"}}
+  ]'
+  MOCK_TIMELINE_BODY='[{"event":"review_dismissed","dismissed_review":{"review_id":102,"state":"changes_requested","dismissal_message":"JUDGE-RULED: 0123456789abcdef covers 1 blocking findings at bbb; tracked in #12"}}]'
+  local out ids
+  out=$(main "owner" "repo" "1") || { MOCK_TIMELINE_BODY='[]'; return 1; }
+  MOCK_TIMELINE_BODY='[]'
+  ids=$(jq -r '.dismissed | map("\(.login):\(.review_id)") | join(",")' <<<"$out")
+  assert_eq "fleet CR swept" "coding-policy-fleet-reviewer[bot]:101" "$ids" || return 1
+  : > "$DISMISS_LOG"
+  MOCK_REVIEWS_BODY='[
+    {"id":111,"state":"CHANGES_REQUESTED","commit_id":"aaa","submitted_at":"2026-01-01T00:00:00Z","user":{"login":"coding-policy-fleet-reviewer[bot]"}},
+    {"id":112,"state":"APPROVED","commit_id":"bbb","submitted_at":"2026-01-02T00:00:00Z","user":{"login":"coding-policy-fleet-reviewer[bot]"}}
+  ]'
+  out=$(main "owner" "repo" "1") || return 1
+  assert_eq "approved fleet review sweeps nothing" "0" "$(dismiss_count)" || return 1
+  assert_eq "fleet not left_active" "0" "$(jq '.left_active | length' <<<"$out")"
+}
+
 # Two stale CRs before a clean COMMENT -> both dismissed.
 t_multiple_stale_crs_all_dismissed() {
   MOCK_REVIEWS_BODY='[
@@ -248,6 +271,7 @@ run "no reviews is a no-op"                     t_no_reviews_is_noop
 run "latest DISMISSED leaves earlier active CR" t_latest_dismissed_leaves_earlier_active_cr
 run "latest ruled dismissal sweeps earlier CR"  t_latest_ruled_dismissal_sweeps_earlier_cr
 run "unmarked dismissal is not an all-clear"    t_latest_unmarked_dismissal_is_not_all_clear
+run "fleet reviewer swept only after ruling"    t_fleet_reviewer_swept_only_after_ruled_dismissal
 run "multiple stale CRs all dismissed"          t_multiple_stale_crs_all_dismissed
 run "login is glob-safe against cwd files"      t_login_is_glob_safe_against_cwd_files
 
