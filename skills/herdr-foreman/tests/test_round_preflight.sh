@@ -23,6 +23,7 @@
 #                                  blocks too.
 #   8. --no-measure             -> headroom skipped, foreman still verified, ready.
 #      Measure fails            -> foreman tier a dependency failure, not verified.
+#      Measure output unreadable-> headroom blocked, foreman tier not verified.
 #   9. Missing --repo/--checkout-> exit 2, usage error, no JSON verdict.
 #  10. Every check's payload    -> carried through under `checks.<name>.detail`.
 #  11. Gate pointers            -> resolved once, carried for the briefs.
@@ -261,6 +262,20 @@ main() {
      && [[ "$(field "$OUT" 'd["checks"]["foreman_tier"].get("detail")')" == "null" ]] \
      && printf '%s' "$OUT" | grep -q 'not verified: the foreman'; then
     pass; else fail "a failed measure records the foreman tier as a dependency failure, got RC=$RC OUT=$OUT"; fi
+
+  # A measure that exits 0 with unreadable output records headroom blocked;
+  # the foreman's tier is still a dependency failure, never verified.
+  shadow "$TMP/measurebadjson"
+  # The stub's `$*` and `$FOREMAN_TIER_*` expand when the stub runs, not here.
+  # shellcheck disable=SC2016
+  printf '#!/usr/bin/env bash\nset -euo pipefail\ncase "$*" in\n  *capability-check*) printf %s; exit 0 ;;\n  *measure*) printf not-json; exit 0 ;;\n  *verify-foreman*) printf %%s "$FOREMAN_TIER_OUT"; exit "$FOREMAN_TIER_RC" ;;\nesac\nexit 9\n' \
+    "'{\"due\":false,\"entries\":0}'" > "$TMP/measurebadjson/foreman.sh" || die "write foreman stub"
+  run "$TMP/measurebadjson"
+  if [[ $RC -eq 1 ]] && [[ "$(field "$OUT" 'd["checks"]["headroom"]["status"]')" == '"blocked"' ]] \
+     && [[ "$(field "$OUT" 'd["checks"]["foreman_tier"]["status"]')" == '"failed"' ]] \
+     && [[ "$(field "$OUT" 'd["checks"]["foreman_tier"].get("detail")')" == "null" ]] \
+     && printf '%s' "$OUT" | grep -q 'not verified: the foreman'; then
+    pass; else fail "a zero-exit unreadable measure leaves the foreman tier unverified, got RC=$RC OUT=$OUT"; fi
 
   shadow "$TMP/usage"
   for args in "--checkout /tmp" "--repo o/r"; do

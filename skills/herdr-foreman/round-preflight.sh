@@ -39,7 +39,7 @@
 # unconfigured, not blocking, with the configure command as
 # `detail.warning` when config has no `foreman` block; failed, and blocking,
 # when the live argv differs or the selection refuses; failed, and
-# blocking, without running when `checks.headroom` failed, since the
+# blocking, without running when `checks.headroom` did not pass, since the
 # selection reads that measurement. `--no-measure` reuses the latest snapshot.
 #
 # `checks.worktrees` (the sweep, sweep-worktrees.sh):
@@ -225,8 +225,19 @@ PY
     rc=$?
     cat "${scratch}/measure.err" >&2
     if [ "$rc" -eq 0 ]; then
-      measured=ok
       record headroom ok "" 0 "${scratch}/measure.json" "foreman measure"
+      # A zero exit with unreadable output records headroom blocked, and the
+      # foreman's selection must not read a snapshot that check did not pass.
+      # An unreadable row reads as not passed.
+      local headroom_status=""
+      if ! headroom_status="$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); r=d.get("headroom") if isinstance(d, dict) else None; print(r.get("status", "") if isinstance(r, dict) else "")' "$results")"; then
+        headroom_status=""
+      fi
+      if [ "$headroom_status" = ok ]; then
+        measured=ok
+      else
+        measured=failed
+      fi
     else
       measured=failed
       record headroom failed "foreman measure exited ${rc}; a seat cannot be ranked on an unmeasured roster" 0 ""
@@ -242,7 +253,7 @@ PY
   #     live argv must carry the selected tier. An absent `foreman` block warns
   #     and does not block.
   if [ "$measured" = failed ]; then
-    record foreman_tier failed "not verified: the foreman's tier is selected on the headroom foreman measure writes, and that check failed; fix checks.headroom, then re-run the preflight" 0 ""
+    record foreman_tier failed "not verified: the foreman's tier is selected on the headroom foreman measure writes, and that check did not pass; fix checks.headroom, then re-run the preflight" 0 ""
   else
     bash "${HERE}/foreman.sh" "${common[@]+"${common[@]}"}" verify-foreman \
       > "${scratch}/foreman-tier.json" 2>"${scratch}/foreman-tier.err"

@@ -255,10 +255,10 @@ literal, never a guess:
 | `dispatch_id`, `worker`, `role` | Actual utility dispatch identity and assigned worker/role; `ASSIGNMENT_IDENTITY` governs task events |
 | `report` | Report path, or a `REPORT_PLACEHOLDERS` literal before it is known |
 | `observed` | Source-attributed dispatch result, wait result, worker claim, or Herdr state; never an acceptance decision |
-| `decision` | Foreman assessment from the event subject's `DECISION_MEANINGS` vocabulary |
+| `decision` | Foreman's recorded decision, from the report verdicts and gate evidence, in the event subject's `DECISION_MEANINGS` vocabulary |
 | `head_revision` | Inspected commit SHA, or a `HEAD_PLACEHOLDERS` literal when unverified or without a VCS artifact |
 | `evidence` | Absolute report/artifact paths with the inspected content or digest, VCS refs, and gate/run URLs with their observed results; `UNKNOWN` when none exists |
-| `assessment` | Why this decision follows from the evidence, remaining criteria, and the next action |
+| `assessment` | The verdict lines and gate evidence the decision rests on, remaining criteria, and the next action |
 
 The task identity and base in the document apply to every event. Append a new
 decision when evidence changes; preserve earlier records. Event sections may
@@ -614,8 +614,8 @@ blocking finding, and scoped review cannot approve a release.
 `work` contains `base_revision`, `scope`, repository-relative `paths`, and
 blocking `findings`. A review receipt contains `dispatch`, `head_revision`,
 `verdict`, `review_mode`, independent `reviewer`, `report`, `changed_paths`, and
-`evidence`. The foreman verifies the actual VCS diff before recording these fields;
-the command reads the report, checks its stated head, and records its digest.
+`evidence`. The foreman checks the recorded head and paths against the actual VCS diff before recording these fields;
+the command reads the report, checks its stated head and its `VERDICT:` line against `verdict`, and records its digest.
 The next approved correction rechecks the preceding blocking report's bytes.
 An approval receipt requires full review; tester and external gates remain
 separate requirements in the skill.

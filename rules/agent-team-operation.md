@@ -50,6 +50,7 @@ description: Running a multi-agent team — task-based specialist composition, c
 - The foreman never reasons through task content
 - Acceptance rests on independent reviewer and tester reports, CI, oracle verification and the report-verdict classifier gate
 - The foreman gates on a report's verdict lines and labels, never on its own assessment of the substance
+- Recording a report's verdict, a validated partition or an operator's answer in a foreman-owned record is bookkeeping, never an assessment of task content
 - The foreman never substitutes its own reading for a missing or unusable report
 - A reviewer or tester report missing its `VERDICT:` line, or a blocking finding's severity or scope label, returns to its responsibility with the gap named
 - A brief carries the operator's request verbatim and quotes the reports and findings it acts on
@@ -60,6 +61,7 @@ description: Running a multi-agent team — task-based specialist composition, c
   - An investigation-only deliverable against its request — an independent reviewer
   - A consultation's acceptance — its report's `met`/`unmet` lines, and a dispute over them to an independent reviewer
   - Pre-implementation surfaces or acceptance criteria the operator's request does not state — an advisor consultation
+  - An added obligation or changed scope — the operator, from the reporting worker's proposal
   - A review partition — the developer's report proposes it and `foreman validate-partition` proves it
   - A bug's reproduction and causal diagnosis — the developer and tester, verified by the tester and reviewer
   - Recurring findings, unclear causality or a stalled worker's recoverable partial work — the investigator

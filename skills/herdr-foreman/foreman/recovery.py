@@ -852,7 +852,7 @@ def diagnose(store, assignments, data, at, judge_agent, enrolled_report, supervi
     enrollment has no diagnosis to record. `supervised` and `enrolled_report`
     are the caller's reading of that binding.
 
-    `investigations` are the foreman's assessed specialist consultations. The
+    `investigations` are the recorded, report-bound specialist assessments. The
     judge rules on a prepared causal assessment rather than investigating from
     scratch: the investigator's profile is written for "unclear causality or
     repeated unsuccessful fixes", and it is the cheaper seat (#408). One for
@@ -1191,7 +1191,7 @@ def validate_work(store, assignments, task, fix_round, plan_id=None, work=None, 
     if not isinstance(work, dict) or set(work) != {"base_revision", "scope", "paths", "findings"}:
         raise UsageError("Extra corrections require --work with base_revision, scope, paths and findings from the blocking review.", {})
     if work["base_revision"] != plan["base_revision"] or work["scope"] != plan["scope"]:
-        raise UsageError("Correction base or scope differs from its authorization; preserve the base and ask only for the changed scope decision.", {})
+        raise UsageError("Correction base or scope differs from its authorization; preserve the base and ask the operator only for the changed scope decision.", {})
     paths(work["paths"], "correction paths")
     if not isinstance(work["findings"], list) or not work["findings"] or any(not isinstance(value, str) or not value.strip() for value in work["findings"]):
         raise UsageError("Name the concrete blocking findings this correction addresses.", {})
@@ -1409,6 +1409,17 @@ def abort_pre_send(store, identifier, at, reason):
         _event(store, at, "dispatch_not_sent", record["task"], {"dispatch": identifier, "reason": reason})
 
 
+#: A report's own verdict line: the whole line is `VERDICT: <value>`, optionally
+#: bulleted or backquoted. The template's `VERDICT: blocking | approved` option
+#: list does not match.
+VERDICT_LINE = re.compile(r"^[ \t>*-]*`?VERDICT:[ \t]*(blocking|approved)`?[ \t]*$", re.MULTILINE)
+
+
+def report_verdicts(body):
+    """The set of verdicts a review report states on its own `VERDICT:` lines."""
+    return set(VERDICT_LINE.findall(body))
+
+
 def record_report(store, data, at):
     required = {"dispatch", "head_revision", "verdict", "review_mode", "reviewer", "report", "changed_paths"}
     if not isinstance(data, dict) or set(data) != required:
@@ -1432,6 +1443,10 @@ def record_report(store, data, at):
     evidence, body = receipt(data["report"])
     if data["head_revision"] not in body:
         raise UsageError("The review report does not name the recorded full head SHA; collect the current-tip report before recording it.", {})
+    stated = report_verdicts(body)
+    if stated != {data["verdict"]}:
+        raise UsageError("The review report states VERDICT {} but the receipt records {}; return the report to its reviewer for one `VERDICT: blocking | approved` line, or record the verdict it states.".format(
+            " and ".join(sorted(stated)) or "nothing", data["verdict"]), {})
     result = {"schema_version": RECOVERY_SCHEMA_VERSION, "at": at, **data, "evidence": evidence}
     if record.get("report") and record["report"] != result:
         _event(store, at, "review_superseded", record["task"], {"dispatch": record["id"], "previous": record["report"]})

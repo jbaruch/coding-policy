@@ -109,6 +109,33 @@
   `test_round_preflight.sh` (a failed measure, `--no-measure`) and
   `test_engagement.py`.
 
+  The following policy review found Herdr surfaces still assigning the
+  foreman judgments the Foreman Seat routes elsewhere; the whole
+  `skills/herdr-foreman` tree was swept in one round. Scope decisions on added
+  obligations belong to the operator, not the foreman
+  (`templates/brief-specialist.md`, the accessibility and UX-product profiles,
+  and the `role_clear.py` / `recovery.py` refusals now say so);
+  `references/attention.md` no longer calls artifact acceptance and changed
+  scope "foreman judgments" but routes them to the reports' `met`/`unmet` lines,
+  the reviewer and tester verdicts, and the operator's recorded answer;
+  `partition.py` says the developer's report proposes the partition;
+  `members.py`'s `accepted` meaning and the ledger's `decision`/`assessment`
+  columns rest on the report verdicts and gate evidence rather than the
+  foreman's own verification; Step 16 completes a task on the Step 12 reports.
+  The rule gains two bullets: recording a report's verdict, a validated
+  partition or an operator's answer is bookkeeping, not an assessment of task
+  content (retrospective notes, attention priority and working-memory curation
+  stay foreman-owned records), and an added obligation or changed scope routes
+  to the operator. Two Copilot findings closed with it: `record-report` trusted
+  the caller's `verdict` field while the templates made the report's `VERDICT:`
+  line the gate, so a report could omit or contradict it; the owner now
+  refuses a receipt whose `verdict` differs from the single verdict the report
+  states (`report_verdicts` in `recovery.py`). The round preflight treated
+  `measure`'s zero exit as a measurement even when its output was unreadable
+  and the headroom check recorded `blocked`; `verify-foreman` now runs only
+  when the recorded headroom check passed. Tests: `test_recovery.py`,
+  `test_recovery_cli.py`, `test_round_preflight.sh`.
+
 ## 0.3.319 — 2026-09-28
 
 ### Added

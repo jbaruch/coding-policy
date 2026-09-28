@@ -59,7 +59,7 @@ class RecoveryTests(unittest.TestCase):
         self.investigation = str(investigation)
         self.investigation_sha = hashlib.sha256(investigation.read_bytes()).hexdigest()
         self.review = self.root / "review.md"
-        self.review.write_text("Reviewed head: " + HEAD + "\nBlocking finding F1: quoted input is still accepted as a completion signal.\n")
+        self.review.write_text("Reviewed head: " + HEAD + "\nBlocking finding F1: quoted input is still accepted as a completion signal.\nVERDICT: blocking\n")
         # The assessment a change of direction rests on: what was tried, why it
         # failed, and the experiment that discriminates (#462).
         assessed = self.root / "assessed.md"
@@ -1179,6 +1179,21 @@ class RecoveryTests(unittest.TestCase):
         self.review.write_text("This report was replaced after it was recorded.\n")
         with self.assertRaisesRegex(UsageError, "artifact changed"):
             validate_work(self.store, self.history, TASK, 7, "plan-1", WORK)
+
+    def test_review_receipt_verdict_must_match_the_report_verdict_line(self):
+        self.approve()
+        self.finish(6)
+        data = {"dispatch": "fix-6", "head_revision": HEAD, "verdict": "approved", "review_mode": "full",
+                "reviewer": "independent-reviewer", "report": str(self.review), "changed_paths": ["src/parser.py"]}
+        with self.assertRaisesRegex(UsageError, "states VERDICT blocking but the receipt records approved"):
+            record_report(self.store, data, AT)
+        for body in ("no verdict line", "VERDICT: blocking | approved", "VERDICT: blocking\nVERDICT: approved"):
+            with self.subTest(body=body):
+                self.review.write_text("Reviewed head: " + HEAD + "\n" + body + "\n")
+                with self.assertRaisesRegex(UsageError, "VERDICT"):
+                    record_report(self.store, data, AT)
+        self.review.write_text("Reviewed head: " + HEAD + "\n- `VERDICT: approved`\n")
+        self.assertEqual(record_report(self.store, data, AT)["verdict"], "approved")
 
     def test_future_or_corrupt_recovery_records_preserve_disk_and_refuse_history(self):
         self.approve()

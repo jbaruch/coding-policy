@@ -732,7 +732,7 @@ class RecoveryCommandTests(fixture.CliCase):
         self.assertIn("actual blocking review", err)
         self.assertEqual(self.runner.calls, [])
         review = self.tmp / "review-6.md"
-        review.write_text("Reviewed head " + HEAD + "\nBlocking F1: an escaped quote is still mishandled.\n")
+        review.write_text("Reviewed head " + HEAD + "\nBlocking F1: an escaped quote is still mishandled.\nVERDICT: blocking\n")
         code, _, err = self.owner("record-report", {"dispatch": dispatch, "head_revision": HEAD, "verdict": "blocking",
             "review_mode": "full", "reviewer": "codex", "report": str(review), "changed_paths": ["src/parser.py"]})
         self.assertEqual(code, 0, err)

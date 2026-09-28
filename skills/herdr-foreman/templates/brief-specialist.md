@@ -71,7 +71,7 @@ Write `{{REPORT}}` with:
 - Facts, recommendations, hypotheses and unresolved gaps distinguished.
 - For each finding, its severity, the accepted behavior it serves and the
   observable effect of the proposed correction. Identify added obligations for
-  the foreman's scope decision; a finding cannot authorize them.
+  the operator's scope decision; a finding cannot authorize them.
 - Material contributions to the proposed solution, decisions needing user
   attention, and evidence-linked lesson candidates with their project scope.
 

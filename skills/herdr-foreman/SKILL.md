@@ -782,8 +782,8 @@ worktrees. Proceed immediately to Step 16.
 ## Step 16 — Log the Round
 
 Finalize the task ledger with the round outcome and remaining obligations.
-Mark the task completed only after its acceptance criteria and required
-release and cleanup obligations are verified. When the task merged or was
+Mark the task completed only after the Step 12 reports show its acceptance
+criteria met and its required release and cleanup obligations are verified. When the task merged or was
 abandoned, close it. The record is
 `{"task", "outcome": "merged" | "abandoned", "evidence"}`:
 

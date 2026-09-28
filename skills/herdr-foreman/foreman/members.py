@@ -5,7 +5,7 @@ composes the chain that ends an assignment's observation, and `check-member`
 the chain that checks whether its report landed. Each composes the existing
 owner functions; neither reimplements them.
 
-`close-member` enforces the order the chain requires: the foreman's assessed
+`close-member` enforces the order the chain requires: the foreman's recorded
 outcome must already be in the task ledger before any event is acknowledged
 or the enrollment resolved (rules/agent-team-operation.md Fleet Supervision:
 acknowledging an observation never accepts the assignment). The ledger stays
@@ -59,7 +59,7 @@ DECISION_MEANINGS = {
     "assignment": {
         "pending": "Dispatch is planned or confirmed; no report has been assessed",
         "reported": "Delivery was confirmed; the foreman has not yet accepted the work",
-        "accepted": "The foreman read the report and verified that the assignment's acceptance criteria hold",
+        "accepted": "The report's verdict lines and the independent gates it cites show the assignment's acceptance criteria hold",
         "needs_work": "Evidence shows unmet criteria or invalidates a prior acceptance",
         "blocked": "A specific unresolved dependency or decision prevents the assignment from proceeding",
         "unavailable": "A report is missing or unavailable under the wait/recovery contract",
