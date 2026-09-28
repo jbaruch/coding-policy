@@ -14,6 +14,15 @@ task.
 Schema 2 adds `contribution_source`. A schema-1 record carried a foreman's own
 classification; the owner migration keeps its value and marks it
 `foreman_assessment`, so readers treat both versions alike.
+
+Schema 3 adds `contribution_review`. A worker's own `CONTRIBUTION: none` is
+its word about itself and never clears a contributor exclusion
+(`composition._contributor`). Independent evidence can: a verification-scope
+reviewer on the same task, another agent, whose bound report carries one
+`CONTRIBUTION-REVIEW <dispatch>: <class>` line for the assessed dispatch. The
+record then takes that class with source `independent_review`, unless the
+worker itself declared a contribution, which always stands. Older records
+migrate with `contribution_review: null`.
 Reading history validates stored relationships without reopening old sources.
 Warm follow-up revalidates those sources and the retired fleet enrollment.
 """
@@ -29,16 +38,22 @@ from .tiers import canonical_role
 from . import supervision
 
 
-ASSESSMENT_SCHEMA_VERSION = 2
+ASSESSMENT_SCHEMA_VERSION = 3
 CONSULTATION_ROLES = frozenset({"advisor", "investigator", "architect"})
 ASSESSABLE_ROLES = CONSULTATION_ROLES | {"reviewer", "tester"}
 CONTRIBUTIONS = frozenset({"none", "design", "implementation"})
 INPUT_FIELDS = frozenset({"id", "dispatch", "report", "delivery", "outcome", "contribution", "summary"})
 #: `contribution` is optional input: the owner derives it from the report, and
-#: a supplied value must agree with the derivation.
-REQUIRED_INPUT = INPUT_FIELDS - {"contribution"}
+#: a supplied value must agree with the derivation. `contribution_review` is
+#: optional input naming the independent review of this worker's contribution.
+OPTIONAL_INPUT = frozenset({"contribution", "contribution_review"})
+REQUIRED_INPUT = INPUT_FIELDS - OPTIONAL_INPUT
 #: Where a record's contribution came from.
-CONTRIBUTION_SOURCES = frozenset({"report_declared", "report_undeclared", "foreman_assessment"})
+CONTRIBUTION_SOURCES = frozenset({"report_declared", "report_undeclared", "foreman_assessment", "independent_review"})
+#: A reviewer's line classifying another dispatch's contribution.
+CONTRIBUTION_REVIEW_LINE = re.compile(r"^[ \t>*-]*`?CONTRIBUTION-REVIEW[ \t]+(\S+):[ \t]*([a-z]+)`?[ \t]*$", re.MULTILINE)
+#: What `contribution_review` holds on a record reviewed independently.
+REVIEW_FIELDS = frozenset({"dispatch", "report", "report_evidence"})
 #: A whole line `CONTRIBUTION: <class>`, the shape every report template asks for.
 CONTRIBUTION_LINE = re.compile(r"^CONTRIBUTION:[ \t]*(\S+)[ \t]*$", re.MULTILINE)
 #: The class an undeclared contribution records: unresolved history is never `none`.
@@ -54,7 +69,7 @@ EVIDENCE = re.compile(r"^[ \t]*(?:—|–|-)[ \t]*\S")
 ACCEPTANCE_STATUSES = frozenset({"met", "unmet"})
 #: The fields the foreman quotes from the bound report rather than writes.
 QUOTED_FIELDS = ("outcome", "summary")
-RECORD_FIELDS = INPUT_FIELDS | {"schema_version", "at", "assignment_index", "task", "role", "agent",
+RECORD_FIELDS = INPUT_FIELDS | {"contribution_review"} | {"schema_version", "at", "assignment_index", "task", "role", "agent",
                                 "report_evidence", "delivery_evidence", "contribution_source"}
 
 
@@ -146,29 +161,40 @@ def require_report_result(body, role):
 
 
 def migrate_assessments(payload):
-    """Carry schema-1 records to schema 2 in place; True when any changed.
+    """Carry schema-1 and schema-2 records to schema 3 in place; True when any changed.
 
     Only the owner calls this, on load. A schema-1 contribution was the
-    foreman's own classification and keeps that meaning explicitly.
+    foreman's own classification and keeps that meaning explicitly. Neither
+    older version recorded an independent review.
     """
     records = payload.get("specialist_assessments")
     if not isinstance(records, list):
         return False
     changed = False
     for record in records:
-        if (isinstance(record, dict) and type(record.get("schema_version")) is int
-                and record["schema_version"] == 1 and "contribution_source" not in record):
-            record.update(schema_version=ASSESSMENT_SCHEMA_VERSION, contribution_source="foreman_assessment")
+        if not isinstance(record, dict) or type(record.get("schema_version")) is not int:
+            continue
+        if record["schema_version"] == 1 and "contribution_source" not in record:
+            record.update(schema_version=2, contribution_source="foreman_assessment")
+            changed = True
+        if record["schema_version"] == 2 and "contribution_review" not in record:
+            record.update(schema_version=ASSESSMENT_SCHEMA_VERSION, contribution_review=None)
             changed = True
     return changed
 
 
 def _input(data, required=REQUIRED_INPUT):
-    if not isinstance(data, dict) or not required <= set(data) <= INPUT_FIELDS:
+    if not isinstance(data, dict) or not required <= set(data) <= INPUT_FIELDS | OPTIONAL_INPUT:
         raise UsageError("Specialist assessment requires id, dispatch, report, delivery, outcome and summary, and "
-                         "accepts contribution; quote the delivered report's acceptance lines.", {})
+                         "accepts contribution and contribution_review; quote the delivered report's acceptance lines.", {})
     for key in data:
-        text(data[key], key)
+        if key != "contribution_review":
+            text(data[key], key)
+    review = data.get("contribution_review")
+    if review is not None and (not isinstance(review, dict) or set(review) != {"dispatch", "report"}
+                               or not all(isinstance(review[key], str) and review[key] for key in review)):
+        raise UsageError("contribution_review names the independent reviewer's `dispatch` and its `report` path, "
+                         "and nothing else.", {})
     if "contribution" in data and data["contribution"] not in CONTRIBUTIONS:
         raise UsageError("Contribution must be none, design or implementation, as the report's CONTRIBUTION line "
                          "declares it.", {})
@@ -198,9 +224,14 @@ def validate_assessments(state):
                 or type(record.get("schema_version")) is not int or record["schema_version"] != ASSESSMENT_SCHEMA_VERSION
                 or record.get("contribution_source") not in CONTRIBUTION_SOURCES
                 or (record["contribution_source"] == "report_undeclared"
-                    and record.get("contribution") != UNDECLARED_CONTRIBUTION)):
+                    and record.get("contribution") != UNDECLARED_CONTRIBUTION)
+                or (record["contribution_source"] == "independent_review") != isinstance(record.get("contribution_review"), dict)
+                or (isinstance(record.get("contribution_review"), dict)
+                    and set(record["contribution_review"]) != REVIEW_FIELDS)):
             raise UsageError("Unsupported or corrupt specialist assessment; preserve history and update the owner.", {})
         _input({key: record[key] for key in INPUT_FIELDS}, required=INPUT_FIELDS)
+        if isinstance(record["contribution_review"], dict):
+            validate_receipt(record["contribution_review"]["report_evidence"])
         text(record["at"], "assessment time")
         supervision.timestamp(record["at"])
         if record["id"] in ids:
@@ -219,6 +250,30 @@ def validate_assessments(state):
                 raise UsageError("Specialist assessment receipt names a different artifact; preserve its original evidence.", {})
 
 
+def independent_review(state, dispatch, named):
+    """The contribution class an independent reviewer's report assigns `dispatch`.
+
+    The reviewer is a confirmed verification-scope reviewer dispatch on the
+    same task, held by another agent; its bound report carries exactly one
+    `CONTRIBUTION-REVIEW <dispatch-id>: <class>` line for the assessed dispatch.
+    """
+    reviewer = next((row for row in state["recovery"]["dispatches"] if row["id"] == named["dispatch"]), None)
+    if (reviewer is None or reviewer["status"] != "applied" or canonical_role(reviewer["role"]) != "reviewer"
+            or reviewer.get("reviewer_scope") != "verification" or reviewer["task"] != dispatch["task"]
+            or reviewer["agent"] == dispatch["agent"]):
+        raise UsageError(
+            "contribution_review must name a confirmed verification-scope reviewer dispatch on task {!r} held by an "
+            "agent other than {!r}; a worker's own report never clears its contribution.".format(
+                dispatch["task"], dispatch["agent"]), {"review": named["dispatch"]})
+    evidence, body = receipt(named["report"])
+    lines = [value for target, value in CONTRIBUTION_REVIEW_LINE.findall(body) if target == dispatch["id"]]
+    if len(lines) != 1 or lines[0] not in CONTRIBUTIONS:
+        raise UsageError(
+            "The review report needs exactly one `CONTRIBUTION-REVIEW {}: none | design | implementation` line; "
+            "return it to the reviewer with the gap named.".format(dispatch["id"]), {"found": lines})
+    return {"dispatch": named["dispatch"], "report": named["report"], "report_evidence": evidence, "contribution": lines[0]}
+
+
 def record_assessment(state, state_path, data, at):
     """Append an assessment bound to a delivered enrollment's report bytes.
 
@@ -229,7 +284,11 @@ def record_assessment(state, state_path, data, at):
     supervision.timestamp(at)
     prior = next((row for row in state["specialist_assessments"] if row["id"] == data["id"]), None)
     if prior is not None:
-        if any(prior[key] != data[key] for key in data):
+        def same(key):
+            if key == "contribution_review" and isinstance(prior[key], dict) and isinstance(data[key], dict):
+                return {name: prior[key][name] for name in ("dispatch", "report")} == data[key]
+            return prior[key] == data[key]
+        if not all(same(key) for key in data):
             raise UsageError("Assessment identity already names different input; record a new assessment without rewriting prior evidence.", {})
         return prior
     dispatch, index = _dispatch(state, data["dispatch"])
@@ -244,6 +303,16 @@ def record_assessment(state, state_path, data, at):
     require_report_result(body, canonical_role(dispatch["role"]))
     contribution, source = declared_contribution(body)
     require_quoted(body, data)
+    review = None
+    if data.get("contribution_review") is not None:
+        review = independent_review(state, dispatch, data["contribution_review"])
+        # A worker's own declared contribution always stands; the review
+        # decides only what the worker's word cannot, a `none` or no line.
+        if source != "report_declared" or contribution == "none":
+            contribution, source = review.pop("contribution"), "independent_review"
+        else:
+            review.pop("contribution")
+            review = None
     if "contribution" in data and data["contribution"] != contribution:
         raise UsageError(
             "The bound report records contribution {!r} ({}); the supplied {!r} disagrees. Omit it, or return the "
@@ -267,7 +336,7 @@ def record_assessment(state, state_path, data, at):
     # the field without versioning it (rules/stateful-artifacts.md Migration
     # Policy). The seat stays on the dispatch this record cites (#434).
     result = {"schema_version": ASSESSMENT_SCHEMA_VERSION, "at": at, **data,
-              "contribution": contribution, "contribution_source": source,
+              "contribution": contribution, "contribution_source": source, "contribution_review": review,
               "assignment_index": index, "task": dispatch["task"],
               "role": canonical_role(dispatch["role"]), "agent": dispatch["agent"],
               "report_evidence": report_evidence, "delivery_evidence": delivery_evidence}

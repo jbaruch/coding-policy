@@ -70,7 +70,8 @@ Write `{{REPORT}}` with:
   substance.
 - `CONTRIBUTION: none | design | implementation` — the class of the content you
   originated or materially shaped. The owner script reads this line from
-  your report; an omitted line records as `design`.
+  your report; an omitted line records as `design`. A `none` is your own word
+  and never clears you for independent verification of this task.
 - Evidence inspected, source revisions, experiments and actual results.
 - Facts, recommendations, hypotheses and unresolved gaps distinguished.
 - For each finding, its severity, the accepted behavior it serves and the

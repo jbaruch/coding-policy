@@ -115,6 +115,48 @@ class EngagementTest(unittest.TestCase):
                 with self.assertRaisesRegex(UsageError, "no single `VERDICT"):
                     self.assess(data)
 
+    def independent_reviewer(self, agent="checker", scope="verification", line="CONTRIBUTION-REVIEW consult-1: none"):
+        report = self.root / (agent + "-contribution-review.md")
+        report.write_text("Inspected the consultation's report against the task history.\n" + line + "\n")
+        seat = {**self.dispatch, "id": "review-" + agent, "role": "reviewer", "agent": agent, "reviewer_scope": scope}
+        seat.pop("requirements")
+        # The owner dispatch record is the evidence; no enrollment is needed.
+        recovery.reserve(self.state["recovery"], seat, AT)
+        add_assignment(self.state, AT, "reviewer", agent, task=seat["task"], reviewer_scope=scope)
+        result = {key: copy.deepcopy(seat[key]) for key in ("task", "role", "agent", "fix_round", "reviewer_scope")}
+        recovery.finish_dispatch(self.state["recovery"], seat["id"], {**result, "status": "applied"},
+                                 len(self.state["assignments"]) - 1, AT)
+        return {"dispatch": seat["id"], "report": str(report)}
+
+    def test_an_independent_review_records_no_contribution_from_its_own_report(self):
+        self.report.write_text(self.report.read_text() + "CONTRIBUTION: none\n")
+        named = self.independent_reviewer()
+        data = {key: value for key, value in self.data.items() if key != "contribution"}
+        result = self.assess({**data, "contribution_review": named})
+        self.assertEqual((result["contribution"], result["contribution_source"]), ("none", "independent_review"))
+        self.assertEqual(result["contribution_review"]["dispatch"], named["dispatch"])
+        self.assertEqual(self.assess({**data, "contribution_review": named}), result)
+        engagement.validate_assessments(self.state)
+
+    def test_a_review_by_the_worker_itself_or_outside_verification_is_refused(self):
+        data = {key: value for key, value in self.data.items() if key != "contribution"}
+        for agent, scope, line in (("worker", "verification", "CONTRIBUTION-REVIEW consult-1: none"),
+                                   ("designer", "design", "CONTRIBUTION-REVIEW consult-1: none"),
+                                   ("silent", "verification", "No classification here."),
+                                   ("twice", "verification", "CONTRIBUTION-REVIEW consult-1: none\nCONTRIBUTION-REVIEW consult-1: none")):
+            with self.subTest(agent=agent):
+                named = self.independent_reviewer(agent, scope, line)
+                with self.assertRaises(UsageError):
+                    self.assess({**data, "id": "assessment-" + agent, "contribution_review": named})
+        self.assertEqual(self.state["specialist_assessments"], [])
+
+    def test_a_declared_contribution_stands_over_an_independent_none(self):
+        self.report.write_text(self.report.read_text() + "CONTRIBUTION: design\n")
+        named = self.independent_reviewer()
+        result = self.assess({**self.data, "contribution_review": named})
+        self.assertEqual((result["contribution"], result["contribution_source"]), ("design", "report_declared"))
+        self.assertIsNone(result["contribution_review"])
+
     def test_an_undeclared_contribution_records_design_from_the_report_bytes(self):
         data = {key: value for key, value in self.data.items() if key != "contribution"}
         result = self.assess(data)
@@ -140,7 +182,7 @@ class EngagementTest(unittest.TestCase):
 
     def test_a_schema_1_record_migrates_as_a_foreman_assessment(self):
         record = self.assess()
-        legacy = {key: value for key, value in record.items() if key != "contribution_source"}
+        legacy = {key: value for key, value in record.items() if key not in {"contribution_source", "contribution_review"}}
         legacy.update(schema_version=1, contribution="none")
         self.state["specialist_assessments"] = [legacy]
         save_state(self.path, self.state)
@@ -148,7 +190,8 @@ class EngagementTest(unittest.TestCase):
         self.assertTrue(usable)
         migrated = loaded["specialist_assessments"][0]
         self.assertEqual((migrated["schema_version"], migrated["contribution_source"], migrated["contribution"]),
-                         (2, "foreman_assessment", "none"))
+                         (3, "foreman_assessment", "none"))
+        self.assertIsNone(migrated["contribution_review"])
 
     def test_a_boolean_schema_version_is_never_migrated(self):
         # JSON `true` equals 1 in Python; the owner still refuses it as corrupt.
@@ -313,7 +356,8 @@ class EngagementTest(unittest.TestCase):
 
     def test_corrupt_assessment_preserves_owner_file_and_refuses_read(self):
         self.assess()
-        variants = ({"schema_version": 3}, {"contribution_source": "worker_claim"}, {"assignment_index": 9}, {"assignment_index": False}, {"agent": "other-worker"},
+        variants = ({"schema_version": 4}, {"contribution_source": "independent_review"},
+                    {"contribution_review": {"dispatch": "r", "report": "/r.md"}}, {"contribution_source": "worker_claim"}, {"assignment_index": 9}, {"assignment_index": False}, {"agent": "other-worker"},
                     {"task": "another-task"}, {"at": "2026-02-03T09:00:00Z"},
                     {"report_evidence": {**self.state["specialist_assessments"][0]["report_evidence"], "path": "/other.md"}},
                     # A report that declared nothing records `design`; any

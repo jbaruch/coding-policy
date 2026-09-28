@@ -564,9 +564,9 @@ identities remain unchanged.
 ### Specialist assessment records
 
 `assess-specialist` appends records to the main state's `specialist_assessments`.
-Each schema-2 record contains `id`, `at`, `dispatch`, `assignment_index`, `task`,
+Each schema-3 record contains `id`, `at`, `dispatch`, `assignment_index`, `task`,
 `role`, `agent`, `report`, `delivery`, `outcome`, `contribution`,
-`contribution_source`, `summary`, `report_evidence`, and `delivery_evidence`. The evidence objects contain absolute
+`contribution_source`, `contribution_review`, `summary`, `report_evidence`, and `delivery_evidence`. The evidence objects contain absolute
 `path` and SHA-256 `sha256`. The report is the supervised assignment's enrolled
 path; delivery is saved successful `wait-report` JSON for that worker and path,
 or the exact owner-recorded `recover-report` output for that dispatch and the
@@ -577,7 +577,16 @@ derives it from the bound report bytes (`declared_contribution` in
 `report_declared` for a report's `CONTRIBUTION:` line and `report_undeclared`
 when there is none, which records `design`; a `report_undeclared` record
 holding any other class is corrupt. A supplied `contribution` must match the
-derivation or the record is refused. Outcome and summary quote the report's
+derivation or the record is refused. A worker's own `none` never clears a
+contributor exclusion (`_contributor` in
+`skills/herdr-foreman/foreman/composition.py`). Schema 3 adds
+`contribution_review`: null, or `{dispatch, report, report_evidence}` naming a
+confirmed verification-scope reviewer dispatch on the same task, held by
+another agent, whose bound report carries one `CONTRIBUTION-REVIEW <dispatch>:
+<class>` line for the assessed dispatch (`independent_review`). That class is
+recorded with `contribution_source: independent_review`, the only source whose
+`none` clears an exclusion; a worker's own declared `design` or
+`implementation` always stands. Outcome and summary quote the report's
 acceptance lines and answer, and are not task acceptance; the owner refuses
 either one the bound report does not contain (`require_quoted`), and a report
 whose own result lines are missing, unresolved or `unmet`
@@ -592,8 +601,9 @@ remain contribution evidence even after a later assessment, role or model change
 Missing, corrupt or unsupported assessment history follows the main state's
 preserve-and-refuse writer contract. A schema-1 record carried the foreman's own
 classification; the owner migrates an integer schema-1 record on load to schema 2 with its values kept
-and `contribution_source: foreman_assessment`, so readers treat both alike
-(`migrate_assessments`). A record newer than schema 2 is refused as newer data.
+and `contribution_source: foreman_assessment`, and a schema-2 record to schema 3
+with `contribution_review: null`, so readers treat all alike
+(`migrate_assessments`). A record newer than schema 3 is refused as newer data.
 
 Version 4 admits delivery record schema 2 alongside unchanged schema-1 receipts.
 The new record uses `basis: archived_grok_clear_source`, preserves `native_session`

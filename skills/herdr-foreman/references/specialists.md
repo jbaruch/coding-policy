@@ -325,7 +325,13 @@ owner refuses either one the bound report does not contain.
 `contribution` is optional input: the owner derives it from the bound report's
 `CONTRIBUTION:` line, records `design` when there is none, and refuses a supplied
 value that disagrees (`declared_contribution` in
-`skills/herdr-foreman/foreman/engagement.py`). The delivery file must be the successful
+`skills/herdr-foreman/foreman/engagement.py`). A worker's own `none` never
+clears it for independent verification of the task. Optional
+`contribution_review: {"dispatch": ..., "report": ...}` names a
+verification-scope reviewer on the same task, another agent, whose report
+carries `CONTRIBUTION-REVIEW <dispatch>: none | design | implementation` for
+this dispatch; only that independent `none` clears the exclusion
+(`independent_review` in the same file). The delivery file must be the successful
 `wait-report.sh` JSON receipt for that worker and report, with `found: true`, or
 the unchanged owner `recover-report` result for that exact dispatch and report.
 For native delivery missed by the watcher, complete recovery under

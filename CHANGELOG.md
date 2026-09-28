@@ -203,6 +203,30 @@
   `test_foreman_seat.py` (schema 5 and 6 reads, a block below 6, replay match
   and mismatch), `test_config.py`.
 
+  The next review found a self-clear this PR introduced. `_contributor` in
+  `composition.py` let an assessment's `none` clear a contributor exclusion;
+  that was safe while the class was the foreman's own classification, but this
+  PR made it the worker's own `CONTRIBUTION:` line, so a contributor could
+  declare `none` and seat itself as an independent reviewer or tester. A
+  worker's own `none` now never clears an exclusion: the owner-recorded
+  dispatch role, round and reviewer scope decide, as for an unassessed
+  dispatch. Independent evidence can clear it: `assess-specialist` accepts an
+  optional `contribution_review` naming a confirmed verification-scope reviewer
+  dispatch on the same task, held by another agent, whose bound report carries
+  one `CONTRIBUTION-REVIEW <dispatch>: <class>` line; the record takes that
+  class with source `independent_review`, the only source whose `none` clears.
+  A worker's own declared `design` or `implementation` always stands.
+  Assessment records move to schema 3 (`contribution_review`), the owner
+  migrating schema 1 and 2 on load. `_require_independent_report`, which reads
+  the same exclusions for review receipts, inherits the fix. The rule's
+  consultation-acceptance route is split into two bullets, and Specialist
+  Consultations and Review Before PR state that a self-declared `none` is
+  unresolved independence evidence. Tests: `test_composition.py` (self-declared
+  none stays excluded, independent review clears, declared contribution
+  excludes even a verification reviewer), `test_engagement.py` (independent
+  review recorded and replayed; refused for the worker itself, a design-scope
+  reviewer, a missing or repeated line; a declared contribution stands).
+
 ## 0.3.323 — 2026-09-28
 
 ### Fixed

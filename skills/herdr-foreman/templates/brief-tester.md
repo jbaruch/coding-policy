@@ -100,7 +100,8 @@ Write `{{REPORT}}` covering:
 - Every finding with its severity label, and each blocking finding's scope label.
 - `CONTRIBUTION: none | design | implementation` — the class of any design or
   implementation you originated. The owner script reads this line; an omitted
-  line records as `design`.
+  line records as `design`. A `none` is your own word and never clears you for
+  independent verification of this task.
 - The patch path, when you produced one.
 
 Final chat message ends with exactly:

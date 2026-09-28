@@ -65,7 +65,8 @@ description: Running a multi-agent team — task-based specialist composition, c
   - A finding's severity and scope — the reviewer or tester that raised it
   - A contested label or verdict — the judge in adjudication mode
   - An investigation-only deliverable against its request — an independent reviewer
-  - A consultation's acceptance — its report's `met`/`unmet` lines, and a dispute over them to an independent reviewer
+  - A consultation's acceptance — its report's `met`/`unmet` lines
+  - A dispute over a consultation's `met`/`unmet` lines — an independent reviewer
   - Pre-implementation surfaces or acceptance criteria the operator's request does not state — an advisor consultation
   - An added obligation or changed scope — the operator, from the reporting worker's proposal
   - A review partition — the developer's report proposes it and `foreman validate-partition` proves it
@@ -123,6 +124,8 @@ description: Running a multi-agent team — task-based specialist composition, c
 - Persist specialist lessons through the existing scoped memory owner
 - Record delivered report evidence and the contribution the report declares before relying on a consultation outcome
 - A report declaring no contribution class records `design`
+- A worker's own `CONTRIBUTION: none` never clears a contributor exclusion
+- A verification-scope reviewer's independent `CONTRIBUTION-REVIEW` of that dispatch is the evidence that clears it
 - Narrow exception for retaining an assessed consultation's context.
 - Preconditions (all required):
   1. The foreman requests `--retain-specialist` for one advisor, investigator or architect assignment
@@ -577,6 +580,7 @@ description: Running a multi-agent team — task-based specialist composition, c
 - Exclude actual design and implementation contributors from independent verification of that task
 - A role, model or session change never erases contribution history
 - Treat unassessed possible contributions as unresolved independence evidence
+- A worker's self-declared `none` is unresolved independence evidence
 - Record legacy reviewer responsibilities as unknown until evidence establishes their contribution
 - Before a PR exists, the developer's own evidence is the branch CI its push triggered
 - On an open PR, the developer reads that evidence with `skills/release/poll-pr-reviews.sh`, never the pre-merge watch
