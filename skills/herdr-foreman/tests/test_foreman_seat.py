@@ -57,6 +57,10 @@ def payload(**seat):
             "foreman": {key: value for key, value in block.items() if value is not None}}
 
 
+#: Herdr's record of the foreman seat, bound to the pane the tests verify.
+SEATED = {"foreman": {"name": "foreman", "agent": "claude", "pane_id": "w1:p0", "agent_status": "idle"}}
+
+
 def argv(model, effort=None):
     return ["claude", "--dangerously-skip-permissions", "--model", model] + (["--effort", effort] if effort else [])
 
@@ -205,7 +209,25 @@ class LaunchTest(unittest.TestCase):
 
     def test_verify_refuses_a_running_tier_that_differs(self):
         with self.assertRaises(HerdrError):
-            verify_foreman(Client(live_argv=argv("opus-5", "high")), self.seat, "w1:p0", self.tier)
+            verify_foreman(Client(live_argv=argv("opus-5", "high"), held=SEATED), self.seat, "w1:p0", self.tier)
+
+    def test_verify_proves_the_seat_bound_to_the_pane(self):
+        proof = verify_foreman(Client(live_argv=argv("sonnet-5", "medium"), held=SEATED), self.seat, "w1:p0",
+                               self.tier)
+        self.assertEqual((proof["pane_id"], proof["source"]), ("w1:p0", "process_argv"))
+
+    def test_verify_refuses_another_agents_pane_running_the_same_tier(self):
+        # The argv proves a tier, never whose pane it is (#626): the seat's
+        # name must be bound to the verified pane with the seat's kind.
+        other = {"claude": {"name": "claude", "agent": "claude", "pane_id": "w2:p0", "agent_status": "idle"}}
+        codex_seat = {"foreman": {**SEATED["foreman"], "pane_id": "w2:p0", "agent": "codex"}}
+        for held, pattern in ((other, "no agent named"),
+                              ({**other, **SEATED}, "not the foreman's seat"),
+                              ({**other, **codex_seat}, "not the foreman's seat")):
+            with self.subTest(held=held.get("foreman")):
+                client = Client(live_argv=argv("sonnet-5", "medium"), held=held)
+                with self.assertRaisesRegex(HerdrError, pattern):
+                    verify_foreman(client, self.seat, "w2:p0", self.tier)
 
 
 class CommandTest(unittest.TestCase):
@@ -320,16 +342,32 @@ class CommandTest(unittest.TestCase):
         self.assertEqual(client.starts, [])
 
     def test_verify_proves_the_selected_tier_from_this_pane(self):
-        client = Client(live_argv=argv("sonnet-5", "medium"))
+        client = Client(live_argv=argv("sonnet-5", "medium"), held=SEATED)
         code, out, err = self.run_cli(["verify-foreman"], client, {"HERDR_ENV": "1", "HERDR_PANE_ID": "w1:p0"})
         self.assertEqual(code, 0, err)
         self.assertTrue(json.loads(out)["argv_verified"])
 
     def test_verify_fails_when_the_running_tier_is_not_the_selected_one(self):
-        client = Client(live_argv=argv("claude-haiku-4-5"))
+        client = Client(live_argv=argv("claude-haiku-4-5"), held=SEATED)
         code, out, _ = self.run_cli(["verify-foreman", "--pane", "w1:p0"], client)
         self.assertEqual(code, 1)
         self.assertEqual(out, "")
+
+    def test_verify_never_migrates_an_older_state_file(self):
+        # verify-foreman runs without the state lock, so it never rewrites the
+        # file (#626); start-foreman, under the lock, still migrates it.
+        self.state.write_text(json.dumps({"schema_version": 1, "snapshots": [], "assignments": []}),
+                              encoding="utf-8")
+        before = self.state.read_bytes()
+        client = Client(live_argv=argv("sonnet-5", "medium"), held=SEATED)
+        code, out, err = self.run_cli(["verify-foreman", "--pane", "w1:p0"], client)
+        self.assertNotEqual(code, 0)
+        self.assertEqual(out, "")
+        self.assertIn("owner migration", err)
+        self.assertEqual(self.state.read_bytes(), before)
+        code, _, err = self.run_cli(["start-foreman", "--pane", "w1:p0"], Client())
+        self.assertEqual(code, 0, err)
+        self.assertNotEqual(json.loads(self.state.read_text(encoding="utf-8"))["schema_version"], 1)
 
     def assert_names_the_block_to_add(self, warning):
         self.assertIn(str(self.config), warning)

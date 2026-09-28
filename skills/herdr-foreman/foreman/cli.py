@@ -2012,8 +2012,12 @@ def _foreman_headroom(seat, snapshot):
     return min(readings) if readings else None
 
 
-def _select_foreman_tier(args, seat, warn):
+def _select_foreman_tier(args, seat, warn, *, persist_migration):
     """The tier the seat's coordination round resolves to, by the workers' own machinery.
+
+    `persist_migration` rewrites an older state file while reading it: only a
+    caller holding the state lock (`start-foreman`) passes True; the read-only
+    `verify-foreman` passes False and leaves the file as found.
 
     The operator's tier table supplies the seat's rows, as it does for every
     worker. The tier is the `coordination` row, resolved through `select_tier`;
@@ -2024,7 +2028,8 @@ def _select_foreman_tier(args, seat, warn):
     seat's model or effort.
     """
     state_path = _state_path(args)
-    snapshot = latest_snapshot(load_state(state_path, warn=warn))
+    state, _usable = load_state_checked(state_path, warn=warn, persist_migration=persist_migration)
+    snapshot = latest_snapshot(state)
     headroom = _foreman_headroom(seat, snapshot)
     if not seat.tiers:
         raise UsageError(
@@ -2058,7 +2063,7 @@ def cmd_start_foreman(args, client=None, warn=None, trace=None):
     seat = load_foreman(_config_path(args))
     if seat is None:
         raise UsageError(_foreman_unconfigured(_config_path(args)), {"config": str(_config_path(args))})
-    tier = _select_foreman_tier(args, seat, warn)
+    tier = _select_foreman_tier(args, seat, warn, persist_migration=True)
     client = client if client is not None else _client(args, trace=trace)
     return _foreman_seat_result(args, seat, args.pane, tier, start_foreman(client, seat, args.pane, tier)), None
 
@@ -2083,7 +2088,9 @@ def cmd_verify_foreman(args, client=None, warn=None, trace=None):
         # A visible warning, never a round block: the operator has not opted
         # the seat into tier selection yet.
         return {"configured": False, "pane": pane, "warning": _foreman_unconfigured(_config_path(args))}, None
-    tier = _select_foreman_tier(args, seat, warn)
+    # Registered read-only, so it runs without the state lock: it never
+    # persists a migration (#626).
+    tier = _select_foreman_tier(args, seat, warn, persist_migration=False)
     client = client if client is not None else _client(args, trace=trace)
     return _foreman_seat_result(args, seat, pane, tier, verify_foreman(client, seat, pane, tier)), None
 

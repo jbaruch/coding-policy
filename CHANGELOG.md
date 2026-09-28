@@ -1,5 +1,38 @@
 # Changelog
 
+### Fixed
+
+- **Three foreman-seat verification gaps from #616 close (Fixes #626).**
+  Copilot flagged them as advisory on #616; each let a round pass or write
+  without the evidence its contract names.
+  - `round-preflight.sh` merged any composite row whose `status` was a string,
+    and `ready` reads only `reason`, so a row like
+    `foreman_tier.status = "not-a-valid-status"`, or `failed` with no reason,
+    reported a ready round. So did a `foreman_tier` `ok` row carrying no
+    process-argv proof, or an `unconfigured` row with no warning. Two rounds of
+    growing a bash re-validator of the Python evidence left the gap one field
+    deeper each time, so one owner now decides: `foreman-tier-check.py`
+    requires, for `foreman_tier` `ok`, the verify-foreman result's `verified`
+    proof (source `process_argv`, a non-empty argv, the proven model and
+    effort equal to the selected tier's) and a non-empty warning for
+    `unconfigured`; anything short becomes `failed` with a reason. It exits
+    with the verdict: 0 ready, 1 not ready, 2 could not run. The preflight
+    records the rows on 0 or 1 and fails both rows on any other exit,
+    unreadable output, or an inconsistent verdict: a status outside the
+    helper's documented vocabulary, a ready status carrying a reason or a
+    blocking one without, or rows that contradict the exit code. Its
+    evidence checks are gone.
+  - `verify_foreman` proved the argv of one foreground process of the seat's
+    kind, so `verify-foreman --pane` passed against another Claude or Codex
+    pane running the same tier. It now requires Herdr to bind the seat's agent
+    name, with the seat's kind, to the verified pane, and refuses otherwise
+    with the command to fix it.
+  - `verify-foreman` runs without the state lock, but its tier selection read
+    state with `persist_migration=True`, so the first verify against an older
+    state file could rewrite it unlocked. The verify path now reads without
+    persisting, refusing an older file with the owner command the other
+    read-only commands name; `start-foreman`, under the lock, still migrates.
+
 ## 0.3.327 — 2026-09-28
 
 ### Fixed
