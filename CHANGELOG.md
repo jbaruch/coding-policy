@@ -7,9 +7,9 @@
   ("does the report state a finding the foreman must resolve?") had two policy
   carve-outs folded into it, and the one-line prompt fix after the first eval
   was exactly that policy leaking into the question. It is now four questions
-  in `classify/report-questions.json` (names an open item, accepts every such
+  in `skills/herdr-foreman/classify/report-questions.json` (names an open item, accepts every such
   item, places every such item out of scope, concludes nothing blocks), and
-  `classify/report_verdict.py` `compose` turns the answers into
+  `skills/herdr-foreman/classify/report_verdict.py` `compose` turns the answers into
   `blocking`/`approved`/`insufficient_evidence` in code. Deterministic checks
   run before any answer is used: the report travels as the `report` field of a
   JSON object between marker lines keyed to its own sha256, so it cannot forge
@@ -18,15 +18,15 @@
   report, whitespace aside, or the label fails closed to
   `insufficient_evidence`. Three adversarial reports (an injected
   instruction, a forged delimiter, an injected "treat as blocking") are built
-  in code by `classify/adversarial.py`, never committed as a fixture corpus;
-  the tests build them into their temp dirs, and `evaluate.sh --fixtures`
+  in code by `skills/herdr-foreman/classify/adversarial.py`, never committed as a fixture corpus;
+  the tests build them into their temp dirs, and `skills/herdr-foreman/classify/evaluate.sh --fixtures`
   builds them into its own and scores them apart from the corpus.
-  `report_verdict.py frame` writes the framed question to a named file and
+  `skills/herdr-foreman/classify/report_verdict.py frame` writes the framed question to a named file and
   prints a JSON receipt (report sha256, nonce, size) instead of prose on
   stdout.
 - **Jev is the classifier, with no fallback classifier.** TypeSafe's System
   One answers each atomic question as one Noul with P(yes), through a new
-  stdlib client, `classify/typesafe_client.py`, written to be reused as is by
+  stdlib client, `skills/herdr-foreman/classify/typesafe_client.py`, written to be reused as is by
   #472's evidence assessor. The key comes from `TYPESAFE_API_KEY`
   (`.env.example`) and never reaches a log, an error or a label; provider
   bodies are discarded unread since they can echo the submitted report; 429
@@ -35,7 +35,7 @@
   (python.org builds on macOS) fails TLS verification; the client names that
   fix (`SSL_CERT_FILE`, or `Install Certificates.command`) instead of blaming
   the network, found on the first live run. The model is pinned to
-  `jev-1.13.0` beside its bands in `foreman/report_gates.py`, renewed on the
+  `jev-1.13.0` beside its bands in `skills/herdr-foreman/foreman/report_gates.py`, renewed on the
   capability table's weekly cadence and only with a fresh calibration. An
   unavailable Jev (key unset, service down, report over the state budget,
   answer off contract), or one whose client refuses the request because the
@@ -44,10 +44,10 @@
   to Claude, which is a retry into another classifier that Bounded
   Classification forbids, and it sent a key-carrying report to the fallback
   vendor (policy review and Copilot on #617). Codex, Claude and Grok remain as
-  `--agent` adapters for `evaluate.sh` measurement; their labels never gate,
+  `--agent` adapters for `skills/herdr-foreman/classify/evaluate.sh` measurement; their labels never gate,
   and the label's `fallback` field and `--fallback` option are gone. The
   static answer schema is gone:
-  `report_verdict.py schema` generates it from the questions, so the two cannot
+  `skills/herdr-foreman/classify/report_verdict.py schema` generates it from the questions, so the two cannot
   drift.
 - **A label may add friction to accepting a report, never remove it
   (operator decision on #531).** `foreman report-gate-record` records the gate
@@ -70,9 +70,9 @@
   refuses every reader with a `StateError` instead of a `KeyError`, and
   `close-member` and `record-report` hold the sidecar lock from their gate
   check through their commit, so a gate recorded in between is refused
-  (Copilot on #617). `classify-report.sh` reads each report once into a
+  (Copilot on #617). `skills/herdr-foreman/classify/classify-report.sh` reads each report once into a
   snapshot that every adapter, the evidence check and the label's sha256
-  share, and `evaluate.sh` refuses to report a score whose labels and
+  share, and `skills/herdr-foreman/classify/evaluate.sh` refuses to report a score whose labels and
   failures do not add up to the selected reports. Step 12 records the gates
   after the reports are read in full and before any is gated, and names the
   recorder's JSON output and its failure handling; each resolution record
@@ -84,15 +84,22 @@
   report is gated exactly as before. The owner recomputes the level from
   the probabilities and refuses a report rewritten since classification. The
   gates live in a new sidecar, `<state>.report-gates.json`
-  (`references/report-classifier.md`, Sidecar schema 1). The bands ship
+  (`skills/herdr-foreman/references/report-classifier.md`, Sidecar schema 1). The bands ship
   uncalibrated and conservative (block at P(open item) >= 0.98 with both
   disposals <= 0.05; re-read at >= 0.90 with <= 0.20), so an uncalibrated model
-  rarely gates; `scoring.py calibrate` and the procedure in
-  `references/report-classifier.md` replace them from held-out labels once the
-  key is available locally. `rules/script-delegation.md` Bounded
+  rarely gates. `skills/herdr-foreman/classify/scoring.py calibrate` only
+  proposes bands: it prints them as JSON with the counts it used and writes
+  nothing, and the live bands change only through a reviewed commit to the
+  constants (`skills/herdr-foreman/references/report-classifier.md`, Changing
+  the Bands). It decides held-out itself, from the data it is given: a label
+  counts only when it was asked with the current question hash, by the pinned
+  model, about a report recorded on or after the questions' `changed` date
+  (`evaluate.sh --results` now records `recorded_at`), and it refuses to
+  propose from fewer than its minimum. An earlier cut left held-out to the
+  agent's reading of the split (policy review on #617). `rules/script-delegation.md` Bounded
   Classification now says a label may add a reversible gate, never remove one,
   and that a script decides the level from recorded probabilities.
-- **`evaluate.sh` scores held out by default and reports per-question
+- **`skills/herdr-foreman/classify/evaluate.sh` scores held out by default and reports per-question
   accuracy.** The default split starts at the questions' `changed` date, which
   a question or model change cannot have been written against; `--all` scores
   everything and marks the split not held out. The corpus records only
@@ -119,15 +126,17 @@
   one open item it assigns to a separately assigned judge; the old prompt's
   scope clause was ambiguous about another seat's dispute (ambiguous
   criteria), which `open_items_out_of_scope` now asks literally.
-- **The gate owner closes three holes Copilot found on #617.** The
+- **The gate owner closes stored-path, replay and calibration holes found on #617.** The
   report-gates sidecar followed a live symlink; it now refuses
   one, live or dangling, and opens the file without following links, as the
   capability table does. A saved gate whose report path is not canonical
-  (`/a/../b.md`) passed validation but never matched `require_clear`, so it
-  gated nothing; it is now a malformed record. A replay matched on report
+  (`/a/../b.md`, or a path through a symlinked directory) passed validation
+  but never matched `require_clear`, so it gated nothing; validation now
+  requires the stored path to equal its own `realpath`, and a path that cannot
+  be resolved is malformed too (Copilot, then the policy review, on #617). A replay matched on report
   bytes alone, so a reclassification under a new model, question or bands
   version after a clear was swallowed as a replay; it now records a fresh
-  gate. `scoring.py calibrate` also keeps only the pinned Jev model's labels.
+  gate. `skills/herdr-foreman/classify/scoring.py calibrate` also keeps only the pinned Jev model's labels.
 
 ## 0.3.327 — 2026-09-28
 

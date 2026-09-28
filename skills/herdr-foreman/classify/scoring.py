@@ -1,17 +1,25 @@
 #!/usr/bin/env python3
-"""Score classifier labels against recorded verdicts, and calibrate Jev's bands.
+"""Score classifier labels against recorded verdicts, and propose Jev's bands.
 
 Usage:
   scoring.py score <results.json> <failed> <agent> <model> <split.json>
       Print the accuracy report evaluate.sh emits.
   scoring.py calibrate <results.json>
-      Sweep the annotation and gate bands over held-out Jev labels and print
-      the recommended constants for foreman/report_gates.py. Exit 2 when the
-      results hold fewer than MIN_CALIBRATION_REPORTS usable Jev labels.
+      Sweep the annotation and gate bands over held-out Jev labels and print a
+      proposal as JSON: {"schema_version": 2, "proposed": {"annotation",
+      "block", "reread"}, "counts": {"labels", "approved", "blocking",
+      "excluded"}, "model", "questions_changed", "annotation_top"}. It writes
+      nothing: the live bands are the named constants in
+      skills/herdr-foreman/foreman/report_gates.py, changed only by a reviewed
+      commit. A label is held out when it was asked with the current questions
+      (its `question` hash), by the pinned Jev model, about a report recorded on
+      or after the questions' `changed` date (`recorded_at`); every other label
+      is excluded. Exit 2 when fewer than MIN_CALIBRATION_REPORTS remain.
 
 `results.json` is a list of labels (report_verdict.py), each with `recorded`
-(the verdict the foreman recorded, or a fixture's expected verdict), `source`
-(`corpus` or `fixture`) and, for a fixture, `expected_answers`.
+(the verdict the foreman recorded, or a fixture's expected verdict),
+`recorded_at` (when it was recorded, empty for a fixture), `source` (`corpus`
+or `fixture`) and, for a fixture, `expected_answers`.
 
 Per-question accuracy needs a truth per question, and the corpus records only
 the verdict. A recorded `blocking` determines three answers (an open item is
@@ -122,15 +130,27 @@ def _band(p, yes_at, no_at):
     return "yes" if p >= yes_at else "no" if p <= no_at else "unclear"
 
 
-def calibrate(results):
+def held_out(row, question, changed):
+    """A pinned-model Jev label on the current questions, about a report recorded since they changed."""
     ids = report_verdict.question_ids()
-    # Only the pinned model's labels: its bands are what the gate installs.
-    rows = [row for row in results if row.get("agent") == "jev" and row.get("model") == report_gates.JEV_MODEL
-            and row.get("source") != "fixture"
-            and all(isinstance((row.get("answers") or {}).get(qid, {}).get("p_yes"), (int, float)) for qid in ids)]
+    return (isinstance(row, dict) and row.get("agent") == "jev" and row.get("model") == report_gates.JEV_MODEL
+            and row.get("source") == "corpus" and row.get("question") == question
+            and row.get("recorded") in ("blocking", "approved")
+            and isinstance(row.get("recorded_at"), str) and row["recorded_at"] >= changed
+            and all(isinstance((row.get("answers") or {}).get(qid, {}).get("p_yes"), (int, float)) for qid in ids))
+
+
+def calibrate(results):
+    if not isinstance(results, list):
+        fail("the results file holds a list of labels; pass evaluate.sh --results output unchanged")
+    ids = report_verdict.question_ids()
+    changed = report_verdict.questions()["changed"]
+    question = report_verdict.question_hash()
+    rows = [row for row in results if held_out(row, question, changed)]
     if len(rows) < MIN_CALIBRATION_REPORTS:
-        fail("{} usable held-out Jev labels; calibration needs at least {}. Run evaluate.sh --agent jev --since "
-             "<date> --results <file> on more reports.".format(len(rows), MIN_CALIBRATION_REPORTS))
+        fail("{} held-out Jev labels (current questions, {}, recorded on or after {}); a proposal needs at least "
+             "{}. Run evaluate.sh --agent jev --results <file> after more rounds.".format(
+                 len(rows), report_gates.JEV_MODEL, changed, MIN_CALIBRATION_REPORTS))
     annotation = []
     for yes_at in ANNOTATION_GRID:
         for no_at in ANNOTATION_GRID:
@@ -165,9 +185,12 @@ def calibrate(results):
         fits.sort(key=lambda r: (-r["gated_blocking"], -r["OPEN_AT"], r["DISPOSED_AT"]))
         return fits[0] if fits else None
 
-    return {"schema_version": 1, "labels": len(rows), "approved": len(approved), "blocking": len(blocking),
-            "model": rows[0]["model"], "annotation": annotation[0], "block": pick(MAX_FALSE_BLOCK_RATE),
-            "reread": pick(MAX_FALSE_REREAD_RATE), "annotation_top": annotation[:5]}
+    return {"schema_version": 2, "model": report_gates.JEV_MODEL, "questions_changed": changed,
+            "counts": {"labels": len(rows), "approved": len(approved), "blocking": len(blocking),
+                       "excluded": len(results) - len(rows)},
+            "proposed": {"annotation": annotation[0], "block": pick(MAX_FALSE_BLOCK_RATE),
+                         "reread": pick(MAX_FALSE_REREAD_RATE)},
+            "annotation_top": annotation[:5]}
 
 
 def main(argv):

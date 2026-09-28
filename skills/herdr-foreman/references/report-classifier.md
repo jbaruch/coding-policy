@@ -1,41 +1,50 @@
 # Report Classifier and Report Gates
 
-The owner of the answers below is code: `skills/herdr-foreman/classify/` asks
-the questions and composes the verdict, and
-`skills/herdr-foreman/foreman/report_gates.py` decides and records gates. This
-file says how the pieces fit, what a gate obliges, and how the bands are
-calibrated. It restates no threshold; the constants live at the top of
-`report_gates.py`.
+The owner of the answers below is code:
+`skills/herdr-foreman/classify/classify-report.sh` and
+`skills/herdr-foreman/classify/report_verdict.py` ask the questions and label a
+report, and `skills/herdr-foreman/foreman/report_gates.py` decides and records
+gates. This file says how the pieces fit, what a gate obliges, and how the
+bands change. It restates no threshold, answer set or composition rule; those
+are the owners' contracts.
 
-## Questions and Verdict
+## Labelling a Report
 
-- `classify/report-questions.json` holds the atomic questions and their
-  criteria. A model answers each one `yes`, `no` or `unclear`.
-- `classify/report_verdict.py` `compose` turns the answers into `blocking`,
-  `approved` or `insufficient_evidence`. No model sees that policy.
-- Deterministic checks run first. The report travels as the `report` field of
-  a JSON object between marker lines keyed to its own sha256, so a report
-  cannot forge its delimiter. Every quote an LLM returns must be a passage of
-  the report, or the label is `insufficient_evidence`.
-- Changing a question changes the label's `question` hash. Update the
-  `changed` date in `report-questions.json` with it, so `evaluate.sh` scores
-  the change only on reports recorded afterwards.
+- Input: one delivered report, or a round's reports through
+  `skills/herdr-foreman/classify/classify-reports.sh`.
+- Output: one label per report, the JSON object the
+  `skills/herdr-foreman/classify/report_verdict.py` docstring documents
+  (verdict, per-question answers, the report's sha256, the question hash and
+  the model id). The batch adds `unannotated`, one entry and reason per report
+  that got no label.
+- The questions live in `skills/herdr-foreman/classify/report-questions.json`.
+  Changing one changes every label's `question` hash; update the file's
+  `changed` date with it.
+- Exit behaviour and the deterministic checks that refuse a report before any
+  call are in the `skills/herdr-foreman/classify/classify-report.sh` header.
 
 ## Adapters
 
-- Jev (TypeSafe System One) is the default and answers each question as one
-  Noul with P(yes). It needs `TYPESAFE_API_KEY` (`.env.example`). The client is
-  `classify/typesafe_client.py`, shared with the evidence assessor (#472).
+- Jev (TypeSafe System One) is the default. It needs `TYPESAFE_API_KEY`
+  (`.env.example`). The client is
+  `skills/herdr-foreman/classify/typesafe_client.py`, shared with the evidence
+  assessor (#472).
 - An unavailable Jev, or one whose client refuses the request (the report
   carries the key), produces no label. The report lands in `unannotated` and
   takes the reasoning path, a full read. No other classifier is asked.
 - `--agent codex|claude|grok` runs an LLM adapter for measurement
-  (`evaluate.sh`). An LLM label carries no probabilities and never gates.
+  (`skills/herdr-foreman/classify/evaluate.sh`). An LLM label carries no
+  probabilities and never gates.
 
 ## Report Gates
 
 - `foreman report-gate-record --labels <classify-reports output>` records the
-  gate each label earns. The owner computes the level from the label's
+  gate each label earns and prints
+  `{"schema_version": 1, "recorded": [...], "replayed": [...], "no_gate": [...]}`:
+  `recorded` holds each new gate with its `report`, `level` and `reason`;
+  `replayed` a gate already on record for the same report bytes and
+  classification; `no_gate` each report its label leaves ungated, with the
+  reason. Exit 1 records nothing and names the cause on stderr. The owner computes the level from the label's
   probabilities, the pinned model and the bands alone; the label's own
   `verdict` and `gate` are never inputs.
   A report whose bytes changed since classification is refused: reclassify it.
@@ -77,7 +86,7 @@ cannot be resolved until the enrollment is restored.
 
 ### Sidecar schema 1
 
-`foreman/report_gates.py` owns `<canonical selected state>.report-gates.json`:
+`skills/herdr-foreman/foreman/report_gates.py` owns `<canonical selected state>.report-gates.json`:
 `{"schema_version": 1, "state_path", "gates": [...]}`. Each gate carries
 `schema_version`, `report` (resolved, canonical path), `sha256`, `level`, `reason`,
 `probabilities`, `model`, `question`, `bands`, `at`, `status`
@@ -92,25 +101,22 @@ reader, never reading as no gates. A replay is the same report bytes under the
 same `model`, `question`, `bands` and `level`; any other classification of
 those bytes records a new gate. `close-member` and `record-report` read it and never write it.
 
-## Calibrating the Bands
+## Changing the Bands
 
-The bands ship as `BANDS_VERSION = "uncalibrated-..."` with conservative
-values, so an uncalibrated model rarely gates. Calibrate them on data the
-questions were not written against:
+The live bands are the named constants at the top of
+`skills/herdr-foreman/foreman/report_gates.py`, with `BANDS_VERSION` naming
+their calibration. They ship uncalibrated and conservative. Calibration
+proposes; a reviewed pull request installs:
 
 1. Export `TYPESAFE_API_KEY` in the shell that runs the evaluation.
 2. Run `bash skills/herdr-foreman/classify/evaluate.sh --agent jev --results <labels.json>`.
-   The default split starts at the questions' `changed` date; the output's
-   `split.held_out` must be `true`.
 3. Run `python3 skills/herdr-foreman/classify/scoring.py calibrate <labels.json>`.
-   It refuses fewer labels than `MIN_CALIBRATION_REPORTS`; collect more rounds
-   and repeat. Its selection rules are the constants at the top of
-   `classify/scoring.py`.
-4. Copy the recommended `annotation`, `block` and `reread` values into the
-   constants in `foreman/report_gates.py` and set `BANDS_VERSION` to the
-   calibration date and label count.
-5. Record the held-out size, the chosen values and the resulting false-gate
-   counts in the CHANGELOG entry.
+   It prints proposed bands and the counts it used, and writes nothing. It
+   refuses to propose from too few held-out labels; its held-out test and
+   selection rules are in the `skills/herdr-foreman/classify/scoring.py`
+   docstring and top-of-file constants.
+4. Open a pull request that changes the constants and `BANDS_VERSION`, with the
+   proposal's counts and the resulting false-gate counts in its CHANGELOG
+   entry.
 
-Recalibrate after every `JEV_MODEL` bump and every question change: bands are
-per model version and per question wording.
+Recalibrate after every `JEV_MODEL` bump and every question change.

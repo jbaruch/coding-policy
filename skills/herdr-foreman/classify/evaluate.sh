@@ -26,8 +26,8 @@
 #   --all          score the whole corpus; the split is marked not held out.
 #   --fixtures     also score the adversarial reports adversarial.py builds
 #                  into this run's temp dir, reported apart from the corpus.
-#   --results FILE keep every label with its recorded verdict, the input to
-#                  `scoring.py calibrate`.
+#   --results FILE keep every label with its recorded verdict and date, the
+#                  input to `scoring.py calibrate`.
 #   --corpus-only  build and print the labelled corpus, call no model, spend no
 #                  quota. Use it to see what would be scored.
 #   --limit N      score the N most recent reports instead of all of them.
@@ -232,7 +232,7 @@ with open(answer, encoding="utf-8") as handle:
     label = json.load(handle)
 with open(selected, encoding="utf-8") as handle:
     row = json.load(handle)[index]
-label.update(recorded=row["recorded"], source=row["source"])
+label.update(recorded=row["recorded"], recorded_at=row["at"], source=row["source"])
 if "expected_answers" in row:
     label["expected_answers"] = row["expected_answers"]
 rows.append(label)

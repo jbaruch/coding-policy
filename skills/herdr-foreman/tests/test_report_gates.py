@@ -124,6 +124,25 @@ class RecordTest(GateCase):
         with self.assertRaisesRegex(StateError, "canonical"):
             gates.require_clear(self.state, str(self.report), True)
 
+    def test_a_stored_path_through_a_symlink_is_a_malformed_record(self):
+        self.record(label(self.report, HIGH))
+        (self.root / "linked").symlink_to(self.root)
+        sidecar = gates.storage_path(self.state)
+        document = json.loads(sidecar.read_text())
+        document["gates"][0]["report"] = str(self.root / "linked" / "reviewer.md")
+        sidecar.write_text(json.dumps(document))
+        with self.assertRaisesRegex(StateError, "canonical"):
+            gates.require_clear(self.state, str(self.report), True)
+
+    def test_a_stored_path_that_cannot_resolve_is_a_malformed_record(self):
+        self.record(label(self.report, HIGH))
+        sidecar = gates.storage_path(self.state)
+        document = json.loads(sidecar.read_text())
+        document["gates"][0]["report"] = str(self.root / "bad\x00name.md")
+        sidecar.write_text(json.dumps(document))
+        with self.assertRaisesRegex(StateError, "malformed"):
+            gates.require_clear(self.state, str(self.report), True)
+
 class LedgerCase(GateCase):
     """A gated reviewer report, with the owners' records a resolution is bound to."""
 

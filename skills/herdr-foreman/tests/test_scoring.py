@@ -1,14 +1,23 @@
 """Scoring labels against recorded verdicts, and calibrating Jev's bands from held-out labels."""
 
+import hashlib
+import io
+import json
 import sys
+import tempfile
 import unittest
+from contextlib import redirect_stdout
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "classify"))
 
-import scoring  # noqa: E402 -- the classify dir is on sys.path only from here
+import report_verdict  # noqa: E402 -- the classify dir is on sys.path only from here
+import scoring  # noqa: E402
 from foreman import report_gates  # noqa: E402
+
+CHANGED = report_verdict.questions()["changed"]
+QUESTION = report_verdict.question_hash()
 
 IDS = ("names_open_item", "open_items_accepted", "open_items_out_of_scope", "concludes_nothing_blocks")
 
@@ -16,6 +25,7 @@ IDS = ("names_open_item", "open_items_accepted", "open_items_out_of_scope", "con
 def jev(recorded, p_open, p_disposed=0.01, p_concludes=0.1):
     p = dict(zip(IDS, (p_open, p_disposed, p_disposed, p_concludes)))
     return {"agent": "jev", "model": report_gates.JEV_MODEL, "recorded": recorded, "source": "corpus",
+            "question": QUESTION, "recorded_at": CHANGED + "T12:00:00+00:00",
             "verdict": "blocking", "answers": {qid: {"answer": report_gates.band(v), "p_yes": v} for qid, v in p.items()}}
 
 
@@ -59,17 +69,44 @@ class CalibrateTest(unittest.TestCase):
         rows = ([jev("blocking", 0.995)] * 15 + [jev("blocking", 0.9)] * 5
                 + [jev("approved", 0.93, p_concludes=0.9)] * 3 + [jev("approved", 0.05, p_concludes=0.9)] * 12)
         result = scoring.calibrate(rows)
-        self.assertEqual(result["labels"], 35)
-        self.assertEqual(result["block"]["gated_approved"], 0)
-        self.assertEqual(result["block"]["gated_blocking"], 15)
-        self.assertLessEqual(result["reread"]["gated_approved"], scoring.MAX_FALSE_REREAD_RATE * 15)
-        self.assertEqual(result["annotation"]["missed_blockers"], 0)
+        self.assertEqual(result["counts"]["labels"], 35)
+        proposed = result["proposed"]
+        self.assertEqual(proposed["block"]["gated_approved"], 0)
+        self.assertEqual(proposed["block"]["gated_blocking"], 15)
+        self.assertLessEqual(proposed["reread"]["gated_approved"], scoring.MAX_FALSE_REREAD_RATE * 15)
+        self.assertEqual(proposed["annotation"]["missed_blockers"], 0)
 
     def test_llm_and_fixture_labels_are_not_calibration_data(self):
         rows = ([{**jev("blocking", 0.99), "agent": "claude"}] * 40 + [{**jev("blocking", 0.99), "source": "fixture"}] * 40
                 + [{**jev("blocking", 0.99), "model": "jev-other"}] * 40)
         with self.assertRaises(SystemExit):
             scoring.calibrate(rows)
+
+    def test_labels_that_are_not_held_out_are_excluded(self):
+        good = [jev("blocking", 0.995)] * 20 + [jev("approved", 0.05, p_concludes=0.9)] * 10
+        stale = [{**jev("blocking", 0.99), "recorded_at": "2026-01-01T00:00:00+00:00"}] * 40
+        other = [{**jev("blocking", 0.99), "question": "0" * 64}] * 40
+        undated = [{**jev("blocking", 0.99), "recorded_at": None}] * 40
+        with self.assertRaises(SystemExit):
+            scoring.calibrate(good[:-1] + stale + other + undated)
+        result = scoring.calibrate(good + stale + other + undated)
+        self.assertEqual((result["counts"]["labels"], result["counts"]["excluded"]), (30, 120))
+
+    def test_calibrate_prints_a_proposal_and_writes_nothing(self):
+        rows = [jev("blocking", 0.995)] * 20 + [jev("approved", 0.05, p_concludes=0.9)] * 10
+        owner = Path(report_gates.__file__).read_bytes()
+        with tempfile.TemporaryDirectory(prefix="calibrate-") as root:
+            results = Path(root) / "results.json"
+            results.write_text(json.dumps(rows))
+            before = sorted(path.name for path in Path(root).iterdir())
+            out = io.StringIO()
+            with redirect_stdout(out):
+                self.assertEqual(scoring.main(["calibrate", str(results)]), 0)
+            self.assertEqual(sorted(path.name for path in Path(root).iterdir()), before)
+        proposal = json.loads(out.getvalue())
+        self.assertEqual(set(proposal["proposed"]), {"annotation", "block", "reread"})
+        self.assertEqual(hashlib.sha256(Path(report_gates.__file__).read_bytes()).digest(),
+                         hashlib.sha256(owner).digest())
 
 
 if __name__ == "__main__":

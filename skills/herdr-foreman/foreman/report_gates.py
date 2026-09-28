@@ -27,8 +27,9 @@ undoes it (rules/script-delegation.md Bounded Classification).
 
 Band calibration: `BANDS_VERSION` names the calibration the constants came
 from. They ship uncalibrated and deliberately conservative, so an
-uncalibrated model rarely gates; `references/report-classifier.md` carries the
-calibration procedure, which replaces them from held-out labelled data.
+uncalibrated model rarely gates. `classify/scoring.py calibrate` proposes new
+values and writes nothing; they change only by a reviewed commit here
+(skills/herdr-foreman/references/report-classifier.md, Changing the Bands).
 
 Sidecar (`<state>.report-gates.json`, schema in state-schema.md, Report Gates):
   {"schema_version": 1, "state_path": "<canonical state>", "gates": [<gate>...]}
@@ -232,7 +233,13 @@ def _gate_problem(gate):
         return "unsupported schema_version"
     if not _nonempty(gate["report"]) or not Path(gate["report"]).is_absolute():
         return "report is not an absolute path"
-    if os.path.normpath(gate["report"]) != gate["report"]:
+    # The stored path must be what `_report_key` would store: every symlink
+    # resolved, so `open_gates` can match it.
+    try:
+        canonical = os.path.realpath(gate["report"])
+    except (OSError, ValueError):
+        return "report path cannot be resolved"
+    if canonical != gate["report"]:
         return "report is not a canonical path"
     if not _sha(gate["sha256"]):
         return "sha256 is not a lowercase sha256"

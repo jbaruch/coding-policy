@@ -605,10 +605,8 @@ CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"; [ -d "$
 bash "$CP/skills/herdr-foreman/classify/classify-reports.sh" <report>... > <labels.json>
 ```
 
-Each label carries a verdict (`blocking`, `approved` or
-`insufficient_evidence`) and its per-question answers. A report Jev could not
-label is in `unannotated` with the reason; it gets no gate and is gated exactly
-as it would have been.
+A report in the output's `unannotated` list gets no gate and is gated exactly as
+it would have been.
 
 Read every report file in full, including a report whose worker exited cleanly.
 A `## BLOCKED` section can sit under a report that otherwise reads as finished.
@@ -620,35 +618,15 @@ CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"; [ -d "$
 bash "$CP/skills/herdr-foreman/foreman.sh" report-gate-record --labels <labels.json>
 ```
 
-- Exit 0 prints `{"schema_version": 1, "recorded": [...], "replayed": [...], "no_gate": [...]}`
-- `recorded` holds each new gate with its `report`, `level` and `reason`
-- `replayed` holds a gate already on record for the same report bytes and classification
-- `no_gate` names each report its label leaves ungated, with the reason
-- Exit 1 records nothing and names the cause on stderr
-- A report changed since classification is reclassified, then recorded again
-- An unreadable or malformed gate record is restored before any report is gated
+- Exit 0 prints one JSON object: `recorded`, `replayed` and `no_gate` lists
+- Exit 1: nothing is recorded; resolve the cause stderr names before gating any report
+- `close-member` and `record-report` refuse while a gate forbids the decision
+- A `block` gate clears only through `report-gate-clear`
+- A `reread` gate clears only through `report-gate-reread`
+- A label never approves, accepts or skips a check
 
-A label never approves, accepts or skips a check; its only effect is a
-recorded gate, which adds friction:
-
-- `block` — the report is not accepted until `report-gate-clear` records why
-  it does not block
-- `reread` — the report is not gated until `report-gate-reread` records a full
-  re-read by a worker in the role whose report it is
-- no gate — the report is gated as before
-
-A resolution cites evidence the owners already recorded; the caller never
-names who resolved it:
-
-- `--evidence <report>` — a report supervision observed after the gate, for an
-  applied dispatch on the same task in the gated report's role, or for the
-  pinned judge in adjudication mode (clear only); pass `--reason` with it
-- `--decision <attention id>` — a `decision` on the same task, resolved with the
-  operator's answer after the gate; its answer is the recorded reason
-- Exit 1 records nothing and names the missing evidence on stderr
-
-`close-member` and `record-report` refuse while a gate forbids the decision.
-Gate levels, bands, adapters and resolution evidence are the owners' contract:
+Output fields, gate levels and the evidence each resolution cites are the
+owners' contract:
 
 ```text
 skills/herdr-foreman/references/report-classifier.md
