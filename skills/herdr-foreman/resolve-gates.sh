@@ -52,8 +52,9 @@
 # workflow filename carrying a control character, or a path or filename
 # carrying a backtick, is malformed: the GATES block renders them into every
 # brief's Markdown, where either breaks the block.
-# Exit 2 also when the shared check foreman/renderable.py cannot be imported
-# from the skill directory: an incomplete install, repaired by reinstalling.
+# Exit 2 also when the shared check foreman/renderable.py cannot be loaded
+# from the skill directory (missing, incomplete or corrupt): a damaged
+# install, repaired by reinstalling.
 
 set -euo pipefail
 
@@ -73,12 +74,17 @@ checkout = sys.argv[1]
 # The character rule is shared with the report marker and the brief composer
 # (#578): one module, never a copy per script.
 sys.path.insert(0, sys.argv[2])
+# A damaged install surfaces as one of three load errors: ImportError (module
+# or `offenders` absent), SyntaxError (truncated or corrupt source, null bytes,
+# bad encoding) or NameError (source cut off mid-identifier at module level).
+# The module's top level only binds constants and functions, so nothing else
+# it can raise on import is an install fault; any other error propagates.
 try:
     from foreman.renderable import offenders
-except ImportError as exc:
-    sys.stderr.write("resolve-gates: cannot load the shared renderable-text check from {}/foreman/renderable.py ({}) "
+except (ImportError, SyntaxError, NameError) as exc:
+    sys.stderr.write("resolve-gates: cannot load the shared renderable-text check from {}/foreman/renderable.py ({}: {}) "
                      "-- the plugin install is incomplete; run `tessl install jbaruch/coding-policy` "
-                     "or restore the plugin's skills/herdr-foreman directory.\n".format(sys.argv[2], exc))
+                     "or restore the plugin's skills/herdr-foreman directory.\n".format(sys.argv[2], type(exc).__name__, exc))
     raise SystemExit(2)
 
 path = os.path.join(checkout, ".herdr", "gates.json")

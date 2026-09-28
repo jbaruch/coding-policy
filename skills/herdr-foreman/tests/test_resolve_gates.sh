@@ -21,8 +21,9 @@
 #                               a note or a workflow filename, or a backtick
 #                               in a path or workflow filename: exit 2. A
 #                               backtick in a note stays accepted.
-#  10. Broken install       -> foreman/renderable.py missing or lacking
-#                               `offenders`: exit 2 naming the reinstall,
+#  10. Broken install       -> foreman/renderable.py missing, lacking
+#                               `offenders`, syntactically invalid or cut off
+#                               mid-identifier: exit 2 naming the reinstall,
 #                               never a traceback.
 #
 # No case asserts a filename this script recognises, because it recognises none.
@@ -259,13 +260,20 @@ JSON
 
   # A copy of the script in a skill directory whose shared check is missing,
   # then one whose module lacks the function: exit 2 naming the reinstall.
-  mkdir -p "$TMP/nomod" "$TMP/badmod/foreman" "$TMP/plain" || die "mkdir broken install"
+  # A truncated module (syntax error) and one cut off mid-identifier (name
+  # error) are the same damaged install.
+  mkdir -p "$TMP/nomod" "$TMP/plain" || die "mkdir broken install"
   cp "$SCRIPT" "$TMP/nomod/resolve-gates.sh" || die "copy script (nomod)"
-  cp "$SCRIPT" "$TMP/badmod/resolve-gates.sh" || die "copy script (badmod)"
-  : > "$TMP/badmod/foreman/__init__.py" || die "write badmod package"
-  printf 'UNRENDERABLE_CATEGORIES = frozenset()\n' > "$TMP/badmod/foreman/renderable.py" || die "write badmod module"
   local broken
-  for broken in nomod badmod; do
+  for broken in badmod syntaxmod namemod; do
+    mkdir -p "$TMP/$broken/foreman" || die "mkdir $broken"
+    cp "$SCRIPT" "$TMP/$broken/resolve-gates.sh" || die "copy script ($broken)"
+    : > "$TMP/$broken/foreman/__init__.py" || die "write $broken package"
+  done
+  printf 'UNRENDERABLE_CATEGORIES = frozenset()\n' > "$TMP/badmod/foreman/renderable.py" || die "write badmod module"
+  printf 'UNRENDERABLE_CATEGORIES = frozenset({"Cc",\n' > "$TMP/syntaxmod/foreman/renderable.py" || die "write syntaxmod module"
+  printf 'import unicodedata\nUNRENDERABLE_CATEGORIES = frozen\n' > "$TMP/namemod/foreman/renderable.py" || die "write namemod module"
+  for broken in nomod badmod syntaxmod namemod; do
     OUT="$(bash "$TMP/$broken/resolve-gates.sh" "$TMP/plain" 2>"$ERRFILE")"
     RC=$?
     ERRTEXT="$(cat "$ERRFILE")"
