@@ -51,18 +51,24 @@ to know goes in the report.
   under `~/.worktrees/`.
 - Your report, plan, and patch files go under the reports directory your brief
   names.
+- Build and package caches never go under the reports directory: no
+  `GOCACHE`, `GOMODCACHE`, `PIP_CACHE_DIR`, npm cache or virtualenv there.
+  Leave each tool at its own user-level default. The reports directory holds
+  evidence: reports, logs, receipts, diffs.
 - If your brief names a fixture root, create it yourself under that exact name;
   a directory that already exists, or one reached through a symlink, is a stop,
   not a root to reuse. Fixtures go there and nothing else does.
   Prove the tool's effective root inside it before any command writes through
-  the tool, record every user-level file the run can reach before and after,
-  stop on an unexpected change, and remove the root when you finish
-  (`rules/agent-team-operation.md` Writers and Checkouts carries the
-  preconditions).
+  the tool, record a digest of every user-level file the run can reach before
+  and after (a hash listing, never a copy of a directory tree), copy only the
+  single files the run is expected to change and restore those, stop on an
+  unexpected change and report it unrestored, and
+  remove the root when you finish (`rules/agent-team-operation.md` Writers and
+  Checkouts carries the preconditions).
 - Write nowhere else — not the shared checkout, not your home directory, not a
-  path no brief named. Restoring a user-level file to the state you recorded
-  before the run is the one exception, and only for a file the run itself
-  changed.
+  path no brief named. Restoring a user-level file from the pre-run copy you
+  made of it is the one exception, and only for a file the run itself
+  changed. A tool writing its own default cache is not a write of yours.
 - Prefix every code-touching shell command with `cd <worktree> &&`. Your shell
   does not keep a working directory between calls.
 - Confirm `pwd` before running the build, the tests, or any gate.
