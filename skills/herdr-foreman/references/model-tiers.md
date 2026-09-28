@@ -95,10 +95,11 @@ YOLO requirement does not apply to this seat.
 
 Tier selection for the seat takes three inputs: the seat's tier table, the
 capability table, and the measured headroom of the seat's `window_group`; the
-foreman's own pane is never usage-probed. It returns the selected
-`coordination` row with its capability verdict and pressure headroom, and
-refuses when the table has no `coordination` row or the capability table
-records the selected row inadequate. The selection is `_select_foreman_tier`
+foreman's own pane is never usage-probed. The tier is the operator's
+`coordination` row: no escalation applies to the coordination round, so
+headroom never changes it and is only recorded. Selection returns that row
+with its capability verdict and recorded headroom, and refuses when the table
+has no `coordination` row or the capability table records the row inadequate. The selection is `_select_foreman_tier`
 and `_foreman_headroom` in `skills/herdr-foreman/foreman/cli.py`, resolving
 through `select_tier` in `skills/herdr-foreman/foreman/tiers.py`. The planner
 never seats the foreman on a worker: `plan --roles foreman` is refused.
@@ -130,14 +131,16 @@ its `checks.headroom` and `checks.foreman_tier` rows:
 - the running argv carries the selected tier — `ok`
 - it carries another tier, or the selection refuses — `failed`, and the round
   blocks until the operator restarts the foreman with `start-foreman`
-- config has no `foreman` block — `unconfigured`, a stderr warning with the
-  configure command in `detail.warning`; the round proceeds
+- config has no `foreman` block — `unconfigured`, a stderr warning; its
+  `detail.warning` names the resolved config file, the `schema_version` 6 it
+  needs and the minimal `foreman` block to add, then `start-foreman` to launch
+  it; the round proceeds
 - `checks.headroom` did not pass — the composite runs only
   `verify-foreman --config-only`, which reads config presence without
   selecting or probing; a configured foreman records `failed` as a dependency
   on headroom, and an absent block is still `unconfigured`
 
-A selection that moves, on new capability evidence or a table edit, reads as
+A selection that moves, on a capability-table verdict or a table edit, reads as
 a mismatch at the next preflight; the restart picks the new tier. A context
 reset keeps the pane's process, so the proven tier survives it.
 

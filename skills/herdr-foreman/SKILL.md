@@ -22,8 +22,8 @@ or handoff covering every active assignment. Keep user attention visible under
 
 Follow `rules/agent-team-operation.md` for round constraints.
 
-You run on the foreman's selected tier: the `coordination` row `select_tier`
-resolves from the operator's tier table with the seat's measured headroom
+You run on the foreman's selected tier: the operator's `coordination` row,
+resolved through `select_tier` and checked against the capability table
 (`rules/agent-team-operation.md` Foreman Seat).
 
 Each command resolves `CP` to the local or home plugin, or to `.` in a

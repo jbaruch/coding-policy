@@ -30,7 +30,7 @@ from .assign import apply as apply_assignments
 from .assign import APPLY_SCHEMA_VERSION, dry_run, freeze_decision, freeze_paths, read_frozen, native_context_session, normalize_assignments, resolve_paths, validate_fix_history
 from . import renderable
 from . import attention, capabilities, chronology, composition, engagement, foreman_queue, foreman_reset, historical, home, load_set, members, memory, oracle, partition, recovery, report_delivery, restoration, role_clear, retrospective, retrospective_runtime, supervision, supervision_gate, supervision_runtime, triggers
-from .config import default_config_path, load_config, load_foreman, load_judge, load_role_costs, select_agents
+from .config import FOREMAN_CONFIG_VERSION, default_config_path, load_config, load_foreman, load_judge, load_role_costs, select_agents
 from .errors import PlanError, StateError, ForemanError, UsageError
 from .herdr import (
     DEFAULT_MARKER_TIMEOUT_MS,
@@ -1980,10 +1980,15 @@ def cmd_start_judge(args, client=None, warn=None, trace=None):
             "pane": args.pane, "argv_verified": True, "verified": proof}, None
 
 
+#: The minimal `foreman` block the unconfigured warning tells the operator to add.
+FOREMAN_BLOCK_SNIPPET = ('"foreman": {"agent": "foreman", "kind": "claude", "window_group": "<window-group>", '
+                         '"tiers": {"coordination": {"model": "<model>", "effort": "<effort>"}}}')
+
+
 def _foreman_unconfigured(path):
-    return ("Config at {} has no `foreman` block, so the foreman's tier is neither selected nor proven. Add one "
-            "naming its agent and kind (config.example.json), then start the foreman with `{}`.".format(
-                path, runnable.command("start-foreman --pane <pane-id>")))
+    return ("Config at {} has no `foreman` block, so the foreman's tier is neither selected nor proven. Edit that "
+            "file: set `schema_version` to {}, and add {}. Then launch the foreman with `{}`.".format(
+                path, FOREMAN_CONFIG_VERSION, FOREMAN_BLOCK_SNIPPET, runnable.command("start-foreman --pane <pane-id>")))
 
 
 def _foreman_headroom(seat, snapshot):
@@ -1993,7 +1998,8 @@ def _foreman_headroom(seat, snapshot):
     the foreman cannot be probed from the pane it runs in. Its window is the
     `window_group` it declares, and that window's headroom is the minimum
     across the measured workers in it, the way `plan` charges a shared window.
-    No group, or no measured member, reads as unmeasured.
+    No group, or no measured member, reads as unmeasured. The value is recorded
+    with the selection (`pressure_headroom`); it never changes the row.
     """
     if not seat.window_group or not isinstance(snapshot, dict):
         return None
@@ -2010,10 +2016,11 @@ def _select_foreman_tier(args, seat, warn):
     """The tier the seat's coordination round resolves to, by the workers' own machinery.
 
     The operator's tier table supplies the seat's rows, as it does for every
-    worker. `select_tier` resolves the `coordination` row with the seat's
-    measured headroom, declining a discretionary escalation under scarcity as
-    any non-judgment round does; the capability table refuses a selected row it
-    records inadequate. No rule, plugin default or hardcoded value pins this
+    worker. The tier is the `coordination` row, resolved through `select_tier`;
+    the capability table refuses it when it records it inadequate. The
+    coordination round carries no escalation context, so no escalation applies
+    and measured headroom never changes the row. Headroom is passed only so the
+    selection records it. No rule, plugin default or hardcoded value pins this
     seat's model or effort.
     """
     state_path = _state_path(args)
@@ -2024,10 +2031,10 @@ def _select_foreman_tier(args, seat, warn):
             "The foreman seat has no tier table: add `foreman.tiers`, or configure a {} worker with one, so tier "
             "selection can choose its model and effort.".format(seat.kind), {"agent": seat.agent})
     needs = capabilities.required(FOREMAN_ROLE, COORDINATION_ROUND, JUDGMENT_ROUNDS)
-    # The configured coordination row is the floor (Round Tiers): select_tier
-    # resolves it with measured headroom, and no cheaper unrelated row ever
-    # substitutes for it. The capability table assesses the selected row; an
-    # inadequate verdict refuses the start.
+    # The configured coordination row is the tier: no escalation context, so
+    # select_tier returns that row and headroom is only recorded; no cheaper
+    # unrelated row ever substitutes for it. The capability table assesses the
+    # row; an inadequate verdict refuses the start.
     try:
         tier = select_tier(seat, FOREMAN_ROLE, headroom=headroom)
     except MissingTierError:

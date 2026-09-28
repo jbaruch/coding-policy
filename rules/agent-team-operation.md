@@ -37,16 +37,17 @@ description: Running a multi-agent team — task-based specialist composition, c
 - The operator's `config.json` `foreman` block declares the seat like a worker: its agent, kind, launch options and an optional tier table
 - The operator's tier table supplies the foreman's rows, as it does for every worker
 - No rule, plugin default or hardcoded value pins the foreman's model or effort
-- `select_tier` resolves the foreman's `coordination` row with the foreman's measured headroom
-- Under measured scarcity the foreman's round declines a discretionary escalation, as any non-judgment round does under Round Tiers
-- The capability table refuses a selected row it records inadequate
-- The foreman's headroom is the measured headroom of the `window_group` its block declares
+- The foreman's tier is the operator's `coordination` row, resolved through `select_tier`
+- The capability table refuses that row when it records it inadequate
+- No escalation applies to the coordination round
+- Measured headroom never changes the foreman's row
+- The foreman's headroom is the measured headroom of the `window_group` its block declares, recorded with the selection
 - A foreman declaring no `window_group` reads as unmeasured
 - The foreman's agent is never a configured worker or the pinned judge's
 - `foreman start-foreman` launches the selected tier and proves it from the launch argv
 - The round preflight proves the running foreman's argv carries the selected tier, after it measures headroom
 - A running tier other than the selected one blocks the round
-- An absent `foreman` block is a visible preflight warning naming the configure command, never a round block
+- An absent `foreman` block is a visible preflight warning naming the config file and the block to add, never a round block
 - The seat's config, selection and launch contracts are in `skills/herdr-foreman/references/model-tiers.md` Foreman Seat
 
 ## Team Composition

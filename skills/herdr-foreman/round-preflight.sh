@@ -241,8 +241,8 @@ PY
     record authority failed "verify-authority.sh exited ${rc} for ${repo}; an unanswerable authority check is not permission" 0 ""
   fi
 
-  # 4. Headroom and the foreman's tier: ONE composite check. The tier is
-  #    selected on the headroom `foreman measure` writes, so the dependency
+  # 4. Headroom and the foreman's tier: ONE composite check. The tier
+  #    selection reads the snapshot `foreman measure` writes, so the dependency
   #    lives inside foreman-tier-check.py, never between two preflight checks.
   #    Its single result carries a `headroom` and a `foreman_tier` row; an
   #    absent `foreman` block is the `unconfigured` warning and never blocks.

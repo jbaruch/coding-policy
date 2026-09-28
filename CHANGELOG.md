@@ -13,11 +13,12 @@
   or `effort` field on it is refused, and its agent is never a configured
   worker or the pinned judge. Config moves to schema 6; schemas 1–5 stay
   readable with the seat unconfigured, and a block below schema 6 is refused
-  naming the version it needs. The seat's round type is `coordination`:
-  `select_tier` resolves the operator's `coordination` row with the measured
-  headroom of the seat's `window_group`, declining a discretionary escalation
-  under scarcity like any non-judgment round and never substituting a cheaper
-  row, and the capability table refuses an inadequate selected row.
+  naming the version it needs. The seat's tier is the operator's
+  `coordination` row, resolved through `select_tier` and refused when the
+  capability table records it inadequate; a cheaper row never substitutes.
+  No escalation applies to the coordination round, so the measured headroom of
+  the seat's `window_group` is recorded with the selection and never changes
+  the row.
   `foreman start-foreman --pane` launches the selected tier and proves it from
   the launch argv; it refuses a pane whose foreground holds anything but its
   shell, and a retry replays an already-running matching seat after proving its
@@ -27,7 +28,9 @@
   and the tier proof as one composite check, `foreman-tier-check.py`, and
   records its `checks.headroom` and `checks.foreman_tier` rows: a running tier
   other than the selected one blocks the round, and an absent block is a
-  visible `unconfigured` warning, never a block. The pinned judge keeps the
+  visible `unconfigured` warning, never a block, naming the resolved config
+  file, the `schema_version` 6 it needs and the minimal `foreman` block to add,
+  then `start-foreman` to launch it. The pinned judge keeps the
   most capable model. The other half of #601, routing every judgment the
   foreman makes to a worker, moved to #625 for a design-first redo. Tests:
   `test_foreman_seat.py`, `test_round_preflight.sh`, `test_config.py`.

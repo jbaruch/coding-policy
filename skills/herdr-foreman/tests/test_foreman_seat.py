@@ -1,9 +1,10 @@
 """The foreman seat: declared like a worker, its tier selected, the selection proven.
 
 rules/agent-team-operation.md Foreman Seat: no model or effort is pinned for
-the foreman. Its `coordination` round is resolved by the same machinery as
-every seat -- its tier table (or its kind's worker table), the capability
-table and measured headroom -- and `start-foreman` / `verify-foreman` prove
+the foreman. Its tier is the operator's `coordination` row, resolved through
+`select_tier` from its tier table (or its kind's worker table) and refused
+when the capability table records it inadequate; measured headroom is
+recorded and never changes the row. `start-foreman` / `verify-foreman` prove
 the SELECTED tier from argv. Every test drives `main()` or the launch helpers
 with an in-memory client, so nothing spawns a process or contacts Herdr.
 """
@@ -262,6 +263,25 @@ class CommandTest(unittest.TestCase):
         # The shared window's reading, not an unrelated worker's.
         self.assertEqual(json.loads(out)["tier"]["pressure_headroom"], 12.0)
 
+    def test_headroom_never_changes_the_foremans_row(self):
+        from foreman.state import SNAPSHOT_SCHEMA_VERSION, add_snapshot, empty_state, save_state
+        self.write(payload(window_group="claude-max-weekly"))
+        tiers = []
+        for pct in (2.0, 95.0):
+            with self.subTest(headroom=pct):
+                state = empty_state()
+                add_snapshot(state, {"schema_version": SNAPSHOT_SCHEMA_VERSION, "measured_at": AT, "failed_agents": [],
+                                     "agents": {"claude": {"kind": "claude", "headroom_pct": pct,
+                                                           "window_group": "claude-max-weekly", "tier_billing": {}}}})
+                save_state(self.state, state)
+                code, out, err = self.run_cli(["start-foreman", "--pane", "w1:p0"], Client())
+                self.assertEqual(code, 0, err)
+                tier = json.loads(out)["tier"]
+                self.assertFalse(tier["de_escalated"])
+                tiers.append((tier["tier_row"], tier["model"], tier["effort"]))
+        self.assertEqual(tiers[0], tiers[1])
+        self.assertEqual(tiers[0], ("coordination", "sonnet-5", "medium"))
+
     def test_a_foreman_without_a_window_is_unmeasured(self):
         client = Client()
         code, out, err = self.run_cli(["start-foreman", "--pane", "w1:p0"], client)
@@ -311,13 +331,21 @@ class CommandTest(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertEqual(out, "")
 
+    def assert_names_the_block_to_add(self, warning):
+        self.assertIn(str(self.config), warning)
+        self.assertIn("`schema_version` to 6", warning)
+        for field in ('"foreman": {', '"agent"', '"kind"', '"window_group"', '"tiers": {"coordination"'):
+            self.assertIn(field, warning)
+        self.assertIn("start-foreman --pane", warning)
+        self.assertNotIn("configure command", warning)
+
     def test_verify_without_a_block_warns_and_passes(self):
         self.write({"schema_version": 1, "agents": [WORKER]})
         code, out, err = self.run_cli(["verify-foreman", "--pane", "w1:p0"], Client())
         self.assertEqual(code, 0, err)
         result = json.loads(out)
         self.assertFalse(result["configured"])
-        self.assertIn("start-foreman", result["warning"])
+        self.assert_names_the_block_to_add(result["warning"])
 
     def test_verify_config_only_reports_presence_without_selection_or_probe(self):
         code, out, err = self.run_cli(["verify-foreman", "--config-only"], Client())
@@ -328,7 +356,7 @@ class CommandTest(unittest.TestCase):
         self.assertEqual(code, 0, err)
         result = json.loads(out)
         self.assertFalse(result["configured"])
-        self.assertIn("start-foreman", result["warning"])
+        self.assert_names_the_block_to_add(result["warning"])
 
     def test_start_without_a_block_is_refused(self):
         self.write({"schema_version": 1, "agents": [WORKER]})

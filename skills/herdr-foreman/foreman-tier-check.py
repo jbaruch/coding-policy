@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Headroom measurement and the foreman's tier proof, as one composite check.
 
-The foreman's tier is selected on the headroom `foreman measure` writes
-(`rules/agent-team-operation.md` Foreman Seat), so the two are one check: the
+The foreman's tier selection reads the snapshot `foreman measure` writes and
+records its headroom (`rules/agent-team-operation.md` Foreman Seat), so the
+two are one check: the
 round preflight runs this once and records its result. Config presence is read
 apart from the measurement, so an absent `foreman` block is always the
 `unconfigured` warning and never a block.
@@ -18,7 +19,7 @@ Output contract (rules/script-delegation.md -- structured stdout):
                 without one readable JSON object
   foreman_tier: ok (the verify-foreman proof as detail) when headroom is ok or
                 skipped and this pane runs the selected tier; unconfigured, with
-                the configure command in `detail.warning`, when config has no
+                the config file and block to add in `detail.warning`, when config has no
                 `foreman` block, whatever headroom reported; failed otherwise,
                 naming the command to re-run
   A row carrying `reason` blocks the round; `unconfigured` and `skipped` do not.
@@ -86,7 +87,7 @@ def foreman_row(common, measured):
         if flag is False:
             return {"status": "unconfigured", "detail": payload}
         return {"status": "failed",
-                "reason": "not verified: the foreman's tier is selected on the headroom foreman measure writes, and "
+                "reason": "not verified: the foreman's tier selection reads the snapshot foreman measure writes, and "
                           "that check did not pass; fix checks.headroom, then re-run the preflight"}
     code, out = run([*common, "verify-foreman"])
     if code != 0:
