@@ -660,6 +660,10 @@ informational plan name and never feeds headroom.
   report's attribution predicate holds. What each field counts, and that
   predicate, are the contract of `skills/herdr-foreman/foreman/cost_report.py`
   (module docstring), not restated here.
+  `skills/herdr-foreman/prune-report-caches.py` reads `recovery.dispatches[]`
+  `brief` and `common` paths to find reports directories, without writing or
+  migrating; an unusable or unmigrated state file is its `could_not_check`,
+  never an empty ledger. Its contract is that script's top-of-file docstring.
 - **Seat vs responsibility** — a partitioned round plans several seats of one
   role (`reviewer#api`, `reviewer#core`). `assignments[].role` holds the
   RESPONSIBILITY (`reviewer`), so per-role history, independence and rotation
