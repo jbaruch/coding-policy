@@ -162,11 +162,21 @@ if not stat.S_ISDIR(info.st_mode):
     sys.stderr.write("{} is not a directory\n".format(sys.argv[1]))
     sys.exit(1)
 try:
-    # Opening it and reading one entry is enough to prove it is listable.
-    with os.scandir(sys.argv[1]) as entries:
-        next(entries, None)
+    # Open it without following a symlink and read one entry through that
+    # descriptor: the directory proven listable is the one fstat names, so a
+    # swap after the lstat above cannot pass as the original.
+    fd = os.open(sys.argv[1], os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        opened = os.fstat(fd)
+        with os.scandir(fd) as entries:
+            next(entries, None)
+    finally:
+        os.close(fd)
 except OSError as exc:
     sys.stderr.write("cannot list {}: {}\n".format(sys.argv[1], exc.strerror or exc))
+    sys.exit(1)
+if (opened.st_dev, opened.st_ino) != (info.st_dev, info.st_ino):
+    sys.stderr.write("{} changed while it was being read\n".format(sys.argv[1]))
     sys.exit(1)
 print("{}:{}".format(info.st_dev, info.st_ino))' "$1" 2>"$ERRFILE"
 }

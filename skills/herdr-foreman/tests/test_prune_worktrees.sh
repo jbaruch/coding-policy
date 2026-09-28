@@ -68,6 +68,8 @@
 #  90. Root moved at the   -> a root renamed between its last identity check
 #      metadata step          and the metadata removal keeps the registrations
 #                             of the worktrees it still holds.
+#  91. Metadata removal    -> a failed per-entry removal leaves the entry
+#      fails                  registered and its branch undeleted; exit 2.
 #  34. Recreated config   -> a branch.<name> section recreated after the
 #                             deletion is left untouched.
 #  35. Reachable, idle      -> a clean worktree whose HEAD an origin branch
@@ -1253,6 +1255,31 @@ SHIM
   if [[ -e "$shim90/done" ]] && listed "$SHARED" "$ROOT/live90" && [[ -d "$ROOT/live90" ]] \
     && ! listed "$SHARED" "$ROOT/gone90" && has_branch "$SHARED" review/live90; then
     pass; else fail "root moved at the metadata step: rc=$RC out=$OUT err=$ERRTEXT"; fi
+
+  # --- 91. a failed per-entry metadata removal keeps the entry and its branch.
+  mk_repo ninetyone
+  add_wt "$SHARED" review/gone91 "$ROOT/gone91"
+  rm -rf "$ROOT/gone91" || die "rm gone91 failed"
+  local shim91="$TMP/shim91"
+  mkdir -p "$shim91" || die "mkdir shim91 failed"
+  cat > "$shim91/git" <<SHIM || die "shim91 write failed"
+#!/usr/bin/env bash
+set -euo pipefail
+if [[ "\$*" == *"worktree remove $ROOT/gone91"* ]]; then
+  echo "fixture refuses the metadata removal" >&2
+  exit 1
+fi
+exec "$real_git" "\$@"
+SHIM
+  chmod +x "$shim91/git" || die "chmod shim91 failed"
+  RUN_SEQ=$((RUN_SEQ+1))
+  OUT="$(env WORKTREE_ROOT="$ROOT" PRUNE_IDLE_HOURS=0 PATH="$shim91:$PATH" bash "$SCRIPT" "$SHARED" 2>"$TMP/err.$RUN_SEQ")"; RC=$?
+  ERRTEXT="$(cat "$TMP/err.$RUN_SEQ")"
+  echo "91. a failed metadata removal leaves the entry registered and its branch undeleted"
+  if (( RC == 2 )) && [[ "$OUT" == *"removing its stale metadata failed"*"fixture refuses the metadata removal"* ]] \
+    && listed "$SHARED" "$ROOT/gone91" && has_branch "$SHARED" review/gone91 \
+    && [[ "$(branches_deleted)" != *review/gone91* ]]; then
+    pass; else fail "metadata removal fails: rc=$RC out=$OUT err=$ERRTEXT"; fi
 
   # --- 14. usage / not a repo.
   run
