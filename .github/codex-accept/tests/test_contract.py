@@ -1481,6 +1481,23 @@ class ExportTests(unittest.TestCase):
                 c.extract_archive(data, self.base / "link/download")
         compared.assert_not_called()
 
+    def test_existing_destination_with_parent_traversal_refuses(self):
+        self.seal()
+        data = self.archive_bytes(self.output)
+        destination = self.base / "download"
+        c.extract_archive(data, destination)
+        (self.base / "inner").mkdir()  # The traversal must resolve, so the existing-destination branch runs.
+        with self.assertRaisesRegex(c.Refusal, "must not contain \\.\\. components"):
+            c.extract_archive(data, self.base / "inner" / ".." / "download")
+
+    def test_seal_output_behind_symlinked_ancestor_refuses_without_writing_outside(self):
+        outside = self.base / "outside"; (outside / "sub").mkdir(parents=True)
+        (self.base / "link").symlink_to(outside, target_is_directory=True)
+        self.output = self.base / "link/sub/export"
+        with self.assertRaisesRegex(c.Refusal, "Export destination parent .* ancestor link is a symlink"):
+            self.seal()
+        self.assertEqual(list((outside / "sub").iterdir()), [])
+
     def test_clean_archive_roundtrip(self):
         self.seal(); buffer = io.BytesIO()
         with zipfile.ZipFile(buffer, "w") as archive:

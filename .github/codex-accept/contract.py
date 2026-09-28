@@ -273,6 +273,8 @@ def open_anchor(root: Path, kind: str) -> int:
     ancestor refuses instead of redirecting the walk. anchored() rewrites the macOS /var and
     /tmp aliases first, so the walk never follows those either.
     """
+    # The kernel resolves ".." against the descriptor it walked into, so it never reaches the walk.
+    require(".." not in root.parts, f"{kind} {root} must not contain .. components; pass a contained path")
     fd = os.open("/", DIR_FLAGS)
     opened = False
     try:
@@ -293,6 +295,16 @@ def open_anchor(root: Path, kind: str) -> int:
     finally:
         if not opened:
             os.close(fd)
+
+
+@contextmanager
+def anchor_dir(root: Path, kind: str) -> Iterator[int]:
+    """open_anchor as a context manager: the descriptor closes on exit."""
+    fd = open_anchor(root, kind)
+    try:
+        yield fd
+    finally:
+        os.close(fd)
 
 
 def write_under(root: Path, path: Path, value: bytes, private: bool) -> None:
@@ -864,7 +876,8 @@ def seal(root: Path, evidence: Path, output: Path) -> dict[str, Any]:
     require(regular(root / "seed/auth.json") == regular(oracle),
             "Central seed changed; refuse export and inspect isolated auth handling")
     if output.exists() or output.is_symlink():
-        require(not output.is_symlink(), "Export destination is a symlink; refuse it")
+        os.close(open_anchor(output, "Export destination"))
+        output = anchored(output)
         manifest = verify_artifact(output, context, known)
         require(regular(output / "manifest.json") == encoded(manifest),
                 "Export destination manifest is not the sealed encoding; refuse to overwrite it")
@@ -873,7 +886,9 @@ def seal(root: Path, evidence: Path, output: Path) -> dict[str, Any]:
         return manifest
     validate_proof(parse(regular(evidence / "credential-boundary.json")), context)
     # Only an explicit fixed projection is copied, never raw evidence recursion.
-    with tempfile.TemporaryDirectory(prefix="acr-seal-", dir=output.parent) as name:
+    # The parent is walked no-follow and held open; the export is published relative to it.
+    with anchor_dir(output.parent, "Export destination parent") as parent, \
+            tempfile.TemporaryDirectory(prefix="acr-seal-", dir=anchored(output.parent)) as name:
         staging = Path(name)
         files = {}
         for member in sorted(evidence_names()):
@@ -913,7 +928,7 @@ def seal(root: Path, evidence: Path, output: Path) -> dict[str, Any]:
         for path in sorted(evidence_names() | {"manifest.json"}):
             # Presence already enforced. A scanner exception/nonzero aborts export.
             run(["bash", str(scanner), str(oracle), str(staging / path)])
-        staging.rename(output)
+        os.rename(staging.name, output.name, src_dir_fd=parent, dst_dir_fd=parent)
     return manifest
 
 

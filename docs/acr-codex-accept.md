@@ -165,8 +165,9 @@ descriptor, and its link count is re-checked right before the 0600 `fchmod`.
 A `..` component, a symlinked parent or ancestor, a FIFO or other non-regular
 file, a hard link, or different
 existing content refuses; keep that run root for inspection and re-run with a
-fresh one. An existing download destination is walked the same way before its
-members are compared. These checks catch a mistaken or stale path; a hostile
+fresh one. An existing download or export destination is walked the same way
+before its members are compared, and a new export is renamed into place
+relative to its walked parent. These checks catch a mistaken or stale path; a hostile
 process running as the same user can still swap a component between the walk
 and a later path-based read.
 `CODEX_AUTH_JSON` is scoped to that single step. The suite token is scoped to conversion and sealing.
