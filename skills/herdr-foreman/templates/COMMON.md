@@ -61,7 +61,8 @@ to know goes in the report.
   Prove the tool's effective root inside it before any command writes through
   the tool, record a digest of every user-level file the run can reach before
   and after (a hash listing, never a copy of a directory tree), copy only the
-  single files you must be able to restore, stop on an unexpected change, and
+  single files the run is expected to change and restore those, stop on an
+  unexpected change and report it unrestored, and
   remove the root when you finish (`rules/agent-team-operation.md` Writers and
   Checkouts carries the preconditions).
 - Write nowhere else — not the shared checkout, not your home directory, not a

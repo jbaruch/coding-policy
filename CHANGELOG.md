@@ -61,8 +61,9 @@
     user-level default location.
     The fixture-root carve-out's home guard now records digests, and copies
     only the single files it must restore (preconditions 7 and 9), instead
-    of copying directory trees; `references/round-flow.md` carries the same
-    contract. The rule states what the prune enforces (a directory matching
+    of copying directory trees; an unexpected change, which has no copy,
+    stops the rehearsal and goes to the operator unrestored.
+    `references/round-flow.md` and `COMMON.md` carry the same contract. The rule states what the prune enforces (a directory matching
     one enumerated cache kind by name, signature and top-level entries), not
     a blanket "never removes evidence" it cannot prove for a file nested deep
     inside a cache.

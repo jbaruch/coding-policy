@@ -210,7 +210,7 @@ if count:
                               count, "y" if count == 1 else "ies", size(doc["bytes"]), rerun))
     else:
         paragraphs.append(head + "removed {} regenerable build cache director{} ({}) from idle Herdr reports "
-                          "directories; evidence files were kept.".format(
+                          "directories; every other file and directory was kept.".format(
                               count, "y" if count == 1 else "ies", size(doc["bytes"])))
 if doc["incomplete"]:
     paragraphs.append(head + "the report-cache prune stopped at its time budget with directories left to check; "
