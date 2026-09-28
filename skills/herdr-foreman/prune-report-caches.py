@@ -12,7 +12,13 @@ Discovery — reports directories come from the ledger, never from a guess.
 Every `recovery.dispatches[]` row in the foreman state file records the
 `brief` and `common` paths `compose-briefs.sh` wrote into the round's reports
 directory (frozen copies sit in its `.dispatched/` subdirectory, whose parent
-is taken). The distinct directories those paths name are the candidates. The
+is taken). The distinct directories those paths name are the candidates.
+The ledger is a hint, never authority (`rules/stateful-artifacts.md`): a
+candidate is pruned only when at least one of its recorded `brief`/`common`
+files is still there, read through the candidate's descriptor as a regular
+file, and a frozen copy (`<stem>.<16 hex>.<ext>` under `.dispatched/`,
+`foreman/assign.py` `freeze_paths`) still hashes to the digest its name
+carries. A candidate without that live evidence is skipped `unverified`. The
 state file is read through the owner's loader (`foreman/state.py`
 `load_state_checked`) with `persist_migration=False`: nothing is written or
 migrated, and a file needing migration, a corrupt one, or one from a newer
@@ -57,8 +63,12 @@ whole. The plugin-cache copy row matches a `plugins/cache` directory, holding
 directories alone, whose grandparent is one of PLUGIN_HOMES: a copy of an
 agent home's plugin cache taken by a home guard. Every other file and
 directory stays, evidence included. The signature is re-checked on the
-descriptor immediately before removal. Directories inside a removed cache are
-made owner-writable first (the Go module cache is read-only by design).
+descriptor immediately before removal. A cache is classified, re-checked and
+emptied through one descriptor held open throughout; its name must still
+name that same directory under the lock, before its contents go and again
+before the final `rmdir`, or nothing more is removed. Directories inside a
+removed cache are made owner-writable first (the Go module cache is
+read-only by design).
 
 Interrupted removal — a cache is removed in place, its signature entries
 (SIGNATURE_LAST, nested per level) after everything else. A removal cut
@@ -81,7 +91,7 @@ Contract:
              "bytes": int,
              "skipped": [{"path": str,
                           "reason": "not_idle"|"active_assignment"|"busy"|
-                                    "outside_root"|"symlink"}],
+                                    "unverified"|"outside_root"|"symlink"}],
              "failed": [{"path": str, "error": str}],
              "incomplete": bool, "could_not_check": str|null}
           `caches` lists what was removed (under --dry-run, what would be),
@@ -96,6 +106,7 @@ Contract:
 
 import argparse
 import errno
+import hashlib
 import json
 import math
 import os
@@ -277,37 +288,90 @@ SIGNATURE_LAST = {
 }
 
 
+def _plugin_copy(name, parts):
+    return len(parts) >= 3 and name == "cache" and parts[-2] == "plugins" and parts[-3] in PLUGIN_HOMES
+
+
+def kind_of(fd, name, parts):
+    """The kind of the opened directory `fd`, named `name` at `parts` below
+    the candidate, or None."""
+    if _plugin_copy(name, parts):
+        return PLUGIN_CACHE_COPY if _only(fd, any_dir=True) else None
+    for kind, (names, signature) in CACHE_KINDS.items():
+        if name in names and signature(fd):
+            return kind
+    return None
+
+
 def classify_at(parent_fd, name, parts):
     """The kind of directory `name` in `parent_fd` (at `parts` below the
     candidate), or None."""
-    copy = len(parts) >= 3 and name == "cache" and parts[-2] == "plugins" and parts[-3] in PLUGIN_HOMES
-    if not copy and not any(name in names for names, _signature in CACHE_KINDS.values()):
+    if not _plugin_copy(name, parts) and not any(name in names for names, _signature in CACHE_KINDS.values()):
         return None
     fd = open_at(parent_fd, name)
     try:
-        if copy:
-            return PLUGIN_CACHE_COPY if _only(fd, any_dir=True) else None
-        for kind, (names, signature) in CACHE_KINDS.items():
-            if name in names and signature(fd):
-                return kind
-        return None
+        return kind_of(fd, name, parts)
     finally:
         os.close(fd)
 
 
 def reports_dirs(document):
-    """Distinct reports directories named by the ledger's dispatch rows."""
-    found = set()
+    """{reports directory: [recorded brief/common paths in it]} from the
+    ledger's dispatch rows."""
+    found = {}
     for row in document.get("recovery", {}).get("dispatches", []):
         for key in ("brief", "common"):
             value = row.get(key)
             if not isinstance(value, str) or not os.path.isabs(value):
                 continue
-            parent = os.path.dirname(os.path.normpath(value))
+            value = os.path.normpath(value)
+            parent = os.path.dirname(value)
             if os.path.basename(parent) == ".dispatched":
                 parent = os.path.dirname(parent)
-            found.add(parent)
-    return sorted(found)
+            found.setdefault(parent, set()).add(value)
+    return {parent: sorted(paths) for parent, paths in sorted(found.items())}
+
+
+def _frozen_digest(name):
+    """The 16-hex digest a `freeze_paths` copy's name carries, or None."""
+    pieces = name.rsplit(".", 2)
+    if len(pieces) == 3 and len(pieces[1]) == 16 and set(pieces[1]) <= HEX:
+        return pieces[1]
+    return None
+
+
+def owned(cand_fd, candidate, recorded):
+    """Whether a recorded brief or common file is still in the candidate,
+    read through its descriptor, a frozen copy still matching its digest."""
+    for path in recorded:
+        parts = tuple(os.path.relpath(path, candidate).split(os.sep))
+        try:
+            parent_fd = open_rel(cand_fd, parts[:-1])
+        except OSError:
+            continue
+        try:
+            fd = os.open(parts[-1], FILE_FLAGS, dir_fd=parent_fd)
+        except OSError:
+            continue
+        finally:
+            os.close(parent_fd)
+        try:
+            if not stat.S_ISREG(os.fstat(fd).st_mode):
+                continue
+            digest = _frozen_digest(parts[-1]) if parts[:-1] == (".dispatched",) else None
+            if digest is None:
+                return True
+            hasher = hashlib.sha256()
+            while True:
+                block = os.read(fd, 1 << 16)
+                if not block:
+                    break
+                hasher.update(block)
+            if hasher.hexdigest()[:16] == digest:
+                return True
+        finally:
+            os.close(fd)
+    return False
 
 
 class OutOfBudget(Exception):
@@ -361,14 +425,28 @@ def _changed():
     return OSError(errno.EAGAIN, "changed while being removed; re-run to retry")
 
 
-def remove_at(dir_fd, name, dry_run, last=None):
+def remove_children(fd, dry_run, last=None) -> int:
+    """Allocated bytes of everything inside the opened directory `fd`;
+    removed unless dry_run. Children named in `last` (a SIGNATURE_LAST
+    level) go after the others."""
+    last = last or {}
+    st = os.fstat(fd)
+    if not dry_run and (st.st_mode & stat.S_IRWXU) != stat.S_IRWXU:
+        os.fchmod(fd, st.st_mode | stat.S_IRWXU)
+    with os.scandir(fd) as entries:
+        children = sorted((entry.name for entry in entries), key=lambda child: child in last)
+    freed = 0
+    for child in children:
+        freed += remove_at(fd, child, dry_run, last.get(child))
+    return freed
+
+
+def remove_at(dir_fd, name, dry_run, last=None) -> int:
     """Allocated bytes of entry `name` in directory `dir_fd`; removed unless dry_run.
 
     Never follows a symlink: a link is unlinked (or counted), never entered.
     A directory whose identity changed between `lstat` and open raises.
-    Children named in `last` (a SIGNATURE_LAST level) go after the others.
     """
-    last = last or {}
     freed = 0
     st = os.stat(name, dir_fd=dir_fd, follow_symlinks=False)
     if stat.S_ISDIR(st.st_mode):
@@ -376,12 +454,7 @@ def remove_at(dir_fd, name, dry_run, last=None):
         try:
             if not _same(os.fstat(fd), st):
                 raise _changed()
-            if not dry_run and (st.st_mode & stat.S_IRWXU) != stat.S_IRWXU:
-                os.fchmod(fd, st.st_mode | stat.S_IRWXU)
-            with os.scandir(fd) as entries:
-                children = sorted((entry.name for entry in entries), key=lambda child: child in last)
-            for child in children:
-                freed += remove_at(fd, child, dry_run, last.get(child))
+            freed = remove_children(fd, dry_run, last)
         finally:
             os.close(fd)
         if not dry_run:
@@ -389,6 +462,53 @@ def remove_at(dir_fd, name, dry_run, last=None):
     elif not dry_run:
         os.unlink(name, dir_fd=dir_fd)
     return freed + st.st_blocks * 512
+
+
+class Skip(Exception):
+    """Stop pruning this candidate; `reason` is its `skipped` reason."""
+
+    def __init__(self, reason):
+        super().__init__(reason)
+        self.reason = reason
+
+
+def _still(parent_fd, name, fd):
+    """Raise unless `name` in `parent_fd` is still the directory `fd` holds."""
+    st = _lstat_at(parent_fd, name)
+    if st is None or not _same(st, os.fstat(fd)):
+        raise _changed()
+
+
+def remove_cache(parent_fd, name, parts, kind, real, dry_run, state_path):
+    """Bytes of the cache `name` in `parent_fd`, removed unless dry_run, or
+    None when it no longer classifies as `kind`. Raises Skip for an active or
+    locked candidate."""
+    st = _lstat_at(parent_fd, name)
+    if st is None or not stat.S_ISDIR(st.st_mode):
+        return None
+    fd = open_at(parent_fd, name)
+    try:
+        if not _same(os.fstat(fd), st):
+            raise _changed()
+        if kind_of(fd, name, parts) != kind:
+            return None
+        if dry_run:
+            return remove_children(fd, True) + st.st_blocks * 512
+        try:
+            with ledger.state_lock(supervision.store_path(state_path)):
+                if busy(real, active_report_dirs(state_path)):
+                    raise Skip("active_assignment")
+                _still(parent_fd, name, fd)
+                if kind_of(fd, name, parts) != kind:
+                    raise _changed()
+                freed = remove_children(fd, False, SIGNATURE_LAST.get(kind))
+                _still(parent_fd, name, fd)
+                os.rmdir(name, dir_fd=parent_fd)
+                return freed + st.st_blocks * 512
+        except ForemanError:
+            raise Skip("busy") from None
+    finally:
+        os.close(fd)
 
 
 def within(path, root):
@@ -428,7 +548,7 @@ def load_ledger(state_path, default):
         return None, None, exc.message
 
 
-def prune_candidate(root_fd, real_root, real, cutoff, budget, dry_run, state_path, result):
+def prune_candidate(root_fd, real_root, real, candidate, recorded, cutoff, budget, dry_run, state_path, result):
     """Survey one resolved candidate and remove its caches when idle.
 
     Each live removal runs under the supervision store's owner lock, after
@@ -449,6 +569,9 @@ def prune_candidate(root_fd, real_root, real, cutoff, budget, dry_run, state_pat
             return False
         raise
     try:
+        if not owned(cand_fd, candidate, recorded):
+            result["skipped"].append({"path": real, "reason": "unverified"})
+            return False
         idle, caches = survey(cand_fd, cutoff, budget)
         if not idle:
             result["skipped"].append({"path": real, "reason": "not_idle"})
@@ -459,25 +582,16 @@ def prune_candidate(root_fd, real_root, real, cutoff, budget, dry_run, state_pat
             try:
                 parent_fd = open_rel(cand_fd, cache_parts[:-1])
                 try:
-                    name = cache_parts[-1]
-                    if not _is_dir_at(parent_fd, name) or classify_at(parent_fd, name, cache_parts) != kind:
-                        continue
-                    if dry_run:
-                        size = remove_at(parent_fd, name, True)
-                    else:
-                        try:
-                            with ledger.state_lock(supervision.store_path(state_path)):
-                                if busy(real, active_report_dirs(state_path)):
-                                    result["skipped"].append({"path": real, "reason": "active_assignment"})
-                                    return True
-                                size = remove_at(parent_fd, name, False, SIGNATURE_LAST.get(kind))
-                        except ForemanError:
-                            result["skipped"].append({"path": real, "reason": "busy"})
-                            return True
+                    size = remove_cache(parent_fd, cache_parts[-1], cache_parts, kind, real, dry_run, state_path)
                 finally:
                     os.close(parent_fd)
+            except Skip as skip:
+                result["skipped"].append({"path": real, "reason": skip.reason})
+                return True
             except OSError as exc:
                 result["failed"].append({"path": path, "error": exc.strerror or str(exc)})
+                continue
+            if size is None:
                 continue
             result["caches"].append({"path": path, "kind": kind, "bytes": size})
             result["bytes"] += size
@@ -512,7 +626,7 @@ def run(args):
     result["reports_dirs"] = len(candidates)
     covered = []
     try:
-        for candidate in candidates:
+        for candidate, recorded in candidates.items():
             budget.check()
             if os.path.islink(candidate):
                 result["skipped"].append({"path": candidate, "reason": "symlink"})
@@ -530,7 +644,8 @@ def run(args):
                 result["skipped"].append({"path": real, "reason": "active_assignment"})
                 continue
             try:
-                if prune_candidate(root_fd, real_root, real, cutoff, budget, args.dry_run, state_path, result):
+                if prune_candidate(root_fd, real_root, real, candidate, recorded, cutoff, budget, args.dry_run,
+                                   state_path, result):
                     covered.append(real)
             except OSError as exc:
                 result["failed"].append({"path": real, "error": exc.strerror or str(exc)})

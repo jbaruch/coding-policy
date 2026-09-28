@@ -16,7 +16,10 @@
     finds reports directories from the foreman ledger (the `brief` and
     `common` paths every dispatch row records, whose directory is the one
     `compose-briefs.sh` wrote), never by scanning `~/.local/state`, where
-    other tools (cmux, gh, pnpm) keep their own state. A directory is pruned
+    other tools (cmux, gh, pnpm) keep their own state. The ledger is a hint:
+    a directory is touched only while one of its recorded briefs is still in
+    it, a frozen copy still hashing to the digest in its name, so a path
+    recreated by someone else after the round is skipped. A directory is pruned
     only when no active supervision enrollment reports into it and nothing
     below it changed for a day, so a live worker's build never loses its
     cache mid-compile, even a worker quiet for longer than a day; an
@@ -33,7 +36,10 @@
     Everything below the state root runs on descriptors: the root is opened
     once and every directory under it is reached one `O_NOFOLLOW` component
     at a time, never re-resolved by path, so a symlink swapped in for any
-    ancestor between the survey and the removal is never entered. A cache is
+    ancestor between the survey and the removal is never entered. Each cache
+    is classified, re-checked and emptied through one held descriptor, and
+    its name must still point at that directory before anything goes, so a
+    cache swapped for a same-named evidence directory is left alone. A cache is
     removed in place with the entries its signature reads going last, so a
     removal cut short by the hook's budget still looks like the same cache
     and the next session finishes it; no rename, marker or other state

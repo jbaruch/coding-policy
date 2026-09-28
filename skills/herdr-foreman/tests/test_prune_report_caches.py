@@ -37,9 +37,16 @@ Covers:
                             supervision under its lock.
  18. Locked supervision  -> a store lock held by a foreman command skips the
                             directory as busy.
+ 19. Unverified          -> a recorded directory holding none of its recorded
+                            briefs, or a frozen copy whose bytes no longer
+                            match its name, is skipped.
+ 20. Replaced cache      -> a cache swapped for an evidence directory of the
+                            same name after it was classified is never
+                            touched: nothing removed, evidence intact.
 """
 
 import argparse
+import hashlib
 import importlib.util
 import json
 import os
@@ -143,14 +150,19 @@ class Fixture:
         self.state = self.root / "foreman" / "state.json"
         self.rows = []
 
-    def record(self, reports_dir):
-        """A dispatch row naming a frozen brief under `reports_dir`."""
+    def record(self, reports_dir, write_brief=True):
+        """A dispatch row naming a frozen brief under `reports_dir`, written
+        there with the digest its name carries unless `write_brief` is false."""
         index = len(self.rows)
-        brief = str(Path(reports_dir) / ".dispatched" / "brief-{}.md".format(index))
+        body = "brief {}\n".format(index)
+        digest = hashlib.sha256(body.encode()).hexdigest()[:16]
+        brief = Path(reports_dir) / ".dispatched" / "brief-{}.{}.md".format(index, digest)
+        if write_brief:
+            write(brief, body)
         self.rows.append({"schema_version": 1, "at": AT, "id": "d{}".format(index), "fingerprint": "f{}".format(index),
                           "task": "t{}".format(index), "role": "developer", "agent": "w{}".format(index),
                           "fix_round": None, "status": "not_sent", "plan": None, "work": None,
-                          "brief": brief, "common": str(Path(reports_dir) / "COMMON.md"),
+                          "brief": str(brief), "common": str(Path(reports_dir) / "COMMON.md"),
                           "result": None, "report": None})
 
     def save(self):
@@ -280,7 +292,7 @@ class PruneReportCachesTests(unittest.TestCase):
         self.assertTrue((stray / "venv" / "pyvenv.cfg").is_file())
 
     def test_missing_directory_is_counted(self):
-        self.fx.record(self.fx.root / "round" / "gone")
+        self.fx.record(self.fx.root / "round" / "gone", write_brief=False)
         self.fx.save()
         rc, doc, err = run(self.fx)
         self.assertEqual(rc, 0, err)
@@ -352,6 +364,50 @@ class PruneReportCachesTests(unittest.TestCase):
         self.assertTrue((outside / "venv" / "pyvenv.cfg").is_file())
         self.assertEqual(result["caches"], [])
         self.assertEqual([f["path"] for f in result["failed"]], [str(top / CACHE_PATHS["virtualenv"])])
+
+    def test_directory_without_its_recorded_briefs_is_skipped(self):
+        top = self.fx.reports()
+        tampered = self.fx.reports(name="round/tampered")
+        self.fx.save()
+        for path in (top / ".dispatched").iterdir():
+            path.unlink()
+        for path in (tampered / ".dispatched").iterdir():
+            path.write_text("other bytes\n")
+        age(top)
+        age(tampered)
+        rc, doc, err = run(self.fx)
+        self.assertEqual(rc, 0, err)
+        self.assertEqual(doc["caches"], [])
+        self.assertEqual(sorted(s["path"] for s in doc["skipped"] if s["reason"] == "unverified"),
+                         sorted([str(top), str(tampered)]))
+        self.assertTrue((top / CACHE_PATHS["virtualenv"]).is_dir())
+
+    def test_cache_replaced_after_classification_is_never_touched(self):
+        top = self.fx.reports(caches=("virtualenv",))
+        self.fx.save()
+        age(top)
+        module = load_script()
+        checked = module.busy
+        venv = top / CACHE_PATHS["virtualenv"]
+
+        calls = []
+
+        def swap_then_check(real, active):
+            calls.append(real)
+            if len(calls) == 2:  # the re-check under the lock, after classification
+                venv.rename(top / "moved-venv")
+                write(venv / "pyvenv.cfg", "home = /usr/bin\n")
+                write(venv / "findings.md", "evidence")
+            return checked(real, active)
+
+        setattr(module, "busy", swap_then_check)
+        args = argparse.Namespace(dry_run=False, root=str(self.fx.root), state=str(self.fx.state), now=NOW,
+                                  budget_sec=None)
+        result = module.run(args)
+        self.assertEqual(result["caches"], [])
+        self.assertEqual([f["path"] for f in result["failed"]], [str(venv)])
+        self.assertTrue((venv / "findings.md").is_file())
+        self.assertTrue((top / "moved-venv" / "pyvenv.cfg").is_file())
 
     def test_cache_holding_evidence_stays_whole(self):
         top = self.fx.reports(caches=())
