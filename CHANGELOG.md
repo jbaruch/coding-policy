@@ -30,7 +30,9 @@
   drawn on by another task during the span, keeps `attribution: unknown`; a
   reset between readings makes the movement itself unknown. No savings claim
   is made from a quota or multiplier change. Judgment floors and the pinned
-  judge are unchanged.
+  judge are unchanged. The herdr-foreman skill's description now triggers on
+  cost and resource-use requests, and Step 1 routes them to `cost-report` as a
+  fourth offline action.
 
 ## 0.3.316 — 2026-09-28
 
