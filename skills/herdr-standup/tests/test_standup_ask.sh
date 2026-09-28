@@ -30,6 +30,11 @@
 #  11. Exact fit      -> a pane exactly as wide as that need is asked.
 #  11b. Turn started  -> idle at the first read, working at the measurement:
 #                        exit 3, nothing sent.
+#  11c. Turn at send  -> idle at both earlier reads, working at the last read
+#                        before the send: exit 3, nothing sent (#585).
+#  11d. Read-then-send -> that last `agent get` is the herdr call right
+#                        before `agent prompt`.
+#  11e. Last read fails -> exit 2, nothing sent.
 #  12. Measure fails  -> a failed `foreman marker-fit` is exit 2, nothing sent.
 #  13. No foreman.sh  -> exit 1 before any herdr call.
 #
@@ -46,31 +51,42 @@ fail() { FAIL=$((FAIL+1)); echo "  ✗ FAIL: $1" >&2; }
 mk_fake_herdr() { # <path>
   cat > "$1" <<'FAKE' || die "could not write the fake herdr"
 #!/usr/bin/env bash
-set -uo pipefail
-[[ -n "${FAKE_ARGV_FILE:-}" ]] && printf '%s\n' "$*" >> "$FAKE_ARGV_FILE"
+set -euo pipefail
+if [[ -n "${FAKE_ARGV_FILE:-}" ]]; then printf '%s\n' "$*" >> "$FAKE_ARGV_FILE"; fi
 case "${1:-} ${2:-}" in
   "agent get")
-    [[ -n "${FAKE_GET_ERR:-}" ]] && { printf '{"error":{"code":"agent_not_found"}}\n' >&2; exit 1; }
-    [[ -n "${FAKE_GET_BAD:-}" ]] && { printf '{"id":"cli:agent:get","result":{}}\n'; exit 0; }
+    if [[ -n "${FAKE_GET_ERR:-}" ]]; then printf '{"error":{"code":"agent_not_found"}}\n' >&2; exit 1; fi
+    if [[ -n "${FAKE_GET_BAD:-}" ]]; then printf '{"id":"cli:agent:get","result":{}}\n'; exit 0; fi
     status="${FAKE_STATUS:-idle}"
     # FAKE_STATUS_LATER answers every read after the first: a worker that
     # starts a turn between the readiness read and the measurement.
     if [[ -n "${FAKE_STATUS_LATER:-}" ]]; then
       if [[ -e "$FAKE_GET_SEEN" ]]; then status="$FAKE_STATUS_LATER"; fi
-      : > "$FAKE_GET_SEEN" || exit 3
+      : > "$FAKE_GET_SEEN"
+    fi
+    # FAKE_STATUS_SEQ answers the Nth read with its Nth word; the last word
+    # repeats. FAKE_GET_COUNT is the file that counts the reads.
+    if [[ -n "${FAKE_STATUS_SEQ:-}" ]]; then
+      read -r -a seq <<<"$FAKE_STATUS_SEQ"
+      printf 'x\n' >> "$FAKE_GET_COUNT"
+      n="$(wc -l < "$FAKE_GET_COUNT")"
+      n=$(( n > ${#seq[@]} ? ${#seq[@]} : n ))
+      status="${seq[$((n - 1))]}"
+      # The word ERR makes that read a herdr failure.
+      if [[ "$status" == "ERR" ]]; then printf '{"error":{"code":"agent_not_found"}}\n' >&2; exit 1; fi
     fi
     printf '{"id":"cli:agent:get","result":{"type":"agent_info","agent":{"agent":"claude","agent_status":"%s","pane_id":"w2:p1","name":"%s"}}}\n' \
       "$status" "${3:-worker}"
     exit 0
     ;;
   "pane layout")
-    [[ -n "${FAKE_LAYOUT_ERR:-}" ]] && { printf '{"error":{"code":"pane_not_found"}}\n' >&2; exit 1; }
+    if [[ -n "${FAKE_LAYOUT_ERR:-}" ]]; then printf '{"error":{"code":"pane_not_found"}}\n' >&2; exit 1; fi
     printf '{"result":{"type":"pane_layout","layout":{"panes":[{"pane_id":"w2:p1","rect":{"height":48,"width":%s,"x":0,"y":0}}]}}}\n' \
       "${FAKE_WIDTH:-400}"
     exit 0
     ;;
   "agent prompt")
-    [[ -n "${FAKE_PROMPT_ERR:-}" ]] && { printf '{"error":{"code":"agent_blocked"}}\n' >&2; exit 1; }
+    if [[ -n "${FAKE_PROMPT_ERR:-}" ]]; then printf '{"error":{"code":"agent_blocked"}}\n' >&2; exit 1; fi
     printf '{"id":"cli:agent:prompt","result":{"type":"agent_prompt"}}\n'
     exit 0
     ;;
@@ -240,6 +256,31 @@ main() {
      && ! printf '%s' "$ARGVTEXT" | grep -q "agent prompt" \
      && [[ "$(printf '%s\n' "$ARGVTEXT" | grep -c "agent get")" -eq 2 ]]; then
     pass; else fail "idle then working: expected exit 3 with nothing sent, got RC=$RC OUT=$OUT ARGV=$ARGVTEXT ERR=$ERRTEXT"; fi
+
+  # 11c. A worker idle at the first read and at the measurement but working
+  #      at the last read before the send is not asked (#585).
+  run FAKE_STATUS_SEQ="idle idle working" FAKE_GET_COUNT="$TMP/get-count.$((RUN_SEQ+1))"
+  if [[ $RC -eq 3 ]] && printf '%s' "$OUT" | jq -e '.sent == false and .state == "working"' >/dev/null 2>&1 \
+     && ! printf '%s' "$ARGVTEXT" | grep -q "agent prompt" \
+     && [[ "$(printf '%s\n' "$ARGVTEXT" | grep -c "agent get")" -eq 3 ]]; then
+    pass; else fail "working at the send: expected exit 3 with nothing sent, got RC=$RC OUT=$OUT ARGV=$ARGVTEXT ERR=$ERRTEXT"; fi
+
+  # 11d. The last read sits immediately before the send: the prompt call is
+  #      the very next herdr call after that third `agent get`.
+  #      The prompt text spans lines, so only lines naming a herdr call count.
+  local calls
+  run FAKE_STATUS_SEQ="idle" FAKE_GET_COUNT="$TMP/get-count.$((RUN_SEQ+1))"
+  calls="$(printf '%s\n' "$ARGVTEXT" | grep -E '^(agent|pane) ')"
+  if [[ $RC -eq 0 ]] && [[ "$(printf '%s\n' "$calls" | tail -n 2 | head -n 1)" == "agent get worker" ]] \
+     && [[ "$(printf '%s\n' "$calls" | grep -c "^agent get")" -eq 3 ]] \
+     && printf '%s\n' "$calls" | tail -n 1 | grep -q "^agent prompt worker"; then
+    pass; else fail "read before send: expected agent get then agent prompt last, got RC=$RC ARGV=$ARGVTEXT"; fi
+
+  # 11e. A failed last read fails closed: exit 2, nothing sent.
+  run FAKE_STATUS_SEQ="idle idle ERR" FAKE_GET_COUNT="$TMP/get-count.$((RUN_SEQ+1))"
+  if [[ $RC -eq 2 && -z "$OUT" ]] && ! printf '%s' "$ARGVTEXT" | grep -q "agent prompt" \
+     && printf '%s' "$ERRTEXT" | grep -q "nothing was sent"; then
+    pass; else fail "failed last read: expected exit 2 with nothing sent, got RC=$RC OUT=$OUT ARGV=$ARGVTEXT ERR=$ERRTEXT"; fi
 
   # 12. A measurement that fails is a tool failure, never a send.
   run FAKE_STATUS=idle FAKE_LAYOUT_ERR=1

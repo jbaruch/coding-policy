@@ -1205,12 +1205,22 @@ def cmd_apply(args, client=None, warn=None, trace=None):
         judge_mode = recovery.require_judge_mode(
             _judge_mode_for(args, document if isinstance(document, dict) else None))
 
+    # The oracle each mechanical round is licensed on, pin included, bound into
+    # its dispatch: `verify-oracle` reads it back from the ledger, never from
+    # the mutable plan alone (#585).
+    oracles = oracle.dispatch_oracles(document, list(assignments)) if "assignments" in document else {}
+
     def options_for(role):
         options = {**task_context, "rounds": rounds, "retain_context": args.retain_context, "no_clear": args.no_clear}
         if requirements:
             options["requirements"] = requirements
         if args.retain_specialist:
             options["retain_specialist"] = True
+        # The rounds already carry the oracle's kind, path or value; the pin is
+        # the one input they lack. Absent on every other round, so their
+        # identities are unchanged.
+        if "sha256" in oracles.get(role, {}):
+            options["oracle_pin"] = oracles[role]["sha256"]
         return options
 
     # The bytes each frozen copy was verified to hold, once the freeze below
@@ -1329,6 +1339,8 @@ def cmd_apply(args, client=None, warn=None, trace=None):
                     dispatches[role]["requirements"] = requirements[role]
                 if canonical_role(role) == "judge":
                     dispatches[role]["judge_mode"] = judge_mode
+                if role in oracles:
+                    dispatches[role]["oracle"] = oracles[role]
                 if canonical_role(role) == "reviewer":
                     dispatches[role]["reviewer_scope"] = "design" if rounds.get(role, {}).get("type") in {"architect", "reconciliation"} else "verification"
         if len(replayed) == len(assignments):
@@ -2135,7 +2147,12 @@ def cmd_validate_partition(args, client=None, warn=None, trace=None):
 
 
 def cmd_verify_oracle(args, client=None, warn=None, trace=None):
-    return oracle.run_command(args)
+    """The oracle gate for a mechanical round, against the oracle its dispatch bound (#585)."""
+    state, usable = load_state_checked(_state_path(args), warn, persist_migration=False)
+    if not usable:
+        raise StateError("The dispatch state is unusable, so the oracle the round was sent with cannot be read; "
+                         "restore it before verifying.", {})
+    return oracle.run_command(args, state["recovery"]["dispatches"])
 
 
 def cmd_probe_report(args, client=None, warn=None, trace=None):

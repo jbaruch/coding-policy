@@ -578,6 +578,10 @@ def stale_grok_source(dispatch, assignment, observed, body, prompt, plan_body, *
     # (#478).
     if "judge_mode" in dispatch:
         options["judge_mode"] = dispatch["judge_mode"]
+    # A mechanical round's oracle pin is part of its identity from recovery
+    # store 14 on; a dispatch that bound none is rebuilt without it (#585).
+    if isinstance(dispatch.get("oracle"), dict) and "sha256" in dispatch["oracle"]:
+        options["oracle_pin"] = dispatch["oracle"]["sha256"]
     task_context = {key: options[key] for key in ("task", "fix_round", "plan", "work")}
     if plan.get("task_context") is not None and plan["task_context"] != task_context:
         raise UsageError("grok_dispatch_unbound: original plan names different task or correction bounds; restore its dispatch inputs.", {})

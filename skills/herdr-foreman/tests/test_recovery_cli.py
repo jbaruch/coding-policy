@@ -488,6 +488,44 @@ class RecoveryCommandTests(fixture.CliCase):
         with self.assertRaisesRegex(UsageError, "task closure this version never wrote"):
             recovery_module.migrate_store(store)
 
+    def test_an_older_store_carrying_a_bound_oracle_is_refused_as_newer_data(self):
+        # coding-policy#585: store version 14 owns the dispatch-bound oracle.
+        from foreman import recovery as recovery_module
+        store = recovery_module.empty_recovery()
+        store["schema_version"] = 13
+        store["dispatches"].append({"schema_version": 1, "id": "d", "role": "developer", "agent": "claude",
+                                    "task": TASK, "status": "applied",
+                                    "oracle": {"kind": "digest", "value": "a" * 64}})
+        with self.assertRaisesRegex(UsageError, "dispatch-bound oracle this version never wrote"):
+            recovery_module.migrate_store(store)
+
+    def test_a_version_thirteen_store_without_bound_oracles_still_migrates(self):
+        from foreman import recovery as recovery_module
+        store = recovery_module.empty_recovery()
+        store["schema_version"] = 13
+        store["dispatches"].append({"schema_version": 1, "id": "d", "role": "developer", "agent": "claude",
+                                    "task": TASK, "status": "applied"})
+        self.assertTrue(recovery_module.migrate_store(store))
+        self.assertEqual(store["schema_version"], recovery_module.RECOVERY_STORE_VERSION)
+
+    def test_a_malformed_bound_oracle_is_refused_on_load(self):
+        from foreman import recovery as recovery_module
+        for label, bound in (("digest with a pin", {"kind": "digest", "value": "a" * 64, "sha256": "a" * 64}),
+                             ("patch without a pin", {"kind": "patch", "path": "/x.patch"}),
+                             ("patch with a bad pin", {"kind": "patch", "path": "/x.patch", "sha256": "short"}),
+                             ("not an object", "digest")):
+            with self.subTest(label):
+                state = empty_state()
+                add_assignment(state, AT, "developer", "claude", task=TASK)
+                state["recovery"]["dispatches"].append({
+                    "schema_version": 1, "at": AT, "id": "d", "fingerprint": "e" * 64, "role": "developer",
+                    "agent": "claude", "task": TASK, "fix_round": None, "plan": None, "work": None,
+                    "status": "applied", "assignment_index": 0, "report": None, "oracle": bound,
+                    "result": {"schema_version": 1, "task": TASK, "role": "developer", "agent": "claude",
+                               "fix_round": None, "status": "applied"}})
+                with self.assertRaisesRegex(UsageError, "bound oracle is malformed"):
+                    recovery_module.validate_store(state["recovery"], state["assignments"])
+
     def test_a_version_twelve_store_with_judge_modes_still_migrates(self):
         # Judge modes are owned since store version 12; bumping past it must
         # upgrade such a store, not refuse it as newer data.

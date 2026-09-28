@@ -165,9 +165,13 @@ ever inferred for it.
 Plan schema 12 adds `oracle_pins`, a `{role: {"path", "sha256"}}` map with
 one entry per `patch` or `fixture` oracle in the `rounds.<role>.context` of a
 `mechanical` round (#488). Writer: `plan`, which hashes each such oracle file
-as it writes the plan. Reader: `verify-oracle`, which refuses an oracle on a
+as it writes the plan. Readers: `apply`, which binds each mechanical round's
+oracle and pin into its dispatch (Recovery records, `dispatches`), and
+`verify-oracle`, which refuses an oracle on a
 round that is not `mechanical`, a `patch` or `fixture` oracle with no pin for
-its role and path, and an oracle file whose bytes no longer hash to the pin.
+its role and path, an oracle file whose bytes no longer hash to the pin, and a
+plan whose oracle or pin differs from the one the role's latest dispatch under
+`--task` bound (#585).
 A `digest` oracle carries its expected value already and takes no pin. An
 older plan pinned nothing; replan it before its round is gated.
 
@@ -209,22 +213,29 @@ Record its absolute path in the saved task authorization context and the foreman
 handoff before first dispatch. Do not move or delete it during worktree cleanup.
 It replaces the informal round log, not the utility's dispatch/recovery ledger.
 
-The Markdown document's frontmatter contains `schema_version: 1`, the stable
-`task`, full original `base_revision`, and the absolute `dispatch_state` path
-of the utility ledger. Each appended event is a Markdown section with these
-required fields; unavailable values are the literal `unknown`, never guesses:
+The field formats are named constants at the top of
+`skills/herdr-foreman/foreman/members.py`, under its `Task-ledger schema 1`
+comment: the schema version, the frontmatter and event field lists, the
+subjects and each subject's decisions with their meanings, which fields a
+task event records as not applicable, the commit-SHA pattern, and the
+literals that stand in for a SHA or a report path. This section names them
+and restates none of them. The Markdown document's frontmatter carries
+`FRONT_FIELDS`: the stable `task`, the original `base_revision`, and the
+`dispatch_state` path of the utility ledger. Each appended event is a Markdown
+section carrying `EVENT_FIELDS`; an unavailable value is the `UNKNOWN`
+literal, never a guess:
 
 | Field | Meaning |
 | --- | --- |
-| `schema_version` | `1` on every event |
-| `id`, `at` | Unique event identity and timezone-qualified observation time |
-| `subject` | `task` or `assignment` |
-| `dispatch_id`, `worker`, `role` | Actual utility dispatch identity and assigned worker/role; `not_applicable` for task events |
-| `report` | Absolute report path, or `unknown` before it is known |
+| `schema_version` | `LEDGER_SCHEMA_VERSION` on every event |
+| `id`, `at` | Unique event identity and observation time, in the timezone-qualified form `chronology.timestamp` accepts |
+| `subject` | Whether the event judges the whole task or one assignment |
+| `dispatch_id`, `worker`, `role` | Actual utility dispatch identity and assigned worker/role; `ASSIGNMENT_IDENTITY` governs task events |
+| `report` | Report path, or a `REPORT_PLACEHOLDERS` literal before it is known |
 | `observed` | Source-attributed dispatch result, wait result, worker claim, or Herdr state; never an acceptance decision |
-| `decision` | Foreman assessment using the status vocabulary in `references/task-ledger.md` |
-| `head_revision` | Full inspected commit SHA, `unknown` when unverified, or `not_applicable` for work without a VCS artifact |
-| `evidence` | Absolute report/artifact paths with the inspected content or digest, VCS refs, and gate/run URLs with their observed results; `unknown` when none exists |
+| `decision` | Foreman assessment from the event subject's `DECISION_MEANINGS` vocabulary |
+| `head_revision` | Inspected commit SHA, or a `HEAD_PLACEHOLDERS` literal when unverified or without a VCS artifact |
+| `evidence` | Absolute report/artifact paths with the inspected content or digest, VCS refs, and gate/run URLs with their observed results; `UNKNOWN` when none exists |
 | `assessment` | Why this decision follows from the evidence, remaining criteria, and the next action |
 
 The task identity and base in the document apply to every event. Append a new
@@ -238,22 +249,12 @@ decision log, not a new machine status API or an input to `foreman.sh apply`.
   One active foreman writes a task ledger; transfer ownership explicitly on handoff.
 - **Readers** — a resumed foreman and `herdr-standup` read schema 1 without changing
   its meaning. `close-member` (`skills/herdr-foreman/foreman/members.py`)
-  reads it too, and only through a validated schema-1 document: frontmatter
-  carrying every field above, `dispatch_state` naming an existing file that
-  resolves to the state the command runs against, and every event carrying every field exactly once.
-  The frontmatter holds a full `base_revision` SHA and an absolute
-  `dispatch_state`. Every event field other than `observed`, `evidence` and
-  `assessment` holds the format the table names, in every event: an `id` matching its
-  section heading and naming no other event; a timezone-qualified `at`; a
-  `subject` of `task` or `assignment`; a `decision` from that subject's
-  vocabulary in `references/task-ledger.md`; `dispatch_id`, `worker` and
-  `role` as `not_applicable` on a task event and never on an assignment
-  event; a `report` that is an absolute path or `unknown`; and a full
-  `head_revision` SHA or its
-  `unknown`/`not_applicable` literal. `observed`, `evidence` and
-  `assessment` are free text and need only be present. Any other version,
-  a missing, repeated or malformed field or another state's ledger is
-  refused and closes nothing. An append never repairs a malformed event; record a
+  reads it too, and only through a validated schema-1 document: every field
+  present exactly once and in the format the constants above name, and
+  `dispatch_state` naming an existing file that resolves to the state the
+  command runs against. The validation is `ledger_events` and
+  `_check_formats` in `members.py`. Any other version, a missing, repeated or
+  malformed field or another state's ledger is refused and closes nothing. An append never repairs a malformed event; record a
   recovered ledger at a new path, as Migration below describes. It matches an event by `dispatch_id`, `worker` and `report`, and
   never writes the ledger. Workers never write it. Standup reads it without migration and
   labels unaccepted worker claims as reported; it grants no completion status.
@@ -462,7 +463,7 @@ document and arrives already stamped.
 
 ## Recovery records
 
-The recovery document uses `schema_version: 13`; individual records retain their
+The recovery document uses `schema_version: 14`; individual records retain their
 independent versions. Version 6 adds the dispatch fields `brief_identity`, `refusal` and
 `refusal_move` and the `refusal_authorizations` collection; version 7 adds the
 dispatch's send-time `provider`; version 8 adds the `diagnoses` collection;
@@ -472,7 +473,9 @@ collection; version 12 adds `judge_mode` to a judge dispatch, its
 `context_before_send` and its saved result, and binds it into the dispatch
 fingerprint, so an adjudication and a diagnosis of one brief are separate
 dispatches. Only judge dispatches carry the field. Version 13 adds the
-`task_closed` event kind. The
+`task_closed` event kind. Version 14 adds `oracle` to a mechanical round's
+dispatch and binds a `patch` or `fixture` oracle's pin into the dispatch
+fingerprint (#585). The
 owner stamps an older store on load, adds the empty collections, and refuses one
 already carrying a field — or a seat-named dispatch — its version did not own. Generic records remain version 1; stale-Grok delivery and
 composition-bearing dispatch/result records use version 2; a judge
@@ -504,7 +507,7 @@ replacement for live readiness, source review, or release gates.
 | `tasks` | Keyed by original task identity; `task`, immutable full `base_revision`, `scope`, `allowed_paths`, `authorization`. Migration invents none of them. |
 | `checkpoints` | Record schema 3. Unique `id`, `fix_round`, original `base_revision`, concrete `defect`, `previous_attempts`, `progress`, `change_in_approach`. Carries `judge_agent`, `judge_report` and `judge_evidence` only when a ruling is cited, and a cited one requires a completed pinned-judge assignment after the preceding developer attempt plus the `requested_by` receipt (source and quote) for the operator request it answers. A partial trio is refused, one task records at most one cited ruling, and `requested_by` without a cited ruling is refused. Version-1 rows migrate to 2, the shape that predates the receipt; a version-2 row carrying one is refused, and neither older version has a receipt invented for it. The reader accepts versions 2 and 3. |
 | `plans` | Unique `id`, `checkpoint`, original `base_revision`, `scope`, `allowed_paths`, `additional_fixes`, derived `first_fix`/`last_fix`, `authorization`; optional `supersedes` references a preserved prior approval. |
-| `dispatches` | Unique `id`, byte/input `fingerprint`, `role` (the SEAT, per the Writer / Reader Contract's Seat vs responsibility), `agent`, cumulative `fix_round`, `plan` or null, `work` or null, `status`, `result`, `report`, and `assignment_index` once an outcome is recorded. CLI records `brief`, `common`, `observed_before`, and `context_before_send`; reconciled retries preserve `prior_assignment_indices`. `provider` is the worker's config `kind` at send time, authoritative for the refusal's attribution. `brief_identity` digests the common and role brief bytes with the enrolled report path masked. From #460, `brief` and `common` name frozen copies under the source's `.dispatched/` directory (from #554, the source directory's canonical path; a recorded path with a symlinked component is refused when read back), named by their content's sha256 and never rewritten (a link or non-regular file there is refused, and so is a `.dispatched/` that is itself a link), so the prompt a recovery rebuilds reads the bytes that were checked and sent. A dispatch whose complete identity under its source paths is already recorded keeps those paths, so its replay still matches: the same `fingerprint` (or a judge row's pre-mode form) on an `applied` row, whose replay returns its saved receipt and sends nothing. A retry of a row never sent, and a later correction over the same files, are new sends and are frozen; a source brief that changes during the replay is refused; a batch mixing replays with new roles is refused (`assign.freeze_decision`). `refusal` (`provider`, `reason`, `receipt`, `report_path`, `evidence`) appears once `record-refusal` binds an exit-5 receipt to an applied row's enrolled report; `refusal_move` (`from`, `from_provider`, `provider`) appears on the dispatch that carried the refused brief, same `brief_identity`, to another provider. |
+| `dispatches` | Unique `id`, byte/input `fingerprint`, `role` (the SEAT, per the Writer / Reader Contract's Seat vs responsibility), `agent`, cumulative `fix_round`, `plan` or null, `work` or null, `status`, `result`, `report`, and `assignment_index` once an outcome is recorded. CLI records `brief`, `common`, `observed_before`, and `context_before_send`; reconciled retries preserve `prior_assignment_indices`. `provider` is the worker's config `kind` at send time, authoritative for the refusal's attribution. `brief_identity` digests the common and role brief bytes with the enrolled report path masked. From #460, `brief` and `common` name frozen copies under the source's `.dispatched/` directory (from #554, the source directory's canonical path; a recorded path with a symlinked component is refused when read back), named by their content's sha256 and never rewritten (a link or non-regular file there is refused, and so is a `.dispatched/` that is itself a link), so the prompt a recovery rebuilds reads the bytes that were checked and sent. A dispatch whose complete identity under its source paths is already recorded keeps those paths, so its replay still matches: the same `fingerprint` (or a judge row's pre-mode form) on an `applied` row, whose replay returns its saved receipt and sends nothing. A retry of a row never sent, and a later correction over the same files, are new sends and are frozen; a source brief that changes during the replay is refused; a batch mixing replays with new roles is refused (`assign.freeze_decision`). `refusal` (`provider`, `reason`, `receipt`, `report_path`, `evidence`) appears once `record-refusal` binds an exit-5 receipt to an applied row's enrolled report; `refusal_move` (`from`, `from_provider`, `provider`) appears on the dispatch that carried the refused brief, same `brief_identity`, to another provider. `oracle` (from recovery store 14) appears on a dispatch whose plan round is `mechanical` with an oracle: the oracle as the plan licensed it, a `digest` with its `value` or a `patch` or `fixture` with its `path` and the `sha256` its plan pinned. `apply` refuses a pinned file that no longer hashes to its pin before anything is sent, and folds the pin into the `fingerprint`; `verify-oracle` checks the round against this field and refuses a plan that no longer declares it. |
 | `context_permissions` | Original `assignment_index`, `next_fix`, `reason`, `authorization`, `evidence`, `evidence_receipt`, later `observed_session`, and `basis: operator_authorized_fresh_handoff`. The original null session is never replaced. |
 | `events` | Append-only `sequence`, `kind`, and structured `details` preserving approvals, waiting states, reservations, send transitions, results, transport retries, superseded review receipts, and recovery decisions. Kind `task_closed` carries `details.outcome` (`merged` or `abandoned`) and `details.evidence`; it ends the task's developer reservation until a later developer assignment reopens the task. Owned from recovery store version 13; an older store carrying one is refused as newer data. |
 | `hand_clearances` | Unique `id`, original release `assignment_index`, `previous_developer`, complete owner `input`, clear byte `receipts`, later `observed_session` or null, and `basis: verified_required_release_clear`. Both indices retain their original rows. The later observation never substitutes for historical proof; changed or missing current IDs do not invalidate archived clear evidence. |

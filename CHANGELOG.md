@@ -99,6 +99,90 @@
   scope clause was ambiguous about another seat's dispute (ambiguous
   criteria), which `open_items_out_of_scope` now asks literally.
 
+## 0.3.316 — 2026-09-28
+
+### Changed
+
+- **The task ledger's field formats are now code constants the docs point at
+  (#589).** The formats lived in prose in three places — the
+  `state-schema.md` Task Ledger table, its reader-contract paragraph, and the
+  blank template in `references/task-ledger.md` — while
+  `members.ledger_events` validated against a hand-written reading of all
+  three. Every review round on #570 found another spot where they disagreed
+  (report `not_applicable`, SHA case, decision vocabulary, duplicate fields).
+  Per `rules/script-as-black-box.md`, the vocabulary now lives only in
+  `skills/herdr-foreman/foreman/members.py`: `DECISION_MEANINGS` carries each
+  subject's decisions with their meanings (the table moved out of
+  `task-ledger.md`), and `SUBJECTS`, `DECISIONS`, `UNKNOWN`, `NOT_APPLICABLE`,
+  `REPORT_PLACEHOLDERS`, `FREE_TEXT_FIELDS` join the existing field lists, SHA
+  pattern and placeholder sets. The schema section and the template name those
+  constants instead of restating them. Validation semantics are unchanged from
+  #570: `report` is an absolute path or `unknown` on every event, SHAs pass in
+  either case, a repeated schema field is refused, `dispatch_state` names an
+  existing file. New `LedgerDocsPointAtTheConstants` tests fail when a doc
+  cites a constant that does not exist, when the template's fields stop
+  matching `FRONT_FIELDS`/`EVENT_FIELDS`, when the schema table stops covering
+  exactly the event fields, or when a doc restates a decision vocabulary.
+
+## 0.3.315 — 2026-09-28
+
+### Fixed
+
+- **The ACR acceptance helper now walks its output roots from `/` (#566).**
+  `write_under` in `.github/codex-accept/contract.py` opened its anchor with
+  one `O_NOFOLLOW` open, which constrains only the anchor's last component: an
+  operator-supplied `--output`, `--artifact` or `--run-root` like
+  `link/sub/download` walked through `link` and wrote wherever it pointed. The
+  new `open_anchor` opens every component from `/` with `O_NOFOLLOW` and
+  refuses a symlinked or non-directory ancestor by name. The macOS `/var` and
+  `/tmp` system links stay usable: `anchored()` spells them as their
+  `/private/` targets before the walk, sharing one `system_alias` check with
+  `run_root_path`. `extract_archive`'s existing-destination branch now runs
+  the same walk before comparing members, so matching content prepopulated
+  behind a symlinked parent refuses instead of passing as an idempotent
+  re-run. `seal()`'s `--output`, which never reached `write_under`, now walks
+  its parent the same way, holds it open and publishes the export with a
+  descriptor-relative `rename`, and its existing-destination branch walks the
+  destination before verifying it. `open_anchor` refuses a `..` component
+  itself, so the existing-destination branches keep the no-traversal
+  invariant `write_under` already enforced. Scope stays the documented threat model: the walk catches mistaken
+  or stale paths, and a hostile same-user process can still swap a component
+  between the walk and the later path-based `members()` read. Follow-up from
+  #563's review.
+
+## 0.3.314 — 2026-09-28
+
+### Fixed
+
+- **`verify-oracle` checks a mechanical round against the oracle its dispatch
+  was sent with, not the plan file as it reads at the gate (#585).** #576 pinned
+  each `patch` or `fixture` oracle file's sha256 in the plan's `oracle_pins`,
+  but the plan is a mutable file and the pins were not part of what `apply`
+  recorded: rewriting the oracle file and its pin together after dispatch let
+  `verify-oracle` accept bytes the round was never licensed on. `apply` now
+  binds each mechanical round's oracle, pin included, onto its dispatch record
+  as `oracle`, folds the pin into the dispatch fingerprint (so an edited plan
+  is new inputs under a recorded `--dispatch-id`, never a replay), and refuses
+  a pinned file that no longer hashes to its pin before anything is sent.
+  `verify-oracle` now takes a required `--task`, reads the role's latest
+  dispatch under it, and refuses unless that dispatch is applied, went to the
+  plan's worker under the plan's task context, and bound exactly the oracle
+  the plan declares. The same check closes the digest case: a `digest` value
+  edited after dispatch is refused too. Recovery store version 14 owns the
+  field; an older store carrying it is refused as newer data, and stale-Grok
+  delivery recovery rebuilds the fingerprint with the saved pin.
+- **`standup-ask.sh` reads the worker's status once more immediately before
+  sending the standup (#585).** Herdr has no check-and-prompt operation: the
+  script read readiness, measured the pane (which reads it again), then sent,
+  so a turn that started after the measurement still got the question. A last
+  `herdr agent get` right before `herdr agent prompt` now narrows the window to
+  the gap between those two calls, exits 3 with nothing sent on any state but
+  idle or done, and exits 2 with nothing sent when that read fails. The script
+  header names the residual gap: `herdr agent prompt` itself rejects an
+  already-`blocked` worker but submits to a `working` one, so a turn that
+  starts inside the remaining gap still receives the question until Herdr
+  offers a readiness-guarded send.
+
 ## 0.3.313 — 2026-09-28
 
 ### Fixed
