@@ -129,6 +129,12 @@
   version after a clear was swallowed as a replay; it now records a fresh
   gate. `scoring.py calibrate` also keeps only the pinned Jev model's labels.
 
+## 0.3.327 — 2026-09-28
+
+### Fixed
+
+- `prune-report-caches.py` accepts a `<module>@<version>` directory as Go module cache only when the version is a Go version (`v` plus a digit). Before this, an evidence directory named `report@` (empty version) or `@v1.0.0` (empty module) next to a matching `cache/download/<module>/@v/` was classified as cache and deleted. Copilot flagged this on #629 after it shipped (0.3.326).
+
 ## 0.3.326 — 2026-09-28
 
 ### Fixed
