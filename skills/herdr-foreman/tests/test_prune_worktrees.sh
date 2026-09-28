@@ -69,7 +69,13 @@
 #      metadata step          and the metadata removal keeps the registrations
 #                             of the worktrees it still holds.
 #  91. Metadata removal    -> a failed per-entry removal leaves the entry
-#      fails                  registered and its branch undeleted; exit 2.
+#      fails                  registered and its branch undeleted; exit 2
+#                             (skipped as root).
+#  92. Path reappears      -> a worktree moved back between the absence check
+#                             and the cleanup keeps its files, commits and
+#                             registration; exit 2.
+#  93. Stale outside root  -> a vanished registration outside the root is
+#                             dropped too.
 #  34. Recreated config   -> a branch.<name> section recreated after the
 #                             deletion is left untouched.
 #  35. Reachable, idle      -> a clean worktree whose HEAD an origin branch
@@ -1234,13 +1240,14 @@ SHIM
   add_wt "$SHARED" review/live90 "$ROOT/live90"; commit_in "$ROOT/live90" live
   local shim90="$TMP/shim90" moved90="$ROOT.moved90"
   mkdir -p "$shim90" || die "mkdir shim90 failed"
-  # The metadata step's own git call (a whole-repository `worktree prune` or a
-  # per-entry `worktree remove`) runs just after the root's identity was
-  # re-proven; the shim renames the root first, inside that window.
+  # The metadata step's first git call (a whole-repository `worktree prune`, a
+  # per-entry `worktree remove`, or the admin-directory lookup) runs just after
+  # the root's identity was re-proven; the shim renames the root first, inside
+  # that window.
   cat > "$shim90/git" <<SHIM || die "shim90 write failed"
 #!/usr/bin/env bash
 set -euo pipefail
-if [[ ( "\$*" == *"worktree prune"* || "\$*" == *"worktree remove"* ) && ! -e "$shim90/done" ]]; then
+if [[ ( "\$*" == *"worktree prune"* || "\$*" == *"worktree remove"* || "\$*" == *"--git-common-dir"* ) && ! -e "$shim90/done" ]]; then
   : > "$shim90/done"
   mv "$ROOT" "$moved90"
 fi
@@ -1257,29 +1264,59 @@ SHIM
     pass; else fail "root moved at the metadata step: rc=$RC out=$OUT err=$ERRTEXT"; fi
 
   # --- 91. a failed per-entry metadata removal keeps the entry and its branch.
-  mk_repo ninetyone
-  add_wt "$SHARED" review/gone91 "$ROOT/gone91"
-  rm -rf "$ROOT/gone91" || die "rm gone91 failed"
-  local shim91="$TMP/shim91"
-  mkdir -p "$shim91" || die "mkdir shim91 failed"
-  cat > "$shim91/git" <<SHIM || die "shim91 write failed"
+  if [[ "$(id -u)" == 0 ]]; then
+    echo "91. skipped: root writes into any directory"
+  else
+    mk_repo ninetyone
+    add_wt "$SHARED" review/gone91 "$ROOT/gone91"
+    rm -rf "$ROOT/gone91" || die "rm gone91 failed"
+    # The admin directory refuses writes: git still reads it, the drop fails.
+    chmod 555 "$SHARED/.git/worktrees" || die "chmod worktrees91 failed"
+    run "$SHARED"
+    chmod 755 "$SHARED/.git/worktrees" || die "restore worktrees91 failed"
+    echo "91. a failed metadata removal leaves the entry registered and its branch undeleted"
+    if (( RC == 2 )) && [[ "$OUT" == *"removing its stale registration failed"*"re-run the sweep"* ]] \
+      && listed "$SHARED" "$ROOT/gone91" && has_branch "$SHARED" review/gone91 \
+      && [[ "$(branches_deleted)" != *review/gone91* ]]; then
+      pass; else fail "metadata removal fails: rc=$RC out=$OUT err=$ERRTEXT"; fi
+  fi
+
+  # --- 92. a worktree that reappears before the cleanup is never touched.
+  mk_repo ninetytwo
+  add_wt "$SHARED" review/back92 "$ROOT/back92"; commit_in "$ROOT/back92" kept92
+  local tip92 aside92="$TMP/aside92" shim92="$TMP/shim92"
+  tip92="$(git -C "$ROOT/back92" rev-parse HEAD)" || die "rev-parse back92 failed"
+  mv "$ROOT/back92" "$aside92" || die "move back92 aside failed"
+  mkdir -p "$shim92" || die "mkdir shim92 failed"
+  # Gone at the inventory, back on disk when the cleanup's first git call runs.
+  cat > "$shim92/git" <<SHIM || die "shim92 write failed"
 #!/usr/bin/env bash
 set -euo pipefail
-if [[ "\$*" == *"worktree remove $ROOT/gone91"* ]]; then
-  echo "fixture refuses the metadata removal" >&2
-  exit 1
+if [[ ( "\$*" == *"worktree remove"* || "\$*" == *"--git-common-dir"* ) && ! -e "$shim92/done" ]]; then
+  : > "$shim92/done"
+  mv "$aside92" "$ROOT/back92"
 fi
 exec "$real_git" "\$@"
 SHIM
-  chmod +x "$shim91/git" || die "chmod shim91 failed"
+  chmod +x "$shim92/git" || die "chmod shim92 failed"
   RUN_SEQ=$((RUN_SEQ+1))
-  OUT="$(env WORKTREE_ROOT="$ROOT" PRUNE_IDLE_HOURS=0 PATH="$shim91:$PATH" bash "$SCRIPT" "$SHARED" 2>"$TMP/err.$RUN_SEQ")"; RC=$?
+  OUT="$(env WORKTREE_ROOT="$ROOT" PRUNE_IDLE_HOURS=0 PATH="$shim92:$PATH" bash "$SCRIPT" "$SHARED" 2>"$TMP/err.$RUN_SEQ")"; RC=$?
   ERRTEXT="$(cat "$TMP/err.$RUN_SEQ")"
-  echo "91. a failed metadata removal leaves the entry registered and its branch undeleted"
-  if (( RC == 2 )) && [[ "$OUT" == *"removing its stale metadata failed"*"fixture refuses the metadata removal"* ]] \
-    && listed "$SHARED" "$ROOT/gone91" && has_branch "$SHARED" review/gone91 \
-    && [[ "$(branches_deleted)" != *review/gone91* ]]; then
-    pass; else fail "metadata removal fails: rc=$RC out=$OUT err=$ERRTEXT"; fi
+  echo "92. a worktree moved back before the cleanup keeps its files, commits and registration"
+  if (( RC == 2 )) && [[ -e "$shim92/done" ]] && [[ -f "$ROOT/back92/kept92" ]] \
+    && listed "$SHARED" "$ROOT/back92" && [[ "$OUT" == *"no longer confirmed gone"* ]] \
+    && [[ "$(git -C "$SHARED" rev-parse refs/heads/review/back92)" == "$tip92" ]] \
+    && [[ "$(git -C "$ROOT/back92" rev-parse HEAD)" == "$tip92" ]]; then
+    pass; else fail "path reappears: rc=$RC out=$OUT err=$ERRTEXT"; fi
+
+  # --- 93. a vanished registration outside the root is dropped as well.
+  mk_repo ninetythree
+  add_wt "$SHARED" review/out93 "$TMP/outside93"
+  rm -rf "$TMP/outside93" || die "rm outside93 failed"
+  run "$SHARED"
+  echo "93. a vanished registration outside the worktree root is dropped"
+  if (( RC == 0 )) && [[ "$(kept_reason "$TMP/outside93")" == prunable ]] && ! listed "$SHARED" "$TMP/outside93"; then
+    pass; else fail "stale outside root: rc=$RC out=$OUT err=$ERRTEXT"; fi
 
   # --- 14. usage / not a repo.
   run

@@ -24,6 +24,10 @@
 #     work that exists nowhere else, with the one-line command for the
 #     operator. Nothing here pushes, commits, stashes or deletes that work.
 #   * KEPT for every other reason below.
+# A registration whose directory is gone and that is not locked is reported
+# `prunable` wherever it lives, inside the root or outside it, the shared
+# checkout's default branch included; a live run drops the registration
+# (`release_gone`) and only then lets its branch reach the branch pass.
 # A worktree holding another repository's checkout is KEPT: a gitlink found
 # from the index (never .gitmodules) whose checkout changed (submodule-dirty)
 # or is populated (submodule), or any other .git anywhere below it, found by
@@ -72,15 +76,14 @@
 # branch instead of being force-deleted. `branch -d` would re-derive the
 # safety against the local default, which may lag origin's, and `branch -D`
 # would skip it entirely; neither is atomic with the check. Removal is `git worktree remove`,
-# never `rm -rf`. Stale worktree metadata is removed after every worktree
+# never `rm -rf`. Stale registrations are dropped after every worktree
 # decision and before the branch pass, so a confirmed-gone entry's merged
-# branch goes in the same run. Only the entries this run judged `prunable` are
-# touched, each with its own `git worktree remove` (which, for a missing
-# directory, deletes only the entry's administrative files), never
-# `git worktree prune`: that drops every entry whose directory it cannot see
-# at that instant, so a root renamed after the last identity check would lose
-# the registrations of the worktrees it still holds (#597). The removals are
-# skipped when any worktree could not be entered. Nothing here pushes to
+# branch goes in the same run. Every registration this run judged `prunable`
+# (its directory gone, not locked, inside the root or outside it) is dropped
+# on its own by `release_gone`, which touches only git's admin entry and never
+# the worktree path; never `git worktree prune`, which drops every entry whose
+# directory it cannot see at that instant (#597). The drops are skipped when
+# any worktree could not be entered. Nothing here pushes to
 # origin; a dry run still fetches (without --prune), reads origin's default
 # branch with `ls-remote --symref` instead of rewriting origin/HEAD, and skips
 # the metadata removals, so its decisions are current and .git is otherwise
@@ -109,8 +112,8 @@
 #           incomplete listing, or cannot print this path faithfully), in-use
 #           (a process works inside it), locked (with its lock_reason),
 #           nested-repo, not-idle (activity within IDLE_HOURS), outside-root,
-#           prunable (its directory is gone; a live run removes its
-#           metadata), submodule, submodule-dirty, unpushed (idle, commits
+#           prunable (its directory is gone; a live run drops its
+#           registration, inside the root or outside it), submodule, submodule-dirty, unpushed (idle, commits
 #           origin holds nowhere; with unpushed_commits, age_hours and
 #           command, and for a worktree its head too).
 #   stderr: diagnostics only.
@@ -197,29 +200,136 @@ root_holds() { # <target> <branch|"">
   return 1
 }
 
-# Remove the metadata of one worktree this run confirmed gone. `git worktree
-# remove` on a missing directory deletes only that entry's administrative
-# files, so the registration of a worktree still on disk is never touched,
-# wherever it has moved. `git worktree prune` would instead drop every entry
-# whose directory it cannot see at that instant: a root renamed after the last
-# identity check would lose the registrations of every worktree it holds
-# (#597). Returns 0 once the entry is gone (in a dry run, at once), 1 when it
-# was left registered.
+# Drop git's registration of one worktree this run confirmed gone, touching
+# only git's own admin entry (<common-dir>/worktrees/<id>) and never the
+# worktree path (#597). `git worktree prune` would drop every entry whose
+# directory it cannot see at that instant, so a root renamed after the last
+# identity check would lose every registration under it; `git worktree remove`
+# on a path that reappeared would delete that live worktree without judging
+# it. The entry is found by its `gitdir` file, detached by an atomic rename
+# out of worktrees/, checked to be the directory it was, and the path is
+# re-read after the detach: a path present again gets its entry renamed back.
+# Only an entry detached while its path was absent is deleted. A directory
+# moved back after that finds its `.git` file pointing at no repository:
+# its files and its branch's commits are intact, and `git worktree repair`
+# cannot restore the entry (register it again with `git worktree add`).
+# Returns 0 once the entry is gone (in a dry run, at once), 1 when it was
+# left registered.
+#: Exit codes of the admin-entry helper below.
+GONE_KEPT_PRESENT=3
 release_gone() { # <shared> <dry> <path> <branch|"">
   if (( $2 )); then return 0; fi
   root_holds "$3" "$4" || return 1
-  local parent
-  parent="$(dirname "$3" && printf 'x')"
-  parent="${parent%x}"; parent="${parent%$'\n'}"
-  if [[ -e "$3" || ! -d "$parent" || ! -x "$parent" ]]; then
-    row failed "$3" "$4" "no longer confirmed gone, so its metadata was left in place — re-run to judge it again"
+  local common rc=0
+  if ! common="$(git -C "$1" rev-parse --path-format=absolute --git-common-dir 2>"$ERRFILE" && printf 'x')"; then
+    row failed "$3" "$4" "cannot locate the repository's worktree admin directory: $(tr '\n' ' ' < "$ERRFILE") — its registration was left in place; run \`git -C ${1} rev-parse --git-common-dir\` to see why, then re-run the sweep"
     return 1
   fi
-  if ! git -C "$1" worktree remove "$3" 2>"$ERRFILE"; then
-    row failed "$3" "$4" "removing its stale metadata failed: $(tr '\n' ' ' < "$ERRFILE") — the entry remains"
-    return 1
-  fi
-  return 0
+  common="${common%x}"; common="${common%$'\n'}"
+  python3 - "$common" "$3" 2>"$ERRFILE" <<'PY' || rc=$?
+import os, shutil, stat, sys
+
+common, path = sys.argv[1], sys.argv[2]
+admin_root = os.path.join(common, "worktrees")
+want = os.path.join(path, ".git")
+
+
+def fail(message):
+    sys.stderr.write(message)
+    sys.exit(1)
+
+
+def path_state():
+    """'gone' only when lstat says the path does not exist; any other read
+    failure is not proof of absence."""
+    try:
+        os.lstat(path)
+    except FileNotFoundError:
+        return "gone"
+    except OSError as exc:
+        return "unreadable ({})".format(exc.strerror or exc)
+    return "present"
+
+
+def read_gitdir(entry):
+    fd = os.open(os.path.join(entry, "gitdir"), os.O_RDONLY | os.O_NOFOLLOW)
+    try:
+        with os.fdopen(fd, "rb", closefd=False) as handle:
+            data = handle.read()
+    finally:
+        os.close(fd)
+    data = data.decode("utf-8", "surrogateescape")
+    return data[:-1] if data.endswith("\n") else data
+
+
+try:
+    ids = os.listdir(admin_root)
+except OSError as exc:
+    fail("cannot list {}: {}".format(admin_root, exc.strerror or exc))
+matches = []
+for ident in ids:
+    entry = os.path.join(admin_root, ident)
+    try:
+        info = os.lstat(entry)
+    except OSError as exc:
+        fail("cannot read {}: {}".format(entry, exc.strerror or exc))
+    if not stat.S_ISDIR(info.st_mode):
+        continue
+    try:
+        gitdir = read_gitdir(entry)
+    except FileNotFoundError:
+        continue
+    except OSError as exc:
+        fail("cannot read {}/gitdir: {}".format(entry, exc.strerror or exc))
+    if gitdir == want:
+        matches.append((ident, entry, info))
+if len(matches) != 1:
+    fail("{} admin entries in {} name {}".format(len(matches), admin_root, want))
+ident, entry, info = matches[0]
+if os.path.lexists(os.path.join(entry, "locked")):
+    fail("{} was locked after the inventory".format(entry))
+state = path_state()
+if state != "gone":
+    sys.stderr.write("{} is {}".format(path, state))
+    sys.exit(3)  # GONE_KEPT_PRESENT
+trash = os.path.join(common, "prune-worktrees-detached-{}-{}".format(ident, os.getpid()))
+if os.path.lexists(trash):
+    fail("{} already exists".format(trash))
+try:
+    os.rename(entry, trash)
+except OSError as exc:
+    fail("cannot detach {}: {}".format(entry, exc.strerror or exc))
+try:
+    moved = os.lstat(trash)
+except OSError as exc:
+    fail("detached {} to {} but cannot read it back: {} — move it back by hand".format(
+        entry, trash, exc.strerror or exc))
+state = path_state()
+if (moved.st_dev, moved.st_ino) != (info.st_dev, info.st_ino) or state != "gone":
+    try:
+        os.rename(trash, entry)
+    except OSError as exc:
+        fail("{} changed during the cleanup and could not be put back: {} — move {} back to {} by hand".format(
+            entry, exc.strerror or exc, trash, entry))
+    if state != "gone":
+        sys.stderr.write("{} is {}".format(path, state))
+        sys.exit(3)  # GONE_KEPT_PRESENT
+    fail("{} was replaced during the cleanup".format(entry))
+try:
+    shutil.rmtree(trash)
+except OSError as exc:
+    fail("the stale entry was detached but {} could not be deleted: {} — delete it by hand".format(
+        trash, exc.strerror or exc))
+PY
+  case "$rc" in
+    0) return 0 ;;
+    "$GONE_KEPT_PRESENT")
+      row failed "$3" "$4" "no longer confirmed gone ($(tr '\n' ' ' < "$ERRFILE")), so its registration was left in place — re-run the sweep to judge it again"
+      return 1 ;;
+    *)
+      row failed "$3" "$4" "removing its stale registration failed: $(tr '\n' ' ' < "$ERRFILE") — the entry remains; fix the cause named here, then re-run the sweep"
+      return 1 ;;
+  esac
 }
 
 # After a git command that talks to origin fails: replace its stderr in
@@ -874,20 +984,21 @@ IDLE_HOURS="${PRUNE_IDLE_HOURS:-24}"
 decide_worktree() { # <shared> <abs_root> <default> <dry-run 0|1> <path> <branch|""> <detached 0|1> <locked 0|1> [lock-reason]
   DECIDED_PRUNABLE=0
   local shared="$1" abs_root="$2" db="$3" dry="$4" path="$5" branch="$6" detached="$7" locked="$8" lock_reason="${9:-}"
+  if (( locked )); then
+    row kept "$path" "$branch" locked "" "$lock_reason"; return 0
+  fi
+  if [[ ! -d "$path" ]]; then
+    # A stale registration, inside the root or outside it: the caller drops
+    # the registration and then releases its branch to the branch pass (which
+    # never deletes the default branch).
+    DECIDED_PRUNABLE=1
+    row kept "$path" "$branch" prunable; return 0
+  fi
   if [[ "$path" != "$abs_root"/* ]]; then
     row kept "$path" "$branch" outside-root; return 0
   fi
   if [[ -n "$branch" && "$branch" == "$db" ]]; then
     row kept "$path" "$branch" default-branch; return 0
-  fi
-  if (( locked )); then
-    row kept "$path" "$branch" locked "" "$lock_reason"; return 0
-  fi
-  if [[ ! -d "$path" ]]; then
-    # The caller releases this branch to the branch pass once the metadata
-    # prune runs; an entry kept for any earlier reason never reaches here.
-    DECIDED_PRUNABLE=1
-    row kept "$path" "$branch" prunable; return 0
   fi
   # Age first, and every read below without optional locks: judging a
   # worktree must never refresh its index and reset its clock.
@@ -1229,8 +1340,7 @@ main() {
           if (( DECIDED_PRUNABLE )); then
             prunable_paths+=("$path"); prunable_owners+=("$branch")
           elif [[ -n "$branch" ]]; then
-            # Kept for a reason that outranks prunable (locked, outside the
-            # root, the default branch): still checked out.
+            # Locked: git keeps a locked entry, so it is still checked out.
             seen_branches+=("$branch")
           fi
           path=""; branch=""; detached=0; locked=0; lock_reason=""

@@ -3,27 +3,40 @@
 ### Fixed
 
 - **The worktree prune now treats an unlistable root as a changed root, and
-  its metadata step can no longer drop the registrations of worktrees a moved
-  root still holds (#597).** Both are follow-ups to #588's root-identity
-  check in `skills/herdr-foreman/prune-worktrees.sh`. First, the check read
-  the root with `lstat` alone, so a root whose permissions were revoked
-  mid-run (same inode) still passed; it now also opens the directory
-  (`O_NOFOLLOW`) and reads one entry through that descriptor, and requires the
-  descriptor's `fstat` identity to match the `lstat` one, so a swap between the
-  two reads cannot pass as the original. A root that cannot be listed stops
-  every later destructive step like a replaced one. Second, `git worktree prune --expire now` ran
-  just after that check but was not atomic with it: a root renamed inside the
-  window had every worktree under it read as gone, and git dropped their
-  registrations. The run no longer calls `git worktree prune`. It removes the
-  metadata of each entry it judged `prunable`, one `git worktree remove` per
-  entry (for a missing directory git deletes only that entry's administrative
-  files), after re-proving the root and re-confirming the directory is still
-  absent. A worktree still on disk is never touched, wherever it has moved.
-  The residual window is one entry already confirmed gone. Registrations the
-  run did not judge `prunable` (a vanished worktree outside the root, say) are
-  no longer cleared as a side effect. Tests 89 (root made unlistable after the
-  first removal), 90 (root renamed at the metadata step) and 91 (a failed
-  per-entry removal keeps the entry and its branch) fail on the previous code. `rules/agent-team-operation.md` and `sweep-worktrees.sh` no
+  its stale-registration cleanup can neither drop the registrations of
+  worktrees a moved root still holds nor delete a worktree that reappears
+  (#597).** Both are follow-ups to #588's root-identity check in
+  `skills/herdr-foreman/prune-worktrees.sh`. First, the check read the root
+  with `lstat` alone, so a root whose permissions were revoked mid-run (same
+  inode) still passed; it now also opens the directory (`O_NOFOLLOW`), reads
+  one entry through that descriptor, and requires the descriptor's `fstat`
+  identity to match the `lstat` one, so a swap between the two reads cannot
+  pass as the original. A root that cannot be listed stops every later
+  destructive step like a replaced one. Second, `git worktree prune --expire
+  now` ran just after that check but was not atomic with it: a root renamed
+  inside the window had every worktree under it read as gone, and git dropped
+  their registrations. A first fix replaced it with one `git worktree remove`
+  per confirmed-gone entry, but the policy review caught that a path
+  reappearing between the absence check and that call would be removed as a
+  live worktree, unjudged, unpushed commits and all. The cleanup is now
+  metadata-only (`release_gone`): it finds the entry's admin directory under
+  `<common-dir>/worktrees/` by its `gitdir` file, detaches it with an atomic
+  rename out of `worktrees/`, confirms the renamed directory is the one it
+  read, re-reads the worktree path, and renames the entry back if the path is
+  present again. Only an entry detached while its path was absent is
+  deleted; the worktree path itself is never touched. A directory moved back
+  after that point finds its `.git` file pointing at no repository; its files
+  and branch commits survive, but `git worktree repair` cannot restore the
+  entry (verified on git 2.55), so it is re-registered with `git worktree
+  add`. Every stale registration that is not locked is now dropped, outside
+  the worktree root too, so the rule's "leave no orphans" holds; the default
+  branch's registration is dropped but the branch pass never deletes the
+  default branch. Tests 89 (root made unlistable after the first removal), 90
+  (root renamed at the cleanup step), 91 (a failed drop keeps the entry and
+  its branch), 92 (a worktree with an unpushed commit moved back between the
+  absence check and the cleanup keeps its files, commits and registration)
+  and 93 (a stale registration outside the root is dropped) fail on the
+  previous code. `rules/agent-team-operation.md` and `sweep-worktrees.sh` no
   longer name `git worktree prune` as the step that clears a vanished
   worktree's registration. The sweep's test 23 swapped the root at the first
   repository's `worktree prune`, a call that no longer happens; it now swaps
