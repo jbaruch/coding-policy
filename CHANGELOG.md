@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.314 — 2026-09-28
+
 ### Fixed
 
 - **`verify-oracle` checks a mechanical round against the oracle its dispatch
