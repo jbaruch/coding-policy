@@ -309,14 +309,22 @@ main() {
      && printf '%s' "$OUT" | grep -q 'without one readable headroom and foreman_tier result'; then
     pass; else fail "an incomplete composite result fails both rows, got RC=$RC OUT=$OUT"; fi
 
-  # A status outside the documented set, or a blocking status without a
-  # reason, is a malformed row: both rows fail, never a ready round (#626).
+  # A row whose status is unknown, or that lacks the evidence its status
+  # carries, is malformed: both rows fail, never a ready round (#626).
   local case_no=0 bad
+  local measured='"detail": {"agents": {}}'
+  local proven='"detail": {"configured": true, "argv_verified": true}'
   for bad in \
-    '{"headroom": {"status": "ok"}, "foreman_tier": {"status": "not-a-valid-status"}}' \
-    '{"headroom": {"status": "ok"}, "foreman_tier": {"status": "failed"}}' \
-    '{"headroom": {"status": "blocked", "reason": " "}, "foreman_tier": {"status": "ok"}}' \
-    '{"headroom": {"status": "unconfigured"}, "foreman_tier": {"status": "ok"}}'; do
+    "{\"headroom\": {\"status\": \"ok\", $measured}, \"foreman_tier\": {\"status\": \"not-a-valid-status\"}}" \
+    "{\"headroom\": {\"status\": \"ok\", $measured}, \"foreman_tier\": {\"status\": \"failed\"}}" \
+    "{\"headroom\": {\"status\": \"blocked\", \"reason\": \" \"}, \"foreman_tier\": {\"status\": \"ok\", $proven}}" \
+    "{\"headroom\": {\"status\": \"unconfigured\"}, \"foreman_tier\": {\"status\": \"ok\", $proven}}" \
+    "{\"headroom\": {\"status\": \"ok\"}, \"foreman_tier\": {\"status\": \"ok\", $proven}}" \
+    "{\"headroom\": {\"status\": \"ok\", \"detail\": {}}, \"foreman_tier\": {\"status\": \"ok\", $proven}}" \
+    "{\"headroom\": {\"status\": \"ok\", $measured}, \"foreman_tier\": {\"status\": \"ok\"}}" \
+    "{\"headroom\": {\"status\": \"ok\", $measured}, \"foreman_tier\": {\"status\": \"ok\", \"detail\": {\"configured\": true}}}" \
+    "{\"headroom\": {\"status\": \"skipped\"}, \"foreman_tier\": {\"status\": \"unconfigured\"}}" \
+    "{\"headroom\": {\"status\": \"skipped\"}, \"foreman_tier\": {\"status\": \"unconfigured\", \"detail\": {\"configured\": false, \"warning\": \"  \"}}}"; do
     case_no=$((case_no + 1))
     shadow "$TMP/compositestatus$case_no"
     printf '%s\n' "$bad" > "$TMP/compositestatus$case_no/composite.json" || die "write composite fixture"

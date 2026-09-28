@@ -38,9 +38,8 @@
 # check, foreman-tier-check.py, which owns the dependency between them; its
 # docstring states each row's statuses. An absent `foreman` block is
 # `unconfigured`, never blocking, whatever headroom reported. A composite run
-# that exits non-zero or returns no readable pair fails both rows, as does a row
-# whose status is outside that docstring's set, or a `failed` or `blocked` row
-# without a reason.
+# that exits non-zero or returns no readable pair fails both rows, as does any
+# row whose shape is not one `merge_composite`'s SHAPES table allows.
 # `--no-measure` reuses the latest snapshot.
 #
 # `checks.worktrees` (the sweep, sweep-worktrees.sh):
@@ -142,18 +141,39 @@ with open(composite, encoding="utf-8") as handle:
     rows = json.load(handle)
 if not isinstance(rows, dict) or set(rows) != {"headroom", "foreman_tier"}:
     sys.exit("the composite result is not exactly a headroom and a foreman_tier row")
-# Each row's status set is foreman-tier-check.py's docstring. `ready` reads only
-# `reason`, so a blocking status without one would pass the round.
-STATUSES = {"headroom": {"ok", "skipped", "failed", "blocked"},
-            "foreman_tier": {"ok", "unconfigured", "failed"}}
-BLOCKING = {"failed", "blocked"}
+# SHAPES is the one table of what foreman-tier-check.py emits per row and
+# status: whether a non-empty `reason` is carried, and the evidence `detail`
+# must hold (None: no detail). `ready` reads only `reason`, so a row missing
+# the evidence its status names would pass the round without it.
+def _measured(detail):  # the `foreman measure` snapshot
+    return isinstance(detail.get("agents"), dict)
+def _tier_proven(detail):  # the verify-foreman argv proof
+    return detail.get("configured") is True and detail.get("argv_verified") is True
+def _warned(detail):  # the unconfigured seat's visible warning
+    warning = detail.get("warning")
+    return detail.get("configured") is False and isinstance(warning, str) and bool(warning.strip())
+SHAPES = {
+    ("headroom", "ok"): (False, _measured),
+    ("headroom", "skipped"): (False, None),
+    ("headroom", "failed"): (True, None),
+    ("headroom", "blocked"): (True, None),
+    ("foreman_tier", "ok"): (False, _tier_proven),
+    ("foreman_tier", "unconfigured"): (False, _warned),
+    ("foreman_tier", "failed"): (True, None),
+}
+def well_formed(name, row):
+    shape = SHAPES.get((name, row.get("status"))) if isinstance(row, dict) else None
+    if shape is None:
+        return False
+    needs_reason, evidence = shape
+    if set(row) != {"status"} | ({"reason"} if needs_reason else set()) | ({"detail"} if evidence else set()):
+        return False
+    if needs_reason and not (isinstance(row["reason"], str) and row["reason"].strip()):
+        return False
+    return evidence is None or (isinstance(row["detail"], dict) and evidence(row["detail"]))
 merged = {}
 for name, row in rows.items():
-    if (not isinstance(row, dict) or row.get("status") not in STATUSES[name]
-            or not set(row) <= {"status", "reason", "detail"}
-            or ("reason" in row and not isinstance(row["reason"], str))
-            or (row["status"] in BLOCKING and not row.get("reason", "").strip())
-            or ("detail" in row and not isinstance(row["detail"], dict))):
+    if not well_formed(name, row):
         sys.exit("the {} row is malformed".format(name))
     merged[name] = {**row, "due": False}
 with open(path, encoding="utf-8") as handle:

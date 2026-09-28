@@ -8,9 +8,13 @@
   - `round-preflight.sh` merged any composite row whose `status` was a string,
     and `ready` reads only `reason`, so a row like
     `foreman_tier.status = "not-a-valid-status"`, or `failed` with no reason,
-    reported a ready round. Each row's status is now checked against the set
-    `foreman-tier-check.py`'s docstring states, a `failed` or `blocked` row
-    needs a non-empty reason, and a malformed composite fails both rows.
+    reported a ready round. So did an `ok` row with no proof detail, or an
+    `unconfigured` row with no warning. `merge_composite` now checks each row
+    against one table, `SHAPES`, of what `foreman-tier-check.py` emits per
+    status: a headroom `ok` carries the measure snapshot, a `foreman_tier`
+    `ok` the verified argv proof, `unconfigured` a non-empty `detail.warning`,
+    and `failed` or `blocked` a non-empty reason. Any other shape fails both
+    rows.
   - `verify_foreman` proved the argv of one foreground process of the seat's
     kind, so `verify-foreman --pane` passed against another Claude or Codex
     pane running the same tier. It now requires Herdr to bind the seat's agent
