@@ -35,7 +35,7 @@ description: Running a multi-agent team — task-based specialist composition, c
 ## Foreman Seat
 
 - The foreman does no heavy lifting
-- Every judgment on task content goes to a worker
+- Every judgment on task content goes to the responsible worker, or to the operator where operator authority is required
 - The operator's `config.json` `foreman` block declares the seat like a worker: its agent, kind, launch options and an optional tier table
 - No rule, config field or default pins the foreman's model or effort
 - Tier selection resolves the foreman's `coordination` round through the machinery every seat uses: the tier table, the capability table and measured headroom
@@ -55,7 +55,7 @@ description: Running a multi-agent team — task-based specialist composition, c
 - A reviewer or tester report missing its `VERDICT:` line, or a blocking finding's severity or scope label, returns to its responsibility with the gap named
 - A brief carries the operator's request verbatim and quotes the reports and findings it acts on
 - The foreman writes no acceptance criterion, diagnosis, correction proposal or recommendation of its own
-- Judgment the foreman would otherwise make routes to a worker:
+- Judgment the foreman would otherwise make routes to the worker or operator each line names:
   - A finding's severity and scope — the reviewer or tester that raised it
   - A contested label or verdict — the judge in adjudication mode
   - An investigation-only deliverable against its request — an independent reviewer

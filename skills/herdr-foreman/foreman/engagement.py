@@ -2,10 +2,14 @@
 
 Report delivery proves an artifact arrived. The contribution class is the one
 the bound report declares on its `CONTRIBUTION:` line, derived here from the
-report bytes; a report declaring none records `design` (#601). The foreman
-quotes the report's acceptance lines as outcome and summary, and the owner
-refuses either one the bound report does not contain. These receipts never
-accept the whole task.
+report bytes; a report declaring none records `design` (#601). A
+consultation's report carries one `ACCEPTANCE <k>/<N>: met|unmet` line per
+criterion, and a reviewer's or tester's one `VERDICT:` line; the owner parses
+them and refuses a report missing any, or with a criterion `unmet` or
+unresolved, so it returns to its responsibility (`require_report_result`). The
+foreman quotes the report as outcome and summary, and the owner refuses either
+one the bound report does not contain. These receipts never accept the whole
+task.
 
 Schema 2 adds `contribution_source`. A schema-1 record carried a foreman's own
 classification; the owner migration keeps its value and marks it
@@ -20,7 +24,7 @@ import re
 from . import runnable
 from .chronology import latest_assignment
 from .errors import UsageError
-from .recovery import receipt, text, validate_receipt
+from .recovery import receipt, report_verdicts, text, validate_receipt
 from .tiers import canonical_role
 from . import supervision
 
@@ -39,6 +43,13 @@ CONTRIBUTION_SOURCES = frozenset({"report_declared", "report_undeclared", "forem
 CONTRIBUTION_LINE = re.compile(r"^CONTRIBUTION:[ \t]*(\S+)[ \t]*$", re.MULTILINE)
 #: The class an undeclared contribution records: unresolved history is never `none`.
 UNDECLARED_CONTRIBUTION = "design"
+#: A consultation report's per-criterion line: `ACCEPTANCE <k>/<N>: <status>`,
+#: optionally bulleted or backquoted, evidence after the status. Criteria are
+#: numbered 1..N in the order the brief states them.
+ACCEPTANCE_LINE = re.compile(
+    r"^[ \t>*-]*`?ACCEPTANCE[ \t]+(\d+)/(\d+):[ \t]*([A-Za-z_-]*)", re.MULTILINE)
+#: The resolved statuses an acceptance line may carry.
+ACCEPTANCE_STATUSES = frozenset({"met", "unmet"})
 #: The fields the foreman quotes from the bound report rather than writes.
 QUOTED_FIELDS = ("outcome", "summary")
 RECORD_FIELDS = INPUT_FIELDS | {"schema_version", "at", "assignment_index", "task", "role", "agent",
@@ -77,6 +88,54 @@ def require_quoted(body, data):
         raise UsageError(
             "The bound report does not contain the supplied {}; quote its acceptance lines verbatim, or return the "
             "report to its responsibility with the gap named.".format(" or ".join(missing)), {"missing": missing})
+
+
+def acceptance_results(body):
+    """`{k: status}` from a report's acceptance lines, refusing an incomplete set.
+
+    Every criterion 1..N carries exactly one line, every line declares the
+    same N, and every status is `met` or `unmet`. Anything else is the gap the
+    report returns to its responsibility with.
+    """
+    lines = ACCEPTANCE_LINE.findall(body)
+    if not lines:
+        raise UsageError(
+            "The report carries no `ACCEPTANCE <k>/<N>: met|unmet` lines; return it to its responsibility for one "
+            "line per acceptance criterion.", {"missing": "acceptance"})
+    totals = {int(total) for _index, total, _status in lines}
+    indices = [int(index) for index, _total, _status in lines]
+    total = next(iter(totals))
+    if len(totals) != 1 or total < 1 or sorted(indices) != list(range(1, total + 1)):
+        raise UsageError(
+            "The report's acceptance lines are incomplete or inconsistent (criteria {} of totals {}); return it to "
+            "its responsibility for exactly one line per criterion 1..N.".format(
+                sorted(indices), sorted(totals)), {"indices": sorted(indices), "totals": sorted(totals)})
+    results = {int(index): status for index, _total, status in lines}
+    unresolved = sorted(index for index, status in results.items() if status not in ACCEPTANCE_STATUSES)
+    if unresolved:
+        raise UsageError(
+            "Acceptance criteria {} carry no met/unmet status; return the report to its responsibility with the gap "
+            "named.".format(unresolved), {"unresolved": unresolved})
+    return results
+
+
+def require_report_result(body, role):
+    """Refuse a report whose own result lines are missing, unresolved or unmet.
+
+    A consultation needs every acceptance criterion `met`; a reviewer or
+    tester needs exactly one `VERDICT:` line.
+    """
+    if role in CONSULTATION_ROLES:
+        unmet = sorted(index for index, status in acceptance_results(body).items() if status != "met")
+        if unmet:
+            raise UsageError(
+                "Acceptance criteria {} are reported unmet; return the consultation to its responsibility with them "
+                "named.".format(unmet), {"unmet": unmet})
+        return
+    if len(report_verdicts(body)) != 1:
+        raise UsageError(
+            "The {} report states no single `VERDICT: blocking | approved` line; return it to its responsibility "
+            "with the gap named.".format(role), {"missing": "verdict"})
 
 
 def migrate_assessments(payload):
@@ -175,6 +234,7 @@ def record_assessment(state, state_path, data, at):
         raise UsageError("Assessment must name the report enrolled before this dispatch; inspect `{}` and preserve that report path.".format(
             runnable.command("supervision-status")), {})
     report_evidence, body = receipt(data["report"])
+    require_report_result(body, canonical_role(dispatch["role"]))
     contribution, source = declared_contribution(body)
     require_quoted(body, data)
     if "contribution" in data and data["contribution"] != contribution:
@@ -220,9 +280,11 @@ def require_followup(state, state_path, assignments):
             raise UsageError("Retained specialist needs the preceding assignment's saved foreman assessment; run `{}` before following up.".format(
                 runnable.command("assess-specialist")), {})
         for key in ("report_evidence", "delivery_evidence"):
-            current, _body = receipt(assessment[key]["path"])
+            current, body = receipt(assessment[key]["path"])
             if current != assessment[key]:
                 raise UsageError("Specialist follow-up evidence changed; restore the original report and delivery receipt or start a fresh assessed handoff.", {})
+            if key == "report_evidence":
+                require_report_result(body, assessment["role"])
         fleet = supervision.load(state_path)
         member = next((item for item in fleet["members"] if item["id"] == assessment["dispatch"]), None)
         if member is None or member["active"] or not member.get("resolution") or any(item["member"] == member["id"] for item in supervision.pending(fleet)):

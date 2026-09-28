@@ -26,7 +26,8 @@ Follow `rules/agent-team-operation.md` for round constraints.
 You run on the selected tier for the foreman (`rules/agent-team-operation.md` Foreman
 Seat). Dispatch, run owner scripts, keep the owner records, and gate on the
 evidence reports and scripts produce. Never reason through task content. Each
-judgment below routes to a worker, and you act on its report:
+judgment below routes to the worker or operator its row names, and you act on
+that report or recorded decision:
 
 | Step | Judgment | Routes to |
 | --- | --- | --- |
@@ -42,6 +43,7 @@ judgment below routes to a worker, and you act on its report:
 | 12 | An investigation-only deliverable | An independent reviewer |
 | 12 | Recurring findings or unclear causality | `investigator` consultation |
 | 12 | A non-converging fix loop | Investigator, then judge diagnosis (Step 13) |
+| 12 | An added obligation or changed scope | The operator, from the reporting worker's proposal |
 
 A reviewer or tester report missing its `VERDICT:` line or a blocking finding's label returns to its
 responsibility with the gap named; never fill it from your own reading. Mode

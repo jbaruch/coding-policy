@@ -254,7 +254,8 @@ accepted behavior, scope, relevant prior decisions, available inputs, permitted
 actions and stopping condition. Quote the question from the operator's request,
 the report that raised it, or the trigger detection that fired it; the foreman
 frames no question from its own reading of task content. The acceptance
-criteria are the ones the report will mark `met` or `unmet`. Supply the source paths and revisions, useful project lessons, and
+criteria are the ones the report will mark `met` or `unmet`, one
+`ACCEPTANCE <k>/<N>:` line each, numbered in the order the brief states them. Supply the source paths and revisions, useful project lessons, and
 the selected profile's applicable questions in the brief. The worker should
 not need an earlier conversation to reconstruct its assignment.
 
@@ -287,10 +288,13 @@ Confirm delivery through the normal report checkpoint and save its successful
 JSON output. Read the actual report in full. The foreman does no heavy lifting
 and does not re-assess a consultation's substance
 (`rules/agent-team-operation.md` Foreman Seat). The outcome is the report's own
-acceptance lines, each criterion `met` or `unmet` with its evidence; the
-contribution is the report's `CONTRIBUTION:` line, and a report without one
-records `design`. A criterion reported `unmet`, or a line missing, returns the
-consultation to its responsibility with the gap named. A dispute over whether a
+`ACCEPTANCE <k>/<N>: met|unmet` lines, one per criterion; a reviewer's or
+tester's is its single `VERDICT:` line. The contribution is the report's
+`CONTRIBUTION:` line, and a report without one records `design`. The owner
+refuses the assessment, and a warm follow-up on it, when a line is missing,
+duplicated or unresolved, or a criterion is `unmet`
+(`require_report_result` in `skills/herdr-foreman/foreman/engagement.py`); the
+consultation returns to its responsibility with the gap named. A dispute over whether a
 consultation met its criteria goes to an independent reviewer, and a contested
 verdict from that reviewer to the judge.
 

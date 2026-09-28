@@ -34,7 +34,8 @@ class EngagementTest(unittest.TestCase):
         who = supervision.identity("lead", str(self.root), "fixture", pane_id="lead-pane")
         supervision.bind(self.path, who, AT)
         self.report = self.root / "report.md"
-        self.report.write_text("Inspected onboarding. Recommend grouping account fields; implementation remains open.\n")
+        self.report.write_text("Inspected onboarding. Recommend grouping account fields; implementation remains open.\n"
+                               "ACCEPTANCE 1/1: met — the grouping proposal is complete\n")
         self.delivery = self.root / "delivery.json"
         self.delivery.write_text(json.dumps({"found": True, "agent": "worker", "report_path": str(self.report)}))
         self.state = empty_state()
@@ -62,6 +63,53 @@ class EngagementTest(unittest.TestCase):
     def retire(self):
         return supervision.resolve(self.path, {"id": self.dispatch["id"], "outcome": "Report assessed; consultation ended",
                                                "evidence": [str(self.report)]}, LATER)
+
+    def test_a_complete_all_met_acceptance_set_is_assessable(self):
+        self.report.write_text("Recommend grouping account fields; implementation remains open.\n"
+                               "- `ACCEPTANCE 2/2: met` — the tab order is preserved\n"
+                               "ACCEPTANCE 1/2: met — the grouping proposal is complete\n")
+        self.assertEqual(engagement.acceptance_results(self.report.read_text()), {1: "met", 2: "met"})
+        self.assertEqual(self.assess()["id"], "assessment-1")
+
+    def test_missing_or_unresolved_acceptance_lines_return_the_report(self):
+        head = "Recommend grouping account fields; implementation remains open.\n"
+        for body, pattern in (("", "no `ACCEPTANCE"),
+                              ("Each acceptance criterion is met.\n", "no `ACCEPTANCE"),
+                              ("ACCEPTANCE 1/2: met — grouped\n", "incomplete"),
+                              ("ACCEPTANCE 1/1: met — a\nACCEPTANCE 1/1: met — b\n", "incomplete"),
+                              ("ACCEPTANCE 1/2: met — a\nACCEPTANCE 2/3: met — b\n", "incomplete"),
+                              ("ACCEPTANCE 1/1: partial — half done\n", "no met/unmet status"),
+                              ("ACCEPTANCE 1/1:\n", "no met/unmet status")):
+            with self.subTest(body=body):
+                self.report.write_text(head + body)
+                with self.assertRaisesRegex(UsageError, pattern):
+                    self.assess()
+        self.assertEqual(self.state["specialist_assessments"], [])
+
+    def test_an_unmet_criterion_returns_the_consultation(self):
+        self.report.write_text("Recommend grouping account fields; implementation remains open.\n"
+                               "ACCEPTANCE 1/2: met — the proposal is complete\n"
+                               "ACCEPTANCE 2/2: unmet — no screen-reader check was possible\n")
+        with self.assertRaisesRegex(UsageError, r"criteria \[2\] are reported unmet"):
+            self.assess()
+        self.assertEqual(self.state["specialist_assessments"], [])
+
+    def test_a_reviewer_report_without_one_verdict_line_is_not_assessable(self):
+        report = self.root / "review-report.md"
+        delivery = self.root / "review-delivery.json"
+        delivery.write_text(json.dumps({"found": True, "agent": "checker", "report_path": str(report)}))
+        seat = {**self.dispatch, "id": "review-1", "role": "reviewer", "agent": "checker", "reviewer_scope": "verification"}
+        seat.pop("requirements")
+        self.seed({**seat, "report": str(report)})
+        data = {**self.data, "id": "assessment-review", "dispatch": "review-1", "report": str(report),
+                "delivery": str(delivery), "contribution": "none", "outcome": "no blocking findings.",
+                "summary": "Reviewed the pushed tip"}
+        for body in ("Reviewed the pushed tip; no blocking findings.\nCONTRIBUTION: none\n",
+                     "Reviewed the pushed tip; no blocking findings.\nVERDICT: blocking | approved\nCONTRIBUTION: none\n"):
+            with self.subTest(body=body):
+                report.write_text(body)
+                with self.assertRaisesRegex(UsageError, "no single `VERDICT"):
+                    self.assess(data)
 
     def test_an_undeclared_contribution_records_design_from_the_report_bytes(self):
         data = {key: value for key, value in self.data.items() if key != "contribution"}
@@ -141,7 +189,7 @@ class EngagementTest(unittest.TestCase):
         # The seat stays on the dispatch, so a slice's verdict reaches its
         # assessment through the responsibility it fills (#434).
         report = self.root / "slice-report.md"
-        report.write_text("Reviewed the api slice at the pushed tip; no blocking findings.\nCONTRIBUTION: none\n")
+        report.write_text("Reviewed the api slice at the pushed tip; no blocking findings.\nVERDICT: approved\nCONTRIBUTION: none\n")
         delivery = self.root / "slice-delivery.json"
         delivery.write_text(json.dumps({"found": True, "agent": "slicer", "report_path": str(report)}))
         seat = {**self.dispatch, "id": "slice-1", "role": "reviewer#api", "agent": "slicer",
@@ -240,6 +288,17 @@ class EngagementTest(unittest.TestCase):
                 engagement.require_followup(self.state, self.path, {"advisor": "worker"})
             engagement.validate_assessments(self.state)
             path.write_bytes(before)
+
+    def test_followup_refuses_a_saved_assessment_whose_report_lacks_acceptance_lines(self):
+        # A record saved before the acceptance-line contract binds bytes with
+        # no per-criterion result; the warm follow-up refuses it.
+        self.assess()
+        self.retire()
+        self.report.write_text("Inspected onboarding. Recommend grouping account fields; implementation remains open.\n")
+        record = self.state["specialist_assessments"][0]
+        record["report_evidence"], _body = recovery.receipt(str(self.report))
+        with self.assertRaisesRegex(UsageError, "no `ACCEPTANCE"):
+            engagement.require_followup(self.state, self.path, {"advisor": "worker"})
 
     def test_intervening_assignment_cannot_reuse_previous_consultation_assessment(self):
         self.assess()
@@ -342,6 +401,7 @@ class EngagementTest(unittest.TestCase):
         dispatch["result"]["role"] = "reviewer"
         source = Path(request["source"])
         source.write_text(source.read_text().replace("Your role for this task is JUDGE", "Your role for this task is REVIEWER"))
+        case.report.write_text("Current report bytes.\nVERDICT: approved\n")
         recovered = report_delivery.recover(state["recovery"], state["assignments"], request, delivery_fixture.AT)
         path = case.tmp / "state.json"
         who = supervision.identity("delivery-lead", str(case.tmp), "fixture", pane_id="delivery-lead-pane")

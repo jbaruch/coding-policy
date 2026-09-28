@@ -24,6 +24,7 @@
 #   8. --no-measure             -> headroom skipped, foreman still verified, ready.
 #      Measure fails            -> foreman tier a dependency failure, not verified.
 #      Measure output unreadable-> headroom blocked, foreman tier not verified.
+#      No foreman block + failed measure -> unconfigured warning, not a block.
 #   9. Missing --repo/--checkout-> exit 2, usage error, no JSON verdict.
 #  10. Every check's payload    -> carried through under `checks.<name>.detail`.
 #  11. Gate pointers            -> resolved once, carried for the briefs.
@@ -262,6 +263,16 @@ main() {
      && [[ "$(field "$OUT" 'd["checks"]["foreman_tier"].get("detail")')" == "null" ]] \
      && printf '%s' "$OUT" | grep -q 'not verified: the foreman'; then
     pass; else fail "a failed measure records the foreman tier as a dependency failure, got RC=$RC OUT=$OUT"; fi
+
+  # An absent `foreman` block is detected apart from headroom: a failed
+  # measure still reports it as the unconfigured warning, never a block.
+  FOREMAN_TIER_OUT='{"configured":false,"warning":"add a foreman block, then run start-foreman"}' run "$TMP/measurefails"
+  if [[ $RC -eq 1 ]] && [[ "$(field "$OUT" 'd["checks"]["headroom"]["status"]')" == '"failed"' ]] \
+     && [[ "$(field "$OUT" 'd["checks"]["foreman_tier"]["status"]')" == '"unconfigured"' ]] \
+     && [[ "$(field "$OUT" 'd["checks"]["foreman_tier"].get("reason")')" == "null" ]] \
+     && ! printf '%s' "$OUT" | grep -q 'not verified: the foreman' \
+     && printf '%s' "$ERRTEXT" | grep -q 'foreman seat is unconfigured'; then
+    pass; else fail "an absent foreman block warns even when measure failed, got RC=$RC OUT=$OUT ERR=$ERRTEXT"; fi
 
   # A measure that exits 0 with unreadable output records headroom blocked;
   # the foreman's tier is still a dependency failure, never verified.

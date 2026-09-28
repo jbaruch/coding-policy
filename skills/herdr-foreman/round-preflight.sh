@@ -37,9 +37,10 @@
 # `checks.foreman_tier` (`foreman verify-foreman`): ok with the argv proof as
 # detail when this pane runs the foreman's selected tier;
 # unconfigured, not blocking, with the configure command as
-# `detail.warning` when config has no `foreman` block; failed, and blocking,
+# `detail.warning` when config has no `foreman` block, whatever
+# `checks.headroom` reported; failed, and blocking,
 # when the live argv differs or the selection refuses; failed, and
-# blocking, without running when `checks.headroom` did not pass, since the
+# blocking, for a configured foreman when `checks.headroom` did not pass, since the
 # selection reads that measurement. `--no-measure` reuses the latest snapshot.
 #
 # `checks.worktrees` (the sweep, sweep-worktrees.sh):
@@ -247,13 +248,29 @@ PY
   fi
 
   # 4b. The foreman's own tier, selected on the headroom check 4 measures, so
-  #     it runs only on that measurement: a failed measure records a
-  #     dependency failure here instead of verifying against a stale or absent
-  #     snapshot. Under --no-measure it reuses the latest snapshot. This pane's
-  #     live argv must carry the selected tier. An absent `foreman` block warns
-  #     and does not block.
+  #     it runs only on that measurement: when headroom did not pass, a
+  #     configured foreman records a dependency failure here instead of
+  #     verifying against a stale or absent snapshot. Config presence is read
+  #     independently, so an absent `foreman` block still warns and never
+  #     blocks. Under --no-measure it reuses the latest snapshot. This pane's
+  #     live argv must carry the selected tier.
   if [ "$measured" = failed ]; then
-    record foreman_tier failed "not verified: the foreman's tier is selected on the headroom foreman measure writes, and that check did not pass; fix checks.headroom, then re-run the preflight" 0 ""
+    bash "${HERE}/foreman.sh" "${common[@]+"${common[@]}"}" verify-foreman --config-only \
+      > "${scratch}/foreman-config.json" 2>"${scratch}/foreman-config.err"
+    rc=$?
+    cat "${scratch}/foreman-config.err" >&2
+    local present=""
+    if [ "$rc" -eq 0 ]; then
+      if ! present="$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); d=d if isinstance(d, dict) else {}; v=d.get("configured"); print("1" if v is True else "0" if v is False else sys.exit("configured is not a boolean"))' "${scratch}/foreman-config.json")"; then
+        present=""
+      fi
+    fi
+    if [ "$present" = "0" ]; then
+      echo "round-preflight: warning: the foreman seat is unconfigured; see checks.foreman_tier.detail.warning" >&2
+      record foreman_tier unconfigured "" 0 "${scratch}/foreman-config.json" "foreman verify-foreman --config-only"
+    else
+      record foreman_tier failed "not verified: the foreman's tier is selected on the headroom foreman measure writes, and that check did not pass; fix checks.headroom, then re-run the preflight" 0 ""
+    fi
   else
     bash "${HERE}/foreman.sh" "${common[@]+"${common[@]}"}" verify-foreman \
       > "${scratch}/foreman-tier.json" 2>"${scratch}/foreman-tier.err"

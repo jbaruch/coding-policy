@@ -569,7 +569,9 @@ when there is none, which records `design`; a `report_undeclared` record
 holding any other class is corrupt. A supplied `contribution` must match the
 derivation or the record is refused. Outcome and summary quote the report's
 acceptance lines and answer, and are not task acceptance; the owner refuses
-either one the bound report does not contain (`require_quoted`).
+either one the bound report does not contain (`require_quoted`), and a report
+whose own result lines are missing, unresolved or `unmet`
+(`require_report_result`).
 
 The utility verifies the original confirmed dispatch, assignment and enrollment
 before appending. Exact ID/input retries preserve the original receipt, including

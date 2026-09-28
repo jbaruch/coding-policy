@@ -124,6 +124,10 @@ from its pane's live foreground argv, this Herdr pane by default or
   blocks until the operator restarts the foreman with `start-foreman`
 - config has no `foreman` block — `unconfigured`, a stderr warning with the
   configure command in `detail.warning`; the round proceeds
+- `checks.headroom` did not pass — the preflight runs only
+  `verify-foreman --config-only`, which reads config presence without
+  selecting or probing; a configured foreman records `failed` as a dependency
+  on headroom, and an absent block is still `unconfigured`
 
 A selection that moves, on new capability evidence or a table edit, reads as
 a mismatch at the next preflight; the restart picks the new tier. A context

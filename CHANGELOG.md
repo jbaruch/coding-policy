@@ -136,6 +136,24 @@
   when the recorded headroom check passed. Tests: `test_recovery.py`,
   `test_recovery_cli.py`, `test_round_preflight.sh`.
 
+  The next review found three more gaps. The Foreman Seat's opener said every
+  task-content judgment goes to a worker while its route list sent added
+  obligations to the operator; the opener, the route lead-in and SKILL.md's
+  routing table now route to the responsible worker, or to the operator where
+  operator authority is required. The preflight skipped `verify-foreman` when
+  headroom failed, so an absent `foreman` block read as a block instead of the
+  `unconfigured` warning; a new `verify-foreman --config-only` reads config
+  presence without selecting or probing, and the preflight uses it on that
+  path. `assess-specialist` accepted any report substring as the outcome, so a
+  report with no acceptance-status lines could be recorded as assessed and
+  satisfy a retained follow-up; the specialist brief now asks for one
+  `ACCEPTANCE <k>/<N>: met|unmet — <evidence>` line per criterion, and the
+  owner (`require_report_result` in `engagement.py`) refuses the assessment
+  and the warm follow-up when a line is missing, duplicated or unresolved, or
+  a criterion is `unmet`. A reviewer or tester assessment needs its single
+  `VERDICT:` line. Tests: `test_engagement.py`, `test_foreman_seat.py`,
+  `test_round_preflight.sh`.
+
 ## 0.3.321 — 2026-09-28
 
 ### Fixed

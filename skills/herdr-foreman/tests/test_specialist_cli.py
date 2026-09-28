@@ -234,7 +234,7 @@ class SpecialistCliTest(fixture.CliCase):
         result = {key: value for key, value in state["assignments"][0].items() if key != "reviewer_scope"}
         recovery.finish_dispatch(state["recovery"], record["id"], {**result, "pane_id": "w2:p1"}, 0, AT)
         prior_report = self.tmp / "prior-report.md"
-        prior_report.write_text("Proposed the interaction; implementation remains pending.")
+        prior_report.write_text("Proposed the interaction; implementation remains pending.\nACCEPTANCE 1/1: met — the interaction is proposed\n")
         delivery = self.tmp / "prior-delivery.json"
         delivery.write_text(json.dumps({"found": True, "agent": "claude", "report_path": str(prior_report)}))
         supervision.enroll(self.state, {"id": record["id"], "agent": "claude", "task": "task-1", "report": str(prior_report),

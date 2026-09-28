@@ -134,6 +134,8 @@ def build_parser():
     verify_foreman = sub.add_parser("verify-foreman", parents=[common],
                                     help="Prove the live foreman pane runs the configured foreman tier. Read-only.")
     verify_foreman.add_argument("--pane", help="The foreman's pane (default: this Herdr pane, $HERDR_PANE_ID).")
+    verify_foreman.add_argument("--config-only", action="store_true",
+                                help="Report only whether config declares a foreman block; no tier selection, no pane probe.")
 
     for command in ("retro-check", "retro-record"):
         retro_parser = sub.add_parser(command, parents=[common], help="Check or record a foreman-authored retrospective.")
@@ -2052,6 +2054,13 @@ def cmd_start_foreman(args, client=None, warn=None, trace=None):
 
 
 def cmd_verify_foreman(args, client=None, warn=None, trace=None):
+    if getattr(args, "config_only", False):
+        # The preflight's view when headroom did not pass: whether the seat is
+        # configured is independent of any measurement.
+        seat = load_foreman(_config_path(args))
+        if seat is None:
+            return {"configured": False, "warning": _foreman_unconfigured(_config_path(args))}, None
+        return {"configured": True, "agent": seat.agent}, None
     pane = args.pane
     if not pane:
         # rules/agent-team-operation.md Two Modes: a team round is HERDR_ENV set, any value.

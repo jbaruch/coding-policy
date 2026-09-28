@@ -246,6 +246,17 @@ class CommandTest(unittest.TestCase):
         self.assertFalse(result["configured"])
         self.assertIn("start-foreman", result["warning"])
 
+    def test_verify_config_only_reports_presence_without_selection_or_probe(self):
+        code, out, err = self.run_cli(["verify-foreman", "--config-only"], Client())
+        self.assertEqual(code, 0, err)
+        self.assertTrue(json.loads(out)["configured"])
+        self.write({"schema_version": 1, "agents": [WORKER]})
+        code, out, err = self.run_cli(["verify-foreman", "--config-only"], Client())
+        self.assertEqual(code, 0, err)
+        result = json.loads(out)
+        self.assertFalse(result["configured"])
+        self.assertIn("start-foreman", result["warning"])
+
     def test_start_without_a_block_is_refused(self):
         self.write({"schema_version": 1, "agents": [WORKER]})
         client = Client()
