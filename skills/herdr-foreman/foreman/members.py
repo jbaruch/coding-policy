@@ -29,27 +29,61 @@ from .chronology import timestamp
 from .errors import StateError, UsageError
 from .state import load_state_checked
 
-#: Ledger decisions that record an assessment (references/task-ledger.md);
-#: `pending`, `reported` and `unknown` do not.
-ASSESSED = frozenset({"accepted", "needs_work", "blocked", "unavailable"})
-#: The task-ledger schema this reader accepts (state-schema.md, Task Ledger).
+# Task-ledger schema 1 (#589). These constants ARE the ledger's field formats:
+# state-schema.md (Task Ledger) and references/task-ledger.md name them and
+# restate none of them, so one edit here changes the contract and the validator.
+#: The schema version the frontmatter and every event carry.
 LEDGER_SCHEMA_VERSION = "1"
+#: Frontmatter fields, each required exactly once.
 FRONT_FIELDS = ("schema_version", "task", "base_revision", "dispatch_state")
+#: Event fields, each required exactly once per event; `id` repeats the event's section heading
+#: and names no other event.
 EVENT_FIELDS = ("schema_version", "id", "at", "subject", "dispatch_id", "worker", "role", "report", "observed",
                 "decision", "head_revision", "evidence", "assessment")
-#: A full SHA-1 or SHA-256 commit id in either case: schema 1 promises a "full SHA"
-#: and never a case, so an uppercase id a writer copied is still schema 1.
-LEDGER_SHA = re.compile(r"[0-9a-fA-F]{40}(?:[0-9a-fA-F]{24})?")
-#: `head_revision` values that stand in for a SHA (state-schema.md, Task Ledger).
-HEAD_PLACEHOLDERS = frozenset({"unknown", "not_applicable"})
-#: Each subject's decision vocabulary (references/task-ledger.md, Record Decisions as They Happen).
-DECISIONS = {"assignment": ASSESSED | {"pending", "reported", "unknown"},
-             "task": frozenset({"in_progress", "awaiting_diagnosis", "diagnosed_stop", "waiting_for_operator",
-                                "ready_for_release", "completed"})}
-#: The assignment identity a task event carries as `not_applicable`, and an assignment event never does.
+#: Event fields held as free text: the schema promises no format for them beyond presence.
+FREE_TEXT_FIELDS = ("observed", "evidence", "assessment")
+#: The literal an unavailable value is recorded as, never a guess.
+UNKNOWN = "unknown"
+#: The literal a field that does not apply to its event's subject is recorded as.
+NOT_APPLICABLE = "not_applicable"
+#: Each subject's decisions and what each one means. A subject is one of these keys.
+DECISION_MEANINGS = {
+    "task": {
+        "in_progress": "Required task work remains",
+        "awaiting_diagnosis": "An exhausted allowance awaits the judge's remedy",
+        "diagnosed_stop": "A `stop` remedy ships what is clean and tracks the remainder",
+        "waiting_for_operator": "A named required operator decision remains outstanding",
+        "ready_for_release": "Step 12's current-tip verification gate holds; release remains outstanding",
+        "completed": "All task acceptance criteria and required release/cleanup obligations are verified",
+    },
+    "assignment": {
+        "pending": "Dispatch is planned or confirmed; no report has been assessed",
+        "reported": "Delivery was confirmed; the foreman has not yet accepted the work",
+        "accepted": "The foreman read the report and verified that the assignment's acceptance criteria hold",
+        "needs_work": "Evidence shows unmet criteria or invalidates a prior acceptance",
+        "blocked": "A specific unresolved dependency or decision prevents the assignment from proceeding",
+        "unavailable": "A report is missing or unavailable under the wait/recovery contract",
+        UNKNOWN: "Dispatch or outcome evidence is insufficient; reconcile before retrying",
+    },
+}
+#: The subjects, in the order refusals name them.
+SUBJECTS = tuple(DECISION_MEANINGS)
+#: Each subject's decision vocabulary.
+DECISIONS = {subject: frozenset(meanings) for subject, meanings in DECISION_MEANINGS.items()}
+#: Assignment decisions that record an assessment; `pending`, `reported` and `unknown` do not.
+ASSESSED = frozenset({"accepted", "needs_work", "blocked", "unavailable"})
+#: The assignment identity a task event carries as NOT_APPLICABLE, and an assignment event never does.
 ASSIGNMENT_IDENTITY = ("dispatch_id", "worker", "role")
-# `observed`, `evidence` and `assessment` are free text; the schema promises
-# no format for them beyond presence, so none is checked.
+#: `base_revision` and `head_revision`: a full SHA-1 or SHA-256 commit id in either case.
+#: Schema 1 promises a "full SHA" and never a case, so an uppercase id a writer copied is still schema 1.
+LEDGER_SHA = re.compile(r"[0-9a-fA-F]{40}(?:[0-9a-fA-F]{24})?")
+#: `head_revision` literals that stand in for a LEDGER_SHA commit id.
+HEAD_PLACEHOLDERS = frozenset({UNKNOWN, NOT_APPLICABLE})
+#: `report` literals that stand in for an absolute path, on every subject's events.
+REPORT_PLACEHOLDERS = frozenset({UNKNOWN})
+# `at` holds a timezone-qualified ISO-8601 timestamp, the form chronology.timestamp
+# accepts. `report` and `dispatch_state` hold absolute paths free of NUL bytes
+# (`_absolute`); `dispatch_state` also names an existing file (`_resolve_bound`).
 #: A field name starts with a letter, so no ledger line can set the parser's own `_section` key.
 FIELD = re.compile(r"^- ([a-z][a-z_]*): (.*)$")
 FRONT_FIELD = re.compile(r"^([a-z_]+): (.*)$")
@@ -89,7 +123,7 @@ def ledger_events(path):
             header["schema_version"], LEDGER_SCHEMA_VERSION))
     if LEDGER_SHA.fullmatch(header["base_revision"]) is None:
         raise _unusable(path, "its base_revision {!r} is not a full hexadecimal commit SHA".format(header["base_revision"]))
-    if not os.path.isabs(header["dispatch_state"]) or "\0" in header["dispatch_state"]:
+    if not _absolute(header["dispatch_state"]):
         raise _unusable(path, "its dispatch_state {!r} is not an absolute path free of NUL bytes".format(header["dispatch_state"]))
     events, current = [], None
     for line in text[front.end():].splitlines():
@@ -136,17 +170,22 @@ def _check_formats(path, event):
                         "not_applicable".format(section, head))
     subject = event["subject"]
     if subject not in DECISIONS:
-        raise _unusable(path, "event {} has subject {!r}, not task or assignment".format(section, subject))
+        raise _unusable(path, "event {} has subject {!r}, not {}".format(section, subject, " or ".join(SUBJECTS)))
     if event["decision"] not in DECISIONS[subject]:
         raise _unusable(path, "event {} has decision {!r}, not one of the {} decisions ({})".format(
             section, event["decision"], subject, ", ".join(sorted(DECISIONS[subject]))))
     for key in ASSIGNMENT_IDENTITY:
-        if (event[key] == "not_applicable") != (subject == "task"):
+        if (event[key] == NOT_APPLICABLE) != (subject == "task"):
             raise _unusable(path, "event {} has {} {!r}; a task event carries not_applicable and an assignment "
                             "event its actual value".format(section, key, event[key]))
     report = event["report"]
-    if report != "unknown" and (not os.path.isabs(report) or "\0" in report):
+    if report not in REPORT_PLACEHOLDERS and not _absolute(report):
         raise _unusable(path, "event {} has report {!r}, not an absolute path or unknown".format(section, report))
+
+
+def _absolute(value):
+    """Whether a ledger path field holds an absolute path free of NUL bytes."""
+    return os.path.isabs(value) and "\0" not in value
 
 
 def _resolve_bound(path, dispatch_state):
