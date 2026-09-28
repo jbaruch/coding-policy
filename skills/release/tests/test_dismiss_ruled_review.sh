@@ -287,6 +287,19 @@ t_unmatched_finding_line_refuses() {
   assert_eq "no dismissal" "0" "$(dismissals)"
 }
 
+t_duplicate_review_finding_refuses() {
+  local body
+  body=$(golden_body '{"summary":"Policy loaded: 26 rule files. Twice.","findings":[
+    {"path":"rules/b.md","line":7,"rule":"context-writing-style","severity":"blocking","message":"colon attaches a rationale"},
+    {"path":"rules/b.md","line":7,"rule":"context-writing-style","severity":"blocking","message":"semicolon attaches another"}]}') || return 1
+  set_review CHANGES_REQUESTED "$HEAD_SHA" "$body"
+  write_ruling "$HEAD_SHA" "$DECLINE_TWO"
+  invoke_ruled
+  assert_eq "exit" "1" "$RC" || return 1
+  assert_unmet "duplicate blocking findings" "the duplicate review finding" || return 1
+  assert_eq "nothing posted" "0" "$(wc -l < "$EVENTS" | tr -d ' ')"
+}
+
 t_floor_rule_refuses() {
   set_review CHANGES_REQUESTED "$HEAD_SHA" "$BODY_FLOOR"
   write_ruling "$HEAD_SHA" "FINDING: policy a.sh:1 no-secrets — decline — test token"
@@ -465,6 +478,7 @@ run "a different line does not cover"               t_different_line_does_not_co
 run "same path, different rule refuses"             t_same_path_different_rule_refuses
 run "a duplicate FINDING line refuses"              t_duplicate_finding_line_refuses
 run "an unmatched FINDING line refuses"             t_unmatched_finding_line_refuses
+run "duplicate findings in the review refuse"      t_duplicate_review_finding_refuses
 run "a floor rule refuses"                          t_floor_rule_refuses
 run "a failing check refuses"                       t_failing_check_refuses
 run "pending checks do not refuse"                  t_pending_checks_do_not_refuse

@@ -41,8 +41,9 @@
 #   3. Its `## Blocking findings` section parses in post-review.sh format, one
 #      "- `<path>:<line>` — **<rule>** — <message>" line per finding.
 #   4. FINDING lines and blocking findings pair one-to-one on path, line and
-#      rule: no two FINDING lines share an identity, and every FINDING line
-#      names a blocking finding in the review.
+#      rule: no two blocking findings in the review share an identity, no two
+#      FINDING lines share an identity, and every FINDING line names a
+#      blocking finding in the review.
 #   5. Every blocking finding's FINDING line is defer or decline, and either the
 #      ruling's HEAD is the live head, or the compare API shows the path
 #      unchanged from the ruling's HEAD to the live head (status ahead or
@@ -249,6 +250,14 @@ if out["unmet"]:
 ruling_head = heads[0]
 
 finding_keys = {(f["path"], f["line"], f["rule"]) for f in findings}
+if len(finding_keys) != len(findings):
+    seen, repeated = set(), set()
+    for f in findings:
+        key = (f["path"], f["line"], f["rule"])
+        if key in seen:
+            repeated.add(f"{key[0]}:{key[1]} {key[2]}")
+        seen.add(key)
+    out["unmet"].append(f"the review carries duplicate blocking findings (same path, line and rule): {sorted(repeated)} — no ruling line can pair with each; fix them")
 unmatched = sorted(f"{k[0]}:{k[1]} {k[2]}" for k in entries if k not in finding_keys)
 if unmatched:
     out["unmet"].append(f"FINDING line(s) naming no blocking finding in the review: {unmatched}")

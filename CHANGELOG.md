@@ -35,7 +35,15 @@
     (`--followup-issue`), reusing only a comment identical to the generated
     entry, and dismisses only after that post, with a `JUDGE-RULED:` message.
     The follow-up entry exists by construction, never by an unverified URL.
-    Without `--ruling` it lists the findings to weigh.
+    A review carrying two blocking findings with the same path, line and rule
+    is refused, since no ruling line could pair with each. Without `--ruling`
+    it lists the findings to weigh.
+  - `RULED` trusts the `JUDGE-RULED:` dismissal-message prefix; poll does not
+    re-verify the ruling. The threat model (standing decision from #566)
+    excludes a hostile same-user maintainer, and anyone able to dismiss a
+    review can already merge the PR, so extra evidence would guard nothing.
+    The trust is stated in the poll script header, and ci-safety names a hand
+    dismissal carrying the marker a violation, never a ruled dismissal.
   - `poll-pr-reviews.sh` reads a marker dismissal on the head as the new
     `RULED` state, `watch-pr-reviews.sh` treats it as ready, and
     `dismiss-stale-reviews.sh` counts it as an all-clear. The fleet App stays

@@ -38,6 +38,7 @@ alwaysApply: true
   3. The script posted the ruled findings to the task's follow-up issue before dismissing
   4. The dismissal message carries the script's `JUDGE-RULED:` marker
 - A hand dismissal of a gating policy review is not sanctioned
+- A hand dismissal carrying the marker is a violation of this carve-out, never a ruled dismissal
 - After a ruled dismissal, `skills/release/dismiss-stale-reviews.sh` sweeps the same policy identity's earlier `CHANGES_REQUESTED` reviews, the fleet reviewer included
 - Merging after a ruled dismissal is not a `Never Skip Tests` violation
 - Every other policy-review `CHANGES_REQUESTED` blocks the merge until resolved through review

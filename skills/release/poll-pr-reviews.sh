@@ -46,6 +46,9 @@
 # message starts with RULED_MARKER, meaning a weighing ruling covers every
 # blocking finding in it (rules/ci-safety.md Judge-Ruled-Review Dismissal
 # Carve-Out). Any other dismissal reads "none".
+# `RULED` trusts the `JUDGE-RULED:` dismissal message; only
+# dismiss-ruled-review.sh writes it; a hand dismissal is not sanctioned
+# (rules/ci-safety.md Judge-Ruled-Review Dismissal Carve-Out).
 #
 # `requested` reports exactly one fact: a review request for that login is still
 # pending on the PR. It separates two states a bare `state: "none"` conflates

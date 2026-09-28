@@ -146,7 +146,7 @@ It returns the full `poll-pr-reviews.sh` snapshot plus a `watch` object — `{"r
   - Advisory deferred: `Acknowledged — deferred to <follow-up ref>` (em dash `—`; names where it is tracked)
 - **Marginal blocking finding:** a nominated finding may go to a weighing instead of a fix (`rules/review-severity.md` Judge-Weighed Finding Carve-Out)
   - The operator is the judge
-  - Nominate a finding with a cited reachability claim in the question
+  - Nominate a finding only when it sits on lines the previous fix push added, or with a cited reachability claim marking it marginal
   - Ask one decision question per gate, carrying every nomination
   - Keep fixing while the question is open
   - Treat no answer as `fix`
@@ -177,7 +177,8 @@ It returns the full `poll-pr-reviews.sh` snapshot plus a `watch` object — `{"r
 Only proceed when:
 - Step 5's watcher returned `.watch.result` as `ready` — its exit-0 readiness conjunction (mergeable, CI `success`/`none`, both bots posted, the policy reviewer not `CHANGES_REQUESTED`); the field predicate is the watcher's, not restated here (`rules/script-as-black-box.md` — see `skills/release/watch-pr-reviews.sh` header). `ready` already requires each bot's `state` to have left `none`, so a reviewer that never ran cannot satisfy the gate vacuously, AND
 - Every non-empty `reviews.*.body` in the returned snapshot has been read in full — a `COMMENTED` state with zero inline comments is not a license to skip the body (see `rules/reviewer-feedback-reading.md`), AND
-- Every inline comment from Step 5's `inline_comments` count has a `Fixed in <sha>`, `Declining — <reason>`, or `Acknowledged — deferred to <follow-up ref>` reply per Step 6, a ruled finding's reply citing its ruling (verify by listing the PR's review comments — the poll script tracks counts, not reply state, so the operator confirms thread closure). An advisory comment deferred with the `Acknowledged — deferred` reply closes its thread and never blocks the merge per `rules/review-severity.md`.
+- Every inline comment from Step 5's `inline_comments` count has a `Fixed in <sha>`, `Declining — <reason>`, or `Acknowledged — deferred to <follow-up ref>` reply per Step 6 (verify by listing the PR's review comments — the poll script tracks counts, not reply state, so the operator confirms thread closure). An advisory comment deferred with the `Acknowledged — deferred` reply closes its thread and never blocks the merge per `rules/review-severity.md`, AND
+- A ruled finding's reply cites its ruling, per Step 6.
 
 A `COMMENTED` review never gates the merge on its state alone — but its body must be read before merge, zero inline comments included. With inline comments, it is mergeable once every thread also has a reply. Advisory findings (the reviewer's `## Advisory findings` section, and every Copilot comment) do not block the merge — acknowledge them and defer per `rules/review-severity.md`; only a blocking finding gates.
 
