@@ -61,33 +61,30 @@ main() {
   [ $# -eq 1 ] || die "usage: resolve-gates.sh <checkout>"
   local checkout="$1"
   [ -d "$checkout" ] || die "'${checkout}' is not a directory -- pass the repository checkout"
+  local skill_dir
+  skill_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)" || die "cannot resolve the skill directory -- reinstall the plugin"
 
-  python3 - "$checkout" <<'PY'
-import json, os, stat, sys, unicodedata
+  python3 - "$checkout" "$skill_dir" <<'PY'
+import json, os, stat, sys
 
 checkout = sys.argv[1]
+# The character rule is shared with the report marker and the brief composer
+# (#578): one module, never a copy per script.
+sys.path.insert(0, sys.argv[2])
+from foreman.renderable import offenders
 
 path = os.path.join(checkout, ".herdr", "gates.json")
-
-
-#: Unicode general categories no rendered value may carry: controls (Cc),
-#: format characters such as bidi overrides (Cf), surrogates (Cs), line and
-#: paragraph separators (Zl, Zp), private-use (Co) and unassigned (Cn) code
-#: points. A class, not a list of characters, so a new separator is covered.
-UNRENDERABLE_CATEGORIES = frozenset({"Cc", "Cf", "Cs", "Zl", "Zp", "Co", "Cn"})
 
 
 def refuse_unrenderable(value, label, code_span, remedy):
     """Refuse text the GATES block cannot carry intact.
 
     Every brief renders these values into Markdown, one value per line. A
-    character in UNRENDERABLE_CATEGORIES breaks a line, reorders or hides
+    character foreman/renderable.py refuses breaks a line, reorders or hides
     text, or fails path resolution; a backtick closes the code span a path
     renders in.
     """
-    bad = sorted({char for char in value
-                  if unicodedata.category(char) in UNRENDERABLE_CATEGORIES
-                  or (code_span and char == "`")})
+    bad = offenders(value, code_span)
     if bad:
         sys.stderr.write("resolve-gates: {} {!r} carries {}, which the briefs' Markdown GATES block "
                          "cannot render intact. {}\n".format(
