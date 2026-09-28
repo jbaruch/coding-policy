@@ -33,32 +33,30 @@ The operator requests Copilot via `skills/release/request-copilot-review.sh <own
 
 ## Weighed findings and the ruled dismissal
 
-Reference for Step 6 — how a marginal blocking finding reaches a weighing and how a ruling clears the gating policy review (`rules/review-severity.md` Judge-Weighed Finding Carve-Out; `rules/ci-safety.md` Judge-Ruled-Review Dismissal Carve-Out).
+Reference for Step 6 — how a marginal blocking finding reaches a weighing and how the operator's ruling clears the gating policy review (`rules/review-severity.md` Judge-Weighed Finding Carve-Out; `rules/ci-safety.md` Judge-Ruled-Review Dismissal Carve-Out). The operator is the judge; the agent nominates.
 
-### Who rules
+### The question
 
-- **Herdr team round:** the pinned judge writes the ruling (`rules/agent-team-operation.md` Judge Seat).
-- **Standalone:** the operator is the judge. Nominate only a finding on lines the previous fix push added, or one you mark `MARGINAL:` with a cited path from input to the flagged line. Ask one question per gate, carrying every nomination:
+Nominate only a finding on lines the previous fix push added, or one you can support with a cited reachability claim — a path from input to the flagged line, with file and line citations. The claim travels in the question itself; no separate report is needed. Ask one question per gate, carrying every nomination:
 
-  ```text
-  Weighing request at <head sha>. For each finding answer fix, defer or decline:
-  1. <source> <path>:<line> <rule> — <finding text> — nominated because <added by last fix | MARGINAL: reachability claim with citation>
-  I keep fixing meanwhile; no answer means fix.
-  ```
+```text
+Weighing request at <head sha>. For each finding answer fix, defer or decline:
+1. <source> <path>:<line> <rule> — <finding text> — nominated because <added by the last fix push | reachability claim with citations>
+Floors are always fix. I keep fixing meanwhile; no answer means fix.
+```
 
-  The question never blocks. Keep working the fix loop; a finding the operator has not answered stays blocking.
+The question never blocks. Keep working the fix loop; a finding the operator has not answered stays blocking.
 
 ### The ruling file
 
-The format is in the `skills/release/dismiss-ruled-review.sh` header. A standalone ruling carries the operator's answer verbatim on an `ANSWER:` line and one `FINDING:` line per answered finding, written from that answer. Keep the file for the life of the PR; the dismissal message pins its sha256 digest.
+Write the operator's answer into a ruling file. Its format, `SCHEMA` version, required `ANSWER:` line and writer/reader contract are in the `skills/release/dismiss-ruled-review.sh` header. Keep the file for the life of the PR; the dismissal message pins its sha256 digest.
 
 ### Order of work
 
-1. `defer`: add the finding to the task's follow-up issue, citing the ruling. Its URL is the script's `--followup`.
-2. Run `dismiss-ruled-review.sh` with `--ruling` (Step 6 command block). Exit 1 names each unmet condition in `.unmet`; fix those findings instead.
-3. Reply citing the ruling, with `<digest>` the 16-hex digest from the script's `.message`. Policy findings live in the review body, so their replies go in one PR comment; Copilot findings get a reply on their own thread:
-   - Declined: `Declining — judge ruling <digest>: <reply from the ruling>`
-   - Deferred: `Acknowledged — deferred to <follow-up ref> (judge ruling <digest>)`
-4. Run `dismiss-stale-reviews.sh` (Step 7), then re-run the Step 5 watcher. `poll-pr-reviews.sh` reads the dismissed review as `RULED`, which the watcher's ready test accepts.
+1. Run `dismiss-ruled-review.sh` with `--ruling` and `--followup-issue` (Step 6 command block). It posts the ruled findings to the follow-up issue — `defer`, or `decline` labelled won't-fix — then dismisses the review. Exit 1 names each unmet condition in `.unmet`; fix those findings instead.
+2. Reply citing the ruling, with `<digest>` the 16-hex digest from the script's `.message`. Policy findings live in the review body, so their replies go in one PR comment; Copilot findings get a reply on their own thread:
+   - Declined: `Declining — judge ruling <digest>: <reason from the ruling>`
+   - Deferred: `Acknowledged — deferred to #<follow-up issue> (judge ruling <digest>)`
+3. Run `dismiss-stale-reviews.sh` (Step 7), then re-run the Step 5 watcher. `poll-pr-reviews.sh` reads the dismissed review as `RULED`, which the watcher's ready test accepts.
 
-A later push re-runs the policy reviewer; run the script again with the same ruling. A re-raised finding stays covered while its file is unchanged from the ruling's `HEAD:`; the script checks that through the compare API. Any other re-raise goes back to a weighing or the fix loop.
+A later push re-runs the policy reviewer. Run the script again with the same ruling: it dismisses the new review when the ruling still covers it, and exits 1 naming each finding it no longer covers otherwise. Those go back to a new question or the fix loop.

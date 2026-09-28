@@ -2,41 +2,48 @@
 
 ### Added
 
-- **A judge can weigh a marginal blocking finding, and a ruling clears the
-  gating policy review (Part of #632, PR A of 2: release side).** Blocking
-  findings whose fix costs more than the failure they prevent had no exit
-  short of a `stop` diagnosis. #616 spent 12 fix rounds, and #624 and
-  #627/#617 churned on marginal findings the previous fix round had itself
-  introduced. The reviewer kept finding something one line deeper, and every
-  round was a full re-review.
-  - `rules/review-severity.md` gains the Judge-Weighed Finding Carve-Out. A
-    completed weighing ruling may rule a nominated blocking finding `defer`
-    (tracked in the task's follow-up issue) or `decline`, when the finding's
-    file is unchanged from the ruling's `HEAD:` and no floor applies: failing
-    checks, reachable security or data-loss defects, `no-secrets` and
-    `ci-safety` findings, unmet carve-out preconditions, and operator-stated
-    acceptance criteria are always `fix`. In standalone mode the operator is
-    the judge: the agent asks one non-blocking question per gate, keeps
-    fixing, reads no answer as `fix`, and records the answer verbatim as the
-    ruling file.
+- **The operator can weigh a marginal blocking finding, and the ruling clears
+  the gating policy review (Part of #632, PR A of 2: release side, standalone
+  only).** Blocking findings whose fix costs more than the failure they
+  prevent had no exit short of a `stop` diagnosis. #616 spent 12 fix rounds,
+  and #624 and #627/#617 churned on marginal findings the previous fix round
+  had itself introduced. The reviewer kept finding something one line deeper,
+  and every round was a full re-review.
+  - `rules/review-severity.md` gains the Judge-Weighed Finding Carve-Out, in
+    standalone mode only; PR B adds the Herdr judge seat. The agent nominates
+    a finding on lines the previous fix push added, or one it backs with a
+    cited reachability claim, in one non-blocking question per gate. It keeps
+    fixing meanwhile, and no answer means `fix`. The operator's verbatim
+    answer becomes the ruling file. A `defer` or `decline` ruling lets the
+    finding ship only while its file is unchanged from the ruling's `HEAD:`,
+    under no floor, and entered in the task's follow-up issue, `decline`
+    labelled won't-fix, so no outcome goes untracked. The operator rules
+    `fix` on every floor; the script refuses the rule-id floors and failing
+    checks, and classifies no judgment floor.
   - `rules/ci-safety.md` gains the Judge-Ruled-Review Dismissal Carve-Out:
     the policy reviewer's latest `CHANGES_REQUESTED` on the head is dismissed
-    only through `skills/release/dismiss-ruled-review.sh`, never by hand. The
-    Superseded-Bot-Review carve-out counts a ruled dismissal as an all-clear.
-  - New `skills/release/dismiss-ruled-review.sh` checks the ruling against
-    the review's `## Blocking findings`, carries a ruling across heads only
-    while the finding's path is unchanged per the compare API, refuses floor
-    rules and failing checks, requires `--followup` for a `defer`, and
-    dismisses with a `JUDGE-RULED:` message. Without `--ruling` it lists the
-    findings to weigh.
+    only through `skills/release/dismiss-ruled-review.sh`, never by hand, and
+    the stale sweep then clears that identity's earlier requests, the fleet
+    reviewer included.
+  - New `skills/release/dismiss-ruled-review.sh`. The ruling file is a
+    versioned artifact (`SCHEMA: 1`, owned by the release skill, read only by
+    this script), and a ruling without a non-empty `ANSWER:` line is refused.
+    FINDING lines pair one-to-one with the review's blocking findings on path,
+    line and rule; duplicate and unmatched lines are refused. A ruling carries
+    to a later head only while the path is unchanged per the compare API. The
+    script posts the ruled findings to the follow-up issue itself
+    (`--followup-issue`), reusing a comment that already cites the ruling
+    digest, and dismisses only after that post, with a `JUDGE-RULED:` message.
+    The follow-up entry exists by construction, never by an unverified URL.
+    Without `--ruling` it lists the findings to weigh.
   - `poll-pr-reviews.sh` reads a marker dismissal on the head as the new
     `RULED` state, `watch-pr-reviews.sh` treats it as ready, and
-    `dismiss-stale-reviews.sh` counts it as an all-clear. The marker is
-    pinned equal across the three scripts by a test.
-  - Release skill Step 6 and `REVIEW_DETAILS.md` carry the standalone
-    question, the ruling file, the order of work and the reply literals
-    citing the ruling. PR B wires the Herdr judge seat, the churn signal and
-    the worker briefs.
+    `dismiss-stale-reviews.sh` counts it as an all-clear. The fleet App stays
+    out of `GATING_BOTS` and is swept only after a ruled dismissal. The marker
+    is pinned equal across the three scripts by a test.
+  - Release skill Step 6 and `REVIEW_DETAILS.md` carry the question template,
+    the ruling file pointer, the order of work and the reply literals citing
+    the ruling.
 
 ## 0.3.329 — 2026-09-28
 

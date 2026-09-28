@@ -144,17 +144,27 @@ It returns the full `poll-pr-reviews.sh` snapshot plus a `watch` object — `{"r
   - Accepted: `Fixed in <sha>` (literal phrase; `Done` / `Accepted and fixed` do not satisfy)
   - Declined: `Declining — <reason with cited evidence>` (em dash `—`, not hyphen or period)
   - Advisory deferred: `Acknowledged — deferred to <follow-up ref>` (em dash `—`; names where it is tracked)
-- **Marginal blocking finding:** a nominated finding may go to a weighing instead of a fix (`rules/review-severity.md` Judge-Weighed Finding Carve-Out). Standalone, the operator is the judge: ask one decision question per gate naming every nomination, keep fixing while it is open, and treat no answer as `fix`. The ruling-file format, the standalone question and the reply literals for a ruled finding are in:
+- **Marginal blocking finding:** a nominated finding may go to a weighing instead of a fix (`rules/review-severity.md` Judge-Weighed Finding Carve-Out)
+  - The operator is the judge
+  - Nominate a finding with a cited reachability claim in the question
+  - Ask one decision question per gate, carrying every nomination
+  - Keep fixing while the question is open
+  - Treat no answer as `fix`
+  - The question template, ruling file and reply literals are in:
 
   ```text
   skills/release/REVIEW_DETAILS.md
   ```
 
-- **Ruled policy review:** once a ruling covers every blocking finding, list or dismiss with the script below. Without `--ruling` it lists the blocking findings to name in the question; with it, it dismisses the review only when its predicate holds. Exit 0 dismissed, noop or listed; 1 predicate unmet, `.unmet` naming each failed condition; 2 usage or API error. The predicate is the script's — see `skills/release/dismiss-ruled-review.sh` header, not restated here (`rules/script-as-black-box.md`):
+- **Ruled policy review:** list or dismiss with the script below
+  - Without `--ruling` it lists the blocking findings to name in the question
+  - With `--ruling` it posts the ruled findings to the follow-up issue, then dismisses the review, only when its predicate holds
+  - Exit 0 dismissed, noop or listed; 1 predicate unmet, `.unmet` naming each failed condition; 2 usage or API error
+  - The predicate is the script's — see `skills/release/dismiss-ruled-review.sh` header, not restated here (`rules/script-as-black-box.md`)
 
   ```bash
   CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"; [ -d "$CP" ] || case "$(git config --get remote.origin.url)" in git@github.com:jbaruch/coding-policy|git@github.com:jbaruch/coding-policy.git|https://github.com/jbaruch/coding-policy|https://github.com/jbaruch/coding-policy.git|ssh://git@github.com/jbaruch/coding-policy|ssh://git@github.com/jbaruch/coding-policy.git) CP=. ;; *) echo "coding-policy plugin not found: run tessl install jbaruch/coding-policy" >&2; exit 1 ;; esac
-  bash "$CP/skills/release/dismiss-ruled-review.sh" <owner> <repo> <pr-number> --ruling <ruling-file> [--followup <follow-up-url>]
+  bash "$CP/skills/release/dismiss-ruled-review.sh" <owner> <repo> <pr-number> --ruling <ruling-file> --followup-issue <issue-number>
   ```
 
 - Push fixes to the same branch
