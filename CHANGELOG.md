@@ -129,6 +129,30 @@
   version after a clear was swallowed as a replay; it now records a fresh
   gate. `scoring.py calibrate` also keeps only the pinned Jev model's labels.
 
+## 0.3.326 — 2026-09-28
+
+### Fixed
+
+- **The Go module-cache predicate in `prune-report-caches.py` no longer
+  takes evidence with it (#628).** Once `cache/download` existed, every
+  top-level directory of a `go-mod-cache` counted as cache, so a
+  `findings/report.md` left beside it was deleted, breaking the
+  "non-cache content is kept" contract. Only `cache/` and module path roots
+  the download cache backs now qualify: a dotted host with
+  `cache/download/<host>/`, or a `<module>@<version>` entry with
+  `cache/download/<module>/@v/`. A name that merely contains a dot or an `@`
+  (`findings.v1/`, `report@draft/`) is not enough; any other top-level entry
+  leaves the whole directory in place. A recorded reports
+  directory that fails to open with `ENOTDIR` is now classified by a
+  no-follow stat of the component that failed: a regular file (or other
+  non-directory) is `missing`, a symlink stays `symlink` (Linux reports
+  `ENOTDIR` for a symlink opened with `O_NOFOLLOW|O_DIRECTORY`, macOS
+  `ELOOP`), and a stat failure or a tree that reads whole again is `failed`,
+  never `missing`. The two swap-race findings
+  from #624's review were declined: more descriptor hardening is not the
+  answer, a smaller report-instead-of-delete design is, if a real case
+  appears. Fixes #628.
+
 ## 0.3.325 — 2026-09-28
 
 ### Fixed
