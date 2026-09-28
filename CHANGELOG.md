@@ -1,5 +1,25 @@
 # Changelog
 
+### Fixed
+
+- **A frozen dispatch's identity and sent prompt now come from the bytes its
+  freeze verified (#565).** #554 (0.3.292) made `freeze_paths` write and verify
+  each frozen copy through a no-follow descriptor walk, but in the same `apply`
+  call the readers after it went back to the copies by pathname:
+  `recovery.dispatch_identity`, `recovery.brief_identity`,
+  `assign.tiered_prompt`, the REPORT-marker width check and the slice-boundary
+  check. A copy's ancestor directory swapped for a link in that interval was
+  followed there, so the recorded fingerprint and the prompt hash the worker
+  received could describe bytes other than the ones verified. `freeze_paths`
+  now returns a `FrozenPaths` carrying each copy's verified bytes, and every
+  one of those readers takes them through the new `recovery.briefing_bytes`;
+  replays and dry runs, which freeze nothing, still read their source paths.
+  `recover-report` gets the same treatment: its prompt-hash and fingerprint
+  checks use the bytes the brief's receipt recorded, instead of a second read
+  that could let the receipt bind bytes the hash never checked. Regressions
+  swap the frozen directory for a decoy between the freeze and the identity,
+  and swap a brief between its receipt and the prompt-hash check.
+
 ## 0.3.310 — 2026-09-28
 
 ### Fixed
