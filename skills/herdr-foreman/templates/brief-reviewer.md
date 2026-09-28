@@ -79,9 +79,6 @@ Write `{{REPORT}}` covering:
   implementation you originated. The owner script reads this line; an omitted
   line records as `design`. A `none` is your own word and never clears you for
   independent verification of this task.
-- When this brief names another dispatch whose contribution to classify, one
-  `CONTRIBUTION-REVIEW <dispatch>: none | design | implementation` line for it,
-  with the evidence you inspected.
 - What you deliberately did not flag, and why.
 
 Final chat message ends with exactly:

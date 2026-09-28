@@ -125,7 +125,6 @@ description: Running a multi-agent team — task-based specialist composition, c
 - Record delivered report evidence and the contribution the report declares before relying on a consultation outcome
 - A report declaring no contribution class records `design`
 - A worker's own `CONTRIBUTION: none` never clears a contributor exclusion
-- A verification-scope reviewer's independent `CONTRIBUTION-REVIEW` of that dispatch is the evidence that clears it
 - Narrow exception for retaining an assessed consultation's context.
 - Preconditions (all required):
   1. The foreman requests `--retain-specialist` for one advisor, investigator or architect assignment
@@ -580,7 +579,7 @@ description: Running a multi-agent team — task-based specialist composition, c
 - Exclude actual design and implementation contributors from independent verification of that task
 - A role, model or session change never erases contribution history
 - Treat unassessed possible contributions as unresolved independence evidence
-- A worker's self-declared `none` is unresolved independence evidence
+- A self-declared contribution class follows Specialist Consultations
 - Record legacy reviewer responsibilities as unknown until evidence establishes their contribution
 - Before a PR exists, the developer's own evidence is the branch CI its push triggered
 - On an open PR, the developer reads that evidence with `skills/release/poll-pr-reviews.sh`, never the pre-merge watch
