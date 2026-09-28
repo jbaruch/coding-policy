@@ -16,6 +16,8 @@
 #   3. Portable mode        -> nothing removed; the status names the command.
 #   4. Worker session       -> HERDR_ENV in a linked worktree: nothing removed,
 #                              nothing printed.
+#  11. Herdr, main checkout -> HERDR_ENV in a main checkout: nothing removed,
+#                              nothing printed.
 #   5. Portable, linked     -> nothing removed, nothing printed.
 #   6. Unusable ledger      -> a could-not-check line, nothing removed.
 #   7. Out of time          -> a stand-in runner reports the timeout; a
@@ -168,6 +170,13 @@ main() {
   if [[ "$RC" == 0 && -d "$top/developer-evidence/venv" ]] \
       && [[ "$(context "$OUT")" == *"REPORT_CACHES_BUDGET_SEC is not a positive whole number"* ]]; then pass
   else fail "case 10: rc=$RC out=$OUT"; fi
+
+  echo "11. a Herdr session in a main checkout deletes nothing"
+  case="$TMP/c11"; mkdir -p "$case" || die "mkdir failed"
+  top="$(build "$case")" || die "fixture build failed"
+  run_hook "$case" "$repo" HERDR_ENV=1
+  if [[ "$RC" == 0 && -z "$OUT" && -d "$top/developer-evidence/venv" ]]; then pass
+  else fail "case 11: rc=$RC out=$OUT"; fi
 
   echo ""
   echo "passed: $PASS, failed: $FAIL"

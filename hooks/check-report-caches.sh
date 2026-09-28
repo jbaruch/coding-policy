@@ -10,11 +10,12 @@
 # This hook runs it live, so the safe mechanical fix happens without a word
 # beyond the bytes it reclaimed.
 #
-# Mode, mirroring hooks/check-leftover-worktrees.sh:
-#   - Herdr worker session (HERDR_ENV set, even empty) in a linked worktree,
-#     or in a checkout git cannot place: nothing runs, nothing is printed.
-#     Workers never delete (rules/agent-team-operation.md Writers and
-#     Checkouts).
+# Mode:
+#   - Herdr session (HERDR_ENV set, even empty), wherever it sits: nothing
+#     runs, nothing is printed. A worker may sit in any checkout, a read-only
+#     role in the shared one, and workers never delete
+#     (rules/agent-team-operation.md Writers and Checkouts); the operator's
+#     own sessions do the pruning.
 #   - Portable mode (SESSION_START_MODE=portable, set by
 #     hooks/session-start.sh under `tessl hook run`, which strips HERDR_ENV):
 #     a linked worktree may be a worker's, so nothing runs there; anywhere
@@ -28,7 +29,7 @@
 #           status holds "Session-start status — " paragraphs: the caches
 #           removed (or, in portable mode, removable) with their total size,
 #           the removals that failed, and a "could not check" line when the
-#           ledger could not be read, the owner script failed or ran out of
+#           owner script could not check (its exit 3), failed or ran out of
 #           time, or python3 is missing, each with the command to rerun.
 #           Silent when there is nothing to report and in the skipped modes.
 #   stderr: the owner script's diagnostics, relayed, plus this hook's warnings.
@@ -94,12 +95,11 @@ linked_worktree() {
 }
 
 main() {
-  local mode="${SESSION_START_MODE:-native}" linked
-  linked="$(linked_worktree)"
-  if [[ -n "${HERDR_ENV+x}" && "$linked" != no ]]; then
+  local mode="${SESSION_START_MODE:-native}"
+  if [[ -n "${HERDR_ENV+x}" ]]; then
     return 0
   fi
-  if [[ "$mode" == portable && "$linked" != no ]]; then
+  if [[ "$mode" == portable && "$(linked_worktree)" != no ]]; then
     return 0
   fi
   if ! command -v python3 >/dev/null; then
@@ -193,7 +193,7 @@ shape_ok = (isinstance(doc, dict) and isinstance(doc.get("caches"), list) and is
             and all(isinstance(c, dict) and isinstance(c.get("path"), str) for c in doc["caches"])
             and all(isinstance(f, dict) and isinstance(f.get("path"), str) and isinstance(f.get("error"), str)
                     for f in doc["failed"]))
-if rc not in ("0", "2") or not shape_ok:
+if rc not in ("0", "2", "3") or not shape_ok:
     emit([head + "could not prune build caches from Herdr reports directories: the owner script exited {} "
           "without a readable result; run {} to see why.".format(rc, rerun)])
     sys.exit(0)

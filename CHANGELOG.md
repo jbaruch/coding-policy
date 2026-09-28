@@ -38,10 +38,13 @@
     without a valid marker, is never touched.
   - New session-start hook `hooks/check-report-caches.sh` runs it live and
     reports the reclaimed size: the fix is mechanical and the caches are
-    regenerable, so the hook acts rather than warns. It mirrors
-    `check-leftover-worktrees.sh`'s mode policy (nothing in a Herdr worker's
-    linked worktree, a dry run under tessl, nothing under tessl in a linked
-    worktree).
+    regenerable, so the hook acts rather than warns. It runs nothing in any
+    Herdr session, since a worker (a read-only one included) can sit in the
+    shared checkout and workers never delete; the operator's own sessions do
+    the pruning. Under tessl it dry-runs, and skips a linked worktree, as
+    `check-leftover-worktrees.sh` does. The owner script exits 3 when it
+    could not check (an unreadable ledger, supervision store or state root)
+    so that failure is never a silent success.
   - Prevention: `rules/agent-team-operation.md` Writers and Checkouts and
     the workers' `COMMON.md` keep build and package caches at the tool's
     default location or in a scratch directory removed at assignment end.

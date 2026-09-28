@@ -20,13 +20,13 @@ Covers:
   7. Read-only cache     -> a Go module cache with read-only dirs is removed.
   8. Interrupted removal -> a leftover tombstone carrying its kind marker is
                             finished; a suffixed directory without one stays.
-  9. Unusable ledger     -> could_not_check, nothing removed, exit 0.
+  9. Unusable ledger     -> could_not_check, nothing removed, exit 3.
  10. No ledger           -> nothing to do, exit 0.
  11. Out of budget       -> incomplete, nothing started after the budget.
  12. Usage error         -> a non-positive or non-finite budget exits 1.
  13. Active assignment   -> an active supervision enrollment whose report is
                             in the directory keeps it whole, however old.
- 14. Unusable supervision-> could_not_check, nothing removed.
+ 14. Unusable supervision-> could_not_check, nothing removed, exit 3.
  15. Marked, not renamed -> a cache a killed run marked but never renamed is
                             removed on the next run, never stuck.
  16. Swap race           -> a directory replaced by a symlink between the
@@ -357,7 +357,7 @@ class PruneReportCachesTests(unittest.TestCase):
         Path(str(self.fx.state) + ".supervision.json").write_text("{not json")
         age(top)
         rc, doc, err = run(self.fx)
-        self.assertEqual(rc, 0, err)
+        self.assertEqual(rc, 3, err)
         self.assertIsNotNone(doc["could_not_check"])
         self.assertEqual(doc["caches"], [])
         self.assertTrue((top / CACHE_PATHS["virtualenv"]).is_dir())
@@ -368,7 +368,8 @@ class PruneReportCachesTests(unittest.TestCase):
         self.fx.state.write_text("{not json")
         age(top)
         rc, doc, err = run(self.fx)
-        self.assertEqual(rc, 0, err)
+        self.assertEqual(rc, 3, err)
+        self.assertIn("nothing removed", err)
         self.assertIsNotNone(doc["could_not_check"])
         self.assertEqual(doc["caches"], [])
         self.assertTrue((top / CACHE_PATHS["virtualenv"]).is_dir())

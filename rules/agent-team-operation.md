@@ -317,7 +317,7 @@ description: Running a multi-agent team — task-based specialist composition, c
 - The session-start hook `hooks/check-report-caches.sh` removes build and package caches from idle reports directories through `skills/herdr-foreman/prune-report-caches.py`
 - Its discovery, idleness and cache predicates live in that script's top-of-file docstring
 - It never removes an evidence file
-- In a Herdr worker session, it deletes nothing
+- In a Herdr session, it runs nothing
 - Under tessl (portable mode), it reports from a dry run and deletes nothing
 - Under tessl, it skips a linked worktree
 - Narrow exception for a task-owned fixture root outside the reports directory

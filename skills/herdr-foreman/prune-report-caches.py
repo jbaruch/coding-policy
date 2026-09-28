@@ -82,8 +82,9 @@ Contract:
           ledger, the supervision store or ROOT could not be read; nothing
           is removed then.
   stderr: diagnostics.
-  exit  : 0 done (including could_not_check); 2 when any removal failed
-          (the JSON still names each); 1 on a usage error.
+  exit  : 0 done; 2 when any removal failed; 3 on could_not_check (the
+          JSON is printed either way, and stderr names the cause); 1 on a
+          usage error. An absent state file is no prior state, exit 0.
 """
 
 import argparse
@@ -557,6 +558,10 @@ def main(argv=None):
     args = parse(sys.argv[1:] if argv is None else argv)
     result = run(args)
     print(json.dumps(result))
+    if result["could_not_check"]:
+        print("prune-report-caches: nothing removed — {}; restore it, then re-run".format(
+            result["could_not_check"]), file=sys.stderr)
+        return 3
     for failure in result["failed"]:
         print("prune-report-caches: could not remove {}: {} — check its permissions, then re-run".format(
             failure["path"], failure["error"]), file=sys.stderr)
