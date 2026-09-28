@@ -1469,6 +1469,35 @@ class ExportTests(unittest.TestCase):
             c.extract_archive(self.archive_bytes(self.output), self.base / "link/download")
         self.assertEqual(list(outside.iterdir()), [])
 
+    def test_existing_destination_behind_symlinked_parent_refuses_before_comparing(self):
+        # Prepopulated outside with the exact archive content: a comparison through the link would accept it.
+        self.seal()
+        data = self.archive_bytes(self.output)
+        outside = self.base / "outside"; outside.mkdir()
+        c.extract_archive(data, outside / "download")
+        (self.base / "link").symlink_to(outside, target_is_directory=True)
+        with mock.patch.object(c, "members", wraps=c.members) as compared:
+            with self.assertRaisesRegex(c.Refusal, "Download destination .* ancestor link is a symlink"):
+                c.extract_archive(data, self.base / "link/download")
+        compared.assert_not_called()
+
+    def test_existing_destination_with_parent_traversal_refuses(self):
+        self.seal()
+        data = self.archive_bytes(self.output)
+        destination = self.base / "download"
+        c.extract_archive(data, destination)
+        (self.base / "inner").mkdir()  # The traversal must resolve, so the existing-destination branch runs.
+        with self.assertRaisesRegex(c.Refusal, "must not contain \\.\\. components"):
+            c.extract_archive(data, self.base / "inner" / ".." / "download")
+
+    def test_seal_output_behind_symlinked_ancestor_refuses_without_writing_outside(self):
+        outside = self.base / "outside"; (outside / "sub").mkdir(parents=True)
+        (self.base / "link").symlink_to(outside, target_is_directory=True)
+        self.output = self.base / "link/sub/export"
+        with self.assertRaisesRegex(c.Refusal, "Export destination parent .* ancestor link is a symlink"):
+            self.seal()
+        self.assertEqual(list((outside / "sub").iterdir()), [])
+
     def test_clean_archive_roundtrip(self):
         self.seal(); buffer = io.BytesIO()
         with zipfile.ZipFile(buffer, "w") as archive:
@@ -1551,6 +1580,39 @@ class WriteTests(unittest.TestCase):
         with self.assertRaisesRegex(c.Refusal, "does not exist; create it"):
             c.write_new(root / "absent", root / "absent/manifest.json", b"{}")
         self.assertEqual(list(outside.iterdir()), [])
+
+    def test_symlinked_ancestor_of_the_root_refuses_without_writing_outside(self):
+        # O_NOFOLLOW on the root alone constrains only its last component; link/sub/download
+        # would walk through <link> into <outside>.
+        root, outside = self.dirs()
+        (outside / "sub/download").mkdir(parents=True)
+        (root / "link").symlink_to(outside, target_is_directory=True)
+        anchor = root / "link/sub/download"
+        for writer in (c.write_new, c.write_private):
+            with self.subTest(writer=writer.__name__):
+                with self.assertRaisesRegex(c.Refusal, "ancestor link is a symlink or not a directory"):
+                    writer(anchor, anchor / "manifest.json", b"{}")
+                self.assertEqual(list((outside / "sub/download").iterdir()), [])
+
+    def test_relative_root_is_walked_from_slash(self):
+        root, _ = self.dirs()
+        previous = os.getcwd()
+        self.addCleanup(os.chdir, previous)
+        os.chdir(root)
+        (root / "inner").mkdir()
+        c.write_new(Path("inner"), Path("inner/relative.json"), b"{}")
+        self.assertEqual((root / "inner/relative.json").read_bytes(), b"{}")
+
+    def test_system_temporary_alias_spelling_still_writes(self):
+        # macOS spells gettempdir through the /var -> /private/var system link; that one is allowed.
+        root, _ = self.dirs()
+        if sys.platform == "darwin" and str(root).startswith("/private/var/"):
+            root = Path(str(root).removeprefix("/private"))
+        for writer in (c.write_new, c.write_private):
+            with self.subTest(writer=writer.__name__):
+                target = root / writer.__name__ / "alias.json"
+                writer(root, target, b"{}")
+                self.assertEqual(target.read_bytes(), b"{}")
 
     def test_different_existing_content_tells_the_operator_to_keep_the_root_and_rerun_fresh(self):
         root, _ = self.dirs()
