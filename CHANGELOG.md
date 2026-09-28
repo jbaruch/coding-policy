@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.329 — 2026-09-28
+
 ### Changed
 
 - **The report classifier asks atomic questions, frames the report as data,
