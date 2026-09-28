@@ -38,7 +38,17 @@
 
 set -uo pipefail
 
-HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd && printf x)"
+# Command substitution strips every trailing newline, so the script directory
+# never passes through one bare: parameter expansion derives it (#487), and a
+# sentinel carries `pwd` across the strip (#466).
+case "${BASH_SOURCE[0]}" in
+  */*) HERE_SRC="${BASH_SOURCE[0]%/*}" ;;
+  *) HERE_SRC=. ;;
+esac
+if ! HERE="$(cd -- "${HERE_SRC:-/}" && pwd && printf x)"; then
+  echo "evaluate: cannot enter the script directory ${HERE_SRC:-/} — restore read and search access to the plugin directory, or reinstall the plugin, then re-run" >&2
+  exit 2
+fi
 HERE="${HERE%x}"
 HERE="${HERE%$'\n'}"
 
@@ -113,8 +123,9 @@ PY
 
 main() {
   local state_root="${XDG_STATE_HOME:-${HOME}/.local/state}"
-  local skill_dir
-  skill_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)" || die "cannot resolve the skill directory"
+  # HERE is absolute, so its parent comes from parameter expansion too (#487).
+  local skill_dir="${HERE%/*}"
+  skill_dir="${skill_dir:-/}"
   local limit=0 since="" model="" agent="claude" state="" corpus_only=0
   while [ $# -gt 0 ]; do
     case "$1" in

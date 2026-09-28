@@ -59,9 +59,9 @@ from .herdr import (
 from .composer import COMPOSER_READ_LINES, COMPOSER_READ_SOURCE, checkable
 from .probe import PROBE_READ_LINES, PROBE_READ_SOURCE, resolve_status, stderr_warn
 from .chronology import latest_assignment
-from .recovery import JUDGE_MODES, empty_recovery, fresh_transition, task_record, validate_work
+from .recovery import JUDGE_MODES, briefing_bytes, empty_recovery, fresh_transition, task_record, validate_work
 from .launch import restart_worker, verify_running, verify_running_permissions
-from .tiers import canonical_role, launch_flags, require_seatable, worker_launch_args
+from .tiers import EFFORT_RANK, canonical_role, launch_flags, require_seatable, still_de_escalated, worker_launch_args
 from .report_delivery import marker_columns
 from .composition import normalize_requirement, parse_requirements, seat_holds
 
@@ -101,13 +101,16 @@ def assignment_text(role, common_path, brief_path):
     )
 
 
-def tiered_prompt(text, tier, common, brief):
-    """Hash length-framed dispatch inputs, excluding this metadata footer."""
+def tiered_prompt(text, tier, common, brief, contents=None):
+    """Hash length-framed dispatch inputs, excluding this metadata footer.
+
+    `contents` is `briefing_bytes`'s map of verified frozen bytes (#565).
+    """
     digest = hashlib.sha256()
     parts = [text.encode("utf-8")]
     for path in (common, brief):
         try:
-            parts.append(Path(path).read_bytes())
+            parts.append(briefing_bytes(path, contents))
         except OSError as exc:
             raise UsageError("Cannot read briefing file {}: {}. Restore readability or correct its --common/--brief path before dispatch.".format(
                 path, exc.strerror or str(exc)), {"path": str(path)}) from None
@@ -226,6 +229,20 @@ def freeze_decision(assignments, is_replay):
     return "source"
 
 
+class FrozenPaths(dict):
+    """Frozen copy paths by key, with `contents`: each copy's path mapped to the bytes its freeze verified.
+
+    A consumer reading the copy again by name would follow an ancestor swapped
+    for a link after the freeze, so the dispatch's identity and its sent
+    prompt could be computed from other bytes than the ones verified (#565).
+    Consumers take `contents` through `recovery.briefing_bytes` instead.
+    """
+
+    def __init__(self, paths, contents):
+        super().__init__(paths)
+        self.contents = contents
+
+
 def freeze_paths(paths):
     """Copy each brief, and the common brief, to a content-addressed file nothing rewrites.
 
@@ -237,8 +254,9 @@ def freeze_paths(paths):
     sha256, so the same brief freezes to the same file and a retry is unchanged.
     The copy sits under the source directory's canonical path: `read_frozen`
     refuses a link anywhere on the way, so an alias could never be read back (#554).
+    Returns a `FrozenPaths` carrying the verified bytes to every later reader (#565).
     """
-    frozen = {}
+    frozen, contents = {}, {}
     for key, source in paths.items():
         # Canonical first, then one descriptor for that directory, held
         # through both the read and the write: a path resolved twice would let
@@ -260,7 +278,8 @@ def freeze_paths(paths):
         # link-refusing walk the gate uses (#554).
         _require_frozen_copy(target, digest)
         frozen[key] = str(target)
-    return frozen
+        contents[str(target)] = data
+    return FrozenPaths(frozen, contents)
 
 
 def _close(fd):
@@ -654,6 +673,27 @@ def validate_fix_history(assignments, history, task, fix_round):
         )
 
 
+def retained_tier(agent, wanted, previous_tier):
+    """The tier a retained fix round runs at: the planned row at the kept effort.
+
+    A retained session never switches model or raises effort. It keeps the
+    preceding round's verified effort, and with it that round's cost fields.
+    `de_escalated` then reports the running tier, never the plan: a kept effort
+    can reach what the plan's declined escalation wanted (#591).
+    """
+    if (not isinstance(previous_tier, dict) or not previous_tier.get("verified")
+            or previous_tier.get("model") != wanted["model"]
+            or EFFORT_RANK.get(previous_tier.get("effort"), -1) < EFFORT_RANK.get(wanted.get("effort"), 0)):
+        raise UsageError("Retained context cannot switch model or raise effort. Recover the task through an explicit fresh-round decision without resetting its counter.", {})
+    tier = {**wanted, "effort": previous_tier.get("effort")}
+    if previous_tier.get("effort") != wanted.get("effort"):
+        for key, default in (("multiplier", 1.0), ("effective_multiplier", 1.0), ("billing_window", "unknown")):
+            tier[key] = previous_tier.get(key, default)
+        if "de_escalated" in wanted:
+            tier["de_escalated"] = still_de_escalated(agent, wanted, previous_tier.get("effort"))
+    return tier
+
+
 def validate_retained_history(assignments, history, task, fix_round):
     """Only the same agent's last confirmed task/role can retain context.
 
@@ -766,12 +806,13 @@ def correlate_dispatch_session(client, agent, pane_id, previous, before_prompt, 
     return None
 
 
-def build_steps(client, assignments, agents_by_name, paths, panes=None, no_clear=False, settle_timeout_ms=DEFAULT_SETTLE_TIMEOUT_MS, start_timeout_ms=DEFAULT_START_TIMEOUT_MS, track_context=False, tiers=None, requirements=None):
+def build_steps(client, assignments, agents_by_name, paths, panes=None, no_clear=False, settle_timeout_ms=DEFAULT_SETTLE_TIMEOUT_MS, start_timeout_ms=DEFAULT_START_TIMEOUT_MS, track_context=False, tiers=None, requirements=None, contents=None):
     """Build the per-role command plan. Pure with respect to herdr: nothing runs.
 
     This is what `--dry-run` prints, and what the live path walks. `panes` maps
     agent name to pane id; `--dry-run` has resolved no panes, so its rendering
     carries PANE_ID_PLACEHOLDER where the live path substitutes the real id.
+    `contents` carries a frozen dispatch's verified bytes to the prompt hash.
     """
     validate_agents(assignments, agents_by_name)
     panes = panes or {}
@@ -806,7 +847,7 @@ def build_steps(client, assignments, agents_by_name, paths, panes=None, no_clear
         tier = (tiers or {}).get(role)
         prompt_hash = None
         if tier:
-            text, prompt_hash = tiered_prompt(text, tier, paths["common"], paths[role])
+            text, prompt_hash = tiered_prompt(text, tier, paths["common"], paths[role], contents)
             commands.extend(composer_reads)
             commands.append(client.argv_pane_process_info(pane_id))
             if not no_clear:
@@ -879,17 +920,20 @@ def build_steps(client, assignments, agents_by_name, paths, panes=None, no_clear
     return steps
 
 
-def brief_markers(brief_path):
-    """Every bare `REPORT: <path>` line the brief tells its worker to emit."""
+def brief_markers(brief_path, contents=None):
+    """Every bare `REPORT: <path>` line the brief tells its worker to emit.
+
+    `contents` is `briefing_bytes`'s map of verified frozen bytes (#565).
+    """
     try:
-        text = Path(brief_path).read_text(encoding="utf-8")
+        text = briefing_bytes(brief_path, contents).decode("utf-8")
     except (OSError, UnicodeDecodeError) as exc:
         raise UsageError("Cannot read brief {} to measure its REPORT marker: {}. Restore it or correct "
                          "its --brief path before dispatch.".format(brief_path, exc), {"path": str(brief_path)}) from None
     return [line[len("REPORT: "):] for line in text.splitlines() if line.startswith("REPORT: ")]
 
 
-def refuse_wrapping_markers(client, steps, agents_by_name, reports):
+def refuse_wrapping_markers(client, steps, agents_by_name, reports, contents=None):
     """Refuse, before any input, a report marker the target pane would wrap.
 
     A wrapped `REPORT: <path>` row cannot be told from two authored rows, so
@@ -903,7 +947,7 @@ def refuse_wrapping_markers(client, steps, agents_by_name, reports):
         return
     too_narrow, mismatched = {}, {}
     for step in steps:
-        markers = brief_markers(step["brief"])
+        markers = brief_markers(step["brief"], contents)
         report = reports.get(step["role"])
         if report is not None and report not in markers:
             mismatched[step["role"]] = {"report": report, "brief": step["brief"]}
@@ -970,8 +1014,11 @@ def check_all_ready(client, assignments, agents_by_name, warn=None):
     return statuses
 
 
-def apply(client, assignments, agents_by_name, paths, at, no_clear=False, settle_timeout_ms=DEFAULT_SETTLE_TIMEOUT_MS, on_assigned=None, warn=None, sleep=time.sleep, settle_sec=COMPOSER_SETTLE_SEC, landing_attempts=LANDING_ATTEMPTS, start_timeout_ms=DEFAULT_START_TIMEOUT_MS, allow_recovery=False, task=None, retain_context=False, fix_round=None, judge_mode=None, history=None, tiers=None, recovery=None, plan_id=None, work=None, on_prepare=None, on_before_send=None, on_result=None, retrospective_guard=None, retain_specialist=False, requirements=None, reserved=None, reports=None):
+def apply(client, assignments, agents_by_name, paths, at, no_clear=False, settle_timeout_ms=DEFAULT_SETTLE_TIMEOUT_MS, on_assigned=None, warn=None, sleep=time.sleep, settle_sec=COMPOSER_SETTLE_SEC, landing_attempts=LANDING_ATTEMPTS, start_timeout_ms=DEFAULT_START_TIMEOUT_MS, allow_recovery=False, task=None, retain_context=False, fix_round=None, judge_mode=None, history=None, tiers=None, recovery=None, plan_id=None, work=None, on_prepare=None, on_before_send=None, on_result=None, retrospective_guard=None, retain_specialist=False, requirements=None, reserved=None, reports=None, contents=None):
     """Hand each agent its brief using the selected context mode.
+
+    `contents` carries a frozen dispatch's verified bytes, keyed by frozen
+    path, to every brief read below (#565).
 
     `on_assigned(role, agent, at, status, context)` is called after each hand-off so the
     caller records it in the state ledger as it goes -- an interrupted run
@@ -993,17 +1040,7 @@ def apply(client, assignments, agents_by_name, paths, at, no_clear=False, settle
     tiers = dict(tiers or {})
     specialist_prior = validate_specialist_history(assignments, history, task, requirements, tiers) if retain_specialist else None
     if prior is not None and tiers.get("developer"):
-        previous_tier = prior.get("tier")
-        wanted = tiers["developer"]
-        effort_rank = {None: 0, "low": 1, "medium": 2, "high": 3, "xhigh": 4, "max": 5}
-        if (not isinstance(previous_tier, dict) or not previous_tier.get("verified")
-                or previous_tier.get("model") != wanted["model"]
-                or effort_rank.get(previous_tier.get("effort"), -1) < effort_rank.get(wanted.get("effort"), 0)):
-            raise UsageError("Retained context cannot switch model or raise effort. Recover the task through an explicit fresh-round decision without resetting its counter.", {})
-        tiers["developer"] = {**wanted, "effort": previous_tier.get("effort")}
-        if previous_tier.get("effort") != wanted.get("effort"):
-            for key, default in (("multiplier", 1.0), ("effective_multiplier", 1.0), ("billing_window", "unknown")):
-                tiers["developer"][key] = previous_tier.get(key, default)
+        tiers["developer"] = retained_tier(agents_by_name[assignments["developer"]], tiers["developer"], prior.get("tier"))
     skip_clear = no_clear or retain_context or retain_specialist
     clear_reason = "retained" if retain_context or retain_specialist else "hand" if no_clear else "automatic"
     # Resolve the sink once. Every helper below defaults it too, but this
@@ -1032,6 +1069,7 @@ def apply(client, assignments, agents_by_name, paths, at, no_clear=False, settle
         track_context=task is not None,
         tiers=tiers,
         requirements=requirements,
+        contents=contents,
     )
     # Prove every pre-existing legacy worker before any role receives input.
     # The foreman starts these workers manually; apply never guesses a tier
@@ -1043,7 +1081,7 @@ def apply(client, assignments, agents_by_name, paths, at, no_clear=False, settle
             raise UsageError("Herdr reported no pane for {!r}; inspect `herdr agent list` before dispatch so live YOLO arguments can be verified.".format(step["agent"]), {})
         if not step["tier"]:
             verify_running_permissions(client, agents_by_name[step["agent"]], step["pane_id"])
-    refuse_wrapping_markers(client, steps, agents_by_name, reports)
+    refuse_wrapping_markers(client, steps, agents_by_name, reports, contents)
 
     if retrospective_guard is not None:
         retrospective_guard.preflight(steps, statuses)
