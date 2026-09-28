@@ -16,12 +16,18 @@ Process steps in order. Do not skip ahead.
 
 Structured workflow for shipping code: PR creation, automated policy review, merge, and cleanup. Do not stop between steps; the skill runs end-to-end from `git push` through merge + cleanup verification in a single agent session.
 
+Each command block resolves `CP` to the project-local plugin, falling back to
+`$HOME/.tessl/plugins/jbaruch/coding-policy`, then to `.` in a coding-policy
+clone, and stops with an install instruction anywhere else. Run the resolver in every call. Prose `skills/...` paths are relative to
+that plugin root.
+
 ## Step 1 — Verify Readiness
 
 Nothing below runs until this exits 0:
 
 ```bash
-bash skills/release/check-leftovers.sh
+CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"; [ -d "$CP" ] || case "$(git config --get remote.origin.url)" in git@github.com:jbaruch/coding-policy|git@github.com:jbaruch/coding-policy.git|https://github.com/jbaruch/coding-policy|https://github.com/jbaruch/coding-policy.git|ssh://git@github.com/jbaruch/coding-policy|ssh://git@github.com/jbaruch/coding-policy.git) CP=. ;; *) echo "coding-policy plugin not found: run tessl install jbaruch/coding-policy" >&2; exit 1 ;; esac
+bash "$CP/skills/release/check-leftovers.sh"
 ```
 
 Exit 0 clears the release. Exit 1 blocks it, with `blocking` naming each leftover and the stderr diagnostic naming its worktree — commit, stash, or gitignore the work, then re-run. Exit 2 is a usage or tool-state error, never a verdict. Which worktree states it refuses, and why another worktree's work in progress does not trip it, are the script's decision contract — see `skills/release/check-leftovers.sh` header, not restated here (`rules/script-as-black-box.md`).
@@ -63,7 +69,8 @@ Exit 0 clears the release. Exit 1 blocks it, with `blocking` naming each leftove
 - Check the link GitHub resolved from the body:
 
   ```bash
-  python3 skills/release/check-closing-issues.py <owner> <repo> <pr-number>
+  CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"; [ -d "$CP" ] || case "$(git config --get remote.origin.url)" in git@github.com:jbaruch/coding-policy|git@github.com:jbaruch/coding-policy.git|https://github.com/jbaruch/coding-policy|https://github.com/jbaruch/coding-policy.git|ssh://git@github.com/jbaruch/coding-policy|ssh://git@github.com/jbaruch/coding-policy.git) CP=. ;; *) echo "coding-policy plugin not found: run tessl install jbaruch/coding-policy" >&2; exit 1 ;; esac
+  python3 "$CP/skills/release/check-closing-issues.py" <owner> <repo> <pr-number>
   ```
 
 - Exit 0 passes
@@ -103,7 +110,8 @@ skills/release/REVIEW_DETAILS.md
 **Also request Copilot.** Copilot is a deliberate second reviewer with a different lens — the policy reviewer enforces `rules/*.md` compliance, Copilot reads for correctness, bugs, security, and test gaps. The policy reviewer gates the merge only on **blocking** findings; advisory-only reviews post `COMMENT` and never gate, and Copilot is always advisory (read it, never gate on it) — see `rules/review-severity.md`:
 
 ```bash
-bash skills/release/request-copilot-review.sh <owner> <repo> <pr-number>
+CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"; [ -d "$CP" ] || case "$(git config --get remote.origin.url)" in git@github.com:jbaruch/coding-policy|git@github.com:jbaruch/coding-policy.git|https://github.com/jbaruch/coding-policy|https://github.com/jbaruch/coding-policy.git|ssh://git@github.com/jbaruch/coding-policy|ssh://git@github.com/jbaruch/coding-policy.git) CP=. ;; *) echo "coding-policy plugin not found: run tessl install jbaruch/coding-policy" >&2; exit 1 ;; esac
+bash "$CP/skills/release/request-copilot-review.sh" <owner> <repo> <pr-number>
 ```
 
 Proceed immediately to Step 5.
@@ -113,7 +121,8 @@ Proceed immediately to Step 5.
 Block until the PR reaches a merge-gate-relevant terminal state. The watcher polls `poll-pr-reviews.sh` at a script-owned interval up to a script-owned budget and watches exactly the fields the Step 7 merge gate reads — each gating bot's latest review state (resolved by bot login), CI status, and merge state. Do not hand-roll a poll loop, and do not wrap the watch in an invented wall-clock `timeout` (see `rules/ci-safety.md` "Always Watch CI"):
 
 ```bash
-bash skills/release/watch-pr-reviews.sh <owner> <repo> <pr-number>
+CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"; [ -d "$CP" ] || case "$(git config --get remote.origin.url)" in git@github.com:jbaruch/coding-policy|git@github.com:jbaruch/coding-policy.git|https://github.com/jbaruch/coding-policy|https://github.com/jbaruch/coding-policy.git|ssh://git@github.com/jbaruch/coding-policy|ssh://git@github.com/jbaruch/coding-policy.git) CP=. ;; *) echo "coding-policy plugin not found: run tessl install jbaruch/coding-policy" >&2; exit 1 ;; esac
+bash "$CP/skills/release/watch-pr-reviews.sh" <owner> <repo> <pr-number>
 ```
 
 It returns the full `poll-pr-reviews.sh` snapshot plus a `watch` object — `{"result": ..., "attempts": N, "elapsed_seconds": N}`. The interval/budget constants and the result contract are the script's, not restated here (`rules/script-as-black-box.md` — see the header's result matrix). Branch on `.watch.result`:
@@ -122,7 +131,7 @@ It returns the full `poll-pr-reviews.sh` snapshot plus a `watch` object — `{"r
 - `changes_requested` (exit 0) — the policy reviewer requested changes (a blocking finding). Go to Step 6, address it, push; the next push re-fires the review, so re-run the watcher.
 - `ci_failure` (exit 0) — a check failed. Fix it (Step 6), push, re-run the watcher.
 - `dirty` (exit 0) — the branch conflicts with `main` and GitHub skipped the `pull_request:` workflows. Rebase onto current `main`, resolve, force-push, then re-run the watcher — the push re-fires the missed workflows.
-- `review_unrequested` (exit 1) — Copilot has no verdict at this head and no pending request, so no wait can produce one. Request it with `skills/release/request-copilot-review.sh <owner> <repo> <pr-number>` and re-run the watcher. The policy reviewer runs on the push and never produces this result.
+- `review_unrequested` (exit 1) — Copilot has no verdict at this head and no pending request, so no wait can produce one. Request it with Step 4's command block and re-run the watcher. The policy reviewer runs on the push and never produces this result.
 - `pending_at_budget` (exit 1) — a signal never arrived within the budget (a reviewer that never posted, CI stuck pending). Inspect which field is still `none`/`pending` in the returned snapshot. If the policy reviewer never posted on coding-policy's own PRs, check the `review-codex.yml` run (`gh run list --workflow review-codex.yml`) — a missing or expired `CODEX_AUTH_JSON` secret is the usual cause. On a consumer repo, confirm `review-trigger.yml` dispatched and the fleet App ran in coding-policy; its scheduled poll is the backstop. Re-run the watcher to keep waiting once the cause is understood.
 
 ## Step 6 — Address Feedback
@@ -136,7 +145,7 @@ It returns the full `poll-pr-reviews.sh` snapshot plus a `watch` object — `{"r
   - Declined: `Declining — <reason with cited evidence>` (em dash `—`, not hyphen or period)
   - Advisory deferred: `Acknowledged — deferred to <follow-up ref>` (em dash `—`; names where it is tracked)
 - Push fixes to the same branch
-- **Re-request Copilot after every push** via `skills/release/request-copilot-review.sh` (same args as Step 4). Copilot does not re-post on its own.
+- **Re-request Copilot after every push** with Step 4's command block. Copilot does not re-post on its own.
 - The policy reviewer re-runs automatically on every push (coding-policy via `review-codex.yml` `pull_request: synchronize`; consumers via `review-trigger.yml` re-dispatching the fleet App). No manual re-request.
 - Repeat Step 5 until the policy reviewer carries no blocking finding — `APPROVED`, or `COMMENTED` with its body read and only advisories — and every thread has a reply.
 
@@ -154,7 +163,8 @@ Once these conditions hold, merge automatically per `rules/ship-on-green.md` —
 **Clear superseded review gates first.** This applies to coding-policy's OWN releases, where the policy reviewer posts as `github-actions[bot]`, which cannot `APPROVE` (GitHub returns HTTP 422), so a clean re-review lands as a `COMMENT` that does NOT supersede the bot's earlier `CHANGES_REQUESTED` — the stale request keeps `merge_state.status` at `BLOCKED`. On consumer repos the reviewer is the central fleet App `coding-policy-fleet-reviewer[bot]` (coding-policy#202), which CAN `APPROVE` and supersedes its own earlier `CHANGES_REQUESTED` directly — no dismissal needed there. Dismiss every superseded `github-actions[bot]` review before merging:
 
 ```bash
-bash skills/release/dismiss-stale-reviews.sh <owner> <repo> <pr-number>
+CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"; [ -d "$CP" ] || case "$(git config --get remote.origin.url)" in git@github.com:jbaruch/coding-policy|git@github.com:jbaruch/coding-policy.git|https://github.com/jbaruch/coding-policy|https://github.com/jbaruch/coding-policy.git|ssh://git@github.com/jbaruch/coding-policy|ssh://git@github.com/jbaruch/coding-policy.git) CP=. ;; *) echo "coding-policy plugin not found: run tessl install jbaruch/coding-policy" >&2; exit 1 ;; esac
+bash "$CP/skills/release/dismiss-stale-reviews.sh" <owner> <repo> <pr-number>
 ```
 
 Run it once Step 5's poll shows every bot's latest verdict clean. It emits a JSON summary of what it dismissed and what it left active, exits non-zero on API failure, and is idempotent on re-run. Which reviews it dismisses and which it leaves is the script's decision contract — see `skills/release/dismiss-stale-reviews.sh` header, not restated here (`rules/script-as-black-box.md`).
@@ -165,7 +175,7 @@ Run it once Step 5's poll shows every bot's latest verdict clean. It emits a JSO
 skills/release/PUBLICATION.md
 ```
 
-**Tessl publication:** capture the registry baseline into `PRE` with `registry-baseline.sh` before merging. A publication on another channel skips this gate.
+**Tessl publication:** before merging, run `registry-baseline.sh` and record the version it prints as `<pre>`. A publication on another channel skips this gate.
 
 Pick the right cleanup path based on where you ran the skill from.
 
@@ -210,7 +220,13 @@ Order in (B) is mandatory: `git branch -d` refuses to delete a branch that is ch
 After merge — per `rules/ci-safety.md`'s Always Watch CI duty extended through release, run each gate its channels owe, in order:
 
 - Verify the merge landed on main (`git pull --ff-only` succeeds; `git log -1 --oneline` shows the merge commit)
-- Confirm every closing issue closed: `python3 skills/release/check-closing-issues.py <owner> <repo> <pr-number> --merged`
+- Confirm every closing issue closed:
+
+  ```bash
+  CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"; [ -d "$CP" ] || case "$(git config --get remote.origin.url)" in git@github.com:jbaruch/coding-policy|git@github.com:jbaruch/coding-policy.git|https://github.com/jbaruch/coding-policy|https://github.com/jbaruch/coding-policy.git|ssh://git@github.com/jbaruch/coding-policy|ssh://git@github.com/jbaruch/coding-policy.git) CP=. ;; *) echo "coding-policy plugin not found: run tessl install jbaruch/coding-policy" >&2; exit 1 ;; esac
+  python3 "$CP/skills/release/check-closing-issues.py" <owner> <repo> <pr-number> --merged
+  ```
+
 - Exit 1 (`still_open`) names each closing issue still open at the script's poll budget
 - Every issue comment below is an action on that issue's repository, governed by `rules/external-repo-contributions.md`:
   - In a repository the operator owns, close each still-open issue with a comment naming the PR
@@ -222,7 +238,7 @@ After merge — per `rules/ci-safety.md`'s Always Watch CI duty extended through
 - Watch the resolved run to a terminal state
 - Require its `conclusion` to be `success`
 - Each channel keeps its own run id; a mixed publication holds both at once, and each confirmation below reads the id for its own channel
-- **Tessl publication:** confirm conjuncts 1 and 2 with `confirm-tessl-landed.sh`, passing `PRE` and the resolved run id. Which conjuncts it reads is the script's decision contract — see `PUBLICATION.md`
+- **Tessl publication:** confirm conjuncts 1 and 2 with `confirm-tessl-landed.sh`, passing `<pre>` and the resolved run id. Which conjuncts it reads is the script's decision contract — see `PUBLICATION.md`
 - Gate on that helper's exit code
 - Keep the version it prints for the moderation gate
 - A non-zero exit stops the release there, with no fall-through to moderation
