@@ -1015,6 +1015,11 @@ def cmd_plan(args, client=None, warn=None, trace=None):
         )
     result["task_context"] = ({"task": args.task, "fix_round": args.fix_round,
                                "plan": args.correction_plan, "work": work} if args.task else None)
+    # A patch or fixture oracle is a path; pin the bytes behind it now, so
+    # `verify-oracle` checks the round against the file it was licensed on (#488).
+    pins = oracle.pin_oracles(result.get("rounds"))
+    if pins:
+        result["oracle_pins"] = pins
     # The composer requires each seat's owned paths and reads no partition, so
     # the plan hands them over from the document `validate-partition` accepted.
     if seat_paths:
@@ -1540,6 +1545,7 @@ def cmd_foreman_reset(args, client=None, warn=None, trace=None, spawn=None):
         return {"schema_version": foreman_reset.RESET_SCHEMA_VERSION, "scheduled": True, **existing,
                 "log": str(Path(str(state_path) + ".foreman-reset.log"))}, None
     plan = foreman_reset.preflight(stow, data, caller)
+    native_session = foreman_reset.bound_session(data)
     log = Path(str(state_path) + ".foreman-reset.log")
     # The deliverer runs from the package directory, so every path it gets is absolute.
     argv = [sys.executable, "-m", "foreman", "foreman-reset-deliver", "--pane", plan["pane_id"], "--stow", plan["stow"],
@@ -1559,7 +1565,7 @@ def cmd_foreman_reset(args, client=None, warn=None, trace=None, spawn=None):
             raise StateError("Could not start the reset deliverer ({}); nothing was sent.".format(exc),
                              {"log": str(log)}) from None
 
-    row = foreman_reset.schedule(state_path, plan, at, start, options=options)
+    row = foreman_reset.schedule(state_path, plan, at, start, native_session=native_session, options=options)
     return {"schema_version": foreman_reset.RESET_SCHEMA_VERSION, "scheduled": True, **row, "log": str(log),
             "next": "End this turn now; the deliverer clears the pane once it is idle."}, None
 
@@ -1644,6 +1650,7 @@ def cmd_foreman_reset_deliver(args, client=None, warn=None, trace=None):
         client = client if client is not None else _client(args, trace=trace)
         result = foreman_reset.deliver(
             client, load_config(_config_path(args)), args.pane, args.stow, str(state_path), warn=_log_safe(warn), options=options,
+            native_session=claimed["native_session"],
             still_ready=lambda: memory.show(state_path, now_iso(), args.stow)["record"].get("reset_ready") is True)
     except ForemanError as exc:
         status = "interrupted" if isinstance(exc, foreman_reset.DeliveryInterrupted) else "failed"

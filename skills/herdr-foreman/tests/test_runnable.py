@@ -83,6 +83,7 @@ def bare_hints(text, names):
     ...`) and the resume template's `{tl}` launcher placeholder are rendered
     forms. A one-word name (`plan`, `state`) counts only in a command position:
     backticked, after `foreman `, or after a verb that tells the reader to run it.
+    A bare `foreman --<flag>` (#590) never runs as written either.
     """
     alternation = "|".join(re.escape(name) for name in names)
     hyphenated = "|".join(re.escape(name) for name in names if "-" in name)
@@ -90,6 +91,7 @@ def bare_hints(text, names):
     patterns = [
         r"`(?:foreman )?(?:{}){}".format(alternation, end),
         r"\bforeman (?:{}){}".format(alternation, end),
+        r"(?<![\w-])foreman --?[a-z][\w-]*",
         r"\b(?:{}) (?:{}){}".format(IMPERATIVE_VERBS, alternation, end),
     ]
     if hyphenated:
@@ -117,6 +119,9 @@ class BareHintTest(unittest.TestCase):
         self.assertEqual(bare_hints("run `{tl} supervision-bind {flags}`", names), [])
         self.assertEqual(bare_hints("the .supervision-bind.json lock", names), [])
         self.assertEqual(bare_hints("the owner needs supervision-bind.", names), ["supervision-bind"])
+        self.assertEqual(bare_hints("Unknown supervision command; run foreman --help.", names), ["foreman --help"])
+        self.assertEqual(bare_hints("run `foreman -h` first", names), ["foreman -h"])
+        self.assertEqual(bare_hints("run `bash /x/foreman.sh --help`", names), [])
 
     def test_no_package_string_names_a_subcommand_that_does_not_run_as_written(self):
         names = subcommands()
@@ -159,6 +164,23 @@ class CommandTest(unittest.TestCase):
                                             env=env, cwd=root, check=False)
                     self.assertEqual(result.returncode, 0, result.stderr)
                     self.assertIn("usage: foreman " + tail.split()[0], result.stdout)
+
+    def test_the_unknown_supervision_fallback_names_a_runnable_help(self):
+        from foreman import supervision_runtime
+        from foreman.errors import UsageError
+        args = argparse.Namespace(command="supervision-bogus", now=None, record=None)
+        with self.assertRaises(UsageError) as caught:
+            supervision_runtime.run_command(args, "unused-state.json", "2026-01-01T00:00:00Z")
+        found = re.search(r"`(bash [^`]+)`", caught.exception.message)
+        self.assertIsNotNone(found, caught.exception.message)
+        assert found is not None  # narrows the Optional for pyright; the assertion above reports the message
+        with tempfile.TemporaryDirectory(prefix="foreman-runnable-") as root:
+            env = {key: value for key, value in os.environ.items() if not key.startswith(("HERDR", "FOREMAN"))}
+            env.update(HOME=root, XDG_STATE_HOME=root, XDG_CONFIG_HOME=root)
+            result = subprocess.run(shlex.split(found.group(1)), capture_output=True, text=True,
+                                    env=env, cwd=root, check=False)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("usage: foreman", result.stdout)
 
 
 if __name__ == "__main__":
