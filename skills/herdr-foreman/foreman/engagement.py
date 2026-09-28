@@ -3,8 +3,9 @@
 Report delivery proves an artifact arrived. The contribution class is the one
 the bound report declares on its `CONTRIBUTION:` line, derived here from the
 report bytes; a report declaring none records `design` (#601). The foreman
-quotes the report's acceptance lines as outcome and summary. These receipts
-never accept the whole task.
+quotes the report's acceptance lines as outcome and summary, and the owner
+refuses either one the bound report does not contain. These receipts never
+accept the whole task.
 
 Schema 2 adds `contribution_source`. A schema-1 record carried a foreman's own
 classification; the owner migration keeps its value and marks it
@@ -38,6 +39,8 @@ CONTRIBUTION_SOURCES = frozenset({"report_declared", "report_undeclared", "forem
 CONTRIBUTION_LINE = re.compile(r"^CONTRIBUTION:[ \t]*(\S+)[ \t]*$", re.MULTILINE)
 #: The class an undeclared contribution records: unresolved history is never `none`.
 UNDECLARED_CONTRIBUTION = "design"
+#: The fields the foreman quotes from the bound report rather than writes.
+QUOTED_FIELDS = ("outcome", "summary")
 RECORD_FIELDS = INPUT_FIELDS | {"schema_version", "at", "assignment_index", "task", "role", "agent",
                                 "report_evidence", "delivery_evidence", "contribution_source"}
 
@@ -58,6 +61,24 @@ def declared_contribution(body):
     return values[0], "report_declared"
 
 
+def _collapse(value):
+    return " ".join(value.split())
+
+
+def require_quoted(body, data):
+    """Refuse an outcome or summary the bound report does not contain.
+
+    A quote matches the report with runs of whitespace collapsed, so a line
+    wrapped differently in the input still reads as the same words.
+    """
+    report = _collapse(body)
+    missing = [key for key in QUOTED_FIELDS if _collapse(data[key]) not in report]
+    if missing:
+        raise UsageError(
+            "The bound report does not contain the supplied {}; quote its acceptance lines verbatim, or return the "
+            "report to its responsibility with the gap named.".format(" or ".join(missing)), {"missing": missing})
+
+
 def migrate_assessments(payload):
     """Carry schema-1 records to schema 2 in place; True when any changed.
 
@@ -69,7 +90,8 @@ def migrate_assessments(payload):
         return False
     changed = False
     for record in records:
-        if isinstance(record, dict) and record.get("schema_version") == 1 and "contribution_source" not in record:
+        if (isinstance(record, dict) and type(record.get("schema_version")) is int
+                and record["schema_version"] == 1 and "contribution_source" not in record):
             record.update(schema_version=ASSESSMENT_SCHEMA_VERSION, contribution_source="foreman_assessment")
             changed = True
     return changed
@@ -108,7 +130,9 @@ def validate_assessments(state):
     for record in records:
         if (not isinstance(record, dict) or set(record) != RECORD_FIELDS
                 or type(record.get("schema_version")) is not int or record["schema_version"] != ASSESSMENT_SCHEMA_VERSION
-                or record.get("contribution_source") not in CONTRIBUTION_SOURCES):
+                or record.get("contribution_source") not in CONTRIBUTION_SOURCES
+                or (record["contribution_source"] == "report_undeclared"
+                    and record.get("contribution") != UNDECLARED_CONTRIBUTION)):
             raise UsageError("Unsupported or corrupt specialist assessment; preserve history and update the owner.", {})
         _input({key: record[key] for key in INPUT_FIELDS}, required=INPUT_FIELDS)
         text(record["at"], "assessment time")
@@ -152,6 +176,7 @@ def record_assessment(state, state_path, data, at):
             runnable.command("supervision-status")), {})
     report_evidence, body = receipt(data["report"])
     contribution, source = declared_contribution(body)
+    require_quoted(body, data)
     if "contribution" in data and data["contribution"] != contribution:
         raise UsageError(
             "The bound report records contribution {!r} ({}); the supplied {!r} disagrees. Omit it, or return the "

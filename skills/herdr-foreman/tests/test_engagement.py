@@ -43,8 +43,8 @@ class EngagementTest(unittest.TestCase):
                          "requirements": copy.deepcopy(REQUIREMENT)}
         self.seed(self.dispatch)
         self.data = {"id": "assessment-1", "dispatch": "consult-1", "report": str(self.report),
-                     "delivery": str(self.delivery), "outcome": "consultation assessed",
-                     "contribution": "design", "summary": "The proposal supplies interaction decisions; independent review remains required."}
+                     "delivery": str(self.delivery), "outcome": "Recommend grouping account fields",
+                     "contribution": "design", "summary": "implementation remains open."}
 
     def seed(self, dispatch):
         recovery.reserve(self.state["recovery"], dispatch, AT)
@@ -98,6 +98,30 @@ class EngagementTest(unittest.TestCase):
         self.assertEqual((migrated["schema_version"], migrated["contribution_source"], migrated["contribution"]),
                          (2, "foreman_assessment", "none"))
 
+    def test_a_boolean_schema_version_is_never_migrated(self):
+        # JSON `true` equals 1 in Python; the owner still refuses it as corrupt.
+        record = self.assess()
+        legacy = {key: value for key, value in record.items() if key != "contribution_source"}
+        legacy["schema_version"] = True
+        self.state["specialist_assessments"] = [legacy]
+        save_state(self.path, self.state)
+        before = self.path.read_bytes()
+        _loaded, usable = load_state_checked(self.path, warn=lambda _: None)
+        self.assertFalse(usable)
+        self.assertEqual(self.path.read_bytes(), before)
+
+    def test_an_outcome_or_summary_the_report_does_not_contain_is_refused(self):
+        for change in ({"outcome": "All acceptance criteria met"}, {"summary": "The consultation failed."}):
+            with self.subTest(change=change):
+                with self.assertRaises(UsageError) as caught:
+                    self.assess({**self.data, **change})
+                self.assertEqual(caught.exception.details["missing"], list(change))
+                self.assertEqual(self.state["specialist_assessments"], [])
+
+    def test_a_quote_wrapped_differently_still_matches_the_report(self):
+        result = self.assess({**self.data, "outcome": "Recommend grouping\n  account fields"})
+        self.assertEqual(result["outcome"], "Recommend grouping\n  account fields")
+
     def test_assessment_binds_actual_delivery_and_persists_without_accepting_task(self):
         before = copy.deepcopy(self.state["assignments"])
         result = self.assess()
@@ -126,7 +150,8 @@ class EngagementTest(unittest.TestCase):
         self.seed({**seat, "report": str(report)})
         result = self.assess({**self.data, "id": "assessment-slice", "dispatch": "slice-1",
                               "report": str(report), "delivery": str(delivery),
-                              "contribution": "none", "outcome": "slice reviewed clean"})
+                              "contribution": "none", "outcome": "no blocking findings.",
+                              "summary": "Reviewed the api slice at the pushed tip"})
         # The assessment record is independently versioned, so its `role` keeps
         # holding the RESPONSIBILITY. The seat stays on the dispatch the record
         # cites (#434).
@@ -227,7 +252,11 @@ class EngagementTest(unittest.TestCase):
         self.assess()
         variants = ({"schema_version": 3}, {"contribution_source": "worker_claim"}, {"assignment_index": 9}, {"assignment_index": False}, {"agent": "other-worker"},
                     {"task": "another-task"}, {"at": "2026-02-03T09:00:00Z"},
-                    {"report_evidence": {**self.state["specialist_assessments"][0]["report_evidence"], "path": "/other.md"}})
+                    {"report_evidence": {**self.state["specialist_assessments"][0]["report_evidence"], "path": "/other.md"}},
+                    # A report that declared nothing records `design`; any
+                    # other class under that source erases a contribution.
+                    {"contribution": "none"}, {"contribution": "implementation"})
+        self.assertEqual(self.state["specialist_assessments"][0]["contribution_source"], "report_undeclared")
         for change in variants:
             with self.subTest(change=change):
                 corrupted = copy.deepcopy(self.state)
@@ -322,7 +351,7 @@ class EngagementTest(unittest.TestCase):
         delivery = case.tmp / "recovered-delivery.json"
         delivery.write_text(json.dumps(recovered))
         data = {"id": "recovered-assessment", "dispatch": dispatch["id"], "report": str(case.report), "delivery": str(delivery),
-                "outcome": "Recovered report assessed", "summary": "Independent report read after native delivery recovery."}
+                "outcome": "Current report bytes.", "summary": "Current report bytes."}
         return state, path, data, recovered
 
     def test_exact_owner_recovered_delivery_can_be_assessed(self):

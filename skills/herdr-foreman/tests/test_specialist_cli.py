@@ -241,7 +241,7 @@ class SpecialistCliTest(fixture.CliCase):
                                        "pane_id": "w2:p1", "native_session": native}, AT)
         if assess:
             engagement.record_assessment(state, self.state, {"id": "assessed", "dispatch": record["id"], "report": str(prior_report),
-                "delivery": str(delivery), "outcome": "Consultation delivered", "contribution": "design", "summary": "Interaction proposal read and assessed."}, AT)
+                "delivery": str(delivery), "outcome": "Proposed the interaction", "contribution": "design", "summary": "implementation remains pending."}, AT)
         if retire:
             supervision.resolve(self.state, {"id": record["id"], "outcome": "Consultation ended", "evidence": [str(prior_report)]}, AT)
         save_state(self.state, state)
@@ -281,8 +281,8 @@ class SpecialistCliTest(fixture.CliCase):
         report = self.tmp / "prior-report.md"
         report.write_text(report.read_text() + "\nCONTRIBUTION: none\n")
         data = {"id": "assessed-via-cli", "dispatch": "prior:advisor", "report": str(self.tmp / "prior-report.md"),
-                "delivery": str(self.tmp / "prior-delivery.json"), "outcome": "Delivered consultation",
-                "contribution": "none", "summary": "Read the report; no design contribution was made."}
+                "delivery": str(self.tmp / "prior-delivery.json"), "outcome": "Proposed the interaction",
+                "contribution": "none", "summary": "implementation remains pending."}
         record = self.tmp / "assessment.json"
         record.write_text(json.dumps(data))
         code, out, err = self.invoke(["assess-specialist", "--record", str(record), "--now", AT], self._client({}))

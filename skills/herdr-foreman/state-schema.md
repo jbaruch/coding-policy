@@ -565,9 +565,11 @@ same report bytes.
 derives it from the bound report bytes (`declared_contribution` in
 `skills/herdr-foreman/foreman/engagement.py`): `contribution_source` is
 `report_declared` for a report's `CONTRIBUTION:` line and `report_undeclared`
-when there is none, which records `design`. A supplied `contribution` must
-match the derivation or the record is refused. Outcome and summary quote the
-report's acceptance lines and answer, and are not task acceptance.
+when there is none, which records `design`; a `report_undeclared` record
+holding any other class is corrupt. A supplied `contribution` must match the
+derivation or the record is refused. Outcome and summary quote the report's
+acceptance lines and answer, and are not task acceptance; the owner refuses
+either one the bound report does not contain (`require_quoted`).
 
 The utility verifies the original confirmed dispatch, assignment and enrollment
 before appending. Exact ID/input retries preserve the original receipt, including
@@ -577,7 +579,7 @@ report and delivery bytes and prior supervision disposition. Authored assessment
 remain contribution evidence even after a later assessment, role or model change.
 Missing, corrupt or unsupported assessment history follows the main state's
 preserve-and-refuse writer contract. A schema-1 record carried the foreman's own
-classification; the owner migrates it on load to schema 2 with its values kept
+classification; the owner migrates an integer schema-1 record on load to schema 2 with its values kept
 and `contribution_source: foreman_assessment`, so readers treat both alike
 (`migrate_assessments`). A record newer than schema 2 is refused as newer data.
 

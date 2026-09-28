@@ -316,7 +316,8 @@ the supervision member, the worker's report path, and the saved delivery path:
 }
 ```
 
-`outcome` and `summary` quote the report's acceptance lines and answer.
+`outcome` and `summary` quote the report's acceptance lines and answer; the
+owner refuses either one the bound report does not contain.
 `contribution` is optional input: the owner derives it from the bound report's
 `CONTRIBUTION:` line, records `design` when there is none, and refuses a supplied
 value that disagrees (`declared_contribution` in
