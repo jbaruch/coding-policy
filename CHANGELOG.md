@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.306 — 2026-09-28
+
 ### Fixed
 
 - **Cleanup hardening left over from the #543 review (#583).** Copilot
