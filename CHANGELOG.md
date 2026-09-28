@@ -136,6 +136,57 @@
   when the recorded headroom check passed. Tests: `test_recovery.py`,
   `test_recovery_cli.py`, `test_round_preflight.sh`.
 
+## 0.3.321 — 2026-09-28
+
+### Fixed
+
+- **The worktree prune now treats an unlistable root as a changed root, and
+  its stale-registration prune can no longer drop the registrations of
+  worktrees a moved root still holds (#597).** Both are follow-ups to #588's
+  root-identity check in `skills/herdr-foreman/prune-worktrees.sh`. First,
+  the check read the root with `lstat` alone, so a root whose permissions
+  were revoked mid-run (same inode) still passed. It now also opens the
+  directory (`O_NOFOLLOW`), reads one entry through that descriptor, and
+  requires the `lstat` before, the descriptor's `fstat` and an `lstat` after
+  the listing to name one directory. A root that cannot be listed stops every
+  later destructive step like a replaced one. Second, `git worktree prune
+  --expire now` ran just after that check but was not atomic with it: a root
+  renamed inside the window had every worktree under it read as gone, and git
+  dropped their registrations. The run now locks every registration whose
+  directory was present at the inventory and is not already locked (`git
+  worktree lock --reason prune-worktrees:<pid>:<nonce>`), re-proves the root,
+  runs the prune (git never drops a locked entry), and unlocks exactly the
+  entries this run locked that still carry its reason, on every exit path
+  including an interrupt. An entry someone else locked is never unlocked. A
+  lock left by a killed run, whose pid is no longer alive, is released at the
+  start of the next live run; a lock held by a live pid is left alone. A lock
+  that cannot be taken stops the prune, so nothing is dropped. A stale
+  registration's branch reaches the branch pass only once a fresh registry
+  read shows the prune actually dropped it, so a path that reappeared before
+  the prune keeps both its registration and its branch.
+  Two rounds of review went through a hand-rolled alternative first: a
+  per-entry `git worktree remove` (which would delete a live worktree whose
+  path reappeared mid-run), then a metadata-only rename of git's admin entry
+  (which kept producing new edge cases: relative `gitdir` links, a lock taken
+  mid-detach, a failed delete after the detach). Locking and letting git
+  prune keeps git's own rules in charge, relative links included. A note
+  from that detour: `git worktree repair` cannot restore a registration whose
+  admin entry was deleted (verified on git 2.55: "unable to locate
+  repository"); such a worktree is re-registered with `git worktree add`.
+  Every unlocked stale registration is still dropped, outside the worktree
+  root too, so `rules/agent-team-operation.md` keeps promising that a
+  vanished worktree's registration is cleared when the sweep prunes its
+  repository. Tests 89 (root made unlistable after the first removal), 90
+  (root renamed at the prune), 91 (a lock that cannot be taken stops the
+  prune), 92 (a worktree with an unpushed commit moved back before the prune
+  keeps its files, commits and registration), 93 (a stale registration
+  outside the root is dropped), 94 (a relative `gitdir` registration is
+  dropped), 95 (an operator's lock survives, and the run leaves none of its
+  own) and 96 (a killed run's lock is released, a live one's is not) cover
+  it. Test 30's shim now empties the inventory, the second registry read of
+  a live run. The sweep's test 23 now swaps the root at the first
+  repository's branch deletion, its last destructive step.
+
 ## 0.3.319 — 2026-09-28
 
 ### Added
