@@ -310,6 +310,16 @@ description: Running a multi-agent team — task-based specialist composition, c
 - Every other worktree leaves only through the sweep or the session-start cleanup of `rules/agent-worktree-isolation.md` Cleanup
 - A worker's report, plan, and patch artifacts go only under the reports directory its brief names
 - A worker writes nowhere else
+- Build and package caches are tool state, never artifacts (Go build and module caches, pip and npm caches, virtualenvs)
+- A worker keeps them at the tool's user-level default location, or in a scratch directory it removes when the assignment ends
+- A worker never places a build or package cache under the reports directory
+- A tool's writes to its own default cache location are outside the write limit above
+- The session-start hook `hooks/check-report-caches.sh` removes build and package caches from idle reports directories through `skills/herdr-foreman/prune-report-caches.py`
+- Its discovery, idleness and cache predicates live in that script's top-of-file docstring
+- It never removes an evidence file
+- In a Herdr worker session, it deletes nothing
+- Under tessl (portable mode), it reports from a dry run and deletes nothing
+- Under tessl, it skips a linked worktree
 - Narrow exception for a task-owned fixture root outside the reports directory
 - Applies when the tool under test resolves its configuration from filesystem ancestors, so a fixture placed under the reports directory initializes the operator's own project instead of the fixture's
 - Preconditions (all required):
@@ -319,9 +329,9 @@ description: Running a multi-agent team — task-based specialist composition, c
   4. The root holds fixtures alone
   5. The root resolves outside every ancestor that configures the tool
   6. The worker proves the tool's effective root inside the fixture before any command that writes through it
-  7. The worker records the state of each user-level file the rehearsal can reach, before and after
+  7. The worker records a digest of each user-level file the rehearsal can reach, before and after, never a copy of a directory tree
   8. An unexpected change stops the rehearsal
-  9. A user-level file the rehearsal changed is restored from that record
+  9. A user-level file the rehearsal changed is restored from a pre-run copy of that file alone
   10. Reinstalling the operator's environment is never the automatic recovery
   11. The worker removes the fixture root when the assignment ends
 - Every report, plan and patch artifact still goes under the reports directory its brief names
