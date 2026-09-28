@@ -27,6 +27,11 @@ Covers:
  13. Active assignment   -> an active supervision enrollment whose report is
                             in the directory keeps it whole, however old.
  14. Unusable supervision-> could_not_check, nothing removed.
+ 15. Marked, not renamed -> a cache a killed run marked but never renamed is
+                            removed on the next run, never stuck.
+ 16. Swap race           -> a directory replaced by a symlink between the
+                            survey and the removal is never entered; the
+                            cache behind the link survives.
 """
 
 import argparse
@@ -294,6 +299,42 @@ class PruneReportCachesTests(unittest.TestCase):
         self.assertTrue((impostor / "findings.md").is_file())
         self.assertTrue((forged / ".prune-report-caches-kind").is_file())
         self.assertEqual([c["kind"] for c in doc["caches"]], ["interrupted-removal"])
+
+    def test_marked_cache_left_at_its_name_is_finished(self):
+        top = self.fx.reports(caches=("virtualenv", "python-bytecode"))
+        write(top / CACHE_PATHS["virtualenv"] / ".prune-report-caches-kind", "virtualenv\n")
+        write(top / CACHE_PATHS["python-bytecode"] / ".prune-report-caches-kind", "python-bytecode\n")
+        self.fx.save()
+        age(top)
+        rc, doc, err = run(self.fx)
+        self.assertEqual(rc, 0, err)
+        self.assertEqual(sorted(c["kind"] for c in doc["caches"]), ["python-bytecode", "virtualenv"])
+        self.assertFalse(os.path.lexists(top / CACHE_PATHS["virtualenv"]))
+        self.assertFalse(os.path.lexists(top / CACHE_PATHS["python-bytecode"]))
+
+    def test_directory_swapped_for_a_symlink_is_never_entered(self):
+        top = self.fx.reports(caches=("virtualenv",))
+        self.fx.save()
+        age(top)
+        outside = Path(os.path.realpath(self.temp.name)) / "outside"
+        build_cache(outside / "venv", "virtualenv")
+        module = load_script()
+        surveyed = module.survey
+
+        def survey_then_swap(cand_fd, cutoff, budget):
+            outcome = surveyed(cand_fd, cutoff, budget)
+            evidence = top / "developer-evidence"
+            evidence.rename(top / "moved-evidence")
+            os.symlink(outside, evidence)
+            return outcome
+
+        setattr(module, "survey", survey_then_swap)
+        args = argparse.Namespace(dry_run=False, root=str(self.fx.root), state=str(self.fx.state), now=NOW,
+                                  budget_sec=None)
+        result = module.run(args)
+        self.assertTrue((outside / "venv" / "pyvenv.cfg").is_file())
+        self.assertEqual(result["caches"], [])
+        self.assertEqual([f["path"] for f in result["failed"]], [str(top / CACHE_PATHS["virtualenv"])])
 
     def test_active_enrollment_keeps_the_directory(self):
         top = self.fx.reports()

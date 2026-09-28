@@ -26,12 +26,16 @@
     files, and so on); a `venv` holding notes, or a `before/` holding a
     source snapshot, stays. Symlinks are never followed, directories outside
     the state root are skipped, and the ledger is read without migrating it.
-    Removal walks by directory descriptor with `O_NOFOLLOW`, so a link
-    swapped in mid-run is never entered. A cache gets a marker naming its
-    kind and is renamed to a tombstone before removal, so a removal cut short
-    by the hook's budget is finished next session instead of leaving a
-    signature-less half-cache no run would recognize; a directory that only
-    carries the tombstone suffix, without that marker, is never touched.
+    Everything below the state root runs on descriptors: the root is opened
+    once and every directory under it is reached one `O_NOFOLLOW` component
+    at a time, never re-resolved by path, so a symlink swapped in for any
+    ancestor between the survey and the removal is never entered. A cache
+    gets a marker naming its kind and is renamed to a tombstone before
+    removal, so a removal cut short by the hook's budget is finished next
+    session instead of leaving a signature-less half-cache no run would
+    recognize; a run cut short between marking and renaming leaves a marker
+    the next run reuses; a directory that only carries the tombstone suffix,
+    without a valid marker, is never touched.
   - New session-start hook `hooks/check-report-caches.sh` runs it live and
     reports the reclaimed size: the fix is mechanical and the caches are
     regenerable, so the hook acts rather than warns. It mirrors

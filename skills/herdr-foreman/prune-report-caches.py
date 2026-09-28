@@ -22,13 +22,14 @@ read under the owner's shared home guard (`foreman/home.py` `guard`).
 Containment — a candidate is resolved (`os.path.realpath`) and must lie
 strictly below the resolved ROOT (default `$XDG_STATE_HOME`, else
 `~/.local/state`, `--root` overrides); anything else is skipped as
-`outside_root`, and a candidate that is itself a symlink as `symlink`. A candidate that is not a directory is counted `missing`.
-Nothing below a candidate is followed through a symlink: every entry is read
-with `lstat`, a symlink is never descended into, and a cache directory is
-re-proven a real directory with its signature immediately before removal.
-Removal walks by directory descriptor (`O_NOFOLLOW`, `dir_fd`), and a
-directory whose identity changed between `lstat` and open is left alone, so
-a link swapped in mid-run is never entered.
+`outside_root`, and a candidate that is itself a symlink as `symlink`. A
+candidate that is not a directory is counted `missing`. Everything after that
+runs on file descriptors: ROOT is opened once, the candidate is opened from
+it one component at a time with `O_NOFOLLOW` (a component turned symlink is
+`symlink`), and every survey read, signature check, rename and removal below
+it is `openat`/`fstatat`/`unlinkat` relative to a descriptor reached the same
+way. No path is ever re-resolved by name, so a symlink swapped in for any
+directory mid-run is never entered: the open fails and the entry is `failed`.
 
 Idleness — a candidate is idle when both hold:
   * no active supervision enrollment (`foreman/supervision.py` `load`, the
@@ -47,13 +48,17 @@ when its basename and its content signature both match one row of
 CACHE_KINDS (names and signatures there). The plugin-cache copy row matches a
 `plugins/cache` directory whose grandparent is one of PLUGIN_HOMES: a copy of
 an agent home's plugin cache taken by a home guard. Every other file and
-directory stays, evidence included. Directories inside a removed cache are
+directory stays, evidence included. The signature is re-checked on the
+descriptor immediately before removal. Directories inside a removed cache are
 made owner-writable first (the Go module cache is read-only by design).
-Before removal starts, a cache gets a TOMBSTONE_MARKER file naming its kind
-and is renamed to its name plus TOMBSTONE_SUFFIX; the marker is removed last.
-A directory carrying that suffix AND a marker naming a known kind is removed
-as `interrupted-removal`, so a removal a killed run cut short is finished by
-the next one. A suffixed directory without that marker is not a cache.
+
+Interrupted removal — before removal starts, a cache gets a TOMBSTONE_MARKER
+file naming its kind, then is renamed to its name plus TOMBSTONE_SUFFIX; the
+marker is removed last. A run finding a directory with that suffix AND a
+marker naming a known kind removes it as `interrupted-removal`. A run finding
+a cache still at its own name with a marker naming its kind (cut short
+between marking and renaming) reuses that marker. A suffixed directory
+without a valid marker is not a cache and stays.
 
 Budget — `--budget-sec` stops starting new work once that many seconds have
 passed and reports `incomplete: true`; a re-run continues where it stopped.
@@ -74,8 +79,8 @@ Contract:
              "incomplete": bool, "could_not_check": str|null}
           `caches` lists what was removed (under --dry-run, what would be),
           `bytes` their allocated size. `could_not_check` names why the
-          ledger or the supervision store could not be read; nothing is
-          removed then.
+          ledger, the supervision store or ROOT could not be read; nothing
+          is removed then.
   stderr: diagnostics.
   exit  : 0 done (including could_not_check); 2 when any removal failed
           (the JSON still names each); 1 on a usage error.
@@ -108,76 +113,115 @@ GO_BUILD_README = b"This directory holds cached build artifacts from the Go buil
 #: Directory names a copied agent home carries its plugin cache under.
 PLUGIN_HOMES = frozenset({".claude", ".codex", "codex-home"})
 
-#: A cache is renamed to `<name>` + this suffix before its removal starts, so
-#: a removal cut short leaves a directory the next run recognizes and finishes.
+#: A cache is renamed to `<name>` + this suffix before its removal starts.
 TOMBSTONE_SUFFIX = ".prune-report-caches-removing"
 TOMBSTONE = "interrupted-removal"
 
-#: The file inside a tombstone naming the kind of cache it was.
+#: The file inside a marked cache or a tombstone naming the kind of cache it is.
 TOMBSTONE_MARKER = ".prune-report-caches-kind"
 
 DIR_FLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+FILE_FLAGS = os.O_RDONLY | os.O_NOFOLLOW
 
 
-def _lstat(path):
+def _lstat_at(dir_fd, name):
     try:
-        return os.lstat(path)
+        return os.stat(name, dir_fd=dir_fd, follow_symlinks=False)
     except FileNotFoundError:
         return None
 
 
-def _is_dir(path):
-    st = _lstat(path)
+def _is_dir_at(dir_fd, name):
+    st = _lstat_at(dir_fd, name)
     return st is not None and stat.S_ISDIR(st.st_mode)
 
 
-def _is_file(path):
-    st = _lstat(path)
+def _is_file_at(dir_fd, name):
+    st = _lstat_at(dir_fd, name)
     return st is not None and stat.S_ISREG(st.st_mode)
 
 
-def _go_build(path):
-    readme = os.path.join(path, "README")
-    if not _is_file(readme):
+def _head_at(dir_fd, name, size):
+    """The first `size` bytes of regular file `name`, or None."""
+    if not _is_file_at(dir_fd, name):
+        return None
+    fd = os.open(name, FILE_FLAGS, dir_fd=dir_fd)
+    try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            return None
+        return os.read(fd, size)
+    finally:
+        os.close(fd)
+
+
+def open_at(dir_fd, name):
+    """Open directory `name` in `dir_fd` without following a symlink."""
+    return os.open(name, DIR_FLAGS, dir_fd=dir_fd)
+
+
+def open_rel(base_fd, parts):
+    """Open the directory `parts` below `base_fd`, one no-follow step each."""
+    fd = os.dup(base_fd)
+    for part in parts:
+        try:
+            child = open_at(fd, part)
+        finally:
+            os.close(fd)
+        fd = child
+    return fd
+
+
+def _go_build(fd):
+    return _head_at(fd, "README", len(GO_BUILD_README)) == GO_BUILD_README
+
+
+def _go_module(fd):
+    if not _is_dir_at(fd, "cache"):
         return False
-    with open(readme, "rb") as handle:
-        return handle.read(len(GO_BUILD_README)) == GO_BUILD_README
+    cache = open_at(fd, "cache")
+    try:
+        return _is_dir_at(cache, "download")
+    finally:
+        os.close(cache)
 
 
-def _go_module(path):
-    return _is_dir(os.path.join(path, "cache")) and _is_dir(os.path.join(path, "cache", "download"))
+def _pip(fd):
+    return any(_is_dir_at(fd, name) for name in ("http", "http-v2", "wheels", "selfcheck"))
 
 
-def _pip(path):
-    return any(_is_dir(os.path.join(path, name)) for name in ("http", "http-v2", "wheels", "selfcheck"))
+def _npm(fd):
+    return _is_dir_at(fd, "_cacache")
 
 
-def _npm(path):
-    return _is_dir(os.path.join(path, "_cacache"))
+def _venv(fd):
+    return _is_file_at(fd, "pyvenv.cfg")
 
 
-def _venv(path):
-    return _is_file(os.path.join(path, "pyvenv.cfg"))
+def _node_modules(fd):
+    return _is_file_at(fd, ".package-lock.json")
 
 
-def _node_modules(path):
-    return _is_file(os.path.join(path, ".package-lock.json"))
-
-
-def _bytecode(path):
+def _bytecode(fd, top=True):
     """Only directories and `.pyc` regular files, all the way down."""
-    stack = [path]
-    while stack:
-        with os.scandir(stack.pop()) as entries:
-            for entry in entries:
-                if entry.is_dir(follow_symlinks=False):
-                    stack.append(entry.path)
-                elif not (entry.is_file(follow_symlinks=False) and entry.name.endswith(".pyc")):
+    with os.scandir(fd) as entries:
+        listed = [(entry.name, entry.stat(follow_symlinks=False).st_mode) for entry in entries]
+    for name, mode in listed:
+        if top and name == TOMBSTONE_MARKER:
+            continue
+        if stat.S_ISDIR(mode):
+            child = open_at(fd, name)
+            try:
+                if not _bytecode(child, top=False):
                     return False
+            finally:
+                os.close(child)
+        elif not (stat.S_ISREG(mode) and name.endswith(".pyc")):
+            return False
     return True
 
 
-#: kind -> (basenames, signature). A directory is a cache only when both match.
+#: kind -> (basenames, signature over the directory's descriptor). A directory
+#: is a cache only when both match.
 CACHE_KINDS = {
     "go-build-cache": (frozenset({"go-cache", "gocache", "go-build", "go-build-cache"}), _go_build),
     "go-module-cache": (frozenset({"go-mod-cache", "go-modcache", "gomodcache", "modcache"}), _go_module),
@@ -192,27 +236,33 @@ PLUGIN_CACHE_COPY = "plugin-cache-copy"
 KNOWN_KINDS = frozenset(CACHE_KINDS) | {PLUGIN_CACHE_COPY}
 
 
-def _tombstone(path):
-    """A marker naming a known kind, as a regular file directly inside."""
-    marker = os.path.join(path, TOMBSTONE_MARKER)
-    if not _is_file(marker):
-        return False
-    with open(marker, "rb") as handle:
-        return handle.read(64).decode("ascii", "replace").strip() in KNOWN_KINDS
+def marker_kind(fd):
+    """The known kind a TOMBSTONE_MARKER directly inside names, or None."""
+    head = _head_at(fd, TOMBSTONE_MARKER, 64)
+    if head is None:
+        return None
+    kind = head.decode("ascii", "replace").strip()
+    return kind if kind in KNOWN_KINDS else None
 
 
-def classify(path, top):
-    """The CACHE_KINDS kind of directory `path` below `top`, or None."""
-    name = os.path.basename(path)
-    rel = os.path.relpath(path, top).split(os.sep)
-    if name.endswith(TOMBSTONE_SUFFIX) and _tombstone(path):
-        return TOMBSTONE
-    if name == "cache" and len(rel) >= 3 and rel[-2] == "plugins" and rel[-3] in PLUGIN_HOMES:
+def classify_at(parent_fd, name, parts):
+    """The kind of directory `name` in `parent_fd` (at `parts` below the
+    candidate), or None."""
+    if len(parts) >= 3 and name == "cache" and parts[-2] == "plugins" and parts[-3] in PLUGIN_HOMES:
         return PLUGIN_CACHE_COPY
-    for kind, (names, signature) in CACHE_KINDS.items():
-        if name in names and signature(path):
-            return kind
-    return None
+    tomb = name.endswith(TOMBSTONE_SUFFIX)
+    if not tomb and not any(name in names for names, _signature in CACHE_KINDS.values()):
+        return None
+    fd = open_at(parent_fd, name)
+    try:
+        if tomb:
+            return TOMBSTONE if marker_kind(fd) else None
+        for kind, (names, signature) in CACHE_KINDS.items():
+            if name in names and signature(fd):
+                return kind
+        return None
+    finally:
+        os.close(fd)
 
 
 def reports_dirs(document):
@@ -243,27 +293,33 @@ class Budget:
             raise OutOfBudget()
 
 
-def survey(top, cutoff, budget):
-    """(idle, caches) for one reports directory; caches as (path, kind)."""
-    st = os.lstat(top)
-    if st.st_mtime > cutoff:
+def survey(cand_fd, cutoff, budget):
+    """(idle, caches) for one opened reports directory; caches as parts tuples
+    below it with their kind."""
+    if os.fstat(cand_fd).st_mtime > cutoff:
         return False, []
     caches = []
-    stack = [(top, False)]
+    root_parts: tuple[str, ...] = ()
+    stack: list[tuple[tuple[str, ...], bool]] = [(root_parts, False)]
     while stack:
         budget.check()
-        current, inside = stack.pop()
-        with os.scandir(current) as entries:
-            for entry in entries:
-                info = entry.stat(follow_symlinks=False)
+        parts, inside = stack.pop()
+        fd = open_rel(cand_fd, parts)
+        try:
+            with os.scandir(fd) as entries:
+                listed = [(entry.name, entry.stat(follow_symlinks=False)) for entry in entries]
+            for name, info in listed:
                 if info.st_mtime > cutoff:
                     return False, []
                 if not stat.S_ISDIR(info.st_mode):
                     continue
-                kind = None if inside else classify(entry.path, top)
+                child = parts + (name,)
+                kind = None if inside else classify_at(fd, name, child)
                 if kind:
-                    caches.append((entry.path, kind))
-                stack.append((entry.path, inside or bool(kind)))
+                    caches.append((child, kind))
+                stack.append((child, inside or bool(kind)))
+        finally:
+            os.close(fd)
     return True, caches
 
 
@@ -284,7 +340,7 @@ def remove_at(dir_fd, name, dry_run, marker_last=False):
     freed = 0
     st = os.stat(name, dir_fd=dir_fd, follow_symlinks=False)
     if stat.S_ISDIR(st.st_mode):
-        fd = os.open(name, DIR_FLAGS, dir_fd=dir_fd)
+        fd = open_at(dir_fd, name)
         try:
             if not _same(os.fstat(fd), st):
                 raise _changed()
@@ -304,45 +360,42 @@ def remove_at(dir_fd, name, dry_run, marker_last=False):
     return freed + st.st_blocks * 512
 
 
-def _absent(name, dir_fd):
+def mark(cache_fd, kind):
+    """Write the kind marker, or accept one an interrupted run already wrote."""
     try:
-        os.stat(name, dir_fd=dir_fd, follow_symlinks=False)
-    except FileNotFoundError:
-        return True
-    return False
-
-
-def remove_cache(path, kind, dry_run):
-    """Mark, rename to a tombstone, then remove; bytes freed (or measured)."""
-    parent, name = os.path.split(path)
-    pfd = os.open(parent, DIR_FLAGS)
+        fd = os.open(TOMBSTONE_MARKER, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=cache_fd)
+    except FileExistsError:
+        if marker_kind(cache_fd) != kind:
+            raise FileExistsError(errno.EEXIST, "holds a {} that does not name {}; remove it by hand".format(
+                TOMBSTONE_MARKER, kind)) from None
+        return
     try:
-        if dry_run or kind == TOMBSTONE:
-            return remove_at(pfd, name, dry_run, marker_last=True)
-        tomb = name + TOMBSTONE_SUFFIX
-        if not _absent(tomb, pfd):
-            raise FileExistsError(errno.EEXIST, "a leftover {} is in the way; remove it by hand".format(
-                os.path.join(parent, tomb)))
-        st = os.stat(name, dir_fd=pfd, follow_symlinks=False)
-        cfd = os.open(name, DIR_FLAGS, dir_fd=pfd)
-        try:
-            if not _same(os.fstat(cfd), st):
-                raise _changed()
-            if (st.st_mode & stat.S_IRWXU) != stat.S_IRWXU:
-                os.fchmod(cfd, st.st_mode | stat.S_IRWXU)
-            mfd = os.open(TOMBSTONE_MARKER, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=cfd)
-            try:
-                os.write(mfd, kind.encode("ascii") + b"\n")
-            finally:
-                os.close(mfd)
-            os.rename(name, tomb, src_dir_fd=pfd, dst_dir_fd=pfd)
-            if not _same(os.stat(tomb, dir_fd=pfd, follow_symlinks=False), st):
-                raise _changed()
-        finally:
-            os.close(cfd)
-        return remove_at(pfd, tomb, dry_run, marker_last=True)
+        os.write(fd, kind.encode("ascii") + b"\n")
     finally:
-        os.close(pfd)
+        os.close(fd)
+
+
+def remove_cache(parent_fd, name, kind, dry_run):
+    """Mark, rename to a tombstone, then remove; bytes freed (or measured)."""
+    if dry_run or kind == TOMBSTONE:
+        return remove_at(parent_fd, name, dry_run, marker_last=True)
+    tomb = name + TOMBSTONE_SUFFIX
+    if _lstat_at(parent_fd, tomb) is not None:
+        raise FileExistsError(errno.EEXIST, "a leftover {} is in the way; remove it by hand".format(tomb))
+    st = os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
+    cache_fd = open_at(parent_fd, name)
+    try:
+        if not _same(os.fstat(cache_fd), st):
+            raise _changed()
+        if (st.st_mode & stat.S_IRWXU) != stat.S_IRWXU:
+            os.fchmod(cache_fd, st.st_mode | stat.S_IRWXU)
+        mark(cache_fd, kind)
+        os.rename(name, tomb, src_dir_fd=parent_fd, dst_dir_fd=parent_fd)
+        if not _same(os.stat(tomb, dir_fd=parent_fd, follow_symlinks=False), st):
+            raise _changed()
+    finally:
+        os.close(cache_fd)
+    return remove_at(parent_fd, tomb, dry_run, marker_last=True)
 
 
 def within(path, root):
@@ -377,6 +430,49 @@ def load_ledger(state_path, default):
         return None, None, exc.message
 
 
+def prune_candidate(root_fd, real_root, real, cutoff, budget, dry_run, result):
+    """Survey one resolved candidate and remove its caches when idle.
+
+    Returns True when the candidate was idle (its walk covers descendants).
+    """
+    parts = tuple(os.path.relpath(real, real_root).split(os.sep))
+    try:
+        cand_fd = open_rel(root_fd, parts)
+    except FileNotFoundError:
+        result["missing"] += 1
+        return False
+    except OSError as exc:
+        if exc.errno in (errno.ELOOP, errno.ENOTDIR):
+            result["skipped"].append({"path": real, "reason": "symlink"})
+            return False
+        raise
+    try:
+        idle, caches = survey(cand_fd, cutoff, budget)
+        if not idle:
+            result["skipped"].append({"path": real, "reason": "not_idle"})
+            return False
+        for cache_parts, kind in caches:
+            budget.check()
+            path = os.path.join(real, *cache_parts)
+            try:
+                parent_fd = open_rel(cand_fd, cache_parts[:-1])
+                try:
+                    name = cache_parts[-1]
+                    if not _is_dir_at(parent_fd, name) or classify_at(parent_fd, name, cache_parts) != kind:
+                        continue
+                    size = remove_cache(parent_fd, name, kind, dry_run)
+                finally:
+                    os.close(parent_fd)
+            except OSError as exc:
+                result["failed"].append({"path": path, "error": exc.strerror or str(exc)})
+                continue
+            result["caches"].append({"path": path, "kind": kind, "bytes": size})
+            result["bytes"] += size
+        return True
+    finally:
+        os.close(cand_fd)
+
+
 def run(args):
     result = {"schema_version": SCHEMA_VERSION, "dry_run": args.dry_run, "root": None, "reports_dirs": 0,
               "missing": 0, "caches": [], "bytes": 0, "skipped": [], "failed": [], "incomplete": False,
@@ -389,6 +485,13 @@ def run(args):
         result["could_not_check"] = why
         return result
     real_root = os.path.realpath(root)
+    try:
+        root_fd = os.open(real_root, DIR_FLAGS)
+    except FileNotFoundError:
+        root_fd = None
+    except OSError as exc:
+        result["could_not_check"] = "the state root {} cannot be opened: {}".format(real_root, exc.strerror)
+        return result
     now = time.time() if args.now is None else args.now
     cutoff = now - IDLE_HOURS * 3600
     budget = Budget(args.budget_sec)
@@ -405,7 +508,7 @@ def run(args):
             if not within(real, real_root):
                 result["skipped"].append({"path": candidate, "reason": "outside_root"})
                 continue
-            if not _is_dir(real):
+            if root_fd is None:
                 result["missing"] += 1
                 continue
             if any(within(real, done) for done in covered):
@@ -414,27 +517,15 @@ def run(args):
                 result["skipped"].append({"path": real, "reason": "active_assignment"})
                 continue
             try:
-                idle, caches = survey(real, cutoff, budget)
+                if prune_candidate(root_fd, real_root, real, cutoff, budget, args.dry_run, result):
+                    covered.append(real)
             except OSError as exc:
                 result["failed"].append({"path": real, "error": exc.strerror or str(exc)})
-                continue
-            if not idle:
-                result["skipped"].append({"path": real, "reason": "not_idle"})
-                continue
-            covered.append(real)
-            for path, kind in caches:
-                budget.check()
-                try:
-                    if not _is_dir(path) or classify(path, real) != kind:
-                        continue
-                    size = remove_cache(path, kind, args.dry_run)
-                except OSError as exc:
-                    result["failed"].append({"path": path, "error": exc.strerror or str(exc)})
-                    continue
-                result["caches"].append({"path": path, "kind": kind, "bytes": size})
-                result["bytes"] += size
     except OutOfBudget:
         result["incomplete"] = True
+    finally:
+        if root_fd is not None:
+            os.close(root_fd)
     return result
 
 
