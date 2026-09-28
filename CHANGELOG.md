@@ -23,8 +23,9 @@
   (exit 1 without it) and exits 3 when the check cannot run, never treating an
   unchecked path as accepted; a refusal counts only when the module's JSON
   verdict reaches stdout, so a crash exiting 1 (a failed import) is exit 3,
-  not a misreported bad path. Every template renders `REPORT`,
-  `REVIEW_PACKAGE`, `POLICY_INDEX` and `RELEASE_SKILL` inside a code span, so
+  not a misreported bad path. `resolve-gates.sh` exits 2 with a reinstall
+  instruction, never a traceback, when that module cannot be imported. Every
+  template renders `REPORT`, `REVIEW_PACKAGE`, `POLICY_INDEX` and `RELEASE_SKILL` inside a code span, so
   the composer also refuses a backtick in them, as it already did in slice
   globs. `marker-fit` is stricter than before: it also refuses format,
   private-use and unassigned characters.

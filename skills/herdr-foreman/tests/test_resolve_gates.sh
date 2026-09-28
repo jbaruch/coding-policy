@@ -21,6 +21,9 @@
 #                               a note or a workflow filename, or a backtick
 #                               in a path or workflow filename: exit 2. A
 #                               backtick in a note stays accepted.
+#  10. Broken install       -> foreman/renderable.py missing or lacking
+#                               `offenders`: exit 2 naming the reinstall,
+#                               never a traceback.
 #
 # No case asserts a filename this script recognises, because it recognises none.
 # An earlier draft matched a hardcoded list of names, which is the enumerated
@@ -251,6 +254,27 @@ JSON
   run "$TMP/does-not-exist"
   if [[ $RC -eq 2 && -z "$OUT" ]] && printf '%s' "$ERRTEXT" | grep -q 'not a directory'; then
     pass; else fail "an absent checkout is a tool error, got RC=$RC OUT=$OUT"; fi
+
+  echo "▶ a broken install" >&2
+
+  # A copy of the script in a skill directory whose shared check is missing,
+  # then one whose module lacks the function: exit 2 naming the reinstall.
+  mkdir -p "$TMP/nomod" "$TMP/badmod/foreman" "$TMP/plain" || die "mkdir broken install"
+  cp "$SCRIPT" "$TMP/nomod/resolve-gates.sh" || die "copy script (nomod)"
+  cp "$SCRIPT" "$TMP/badmod/resolve-gates.sh" || die "copy script (badmod)"
+  : > "$TMP/badmod/foreman/__init__.py" || die "write badmod package"
+  printf 'UNRENDERABLE_CATEGORIES = frozenset()\n' > "$TMP/badmod/foreman/renderable.py" || die "write badmod module"
+  local broken
+  for broken in nomod badmod; do
+    OUT="$(bash "$TMP/$broken/resolve-gates.sh" "$TMP/plain" 2>"$ERRFILE")"
+    RC=$?
+    ERRTEXT="$(cat "$ERRFILE")"
+    if [[ $RC -eq 2 && -z "$OUT" ]] \
+       && printf '%s' "$ERRTEXT" | grep -q '^resolve-gates: cannot load the shared renderable-text check' \
+       && printf '%s' "$ERRTEXT" | grep -q 'tessl install jbaruch/coding-policy' \
+       && ! printf '%s' "$ERRTEXT" | grep -q 'Traceback'; then
+      pass; else fail "an unimportable shared check ($broken) is exit 2 naming the reinstall, got RC=$RC OUT=$OUT ERR=$ERRTEXT"; fi
+  done
 
   echo "─────────────────────────────────────────────" >&2
   if [[ $FAIL -gt 0 ]]; then echo "FAILED: ${FAIL} failed, ${PASS} passed" >&2; exit 1; fi
