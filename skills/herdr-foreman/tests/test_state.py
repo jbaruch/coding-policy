@@ -84,6 +84,46 @@ class RoundTripTest(unittest.TestCase):
         save_state(self.path, empty_state())
         self.assertEqual(load_state(self.path)["assignments"], [])
 
+    def test_save_refuses_a_symlink_rather_than_replacing_it(self):
+        # The atomic rename would replace the link itself, destroying the
+        # redirect and leaving its target stale; live and dangling alike.
+        self.path.parent.mkdir(parents=True)
+        real = Path(self.tmp) / "real.json"
+        save_state(real, empty_state())
+        original = real.read_bytes()
+        state = empty_state()
+        add_assignment(state, "2026-01-02T03:04:05+00:00", "developer", "grok")
+        for target in (real, Path(self.tmp) / "gone.json"):
+            with self.subTest(target=target.name):
+                if self.path.is_symlink():
+                    self.path.unlink()
+                self.path.symlink_to(target)
+                with self.assertRaisesRegex(StateError, "is a symlink"):
+                    save_state(self.path, state)
+                self.assertTrue(self.path.is_symlink())
+                self.assertEqual(os.readlink(self.path), str(target))
+        self.assertEqual(real.read_bytes(), original)
+        self.assertFalse((Path(self.tmp) / "gone.json").exists())
+
+    @unittest.skipIf(os.geteuid() == 0, "root searches any directory")
+    def test_save_refuses_a_target_it_cannot_inspect(self):
+        # An unsearchable ancestor makes the link probe itself fail; that is a
+        # StateError naming the path, never a traceback or a blind write.
+        locked = Path(self.tmp) / "locked"
+        (locked / "sub").mkdir(parents=True)
+        os.chmod(locked, 0)
+        self.addCleanup(os.chmod, locked, 0o755)
+        with self.assertRaisesRegex(StateError, "Cannot inspect the state file"):
+            save_state(locked / "sub" / "state.json", empty_state())
+
+    def test_save_follows_a_symlinked_parent_directory(self):
+        real = Path(self.tmp) / "real-dir"
+        real.mkdir()
+        alias = Path(self.tmp) / "alias-dir"
+        alias.symlink_to(real, target_is_directory=True)
+        save_state(alias / "state.json", empty_state())
+        self.assertEqual(load_state(real / "state.json"), empty_state())
+
     def test_file_ends_with_a_newline(self):
         save_state(self.path, empty_state())
         self.assertTrue(self.path.read_text(encoding="utf-8").endswith("}\n"))
