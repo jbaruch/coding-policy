@@ -4,8 +4,21 @@
 set -euo pipefail
 
 main() {
-  local plugin_root
-  plugin_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+  local src dir plugin_root
+  # Command substitution strips every trailing newline, so neither the hooks
+  # directory nor the plugin root passes through one bare: parameter expansion
+  # derives the first, and a sentinel carries `pwd` across the strip (#487).
+  src="${BASH_SOURCE[0]}"
+  case "$src" in
+    */*) dir="${src%/*}" ;;
+    *) dir=. ;;
+  esac
+  if ! plugin_root="$(cd -- "${dir:-/}/.." && pwd && printf x)"; then
+    echo "herdr-supervision-stop: cannot enter the plugin root above ${dir:-/} — reinstall the plugin to enable the native supervision gate" >&2
+    return 0
+  fi
+  plugin_root="${plugin_root%x}"
+  plugin_root="${plugin_root%$'\n'}"
   if ! command -v python3 >/dev/null 2>&1; then
     echo 'herdr-supervision-stop: python3 is missing — restore Python to enable the native supervision gate' >&2
     return 0

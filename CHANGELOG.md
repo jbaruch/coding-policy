@@ -16,6 +16,41 @@
   `skills/release/check-changelog-placement.py` refuses any edit to a block
   under a published heading as new parked content, the same limit #581 hit.
 
+## 0.3.308 — 2026-09-28
+
+### Fixed
+
+- **The release publication contract and the plugin's hooks now run from an
+  installed plugin whatever its directory is called (#487).**
+  `skills/release/PUBLICATION.md`, which release Step 7 sends the agent to,
+  still invoked six scripts by bare path — the #465 defect #485 fixed
+  everywhere else. From an installed plugin those files are mode 0644, so every
+  confirmation step would stop at `permission denied`; each now carries a
+  `bash ` prefix. `scripts/tests/test_shipped_invocations.py` scans every
+  fenced shell block under `skills/` and `hooks/` for a script named by bare
+  path in command position, so the next one fails CI instead of a consumer's
+  release. It tokenizes each line with `shlex` rather than a regex: three
+  review rounds each found a quoting, operator or wrapper form a regex split
+  missed, and a real tokenizer settles the whole class. It skips assignments,
+  redirections, keywords and wrappers such as `env` and `sudo`, and reports a
+  line it cannot tokenize instead of skipping it; its first run caught a `foreman.sh validate-partition` in
+  `skills/herdr-foreman/references/review-partition.md`, a path that resolves
+  nowhere. It and the matching `foreman detect-triggers` block in
+  `specialists.md` are now `text` synopses pointing at the runnable form in
+  `skills/herdr-foreman/SKILL.md` Step 5, the shape `working-memory.md`
+  already uses.
+  `hooks/check-leftover-worktrees.sh` added #466's newline sentinel to `pwd`
+  but still fed `cd` a `$(dirname ...)` capture, which strips a trailing
+  newline from the hooks directory's name before `cd` sees it. The same shape,
+  without even the sentinel, sat in `hooks/session-start.sh` (which dispatches
+  the leftover hook, so its fix was unreachable), `hooks/herdr-team-status.sh`,
+  `hooks/herdr-supervision-stop.sh` and `hooks/stop-handoff-hygiene.sh`. All
+  five now derive the directory by
+  parameter expansion, carry `pwd` through a sentinel, and warn rather than
+  die when `cd` fails. Each has a fixture staging it under a directory whose
+  name ends in a newline — for the Stop hook, the plugin root too — and each
+  fixture fails against the old code.
+
 ## 0.3.307 — 2026-09-28
 
 ### Fixed

@@ -17,7 +17,7 @@ Read the repo's publish workflow and its manifest:
 A publication on another channel skips this gate.
 
 ```bash
-PRE=$(skills/release/registry-baseline.sh <workspace> <plugin>) || exit
+PRE=$(bash skills/release/registry-baseline.sh <workspace> <plugin>) || exit
 ```
 
 Exit 0 prints the version and nothing else. Any other exit means the baseline could not be vouched for and the release stops: an empty `PRE` passes the registry-advance conjunct vacuously, reporting a publish that never happened. Which conditions it refuses, and why it has no verdict exit, are the script's contract — see `skills/release/registry-baseline.sh` header, not restated here (`rules/script-as-black-box.md`).
@@ -43,7 +43,7 @@ Each channel keeps its own run id in its own variable. A mixed publication runs 
 
 # Tessl — the publish workflow fires on the merge commit.
 merge_sha=$(gh pr view <N> --json mergeCommit --jq '.mergeCommit.oid')
-tessl_run=$(skills/release/resolve-publish-run.sh <owner> <repo> "$merge_sha" "<tessl-publish-workflow>") || exit
+tessl_run=$(bash skills/release/resolve-publish-run.sh <owner> <repo> "$merge_sha" "<tessl-publish-workflow>") || exit
 tessl_run_id=$(jq -r '.database_id' <<<"$tessl_run")
 gh run watch "$tessl_run_id"
 
@@ -51,7 +51,7 @@ gh run watch "$tessl_run_id"
 # run carries the tag name as its `headBranch`. Pass the tag as the fifth
 # argument and the commit the tag points at as the third.
 tag_sha=$(git rev-list -n 1 "<tag>")
-tag_run=$(skills/release/resolve-publish-run.sh <owner> <repo> "$tag_sha" "<tag-publish-workflow>" "<tag>") || exit
+tag_run=$(bash skills/release/resolve-publish-run.sh <owner> <repo> "$tag_sha" "<tag-publish-workflow>" "<tag>") || exit
 tag_run_id=$(jq -r '.database_id' <<<"$tag_run")
 gh run watch "$tag_run_id"
 ```
@@ -65,7 +65,7 @@ Omit `--exit-status` from the watch. Read the run conclusion through each channe
 Capture the emitted `current` version for the moderation gate that follows.
 
 ```bash
-CURRENT=$(skills/release/confirm-tessl-landed.sh <workspace> <plugin> "$PRE" "$tessl_run_id") || exit
+CURRENT=$(bash skills/release/confirm-tessl-landed.sh <workspace> <plugin> "$PRE" "$tessl_run_id") || exit
 ```
 
 A bare `exit` propagates the helper's own status rather than flattening it to 1, so a caller scripting from this reference keeps the distinction the next paragraph draws.
@@ -77,7 +77,7 @@ Exit 0 prints the landed version. Exit 1 is a definitive "did not land"; exit 2 
 A freshly published version can be install-blocked until its moderation state reaches `pass`; poll with exponential backoff (the script owns the backoff constants and the cleared/blocked decision).
 
 ```bash
-skills/release/verify-moderation-cleared.sh <workspace> <plugin> "$CURRENT"
+bash skills/release/verify-moderation-cleared.sh <workspace> <plugin> "$CURRENT"
 ```
 
 Exit 0 = moderation cleared. Exit 1 = blocked or still-pending at budget exhaustion — an unconfirmed release; surface it and do not report success. Exit 2 = a usage or tool-state error, never a moderation verdict. Which condition lands in which rc is the script's decision contract — see `skills/release/verify-moderation-cleared.sh` header, not restated here (`rules/script-as-black-box.md`). Never report the release confirmed until this clears. See `rules/ci-safety.md` for the full three-conjunct contract. Every Tessl publication keeps this whole contract, mixed distribution included.
@@ -91,7 +91,7 @@ The resolved run's `conclusion` is `success`, AND the release the run was suppos
 # confirm-tessl-landed.sh. Pass THIS channel's run id: its conclusion
 # is this check's first conjunct, and a mixed publication must not
 # confirm the tag release against the Tessl run.
-skills/release/verify-github-release.sh <owner> <repo> "<tag>" "$tag_run_id"
+bash skills/release/verify-github-release.sh <owner> <repo> "<tag>" "$tag_run_id"
 ```
 
 Exit 0 = both conjuncts hold. Exit 1 = a definitive no — an unconfirmed release; surface it and do not report success. Exit 2 = indeterminate or a usage error; an indeterminate answer is never a landing. Which conjuncts it reads, and which conditions land in which exit code, are the script's decision contract — see `skills/release/verify-github-release.sh` header, not restated here (`rules/script-as-black-box.md`).

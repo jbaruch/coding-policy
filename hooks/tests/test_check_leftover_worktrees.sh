@@ -246,9 +246,10 @@ SH
 
 # A staged plugin: the hook and the result-check module it imports, laid out
 # as the plugin ships them. Each case adds its own owner scripts.
-stage_plugin() { # <dir>
-  mkdir -p "$1/hooks" "$1/skills/herdr-foreman/foreman" || die "mkdir stage $1 failed"
-  cp "$HOOK" "$1/hooks/" || die "stage the hook failed"
+stage_plugin() { # <dir> [hooks-dir-name]
+  local hooks="${2:-hooks}"
+  mkdir -p "$1/$hooks" "$1/skills/herdr-foreman/foreman" || die "mkdir stage $1 failed"
+  cp "$HOOK" "$1/$hooks/" || die "stage the hook failed"
   cp "${HERE}/../../skills/herdr-foreman/foreman/__init__.py" "${HERE}/../../skills/herdr-foreman/foreman/prune_result.py" \
     "$1/skills/herdr-foreman/foreman/" || die "stage the result checks failed"
 }
@@ -523,6 +524,29 @@ main() {
   if [[ "$set_line" == "prune-worktrees.sh ssh -i /keys/case15 -o BatchMode=yes" \
      && "$unset_line" == "prune-worktrees.sh ssh -o BatchMode=yes" ]]; then pass
   else fail "c15: set=$set_line unset=$unset_line ERR=$ERR"; fi
+
+  echo "16. a hooks directory whose name ends in a newline still reaches its owner scripts"
+  # A `$(dirname ...)` capture drops the newline, and the hook then looks for
+  # its owner scripts beside a directory that does not exist (#487).
+  if mkdir "$TMP/nl-probe16${nl}" 2>"$TMP/nl16.err"; then
+    rmdir "$TMP/nl-probe16${nl}" || die "rmdir the newline probe failed"
+    mk_case c16
+    quiet "wt add" git -C "$SHARED" worktree add -q --detach "$ROOT/spent" origin/main
+    age_wt "$ROOT/spent" "$AGED_MTIME"
+    local stage16="$CASE/stage16"
+    stage_plugin "$stage16" "hooks${nl}"
+    cp "${HERE}/../../skills/herdr-foreman/bounded-run.sh" "${HERE}/../../skills/herdr-foreman/prune-worktrees.sh" \
+      "${HERE}/../../skills/herdr-foreman/prune-remote-branches.sh" "$stage16/skills/herdr-foreman/" \
+      || die "stage the owner scripts failed"
+    local real_hook16="$HOOK"
+    HOOK="$stage16/hooks${nl}/$(basename "$real_hook16")"
+    run_hook "$SHARED"
+    HOOK="$real_hook16"
+    if [[ $RC -eq 0 && -z "$OUT" && ! -e "$ROOT/spent" ]]; then pass
+    else fail "c16: RC=$RC OUT=$OUT ERR=$ERR"; fi
+  else
+    echo "16. skipped: this filesystem refuses a name ending in a newline ($(cat "$TMP/nl16.err"))"
+  fi
 
   echo
   echo "passed=${PASS} failed=${FAIL}"

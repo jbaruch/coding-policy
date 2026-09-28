@@ -21,6 +21,7 @@
 #  10. python3 and jq both fail to parse -> a status naming the parsers, not the hook.
 #   6. jq only, no python3  -> the same merged payload.
 #   7. Neither python3 nor jq -> the hooks still run; a warning, no payload.
+#  11. A hooks directory whose name ends in a newline -> its hooks still run.
 #
 # Run: bash hooks/tests/test_session_start.sh
 set -uo pipefail
@@ -142,6 +143,20 @@ PY
   OUT="$(PATH="$shims:$PATH" SESSION_START_HOOKS="one" bash "$DIR/session-start.sh" </dev/null 2>"$TMP/err")"; RC=$?
   if [[ $RC -eq 0 ]] && context | grep -q "could not parse hook one's output" && ! context | grep -q "printed something other"; then
     pass; else fail "parser failure: expected a parser status, got RC=$RC OUT=$OUT err=$(cat "$TMP/err")"; fi
+
+  # 11. a hooks directory whose name ends in a newline still finds its hooks;
+  #     a `$(dirname ...)` capture would drop the newline (#487). The name
+  #     must not collide with $DIR once stripped, or the old code would pass
+  #     by running the plain directory's hooks.
+  local plain_dir="$DIR"
+  DIR="$TMP/"$'nl-hooks\n'
+  mkdir -p "$DIR" || die "cannot create the newline-named hooks directory"
+  cp "$plain_dir/session-start.sh" "$DIR/" || die "cannot copy session-start.sh"
+  fake_hook one "printf '%s\n' '{\"additionalContext\":\"Session-start status — one\"}'"
+  run one
+  if [[ $RC -eq 0 ]] && [[ "$(context)" == 'Session-start status — one' ]]; then
+    pass; else fail "newline-named hooks dir: expected hook one's status, got RC=$RC OUT=$OUT err=$(cat "$TMP/err")"; fi
+  DIR="$plain_dir"
 
   echo "─────────────────────────────────────────────"
   if (( FAIL > 0 )); then echo "FAILED: ${FAIL} failed, ${PASS} passed"; exit 1; fi
