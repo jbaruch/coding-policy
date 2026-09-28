@@ -8,9 +8,9 @@ import unittest
 import urllib.request
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "classify"))
 
-from classify import typesafe_client as ts  # noqa: E402 -- the skill dir is on sys.path only from here
+import typesafe_client as ts  # noqa: E402 -- the classify dir is on sys.path only from here
 
 KEY = "ts-live-0123456789abcdef"
 MODEL = "jev-1.13.0"

@@ -135,7 +135,8 @@
     {
       "root": "skills/herdr-foreman",
       "extraPaths": [
-        "skills/herdr-foreman"
+        "skills/herdr-foreman",
+        "skills/herdr-foreman/classify"
       ]
     },
     {

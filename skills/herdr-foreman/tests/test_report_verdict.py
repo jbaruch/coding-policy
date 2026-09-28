@@ -12,9 +12,10 @@ from pathlib import Path
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "classify"))
 
-from classify import report_verdict as rv  # noqa: E402 -- the skill dir is on sys.path only from here
-from classify import typesafe_client as ts  # noqa: E402
+import report_verdict as rv  # noqa: E402 -- the classify dir is on sys.path only from here
+import typesafe_client as ts  # noqa: E402
 from foreman import report_gates  # noqa: E402
 
 FIXTURES = Path(__file__).resolve().parents[1] / "classify" / "fixtures"

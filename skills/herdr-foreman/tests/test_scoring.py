@@ -5,8 +5,9 @@ import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "classify"))
 
-from classify import scoring  # noqa: E402 -- the skill dir is on sys.path only from here
+import scoring  # noqa: E402 -- the classify dir is on sys.path only from here
 from foreman import report_gates  # noqa: E402
 
 IDS = ("names_open_item", "open_items_accepted", "open_items_out_of_scope", "concludes_nothing_blocks")

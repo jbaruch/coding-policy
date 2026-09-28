@@ -31,7 +31,17 @@
 
 set -euo pipefail
 
-HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd && printf x)"
+# Command substitution strips every trailing newline, so the script directory
+# never passes through one bare: parameter expansion derives it (#487), and a
+# sentinel carries `pwd` across the strip (#466).
+case "${BASH_SOURCE[0]}" in
+  */*) HERE_SRC="${BASH_SOURCE[0]%/*}" ;;
+  *) HERE_SRC=. ;;
+esac
+if ! HERE="$(cd -- "${HERE_SRC:-/}" && pwd && printf x)"; then
+  echo "classify-reports: cannot enter the script directory ${HERE_SRC:-/} — restore read and search access to the plugin directory, or reinstall the plugin, then re-run" >&2
+  exit 2
+fi
 HERE="${HERE%x}"
 HERE="${HERE%$'\n'}"
 

@@ -52,9 +52,12 @@ from pathlib import Path
 from typing import NoReturn
 
 HERE = Path(__file__).resolve().parent
+# The directory's own name is never imported: an installed or copied plugin may
+# live under any name (#592), so siblings resolve from HERE itself.
 sys.path.insert(0, str(HERE.parent))
+sys.path.insert(0, str(HERE))
 
-from classify import typesafe_client  # noqa: E402 -- the skill dir is on sys.path only from here
+import typesafe_client  # noqa: E402 -- HERE and the skill dir are on sys.path only from here
 from foreman import report_gates  # noqa: E402
 
 SCHEMA_VERSION = 2

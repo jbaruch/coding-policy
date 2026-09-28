@@ -28,8 +28,9 @@ from typing import NoReturn
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent))
+sys.path.insert(0, str(HERE))
 
-from classify import report_verdict  # noqa: E402 -- the skill dir is on sys.path only from here
+import report_verdict  # noqa: E402 -- HERE and the skill dir are on sys.path only from here
 from foreman import report_gates  # noqa: E402
 
 #: Truths a recorded verdict determines, per question.

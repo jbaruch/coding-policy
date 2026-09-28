@@ -36,6 +36,7 @@
 #                                 disagreements, fixtures reported apart.
 #  15. A failed classification  -> exit 1 with a partial score, never averaged
 #                                 over the ones that worked.
+#  16. A newline-named dir      -> every script still finds its siblings.
 
 set -uo pipefail
 
@@ -430,6 +431,35 @@ assert len(d["fixtures"]["flipped"]) == 3, d
   if [[ $RC -eq 1 ]] && [[ "$(field "$OUT" failed)" == "1" ]] \
      && [[ "$(field "$OUT" scored)" == "0" ]]; then
     pass; else fail "a failed classification exits 1 and is counted, got RC=$RC OUT=$OUT"; fi
+
+  echo "▶ a directory name ending in a newline" >&2
+
+  # A `$(dirname ...)` capture drops the newline, and the scripts then look for
+  # the questions, the prompt and each other beside a directory that does not
+  # exist (#592). The Python owners resolve from `__file__`.
+  local nl_dir="$TMP/nl-skill/classify"$'\n'
+  if mkdir -p "$nl_dir" 2>"$TMP/nl.err"; then
+    cp -R "$DIR"/. "$nl_dir/" || die "copy the classify dir into $nl_dir"
+    cp -R "$DIR/../foreman" "$TMP/nl-skill/foreman" || die "copy the foreman package beside $nl_dir"
+    OUT="$(PATH="$TMP/ok:$PATH" bash "$nl_dir/classify-report.sh" "$report" --agent codex 2>"$ERRFILE")"
+    RC=$?
+    if [[ $RC -eq 0 ]] && [[ "$(field "$OUT" verdict)" == "blocking" ]]; then
+      pass; else fail "classify-report.sh in a newline-named dir, got RC=$RC OUT=$OUT ERR=$(cat "$ERRFILE")"; fi
+    OUT="$(PATH="$TMP/batch:$PATH" bash "$nl_dir/classify-reports.sh" "$second" "$second" 2>"$ERRFILE")"
+    RC=$?
+    if [[ $RC -eq 0 ]] && printf '%s' "$OUT" | python3 -c '
+import json, sys
+d = json.load(sys.stdin)
+assert len(d["labels"]) == 2 and d["unannotated"] == [], d
+'; then
+      pass; else fail "classify-reports.sh in a newline-named dir, got RC=$RC OUT=$OUT ERR=$(cat "$ERRFILE")"; fi
+    OUT="$(bash "$nl_dir/evaluate.sh" --corpus-only --state "$state" --all 2>"$ERRFILE")"
+    RC=$?
+    if [[ $RC -eq 0 ]] && [[ "$(field "$OUT" corpus)" == "1" ]]; then
+      pass; else fail "evaluate.sh in a newline-named dir, got RC=$RC OUT=$OUT ERR=$(cat "$ERRFILE")"; fi
+  else
+    echo "  skipped: this filesystem refuses a name ending in a newline ($(cat "$TMP/nl.err"))" >&2
+  fi
 
   echo "─────────────────────────────────────────────" >&2
   if [[ $FAIL -gt 0 ]]; then echo "FAILED: ${FAIL} failed, ${PASS} passed" >&2; exit 1; fi

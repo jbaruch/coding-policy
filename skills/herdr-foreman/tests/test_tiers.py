@@ -9,6 +9,7 @@ from types import SimpleNamespace
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from foreman.assign import retained_tier
 from foreman.errors import ConfigError, HerdrError, UsageError
 from foreman.tiers import TOP_MODELS, MissingTierError, SEATABLE_ROLES, launch_flags, mechanical_allowed, parse_tiers, require_seatable, select_tier as _select_tier, verify_argv, verify_worker_permissions, worker_launch_args
 
@@ -633,6 +634,51 @@ class SeatableRoleTest(unittest.TestCase):
             require_seatable("developer#api")
         for role in SEATABLE_ROLES:
             self.assertIn(role, str(caught.exception))
+
+
+class RetainedDeEscalationTest(unittest.TestCase):
+    """A retained fix round reports the de-escalation its running tier carries (#591)."""
+
+    RISK = {"risk_flags": ["network", "persistence"]}
+
+    def worker(self, kind, fix):
+        worker = agent(kind)
+        worker.tiers.update(parse_tiers({"fix": fix}, kind))
+        return worker
+
+    def planned(self, worker):
+        tier = select_tier(worker, "developer", context=self.RISK, fix_round=1, headroom=1.0)
+        self.assertTrue(tier["de_escalated"])
+        return tier
+
+    def previous(self, model, effort):
+        return {"kind": "codex", "model": model, "effort": effort, "multiplier": 3, "effective_multiplier": 3,
+                "billing_window": "weekly", "verified": {"model": model, "effort": effort, "source": "launch_argv"}}
+
+    def test_a_kept_effort_that_reaches_the_declined_step_is_not_de_escalated(self):
+        worker = self.worker("codex", {"model": "gpt-5.6-sol", "effort": "medium"})
+        tier = retained_tier(worker, self.planned(worker), self.previous("gpt-5.6-sol", "xhigh"))
+        self.assertEqual((tier["effort"], tier["de_escalated"]), ("xhigh", False))
+
+    def test_a_kept_effort_still_below_the_declined_step_stays_de_escalated(self):
+        worker = self.worker("codex", {"model": "gpt-5.6-sol", "effort": "medium"})
+        tier = retained_tier(worker, self.planned(worker), self.previous("gpt-5.6-sol", "high"))
+        self.assertEqual((tier["effort"], tier["de_escalated"]), ("high", True))
+
+    def test_a_declined_model_switch_stays_de_escalated_whatever_the_effort(self):
+        worker = self.worker("claude", {"model": "sonnet-5", "effort": "medium"})
+        tier = retained_tier(worker, self.planned(worker), self.previous("sonnet-5", "max"))
+        self.assertEqual((tier["model"], tier["effort"], tier["de_escalated"]), ("sonnet-5", "max", True))
+
+    def test_an_unchanged_effort_keeps_the_planned_flag(self):
+        worker = self.worker("codex", {"model": "gpt-5.6-sol", "effort": "medium"})
+        planned = self.planned(worker)
+        self.assertEqual(retained_tier(worker, planned, self.previous("gpt-5.6-sol", "medium")), planned)
+
+    def test_a_plan_without_the_flag_gains_none(self):
+        worker = self.worker("codex", {"model": "gpt-5.6-sol", "effort": "medium"})
+        planned = {key: value for key, value in self.planned(worker).items() if key != "de_escalated"}
+        self.assertNotIn("de_escalated", retained_tier(worker, planned, self.previous("gpt-5.6-sol", "xhigh")))
 
 
 if __name__ == "__main__":
