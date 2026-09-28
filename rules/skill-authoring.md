@@ -65,8 +65,9 @@ description: SKILL.md structure, frontmatter, execution-mode preamble, flat step
 - Deterministic operations must be executable script files, not inline code blocks for the agent to copy-paste — see `rules/script-delegation.md`
 - In rule prose, documentation, and skill cross-references, use repo-relative paths (`skills/<name>/<file>.<ext>`)
 - In step bodies, use the path that resolves at the invocation site
-- Repo-relative when the skill runs from a clone of this repo: `skills/release/poll-pr-reviews.sh`
-- Plugin-mount path when the skill runs inside a consumer: `.tessl/plugins/jbaruch/coding-policy/skills/onboard-repo/preflight.sh`
+- Repo-relative when the skill runs only from a clone of this repo: `skills/<name>/<script>`
+- Plugin-mount path when the skill runs only inside a consumer: `.tessl/plugins/jbaruch/coding-policy/skills/onboard-repo/preflight.sh`
+- A resolved `$CP` path when the skill runs in both, under the installed-plugin bootstrap in `rules/script-delegation.md` Scripts Are Real Files
 - Don't mix conventions inside one SKILL.md — if one step invokes via a mount path, every other script-invoking step must too
 - Include the expected input/output contract in the step description
 
