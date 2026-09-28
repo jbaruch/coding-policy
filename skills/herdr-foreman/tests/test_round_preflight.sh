@@ -309,6 +309,27 @@ main() {
      && printf '%s' "$OUT" | grep -q 'without one readable headroom and foreman_tier result'; then
     pass; else fail "an incomplete composite result fails both rows, got RC=$RC OUT=$OUT"; fi
 
+  # A status outside the documented set, or a blocking status without a
+  # reason, is a malformed row: both rows fail, never a ready round (#626).
+  local case_no=0 bad
+  for bad in \
+    '{"headroom": {"status": "ok"}, "foreman_tier": {"status": "not-a-valid-status"}}' \
+    '{"headroom": {"status": "ok"}, "foreman_tier": {"status": "failed"}}' \
+    '{"headroom": {"status": "blocked", "reason": " "}, "foreman_tier": {"status": "ok"}}' \
+    '{"headroom": {"status": "unconfigured"}, "foreman_tier": {"status": "ok"}}'; do
+    case_no=$((case_no + 1))
+    shadow "$TMP/compositestatus$case_no"
+    printf '%s\n' "$bad" > "$TMP/compositestatus$case_no/composite.json" || die "write composite fixture"
+    printf '#!/usr/bin/env python3\nimport pathlib\nprint((pathlib.Path(__file__).parent / "composite.json").read_text(), end="")\n' \
+      > "$TMP/compositestatus$case_no/foreman-tier-check.py" || die "write composite stub"
+    run "$TMP/compositestatus$case_no"
+    if [[ $RC -eq 1 ]] && [[ "$(field "$OUT" 'd["ready"]')" == "false" ]] \
+       && [[ "$(field "$OUT" 'd["checks"]["headroom"]["status"]')" == '"failed"' ]] \
+       && [[ "$(field "$OUT" 'd["checks"]["foreman_tier"]["status"]')" == '"failed"' ]] \
+       && printf '%s' "$OUT" | grep -q 'without one readable headroom and foreman_tier result'; then
+      pass; else fail "a malformed composite row ($bad) fails both rows, got RC=$RC OUT=$OUT"; fi
+  done
+
   shadow "$TMP/usage"
   for args in "--checkout /tmp" "--repo o/r"; do
     # shellcheck disable=SC2086  # deliberate word splitting of the fixture args

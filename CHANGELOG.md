@@ -1,5 +1,27 @@
 # Changelog
 
+### Fixed
+
+- **Three foreman-seat verification gaps from #616 close (Fixes #626).**
+  Copilot flagged them as advisory on #616; each let a round pass or write
+  without the evidence its contract names.
+  - `round-preflight.sh` merged any composite row whose `status` was a string,
+    and `ready` reads only `reason`, so a row like
+    `foreman_tier.status = "not-a-valid-status"`, or `failed` with no reason,
+    reported a ready round. Each row's status is now checked against the set
+    `foreman-tier-check.py`'s docstring states, a `failed` or `blocked` row
+    needs a non-empty reason, and a malformed composite fails both rows.
+  - `verify_foreman` proved the argv of one foreground process of the seat's
+    kind, so `verify-foreman --pane` passed against another Claude or Codex
+    pane running the same tier. It now requires Herdr to bind the seat's agent
+    name, with the seat's kind, to the verified pane, and refuses otherwise
+    with the command to fix it.
+  - `verify-foreman` runs without the state lock, but its tier selection read
+    state with `persist_migration=True`, so the first verify against an older
+    state file could rewrite it unlocked. The verify path now reads without
+    persisting, refusing an older file with the owner command the other
+    read-only commands name; `start-foreman`, under the lock, still migrates.
+
 ## 0.3.324 — 2026-09-28
 
 ### Changed

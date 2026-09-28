@@ -38,7 +38,9 @@
 # check, foreman-tier-check.py, which owns the dependency between them; its
 # docstring states each row's statuses. An absent `foreman` block is
 # `unconfigured`, never blocking, whatever headroom reported. A composite run
-# that exits non-zero or returns no readable pair fails both rows.
+# that exits non-zero or returns no readable pair fails both rows, as does a row
+# whose status is outside that docstring's set, or a `failed` or `blocked` row
+# without a reason.
 # `--no-measure` reuses the latest snapshot.
 #
 # `checks.worktrees` (the sweep, sweep-worktrees.sh):
@@ -140,11 +142,17 @@ with open(composite, encoding="utf-8") as handle:
     rows = json.load(handle)
 if not isinstance(rows, dict) or set(rows) != {"headroom", "foreman_tier"}:
     sys.exit("the composite result is not exactly a headroom and a foreman_tier row")
+# Each row's status set is foreman-tier-check.py's docstring. `ready` reads only
+# `reason`, so a blocking status without one would pass the round.
+STATUSES = {"headroom": {"ok", "skipped", "failed", "blocked"},
+            "foreman_tier": {"ok", "unconfigured", "failed"}}
+BLOCKING = {"failed", "blocked"}
 merged = {}
 for name, row in rows.items():
-    if (not isinstance(row, dict) or not isinstance(row.get("status"), str)
+    if (not isinstance(row, dict) or row.get("status") not in STATUSES[name]
             or not set(row) <= {"status", "reason", "detail"}
             or ("reason" in row and not isinstance(row["reason"], str))
+            or (row["status"] in BLOCKING and not row.get("reason", "").strip())
             or ("detail" in row and not isinstance(row["detail"], dict))):
         sys.exit("the {} row is malformed".format(name))
     merged[name] = {**row, "due": False}

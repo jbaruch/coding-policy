@@ -124,12 +124,16 @@ by another kind, or a live tier other than the selected one, refuses
 
 `foreman verify-foreman` re-runs the selection and proves the running foreman
 from its pane's live foreground argv, this Herdr pane by default or
-`--pane <pane-id>`. Step 2's round preflight runs it inside one composite check
+`--pane <pane-id>`. The pane must be the one Herdr binds to the seat's agent
+name, with the seat's kind; any other pane refuses, whatever tier it runs. It
+reads state without the lock and never persists a migration: an older state
+file refuses with the owner command to run. Step 2's round preflight runs it inside one composite check
 with `foreman measure`, `skills/herdr-foreman/foreman-tier-check.py`, and records
 its `checks.headroom` and `checks.foreman_tier` rows:
 
 - the running argv carries the selected tier — `ok`
-- it carries another tier, or the selection refuses — `failed`, and the round
+- it carries another tier, the pane is not the seat's, or the selection
+  refuses — `failed`, and the round
   blocks until the operator restarts the foreman with `start-foreman`
 - config has no `foreman` block — `unconfigured`, a stderr warning; its
   `detail.warning` names the resolved config file, the `schema_version` 6 it
