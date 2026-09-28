@@ -18,8 +18,10 @@
     `unconfigured`; anything short becomes `failed` with a reason. It exits
     with the verdict: 0 ready, 1 not ready, 2 could not run. The preflight
     records the rows on 0 or 1 and fails both rows on any other exit,
-    unreadable output, or rows that contradict the exit code; its evidence
-    checks are gone.
+    unreadable output, or an inconsistent verdict: a status outside the
+    helper's documented vocabulary, a ready status carrying a reason or a
+    blocking one without, or rows that contradict the exit code. Its
+    evidence checks are gone.
   - `verify_foreman` proved the argv of one foreground process of the seat's
     kind, so `verify-foreman --pane` passed against another Claude or Codex
     pane running the same tier. It now requires Herdr to bind the seat's agent

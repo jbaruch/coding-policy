@@ -305,7 +305,12 @@ main() {
     "0|not json|both-failed" \
     '0|{"headroom": {"status": "ok"}}|both-failed' \
     "0|$failed_rows|both-failed" \
-    "1|$ok_rows|both-failed"; do
+    "1|$ok_rows|both-failed" \
+    '0|{"headroom": {"status": "ok", "detail": {}}, "foreman_tier": {"status": "failed"}}|both-failed' \
+    '0|{"headroom": {"status": "ok", "detail": {}}, "foreman_tier": {"status": "not-a-valid-status"}}|both-failed' \
+    '1|{"headroom": {"status": "ok", "detail": {}}, "foreman_tier": {"status": "failed"}}|both-failed' \
+    '1|{"headroom": {"status": "skipped", "reason": "stray"}, "foreman_tier": {"status": "failed", "reason": "r"}}|both-failed' \
+    '0|{"headroom": {"status": "unconfigured"}, "foreman_tier": {"status": "ok", "detail": {}}}|both-failed'; do
     case_no=$((case_no + 1))
     code="${spec%%|*}"; json="${spec#*|}"; want="${json##*|}"; json="${json%|*}"
     shadow "$TMP/composite$case_no"

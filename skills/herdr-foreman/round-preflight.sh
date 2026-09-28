@@ -137,21 +137,33 @@ main() {
   merge_composite() { # <composite-json-file> <exit:0|1>; prints the foreman_tier status
     # foreman-tier-check.py owns the verdict and the evidence each row needs
     # (its docstring). This only parses what to record, and fails closed when
-    # the rows contradict the exit code it gates on.
+    # the output is not a consistent verdict: an unknown status, a reason that
+    # does not match its status, or rows that contradict the exit code.
     python3 - "$results" "$1" "$2" <<'PY'
 import json, sys
 path, composite, code = sys.argv[1:4]
+# Each row's status vocabulary, as foreman-tier-check.py's docstring states it:
+# a ready status carries no reason, a blocking one a non-empty reason.
+READY = {"headroom": {"ok", "skipped"}, "foreman_tier": {"ok", "unconfigured"}}
+BLOCKING = {"headroom": {"failed", "blocked"}, "foreman_tier": {"failed"}}
 with open(composite, encoding="utf-8") as handle:
     rows = json.load(handle)
 if not isinstance(rows, dict) or set(rows) != {"headroom", "foreman_tier"}:
     sys.exit("the composite result is not exactly a headroom and a foreman_tier row")
 for name, row in rows.items():
-    if (not isinstance(row, dict) or not isinstance(row.get("status"), str)
-            or not set(row) <= {"status", "reason", "detail"}
-            or ("reason" in row and not (isinstance(row["reason"], str) and row["reason"].strip()))
+    if (not isinstance(row, dict) or not set(row) <= {"status", "reason", "detail"}
             or ("detail" in row and not isinstance(row["detail"], dict))):
         sys.exit("the {} row is malformed".format(name))
-blocking = any("reason" in row for row in rows.values())
+    status, reason = row.get("status"), row.get("reason")
+    if status in READY[name]:
+        consistent = "reason" not in row
+    elif status in BLOCKING[name]:
+        consistent = isinstance(reason, str) and bool(reason.strip())
+    else:
+        consistent = False
+    if not consistent:
+        sys.exit("the {} row's status and reason are not a verdict".format(name))
+blocking = any(row["status"] in BLOCKING[name] for name, row in rows.items())
 if blocking != (code == "1"):
     sys.exit("the rows contradict the verdict exit {}".format(code))
 merged = {name: {**row, "due": False} for name, row in rows.items()}
