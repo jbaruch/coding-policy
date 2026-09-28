@@ -395,9 +395,13 @@ script's top-of-file contract.
 - **Exit 0** — every repository decided cleanly. Relay `report`, raise each
   `dirty` or `unpushed` item it lists, and continue.
 - **Exit 2** — JSON is present; at least one repository's prune failed or a
-  path could not be read, and every other repository still ran. Relay
-  `report` (its failure and error lines name each one), repair what they
-  name, then run the sweep again.
+  path could not be read. Every other repository still ran, unless the
+  root changed mid-sweep: then the prune in flight stopped its removals,
+  and the error and failure lines name the repositories and steps left
+  undone.
+  - Relay `report`; its failure and error lines name each one.
+  - Repair what they name.
+  - Run the sweep again.
 - **Exit 1** — no JSON; a precondition is unmet. Report the stderr
   diagnostic, repair what it names, then run the sweep again.
 
@@ -519,12 +523,17 @@ checkpoint's `exit` and delivery JSON as `wait`:
   wait's own exit, 2 included); resolve the diagnostic stderr names, then run
   it again
 
-Read delivered reports in full. Pass the worker's checkout as `--worktree`
-when it has one. An exit 1 then carries either `reason: checkpoint_pending` or a `stall` object; act on a
-stall under `rules/agent-team-operation.md` Stalled Workers and record the
-obligation through `references/attention.md`. Preserve the blocked/refusal and native-recovery paths in the
-following references; never re-dispatch over uncertainty or resend a refused
-brief to its provider.
+Then act on the checkpoint:
+
+- Read delivered reports in full
+- Pass the worker's checkout as `--worktree` when it has one
+- An exit 1 carries either `reason: checkpoint_pending` or a `stall` object
+- A `stall` is classified only when `--worktree` names the checkout
+- Act on a stall under `rules/agent-team-operation.md` Stalled Workers
+- Record a stall's obligation through `references/attention.md`
+- Preserve the blocked/refusal and native-recovery paths in the references below
+- Never re-dispatch over uncertainty
+- Never resend a refused brief to its provider
 
 ```text
 skills/herdr-foreman/references/supervision.md

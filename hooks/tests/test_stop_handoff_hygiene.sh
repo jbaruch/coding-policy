@@ -35,6 +35,8 @@
 #   8. No jq           -> fail-open allow, exit 0.
 #   9. Not a repo      -> allow, exit 0.
 #  10. Engine absent   -> block with install guidance (changed .sh, no shellcheck).
+#  12. SSH BatchMode   -> appended to a user-set GIT_SSH_COMMAND, and the
+#      default when none is set.
 #
 # Run: bash hooks/tests/test_stop_handoff_hygiene.sh
 set -uo pipefail
@@ -71,8 +73,8 @@ make_gone_branch() {
 
 mk_stub_bin() { # <dir> <sc_rc> <py_rc>
   mkdir -p "$1" || die "mk_stub_bin: mkdir $1 failed"
-  printf '#!/usr/bin/env bash\nexit %s\n' "$2" > "$1/shellcheck" || die "stub shellcheck failed"
-  printf '#!/usr/bin/env bash\nexit %s\n' "$3" > "$1/pyright"    || die "stub pyright failed"
+  printf '#!/usr/bin/env bash\nset -euo pipefail\nexit %s\n' "$2" > "$1/shellcheck" || die "stub shellcheck failed"
+  printf '#!/usr/bin/env bash\nset -euo pipefail\nexit %s\n' "$3" > "$1/pyright"    || die "stub pyright failed"
   chmod +x "$1/shellcheck" "$1/pyright" || die "chmod stubs failed"
 }
 
@@ -187,6 +189,7 @@ main() {
   trap cleanup EXIT
   export HOME="$TMP/home"; mkdir -p "$HOME" || die "could not create isolated HOME"
   export GIT_CONFIG_NOSYSTEM=1
+  unset GIT_SSH_COMMAND
   export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t
   # Every commit and reflog entry is dated nine days before PRUNE_NOW.
   export GIT_AUTHOR_DATE="2020-01-01T00:00:00Z" GIT_COMMITTER_DATE="2020-01-01T00:00:00Z"
@@ -361,7 +364,7 @@ main() {
 
   # 6. changed-set diagnostics finding -> block. Uncommitted .sh + failing engine.
   mk_origin o6; clone_from "$BARE" "$TMP/r6"
-  printf '#!/usr/bin/env bash\necho hi\n' > "$TMP/r6/new.sh" || die "r6 new.sh failed"
+  printf '#!/usr/bin/env bash\nset -euo pipefail\necho hi\n' > "$TMP/r6/new.sh" || die "r6 new.sh failed"
   mk_stub_bin "$TMP/r6-bin" 1 0     # stub engine exits 1 (a finding)
   run_hook "$TMP/r6" '{"stop_hook_active":false}' "$TMP/r6-bin:$PATH"
   if [[ $RC -eq 0 ]] && reason_has "shellcheck findings" \
@@ -371,7 +374,7 @@ main() {
   # 7. changed-set diagnostics clean -> no diagnostics block (dirty tree is only
   #    report-only, so allow). Proves the changed set was linted and passed.
   mk_origin o7; clone_from "$BARE" "$TMP/r7"
-  printf '#!/usr/bin/env bash\necho hi\n' > "$TMP/r7/new.sh" || die "r7 new.sh failed"
+  printf '#!/usr/bin/env bash\nset -euo pipefail\necho hi\n' > "$TMP/r7/new.sh" || die "r7 new.sh failed"
   mk_stub_bin "$TMP/r7-bin" 0 0     # engines clean
   run_hook "$TMP/r7" '{"stop_hook_active":false}' "$TMP/r7-bin:$PATH"
   if [[ $RC -eq 0 && -z "$OUT" ]]; then pass; else fail "diag clean: expected allow/silence, got RC=$RC OUT=$OUT"; fi
@@ -397,7 +400,7 @@ main() {
   #     engine). PATH has git/jq/cat/bash but no shellcheck; a changed .sh forces
   #     the check.
   mk_origin o10; clone_from "$BARE" "$TMP/r10"
-  printf '#!/usr/bin/env bash\necho hi\n' > "$TMP/r10/new.sh" || die "r10 new.sh failed"
+  printf '#!/usr/bin/env bash\nset -euo pipefail\necho hi\n' > "$TMP/r10/new.sh" || die "r10 new.sh failed"
   local engbin="$TMP/engbin"; mkdir -p "$engbin" || die "engbin mkdir failed"
   local u p2
   for u in bash git jq cat mktemp rm; do
@@ -469,6 +472,29 @@ main() {
   VIRTUAL_ENV="" run_hook "$repo" '{"stop_hook_active":false}' "$engbin"
   if [[ $RC -eq 0 ]] && reason_has 'pyright is not installed'; then
     pass; else fail "missing Pyright must retain install guidance: OUT=$OUT"; fi
+
+  # 12. BatchMode reaches the owner script whether or not GIT_SSH_COMMAND is
+  #     already set. A staged plugin whose prune stand-in records it.
+  mk_origin o12; clone_from "$BARE" "$TMP/r12"
+  g -C "$TMP/r12" switch -qc feat/ssh || die "r12 branch failed"
+  make_gone_branch "$TMP/r12" feat/ssh
+  g -C "$TMP/r12" switch -q main || die "r12 switch main failed"
+  local stage12="$TMP/stage12" calls12="$TMP/calls12" set12 unset12 real_hook12="$HOOK"
+  mkdir -p "$stage12/hooks" "$stage12/skills/herdr-foreman" || die "stage12 mkdir failed"
+  cp "$HOOK" "$stage12/hooks/" || die "stage the stop hook failed"
+  cp "$(dirname "$HOOK")/../skills/herdr-foreman/bounded-run.sh" "$stage12/skills/herdr-foreman/" || die "stage the runner failed"
+  # shellcheck disable=SC2016  # GIT_SSH_COMMAND expands in the stand-in, not here.
+  printf '#!/usr/bin/env bash\nset -euo pipefail\nprintf "%%s\\n" "${GIT_SSH_COMMAND:-}" >> %q\nexit 1\n' "$calls12" \
+    > "$stage12/skills/herdr-foreman/prune-worktrees.sh" || die "write the recording prune failed"
+  HOOK="$stage12/hooks/stop-handoff-hygiene.sh"
+  run_hook "$TMP/r12" '{"stop_hook_active":false}' "$PATH" GIT_SSH_COMMAND="ssh -i /keys/case12"
+  set12="$(head -n 1 "$calls12")"
+  : > "$calls12" || die "clear calls12 failed"
+  run_hook "$TMP/r12" '{"stop_hook_active":false}' "$PATH"
+  unset12="$(head -n 1 "$calls12")"
+  HOOK="$real_hook12"
+  if [[ "$set12" == "ssh -i /keys/case12 -o BatchMode=yes" && "$unset12" == "ssh -o BatchMode=yes" ]]; then
+    pass; else fail "BatchMode: set=$set12 unset=$unset12 ERR=$ERRTEXT"; fi
 
   echo "─────────────────────────────────────────────" >&2
   if [[ $FAIL -gt 0 ]]; then echo "FAILED: ${FAIL} failed, ${PASS} passed" >&2; exit 1; fi

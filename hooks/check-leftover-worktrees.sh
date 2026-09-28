@@ -141,13 +141,25 @@ main() {
 
   # The shared checkout is the first entry of the worktree list, whichever
   # worktree this session sits in; a bare repository has no checkout to clean.
-  local shared
+  local shared list list_err
   rc=0
-  err="$(mktemp)" || { cannot_check "mktemp failed; make ${TMPDIR:-/tmp} writable."; return 0; }
-  shared="$(git worktree list --porcelain -z 2>"$err" | python3 -c '
+  list="$(mktemp -d)" || { cannot_check "mktemp failed; make ${TMPDIR:-/tmp} writable."; return 0; }
+  # Captured to a file and git's own exit checked before anything is parsed,
+  # as hooks/stop-handoff-hygiene.sh reads it: a git failure is named as one,
+  # never folded into the parser's verdict.
+  git worktree list --porcelain -z >"${list}/out" 2>"${list}/err" || rc=$?
+  list_err="$(cat "${list}/err")"
+  if (( rc != 0 )); then
+    if ! rm -rf "$list"; then warn "could not remove ${list} — delete it by hand"; fi
+    cannot_check "\`git worktree list --porcelain -z\` exited ${rc} (${list_err}); run it here to see why."
+    return 0
+  fi
+  shared="$(python3 -c '
 import sys
 first = []
-for field in sys.stdin.buffer.read().split(b"\0"):
+with open(sys.argv[1], "rb") as handle:
+    fields = handle.read().split(b"\0")
+for field in fields:
     if not field:
         break
     first.append(field)
@@ -156,17 +168,15 @@ if not first or not first[0].startswith(b"worktree "):
 if b"bare" in first:
     sys.exit(4)
 sys.stdout.buffer.write(first[0][len(b"worktree "):] + b"x")
-')" || rc=$?
+' "${list}/out")" || rc=$?
   # The sentinel keeps a trailing newline in the path through the command
   # substitution; it comes off only here.
   shared="${shared%x}"
-  local list_err
-  list_err="$(cat "$err")"
-  if ! rm -f "$err"; then warn "could not remove ${err} — delete it by hand"; fi
+  if ! rm -rf "$list"; then warn "could not remove ${list} — delete it by hand"; fi
   case "$rc" in
     0) ;;
     4) return 0 ;;
-    *) cannot_check "\`git worktree list --porcelain -z\` gave no worktree (exit ${rc}; ${list_err}); run it here to see why."; return 0 ;;
+    *) cannot_check "\`git worktree list --porcelain -z\` gave no worktree (parse exit ${rc}; ${list_err}); run it here to see why."; return 0 ;;
   esac
 
   local here
@@ -194,7 +204,8 @@ sys.stdout.buffer.write(first[0][len(b"worktree "):] + b"x")
   if [[ "${SESSION_START_MODE:-native}" == portable ]]; then mode_args=(--dry-run); fi
   # Nothing may stop to ask for a credential: an unattended prompt is a hang.
   export GIT_TERMINAL_PROMPT=0 GH_PROMPT_DISABLED=1
-  export GIT_SSH_COMMAND="${GIT_SSH_COMMAND:-ssh -o BatchMode=yes}"
+  # Appended, never a default: a user-set command keeps BatchMode too.
+  export GIT_SSH_COMMAND="${GIT_SSH_COMMAND:-ssh} -o BatchMode=yes"
 
   local start=$SECONDS left prune_rc=0 remote_rc=0
   bash "$runner" "$BUDGET_SEC" bash "$prune" "$shared" ${mode_args[@]+"${mode_args[@]}"} \
