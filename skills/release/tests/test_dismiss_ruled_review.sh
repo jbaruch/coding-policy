@@ -208,7 +208,7 @@ eval "real_$(declare -f verify_judge_ruling)"
 # refusal. Records the task and ruling it was asked about.
 verify_judge_ruling() {
   printf '%s %s\n' "$1" "$2" > "${TMPDIR_TEST}/binding-call"
-  printf '%s' "${MOCK_BINDING:-ok}" > "$3"
+  printf '%s' "${MOCK_BINDING:-ok $(python3 -c 'import hashlib,sys; print(hashlib.sha256(open(sys.argv[1],"rb").read()).hexdigest())' "$2")}" > "$3"
 }
 dismissals() { grep -c '^dismiss ' "$EVENTS"; }
 comments() { grep -c '^comment$' "$EVENTS"; }
@@ -573,14 +573,25 @@ t_hostile_cdpath_keeps_the_sibling_foreman() {
   mkdir -p "${decoy}/release" "${stage}/release" "${stage}/herdr-foreman" \
     || { echo "    FAIL: cannot build the CDPATH fixture" >&2; return 1; }
   cp "$SCRIPT" "${stage}/release/dismiss-ruled-review.sh" || { echo "    FAIL: cannot stage the script" >&2; return 1; }
-  printf '#!/usr/bin/env bash\necho "sibling $*" > "%s"\nexit 0\n' "${TMPDIR_TEST}/foreman-called" \
+  printf '#!/usr/bin/env bash\necho "sibling $*" > "%s"\necho "{\\"sha256\\": \\"%s\\"}"\nexit 0\n' "${TMPDIR_TEST}/foreman-called" "$(printf 'a%.0s' {1..64})" \
     > "${stage}/herdr-foreman/foreman.sh" || { echo "    FAIL: cannot stage the foreman stub" >&2; return 1; }
   rm -f "${TMPDIR_TEST}/foreman-called"
   out="${TMPDIR_TEST}/hostile-binding"
   ( cd "$stage" && CDPATH="$decoy" bash -c 'source release/dismiss-ruled-review.sh; set +e; verify_judge_ruling t-632 /r/x.md "$1"' _ "$out" ) \
     2>"${TMPDIR_TEST}/stderr" || { echo "    FAIL: the staged binding check exited non-zero: $(cat "${TMPDIR_TEST}/stderr")" >&2; return 1; }
-  assert_eq "binding result" "ok" "$(cat "$out")" || return 1
+  assert_eq "binding result" "ok $(printf 'a%.0s' {1..64})" "$(cat "$out")" || return 1
   assert_eq "sibling foreman ran" "sibling verify-ruling --task t-632 --ruling /r/x.md" "$(cat "${TMPDIR_TEST}/foreman-called")"
+}
+
+t_ruling_changed_since_verification_refuses() {
+  set_review CHANGES_REQUESTED "$HEAD_SHA" "$BODY_TWO"
+  write_judge_ruling "$HEAD_SHA" "$DECLINE_ONE" "$DECLINE_TWO"
+  MOCK_BINDING="ok $(printf '0%.0s' {1..64})"
+  invoke_team_ruled
+  assert_eq "exit" "1" "$RC" || return 1
+  assert_unmet "ruling changed since verification — re-run" "the digest mismatch" || return 1
+  assert_eq "zero comments" "0" "$(comments)" || return 1
+  assert_eq "zero dismissals" "0" "$(dismissals)"
 }
 
 t_team_round_ruling_without_task_is_usage() {
@@ -710,6 +721,7 @@ run_suite() {
   run "team round: an operator ruling refuses"        t_team_round_operator_ruling_refuses
   run "team round: an unbound judge ruling refuses"   t_unbound_judge_ruling_refuses
   run "team round: a ruling without --task is usage"  t_team_round_ruling_without_task_is_usage
+  run "a ruling changed since verification refuses"   t_ruling_changed_since_verification_refuses
   run "a hostile CDPATH keeps the sibling foreman"    t_hostile_cdpath_keeps_the_sibling_foreman
   run "the real binding reports the foreman refusal"  t_real_binding_reports_the_foreman_refusal
   run "standalone: a judge ruling refuses"            t_standalone_judge_ruling_refuses

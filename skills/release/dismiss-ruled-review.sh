@@ -299,8 +299,11 @@ else:
         binding = fh.read().strip()
     if authorities[0] != "judge":
         out["unmet"].append(f"in a Herdr team round (HERDR_ENV set) the pinned judge weighs, so the ruling's authority must be 'judge', not '{authorities[0]}'")
-    elif binding != "ok":
+    elif not binding.startswith("ok "):
         out["unmet"].append(f"the ruling is not the pinned judge's enrolled weighing report: {binding}")
+    elif binding[len("ok "):] != hashlib.sha256(ruling_bytes).hexdigest():
+        # The bytes parsed here are not the bytes the foreman verified.
+        out["unmet"].append("ruling changed since verification — re-run")
 if malformed:
     out["unmet"].append(f"unparseable FINDING line(s): {malformed}")
 if duplicates:
@@ -420,8 +423,9 @@ PY
 
 # Whether the ruling file is the pinned judge's enrolled weighing report for
 # <task>, from the foreman's owner records (`foreman verify-ruling`). Writes
-# "ok", or the refusal's message, to <out>. Returns non-zero only when the
-# check could not run.
+# "ok <sha256 of the verified bytes>", or the refusal's message, to <out>.
+# Returns non-zero only when the check could not run.
+# decide() hashes the bytes it parses and refuses a digest that differs.
 verify_judge_ruling() { # <task> <ruling> <out>
   local foreman="${DISMISS_DIR}/../herdr-foreman/foreman.sh"
   if [[ ! ( -f "$foreman" && -r "$foreman" ) ]]; then
@@ -429,8 +433,24 @@ verify_judge_ruling() { # <task> <ruling> <out>
     return 2
   fi
   if bash "$foreman" verify-ruling --task "$1" --ruling "$2" > "${3}.json" 2> "${3}.err"; then
-    printf 'ok' > "$3"
-    return 0
+    python3 - "${3}.json" "$3" <<'PY'
+import json
+import re
+import sys
+
+try:
+    with open(sys.argv[1], encoding="utf-8") as fh:
+        digest = json.load(fh).get("sha256")
+except (OSError, ValueError, AttributeError) as exc:
+    print(f"error: foreman verify-ruling succeeded without a readable JSON result ({exc}) — reinstall the coding-policy plugin, then re-run", file=sys.stderr)
+    sys.exit(2)
+if not isinstance(digest, str) or re.fullmatch(r"[0-9a-f]{64}", digest) is None:
+    print("error: foreman verify-ruling succeeded without the verified sha256 — reinstall the coding-policy plugin, then re-run", file=sys.stderr)
+    sys.exit(2)
+with open(sys.argv[2], "w", encoding="utf-8") as fh:
+    fh.write("ok " + digest)
+PY
+    return
   fi
   python3 - "${3}.err" "$3" <<'PY'
 import json
