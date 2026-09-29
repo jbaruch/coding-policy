@@ -11,9 +11,9 @@
 # never lands in `reviewRequests` — and it would clear reviewers already
 # requested on the PR (issue #297).
 #
-# Before requesting, it removes any pending Copilot request via REST DELETE
-# `reviewers[]=Copilot` — a pending request Copilot dropped turns every
-# re-request into a no-op (issue #641); a 422 on the removal is nothing pending.
+# Before requesting, it removes a pending Copilot request (GraphQL
+# `reviewRequests`) via REST DELETE `reviewers[]=Copilot` — a pending request
+# Copilot dropped turns every re-request into a no-op (issue #641).
 # A Copilot run in flight (copilot-run.sh) is left alone: removing its request
 # discards its result, so the script neither removes nor requests (#641).
 #
@@ -26,7 +26,8 @@
 
 set -euo pipefail
 
-# copilot-run.sh provides copilot_run_in_flight, shared with poll-pr-reviews.sh.
+# copilot-run.sh provides copilot_run_in_flight, fetch_requested_logins and
+# requested_among, shared with poll-pr-reviews.sh.
 # Sourced, not run, so a caller's in-process `gh` mock reaches it. Command
 # substitution strips every trailing newline, so the script directory never
 # passes through one bare: parameter expansion derives it (#487), and a
@@ -116,20 +117,15 @@ request_with_bot_id() {
   " --jq '[.data.requestReviews.pullRequest.reviewRequests.nodes[]?.requestedReviewer.login // empty]' 2>"$err_path"
 }
 
-# Remove any pending Copilot review request. REST DELETE with the login
-# `Copilot` is the only form GitHub accepts for the bot — its node id and
+# Remove the pending Copilot review request. Called only when one is pending,
+# so any failure is real. REST DELETE with the login `Copilot` is the only
+# form GitHub accepts for the bot — its node id and
 # `copilot-pull-request-reviewer` both return 422. The success body (the PR)
-# is discarded. An HTTP 422 is the expected "nothing to remove" non-result:
-# warn and continue, since the request that follows is verified on its own.
-# Any other failure stops before the request.
+# is discarded.
 remove_pending_copilot_request() {
   local owner="$1" repo="$2" pr_number="$3" err
   if err=$(gh api -X DELETE "repos/${owner}/${repo}/pulls/${pr_number}/requested_reviewers" \
       -f 'reviewers[]=Copilot' 2>&1 >/dev/null); then
-    return 0
-  fi
-  if [[ "$err" == *"HTTP 422"* ]]; then
-    echo "warn: no pending Copilot request removed on ${owner}/${repo}#${pr_number} (HTTP 422): ${err}" >&2
     return 0
   fi
   echo "error: removing the pending Copilot request on ${owner}/${repo}#${pr_number} failed: ${err} — check 'gh auth status' and that the token can edit pull requests, then re-run" >&2
@@ -194,7 +190,14 @@ main() {
     return 0
   fi
 
-  remove_pending_copilot_request "$owner" "$repo" "$pr_number" || exit 1
+  local requested_logins pending
+  requested_logins=$(fetch_requested_logins "$owner" "$repo" "$pr_number") \
+    || { echo "error: failed to read the pending review requests on ${owner}/${repo}#${pr_number} — run 'gh auth status', then re-run" >&2; exit 1; }
+  pending=$(requested_among "$requested_logins" "copilot-pull-request-reviewer") \
+    || { echo "error: could not match Copilot against the pending review requests on ${owner}/${repo}#${pr_number}: ${requested_logins} — re-run once 'gh api graphql' returns that PR's reviewRequests" >&2; exit 1; }
+  if [[ "$pending" == true ]]; then
+    remove_pending_copilot_request "$owner" "$repo" "$pr_number" || exit 1
+  fi
 
   local bot_id="${COPILOT_BOT_ID:-$COPILOT_BOT_ID_DEFAULT}"
   local reviewers

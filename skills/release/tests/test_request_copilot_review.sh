@@ -115,6 +115,9 @@ gh() {
 #   DELETE_FAIL       fail the REST removal with HTTP 403 or 422
 #   CALL_LOG          file each call appends its kind to (delete / mutation)
 #   TIMELINE_FIXTURE  PR timeline JSON array (default: empty, no run in flight)
+#   PENDING_FIXTURE   pending reviewRequests response (default: none pending)
+PENDING_NONE='{"data":{"repository":{"pullRequest":{"reviewRequests":{"nodes":[]}}}}}'
+PENDING_COPILOT='{"data":{"repository":{"pullRequest":{"reviewRequests":{"nodes":[{"requestedReviewer":{"__typename":"Bot","login":"copilot-pull-request-reviewer"}}]}}}}}'
 # shellcheck disable=SC2329  # invoked indirectly via a per-test gh() override
 _main_gh_mock() {
   if [[ "$1" == api && "$2" == --paginate && "$3" == repos/*/issues/*/timeline* ]]; then
@@ -159,6 +162,8 @@ _main_gh_mock() {
       return 1
     fi
     fixture="${MUT_FIXTURE:?MUT_FIXTURE unset}"
+  elif [[ "$query" == *"reviewRequests(first: 50)"* ]]; then
+    fixture="${PENDING_FIXTURE:-$PENDING_NONE}"
   elif [[ "$query" == *"pullRequest(number"* ]]; then
     fixture='{"data":{"repository":{"pullRequest":{"id":"PR_kwDOX"}}}}'
   elif [[ "$query" == *"pullRequests(last"* ]]; then
@@ -333,99 +338,73 @@ t_main_surfaces_mutation_error_on_terminal_failure() {
 
 MUT_OK_FIXTURE='{"data":{"requestReviews":{"pullRequest":{"reviewRequests":{"nodes":[{"requestedReviewer":{"__typename":"Bot","login":"copilot-pull-request-reviewer"}}]}}}}}'
 
-# #641: a pending request Copilot dropped makes every re-request a no-op, so
-# main() removes it first. The removal must precede the request.
+# Drive main() under the mock with the given env assignments; set RC, OUT,
+# ERR and CALLS (the delete/mutation calls in order, space-separated).
+run_main() { # <VAR=value>...
+  local log errf
+  log=$(mktemp) || { echo "    FAIL: mktemp failed" >&2; return 1; }
+  errf=$(mktemp) || { rm -f "$log"; echo "    FAIL: mktemp failed" >&2; return 1; }
+  OUT=$(
+    # shellcheck disable=SC2317  # gh() runs indirectly through the sourced main(); shellcheck cannot trace the call
+    gh() { _main_gh_mock "$@"; }
+    env_args=("$@")
+    for a in "${env_args[@]}"; do export "${a?}"; done
+    CALL_LOG="$log" MUT_FIXTURE="$MUT_OK_FIXTURE" main owner repo 5 2>"$errf"
+  )
+  RC=$?
+  CALLS=$(tr '\n' ' ' < "$log")
+  ERR=$(cat "$errf")
+  rm -f "$log" "$errf"
+}
+
+# A request newer than the last run start never started: the stuck request
+# (#641) that turns every re-request into a no-op.
+NEVER_STARTED='[{"event":"copilot_work_started","created_at":"2026-09-29T01:40:27Z"},{"event":"reviewed","user":{"login":"Copilot"},"submitted_at":"2026-09-29T01:43:31Z"},{"event":"review_requested","requested_reviewer":{"login":"Copilot"},"created_at":"2026-09-29T13:24:00Z"}]'
+IN_FLIGHT='[{"event":"reviewed","user":{"login":"Copilot"},"submitted_at":"2026-09-29T01:43:31Z"},{"event":"review_requested","requested_reviewer":{"login":"Copilot"},"created_at":"2026-09-29T18:31:54Z"},{"event":"copilot_work_started","created_at":"2026-09-29T18:32:51Z"}]'
+
+# #641: a pending request is removed, then requested afresh — in that order.
 t_main_removes_pending_request_before_requesting() {
-  local log rc calls
-  log=$(mktemp) || { echo "    FAIL: mktemp failed" >&2; return 1; }
-  (
-    # shellcheck disable=SC2317  # gh() runs indirectly through the sourced main(); shellcheck cannot trace the call
-    gh() { _main_gh_mock "$@"; }
-    CALL_LOG="$log" MUT_FIXTURE="$MUT_OK_FIXTURE" main owner repo 5 >/dev/null 2>&1
-  )
-  rc=$?
-  calls=$(tr '\n' ' ' < "$log")
-  rm -f "$log"
-  assert_eq "exit code" "0" "$rc" || return 1
-  assert_eq "call order" "delete mutation " "$calls"
+  run_main "PENDING_FIXTURE=$PENDING_COPILOT" "TIMELINE_FIXTURE=$NEVER_STARTED" || return 1
+  assert_eq "exit code" "0" "$RC" || return 1
+  assert_eq "call order" "delete mutation " "$CALLS"
 }
 
-# #641: a failed removal is a real fault — exit non-zero with the error text,
-# and never send the request that would be a silent no-op.
-t_main_stops_when_removal_fails() {
-  local log err rc calls
-  log=$(mktemp) || { echo "    FAIL: mktemp failed" >&2; return 1; }
-  err=$(
-    # shellcheck disable=SC2317  # gh() runs indirectly through the sourced main(); shellcheck cannot trace the call
-    gh() { _main_gh_mock "$@"; }
-    CALL_LOG="$log" DELETE_FAIL=403 MUT_FIXTURE="$MUT_OK_FIXTURE" main owner repo 5 2>&1 >/dev/null
-  )
-  rc=$?
-  calls=$(tr '\n' ' ' < "$log")
-  rm -f "$log"
-  assert_eq "exit code" "1" "$rc" || return 1
-  assert_eq "calls" "delete " "$calls" || return 1
-  [[ "$err" == *"HTTP 403"* ]] \
-    || { echo "    FAIL: stderr missing the removal error text: $err" >&2; return 1; }
+# Nothing pending: no removal is sent, the request goes out.
+t_main_requests_without_removal_when_nothing_pending() {
+  run_main "PENDING_FIXTURE=$PENDING_NONE" || return 1
+  assert_eq "exit code" "0" "$RC" || return 1
+  assert_eq "calls" "mutation " "$CALLS" || return 1
+  echo "$OUT" | jq -e '.pr_number == 5' >/dev/null 2>&1 \
+    || { echo "    FAIL: output envelope missing: $OUT" >&2; return 1; }
 }
 
-# #641: a 422 on the removal is the expected nothing-to-remove non-result —
-# warn, then still request.
-t_main_requests_after_nothing_to_remove() {
-  local log out rc calls
-  log=$(mktemp) || { echo "    FAIL: mktemp failed" >&2; return 1; }
-  out=$(
-    # shellcheck disable=SC2317  # gh() runs indirectly through the sourced main(); shellcheck cannot trace the call
-    gh() { _main_gh_mock "$@"; }
-    CALL_LOG="$log" DELETE_FAIL=422 MUT_FIXTURE="$MUT_OK_FIXTURE" main owner repo 5 2>/dev/null
-  )
-  rc=$?
-  calls=$(tr '\n' ' ' < "$log")
-  rm -f "$log"
-  assert_eq "exit code" "0" "$rc" || return 1
-  assert_eq "call order" "delete mutation " "$calls" || return 1
-  echo "$out" | jq -e '.pr_number == 5' >/dev/null 2>&1 \
-    || { echo "    FAIL: output envelope missing after a 422 removal: $out" >&2; return 1; }
+# A pending request whose removal fails is a real fault, 422 included: exit
+# non-zero with the error text, and never send the request that would be a
+# silent no-op.
+t_main_stops_when_removal_fails_422() {
+  run_main "PENDING_FIXTURE=$PENDING_COPILOT" DELETE_FAIL=422 || return 1
+  assert_eq "exit code" "1" "$RC" || return 1
+  assert_eq "calls" "delete " "$CALLS" || return 1
+  [[ "$ERR" == *"HTTP 422"* ]] \
+    || { echo "    FAIL: stderr missing the removal error text: $ERR" >&2; return 1; }
+}
+
+t_main_stops_when_removal_fails_403() {
+  run_main "PENDING_FIXTURE=$PENDING_COPILOT" DELETE_FAIL=403 || return 1
+  assert_eq "exit code" "1" "$RC" || return 1
+  assert_eq "calls" "delete " "$CALLS" || return 1
+  [[ "$ERR" == *"HTTP 403"* ]] \
+    || { echo "    FAIL: stderr missing the removal error text: $ERR" >&2; return 1; }
 }
 
 # #641: removing the request of a run in progress discards its result, so a
 # run in flight is left alone — no removal, no request, exit 0.
 t_main_leaves_an_in_flight_run_alone() {
-  local log out rc calls
-  log=$(mktemp) || { echo "    FAIL: mktemp failed" >&2; return 1; }
-  out=$(
-    # shellcheck disable=SC2317  # gh() runs indirectly through the sourced main(); shellcheck cannot trace the call
-    gh() { _main_gh_mock "$@"; }
-    CALL_LOG="$log" MUT_FIXTURE="$MUT_OK_FIXTURE" \
-    TIMELINE_FIXTURE='[{"event":"reviewed","user":{"login":"Copilot"},"submitted_at":"2026-09-29T01:43:31Z"},{"event":"review_requested","requested_reviewer":{"login":"Copilot"},"created_at":"2026-09-29T18:31:54Z"},{"event":"copilot_work_started","created_at":"2026-09-29T18:32:51Z"}]' \
-      main owner repo 5 2>/dev/null
-  )
-  rc=$?
-  calls=$(tr '\n' ' ' < "$log")
-  rm -f "$log"
-  assert_eq "exit code" "0" "$rc" || return 1
-  assert_eq "calls" "" "$calls" || return 1
-  echo "$out" | jq -e '.in_flight == true and .pr_number == 5' >/dev/null 2>&1 \
-    || { echo "    FAIL: expected an in_flight envelope: $out" >&2; return 1; }
-}
-
-# #641: a request newer than the last run start never started — the stuck
-# request the fix exists for — so it is removed and requested afresh.
-t_main_replaces_a_request_that_never_started() {
-  local log rc calls
-  log=$(mktemp) || { echo "    FAIL: mktemp failed" >&2; return 1; }
-  (
-    # shellcheck disable=SC2317  # gh() runs indirectly through the sourced main(); shellcheck cannot trace the call
-    gh() { _main_gh_mock "$@"; }
-    CALL_LOG="$log" MUT_FIXTURE="$MUT_OK_FIXTURE" \
-    TIMELINE_FIXTURE='[{"event":"copilot_work_started","created_at":"2026-09-29T01:40:27Z"},{"event":"reviewed","user":{"login":"Copilot"},"submitted_at":"2026-09-29T01:43:31Z"},{"event":"review_requested","requested_reviewer":{"login":"Copilot"},"created_at":"2026-09-29T13:24:00Z"}]' \
-      main owner repo 5 >/dev/null 2>&1
-  )
-  rc=$?
-  calls=$(tr '\n' ' ' < "$log")
-  rm -f "$log"
-  assert_eq "exit code" "0" "$rc" || return 1
-  assert_eq "call order" "delete mutation " "$calls"
+  run_main "PENDING_FIXTURE=$PENDING_COPILOT" "TIMELINE_FIXTURE=$IN_FLIGHT" || return 1
+  assert_eq "exit code" "0" "$RC" || return 1
+  assert_eq "calls" "" "$CALLS" || return 1
+  echo "$OUT" | jq -e '.in_flight == true and .pr_number == 5' >/dev/null 2>&1 \
+    || { echo "    FAIL: expected an in_flight envelope: $OUT" >&2; return 1; }
 }
 
 # --- driver ---
@@ -446,10 +425,10 @@ run_suite() {
   run "requestReviews mutation runs in union mode (#297)"              t_mutation_runs_in_union_mode
   run "main surfaces the GraphQL error on a terminal failure (#297)"   t_main_surfaces_mutation_error_on_terminal_failure
   run "main removes a pending Copilot request before requesting (#641)" t_main_removes_pending_request_before_requesting
-  run "main stops without requesting when the removal fails (#641)"   t_main_stops_when_removal_fails
-  run "main still requests after a 422 nothing-to-remove (#641)"      t_main_requests_after_nothing_to_remove
+  run "main requests without a removal when nothing is pending (#641)" t_main_requests_without_removal_when_nothing_pending
+  run "main stops on a 422 removal of a pending request (#641)"       t_main_stops_when_removal_fails_422
+  run "main stops on a 403 removal of a pending request (#641)"       t_main_stops_when_removal_fails_403
   run "main leaves a Copilot run in flight alone (#641)"              t_main_leaves_an_in_flight_run_alone
-  run "main replaces a request that never started (#641)"             t_main_replaces_a_request_that_never_started
   printf '{"suite":"test_request_copilot_review.sh","passed":%d,"failed":%d}\n' "$PASS_COUNT" "$FAIL_COUNT"
   [[ $FAIL_COUNT -eq 0 ]]
 }

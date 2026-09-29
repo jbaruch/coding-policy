@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# Shared Copilot run-state predicate. Sourced by poll-pr-reviews.sh and
-# request-copilot-review.sh — defines copilot_run_in_flight() with no side
-# effects and no TOP-LEVEL `set` changes, so sourcing it under the caller's
+# Shared review-request state helpers. Sourced by poll-pr-reviews.sh and
+# request-copilot-review.sh — defines copilot_run_in_flight(),
+# fetch_requested_logins() and requested_among() with no side effects and no
+# TOP-LEVEL `set` changes, so sourcing it under the caller's
 # `set -euo pipefail` is safe. Direct execution is a guarded CLI (entry-point
 # guard at the foot of the file): `copilot-run.sh <owner> <repo> <pr-number>`
 # prints {"in_flight": bool} and exits 0, or exits non-zero with a stderr
@@ -30,6 +31,38 @@ copilot_run_in_flight() {
               | select((.user.login // "") | test("copilot"; "i"))
               | .submitted_at] | max) as $s
     | $w != null and ($r == null or $w > $r) and ($s == null or $w > $s)'
+}
+
+# Logins with a review request still pending on the PR, lowercased and with the
+# `[bot]` suffix stripped so one spelling compares against another. GraphQL, not
+# the REST `requested_reviewers` endpoint: that endpoint omits bot reviewers
+# entirely (#276), so every bot lane would read "never requested" there.
+fetch_requested_logins() {
+  local owner="$1" repo="$2" pr="$3"
+  gh api graphql -f query="
+    query { repository(owner: \"${owner}\", name: \"${repo}\") {
+      pullRequest(number: ${pr}) {
+        reviewRequests(first: 50) { nodes { requestedReviewer {
+          __typename
+          ... on Bot { login }
+          ... on User { login }
+          ... on Team { slug }
+        } } }
+      }
+    } }
+  " --jq '[.data.repository.pullRequest.reviewRequests.nodes[]?.requestedReviewer
+           | (.login // .slug) | select(. != null) | ascii_downcase | sub("\\[bot\\]$"; "")]' \
+    | jq -c '.'
+}
+
+# Is any of <login...> among the pending review requests?
+requested_among() { # <requested-json> <login...>
+  local requested="$1"; shift
+  local logins_json
+  logins_json=$(jq -n '$ARGS.positional' --args "$@") || return 1
+  printf '%s' "$requested" | jq --argjson logins "$logins_json" \
+    '[$logins[] | ascii_downcase | sub("\\[bot\\]$"; "")] as $want
+     | any(.[]; . as $have | $want | index($have) != null)'
 }
 
 # Direct execution: a guarded CLI (rules/file-hygiene.md Standalone Scripts).

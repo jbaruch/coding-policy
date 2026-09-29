@@ -17,21 +17,23 @@
   And removing the request of a run in progress discards that run's result:
   a removal at 18:35:15 killed a run that finished at 18:36:11, and only the
   next run posted.
-  - New `skills/release/copilot-run.sh` holds one predicate,
-    `copilot_run_in_flight`: the timeline's latest `copilot_work_started` is
-    newer than both the latest Copilot `review_requested` and the latest
-    Copilot `reviewed` event. It is sourced by both callers, and runs as a
-    guarded CLI printing `{"in_flight": bool}`.
+  - New `skills/release/copilot-run.sh` owns the review-request state both
+    callers read. `copilot_run_in_flight`: the timeline's latest
+    `copilot_work_started` is newer than both the latest Copilot
+    `review_requested` and the latest Copilot `reviewed` event.
+    `fetch_requested_logins` and `requested_among` (pending requests from
+    GraphQL `reviewRequests`, since REST `requested_reviewers` omits bots,
+    #276) move there from `poll-pr-reviews.sh` unchanged. Both callers source
+    it; run directly it prints `{"in_flight": bool}`.
   - `request-copilot-review.sh` leaves a run in flight alone: it removes
     nothing, requests nothing, and emits `{"pr_number","in_flight":true}` with
-    exit 0. Otherwise it removes any pending Copilot request, then requests as
-    before, so a request that never started is replaced. A successful removal
-    answers 200 with the PR body, whose REST `requested_reviewers` omits bots
-    (#276) and so cannot show whether anything was removed. An HTTP 422 is
-    treated as the expected "nothing to remove" non-result, per the issue: the
-    script warns and still requests, and the request is verified as before.
-    Any other removal failure exits non-zero with the error text and sends no
-    request.
+    exit 0. Otherwise it reads the pending requests first. A pending Copilot
+    request is removed, then requested afresh, so a request that never started
+    is replaced; any removal failure, 422 included, exits non-zero with the
+    error text and sends no request. With nothing pending it sends no removal
+    and requests as before. An earlier revision of this PR read a removal 422
+    as "nothing pending"; the explicit read removes that ambiguity, so no
+    status code carries meaning.
   - `poll-pr-reviews.sh` reports Copilot's `requested` true while its run is
     in flight. A review on an older head predates the new run's start, so the
     stale-head case follows from the same comparison.

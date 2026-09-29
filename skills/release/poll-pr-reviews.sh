@@ -78,7 +78,8 @@
 
 set -euo pipefail
 
-# copilot-run.sh provides copilot_run_in_flight, shared with request-copilot-review.sh.
+# copilot-run.sh provides copilot_run_in_flight, fetch_requested_logins and
+# requested_among, shared with request-copilot-review.sh.
 # Sourced, not run, so a caller's in-process `gh` mock reaches it. Command
 # substitution strips every trailing newline, so the script directory never
 # passes through one bare: parameter expansion derives it (#487), and a
@@ -274,41 +275,6 @@ fetch_merge_state() {
   local owner="$1" repo="$2" pr="$3"
   gh pr view "$pr" --repo "${owner}/${repo}" --json mergeStateStatus,mergeable,headRefOid \
     | jq -c '{status: .mergeStateStatus, mergeable: .mergeable, head_sha: .headRefOid}'
-}
-
-# Logins with a review request still pending on the PR, lowercased and with the
-# `[bot]` suffix stripped so one spelling compares against another. GitHub
-# reports a bot reviewer under either spelling depending on the surface.
-# Logins with a review request still pending on the PR, lowercased and with the
-# `[bot]` suffix stripped so one spelling compares against another. GraphQL, not
-# the REST `requested_reviewers` endpoint: that endpoint omits bot reviewers
-# entirely (#276), so every bot lane would read "never requested" there.
-fetch_requested_logins() {
-  local owner="$1" repo="$2" pr="$3"
-  gh api graphql -f query="
-    query { repository(owner: \"${owner}\", name: \"${repo}\") {
-      pullRequest(number: ${pr}) {
-        reviewRequests(first: 50) { nodes { requestedReviewer {
-          __typename
-          ... on Bot { login }
-          ... on User { login }
-          ... on Team { slug }
-        } } }
-      }
-    } }
-  " --jq '[.data.repository.pullRequest.reviewRequests.nodes[]?.requestedReviewer
-           | (.login // .slug) | select(. != null) | ascii_downcase | sub("\\[bot\\]$"; "")]' \
-    | jq -c '.'
-}
-
-# Is any of <login...> among the pending review requests?
-requested_among() { # <requested-json> <login...>
-  local requested="$1"; shift
-  local logins_json
-  logins_json=$(jq -n '$ARGS.positional' --args "$@") || return 1
-  printf '%s' "$requested" | jq --argjson logins "$logins_json" \
-    '[$logins[] | ascii_downcase | sub("\\[bot\\]$"; "")] as $want
-     | any(.[]; . as $have | $want | index($have) != null)'
 }
 
 main() {
