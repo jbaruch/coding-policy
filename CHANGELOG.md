@@ -56,6 +56,27 @@
     carry the wiring. `test_compose_briefs.sh` moves to the guarded
     `run_suite` and JSON-result pattern.
 
+## 0.3.335 — 2026-09-29
+
+### Fixed
+
+- **`check-changelog-placement.py --since-last-publish` finds its baseline
+  under non-default stamp-action inputs (Fixes #618).** The baseline is the
+  last bot commit touching only publish bookkeeping, and three inputs hid it.
+  `--changelog ./CHANGELOG.md` never equalled the `CHANGELOG.md` that
+  `git diff-tree` reports, so the stamp commit was no baseline and every
+  entry it had stamped read as new; both paths are now normalized. A custom
+  `manifest:` reached the stamp script but not the checker, so its bump
+  commit was no baseline either; the checker gains `--manifest`, and the
+  stamp action forwards its `manifest:` input verbatim with no branching of
+  its own, so the path is covered by the script's tests. The stamp action's
+  `commit` input is removed, with the staged-only branch of
+  `skills/release/commit-stamp.sh` that served it (its argument list drops
+  `do-commit`). Under `commit: false` the caller wrote the bookkeeping
+  commit, which the check cannot find as its baseline, so that mode could
+  only produce an unguarded stamp; no caller used it. The repo's own publish
+  uses the defaults and is unaffected.
+
 ## 0.3.334 — 2026-09-29
 
 ### Fixed
