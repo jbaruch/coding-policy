@@ -349,9 +349,9 @@ conditions.
 Track actual contributions across session clears, worker changes and model
 changes. A contribution only ever adds an exclusion; nothing clears one. A
 worker is a possible contributor when its dispatch was classified one before it
-ran, when its report declares `CONTRIBUTION: design` or `CONTRIBUTION:
-implementation`, or when you exclude it. A declared or legacy `none` changes
-nothing. Every consultation worker stays excluded from verifying its own task.
+ran, or when its report declares `CONTRIBUTION: design` or `CONTRIBUTION:
+implementation`. A plan's `--exclude` narrows that plan alone and is never
+contribution history. A declared or legacy `none` changes nothing. Every consultation worker stays excluded from verifying its own task.
 Decide independence against the subject being verified, never against the
 worker's current title or a fresh context. Obtain another qualified worker for
 independent assessment of a contributor's work. Keep the ordinary reviewer and

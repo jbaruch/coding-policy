@@ -28,9 +28,10 @@
     assessment". The Judge Seat's "foreman override of a blocking finding"
     trigger becomes "a report `VERDICT:` the classifier gate contradicts".
     Review Before PR makes independence add-only: a dispatch classified a
-    possible contribution, a report declaring `design` or `implementation`, or
-    a foreman `--exclude` adds an exclusion, and nothing, a worker's own
-    `CONTRIBUTION: none` included, clears one. Every consultation worker stays
+    possible contribution, or a report declaring `design` or `implementation`,
+    adds an exclusion, and nothing, a worker's own `CONTRIBUTION: none`
+    included, clears one. A foreman `--exclude` narrows one plan and is never
+    contribution history. Every consultation worker stays
     excluded from verifying its own task; that costs staffing, deliberately.
   - New leaf module `skills/herdr-foreman/foreman/report_contract.py` is the
     one parser: line forms, tolerated markup, and the refusal classes

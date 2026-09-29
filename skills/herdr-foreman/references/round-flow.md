@@ -67,7 +67,8 @@ not a review of the code that got written, and a test plan is not a test run.
 
 Phase 2 excludes every possible contributor from reviewer and tester. The
 owner applies recorded contribution history, which only ever adds an
-exclusion; use `--exclude` for relevant contributions outside it. A recorded
+exclusion; use `--exclude` to narrow the current plan for relevant
+contributions outside it, which records no contribution history. A recorded
 `none` clears nothing. The reviewer responsibility is verification only; it no
 longer carries pre-development Mode A. Historical reviewer responsibility stays
 unknown, and unknown excludes.

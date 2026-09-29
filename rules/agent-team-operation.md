@@ -604,9 +604,9 @@ description: Running a multi-agent team — task-based specialist composition, c
 - Exclude every possible contributor from independent verification of that task
 - A dispatch classified a possible contribution before its worker ran makes that worker a possible contributor
 - A report declaring a `design` or `implementation` contribution makes its worker a possible contributor
-- A worker the foreman excludes is a possible contributor
 - A contribution only adds an exclusion
-- Nothing clears an exclusion
+- Nothing clears an exclusion a recorded classification or a declared contribution adds
+- A foreman `--exclude` narrows the current plan alone and is never contribution history
 - A worker's own `CONTRIBUTION: none` changes nothing
 - Every consultation worker stays excluded from verifying its own task
 - A role, model or session change never erases contribution history
