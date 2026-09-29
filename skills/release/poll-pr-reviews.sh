@@ -51,8 +51,9 @@
 # a hand dismissal carrying the marker violates rules/ci-safety.md
 # Judge-Ruled-Review Dismissal Carve-Out.
 #
-# `requested` reports exactly one fact: a review request for that login is still
-# pending on the PR. It separates two states a bare `state: "none"` conflates
+# `requested` reports exactly one fact: a review for that login is still owed
+# on a request — pending on the PR, or for Copilot a run in flight (below). It
+# separates two states a bare `state: "none"` conflates
 # for a REQUEST-TRIGGERED reviewer (Copilot): asked for and not yet answered
 # (waiting is meaningful), versus never asked (waiting cannot produce it, and a
 # reader without GitHub write scope cannot ask). A developer collecting its own
@@ -67,12 +68,37 @@
 # an unrequested Copilot lane. Resolve a reviewer's arrival by how it is
 # triggered (rules/ci-safety.md Always Watch CI), never by this field alone.
 #
+# Copilot's `requested` is also true while its run is in flight — predicate in
+# copilot-run.sh — since a started run consumes the request (#641).
+#
 # `merge_state.status == "DIRTY"` / `mergeable == "CONFLICTING"` means GitHub
 # couldn't create `refs/pull/N/merge` and silently skipped `pull_request:`
 # workflows — agent should surface a rebase recommendation rather than keep
 # polling `ci.status: none`.
 
 set -euo pipefail
+
+# copilot-run.sh provides copilot_run_in_flight, fetch_requested_logins and
+# requested_among, shared with request-copilot-review.sh.
+# Sourced, not run, so a caller's in-process `gh` mock reaches it. Command
+# substitution strips every trailing newline, so the script directory never
+# passes through one bare: parameter expansion derives it (#487), and a
+# sentinel carries `pwd` across the strip (#466).
+case "${BASH_SOURCE[0]}" in
+  */*) _ppr_src="${BASH_SOURCE[0]%/*}" ;;
+  *) _ppr_src=. ;;
+esac
+if ! _ppr_dir="$(CDPATH='' cd -- "${_ppr_src:-/}" && pwd && printf x)"; then
+  echo "error: cannot enter the script directory ${_ppr_src:-/} — restore read and search access to the plugin directory, or reinstall the plugin, then re-run" >&2
+  exit 2
+fi
+_ppr_dir="${_ppr_dir%x}"
+_ppr_dir="${_ppr_dir%$'\n'}"
+# shellcheck source=skills/release/copilot-run.sh
+if ! source "${_ppr_dir}/copilot-run.sh"; then
+  echo "error: cannot source ${_ppr_dir}/copilot-run.sh — the release skill tree is incomplete; re-clone the repo or re-install the plugin, then re-run" >&2
+  exit 2
+fi
 
 # Bot logins, by surface. A reviewer does NOT necessarily author its reviews
 # and its inline comments under the same login, and the policy reviewer's login
@@ -251,41 +277,6 @@ fetch_merge_state() {
     | jq -c '{status: .mergeStateStatus, mergeable: .mergeable, head_sha: .headRefOid}'
 }
 
-# Logins with a review request still pending on the PR, lowercased and with the
-# `[bot]` suffix stripped so one spelling compares against another. GitHub
-# reports a bot reviewer under either spelling depending on the surface.
-# Logins with a review request still pending on the PR, lowercased and with the
-# `[bot]` suffix stripped so one spelling compares against another. GraphQL, not
-# the REST `requested_reviewers` endpoint: that endpoint omits bot reviewers
-# entirely (#276), so every bot lane would read "never requested" there.
-fetch_requested_logins() {
-  local owner="$1" repo="$2" pr="$3"
-  gh api graphql -f query="
-    query { repository(owner: \"${owner}\", name: \"${repo}\") {
-      pullRequest(number: ${pr}) {
-        reviewRequests(first: 50) { nodes { requestedReviewer {
-          __typename
-          ... on Bot { login }
-          ... on User { login }
-          ... on Team { slug }
-        } } }
-      }
-    } }
-  " --jq '[.data.repository.pullRequest.reviewRequests.nodes[]?.requestedReviewer
-           | (.login // .slug) | select(. != null) | ascii_downcase | sub("\\[bot\\]$"; "")]' \
-    | jq -c '.'
-}
-
-# Is any of <login...> among the pending review requests?
-requested_among() { # <requested-json> <login...>
-  local requested="$1"; shift
-  local logins_json
-  logins_json=$(jq -n '$ARGS.positional' --args "$@") || return 1
-  printf '%s' "$requested" | jq --argjson logins "$logins_json" \
-    '[$logins[] | ascii_downcase | sub("\\[bot\\]$"; "")] as $want
-     | any(.[]; . as $have | $want | index($have) != null)'
-}
-
 main() {
   if [[ $# -ne 3 ]]; then
     echo "usage: $0 <owner> <repo> <pr-number>" >&2
@@ -353,6 +344,17 @@ main() {
     || { echo "error: could not match the policy reviewer against the pending review requests on ${owner}/${repo}#${pr_number} — inspect the list with 'gh api graphql' for that PR's reviewRequests, then re-run this snapshot once it returns an array of reviewer logins" >&2; exit 1; }
   copilot_requested=$(requested_among "$requested_logins" "$COPILOT_REVIEW_LOGIN") \
     || { echo "error: could not match Copilot against the pending review requests on ${owner}/${repo}#${pr_number} — inspect the list with 'gh api graphql' for that PR's reviewRequests, then re-run this snapshot once it returns an array of reviewer logins" >&2; exit 1; }
+  # The timeline is read before the Copilot review, so a review posted in
+  # between is seen by the review fetch.
+  local copilot_started_at=""
+  if [[ "$copilot_requested" == false ]]; then
+    local timeline flight
+    timeline=$(copilot_timeline "$owner" "$repo" "$pr_number") \
+      || { echo "error: failed to read whether a Copilot run is in flight on ${owner}/${repo}#${pr_number} — the diagnostic above names the failing read; fix it, then retry" >&2; exit 1; }
+    flight=$(copilot_in_flight_state "$timeline")
+    copilot_requested=$(printf '%s' "$flight" | jq -r '.in_flight')
+    copilot_started_at=$(printf '%s' "$flight" | jq -r '.started_at // empty')
+  fi
 
   local codex_review copilot_review codex_comments copilot_comments
   codex_review=$(latest_review_by   "$owner" "$repo" "$pr_number" "${CODEX_REVIEW_LOGINS[@]}") \
@@ -363,6 +365,12 @@ main() {
   codex_review=$(resolve_ruled_dismissal "$owner" "$repo" "$pr_number" "$codex_review") \
     || { echo "error: failed to read the dismissal of the policy review on ${owner}/${repo}#${pr_number} — inspect 'gh api --paginate repos/${owner}/${repo}/issues/${pr_number}/timeline', then retry" >&2; exit 1; }
   copilot_review=$(printf '%s' "$copilot_review" | jq 'del(._dismissed_review_id)')
+  # A Copilot review that posted after the in-flight run started (between
+  # the timeline and review reads) is the owed review: nothing is owed now.
+  if [[ -n "$copilot_started_at" ]]; then
+    copilot_requested=$(printf '%s' "$copilot_review" | jq --arg s "$copilot_started_at" \
+      'if (.submitted_at // "") > $s then false else true end')
+  fi
   # Resolve each verdict against head — stale reviews collapse to "none".
   codex_review=$(resolve_review_against_head   "$codex_review"   "$head_sha")
   copilot_review=$(resolve_review_against_head "$copilot_review" "$head_sha")

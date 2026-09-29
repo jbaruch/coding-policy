@@ -21,9 +21,12 @@
 #        emitted on stdout when a terminal state is reached (rc 0 or 1).
 # Exit / result matrix (branch on .watch.result):
 #   rc 0, result "ready"             — mergeable, CI success/none, both bots
-#                                      posted (so their bodies can be read), and
-#                                      the policy reviewer is not
-#                                      CHANGES_REQUESTED. Copilot may be
+#                                      posted (so their bodies can be read), no
+#                                      Copilot review still owed (`requested`
+#                                      true: a re-request or a run in flight
+#                                      keeps it waiting past an older review at
+#                                      the same head), and the policy reviewer
+#                                      is not CHANGES_REQUESTED. Copilot may be
 #                                      CHANGES_REQUESTED and this still reaches
 #                                      ready (Copilot is always advisory). A
 #                                      policy state of RULED (dismissed by
@@ -40,9 +43,9 @@
 #   rc 0, result "dirty"             — branch conflicts with the base; GitHub
 #                                      skipped the pull_request: workflows.
 #                                      Rebase, resolve, force-push, re-run.
-#   rc 1, result "review_unrequested" — Copilot has no verdict at this head and
-#                                      no pending request, so no wait can
-#                                      produce one. Request it
+#   rc 1, result "review_unrequested" — Copilot has no verdict at this head,
+#                                      no pending request and no run in
+#                                      flight, so no wait can produce one. Request it
 #                                      (request-copilot-review.sh) and re-run.
 #                                      The policy reviewer runs on the push and
 #                                      never produces this result.
@@ -148,6 +151,10 @@ main() {
     # side for `false` as well as for null, which is exactly the value this
     # branch exists to read. Absence alone defaults to waiting.
     copilot_requested=$(printf '%s' "$snapshot" | jq -r '.reviews.copilot | if has("requested") then .requested else true end')
+    # A review still owed blocks `ready` only when the snapshot says so: an
+    # older poll-pr-reviews.sh carries no `requested`, and reads as not owed.
+    local copilot_owed
+    copilot_owed=$(printf '%s' "$snapshot" | jq -r '.reviews.copilot.requested == true')
 
     # Order matters: a conflicting branch or a failed check or a blocking
     # CHANGES_REQUESTED verdict is terminal-for-this-round — the agent must
@@ -169,22 +176,25 @@ main() {
 
     # Ready = the exact Step 7 merge-gate field conjunction: mergeable, CI
     # green-or-absent, and BOTH bots have posted a verdict (state left "none")
-    # so each body can be read before merge. The policy reviewer is not
-    # CHANGES_REQUESTED here — the guard above returned; Copilot never gates.
+    # so each body can be read before merge, and no Copilot review is still
+    # owed — an older same-head review is not the one a re-request or a run in
+    # flight will post. The policy reviewer is not CHANGES_REQUESTED here —
+    # the guard above returned; Copilot never gates.
     if [[ "$mergeable" == "MERGEABLE" \
        && ( "$ci" == "success" || "$ci" == "none" ) \
        && "$codex" != "none" \
-       && "$copilot" != "none" ]]; then
+       && "$copilot" != "none" \
+       && "$copilot_owed" == "false" ]]; then
       emit_and_exit "ready" "$attempts" "$elapsed" "$snapshot" 0
     fi
 
-    # Copilot is request-triggered: with no posted verdict at this head and no
-    # pending request, nothing is coming and the budget would be spent proving
+    # Copilot is request-triggered: with no posted verdict at this head, no
+    # pending request and no run in flight, nothing is coming and the budget would be spent proving
     # it. Say so at once instead (rules/ci-safety.md Always Watch CI). The
     # policy reviewer is push-triggered and never carries a pending request, so
     # it is not read this way.
     if [[ "$copilot" == "none" && "$copilot_requested" == "false" ]]; then
-      echo "error: Copilot has no review at this head and no pending request on ${owner}/${repo}#${pr} — run 'bash ${SCRIPT_DIR}/request-copilot-review.sh ${owner} ${repo} ${pr}' and re-run this watch; waiting cannot produce a review nobody asked for" >&2
+      echo "error: Copilot has no review at this head, no pending request and no run in flight on ${owner}/${repo}#${pr} — run 'bash ${SCRIPT_DIR}/request-copilot-review.sh ${owner} ${repo} ${pr}' and re-run this watch; waiting cannot produce a review nobody asked for" >&2
       emit_and_exit "review_unrequested" "$attempts" "$elapsed" "$snapshot" 1
     fi
 

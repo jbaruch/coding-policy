@@ -101,10 +101,12 @@ alwaysApply: true
 - `watch-pr-reviews.sh` is the sole correct resolver of the gate fields above
 - The pre-merge watch belongs to the merge decision; a stage that does not merge reads a snapshot instead
 - Reading an open PR's current gate evidence without merging runs `skills/release/poll-pr-reviews.sh` once, never the blocking watch
-- The snapshot's `requested` is exactly one fact: a review request for that login is still pending on the PR
-- It is false for a review that already posted, and false for a push-triggered reviewer, which is never requested at all
+- The snapshot's `requested` is exactly one fact: a review for that login is still owed on a request
+- Owed means a request still pending on the PR, or a Copilot run that consumed one with no review posted since — predicate in `skills/release/copilot-run.sh` `copilot_run_in_flight`
+- It is false once the owed review has posted, and false for a push-triggered reviewer, which is never requested at all
+- A same-head review posted before the request or run it answers does not clear it
 - Resolve a reviewer's arrival by how it is triggered: a push-triggered review is owed by the push, a request-triggered one only once requested
-- A request-triggered lane with no posted review and no pending request is diagnosed and named, never waited out
+- A request-triggered lane with no posted review and `requested` false is diagnosed and named, never waited out
 - Never wait on a request-triggered review the waiting role has no scope to request
 - The gating reviewer's bot login varies by repository — resolved inside `poll-pr-reviews.sh`
 - A non-gating check that reds and surfaces as the watcher's `ci_failure` result is not a reason to hand-roll
