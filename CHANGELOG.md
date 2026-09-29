@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.333 — 2026-09-29
+
 ### Fixed
 
 - **`onboard-repo` and `migrate-to-plugin` find a global-only install (Fixes
