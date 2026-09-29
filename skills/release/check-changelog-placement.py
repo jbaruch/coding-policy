@@ -49,12 +49,16 @@ Modes
         are read from <ref>..HEAD.
 
     check-changelog-placement.py --since-last-publish [--changelog CHANGELOG.md]
+                                 [--manifest <path>]
         Measure the working tree against the last commit the publish pipeline
         recorded, as the stamp step does before publishing. That baseline is
         the newest first-parent ancestor of HEAD (HEAD included) authored by
         `github-actions[bot]` that changes only publish bookkeeping files: the
-        changelog, `.tessl-plugin/plugin.json`, `tile.json` (the stamp commit
-        and the version-bump commit). A publish the check stopped writes no
+        changelog, `.tessl-plugin/plugin.json`, `tile.json` and the
+        `--manifest` path when given (the stamp commit and the version-bump
+        commit). Both paths are normalized (`./CHANGELOG.md` is
+        `CHANGELOG.md`) and read from the repository root; an empty
+        `--manifest` is none. A publish the check stopped writes no
         such commit, so a later push or a manual `workflow_dispatch` is still
         measured from the last real publish and cannot carry a refused item
         through. Trailers are read from <baseline>..HEAD. A shallow checkout
@@ -77,6 +81,7 @@ output, base ref unknown, shallow history, unreadable file).
 """
 import argparse
 import json
+import posixpath
 import subprocess
 import sys
 from collections import Counter
@@ -135,7 +140,7 @@ def base_text(base: str, changelog: str) -> str:
     return proc.stdout
 
 
-def last_publish(changelog: str) -> str | None:
+def last_publish(changelog: str, manifest: str | None = None) -> str | None:
     """The newest publish-bookkeeping commit on HEAD's first-parent line.
 
     None when history holds none. The predicate is in the module docstring.
@@ -145,7 +150,7 @@ def last_publish(changelog: str) -> str | None:
             "this checkout is shallow, so the last publish commit may be "
             "missing from it. Check out with full history (`actions/checkout` "
             "with `fetch-depth: 0`).")
-    allowed = BOOKKEEPING | {changelog}
+    allowed = BOOKKEEPING | {changelog} | ({manifest} if manifest else set())
     log = checked("log", "--first-parent", "--format=%H%x09%an", "HEAD")
     for line in log.splitlines():
         sha, _, author = line.partition("\t")
@@ -302,7 +307,14 @@ def main(argv=None) -> int:
     mode.add_argument("--since-last-publish", action="store_true",
                       help="measure against the last publish-bookkeeping commit")
     parser.add_argument("--changelog", default="CHANGELOG.md")
+    parser.add_argument("--manifest",
+                        help="a plugin manifest the version-bump commit may touch")
     args = parser.parse_args(argv)
+    # `diff-tree` and the tree lookups spell paths from the repository root
+    # with no `./` or `a/../` segments; compare in that spelling.
+    args.changelog = posixpath.normpath(args.changelog)
+    if args.manifest:
+        args.manifest = posixpath.normpath(args.manifest)
 
     path = Path(args.changelog)
     try:
@@ -318,7 +330,7 @@ def main(argv=None) -> int:
     base = args.base
     try:
         if args.since_last_publish:
-            base = last_publish(args.changelog)
+            base = last_publish(args.changelog, args.manifest)
             if base is None:
                 return nothing("no publish-bookkeeping commit by {} in this "
                                "history; the placement check has nothing to "
