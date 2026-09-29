@@ -13,7 +13,7 @@ main() {
     */*) dir="${src%/*}" ;;
     *) dir=. ;;
   esac
-  if ! plugin_root="$(cd -- "${dir:-/}/.." && pwd && printf x)"; then
+  if ! plugin_root="$(CDPATH='' cd -- "${dir:-/}/.." && pwd && printf x)"; then
     echo "herdr-supervision-stop: cannot enter the plugin root above ${dir:-/} — reinstall the plugin to enable the native supervision gate" >&2
     return 0
   fi

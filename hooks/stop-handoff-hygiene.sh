@@ -257,7 +257,7 @@ read_owner_decisions() {
     */*) dir="${src%/*}" ;;
     *) dir=. ;;
   esac
-  here="$(cd -- "${dir:-/}" && pwd && printf x)" || { warn "cannot resolve the hooks directory — skipping the worktree check; restore access to the plugin directory or reinstall the plugin"; return 0; }
+  here="$(CDPATH='' cd -- "${dir:-/}" && pwd && printf x)" || { warn "cannot resolve the hooks directory — skipping the worktree check; restore access to the plugin directory or reinstall the plugin"; return 0; }
   here="${here%x}"
   here="${here%$'\n'}"
   prune="${here}/../skills/herdr-foreman/prune-worktrees.sh"
