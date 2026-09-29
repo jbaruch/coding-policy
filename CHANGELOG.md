@@ -1,5 +1,50 @@
 # Changelog
 
+### Added
+
+- **The pinned judge weighs marginal findings in a Herdr team round (Closes
+  #632, PR B of 2; PR A was #633).** PR A let the standalone operator rule a
+  marginal blocking finding `defer` or `decline`; a team round still spent a
+  counted fix round on every finding, marginal or not, until exhaustion.
+  - `rules/agent-team-operation.md` Judge Seat adds the weighing nomination
+    as a fourth adjudication trigger, so a weighing runs in the existing
+    `adjudication` mode and no state schema changes. The foreman nominates
+    and never weighs: a finding is nominated only by `foreman finding-churn`
+    or by a worker report's `MARGINAL:` line. One weighing carries every
+    nomination at a gate; a covered finding is never re-nominated while its
+    file is unchanged since the ruling's `HEAD:`; a `fix` that stays open
+    takes the fix loop and its exhaustion route, never a second weighing;
+    every floor is ruled `fix`. Fix Loops reads a covered finding `DECLINED`
+    citing the ruling.
+  - `rules/review-severity.md` Judge-Weighed Finding Carve-Out now covers
+    both modes: standalone the operator rules, in a team round the pinned
+    judge does.
+  - One format, one script. The judge's weighing report is written in the
+    ruling-file format `skills/release/dismiss-ruled-review.sh` already
+    reads, and the release worker passes it to the script unchanged. The
+    format gains a required `AUTHORITY:` line (schema_version 2; a version-1
+    file is refused with the rewrite message): `operator` with its verbatim
+    `ANSWER:` standalone, `judge <path>` in a team round, where the path must
+    resolve to the `--ruling` file itself so a hand-written copy is refused.
+    The script no longer refuses `HERDR_ENV`; it refuses an authority the
+    mode does not accept.
+  - New `foreman finding-churn` (`skills/herdr-foreman/foreman/churn.py`):
+    diffs each finding's path between the previous fix round's head and the
+    current head with `-U0`, and reports `added_by_last_fix` and
+    `path_changed`. The second bit answers carry-over for internal findings.
+    Paths are diffed one at a time with renames off, so no quoted diff
+    header is parsed and a renamed file reads as added and changed, the
+    direction that never waives a finding.
+  - New `templates/brief-judge-weighing.md` (role key `judge-weighing`,
+    composed like `judge-diagnosis`). Reviewer, tester and developer briefs
+    gain the optional `MARGINAL:` line; the release brief gains
+    `WEIGHING_RULING`, enters internal ruled findings in the follow-up issue,
+    and runs `dismiss-ruled-review.sh` then `dismiss-stale-reviews.sh` for a
+    ruled policy review. SKILL.md Steps 12–14 and the round-flow,
+    judge-round, round-setup, attention and assignment-reasoning references
+    carry the wiring. `test_compose_briefs.sh` moves to the guarded
+    `run_suite` and JSON-result pattern.
+
 ## 0.3.330 — 2026-09-28
 
 ### Added
