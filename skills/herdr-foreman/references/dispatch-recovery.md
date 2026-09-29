@@ -150,7 +150,7 @@ instruction into permission to exceed an exhausted correction budget.
 | `import-correction` | Fields under Historical manual corrections below | Import an already authorized, completed manual attempt without sending input or granting future attempts. |
 | `record-historical-review` | unique `id`, `historical_attempt`, full `head_revision`, `verdict`, `review_mode`, independent `reviewer`, absolute `report` | Append an actual review receipt for an imported correction. Full review is required for approval; other verification gates remain separate. |
 | `recover-report` | unique `id`, original `dispatch`, absolute `report`, `wait_receipt`, `pane`, `visible`, `source` | Append evidence of a completed delivery missed by the old watcher; see Completed native report recovery. No worker input or review approval. |
-| `assess-specialist` | `id`, actual `dispatch`, absolute `report` and successful `delivery` receipt | Record a delivered reviewer, tester or consultation report's contract lines under `references/specialists.md`; a gap records nothing. No task completion or enrollment retirement. |
+| `assess-specialist` | `id`, actual `dispatch`, absolute `report` and successful `delivery` receipt | Record a delivered reviewer, tester or consultation report's contract lines under `references/specialists.md`. A gap records no assessment, except a declared `design` or `implementation` contribution, which is saved as a `contribution_only` entry under that `id`; the re-dispatched report's assessment uses a fresh `id`. No task completion or enrollment retirement. |
 
 `allowed_paths` contains repository-relative paths or globs. Preserve the
 original task and base across every approval. Read and verify the source diff

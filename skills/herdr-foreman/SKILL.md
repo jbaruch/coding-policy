@@ -578,7 +578,8 @@ skills/herdr-foreman/references/dispatch-recovery.md
 Save each reviewer, tester and consultation report's successful delivery
 receipt and record its contract lines with `assess-specialist` under
 `references/specialists.md` before retiring its enrollment. A refusal names
-the report's gap and records nothing: record `needs_work` in Step 12 and
+the report's gap; what it saves is the `assess-specialist` contract in
+`references/dispatch-recovery.md`. Record `needs_work` in Step 12 and
 re-dispatch the same responsibility with that gap named. A reviewer or tester
 re-dispatch spends no developer fix round.
 
