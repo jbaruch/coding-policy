@@ -669,8 +669,9 @@ bash "$CP/skills/herdr-foreman/foreman.sh" verify-partition \
 Only now, with every report's gates recorded, record each assignment's outcome
 in the task ledger from its recorded contract lines, citing the report:
 
-- `accepted` for a reviewer or tester needs its recorded `VERDICT:` at the
-  current report bytes, and for a consultation every criterion `met`
+- `accepted` for a reviewer or tester needs a recorded valid `VERDICT:` at the
+  current report bytes, whatever its value; for a consultation it needs every
+  `ACCEPTANCE` line `met`. The verdict gates the round below, never acceptance
 - A contract gap, or an `unmet` criterion, is `needs_work`
 - A developer's work rests on the reviewer's and tester's verdicts
 

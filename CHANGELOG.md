@@ -47,7 +47,8 @@
     dispatch, and records nothing while a gap exists except a declared
     `design` or `implementation` contribution, kept as a
     `source: contribution_only` entry that satisfies nothing else, so a
-    refusal never discards an exclusion. `close-member` refuses
+    refusal never discards an exclusion. The entry keeps its refusal, and
+    an identical retry replays it without a second record. `close-member` refuses
     `accepted` for a reviewer, tester or consultation without a report-sourced
     record at the current report bytes (every criterion `met` for a
     consultation), before its classifier gates; `needs_work` is never refused
@@ -73,7 +74,8 @@
     finding for the round, taken through the existing Blocking Gate and fix
     loop; a completed adjudication settles a disputed verdict directly.
     `record-historical-review` imports predate the contract and stay
-    outside it.
+    outside it. The blocking-verdict to round-gate mapping stays in Step 12
+    prose as today; moving it into owner state is #646.
   - `SKILL.md` Steps 10–12, `references/specialists.md`, `round-flow.md`,
     `assignment-reasoning.md`, `dispatch-recovery.md` and `state-schema.md`
     follow, with one line each in `attention.md` and `herdr.md` and

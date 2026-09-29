@@ -52,8 +52,8 @@ _BOUND_FIELDS = frozenset({"schema_version", "at", "assignment_index", "task", "
 LEGACY_FIELDS = INPUT_FIELDS | RETIRED_INPUT_FIELDS | _BOUND_FIELDS
 #: Exactly the fields a schema-2 record carries.
 RECORD_FIELDS = INPUT_FIELDS | _BOUND_FIELDS | frozenset(
-    {"source", "brief_evidence", "criteria", "acceptance", "verdict", "contribution", "legacy"})
-#: Line fields a migrated record holds as null.
+    {"source", "brief_evidence", "criteria", "acceptance", "verdict", "contribution", "legacy", "gap"})
+#: Line fields a migrated or contribution-only record holds as null.
 _LINE_FIELDS = ("brief_evidence", "criteria", "acceptance", "verdict")
 
 
@@ -141,7 +141,7 @@ def migrate_assessments(payload):
         upgraded = {key: record[key] for key in INPUT_FIELDS | _BOUND_FIELDS}
         upgraded.update(schema_version=ASSESSMENT_SCHEMA_VERSION, source="foreman_assessment",
                         brief_evidence=None, criteria=None, acceptance=None, verdict=None,
-                        contribution=record["contribution"],
+                        contribution=record["contribution"], gap=None,
                         legacy={"outcome": record["outcome"], "summary": record["summary"]})
         records[index] = upgraded
         changed = True
@@ -152,17 +152,24 @@ def _validate_lines(record, dispatch):
     if record["source"] == "foreman_assessment":
         legacy = record["legacy"]
         if (not isinstance(legacy, dict) or set(legacy) != {"outcome", "summary"}
-                or not _text_in(record["contribution"], CONTRIBUTIONS)
+                or not _text_in(record["contribution"], CONTRIBUTIONS) or record["gap"] is not None
                 or any(record[key] is not None for key in _LINE_FIELDS)):
             raise _corrupt()
         text(legacy["outcome"], "legacy outcome")
         text(legacy["summary"], "legacy summary")
         return
     if record["source"] == "contribution_only":
+        gap = record["gap"]
         if (record["legacy"] is not None or not _text_in(record["contribution"], EXCLUDING_CONTRIBUTIONS)
-                or any(record[key] is not None for key in _LINE_FIELDS)):
+                or any(record[key] is not None for key in _LINE_FIELDS)
+                or not isinstance(gap, dict) or set(gap) != {"message", "gaps"} or not isinstance(gap["gaps"], list)):
             raise _corrupt()
+        text(gap["message"], "gap message")
+        for item in gap["gaps"]:
+            text(item, "gap")
         return
+    if record["gap"] is not None:
+        raise _corrupt()
     role = record["role"]
     if record["legacy"] is not None or record["contribution"] is not None and not _text_in(record["contribution"], CONTRIBUTIONS):
         raise _corrupt()
@@ -221,6 +228,13 @@ def validate_assessments(state):
         _validate_lines(record, dispatch)
 
 
+def _gap_refusal(record):
+    """The refusal a contribution-only record stands for, rebuilt from what it saved."""
+    return ContractGap("{} Its declared `{}` contribution is recorded as an independence exclusion.".format(
+        record["gap"]["message"], record["contribution"]),
+        {"gaps": list(record["gap"]["gaps"]), "contribution_record": record["id"]}, record)
+
+
 def _brief_criteria(dispatch):
     """The dispatched brief's receipt and criteria count, read from its frozen bytes."""
     # Deferred: `assign` imports the dispatch stack, and this module loads
@@ -251,6 +265,9 @@ def record_assessment(state, state_path, data, at):
     prior = next((row for row in state["specialist_assessments"] if row["id"] == data["id"]), None)
     if prior is not None:
         if prior["source"] == "contribution_only":
+            # An identical retry replays the same refusal; nothing new is recorded.
+            if all(prior[key] == data[key] for key in INPUT_FIELDS) and receipt(data["report"])[0] == prior["report_evidence"]:
+                raise _gap_refusal(prior)
             raise UsageError("Assessment identity {} holds only the declared contribution of a report refused for a "
                              "contract gap; re-dispatch and assess the new report under a new id.".format(data["id"]), {})
         if prior["source"] != "report":
@@ -298,15 +315,16 @@ def record_assessment(state, state_path, data, at):
         if not declared:
             raise
         # Add-only: the refusal never discards an exclusion the report declared.
+        gaps = exc.details.get("gaps") if isinstance(exc.details, dict) else None
         record = {**bound, "source": "contribution_only", "brief_evidence": None, "criteria": None,
                   "acceptance": None, "verdict": None, "legacy": None,
-                  "contribution": "implementation" if "implementation" in declared else "design"}
+                  "contribution": "implementation" if "implementation" in declared else "design",
+                  "gap": {"message": exc.message, "gaps": [str(item) for item in gaps or ()]}}
         state["specialist_assessments"].append(record)
-        raise ContractGap("{} Its declared `{}` contribution is recorded as an independence exclusion.".format(
-            exc.message, record["contribution"]), {**exc.details, "contribution_record": record["id"]}, record) from None
+        raise _gap_refusal(record) from None
     result = {**bound, "source": "report", "brief_evidence": brief_evidence, "criteria": criteria,
               "acceptance": lines["acceptance"], "verdict": lines["verdict"],
-              "contribution": lines["contribution"], "legacy": None}
+              "contribution": lines["contribution"], "legacy": None, "gap": None}
     state["specialist_assessments"].append(result)
     return result
 
@@ -337,11 +355,11 @@ def investigated(record):
 def require_accepted(state, dispatch_id, report):
     """Refuse an `accepted` closure the report's recorded contract lines do not support.
 
-    A reviewer or tester needs a report-sourced record of this dispatch and
-    report whose receipt matches the current bytes; a consultation's record
-    also states every criterion `met`. Any other responsibility passes through.
-    Acceptance is contract completeness, whatever the `verdict`: a blocking
-    verdict gates the round at SKILL.md Step 12 and the round-flow Release Gate.
+    A reviewer or tester is accepted with any valid recorded `verdict`: it
+    needs a report-sourced record of this dispatch and report whose receipt
+    matches the current bytes. A consultation's record must also state every
+    `ACCEPTANCE` line `met`. Any other responsibility passes through. A
+    blocking verdict gates the round at SKILL.md Step 12, never acceptance.
     """
     dispatch = next((row for row in state["recovery"]["dispatches"] if row["id"] == dispatch_id), None)
     if dispatch is None:

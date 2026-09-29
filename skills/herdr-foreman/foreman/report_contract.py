@@ -200,7 +200,7 @@ def report_lines(text, role, specialty=None, criteria=None):
             gaps.append("missing ACCEPTANCE {}".format(", ".join(str(k) for k in missing)))
     if gaps:
         raise UsageError("The {} report does not meet its contract: {}. Record `needs_work` and send it back to "
-                         "its responsibility with these gaps named; nothing was recorded.".format(
+                         "its responsibility with these gaps named; no assessment was recorded.".format(
                              role, "; ".join(gaps)), {"gaps": gaps})
     return {"verdict": verdicts[0] if verdicts else None,
             "acceptance": [accepted[k] for k in sorted(accepted)] if consultation else None,

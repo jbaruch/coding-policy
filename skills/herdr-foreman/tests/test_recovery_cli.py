@@ -102,7 +102,7 @@ class RecoveryCommandTests(fixture.CliCase):
             record.update(schema_version=1, outcome="delivered", contribution="design",
                           summary="The find-rate tracks review surface area.")
         else:
-            record.update(schema_version=2, source="report", criteria=1, verdict=None, contribution=None, legacy=None,
+            record.update(schema_version=2, source="report", criteria=1, verdict=None, contribution=None, legacy=None, gap=None,
                           brief_evidence={"path": "/reports/.dispatched/brief.0123456789abcdef.md",
                                           "sha256": "0123456789abcdef" + "0" * 48},
                           acceptance=[{"k": 1, "state": criterion, "evidence": "reproduction in section 1"}])

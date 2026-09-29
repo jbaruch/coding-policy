@@ -497,7 +497,7 @@ class HistoricalCommandsTest(fixture.CliCase):
             "dispatch": "investigator-dispatch", "assignment_index": index, "task": TASK,
             "role": "investigator", "agent": "grok", "report": self.investigation(),
             "delivery": "/reports/delivery.json", "source": "report", "criteria": 1, "verdict": None,
-            "contribution": None, "legacy": None,
+            "contribution": None, "legacy": None, "gap": None,
             "brief_evidence": {"path": "/reports/.dispatched/brief.0123456789abcdef.md",
                                "sha256": "0123456789abcdef" + "0" * 48},
             "acceptance": [{"k": 1, "state": "met", "evidence": "the loop did not converge on surface area"}],

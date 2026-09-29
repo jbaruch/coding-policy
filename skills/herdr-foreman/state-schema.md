@@ -570,7 +570,7 @@ the line formats and refusal classes.
 Each schema-2 record contains `schema_version: 2`, `id`, `at`, `dispatch`,
 `assignment_index`, `task`, `role`, `agent`, `report`, `delivery`,
 `report_evidence`, `delivery_evidence`, `source`, `brief_evidence`, `criteria`,
-`acceptance`, `verdict`, `contribution` and `legacy`. The evidence objects
+`acceptance`, `verdict`, `contribution`, `legacy` and `gap`. The evidence objects
 contain absolute `path` and SHA-256 `sha256`. The report is the supervised
 assignment's enrolled path; delivery is saved successful `wait-report` JSON for
 that worker and path, or the exact owner-recorded `recover-report` output for
@@ -585,6 +585,7 @@ that dispatch and the same report bytes.
 | `verdict` | `blocking` or `approved` where the role or dispatch specialty requires the line, else null |
 | `contribution` | The report's optional `CONTRIBUTION:` value or null; a migrated record keeps its old value |
 | `legacy` | `{outcome, summary}` on a migrated record, else null |
+| `gap` | `{message, gaps}` on a `contribution_only` record: the refusal it replays on an identical retry (same input, same report bytes); else null |
 
 The role and specialty come from the owner dispatch, never from the caller. A
 report with a contract gap appends nothing, save a `contribution_only` entry

@@ -326,6 +326,7 @@ class EngagementTest(unittest.TestCase):
         variants = ({"schema_version": 3}, {"assignment_index": 9}, {"assignment_index": False}, {"agent": "other-worker"},
                     {"task": "another-task"}, {"at": "2026-02-03T09:00:00Z"}, {"source": "operator"},
                     {"verdict": "approved"}, {"criteria": 3}, {"legacy": {"outcome": "x", "summary": "y"}},
+                    {"gap": {"message": "x", "gaps": []}},
                     {"contribution": "maybe"},
                     {"report_evidence": {**self.state["specialist_assessments"][0]["report_evidence"], "path": "/other.md"}})
         for change in variants:
@@ -397,11 +398,22 @@ class EngagementTest(unittest.TestCase):
             ["reviewer"], [], {}, self.state["assignments"], "task-1",
             assessments=self.state["specialist_assessments"], candidate_names=["verifier"])
         self.assertEqual(constraints["exclude"]["reviewer"], ["verifier"])
-        # It never satisfies acceptance, and its id is never reused for a record.
+        # It never satisfies acceptance.
         with self.assertRaises(UsageError):
             engagement.require_accepted(self.state, "review-1", data["report"])
-        with self.assertRaisesRegex(UsageError, "new id"):
+        # An identical retry replays the same refusal and records nothing new.
+        before = copy.deepcopy(self.state["specialist_assessments"])
+        with self.assertRaises(engagement.ContractGap) as replay:
+            self.assess(data, at="2026-02-03T12:00:00+00:00")
+        self.assertEqual(replay.exception.message, caught.exception.message)
+        self.assertEqual(replay.exception.details["gaps"], caught.exception.details["gaps"])
+        self.assertEqual(self.state["specialist_assessments"], before)
+        # Different report bytes under that id are id reuse.
+        Path(data["report"]).write_text("Reviewed again.\nVERDICT: approved\n")
+        with self.assertRaisesRegex(UsageError, "new id") as reused:
             self.assess(data)
+        self.assertNotIsInstance(reused.exception, engagement.ContractGap)
+        self.assertEqual(self.state["specialist_assessments"], before)
         self.assertEqual(recovery.accepted(self.state["specialist_assessments"]), [])
         save_state(self.path, self.state)
         self.assertTrue(load_state_checked(self.path)[1])
@@ -433,7 +445,8 @@ class EngagementTest(unittest.TestCase):
         with self.assertRaises(engagement.ContractGap):
             self.assess(data)
         for change in ({"contribution": "none"}, {"contribution": ["design"]}, {"verdict": "approved"},
-                       {"legacy": {"outcome": "x", "summary": "y"}}):
+                       {"legacy": {"outcome": "x", "summary": "y"}}, {"gap": None}, {"gap": {"message": "x"}},
+                       {"gap": {"message": "x", "gaps": [1]}}):
             with self.subTest(change=change):
                 corrupted = copy.deepcopy(self.state)
                 corrupted["specialist_assessments"][-1].update(change)
