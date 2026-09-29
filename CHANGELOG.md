@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.337 — 2026-09-29
+
 ### Added
 
 - **The pinned judge weighs marginal findings in a Herdr team round (Closes
