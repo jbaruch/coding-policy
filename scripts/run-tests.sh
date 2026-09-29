@@ -120,7 +120,7 @@ remove_xdg_run_home() {
 main() {
   local base="${1:-}"
   if [[ -z "$base" ]]; then
-    base="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+    base="$(CDPATH='' cd -- "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
   fi
   if [[ ! -d "$base" ]]; then
     echo "run-tests: base dir not found: $base" >&2

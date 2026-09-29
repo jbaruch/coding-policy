@@ -103,7 +103,7 @@ case "${BASH_SOURCE[0]}" in
   */*) _sp_src="${BASH_SOURCE[0]%/*}" ;;
   *) _sp_src=. ;;
 esac
-if ! _sp_dir="$(cd -- "${_sp_src:-/}" && pwd && printf x)"; then
+if ! _sp_dir="$(CDPATH='' cd -- "${_sp_src:-/}" && pwd && printf x)"; then
   echo "error: cannot enter the script directory ${_sp_src:-/} — restore read and search access to the plugin directory, or reinstall the plugin, then re-run" >&2
   exit 1
 fi
