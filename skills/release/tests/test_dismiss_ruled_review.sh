@@ -480,11 +480,13 @@ t_team_round_version_1_ruling_refuses_unmodified() {
   grep -v '^AUTHORITY:' "$RULING" | sed 's/^schema_version: 2$/schema_version: 1/' > "${RULING}.tmp" \
     && mv "${RULING}.tmp" "$RULING"
   local before after
-  before=$(digest_of_ruling)
+  before=$(digest_of_ruling) || { echo "    FAIL: could not digest the ruling before the run" >&2; return 1; }
+  [[ -n "$before" ]] || { echo "    FAIL: empty digest of the ruling before the run" >&2; return 1; }
   invoke_team_ruled
-  after=$(digest_of_ruling)
+  after=$(digest_of_ruling) || { echo "    FAIL: could not digest the ruling after the run" >&2; return 1; }
+  [[ -n "$after" ]] || { echo "    FAIL: empty digest of the ruling after the run" >&2; return 1; }
   assert_eq "exit" "1" "$RC" || return 1
-  assert_unmet "re-dispatch the pinned judge" "the team-round schema" || return 1
+  assert_unmet "is malformed — re-dispatch the pinned judge" "the team-round schema" || return 1
   assert_eq "ruling bytes unchanged" "$before" "$after" || return 1
   assert_eq "nothing posted" "0" "$(wc -l < "$EVENTS" | tr -d ' ')"
 }

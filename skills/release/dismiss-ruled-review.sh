@@ -28,9 +28,8 @@
 #   Readers, two:
 #     - This script reads every line. It accepts only RULING_SCHEMA; a missing
 #       schema_version line or any other version is refused (exit 1), after
-#       the owner migration below. In a team round it never modifies the
-#       file. It promises nothing is posted or dismissed unless the whole
-#       predicate holds.
+#       the owner migration below. It promises nothing is posted or dismissed
+#       unless the whole predicate holds.
 #     - `foreman verify-ruling` (skills/herdr-foreman/foreman/cli.py
 #       `cmd_verify_ruling`), called by this script for `AUTHORITY: judge`,
 #       reads the file's bytes and nothing inside them. It accepts the file
@@ -39,13 +38,14 @@
 #       with a frozen brief carrying the judge-weighing template's marker line.
 #       It promises the file's sha256 on success and a refusal message
 #       otherwise; it never parses or migrates the ruling.
-#   Migration (owner, standalone only): a version-1 file, which only the
-#     operator ever wrote, is upgraded in place before it is read: its
-#     `schema_version: 1` line
+#   Migration (owner): schema 1 was written only by standalone operator
+#     rulings; the owner migrates those. Standalone, a version-1 file is
+#     upgraded in place before it is read: its `schema_version: 1` line
 #     becomes `schema_version: 2` plus `AUTHORITY: operator`, every other line
-#     kept. In a team round the file is the judge's delivered report, bound by
-#     its digest; a version-1 file there is refused (exit 1), never rewritten. The rewrite changes the file's digest, so a follow-up entry posted
-#     under the version-1 digest is not reused.
+#     kept. The rewrite changes the file's digest, so a follow-up entry posted
+#     under the version-1 digest is not reused. A team-round ruling below the
+#     current schema was never written by any version and is refused as
+#     malformed (exit 1), never modified.
 #   Format, schema_version 2 (lines in any order after the first; unknown lines ignored):
 #     RULING: weighed                       (first line, required)
 #     schema_version: 2                     (required)
@@ -287,7 +287,7 @@ for ln in ruling_lines:
 if not ruling_lines or ruling_lines[0].strip() != "RULING: weighed":
     out["unmet"].append("the ruling's first line is not 'RULING: weighed'")
 if schemas != [schema] and mode == "team":
-    out["unmet"].append(f"the ruling carries no single 'schema_version: {schema}' line — re-dispatch the pinned judge's weighing for a current-format report; never edit the delivered one")
+    out["unmet"].append(f"the ruling carries no single 'schema_version: {schema}' line, so this team-round ruling is malformed — re-dispatch the pinned judge's weighing for a current-format report; never edit the delivered one")
 elif schemas != [schema]:
     out["unmet"].append(f"the ruling carries no single 'schema_version: {schema}' line — rewrite it in the current format")
 if len(heads) != 1:
