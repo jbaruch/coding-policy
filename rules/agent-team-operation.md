@@ -153,7 +153,8 @@ description: Running a multi-agent team — task-based specialist composition, c
 - `stop` is terminal and never repeats; an approach takes at most five diagnoses
 - No exhausted allowance waits on an operator decision
 - The judge is read-only: it never edits a repository file, never runs a mutating git or `gh` command, never posts to GitHub, never dispatches a subagent — its only output is its report file
-- A weighing has no positions; the position, citation and ruling-grammar bullets below govern a dispute alone
+- A weighing has no positions
+- The position, citation and ruling-grammar bullets below govern a dispute alone
 - Each dispute position cites its evidence: file and line, or command output, each at a named revision
 - Narrow exception for a position whose evidence an investigator supplied.
 - Preconditions (all required):
