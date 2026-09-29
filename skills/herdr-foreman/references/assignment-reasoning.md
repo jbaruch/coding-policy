@@ -20,8 +20,8 @@ State investigation-only intent explicitly in the role's task text and select
 the developer template's investigation branch. Its deliverable is a report;
 implementation, push, PR and release instructions do not apply to that branch.
 
-Gate investigation reports against the requested knowledge and evidence, including
-required independent checks. The implementation phases in Review Before PR apply
+Gate investigation reports on their recorded `ACCEPTANCE` lines against the
+requested knowledge and evidence, including required independent checks. The implementation phases in Review Before PR apply
 only to authorized code changes. Preserve blocking-finding, correction-allowance,
 and judge rules for the investigation. A completed judge ruling (`uphold A`,
 `uphold B` or `amend`) returns the investigation to its knowledge-deliverable
@@ -45,9 +45,11 @@ the proposed change as one of:
   behavior or whether the proposed fix is necessary. Name that uncertainty.
 
 A reviewer's label or confidence does not amend the accepted contract. Scope
-classification also does not dismiss a blocking finding: a contested verdict,
-foreman override, bot disagreement, or weighing nomination follows the existing judge path in
-`rules/agent-team-operation.md`. The foreman cannot waive a finding by calling it
+classification is friction-only routing: every outcome keeps the blocking
+finding in force, and an expansion only adds an operator decision. It never
+dismisses a blocking finding: a contested verdict, a report `VERDICT:` the
+classifier gate contradicts, a bot disagreement, or a weighing nomination
+follows the existing judge path in `rules/agent-team-operation.md`. The foreman cannot waive a finding by calling it
 an expansion. An agreed correction still obeys the fix allowance and release
 gates; this reference adds no attempts or substitute judge trigger.
 

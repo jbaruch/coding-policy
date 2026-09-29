@@ -38,10 +38,11 @@ gate; they do not require a pushed branch or release reports.
 
 **Phase 1 — pre-development.** An architect or advisor supplies the
 needed design or interaction report. An investigator may first resolve a causal
-question. Assess each consultation before using its outcome. The tester maps each acceptance
+question. Record each consultation's contract lines with `assess-specialist`
+before using its outcome. The tester maps each acceptance
 criterion to a test, or delivers those tests as a patch (tester Mode A or B).
-Plan that work with `--round tester=test_plan` and record its actual contribution
-through `assess-specialist` before selecting Phase 2 verifiers. A test patch
+Plan that work with `--round tester=test_plan`; that dispatch makes its tester
+a possible contributor, and no later assessment clears it. A test patch
 author is an implementation contributor, even while holding the tester role.
 The developer implements against both, runs the repo's gates, pushes the
 branch, and stops without opening a PR.
@@ -64,12 +65,12 @@ the current tip by SHA.
 The release hand-off reads Phase 2 reports and nothing else. A design note is
 not a review of the code that got written, and a test plan is not a test run.
 
-Phase 2 excludes actual design and implementation contributors from reviewer
-and tester. The owner applies recorded contribution history; use `--exclude`
-for relevant contributions outside it. Assess uncertain prior consultations
-under `references/specialists.md`. The reviewer responsibility is verification
-only; it no longer carries pre-development Mode A. Historical reviewer
-responsibility remains unknown until its actual contribution is established.
+Phase 2 excludes every possible contributor from reviewer and tester. The
+owner applies recorded contribution history, which only ever adds an
+exclusion; use `--exclude` for relevant contributions outside it. A recorded
+`none` clears nothing. The reviewer responsibility is verification only; it no
+longer carries pre-development Mode A. Historical reviewer responsibility stays
+unknown, and unknown excludes.
 
 Consultations can enter later when a new question could change implementation
 or verification. Scope any resulting correction through the accepted behavior
@@ -107,12 +108,14 @@ assignment, or closes an investigation-only knowledge deliverable through Step 1
 9. **Observe** — `supervision-watch` observes every enrolled worker. Verify
    candidates with `wait-report.sh --once`, ledger outcomes, and acknowledge
    handled events under `references/supervision.md`.
-10. **Gate** — the foreman reads every report in full and decides: another round,
-   or the release hand-off.
+10. **Gate** — the foreman reads every report in full and gates on its recorded
+   contract lines, its classifier gates and the judge's rulings: another
+   round, or the release hand-off.
 
-Before relying on consultation output, save the report delivery receipt and run
-`assess-specialist` under `references/specialists.md`. Record the accepted outcome
-in the task ledger and resolve its supervision obligations separately. Keep
+Before relying on a reviewer, tester or consultation report, save its delivery
+receipt and run `assess-specialist` under `references/specialists.md`. Record
+the outcome its lines support in the task ledger and resolve its supervision
+obligations separately. Keep
 useful sessions available for likely follow-up, while preserving scoped lessons
 outside the session. No idle specialist counts as active work.
 
@@ -126,7 +129,11 @@ All references to the round log here mean that ledger.
 A report is the worker's only channel to the foreman. Read all of it, every time —
 a `## BLOCKED` section can sit under a report that otherwise reads as finished.
 
-- **Blocking findings present** — take Step 12's bounded fix path under
+- **A contract gap** — `assess-specialist` refused the report, naming the
+  missing, extra, duplicated or malformed line. Record `needs_work` and send
+  the same responsibility a fresh brief naming the gap. A reviewer or tester
+  re-dispatch spends no developer fix round. Never read around the gap.
+- **A recorded `VERDICT: blocking`** — take Step 12's bounded fix path under
   `rules/agent-team-operation.md` Fix Loops. Keep a stable task identifier and
   advance its fix counter; changing worker or scope never restarts it.
   Name the findings and prior report in each brief. Re-check the findings
@@ -157,18 +164,23 @@ a `## BLOCKED` section can sit under a report that otherwise reads as finished.
 
 ## Release Gate
 
-For an authorized implementation release, Step 12 requires all four:
+For an authorized implementation release, Step 12 requires all five:
 
 1. The developer's report names the branch and the commit SHA it pushed.
-2. A broad reviewer **Mode B** report reviews that same SHA and carries no
-   blocking finding.
+2. A broad reviewer **Mode B** report reviews that same SHA and records
+   `VERDICT: approved`.
 3. A broad tester **Mode C** report verifies that same SHA, with the repo's
-   gates run and every acceptance criterion met.
+   gates run, and records `VERDICT: approved`.
 4. Nothing has been pushed to the branch after those two reports.
+5. Every `security`, `ux-product` or `documentation` consultation that recorded
+   `VERDICT: blocking` has a later report of the same specialty recording
+   `VERDICT: approved`, or a completed ruling settles it.
 
-A blocking finding a completed weighing ruled `defer` or `decline` does not
-fail 2 or 3 while the ruling covers it (see
-`skills/herdr-foreman/references/judge-round.md`).
+A blocking verdict whose findings a completed weighing ruled `defer` or
+`decline` is settled by the next reviewer or tester report at the tip. That
+report marks each covered finding DECLINED, citing the ruling, and records
+`VERDICT: approved` (see `skills/herdr-foreman/references/judge-round.md`).
+The foreman never matches rulings to findings.
 
 Under a recorded `stop` remedy, 2 and 3 read against what ships: the excluded
 defect is a tracked accepted defect and the shipped scope carries no other
@@ -236,7 +248,8 @@ and treat the return to Step 4 as a round boundary: log the round and reset
 the stow, so the reset context returns to Step 4 with self-contained briefs
 carrying them. Preserve the developer for retained fixes; use a fresh context for the
 fresh-worker stage. Never reset the counter during re-planning. At a contested
-verdict, a foreman override, or a weighing nomination, go to Step 13 first.
+verdict, a report `VERDICT:` the classifier gate contradicts, or a weighing
+nomination, go to Step 13 first.
 Nominations wait for the gate's weighing; other blocking findings take the
 fix path meanwhile. At an exhausted allowance,
 record the checkpoint through the owner commands in
@@ -291,9 +304,9 @@ both: re-run Phase 2 against the new tip.
 The workers share one GitHub account, and GitHub refuses `APPROVE` and
 `REQUEST_CHANGES` on that account's own PR. Internal reviews are posted as
 COMMENT reviews with each finding labelled blocking or advisory per
-`rules/review-severity.md`. The COMMENT state carries no gate, so the FOREMAN is
-the gate: a blocking finding in an internal review sends the round back,
-whatever GitHub's merge box says.
+`rules/review-severity.md`, and its report records the one `VERDICT:` line.
+The COMMENT state carries no gate, so the FOREMAN is the gate: a recorded
+`VERDICT: blocking` sends the round back, whatever GitHub's merge box says.
 
 ## The Judge
 
@@ -308,10 +321,10 @@ diagnosis asks why a fix loop is not converging. Dispatch adjudication on
 exactly one of four triggers:
 
 - A contested reviewer or tester verdict — one worker's finding, another
-  worker's (or the foreman's) disagreement, neither side able to settle it by
-  re-reading the rule.
-- A foreman override of a blocking finding — the foreman about to waive a finding a
-  worker labelled blocking gets a second, independent read first.
+  worker's disagreement, neither side able to settle it by re-reading the rule.
+- A report `VERDICT:` the classifier gate contradicts — a classifier `block`
+  gate on a report recording `VERDICT: approved`. The foreman settles that
+  contradiction by neither the line nor the label.
 - A bot finding the team disagrees with — the policy reviewer or Copilot flags
   something the developer and reviewer both think is wrong.
 - A weighing nomination — a blocking finding `foreman finding-churn` places on

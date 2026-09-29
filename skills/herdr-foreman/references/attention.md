@@ -12,7 +12,7 @@ Run through the installed `skills/herdr-foreman/foreman.sh` with an explicit `ba
 | --- | --- | --- |
 | `attention-record --record entry.json [--now ISO]` | New obligation | Saved event and `replayed` |
 | `attention-update --record event.json [--now ISO]` | Explicit lifecycle transition | Saved event and `replayed` |
-| `attention-progress --record progress.json [--now ISO]` | Foreman-assessed progress fact with ledger source | Saved event and `replayed` |
+| `attention-progress --record progress.json [--now ISO]` | Progress fact with ledger source; a statement about task content also cites its report as an `artifact` source | Saved event and `replayed` |
 | `attention-list [--task ID] [--limit N] [--offset N] [--since ISO] [--include-closed] [--now ISO]` | Offline view | Same structured view as `catch-up` |
 | `catch-up [--task ID] [--limit N] [--offset N] [--since ISO] [--include-closed] [--now ISO]` | Offline view | Actionable, deferred, progress, optional closed pages; source pointers; rendered Markdown |
 | `attention-show --id ID [--now ISO]` | Obligation ID | Current record and its complete lifecycle history |

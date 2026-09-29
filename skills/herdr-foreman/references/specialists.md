@@ -246,8 +246,7 @@ plan, apply, assessment, observation and follow-up.
 
 State the question the specialist must settle, why its answer matters now, the
 accepted behavior, scope, relevant prior decisions, available inputs, permitted
-actions and stopping condition. Define what the foreman will inspect to accept
-the result. Supply the source paths and revisions, useful project lessons, and
+actions and stopping condition. Number the criteria its report answers. Supply the source paths and revisions, useful project lessons, and
 the selected profile's applicable questions in the brief. The worker should
 not need an earlier conversation to reconstruct its assignment.
 
@@ -262,7 +261,10 @@ composer; its canonical consultation roles select that shared template. Supply
 `TASK`, `SPECIALTY`, `RESPONSIBILITY`, `OBJECTIVE`, `ACCEPTANCE_CRITERIA`, `INPUTS`,
 `TOOLS_AND_SKILLS`, `SCOPE_LIMITS`, `CONTRIBUTION_HISTORY`, `KNOWLEDGE` and `REPORT`,
 plus the common task, branch and authority values. Set `RESPONSIBILITY` to the
-planned role. Put applicable profile questions and evidence in the actual
+planned role. `ACCEPTANCE_CRITERIA` is one `CRITERION <k>: <text>` line per
+criterion, numbered from 1; the template renders it as the brief's single
+`## Acceptance Criteria` section. `apply` refuses a consultation brief without
+that contiguous block, and its count is the `N` the report answers. Put applicable profile questions and evidence in the actual
 brief values; a bare profile name is insufficient. For a developer, reviewer or
 tester with specialist requirements, supply the same bounded expertise context
 in `SPECIALIST_CONTEXT` within its normal role brief.
@@ -277,10 +279,12 @@ its genuine block is recorded; idle bench membership creates no monitoring job.
 ## Assess specialist work
 
 Confirm delivery through the normal report checkpoint and save its successful
-JSON output. Read the actual report in full. Inspect the requested artifact and
-source evidence, then assess the assignment outcome and what the worker
-contributed. A worker's contribution claim is an input to that judgment, not
-the judgment itself.
+JSON output. Read the actual report in full. Its contract lines decide its
+outcome, never your reading of it: one `ACCEPTANCE <k>/<N>:` line per criterion,
+one `VERDICT:` line for a `security`, `ux-product` or `documentation`
+specialty, and at most one optional `CONTRIBUTION:` line. Line formats and
+refusal classes are in `skills/herdr-foreman/foreman/report_contract.py`'s
+module docstring.
 
 Run the installed `skills/herdr-foreman/foreman.sh` with explicit `bash` and
 the plugin root resolved by the skill. This synopsis names its owner command:
@@ -297,16 +301,12 @@ the supervision member, the worker's report path, and the saved delivery path:
   "id": "onboarding-ux-assessment-1",
   "dispatch": "onboarding-ux-dispatch-1",
   "report": "/durable/team/reports/ux-1.md",
-  "delivery": "/durable/team/reports/ux-1-delivery.json",
-  "outcome": "The requested interaction proposal is complete; implementation remains open.",
-  "contribution": "design",
-  "summary": "The report proposes the chosen recovery flow and supplies acceptance criteria."
+  "delivery": "/durable/team/reports/ux-1-delivery.json"
 }
 ```
 
-`outcome` and `summary` record the foreman's actual assessment and rationale.
-`contribution` is `none`, `design` or `implementation`; classify the substantive
-work rather than its current role. The delivery file must be the successful
+`outcome`, `summary` and `contribution` are refused by name: the record reads
+them from the report, never from you. The delivery file must be the successful
 `wait-report.sh` JSON receipt for that worker and report, with `found: true`, or
 the unchanged owner `recover-report` result for that exact dispatch and report.
 For native delivery missed by the watcher, complete recovery under
@@ -316,17 +316,23 @@ invented receipt does not establish delivery.
 Use an actual dispatch identity and matching report path; never invent history
 for a report that has not been reconciled with its assignment.
 
-The command emits JSON and preserves an immutable assessment with report and
-delivery receipts in the existing owner state. It binds the saved bytes to the
-assignment; it cannot infer semantic truth from report prose. Handle any
-non-zero diagnostic before continuing. Keep the referenced evidence files for
-future verification.
+The command re-derives `N` from the frozen brief the dispatch sent, parses the
+report against the dispatch's own role and specialty, and emits JSON. It
+preserves an immutable record with brief, report and delivery receipts in the
+existing owner state; `skills/herdr-foreman/state-schema.md` Specialist
+assessment records holds its shape. A report missing a required line, or
+carrying an extra, duplicate, mismatched or malformed one, records nothing and
+names the gap: record `needs_work` and re-dispatch the same responsibility with
+that gap named. Keep the referenced evidence files for future verification.
 An exact retry with the same assessment id returns its original record. A new
-assessment uses a new id and preserves the old evidence. The command also accepts
-confirmed reviewer or tester dispatches when their contribution needs assessment;
-developer work remains on the normal developer receipt and correction path.
+assessment uses a new id and preserves the old evidence. Run it on every
+reviewer and tester report too, where the contract is one `VERDICT:` line;
+`close-member` refuses `accepted` without it. Developer work remains on the
+normal developer receipt and correction path.
 
-Record the assessed outcome and evidence in the task ledger. Handle pending
+Record the outcome the lines support in the task ledger, citing the report: a
+consultation with every criterion `met` may be `accepted`, and an `unmet`
+criterion is `needs_work`. Handle pending
 supervision events and retire the preceding enrollment through
 `skills/herdr-foreman/references/supervision.md`. Assessment, event
 acknowledgement and enrollment retirement are distinct operations. None of them
@@ -341,25 +347,20 @@ conditions.
 ## Preserve contribution history and knowledge
 
 Track actual contributions across session clears, worker changes and model
-changes. Record who originated or materially shaped the accepted design, wrote
-the implementation, or authored the artifact under review. Consultation that
-only inspects evidence may remain independent; a specialist that shaped the
-solution must disclose that contribution. Decide independence against the
-subject being verified, never against the worker's current title or a fresh
-context. Obtain another qualified worker for independent assessment of a
-contributor's work. Keep the ordinary reviewer and tester gates intact.
-
-An unassessed consultation is unresolved contribution history. Assess it before
-relying on that worker's independence. A `none` assessment records that the foreman
-verified no contributing work; a design or implementation contribution remains
-part of the task history across role, model and session changes. Obtain a
-different qualified worker for the independent gate when the subject includes
-that contribution.
+changes. A contribution only ever adds an exclusion; nothing clears one. A
+worker is a possible contributor when its dispatch was classified one before it
+ran, when its report declares `CONTRIBUTION: design` or `CONTRIBUTION:
+implementation`, or when you exclude it. A declared or legacy `none` changes
+nothing. Every consultation worker stays excluded from verifying its own task.
+Decide independence against the subject being verified, never against the
+worker's current title or a fresh context. Obtain another qualified worker for
+independent assessment of a contributor's work. Keep the ordinary reviewer and
+tester gates intact.
 
 New reviewer assignments carry an explicit verification scope. Migrated reviewer
-history retains unknown scope, and architecture work remains a possible
-contribution until assessed against actual output. The owner never infers
-independence from a newer schema stamp. External authors and work without usable
+history retains unknown scope, which excludes, and architecture work remains a
+possible contribution. The owner never infers independence from a newer schema
+stamp. External authors and work without usable
 task provenance still need the foreman's explicit exclusions. Follow the planning
 contract in `references/round-setup.md` Step 5 rather than reclassifying history
 from a worker's current label.

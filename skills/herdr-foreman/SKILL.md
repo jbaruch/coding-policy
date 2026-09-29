@@ -488,6 +488,8 @@ report path from its brief. Apply enrolls before input; unknown sends remain
 observation obligations. Apply refuses while an open decision or blocker on the
 task is unanswered; see the attention reference's Dispatch gate.
 Classify every brief against Step 3's authorization before sending it.
+Apply refuses a consultation brief without a contiguous `CRITERION 1..N` block
+under `## Acceptance Criteria`. That block is the `N` its report answers.
 Append the dispatch outcome to the task ledger; `applied` proves dispatch only.
 
 Apply the recovery reference's Dispatch context requirements before sending.
@@ -573,8 +575,12 @@ skills/herdr-foreman/references/supervision.md
 skills/herdr-foreman/references/dispatch-recovery.md
 ```
 
-Save a consultation's successful delivery receipt and record `assess-specialist`
-under `references/specialists.md` before retiring its enrollment.
+Save each reviewer, tester and consultation report's successful delivery
+receipt and record its contract lines with `assess-specialist` under
+`references/specialists.md` before retiring its enrollment. A refusal names
+the report's gap and records nothing: record `needs_work` in Step 12 and
+re-dispatch the same responsibility with that gap named. A reviewer or tester
+re-dispatch spends no developer fix round.
 
 Record user-facing obligations in the attention queue. Acknowledge only handled
 event IDs through the saved snapshot; schedule pending rechecks. Record no
@@ -600,7 +606,8 @@ gated exactly as it would have been.
 
 Read every report file in full, including a report whose worker exited cleanly.
 A `## BLOCKED` section can sit under a report that otherwise reads as finished.
-Classify each finding blocking or advisory per `rules/review-severity.md`.
+A report's recorded `VERDICT:` and `ACCEPTANCE` lines decide it. Never accept,
+reject or rate a finding on your own reading.
 Then record the gates the labels earn, before gating any report:
 
 ```bash
@@ -658,11 +665,17 @@ bash "$CP/skills/herdr-foreman/foreman.sh" verify-partition \
 - The new plan then takes Step 7 composition, Step 10 dispatch, Step 11
   observation, and this step's gate
 
-Only now, with every report's gates recorded, record assignment acceptance or
-outstanding work in the task ledger against the inspected report and artifact
-evidence. Record the task's gate decision separately; a worker finishing its
-brief never completes the whole task. Once the ledger records an assignment's
-assessed outcome, close its enrollment in one call:
+Only now, with every report's gates recorded, record each assignment's outcome
+in the task ledger from its recorded contract lines, citing the report:
+
+- `accepted` for a reviewer or tester needs its recorded `VERDICT:` at the
+  current report bytes, and for a consultation every criterion `met`
+- A contract gap, or an `unmet` criterion, is `needs_work`
+- A developer's work rests on the reviewer's and tester's verdicts
+
+Record the task's gate decision separately; a worker finishing its brief never
+completes the whole task. Once the ledger records an assignment's assessed
+outcome, close its enrollment in one call:
 
 ```bash
 CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"; [ -d "$CP" ] || case "$(git config --get remote.origin.url)" in git@github.com:jbaruch/coding-policy|git@github.com:jbaruch/coding-policy.git|https://github.com/jbaruch/coding-policy|https://github.com/jbaruch/coding-policy.git|ssh://git@github.com/jbaruch/coding-policy|ssh://git@github.com/jbaruch/coding-policy.git) CP=. ;; *) echo "coding-policy plugin not found: run tessl install jbaruch/coding-policy" >&2; exit 1 ;; esac
@@ -671,8 +684,10 @@ bash "$CP/skills/herdr-foreman/foreman.sh" close-member --enrollment <enrollment
 ```
 
 It refuses until the ledger's latest event for that worker and report carries
-an assessed decision, then acknowledges the enrollment's pending events and
-resolves it, citing that ledger event; a repeat replays. Resolution stays
+an assessed decision, and refuses `accepted` without the report's recorded
+contract lines, checked before its classifier gates. It then acknowledges the
+enrollment's pending events and resolves it, citing that ledger event; a repeat
+replays. Resolution stays
 separate from assignment acceptance and task completion.
 Resume Step 11's fleet watch for any enrollment still observed.
 Assess correction scope and bug evidence under `references/assignment-reasoning.md`.
@@ -686,15 +701,24 @@ continuation step. The reset foreman takes Step 17's Resume Route.
 After accepting a consultation, return to Step 4 for the next needed
 responsibility. For an investigation-only task, use the knowledge gate below.
 
-For an investigation-only task, assess every assigned report against the requested
-knowledge deliverable. Resolve blocking findings through the same bounded and
-judge paths below. Once its criteria hold, present the findings and preserve open
-user decisions; proceed to Step 15 if a task worktree needs cleanup, otherwise
+For an investigation-only task, gate every assigned report on its recorded
+`ACCEPTANCE` lines. Resolve a blocking verdict through the same bounded and
+judge paths below. Once every criterion is met, present the findings and
+preserve open user decisions; proceed to Step 15 if a task worktree needs cleanup, otherwise
 Step 16. No implementation or release is inferred from the diagnostic result.
 
-- **Any blocking finding** — apply the round-flow reference's Blocking Gate
-  contract and `rules/agent-team-operation.md` Fix Loops. Return to Step 4 for
-  an authorized correction or Step 13 for a required judge ruling.
+- **Any blocking verdict** — a recorded `VERDICT: blocking` from a reviewer,
+  tester, or `security`, `ux-product` or `documentation` consultation. Apply
+  the round-flow reference's Blocking Gate contract and
+  `rules/agent-team-operation.md` Fix Loops. Return to Step 4 for an authorized
+  correction or Step 13 for a required judge ruling.
+- **A ruled blocking verdict** — a blocking verdict whose findings a weighing
+  ruled `defer` or `decline` is settled by the next reviewer or tester
+  re-check at the tip. That report marks each covered finding DECLINED with
+  the ruling and records `VERDICT: approved`. Never match rulings to findings
+  yourself.
+- **A contradicting gate** — a classifier `block` gate on a `VERDICT: approved`
+  report goes to Step 13 for adjudication.
 - **A weighing nomination** — a finding a worker report marks `MARGINAL:`, or
   one `foreman finding-churn` places on lines the previous fix round added,
   goes to Step 13 for a weighing.
@@ -706,9 +730,9 @@ Step 16. No implementation or release is inferred from the diagnostic result.
   {"diagnosis_input": true}}`, and take its assessed report to Step 13 for the
   diagnosis.
 - **No operator wait at exhaustion** — no operator decision is awaited.
-- **Advisory findings only** — record them in the round log and fold them into
-  the next round that is already happening. Never spend a round on a lone
-  advisory.
+- **`VERDICT: approved` with advisory findings** — record them in the round
+  log and fold them into the next round that is already happening. Never spend
+  a round on a lone advisory.
 
 Apply the release gate in this reference; obtain broad independent reviewer and
 tester passes against the current pushed tip before release:

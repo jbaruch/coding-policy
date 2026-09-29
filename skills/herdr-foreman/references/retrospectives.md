@@ -40,7 +40,7 @@ findings, test and publish results, and measured headroom where available. Read
 the previous retrospective and its open actions. Workers' normal reports include
 handoff observations; use them without sending another prompt or clearing context.
 Read-only status and process inspection may establish transition evidence.
-Include saved specialist requirements, foreman contribution assessments, and the
+Include saved specialist requirements, report-contract assessments, and the
 decisions that used or declined their output. An unused profile has no missing
 report; distinguish unneeded expertise from expertise the task lacked.
 
