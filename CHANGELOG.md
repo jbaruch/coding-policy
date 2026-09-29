@@ -1,5 +1,46 @@
 # Changelog
 
+## 0.3.335 — 2026-09-29
+
+### Fixed
+
+- **`check-changelog-placement.py --since-last-publish` finds its baseline
+  under non-default stamp-action inputs (Fixes #618).** The baseline is the
+  last bot commit touching only publish bookkeeping, and three inputs hid it.
+  `--changelog ./CHANGELOG.md` never equalled the `CHANGELOG.md` that
+  `git diff-tree` reports, so the stamp commit was no baseline and every
+  entry it had stamped read as new; both paths are now normalized. A custom
+  `manifest:` reached the stamp script but not the checker, so its bump
+  commit was no baseline either; the checker gains `--manifest`, and the
+  stamp action forwards its `manifest:` input verbatim with no branching of
+  its own, so the path is covered by the script's tests. The stamp action's
+  `commit` input is removed, with the staged-only branch of
+  `skills/release/commit-stamp.sh` that served it (its argument list drops
+  `do-commit`). Under `commit: false` the caller wrote the bookkeeping
+  commit, which the check cannot find as its baseline, so that mode could
+  only produce an unguarded stamp; no caller used it. The repo's own publish
+  uses the defaults and is unaffected.
+
+## 0.3.334 — 2026-09-29
+
+### Fixed
+
+- **The CHANGELOG stamp heads the version smart-publish actually publishes
+  (Fixes #606).** `stamp-changelog.py` read the registry latest from the
+  `tessl plugin info` listing, which lags the versions API by minutes, while
+  `smart-publish.sh` computes its target from the versions API through
+  `registry-version.sh`. Three publishes on 2026-09-25 stamped a heading one
+  version behind what the same run published (two `## 0.3.268` headings, no
+  `## 0.3.271`). The stamp now reads through `registry-version.sh` too, so
+  both steps compute from the same source. The stamp-changelog action now
+  also needs `jq` on PATH, which the publish job already required. The old
+  404 and no-auth fallbacks to the manifest version are gone:
+  `registry-version.sh` reports never-published as `{"version": null}` on
+  exit 0, so any non-zero exit is a tool failure and fails the stamp step.
+  Both fleet publish workflows run `setup-tessl` before the stamp.
+
+## 0.3.333 — 2026-09-29
+
 ### Fixed
 
 - **`onboard-repo` and `migrate-to-plugin` find a global-only install (Fixes

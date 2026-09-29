@@ -526,6 +526,79 @@ class PublishModeTest(_RepoCase):
         self.assertEqual(proc.returncode, 1, proc.stderr)
         self.assertEqual(proc.payload["verdict"], "misfiled")
 
+    def test_a_non_canonical_changelog_spelling_is_still_measured(self):
+        # #618: `diff-tree` reports `CHANGELOG.md`, which never equalled
+        # `./CHANGELOG.md`, so the bot's stamp commit was no baseline and the
+        # entry it stamped read as new against the older bump.
+        stamped = TWO_VERSIONS.replace("0.3.9", "0.3.10").replace("0.3.8", "0.3.9")
+        self.changelog.write_text(stamped, encoding="utf-8")
+        self.git("-c", "user.name=github-actions[bot]", "commit", "-q", "-am",
+                 "Stamp")
+        self.merge(stamped.replace(
+            "## 0.3.10", "### Added\n\n- **A new entry.** Not yet stamped.\n\n## 0.3.10"))
+        proc = run_script(
+            [_sys.executable, _os.path.join(_ROOT, "check-changelog-placement.py"),
+             "--since-last-publish", "--changelog", "./CHANGELOG.md"],
+            cwd=self.root, capture_output=True, text=True)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(proc.payload["verdict"], "pass")
+
+    def test_a_bot_bump_of_a_custom_manifest_is_a_baseline(self):
+        # #618: the stamp action's `manifest:` input names the file the
+        # bump commit touches; without it that commit was no baseline, so
+        # the check measured from an older publish.
+        custom = self.root / "meta" / "plugin.json"
+        custom.parent.mkdir()
+        custom.write_text('{"version": "0.3.9"}\n', encoding="utf-8")
+        self.git("add", "meta/plugin.json")
+        self.git("commit", "-q", "-m", "custom manifest")
+        custom.write_text('{"version": "0.3.10"}\n', encoding="utf-8")
+        self.git("-c", "user.name=github-actions[bot]", "commit", "-q", "-am",
+                 "Bump to 0.3.10")
+        bump = subprocess.run(["git", "rev-parse", "HEAD"], cwd=self.root,
+                              check=True, capture_output=True,
+                              text=True).stdout.strip()
+        self.merge(MISFILED)
+        proc = run_script(
+            [_sys.executable, _os.path.join(_ROOT, "check-changelog-placement.py"),
+             "--since-last-publish", "--manifest", "meta/plugin.json"],
+            cwd=self.root, capture_output=True, text=True)
+        self.assertEqual(proc.returncode, 1, proc.stderr)
+        self.assertEqual(proc.payload["base"], bump)
+
+    def run_as_action(self, manifest=""):
+        """The argv `.github/actions/stamp-changelog/action.yml` passes.
+
+        The action forwards its `changelog` and `manifest` inputs verbatim,
+        an unset `manifest:` as the empty string.
+        """
+        return run_script(
+            [_sys.executable, _os.path.join(_ROOT, "check-changelog-placement.py"),
+             "--since-last-publish", "--changelog", "CHANGELOG.md",
+             "--manifest", manifest],
+            cwd=self.root, capture_output=True, text=True)
+
+    def test_the_action_default_inputs_measure_from_the_last_bump(self):
+        self.merge(MISFILED)
+        proc = self.run_as_action()
+        self.assertEqual(proc.payload["verdict"], "misfiled", proc.stderr)
+
+    def test_the_action_forwards_a_custom_manifest_as_a_baseline(self):
+        # The bot's bump of a custom manifest also stamps an entry; measured
+        # from the older bump instead, that stamped entry would read as new.
+        custom = self.root / "meta" / "plugin.json"
+        custom.parent.mkdir()
+        custom.write_text('{"version": "0.3.9"}\n', encoding="utf-8")
+        self.git("add", "meta/plugin.json")
+        self.git("commit", "-q", "-m", "custom manifest")
+        stamped = TWO_VERSIONS.replace("0.3.9", "0.3.10").replace("0.3.8", "0.3.9")
+        self.changelog.write_text(stamped, encoding="utf-8")
+        custom.write_text('{"version": "0.3.10"}\n', encoding="utf-8")
+        self.git("-c", "user.name=github-actions[bot]", "commit", "-q", "-am",
+                 "Bump to 0.3.10")
+        proc = self.run_as_action(manifest="./meta/plugin.json")
+        self.assertEqual(proc.payload["verdict"], "pass", proc.stderr)
+
     def test_no_publish_in_history_has_nothing_to_measure(self):
         fresh = tempfile.TemporaryDirectory()
         self.addCleanup(fresh.cleanup)
