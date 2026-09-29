@@ -29,7 +29,7 @@ from . import __version__
 from .assign import apply as apply_assignments
 from .assign import APPLY_SCHEMA_VERSION, dry_run, freeze_decision, freeze_paths, read_frozen, native_context_session, normalize_assignments, resolve_paths, validate_fix_history
 from . import renderable
-from . import attention, capabilities, chronology, composition, engagement, foreman_queue, foreman_reset, historical, home, load_set, members, memory, oracle, partition, recovery, report_delivery, report_gates, restoration, role_clear, retrospective, retrospective_runtime, supervision, supervision_gate, supervision_runtime, triggers
+from . import attention, capabilities, chronology, churn, composition, engagement, foreman_queue, foreman_reset, historical, home, load_set, members, memory, oracle, partition, recovery, report_delivery, report_gates, restoration, role_clear, retrospective, retrospective_runtime, supervision, supervision_gate, supervision_runtime, triggers
 from .config import FOREMAN_CONFIG_VERSION, default_config_path, load_config, load_foreman, load_judge, load_role_costs, select_agents
 from .errors import PlanError, StateError, ForemanError, UsageError
 from .herdr import (
@@ -168,6 +168,7 @@ def build_parser():
     oracle.register_commands(sub, common)
 
     triggers.register_command(sub, common)
+    churn.register_command(sub, common)
 
     measure_parser = sub.add_parser(
         "measure",
@@ -2195,6 +2196,10 @@ def cmd_detect_triggers(args, client=None, warn=None, trace=None):
     return triggers.run_command(args)
 
 
+def cmd_finding_churn(args, client=None, warn=None, trace=None):
+    return churn.run_command(args)
+
+
 def _dispatched_seat_briefs(plan, slice_paths, dispatches, task):
     """Each seat's brief text as THIS plan dispatched it, or a refusal naming the seat.
 
@@ -2357,6 +2362,7 @@ COMMANDS = {
     "load-set": cmd_load_set,
     **{command: cmd_recovery for command in ("task", "checkpoint", "authorize-corrections", "authorize-approach", "recover-context", "recover-role-clear", "record-report", "record-refusal", "authorize-refused-dispatch", "diagnose", "reconcile", "record-release-clear", "import-correction", "record-historical-review", "recover-report", "assess-specialist", "close-task")},
     "detect-triggers": cmd_detect_triggers,
+    "finding-churn": cmd_finding_churn,
     "validate-partition": cmd_validate_partition,
     "verify-partition": cmd_verify_partition,
     "verify-oracle": cmd_verify_oracle,
@@ -2377,7 +2383,7 @@ COMMANDS = {
 
 
 #: Commands that read neither the state nor the config home.
-HOME_FREE_COMMANDS = frozenset({"marker-fit"})
+HOME_FREE_COMMANDS = frozenset({"marker-fit", "finding-churn"})
 
 
 def main(argv=None, stdout=None, stderr=None, client=None):
@@ -2420,7 +2426,7 @@ def main(argv=None, stdout=None, stderr=None, client=None):
             home.require_current(defaults)
             # Commands that may migrate or write state share its canonical lock.
             # Dry runs, probes, and retrospective reads remain read-only.
-            readonly = args.command in {"probe-report", "marker-fit", "detect-triggers", "validate-partition", "verify-oracle", "retro-check", "retro-list", "retro-show", "capability-check", "capability-show", "supervision-gate", "load-set", "foreman-queue", "cost-report", "check-member", "verify-foreman", "report-gate-status"} or getattr(args, "dry_run", False)
+            readonly = args.command in {"probe-report", "marker-fit", "detect-triggers", "finding-churn", "validate-partition", "verify-oracle", "retro-check", "retro-list", "retro-show", "capability-check", "capability-show", "supervision-gate", "load-set", "foreman-queue", "cost-report", "check-member", "verify-foreman", "report-gate-status"} or getattr(args, "dry_run", False)
             # The deliverer starts while `foreman-reset` still holds the state lock;
             # it serializes on the reset record's own lock instead. close-member
             # writes only through the supervision owner's own lock.
