@@ -461,6 +461,26 @@ t_schema_missing_or_other_refuses() {
   assert_eq "no dismissal" "0" "$(dismissals)"
 }
 
+# Args: <invoke-fn> <writer-fn>. A ruling one schema above RULING_SCHEMA.
+check_newer_schema_refused_unmodified() {
+  set_review CHANGES_REQUESTED "$HEAD_SHA" "$BODY_TWO"
+  "$2" "$HEAD_SHA" "$DECLINE_ONE" "$DECLINE_TWO"
+  local newer=$((RULING_SCHEMA + 1)) before after
+  sed "s/^schema_version: ${RULING_SCHEMA}\$/schema_version: ${newer}/" "$RULING" > "${RULING}.tmp" \
+    && mv "${RULING}.tmp" "$RULING"
+  before=$(digest_of_ruling) || { echo "    FAIL: could not digest the ruling before the run" >&2; return 1; }
+  [[ -n "$before" ]] || { echo "    FAIL: empty digest of the ruling before the run" >&2; return 1; }
+  "$1"
+  after=$(digest_of_ruling) || { echo "    FAIL: could not digest the ruling after the run" >&2; return 1; }
+  [[ -n "$after" ]] || { echo "    FAIL: empty digest of the ruling after the run" >&2; return 1; }
+  assert_eq "exit" "1" "$RC" || return 1
+  assert_unmet "schema ${newer}, newer than this script accepts (${RULING_SCHEMA}) — update the coding-policy plugin" "the newer schema" || return 1
+  assert_eq "ruling bytes unchanged" "$before" "$after" || return 1
+  assert_eq "nothing posted" "0" "$(wc -l < "$EVENTS" | tr -d ' ')"
+}
+t_standalone_newer_schema_refuses_unmodified() { check_newer_schema_refused_unmodified invoke_ruled write_ruling; }
+t_team_round_newer_schema_refuses_unmodified() { check_newer_schema_refused_unmodified invoke_team_ruled write_judge_ruling; }
+
 t_version_1_ruling_is_upgraded_then_read() {
   set_review CHANGES_REQUESTED "$HEAD_SHA" "$BODY_TWO"
   write_ruling "$HEAD_SHA" "$DECLINE_ONE" "$DECLINE_TWO"
@@ -472,6 +492,23 @@ t_version_1_ruling_is_upgraded_then_read() {
   assert_eq "upgraded lines" "schema_version: 2|AUTHORITY: operator" \
     "$(grep -E '^(schema_version|AUTHORITY):' "$RULING" | paste -sd'|' -)" || return 1
   grep -qF "$DECLINE_ONE" "$RULING" || { echo "    FAIL: the upgrade kept the FINDING lines" >&2; return 1; }
+}
+
+t_team_round_version_1_ruling_refuses_unmodified() {
+  set_review CHANGES_REQUESTED "$HEAD_SHA" "$BODY_TWO"
+  write_judge_ruling "$HEAD_SHA" "$DECLINE_ONE" "$DECLINE_TWO"
+  grep -v '^AUTHORITY:' "$RULING" | sed 's/^schema_version: 2$/schema_version: 1/' > "${RULING}.tmp" \
+    && mv "${RULING}.tmp" "$RULING"
+  local before after
+  before=$(digest_of_ruling) || { echo "    FAIL: could not digest the ruling before the run" >&2; return 1; }
+  [[ -n "$before" ]] || { echo "    FAIL: empty digest of the ruling before the run" >&2; return 1; }
+  invoke_team_ruled
+  after=$(digest_of_ruling) || { echo "    FAIL: could not digest the ruling after the run" >&2; return 1; }
+  [[ -n "$after" ]] || { echo "    FAIL: empty digest of the ruling after the run" >&2; return 1; }
+  assert_eq "exit" "1" "$RC" || return 1
+  assert_unmet "is malformed — re-dispatch the pinned judge" "the team-round schema" || return 1
+  assert_eq "ruling bytes unchanged" "$before" "$after" || return 1
+  assert_eq "nothing posted" "0" "$(wc -l < "$EVENTS" | tr -d ' ')"
 }
 
 t_unreadable_ruling_bytes_exit_2_without_traceback() {
@@ -759,7 +796,10 @@ run_suite() {
   run "carry-over across a diverged compare refuses"  t_carry_over_diverged_refuses
   run "a missing or empty ANSWER refuses"             t_missing_answer_refuses
   run "a missing or other schema_version refuses"             t_schema_missing_or_other_refuses
+  run "standalone: a newer schema refuses, unmodified" t_standalone_newer_schema_refuses_unmodified
+  run "team round: a newer schema refuses, unmodified" t_team_round_newer_schema_refuses_unmodified
   run "a version-1 ruling is upgraded, then read"     t_version_1_ruling_is_upgraded_then_read
+  run "team round: a version-1 ruling refuses, unmodified" t_team_round_version_1_ruling_refuses_unmodified
   run "non-UTF-8 ruling bytes exit 2, no traceback"   t_unreadable_ruling_bytes_exit_2_without_traceback
   run "a malformed ruling refuses"                    t_malformed_ruling_refuses
   run "list mode emits the blocking findings"         t_list_mode_emits_findings

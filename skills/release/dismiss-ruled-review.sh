@@ -30,6 +30,8 @@
 #       schema_version line or any other version is refused (exit 1), after
 #       the owner migration below. It promises nothing is posted or dismissed
 #       unless the whole predicate holds.
+#       A version newer than RULING_SCHEMA, in either mode, is refused (exit 1)
+#       as a lagging reader, the file untouched: update the plugin, then rerun.
 #     - `foreman verify-ruling` (skills/herdr-foreman/foreman/cli.py
 #       `cmd_verify_ruling`), called by this script for `AUTHORITY: judge`,
 #       reads the file's bytes and nothing inside them. It accepts the file
@@ -38,11 +40,14 @@
 #       with a frozen brief carrying the judge-weighing template's marker line.
 #       It promises the file's sha256 on success and a refusal message
 #       otherwise; it never parses or migrates the ruling.
-#   Migration (owner): a version-1 file, which only the operator ever wrote,
-#     is upgraded in place before it is read: its `schema_version: 1` line
+#   Migration (owner): schema 1 was written only by standalone operator
+#     rulings; the owner migrates those. Standalone, a version-1 file is
+#     upgraded in place before it is read: its `schema_version: 1` line
 #     becomes `schema_version: 2` plus `AUTHORITY: operator`, every other line
 #     kept. The rewrite changes the file's digest, so a follow-up entry posted
-#     under the version-1 digest is not reused.
+#     under the version-1 digest is not reused. A team-round ruling below the
+#     current schema was never written by any version and is refused as
+#     malformed (exit 1), never modified.
 #   Format, schema_version 2 (lines in any order after the first; unknown lines ignored):
 #     RULING: weighed                       (first line, required)
 #     schema_version: 2                     (required)
@@ -283,7 +288,12 @@ for ln in ruling_lines:
     entries[key] = m.groupdict()
 if not ruling_lines or ruling_lines[0].strip() != "RULING: weighed":
     out["unmet"].append("the ruling's first line is not 'RULING: weighed'")
-if schemas != [schema]:
+if len(schemas) == 1 and schemas[0].isdecimal() and int(schemas[0]) > int(schema):
+    # A lagging reader: never read as malformed, never migrated downward.
+    out["unmet"].append(f"the ruling is schema {schemas[0]}, newer than this script accepts ({schema}) — update the coding-policy plugin (`tessl update`), then rerun")
+elif schemas != [schema] and mode == "team":
+    out["unmet"].append(f"the ruling carries no single 'schema_version: {schema}' line, so this team-round ruling is malformed — re-dispatch the pinned judge's weighing for a current-format report; never edit the delivered one")
+elif schemas != [schema]:
     out["unmet"].append(f"the ruling carries no single 'schema_version: {schema}' line — rewrite it in the current format")
 if len(heads) != 1:
     out["unmet"].append("the ruling carries no single 'HEAD: <40-hex sha>' line — write the full commit sha the findings were raised on")
@@ -575,7 +585,7 @@ main() {
   for tool in gh python3; do
     command -v "$tool" >/dev/null || { echo "error: ${tool} is not on PATH — install it and re-run" >&2; exit 2; }
   done
-  if [[ -n "$ruling" ]]; then
+  if [[ -n "$ruling" && -z "${HERDR_ENV+x}" ]]; then
     migrate_ruling "$ruling" || exit 2
   fi
 
