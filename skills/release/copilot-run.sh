@@ -1,0 +1,108 @@
+#!/usr/bin/env bash
+# Shared review-request state helpers. Sourced by poll-pr-reviews.sh and
+# request-copilot-review.sh — defines copilot_timeline(),
+# copilot_in_flight_state(), copilot_run_in_flight(), fetch_requested_logins()
+# and requested_among() with no other side effects.
+# It sets `set -euo pipefail` at the top; both callers already run under it.
+# Direct execution is a guarded CLI (entry-point guard at the foot of the
+# file): `copilot-run.sh <owner> <repo> <pr-number>`
+# prints {"in_flight": bool} and exits 0, or exits non-zero with a stderr
+# diagnostic when the timeline read fails.
+#
+# copilot_run_in_flight <owner> <repo> <pr-number>: prints true when the PR
+# timeline holds a Copilot `review_requested` event and its last
+# `copilot_work_started` comes after the last Copilot `review_requested`, the
+# last Copilot `reviewed` event and the last push (`committed` or
+# `head_ref_force_pushed`), else false. With no Copilot request on the
+# timeline, nothing is in flight. A run started before the latest push is
+# stale: its review would land on an older head, and reading it as in flight
+# would stop request-copilot-review.sh from ever re-requesting. A
+# started run consumes its request, and removing a request while the run is in
+# progress discards the run's result (#641). Order is timeline position (the
+# API returns events in order), not timestamp: a request and its run start can
+# share a second.
+
+set -euo pipefail
+
+# copilot_timeline <owner> <repo> <pr-number>: prints the PR timeline as one
+# JSON array. A non-object element is a malformed read, never data to skip:
+# dropping it would shift the positions the in-flight check compares.
+copilot_timeline() {
+  local owner="$1" repo="$2" pr="$3" timeline
+  if ! timeline=$(gh api --paginate "repos/${owner}/${repo}/issues/${pr}/timeline?per_page=100" | jq -s 'add // []'); then
+    echo "error: failed to read the timeline of ${owner}/${repo}#${pr} — check 'gh auth status', then retry 'gh api --paginate repos/${owner}/${repo}/issues/${pr}/timeline'" >&2
+    return 1
+  fi
+  if ! printf '%s' "$timeline" | jq -e 'type == "array" and all(.[]; type == "object")' >/dev/null; then
+    echo "error: the timeline of ${owner}/${repo}#${pr} holds a non-object element (a malformed or partial response) — re-run; if it persists, inspect 'gh api --paginate repos/${owner}/${repo}/issues/${pr}/timeline'" >&2
+    return 1
+  fi
+  printf '%s' "$timeline"
+}
+
+# copilot_in_flight_state <timeline-json>: prints {"in_flight": bool,
+# "started_at": <the in-flight run's created_at, or null>}.
+copilot_in_flight_state() {
+  printf '%s' "$1" | jq -c '
+    to_entries as $ev
+    | ([$ev[] | select(.value.event == "copilot_work_started") | .key] | max) as $w
+    | ([$ev[] | select(.value.event == "review_requested")
+              | select((.value.requested_reviewer.login // "") | test("copilot"; "i"))
+              | .key] | max) as $r
+    | ([$ev[] | select(.value.event == "reviewed")
+              | select((.value.user.login // "") | test("copilot"; "i"))
+              | .key] | max) as $s
+    | ([$ev[] | select(.value.event == "committed" or .value.event == "head_ref_force_pushed")
+              | .key] | max) as $p
+    | ($w != null and $r != null and $w > $r and $w > ($s // -1) and $w > ($p // -1)) as $f
+    | {in_flight: $f, started_at: (if $f then ($ev[$w].value.created_at // null) else null end)}'
+}
+
+copilot_run_in_flight() {
+  local timeline state
+  timeline=$(copilot_timeline "$1" "$2" "$3") || return 1
+  state=$(copilot_in_flight_state "$timeline") || return 1
+  printf '%s' "$state" | jq -r '.in_flight'
+}
+
+# Logins with a review request still pending on the PR, lowercased and with the
+# `[bot]` suffix stripped so one spelling compares against another. GraphQL, not
+# the REST `requested_reviewers` endpoint: that endpoint omits bot reviewers
+# entirely (#276), so every bot lane would read "never requested" there.
+fetch_requested_logins() {
+  local owner="$1" repo="$2" pr="$3"
+  gh api graphql -f query="
+    query { repository(owner: \"${owner}\", name: \"${repo}\") {
+      pullRequest(number: ${pr}) {
+        reviewRequests(first: 50) { nodes { requestedReviewer {
+          __typename
+          ... on Bot { login }
+          ... on User { login }
+          ... on Team { slug }
+        } } }
+      }
+    } }
+  " --jq '[.data.repository.pullRequest.reviewRequests.nodes[]?.requestedReviewer
+           | (.login // .slug) | select(. != null) | ascii_downcase | sub("\\[bot\\]$"; "")]' \
+    | jq -c '.'
+}
+
+# Is any of <login...> among the pending review requests?
+requested_among() { # <requested-json> <login...>
+  local requested="$1"; shift
+  local logins_json
+  logins_json=$(jq -n '$ARGS.positional' --args "$@") || return 1
+  printf '%s' "$requested" | jq --argjson logins "$logins_json" \
+    '[$logins[] | ascii_downcase | sub("\\[bot\\]$"; "")] as $want
+     | any(.[]; . as $have | $want | index($have) != null)'
+}
+
+# Direct execution: a guarded CLI (rules/file-hygiene.md Standalone Scripts).
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+  if [[ $# -ne 3 ]]; then
+    echo "usage: $0 <owner> <repo> <pr-number>" >&2
+    exit 2
+  fi
+  _in_flight=$(copilot_run_in_flight "$1" "$2" "$3")
+  python3 -c 'import json, sys; print(json.dumps({"in_flight": sys.argv[1] == "true"}))' "$_in_flight"
+fi

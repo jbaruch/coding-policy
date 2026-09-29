@@ -82,6 +82,70 @@
     follow, with one line each in `attention.md` and `herdr.md` and
     noun-only edits in `retrospectives.md` and `working-memory.md`.
 
+## 0.3.339 — 2026-09-29
+
+### Fixed
+
+- **Copilot run state is read from the PR timeline, and a stuck request is
+  replaced (Fixes #641).** On #634 a Copilot request stayed pending in GraphQL
+  `reviewRequests` with no `copilot_work_started` after it. While it was
+  pending every re-request was a no-op (the script, a bare `requestReviews`
+  even with `union:false`, an empty commit), so `watch-pr-reviews.sh` sat at
+  `pending_at_budget` for three budgets. A REST `DELETE
+  .../requested_reviewers` with `reviewers[]=Copilot` cleared it (the bot node
+  id and `copilot-pull-request-reviewer` return 422), and Copilot started a
+  minute after the fresh request. Later on the same PR two more facts
+  surfaced. Once Copilot starts work it consumes the request, so the snapshot
+  read `state: none, requested: false` mid-run and the watcher returned
+  `review_unrequested`, a false "request it" while the review was running.
+  And removing the request of a run in progress discards that run's result:
+  a removal at 18:35:15 killed a run that finished at 18:36:11, and only the
+  next run posted.
+  - New `skills/release/copilot-run.sh` owns the review-request state both
+    callers read. `copilot_run_in_flight`: the timeline holds a Copilot
+    `review_requested`, and its last `copilot_work_started` comes after both
+    the last Copilot `review_requested` and the last Copilot `reviewed`
+    event, by timeline position rather than timestamp, since a request and its
+    run start can share a second. With no Copilot request on the timeline
+    nothing is in flight. A run started before the latest push (`committed`
+    or `head_ref_force_pushed` on the timeline) is stale and not in flight.
+    Without that, a run dropped on an older head read as in flight forever,
+    and `request-copilot-review.sh` refused to re-request: a deadlock. A
+    timeline holding a non-object element fails the read instead of being
+    filtered, since dropping an element shifts the positions compared.
+    `poll-pr-reviews.sh` clears an in-flight run when a Copilot review
+    submitted after its start arrives with the reviews read. `poll-pr-reviews.sh` reads the timeline before the
+    Copilot review, so a review posted between the two reads is seen.
+    `fetch_requested_logins` and `requested_among` (pending requests from
+    GraphQL `reviewRequests`, since REST `requested_reviewers` omits bots,
+    #276) move there from `poll-pr-reviews.sh` unchanged. Both callers source
+    it; run directly it prints `{"in_flight": bool}`.
+  - `request-copilot-review.sh` leaves a run in flight alone: it removes
+    nothing, requests nothing, and emits `{"pr_number","in_flight":true}` with
+    exit 0. Otherwise it reads the pending requests first. A pending Copilot
+    request is removed, then requested afresh, so a request that never started
+    is replaced; any removal failure, 422 included, exits non-zero with the
+    error text and sends no request. With nothing pending it sends no removal
+    and requests as before. An earlier revision of this PR read a removal 422
+    as "nothing pending"; the explicit read removes that ambiguity, so no
+    status code carries meaning.
+  - `poll-pr-reviews.sh` reports Copilot's `requested` true while its run is
+    in flight. A review on an older head predates the new run's start, so the
+    stale-head case follows from the same comparison.
+  - `watch-pr-reviews.sh` reaches `ready` only when Copilot's `requested` is
+    false. An older Copilot review at the same head is not the one a
+    re-request or a run in flight owes, and previously satisfied `ready`
+    before the owed review posted. A snapshot without `requested` (an older
+    poll script) reads as not owed.
+  - `rules/ci-safety.md` Always Watch CI now defines `requested` as a review
+    still owed on a request (pending, or consumed by a Copilot run with none
+    posted since), and the `review_unrequested` wording in
+    `watch-pr-reviews.sh` and `skills/release/SKILL.md` names the in-flight
+    run.
+  - Not included: the issue's optional stuck-request detection (a
+    `review_stuck` result past a threshold), which needs a script-owned
+    threshold and a new result state in both scripts.
+
 ## 0.3.338 — 2026-09-29
 
 ### Fixed
