@@ -30,6 +30,8 @@
 #       schema_version line or any other version is refused (exit 1), after
 #       the owner migration below. It promises nothing is posted or dismissed
 #       unless the whole predicate holds.
+#       A version newer than RULING_SCHEMA, in either mode, is refused (exit 1)
+#       as a lagging reader, the file untouched: update the plugin, then rerun.
 #     - `foreman verify-ruling` (skills/herdr-foreman/foreman/cli.py
 #       `cmd_verify_ruling`), called by this script for `AUTHORITY: judge`,
 #       reads the file's bytes and nothing inside them. It accepts the file
@@ -286,7 +288,10 @@ for ln in ruling_lines:
     entries[key] = m.groupdict()
 if not ruling_lines or ruling_lines[0].strip() != "RULING: weighed":
     out["unmet"].append("the ruling's first line is not 'RULING: weighed'")
-if schemas != [schema] and mode == "team":
+if len(schemas) == 1 and schemas[0].isdecimal() and int(schemas[0]) > int(schema):
+    # A lagging reader: never read as malformed, never migrated downward.
+    out["unmet"].append(f"the ruling is schema {schemas[0]}, newer than this script accepts ({schema}) — update the coding-policy plugin (`tessl update`), then rerun")
+elif schemas != [schema] and mode == "team":
     out["unmet"].append(f"the ruling carries no single 'schema_version: {schema}' line, so this team-round ruling is malformed — re-dispatch the pinned judge's weighing for a current-format report; never edit the delivered one")
 elif schemas != [schema]:
     out["unmet"].append(f"the ruling carries no single 'schema_version: {schema}' line — rewrite it in the current format")
