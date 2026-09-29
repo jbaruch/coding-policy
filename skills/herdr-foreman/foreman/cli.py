@@ -2296,7 +2296,9 @@ def cmd_verify_ruling(args, client=None, warn=None, trace=None):
     enrollment whose report path is the ruling file, never by "latest judge
     adjudication". That dispatch must be the pinned judge's, applied, on the
     given task, and its frozen brief must open with `WEIGHING_BRIEF_MARKER`: the
-    bytes the judge actually read were the weighing brief, not a dispute's.
+    bytes the judge actually read were the weighing brief, not a dispute's. The
+    ruling's current bytes must match a delivery the owners recorded for that
+    dispatch (`report_gates.ledger_view`).
     """
     judge = load_judge(_config_path(args))
     if judge is None:
@@ -2332,8 +2334,17 @@ def cmd_verify_ruling(args, client=None, warn=None, trace=None):
         body = ruling.read_bytes()
     except OSError as exc:
         raise UsageError("Cannot read the ruling at {}: {}.".format(args.ruling, exc), {}) from None
+    digest = hashlib.sha256(body).hexdigest()
+    # The enrolled path names where the report was meant to land, not what is
+    # there now: the bytes must be ones the owners recorded delivered for this
+    # dispatch, read through the same receipts report gates resolve against.
+    key = str(ruling.resolve())
+    if not any(row["dispatch"] == dispatch["id"] and row["path"] == key and row["sha256"] == digest
+               for row in report_gates.ledger_view(_state_path(args), judge.agent)["deliveries"]):
+        raise UsageError("The ruling's current bytes match no recorded delivery of the judge's report — re-deliver or "
+                         "re-weigh.", {"dispatch": dispatch["id"], "sha256": digest})
     return {"task": args.task, "dispatch": dispatch["id"], "judge": judge.agent, "report": str(ruling),
-            "sha256": hashlib.sha256(body).hexdigest()}, None
+            "sha256": digest}, None
 
 
 def cmd_verify_oracle(args, client=None, warn=None, trace=None):

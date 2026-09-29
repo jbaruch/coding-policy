@@ -583,7 +583,8 @@ class RecoveryCommandTests(fixture.CliCase):
         self.assertEqual(code, 1)
         self.assertIn("unspent attempts under plan diag-cap:plan", err)
 
-    def seed_judge_dispatch(self, dispatch_id, brief_text, task=TASK, agent="claude", mode="adjudication"):
+    def seed_judge_dispatch(self, dispatch_id, brief_text, task=TASK, agent="claude", mode="adjudication",
+                            delivered=True):
         """An applied judge dispatch whose frozen brief holds `brief_text`, and its enrolled report."""
         from foreman import supervision
         from foreman import recovery
@@ -607,6 +608,10 @@ class RecoveryCommandTests(fixture.CliCase):
         report.write_text("RULING: weighed\nschema_version: 2\nAUTHORITY: judge\n")
         supervision.enroll(self.state, {"id": dispatch_id, "agent": agent, "task": task,
                                         "report": str(report), "pane_id": None, "native_session": None}, AT)
+        if delivered:
+            digest = hashlib.sha256(report.read_bytes()).hexdigest()
+            supervision.transaction(self.state, lambda data: supervision.append_event(
+                data, AT, dispatch_id, "report_observed", {"present": True, "path": str(report), "sha256": digest}))
         return report
 
     def bind_weighing_fixture(self):
@@ -639,6 +644,21 @@ class RecoveryCommandTests(fixture.CliCase):
         payload = json.loads(out)
         self.assertEqual((payload["dispatch"], payload["judge"]), ("weighing", "claude"))
         self.assertEqual(payload["sha256"], hashlib.sha256(report.read_bytes()).hexdigest())
+
+    def test_verify_ruling_refuses_bytes_changed_after_delivery(self):
+        self.bind_weighing_fixture()
+        report = self.seed_judge_dispatch("weighing", self.weighing_brief())
+        report.write_text("RULING: weighed\nschema_version: 2\nAUTHORITY: judge\nFINDING: planted\n")
+        code, out, err = self.verify(report)
+        self.assertEqual((code, out), (1, ""))
+        self.assertIn("match no recorded delivery", err)
+
+    def test_verify_ruling_refuses_a_report_never_delivered(self):
+        self.bind_weighing_fixture()
+        report = self.seed_judge_dispatch("weighing", self.weighing_brief(), delivered=False)
+        code, out, err = self.verify(report)
+        self.assertEqual((code, out), (1, ""))
+        self.assertIn("match no recorded delivery", err)
 
     def test_verify_ruling_refuses_a_dispute_adjudication(self):
         self.bind_weighing_fixture()
