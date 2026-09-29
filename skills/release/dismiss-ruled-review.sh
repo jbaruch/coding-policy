@@ -28,8 +28,9 @@
 #   Readers, two:
 #     - This script reads every line. It accepts only RULING_SCHEMA; a missing
 #       schema_version line or any other version is refused (exit 1), after
-#       the owner migration below. It promises nothing is posted or dismissed
-#       unless the whole predicate holds.
+#       the owner migration below. In a team round it never modifies the
+#       file. It promises nothing is posted or dismissed unless the whole
+#       predicate holds.
 #     - `foreman verify-ruling` (skills/herdr-foreman/foreman/cli.py
 #       `cmd_verify_ruling`), called by this script for `AUTHORITY: judge`,
 #       reads the file's bytes and nothing inside them. It accepts the file
@@ -38,10 +39,12 @@
 #       with a frozen brief carrying the judge-weighing template's marker line.
 #       It promises the file's sha256 on success and a refusal message
 #       otherwise; it never parses or migrates the ruling.
-#   Migration (owner): a version-1 file, which only the operator ever wrote,
-#     is upgraded in place before it is read: its `schema_version: 1` line
+#   Migration (owner, standalone only): a version-1 file, which only the
+#     operator ever wrote, is upgraded in place before it is read: its
+#     `schema_version: 1` line
 #     becomes `schema_version: 2` plus `AUTHORITY: operator`, every other line
-#     kept. The rewrite changes the file's digest, so a follow-up entry posted
+#     kept. In a team round the file is the judge's delivered report, bound by
+#     its digest; a version-1 file there is refused (exit 1), never rewritten. The rewrite changes the file's digest, so a follow-up entry posted
 #     under the version-1 digest is not reused.
 #   Format, schema_version 2 (lines in any order after the first; unknown lines ignored):
 #     RULING: weighed                       (first line, required)
@@ -283,7 +286,9 @@ for ln in ruling_lines:
     entries[key] = m.groupdict()
 if not ruling_lines or ruling_lines[0].strip() != "RULING: weighed":
     out["unmet"].append("the ruling's first line is not 'RULING: weighed'")
-if schemas != [schema]:
+if schemas != [schema] and mode == "team":
+    out["unmet"].append(f"the ruling carries no single 'schema_version: {schema}' line — re-dispatch the pinned judge's weighing for a current-format report; never edit the delivered one")
+elif schemas != [schema]:
     out["unmet"].append(f"the ruling carries no single 'schema_version: {schema}' line — rewrite it in the current format")
 if len(heads) != 1:
     out["unmet"].append("the ruling carries no single 'HEAD: <40-hex sha>' line — write the full commit sha the findings were raised on")
@@ -575,7 +580,7 @@ main() {
   for tool in gh python3; do
     command -v "$tool" >/dev/null || { echo "error: ${tool} is not on PATH — install it and re-run" >&2; exit 2; }
   done
-  if [[ -n "$ruling" ]]; then
+  if [[ -n "$ruling" && -z "${HERDR_ENV+x}" ]]; then
     migrate_ruling "$ruling" || exit 2
   fi
 

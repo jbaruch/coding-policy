@@ -1,5 +1,9 @@
 # Changelog
 
+### Fixed
+
+- Follow-up to #634. `skills/release/dismiss-ruled-review.sh` ran its schema-1 → schema-2 owner migration in a Herdr team round too, rewriting the pinned judge's delivered weighing report in place as an operator ruling before `foreman verify-ruling` checked its recorded delivery digest — destroying the delivered report. The migration now runs standalone only; a team-round ruling lacking the current schema is refused (exit 1) with an instruction to re-dispatch the judge's weighing, and the file is never modified. `skills/herdr-foreman/templates/brief-release.md` told the release worker to record every covered internal finding as a `decline`/won't-fix entry; it now enters each with its ruling's actual verdict — a `defer` as a deferred follow-up entry, a `decline` labelled won't-fix. Both defects were Copilot findings on #634's final head.
+
 ## 0.3.337 — 2026-09-29
 
 ### Added

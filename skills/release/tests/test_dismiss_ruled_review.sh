@@ -474,6 +474,21 @@ t_version_1_ruling_is_upgraded_then_read() {
   grep -qF "$DECLINE_ONE" "$RULING" || { echo "    FAIL: the upgrade kept the FINDING lines" >&2; return 1; }
 }
 
+t_team_round_version_1_ruling_refuses_unmodified() {
+  set_review CHANGES_REQUESTED "$HEAD_SHA" "$BODY_TWO"
+  write_judge_ruling "$HEAD_SHA" "$DECLINE_ONE" "$DECLINE_TWO"
+  grep -v '^AUTHORITY:' "$RULING" | sed 's/^schema_version: 2$/schema_version: 1/' > "${RULING}.tmp" \
+    && mv "${RULING}.tmp" "$RULING"
+  local before after
+  before=$(digest_of_ruling)
+  invoke_team_ruled
+  after=$(digest_of_ruling)
+  assert_eq "exit" "1" "$RC" || return 1
+  assert_unmet "re-dispatch the pinned judge" "the team-round schema" || return 1
+  assert_eq "ruling bytes unchanged" "$before" "$after" || return 1
+  assert_eq "nothing posted" "0" "$(wc -l < "$EVENTS" | tr -d ' ')"
+}
+
 t_unreadable_ruling_bytes_exit_2_without_traceback() {
   set_review CHANGES_REQUESTED "$HEAD_SHA" "$BODY_TWO"
   printf 'RULING: weighed\nschema_version: 1\nANSWER: \xff\xfe\n' > "$RULING"
@@ -760,6 +775,7 @@ run_suite() {
   run "a missing or empty ANSWER refuses"             t_missing_answer_refuses
   run "a missing or other schema_version refuses"             t_schema_missing_or_other_refuses
   run "a version-1 ruling is upgraded, then read"     t_version_1_ruling_is_upgraded_then_read
+  run "team round: a version-1 ruling refuses, unmodified" t_team_round_version_1_ruling_refuses_unmodified
   run "non-UTF-8 ruling bytes exit 2, no traceback"   t_unreadable_ruling_bytes_exit_2_without_traceback
   run "a malformed ruling refuses"                    t_malformed_ruling_refuses
   run "list mode emits the blocking findings"         t_list_mode_emits_findings
