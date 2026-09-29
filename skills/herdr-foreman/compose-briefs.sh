@@ -55,7 +55,7 @@ FOREMAN_REPORT_PATH_MAX_COLS="${FOREMAN_REPORT_PATH_MAX_COLS:-100}"
 
 warn() { printf 'compose-briefs: %s\n' "$1" >&2; }
 
-SKILL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SKILL_DIR="$(CDPATH='' cd -- "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Whether one JSON value (a string or an array of strings) stays intact on a
 # rendered line. The character rule is `foreman/renderable.py`, the one check

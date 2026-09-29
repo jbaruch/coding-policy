@@ -80,7 +80,7 @@ case "${BASH_SOURCE[0]}" in
   */*) _cpl_src="${BASH_SOURCE[0]%/*}" ;;
   *) _cpl_src=. ;;
 esac
-if _cpl_dir="$(cd -- "${_cpl_src:-/}" && pwd && printf x)"; then
+if _cpl_dir="$(CDPATH='' cd -- "${_cpl_src:-/}" && pwd && printf x)"; then
   _cpl_dir="${_cpl_dir%x}"
   _cpl_dir="${_cpl_dir%$'\n'}"
 else

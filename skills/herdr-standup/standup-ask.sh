@@ -65,7 +65,7 @@ case "${BASH_SOURCE[0]}" in
   */*) _skill_src="${BASH_SOURCE[0]%/*}" ;;
   *) _skill_src=. ;;
 esac
-if ! SKILL_DIR="$(cd -- "${_skill_src:-/}" && pwd && printf x)"; then
+if ! SKILL_DIR="$(CDPATH='' cd -- "${_skill_src:-/}" && pwd && printf x)"; then
   echo "standup-ask: cannot enter the script directory ${_skill_src:-/} — restore read and search access to the plugin directory, or reinstall the plugin, then re-run" >&2
   exit 1
 fi
