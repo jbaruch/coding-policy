@@ -194,7 +194,7 @@ description: Running a multi-agent team — task-based specialist composition, c
 - `fix` returns the finding to the fix loop
 - `defer` and `decline` stop the finding blocking the round and spend no fix round
 - Each `defer` and `decline` is entered in the task's follow-up issue, citing the ruling
-- A ruling covers a re-raised finding only while the finding's file is unchanged since the ruling's `HEAD:`
+- A ruling covers a re-raised finding only while `foreman finding-churn` from the ruling's `HEAD:` to the current head reports the finding's file unchanged
 - A finding a ruling covers is never re-nominated
 - A `fix` finding that stays open follows the fix loop and its exhaustion route, never a second weighing
 - Every finding under a `rules/review-severity.md` Judge-Weighed Finding Carve-Out floor is ruled `fix`
@@ -302,7 +302,8 @@ description: Running a multi-agent team — task-based specialist composition, c
 - Record `awaiting_diagnosis` when implementation awaits the judge's remedy
 - An active audit worker never establishes implementation progress
 - Scope fix re-checks to each prior finding: RESOLVED, OPEN, or DECLINED with a reason
-- A finding a weighing ruled `defer` or `decline` reads DECLINED, citing the ruling
+- A finding a weighing ruled `defer` or `decline` reads DECLINED, citing the ruling, while that ruling still covers it
+- A covered finding whose file changed is re-checked as OPEN or RESOLVED
 - Restrict NEW findings in a scoped re-check to blocking severity
 - Record new advisories in the round's follow-up issue without extending the fix loop
 - Run a broad whole-branch review before release

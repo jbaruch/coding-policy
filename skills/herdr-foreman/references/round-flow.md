@@ -167,7 +167,8 @@ For an authorized implementation release, Step 12 requires all four:
 4. Nothing has been pushed to the branch after those two reports.
 
 A blocking finding a completed weighing ruled `defer` or `decline` does not
-fail 2 or 3 while its file is unchanged since the ruling's `HEAD:`.
+fail 2 or 3 while `foreman finding-churn` from the ruling's `HEAD:` to the tip
+reports its path unchanged.
 
 Under a recorded `stop` remedy, 2 and 3 read against what ships: the excluded
 defect is a tracked accepted defect and the shipped scope carries no other
@@ -496,9 +497,10 @@ authorization. A blocked ruling follows the operator-question path below.
   `ACTION:` as the next counted fix.
 - **`RULING: weighed`** — record the ruling. Its `fix` findings return to
   Step 12 as the next counted fix, `ACTION:` carrying them. Its `defer` and
-  `decline` findings stop blocking: the next re-check reads them `DECLINED`
-  citing the ruling, and the release brief carries the ruling as
-  `WEIGHING_RULING`. Record an `update` attention item naming the ruling; it
+  `decline` findings stop blocking while the ruling covers them: re-check and
+  release briefs list each as covered while `foreman finding-churn` from the
+  ruling's `HEAD:` reports its path unchanged, and the release brief carries
+  the ruling as `WEIGHING_RULING`. Record an `update` attention item naming the ruling; it
   gates nothing. Never nominate a covered finding again.
 - **`blocked`** — the judge declined to rule. Stop the round and put its
   named question to the operator. Do not dispatch a second judge and do not

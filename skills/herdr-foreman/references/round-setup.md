@@ -307,9 +307,15 @@ What you decide, and it is the whole of your job here:
 - For a judge weighing under the role key `judge-weighing`: `TASK`, `HEAD`,
   `NOMINATIONS`, `INVESTIGATION_REPORT` and `TREE` (see
   `skills/herdr-foreman/references/judge-round.md` step 1).
-- For release: `WEIGHING_RULING` — the judge's weighing report path and the
-  task's follow-up issue number, or "none". A release carrying a ruling also
-  lists follow-up issue comments and the ruled dismissal in `AUTHORIZED_ACTIONS`.
+- For release: `WEIGHING_RULING` — the judge's weighing report path, the
+  task's follow-up issue number, and each reviewer or tester finding the
+  ruling still covers, or "none". A release carrying a ruling also lists
+  follow-up issue comments and the ruled dismissal in `AUTHORIZED_ACTIONS`.
+- Coverage: a `defer` or `decline` finding is covered while
+  `foreman finding-churn --from <ruling HEAD> --to <tip>` reports its
+  `path_changed` false (judge-round step 1 has the command). List it as
+  covered in scoped re-check and release briefs; list one whose path changed
+  as no longer covered.
 
 | Phase | Role | Mode | Output |
 | ----- | ---- | ---- | ------ |

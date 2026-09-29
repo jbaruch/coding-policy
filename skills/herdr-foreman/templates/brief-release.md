@@ -32,8 +32,8 @@ Read, in `{{REPORTS_DIR}}`, the reviewer's and the tester's reports against the
 pushed tip. Both must cover the full branch and satisfy the foreman's release
 gate. Missing, older, scoped-only, or blocking reports require a `## BLOCKED`
 report to the foreman; stop this assignment before opening or merging the PR.
-A blocking finding the weighing ruling below rules `defer` or `decline` does
-not block. List deferred advisories with their existing follow-up references.
+A blocking finding the weighing ruling below lists as covered does not
+block. List deferred advisories with their existing follow-up references.
 
 ## Weighing Ruling
 
@@ -42,9 +42,9 @@ Ruling this brief carries: {{WEIGHING_RULING}}
 When it names a ruling file, that file is the pinned judge's report. Pass that
 path unchanged; never copy or edit the file.
 
-- A `FINDING:` line from the reviewer or the tester ruled `defer` or `decline`:
-  enter it in the task's follow-up issue before opening the PR, citing the
-  ruling path, a `decline` labelled won't-fix.
+- Each reviewer or tester finding it lists as covered: enter it in the task's
+  follow-up issue before opening the PR, citing the ruling path, a `decline`
+  labelled won't-fix.
 - A ruling over policy-review findings: at release Step 6 run
   `dismiss-ruled-review.sh` with `--ruling` and `--followup-issue`, then
   `dismiss-stale-reviews.sh` at Step 7. The script posts the follow-up entries
