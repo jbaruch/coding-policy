@@ -21,7 +21,8 @@ Convert a legacy `tile.json` plugin to the `plugin.json` form and reconcile the 
 Run the deterministic migration from the repo root:
 
 ```bash
-bash .tessl/plugins/jbaruch/coding-policy/skills/migrate-to-plugin/migrate.sh .
+CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"; [ -d "$CP" ] || case "$(git config --get remote.origin.url)" in git@github.com:jbaruch/coding-policy|git@github.com:jbaruch/coding-policy.git|https://github.com/jbaruch/coding-policy|https://github.com/jbaruch/coding-policy.git|ssh://git@github.com/jbaruch/coding-policy|ssh://git@github.com/jbaruch/coding-policy.git) CP=. ;; *) echo "coding-policy plugin not found: run tessl install jbaruch/coding-policy" >&2; exit 1 ;; esac
+bash "$CP/skills/migrate-to-plugin/migrate.sh" .
 ```
 
 The script detects the manifest state, runs `tessl plugin migrate`, renames `.tileignore` → `.tesslignore`, removes the obsolete `tile.json`, runs `tessl plugin lint`, and emits a JSON report with a `residual_files` list. Contract — inputs, output shape, exit codes — is in the script's top-of-file docstring.

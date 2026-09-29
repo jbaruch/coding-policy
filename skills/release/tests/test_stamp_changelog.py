@@ -112,7 +112,7 @@ class Main(unittest.TestCase):
 
 
 class QueryLatestVersion(unittest.TestCase):
-    """query_latest_version degrades gracefully when the stamp step has no auth."""
+    """query_latest_version maps registry-version.sh's contract; failures raise."""
 
     def _run(self, returncode, stdout="", stderr=""):
         cp = subprocess.CompletedProcess(args=[], returncode=returncode, stdout=stdout, stderr=stderr)
@@ -120,19 +120,67 @@ class QueryLatestVersion(unittest.TestCase):
             return stamp_changelog.query_latest_version("jbaruch/x")
 
     def test_success_parses_latest(self):
-        self.assertEqual(self._run(0, stdout="Name  x\nLatest Version  0.2.64\n"), "0.2.64")
+        self.assertEqual(self._run(0, stdout='{"version":"0.2.64"}\n'), "0.2.64")
 
-    def test_404_returns_none(self):
-        self.assertIsNone(self._run(1, stderr="request failed: HTTP 404"))
+    def test_never_published_returns_none(self):
+        self.assertIsNone(self._run(0, stdout='{"version":null}\n'))
 
-    def test_auth_failure_returns_none(self):
-        # The regression: no auth in the stamp step must fall back, not raise (#207).
-        msg = "✘ Please authenticate with Tessl to continue. Run `tessl login` to sign up or log in."
-        self.assertIsNone(self._run(1, stderr=msg))
-
-    def test_non_auth_failure_still_raises(self):
+    def test_404_raises(self):
+        # Never-published is {"version": null} on exit 0; a 404 is a tool failure.
         with self.assertRaises(RuntimeError):
-            self._run(1, stderr="connection reset by peer")
+            self._run(2, stderr="request failed: HTTP 404")
+
+    def test_auth_failure_raises(self):
+        msg = "✘ Please authenticate with Tessl to continue. Run `tessl login` to sign up or log in."
+        with self.assertRaises(RuntimeError):
+            self._run(2, stderr=msg)
+
+    def test_network_failure_raises(self):
+        with self.assertRaises(RuntimeError):
+            self._run(2, stderr="connection reset by peer")
+
+
+_LAGGING_TESSL = """#!/usr/bin/env bash
+set -euo pipefail
+if [[ "$1" == "api" ]]; then
+  printf '%s' '{"data":[{"attributes":{"version":"0.3.269"}},{"attributes":{"version":"0.3.268"}}]}'
+  exit 0
+fi
+if [[ "$1" == "plugin" && "$2" == "info" ]]; then
+  printf 'Name  ws/p\\nLatest Version  0.3.268\\n'
+  exit 0
+fi
+echo "unexpected tessl call: $*" >&2
+exit 1
+"""
+
+
+class RegistryLag(unittest.TestCase):
+    """The stamp reads the registry source smart-publish.sh publishes from (#606)."""
+
+    def test_stamps_from_versions_api_not_lagging_plugin_info(self):
+        import os
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            tmp = Path(d)
+            # Stub tessl: the plugin-info listing still shows the previous
+            # version while the versions API already has the just-published one.
+            stub = tmp / "tessl"
+            stub.write_text(_LAGGING_TESSL)
+            stub.chmod(0o755)
+            changelog = tmp / "CHANGELOG.md"
+            changelog.write_text("# Changelog\n\n### fix — y\n")
+            manifest = tmp / "plugin.json"
+            manifest.write_text('{"name": "ws/p", "version": "0.3.268"}')
+            env = dict(os.environ, PATH=f"{tmp}{os.pathsep}{os.environ['PATH']}")
+            proc = subprocess.run(
+                ["python3", str(SCRIPT), "--changelog", str(changelog),
+                 "--manifest", str(manifest), "--date", "2026-09-25"],
+                capture_output=True, text=True, env=env,
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            # smart-publish.sh publishes the versions-API latest plus one patch.
+            self.assertIn("## 0.3.270 — 2026-09-25", changelog.read_text())
 
 
 class StampChangelog(unittest.TestCase):
