@@ -112,7 +112,7 @@ description: Running a multi-agent team — task-based specialist composition, c
 ## Judge Seat
 
 - The reserved `judge` seat runs on the most capable model available and holds no other responsibility
-- The foreman dispatches the judge in adjudication mode for one of three triggers: a contested reviewer or tester verdict, a foreman override of a blocking finding, or a bot finding the team disagrees with
+- The foreman dispatches the judge in adjudication mode for one of four triggers: a contested reviewer or tester verdict, a foreman override of a blocking finding, a bot finding the team disagrees with, or a weighing nomination
 - The foreman dispatches the judge in diagnosis mode at an exhausted allowance with blocking work remaining, on the investigator's assessment
 - Every judge dispatch declares which mode it is for, at plan and at apply
 - An undeclared mode is refused, never defaulted
@@ -153,7 +153,9 @@ description: Running a multi-agent team — task-based specialist composition, c
 - `stop` is terminal and never repeats; an approach takes at most five diagnoses
 - No exhausted allowance waits on an operator decision
 - The judge is read-only: it never edits a repository file, never runs a mutating git or `gh` command, never posts to GitHub, never dispatches a subagent — its only output is its report file
-- Each adjudication position cites its evidence: file and line, or command output, each at a named revision
+- A weighing has no positions
+- The position, citation and ruling-grammar bullets below govern a dispute alone
+- Each dispute position cites its evidence: file and line, or command output, each at a named revision
 - Narrow exception for a position whose evidence an investigator supplied.
 - Preconditions (all required):
   1. An investigator report is attached to the adjudication
@@ -161,10 +163,10 @@ description: Running a multi-agent team — task-based specialist composition, c
   3. The position's evidence value names that report
 - Every other position cites its own evidence
 - A position with no citations goes to an investigator before the judge is dispatched
-- In adjudication mode the judge reads both positions and the governing rule
+- In a dispute the judge reads both positions and the governing rule
 - It checks only the cited evidence against the tree
-- It returns `RULING: uphold A | uphold B | amend — <line> | insufficient — <facts needed> | blocked — <question>` with numbered reasons, an `ACTION:` naming the minimal step, and an `UNVERIFIED:` line
-- In adjudication mode the judge never explores the tree beyond the cited evidence
+- A dispute returns `RULING: uphold A | uphold B | amend — <line> | insufficient — <facts needed> | blocked — <question>` with numbered reasons, an `ACTION:` naming the minimal step, and an `UNVERIFIED:` line
+- In a dispute the judge never explores the tree beyond the cited evidence
 - `insufficient` names the disputed facts the cited evidence cannot settle
 - On an `insufficient` ruling the foreman dispatches an investigator to establish those facts with citations
 - The judge is re-dispatched on the same dispute with that investigator report
@@ -180,6 +182,21 @@ description: Running a multi-agent team — task-based specialist composition, c
 - A `blocked` ruling stops the round and sends the named question to the operator
 - `blocked` is for a question only the operator can answer
 - A fact the tree can settle is `insufficient`, never `blocked`
+- A weighing, its ruling file, coverage and floors follow `rules/review-severity.md` Judge-Weighed Finding Carve-Out
+- The foreman nominates findings for a weighing and never weighs one itself
+- `foreman finding-churn` placing a finding on lines the previous fix round added nominates it
+- A worker report marking a finding `MARGINAL:` with a cited reachability claim nominates it
+- No other signal nominates a finding
+- One weighing dispatch carries every nomination for one gate
+- The judge rules each nomination `fix`, `defer` or `decline`
+- A weighing returns `RULING: weighed`, `insufficient` or `blocked`, never `uphold` or `amend`
+- `RULING: weighed` is a completed ruling
+- `insufficient` and `blocked` keep their adjudication meaning in a weighing
+- `fix` returns the finding to the fix loop
+- `defer` and `decline` stop the finding blocking the round
+- `defer` and `decline` spend no fix round
+- A finding a ruling covers is never re-nominated
+- A `fix` finding that stays open follows the fix loop and its exhaustion route, never a second weighing
 - The judge is declared in `config.json`, measured, and planned like every other seat
 - The judge worker and the `claude` worker authenticate as one Claude subscription and draw on one weekly window
 - `window_group` names the usage window an agent shares with other agents
@@ -284,6 +301,8 @@ description: Running a multi-agent team — task-based specialist composition, c
 - Record `awaiting_diagnosis` when implementation awaits the judge's remedy
 - An active audit worker never establishes implementation progress
 - Scope fix re-checks to each prior finding: RESOLVED, OPEN, or DECLINED with a reason
+- A finding a weighing ruled `defer` or `decline` reads DECLINED, citing the ruling, while that ruling still covers it
+- A covered finding whose file changed is re-checked as OPEN or RESOLVED
 - Restrict NEW findings in a scoped re-check to blocking severity
 - Record new advisories in the round's follow-up issue without extending the fix loop
 - Run a broad whole-branch review before release

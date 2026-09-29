@@ -63,6 +63,10 @@ the implementation and push stages below apply only to authorized code changes.
   body saying why.
 - Run the repository's configured gates from inside the worktree. Green before
   you push.
+- Fix every blocking finding this brief names. When you judge one not worth
+  its fix, fix it anyway and add one line to your report,
+  `MARGINAL: <finding> — <reachability claim with file and line citations>`;
+  the foreman may nominate it for the judge's weighing at the next gate.
 
 ## Push, Then Stop
 

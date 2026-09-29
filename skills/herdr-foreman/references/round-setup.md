@@ -304,6 +304,14 @@ What you decide, and it is the whole of your job here:
   `INVESTIGATION_REPORT` (the assessed investigator report the judge rules on),
   `TASK`, `FIX_ROUNDS`, `REMAINING_WORK`, `ROUND_HISTORY`, `TREE`, and
   `PRIOR_REMEDY` (any earlier remedy and what it changed, or "none").
+- For a judge weighing under the role key `judge-weighing`: `TASK`, `HEAD`,
+  `NOMINATIONS`, `INVESTIGATION_REPORT` and `TREE` (see
+  `skills/herdr-foreman/references/judge-round.md` step 1).
+- For release: `WEIGHING_RULING` — the judge's weighing report path, the
+  task identifier, the task's follow-up issue number, and each reviewer or tester finding the
+  ruling still covers, or "none". A release carrying a ruling also lists
+  follow-up issue comments and the ruled dismissal in `AUTHORIZED_ACTIONS`.
+- Coverage: see `skills/herdr-foreman/references/judge-round.md`.
 
 | Phase | Role | Mode | Output |
 | ----- | ---- | ---- | ------ |

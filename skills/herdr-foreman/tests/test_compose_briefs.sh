@@ -25,8 +25,11 @@
 #                          the literal text and leave no placeholder behind).
 #  13. Object value     -> exit 2 for the same reason.
 #  14. Number value     -> accepted; an issue number is legitimate text.
+#  23. Judge weighing   -> the shipped judge-weighing brief renders under its
+#                          role key, its deliverable in the ruling-file format.
 #
 # Run: bash skills/herdr-foreman/tests/test_compose_briefs.sh
+# Progress goes to stderr; stdout carries one JSON result.
 set -uo pipefail
 
 die() { echo "fatal: $*" >&2; exit 2; }
@@ -60,7 +63,8 @@ run() { # <templates> <values-file> <outdir>
   ERRTEXT="$(cat "$TMP/err.$RUN_SEQ")"
 }
 
-main() {
+# `run_suite`, not `main`: the entry point every sourced-harness suite shares.
+run_suite() {
   SCRIPT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/compose-briefs.sh"
   [[ -f "$SCRIPT" && -r "$SCRIPT" ]] || die "compose-briefs.sh not found at $SCRIPT"
   command -v jq >/dev/null 2>&1 || die "jq required for these tests"
@@ -161,7 +165,7 @@ JSON
     "developer": {"WORKTREE": "/wt/dev", "REPORTS_DIR": "/r", "REPORT": "/r/dev.md"},
     "reviewer": {"REPORT": "/r/review.md"},
     "tester": {"WORKTREE": "/wt/test", "REPORTS_DIR": "/r", "REPORT": "/r/test.md"},
-    "release": {"WORKTREE": "/wt/dev", "REPORTS_DIR": "/r", "REPORT": "/r/release.md"}
+    "release": {"WORKTREE": "/wt/dev", "REPORTS_DIR": "/r", "REPORT": "/r/release.md", "WEIGHING_RULING": "none"}
   }
 }
 JSON
@@ -652,11 +656,30 @@ JSON
       pass; else fail "shipped brief-${shipped_role}.md must carry {{SLICE_SCOPE}}"; fi
   done
 
+  # 23. The shipped judge-weighing brief renders under its own role key, and
+  #     its deliverable opens with the ruling-file lines the release script
+  #     reads.
+  local vw="$TMP/weighing.json" ow="$TMP/out23"
+  jq -n --arg p "$TMP/package.diff" \
+    '{shared: {SHARED_CHECKOUT: "/repo", AUTHORITY_STATEMENT: "owner of jbaruch/x", EXTERNAL_PERMISSION: "none",
+               TASK_AUTHORIZATION: "Operator request: ship issue #7 in jbaruch/x", AUTHORIZED_ACTIONS: "none",
+               POLICY_INDEX: $p, RELEASE_SKILL: $p, GATES: "- AGENTS.md"},
+      roles: {"judge-weighing": {TASK: "issue-7", HEAD: "cccccccccccccccccccccccccccccccccccccccc",
+               NOMINATIONS: "1. policy skills/x/run.sh:3 error-handling — churn: added by the last fix",
+               INVESTIGATION_REPORT: "none", TREE: "/wt/judge", REPORT: "/r/judge-weighing.md"}}}' \
+    > "$vw" || die "could not write $vw"
+  run "$(dirname "$SCRIPT")/templates" "$vw" "$ow"
+  if [[ $RC -eq 0 ]] && grep -qx 'AUTHORITY: judge' "$ow/brief-judge-weighing.md" \
+     && grep -qx 'HEAD: cccccccccccccccccccccccccccccccccccccccc' "$ow/brief-judge-weighing.md" \
+     && grep -qx 'schema_version: 2' "$ow/brief-judge-weighing.md"; then
+    pass; else fail "judge-weighing: expected exit 0 and the ruling-file deliverable, got RC=$RC ERR=$ERRTEXT"; fi
+
   echo "─────────────────────────────────────────────" >&2
+  printf '{"suite":"test_compose_briefs.sh","passed":%d,"failed":%d}\n' "$PASS" "$FAIL"
   if [[ $FAIL -gt 0 ]]; then echo "FAILED: ${FAIL} failed, ${PASS} passed" >&2; exit 1; fi
   echo "PASSED: all ${PASS} checks" >&2
 }
 
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
-  main "$@"
+  run_suite "$@"
 fi

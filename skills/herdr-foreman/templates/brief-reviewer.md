@@ -38,6 +38,11 @@ Expected range: `{{REVIEW_BASE}}..{{REVIEW_HEAD}}`.
    The foreman enforces the blocking findings; a COMMENT state gates nothing on
    its own.
 
+A blocking finding you judge not worth its fix stays blocking. Add one line
+under it, `MARGINAL: <finding> — <reachability claim with file and line
+citations>`, and the foreman may nominate it for the judge's weighing. Never
+re-raise a finding this brief lists as covered by a weighing ruling.
+
 Do not fix what you find. Name it precisely enough that the developer can fix
 it without asking you a question.
 
@@ -49,7 +54,9 @@ foreman resolves scope under the existing authorization and judge rules.
 
 When the foreman names a **scoped re-check**, verify each prior finding against
 the current tip and report `RESOLVED`, `OPEN`, or `DECLINED — <reason>`.
-Restrict `NEW` findings to blocking severity. Record new advisories in the
+A prior finding this brief lists as covered by a weighing ruling reads
+`DECLINED — ruling <report path>`; one it lists as no longer covered is
+checked like any other. Restrict `NEW` findings to blocking severity. Record new advisories in the
 brief's follow-up issue; they never extend the fix loop. Name missing scope
 inputs in a `## BLOCKED` report instead of guessing which findings to check.
 
