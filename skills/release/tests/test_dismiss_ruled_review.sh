@@ -195,11 +195,10 @@ write_judge_ruling() {
 OUT=""; RC=0
 invoke() { RC=0; OUT=$( (main owner repo 5 "$@") 2>"${TMPDIR_TEST}/stderr") || RC=$?; }
 invoke_ruled() { invoke --ruling "$RULING" --followup-issue "$ISSUE"; }
-# The same run inside a Herdr team round.
-invoke_team_ruled() {
-  RC=0
-  OUT=$( (export HERDR_ENV=1; main owner repo 5 --ruling "$RULING" --followup-issue "$ISSUE") 2>"${TMPDIR_TEST}/stderr") || RC=$?
-}
+# The same runs inside a Herdr team round: HERDR_ENV set for main alone.
+main_team() { HERDR_ENV=1 main owner repo 5 "$@"; }
+invoke_team() { RC=0; OUT=$( (main_team "$@") 2>"${TMPDIR_TEST}/stderr") || RC=$?; }
+invoke_team_ruled() { invoke_team --ruling "$RULING" --followup-issue "$ISSUE"; }
 dismissals() { grep -c '^dismiss ' "$EVENTS"; }
 comments() { grep -c '^comment$' "$EVENTS"; }
 digest_of_ruling() { python3 -c 'import hashlib,sys; print(hashlib.sha256(open(sys.argv[1],"rb").read()).hexdigest()[:16])' "$RULING"; }
@@ -542,7 +541,7 @@ t_missing_authority_refuses() {
 
 t_team_round_list_mode_emits_findings() {
   set_review CHANGES_REQUESTED "$HEAD_SHA" "$BODY_TWO"
-  RC=0; OUT=$( (export HERDR_ENV=1; main owner repo 5) 2>"${TMPDIR_TEST}/stderr") || RC=$?
+  invoke_team
   assert_eq "exit" "0" "$RC" || return 1
   assert_eq "result" "findings" "$(jq -r .result <<<"$OUT")"
 }
