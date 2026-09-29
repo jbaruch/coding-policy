@@ -56,6 +56,48 @@
     carry the wiring. `test_compose_briefs.sh` moves to the guarded
     `run_suite` and JSON-result pattern.
 
+## 0.3.334 — 2026-09-29
+
+### Fixed
+
+- **The CHANGELOG stamp heads the version smart-publish actually publishes
+  (Fixes #606).** `stamp-changelog.py` read the registry latest from the
+  `tessl plugin info` listing, which lags the versions API by minutes, while
+  `smart-publish.sh` computes its target from the versions API through
+  `registry-version.sh`. Three publishes on 2026-09-25 stamped a heading one
+  version behind what the same run published (two `## 0.3.268` headings, no
+  `## 0.3.271`). The stamp now reads through `registry-version.sh` too, so
+  both steps compute from the same source. The stamp-changelog action now
+  also needs `jq` on PATH, which the publish job already required. The old
+  404 and no-auth fallbacks to the manifest version are gone:
+  `registry-version.sh` reports never-published as `{"version": null}` on
+  exit 0, so any non-zero exit is a tool failure and fails the stamp step.
+  Both fleet publish workflows run `setup-tessl` before the stamp.
+
+## 0.3.333 — 2026-09-29
+
+### Fixed
+
+- **`onboard-repo` and `migrate-to-plugin` find a global-only install (Fixes
+  #599).** Both skills invoked their scripts by the project-local mount path
+  alone (`bash .tessl/plugins/jbaruch/coding-policy/skills/<name>/<script>`).
+  A consumer whose coding-policy install lives only under
+  `$HOME/.tessl/plugins/...` has no such directory, so every step failed with
+  file-not-found. `onboard-repo` was the likeliest to hit it: the repo being
+  onboarded often carries no local install yet. Found while auditing #574 and
+  left out of it to keep that PR to the clone-relative defect.
+  - Every script block in both `SKILL.md` files now opens with the same `$CP`
+    resolver #574 gave release, herdr and adopt-fork-pr: project-local mount,
+    then the `$HOME` mount, then `.` only on an exact coding-policy origin.
+    `onboard-repo`'s combined install/upgrade blocks split into one block per
+    mode, so each block is one resolver plus one invocation.
+  - `rules/script-delegation.md`'s installed-plugin bootstrap carve-out lists
+    both files. `rules/skill-authoring.md`'s plugin-mount example, which
+    named `onboard-repo/preflight.sh`, becomes a generic placeholder.
+  - `skills/herdr-foreman/tests/test_skill_invocations.sh` checks both skills
+    (red before the fix: missing resolver, missing `bash "$CP/..."`
+    invocations).
+
 ## 0.3.332 — 2026-09-29
 
 ### Fixed

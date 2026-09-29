@@ -40,8 +40,10 @@ set -uo pipefail
 # directory, so it only ever read herdr-foreman's SKILL.md. release ships to
 # every consumer and invoked its scripts by clone-relative path (#574);
 # adopt-fork-pr runs in any repo, this one included, and invoked its script
-# by a mount path a clone does not have.
-SKILLS=(herdr-foreman herdr-standup release adopt-fork-pr)
+# by a mount path a clone does not have. onboard-repo and migrate-to-plugin
+# invoked theirs by the project-local mount alone, which a global-only
+# install does not have (#599).
+SKILLS=(herdr-foreman herdr-standup release adopt-fork-pr onboard-repo migrate-to-plugin)
 
 # Reference files whose command blocks the bootstrap carve-out also covers.
 REFERENCES=(herdr-foreman/references/round-setup.md herdr-foreman/references/judge-round.md
