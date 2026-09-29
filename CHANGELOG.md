@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.334 — 2026-09-29
+
 ### Fixed
 
 - **The CHANGELOG stamp heads the version smart-publish actually publishes
