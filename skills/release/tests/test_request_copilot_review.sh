@@ -352,9 +352,17 @@ run_main() { # <VAR=value>...
     CALL_LOG="$log" MUT_FIXTURE="$MUT_OK_FIXTURE" main owner repo 5 2>"$errf"
   )
   RC=$?
-  CALLS=$(tr '\n' ' ' < "$log")
-  ERR=$(cat "$errf")
-  rm -f "$log" "$errf"
+  local ok=0
+  if ! CALLS=$(tr '\n' ' ' < "$log"); then
+    echo "    FAIL: could not read the call log ${log} — check TMPDIR is readable" >&2; ok=1
+  fi
+  if ! ERR=$(cat "$errf"); then
+    echo "    FAIL: could not read the stderr capture ${errf} — check TMPDIR is readable" >&2; ok=1
+  fi
+  if ! rm -f "$log" "$errf"; then
+    echo "    FAIL: could not remove ${log} ${errf} — delete them by hand" >&2; ok=1
+  fi
+  return "$ok"
 }
 
 # A request newer than the last run start never started: the stuck request

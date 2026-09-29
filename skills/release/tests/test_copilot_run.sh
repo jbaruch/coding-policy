@@ -124,8 +124,19 @@ t_same_second_request_after_start_is_not_in_flight() {
   assert_eq "in_flight" "false" "$(in_flight_for "[$start,$req]")"
 }
 
-t_non_object_element_is_ignored() {
-  assert_eq "in_flight" "true" "$(in_flight_for "[\"Not Found\",$REQ,$START]")"
+# A non-object element is a malformed read: fail, never skip it (skipping
+# shifts the positions the check compares).
+t_non_object_element_fails() {
+  local out rc err
+  err=$(mktemp) || { echo "    FAIL: mktemp failed" >&2; return 1; }
+  out=$(TIMELINE_FIXTURE="[\"Not Found\",$REQ,$START]" copilot_run_in_flight owner repo 1 2>"$err")
+  rc=$?
+  local msg; msg=$(cat "$err")
+  if ! rm -f "$err"; then echo "    FAIL: could not remove ${err}" >&2; return 1; fi
+  assert_eq "exit code" "1" "$rc" || return 1
+  assert_eq "stdout" "" "$out" || return 1
+  [[ "$msg" == *"non-object element"* ]] \
+    || { echo "    FAIL: stderr missing the malformed-timeline diagnostic: $msg" >&2; return 1; }
 }
 
 t_timeline_failure_is_non_zero() {
@@ -151,7 +162,7 @@ run_suite() {
   run "another reviewer's request is ignored"              t_another_reviewers_request_is_ignored
   run "a same-second run start after its request is in flight" t_same_second_start_is_in_flight
   run "a same-second request after the start is not in flight" t_same_second_request_after_start_is_not_in_flight
-  run "a non-object timeline element is ignored"           t_non_object_element_is_ignored
+  run "a non-object timeline element fails the read"      t_non_object_element_fails
   run "a failed timeline read exits non-zero, no verdict"  t_timeline_failure_is_non_zero
   printf '{"suite":"test_copilot_run.sh","passed":%d,"failed":%d}\n' "$PASS_COUNT" "$FAIL_COUNT"
   [[ $FAIL_COUNT -eq 0 ]]

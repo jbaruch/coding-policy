@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Shared review-request state helpers. Sourced by poll-pr-reviews.sh and
-# request-copilot-review.sh — defines copilot_run_in_flight(),
-# fetch_requested_logins() and requested_among() with no other side effects.
+# request-copilot-review.sh — defines copilot_timeline(),
+# copilot_in_flight_state(), copilot_run_in_flight(), fetch_requested_logins()
+# and requested_among() with no other side effects.
 # It sets `set -euo pipefail` at the top; both callers already run under it.
 # Direct execution is a guarded CLI (entry-point guard at the foot of the
 # file): `copilot-run.sh <owner> <repo> <pr-number>`
@@ -23,14 +24,27 @@
 
 set -euo pipefail
 
-copilot_run_in_flight() {
+# copilot_timeline <owner> <repo> <pr-number>: prints the PR timeline as one
+# JSON array. A non-object element is a malformed read, never data to skip:
+# dropping it would shift the positions the in-flight check compares.
+copilot_timeline() {
   local owner="$1" repo="$2" pr="$3" timeline
   if ! timeline=$(gh api --paginate "repos/${owner}/${repo}/issues/${pr}/timeline?per_page=100" | jq -s 'add // []'); then
     echo "error: failed to read the timeline of ${owner}/${repo}#${pr} — check 'gh auth status', then retry 'gh api --paginate repos/${owner}/${repo}/issues/${pr}/timeline'" >&2
     return 1
   fi
-  printf '%s' "$timeline" | jq '
-    [.[] | select(type == "object")] | to_entries as $ev
+  if ! printf '%s' "$timeline" | jq -e 'type == "array" and all(.[]; type == "object")' >/dev/null; then
+    echo "error: the timeline of ${owner}/${repo}#${pr} holds a non-object element (a malformed or partial response) — re-run; if it persists, inspect 'gh api --paginate repos/${owner}/${repo}/issues/${pr}/timeline'" >&2
+    return 1
+  fi
+  printf '%s' "$timeline"
+}
+
+# copilot_in_flight_state <timeline-json>: prints {"in_flight": bool,
+# "started_at": <the in-flight run's created_at, or null>}.
+copilot_in_flight_state() {
+  printf '%s' "$1" | jq -c '
+    to_entries as $ev
     | ([$ev[] | select(.value.event == "copilot_work_started") | .key] | max) as $w
     | ([$ev[] | select(.value.event == "review_requested")
               | select((.value.requested_reviewer.login // "") | test("copilot"; "i"))
@@ -40,7 +54,15 @@ copilot_run_in_flight() {
               | .key] | max) as $s
     | ([$ev[] | select(.value.event == "committed" or .value.event == "head_ref_force_pushed")
               | .key] | max) as $p
-    | $w != null and $r != null and $w > $r and $w > ($s // -1) and $w > ($p // -1)'
+    | ($w != null and $r != null and $w > $r and $w > ($s // -1) and $w > ($p // -1)) as $f
+    | {in_flight: $f, started_at: (if $f then ($ev[$w].value.created_at // null) else null end)}'
+}
+
+copilot_run_in_flight() {
+  local timeline state
+  timeline=$(copilot_timeline "$1" "$2" "$3") || return 1
+  state=$(copilot_in_flight_state "$timeline") || return 1
+  printf '%s' "$state" | jq -r '.in_flight'
 }
 
 # Logins with a review request still pending on the PR, lowercased and with the

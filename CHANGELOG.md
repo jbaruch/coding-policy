@@ -26,7 +26,11 @@
     nothing is in flight. A run started before the latest push (`committed`
     or `head_ref_force_pushed` on the timeline) is stale and not in flight.
     Without that, a run dropped on an older head read as in flight forever,
-    and `request-copilot-review.sh` refused to re-request: a deadlock. `poll-pr-reviews.sh` reads the timeline before the
+    and `request-copilot-review.sh` refused to re-request: a deadlock. A
+    timeline holding a non-object element fails the read instead of being
+    filtered, since dropping an element shifts the positions compared.
+    `poll-pr-reviews.sh` clears an in-flight run when a Copilot review
+    submitted after its start arrives with the reviews read. `poll-pr-reviews.sh` reads the timeline before the
     Copilot review, so a review posted between the two reads is seen.
     `fetch_requested_logins` and `requested_among` (pending requests from
     GraphQL `reviewRequests`, since REST `requested_reviewers` omits bots,

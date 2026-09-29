@@ -224,6 +224,28 @@ t_main_sees_review_posted_after_timeline_read() {
   assert_eq "copilot requested" "false"     "$(echo "$out" | jq -r '.reviews.copilot.requested')"
 }
 
+# #641: the timeline showed a run in flight, and its review posted before the
+# reviews read. The owed review has arrived, so nothing is owed.
+t_main_clears_in_flight_when_its_review_posts_between_reads() {
+  local MOCK_MERGE_STATE=clean MOCK_REQUESTED_BODY='[]' MOCK_REVIEWS_BODY='[]'
+  local MOCK_TIMELINE_BODY='[{"event":"review_requested","requested_reviewer":{"login":"Copilot"},"created_at":"2026-09-29T18:31:54Z"},{"event":"copilot_work_started","created_at":"2026-09-29T18:32:51Z"}]'
+  local MOCK_REVIEWS_AFTER_TIMELINE='[{"user":{"login":"copilot-pull-request-reviewer[bot]"},"state":"COMMENTED","submitted_at":"2026-09-29T18:40:00Z","body":"done","commit_id":"'"$HEAD_SHA"'"}]'
+  local MOCK_TIMELINE_READ_FLAG out rc
+  MOCK_TIMELINE_READ_FLAG=$(mktemp -u) || { echo "    FAIL: mktemp failed" >&2; return 1; }
+  out=$(main owner repo 1)
+  rc=$?
+  if ! rm -f "$MOCK_TIMELINE_READ_FLAG"; then
+    echo "    FAIL: could not remove the flag file ${MOCK_TIMELINE_READ_FLAG} — delete it by hand and check TMPDIR is writable" >&2
+    return 1
+  fi
+  if [[ $rc -ne 0 ]]; then
+    echo "    FAIL: main exited ${rc} — run the suite with stderr visible to see the poll-pr-reviews.sh diagnostic" >&2
+    return 1
+  fi
+  assert_eq "copilot state"     "COMMENTED" "$(echo "$out" | jq -r '.reviews.copilot.state')" || return 1
+  assert_eq "copilot requested" "false"     "$(echo "$out" | jq -r '.reviews.copilot.requested')"
+}
+
 t_main_marks_copilot_in_flight_with_no_review_requested() {
   local MOCK_MERGE_STATE=clean MOCK_REQUESTED_BODY='[]' MOCK_REVIEWS_BODY='[]'
   local MOCK_TIMELINE_BODY='[{"event":"review_requested","requested_reviewer":{"login":"Copilot"},"created_at":"2026-09-29T18:31:54Z"},{"event":"copilot_work_started","created_at":"2026-09-29T18:32:51Z"}]'
@@ -745,6 +767,7 @@ run_suite() {
   run "main marks an in-flight Copilot run requested (#641)"            t_main_marks_copilot_in_flight_requested
   run "main marks an in-flight first Copilot run requested (#641)"      t_main_marks_copilot_in_flight_with_no_review_requested
   run "main sees a review posted after the timeline read (#641)"      t_main_sees_review_posted_after_timeline_read
+  run "main clears an in-flight run whose review posted (#641)"       t_main_clears_in_flight_when_its_review_posts_between_reads
   run "main: a review after the run started is not requested (#641)"   t_main_copilot_run_finished_by_posted_review_is_not_requested
   printf '{"suite":"test_poll_pr_reviews.sh","passed":%d,"failed":%d}\n' "$PASS_COUNT" "$FAIL_COUNT"
   [[ $FAIL_COUNT -eq 0 ]]
