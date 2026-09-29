@@ -32,8 +32,10 @@ description: |
 
   Requirements (consumer must arrange):
     - `python3` on PATH (stdlib only — the script needs no packages).
-    - `tessl` CLI on PATH (typically via `tesslio/setup-tessl@v2`) so the
-      script can read the registry's latest version. Skip this by passing
+    - `tessl` CLI (authenticated, typically via `tesslio/setup-tessl@v2`)
+      and `jq` on PATH so `skills/release/registry-version.sh` can read the
+      registry's latest version; any failure of that read fails the step
+      (exit contract in that script's header). Skip this by passing
       `latest:` explicitly.
     - The consumer repo checked out (`actions/checkout@v4`) with a writable
       working tree; the step runs against `$GITHUB_WORKSPACE`.
@@ -54,7 +56,8 @@ inputs:
   latest:
     description: |
       Latest published version (X.Y.Z) to compute against. When empty the
-      script queries the registry via `tessl plugin info`. Set it to skip
+      script queries the registry's versions API via
+      `skills/release/registry-version.sh`. Set it to skip
       the registry query (testing / offline runs).
     required: false
     default: ''

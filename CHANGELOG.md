@@ -1,5 +1,21 @@
 # Changelog
 
+### Fixed
+
+- **The CHANGELOG stamp heads the version smart-publish actually publishes
+  (Fixes #606).** `stamp-changelog.py` read the registry latest from the
+  `tessl plugin info` listing, which lags the versions API by minutes, while
+  `smart-publish.sh` computes its target from the versions API through
+  `registry-version.sh`. Three publishes on 2026-09-25 stamped a heading one
+  version behind what the same run published (two `## 0.3.268` headings, no
+  `## 0.3.271`). The stamp now reads through `registry-version.sh` too, so
+  both steps compute from the same source. The stamp-changelog action now
+  also needs `jq` on PATH, which the publish job already required. The old
+  404 and no-auth fallbacks to the manifest version are gone:
+  `registry-version.sh` reports never-published as `{"version": null}` on
+  exit 0, so any non-zero exit is a tool failure and fails the stamp step.
+  Both fleet publish workflows run `setup-tessl` before the stamp.
+
 ## 0.3.333 — 2026-09-29
 
 ### Fixed
