@@ -444,10 +444,23 @@ t_schema_missing_or_other_refuses() {
   assert_eq "exit without schema_version" "1" "$RC" || return 1
   assert_unmet "schema_version: 2" "the schema" || return 1
   write_ruling "$HEAD_SHA" "$DECLINE_ONE" "$DECLINE_TWO"
-  sed 's/^schema_version: 2$/schema_version: 1/' "$RULING" > "${RULING}.tmp" && mv "${RULING}.tmp" "$RULING"
+  sed 's/^schema_version: 2$/schema_version: 3/' "$RULING" > "${RULING}.tmp" && mv "${RULING}.tmp" "$RULING"
   invoke_ruled
-  assert_eq "exit with schema_version 1" "1" "$RC" || return 1
+  assert_eq "exit with schema_version 3" "1" "$RC" || return 1
   assert_eq "no dismissal" "0" "$(dismissals)"
+}
+
+t_version_1_ruling_is_upgraded_then_read() {
+  set_review CHANGES_REQUESTED "$HEAD_SHA" "$BODY_TWO"
+  write_ruling "$HEAD_SHA" "$DECLINE_ONE" "$DECLINE_TWO"
+  grep -v '^AUTHORITY:' "$RULING" | sed 's/^schema_version: 2$/schema_version: 1/' > "${RULING}.tmp" \
+    && mv "${RULING}.tmp" "$RULING"
+  invoke_ruled
+  assert_eq "exit" "0" "$RC" || return 1
+  assert_eq "result" "dismissed" "$(jq -r .result <<<"$OUT")" || return 1
+  assert_eq "upgraded lines" "schema_version: 2|AUTHORITY: operator" \
+    "$(grep -E '^(schema_version|AUTHORITY):' "$RULING" | paste -sd'|' -)" || return 1
+  grep -qF "$DECLINE_ONE" "$RULING" || { echo "    FAIL: the upgrade kept the FINDING lines" >&2; return 1; }
 }
 
 t_malformed_ruling_refuses() {
@@ -631,6 +644,7 @@ run_suite() {
   run "carry-over across a diverged compare refuses"  t_carry_over_diverged_refuses
   run "a missing or empty ANSWER refuses"             t_missing_answer_refuses
   run "a missing or other schema_version refuses"             t_schema_missing_or_other_refuses
+  run "a version-1 ruling is upgraded, then read"     t_version_1_ruling_is_upgraded_then_read
   run "a malformed ruling refuses"                    t_malformed_ruling_refuses
   run "list mode emits the blocking findings"         t_list_mode_emits_findings
   run "usage errors exit 2"                           t_usage_errors_exit_2
