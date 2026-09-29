@@ -36,12 +36,14 @@
     positions, so Judge Seat scopes the position, citation and ruling-grammar
     bullets to disputes and gives a weighing its own `RULING:` set.
   - New `foreman finding-churn` (`skills/herdr-foreman/foreman/churn.py`):
-    diffs each finding's path between the previous fix round's head and the
+    diffs each finding's file between the previous fix round's head and the
     current head with `-U0`, and reports `added_by_last_fix` and
     `path_changed`. The second bit answers carry-over for internal findings.
-    Paths are diffed one at a time with renames off, so no quoted diff
-    header is parsed and a renamed file reads as added and changed, the
-    direction that never waives a finding. Each path is a `:(literal)`
+    `--from` must be an ancestor of `--to`. The range is classified with
+    `-M`: a renamed file is diffed blob to blob, so a pure rename adds no
+    line and reads `path_changed` true, and a rename with edits reports only
+    the edited lines. A path gone from `--to`, or a change git classifies
+    another way, is refused rather than guessed. Each path is a `:(literal)`
     pathspec, and an unknown revision is refused through partition's probe
     while a broken repository keeps git's own diagnostic. Coverage in re-check
     and release briefs is the foreman's call from `path_changed`, never the

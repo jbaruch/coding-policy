@@ -182,14 +182,12 @@ description: Running a multi-agent team — task-based specialist composition, c
 - A `blocked` ruling stops the round and sends the named question to the operator
 - `blocked` is for a question only the operator can answer
 - A fact the tree can settle is `insufficient`, never `blocked`
-- A weighing is the one `rules/review-severity.md` Judge-Weighed Finding Carve-Out defines
+- A weighing, its ruling file, coverage and floors follow `rules/review-severity.md` Judge-Weighed Finding Carve-Out
 - The foreman nominates findings for a weighing and never weighs one itself
 - `foreman finding-churn` placing a finding on lines the previous fix round added nominates it
 - A worker report marking a finding `MARGINAL:` with a cited reachability claim nominates it
 - No other signal nominates a finding
 - One weighing dispatch carries every nomination for one gate
-- The weighing report is the ruling file, in the format the `skills/release/dismiss-ruled-review.sh` header names
-- `foreman verify-ruling` binds the ruling file to the report supervision enrolled for that weighing
 - The judge rules each nomination `fix`, `defer` or `decline`
 - A weighing returns `RULING: weighed`, `insufficient` or `blocked`, never `uphold` or `amend`
 - `RULING: weighed` is a completed ruling
@@ -197,11 +195,8 @@ description: Running a multi-agent team — task-based specialist composition, c
 - `fix` returns the finding to the fix loop
 - `defer` and `decline` stop the finding blocking the round
 - `defer` and `decline` spend no fix round
-- Each `defer` and `decline` is entered in the task's follow-up issue, citing the ruling
-- A ruling covers a re-raised finding only while `foreman finding-churn` from the ruling's `HEAD:` to the current head reports the finding's file unchanged
 - A finding a ruling covers is never re-nominated
 - A `fix` finding that stays open follows the fix loop and its exhaustion route, never a second weighing
-- Every finding under a `rules/review-severity.md` Judge-Weighed Finding Carve-Out floor is ruled `fix`
 - The judge is declared in `config.json`, measured, and planned like every other seat
 - The judge worker and the `claude` worker authenticate as one Claude subscription and draw on one weekly window
 - `window_group` names the usage window an agent shares with other agents
