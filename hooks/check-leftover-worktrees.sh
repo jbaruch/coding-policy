@@ -188,7 +188,7 @@ sys.stdout.buffer.write(first[0][len(b"worktree "):] + b"x")
     */*) dir="${src%/*}" ;;
     *) dir=. ;;
   esac
-  if ! here="$(cd -- "${dir:-/}" && pwd && printf x)"; then
+  if ! here="$(CDPATH='' cd -- "${dir:-/}" && pwd && printf x)"; then
     cannot_check "the hooks directory ${dir:-/} cannot be entered; reinstall the plugin."
     return 0
   fi

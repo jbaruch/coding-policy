@@ -426,6 +426,17 @@ check_install_shapes() { # <skill-file>
   else
     fail "inline-span guard accepted a repo-relative invocation"
   fi
+  # A stale resolver in a block nested in a list item is still caught (#621).
+  # shellcheck disable=SC2016 # Backticks and $CP are Markdown literals, not shell.
+  printf -- '- Run it:\n\n  ```bash\n  %s\n  bash "$CP/skills/herdr-foreman/roster.sh"\n  ```\n' \
+    'CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"' \
+    > "$fixture/indented.md" || die "cannot write indented block fixture"
+  if bash -c 'source "$1"; check_invocations indented "$2"; (( FAIL > 0 ))' \
+    bash "${BASH_SOURCE[0]}" "$fixture/indented.md" > "$fixture/guard.log" 2>&1; then
+    pass
+  else
+    fail "bootstrap guard accepted a stale resolver in an indented command block"
+  fi
   cleanup
   [[ -z "$INSTALL_FIXTURE" ]] || die "install fixture cleanup failed; the exit trap will retry"
 }
@@ -457,7 +468,8 @@ check_cleanup_retry() {
   [[ -z "$INSTALL_FIXTURE" ]] || die "cleanup retry fixture remains; the exit trap will retry"
 }
 
-main() {
+# Progress and failures go to stderr; stdout carries one JSON result.
+run_suite() {
   local skills_root skill name
   trap cleanup EXIT
   skills_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)" || die "could not resolve the skills dir"
@@ -479,12 +491,12 @@ main() {
   skill="${skills_root}/${MODE_GATE_SKILL}/SKILL.md"
   check_mode_gate "$MODE_GATE_SKILL" "$skill"
 
-  echo
-  echo "results: ${PASS} pass, ${FAIL} fail"
+  echo "results: ${PASS} pass, ${FAIL} fail" >&2
+  printf '{"suite":"test_skill_invocations.sh","passed":%d,"failed":%d}\n' "$PASS" "$FAIL"
   (( FAIL == 0 ))
 }
 
 # Entry-point guard (rules/file-hygiene.md Standalone Scripts).
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
-  main "$@"
+  run_suite
 fi
