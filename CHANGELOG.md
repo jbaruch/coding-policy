@@ -53,7 +53,9 @@
     consultation), before its classifier gates; `needs_work` is never refused
     on that ground. `record-report` refuses a gap or a verdict that differs
     from the report's line, before its classifier gates. `diagnose` and the
-    judge-investigation gate count only accepted investigator records. A
+    judge-investigation gate count only accepted investigator records with no
+    blocking verdict. Acceptance is contract completeness whatever the
+    verdict; a blocking verdict gates the round, never the assignment. A
     classifier label still only adds a gate on top of a line.
   - Specialist assessment records go from schema 1 to 2 with an owner
     migration while state loads: a schema-1 record becomes

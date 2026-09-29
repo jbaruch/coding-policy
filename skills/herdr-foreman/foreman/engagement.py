@@ -312,13 +312,26 @@ def record_assessment(state, state_path, data, at):
 
 
 def all_met(record):
-    """Whether a report-sourced record states no criterion `unmet`; a reviewer or tester record has none."""
+    """Whether a report-sourced record states no criterion `unmet`; a reviewer or tester record has none.
+
+    Acceptance is contract completeness, whatever the `verdict`: a blocking
+    verdict gates the round at SKILL.md Step 12 and the round-flow Release Gate.
+    """
     return record["source"] == "report" and all(row["state"] == "met" for row in record["acceptance"] or ())
 
 
 def accepted_investigations(state):
-    """Report-sourced investigator records with every criterion met: all that diagnose and the judge gate count."""
-    return [row for row in state["specialist_assessments"] if row["role"] == "investigator" and all_met(row)]
+    """Investigator records the diagnose and judge gates count: every criterion met and no blocking verdict.
+
+    These gates rely on the investigation's outcome, not only its acceptance:
+    an investigator seated with a verdict specialty can record `blocking`.
+    """
+    return [row for row in state["specialist_assessments"] if row["role"] == "investigator" and investigated(row)]
+
+
+def investigated(record):
+    """An accepted record whose outcome a diagnosis can rule on: all criteria met, verdict not `blocking`."""
+    return all_met(record) and record.get("verdict") != "blocking"
 
 
 def require_accepted(state, dispatch_id, report):
@@ -327,6 +340,8 @@ def require_accepted(state, dispatch_id, report):
     A reviewer or tester needs a report-sourced record of this dispatch and
     report whose receipt matches the current bytes; a consultation's record
     also states every criterion `met`. Any other responsibility passes through.
+    Acceptance is contract completeness, whatever the `verdict`: a blocking
+    verdict gates the round at SKILL.md Step 12 and the round-flow Release Gate.
     """
     dispatch = next((row for row in state["recovery"]["dispatches"] if row["id"] == dispatch_id), None)
     if dispatch is None:

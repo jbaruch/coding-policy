@@ -406,6 +406,18 @@ class EngagementTest(unittest.TestCase):
         save_state(self.path, self.state)
         self.assertTrue(load_state_checked(self.path)[1])
 
+    def test_a_blocking_verdict_is_an_accepted_assignment_that_still_gates_the_round(self):
+        # #625 note section 3: acceptance is contract completeness; the
+        # blocking verdict gates the round, never the assignment.
+        data = self.seed_reviewer("Reviewed the tip; B1 is blocking.\nVERDICT: blocking\n")
+        record = self.assess(data)
+        accepted = engagement.require_accepted(self.state, "review-1", data["report"])
+        self.assertEqual((accepted or {}).get("id"), "review-assessment")
+        self.assertEqual(record["verdict"], "blocking")
+        # A verdict-bearing investigator's blocking outcome is no ground for a diagnosis.
+        self.assertTrue(engagement.all_met(record))
+        self.assertFalse(engagement.investigated(record))
+
     def test_a_gapped_report_without_an_excluding_contribution_records_nothing(self):
         data = self.seed_reviewer("Reviewed.\n")
         for text in ("Reviewed.\n", "Reviewed.\nCONTRIBUTION: none\n", "Reviewed.\nCONTRIBUTION: some\n"):

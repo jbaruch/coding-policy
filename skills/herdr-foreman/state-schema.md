@@ -599,7 +599,8 @@ A report-sourced record gates three readers. `close-member` needs one matching
 the current report bytes before an `accepted` reviewer, tester or consultation
 closure, and for a consultation every criterion `met`. `diagnose` and the
 judge-investigation gate count only investigator records with every criterion
-`met`. A warm follow-up needs one for the preceding assignment and revalidates
+`met` and no `blocking` verdict. Acceptance itself is contract completeness,
+whatever the verdict; a blocking verdict gates the round, never the assignment. A warm follow-up needs one for the preceding assignment and revalidates
 its report and delivery bytes and prior supervision disposition.
 
 A `design` or `implementation` contribution on any record adds a same-task

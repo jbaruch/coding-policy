@@ -398,6 +398,8 @@ description: Running a multi-agent team — task-based specialist composition, c
 - `N` is the count of `CRITERION` lines in the brief `apply` sent
 - A `security`, `ux-product` or `documentation` consultation also carries one `VERDICT:` line
 - A blocking `VERDICT:` from one of these gates the round the way a reviewer's does
+- An assignment is accepted when its report's required lines pass the contract, whatever its `VERDICT:`
+- A blocking `VERDICT:` gates the round, never the assignment's acceptance
 - Every other consultation report carries `ACCEPTANCE` lines only
 - A developer report carries no required line
 - The reviewer's and tester's verdicts gate the developer's work

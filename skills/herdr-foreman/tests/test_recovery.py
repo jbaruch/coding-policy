@@ -502,7 +502,8 @@ class RecoveryTests(unittest.TestCase):
         # investigation (#625).
         accepted = self.investigated(index=seeded, at=seeded_at)
         for change in ({"acceptance": [{"k": 1, "state": "unmet", "evidence": "no reproduction"}]},
-                       {"source": "foreman_assessment", "acceptance": None}):
+                       {"source": "foreman_assessment", "acceptance": None},
+                       {"verdict": "blocking"}):
             with self.subTest(change=change), self.assertRaisesRegex(UsageError, "prepared causal assessment"):
                 self.run_diagnosis(request, investigations=[{**accepted[0], **change}])
         self.assertEqual(self.run_diagnosis(request, investigations=accepted)["remedy"], "continue")

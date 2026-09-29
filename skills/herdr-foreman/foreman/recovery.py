@@ -672,14 +672,15 @@ def checkpoint(store, assignments, data, at, judge_agent):
 
 
 def accepted(assessments):
-    """The report-sourced assessments stating every criterion met (#625).
+    """The report-sourced assessments stating every criterion met and no blocking verdict (#625).
 
-    A migrated foreman assessment, or a report with an `unmet` criterion,
-    never satisfies the diagnose or judge-investigation gate.
+    A migrated foreman assessment, a report with an `unmet` criterion, or one
+    recording `VERDICT: blocking` never satisfies the diagnose or
+    judge-investigation gate, which rely on the investigation's outcome.
     """
-    from .engagement import all_met
+    from .engagement import investigated
 
-    return [row for row in assessments if all_met(row)]
+    return [row for row in assessments if investigated(row)]
 
 
 def investigated_after(assignments, row, task, developer_index):
