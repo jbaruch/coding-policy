@@ -66,7 +66,8 @@ MISFILED = """# Changelog
 """
 
 
-VERDICT_EXIT = {"pass": 0, "nothing_to_measure": 0, "misfiled": 1, "error": 2}
+VERDICT_EXIT = {"pass": 0, "nothing_to_measure": 0, "skipped": 0, "misfiled": 1,
+                "error": 2}
 
 
 def run_script(cmd, **kwargs):
@@ -565,6 +566,49 @@ class PublishModeTest(_RepoCase):
             cwd=self.root, capture_output=True, text=True)
         self.assertEqual(proc.returncode, 1, proc.stderr)
         self.assertEqual(proc.payload["base"], bump)
+
+    def run_as_action(self, manifest="", commit="true"):
+        """The argv `.github/actions/stamp-changelog/action.yml` passes.
+
+        The action forwards its `changelog`, `manifest` and `commit` inputs
+        verbatim, an unset `manifest:` as the empty string.
+        """
+        return run_script(
+            [_sys.executable, _os.path.join(_ROOT, "check-changelog-placement.py"),
+             "--since-last-publish", "--changelog", "CHANGELOG.md",
+             "--manifest", manifest, "--commit-mode", commit],
+            cwd=self.root, capture_output=True, text=True)
+
+    def test_the_action_default_inputs_measure_from_the_last_bump(self):
+        self.merge(MISFILED)
+        proc = self.run_as_action()
+        self.assertEqual(proc.payload["verdict"], "misfiled", proc.stderr)
+
+    def test_the_action_forwards_a_custom_manifest_as_a_baseline(self):
+        # The bot's bump of a custom manifest also stamps an entry; measured
+        # from the older bump instead, that stamped entry would read as new.
+        custom = self.root / "meta" / "plugin.json"
+        custom.parent.mkdir()
+        custom.write_text('{"version": "0.3.9"}\n', encoding="utf-8")
+        self.git("add", "meta/plugin.json")
+        self.git("commit", "-q", "-m", "custom manifest")
+        stamped = TWO_VERSIONS.replace("0.3.9", "0.3.10").replace("0.3.8", "0.3.9")
+        self.changelog.write_text(stamped, encoding="utf-8")
+        custom.write_text('{"version": "0.3.10"}\n', encoding="utf-8")
+        self.git("-c", "user.name=github-actions[bot]", "commit", "-q", "-am",
+                 "Bump to 0.3.10")
+        proc = self.run_as_action(manifest="./meta/plugin.json")
+        self.assertEqual(proc.payload["verdict"], "pass", proc.stderr)
+
+    def test_commit_mode_false_skips_the_check_with_a_warning(self):
+        # #618: under `commit: false` the caller writes the bookkeeping
+        # commit, so the check has no baseline it can trust.
+        self.merge(MISFILED)
+        proc = self.run_as_action(commit="false")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(proc.payload["verdict"], "skipped")
+        self.assertIsNone(proc.payload["base"])
+        self.assertIn("::warning::", proc.stderr)
 
     def test_no_publish_in_history_has_nothing_to_measure(self):
         fresh = tempfile.TemporaryDirectory()

@@ -29,8 +29,8 @@ description: |
   the version would publish with no heading of its own (#581). The check is
   `skills/release/check-changelog-placement.py --since-last-publish`,
   measured against the last stamp or version-bump commit on the branch.
-  With `commit: false` the check is skipped with a warning: the caller's
-  commit is not one it can find as its baseline.
+  With `commit: false` the script skips the check with a warning: the
+  caller's commit is not one it can find as its baseline.
 
   Requirements (consumer must arrange):
     - `python3` on PATH (stdlib only — the script needs no packages).
@@ -117,17 +117,10 @@ runs:
           echo "::error::check-changelog-placement.py not found at $placement — verify the pinned jbaruch/coding-policy/.github/actions/stamp-changelog@<ref> in this workflow points at a ref that carries skills/release/check-changelog-placement.py, and bump the ref if it is stale." >&2
           exit 1
         fi
-        # With `commit: false` the caller writes the bookkeeping commit, and
-        # nothing makes it the bot-authored, bookkeeping-only commit the check
-        # takes as its baseline, so the check would measure from the wrong
-        # publish. Skip it visibly rather than stop a correct publish (#618).
-        if [ "$DO_COMMIT" != "true" ]; then
-          echo "::warning::commit is '$DO_COMMIT', so the CHANGELOG placement check is skipped — the caller's bookkeeping commit is not one the check can find as its baseline. Set commit: 'true' to keep the check." >&2
-        else
-          placement_args=(--since-last-publish --changelog "$CHANGELOG")
-          if [ -n "$MANIFEST" ]; then placement_args+=(--manifest "$MANIFEST"); fi
-          python3 "$placement" "${placement_args[@]}"
-        fi
+        # The inputs go through verbatim; the script owns the empty-manifest
+        # and `commit: false` cases (#618).
+        python3 "$placement" --since-last-publish --changelog "$CHANGELOG" \
+          --manifest "$MANIFEST" --commit-mode "$DO_COMMIT"
 
         # Append optional flags with explicit `if` blocks — clearer than
         # `&&` one-liners and unambiguous to read.

@@ -49,7 +49,7 @@ Modes
         are read from <ref>..HEAD.
 
     check-changelog-placement.py --since-last-publish [--changelog CHANGELOG.md]
-                                 [--manifest <path>]
+                                 [--manifest <path>] [--commit-mode true|<other>]
         Measure the working tree against the last commit the publish pipeline
         recorded, as the stamp step does before publishing. That baseline is
         the newest first-parent ancestor of HEAD (HEAD included) authored by
@@ -57,7 +57,11 @@ Modes
         changelog, `.tessl-plugin/plugin.json`, `tile.json` and the
         `--manifest` path when given (the stamp commit and the version-bump
         commit). Both paths are normalized (`./CHANGELOG.md` is
-        `CHANGELOG.md`) and read from the repository root. A publish the check stopped writes no
+        `CHANGELOG.md`) and read from the repository root; an empty
+        `--manifest` is none. A `--commit-mode` other than `true` (the stamp
+        action's `commit: false`) means the caller writes the bookkeeping
+        commit, which the check cannot find: it warns on stderr and returns
+        `skipped` without measuring. A publish the check stopped writes no
         such commit, so a later push or a manual `workflow_dispatch` is still
         measured from the last real publish and cannot carry a refused item
         through. Trailers are read from <baseline>..HEAD. A shallow checkout
@@ -70,11 +74,11 @@ Output
 stdout carries exactly one JSON object on every outcome, usage errors
 included; human diagnostics go to stderr:
 
-    {"verdict": "pass" | "nothing_to_measure" | "misfiled" | "error",
+    {"verdict": "pass" | "nothing_to_measure" | "skipped" | "misfiled" | "error",
      "base": <ref or null>, "new_items": [<first line of each>],
      "reason": <string or null>}
 
-Exit 0 on `pass` and `nothing_to_measure`. Exit 1 on `misfiled`. Exit 2 on
+Exit 0 on `pass`, `nothing_to_measure` and `skipped`. Exit 1 on `misfiled`. Exit 2 on
 `error`: a usage or tool error (`git` unavailable or emitting undecodable
 output, base ref unknown, shallow history, unreadable file).
 """
@@ -308,6 +312,8 @@ def main(argv=None) -> int:
     parser.add_argument("--changelog", default="CHANGELOG.md")
     parser.add_argument("--manifest",
                         help="a plugin manifest the version-bump commit may touch")
+    parser.add_argument("--commit-mode", default="true",
+                        help="the stamp action's `commit` input; not `true` skips the check")
     args = parser.parse_args(argv)
     # `diff-tree` and the tree lookups spell paths from the repository root
     # with no `./` or `a/../` segments; compare in that spelling.
@@ -315,6 +321,14 @@ def main(argv=None) -> int:
     if args.manifest:
         args.manifest = posixpath.normpath(args.manifest)
 
+    if args.since_last_publish and args.commit_mode != "true":
+        reason = ("commit mode is '{}', so the caller writes the bookkeeping "
+                  "commit and the placement check cannot find it as its "
+                  "baseline; the check is skipped. Set commit: 'true' to keep "
+                  "the check.".format(args.commit_mode))
+        print("::warning::{}".format(reason), file=sys.stderr)
+        emit("skipped", reason=reason)
+        return 0
     path = Path(args.changelog)
     try:
         text = path.read_text(encoding="utf-8")

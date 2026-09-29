@@ -9,12 +9,14 @@
   `git diff-tree` reports, so the stamp commit was no baseline and every
   entry it had stamped read as new; both paths are now normalized. A custom
   `manifest:` reached the stamp script but not the checker, so its bump
-  commit was no baseline either; the checker gains `--manifest` and the
-  action passes it through. Under `commit: false` the caller writes the
-  bookkeeping commit, and nothing makes it one the check can find, so the
-  action now skips the check with a `::warning::` instead of measuring from
-  the wrong publish. The repo's own publish uses the defaults and is
-  unaffected.
+  commit was no baseline either; the checker gains `--manifest`. Under
+  `commit: false` the caller writes the bookkeeping commit, and nothing
+  makes it one the check can find, so the checker gains `--commit-mode`:
+  anything but `true` prints a `::warning::` and returns a `skipped` verdict
+  (exit 0) instead of measuring from the wrong publish. The stamp action
+  forwards its `manifest:` and `commit:` inputs verbatim with no branching of
+  its own, so both paths are covered by the script's tests. The repo's own
+  publish uses the defaults and is unaffected.
 
 ## 0.3.332 — 2026-09-29
 
