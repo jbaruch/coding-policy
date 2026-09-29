@@ -344,6 +344,12 @@ main() {
     || { echo "error: could not match the policy reviewer against the pending review requests on ${owner}/${repo}#${pr_number} — inspect the list with 'gh api graphql' for that PR's reviewRequests, then re-run this snapshot once it returns an array of reviewer logins" >&2; exit 1; }
   copilot_requested=$(requested_among "$requested_logins" "$COPILOT_REVIEW_LOGIN") \
     || { echo "error: could not match Copilot against the pending review requests on ${owner}/${repo}#${pr_number} — inspect the list with 'gh api graphql' for that PR's reviewRequests, then re-run this snapshot once it returns an array of reviewer logins" >&2; exit 1; }
+  # The timeline is read before the Copilot review, so a review posted in
+  # between is seen by the review fetch.
+  if [[ "$copilot_requested" == false ]]; then
+    copilot_requested=$(copilot_run_in_flight "$owner" "$repo" "$pr_number") \
+      || { echo "error: failed to read whether a Copilot run is in flight on ${owner}/${repo}#${pr_number} — the diagnostic above names the failing read; fix it, then retry" >&2; exit 1; }
+  fi
 
   local codex_review copilot_review codex_comments copilot_comments
   codex_review=$(latest_review_by   "$owner" "$repo" "$pr_number" "${CODEX_REVIEW_LOGINS[@]}") \
@@ -354,10 +360,6 @@ main() {
   codex_review=$(resolve_ruled_dismissal "$owner" "$repo" "$pr_number" "$codex_review") \
     || { echo "error: failed to read the dismissal of the policy review on ${owner}/${repo}#${pr_number} — inspect 'gh api --paginate repos/${owner}/${repo}/issues/${pr_number}/timeline', then retry" >&2; exit 1; }
   copilot_review=$(printf '%s' "$copilot_review" | jq 'del(._dismissed_review_id)')
-  if [[ "$copilot_requested" == false ]]; then
-    copilot_requested=$(copilot_run_in_flight "$owner" "$repo" "$pr_number") \
-      || { echo "error: failed to read whether a Copilot run is in flight on ${owner}/${repo}#${pr_number} — the diagnostic above names the failing read; fix it, then retry" >&2; exit 1; }
-  fi
   # Resolve each verdict against head — stale reviews collapse to "none".
   codex_review=$(resolve_review_against_head   "$codex_review"   "$head_sha")
   copilot_review=$(resolve_review_against_head "$copilot_review" "$head_sha")

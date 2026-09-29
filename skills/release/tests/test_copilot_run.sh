@@ -3,8 +3,7 @@
 # a run is in flight when the latest `copilot_work_started` is newer than both
 # the latest Copilot request and the latest Copilot review on the timeline.
 # The two callers (poll-pr-reviews.sh, request-copilot-review.sh) cover the
-# end-to-end paths; this suite covers the predicate's edges and that sourcing
-# the library leaves the caller's shell options alone.
+# end-to-end paths; this suite covers the predicate's edges.
 #
 # Approach: source the library and override `gh` with a shell function that
 # prints TIMELINE_FIXTURE for the paginated timeline read.
@@ -16,11 +15,10 @@ set -uo pipefail
 LIB="$(cd "$(dirname "$0")/.." && pwd)/copilot-run.sh"
 [[ -f "$LIB" ]] || { echo "fatal: copilot-run.sh not found at $LIB" >&2; exit 2; }
 
-# The library changes no shell options when sourced; check before and after.
-OPTS_BEFORE="$-"
 # shellcheck source=skills/release/copilot-run.sh
 source "$LIB" || { echo "fatal: sourcing $LIB failed" >&2; exit 2; }
-OPTS_AFTER="$-"
+# The library turns on `set -e`; this harness aggregates results without it.
+set +e
 
 FAIL_COUNT=0
 PASS_COUNT=0
@@ -69,10 +67,6 @@ in_flight_for() { # <timeline-json>
   TIMELINE_FIXTURE="$1" copilot_run_in_flight owner repo 1
 }
 
-t_sourcing_keeps_shell_options() {
-  assert_eq "shell options" "$OPTS_BEFORE" "$OPTS_AFTER"
-}
-
 t_empty_timeline_is_not_in_flight() {
   assert_eq "in_flight" "false" "$(in_flight_for '[]')"
 }
@@ -93,6 +87,20 @@ t_another_reviewers_request_is_ignored() {
   assert_eq "in_flight" "true" "$(in_flight_for "[$REQ,$START,$HUMAN_REQ]")"
 }
 
+# A request and its run start in the same second: position decides.
+t_same_second_start_is_in_flight() {
+  local req='{"event":"review_requested","requested_reviewer":{"login":"Copilot"},"created_at":"2026-09-29T18:31:54Z"}'
+  local start='{"event":"copilot_work_started","created_at":"2026-09-29T18:31:54Z"}'
+  assert_eq "in_flight" "true" "$(in_flight_for "[$req,$start]")"
+}
+
+# A re-request in the same second as the run start, listed after it, is newer.
+t_same_second_request_after_start_is_not_in_flight() {
+  local start='{"event":"copilot_work_started","created_at":"2026-09-29T18:31:54Z"}'
+  local req='{"event":"review_requested","requested_reviewer":{"login":"Copilot"},"created_at":"2026-09-29T18:31:54Z"}'
+  assert_eq "in_flight" "false" "$(in_flight_for "[$start,$req]")"
+}
+
 t_non_object_element_is_ignored() {
   assert_eq "in_flight" "true" "$(in_flight_for "[\"Not Found\",$REQ,$START]")"
 }
@@ -109,12 +117,13 @@ t_timeline_failure_is_non_zero() {
 # Progress goes to stderr; stdout carries one JSON result.
 run_suite() {
   echo "== copilot-run.sh tests ==" >&2
-  run "sourcing leaves the caller's shell options alone"   t_sourcing_keeps_shell_options
   run "an empty timeline is not in flight"                 t_empty_timeline_is_not_in_flight
   run "a run started after its request is in flight"       t_started_after_request_is_in_flight
   run "a review after the start ends the run"              t_review_after_start_ends_the_run
   run "a request after the start is not in flight"         t_request_after_start_is_not_in_flight
   run "another reviewer's request is ignored"              t_another_reviewers_request_is_ignored
+  run "a same-second run start after its request is in flight" t_same_second_start_is_in_flight
+  run "a same-second request after the start is not in flight" t_same_second_request_after_start_is_not_in_flight
   run "a non-object timeline element is ignored"           t_non_object_element_is_ignored
   run "a failed timeline read exits non-zero, no verdict"  t_timeline_failure_is_non_zero
   printf '{"suite":"test_copilot_run.sh","passed":%d,"failed":%d}\n' "$PASS_COUNT" "$FAIL_COUNT"

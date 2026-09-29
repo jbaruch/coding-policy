@@ -18,9 +18,12 @@
   a removal at 18:35:15 killed a run that finished at 18:36:11, and only the
   next run posted.
   - New `skills/release/copilot-run.sh` owns the review-request state both
-    callers read. `copilot_run_in_flight`: the timeline's latest
-    `copilot_work_started` is newer than both the latest Copilot
-    `review_requested` and the latest Copilot `reviewed` event.
+    callers read. `copilot_run_in_flight`: the timeline's last
+    `copilot_work_started` comes after both the last Copilot
+    `review_requested` and the last Copilot `reviewed` event, by timeline
+    position rather than timestamp, since a request and its run start can
+    share a second. `poll-pr-reviews.sh` reads the timeline before the
+    Copilot review, so a review posted between the two reads is seen.
     `fetch_requested_logins` and `requested_among` (pending requests from
     GraphQL `reviewRequests`, since REST `requested_reviewers` omits bots,
     #276) move there from `poll-pr-reviews.sh` unchanged. Both callers source

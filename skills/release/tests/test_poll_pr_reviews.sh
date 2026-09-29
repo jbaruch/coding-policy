@@ -119,6 +119,14 @@ gh() {
         esac
       done
       [[ $saw_paginate -eq 1 ]] || { echo "mock gh api: missing --paginate (required so the script never silently misses page 2+)" >&2; return 99; }
+      # MOCK_PATH_LOG, when set, records each paginated read's endpoint kind
+      # in order, so a test can assert the order of reads.
+      if [[ -n "${MOCK_PATH_LOG:-}" ]]; then
+        case "$path" in
+          *reviews*)  echo reviews  >> "$MOCK_PATH_LOG" ;;
+          *timeline*) echo timeline >> "$MOCK_PATH_LOG" ;;
+        esac
+      fi
       case "$path" in
         *reviews*)  echo "${MOCK_REVIEWS_BODY:-[]}" ;;
         *comments*) echo "${MOCK_COMMENTS_BODY:-[]}" ;;
@@ -187,6 +195,18 @@ t_main_marks_copilot_in_flight_requested() {
   out=$(main owner repo 1)
   assert_eq "copilot state"     "none" "$(echo "$out" | jq -r '.reviews.copilot.state')" || return 1
   assert_eq "copilot requested" "true" "$(echo "$out" | jq -r '.reviews.copilot.requested')"
+}
+
+# #641: the timeline is read before the reviews, so a review posted between
+# the two reads is seen by the review fetch rather than missed.
+t_main_reads_timeline_before_reviews() {
+  local MOCK_MERGE_STATE=clean MOCK_REQUESTED_BODY='[]' MOCK_REVIEWS_BODY='[]'
+  local MOCK_TIMELINE_BODY='[]' MOCK_PATH_LOG reads
+  MOCK_PATH_LOG=$(mktemp) || { echo "    FAIL: mktemp failed" >&2; return 1; }
+  main owner repo 1 >/dev/null
+  reads=$(tr '\n' ' ' < "$MOCK_PATH_LOG")
+  rm -f "$MOCK_PATH_LOG"
+  assert_eq "read order" "timeline reviews reviews " "$reads"
 }
 
 t_main_marks_copilot_in_flight_with_no_review_requested() {
@@ -709,6 +729,7 @@ run_suite() {
   run "main marks a requested-and-pending lane (#369)"                  t_main_marks_a_pending_lane_requested
   run "main marks an in-flight Copilot run requested (#641)"            t_main_marks_copilot_in_flight_requested
   run "main marks an in-flight first Copilot run requested (#641)"      t_main_marks_copilot_in_flight_with_no_review_requested
+  run "main reads the timeline before the reviews (#641)"             t_main_reads_timeline_before_reviews
   run "main: a review after the run started is not requested (#641)"   t_main_copilot_run_finished_by_posted_review_is_not_requested
   printf '{"suite":"test_poll_pr_reviews.sh","passed":%d,"failed":%d}\n' "$PASS_COUNT" "$FAIL_COUNT"
   [[ $FAIL_COUNT -eq 0 ]]
