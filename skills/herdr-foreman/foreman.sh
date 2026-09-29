@@ -28,7 +28,7 @@ main() {
     */*) skill_src="${BASH_SOURCE[0]%/*}" ;;
     *) skill_src=. ;;
   esac
-  if ! skill_dir="$(cd -- "${skill_src:-/}" && pwd && printf x)"; then
+  if ! skill_dir="$(CDPATH='' cd -- "${skill_src:-/}" && pwd && printf x)"; then
     echo "foreman: cannot enter the script directory ${skill_src:-/} — restore read and search access to the plugin directory, or reinstall the plugin, then re-run" >&2
     return 1
   fi

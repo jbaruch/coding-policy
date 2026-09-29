@@ -1,5 +1,18 @@
 # Changelog
 
+### Fixed
+
+- **A hostile `CDPATH` no longer corrupts a hook's or skill script's resolved
+  directory (Fixes #613).** The script-directory derivation ran a relative
+  `cd` inside a command substitution. With `CDPATH` set, `cd` searched it
+  first and printed the directory it chose, so the captured value named a
+  same-named decoy and gained an extra line. Every such site under `hooks/`,
+  `skills/` and `scripts/` now runs `CDPATH='' cd -- ...`, keeping the
+  trailing-newline sentinel. `hooks/tests/test_cdpath_script_dir.sh` runs
+  `hooks/herdr-supervision-stop.sh` and `skills/herdr-foreman/foreman.sh` by
+  relative path against a decoy `CDPATH` and asserts the directory each hands
+  on.
+
 ## 0.3.331 — 2026-09-29
 
 ### Fixed

@@ -65,7 +65,7 @@ main() {
   local checkout="$1"
   [ -d "$checkout" ] || die "'${checkout}' is not a directory -- pass the repository checkout"
   local skill_dir
-  skill_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)" || die "cannot resolve the skill directory -- reinstall the plugin"
+  skill_dir="$(CDPATH='' cd -- "$(dirname "${BASH_SOURCE[0]}")" && pwd)" || die "cannot resolve the skill directory -- reinstall the plugin"
 
   python3 - "$checkout" "$skill_dir" <<'PY'
 import json, os, stat, sys

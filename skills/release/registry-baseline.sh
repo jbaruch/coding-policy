@@ -24,7 +24,7 @@ case "${BASH_SOURCE[0]}" in
   */*) _here_src="${BASH_SOURCE[0]%/*}" ;;
   *) _here_src=. ;;
 esac
-if ! here="$(cd -- "${_here_src:-/}" && pwd && printf x)"; then
+if ! here="$(CDPATH='' cd -- "${_here_src:-/}" && pwd && printf x)"; then
   echo "registry-baseline: cannot enter the script directory ${_here_src:-/} — restore read and search access to the plugin directory, or reinstall the plugin, then re-run" >&2
   exit 2
 fi
