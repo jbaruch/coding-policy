@@ -40,6 +40,7 @@ import hashlib
 from pathlib import Path
 from functools import partial
 
+from . import report_contract
 from . import runnable
 from .composer import (
     COMPOSER_SETTLE_SEC,
@@ -976,6 +977,28 @@ def refuse_wrapping_markers(client, steps, agents_by_name, reports, contents=Non
         )
 
 
+def require_criteria(steps, contents=None):
+    """Refuse, before any input, a consultation brief without a contiguous `CRITERION 1..N` block.
+
+    The criteria count a consultation report answers is read from the brief
+    this dispatch sends, never from the report (`foreman/report_contract.py`,
+    #625). `contents` is `briefing_bytes`'s map of verified frozen bytes.
+    """
+    for step in steps:
+        if canonical_role(step["role"]) not in CONSULTATION_ROLES:
+            continue
+        try:
+            text = briefing_bytes(step["brief"], contents).decode("utf-8")
+        except (OSError, UnicodeDecodeError) as exc:
+            raise UsageError("Cannot read brief {} to count its acceptance criteria: {}. Restore it or correct its "
+                             "--brief path before dispatch.".format(step["brief"], exc), {"path": str(step["brief"])}) from None
+        try:
+            report_contract.brief_criteria(text)
+        except UsageError as exc:
+            raise UsageError("Brief for {} ({}): {}".format(step["role"], step["brief"], exc.message),
+                             {**exc.details, "role": step["role"]}) from None
+
+
 def check_all_ready(client, assignments, agents_by_name, warn=None):
     """Read every target's live status before anything is sent.
 
@@ -1082,6 +1105,7 @@ def apply(client, assignments, agents_by_name, paths, at, no_clear=False, settle
         if not step["tier"]:
             verify_running_permissions(client, agents_by_name[step["agent"]], step["pane_id"])
     refuse_wrapping_markers(client, steps, agents_by_name, reports, contents)
+    require_criteria(steps, contents)
 
     if retrospective_guard is not None:
         retrospective_guard.preflight(steps, statuses)
@@ -1330,4 +1354,5 @@ def dry_run(client, assignments, agents_by_name, paths, no_clear=False, settle_t
     for step in result["steps"]:
         if requirements is not None and step["role"] in requirements:
             step["requirements"] = requirements[step["role"]]
+    require_criteria(result["steps"])
     return result

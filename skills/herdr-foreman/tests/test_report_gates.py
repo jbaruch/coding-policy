@@ -13,7 +13,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from foreman import attention, cli, members, report_gates as gates, supervision  # noqa: E402 -- the skill dir is on sys.path only from here
 from foreman.errors import StateError, UsageError  # noqa: E402
-from tests.test_members import LATER, MembersCase  # noqa: E402
+from tests.test_members import LATER, MembersCase, seed_contract  # noqa: E402
 from foreman import supervision as store  # noqa: E402
 
 AT = "2026-09-27T12:00:00+00:00"
@@ -463,7 +463,9 @@ class InterleavingTest(GateCase):
 
 class CloseMemberGateTest(MembersCase):
     def gate(self, probabilities):
-        Path(self.report).write_text("B1 blocking: the parser accepts a quoted marker.\n")
+        # The report's recorded VERDICT is what an `accepted` closure reads first (#625).
+        Path(self.report).write_text("B1 blocking: the parser accepts a quoted marker.\nVERDICT: approved\n")
+        seed_contract(self)
         gates.record(self.path, {"labels": [label(self.report, probabilities)]}, "2026-09-01T12:01:00+00:00")
 
     def test_an_open_block_refuses_an_accepted_closure(self):
@@ -497,7 +499,8 @@ class CloseMemberGateTest(MembersCase):
 
     def test_a_gate_recorded_mid_closure_is_refused(self):
         self.emit()
-        Path(self.report).write_text("B1 blocking: the parser accepts a quoted marker.\n")
+        Path(self.report).write_text("B1 blocking: the parser accepts a quoted marker.\nVERDICT: approved\n")
+        seed_contract(self)
         self.write_ledger("accepted")
         attempts = []
         real_resolve = members.supervision.resolve

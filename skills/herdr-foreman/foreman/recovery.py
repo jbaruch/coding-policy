@@ -17,6 +17,7 @@ from . import runnable
 from .errors import UsageError
 from .chronology import assignment_after, latest_assignment, timestamp
 from .oracle import bound_oracle_problem
+from .report_contract import report_lines
 from .tiers import SEAT_SEPARATOR, canonical_role, require_seatable
 
 
@@ -670,6 +671,17 @@ def checkpoint(store, assignments, data, at, judge_agent):
     return record
 
 
+def accepted(assessments):
+    """The report-sourced assessments stating every criterion met (#625).
+
+    A migrated foreman assessment, or a report with an `unmet` criterion,
+    never satisfies the diagnose or judge-investigation gate.
+    """
+    from .engagement import all_met
+
+    return [row for row in assessments if all_met(row)]
+
+
 def investigated_after(assignments, row, task, developer_index):
     """True when `row` assesses an investigator consultation of `task` that
     followed the developer attempt at `developer_index`."""
@@ -705,15 +717,16 @@ def require_investigation_before_judge(store, assignments, task, investigations,
     expensive seat is never spent before that assessment exists. A judge
     dispatched for an ordinary dispute is untouched: the assessment gate
     applies only to a DIAGNOSIS at an exhausted allowance with no unspent
-    bound.
+    bound, and counts only accepted investigator records (`accepted`).
 
     `mode` is the dispatch's declared judge mode. With it, a diagnosis for a
     task whose ladder reached `stop` is refused before the round runs: `stop`
     ends implementation and the ladder, and the one operator-requested ruling a
     checkpoint may cite is bounded per task, so there is nothing such a round
     could record. An adjudication is untouched on the same task -- the judge
-    still owes a contested reviewer or tester verdict, a foreman override, or a
-    disputed bot finding during the release of the clean scope. An operator
+    still owes a contested reviewer or tester verdict, a report `VERDICT:` the
+    classifier gate contradicts, or a disputed bot finding during the release
+    of the clean scope. An operator
     plan authorized over the `stop` lifts the refusal, since the correction it
     authorizes is ordinary work.
 
@@ -739,8 +752,9 @@ def require_investigation_before_judge(store, assignments, task, investigations,
     developer = latest_assignment(assignments, task=task, role="developer", status="applied")
     if developer is None:
         return None
-    if not any(investigated_after(assignments, row, task, developer[0]) for row in investigations):
-        raise UsageError("Task {} sits at an exhausted allowance: consult the investigator and assess its report before dispatching the judge, which rules on that assessment.".format(task), {})
+    if not any(investigated_after(assignments, row, task, developer[0]) for row in accepted(investigations)):
+        raise UsageError("Task {} sits at an exhausted allowance: consult the investigator and record `{}` on its report, every criterion met, before dispatching the judge, which rules on that assessment.".format(
+            task, runnable.command("assess-specialist")), {})
     return None
 
 
@@ -852,8 +866,8 @@ def diagnose(store, assignments, data, at, judge_agent, enrolled_report, supervi
     enrollment has no diagnosis to record. `supervised` and `enrolled_report`
     are the caller's reading of that binding.
 
-    `investigations` are the foreman's assessed specialist consultations. The
-    judge rules on a prepared causal assessment rather than investigating from
+    `investigations` are the recorded specialist assessments; only accepted
+    ones count (`accepted`). The judge rules on a prepared causal assessment rather than investigating from
     scratch: the investigator's profile is written for "unclear causality or
     repeated unsuccessful fixes", and it is the cheaper seat (#408). One for
     this task after the latest developer attempt is required.
@@ -938,11 +952,11 @@ def diagnose(store, assignments, data, at, judge_agent, enrolled_report, supervi
     # it. The assessment time is what matters: an investigator dispatched early
     # and assessed after the judge finished is not what the judge read (#408).
     judge_at = timestamp(assignments[judge[0]].get("at"), "Judge assignment chronology")
-    consulted = [row for row in investigations
+    consulted = [row for row in accepted(investigations)
                  if investigated_after(assignments, row, data["task"], developer[0])
                  and timestamp(row["at"], "Investigator assessment chronology") < judge_at]
     if not consulted:
-        raise UsageError("A diagnosis rules on a prepared causal assessment: record an assessed investigator consultation for task {} after its latest developer attempt, assessed before the judge dispatch you cite.".format(data["task"]), {})
+        raise UsageError("A diagnosis rules on a prepared causal assessment: record an accepted investigator assessment (every criterion met) for task {} after its latest developer attempt, assessed before the judge dispatch you cite.".format(data["task"]), {})
     if supervised:
         if not isinstance(enrolled_report, str) or not enrolled_report.strip():
             raise UsageError("This foreman is bound, and no supervision enrollment binds a report to the pinned judge on task {}; dispatch the diagnosis through the bound round before recording it.".format(data["task"]), {})
@@ -965,7 +979,7 @@ def diagnose(store, assignments, data, at, judge_agent, enrolled_report, supervi
     assessment = next((row for row in consulted
                        if str(Path(row["report"]).resolve()) == str(Path(cited).resolve())), None)
     if assessment is None:
-        raise UsageError("ASSESSMENT names {}, which is not an assessed investigator report for task {} after its latest developer attempt; cite the report the diagnosis ruled on.".format(cited, data["task"]), {})
+        raise UsageError("ASSESSMENT names {}, which is not an accepted investigator report for task {} after its latest developer attempt; cite the report the diagnosis ruled on.".format(cited, data["task"]), {})
     # The saved receipt is a last-seen snapshot, never authority
     # (rules/stateful-artifacts.md Hints, Not Authority): a report deleted or
     # rewritten since its assessment would otherwise authorize a correction
@@ -1432,6 +1446,12 @@ def record_report(store, data, at):
     evidence, body = receipt(data["report"])
     if data["head_revision"] not in body:
         raise UsageError("The review report does not name the recorded full head SHA; collect the current-tip report before recording it.", {})
+    # The report's own VERDICT line decides, never the caller's reading of it
+    # (#625): a gap refuses the receipt, and so does a verdict that differs.
+    stated = report_lines(body, "reviewer")["verdict"]
+    if stated != data["verdict"]:
+        raise UsageError("The review report states `VERDICT: {}`, not {!r}; record the verdict the report carries.".format(
+            stated, data["verdict"]), {})
     result = {"schema_version": RECOVERY_SCHEMA_VERSION, "at": at, **data, "evidence": evidence}
     if record.get("report") and record["report"] != result:
         _event(store, at, "review_superseded", record["task"], {"dispatch": record["id"], "previous": record["report"]})

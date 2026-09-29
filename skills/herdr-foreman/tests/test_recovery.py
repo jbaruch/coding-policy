@@ -59,7 +59,7 @@ class RecoveryTests(unittest.TestCase):
         self.investigation = str(investigation)
         self.investigation_sha = hashlib.sha256(investigation.read_bytes()).hexdigest()
         self.review = self.root / "review.md"
-        self.review.write_text("Reviewed head: " + HEAD + "\nBlocking finding F1: quoted input is still accepted as a completion signal.\n")
+        self.review.write_text("Reviewed head: " + HEAD + "\nBlocking finding F1: quoted input is still accepted as a completion signal.\nVERDICT: blocking\n")
         # The assessment a change of direction rests on: what was tried, why it
         # failed, and the experiment that discriminates (#462).
         assessed = self.root / "assessed.md"
@@ -149,7 +149,8 @@ class RecoveryTests(unittest.TestCase):
                else hashlib.sha256(Path(report).read_bytes()).hexdigest() if Path(report).exists()
                else "d" * 64)
         return [{"task": TASK, "role": "investigator", "assignment_index": index, "at": at,
-                 "report": report, "report_evidence": {"path": report, "sha256": sha}}]
+                 "report": report, "report_evidence": {"path": report, "sha256": sha},
+                 "source": "report", "acceptance": [{"k": 1, "state": "met", "evidence": "reproduced"}]}]
 
     def run_diagnosis(self, data, judge="judge", enrolled=None, investigations=None):
         # The fixture's judge dispatch enrolls the report the request cites,
@@ -366,7 +367,7 @@ class RecoveryTests(unittest.TestCase):
         with self.assertRaisesRegex(UsageError, "must carry DIAGNOSIS"):
             self.run_diagnosis({**self.diagnosis("diag-1", "continue", 2),
                                 "judge_report": self._report_without_assessment()}, "judge")
-        with self.assertRaisesRegex(UsageError, "not an assessed investigator report"):
+        with self.assertRaisesRegex(UsageError, "not an accepted investigator report"):
             self.run_diagnosis(self.diagnosis("diag-1", "continue", 2, assessment=str(self.root / "other.md")), "judge")
         record = self.run_diagnosis(self.diagnosis("diag-1", "continue", 2), "judge")
         self.assertEqual(record["investigator_report"]["report"], self.investigation)
@@ -483,9 +484,11 @@ class RecoveryTests(unittest.TestCase):
         # Another task's assessment, and one predating the latest attempt, are
         # not this loop's evidence.
         with self.assertRaisesRegex(UsageError, "prepared causal assessment"):
-            self.run_diagnosis(request, investigations=[{"task": "another", "role": "investigator", "assignment_index": 0}])
+            self.run_diagnosis(request, investigations=[{"task": "another", "role": "investigator", "assignment_index": 0,
+                                                                           "source": "report", "acceptance": []}])
         with self.assertRaisesRegex(UsageError, "prepared causal assessment"):
-            self.run_diagnosis(request, investigations=[{"task": TASK, "role": "architect", "assignment_index": 0}])
+            self.run_diagnosis(request, investigations=[{"task": TASK, "role": "architect", "assignment_index": 0,
+                                                                           "source": "report", "acceptance": []}])
         with self.assertRaisesRegex(UsageError, "prepared causal assessment"):
             self.run_diagnosis(request, investigations=self.investigated(index=0))
         # A consultation delivered after the judge dispatch is not what it read.
@@ -495,7 +498,14 @@ class RecoveryTests(unittest.TestCase):
         # Dispatched early, assessed late: the judge still did not read it.
         with self.assertRaisesRegex(UsageError, "assessed before the judge dispatch"):
             self.run_diagnosis(request, investigations=self.investigated(index=seeded, at="2026-02-03T23:00:00+00:00"))
-        self.assertEqual(self.run_diagnosis(request, investigations=self.investigated(index=seeded, at=seeded_at))["remedy"], "continue")
+        # An unmet criterion, or a migrated foreman assessment, is no accepted
+        # investigation (#625).
+        accepted = self.investigated(index=seeded, at=seeded_at)
+        for change in ({"acceptance": [{"k": 1, "state": "unmet", "evidence": "no reproduction"}]},
+                       {"source": "foreman_assessment", "acceptance": None}):
+            with self.subTest(change=change), self.assertRaisesRegex(UsageError, "prepared causal assessment"):
+                self.run_diagnosis(request, investigations=[{**accepted[0], **change}])
+        self.assertEqual(self.run_diagnosis(request, investigations=accepted)["remedy"], "continue")
 
     def test_an_adjudication_report_is_not_a_diagnosis(self):
         # coding-policy#407: RULING and ACTION belong to adjudication; a mixed
@@ -1175,6 +1185,16 @@ class RecoveryTests(unittest.TestCase):
                        {"head_revision": "c" * 40}, {"changed_paths": ["outside/scope.py"]}):
             with self.subTest(change=change), self.assertRaises(UsageError):
                 record_report(self.store, {**data, **change}, AT)
+        # The report's own VERDICT line decides: a differing verdict and a
+        # contract gap both refuse (#625).
+        with self.assertRaisesRegex(UsageError, "VERDICT: blocking"):
+            record_report(self.store, {**data, "verdict": "approved"}, AT)
+        original = self.review.read_text()
+        for text in (original.replace("VERDICT: blocking\n", ""), original + "VERDICT: blocking\n"):
+            self.review.write_text(text)
+            with self.subTest(text=text), self.assertRaisesRegex(UsageError, "contract"):
+                record_report(self.store, data, AT)
+        self.review.write_text(original)
         record_report(self.store, data, AT)
         self.review.write_text("This report was replaced after it was recorded.\n")
         with self.assertRaisesRegex(UsageError, "artifact changed"):

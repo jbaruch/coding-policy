@@ -1,4 +1,4 @@
-"""Delivered specialist evidence survives replay and gates warm follow-ups."""
+"""Delivered report-contract evidence survives replay, migrates from schema 1, and gates warm follow-ups."""
 
 import copy
 import json
@@ -12,6 +12,7 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from foreman import engagement, recovery, report_delivery, supervision
+from foreman.assign import freeze_paths
 from foreman.errors import UsageError
 from foreman.state import STATE_SCHEMA_VERSION, add_assignment, empty_state, load_state_checked, save_state
 from tests import test_report_delivery as delivery_fixture
@@ -20,6 +21,27 @@ AT = "2026-02-03T10:00:00+00:00"
 LATER = "2026-02-03T11:00:00+00:00"
 REQUIREMENT = {"specialty": "ux", "required_capabilities": ["interaction-design"],
                "independent": False, "engagement": "onboarding-design"}
+#: A consultation report meeting a two-criterion brief.
+CONSULT_REPORT = ("Inspected onboarding. Recommend grouping account fields; implementation remains open.\n"
+                  "ACCEPTANCE 1/2: met — grouping proposal in section 2\n"
+                  "ACCEPTANCE 2/2: met — flow verified against the shipped screens\n")
+
+
+def frozen_brief(root, criteria=2, name="consult-brief.md"):
+    """A consultation brief carrying `criteria` CRITERION lines, frozen the way apply freezes it."""
+    source = Path(root) / name
+    lines = ["# Brief", "", "## Acceptance Criteria", ""]
+    lines += ["CRITERION {}: criterion number {}".format(k, k) for k in range(1, criteria + 1)]
+    source.write_text("\n".join(lines + ["", "## Report", "", "Write the report."]) + "\n")
+    return freeze_paths({"brief": str(source)})["brief"]
+
+
+def legacy_record(record):
+    """The schema-1 shape of a report-sourced record, as a pre-#625 foreman wrote it."""
+    keep = {key: record[key] for key in ("id", "dispatch", "report", "delivery", "at", "assignment_index", "task",
+                                         "role", "agent", "report_evidence", "delivery_evidence")}
+    return {**keep, "schema_version": 1, "outcome": "legacy outcome", "summary": "legacy summary",
+            "contribution": "none"}
 
 
 class EngagementTest(unittest.TestCase):
@@ -34,17 +56,16 @@ class EngagementTest(unittest.TestCase):
         who = supervision.identity("lead", str(self.root), "fixture", pane_id="lead-pane")
         supervision.bind(self.path, who, AT)
         self.report = self.root / "report.md"
-        self.report.write_text("Inspected onboarding. Recommend grouping account fields; implementation remains open.\n")
+        self.report.write_text(CONSULT_REPORT)
         self.delivery = self.root / "delivery.json"
         self.delivery.write_text(json.dumps({"found": True, "agent": "worker", "report_path": str(self.report)}))
         self.state = empty_state()
         self.dispatch = {"id": "consult-1", "fingerprint": "a" * 64, "task": "task-1", "role": "advisor",
                          "agent": "worker", "fix_round": None, "plan": None, "work": None,
-                         "requirements": copy.deepcopy(REQUIREMENT)}
+                         "requirements": copy.deepcopy(REQUIREMENT), "brief": frozen_brief(self.root)}
         self.seed(self.dispatch)
         self.data = {"id": "assessment-1", "dispatch": "consult-1", "report": str(self.report),
-                     "delivery": str(self.delivery), "outcome": "consultation assessed",
-                     "contribution": "design", "summary": "The proposal supplies interaction decisions; independent review remains required."}
+                     "delivery": str(self.delivery)}
 
     def seed(self, dispatch):
         recovery.reserve(self.state["recovery"], dispatch, AT)
@@ -63,12 +84,18 @@ class EngagementTest(unittest.TestCase):
         return supervision.resolve(self.path, {"id": self.dispatch["id"], "outcome": "Report assessed; consultation ended",
                                                "evidence": [str(self.report)]}, LATER)
 
-    def test_assessment_binds_actual_delivery_and_persists_without_accepting_task(self):
+    def test_assessment_records_report_lines_bound_to_delivery_without_accepting_task(self):
         before = copy.deepcopy(self.state["assignments"])
         result = self.assess()
         self.assertEqual(result["assignment_index"], 0)
         self.assertEqual(result["task"], "task-1")
-        self.assertEqual(result["contribution"], "design")
+        self.assertEqual(result["source"], "report")
+        self.assertEqual(result["criteria"], 2)
+        self.assertEqual([row["state"] for row in result["acceptance"]], ["met", "met"])
+        self.assertIsNone(result["verdict"])
+        self.assertIsNone(result["contribution"])
+        self.assertIsNone(result["legacy"])
+        self.assertEqual(result["brief_evidence"]["path"], self.dispatch["brief"])
         self.assertEqual(result["report_evidence"], recovery.receipt(str(self.report))[0])
         self.assertEqual(result["delivery_evidence"], recovery.receipt(str(self.delivery))[0])
         self.assertEqual(self.state["assignments"], before)
@@ -78,28 +105,79 @@ class EngagementTest(unittest.TestCase):
         self.assertTrue(usable)
         self.assertEqual(loaded, self.state)
 
+    def test_retired_foreman_inputs_are_refused_by_name(self):
+        for extra in ({"outcome": "done"}, {"summary": "read it"}, {"contribution": "none"}):
+            with self.subTest(extra=extra), self.assertRaises(UsageError) as caught:
+                self.assess({**self.data, **extra})
+            self.assertIn(next(iter(extra)), caught.exception.message)
+        self.assertEqual(self.state["specialist_assessments"], [])
+
+    def test_criteria_count_comes_from_the_dispatched_brief(self):
+        # The report says N=3; the frozen brief says 2. The brief decides.
+        self.report.write_text("ACCEPTANCE 1/3: met — a\nACCEPTANCE 2/3: met — b\nACCEPTANCE 3/3: met — c\n")
+        with self.assertRaises(UsageError) as caught:
+            self.assess()
+        self.assertIn("recorded 2", caught.exception.message)
+        self.assertEqual(self.state["specialist_assessments"], [])
+
+    def test_consultation_without_a_frozen_brief_is_refused(self):
+        self.state["recovery"]["dispatches"][0].pop("brief")
+        with self.assertRaises(UsageError) as caught:
+            self.assess()
+        self.assertIn("frozen brief", caught.exception.message)
+
+    def test_verdict_rule_follows_the_dispatch_specialty(self):
+        verdict = CONSULT_REPORT + "VERDICT: blocking\n"
+        for specialty, text, ok in (("security", verdict, True), ("ux-product", verdict, True),
+                                    ("documentation", verdict, True), ("security", CONSULT_REPORT, False),
+                                    ("ux", verdict, False), ("performance-reliability", verdict, False),
+                                    ("accessibility", CONSULT_REPORT, True)):
+            with self.subTest(specialty=specialty, verdict="VERDICT" in text):
+                self.state["recovery"]["dispatches"][0]["requirements"]["specialty"] = specialty
+                self.state["assignments"][0]["requirements"]["specialty"] = specialty
+                self.state["specialist_assessments"] = []
+                self.report.write_text(text)
+                if ok:
+                    result = self.assess()
+                    self.assertEqual(result["verdict"], "blocking" if "VERDICT" in text else None)
+                    engagement.validate_assessments(self.state)
+                else:
+                    with self.assertRaises(UsageError):
+                        self.assess()
+
     def test_a_review_seats_delivered_report_is_assessable(self):
         # The seat stays on the dispatch, so a slice's verdict reaches its
         # assessment through the responsibility it fills (#434).
         report = self.root / "slice-report.md"
-        report.write_text("Reviewed the api slice at the pushed tip; no blocking findings.\n")
+        report.write_text("Reviewed the api slice at the pushed tip; no blocking findings.\nVERDICT: approved\n")
         delivery = self.root / "slice-delivery.json"
         delivery.write_text(json.dumps({"found": True, "agent": "slicer", "report_path": str(report)}))
         seat = {**self.dispatch, "id": "slice-1", "role": "reviewer#api", "agent": "slicer",
                 "reviewer_scope": "verification"}
         seat.pop("requirements")
+        seat.pop("brief")
         self.seed({**seat, "report": str(report)})
-        result = self.assess({**self.data, "id": "assessment-slice", "dispatch": "slice-1",
-                              "report": str(report), "delivery": str(delivery),
-                              "contribution": "none", "outcome": "slice reviewed clean"})
+        result = self.assess({"id": "assessment-slice", "dispatch": "slice-1",
+                              "report": str(report), "delivery": str(delivery)})
         # The assessment record is independently versioned, so its `role` keeps
         # holding the RESPONSIBILITY. The seat stays on the dispatch the record
         # cites (#434).
         self.assertEqual(result["role"], "reviewer")
+        self.assertEqual(result["verdict"], "approved")
+        self.assertIsNone(result["criteria"])
         self.assertEqual(result["dispatch"], "slice-1")
         self.assertEqual(self.state["recovery"]["dispatches"][-1]["role"], "reviewer#api")
         self.assertEqual(self.state["assignments"][-1]["role"], "reviewer")
         engagement.validate_assessments(self.state)
+
+    def test_a_contract_gap_records_nothing(self):
+        for text in ("No lines at all.\n", CONSULT_REPORT + "ACCEPTANCE 2/2: met — again\n",
+                     CONSULT_REPORT + "VERDICT: approved\n", CONSULT_REPORT.replace("ACCEPTANCE 2/2: met — flow verified against the shipped screens\n", "")):
+            with self.subTest(text=text):
+                self.report.write_text(text)
+                with self.assertRaises(UsageError):
+                    self.assess()
+                self.assertEqual(self.state["specialist_assessments"], [])
 
     def test_exact_assessment_retry_preserves_original_time_and_unavailable_receipts(self):
         original = copy.deepcopy(self.assess())
@@ -112,8 +190,8 @@ class EngagementTest(unittest.TestCase):
     def test_changed_retry_refuses_without_rewriting_original_assessment(self):
         self.assess()
         before = copy.deepcopy(self.state)
-        for change in ({"summary": "Different conclusion"}, {"contribution": "none"}, {"report": str(self.root / "other.md")},
-                       {"delivery": str(self.root / "other.json")}, {"outcome": "whole task done"}):
+        for change in ({"report": str(self.root / "other.md")}, {"delivery": str(self.root / "other.json")},
+                       {"dispatch": "other-dispatch"}):
             with self.subTest(change=change), self.assertRaises(UsageError):
                 self.assess({**self.data, **change})
             self.assertEqual(self.state, before)
@@ -152,10 +230,7 @@ class EngagementTest(unittest.TestCase):
                 self.assess()
         self.assertEqual(self.state["specialist_assessments"], [])
 
-    def test_assessment_time_and_contribution_are_explicit(self):
-        for contribution in ("maybe", "", None):
-            with self.subTest(contribution=contribution), self.assertRaises(UsageError):
-                self.assess({**self.data, "contribution": contribution})
+    def test_assessment_time_is_explicit(self):
         for at in ("2026-02-03T09:00:00Z", "2026-02-03T11:00:00"):
             with self.subTest(at=at), self.assertRaises(UsageError):
                 self.assess(at=at)
@@ -188,10 +263,70 @@ class EngagementTest(unittest.TestCase):
         with self.assertRaises(UsageError):
             engagement.require_followup(self.state, self.path, {"advisor": "worker"})
 
+    def test_accepted_needs_every_criterion_met_and_current_bytes(self):
+        with self.assertRaises(UsageError):
+            engagement.require_accepted(self.state, "consult-1", str(self.report))
+        self.assess()
+        record = engagement.require_accepted(self.state, "consult-1", str(self.report))
+        self.assertEqual((record or {}).get("id"), "assessment-1")
+        self.report.write_text(CONSULT_REPORT + "late edit\n")
+        with self.assertRaises(UsageError):
+            engagement.require_accepted(self.state, "consult-1", str(self.report))
+        self.report.write_text(CONSULT_REPORT.replace("2/2: met", "2/2: unmet"))
+        self.assess({**self.data, "id": "assessment-2"})
+        with self.assertRaises(UsageError) as caught:
+            engagement.require_accepted(self.state, "consult-1", str(self.report))
+        self.assertEqual(dict(caught.exception.details or {}).get("unmet"), [2])
+
+    def test_legacy_record_migrates_idempotently_and_satisfies_nothing(self):
+        self.assess()
+        legacy = legacy_record(self.state["specialist_assessments"][0])
+        legacy["contribution"] = "design"
+        self.state["specialist_assessments"] = [legacy]
+        self.path.write_text(json.dumps(self.state))
+        loaded, usable = load_state_checked(self.path)
+        self.assertTrue(usable)
+        record = loaded["specialist_assessments"][0]
+        self.assertEqual(record["schema_version"], engagement.ASSESSMENT_SCHEMA_VERSION)
+        self.assertEqual(record["source"], "foreman_assessment")
+        self.assertEqual(record["legacy"], {"outcome": "legacy outcome", "summary": "legacy summary"})
+        self.assertEqual(record["contribution"], "design")
+        rewritten = self.path.read_bytes()
+        again, usable = load_state_checked(self.path)
+        self.assertTrue(usable)
+        self.assertEqual(self.path.read_bytes(), rewritten)
+        self.assertFalse(engagement.migrate_assessments(again))
+        self.assertEqual(again, loaded)
+        # A legacy record never accepts, never supports a warm follow-up, and
+        # never counts toward the diagnose or judge-investigation gate.
+        with self.assertRaises(UsageError):
+            engagement.require_accepted(again, "consult-1", str(self.report))
+        self.retire()
+        with self.assertRaises(UsageError):
+            engagement.require_followup(again, self.path, {"advisor": "worker"})
+        self.assertEqual(recovery.accepted(again["specialist_assessments"]), [])
+        with self.assertRaises(UsageError) as caught:
+            engagement.record_assessment(again, self.path, self.data, LATER)
+        self.assertIn("migrated foreman assessment", caught.exception.message)
+
+    def test_schema_one_record_with_schema_two_fields_is_corrupt(self):
+        self.assess()
+        legacy = legacy_record(self.state["specialist_assessments"][0])
+        for extra in ({"source": "report"}, {"verdict": None}, {"legacy": None}):
+            with self.subTest(extra=extra):
+                self.state["specialist_assessments"] = [{**legacy, **extra}]
+                self.path.write_text(json.dumps(self.state))
+                before = self.path.read_bytes()
+                _loaded, usable = load_state_checked(self.path, warn=lambda _: None)
+                self.assertFalse(usable)
+                self.assertEqual(self.path.read_bytes(), before)
+
     def test_corrupt_assessment_preserves_owner_file_and_refuses_read(self):
         self.assess()
-        variants = ({"schema_version": 2}, {"assignment_index": 9}, {"assignment_index": False}, {"agent": "other-worker"},
-                    {"task": "another-task"}, {"at": "2026-02-03T09:00:00Z"},
+        variants = ({"schema_version": 3}, {"assignment_index": 9}, {"assignment_index": False}, {"agent": "other-worker"},
+                    {"task": "another-task"}, {"at": "2026-02-03T09:00:00Z"}, {"source": "operator"},
+                    {"verdict": "approved"}, {"criteria": 3}, {"legacy": {"outcome": "x", "summary": "y"}},
+                    {"contribution": "maybe"},
                     {"report_evidence": {**self.state["specialist_assessments"][0]["report_evidence"], "path": "/other.md"}})
         for change in variants:
             with self.subTest(change=change):
@@ -271,6 +406,7 @@ class EngagementTest(unittest.TestCase):
         case = delivery_fixture.NativeDeliveryTests()
         case.setUp()
         self.addCleanup(case.doCleanups)
+        case.report.write_text("Current report bytes.\nVERDICT: approved\n")
         state, request = case.recovery_fixture()
         state["assignments"][0].update(role="reviewer", reviewer_scope="unknown", judge_mode=None)
         dispatch = state["recovery"]["dispatches"][0]
@@ -286,8 +422,7 @@ class EngagementTest(unittest.TestCase):
             "report": str(case.report), "pane_id": delivery_fixture.PANE, "native_session": None}, delivery_fixture.AT)
         delivery = case.tmp / "recovered-delivery.json"
         delivery.write_text(json.dumps(recovered))
-        data = {"id": "recovered-assessment", "dispatch": dispatch["id"], "report": str(case.report), "delivery": str(delivery),
-                "outcome": "Recovered report assessed", "contribution": "none", "summary": "Independent report read after native delivery recovery."}
+        data = {"id": "recovered-assessment", "dispatch": dispatch["id"], "report": str(case.report), "delivery": str(delivery)}
         return state, path, data, recovered
 
     def test_exact_owner_recovered_delivery_can_be_assessed(self):

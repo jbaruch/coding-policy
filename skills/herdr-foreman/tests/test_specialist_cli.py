@@ -12,14 +12,14 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from foreman import engagement, recovery, supervision
+from foreman import engagement, recovery, report_contract, supervision
 from foreman.config import load_config
 from foreman.state import add_assignment, empty_state, save_state
 from foreman.tiers import select_tier
 from tests import test_cli as fixture
 from tests import test_historical as historical_fixture
 from tests.fakes import FakeRunner, ScriptedReads, agent_json
-from tests.test_engagement import REQUIREMENT
+from tests.test_engagement import REQUIREMENT, frozen_brief
 from tests.tier_fixture import AT, tier_row
 
 SKILL = Path(__file__).resolve().parents[1]
@@ -37,7 +37,8 @@ class SpecialistCliTest(fixture.CliCase):
             agent["capabilities"] = ["interaction-design"] if agent["name"] == "claude" else []
         self.config.write_text(json.dumps(self.settings))
         self.briefs["advisor"] = self.tmp / "advisor.md"
-        self.briefs["advisor"].write_text("Inspect onboarding and report the evidence.")
+        self.briefs["advisor"].write_text("Inspect onboarding and report the evidence.\n\n"
+                                          "## Acceptance Criteria\n\nCRITERION 1: the onboarding flow is assessed\n")
         self.requirements_file = self.tmp / "requirements.json"
         self.requirements_file.write_text(json.dumps({"schema_version": 1, "assignments": {"advisor": REQUIREMENT}}))
         environment = patch.dict(os.environ, {"XDG_STATE_HOME": str(self.tmp / "xdg")})
@@ -226,7 +227,8 @@ class SpecialistCliTest(fixture.CliCase):
         native = {"source": "herdr:claude", "agent": "claude", "kind": "id", "value": "consult-session", "pane_id": "w2:p1"}
         state = empty_state()
         record = {"id": "prior:advisor", "fingerprint": "a" * 64, "task": "task-1", "role": "advisor", "agent": "claude",
-                  "fix_round": None, "plan": None, "work": None, "requirements": copy.deepcopy(REQUIREMENT)}
+                  "fix_round": None, "plan": None, "work": None, "requirements": copy.deepcopy(REQUIREMENT),
+                  "brief": frozen_brief(self.tmp, criteria=1, name="prior-brief.md")}
         recovery.reserve(state["recovery"], record, AT)
         add_assignment(state, "2026-01-08T11:00:00Z", "advisor", "claude", task="task-1", requirements=REQUIREMENT,
             cleared=True, clear_reason="automatic", context_session=native,
@@ -234,14 +236,15 @@ class SpecialistCliTest(fixture.CliCase):
         result = {key: value for key, value in state["assignments"][0].items() if key != "reviewer_scope"}
         recovery.finish_dispatch(state["recovery"], record["id"], {**result, "pane_id": "w2:p1"}, 0, AT)
         prior_report = self.tmp / "prior-report.md"
-        prior_report.write_text("Proposed the interaction; implementation remains pending.")
+        prior_report.write_text("Proposed the interaction; implementation remains pending.\n"
+                                "ACCEPTANCE 1/1: met — interaction proposal in section 1\nCONTRIBUTION: design\n")
         delivery = self.tmp / "prior-delivery.json"
         delivery.write_text(json.dumps({"found": True, "agent": "claude", "report_path": str(prior_report)}))
         supervision.enroll(self.state, {"id": record["id"], "agent": "claude", "task": "task-1", "report": str(prior_report),
                                        "pane_id": "w2:p1", "native_session": native}, AT)
         if assess:
             engagement.record_assessment(state, self.state, {"id": "assessed", "dispatch": record["id"], "report": str(prior_report),
-                "delivery": str(delivery), "outcome": "Consultation delivered", "contribution": "design", "summary": "Interaction proposal read and assessed."}, AT)
+                "delivery": str(delivery)}, AT)
         if retire:
             supervision.resolve(self.state, {"id": record["id"], "outcome": "Consultation ended", "evidence": [str(prior_report)]}, AT)
         save_state(self.state, state)
@@ -279,14 +282,42 @@ class SpecialistCliTest(fixture.CliCase):
     def test_assess_command_retrieves_real_receipts_without_worker_calls(self):
         self.seed_warm_consultation(assess=False, retire=False)
         data = {"id": "assessed-via-cli", "dispatch": "prior:advisor", "report": str(self.tmp / "prior-report.md"),
-                "delivery": str(self.tmp / "prior-delivery.json"), "outcome": "Delivered consultation",
-                "contribution": "none", "summary": "Read the report; no design contribution was made."}
+                "delivery": str(self.tmp / "prior-delivery.json")}
         record = self.tmp / "assessment.json"
+        # The foreman's own reading is no longer an input (#625).
+        record.write_text(json.dumps({**data, "outcome": "Delivered consultation", "contribution": "none"}))
+        code, _, err = self.invoke(["assess-specialist", "--record", str(record), "--now", AT], self._client({}))
+        self.assertEqual(code, 1)
+        self.assertIn("no longer takes", err)
         record.write_text(json.dumps(data))
         code, out, err = self.invoke(["assess-specialist", "--record", str(record), "--now", AT], self._client({}))
         self.assertEqual(code, 0, err)
-        self.assertEqual(json.loads(out)["contribution"], "none")
+        result = json.loads(out)
+        self.assertEqual((result["source"], result["criteria"], result["contribution"]), ("report", 1, "design"))
         self.assertEqual(self.runner.calls, [])
+
+    def test_assess_command_records_nothing_for_a_report_with_a_gap(self):
+        self.seed_warm_consultation(assess=False, retire=False)
+        (self.tmp / "prior-report.md").write_text("Proposed the interaction.\nVERDICT: approved\n")
+        (self.tmp / "prior-delivery.json").write_text(json.dumps(
+            {"found": True, "agent": "claude", "report_path": str(self.tmp / "prior-report.md")}))
+        record = self.tmp / "assessment.json"
+        record.write_text(json.dumps({"id": "gapped", "dispatch": "prior:advisor", "report": str(self.tmp / "prior-report.md"),
+                                      "delivery": str(self.tmp / "prior-delivery.json")}))
+        code, _, err = self.invoke(["assess-specialist", "--record", str(record), "--now", AT], self._client({}))
+        self.assertEqual(code, 1)
+        gaps = json.loads(err)["details"]["gaps"]
+        self.assertTrue(any("extra VERDICT" in gap for gap in gaps), gaps)
+        self.assertTrue(any("missing ACCEPTANCE 1" in gap for gap in gaps), gaps)
+        self.assertEqual(self.saved()["specialist_assessments"], [])
+
+    def test_apply_refuses_a_consultation_brief_without_criteria_before_worker_input(self):
+        self.bind()
+        self.briefs["advisor"].write_text("Inspect onboarding.\n\n## Acceptance Criteria\n\nCRITERION 2: gapped\n")
+        code, _, err = self.invoke(self.apply_args(), self._client({"claude": "idle"}))
+        self.assertEqual(code, 1)
+        self.assertIn("CRITERION", err)
+        self.assertEqual(self.runner.writes(), [])
 
     def test_imported_correction_rejects_other_contributors_and_accepts_independent_reviewer(self):
         case = historical_fixture.HistoricalCommandsTest()
@@ -324,7 +355,8 @@ class SpecialistCliTest(fixture.CliCase):
         for role in ("advisor", "investigator", "architect"):
             values["roles"][role] = {"RESPONSIBILITY": role, "SPECIALTY": "ux", "TASK": "task-1", "ISSUE": "Onboarding",
                 "BRANCH": "feat/onboarding", "OBJECTIVE": "Assess the account setup interaction",
-                "ACCEPTANCE_CRITERIA": "A source-linked answer to the assigned question", "SCOPE_LIMITS": "Read source; write the report",
+                "ACCEPTANCE_CRITERIA": "CRITERION 1: a source-linked answer to the assigned question\nCRITERION 2: the alternatives are compared",
+                "SCOPE_LIMITS": "Read source; write the report",
                 "INPUTS": "Read the accepted interaction", "TOOLS_AND_SKILLS": "Available browser fixture",
                 "KNOWLEDGE": "Saved project conventions", "CONTRIBUTION_HISTORY": "No prior contributions",
                 "REPORT": "/r/" + role + ".md"}
@@ -341,6 +373,8 @@ class SpecialistCliTest(fixture.CliCase):
             self.assertIn("REPORT: /r/" + role + ".md", body)
             self.assertIn("Assess the account setup interaction", body)
             self.assertNotIn("{{", body)
+            # The dispatched brief's criteria count is what the report answers (#625).
+            self.assertEqual(report_contract.brief_criteria(body), 2)
         self.assertEqual(set(files["briefs"]), {"advisor", "investigator", "architect"})
 
 

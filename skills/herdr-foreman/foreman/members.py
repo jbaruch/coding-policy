@@ -5,10 +5,13 @@ composes the chain that ends an assignment's observation, and `check-member`
 the chain that checks whether its report landed. Each composes the existing
 owner functions; neither reimplements them.
 
-`close-member` enforces the order the chain requires: the foreman's assessed
-outcome must already be in the task ledger before any event is acknowledged
-or the enrollment resolved (rules/agent-team-operation.md Fleet Supervision:
-acknowledging an observation never accepts the assignment). The ledger stays
+`close-member` enforces the order the chain requires: the assessed outcome
+must already be in the task ledger before any event is acknowledged or the
+enrollment resolved (rules/agent-team-operation.md Fleet Supervision:
+acknowledging an observation never accepts the assignment). An `accepted`
+outcome for a reviewer, tester or consultation also needs the report's
+recorded contract lines (`engagement.require_accepted`, #625); `needs_work`
+and every other outcome are never refused on that ground. The ledger stays
 the foreman's; this reads it and writes nothing to it. A repeated call replays
 the identical acknowledgement and resolution.
 
@@ -60,7 +63,7 @@ DECISION_MEANINGS = {
     "assignment": {
         "pending": "Dispatch is planned or confirmed; no report has been assessed",
         "reported": "Delivery was confirmed; the foreman has not yet accepted the work",
-        "accepted": "The foreman read the report and verified that the assignment's acceptance criteria hold",
+        "accepted": "The report's recorded contract lines support acceptance and its classifier gates are clear; a developer's work rests on its reviewer's and tester's verdicts",
         "needs_work": "Evidence shows unmet criteria or invalidates a prior acceptance",
         "blocked": "A specific unresolved dependency or decision prevents the assignment from proceeding",
         "unavailable": "A report is missing or unavailable under the wait/recovery contract",
@@ -240,6 +243,8 @@ def close(state_path, enrollment, ledger, at):
     member = _member(supervision.load(state_path), enrollment)
     assignment = supervision.expected_assignment(member)
     event = assessed_event(ledger, assignment, state_path)
+    if event["decision"] == "accepted":
+        _require_contract(state_path, enrollment, assignment["report"])
     # A classifier gate only adds friction: an open re-read refuses any
     # closure, an open block refuses an accepted one (foreman/report_gates.py).
     # The gate lock is held through the closure, so no gate lands in between.
@@ -255,6 +260,17 @@ def close(state_path, enrollment, ledger, at):
         resolved = supervision.resolve(state_path, {"id": enrollment, "outcome": outcome, "evidence": [ledger]}, at)
     return {"schema_version": 1, "enrollment": enrollment, "ledger_event": event.get("id"),
             "decision": event["decision"], "acknowledged": acknowledged, "resolved": resolved}
+
+
+def _require_contract(state_path, enrollment, report):
+    """Refuse an `accepted` closure the report's recorded contract lines do not support."""
+    from .engagement import require_accepted
+
+    state, usable = load_state_checked(state_path, persist_migration=False)
+    if not usable:
+        raise StateError("The dispatch state at {} is unusable, so the report's recorded contract lines cannot be "
+                         "read; restore it before accepting.".format(state_path), {"state": str(state_path)})
+    require_accepted(state, enrollment, report)
 
 
 def wait_inputs(state_path, enrollment, warn=None):
