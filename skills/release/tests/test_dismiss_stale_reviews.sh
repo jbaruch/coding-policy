@@ -48,6 +48,8 @@ run() {
 # Mock `gh api` — two surfaces:
 #   GET  repos/<o>/<r>/pulls/<N>/reviews?per_page=100   -> $MOCK_REVIEWS_BODY
 #   PUT  repos/<o>/<r>/pulls/<N>/reviews/<id>/dismissals -> log <id>, return {}
+#        (MOCK_PUT_FAIL=1: exit 1 with a parse error on stderr, log nothing)
+#   GET  repos/<o>/<r>/pulls/<N>/reviews/<id>           -> state $MOCK_REVIEW_STATE
 gh() {
   [[ "$1" == "api" ]] || { echo "mock gh: unsupported invocation: $*" >&2; return 2; }
   shift
@@ -64,8 +66,18 @@ gh() {
 
   if [[ "$method" == "PUT" && "$path" == *"/dismissals" ]]; then
     local rid="${path%/dismissals}"; rid="${rid##*/}"
+    if [[ "${MOCK_PUT_FAIL:-0}" == "1" ]]; then
+      echo "unexpected end of JSON input" >&2
+      return 1
+    fi
     echo "$rid" >> "$DISMISS_LOG"
     echo '{}'
+    return 0
+  fi
+
+  # Single-review read-back after a failed PUT: GET .../reviews/<id>.
+  if [[ "$path" =~ /reviews/[0-9]+$ ]]; then
+    printf '{"id":%s,"state":"%s"}\n' "${path##*/}" "${MOCK_REVIEW_STATE:-CHANGES_REQUESTED}"
     return 0
   fi
 
@@ -260,6 +272,42 @@ t_login_is_glob_safe_against_cwd_files() {
   assert_eq "one dismissal" "1" "$(dismiss_count)"
 }
 
+# PUT exits non-zero on an unparseable response after GitHub already
+# dismissed the review (#647): the read-back says DISMISSED, so the
+# dismissal counts, exit 0, with a warning on stderr.
+t_failed_put_but_dismissed_is_success() {
+  MOCK_REVIEWS_BODY='[
+    {"id":121,"state":"CHANGES_REQUESTED","commit_id":"aaa","submitted_at":"2026-01-01T00:00:00Z","user":{"login":"github-actions[bot]"}},
+    {"id":122,"state":"COMMENTED","commit_id":"bbb","submitted_at":"2026-01-02T00:00:00Z","user":{"login":"github-actions[bot]"}}
+  ]'
+  local out rc err_file err ids
+  err_file=$(mktemp) || { echo "    mktemp failed" >&2; return 1; }
+  out=$(MOCK_PUT_FAIL=1 MOCK_REVIEW_STATE=DISMISSED main "owner" "repo" "1" 2>"$err_file")
+  rc=$?
+  err=$(<"$err_file"); rm -f "$err_file"
+  assert_eq "exit code" "0" "$rc" || return 1
+  ids=$(jq -r '.dismissed | map(.review_id) | join(",")' <<<"$out")
+  assert_eq "dismissed review_id" "121" "$ids" || return 1
+  [[ "$err" == *"warning: dismissal response for review 121"* ]] \
+    || { echo "    FAIL: no parse warning on stderr: ${err}" >&2; return 1; }
+}
+
+# PUT exits non-zero and the review still reads CHANGES_REQUESTED: failure.
+t_failed_put_not_dismissed_is_failure() {
+  MOCK_REVIEWS_BODY='[
+    {"id":131,"state":"CHANGES_REQUESTED","commit_id":"aaa","submitted_at":"2026-01-01T00:00:00Z","user":{"login":"github-actions[bot]"}},
+    {"id":132,"state":"COMMENTED","commit_id":"bbb","submitted_at":"2026-01-02T00:00:00Z","user":{"login":"github-actions[bot]"}}
+  ]'
+  local rc err_file err
+  err_file=$(mktemp) || { echo "    mktemp failed" >&2; return 1; }
+  (MOCK_PUT_FAIL=1 MOCK_REVIEW_STATE=CHANGES_REQUESTED main "owner" "repo" "1" >/dev/null 2>"$err_file")
+  rc=$?
+  err=$(<"$err_file"); rm -f "$err_file"
+  assert_eq "exit code" "1" "$rc" || return 1
+  [[ "$err" == *"unexpected end of JSON input"* ]] \
+    || { echo "    FAIL: PUT error not surfaced: ${err}" >&2; return 1; }
+}
+
 # --- runner ---
 
 # `run_suite`, not `main`: the sourced script under test owns `main`.
@@ -277,6 +325,8 @@ run_suite() {
   run "fleet reviewer swept only after ruling"    t_fleet_reviewer_swept_only_after_ruled_dismissal
   run "multiple stale CRs all dismissed"          t_multiple_stale_crs_all_dismissed
   run "login is glob-safe against cwd files"      t_login_is_glob_safe_against_cwd_files
+  run "failed PUT but DISMISSED is success"       t_failed_put_but_dismissed_is_success
+  run "failed PUT not dismissed is failure"       t_failed_put_not_dismissed_is_failure
   printf '{"suite":"test_dismiss_stale_reviews.sh","passed":%d,"failed":%d}\n' "$PASS_COUNT" "$FAIL_COUNT"
   [[ $FAIL_COUNT -eq 0 ]]
 }
