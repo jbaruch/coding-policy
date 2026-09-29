@@ -174,6 +174,38 @@ t_main_marks_a_pending_lane_requested() {
   assert_eq "copilot requested" "true" "$(echo "$out" | jq -r '.reviews.copilot.requested')"
 }
 
+# #641: a started Copilot run consumes its request, so `requested` read false
+# while the review was running and the watcher returned review_unrequested. A
+# work-started event newer than the latest Copilot request and review on the
+# timeline marks the lane requested. Locals keep the fixtures out of later
+# tests.
+t_main_marks_copilot_in_flight_requested() {
+  local MOCK_MERGE_STATE=clean MOCK_REQUESTED_BODY='[]'
+  local MOCK_REVIEWS_BODY='[{"user":{"login":"copilot-pull-request-reviewer[bot]"},"state":"COMMENTED","submitted_at":"2026-09-29T17:00:00Z","body":"old","commit_id":"'"$OLD_SHA"'"}]'
+  local MOCK_TIMELINE_BODY='[{"event":"reviewed","user":{"login":"Copilot"},"submitted_at":"2026-09-29T17:00:00Z"},{"event":"review_requested","requested_reviewer":{"login":"Copilot"},"created_at":"2026-09-29T18:31:54Z"},{"event":"copilot_work_started","created_at":"2026-09-29T18:32:51Z"}]'
+  local out
+  out=$(main owner repo 1)
+  assert_eq "copilot state"     "none" "$(echo "$out" | jq -r '.reviews.copilot.state')" || return 1
+  assert_eq "copilot requested" "true" "$(echo "$out" | jq -r '.reviews.copilot.requested')"
+}
+
+t_main_marks_copilot_in_flight_with_no_review_requested() {
+  local MOCK_MERGE_STATE=clean MOCK_REQUESTED_BODY='[]' MOCK_REVIEWS_BODY='[]'
+  local MOCK_TIMELINE_BODY='[{"event":"copilot_work_started","created_at":"2026-09-29T18:32:51Z"}]'
+  local out
+  out=$(main owner repo 1)
+  assert_eq "copilot requested" "true" "$(echo "$out" | jq -r '.reviews.copilot.requested')"
+}
+
+t_main_copilot_run_finished_by_posted_review_is_not_requested() {
+  local MOCK_MERGE_STATE=clean MOCK_REQUESTED_BODY='[]'
+  local MOCK_REVIEWS_BODY='[{"user":{"login":"copilot-pull-request-reviewer[bot]"},"state":"COMMENTED","submitted_at":"2026-09-29T18:40:00Z","body":"done","commit_id":"'"$OLD_SHA"'"}]'
+  local MOCK_TIMELINE_BODY='[{"event":"copilot_work_started","created_at":"2026-09-29T18:32:51Z"},{"event":"reviewed","user":{"login":"Copilot"},"submitted_at":"2026-09-29T18:40:00Z"}]'
+  local out
+  out=$(main owner repo 1)
+  assert_eq "copilot requested" "false" "$(echo "$out" | jq -r '.reviews.copilot.requested')"
+}
+
 t_fetch_merge_state_clean_returns_mergeable_envelope() {
   MOCK_MERGE_STATE=clean
   local out status mergeable
@@ -675,6 +707,9 @@ run_suite() {
   run "requested_among: another reviewer's request is not this one"     t_requested_among_ignores_another_reviewer
   run "main marks a lane nobody requested (#369)"                       t_main_marks_an_unrequested_lane
   run "main marks a requested-and-pending lane (#369)"                  t_main_marks_a_pending_lane_requested
+  run "main marks an in-flight Copilot run requested (#641)"            t_main_marks_copilot_in_flight_requested
+  run "main marks an in-flight first Copilot run requested (#641)"      t_main_marks_copilot_in_flight_with_no_review_requested
+  run "main: a review after the run started is not requested (#641)"   t_main_copilot_run_finished_by_posted_review_is_not_requested
   printf '{"suite":"test_poll_pr_reviews.sh","passed":%d,"failed":%d}\n' "$PASS_COUNT" "$FAIL_COUNT"
   [[ $FAIL_COUNT -eq 0 ]]
 }

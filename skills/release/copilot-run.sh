@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+# Shared Copilot run-state predicate. Sourced by poll-pr-reviews.sh and
+# request-copilot-review.sh — defines copilot_run_in_flight() with no side
+# effects and no TOP-LEVEL `set` changes, so sourcing it under the caller's
+# `set -euo pipefail` is safe. Direct execution is a guarded CLI (entry-point
+# guard at the foot of the file): `copilot-run.sh <owner> <repo> <pr-number>`
+# prints {"in_flight": bool} and exits 0, or exits non-zero with a stderr
+# diagnostic when the timeline read fails.
+#
+# copilot_run_in_flight <owner> <repo> <pr-number>: prints true when the PR
+# timeline's latest `copilot_work_started` is newer than both the latest
+# Copilot `review_requested` and the latest Copilot `reviewed` event, else
+# false. A started run consumes its request, and removing a request while the
+# run is in progress discards the run's result (#641). Timestamps are ISO-8601
+# UTC, so string order is time order.
+
+copilot_run_in_flight() {
+  local owner="$1" repo="$2" pr="$3" timeline
+  if ! timeline=$(gh api --paginate "repos/${owner}/${repo}/issues/${pr}/timeline?per_page=100" | jq -s 'add // []'); then
+    echo "error: failed to read the timeline of ${owner}/${repo}#${pr} — check 'gh auth status', then retry 'gh api --paginate repos/${owner}/${repo}/issues/${pr}/timeline'" >&2
+    return 1
+  fi
+  printf '%s' "$timeline" | jq '
+    [.[] | select(type == "object")] as $ev
+    | ([$ev[] | select(.event == "copilot_work_started") | .created_at] | max) as $w
+    | ([$ev[] | select(.event == "review_requested")
+              | select((.requested_reviewer.login // "") | test("copilot"; "i"))
+              | .created_at] | max) as $r
+    | ([$ev[] | select(.event == "reviewed")
+              | select((.user.login // "") | test("copilot"; "i"))
+              | .submitted_at] | max) as $s
+    | $w != null and ($r == null or $w > $r) and ($s == null or $w > $s)'
+}
+
+# Direct execution: a guarded CLI (rules/file-hygiene.md Standalone Scripts).
+# `set -euo pipefail` is scoped HERE, so sourcing this file never enables it
+# in the caller's shell (rules/error-handling.md).
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+  set -euo pipefail
+  if [[ $# -ne 3 ]]; then
+    echo "usage: $0 <owner> <repo> <pr-number>" >&2
+    exit 2
+  fi
+  _in_flight=$(copilot_run_in_flight "$1" "$2" "$3")
+  python3 -c 'import json, sys; print(json.dumps({"in_flight": sys.argv[1] == "true"}))' "$_in_flight"
+fi

@@ -51,8 +51,9 @@
 # a hand dismissal carrying the marker violates rules/ci-safety.md
 # Judge-Ruled-Review Dismissal Carve-Out.
 #
-# `requested` reports exactly one fact: a review request for that login is still
-# pending on the PR. It separates two states a bare `state: "none"` conflates
+# `requested` reports exactly one fact: a review for that login is still owed
+# on a request — pending on the PR, or for Copilot a run in flight (below). It
+# separates two states a bare `state: "none"` conflates
 # for a REQUEST-TRIGGERED reviewer (Copilot): asked for and not yet answered
 # (waiting is meaningful), versus never asked (waiting cannot produce it, and a
 # reader without GitHub write scope cannot ask). A developer collecting its own
@@ -67,12 +68,36 @@
 # an unrequested Copilot lane. Resolve a reviewer's arrival by how it is
 # triggered (rules/ci-safety.md Always Watch CI), never by this field alone.
 #
+# Copilot's `requested` is also true while its run is in flight — predicate in
+# copilot-run.sh — since a started run consumes the request (#641).
+#
 # `merge_state.status == "DIRTY"` / `mergeable == "CONFLICTING"` means GitHub
 # couldn't create `refs/pull/N/merge` and silently skipped `pull_request:`
 # workflows — agent should surface a rebase recommendation rather than keep
 # polling `ci.status: none`.
 
 set -euo pipefail
+
+# copilot-run.sh provides copilot_run_in_flight, shared with request-copilot-review.sh.
+# Sourced, not run, so a caller's in-process `gh` mock reaches it. Command
+# substitution strips every trailing newline, so the script directory never
+# passes through one bare: parameter expansion derives it (#487), and a
+# sentinel carries `pwd` across the strip (#466).
+case "${BASH_SOURCE[0]}" in
+  */*) _ppr_src="${BASH_SOURCE[0]%/*}" ;;
+  *) _ppr_src=. ;;
+esac
+if ! _ppr_dir="$(CDPATH='' cd -- "${_ppr_src:-/}" && pwd && printf x)"; then
+  echo "error: cannot enter the script directory ${_ppr_src:-/} — restore read and search access to the plugin directory, or reinstall the plugin, then re-run" >&2
+  exit 2
+fi
+_ppr_dir="${_ppr_dir%x}"
+_ppr_dir="${_ppr_dir%$'\n'}"
+# shellcheck source=skills/release/copilot-run.sh
+if ! source "${_ppr_dir}/copilot-run.sh"; then
+  echo "error: cannot source ${_ppr_dir}/copilot-run.sh — the release skill tree is incomplete; re-clone the repo or re-install the plugin, then re-run" >&2
+  exit 2
+fi
 
 # Bot logins, by surface. A reviewer does NOT necessarily author its reviews
 # and its inline comments under the same login, and the policy reviewer's login
@@ -363,6 +388,10 @@ main() {
   codex_review=$(resolve_ruled_dismissal "$owner" "$repo" "$pr_number" "$codex_review") \
     || { echo "error: failed to read the dismissal of the policy review on ${owner}/${repo}#${pr_number} — inspect 'gh api --paginate repos/${owner}/${repo}/issues/${pr_number}/timeline', then retry" >&2; exit 1; }
   copilot_review=$(printf '%s' "$copilot_review" | jq 'del(._dismissed_review_id)')
+  if [[ "$copilot_requested" == false ]]; then
+    copilot_requested=$(copilot_run_in_flight "$owner" "$repo" "$pr_number") \
+      || { echo "error: failed to read whether a Copilot run is in flight on ${owner}/${repo}#${pr_number} — the diagnostic above names the failing read; fix it, then retry" >&2; exit 1; }
+  fi
   # Resolve each verdict against head — stale reviews collapse to "none".
   codex_review=$(resolve_review_against_head   "$codex_review"   "$head_sha")
   copilot_review=$(resolve_review_against_head "$copilot_review" "$head_sha")

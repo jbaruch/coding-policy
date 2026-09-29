@@ -40,9 +40,9 @@
 #   rc 0, result "dirty"             — branch conflicts with the base; GitHub
 #                                      skipped the pull_request: workflows.
 #                                      Rebase, resolve, force-push, re-run.
-#   rc 1, result "review_unrequested" — Copilot has no verdict at this head and
-#                                      no pending request, so no wait can
-#                                      produce one. Request it
+#   rc 1, result "review_unrequested" — Copilot has no verdict at this head,
+#                                      no pending request and no run in
+#                                      flight, so no wait can produce one. Request it
 #                                      (request-copilot-review.sh) and re-run.
 #                                      The policy reviewer runs on the push and
 #                                      never produces this result.
@@ -178,13 +178,13 @@ main() {
       emit_and_exit "ready" "$attempts" "$elapsed" "$snapshot" 0
     fi
 
-    # Copilot is request-triggered: with no posted verdict at this head and no
-    # pending request, nothing is coming and the budget would be spent proving
+    # Copilot is request-triggered: with no posted verdict at this head, no
+    # pending request and no run in flight, nothing is coming and the budget would be spent proving
     # it. Say so at once instead (rules/ci-safety.md Always Watch CI). The
     # policy reviewer is push-triggered and never carries a pending request, so
     # it is not read this way.
     if [[ "$copilot" == "none" && "$copilot_requested" == "false" ]]; then
-      echo "error: Copilot has no review at this head and no pending request on ${owner}/${repo}#${pr} — run 'bash ${SCRIPT_DIR}/request-copilot-review.sh ${owner} ${repo} ${pr}' and re-run this watch; waiting cannot produce a review nobody asked for" >&2
+      echo "error: Copilot has no review at this head, no pending request and no run in flight on ${owner}/${repo}#${pr} — run 'bash ${SCRIPT_DIR}/request-copilot-review.sh ${owner} ${repo} ${pr}' and re-run this watch; waiting cannot produce a review nobody asked for" >&2
       emit_and_exit "review_unrequested" "$attempts" "$elapsed" "$snapshot" 1
     fi
 

@@ -19,6 +19,8 @@
 #   4. confirm-publish-landed.sh -> runs registry-version.sh, gate passes.
 #   5. smart-publish.sh          -> runs registry-version.sh.
 #   6. watch-pr-reviews.sh       -> runs poll-pr-reviews.sh.
+#   7. poll-pr-reviews.sh        -> sources copilot-run.sh.
+#   8. request-copilot-review.sh -> sources copilot-run.sh.
 #
 # Run: bash skills/release/tests/test_script_dir_newline.sh
 set -uo pipefail
@@ -141,6 +143,16 @@ main() {
   run watch-pr-reviews.sh owner repo 1
   if [[ $RC -eq 2 && "$ERRTEXT" == *"poll-pr-reviews.sh failed"* ]] && reached poll-pr-reviews.sh; then
     pass; else fail "watch-pr-reviews.sh: expected its sibling run, got RC=$RC OUT=$OUT ERR=$ERRTEXT"; fi
+
+  # 7-8. The library is sourced at load time; the usage error that follows
+  #      shows the script got past it.
+  for _script in poll-pr-reviews.sh request-copilot-review.sh; do
+    stage "copilot-run-${_script%.sh}" "$_script"
+    lib_stub "$STAGE/copilot-run.sh" copilot_run_in_flight
+    run "$_script"
+    if [[ $RC -eq 2 && "$ERRTEXT" == *usage:* ]] && reached copilot-run.sh; then
+      pass; else fail "${_script}: expected copilot-run.sh sourced, got RC=$RC ERR=$ERRTEXT"; fi
+  done
 
   echo "─────────────────────────────────────────────" >&2
   if [[ $FAIL -gt 0 ]]; then echo "FAILED: ${FAIL} failed, ${PASS} passed" >&2; exit 1; fi

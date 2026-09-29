@@ -11,12 +11,41 @@
 # never lands in `reviewRequests` — and it would clear reviewers already
 # requested on the PR (issue #297).
 #
+# Before requesting, it removes any pending Copilot request via REST DELETE
+# `reviewers[]=Copilot` — a pending request Copilot dropped turns every
+# re-request into a no-op (issue #641); a 422 on the removal is nothing pending.
+# A Copilot run in flight (copilot-run.sh) is left alone: removing its request
+# discards its result, so the script neither removes nor requests (#641).
+#
 # Usage: request-copilot-review.sh <owner> <repo> <pr-number>
 # Env:   COPILOT_BOT_ID (override default BOT_kgDOCnlnWA)
-# Out:   one JSON object on stdout: {"pr_number","bot_id","requested_reviewers"}
-# Exit:  0 on verified request; non-zero with stderr diagnostic on failure
+# Out:   one JSON object on stdout: {"pr_number","bot_id","requested_reviewers"};
+#        a run in flight emits {"pr_number","in_flight":true} instead
+# Exit:  0 on verified request or a run in flight; non-zero with stderr
+#        diagnostic on failure
 
 set -euo pipefail
+
+# copilot-run.sh provides copilot_run_in_flight, shared with poll-pr-reviews.sh.
+# Sourced, not run, so a caller's in-process `gh` mock reaches it. Command
+# substitution strips every trailing newline, so the script directory never
+# passes through one bare: parameter expansion derives it (#487), and a
+# sentinel carries `pwd` across the strip (#466).
+case "${BASH_SOURCE[0]}" in
+  */*) _rcr_src="${BASH_SOURCE[0]%/*}" ;;
+  *) _rcr_src=. ;;
+esac
+if ! _rcr_dir="$(CDPATH='' cd -- "${_rcr_src:-/}" && pwd && printf x)"; then
+  echo "error: cannot enter the script directory ${_rcr_src:-/} — restore read and search access to the plugin directory, or reinstall the plugin, then re-run" >&2
+  exit 2
+fi
+_rcr_dir="${_rcr_dir%x}"
+_rcr_dir="${_rcr_dir%$'\n'}"
+# shellcheck source=skills/release/copilot-run.sh
+if ! source "${_rcr_dir}/copilot-run.sh"; then
+  echo "error: cannot source ${_rcr_dir}/copilot-run.sh — the release skill tree is incomplete; re-clone the repo or re-install the plugin, then re-run" >&2
+  exit 2
+fi
 
 COPILOT_BOT_ID_DEFAULT="BOT_kgDOCnlnWA"
 
@@ -87,6 +116,26 @@ request_with_bot_id() {
   " --jq '[.data.requestReviews.pullRequest.reviewRequests.nodes[]?.requestedReviewer.login // empty]' 2>"$err_path"
 }
 
+# Remove any pending Copilot review request. REST DELETE with the login
+# `Copilot` is the only form GitHub accepts for the bot — its node id and
+# `copilot-pull-request-reviewer` both return 422. The success body (the PR)
+# is discarded. An HTTP 422 is the expected "nothing to remove" non-result:
+# warn and continue, since the request that follows is verified on its own.
+# Any other failure stops before the request.
+remove_pending_copilot_request() {
+  local owner="$1" repo="$2" pr_number="$3" err
+  if err=$(gh api -X DELETE "repos/${owner}/${repo}/pulls/${pr_number}/requested_reviewers" \
+      -f 'reviewers[]=Copilot' 2>&1 >/dev/null); then
+    return 0
+  fi
+  if [[ "$err" == *"HTTP 422"* ]]; then
+    echo "warn: no pending Copilot request removed on ${owner}/${repo}#${pr_number} (HTTP 422): ${err}" >&2
+    return 0
+  fi
+  echo "error: removing the pending Copilot request on ${owner}/${repo}#${pr_number} failed: ${err} — check 'gh auth status' and that the token can edit pull requests, then re-run" >&2
+  return 1
+}
+
 discover_copilot_bot_id() {
   # The Bot type's `login` is reported with the `[bot]` suffix in some
   # GraphQL contexts and without it in others (the REST surface keeps
@@ -136,6 +185,16 @@ main() {
     echo "error: failed to fetch PR node ID for ${owner}/${repo}#${pr_number}" >&2
     exit 1
   }
+
+  local in_flight
+  in_flight=$(copilot_run_in_flight "$owner" "$repo" "$pr_number") || exit 1
+  if [[ "$in_flight" == true ]]; then
+    echo "info: a Copilot run is in flight on ${owner}/${repo}#${pr_number}; leaving its request alone — wait for its review" >&2
+    jq -n --argjson pr_number "$pr_number" '{pr_number: $pr_number, in_flight: true}'
+    return 0
+  fi
+
+  remove_pending_copilot_request "$owner" "$repo" "$pr_number" || exit 1
 
   local bot_id="${COPILOT_BOT_ID:-$COPILOT_BOT_ID_DEFAULT}"
   local reviewers

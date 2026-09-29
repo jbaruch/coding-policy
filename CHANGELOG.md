@@ -1,5 +1,49 @@
 # Changelog
 
+### Fixed
+
+- **Copilot run state is read from the PR timeline, and a stuck request is
+  replaced (Fixes #641).** On #634 a Copilot request stayed pending in GraphQL
+  `reviewRequests` with no `copilot_work_started` after it. While it was
+  pending every re-request was a no-op (the script, a bare `requestReviews`
+  even with `union:false`, an empty commit), so `watch-pr-reviews.sh` sat at
+  `pending_at_budget` for three budgets. A REST `DELETE
+  .../requested_reviewers` with `reviewers[]=Copilot` cleared it (the bot node
+  id and `copilot-pull-request-reviewer` return 422), and Copilot started a
+  minute after the fresh request. Later on the same PR two more facts
+  surfaced. Once Copilot starts work it consumes the request, so the snapshot
+  read `state: none, requested: false` mid-run and the watcher returned
+  `review_unrequested`, a false "request it" while the review was running.
+  And removing the request of a run in progress discards that run's result:
+  a removal at 18:35:15 killed a run that finished at 18:36:11, and only the
+  next run posted.
+  - New `skills/release/copilot-run.sh` holds one predicate,
+    `copilot_run_in_flight`: the timeline's latest `copilot_work_started` is
+    newer than both the latest Copilot `review_requested` and the latest
+    Copilot `reviewed` event. It is sourced by both callers, and runs as a
+    guarded CLI printing `{"in_flight": bool}`.
+  - `request-copilot-review.sh` leaves a run in flight alone: it removes
+    nothing, requests nothing, and emits `{"pr_number","in_flight":true}` with
+    exit 0. Otherwise it removes any pending Copilot request, then requests as
+    before, so a request that never started is replaced. A successful removal
+    answers 200 with the PR body, whose REST `requested_reviewers` omits bots
+    (#276) and so cannot show whether anything was removed. An HTTP 422 is
+    treated as the expected "nothing to remove" non-result, per the issue: the
+    script warns and still requests, and the request is verified as before.
+    Any other removal failure exits non-zero with the error text and sends no
+    request.
+  - `poll-pr-reviews.sh` reports Copilot's `requested` true while its run is
+    in flight. A review on an older head predates the new run's start, so the
+    stale-head case follows from the same comparison.
+  - `rules/ci-safety.md` Always Watch CI now defines `requested` as a review
+    still owed on a request (pending, or consumed by a Copilot run with none
+    posted since), and the `review_unrequested` wording in
+    `watch-pr-reviews.sh` and `skills/release/SKILL.md` names the in-flight
+    run.
+  - Not included: the issue's optional stuck-request detection (a
+    `review_stuck` result past a threshold), which needs a script-owned
+    threshold and a new result state in both scripts.
+
 ## 0.3.335 — 2026-09-29
 
 ### Fixed
