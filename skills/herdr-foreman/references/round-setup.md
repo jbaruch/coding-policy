@@ -308,7 +308,7 @@ What you decide, and it is the whole of your job here:
   `NOMINATIONS`, `INVESTIGATION_REPORT` and `TREE` (see
   `skills/herdr-foreman/references/judge-round.md` step 1).
 - For release: `WEIGHING_RULING` — the judge's weighing report path, the
-  task's follow-up issue number, and each reviewer or tester finding the
+  task identifier, the task's follow-up issue number, and each reviewer or tester finding the
   ruling still covers, or "none". A release carrying a ruling also lists
   follow-up issue comments and the ruled dismissal in `AUTHORIZED_ACTIONS`.
 - Coverage: a `defer` or `decline` finding is covered while

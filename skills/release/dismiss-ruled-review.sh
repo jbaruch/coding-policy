@@ -7,14 +7,16 @@
 # Who ruled follows the mode: standalone (HERDR_ENV unset) the operator, in a
 # Herdr team round (HERDR_ENV set, any value) the pinned judge
 # (rules/agent-team-operation.md Judge Seat). The ruling's AUTHORITY line must
-# name the authority the mode requires.
+# name the authority the mode requires, and a team-round ruling must be the
+# report the foreman's owner records enrolled for the pinned judge's weighing.
 #
-# Usage: dismiss-ruled-review.sh <owner> <repo> <pr-number> [--ruling <file> --followup-issue <number>]
+# Usage: dismiss-ruled-review.sh <owner> <repo> <pr-number> [--ruling <file> --followup-issue <number> [--task <id>]]
 #   Without --ruling: list mode. Emits the blocking findings of the latest
 #   policy review on the head, for composing the weighing question. Dismisses
 #   nothing.
 #   With --ruling: dismissal mode, under the predicate below. --followup-issue
-#   is required with it: the task's follow-up issue in <owner>/<repo>.
+#   is required with it: the task's follow-up issue in <owner>/<repo>. In a
+#   team round --task is required with it too: the foreman's task identifier.
 #
 # Ruling file — a state artifact reused across pushes of one PR.
 #   Owner: the release skill (skills/release/SKILL.md Step 6), which alone
@@ -33,8 +35,7 @@
 #   Format, schema_version 2 (lines in any order after the first; unknown lines ignored):
 #     RULING: weighed                       (first line, required)
 #     schema_version: 2                     (required)
-#     AUTHORITY: operator | judge <path>    (required, exactly one; `judge`
-#                                            names the report's own absolute path)
+#     AUTHORITY: operator | judge           (required, exactly one)
 #     HEAD: <40-hex sha>                    (required, exactly one, full sha)
 #     ANSWER: <operator's answer, verbatim> (required for `operator`, non-empty;
 #                                            continuation lines indented two spaces)
@@ -51,8 +52,9 @@
 #      carries its text.
 #   1a. It carries exactly one AUTHORITY line, and that authority matches the
 #      mode: `operator` standalone, with a non-empty `ANSWER:` line; `judge` in
-#      a team round, naming an absolute path that resolves to the --ruling file
-#      itself.
+#      a team round, where `foreman verify-ruling --task <id>` (the herdr-foreman
+#      owner records) confirms the --ruling file is the report supervision
+#      enrolled for the pinned judge's applied adjudication on that task.
 #   2. The latest policy review (POLICY_REVIEW_LOGINS; per-login latest by
 #      submitted_at, CHANGES_REQUESTED wins across logins — the same resolution
 #      as poll-pr-reviews.sh) is CHANGES_REQUESTED and bound to the live head.
@@ -104,6 +106,20 @@ FLOOR_RULES=(no-secrets ci-safety)
 POLICY_REVIEW_LOGINS=("github-actions[bot]" "coding-policy-fleet-reviewer[bot]")
 
 WORK_DIR=""
+
+# This script's directory, resolved once while BASH_SOURCE still names this
+# file, so a caller that sources it reaches the sibling herdr-foreman skill.
+# Parameter expansion and a sentinel keep a trailing newline in the name (#592).
+case "${BASH_SOURCE[0]}" in
+  */*) _dismiss_src="${BASH_SOURCE[0]%/*}" ;;
+  *) _dismiss_src=. ;;
+esac
+if ! DISMISS_DIR="$(cd -- "${_dismiss_src:-/}" && pwd && printf x)"; then
+  echo "error: cannot enter the script directory ${_dismiss_src:-/} — restore read and search access to the plugin directory, then re-run" >&2
+  exit 2
+fi
+DISMISS_DIR="${DISMISS_DIR%x}"
+DISMISS_DIR="${DISMISS_DIR%$'\n'}"
 
 cleanup() {
   if [[ -n "$WORK_DIR" ]]; then
@@ -261,19 +277,19 @@ if schemas != [schema]:
 if len(heads) != 1:
     out["unmet"].append("the ruling carries no single 'HEAD: <40-hex sha>' line — write the full commit sha the findings were raised on")
 if len(authorities) != 1:
-    out["unmet"].append("the ruling carries no single 'AUTHORITY: operator | judge <path>' line")
+    out["unmet"].append("the ruling carries no single 'AUTHORITY: operator | judge' line")
 elif mode == "standalone":
     if authorities[0] != "operator":
         out["unmet"].append(f"standalone (HERDR_ENV unset) the operator is the judge, so the ruling's authority must be 'operator', not '{authorities[0]}'")
     elif len(answers) != 1 or not answers[0]:
         out["unmet"].append("the ruling carries no single non-empty 'ANSWER:' line quoting the operator verbatim")
 else:
-    kind, _, named = authorities[0].partition(" ")
-    named = named.strip()
-    if kind != "judge":
-        out["unmet"].append(f"in a Herdr team round (HERDR_ENV set) the pinned judge weighs, so the ruling's authority must be 'judge <report path>', not '{authorities[0]}'")
-    elif not os.path.isabs(named) or os.path.realpath(named) != os.path.realpath(ruling_path):
-        out["unmet"].append(f"the judge authority names '{named}', not the --ruling file itself — pass the judge's own weighing report")
+    with open(os.path.join(tmp, "judge_binding"), encoding="utf-8") as fh:
+        binding = fh.read().strip()
+    if authorities[0] != "judge":
+        out["unmet"].append(f"in a Herdr team round (HERDR_ENV set) the pinned judge weighs, so the ruling's authority must be 'judge', not '{authorities[0]}'")
+    elif binding != "ok":
+        out["unmet"].append(f"the ruling is not the pinned judge's enrolled weighing report: {binding}")
 if malformed:
     out["unmet"].append(f"unparseable FINDING line(s): {malformed}")
 if duplicates:
@@ -365,6 +381,7 @@ migrate_ruling() {
   python3 - "$ruling" <<'PY'
 import os
 import sys
+import tempfile
 
 path = sys.argv[1]
 with open(path, encoding="utf-8") as fh:
@@ -373,15 +390,45 @@ old = [i for i, ln in enumerate(lines) if ln.strip() == "schema_version: 1"]
 if len(old) != 1 or any(ln.startswith("AUTHORITY:") for ln in lines):
     sys.exit(0)
 lines[old[0]:old[0] + 1] = ["schema_version: 2", "AUTHORITY: operator"]
-tmp = path + ".migrating"
 try:
-    with open(tmp, "w", encoding="utf-8") as fh:
+    # An exclusive, randomly named sibling: never follows a planted symlink.
+    fd, tmp = tempfile.mkstemp(prefix=".ruling-", dir=os.path.dirname(os.path.abspath(path)))
+    with os.fdopen(fd, "w", encoding="utf-8") as fh:
         fh.write("\n".join(lines) + "\n")
     os.replace(tmp, path)
 except OSError as exc:
     print(f"error: could not upgrade the version-1 ruling at {path} ({exc}) — make the file and its directory writable, then re-run", file=sys.stderr)
     sys.exit(2)
 print(f"dismiss-ruled-review: upgraded the version-1 ruling at {path} to schema_version 2 (AUTHORITY: operator)", file=sys.stderr)
+PY
+}
+
+# Whether the ruling file is the pinned judge's enrolled weighing report for
+# <task>, from the foreman's owner records (`foreman verify-ruling`). Writes
+# "ok", or the refusal's message, to <out>. Returns non-zero only when the
+# check could not run.
+verify_judge_ruling() { # <task> <ruling> <out>
+  local foreman="${DISMISS_DIR}/../herdr-foreman/foreman.sh"
+  if [[ ! ( -f "$foreman" && -r "$foreman" ) ]]; then
+    echo "error: ${foreman} is not readable — reinstall the coding-policy plugin, then re-run" >&2
+    return 2
+  fi
+  if bash "$foreman" verify-ruling --task "$1" --ruling "$2" > "${3}.json" 2> "${3}.err"; then
+    printf 'ok' > "$3"
+    return 0
+  fi
+  python3 - "${3}.err" "$3" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as fh:
+    text = fh.read().strip()
+try:
+    reason = json.loads(text).get("message") or text
+except ValueError:
+    reason = text or "foreman verify-ruling refused with no diagnostic"
+with open(sys.argv[2], "w", encoding="utf-8") as fh:
+    fh.write(reason)
 PY
 }
 
@@ -440,12 +487,13 @@ PY
 
 main() {
   [[ $# -ge 3 ]] || usage
-  local owner="$1" repo="$2" pr="$3" ruling="" issue=""
+  local owner="$1" repo="$2" pr="$3" ruling="" issue="" task=""
   shift 3
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --ruling)         [[ $# -ge 2 ]] || usage; ruling="$2"; shift 2 ;;
       --followup-issue) [[ $# -ge 2 ]] || usage; issue="$2"; shift 2 ;;
+      --task)           [[ $# -ge 2 ]] || usage; task="$2"; shift 2 ;;
       *) usage ;;
     esac
   done
@@ -457,8 +505,12 @@ main() {
     echo "error: --ruling needs --followup-issue <number> — the task's follow-up issue in ${owner}/${repo}, where the ruled findings are entered" >&2
     exit 2
   fi
-  if [[ -z "$ruling" && -n "$issue" ]]; then
-    echo "error: --followup-issue is only meaningful with --ruling" >&2
+  if [[ -n "$ruling" && -n "${HERDR_ENV+x}" && -z "$task" ]]; then
+    echo "error: in a Herdr team round --ruling needs --task <id> — the foreman task the judge's weighing was dispatched under" >&2
+    exit 2
+  fi
+  if [[ -z "$ruling" && ( -n "$issue" || -n "$task" ) ]]; then
+    echo "error: --followup-issue and --task are only meaningful with --ruling" >&2
     exit 2
   fi
   if [[ -n "$ruling" && ! ( -f "$ruling" && -r "$ruling" ) ]]; then
@@ -485,6 +537,9 @@ main() {
     || { echo "error: failed to fetch reviews for ${owner}/${repo}#${pr} — run 'gh auth status', then retry" >&2; exit 2; }
   if [[ -n "$ruling" ]]; then
     fetch_checks "$owner" "$repo" "$pr" "${tmp}/checks.json" || exit 2
+    if [[ -n "${HERDR_ENV+x}" ]]; then
+      verify_judge_ruling "$task" "$ruling" "${tmp}/judge_binding" || exit 2
+    fi
   fi
 
   local decision rc=0

@@ -63,7 +63,7 @@ description: Review findings carry a severity — blocking gates the merge, advi
 - Preconditions (all required):
   1. The ruling rules the finding `defer` or `decline`
   2. In standalone mode, the ruling file carries `AUTHORITY: operator` and quotes the operator's answer verbatim
-  3. In a team round, the ruling file is the pinned judge's weighing report, carrying `AUTHORITY: judge` with its own path
+  3. In a team round, the ruling file carries `AUTHORITY: judge` and `foreman verify-ruling` binds it to the report supervision enrolled for the pinned judge's weighing
   4. The ruling names the finding at its `HEAD:`, and the finding's file is unchanged from that commit to the head
   5. The finding is under no floor
   6. The finding is entered in the task's follow-up issue citing the ruling, a `decline` labelled won't-fix

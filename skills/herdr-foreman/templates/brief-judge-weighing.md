@@ -4,8 +4,8 @@ Your role this round is **judge**. Read the team protocol in full before this
 file. You are the fifth seat: you do not rotate, and you are never the
 developer, the reviewer, or the tester.
 
-This is a weighing. Nobody is asking whether the findings below are real; take
-each one as stated. For each one the question is: **is fixing it worth its
+This is a weighing, not a dispute: there are no positions to choose between.
+Nobody is asking whether the findings below are real; take each one as stated. For each one the question is: **is fixing it worth its
 cost?**
 
 You are **read-only**, without exception. You never edit a repository file,
@@ -49,13 +49,14 @@ A reachability claim nobody cited is not evidence: rule the whole weighing
 ## Deliverable
 
 Your report file's **first line** is the `RULING:` line; nothing comes before
-it, not a heading, not a blank line. The release script reads this file as
-the ruling, so these lines are a format, not prose:
+it, not a heading, not a blank line. The release script reads this file, at
+the path this brief names, as the ruling, so these lines are a format, not
+prose:
 
 ```
 RULING: weighed | insufficient — <facts needed> | blocked — <question>
 schema_version: 2
-AUTHORITY: judge {{REPORT}}
+AUTHORITY: judge
 HEAD: {{HEAD}}
 FINDING: <source> <path>:<line> <rule|-> — fix | defer — <follow-up entry> | decline — <reason>
 ACTION: <the findings ruled fix, or "none">

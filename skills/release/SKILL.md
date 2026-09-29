@@ -160,6 +160,7 @@ It returns the full `poll-pr-reviews.sh` snapshot plus a `watch` object — `{"r
 
 - **Ruled policy review:** list or dismiss with the script below
   - The follow-up issue is in the PR's own repository; the script takes an issue number on that repository
+  - In a Herdr team round also pass `--task <task-id>`, the foreman task the release brief names
   - In a repository the operator does not own, ask first per `rules/external-repo-contributions.md`
   - Without `--ruling` it lists the blocking findings to name in the question
   - With `--ruling` it posts the ruled findings to the follow-up issue, then dismisses the review, only when its predicate holds

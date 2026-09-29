@@ -658,7 +658,7 @@ JSON
 
   # 23. The shipped judge-weighing brief renders under its own role key, and
   #     its deliverable opens with the ruling-file lines the release script
-  #     reads, the authority naming the report's own path.
+  #     reads.
   local vw="$TMP/weighing.json" ow="$TMP/out23"
   jq -n --arg p "$TMP/package.diff" \
     '{shared: {SHARED_CHECKOUT: "/repo", AUTHORITY_STATEMENT: "owner of jbaruch/x", EXTERNAL_PERMISSION: "none",
@@ -669,7 +669,7 @@ JSON
                INVESTIGATION_REPORT: "none", TREE: "/wt/judge", REPORT: "/r/judge-weighing.md"}}}' \
     > "$vw" || die "could not write $vw"
   run "$(dirname "$SCRIPT")/templates" "$vw" "$ow"
-  if [[ $RC -eq 0 ]] && grep -qx 'AUTHORITY: judge /r/judge-weighing.md' "$ow/brief-judge-weighing.md" \
+  if [[ $RC -eq 0 ]] && grep -qx 'AUTHORITY: judge' "$ow/brief-judge-weighing.md" \
      && grep -qx 'HEAD: cccccccccccccccccccccccccccccccccccccccc' "$ow/brief-judge-weighing.md" \
      && grep -qx 'schema_version: 2' "$ow/brief-judge-weighing.md"; then
     pass; else fail "judge-weighing: expected exit 0 and the ruling-file deliverable, got RC=$RC ERR=$ERRTEXT"; fi

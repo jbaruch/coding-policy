@@ -46,7 +46,8 @@ path unchanged; never copy or edit the file.
   follow-up issue before opening the PR, citing the ruling path, a `decline`
   labelled won't-fix.
 - A ruling over policy-review findings: at release Step 6 run
-  `dismiss-ruled-review.sh` with `--ruling` and `--followup-issue`, then
+  `dismiss-ruled-review.sh` with `--ruling`, `--followup-issue` and the
+  `--task` the value above names, then
   `dismiss-stale-reviews.sh` at Step 7. The script posts the follow-up entries
   itself. Its exit 1 goes under `## BLOCKED` with its `.unmet` list; stop there.
 

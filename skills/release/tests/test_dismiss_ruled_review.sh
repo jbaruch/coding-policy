@@ -71,6 +71,7 @@ run() {
   MOCK_COMPARE='{"status":"ahead","files":[]}'
   MOCK_ISSUE_COMMENTS='[]'
   MOCK_COMMENT_RC=0
+  MOCK_BINDING=""
   if "$@"; then
     PASS_COUNT=$((PASS_COUNT + 1)); echo "  pass: $name" >&2
   else
@@ -174,14 +175,14 @@ gh() {
   esac
 }
 
-# The pinned judge's weighing report as a ruling file: judge authority naming
-# the file's own path, no ANSWER. Args: <authority-path> <head> <finding-line>...
+# The pinned judge's weighing report as a ruling file: judge authority, no
+# ANSWER. Args: <head> <finding-line>...
 write_judge_ruling() {
-  local named="$1" head="$2"; shift 2
+  local head="$1"; shift
   {
     echo "RULING: weighed"
     echo "schema_version: 2"
-    echo "AUTHORITY: judge ${named}"
+    echo "AUTHORITY: judge"
     echo "HEAD: ${head}"
     printf '%s\n' "$@"
     echo "ACTION: none"
@@ -198,7 +199,17 @@ invoke_ruled() { invoke --ruling "$RULING" --followup-issue "$ISSUE"; }
 # The same runs inside a Herdr team round: HERDR_ENV set for main alone.
 main_team() { HERDR_ENV=1 main owner repo 5 "$@"; }
 invoke_team() { RC=0; OUT=$( (main_team "$@") 2>"${TMPDIR_TEST}/stderr") || RC=$?; }
-invoke_team_ruled() { invoke_team --ruling "$RULING" --followup-issue "$ISSUE"; }
+invoke_team_ruled() { invoke_team --ruling "$RULING" --followup-issue "$ISSUE" --task t-632; }
+
+# The real binding check, kept under another name before the stub replaces it.
+eval "real_$(declare -f verify_judge_ruling)"
+
+# The owner-records binding, stubbed: "ok" unless a case sets MOCK_BINDING to a
+# refusal. Records the task and ruling it was asked about.
+verify_judge_ruling() {
+  printf '%s %s\n' "$1" "$2" > "${TMPDIR_TEST}/binding-call"
+  printf '%s' "${MOCK_BINDING:-ok}" > "$3"
+}
 dismissals() { grep -c '^dismiss ' "$EVENTS"; }
 comments() { grep -c '^comment$' "$EVENTS"; }
 digest_of_ruling() { python3 -c 'import hashlib,sys; print(hashlib.sha256(open(sys.argv[1],"rb").read()).hexdigest()[:16])' "$RULING"; }
@@ -504,9 +515,10 @@ t_usage_errors_exit_2() {
 
 t_team_round_judge_report_dismisses() {
   set_review CHANGES_REQUESTED "$HEAD_SHA" "$BODY_TWO"
-  write_judge_ruling "$RULING" "$HEAD_SHA" "$DECLINE_ONE" "$DEFER_TWO"
+  write_judge_ruling "$HEAD_SHA" "$DECLINE_ONE" "$DEFER_TWO"
   invoke_team_ruled
   assert_eq "exit" "0" "$RC" || return 1
+  assert_eq "binding asked about" "t-632 ${RULING}" "$(cat "${TMPDIR_TEST}/binding-call")" || return 1
   assert_eq "result" "dismissed" "$(jq -r .result <<<"$OUT")" || return 1
   assert_eq "comment then dismissal" "comment" "$(head -1 "$EVENTS")" || return 1
   assert_eq "one dismissal" "1" "$(dismissals)"
@@ -521,21 +533,37 @@ t_team_round_operator_ruling_refuses() {
   assert_eq "nothing posted" "0" "$(wc -l < "$EVENTS" | tr -d ' ')"
 }
 
-t_judge_ruling_naming_another_file_refuses() {
+t_unbound_judge_ruling_refuses() {
   set_review CHANGES_REQUESTED "$HEAD_SHA" "$BODY_TWO"
-  write_judge_ruling "${TMPDIR_TEST}/judge-report.md" "$HEAD_SHA" "$DECLINE_ONE" "$DECLINE_TWO"
+  write_judge_ruling "$HEAD_SHA" "$DECLINE_ONE" "$DECLINE_TWO"
+  MOCK_BINDING="not the report supervision enrolled for judge dispatch d1"
   invoke_team_ruled
-  assert_eq "another path exit" "1" "$RC" || return 1
-  assert_unmet "not the --ruling file itself" "the copied report" || return 1
-  write_judge_ruling "ruling" "$HEAD_SHA" "$DECLINE_ONE" "$DECLINE_TWO"
-  invoke_team_ruled
-  assert_eq "relative path exit" "1" "$RC" || return 1
+  assert_eq "exit" "1" "$RC" || return 1
+  assert_unmet "not the pinned judge's enrolled weighing report" "the unbound ruling" || return 1
   assert_eq "nothing posted" "0" "$(wc -l < "$EVENTS" | tr -d ' ')"
+}
+
+# The real check reaches the sibling foreman and turns its refusal into a
+# reason: empty XDG homes hold no pinned judge and no dispatch state.
+t_real_binding_reports_the_foreman_refusal() {
+  write_judge_ruling "$HEAD_SHA" "$DECLINE_ONE"
+  local out="${TMPDIR_TEST}/real-binding" rc=0
+  XDG_CONFIG_HOME="${TMPDIR_TEST}/xdg-config" XDG_STATE_HOME="${TMPDIR_TEST}/xdg-state" \
+    real_verify_judge_ruling t-632 "$RULING" "$out" 2>"${TMPDIR_TEST}/stderr" || rc=$?
+  assert_eq "check ran" "0" "$rc" || return 1
+  [[ -s "$out" && "$(cat "$out")" != "ok" ]] || { echo "    FAIL: expected a refusal reason, got '$(cat "$out")'" >&2; return 1; }
+}
+
+t_team_round_ruling_without_task_is_usage() {
+  write_judge_ruling "$HEAD_SHA" "$DECLINE_ONE" "$DECLINE_TWO"
+  invoke_team --ruling "$RULING" --followup-issue "$ISSUE"
+  assert_eq "exit" "2" "$RC" || return 1
+  assert_eq "stdout empty" "" "$OUT"
 }
 
 t_standalone_judge_ruling_refuses() {
   set_review CHANGES_REQUESTED "$HEAD_SHA" "$BODY_TWO"
-  write_judge_ruling "$RULING" "$HEAD_SHA" "$DECLINE_ONE" "$DECLINE_TWO"
+  write_judge_ruling "$HEAD_SHA" "$DECLINE_ONE" "$DECLINE_TWO"
   invoke_ruled
   assert_eq "exit" "1" "$RC" || return 1
   assert_unmet "operator is the judge" "the standalone authority" || return 1
@@ -650,7 +678,9 @@ run_suite() {
   run "usage errors exit 2"                           t_usage_errors_exit_2
   run "team round: the judge's report dismisses"      t_team_round_judge_report_dismisses
   run "team round: an operator ruling refuses"        t_team_round_operator_ruling_refuses
-  run "a judge ruling naming another file refuses"    t_judge_ruling_naming_another_file_refuses
+  run "team round: an unbound judge ruling refuses"   t_unbound_judge_ruling_refuses
+  run "team round: a ruling without --task is usage"  t_team_round_ruling_without_task_is_usage
+  run "the real binding reports the foreman refusal"  t_real_binding_reports_the_foreman_refusal
   run "standalone: a judge ruling refuses"            t_standalone_judge_ruling_refuses
   run "a missing AUTHORITY line refuses"              t_missing_authority_refuses
   run "team round: list mode emits the findings"      t_team_round_list_mode_emits_findings

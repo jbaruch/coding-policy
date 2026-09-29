@@ -583,6 +583,56 @@ class RecoveryCommandTests(fixture.CliCase):
         self.assertEqual(code, 1)
         self.assertIn("unspent attempts under plan diag-cap:plan", err)
 
+    def seed_weighing(self, mode="adjudication"):
+        """The pinned judge's applied weighing after the latest developer attempt, and its enrollment."""
+        from foreman import supervision
+        state = empty_state()
+        add_assignment(state, "2026-02-03T09:00:00+00:00", "developer", "grok", task=TASK)
+        add_assignment(state, "2026-02-03T15:00:00+00:00", "judge", "claude", task=TASK, judge_mode=mode)
+        state["recovery"]["dispatches"].append({
+            "schema_version": 1, "at": "2026-02-03T15:00:00+00:00", "id": "weighing-dispatch",
+            "fingerprint": "f" * 64, "role": "judge", "agent": "claude", "task": TASK,
+            "fix_round": None, "plan": None, "work": None, "status": "applied",
+            "assignment_index": len(state["assignments"]) - 1,
+            "result": {"schema_version": 1, "task": TASK, "role": "judge", "agent": "claude",
+                       "fix_round": None, "status": "applied"}, "report": None})
+        save_state(self.state, state)
+        config = json.loads(self.config.read_text())
+        config["judge"] = {"agent": "claude", "model": "claude-opus-4-6", "effort": "high"}
+        self.config.write_text(json.dumps(config))
+        # Restored on teardown: a leaked path outlives this test's temp dir.
+        environment = patch.dict(os.environ, {"XDG_STATE_HOME": str(self.tmp / "xdg")})
+        environment.start()
+        self.addCleanup(environment.stop)
+        who = supervision.identity("lead-native", str(self.tmp), "fixture", pane_id="lead-pane")
+        supervision.bind(self.state, who, AT, root=self.tmp / "supervision-bindings")
+        delivered = self.tmp / "judge-weighing.md"
+        delivered.write_text("RULING: weighed\nschema_version: 2\nAUTHORITY: judge\n")
+        supervision.enroll(self.state, {"id": "weighing-dispatch", "agent": "claude", "task": TASK,
+                                        "report": str(delivered), "pane_id": None, "native_session": None}, AT)
+        return delivered
+
+    def test_verify_ruling_binds_the_enrolled_weighing_report(self):
+        # coding-policy#632: `AUTHORITY: judge` is only a claim; the owner
+        # records say which report the pinned judge's weighing was sent to.
+        delivered = self.seed_weighing()
+        code, out, err = self.invoke(["verify-ruling", "--task", TASK, "--ruling", str(delivered)])
+        self.assertEqual(code, 0, err)
+        payload = json.loads(out)
+        self.assertEqual((payload["dispatch"], payload["judge"]), ("weighing-dispatch", "claude"))
+        self.assertEqual(payload["sha256"], hashlib.sha256(delivered.read_bytes()).hexdigest())
+        copy = self.tmp / "copy.md"
+        copy.write_text(delivered.read_text())
+        code, out, err = self.invoke(["verify-ruling", "--task", TASK, "--ruling", str(copy)])
+        self.assertEqual((code, out), (1, ""))
+        self.assertIn("not the report supervision enrolled", err)
+
+    def test_verify_ruling_refuses_a_diagnosis_report(self):
+        delivered = self.seed_weighing(mode="diagnosis")
+        code, out, err = self.invoke(["verify-ruling", "--task", TASK, "--ruling", str(delivered)])
+        self.assertEqual((code, out), (1, ""))
+        self.assertIn("no applied adjudication", err)
+
     def test_a_bound_lead_must_cite_the_enrolled_report(self):
         # coding-policy#407: every team round is supervised, so the public
         # command resolves the enrollment and refuses anything else.

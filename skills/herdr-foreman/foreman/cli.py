@@ -166,6 +166,10 @@ def build_parser():
     restoration.register_commands(sub, common)
     partition.register_commands(sub, common)
     oracle.register_commands(sub, common)
+    ruling_parser = sub.add_parser("verify-ruling", parents=[common],
+                                   help="Confirm a weighing ruling file is the report supervision enrolled for the pinned judge's adjudication on a task. Read-only.")
+    ruling_parser.add_argument("--task", required=True)
+    ruling_parser.add_argument("--ruling", required=True, metavar="FILE")
 
     triggers.register_command(sub, common)
     churn.register_command(sub, common)
@@ -2278,6 +2282,41 @@ def cmd_validate_partition(args, client=None, warn=None, trace=None):
     return partition.run_command(args)
 
 
+def cmd_verify_ruling(args, client=None, warn=None, trace=None):
+    """A team-round ruling file is the pinned judge's enrolled adjudication report (#632).
+
+    `skills/release/dismiss-ruled-review.sh` calls this before it accepts
+    `AUTHORITY: judge`: a file declaring its own authority proves nothing, so
+    the binding comes from the owner records the same way `diagnose` binds a
+    diagnosis to the report supervision enrolled for that judge dispatch.
+    """
+    judge = load_judge(_config_path(args))
+    if judge is None:
+        raise UsageError("No pinned judge is configured, so no ruling can be the judge's; add the `judge` block to config.json.", {})
+    state, usable = load_state_checked(_state_path(args), warn, persist_migration=False)
+    if not usable:
+        raise StateError("The dispatch state is unusable, so the judge dispatch cannot be read; restore it before verifying the ruling.", {})
+    store, history = state["recovery"], state["assignments"]
+    dispatch = recovery.applied_judge_dispatch(store, history, args.task, judge.agent)
+    if dispatch is None or history[dispatch["assignment_index"]].get("judge_mode") != "adjudication":
+        raise UsageError("Task {!r} has no applied adjudication by the pinned judge {} after its latest developer attempt; "
+                         "dispatch the weighing through the judge round first.".format(args.task, judge.agent), {"task": args.task})
+    member = next((row for row in supervision.load(_state_path(args))["members"] if row["id"] == dispatch["id"]), None)
+    if member is None:
+        raise UsageError("No supervision enrollment binds a report to judge dispatch {}; dispatch the weighing through the bound round.".format(dispatch["id"]), {})
+    report = supervision.expected_assignment(member)["report"]
+    ruling = Path(args.ruling)
+    if not ruling.is_absolute() or ruling.resolve() != Path(report).resolve():
+        raise UsageError("{} is not the report supervision enrolled for judge dispatch {} ({}); pass the delivered report.".format(
+            args.ruling, dispatch["id"], report), {"enrolled": report})
+    try:
+        body = ruling.read_bytes()
+    except OSError as exc:
+        raise UsageError("Cannot read the ruling at {}: {}.".format(args.ruling, exc), {}) from None
+    return {"task": args.task, "dispatch": dispatch["id"], "judge": judge.agent, "report": report,
+            "sha256": hashlib.sha256(body).hexdigest()}, None
+
+
 def cmd_verify_oracle(args, client=None, warn=None, trace=None):
     """The oracle gate for a mechanical round, against the oracle its dispatch bound (#585)."""
     state, usable = load_state_checked(_state_path(args), warn, persist_migration=False)
@@ -2366,6 +2405,7 @@ COMMANDS = {
     "validate-partition": cmd_validate_partition,
     "verify-partition": cmd_verify_partition,
     "verify-oracle": cmd_verify_oracle,
+    "verify-ruling": cmd_verify_ruling,
     "start-judge": cmd_start_judge,
     "start-foreman": cmd_start_foreman,
     "verify-foreman": cmd_verify_foreman,
@@ -2426,7 +2466,7 @@ def main(argv=None, stdout=None, stderr=None, client=None):
             home.require_current(defaults)
             # Commands that may migrate or write state share its canonical lock.
             # Dry runs, probes, and retrospective reads remain read-only.
-            readonly = args.command in {"probe-report", "marker-fit", "detect-triggers", "finding-churn", "validate-partition", "verify-oracle", "retro-check", "retro-list", "retro-show", "capability-check", "capability-show", "supervision-gate", "load-set", "foreman-queue", "cost-report", "check-member", "verify-foreman", "report-gate-status"} or getattr(args, "dry_run", False)
+            readonly = args.command in {"probe-report", "marker-fit", "detect-triggers", "finding-churn", "validate-partition", "verify-oracle", "verify-ruling", "retro-check", "retro-list", "retro-show", "capability-check", "capability-show", "supervision-gate", "load-set", "foreman-queue", "cost-report", "check-member", "verify-foreman", "report-gate-status"} or getattr(args, "dry_run", False)
             # The deliverer starts while `foreman-reset` still holds the state lock;
             # it serializes on the reset record's own lock instead. close-member
             # writes only through the supervision owner's own lock.
