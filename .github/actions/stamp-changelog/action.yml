@@ -29,7 +29,7 @@ description: |
   the version would publish with no heading of its own (#581). The check is
   `skills/release/check-changelog-placement.py --since-last-publish`,
   measured against the last stamp or version-bump commit on the branch.
-  With `commit: false` the script skips the check with a warning: the
+  With `commit: false` the check is refused and the step fails: the
   caller's commit is not one it can find as its baseline.
 
   Requirements (consumer must arrange):

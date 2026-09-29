@@ -12,8 +12,11 @@
   commit was no baseline either; the checker gains `--manifest`. Under
   `commit: false` the caller writes the bookkeeping commit, and nothing
   makes it one the check can find, so the checker gains `--commit-mode`:
-  anything but `true` prints a `::warning::` and returns a `skipped` verdict
-  (exit 0) instead of measuring from the wrong publish. The stamp action
+  anything but `true` is refused as a usage error (exit 2) naming the fix,
+  `commit: true` or a placement check against a `--base` the caller names.
+  Refused rather than skipped: the action gates on the exit code, so a skip
+  that exits 0 would let a misfiled entry publish. No caller uses
+  `commit: false` today. The stamp action
   forwards its `manifest:` and `commit:` inputs verbatim with no branching of
   its own, so both paths are covered by the script's tests. The repo's own
   publish uses the defaults and is unaffected.

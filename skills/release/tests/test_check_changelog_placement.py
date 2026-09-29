@@ -66,8 +66,7 @@ MISFILED = """# Changelog
 """
 
 
-VERDICT_EXIT = {"pass": 0, "nothing_to_measure": 0, "skipped": 0, "misfiled": 1,
-                "error": 2}
+VERDICT_EXIT = {"pass": 0, "nothing_to_measure": 0, "misfiled": 1, "error": 2}
 
 
 def run_script(cmd, **kwargs):
@@ -600,15 +599,18 @@ class PublishModeTest(_RepoCase):
         proc = self.run_as_action(manifest="./meta/plugin.json")
         self.assertEqual(proc.payload["verdict"], "pass", proc.stderr)
 
-    def test_commit_mode_false_skips_the_check_with_a_warning(self):
+    def test_commit_mode_false_is_refused(self):
         # #618: under `commit: false` the caller writes the bookkeeping
-        # commit, so the check has no baseline it can trust.
+        # commit, so the check has no baseline it can trust. Passing having
+        # checked nothing would let a misfiled entry publish.
         self.merge(MISFILED)
         proc = self.run_as_action(commit="false")
-        self.assertEqual(proc.returncode, 0, proc.stderr)
-        self.assertEqual(proc.payload["verdict"], "skipped")
+        self.assertEqual(proc.returncode, 2, proc.stderr)
+        self.assertEqual(proc.payload["verdict"], "error")
         self.assertIsNone(proc.payload["base"])
-        self.assertIn("::warning::", proc.stderr)
+        self.assertIn("needs the stamp action's own bookkeeping commit", proc.stderr)
+        self.assertIn("commit: 'true'", proc.stderr)
+        self.assertIn("--base <ref>", proc.stderr)
 
     def test_no_publish_in_history_has_nothing_to_measure(self):
         fresh = tempfile.TemporaryDirectory()
