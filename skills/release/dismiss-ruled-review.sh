@@ -25,8 +25,19 @@
 #     in a team round, the pinned judge, whose weighing report
 #     (skills/herdr-foreman/templates/brief-judge-weighing.md) is the ruling
 #     file. One file per gate.
-#   Reader: this script, the only one. It refuses a missing schema_version line or any
-#     version other than RULING_SCHEMA (exit 1).
+#   Readers, two:
+#     - This script reads every line. It accepts only RULING_SCHEMA; a missing
+#       schema_version line or any other version is refused (exit 1), after
+#       the owner migration below. It promises nothing is posted or dismissed
+#       unless the whole predicate holds.
+#     - `foreman verify-ruling` (skills/herdr-foreman/foreman/cli.py
+#       `cmd_verify_ruling`), called by this script for `AUTHORITY: judge`,
+#       reads the file's bytes and nothing inside them. It accepts the file
+#       only when its absolute path is the report of exactly one supervision
+#       enrollment, whose dispatch is the pinned judge's, applied, on --task,
+#       with a frozen brief carrying the judge-weighing template's marker line.
+#       It promises the file's sha256 on success and a refusal message
+#       otherwise; it never parses or migrates the ruling.
 #   Migration (owner): a version-1 file, which only the operator ever wrote,
 #     is upgraded in place before it is read: its `schema_version: 1` line
 #     becomes `schema_version: 2` plus `AUTHORITY: operator`, every other line
@@ -384,8 +395,12 @@ import sys
 import tempfile
 
 path = sys.argv[1]
-with open(path, encoding="utf-8") as fh:
-    lines = fh.read().splitlines()
+try:
+    with open(path, encoding="utf-8") as fh:
+        lines = fh.read().splitlines()
+except (OSError, UnicodeError) as exc:
+    print(f"error: cannot read the ruling at {path} as UTF-8 text ({exc}) — repair the file, or rewrite the ruling in the current format, then re-run", file=sys.stderr)
+    sys.exit(2)
 old = [i for i, ln in enumerate(lines) if ln.strip() == "schema_version: 1"]
 if len(old) != 1 or any(ln.startswith("AUTHORITY:") for ln in lines):
     sys.exit(0)

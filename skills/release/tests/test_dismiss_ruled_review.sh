@@ -474,6 +474,17 @@ t_version_1_ruling_is_upgraded_then_read() {
   grep -qF "$DECLINE_ONE" "$RULING" || { echo "    FAIL: the upgrade kept the FINDING lines" >&2; return 1; }
 }
 
+t_unreadable_ruling_bytes_exit_2_without_traceback() {
+  set_review CHANGES_REQUESTED "$HEAD_SHA" "$BODY_TWO"
+  printf 'RULING: weighed\nschema_version: 1\nANSWER: \xff\xfe\n' > "$RULING"
+  invoke_ruled
+  assert_eq "exit" "2" "$RC" || return 1
+  assert_eq "stdout empty" "" "$OUT" || return 1
+  grep -q "rewrite the ruling" "${TMPDIR_TEST}/stderr" || { echo "    FAIL: no actionable diagnostic" >&2; return 1; }
+  if grep -q "Traceback" "${TMPDIR_TEST}/stderr"; then echo "    FAIL: traceback on stderr" >&2; return 1; fi
+  assert_eq "nothing posted" "0" "$(wc -l < "$EVENTS" | tr -d ' ')"
+}
+
 t_malformed_ruling_refuses() {
   set_review CHANGES_REQUESTED "$HEAD_SHA" "$BODY_TWO"
   write_ruling "$HEAD_SHA" "$DECLINE_ONE" "$DECLINE_TWO"
@@ -673,6 +684,7 @@ run_suite() {
   run "a missing or empty ANSWER refuses"             t_missing_answer_refuses
   run "a missing or other schema_version refuses"             t_schema_missing_or_other_refuses
   run "a version-1 ruling is upgraded, then read"     t_version_1_ruling_is_upgraded_then_read
+  run "non-UTF-8 ruling bytes exit 2, no traceback"   t_unreadable_ruling_bytes_exit_2_without_traceback
   run "a malformed ruling refuses"                    t_malformed_ruling_refuses
   run "list mode emits the blocking findings"         t_list_mode_emits_findings
   run "usage errors exit 2"                           t_usage_errors_exit_2
