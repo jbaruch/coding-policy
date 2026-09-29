@@ -605,7 +605,7 @@ stage_foreman() {
 }
 invoke_team_real_binding() {
   RC=0
-  # shellcheck disable=SC2034  # DISMISS_DIR is read by the sourced script's real_verify_judge_ruling.
+  # shellcheck disable=SC2034,SC2317  # DISMISS_DIR is read by the sourced real_verify_judge_ruling; the override runs indirectly via main_team.
   OUT=$( (DISMISS_DIR="$STAGED_DIR"; verify_judge_ruling() { real_verify_judge_ruling "$@"; }
           main_team --ruling "$RULING" --followup-issue "$ISSUE" --task t-632) 2>"${TMPDIR_TEST}/stderr") || RC=$?
 }
