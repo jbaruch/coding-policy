@@ -583,20 +583,32 @@ class RecoveryCommandTests(fixture.CliCase):
         self.assertEqual(code, 1)
         self.assertIn("unspent attempts under plan diag-cap:plan", err)
 
-    def seed_weighing(self, mode="adjudication"):
-        """The pinned judge's applied weighing after the latest developer attempt, and its enrollment."""
+    def seed_judge_dispatch(self, dispatch_id, brief_text, task=TASK, agent="claude"):
+        """An applied judge dispatch whose frozen brief holds `brief_text`, and its enrolled report."""
         from foreman import supervision
-        state = empty_state()
-        add_assignment(state, "2026-02-03T09:00:00+00:00", "developer", "grok", task=TASK)
-        add_assignment(state, "2026-02-03T15:00:00+00:00", "judge", "claude", task=TASK, judge_mode=mode)
+        from foreman.assign import freeze_paths
+        source = self.tmp / (dispatch_id + "-brief.md")
+        source.write_text(brief_text)
+        frozen = freeze_paths({"judge": str(source)})["judge"]
+        state = self.saved()
+        add_assignment(state, "2026-02-03T15:00:00+00:00", "judge", agent, task=task, judge_mode="adjudication")
         state["recovery"]["dispatches"].append({
-            "schema_version": 1, "at": "2026-02-03T15:00:00+00:00", "id": "weighing-dispatch",
-            "fingerprint": "f" * 64, "role": "judge", "agent": "claude", "task": TASK,
+            "schema_version": 1, "at": "2026-02-03T15:00:00+00:00", "id": dispatch_id,
+            "fingerprint": "f" * 64, "role": "judge", "agent": agent, "task": task,
             "fix_round": None, "plan": None, "work": None, "status": "applied",
-            "assignment_index": len(state["assignments"]) - 1,
-            "result": {"schema_version": 1, "task": TASK, "role": "judge", "agent": "claude",
+            "assignment_index": len(state["assignments"]) - 1, "brief": frozen,
+            "result": {"schema_version": 1, "task": task, "role": "judge", "agent": agent,
                        "fix_round": None, "status": "applied"}, "report": None})
         save_state(self.state, state)
+        report = self.tmp / (dispatch_id + "-report.md")
+        report.write_text("RULING: weighed\nschema_version: 2\nAUTHORITY: judge\n")
+        supervision.enroll(self.state, {"id": dispatch_id, "agent": agent, "task": task,
+                                        "report": str(report), "pane_id": None, "native_session": None}, AT)
+        return report
+
+    def bind_weighing_fixture(self):
+        from foreman import supervision
+        save_state(self.state, empty_state())
         config = json.loads(self.config.read_text())
         config["judge"] = {"agent": "claude", "model": "claude-opus-4-6", "effort": "high"}
         self.config.write_text(json.dumps(config))
@@ -606,32 +618,55 @@ class RecoveryCommandTests(fixture.CliCase):
         self.addCleanup(environment.stop)
         who = supervision.identity("lead-native", str(self.tmp), "fixture", pane_id="lead-pane")
         supervision.bind(self.state, who, AT, root=self.tmp / "supervision-bindings")
-        delivered = self.tmp / "judge-weighing.md"
-        delivered.write_text("RULING: weighed\nschema_version: 2\nAUTHORITY: judge\n")
-        supervision.enroll(self.state, {"id": "weighing-dispatch", "agent": "claude", "task": TASK,
-                                        "report": str(delivered), "pane_id": None, "native_session": None}, AT)
-        return delivered
 
-    def test_verify_ruling_binds_the_enrolled_weighing_report(self):
+    def weighing_brief(self):
+        from foreman import cli
+        return cli.WEIGHING_BRIEF_MARKER.decode() + "\n# Brief — Judge (Weighing)\n"
+
+    def verify(self, ruling, task=TASK):
+        return self.invoke(["verify-ruling", "--task", task, "--ruling", str(ruling)])
+
+    def test_verify_ruling_accepts_the_weighing_dispatch_report(self):
         # coding-policy#632: `AUTHORITY: judge` is only a claim; the owner
-        # records say which report the pinned judge's weighing was sent to.
-        delivered = self.seed_weighing()
-        code, out, err = self.invoke(["verify-ruling", "--task", TASK, "--ruling", str(delivered)])
+        # records and the frozen brief say which report a weighing wrote.
+        self.bind_weighing_fixture()
+        report = self.seed_judge_dispatch("weighing", self.weighing_brief())
+        code, out, err = self.verify(report)
         self.assertEqual(code, 0, err)
         payload = json.loads(out)
-        self.assertEqual((payload["dispatch"], payload["judge"]), ("weighing-dispatch", "claude"))
-        self.assertEqual(payload["sha256"], hashlib.sha256(delivered.read_bytes()).hexdigest())
-        copy = self.tmp / "copy.md"
-        copy.write_text(delivered.read_text())
-        code, out, err = self.invoke(["verify-ruling", "--task", TASK, "--ruling", str(copy)])
-        self.assertEqual((code, out), (1, ""))
-        self.assertIn("not the report supervision enrolled", err)
+        self.assertEqual((payload["dispatch"], payload["judge"]), ("weighing", "claude"))
+        self.assertEqual(payload["sha256"], hashlib.sha256(report.read_bytes()).hexdigest())
 
-    def test_verify_ruling_refuses_a_diagnosis_report(self):
-        delivered = self.seed_weighing(mode="diagnosis")
-        code, out, err = self.invoke(["verify-ruling", "--task", TASK, "--ruling", str(delivered)])
+    def test_verify_ruling_refuses_a_dispute_adjudication(self):
+        self.bind_weighing_fixture()
+        # Same pinned judge, same adjudication mode, same task: only the brief differs.
+        dispute =self.seed_judge_dispatch("dispute", "# Brief — Judge\n\nRULING: uphold A | uphold B\n")
+        code, out, err = self.verify(dispute)
         self.assertEqual((code, out), (1, ""))
-        self.assertIn("no applied adjudication", err)
+        self.assertIn("not the weighing brief", err)
+
+    def test_verify_ruling_refuses_a_report_no_dispatch_enrolled(self):
+        self.bind_weighing_fixture()
+        report = self.seed_judge_dispatch("weighing", self.weighing_brief())
+        copy = self.tmp / "copy.md"
+        copy.write_text(report.read_text())
+        code, out, err = self.verify(copy)
+        self.assertEqual((code, out), (1, ""))
+        self.assertIn("no supervision enrollment", err)
+
+    def test_verify_ruling_refuses_another_task(self):
+        self.bind_weighing_fixture()
+        report = self.seed_judge_dispatch("weighing", self.weighing_brief(), task="other-task")
+        code, out, err = self.verify(report)
+        self.assertEqual((code, out), (1, ""))
+        self.assertIn("not an applied dispatch of the pinned judge", err)
+
+    def test_the_weighing_template_renders_the_marker(self):
+        from foreman import cli
+        template = Path(ROOT) / "templates" / "brief-judge-weighing.md"
+        self.assertIn(cli.WEIGHING_BRIEF_MARKER, template.read_bytes().splitlines())
+        for other in ("brief-judge.md", "brief-judge-diagnosis.md"):
+            self.assertNotIn(cli.WEIGHING_BRIEF_MARKER, (Path(ROOT) / "templates" / other).read_bytes())
 
     def test_a_bound_lead_must_cite_the_enrolled_report(self):
         # coding-policy#407: every team round is supervised, so the public

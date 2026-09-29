@@ -1,3 +1,4 @@
+<!-- herdr-brief: judge-weighing -->
 # Brief — Judge (Weighing)
 
 Your role this round is **judge**. Read the team protocol in full before this

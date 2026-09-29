@@ -2282,38 +2282,54 @@ def cmd_validate_partition(args, client=None, warn=None, trace=None):
     return partition.run_command(args)
 
 
-def cmd_verify_ruling(args, client=None, warn=None, trace=None):
-    """A team-round ruling file is the pinned judge's enrolled adjudication report (#632).
+#: The line only `templates/brief-judge-weighing.md` renders. A frozen judge
+#: brief carrying it was a weighing; a dispute brief never carries it (#632).
+WEIGHING_BRIEF_MARKER = b"<!-- herdr-brief: judge-weighing -->"
 
-    `skills/release/dismiss-ruled-review.sh` calls this before it accepts
-    `AUTHORITY: judge`: a file declaring its own authority proves nothing, so
-    the binding comes from the owner records the same way `diagnose` binds a
-    diagnosis to the report supervision enrolled for that judge dispatch.
+
+def cmd_verify_ruling(args, client=None, warn=None, trace=None):
+    """A team-round ruling file is the report the pinned judge's weighing was sent to write (#632).
+
+    The ruling artifact's writer/reader contract, this reader's side included,
+    is the header of `skills/release/dismiss-ruled-review.sh`, which calls this
+    before it accepts `AUTHORITY: judge`. The dispatch is selected by the supervision
+    enrollment whose report path is the ruling file, never by "latest judge
+    adjudication". That dispatch must be the pinned judge's, applied, on the
+    given task, and its frozen brief must carry `WEIGHING_BRIEF_MARKER`: the
+    bytes the judge actually read were the weighing brief, not a dispute's.
     """
     judge = load_judge(_config_path(args))
     if judge is None:
         raise UsageError("No pinned judge is configured, so no ruling can be the judge's; add the `judge` block to config.json.", {})
+    ruling = Path(args.ruling)
+    if not ruling.is_absolute():
+        raise UsageError("--ruling must be the absolute path of the judge's delivered report.", {"ruling": args.ruling})
     state, usable = load_state_checked(_state_path(args), warn, persist_migration=False)
     if not usable:
         raise StateError("The dispatch state is unusable, so the judge dispatch cannot be read; restore it before verifying the ruling.", {})
-    store, history = state["recovery"], state["assignments"]
-    dispatch = recovery.applied_judge_dispatch(store, history, args.task, judge.agent)
-    if dispatch is None or history[dispatch["assignment_index"]].get("judge_mode") != "adjudication":
-        raise UsageError("Task {!r} has no applied adjudication by the pinned judge {} after its latest developer attempt; "
-                         "dispatch the weighing through the judge round first.".format(args.task, judge.agent), {"task": args.task})
-    member = next((row for row in supervision.load(_state_path(args))["members"] if row["id"] == dispatch["id"]), None)
-    if member is None:
-        raise UsageError("No supervision enrollment binds a report to judge dispatch {}; dispatch the weighing through the bound round.".format(dispatch["id"]), {})
-    report = supervision.expected_assignment(member)["report"]
-    ruling = Path(args.ruling)
-    if not ruling.is_absolute() or ruling.resolve() != Path(report).resolve():
-        raise UsageError("{} is not the report supervision enrolled for judge dispatch {} ({}); pass the delivered report.".format(
-            args.ruling, dispatch["id"], report), {"enrolled": report})
+    enrolled = [row for row in supervision.load(_state_path(args))["members"]
+                if Path(supervision.expected_assignment(row)["report"]).resolve() == ruling.resolve()]
+    if len(enrolled) != 1:
+        raise UsageError("{} is {} supervision enrollment's report; pass the report the judge's weighing dispatch was enrolled "
+                         "to write.".format(args.ruling, "no" if not enrolled else "more than one"), {"ruling": args.ruling})
+    dispatch = next((row for row in state["recovery"]["dispatches"] if row.get("id") == enrolled[0]["id"]), None)
+    if dispatch is None:
+        raise UsageError("The enrollment for {} names dispatch {}, which the dispatch state does not hold; reconcile it "
+                         "before verifying.".format(args.ruling, enrolled[0]["id"]), {})
+    if (canonical_role(dispatch.get("role")) != "judge" or dispatch.get("agent") != judge.agent
+            or dispatch.get("task") != args.task or dispatch.get("status") != "applied"):
+        raise UsageError("Dispatch {} is not an applied dispatch of the pinned judge {} on task {!r}; the ruling is "
+                         "not this task's weighing.".format(dispatch["id"], judge.agent, args.task),
+                         {"dispatch": dispatch["id"], "task": dispatch.get("task"), "agent": dispatch.get("agent")})
+    brief = read_frozen(dispatch.get("brief") or "")
+    if WEIGHING_BRIEF_MARKER not in brief.splitlines():
+        raise UsageError("Dispatch {} sent the judge a brief that is not the weighing brief (templates/brief-judge-weighing.md); "
+                         "a dispute ruling never clears a policy review.".format(dispatch["id"]), {"dispatch": dispatch["id"]})
     try:
         body = ruling.read_bytes()
     except OSError as exc:
         raise UsageError("Cannot read the ruling at {}: {}.".format(args.ruling, exc), {}) from None
-    return {"task": args.task, "dispatch": dispatch["id"], "judge": judge.agent, "report": report,
+    return {"task": args.task, "dispatch": dispatch["id"], "judge": judge.agent, "report": str(ruling),
             "sha256": hashlib.sha256(body).hexdigest()}, None
 
 
