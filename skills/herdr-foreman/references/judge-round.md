@@ -145,6 +145,12 @@ every nominated finding blocking, and report the diagnostic. The binding rules
 are the command's; see `cmd_verify_ruling` in
 `skills/herdr-foreman/foreman/cli.py`.
 
+Coverage, from then on: a `defer` or `decline` finding stays covered while
+`foreman finding-churn --from <ruling HEAD> --to <tip>` (step 1's command)
+reports its `path_changed` false. List each covered finding as covered in
+scoped re-check and release briefs, and one whose path changed as no longer
+covered; it blocks again.
+
 Apply the Ruling Outcomes contract in `skills/herdr-foreman/references/round-flow.md`. Investigation
 rulings return to SKILL.md Step 12's knowledge gate. Implementation rulings route
 unchanged-branch rulings to verified release or renewed verification,

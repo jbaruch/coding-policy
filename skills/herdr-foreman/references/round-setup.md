@@ -311,11 +311,7 @@ What you decide, and it is the whole of your job here:
   task identifier, the task's follow-up issue number, and each reviewer or tester finding the
   ruling still covers, or "none". A release carrying a ruling also lists
   follow-up issue comments and the ruled dismissal in `AUTHORIZED_ACTIONS`.
-- Coverage: a `defer` or `decline` finding is covered while
-  `foreman finding-churn --from <ruling HEAD> --to <tip>` reports its
-  `path_changed` false (judge-round step 1 has the command). List it as
-  covered in scoped re-check and release briefs; list one whose path changed
-  as no longer covered.
+- Coverage: see `skills/herdr-foreman/references/judge-round.md`.
 
 | Phase | Role | Mode | Output |
 | ----- | ---- | ---- | ------ |
