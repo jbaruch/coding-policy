@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.331 — 2026-09-29
+
 ### Fixed
 
 - **The skill-invocation check has a regression fixture for an indented
