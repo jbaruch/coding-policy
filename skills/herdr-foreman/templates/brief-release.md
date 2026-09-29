@@ -5,7 +5,8 @@ and take it through the bots to merge. Read the team protocol in full before
 this file.
 
 COMMON's authorized task actions govern this assignment. If they do not cover
-the required PR, review, merge, publish, and cleanup actions, report BLOCKED
+the required PR, review, follow-up issue, dismissal, merge, publish, and
+cleanup actions, report BLOCKED
 before any repository or GitHub write. This role grants no additional permission.
 
 ## Setup
@@ -31,7 +32,23 @@ Read, in `{{REPORTS_DIR}}`, the reviewer's and the tester's reports against the
 pushed tip. Both must cover the full branch and satisfy the foreman's release
 gate. Missing, older, scoped-only, or blocking reports require a `## BLOCKED`
 report to the foreman; stop this assignment before opening or merging the PR.
-List deferred advisories with their existing follow-up references.
+A blocking finding the weighing ruling below rules `defer` or `decline` does
+not block. List deferred advisories with their existing follow-up references.
+
+## Weighing Ruling
+
+Ruling this brief carries: {{WEIGHING_RULING}}
+
+When it names a ruling file, that file is the pinned judge's report. Pass that
+path unchanged; never copy or edit the file.
+
+- A `FINDING:` line from the reviewer or the tester ruled `defer` or `decline`:
+  enter it in the task's follow-up issue before opening the PR, citing the
+  ruling path, a `decline` labelled won't-fix.
+- A ruling over policy-review findings: at release Step 6 run
+  `dismiss-ruled-review.sh` with `--ruling` and `--followup-issue`, then
+  `dismiss-stale-reviews.sh` at Step 7. The script posts the follow-up entries
+  itself. Its exit 1 goes under `## BLOCKED` with its `.unmet` list; stop there.
 
 ## Release
 
@@ -44,7 +61,9 @@ the PR.
 You do not edit repository content in the release role. If any release step,
 CI failure, or external review requires a source change, report the current
 tip, findings, review URLs, and completed release actions under `## BLOCKED`,
-then stop. The foreman dispatches the next counted developer fix in a fresh
+then stop. For a blocking policy review, include the JSON that
+`dismiss-ruled-review.sh` prints without `--ruling`: it names each finding by
+path, line and rule, the identities a weighing must copy. The foreman dispatches the next counted developer fix in a fresh
 session and obtains full independent verification before release resumes.
 Reuse the task's approved correction bounds; a normal release clear needs no
 new context-change permission. Do not reset the count or waive any release gate.

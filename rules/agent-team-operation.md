@@ -112,7 +112,7 @@ description: Running a multi-agent team — task-based specialist composition, c
 ## Judge Seat
 
 - The reserved `judge` seat runs on the most capable model available and holds no other responsibility
-- The foreman dispatches the judge in adjudication mode for one of three triggers: a contested reviewer or tester verdict, a foreman override of a blocking finding, or a bot finding the team disagrees with
+- The foreman dispatches the judge in adjudication mode for one of four triggers: a contested reviewer or tester verdict, a foreman override of a blocking finding, a bot finding the team disagrees with, or a weighing nomination
 - The foreman dispatches the judge in diagnosis mode at an exhausted allowance with blocking work remaining, on the investigator's assessment
 - Every judge dispatch declares which mode it is for, at plan and at apply
 - An undeclared mode is refused, never defaulted
@@ -180,6 +180,24 @@ description: Running a multi-agent team — task-based specialist composition, c
 - A `blocked` ruling stops the round and sends the named question to the operator
 - `blocked` is for a question only the operator can answer
 - A fact the tree can settle is `insufficient`, never `blocked`
+- A weighing asks whether fixing a finding is worth its cost, never whether the finding is real
+- The foreman nominates findings for a weighing and never weighs one itself
+- `foreman finding-churn` placing a finding on lines the previous fix round added nominates it
+- A worker report marking a finding `MARGINAL:` with a cited reachability claim nominates it
+- No other signal nominates a finding
+- One weighing dispatch carries every nomination for one gate
+- The weighing report is the ruling file, in the format the `skills/release/dismiss-ruled-review.sh` header names
+- Its `AUTHORITY: judge` line names the report's own path
+- The judge rules each nomination `fix`, `defer` or `decline`
+- `RULING: weighed` is a completed ruling
+- `insufficient` and `blocked` keep their adjudication meaning in a weighing
+- `fix` returns the finding to the fix loop
+- `defer` and `decline` stop the finding blocking the round and spend no fix round
+- Each `defer` and `decline` is entered in the task's follow-up issue, citing the ruling
+- A ruling covers a re-raised finding only while the finding's file is unchanged since the ruling's `HEAD:`
+- A finding a ruling covers is never re-nominated
+- A `fix` finding that stays open follows the fix loop and its exhaustion route, never a second weighing
+- Every finding under a `rules/review-severity.md` Judge-Weighed Finding Carve-Out floor is ruled `fix`
 - The judge is declared in `config.json`, measured, and planned like every other seat
 - The judge worker and the `claude` worker authenticate as one Claude subscription and draw on one weekly window
 - `window_group` names the usage window an agent shares with other agents
@@ -284,6 +302,7 @@ description: Running a multi-agent team — task-based specialist composition, c
 - Record `awaiting_diagnosis` when implementation awaits the judge's remedy
 - An active audit worker never establishes implementation progress
 - Scope fix re-checks to each prior finding: RESOLVED, OPEN, or DECLINED with a reason
+- A finding a weighing ruled `defer` or `decline` reads DECLINED, citing the ruling
 - Restrict NEW findings in a scoped re-check to blocking severity
 - Record new advisories in the round's follow-up issue without extending the fix loop
 - Run a broad whole-branch review before release

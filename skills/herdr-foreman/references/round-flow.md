@@ -12,7 +12,7 @@ The shape of one task round, and what the foreman does between the steps of
 | reviewer | none | independent COMMENT review and report |
 | advisor, investigator, architect | none | bounded recommendation, diagnosis or design report |
 | release | release operations only | verified release report |
-| judge | none | completed dispute ruling (binding), or a non-binding `insufficient` |
+| judge | none | completed dispute or weighing ruling (binding), or a non-binding `insufficient` |
 
 Activate the responsibilities the next task decision needs. Add specialty
 requirements through `references/specialists.md`; a profile on the bench needs
@@ -166,6 +166,9 @@ For an authorized implementation release, Step 12 requires all four:
    gates run and every acceptance criterion met.
 4. Nothing has been pushed to the branch after those two reports.
 
+A blocking finding a completed weighing ruled `defer` or `decline` does not
+fail 2 or 3 while its file is unchanged since the ruling's `HEAD:`.
+
 Under a recorded `stop` remedy, 2 and 3 read against what ships: the excluded
 defect is a tracked accepted defect and the shipped scope carries no other
 blocking finding. `rules/review-severity.md` Judge-Accepted Defect Carve-Out
@@ -232,7 +235,9 @@ and treat the return to Step 4 as a round boundary: log the round and reset
 the stow, so the reset context returns to Step 4 with self-contained briefs
 carrying them. Preserve the developer for retained fixes; use a fresh context for the
 fresh-worker stage. Never reset the counter during re-planning. At a contested
-verdict or a foreman override, go to Step 13 first. At an exhausted allowance,
+verdict, a foreman override, or a weighing nomination, go to Step 13 first.
+Nominations wait for the gate's weighing; other blocking findings take the
+fix path meanwhile. At an exhausted allowance,
 record the checkpoint through the owner commands in
 `skills/herdr-foreman/references/dispatch-recovery.md`, report implementation
 as `awaiting_diagnosis`, consult the investigator with round context
@@ -297,8 +302,9 @@ Judge Seat is the contract; this section is the operational detail for
 `skills/herdr-foreman/SKILL.md` Step 13, whose seven steps run from
 `skills/herdr-foreman/references/judge-round.md`.
 
-It runs in two modes. Adjudication settles a dispute; diagnosis asks why a fix
-loop is not converging. Dispatch adjudication on exactly one of three triggers:
+It runs in two modes. Adjudication settles a dispute or weighs findings;
+diagnosis asks why a fix loop is not converging. Dispatch adjudication on
+exactly one of four triggers:
 
 - A contested reviewer or tester verdict — one worker's finding, another
   worker's (or the foreman's) disagreement, neither side able to settle it by
@@ -307,8 +313,13 @@ loop is not converging. Dispatch adjudication on exactly one of three triggers:
   worker labelled blocking gets a second, independent read first.
 - A bot finding the team disagrees with — the policy reviewer or Copilot flags
   something the developer and reviewer both think is wrong.
+- A weighing nomination — a blocking finding `foreman finding-churn` places on
+  lines the previous fix round added, or one a worker report marks `MARGINAL:`.
+  The weighing asks whether the fix is worth its cost, never whether the
+  finding is real, and the judge's report is the ruling file
+  `skills/release/dismiss-ruled-review.sh` reads.
 
-All three are disputes, and a dispute is settled once. Dispatching an
+A dispute is settled once, and a finding is weighed once. Dispatching an
 adjudication at every allowance boundary made the seat a per-round toll on the
 window its developer and reviewers already share; that trigger is gone and
 stays gone.
@@ -483,6 +494,12 @@ authorization. A blocked ruling follows the operator-question path below.
   the round-flow reference's Branch-Changing Ruling contract. Finish here while
   its required operator decision is pending; otherwise return to Step 12 with
   `ACTION:` as the next counted fix.
+- **`RULING: weighed`** — record the ruling. Its `fix` findings return to
+  Step 12 as the next counted fix, `ACTION:` carrying them. Its `defer` and
+  `decline` findings stop blocking: the next re-check reads them `DECLINED`
+  citing the ruling, and the release brief carries the ruling as
+  `WEIGHING_RULING`. Record an `update` attention item naming the ruling; it
+  gates nothing. Never nominate a covered finding again.
 - **`blocked`** — the judge declined to rule. Stop the round and put its
   named question to the operator. Do not dispatch a second judge and do not
   rule in its place. Finish here.

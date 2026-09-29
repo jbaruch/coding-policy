@@ -64,6 +64,12 @@ Expected range: `{{REVIEW_BASE}}..{{REVIEW_HEAD}}`.
 A failing gate is a **blocking** finding. A gap in coverage the issue asked for
 is a blocking finding. A test-naming preference is advisory.
 
+A blocking finding you judge not worth its fix stays blocking. Add one line
+under it, `MARGINAL: <finding> — <reachability claim with file and line
+citations>`, and the foreman may nominate it for the judge's weighing. Never
+re-raise a finding a weighing ruling covers while its file is unchanged since
+the ruling's head.
+
 For a bug fix, verify the reproduction fails before and passes after the change
 where feasible. Retain contradictory evidence and state what any substitute
 check cannot prove. Identify requested new guarantees separately from unmet
@@ -71,7 +77,8 @@ accepted criteria so the foreman can assess their scope.
 
 When the foreman names a **scoped re-check**, verify each prior finding against
 the current tip and report `RESOLVED`, `OPEN`, or `DECLINED — <reason>`.
-Restrict `NEW` findings to blocking severity. Record new advisories in the
+A prior finding a weighing ruled `defer` or `decline` reads
+`DECLINED — ruling <report path>`. Restrict `NEW` findings to blocking severity. Record new advisories in the
 brief's follow-up issue; they never extend the fix loop. Name missing scope
 inputs in a `## BLOCKED` report instead of guessing which findings to check.
 

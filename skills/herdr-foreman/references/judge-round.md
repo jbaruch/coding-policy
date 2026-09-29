@@ -34,6 +34,30 @@ remedy with what it changed.
 The pinned seat is still `judge`, so plan and dispatch that role and pass this
 file as its brief: `--brief judge=<outdir>/brief-judge-diagnosis.md`.
 
+For a weighing, compose from `templates/brief-judge-weighing.md` under the role
+key `judge-weighing`, and pass `--brief judge=<outdir>/brief-judge-weighing.md`.
+One weighing carries every nomination at one gate. Nominate from two sources
+only: a worker report's `MARGINAL:` line, and the churn signal below. Leave out
+a finding a ruling already covers. For internal findings `--from` is the
+previous `record-report` receipt's `head_revision`; for policy findings it is
+the policy reviewer's previous review `commit_id`. The initial implementation
+round has no `--from` and no churn signal.
+
+```bash
+CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"; [ -d "$CP" ] || case "$(git config --get remote.origin.url)" in git@github.com:jbaruch/coding-policy|git@github.com:jbaruch/coding-policy.git|https://github.com/jbaruch/coding-policy|https://github.com/jbaruch/coding-policy.git|ssh://git@github.com/jbaruch/coding-policy|ssh://git@github.com/jbaruch/coding-policy.git) CP=. ;; *) echo "coding-policy plugin not found: run tessl install jbaruch/coding-policy" >&2; exit 1 ;; esac
+bash "$CP/skills/herdr-foreman/foreman.sh" finding-churn \
+  --repo <shared-checkout> --from <previous-head> --to <head> \
+  --finding <path>:<line> [--finding <path>:<line>]...
+```
+
+Emits `{from, to, findings: [{path, line, added_by_last_fix, path_changed}]}`.
+A finding with `added_by_last_fix` true is nominated. Exit 1 names a bad
+reference or finding on stderr; fix it and rerun. Fill `NOMINATIONS` with each
+nominated finding verbatim, its source, `path:line` and rule copied exactly,
+and its evidence; policy findings come from the list-mode JSON in the release
+worker's report. `HEAD` is that head's full sha. Fill `INVESTIGATION_REPORT`
+after an `insufficient` weighing, otherwise "none".
+
 Skip SKILL.md Step 8 for the read-only judge. Proceed immediately to step 2.
 
 ## 2 — Re-measure the Shared Window
@@ -53,7 +77,7 @@ bash "$CP/skills/herdr-foreman/foreman.sh" plan \
   --snapshot <step-2-measure-output> --task <task-id>
 ```
 
-`adjudication` for a dispute, `diagnosis` for an exhausted allowance — the same
+`adjudication` for a dispute or a weighing, `diagnosis` for an exhausted allowance — the same
 choice step 1 made when it composed the brief. Use the recorded mode in steps
 4 and 5. An undeclared mode is refused.
 

@@ -694,7 +694,10 @@ Step 16. No implementation or release is inferred from the diagnostic result.
 
 - **Any blocking finding** — apply the round-flow reference's Blocking Gate
   contract and `rules/agent-team-operation.md` Fix Loops. Return to Step 4 for
-  an authorized correction or Step 13 for a required judge ruling. At an
+  an authorized correction or Step 13 for a required judge ruling.
+  A finding a worker report marks `MARGINAL:`, or one `foreman finding-churn`
+  places on lines the previous fix round added, is a weighing nomination for
+  Step 13. The foreman nominates it and never weighs it. At an
   exhausted approach allowance, record the checkpoint through
   `references/dispatch-recovery.md`, consult the investigator under
   `references/specialists.md` with round context `{"investigator":
@@ -716,7 +719,8 @@ With its release criteria met, proceed immediately to Step 13.
 ## Step 13 — Run the Judge Round
 
 Optional. No trigger — proceed to Step 14. A bot disagreement inside Step 14
-returns here first.
+returns here first. A weighing nomination from Step 12 is an adjudication
+trigger. The judge's report is the ruling.
 
 Run the round's seven steps in order — compose the brief, re-measure the shared
 window, plan the pinned seat, start its worker on the pinned tier, dispatch,
@@ -744,6 +748,9 @@ the developer's agent (template `templates/brief-release.md`, the same
 `already-provisioned`), dispatch through Step 10 so the context is cleared and
 the brief is fresh, and wait on the report in Step 11. A source-changing
 release finding returns to Step 12 for the next counted developer assignment.
+A blocking policy review returns there too, where its nominations go to a
+weighing. Fill `WEIGHING_RULING` with the judge's report and the follow-up
+issue once a weighing covers the findings, otherwise "none".
 The worker merges after all gates pass. Proceed immediately to Step 15 only
 after verifying its reported release against the live VCS and release gates.
 Record that evidence in the task ledger.
