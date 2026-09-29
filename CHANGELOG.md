@@ -1,5 +1,27 @@
 # Changelog
 
+### Fixed
+
+- **`onboard-repo` and `migrate-to-plugin` find a global-only install (Fixes
+  #599).** Both skills invoked their scripts by the project-local mount path
+  alone (`bash .tessl/plugins/jbaruch/coding-policy/skills/<name>/<script>`).
+  A consumer whose coding-policy install lives only under
+  `$HOME/.tessl/plugins/...` has no such directory, so every step failed with
+  file-not-found. `onboard-repo` was the likeliest to hit it: the repo being
+  onboarded often carries no local install yet. Found while auditing #574 and
+  left out of it to keep that PR to the clone-relative defect.
+  - Every script block in both `SKILL.md` files now opens with the same `$CP`
+    resolver #574 gave release, herdr and adopt-fork-pr: project-local mount,
+    then the `$HOME` mount, then `.` only on an exact coding-policy origin.
+    `onboard-repo`'s combined install/upgrade blocks split into one block per
+    mode, so each block is one resolver plus one invocation.
+  - `rules/script-delegation.md`'s installed-plugin bootstrap carve-out lists
+    both files. `rules/skill-authoring.md`'s plugin-mount example, which
+    named `onboard-repo/preflight.sh`, becomes a generic placeholder.
+  - `skills/herdr-foreman/tests/test_skill_invocations.sh` checks both skills
+    (red before the fix: missing resolver, missing `bash "$CP/..."`
+    invocations).
+
 ## 0.3.332 — 2026-09-29
 
 ### Fixed
