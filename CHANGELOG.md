@@ -37,6 +37,11 @@
   - `poll-pr-reviews.sh` reports Copilot's `requested` true while its run is
     in flight. A review on an older head predates the new run's start, so the
     stale-head case follows from the same comparison.
+  - `watch-pr-reviews.sh` reaches `ready` only when Copilot's `requested` is
+    false. An older Copilot review at the same head is not the one a
+    re-request or a run in flight owes, and previously satisfied `ready`
+    before the owed review posted. A snapshot without `requested` (an older
+    poll script) reads as not owed.
   - `rules/ci-safety.md` Always Watch CI now defines `requested` as a review
     still owed on a request (pending, or consumed by a Copilot run with none
     posted since), and the `review_unrequested` wording in
