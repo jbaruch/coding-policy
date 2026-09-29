@@ -27,7 +27,7 @@ command -v jq >/dev/null 2>&1 || { echo "fatal: jq is required to run these test
 source "$SCRIPT"
 set +e
 
-# The script under test refuses a Herdr team round; tests run as standalone.
+# Tests run standalone unless a case sets HERDR_ENV in its own subshell.
 unset HERDR_ENV
 TMPDIR_TEST=$(mktemp -d -t dismiss-ruled-test.XXXXXX) || { echo "fatal: mktemp -d failed" >&2; exit 2; }
 cleanup_tmp() {
@@ -115,12 +115,13 @@ set_review() {
       {"id":8,"user":{"login":"github-actions[bot]"},"state":$state,"commit_id":$commit,"submitted_at":"2026-01-02T00:00:00Z","body":$body}]')
 }
 
-# A complete schema_version 1 ruling. Args: <head> <finding-line>...
+# A complete schema_version 2 operator ruling. Args: <head> <finding-line>...
 write_ruling() {
   local head="$1"; shift
   {
     echo "RULING: weighed"
-    echo "schema_version: 1"
+    echo "schema_version: 2"
+    echo "AUTHORITY: operator"
     echo "HEAD: ${head}"
     echo "ANSWER: decline the error-handling one, the harness sets it; b.md is presentation only"
     printf '%s\n' "$@"
@@ -173,10 +174,32 @@ gh() {
   esac
 }
 
+# The pinned judge's weighing report as a ruling file: judge authority naming
+# the file's own path, no ANSWER. Args: <authority-path> <head> <finding-line>...
+write_judge_ruling() {
+  local named="$1" head="$2"; shift 2
+  {
+    echo "RULING: weighed"
+    echo "schema_version: 2"
+    echo "AUTHORITY: judge ${named}"
+    echo "HEAD: ${head}"
+    printf '%s\n' "$@"
+    echo "ACTION: none"
+    echo "UNVERIFIED: none"
+    echo ""
+    echo "1. Reachability cited at run.sh:3; the harness sets the flag."
+  } > "$RULING"
+}
+
 # Run main in a subshell (it exits); capture stdout and rc.
 OUT=""; RC=0
 invoke() { RC=0; OUT=$( (main owner repo 5 "$@") 2>"${TMPDIR_TEST}/stderr") || RC=$?; }
 invoke_ruled() { invoke --ruling "$RULING" --followup-issue "$ISSUE"; }
+# The same run inside a Herdr team round.
+invoke_team_ruled() {
+  RC=0
+  OUT=$( (export HERDR_ENV=1; main owner repo 5 --ruling "$RULING" --followup-issue "$ISSUE") 2>"${TMPDIR_TEST}/stderr") || RC=$?
+}
 dismissals() { grep -c '^dismiss ' "$EVENTS"; }
 comments() { grep -c '^comment$' "$EVENTS"; }
 digest_of_ruling() { python3 -c 'import hashlib,sys; print(hashlib.sha256(open(sys.argv[1],"rb").read()).hexdigest()[:16])' "$RULING"; }
@@ -420,11 +443,11 @@ t_schema_missing_or_other_refuses() {
   grep -v '^schema_version:' "$RULING" > "${RULING}.tmp" && mv "${RULING}.tmp" "$RULING"
   invoke_ruled
   assert_eq "exit without schema_version" "1" "$RC" || return 1
-  assert_unmet "schema_version: 1" "the schema" || return 1
+  assert_unmet "schema_version: 2" "the schema" || return 1
   write_ruling "$HEAD_SHA" "$DECLINE_ONE" "$DECLINE_TWO"
-  sed 's/^schema_version: 1$/schema_version: 2/' "$RULING" > "${RULING}.tmp" && mv "${RULING}.tmp" "$RULING"
+  sed 's/^schema_version: 2$/schema_version: 1/' "$RULING" > "${RULING}.tmp" && mv "${RULING}.tmp" "$RULING"
   invoke_ruled
-  assert_eq "exit with schema_version 2" "1" "$RC" || return 1
+  assert_eq "exit with schema_version 1" "1" "$RC" || return 1
   assert_eq "no dismissal" "0" "$(dismissals)"
 }
 
@@ -465,8 +488,63 @@ t_usage_errors_exit_2() {
   invoke --ruling "${TMPDIR_TEST}/does-not-exist" --followup-issue "$ISSUE"
   assert_eq "unreadable ruling" "2" "$RC" || return 1
   assert_eq "stdout empty" "" "$OUT"
-  RC=0; ( HERDR_ENV=1 main owner repo 5 ) >/dev/null 2>&1 || RC=$?
-  assert_eq "Herdr team round refused" "2" "$RC" || return 1
+}
+
+t_team_round_judge_report_dismisses() {
+  set_review CHANGES_REQUESTED "$HEAD_SHA" "$BODY_TWO"
+  write_judge_ruling "$RULING" "$HEAD_SHA" "$DECLINE_ONE" "$DEFER_TWO"
+  invoke_team_ruled
+  assert_eq "exit" "0" "$RC" || return 1
+  assert_eq "result" "dismissed" "$(jq -r .result <<<"$OUT")" || return 1
+  assert_eq "comment then dismissal" "comment" "$(head -1 "$EVENTS")" || return 1
+  assert_eq "one dismissal" "1" "$(dismissals)"
+}
+
+t_team_round_operator_ruling_refuses() {
+  set_review CHANGES_REQUESTED "$HEAD_SHA" "$BODY_TWO"
+  write_ruling "$HEAD_SHA" "$DECLINE_ONE" "$DECLINE_TWO"
+  invoke_team_ruled
+  assert_eq "exit" "1" "$RC" || return 1
+  assert_unmet "pinned judge weighs" "the team-round authority" || return 1
+  assert_eq "nothing posted" "0" "$(wc -l < "$EVENTS" | tr -d ' ')"
+}
+
+t_judge_ruling_naming_another_file_refuses() {
+  set_review CHANGES_REQUESTED "$HEAD_SHA" "$BODY_TWO"
+  write_judge_ruling "${TMPDIR_TEST}/judge-report.md" "$HEAD_SHA" "$DECLINE_ONE" "$DECLINE_TWO"
+  invoke_team_ruled
+  assert_eq "another path exit" "1" "$RC" || return 1
+  assert_unmet "not the --ruling file itself" "the copied report" || return 1
+  write_judge_ruling "ruling" "$HEAD_SHA" "$DECLINE_ONE" "$DECLINE_TWO"
+  invoke_team_ruled
+  assert_eq "relative path exit" "1" "$RC" || return 1
+  assert_eq "nothing posted" "0" "$(wc -l < "$EVENTS" | tr -d ' ')"
+}
+
+t_standalone_judge_ruling_refuses() {
+  set_review CHANGES_REQUESTED "$HEAD_SHA" "$BODY_TWO"
+  write_judge_ruling "$RULING" "$HEAD_SHA" "$DECLINE_ONE" "$DECLINE_TWO"
+  invoke_ruled
+  assert_eq "exit" "1" "$RC" || return 1
+  assert_unmet "operator is the judge" "the standalone authority" || return 1
+  assert_eq "nothing posted" "0" "$(wc -l < "$EVENTS" | tr -d ' ')"
+}
+
+t_missing_authority_refuses() {
+  set_review CHANGES_REQUESTED "$HEAD_SHA" "$BODY_TWO"
+  write_ruling "$HEAD_SHA" "$DECLINE_ONE" "$DECLINE_TWO"
+  grep -v '^AUTHORITY:' "$RULING" > "${RULING}.tmp" && mv "${RULING}.tmp" "$RULING"
+  invoke_ruled
+  assert_eq "exit" "1" "$RC" || return 1
+  assert_unmet "AUTHORITY:" "the missing authority" || return 1
+  assert_eq "no dismissal" "0" "$(dismissals)"
+}
+
+t_team_round_list_mode_emits_findings() {
+  set_review CHANGES_REQUESTED "$HEAD_SHA" "$BODY_TWO"
+  RC=0; OUT=$( (export HERDR_ENV=1; main owner repo 5) 2>"${TMPDIR_TEST}/stderr") || RC=$?
+  assert_eq "exit" "0" "$RC" || return 1
+  assert_eq "result" "findings" "$(jq -r .result <<<"$OUT")"
 }
 
 # End to end on the marker: the dismissal message this script actually sends
@@ -557,6 +635,12 @@ run_suite() {
   run "a malformed ruling refuses"                    t_malformed_ruling_refuses
   run "list mode emits the blocking findings"         t_list_mode_emits_findings
   run "usage errors exit 2"                           t_usage_errors_exit_2
+  run "team round: the judge's report dismisses"      t_team_round_judge_report_dismisses
+  run "team round: an operator ruling refuses"        t_team_round_operator_ruling_refuses
+  run "a judge ruling naming another file refuses"    t_judge_ruling_naming_another_file_refuses
+  run "standalone: a judge ruling refuses"            t_standalone_judge_ruling_refuses
+  run "a missing AUTHORITY line refuses"              t_missing_authority_refuses
+  run "team round: list mode emits the findings"      t_team_round_list_mode_emits_findings
   run "the sent marker reads RULED and sweeps"        t_sent_marker_reads_ruled_and_sweeps
   printf '{"suite":"test_dismiss_ruled_review.sh","passed":%d,"failed":%d}\n' "$PASS_COUNT" "$FAIL_COUNT"
   [[ $FAIL_COUNT -eq 0 ]]

@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
-# Dismiss the policy reviewer's gating CHANGES_REQUESTED on the PR head once the
-# operator's recorded weighing ruling rules every blocking finding in it `defer`
-# or `decline` (rules/review-severity.md Judge-Weighed Finding Carve-Out;
+# Dismiss the policy reviewer's gating CHANGES_REQUESTED on the PR head once a
+# recorded weighing ruling rules every blocking finding in it `defer` or
+# `decline` (rules/review-severity.md Judge-Weighed Finding Carve-Out;
 # rules/ci-safety.md Judge-Ruled-Review Dismissal Carve-Out). This script is the
 # only sanctioned path for that dismissal; a hand dismissal is not.
-# Standalone mode only: with HERDR_ENV set (a Herdr team round, any value) it
-# exits 2 and does nothing; a team round follows the Judge Seat workflow.
+# Who ruled follows the mode: standalone (HERDR_ENV unset) the operator, in a
+# Herdr team round (HERDR_ENV set, any value) the pinned judge
+# (rules/agent-team-operation.md Judge Seat). The ruling's AUTHORITY line must
+# name the authority the mode requires.
 #
 # Usage: dismiss-ruled-review.sh <owner> <repo> <pr-number> [--ruling <file> --followup-issue <number>]
 #   Without --ruling: list mode. Emits the blocking findings of the latest
@@ -15,16 +17,22 @@
 #   is required with it: the task's follow-up issue in <owner>/<repo>.
 #
 # Ruling file — a state artifact reused across pushes of one PR.
-#   Owner/writer: the release skill (skills/release/SKILL.md Step 6). The agent
-#     writes it from the operator's answer, one file per gate.
+#   Owner: the release skill (skills/release/SKILL.md Step 6), which alone
+#     changes its shape.
+#   Writers: standalone, the release skill's agent, from the operator's answer;
+#     in a team round, the pinned judge, whose weighing report
+#     (skills/herdr-foreman/templates/brief-judge-weighing.md) is the ruling
+#     file. One file per gate.
 #   Reader: this script, the only one. It refuses a missing schema_version line or any
 #     version other than RULING_SCHEMA (exit 1); it never migrates.
-#   Format, schema_version 1 (lines in any order after the first; unknown lines ignored):
+#   Format, schema_version 2 (lines in any order after the first; unknown lines ignored):
 #     RULING: weighed                       (first line, required)
-#     schema_version: 1                     (required)
+#     schema_version: 2                     (required)
+#     AUTHORITY: operator | judge <path>    (required, exactly one; `judge`
+#                                            names the report's own absolute path)
 #     HEAD: <40-hex sha>                    (required, exactly one, full sha)
-#     ANSWER: <operator's answer, verbatim> (required, non-empty; continuation
-#                                            lines indented two spaces)
+#     ANSWER: <operator's answer, verbatim> (required for `operator`, non-empty;
+#                                            continuation lines indented two spaces)
 #     FINDING: <source> <path>:<line> <rule|-> — fix | defer — <follow-up entry> | decline — <reason>
 #                                           (one per nominated finding)
 #     ACTION: <fix list or "none">          (optional)
@@ -33,9 +41,13 @@
 # Predicate (dismissal mode) — every condition must hold, else nothing is
 # posted or dismissed and the script exits 1:
 #   1. The ruling's first line is exactly `RULING: weighed`; it carries
-#      `schema_version: <RULING_SCHEMA>`, exactly one `HEAD:` line, a non-empty
-#      `ANSWER:` line and at least one FINDING line; every FINDING line parses;
-#      every defer/decline line carries its text.
+#      `schema_version: <RULING_SCHEMA>`, exactly one `HEAD:` line and at least
+#      one FINDING line; every FINDING line parses; every defer/decline line
+#      carries its text.
+#   1a. It carries exactly one AUTHORITY line, and that authority matches the
+#      mode: `operator` standalone, with a non-empty `ANSWER:` line; `judge` in
+#      a team round, naming an absolute path that resolves to the --ruling file
+#      itself.
 #   2. The latest policy review (POLICY_REVIEW_LOGINS; per-login latest by
 #      submitted_at, CHANGES_REQUESTED wins across logins — the same resolution
 #      as poll-pr-reviews.sh) is CHANGES_REQUESTED and bound to the live head.
@@ -51,7 +63,7 @@
 #      unchanged from the ruling's HEAD to the live head (status ahead or
 #      identical, file list under the API's 300-file cap).
 #   6. No blocking finding's rule is in FLOOR_RULES — the rule-id floors. The
-#      judgment floors are the operator's to rule `fix`; this script does not
+#      judgment floors are the ruling authority's to rule `fix`; this script does not
 #      classify them.
 #   7. No check on the head is in the `fail` bucket.
 #
@@ -82,7 +94,7 @@
 set -euo pipefail
 
 RULED_MARKER="JUDGE-RULED:"
-RULING_SCHEMA="1"
+RULING_SCHEMA="2"
 FLOOR_RULES=(no-secrets ci-safety)
 POLICY_REVIEW_LOGINS=("github-actions[bot]" "coding-policy-fleet-reviewer[bot]")
 
@@ -105,8 +117,11 @@ usage() {
 # SHA on stdout), 4 act (decision JSON on stdout; review id, message, digest
 # and follow-up comment body written under <tmp>).
 decide() {
-  local tmp="$1" pr="$2" head="$3" ruling="$4" issue="$5" repo_slug="$6"
-  python3 - "$tmp" "$pr" "$head" "$ruling" "$issue" "$repo_slug" "$RULED_MARKER" "$RULING_SCHEMA" \
+  local tmp="$1" pr="$2" head="$3" ruling="$4" issue="$5" repo_slug="$6" mode="standalone"
+  if [[ -n "${HERDR_ENV+x}" ]]; then
+    mode="team"
+  fi
+  python3 - "$tmp" "$pr" "$head" "$ruling" "$issue" "$repo_slug" "$RULED_MARKER" "$RULING_SCHEMA" "$mode" \
     "${#POLICY_REVIEW_LOGINS[@]}" "${POLICY_REVIEW_LOGINS[@]}" "${FLOOR_RULES[@]}" <<'PY'
 import hashlib
 import json
@@ -114,9 +129,9 @@ import os
 import re
 import sys
 
-tmp, pr, head, ruling_path, issue, repo_slug, marker, schema, n_logins = sys.argv[1:10]
-logins = sys.argv[10:10 + int(n_logins)]
-floors = set(sys.argv[10 + int(n_logins):])
+tmp, pr, head, ruling_path, issue, repo_slug, marker, schema, mode, n_logins = sys.argv[1:11]
+logins = sys.argv[11:11 + int(n_logins)]
+floors = set(sys.argv[11 + int(n_logins):])
 
 FINDING_RE = re.compile(r"^- `(?P<path>.+):(?P<line>\d+)` — \*\*(?P<rule>[^*]+)\*\* — (?P<message>.*)$")
 RULING_LINE_RE = re.compile(
@@ -219,6 +234,7 @@ ruling_lines = ruling_bytes.decode("utf-8", errors="replace").splitlines()
 heads = [m["sha"] for m in (HEAD_RE.match(ln.strip()) for ln in ruling_lines) if m]
 schemas = [ln[len("schema_version:"):].strip() for ln in ruling_lines if ln.startswith("schema_version:")]
 answers = [ln[len("ANSWER:"):].strip() for ln in ruling_lines if ln.startswith("ANSWER:")]
+authorities = [ln[len("AUTHORITY:"):].strip() for ln in ruling_lines if ln.startswith("AUTHORITY:")]
 entries, malformed = {}, []
 duplicates = []
 for ln in ruling_lines:
@@ -239,8 +255,20 @@ if schemas != [schema]:
     out["unmet"].append(f"the ruling carries no single 'schema_version: {schema}' line — rewrite it in the current format")
 if len(heads) != 1:
     out["unmet"].append("the ruling carries no single 'HEAD: <40-hex sha>' line — write the full commit sha the findings were raised on")
-if len(answers) != 1 or not answers[0]:
-    out["unmet"].append("the ruling carries no single non-empty 'ANSWER:' line quoting the operator verbatim")
+if len(authorities) != 1:
+    out["unmet"].append("the ruling carries no single 'AUTHORITY: operator | judge <path>' line")
+elif mode == "standalone":
+    if authorities[0] != "operator":
+        out["unmet"].append(f"standalone (HERDR_ENV unset) the operator is the judge, so the ruling's authority must be 'operator', not '{authorities[0]}'")
+    elif len(answers) != 1 or not answers[0]:
+        out["unmet"].append("the ruling carries no single non-empty 'ANSWER:' line quoting the operator verbatim")
+else:
+    kind, _, named = authorities[0].partition(" ")
+    named = named.strip()
+    if kind != "judge":
+        out["unmet"].append(f"in a Herdr team round (HERDR_ENV set) the pinned judge weighs, so the ruling's authority must be 'judge <report path>', not '{authorities[0]}'")
+    elif not os.path.isabs(named) or os.path.realpath(named) != os.path.realpath(ruling_path):
+        out["unmet"].append(f"the judge authority names '{named}', not the --ruling file itself — pass the judge's own weighing report")
 if malformed:
     out["unmet"].append(f"unparseable FINDING line(s): {malformed}")
 if duplicates:
@@ -379,10 +407,6 @@ PY
 }
 
 main() {
-  if [[ -n "${HERDR_ENV+x}" ]]; then
-    echo "error: dismiss-ruled-review.sh runs in standalone mode only; HERDR_ENV is set, so this is a Herdr team round, which follows the Judge Seat workflow (rules/agent-team-operation.md)" >&2
-    exit 2
-  fi
   [[ $# -ge 3 ]] || usage
   local owner="$1" repo="$2" pr="$3" ruling="" issue=""
   shift 3
@@ -406,7 +430,7 @@ main() {
     exit 2
   fi
   if [[ -n "$ruling" && ! ( -f "$ruling" && -r "$ruling" ) ]]; then
-    echo "error: ruling file not readable at '${ruling}' — pass the recorded operator ruling" >&2
+    echo "error: ruling file not readable at '${ruling}' — pass the recorded ruling (the operator's, or the pinned judge's weighing report)" >&2
     exit 2
   fi
   local tool

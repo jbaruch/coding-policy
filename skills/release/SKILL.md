@@ -145,8 +145,9 @@ It returns the full `poll-pr-reviews.sh` snapshot plus a `watch` object — `{"r
   - Declined: `Declining — <reason with cited evidence>` (em dash `—`, not hyphen or period)
   - Advisory deferred: `Acknowledged — deferred to <follow-up ref>` (em dash `—`; names where it is tracked)
 - **Marginal blocking finding:** a nominated finding may go to a weighing instead of a fix (`rules/review-severity.md` Judge-Weighed Finding Carve-Out)
-  - Standalone only: with `HERDR_ENV` set, skip this path; `dismiss-ruled-review.sh` refuses a team round
-  - The operator is the judge
+  - Standalone, the operator is the judge
+  - In a Herdr team round the foreman nominates and the pinned judge weighs
+  - The release brief then names the judge's report as the ruling file, and the worker asks no question
   - Nominate a finding only when it sits on lines the previous fix push added, or with a cited reachability claim marking it marginal
   - Ask one decision question per gate, carrying every nomination
   - Keep fixing while the question is open
