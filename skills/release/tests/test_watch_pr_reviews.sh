@@ -120,9 +120,12 @@ sleeps() { [[ -f "$TMPDIR_TEST/sleeps" ]] || { echo 0; return; }; wc -l < "$TMPD
 snap() {
   local mergeable="$1" mstatus="$2" ci="$3" codex="$4" copilot="$5"
   local ghc="${6:-0}" cpc="${7:-0}"
-  # `requested` defaults to true: every existing case models a lane that was
-  # asked for and has not answered yet, which is what waiting is for (#369).
-  local cpr="${8:-true}"
+  # `requested` defaults to true while Copilot has not posted (a lane asked
+  # for and not answered yet, which is what waiting is for, #369) and to false
+  # once it has (the owed review arrived, #641).
+  local cpr_default=false
+  [[ "$copilot" == "none" ]] && cpr_default=true
+  local cpr="${8:-$cpr_default}"
   jq -cn \
     --arg mergeable "$mergeable" --arg mstatus "$mstatus" --arg ci "$ci" \
     --arg codex "$codex" --arg copilot "$copilot" \
@@ -165,12 +168,36 @@ test_unrequested_copilot_is_immediate() {
 test_requested_copilot_still_waits() {
   reset_mocks
   queue "$(snap MERGEABLE CLEAN success APPROVED none 0 0 true)" \
-        "$(snap MERGEABLE CLEAN success APPROVED COMMENTED 0 0 true)"
+        "$(snap MERGEABLE CLEAN success APPROVED COMMENTED 0 0 false)"
   local out rc=0
   out=$(main jbaruch coding-policy 42 2>&1) || rc=$?
   assert_eq "exit code" "0" "$rc" || return 1
   assert_eq "result" "ready" "$(result_of "$out")" || return 1
   assert_eq "poll count" "2" "$(calls)" || return 1
+}
+
+# #641: an older same-head Copilot review is not the review a re-request or a
+# run in flight owes. While `requested` is true the watcher keeps waiting; it
+# reaches ready only once the owed review posts and `requested` goes false.
+test_owed_copilot_review_blocks_ready() {
+  reset_mocks
+  queue "$(snap MERGEABLE CLEAN success APPROVED COMMENTED 0 0 true)" \
+        "$(snap MERGEABLE CLEAN success APPROVED COMMENTED 0 0 false)"
+  local out rc=0
+  out=$(main jbaruch coding-policy 42 2>&1) || rc=$?
+  assert_eq "exit code" "0" "$rc" || return 1
+  assert_eq "result" "ready" "$(result_of "$out")" || return 1
+  assert_eq "poll count" "2" "$(calls)" || return 1
+}
+
+# A review still owed for the whole budget ends pending, never ready.
+test_owed_copilot_review_pends_at_budget() {
+  reset_mocks
+  queue "$(snap MERGEABLE CLEAN success APPROVED COMMENTED 0 0 true)"
+  local out rc=0
+  out=$(main jbaruch coding-policy 42 2>/dev/null) || rc=$?
+  assert_eq "exit code" "1" "$rc" || return 1
+  assert_eq "result" "pending_at_budget" "$(result_of "$out")"
 }
 
 # A snapshot from an older poll-pr-reviews.sh carries no `requested` field; the
@@ -370,6 +397,8 @@ run_suite() {
   echo "test_watch_pr_reviews.sh" >&2
   run "an unrequested Copilot lane is diagnosed without waiting" test_unrequested_copilot_is_immediate
   run "a requested Copilot lane still waits for its verdict" test_requested_copilot_still_waits
+  run "an owed Copilot review blocks ready past an older one (#641)" test_owed_copilot_review_blocks_ready
+  run "an owed Copilot review pends at budget, never ready (#641)" test_owed_copilot_review_pends_at_budget
   run "a snapshot without the requested field keeps waiting" test_missing_requested_field_still_waits
   run "ready on first poll — no sleep" test_ready_first_poll
   run "RULED policy review plus green is ready" test_ruled_is_ready
