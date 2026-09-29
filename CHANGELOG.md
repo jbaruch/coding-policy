@@ -25,10 +25,16 @@
     format gains a required `AUTHORITY:` line (schema_version 2; the script,
     as the owner's reader, upgrades a version-1 file in place to
     `AUTHORITY: operator`, the only authority version 1 had): `operator` with its verbatim
-    `ANSWER:` standalone, `judge <path>` in a team round, where the path must
-    resolve to the `--ruling` file itself so a hand-written copy is refused.
-    The script no longer refuses `HERDR_ENV`; it refuses an authority the
-    mode does not accept.
+    `ANSWER:` standalone, `judge` in a team round. A self-declared authority
+    proves nothing, so in a team round the script takes `--task` and asks
+    the new read-only `foreman verify-ruling`, which binds the file to the
+    report supervision enrolled for the pinned judge's applied adjudication
+    on that task, the way `diagnose` binds a diagnosis. The script no longer
+    refuses `HERDR_ENV`; it refuses an authority the mode does not accept,
+    and an unbound judge ruling. The version-1 upgrade writes through an
+    exclusive temp file. A weighing runs in adjudication mode but has no
+    positions, so Judge Seat scopes the position, citation and ruling-grammar
+    bullets to disputes and gives a weighing its own `RULING:` set.
   - New `foreman finding-churn` (`skills/herdr-foreman/foreman/churn.py`):
     diffs each finding's path between the previous fix round's head and the
     current head with `-U0`, and reports `added_by_last_fix` and
