@@ -95,11 +95,27 @@ class RepoTest(unittest.TestCase):
         row = json.loads(out)["findings"][0]
         self.assertEqual((row["added_by_last_fix"], row["path_changed"]), (True, True))
 
-    def test_unknown_commit_is_refused(self):
+    def test_unknown_commit_is_refused_by_name(self):
         code, out, err = self.run_cli("a.py:1", source="0" * 40)
         self.assertEqual(code, 1)
         self.assertEqual(out, "")
-        self.assertIn("--from", json.loads(err)["message"])
+        self.assertIn("0" * 40, json.loads(err)["message"])
+
+    def test_broken_repository_keeps_the_git_diagnostic(self):
+        out, err = io.StringIO(), io.StringIO()
+        code = cli.main(["finding-churn", "--repo", str(self.repo / "missing"), "--from", self.prior,
+                         "--to", self.head, "--finding", "a.py:1"], stdout=out, stderr=err)
+        self.assertEqual(code, 1)
+        message = json.loads(err.getvalue())["message"]
+        self.assertIn("rev-parse", message)
+        self.assertNotIn("does not name a commit", message)
+
+    def test_pathspec_magic_in_a_path_is_literal(self):
+        # A glob `a*.py` would also match a.py, which the prior round changed.
+        code, out, _ = self.run_cli("a*.py:1")
+        self.assertEqual(code, 0)
+        row = json.loads(out)["findings"][0]
+        self.assertEqual((row["added_by_last_fix"], row["path_changed"]), (False, False))
 
 
 if __name__ == "__main__":

@@ -27,6 +27,7 @@ toward refusing carry-over; neither direction waives a finding.
 import re
 
 from .errors import UsageError
+from .partition import _revision as resolve_commit
 from .triggers import git_runner
 
 HUNK_RE = re.compile(r"^@@ -\d+(?:,\d+)? \+(?P<start>\d+)(?:,(?P<count>\d+))? @@")
@@ -57,25 +58,18 @@ def parse_finding(value):
     return path, int(line)
 
 
-def resolve(run, ref, flag):
-    try:
-        return run(["rev-parse", "--verify", "--quiet", ref + "^{commit}"]).strip()
-    except UsageError as exc:
-        raise UsageError("{} {!r} names no commit in this repository ({}); pass the full sha of the head it "
-                         "stands for.".format(flag, ref, exc.message), {"ref": ref}) from None
-
-
 def run_command(args, runner=None):
     run = runner if runner is not None else git_runner(args.repo)
     findings = [parse_finding(value) for value in args.finding]
-    source = resolve(run, args.source, "--from")
-    target = resolve(run, args.target, "--to")
+    # An unknown revision is refused by name; a broken repository keeps git's diagnostic.
+    source = resolve_commit(run, args.source)
+    target = resolve_commit(run, args.target)
     diffs = {}
     rows = []
     for path, line in findings:
         if path not in diffs:
             diffs[path] = run(["diff", "-U0", "--no-color", "--no-ext-diff", "--no-textconv",
-                               "--no-renames", source, target, "--", path])
+                               "--no-renames", source, target, "--", ":(literal)" + path])
         added, changed = classify(diffs[path], line)
         rows.append({"path": path, "line": line, "added_by_last_fix": added, "path_changed": changed})
     return {"from": source, "to": target, "findings": rows}, None
