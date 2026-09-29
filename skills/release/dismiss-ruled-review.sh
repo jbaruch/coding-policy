@@ -125,7 +125,7 @@ case "${BASH_SOURCE[0]}" in
   */*) _dismiss_src="${BASH_SOURCE[0]%/*}" ;;
   *) _dismiss_src=. ;;
 esac
-if ! DISMISS_DIR="$(cd -- "${_dismiss_src:-/}" && pwd && printf x)"; then
+if ! DISMISS_DIR="$(CDPATH='' cd -- "${_dismiss_src:-/}" && pwd && printf x)"; then
   echo "error: cannot enter the script directory ${_dismiss_src:-/} — restore read and search access to the plugin directory, then re-run" >&2
   exit 2
 fi
@@ -140,7 +140,7 @@ cleanup() {
 }
 
 usage() {
-  echo "usage: $0 <owner> <repo> <pr-number> [--ruling <file> --followup-issue <number>]" >&2
+  echo "usage: $0 <owner> <repo> <pr-number> [--ruling <file> --followup-issue <number> [--task <id>]]" >&2
   exit 2
 }
 

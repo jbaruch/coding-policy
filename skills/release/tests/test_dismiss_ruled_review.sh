@@ -565,6 +565,24 @@ t_real_binding_reports_the_foreman_refusal() {
   [[ -s "$out" && "$(cat "$out")" != "ok" ]] || { echo "    FAIL: expected a refusal reason, got '$(cat "$out")'" >&2; return 1; }
 }
 
+# A hostile CDPATH must not redirect the script-dir resolver (#637): a
+# relative `cd` would land in the decoy and print its path, so the team-round
+# binding would look for a foreman that is not the sibling one.
+t_hostile_cdpath_keeps_the_sibling_foreman() {
+  local decoy="${TMPDIR_TEST}/decoy" stage="${TMPDIR_TEST}/stage" out
+  mkdir -p "${decoy}/release" "${stage}/release" "${stage}/herdr-foreman" \
+    || { echo "    FAIL: cannot build the CDPATH fixture" >&2; return 1; }
+  cp "$SCRIPT" "${stage}/release/dismiss-ruled-review.sh" || { echo "    FAIL: cannot stage the script" >&2; return 1; }
+  printf '#!/usr/bin/env bash\necho "sibling $*" > "%s"\nexit 0\n' "${TMPDIR_TEST}/foreman-called" \
+    > "${stage}/herdr-foreman/foreman.sh" || { echo "    FAIL: cannot stage the foreman stub" >&2; return 1; }
+  rm -f "${TMPDIR_TEST}/foreman-called"
+  out="${TMPDIR_TEST}/hostile-binding"
+  ( cd "$stage" && CDPATH="$decoy" bash -c 'source release/dismiss-ruled-review.sh; set +e; verify_judge_ruling t-632 /r/x.md "$1"' _ "$out" ) \
+    2>"${TMPDIR_TEST}/stderr" || { echo "    FAIL: the staged binding check exited non-zero: $(cat "${TMPDIR_TEST}/stderr")" >&2; return 1; }
+  assert_eq "binding result" "ok" "$(cat "$out")" || return 1
+  assert_eq "sibling foreman ran" "sibling verify-ruling --task t-632 --ruling /r/x.md" "$(cat "${TMPDIR_TEST}/foreman-called")"
+}
+
 t_team_round_ruling_without_task_is_usage() {
   write_judge_ruling "$HEAD_SHA" "$DECLINE_ONE" "$DECLINE_TWO"
   invoke_team --ruling "$RULING" --followup-issue "$ISSUE"
@@ -692,6 +710,7 @@ run_suite() {
   run "team round: an operator ruling refuses"        t_team_round_operator_ruling_refuses
   run "team round: an unbound judge ruling refuses"   t_unbound_judge_ruling_refuses
   run "team round: a ruling without --task is usage"  t_team_round_ruling_without_task_is_usage
+  run "a hostile CDPATH keeps the sibling foreman"    t_hostile_cdpath_keeps_the_sibling_foreman
   run "the real binding reports the foreman refusal"  t_real_binding_reports_the_foreman_refusal
   run "standalone: a judge ruling refuses"            t_standalone_judge_ruling_refuses
   run "a missing AUTHORITY line refuses"              t_missing_authority_refuses
