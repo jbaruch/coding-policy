@@ -89,11 +89,41 @@ class RepoTest(unittest.TestCase):
                          [("a.py", 2, True, True), ("a.py", 3, False, True),
                           ("a.py", 5, True, True), ("b.py", 1, False, False)])
 
-    def test_renamed_file_reads_as_added_and_changed(self):
-        code, out, _ = self.run_cli("new.py:2")
-        self.assertEqual(code, 0)
-        row = json.loads(out)["findings"][0]
-        self.assertEqual((row["added_by_last_fix"], row["path_changed"]), (True, True))
+    def test_pure_rename_adds_no_line_but_reads_changed(self):
+        code, out, err = self.run_cli("new.py:1", "new.py:2", "new.py:3")
+        self.assertEqual(code, 0, err)
+        rows = json.loads(out)["findings"]
+        self.assertEqual([(row["added_by_last_fix"], row["path_changed"]) for row in rows], [(False, True)] * 3)
+
+    def test_renamed_and_edited_file_reports_only_edited_lines(self):
+        lines = ["line {}".format(n) for n in range(1, 11)]
+        self.write("d.py", lines)
+        before = self.commit("a file large enough for rename detection")
+        git(self.repo, "mv", "d.py", "e.py")
+        self.write("e.py", lines[:4] + ["EDITED"] + lines[5:])
+        later = self.commit("rename and edit")
+        code, out, err = self.run_cli("e.py:4", "e.py:5", "e.py:6", source=before, target=later)
+        self.assertEqual(code, 0, err)
+        rows = json.loads(out)["findings"]
+        self.assertEqual([(row["added_by_last_fix"], row["path_changed"]) for row in rows],
+                         [(False, True), (True, True), (False, True)])
+
+    def test_non_ancestor_from_is_refused(self):
+        code, out, err = self.run_cli("a.py:1", source=self.head, target=self.prior)
+        self.assertEqual((code, out), (1, ""))
+        self.assertIn("not an ancestor", json.loads(err)["message"])
+
+    def test_path_gone_from_to_is_refused(self):
+        code, out, err = self.run_cli("old.py:1")
+        self.assertEqual((code, out), (1, ""))
+        self.assertIn("does not exist at --to", json.loads(err)["message"])
+
+    def test_name_status_parsing(self):
+        changes, gone = churn.parse_changes("M\0a.py\0R087\0old.py\0new.py\0D\0gone.py\0A\0n.py\0")
+        self.assertEqual(changes, {"a.py": ("M", "a.py"), "new.py": ("R", "old.py"), "n.py": ("A", "n.py")})
+        self.assertEqual(gone, {"old.py", "gone.py"})
+        with self.assertRaises(UsageError):
+            churn.parse_changes("R100\0old.py\0")
 
     def test_unknown_commit_is_refused_by_name(self):
         code, out, err = self.run_cli("a.py:1", source="0" * 40)
