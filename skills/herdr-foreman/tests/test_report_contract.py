@@ -134,6 +134,11 @@ class ReportLinesTest(unittest.TestCase):
         text = consultation(*MET, "The acceptance criteria and the verdict are discussed above.")
         self.assertEqual(report_contract.report_lines(text, "advisor", None, 2)["verdict"], None)
 
+    def test_declared_contributions_survive_other_gaps(self):
+        text = "No verdict.\n- CONTRIBUTION: implementation\nCONTRIBUTION: design\nCONTRIBUTION: lots\n"
+        self.assertEqual(report_contract.declared_contributions(text), {"implementation", "design"})
+        self.assertEqual(report_contract.declared_contributions("contribution: design\n"), set())
+
     def test_every_gap_is_named_at_once(self):
         gaps = self.gaps("VERDICT: approved\nVERDICT: approved\nACCEPTANCE 1/1: met — x\n", "reviewer")
         self.assertIn("duplicate VERDICT", gaps)

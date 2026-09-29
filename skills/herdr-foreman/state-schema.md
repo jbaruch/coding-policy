@@ -578,7 +578,7 @@ that dispatch and the same report bytes.
 
 | Field | Meaning |
 | --- | --- |
-| `source` | `report` for a record parsed from the report's lines; `foreman_assessment` for a migrated schema-1 record |
+| `source` | `report` for a record parsed from the report's lines; `contribution_only` for the declared `design` or `implementation` contribution of a report refused for a contract gap; `foreman_assessment` for a migrated schema-1 record |
 | `brief_evidence` | Receipt of the frozen brief `apply` sent; a consultation's only, else null |
 | `criteria` | `N`, re-derived from that brief's `CRITERION` block; a consultation's only, else null |
 | `acceptance` | `[{k, state, evidence}]` for `k` in `1..N`, `state` `met` or `unmet`; a consultation's only, else null |
@@ -587,7 +587,9 @@ that dispatch and the same report bytes.
 | `legacy` | `{outcome, summary}` on a migrated record, else null |
 
 The role and specialty come from the owner dispatch, never from the caller. A
-report with a contract gap appends nothing. The utility verifies the original
+report with a contract gap appends nothing, save a `contribution_only` entry
+when it declares `design` or `implementation`; that entry has null line fields
+and satisfies no reader below. The utility verifies the original
 confirmed dispatch, assignment, enrollment and frozen brief before appending.
 Exact ID/input retries preserve the original receipt, including after source
 cleanup; changed input requires a new ID. Historical reads validate schema and

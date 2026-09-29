@@ -11,7 +11,7 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from foreman import engagement, recovery, report_delivery, supervision
+from foreman import composition, engagement, recovery, report_delivery, supervision
 from foreman.assign import freeze_paths
 from foreman.errors import UsageError
 from foreman.state import STATE_SCHEMA_VERSION, add_assignment, empty_state, load_state_checked, save_state
@@ -368,6 +368,79 @@ class EngagementTest(unittest.TestCase):
                 corrupted["specialist_assessments"][0].update(change)
                 with self.assertRaises(UsageError):
                     engagement.validate_assessments(corrupted)
+
+    def seed_reviewer(self, text):
+        report = self.root / "review.md"
+        report.write_text(text)
+        delivery = self.root / "review-delivery.json"
+        delivery.write_text(json.dumps({"found": True, "agent": "verifier", "report_path": str(report)}))
+        seat = {**self.dispatch, "id": "review-1", "role": "reviewer", "agent": "verifier",
+                "reviewer_scope": "verification", "report": str(report)}
+        seat.pop("requirements")
+        seat.pop("brief")
+        self.seed(seat)
+        return {"id": "review-assessment", "dispatch": "review-1", "report": str(report), "delivery": str(delivery)}
+
+    def test_a_gapped_report_still_records_its_declared_contribution(self):
+        # #625 review: add-only survives a refusal. A reviewer report missing
+        # its VERDICT but declaring implementation keeps the worker excluded.
+        data = self.seed_reviewer("Reviewed the tip; I rewrote the parser myself.\nCONTRIBUTION: implementation\n")
+        with self.assertRaises(engagement.ContractGap) as caught:
+            self.assess(data)
+        self.assertIn("missing VERDICT line", caught.exception.details["gaps"])
+        record = self.state["specialist_assessments"][-1]
+        self.assertIs(caught.exception.record, record)
+        self.assertEqual((record["source"], record["contribution"], record["verdict"], record["acceptance"]),
+                         ("contribution_only", "implementation", None, None))
+        engagement.validate_assessments(self.state)
+        constraints = composition.selection_constraints(
+            ["reviewer"], [], {}, self.state["assignments"], "task-1",
+            assessments=self.state["specialist_assessments"], candidate_names=["verifier"])
+        self.assertEqual(constraints["exclude"]["reviewer"], ["verifier"])
+        # It never satisfies acceptance, and its id is never reused for a record.
+        with self.assertRaises(UsageError):
+            engagement.require_accepted(self.state, "review-1", data["report"])
+        with self.assertRaisesRegex(UsageError, "new id"):
+            self.assess(data)
+        self.assertEqual(recovery.accepted(self.state["specialist_assessments"]), [])
+        save_state(self.path, self.state)
+        self.assertTrue(load_state_checked(self.path)[1])
+
+    def test_a_gapped_report_without_an_excluding_contribution_records_nothing(self):
+        data = self.seed_reviewer("Reviewed.\n")
+        for text in ("Reviewed.\n", "Reviewed.\nCONTRIBUTION: none\n", "Reviewed.\nCONTRIBUTION: some\n"):
+            with self.subTest(text=text):
+                Path(data["report"]).write_text(text)
+                with self.assertRaises(UsageError) as caught:
+                    self.assess(data)
+                self.assertNotIsInstance(caught.exception, engagement.ContractGap)
+                self.assertEqual(self.state["specialist_assessments"], [])
+
+    def test_unhashable_or_forged_contribution_only_fields_are_corrupt(self):
+        data = self.seed_reviewer("Reviewed.\nCONTRIBUTION: design\n")
+        with self.assertRaises(engagement.ContractGap):
+            self.assess(data)
+        for change in ({"contribution": "none"}, {"contribution": ["design"]}, {"verdict": "approved"},
+                       {"legacy": {"outcome": "x", "summary": "y"}}):
+            with self.subTest(change=change):
+                corrupted = copy.deepcopy(self.state)
+                corrupted["specialist_assessments"][-1].update(change)
+                with self.assertRaises(UsageError):
+                    engagement.validate_assessments(corrupted)
+
+    def test_schema_one_record_with_an_unhashable_contribution_is_corrupt(self):
+        self.assess()
+        legacy = legacy_record(self.state["specialist_assessments"][0])
+        for value in ([], {}, ["design"]):
+            with self.subTest(value=value):
+                self.state["specialist_assessments"] = [{**legacy, "contribution": value}]
+                self.path.write_text(json.dumps(self.state))
+                before = self.path.read_bytes()
+                warnings = []
+                _loaded, usable = load_state_checked(self.path, warn=warnings.append)
+                self.assertFalse(usable)
+                self.assertTrue(any("corrupt specialist assessment" in item for item in warnings))
+                self.assertEqual(self.path.read_bytes(), before)
 
     def test_duplicate_assessment_ids_are_invalid(self):
         self.assess()

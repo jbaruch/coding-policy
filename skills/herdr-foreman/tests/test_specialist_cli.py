@@ -311,6 +311,20 @@ class SpecialistCliTest(fixture.CliCase):
         self.assertTrue(any("missing ACCEPTANCE 1" in gap for gap in gaps), gaps)
         self.assertEqual(self.saved()["specialist_assessments"], [])
 
+    def test_assess_command_saves_a_gapped_reports_declared_contribution(self):
+        self.seed_warm_consultation(assess=False, retire=False)
+        (self.tmp / "prior-report.md").write_text("Proposed the interaction.\nCONTRIBUTION: design\n")
+        (self.tmp / "prior-delivery.json").write_text(json.dumps(
+            {"found": True, "agent": "claude", "report_path": str(self.tmp / "prior-report.md")}))
+        record = self.tmp / "assessment.json"
+        record.write_text(json.dumps({"id": "gapped", "dispatch": "prior:advisor", "report": str(self.tmp / "prior-report.md"),
+                                      "delivery": str(self.tmp / "prior-delivery.json")}))
+        code, _, err = self.invoke(["assess-specialist", "--record", str(record), "--now", AT], self._client({}))
+        self.assertEqual(code, 1)
+        self.assertIn("missing ACCEPTANCE 1", err)
+        saved = self.saved()["specialist_assessments"]
+        self.assertEqual([(row["source"], row["contribution"]) for row in saved], [("contribution_only", "design")])
+
     def test_apply_refuses_a_consultation_brief_without_criteria_before_worker_input(self):
         self.bind()
         self.briefs["advisor"].write_text("Inspect onboarding.\n\n## Acceptance Criteria\n\nCRITERION 2: gapped\n")

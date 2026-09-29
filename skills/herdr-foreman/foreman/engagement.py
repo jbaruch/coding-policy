@@ -12,6 +12,11 @@ held the foreman's own `outcome`, `summary` and `contribution`; the owner
 migration (`migrate_assessments`) moves that prose under `legacy` with
 `source: foreman_assessment`. A legacy record keeps a `design` or
 `implementation` contribution as an exclusion and satisfies nothing else.
+
+A report refused for a contract gap records nothing, save one case: a
+well-formed `design` or `implementation` CONTRIBUTION line in it is recorded as
+a `source: contribution_only` entry, so the exclusion it adds is never lost.
+That entry carries no line fields and satisfies nothing else (#625).
 """
 
 import hashlib
@@ -36,8 +41,11 @@ CONTRIBUTIONS = report_contract.CONTRIBUTIONS
 INPUT_FIELDS = frozenset({"id", "dispatch", "report", "delivery"})
 #: Input fields schema 1 took from the foreman and schema 2 refuses by name.
 RETIRED_INPUT_FIELDS = frozenset({"outcome", "contribution", "summary"})
-#: `source` values: parsed from report lines, or a migrated schema-1 foreman assessment.
-SOURCES = frozenset({"report", "foreman_assessment"})
+#: `source` values: parsed from report lines, the declared contribution of a report
+#: refused for a contract gap, or a migrated schema-1 foreman assessment.
+SOURCES = frozenset({"report", "contribution_only", "foreman_assessment"})
+#: Contributions that add an independence exclusion.
+EXCLUDING_CONTRIBUTIONS = frozenset({"design", "implementation"})
 _BOUND_FIELDS = frozenset({"schema_version", "at", "assignment_index", "task", "role", "agent",
                            "report_evidence", "delivery_evidence"})
 #: Exactly the fields a schema-1 record carries.
@@ -81,6 +89,18 @@ def specialty(dispatch):
 
 def _corrupt():
     return UsageError("Unsupported or corrupt specialist assessment; preserve history and update the owner.", {})
+
+
+class ContractGap(UsageError):
+    """A contract gap whose report still declared an excluding contribution.
+
+    `record` is the `contribution_only` entry already appended to the state;
+    the caller saves the state before letting the refusal propagate.
+    """
+
+    def __init__(self, message, details, record):
+        super().__init__(message, details)
+        self.record = record
 
 
 def _text_in(value, allowed):
@@ -132,11 +152,16 @@ def _validate_lines(record, dispatch):
     if record["source"] == "foreman_assessment":
         legacy = record["legacy"]
         if (not isinstance(legacy, dict) or set(legacy) != {"outcome", "summary"}
-                or record["contribution"] not in CONTRIBUTIONS
+                or not _text_in(record["contribution"], CONTRIBUTIONS)
                 or any(record[key] is not None for key in _LINE_FIELDS)):
             raise _corrupt()
         text(legacy["outcome"], "legacy outcome")
         text(legacy["summary"], "legacy summary")
+        return
+    if record["source"] == "contribution_only":
+        if (record["legacy"] is not None or not _text_in(record["contribution"], EXCLUDING_CONTRIBUTIONS)
+                or any(record[key] is not None for key in _LINE_FIELDS)):
+            raise _corrupt()
         return
     role = record["role"]
     if record["legacy"] is not None or record["contribution"] is not None and not _text_in(record["contribution"], CONTRIBUTIONS):
@@ -225,6 +250,9 @@ def record_assessment(state, state_path, data, at):
     supervision.timestamp(at)
     prior = next((row for row in state["specialist_assessments"] if row["id"] == data["id"]), None)
     if prior is not None:
+        if prior["source"] == "contribution_only":
+            raise UsageError("Assessment identity {} holds only the declared contribution of a report refused for a "
+                             "contract gap; re-dispatch and assess the new report under a new id.".format(data["id"]), {})
         if prior["source"] != "report":
             raise UsageError("Assessment identity {} names a migrated foreman assessment; record the report under a "
                              "new id.".format(data["id"]), {})
@@ -258,13 +286,25 @@ def record_assessment(state, state_path, data, at):
     # the field without versioning it (rules/stateful-artifacts.md Migration
     # Policy). The seat stays on the dispatch this record cites (#434).
     role = canonical_role(dispatch["role"])
-    brief_evidence, criteria = _brief_criteria(dispatch) if role in CONSULTATION_ROLES else (None, None)
-    lines = report_contract.report_lines(body, role, specialty(dispatch), criteria)
-    result = {"schema_version": ASSESSMENT_SCHEMA_VERSION, "at": at, **data,
-              "assignment_index": index, "task": dispatch["task"],
-              "role": role, "agent": dispatch["agent"],
-              "report_evidence": report_evidence, "delivery_evidence": delivery_evidence,
-              "source": "report", "brief_evidence": brief_evidence, "criteria": criteria,
+    bound = {"schema_version": ASSESSMENT_SCHEMA_VERSION, "at": at, **data,
+             "assignment_index": index, "task": dispatch["task"],
+             "role": role, "agent": dispatch["agent"],
+             "report_evidence": report_evidence, "delivery_evidence": delivery_evidence}
+    try:
+        brief_evidence, criteria = _brief_criteria(dispatch) if role in CONSULTATION_ROLES else (None, None)
+        lines = report_contract.report_lines(body, role, specialty(dispatch), criteria)
+    except UsageError as exc:
+        declared = report_contract.declared_contributions(body) & EXCLUDING_CONTRIBUTIONS
+        if not declared:
+            raise
+        # Add-only: the refusal never discards an exclusion the report declared.
+        record = {**bound, "source": "contribution_only", "brief_evidence": None, "criteria": None,
+                  "acceptance": None, "verdict": None, "legacy": None,
+                  "contribution": "implementation" if "implementation" in declared else "design"}
+        state["specialist_assessments"].append(record)
+        raise ContractGap("{} Its declared `{}` contribution is recorded as an independence exclusion.".format(
+            exc.message, record["contribution"]), {**exc.details, "contribution_record": record["id"]}, record) from None
+    result = {**bound, "source": "report", "brief_evidence": brief_evidence, "criteria": criteria,
               "acceptance": lines["acceptance"], "verdict": lines["verdict"],
               "contribution": lines["contribution"], "legacy": None}
     state["specialist_assessments"].append(result)

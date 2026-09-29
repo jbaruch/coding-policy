@@ -44,7 +44,10 @@
   - `assess-specialist` takes only `id`, `dispatch`, `report` and `delivery`,
     refusing `outcome`, `summary` and `contribution` by name. It re-derives
     `N` from the frozen brief, reads role and specialty from the owner
-    dispatch, and records nothing while a gap exists. `close-member` refuses
+    dispatch, and records nothing while a gap exists except a declared
+    `design` or `implementation` contribution, kept as a
+    `source: contribution_only` entry that satisfies nothing else, so a
+    refusal never discards an exclusion. `close-member` refuses
     `accepted` for a reviewer, tester or consultation without a report-sourced
     record at the current report bytes (every criterion `met` for a
     consultation), before its classifier gates; `needs_work` is never refused

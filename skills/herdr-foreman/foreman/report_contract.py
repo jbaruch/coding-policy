@@ -29,6 +29,9 @@ and trailing backticks, are tolerated):
 Refusal classes, each naming the gap: missing, duplicate (an identical repeat
 included), extra, N mismatch, malformed candidate. A candidate is any line whose
 unmarked text starts with one of the upper-case keywords above.
+
+`declared_contributions` reads the well-formed CONTRIBUTION values alone, gap or
+no gap, so a declared contribution is never lost to a refusal elsewhere.
 """
 
 import re
@@ -71,6 +74,16 @@ def _candidates(lines, keywords):
         match = _KEYWORD.match(text)
         if match and match.group(1) in keywords:
             found.append((number, match.group(1), text))
+    return found
+
+
+def declared_contributions(text):
+    """Every value a well-formed CONTRIBUTION line in `text` declares, whatever else the report carries."""
+    found = set()
+    for _number, _keyword, candidate in _candidates(text.splitlines(), {"CONTRIBUTION"}):
+        match = _CONTRIBUTION.match(candidate)
+        if match is not None and match.group(1) in CONTRIBUTIONS:
+            found.add(match.group(1))
     return found
 
 

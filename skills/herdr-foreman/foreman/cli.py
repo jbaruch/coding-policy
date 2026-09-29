@@ -80,7 +80,7 @@ def now_iso():
 #: Recovery subcommands whose help says more than the generic line (#625).
 RECOVERY_HELP = {
     "assess-specialist": "Record a delivered reviewer, tester or consultation report's contract lines "
-                         "(VERDICT, ACCEPTANCE, CONTRIBUTION); a gap records nothing.",
+                         "(VERDICT, ACCEPTANCE, CONTRIBUTION); a gap records only a declared design or implementation contribution.",
     "record-report": "Record a reviewer's verdict on a developer dispatch; the report's own VERDICT line must match it.",
 }
 
@@ -1903,7 +1903,15 @@ def _run_recovery(args, state_path, warn, client, trace):
     elif args.command == "recover-report":
         result = report_delivery.recover(store, history, data, at)
     elif args.command == "assess-specialist":
-        result = engagement.record_assessment(state, state_path, data, at)
+        try:
+            result = engagement.record_assessment(state, state_path, data, at)
+        except engagement.ContractGap:
+            # The refused report's declared contribution is kept before the
+            # refusal propagates: an exclusion is never lost (#625).
+            recovery.validate_store(store, history)
+            engagement.validate_assessments(state)
+            save_state(state_path, state)
+            raise
     elif args.command == "import-correction":
         result = historical.import_attempt(store, history, data, at)
         if result["assignment_index"] == len(history):

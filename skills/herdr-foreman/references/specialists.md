@@ -321,8 +321,8 @@ report against the dispatch's own role and specialty, and emits JSON. It
 preserves an immutable record with brief, report and delivery receipts in the
 existing owner state; `skills/herdr-foreman/state-schema.md` Specialist
 assessment records holds its shape. A report missing a required line, or
-carrying an extra, duplicate, mismatched or malformed one, records nothing and
-names the gap: record `needs_work` and re-dispatch the same responsibility with
+carrying an extra, duplicate, mismatched or malformed one, records nothing
+beyond a declared `design` or `implementation` contribution, and names the gap: record `needs_work` and re-dispatch the same responsibility with
 that gap named. Keep the referenced evidence files for future verification.
 An exact retry with the same assessment id returns its original record. A new
 assessment uses a new id and preserves the old evidence. Run it on every
