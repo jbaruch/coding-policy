@@ -68,9 +68,12 @@
     `decline` is settled by the next reviewer or tester re-check at the tip,
     which marks them DECLINED citing the ruling and records
     `VERDICT: approved`; the foreman never matches rulings to findings. Scope
-    classification stays with the foreman as friction-only routing. The
-    Release Gate gains a fifth item for a blocking security, UX/product or
-    documentation verdict.
+    classification stays with the foreman as friction-only routing. A
+    blocking security, UX/product or documentation verdict is a blocking
+    finding for the round, taken through the existing Blocking Gate and fix
+    loop; a completed adjudication settles a disputed verdict directly.
+    `record-historical-review` imports predate the contract and stay
+    outside it.
   - `SKILL.md` Steps 10–12, `references/specialists.md`, `round-flow.md`,
     `assignment-reasoning.md`, `dispatch-recovery.md` and `state-schema.md`
     follow, with one line each in `attention.md` and `herdr.md` and

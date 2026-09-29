@@ -12,9 +12,9 @@ from unittest import mock
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from foreman import attention, cli, members, report_gates as gates, supervision  # noqa: E402 -- the skill dir is on sys.path only from here
-from foreman.errors import StateError, UsageError  # noqa: E402
-from tests.test_members import LATER, MembersCase, seed_contract  # noqa: E402
-from foreman import supervision as store  # noqa: E402
+from foreman.errors import StateError, UsageError  # noqa: E402 -- the skill dir is on sys.path only from here
+from tests.test_members import LATER, MembersCase, seed_contract  # noqa: E402 -- the skill dir is on sys.path only from here
+from foreman import supervision as store  # noqa: E402 -- the skill dir is on sys.path only from here
 
 AT = "2026-09-27T12:00:00+00:00"
 AFTER = "2026-09-27T12:10:00+00:00"

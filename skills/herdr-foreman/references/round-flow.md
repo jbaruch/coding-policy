@@ -164,7 +164,7 @@ a `## BLOCKED` section can sit under a report that otherwise reads as finished.
 
 ## Release Gate
 
-For an authorized implementation release, Step 12 requires all five:
+For an authorized implementation release, Step 12 requires all four:
 
 1. The developer's report names the branch and the commit SHA it pushed.
 2. A broad reviewer **Mode B** report reviews that same SHA and records
@@ -172,15 +172,17 @@ For an authorized implementation release, Step 12 requires all five:
 3. A broad tester **Mode C** report verifies that same SHA, with the repo's
    gates run, and records `VERDICT: approved`.
 4. Nothing has been pushed to the branch after those two reports.
-5. Every `security`, `ux-product` or `documentation` consultation that recorded
-   `VERDICT: blocking` has a later report of the same specialty recording
-   `VERDICT: approved`, or a completed ruling settles it.
 
-A blocking verdict whose findings a completed weighing ruled `defer` or
-`decline` is settled by the next reviewer or tester report at the tip. That
-report marks each covered finding DECLINED, citing the ruling, and records
-`VERDICT: approved` (see `skills/herdr-foreman/references/judge-round.md`).
-The foreman never matches rulings to findings.
+A blocking `VERDICT:` from a `security`, `ux-product` or `documentation`
+consultation is a blocking finding for the round, taken through the Blocking
+Gate and fix loop like a reviewer's or tester's.
+
+A disputed blocking verdict settles one of two ways. A completed adjudication
+(`uphold` or `amend`) settles it directly. A finding a weighing ruled `defer`
+or `decline` is settled only by the next reviewer or tester report at the tip,
+which marks it DECLINED, citing the ruling, and records `VERDICT: approved`
+(see `skills/herdr-foreman/references/judge-round.md`). The foreman never
+matches rulings to findings.
 
 Under a recorded `stop` remedy, 2 and 3 read against what ships: the excluded
 defect is a tracked accepted defect and the shipped scope carries no other

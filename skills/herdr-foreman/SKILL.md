@@ -709,15 +709,15 @@ preserve open user decisions; proceed to Step 15 if a task worktree needs cleanu
 Step 16. No implementation or release is inferred from the diagnostic result.
 
 - **Any blocking verdict** — a recorded `VERDICT: blocking` from a reviewer,
-  tester, or `security`, `ux-product` or `documentation` consultation. Apply
-  the round-flow reference's Blocking Gate contract and
-  `rules/agent-team-operation.md` Fix Loops. Return to Step 4 for an authorized
-  correction or Step 13 for a required judge ruling.
-- **A ruled blocking verdict** — a blocking verdict whose findings a weighing
-  ruled `defer` or `decline` is settled by the next reviewer or tester
-  re-check at the tip. That report marks each covered finding DECLINED with
-  the ruling and records `VERDICT: approved`. Never match rulings to findings
-  yourself.
+  tester, or `security`, `ux-product` or `documentation` consultation is a
+  blocking finding for the round. Apply the round-flow reference's Blocking
+  Gate contract and `rules/agent-team-operation.md` Fix Loops. Return to
+  Step 4 for an authorized correction or Step 13 for a required judge ruling.
+- **A ruled blocking verdict** — a completed adjudication (`uphold` or `amend`)
+  settles it directly. A finding a weighing ruled `defer` or `decline` is
+  settled only by the next reviewer or tester report at the tip, marking it
+  DECLINED with the ruling and recording `VERDICT: approved`. Never match
+  rulings to findings yourself.
 - **A contradicting gate** — a classifier `block` gate on a `VERDICT: approved`
   report goes to Step 13 for adjudication.
 - **A weighing nomination** — a finding a worker report marks `MARGINAL:`, or

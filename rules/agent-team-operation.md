@@ -397,7 +397,7 @@ description: Running a multi-agent team — task-based specialist composition, c
 - A consultation report carries one `ACCEPTANCE <k>/<N>:` line per criterion its brief states
 - `N` is the count of `CRITERION` lines in the brief `apply` sent
 - A `security`, `ux-product` or `documentation` consultation also carries one `VERDICT:` line
-- A blocking `VERDICT:` from one of these gates the round the way a reviewer's does
+- A blocking consultation `VERDICT:` gates the round like a reviewer's
 - An assignment is accepted when its report's required lines pass the contract, whatever its `VERDICT:`
 - A blocking `VERDICT:` gates the round, never the assignment's acceptance
 - Every other consultation report carries `ACCEPTANCE` lines only
@@ -407,6 +407,9 @@ description: Running a multi-agent team — task-based specialist composition, c
 - The foreman never reads around the gap
 - Line formats and refusal classes are in `skills/herdr-foreman/foreman/report_contract.py`'s module docstring
 - A statement about task content in the ledger, retrospectives or memory cites the report it comes from
+- A completed adjudication (`uphold` or `amend`) settles a disputed blocking `VERDICT:` directly
+- A finding a weighing ruled `defer` or `decline` is settled only by the next reviewer or tester report at the tip, marking it DECLINED and recording `VERDICT: approved`
+- `foreman record-historical-review` imports a review completed before the report contract; the contract does not apply to it
 
 ## Dispatch Safety
 
