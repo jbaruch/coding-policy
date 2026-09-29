@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.339 — 2026-09-29
+
 ### Fixed
 
 - **Copilot run state is read from the PR timeline, and a stuck request is
