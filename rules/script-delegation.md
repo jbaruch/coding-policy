@@ -54,7 +54,7 @@ description: Deterministic operations → script, a fixed answer set read by mea
 - Code blocks in SKILL.md are for showing the agent what command to run, not for embedding logic the agent should reproduce character-by-character
 
 - Narrow exception for the installed-plugin bootstrap.
-- Applies only to command blocks in `skills/herdr-foreman/SKILL.md`, `skills/herdr-standup/SKILL.md`, `skills/herdr-foreman/references/round-setup.md`, `skills/herdr-foreman/references/judge-round.md`, `skills/release/SKILL.md`, `skills/release/PUBLICATION.md`, and `skills/adopt-fork-pr/SKILL.md`.
+- Applies only to command blocks in `skills/herdr-foreman/SKILL.md`, `skills/herdr-standup/SKILL.md`, `skills/herdr-foreman/references/round-setup.md`, `skills/herdr-foreman/references/judge-round.md`, `skills/release/SKILL.md`, `skills/release/PUBLICATION.md`, `skills/adopt-fork-pr/SKILL.md`, `skills/onboard-repo/SKILL.md`, and `skills/migrate-to-plugin/SKILL.md`.
 - Preconditions (all required):
   1. The block initializes `CP` to the literal `.tessl/plugins/jbaruch/coding-policy`
   2. The inline branches are exactly three: a directory test on `CP` falling back to the same path under `$HOME`, a second directory test, and one `case` on `git config --get remote.origin.url`
