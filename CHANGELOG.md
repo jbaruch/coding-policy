@@ -22,8 +22,9 @@
   - One format, one script. The judge's weighing report is written in the
     ruling-file format `skills/release/dismiss-ruled-review.sh` already
     reads, and the release worker passes it to the script unchanged. The
-    format gains a required `AUTHORITY:` line (schema_version 2; a version-1
-    file is refused with the rewrite message): `operator` with its verbatim
+    format gains a required `AUTHORITY:` line (schema_version 2; the script,
+    as the owner's reader, upgrades a version-1 file in place to
+    `AUTHORITY: operator`, the only authority version 1 had): `operator` with its verbatim
     `ANSWER:` standalone, `judge <path>` in a team round, where the path must
     resolve to the `--ruling` file itself so a hand-written copy is refused.
     The script no longer refuses `HERDR_ENV`; it refuses an authority the
@@ -34,7 +35,11 @@
     `path_changed`. The second bit answers carry-over for internal findings.
     Paths are diffed one at a time with renames off, so no quoted diff
     header is parsed and a renamed file reads as added and changed, the
-    direction that never waives a finding.
+    direction that never waives a finding. Each path is a `:(literal)`
+    pathspec, and an unknown revision is refused through partition's probe
+    while a broken repository keeps git's own diagnostic. Coverage in re-check
+    and release briefs is the foreman's call from `path_changed`, never the
+    worker's: the brief lists which findings a ruling still covers.
   - New `templates/brief-judge-weighing.md` (role key `judge-weighing`,
     composed like `judge-diagnosis`). Reviewer, tester and developer briefs
     gain the optional `MARGINAL:` line; the release brief gains
