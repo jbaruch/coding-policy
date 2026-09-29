@@ -18,11 +18,14 @@
   a removal at 18:35:15 killed a run that finished at 18:36:11, and only the
   next run posted.
   - New `skills/release/copilot-run.sh` owns the review-request state both
-    callers read. `copilot_run_in_flight`: the timeline's last
-    `copilot_work_started` comes after both the last Copilot
-    `review_requested` and the last Copilot `reviewed` event, by timeline
-    position rather than timestamp, since a request and its run start can
-    share a second. `poll-pr-reviews.sh` reads the timeline before the
+    callers read. `copilot_run_in_flight`: the timeline holds a Copilot
+    `review_requested`, and its last `copilot_work_started` comes after both
+    the last Copilot `review_requested` and the last Copilot `reviewed`
+    event, by timeline position rather than timestamp, since a request and its
+    run start can share a second. With no Copilot request on the timeline
+    nothing is in flight. Head binding is not implemented: a dropped run from
+    an older head can at worst make the watcher wait out one budget, after
+    which it is diagnosed by hand. `poll-pr-reviews.sh` reads the timeline before the
     Copilot review, so a review posted between the two reads is seen.
     `fetch_requested_logins` and `requested_among` (pending requests from
     GraphQL `reviewRequests`, since REST `requested_reviewers` omits bots,

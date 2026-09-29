@@ -9,8 +9,10 @@
 # diagnostic when the timeline read fails.
 #
 # copilot_run_in_flight <owner> <repo> <pr-number>: prints true when the PR
-# timeline's last `copilot_work_started` comes after both the last Copilot
-# `review_requested` and the last Copilot `reviewed` event, else false. A
+# timeline holds a Copilot `review_requested` event and its last
+# `copilot_work_started` comes after both the last Copilot `review_requested`
+# and the last Copilot `reviewed` event, else false. With no Copilot request
+# on the timeline, nothing is in flight. A
 # started run consumes its request, and removing a request while the run is in
 # progress discards the run's result (#641). Order is timeline position (the
 # API returns events in order), not timestamp: a request and its run start can
@@ -33,7 +35,7 @@ copilot_run_in_flight() {
     | ([$ev[] | select(.value.event == "reviewed")
               | select((.value.user.login // "") | test("copilot"; "i"))
               | .key] | max) as $s
-    | $w != null and $w > ($r // -1) and $w > ($s // -1)'
+    | $w != null and $r != null and $w > $r and $w > ($s // -1)'
 }
 
 # Logins with a review request still pending on the PR, lowercased and with the

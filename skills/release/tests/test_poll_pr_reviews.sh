@@ -211,7 +211,7 @@ t_main_reads_timeline_before_reviews() {
 
 t_main_marks_copilot_in_flight_with_no_review_requested() {
   local MOCK_MERGE_STATE=clean MOCK_REQUESTED_BODY='[]' MOCK_REVIEWS_BODY='[]'
-  local MOCK_TIMELINE_BODY='[{"event":"copilot_work_started","created_at":"2026-09-29T18:32:51Z"}]'
+  local MOCK_TIMELINE_BODY='[{"event":"review_requested","requested_reviewer":{"login":"Copilot"},"created_at":"2026-09-29T18:31:54Z"},{"event":"copilot_work_started","created_at":"2026-09-29T18:32:51Z"}]'
   local out
   out=$(main owner repo 1)
   assert_eq "copilot requested" "true" "$(echo "$out" | jq -r '.reviews.copilot.requested')"
@@ -220,7 +220,7 @@ t_main_marks_copilot_in_flight_with_no_review_requested() {
 t_main_copilot_run_finished_by_posted_review_is_not_requested() {
   local MOCK_MERGE_STATE=clean MOCK_REQUESTED_BODY='[]'
   local MOCK_REVIEWS_BODY='[{"user":{"login":"copilot-pull-request-reviewer[bot]"},"state":"COMMENTED","submitted_at":"2026-09-29T18:40:00Z","body":"done","commit_id":"'"$OLD_SHA"'"}]'
-  local MOCK_TIMELINE_BODY='[{"event":"copilot_work_started","created_at":"2026-09-29T18:32:51Z"},{"event":"reviewed","user":{"login":"Copilot"},"submitted_at":"2026-09-29T18:40:00Z"}]'
+  local MOCK_TIMELINE_BODY='[{"event":"review_requested","requested_reviewer":{"login":"Copilot"},"created_at":"2026-09-29T18:31:54Z"},{"event":"copilot_work_started","created_at":"2026-09-29T18:32:51Z"},{"event":"reviewed","user":{"login":"Copilot"},"submitted_at":"2026-09-29T18:40:00Z"}]'
   local out
   out=$(main owner repo 1)
   assert_eq "copilot requested" "false" "$(echo "$out" | jq -r '.reviews.copilot.requested')"

@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Outcome tests for copilot-run.sh's copilot_run_in_flight predicate (#641):
-# a run is in flight when the latest `copilot_work_started` is newer than both
-# the latest Copilot request and the latest Copilot review on the timeline.
+# a run is in flight when a Copilot request exists and the last
+# `copilot_work_started` comes after both the last Copilot request and the last
+# Copilot review on the timeline.
 # The two callers (poll-pr-reviews.sh, request-copilot-review.sh) cover the
 # end-to-end paths; this suite covers the predicate's edges.
 #
@@ -71,6 +72,12 @@ t_empty_timeline_is_not_in_flight() {
   assert_eq "in_flight" "false" "$(in_flight_for '[]')"
 }
 
+# #641: a run start with no Copilot request on the timeline is not a run the
+# request/remove logic owns.
+t_start_without_request_is_not_in_flight() {
+  assert_eq "in_flight" "false" "$(in_flight_for "[$START]")"
+}
+
 t_started_after_request_is_in_flight() {
   assert_eq "in_flight" "true" "$(in_flight_for "[$REQ,$START]")"
 }
@@ -118,6 +125,7 @@ t_timeline_failure_is_non_zero() {
 run_suite() {
   echo "== copilot-run.sh tests ==" >&2
   run "an empty timeline is not in flight"                 t_empty_timeline_is_not_in_flight
+  run "a run start with no request is not in flight"       t_start_without_request_is_not_in_flight
   run "a run started after its request is in flight"       t_started_after_request_is_in_flight
   run "a review after the start ends the run"              t_review_after_start_ends_the_run
   run "a request after the start is not in flight"         t_request_after_start_is_not_in_flight
