@@ -1,5 +1,76 @@
 # Changelog
 
+### Changed
+
+- **The Herdr foreman gates on report contracts, never on its own reading
+  (Closes #625).** #601 asked for a foreman that dispatches and gates on the
+  evidence reports and scripts produce, without reasoning through task
+  content. #616 tried to ship that together with the foreman's tier
+  selection and went through 12 policy-review rounds: a single absolute rule
+  ("the foreman never reasons through task content") touched about twenty
+  files, and every round found the next surface one finding at a time. #616
+  was split: it shipped the tier selection alone, and this half went to a
+  design note reviewed before any code, with an explicit inventory of what
+  changes and a binding list of what does not. The operator's decisions of
+  2026-09-28 set its scope: gating only, report contracts per role, and an
+  independence exclusion nothing clears.
+  - `rules/agent-team-operation.md` Reports: the foreman gates a report on its
+    required lines, its classifier gates and the judge's rulings, and on
+    nothing else; it never accepts, rejects or rates a finding on its own
+    reading. A reviewer or tester report carries exactly one `VERDICT:` line;
+    a consultation carries one `ACCEPTANCE <k>/<N>:` line per criterion, `N`
+    being the `CRITERION` count of the brief `apply` sent; a `security`,
+    `ux-product` or `documentation` consultation also carries a `VERDICT:`
+    whose `blocking` gates the round like a reviewer's (accessibility and
+    performance-reliability carry `ACCEPTANCE` lines only). A report with a
+    missing, extra or duplicated line goes back to its responsibility with the
+    gap named. Specialist Consultations drops "the foreman's contribution
+    assessment". The Judge Seat's "foreman override of a blocking finding"
+    trigger becomes "a report `VERDICT:` the classifier gate contradicts".
+    Review Before PR makes independence add-only: a dispatch classified a
+    possible contribution, a report declaring `design` or `implementation`, or
+    a foreman `--exclude` adds an exclusion, and nothing, a worker's own
+    `CONTRIBUTION: none` included, clears one. Every consultation worker stays
+    excluded from verifying its own task; that costs staffing, deliberately.
+  - New leaf module `skills/herdr-foreman/foreman/report_contract.py` is the
+    one parser: line forms, tolerated markup, and the refusal classes
+    (missing, duplicate including an identical repeat, extra, N mismatch,
+    malformed candidate), every gap named at once.
+  - `apply` refuses a consultation brief without a contiguous `CRITERION 1..N`
+    block under its single `## Acceptance Criteria` section, before any worker
+    input. `brief-specialist.md` renders `ACCEPTANCE_CRITERIA` there and asks
+    for the report's lines; `brief-reviewer.md` and `brief-tester.md` ask for
+    the one `VERDICT:` line.
+  - `assess-specialist` takes only `id`, `dispatch`, `report` and `delivery`,
+    refusing `outcome`, `summary` and `contribution` by name. It re-derives
+    `N` from the frozen brief, reads role and specialty from the owner
+    dispatch, and records nothing while a gap exists. `close-member` refuses
+    `accepted` for a reviewer, tester or consultation without a report-sourced
+    record at the current report bytes (every criterion `met` for a
+    consultation), before its classifier gates; `needs_work` is never refused
+    on that ground. `record-report` refuses a gap or a verdict that differs
+    from the report's line, before its classifier gates. `diagnose` and the
+    judge-investigation gate count only accepted investigator records. A
+    classifier label still only adds a gate on top of a line.
+  - Specialist assessment records go from schema 1 to 2 with an owner
+    migration while state loads: a schema-1 record becomes
+    `source: foreman_assessment` with its prose under `legacy`, keeps its
+    contribution as an exclusion, and satisfies no acceptance, warm follow-up
+    or diagnose gate. A schema-1 record already carrying schema-2 fields is
+    refused as corrupt; a newer record takes the lagging-reader path. No other
+    state, ledger, dispatch or classifier schema changes.
+  - A blocking verdict whose findings a #634 weighing ruled `defer` or
+    `decline` is settled by the next reviewer or tester re-check at the tip,
+    which marks them DECLINED citing the ruling and records
+    `VERDICT: approved`; the foreman never matches rulings to findings. Scope
+    classification stays with the foreman as friction-only routing. The
+    Release Gate gains a fifth item for a blocking security, UX/product or
+    documentation verdict.
+  - `SKILL.md` Steps 10–12, `references/specialists.md`, `round-flow.md`,
+    `assignment-reasoning.md`, `dispatch-recovery.md` and `state-schema.md`
+    follow, with one line each in `attention.md` and `herdr.md` and
+    noun-only edits in `retrospectives.md` and `working-memory.md`.
+
 ## 0.3.337 — 2026-09-29
 
 ### Added
