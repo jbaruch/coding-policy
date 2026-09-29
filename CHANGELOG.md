@@ -74,6 +74,12 @@
     follow, with one line each in `attention.md` and `herdr.md` and
     noun-only edits in `retrospectives.md` and `working-memory.md`.
 
+## 0.3.338 — 2026-09-29
+
+### Fixed
+
+- Follow-up to #634. `skills/release/dismiss-ruled-review.sh` ran its schema-1 → schema-2 owner migration in a Herdr team round too, rewriting the pinned judge's delivered weighing report in place as an operator ruling before `foreman verify-ruling` checked its recorded delivery digest — destroying the delivered report. The migration now runs standalone only; a team-round ruling lacking the current schema is refused as malformed (exit 1) with an instruction to re-dispatch the judge's weighing, and the file is never modified. No migration applies there: schema 1 was written only by standalone operator rulings, and team-round rulings were introduced at schema 2 by #634. A ruling newer than the script accepts is refused in either mode, the file untouched, with an instruction to update the plugin (`tessl update`) and rerun, never read as malformed or migrated downward. `skills/herdr-foreman/templates/brief-release.md` told the release worker to record every covered internal finding as a `decline`/won't-fix entry; it now enters each with its ruling's actual verdict — a `defer` as a deferred follow-up entry, a `decline` labelled won't-fix. Both defects were Copilot findings on #634's final head.
+
 ## 0.3.337 — 2026-09-29
 
 ### Added

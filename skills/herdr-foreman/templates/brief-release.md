@@ -43,7 +43,8 @@ When it names a ruling file, that file is the pinned judge's report. Pass that
 path unchanged; never copy or edit the file.
 
 - Each reviewer or tester finding it lists as covered: enter it in the task's
-  follow-up issue before opening the PR, citing the ruling path, a `decline`
+  follow-up issue before opening the PR, citing the ruling path, with its
+  ruling's verdict: a `defer` as a deferred follow-up entry, a `decline`
   labelled won't-fix.
 - A ruling over policy-review findings: at release Step 6 run
   `skills/release/dismiss-ruled-review.sh` with `--ruling`, `--followup-issue` and the
