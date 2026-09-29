@@ -129,6 +129,22 @@ under observation.
 
 ## 7 — Act on the Ruling or Remedy
 
+For a weighing, verify the delivered report before recording or applying any
+of its outcomes:
+
+```bash
+CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"; [ -d "$CP" ] || case "$(git config --get remote.origin.url)" in git@github.com:jbaruch/coding-policy|git@github.com:jbaruch/coding-policy.git|https://github.com/jbaruch/coding-policy|https://github.com/jbaruch/coding-policy.git|ssh://git@github.com/jbaruch/coding-policy|ssh://git@github.com/jbaruch/coding-policy.git) CP=. ;; *) echo "coding-policy plugin not found: run tessl install jbaruch/coding-policy" >&2; exit 1 ;; esac
+bash "$CP/skills/herdr-foreman/foreman.sh" verify-ruling \
+  --task <task-id> --ruling <absolute-report-path>
+```
+
+Exit 0 prints `{task, dispatch, judge, report, sha256}`: the report is the one
+the pinned judge's weighing dispatch was enrolled to write, from the weighing
+brief. Any non-zero exit applies nothing: record no `defer` or `decline`, keep
+every nominated finding blocking, and report the diagnostic. The binding rules
+are the command's; see `cmd_verify_ruling` in
+`skills/herdr-foreman/foreman/cli.py`.
+
 Apply the Ruling Outcomes contract in `skills/herdr-foreman/references/round-flow.md`. Investigation
 rulings return to SKILL.md Step 12's knowledge gate. Implementation rulings route
 unchanged-branch rulings to verified release or renewed verification,

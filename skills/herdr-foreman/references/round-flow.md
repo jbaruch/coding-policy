@@ -495,7 +495,9 @@ authorization. A blocked ruling follows the operator-question path below.
   the round-flow reference's Branch-Changing Ruling contract. Finish here while
   its required operator decision is pending; otherwise return to Step 12 with
   `ACTION:` as the next counted fix.
-- **`RULING: weighed`** — record the ruling. Its `fix` findings return to
+- **`RULING: weighed`** — first run `foreman verify-ruling` on the delivered
+  report (judge-round step 7). A failed verification applies nothing: the
+  nominated findings stay blocking. Once it passes, record the ruling. Its `fix` findings return to
   Step 12 as the next counted fix, `ACTION:` carrying them. Its `defer` and
   `decline` findings stop blocking while the ruling covers them: re-check and
   release briefs list each as covered while `foreman finding-churn` from the

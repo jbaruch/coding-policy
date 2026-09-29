@@ -723,7 +723,9 @@ With its release criteria met, proceed immediately to Step 13.
 
 Optional. No trigger — proceed to Step 14. A bot disagreement inside Step 14
 returns here first. A weighing nomination from Step 12 is an adjudication
-trigger. The judge's report is the ruling.
+trigger. The judge's report is the ruling once `foreman verify-ruling`
+binds it in the judge round's last step; until then no `defer` or `decline`
+applies.
 
 Run the round's seven steps in order — compose the brief, re-measure the shared
 window, plan the pinned seat, start its worker on the pinned tier, dispatch,
