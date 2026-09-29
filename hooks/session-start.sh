@@ -125,7 +125,7 @@ main() {
     */*) dir="${src%/*}" ;;
     *) dir=. ;;
   esac
-  here="$(cd -- "${dir:-/}" && pwd && printf x)" || { warn "cannot enter the hooks directory ${dir:-/} — reinstall the plugin"; return 0; }
+  here="$(CDPATH='' cd -- "${dir:-/}" && pwd && printf x)" || { warn "cannot enter the hooks directory ${dir:-/} — reinstall the plugin"; return 0; }
   here="${here%x}"
   here="${here%$'\n'}"
   read -r -a hooks <<<"${SESSION_START_HOOKS:-${HOOKS[*]}}"

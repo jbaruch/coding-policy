@@ -208,7 +208,7 @@ resolve_skill_dir() {
     */*) src="${BASH_SOURCE[0]%/*}" ;;
     *) src=. ;;
   esac
-  if ! SKILL_DIR="$(cd -- "${src:-/}" && pwd && printf x)"; then
+  if ! SKILL_DIR="$(CDPATH='' cd -- "${src:-/}" && pwd && printf x)"; then
     warn "cannot enter the script directory ${src:-/} — restore read and search access to the plugin directory, or reinstall the plugin, then re-run"
     return 1
   fi

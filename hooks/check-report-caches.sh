@@ -117,7 +117,7 @@ main() {
     */*) dir="${src%/*}" ;;
     *) dir=. ;;
   esac
-  if ! here="$(cd -- "${dir:-/}" && pwd && printf x)"; then
+  if ! here="$(CDPATH='' cd -- "${dir:-/}" && pwd && printf x)"; then
     static_cannot_check "the hooks directory cannot be entered; reinstall the plugin."
     return 0
   fi

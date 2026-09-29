@@ -46,7 +46,7 @@ main() {
     */*) dir="${src%/*}" ;;
     *) dir=. ;;
   esac
-  hook_dir="$(cd -- "${dir:-/}" && pwd && printf x)" || {
+  hook_dir="$(CDPATH='' cd -- "${dir:-/}" && pwd && printf x)" || {
     warn "cannot enter the hooks directory ${dir:-/} — reinstall the plugin with \`tessl install jbaruch/coding-policy\`; skipping the team status"
     return 0
   }

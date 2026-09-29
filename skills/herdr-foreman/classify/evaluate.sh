@@ -58,7 +58,7 @@ case "${BASH_SOURCE[0]}" in
   */*) HERE_SRC="${BASH_SOURCE[0]%/*}" ;;
   *) HERE_SRC=. ;;
 esac
-if ! HERE="$(cd -- "${HERE_SRC:-/}" && pwd && printf x)"; then
+if ! HERE="$(CDPATH='' cd -- "${HERE_SRC:-/}" && pwd && printf x)"; then
   echo "evaluate: cannot enter the script directory ${HERE_SRC:-/} — restore read and search access to the plugin directory, or reinstall the plugin, then re-run" >&2
   exit 2
 fi

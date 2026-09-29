@@ -103,7 +103,7 @@ main() {
     */*) here_src="${BASH_SOURCE[0]%/*}" ;;
     *) here_src=. ;;
   esac
-  if ! here="$(cd -- "${here_src:-/}" && pwd && printf x)"; then
+  if ! here="$(CDPATH='' cd -- "${here_src:-/}" && pwd && printf x)"; then
     warn "cannot enter the script directory ${here_src:-/} — restore read and search access to the plugin directory, or reinstall the plugin, then re-run"
     return 1
   fi

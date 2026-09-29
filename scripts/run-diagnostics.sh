@@ -47,7 +47,7 @@ discard() {
 main() {
   local base="${1:-}"
   if [[ -z "$base" ]]; then
-    base="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+    base="$(CDPATH='' cd -- "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
   fi
   if [[ ! -d "$base" ]]; then
     echo "run-diagnostics: base dir not found: $base" >&2
