@@ -13,6 +13,20 @@
   relative path against a decoy `CDPATH` and asserts the directory each hands
   on.
 
+## 0.3.331 — 2026-09-29
+
+### Fixed
+
+- **The skill-invocation check has a regression fixture for an indented
+  command block (Fixes #621).** #615's cost-report block sat in a list item
+  with a stale two-root resolver, and its branch predated the checker's
+  indentation handling (c3b3f862), so the check passed and the policy reviewer
+  caught it instead. The checker already strips a fence's indentation before
+  comparing the resolver literal; `test_skill_invocations.sh` now feeds it an
+  indented stale block that must fail, so dropping that handling reds the
+  suite. No covered file carried a violation. The harness also moves to the
+  guarded `run_suite` entry point with one JSON result line on stdout.
+
 ## 0.3.330 — 2026-09-28
 
 ### Added
