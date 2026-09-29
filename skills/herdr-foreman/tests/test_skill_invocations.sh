@@ -40,8 +40,10 @@ set -uo pipefail
 # directory, so it only ever read herdr-foreman's SKILL.md. release ships to
 # every consumer and invoked its scripts by clone-relative path (#574);
 # adopt-fork-pr runs in any repo, this one included, and invoked its script
-# by a mount path a clone does not have.
-SKILLS=(herdr-foreman herdr-standup release adopt-fork-pr)
+# by a mount path a clone does not have. onboard-repo and migrate-to-plugin
+# invoked theirs by the project-local mount alone, which a global-only
+# install does not have (#599).
+SKILLS=(herdr-foreman herdr-standup release adopt-fork-pr onboard-repo migrate-to-plugin)
 
 # Reference files whose command blocks the bootstrap carve-out also covers.
 REFERENCES=(herdr-foreman/references/round-setup.md herdr-foreman/references/judge-round.md
@@ -457,7 +459,8 @@ check_cleanup_retry() {
   [[ -z "$INSTALL_FIXTURE" ]] || die "cleanup retry fixture remains; the exit trap will retry"
 }
 
-main() {
+# Progress goes to stderr; stdout carries one JSON result.
+run_suite() {
   local skills_root skill name
   trap cleanup EXIT
   skills_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)" || die "could not resolve the skills dir"
@@ -479,12 +482,11 @@ main() {
   skill="${skills_root}/${MODE_GATE_SKILL}/SKILL.md"
   check_mode_gate "$MODE_GATE_SKILL" "$skill"
 
-  echo
-  echo "results: ${PASS} pass, ${FAIL} fail"
+  printf '{"suite":"test_skill_invocations.sh","passed":%d,"failed":%d}\n' "$PASS" "$FAIL"
   (( FAIL == 0 ))
 }
 
 # Entry-point guard (rules/file-hygiene.md Standalone Scripts).
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
-  main "$@"
+  run_suite "$@"
 fi
