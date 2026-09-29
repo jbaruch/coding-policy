@@ -1,41 +1,27 @@
 #!/usr/bin/env bash
-# Stage the stamped CHANGELOG and, when committing, self-push it to the branch.
+# Commit the stamped CHANGELOG and self-push it to the branch.
 # Extracted from the .github/actions/stamp-changelog run block so the git
-# stage/commit/push branches are testable against a temporary remote (issue
+# commit/push branches are testable against a temporary remote (issue
 # #284). The version stamping itself lives in stamp-changelog.py; this owns only
 # the deterministic git side effects (rules/script-delegation.md).
 #
-# Usage: commit-stamp.sh <changelog> <do-commit> <commit-message> <ref-name> <ref-type>
-#   do-commit   "true" commits + pushes; anything else stages only
+# Usage: commit-stamp.sh <changelog> <commit-message> <ref-name> <ref-type>
 #   ref-name    GITHUB_REF_NAME — the branch to push HEAD to
 #   ref-type    GITHUB_REF_TYPE — must be "branch" to push (a tag ref would
 #               push HEAD:<tag> and create a branch named after the tag)
 # Out:  one JSON object on stdout describing the outcome —
-#         {"outcome":"pushed","ref":"<name>"} | {"outcome":"noop"} |
-#         {"outcome":"staged","changed":true|false}
+#         {"outcome":"pushed","ref":"<name>"} | {"outcome":"noop"}
 #       progress and diagnostics go to stderr.
-# Exit: 0 on pushed / noop / staged; non-zero on a non-branch ref, a bad
+# Exit: 0 on pushed / noop; non-zero on a non-branch ref, a bad
 #       argument count, or a git failure.
 set -euo pipefail
 
 main() {
-  if [ "$#" -ne 5 ]; then
-    echo "usage: $0 <changelog> <do-commit> <commit-message> <ref-name> <ref-type>" >&2
+  if [ "$#" -ne 4 ]; then
+    echo "usage: $0 <changelog> <commit-message> <ref-name> <ref-type>" >&2
     return 2
   fi
-  local changelog="$1" do_commit="$2" commit_message="$3" ref_name="$4" ref_type="$5"
-
-  if [ "$do_commit" != "true" ]; then
-    # Stage only the changelog path so commit=false leaves the caller a staged
-    # change to commit (the input's contract), never sweeping in an unrelated
-    # dirty index. `changed` reports whether the stamp actually altered it.
-    git add -- "$changelog"
-    local changed=false
-    if ! git diff --cached --quiet -- "$changelog"; then changed=true; fi
-    echo "commit=false — staged $changelog for the caller (changed=$changed)." >&2
-    python3 -c 'import json,sys; print(json.dumps({"outcome":"staged","changed":sys.argv[1]=="true"}))' "$changed"
-    return 0
-  fi
+  local changelog="$1" commit_message="$2" ref_name="$3" ref_type="$4"
 
   # Refuse a non-branch ref before mutating anything: pushing HEAD:<ref-name> on
   # a tag ref would create a branch named after the tag. The stamp only makes

@@ -49,7 +49,7 @@ Modes
         are read from <ref>..HEAD.
 
     check-changelog-placement.py --since-last-publish [--changelog CHANGELOG.md]
-                                 [--manifest <path>] [--commit-mode true|<other>]
+                                 [--manifest <path>]
         Measure the working tree against the last commit the publish pipeline
         recorded, as the stamp step does before publishing. That baseline is
         the newest first-parent ancestor of HEAD (HEAD included) authored by
@@ -58,10 +58,7 @@ Modes
         `--manifest` path when given (the stamp commit and the version-bump
         commit). Both paths are normalized (`./CHANGELOG.md` is
         `CHANGELOG.md`) and read from the repository root; an empty
-        `--manifest` is none. A `--commit-mode` other than `true` (the stamp
-        action's `commit: false`) means the caller writes the bookkeeping
-        commit, which the check cannot find: it is refused as a usage error
-        without measuring. A publish the check stopped writes no
+        `--manifest` is none. A publish the check stopped writes no
         such commit, so a later push or a manual `workflow_dispatch` is still
         measured from the last real publish and cannot carry a refused item
         through. Trailers are read from <baseline>..HEAD. A shallow checkout
@@ -79,9 +76,8 @@ included; human diagnostics go to stderr:
      "reason": <string or null>}
 
 Exit 0 on `pass` and `nothing_to_measure`. Exit 1 on `misfiled`. Exit 2 on
-`error`: a usage or tool error (`--commit-mode` other than `true` under
-`--since-last-publish`, `git` unavailable or emitting undecodable output,
-base ref unknown, shallow history, unreadable file).
+`error`: a usage or tool error (`git` unavailable or emitting undecodable
+output, base ref unknown, shallow history, unreadable file).
 """
 import argparse
 import json
@@ -313,8 +309,6 @@ def main(argv=None) -> int:
     parser.add_argument("--changelog", default="CHANGELOG.md")
     parser.add_argument("--manifest",
                         help="a plugin manifest the version-bump commit may touch")
-    parser.add_argument("--commit-mode", default="true",
-                        help="the stamp action's `commit` input; not `true` is refused")
     args = parser.parse_args(argv)
     # `diff-tree` and the tree lookups spell paths from the repository root
     # with no `./` or `a/../` segments; compare in that spelling.
@@ -322,12 +316,6 @@ def main(argv=None) -> int:
     if args.manifest:
         args.manifest = posixpath.normpath(args.manifest)
 
-    if args.since_last_publish and args.commit_mode != "true":
-        return fail("commit mode is '{}': the placement guard needs the stamp "
-                    "action's own bookkeeping commit as its baseline. Run the "
-                    "stamp action with commit: 'true', or run the placement "
-                    "check yourself with --base <ref> naming the baseline."
-                    .format(args.commit_mode))
     path = Path(args.changelog)
     try:
         text = path.read_text(encoding="utf-8")

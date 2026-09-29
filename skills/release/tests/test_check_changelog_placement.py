@@ -566,16 +566,16 @@ class PublishModeTest(_RepoCase):
         self.assertEqual(proc.returncode, 1, proc.stderr)
         self.assertEqual(proc.payload["base"], bump)
 
-    def run_as_action(self, manifest="", commit="true"):
+    def run_as_action(self, manifest=""):
         """The argv `.github/actions/stamp-changelog/action.yml` passes.
 
-        The action forwards its `changelog`, `manifest` and `commit` inputs
-        verbatim, an unset `manifest:` as the empty string.
+        The action forwards its `changelog` and `manifest` inputs verbatim,
+        an unset `manifest:` as the empty string.
         """
         return run_script(
             [_sys.executable, _os.path.join(_ROOT, "check-changelog-placement.py"),
              "--since-last-publish", "--changelog", "CHANGELOG.md",
-             "--manifest", manifest, "--commit-mode", commit],
+             "--manifest", manifest],
             cwd=self.root, capture_output=True, text=True)
 
     def test_the_action_default_inputs_measure_from_the_last_bump(self):
@@ -598,19 +598,6 @@ class PublishModeTest(_RepoCase):
                  "Bump to 0.3.10")
         proc = self.run_as_action(manifest="./meta/plugin.json")
         self.assertEqual(proc.payload["verdict"], "pass", proc.stderr)
-
-    def test_commit_mode_false_is_refused(self):
-        # #618: under `commit: false` the caller writes the bookkeeping
-        # commit, so the check has no baseline it can trust. Passing having
-        # checked nothing would let a misfiled entry publish.
-        self.merge(MISFILED)
-        proc = self.run_as_action(commit="false")
-        self.assertEqual(proc.returncode, 2, proc.stderr)
-        self.assertEqual(proc.payload["verdict"], "error")
-        self.assertIsNone(proc.payload["base"])
-        self.assertIn("needs the stamp action's own bookkeeping commit", proc.stderr)
-        self.assertIn("commit: 'true'", proc.stderr)
-        self.assertIn("--base <ref>", proc.stderr)
 
     def test_no_publish_in_history_has_nothing_to_measure(self):
         fresh = tempfile.TemporaryDirectory()
