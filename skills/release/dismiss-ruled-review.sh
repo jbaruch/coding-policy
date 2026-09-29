@@ -432,7 +432,9 @@ verify_judge_ruling() { # <task> <ruling> <out>
     echo "error: ${foreman} is not readable — reinstall the coding-policy plugin, then re-run" >&2
     return 2
   fi
-  if bash "$foreman" verify-ruling --task "$1" --ruling "$2" > "${3}.json" 2> "${3}.err"; then
+  local rc=0
+  bash "$foreman" verify-ruling --task "$1" --ruling "$2" > "${3}.json" 2> "${3}.err" || rc=$?
+  if (( rc == 0 )); then
     python3 - "${3}.json" "$3" <<'PY'
 import json
 import re
@@ -452,18 +454,35 @@ with open(sys.argv[2], "w", encoding="utf-8") as fh:
 PY
     return
   fi
+  # The foreman CLI contract (skills/herdr-foreman/foreman/cli.py `main`): a
+  # refusal exits 1 with a JSON object {"error", "message", "details"} on
+  # stderr, after any `foreman:` diagnostic lines. Only that is a binding
+  # refusal; every other exit or diagnostic is a tool error.
+  if (( rc != 1 )); then
+    echo "error: foreman verify-ruling exited ${rc} instead of answering: $(cat "${3}.err") — repair or reinstall the coding-policy plugin, then re-run" >&2
+    return 2
+  fi
   python3 - "${3}.err" "$3" <<'PY'
 import json
 import sys
 
-with open(sys.argv[1], encoding="utf-8") as fh:
-    text = fh.read().strip()
 try:
-    reason = json.loads(text).get("message") or text
+    with open(sys.argv[1], encoding="utf-8") as fh:
+        lines = fh.read().splitlines()
+except (OSError, UnicodeError) as exc:
+    print(f"error: cannot read foreman verify-ruling's diagnostic ({exc}) — repair or reinstall the coding-policy plugin, then re-run", file=sys.stderr)
+    sys.exit(2)
+start = next((i for i, ln in enumerate(lines) if ln.startswith("{")), None)
+try:
+    refusal = json.loads("\n".join(lines[start:])) if start is not None else None
 except ValueError:
-    reason = text or "foreman verify-ruling refused with no diagnostic"
+    refusal = None
+if (not isinstance(refusal, dict) or not isinstance(refusal.get("error"), str)
+        or not isinstance(refusal.get("message"), str) or not refusal["message"].strip()):
+    print("error: foreman verify-ruling exited 1 without its refusal diagnostic — repair or reinstall the coding-policy plugin, then re-run", file=sys.stderr)
+    sys.exit(2)
 with open(sys.argv[2], "w", encoding="utf-8") as fh:
-    fh.write(reason)
+    fh.write(refusal["message"])
 PY
 }
 

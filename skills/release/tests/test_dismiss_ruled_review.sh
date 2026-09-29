@@ -594,6 +594,53 @@ t_ruling_changed_since_verification_refuses() {
   assert_eq "zero dismissals" "0" "$(dismissals)"
 }
 
+# The real binding against a staged foreman stub. Args: <stub-exit> <stub-stderr>.
+stage_foreman() {
+  local stage="${TMPDIR_TEST}/foreman-stage"
+  mkdir -p "${stage}/release" "${stage}/herdr-foreman" || { echo "fatal: cannot stage the foreman" >&2; exit 2; }
+  printf '%s' "$2" > "${stage}/stderr" || { echo "fatal: cannot stage the foreman stderr" >&2; exit 2; }
+  printf '#!/usr/bin/env bash\ncat "%s" >&2\nexit %s\n' "${stage}/stderr" "$1" > "${stage}/herdr-foreman/foreman.sh" \
+    || { echo "fatal: cannot stage the foreman stub" >&2; exit 2; }
+  STAGED_DIR="${stage}/release"
+}
+invoke_team_real_binding() {
+  RC=0
+  # shellcheck disable=SC2034  # DISMISS_DIR is read by the sourced script's real_verify_judge_ruling.
+  OUT=$( (DISMISS_DIR="$STAGED_DIR"; verify_judge_ruling() { real_verify_judge_ruling "$@"; }
+          main_team --ruling "$RULING" --followup-issue "$ISSUE" --task t-632) 2>"${TMPDIR_TEST}/stderr") || RC=$?
+}
+
+t_foreman_refusal_is_unmet() {
+  set_review CHANGES_REQUESTED "$HEAD_SHA" "$BODY_TWO"
+  write_judge_ruling "$HEAD_SHA" "$DECLINE_ONE" "$DECLINE_TWO"
+  stage_foreman 1 $'foreman: a warning line first\n{\n  "error": "usage_error",\n  "message": "not the weighing brief",\n  "details": {}\n}\n'
+  invoke_team_real_binding
+  assert_eq "exit" "1" "$RC" || return 1
+  assert_unmet "not the weighing brief" "the foreman refusal" || return 1
+  assert_eq "nothing posted" "0" "$(wc -l < "$EVENTS" | tr -d ' ')"
+}
+
+t_foreman_usage_exit_is_a_tool_error() {
+  set_review CHANGES_REQUESTED "$HEAD_SHA" "$BODY_TWO"
+  write_judge_ruling "$HEAD_SHA" "$DECLINE_ONE" "$DECLINE_TWO"
+  stage_foreman 2 $'usage: foreman [-h] COMMAND\nforeman: error: unrecognized arguments\n'
+  invoke_team_real_binding
+  assert_eq "exit" "2" "$RC" || return 1
+  assert_eq "stdout empty" "" "$OUT" || return 1
+  assert_eq "nothing posted" "0" "$(wc -l < "$EVENTS" | tr -d ' ')"
+}
+
+t_foreman_exit_1_with_garbage_is_a_tool_error() {
+  set_review CHANGES_REQUESTED "$HEAD_SHA" "$BODY_TWO"
+  write_judge_ruling "$HEAD_SHA" "$DECLINE_ONE" "$DECLINE_TWO"
+  stage_foreman 1 $'Traceback (most recent call last):\n  boom\n'
+  invoke_team_real_binding
+  assert_eq "exit" "2" "$RC" || return 1
+  assert_eq "stdout empty" "" "$OUT" || return 1
+  grep -q "reinstall the coding-policy plugin" "${TMPDIR_TEST}/stderr" || { echo "    FAIL: no actionable message" >&2; return 1; }
+  assert_eq "nothing posted" "0" "$(wc -l < "$EVENTS" | tr -d ' ')"
+}
+
 t_team_round_ruling_without_task_is_usage() {
   write_judge_ruling "$HEAD_SHA" "$DECLINE_ONE" "$DECLINE_TWO"
   invoke_team --ruling "$RULING" --followup-issue "$ISSUE"
@@ -721,6 +768,9 @@ run_suite() {
   run "team round: an operator ruling refuses"        t_team_round_operator_ruling_refuses
   run "team round: an unbound judge ruling refuses"   t_unbound_judge_ruling_refuses
   run "team round: a ruling without --task is usage"  t_team_round_ruling_without_task_is_usage
+  run "a foreman refusal is unmet"                    t_foreman_refusal_is_unmet
+  run "a foreman usage exit is a tool error"          t_foreman_usage_exit_is_a_tool_error
+  run "foreman exit 1 with garbage is a tool error"   t_foreman_exit_1_with_garbage_is_a_tool_error
   run "a ruling changed since verification refuses"   t_ruling_changed_since_verification_refuses
   run "a hostile CDPATH keeps the sibling foreman"    t_hostile_cdpath_keeps_the_sibling_foreman
   run "the real binding reports the foreman refusal"  t_real_binding_reports_the_foreman_refusal
