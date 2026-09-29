@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.335 — 2026-09-29
+
 ### Fixed
 
 - **`check-changelog-placement.py --since-last-publish` finds its baseline
