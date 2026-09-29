@@ -360,6 +360,8 @@ run_main() { # <VAR=value>...
 # A request newer than the last run start never started: the stuck request
 # (#641) that turns every re-request into a no-op.
 NEVER_STARTED='[{"event":"copilot_work_started","created_at":"2026-09-29T01:40:27Z"},{"event":"reviewed","user":{"login":"Copilot"},"submitted_at":"2026-09-29T01:43:31Z"},{"event":"review_requested","requested_reviewer":{"login":"Copilot"},"created_at":"2026-09-29T13:24:00Z"}]'
+# A run started, then a new push landed before it posted: the run is stale.
+STALE_AFTER_PUSH='[{"event":"review_requested","requested_reviewer":{"login":"Copilot"},"created_at":"2026-09-29T18:31:54Z"},{"event":"copilot_work_started","created_at":"2026-09-29T18:32:51Z"},{"event":"committed","sha":"abc123"}]'
 IN_FLIGHT='[{"event":"reviewed","user":{"login":"Copilot"},"submitted_at":"2026-09-29T01:43:31Z"},{"event":"review_requested","requested_reviewer":{"login":"Copilot"},"created_at":"2026-09-29T18:31:54Z"},{"event":"copilot_work_started","created_at":"2026-09-29T18:32:51Z"}]'
 
 # #641: a pending request is removed, then requested afresh — in that order.
@@ -407,6 +409,15 @@ t_main_leaves_an_in_flight_run_alone() {
     || { echo "    FAIL: expected an in_flight envelope: $OUT" >&2; return 1; }
 }
 
+# #641: a run started before the latest push is stale, so the pending request
+# is removed and requested afresh instead of deadlocking on a run that will
+# never review this head.
+t_main_replaces_request_behind_a_stale_run() {
+  run_main "PENDING_FIXTURE=$PENDING_COPILOT" "TIMELINE_FIXTURE=$STALE_AFTER_PUSH" || return 1
+  assert_eq "exit code" "0" "$RC" || return 1
+  assert_eq "call order" "delete mutation " "$CALLS"
+}
+
 # --- driver ---
 
 # `run_suite`, not `main`: the sourced script under test owns `main`.
@@ -429,6 +440,7 @@ run_suite() {
   run "main stops on a 422 removal of a pending request (#641)"       t_main_stops_when_removal_fails_422
   run "main stops on a 403 removal of a pending request (#641)"       t_main_stops_when_removal_fails_403
   run "main leaves a Copilot run in flight alone (#641)"              t_main_leaves_an_in_flight_run_alone
+  run "main replaces a request behind a run older than the push (#641)" t_main_replaces_request_behind_a_stale_run
   printf '{"suite":"test_request_copilot_review.sh","passed":%d,"failed":%d}\n' "$PASS_COUNT" "$FAIL_COUNT"
   [[ $FAIL_COUNT -eq 0 ]]
 }

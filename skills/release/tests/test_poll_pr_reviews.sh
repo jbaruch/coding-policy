@@ -212,7 +212,10 @@ t_main_sees_review_posted_after_timeline_read() {
   MOCK_TIMELINE_READ_FLAG=$(mktemp -u) || { echo "    FAIL: mktemp failed" >&2; return 1; }
   out=$(main owner repo 1)
   rc=$?
-  rm -f "$MOCK_TIMELINE_READ_FLAG"
+  if ! rm -f "$MOCK_TIMELINE_READ_FLAG"; then
+    echo "    FAIL: could not remove the flag file ${MOCK_TIMELINE_READ_FLAG} — delete it by hand and check TMPDIR is writable" >&2
+    return 1
+  fi
   if [[ $rc -ne 0 ]]; then
     echo "    FAIL: main exited ${rc} — run the suite with stderr visible to see the poll-pr-reviews.sh diagnostic" >&2
     return 1

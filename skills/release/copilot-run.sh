@@ -10,9 +10,12 @@
 #
 # copilot_run_in_flight <owner> <repo> <pr-number>: prints true when the PR
 # timeline holds a Copilot `review_requested` event and its last
-# `copilot_work_started` comes after both the last Copilot `review_requested`
-# and the last Copilot `reviewed` event, else false. With no Copilot request
-# on the timeline, nothing is in flight. A
+# `copilot_work_started` comes after the last Copilot `review_requested`, the
+# last Copilot `reviewed` event and the last push (`committed` or
+# `head_ref_force_pushed`), else false. With no Copilot request on the
+# timeline, nothing is in flight. A run started before the latest push is
+# stale: its review would land on an older head, and reading it as in flight
+# would stop request-copilot-review.sh from ever re-requesting. A
 # started run consumes its request, and removing a request while the run is in
 # progress discards the run's result (#641). Order is timeline position (the
 # API returns events in order), not timestamp: a request and its run start can
@@ -35,7 +38,9 @@ copilot_run_in_flight() {
     | ([$ev[] | select(.value.event == "reviewed")
               | select((.value.user.login // "") | test("copilot"; "i"))
               | .key] | max) as $s
-    | $w != null and $r != null and $w > $r and $w > ($s // -1)'
+    | ([$ev[] | select(.value.event == "committed" or .value.event == "head_ref_force_pushed")
+              | .key] | max) as $p
+    | $w != null and $r != null and $w > $r and $w > ($s // -1) and $w > ($p // -1)'
 }
 
 # Logins with a review request still pending on the PR, lowercased and with the

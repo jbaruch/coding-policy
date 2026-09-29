@@ -62,6 +62,8 @@ REQ='{"event":"review_requested","requested_reviewer":{"login":"Copilot"},"creat
 START='{"event":"copilot_work_started","created_at":"2026-09-29T18:32:51Z"}'
 REVIEW='{"event":"reviewed","user":{"login":"Copilot"},"submitted_at":"2026-09-29T18:40:21Z"}'
 HUMAN_REQ='{"event":"review_requested","requested_reviewer":{"login":"alice"},"created_at":"2026-09-29T18:35:00Z"}'
+PUSH='{"event":"committed","sha":"abc123"}'
+FORCE_PUSH='{"event":"head_ref_force_pushed","created_at":"2026-09-29T18:34:00Z"}'
 LATE_REQ='{"event":"review_requested","requested_reviewer":{"login":"Copilot"},"created_at":"2026-09-29T18:36:33Z"}'
 
 in_flight_for() { # <timeline-json>
@@ -76,6 +78,20 @@ t_empty_timeline_is_not_in_flight() {
 # request/remove logic owns.
 t_start_without_request_is_not_in_flight() {
   assert_eq "in_flight" "false" "$(in_flight_for "[$START]")"
+}
+
+# #641: a run started before the latest push reviews an older head; reading
+# it as in flight would block every re-request.
+t_start_before_push_is_stale() {
+  assert_eq "in_flight" "false" "$(in_flight_for "[$REQ,$START,$PUSH]")"
+}
+
+t_start_before_force_push_is_stale() {
+  assert_eq "in_flight" "false" "$(in_flight_for "[$REQ,$START,$FORCE_PUSH]")"
+}
+
+t_start_after_push_is_in_flight() {
+  assert_eq "in_flight" "true" "$(in_flight_for "[$PUSH,$REQ,$START]")"
 }
 
 t_started_after_request_is_in_flight() {
@@ -127,6 +143,9 @@ run_suite() {
   run "an empty timeline is not in flight"                 t_empty_timeline_is_not_in_flight
   run "a run start with no request is not in flight"       t_start_without_request_is_not_in_flight
   run "a run started after its request is in flight"       t_started_after_request_is_in_flight
+  run "a run started before a push is stale (#641)"        t_start_before_push_is_stale
+  run "a run started before a force-push is stale (#641)"  t_start_before_force_push_is_stale
+  run "a run started after the push is in flight (#641)"   t_start_after_push_is_in_flight
   run "a review after the start ends the run"              t_review_after_start_ends_the_run
   run "a request after the start is not in flight"         t_request_after_start_is_not_in_flight
   run "another reviewer's request is ignored"              t_another_reviewers_request_is_ignored
