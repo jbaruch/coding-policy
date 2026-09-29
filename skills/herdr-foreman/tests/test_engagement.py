@@ -340,6 +340,35 @@ class EngagementTest(unittest.TestCase):
                 self.assertTrue(warnings)
                 self.assertEqual(self.path.read_bytes(), before)
 
+    def test_a_brief_receipt_other_than_the_dispatchs_frozen_brief_is_corrupt(self):
+        # #625 review: a report-sourced consultation record binds the frozen
+        # brief its own dispatch sent, never an unrelated receipt.
+        record = self.assess()
+        other = frozen_brief(self.root, criteria=3, name="unrelated-brief.md")
+        other_sha = recovery.receipt(other)[0]["sha256"]
+        for evidence in ({"path": other, "sha256": other_sha},
+                         {"path": record["brief_evidence"]["path"], "sha256": other_sha},
+                         {"path": str(self.root / "brief.md"), "sha256": record["brief_evidence"]["sha256"]}):
+            with self.subTest(evidence=evidence):
+                corrupted = copy.deepcopy(self.state)
+                corrupted["specialist_assessments"][0]["brief_evidence"] = evidence
+                with self.assertRaises(UsageError):
+                    engagement.validate_assessments(corrupted)
+        engagement.validate_assessments(self.state)
+
+    def test_boolean_or_unhashable_line_values_are_corrupt(self):
+        self.assess()
+        rows = self.state["specialist_assessments"][0]["acceptance"]
+        variants = ({"acceptance": [{**rows[0], "k": True}, rows[1]]}, {"criteria": True},
+                    {"acceptance": [{**rows[0], "state": ["met"]}, rows[1]]}, {"contribution": ["design"]},
+                    {"source": ["report"]})
+        for change in variants:
+            with self.subTest(change=change):
+                corrupted = copy.deepcopy(self.state)
+                corrupted["specialist_assessments"][0].update(change)
+                with self.assertRaises(UsageError):
+                    engagement.validate_assessments(corrupted)
+
     def test_duplicate_assessment_ids_are_invalid(self):
         self.assess()
         self.state["specialist_assessments"].append(copy.deepcopy(self.state["specialist_assessments"][0]))

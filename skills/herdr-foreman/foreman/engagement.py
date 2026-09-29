@@ -16,6 +16,7 @@ migration (`migrate_assessments`) moves that prose under `legacy` with
 
 import hashlib
 import json
+from pathlib import Path
 
 from . import report_contract
 from . import runnable
@@ -82,6 +83,24 @@ def _corrupt():
     return UsageError("Unsupported or corrupt specialist assessment; preserve history and update the owner.", {})
 
 
+def _text_in(value, allowed):
+    """Whether `value` is a string in `allowed`; an unhashable value is simply not one."""
+    return isinstance(value, str) and value in allowed
+
+
+def _frozen_brief_receipt(evidence, dispatch):
+    """Whether a brief receipt names its dispatch's own frozen brief and that copy's content identity.
+
+    Read without reopening the file: the frozen name carries its content
+    digest (`assign.freeze_paths`), so the receipt's digest must match it.
+    """
+    brief = dispatch.get("brief")
+    if not isinstance(brief, str) or evidence["path"] != brief:
+        return False
+    name = Path(brief)
+    return name.parent.name == ".dispatched" and evidence["sha256"][:16] in name.name.split(".")
+
+
 def migrate_assessments(payload):
     """Upgrade schema-1 records in place; True when any record changed. Idempotent.
 
@@ -120,10 +139,10 @@ def _validate_lines(record, dispatch):
         text(legacy["summary"], "legacy summary")
         return
     role = record["role"]
-    if record["legacy"] is not None or record["contribution"] is not None and record["contribution"] not in CONTRIBUTIONS:
+    if record["legacy"] is not None or record["contribution"] is not None and not _text_in(record["contribution"], CONTRIBUTIONS):
         raise _corrupt()
     if report_contract.verdict_required(role, specialty(dispatch)):
-        if record["verdict"] not in report_contract.VERDICTS:
+        if not _text_in(record["verdict"], report_contract.VERDICTS):
             raise _corrupt()
     elif record["verdict"] is not None:
         raise _corrupt()
@@ -132,12 +151,17 @@ def _validate_lines(record, dispatch):
             raise _corrupt()
         return
     validate_receipt(record["brief_evidence"])
+    if not _frozen_brief_receipt(record["brief_evidence"], dispatch):
+        raise _corrupt()
     criteria, acceptance = record["criteria"], record["acceptance"]
+    # `type(...) is int`, never isinstance: a JSON `true` is a Python bool,
+    # which is an int and equals 1.
     if (type(criteria) is not int or criteria < 1 or not isinstance(acceptance, list)
-            or [row.get("k") if isinstance(row, dict) else None for row in acceptance] != list(range(1, criteria + 1))):
+            or any(not isinstance(row, dict) or type(row.get("k")) is not int for row in acceptance)
+            or [row["k"] for row in acceptance] != list(range(1, criteria + 1))):
         raise _corrupt()
     for row in acceptance:
-        if set(row) != {"k", "state", "evidence"} or row["state"] not in report_contract.ACCEPTANCE_STATES:
+        if set(row) != {"k", "state", "evidence"} or not _text_in(row["state"], report_contract.ACCEPTANCE_STATES):
             raise _corrupt()
         text(row["evidence"], "acceptance evidence")
 
@@ -150,7 +174,7 @@ def validate_assessments(state):
     ids = set()
     for record in records:
         if (not isinstance(record, dict) or set(record) != RECORD_FIELDS or type(record.get("schema_version")) is not int
-                or record["schema_version"] != ASSESSMENT_SCHEMA_VERSION or record.get("source") not in SOURCES):
+                or record["schema_version"] != ASSESSMENT_SCHEMA_VERSION or not _text_in(record.get("source"), SOURCES)):
             raise _corrupt()
         _input({key: record[key] for key in INPUT_FIELDS})
         text(record["at"], "assessment time")

@@ -89,7 +89,7 @@ class RecoveryCommandTests(fixture.CliCase):
             "schema_version": 1, "at": "2026-02-03T13:00:00+00:00", "id": "investigator-dispatch",
             "fingerprint": "e" * 64, "role": "investigator", "agent": "grok", "task": TASK,
             "fix_round": None, "plan": None, "work": None, "status": "applied",
-            "assignment_index": index,
+            "assignment_index": index, "brief": "/reports/.dispatched/brief.0123456789abcdef.md",
             "result": {"schema_version": 1, "task": TASK, "role": "investigator", "agent": "grok",
                        "fix_round": None, "status": "applied"}, "report": None})
         record = {
@@ -103,7 +103,8 @@ class RecoveryCommandTests(fixture.CliCase):
                           summary="The find-rate tracks review surface area.")
         else:
             record.update(schema_version=2, source="report", criteria=1, verdict=None, contribution=None, legacy=None,
-                          brief_evidence={"path": "/reports/.dispatched/brief.0123456789abcdef.md", "sha256": "c" * 64},
+                          brief_evidence={"path": "/reports/.dispatched/brief.0123456789abcdef.md",
+                                          "sha256": "0123456789abcdef" + "0" * 48},
                           acceptance=[{"k": 1, "state": criterion, "evidence": "reproduction in section 1"}])
         state["specialist_assessments"].append(record)
         save_state(self.state, state)
