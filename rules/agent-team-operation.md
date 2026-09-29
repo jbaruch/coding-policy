@@ -411,7 +411,7 @@ description: Running a multi-agent team — task-based specialist composition, c
 - A statement about task content in the ledger, retrospectives or memory cites the report it comes from
 - A completed adjudication (`uphold` or `amend`) settles a disputed blocking `VERDICT:` directly
 - A finding a weighing ruled `defer` or `decline` is settled only by the next reviewer or tester report at the tip, marking it DECLINED and recording `VERDICT: approved`
-- `foreman record-historical-review` imports a review completed before the report contract; the contract does not apply to it
+- `foreman record-historical-review` is outside the report contract
 
 ## Dispatch Safety
 

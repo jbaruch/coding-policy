@@ -24,7 +24,7 @@ and trailing backticks, are tolerated):
   CRITERION <k>: <text>
       Brief-side only, inside the brief's single `## Acceptance Criteria`
       section. `brief_criteria` counts them; a CRITERION line anywhere else in
-      the brief is ignored.
+      the brief is ignored. In a report, every CRITERION candidate is extra.
 
 Refusal classes, each naming the gap: missing, duplicate (an identical repeat
 included), extra, N mismatch, malformed candidate. A candidate is any line whose
@@ -155,8 +155,11 @@ def report_lines(text, role, specialty=None, criteria=None):
     wants_verdict = verdict_required(role, specialty)
     limit = criteria if consultation and type(criteria) is int else 0
     gaps, verdicts, contributions, accepted = [], [], [], {}
-    for _number, keyword, candidate in _candidates(text.splitlines(), {"VERDICT", "ACCEPTANCE", "CONTRIBUTION"}):
-        if keyword == "VERDICT":
+    for _number, keyword, candidate in _candidates(text.splitlines(),
+                                                   {"VERDICT", "ACCEPTANCE", "CONTRIBUTION", "CRITERION"}):
+        if keyword == "CRITERION":
+            gaps.append("extra CRITERION line {!r}: criteria belong to the brief, never the report".format(candidate))
+        elif keyword == "VERDICT":
             match = _VERDICT.match(candidate)
             if match is None or match.group(1) not in VERDICTS:
                 gaps.append("malformed VERDICT line {!r}".format(candidate))

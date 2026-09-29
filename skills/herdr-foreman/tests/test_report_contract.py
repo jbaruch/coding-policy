@@ -120,6 +120,10 @@ class ReportLinesTest(unittest.TestCase):
         self.assertIn("extra ACCEPTANCE", self.gaps("VERDICT: approved\nACCEPTANCE 1/1: met — x\n", "reviewer"))
         self.assertIn("extra ACCEPTANCE 3", self.gaps(consultation(*MET, "ACCEPTANCE 3/2: met — x"), "advisor", None, 2))
 
+    def test_a_criterion_line_in_a_report_is_extra(self):
+        self.assertIn("extra CRITERION", self.gaps("VERDICT: approved\nCRITERION 1: restated from the brief\n", "reviewer"))
+        self.assertIn("extra CRITERION", self.gaps(consultation(*MET, "- CRITERION 1: the flow is named"), "advisor", None, 2))
+
     def test_n_mismatch(self):
         text = consultation("ACCEPTANCE 1/1: met — only one")
         self.assertIn("recorded 2", self.gaps(text, "advisor", None, 2))
