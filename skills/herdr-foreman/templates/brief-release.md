@@ -46,9 +46,9 @@ path unchanged; never copy or edit the file.
   follow-up issue before opening the PR, citing the ruling path, a `decline`
   labelled won't-fix.
 - A ruling over policy-review findings: at release Step 6 run
-  `dismiss-ruled-review.sh` with `--ruling`, `--followup-issue` and the
+  `skills/release/dismiss-ruled-review.sh` with `--ruling`, `--followup-issue` and the
   `--task` the value above names, then
-  `dismiss-stale-reviews.sh` at Step 7. The script posts the follow-up entries
+  `skills/release/dismiss-stale-reviews.sh` at Step 7. The script posts the follow-up entries
   itself. Its exit 1 goes under `## BLOCKED` with its `.unmet` list; stop there.
 
 ## Release
@@ -63,7 +63,7 @@ You do not edit repository content in the release role. If any release step,
 CI failure, or external review requires a source change, report the current
 tip, findings, review URLs, and completed release actions under `## BLOCKED`,
 then stop. For a blocking policy review, include the JSON that
-`dismiss-ruled-review.sh` prints without `--ruling`: it names each finding by
+`skills/release/dismiss-ruled-review.sh` prints without `--ruling`: it names each finding by
 path, line and rule, the identities a weighing must copy. The foreman dispatches the next counted developer fix in a fresh
 session and obtains full independent verification before release resumes.
 Reuse the task's approved correction bounds; a normal release clear needs no

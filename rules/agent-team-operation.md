@@ -195,7 +195,8 @@ description: Running a multi-agent team — task-based specialist composition, c
 - `RULING: weighed` is a completed ruling
 - `insufficient` and `blocked` keep their adjudication meaning in a weighing
 - `fix` returns the finding to the fix loop
-- `defer` and `decline` stop the finding blocking the round and spend no fix round
+- `defer` and `decline` stop the finding blocking the round
+- `defer` and `decline` spend no fix round
 - Each `defer` and `decline` is entered in the task's follow-up issue, citing the ruling
 - A ruling covers a re-raised finding only while `foreman finding-churn` from the ruling's `HEAD:` to the current head reports the finding's file unchanged
 - A finding a ruling covers is never re-nominated

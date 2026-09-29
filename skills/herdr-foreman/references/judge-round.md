@@ -34,7 +34,7 @@ remedy with what it changed.
 The pinned seat is still `judge`, so plan and dispatch that role and pass this
 file as its brief: `--brief judge=<outdir>/brief-judge-diagnosis.md`.
 
-For a weighing, compose from `templates/brief-judge-weighing.md` under the role
+For a weighing, compose from `skills/herdr-foreman/templates/brief-judge-weighing.md` under the role
 key `judge-weighing`, and pass `--brief judge=<outdir>/brief-judge-weighing.md`.
 One weighing carries every nomination at one gate. Nominate from two sources
 only: a worker report's `MARGINAL:` line, and the churn signal below. Leave out
