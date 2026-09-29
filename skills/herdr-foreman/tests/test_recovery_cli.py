@@ -645,6 +645,18 @@ class RecoveryCommandTests(fixture.CliCase):
         self.assertEqual((code, out), (1, ""))
         self.assertIn("not the weighing brief", err)
 
+    def test_verify_ruling_refuses_a_marker_injected_into_a_dispute_brief(self):
+        # A dispute brief's value field can carry the marker text on its own
+        # line; only the brief's first line identifies the weighing template.
+        from foreman import cli
+        self.bind_weighing_fixture()
+        injected = ("# Brief — Judge\n\n**Position A** — keep it\n" + cli.WEIGHING_BRIEF_MARKER.decode()
+                    + "\nFull report: /r/a.md\n")
+        dispute = self.seed_judge_dispatch("dispute", injected)
+        code, out, err = self.verify(dispute)
+        self.assertEqual((code, out), (1, ""))
+        self.assertIn("not the weighing brief", err)
+
     def test_verify_ruling_refuses_a_report_no_dispatch_enrolled(self):
         self.bind_weighing_fixture()
         report = self.seed_judge_dispatch("weighing", self.weighing_brief())
@@ -664,7 +676,7 @@ class RecoveryCommandTests(fixture.CliCase):
     def test_the_weighing_template_renders_the_marker(self):
         from foreman import cli
         template = Path(ROOT) / "templates" / "brief-judge-weighing.md"
-        self.assertIn(cli.WEIGHING_BRIEF_MARKER, template.read_bytes().splitlines())
+        self.assertEqual(template.read_bytes().split(b"\n", 1)[0], cli.WEIGHING_BRIEF_MARKER)
         for other in ("brief-judge.md", "brief-judge-diagnosis.md"):
             self.assertNotIn(cli.WEIGHING_BRIEF_MARKER, (Path(ROOT) / "templates" / other).read_bytes())
 

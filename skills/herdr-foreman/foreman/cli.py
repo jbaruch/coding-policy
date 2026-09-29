@@ -2282,8 +2282,8 @@ def cmd_validate_partition(args, client=None, warn=None, trace=None):
     return partition.run_command(args)
 
 
-#: The line only `templates/brief-judge-weighing.md` renders. A frozen judge
-#: brief carrying it was a weighing; a dispute brief never carries it (#632).
+#: The first line only `templates/brief-judge-weighing.md` renders. A frozen
+#: judge brief opening with it was a weighing; a dispute brief never opens with it (#632).
 WEIGHING_BRIEF_MARKER = b"<!-- herdr-brief: judge-weighing -->"
 
 
@@ -2295,7 +2295,7 @@ def cmd_verify_ruling(args, client=None, warn=None, trace=None):
     before it accepts `AUTHORITY: judge`. The dispatch is selected by the supervision
     enrollment whose report path is the ruling file, never by "latest judge
     adjudication". That dispatch must be the pinned judge's, applied, on the
-    given task, and its frozen brief must carry `WEIGHING_BRIEF_MARKER`: the
+    given task, and its frozen brief must open with `WEIGHING_BRIEF_MARKER`: the
     bytes the judge actually read were the weighing brief, not a dispute's.
     """
     judge = load_judge(_config_path(args))
@@ -2322,7 +2322,9 @@ def cmd_verify_ruling(args, client=None, warn=None, trace=None):
                          "not this task's weighing.".format(dispatch["id"], judge.agent, args.task),
                          {"dispatch": dispatch["id"], "task": dispatch.get("task"), "agent": dispatch.get("agent")})
     brief = read_frozen(dispatch.get("brief") or "")
-    if WEIGHING_BRIEF_MARKER not in brief.splitlines():
+    # First line, exact: a value field rendered into a dispute brief can put the
+    # marker text on a line of its own anywhere below it.
+    if brief.split(b"\n", 1)[0].rstrip(b"\r") != WEIGHING_BRIEF_MARKER:
         raise UsageError("Dispatch {} sent the judge a brief that is not the weighing brief (templates/brief-judge-weighing.md); "
                          "a dispute ruling never clears a policy review.".format(dispatch["id"]), {"dispatch": dispatch["id"]})
     try:
