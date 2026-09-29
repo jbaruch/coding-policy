@@ -24,7 +24,9 @@ Usage:
 
     --latest         skip the registry query and use this as the latest
                      published version (for testing / manual runs). Omit in CI
-                     to query the registry via `tessl plugin info`.
+                     to query the registry's versions API via the sibling
+                     `registry-version.sh` — the same read `smart-publish.sh`
+                     computes its target from.
 """
 import argparse
 import json
@@ -87,13 +89,19 @@ def stamp_changelog(text: str, version: str, date: str) -> tuple[str, bool]:
 def query_latest_version(plugin_name: str) -> str | None:
     """Return the registry's latest published version, or None if it can't be read.
 
-    Mirrors the publish step's registry-query handling. Returns None in two cases so the
-    caller falls back to the manifest version: a 404 (the plugin has never been
-    published) and a Tessl auth failure (the stamp step ran without login — see
-    the caller). Any other failure (network, etc.) is surfaced so it is not masked.
+    Reads through `registry-version.sh` — the versions API `smart-publish.sh`
+    computes its target from. The `tessl plugin info` listing lags that API, and
+    a lagging read stamped a heading one version behind the published one (#606).
+
+    Returns None in three cases so the caller falls back to the manifest version:
+    the plugin has never been published, a 404, and a Tessl auth failure (the
+    stamp step ran without login — see the caller). Any other failure (network,
+    etc.) is surfaced so it is not masked.
     """
+    workspace, _, slug = plugin_name.partition("/")
+    script = Path(__file__).resolve().parent / "registry-version.sh"
     proc = subprocess.run(
-        ["tessl", "plugin", "info", plugin_name],
+        ["bash", str(script), workspace, slug],
         capture_output=True, text=True,
     )
     if proc.returncode != 0:
@@ -108,22 +116,17 @@ def query_latest_version(plugin_name: str) -> str | None:
         # authoritative bump downstream. Genuine (non-auth) failures still raise.
         if re.search(r"authenticat|log ?in|sign (?:in|up)", combined, re.IGNORECASE):
             print(
-                f"warning: `tessl plugin info {plugin_name}` requires Tessl auth in "
-                "this step — falling back to the manifest version. Run setup-tessl "
-                "before the stamp step for an authoritative registry check.",
+                f"warning: reading the registry version of {plugin_name} requires "
+                "Tessl auth in this step — falling back to the manifest version. Run "
+                "setup-tessl before the stamp step for an authoritative registry check.",
                 file=sys.stderr,
             )
             return None
         raise RuntimeError(
-            f"`tessl plugin info {plugin_name}` failed (exit {proc.returncode}): "
+            f"registry-version.sh {workspace} {slug} failed (exit {proc.returncode}): "
             f"{proc.stderr.strip() or proc.stdout.strip()}"
         )
-    for line in proc.stdout.splitlines():
-        if "Latest Version" in line:
-            return line.split()[-1]
-    raise RuntimeError(
-        f"Could not find 'Latest Version' in `tessl plugin info {plugin_name}` output"
-    )
+    return json.loads(proc.stdout)["version"]
 
 
 def _read_manifest(manifest: Path | None) -> tuple[str, str]:
