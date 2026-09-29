@@ -119,18 +119,24 @@ gh() {
         esac
       done
       [[ $saw_paginate -eq 1 ]] || { echo "mock gh api: missing --paginate (required so the script never silently misses page 2+)" >&2; return 99; }
-      # MOCK_PATH_LOG, when set, records each paginated read's endpoint kind
-      # in order, so a test can assert the order of reads.
-      if [[ -n "${MOCK_PATH_LOG:-}" ]]; then
-        case "$path" in
-          *reviews*)  echo reviews  >> "$MOCK_PATH_LOG" ;;
-          *timeline*) echo timeline >> "$MOCK_PATH_LOG" ;;
-        esac
-      fi
+      # MOCK_TIMELINE_READ_FLAG, when set, names a file a timeline read
+      # creates; reviews read after it return MOCK_REVIEWS_AFTER_TIMELINE, as
+      # if a review posted between the two reads.
       case "$path" in
-        *reviews*)  echo "${MOCK_REVIEWS_BODY:-[]}" ;;
+        *reviews*)
+          if [[ -n "${MOCK_TIMELINE_READ_FLAG:-}" && -f "$MOCK_TIMELINE_READ_FLAG" ]]; then
+            echo "${MOCK_REVIEWS_AFTER_TIMELINE:-[]}"
+          else
+            echo "${MOCK_REVIEWS_BODY:-[]}"
+          fi
+          ;;
         *comments*) echo "${MOCK_COMMENTS_BODY:-[]}" ;;
-        *timeline*) echo "${MOCK_TIMELINE_BODY:-[]}" ;;
+        *timeline*)
+          if [[ -n "${MOCK_TIMELINE_READ_FLAG:-}" ]]; then
+            : > "$MOCK_TIMELINE_READ_FLAG" || { echo "mock gh api: cannot write $MOCK_TIMELINE_READ_FLAG" >&2; return 2; }
+          fi
+          echo "${MOCK_TIMELINE_BODY:-[]}"
+          ;;
         *) echo "mock gh api: unsupported path: $path" >&2; return 2 ;;
       esac
       ;;
@@ -197,16 +203,22 @@ t_main_marks_copilot_in_flight_requested() {
   assert_eq "copilot requested" "true" "$(echo "$out" | jq -r '.reviews.copilot.requested')"
 }
 
-# #641: the timeline is read before the reviews, so a review posted between
-# the two reads is seen by the review fetch rather than missed.
-t_main_reads_timeline_before_reviews() {
+# #641: the timeline is read before the reviews, so a Copilot review posted
+# between the two reads is seen by the review fetch rather than missed.
+t_main_sees_review_posted_after_timeline_read() {
   local MOCK_MERGE_STATE=clean MOCK_REQUESTED_BODY='[]' MOCK_REVIEWS_BODY='[]'
-  local MOCK_TIMELINE_BODY='[]' MOCK_PATH_LOG reads
-  MOCK_PATH_LOG=$(mktemp) || { echo "    FAIL: mktemp failed" >&2; return 1; }
-  main owner repo 1 >/dev/null
-  reads=$(tr '\n' ' ' < "$MOCK_PATH_LOG")
-  rm -f "$MOCK_PATH_LOG"
-  assert_eq "read order" "timeline reviews reviews " "$reads"
+  local MOCK_TIMELINE_BODY='[]' MOCK_TIMELINE_READ_FLAG out rc
+  local MOCK_REVIEWS_AFTER_TIMELINE='[{"user":{"login":"copilot-pull-request-reviewer[bot]"},"state":"COMMENTED","submitted_at":"2026-09-29T18:40:00Z","body":"done","commit_id":"'"$HEAD_SHA"'"}]'
+  MOCK_TIMELINE_READ_FLAG=$(mktemp -u) || { echo "    FAIL: mktemp failed" >&2; return 1; }
+  out=$(main owner repo 1)
+  rc=$?
+  rm -f "$MOCK_TIMELINE_READ_FLAG"
+  if [[ $rc -ne 0 ]]; then
+    echo "    FAIL: main exited ${rc} — run the suite with stderr visible to see the poll-pr-reviews.sh diagnostic" >&2
+    return 1
+  fi
+  assert_eq "copilot state"     "COMMENTED" "$(echo "$out" | jq -r '.reviews.copilot.state')" || return 1
+  assert_eq "copilot requested" "false"     "$(echo "$out" | jq -r '.reviews.copilot.requested')"
 }
 
 t_main_marks_copilot_in_flight_with_no_review_requested() {
@@ -729,7 +741,7 @@ run_suite() {
   run "main marks a requested-and-pending lane (#369)"                  t_main_marks_a_pending_lane_requested
   run "main marks an in-flight Copilot run requested (#641)"            t_main_marks_copilot_in_flight_requested
   run "main marks an in-flight first Copilot run requested (#641)"      t_main_marks_copilot_in_flight_with_no_review_requested
-  run "main reads the timeline before the reviews (#641)"             t_main_reads_timeline_before_reviews
+  run "main sees a review posted after the timeline read (#641)"      t_main_sees_review_posted_after_timeline_read
   run "main: a review after the run started is not requested (#641)"   t_main_copilot_run_finished_by_posted_review_is_not_requested
   printf '{"suite":"test_poll_pr_reviews.sh","passed":%d,"failed":%d}\n' "$PASS_COUNT" "$FAIL_COUNT"
   [[ $FAIL_COUNT -eq 0 ]]
