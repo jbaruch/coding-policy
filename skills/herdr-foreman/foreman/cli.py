@@ -2317,8 +2317,9 @@ def cmd_verify_ruling(args, client=None, warn=None, trace=None):
         raise UsageError("The enrollment for {} names dispatch {}, which the dispatch state does not hold; reconcile it "
                          "before verifying.".format(args.ruling, enrolled[0]["id"]), {})
     if (canonical_role(dispatch.get("role")) != "judge" or dispatch.get("agent") != judge.agent
-            or dispatch.get("task") != args.task or dispatch.get("status") != "applied"):
-        raise UsageError("Dispatch {} is not an applied dispatch of the pinned judge {} on task {!r}; the ruling is "
+            or dispatch.get("task") != args.task or dispatch.get("status") != "applied"
+            or dispatch.get("judge_mode") != "adjudication"):
+        raise UsageError("Dispatch {} is not an applied adjudication of the pinned judge {} on task {!r}; the ruling is "
                          "not this task's weighing.".format(dispatch["id"], judge.agent, args.task),
                          {"dispatch": dispatch["id"], "task": dispatch.get("task"), "agent": dispatch.get("agent")})
     brief = read_frozen(dispatch.get("brief") or "")

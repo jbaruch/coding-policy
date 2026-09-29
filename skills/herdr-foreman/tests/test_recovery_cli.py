@@ -583,22 +583,25 @@ class RecoveryCommandTests(fixture.CliCase):
         self.assertEqual(code, 1)
         self.assertIn("unspent attempts under plan diag-cap:plan", err)
 
-    def seed_judge_dispatch(self, dispatch_id, brief_text, task=TASK, agent="claude"):
+    def seed_judge_dispatch(self, dispatch_id, brief_text, task=TASK, agent="claude", mode="adjudication"):
         """An applied judge dispatch whose frozen brief holds `brief_text`, and its enrolled report."""
         from foreman import supervision
+        from foreman import recovery
         from foreman.assign import freeze_paths
         source = self.tmp / (dispatch_id + "-brief.md")
         source.write_text(brief_text)
         frozen = freeze_paths({"judge": str(source)})["judge"]
         state = self.saved()
-        add_assignment(state, "2026-02-03T15:00:00+00:00", "judge", agent, task=task, judge_mode="adjudication")
+        add_assignment(state, "2026-02-03T15:00:00+00:00", "judge", agent, task=task, judge_mode=mode)
         state["recovery"]["dispatches"].append({
-            "schema_version": 1, "at": "2026-02-03T15:00:00+00:00", "id": dispatch_id,
+            "schema_version": recovery.JUDGE_DISPATCH_VERSION, "at": "2026-02-03T15:00:00+00:00", "id": dispatch_id,
             "fingerprint": "f" * 64, "role": "judge", "agent": agent, "task": task,
-            "fix_round": None, "plan": None, "work": None, "status": "applied",
+            "fix_round": None, "plan": None, "work": None, "status": "applied", "judge_mode": mode,
+            "context_before_send": {"judge_mode": mode},
             "assignment_index": len(state["assignments"]) - 1, "brief": frozen,
-            "result": {"schema_version": 1, "task": task, "role": "judge", "agent": agent,
-                       "fix_round": None, "status": "applied"}, "report": None})
+            "result": {"schema_version": recovery.JUDGE_DISPATCH_VERSION, "task": task, "role": "judge",
+                       "agent": agent, "fix_round": None, "status": "applied", "judge_mode": mode},
+            "report": None})
         save_state(self.state, state)
         report = self.tmp / (dispatch_id + "-report.md")
         report.write_text("RULING: weighed\nschema_version: 2\nAUTHORITY: judge\n")
@@ -671,7 +674,14 @@ class RecoveryCommandTests(fixture.CliCase):
         report = self.seed_judge_dispatch("weighing", self.weighing_brief(), task="other-task")
         code, out, err = self.verify(report)
         self.assertEqual((code, out), (1, ""))
-        self.assertIn("not an applied dispatch of the pinned judge", err)
+        self.assertIn("not an applied adjudication of the pinned judge", err)
+
+    def test_verify_ruling_refuses_a_diagnosis_carrying_the_weighing_brief(self):
+        self.bind_weighing_fixture()
+        report = self.seed_judge_dispatch("diagnosis", self.weighing_brief(), mode="diagnosis")
+        code, out, err = self.verify(report)
+        self.assertEqual((code, out), (1, ""))
+        self.assertIn("not an applied adjudication of the pinned judge", err)
 
     def test_the_weighing_template_renders_the_marker(self):
         from foreman import cli
