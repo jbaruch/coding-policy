@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.332 — 2026-09-29
+
 ### Fixed
 
 - **A hostile `CDPATH` no longer corrupts a hook's or skill script's resolved
