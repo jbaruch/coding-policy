@@ -29,7 +29,7 @@ from . import __version__
 from .assign import apply as apply_assignments
 from .assign import APPLY_SCHEMA_VERSION, dry_run, freeze_decision, freeze_paths, read_frozen, native_context_session, normalize_assignments, resolve_paths, validate_fix_history
 from . import renderable
-from . import attention, capabilities, chronology, composition, engagement, foreman_queue, foreman_reset, historical, home, load_set, members, memory, oracle, partition, recovery, report_delivery, report_gates, restoration, role_clear, retrospective, retrospective_runtime, supervision, supervision_gate, supervision_runtime, triggers
+from . import attention, capabilities, chronology, churn, composition, engagement, foreman_queue, foreman_reset, historical, home, load_set, members, memory, oracle, partition, recovery, report_delivery, report_gates, restoration, role_clear, retrospective, retrospective_runtime, supervision, supervision_gate, supervision_runtime, triggers
 from .config import FOREMAN_CONFIG_VERSION, default_config_path, load_config, load_foreman, load_judge, load_role_costs, select_agents
 from .errors import PlanError, StateError, ForemanError, UsageError
 from .herdr import (
@@ -166,8 +166,13 @@ def build_parser():
     restoration.register_commands(sub, common)
     partition.register_commands(sub, common)
     oracle.register_commands(sub, common)
+    ruling_parser = sub.add_parser("verify-ruling", parents=[common],
+                                   help="Confirm a weighing ruling file is the report supervision enrolled for the pinned judge's adjudication on a task. Read-only.")
+    ruling_parser.add_argument("--task", required=True)
+    ruling_parser.add_argument("--ruling", required=True, metavar="FILE")
 
     triggers.register_command(sub, common)
+    churn.register_command(sub, common)
 
     measure_parser = sub.add_parser(
         "measure",
@@ -2195,6 +2200,10 @@ def cmd_detect_triggers(args, client=None, warn=None, trace=None):
     return triggers.run_command(args)
 
 
+def cmd_finding_churn(args, client=None, warn=None, trace=None):
+    return churn.run_command(args)
+
+
 def _dispatched_seat_briefs(plan, slice_paths, dispatches, task):
     """Each seat's brief text as THIS plan dispatched it, or a refusal naming the seat.
 
@@ -2271,6 +2280,71 @@ def cmd_verify_partition(args, client=None, warn=None, trace=None):
 
 def cmd_validate_partition(args, client=None, warn=None, trace=None):
     return partition.run_command(args)
+
+
+#: The first line only `templates/brief-judge-weighing.md` renders. A frozen
+#: judge brief opening with it was a weighing; a dispute brief never opens with it (#632).
+WEIGHING_BRIEF_MARKER = b"<!-- herdr-brief: judge-weighing -->"
+
+
+def cmd_verify_ruling(args, client=None, warn=None, trace=None):
+    """A team-round ruling file is the report the pinned judge's weighing was sent to write (#632).
+
+    The ruling artifact's writer/reader contract, this reader's side included,
+    is the header of `skills/release/dismiss-ruled-review.sh`, which calls this
+    before it accepts `AUTHORITY: judge`. The dispatch is selected by the supervision
+    enrollment whose report path is the ruling file, never by "latest judge
+    adjudication". That dispatch must be the pinned judge's, applied, on the
+    given task, and its frozen brief must open with `WEIGHING_BRIEF_MARKER`: the
+    bytes the judge actually read were the weighing brief, not a dispute's. The
+    ruling's current bytes must match a delivery the owners recorded for that
+    dispatch (`report_gates.ledger_view`).
+    """
+    judge = load_judge(_config_path(args))
+    if judge is None:
+        raise UsageError("No pinned judge is configured, so no ruling can be the judge's; add the `judge` block to config.json.", {})
+    ruling = Path(args.ruling)
+    if not ruling.is_absolute():
+        raise UsageError("--ruling must be the absolute path of the judge's delivered report.", {"ruling": args.ruling})
+    state, usable = load_state_checked(_state_path(args), warn, persist_migration=False)
+    if not usable:
+        raise StateError("The dispatch state is unusable, so the judge dispatch cannot be read; restore it before verifying the ruling.", {})
+    enrolled = [row for row in supervision.load(_state_path(args))["members"]
+                if Path(supervision.expected_assignment(row)["report"]).resolve() == ruling.resolve()]
+    if len(enrolled) != 1:
+        raise UsageError("{} is {} supervision enrollment's report; pass the report the judge's weighing dispatch was enrolled "
+                         "to write.".format(args.ruling, "no" if not enrolled else "more than one"), {"ruling": args.ruling})
+    dispatch = next((row for row in state["recovery"]["dispatches"] if row.get("id") == enrolled[0]["id"]), None)
+    if dispatch is None:
+        raise UsageError("The enrollment for {} names dispatch {}, which the dispatch state does not hold; reconcile it "
+                         "before verifying.".format(args.ruling, enrolled[0]["id"]), {})
+    if (canonical_role(dispatch.get("role")) != "judge" or dispatch.get("agent") != judge.agent
+            or dispatch.get("task") != args.task or dispatch.get("status") != "applied"
+            or dispatch.get("judge_mode") != "adjudication"):
+        raise UsageError("Dispatch {} is not an applied adjudication of the pinned judge {} on task {!r}; the ruling is "
+                         "not this task's weighing.".format(dispatch["id"], judge.agent, args.task),
+                         {"dispatch": dispatch["id"], "task": dispatch.get("task"), "agent": dispatch.get("agent")})
+    brief = read_frozen(dispatch.get("brief") or "")
+    # First line, exact: a value field rendered into a dispute brief can put the
+    # marker text on a line of its own anywhere below it.
+    if brief.split(b"\n", 1)[0].rstrip(b"\r") != WEIGHING_BRIEF_MARKER:
+        raise UsageError("Dispatch {} sent the judge a brief that is not the weighing brief (templates/brief-judge-weighing.md); "
+                         "a dispute ruling never clears a policy review.".format(dispatch["id"]), {"dispatch": dispatch["id"]})
+    try:
+        body = ruling.read_bytes()
+    except OSError as exc:
+        raise UsageError("Cannot read the ruling at {}: {}.".format(args.ruling, exc), {}) from None
+    digest = hashlib.sha256(body).hexdigest()
+    # The enrolled path names where the report was meant to land, not what is
+    # there now: the bytes must be ones the owners recorded delivered for this
+    # dispatch, read through the same receipts report gates resolve against.
+    key = str(ruling.resolve())
+    if not any(row["dispatch"] == dispatch["id"] and row["path"] == key and row["sha256"] == digest
+               for row in report_gates.ledger_view(_state_path(args), judge.agent)["deliveries"]):
+        raise UsageError("The ruling's current bytes match no recorded delivery of the judge's report — re-deliver or "
+                         "re-weigh.", {"dispatch": dispatch["id"], "sha256": digest})
+    return {"task": args.task, "dispatch": dispatch["id"], "judge": judge.agent, "report": str(ruling),
+            "sha256": digest}, None
 
 
 def cmd_verify_oracle(args, client=None, warn=None, trace=None):
@@ -2357,9 +2431,11 @@ COMMANDS = {
     "load-set": cmd_load_set,
     **{command: cmd_recovery for command in ("task", "checkpoint", "authorize-corrections", "authorize-approach", "recover-context", "recover-role-clear", "record-report", "record-refusal", "authorize-refused-dispatch", "diagnose", "reconcile", "record-release-clear", "import-correction", "record-historical-review", "recover-report", "assess-specialist", "close-task")},
     "detect-triggers": cmd_detect_triggers,
+    "finding-churn": cmd_finding_churn,
     "validate-partition": cmd_validate_partition,
     "verify-partition": cmd_verify_partition,
     "verify-oracle": cmd_verify_oracle,
+    "verify-ruling": cmd_verify_ruling,
     "start-judge": cmd_start_judge,
     "start-foreman": cmd_start_foreman,
     "verify-foreman": cmd_verify_foreman,
@@ -2377,7 +2453,7 @@ COMMANDS = {
 
 
 #: Commands that read neither the state nor the config home.
-HOME_FREE_COMMANDS = frozenset({"marker-fit"})
+HOME_FREE_COMMANDS = frozenset({"marker-fit", "finding-churn"})
 
 
 def main(argv=None, stdout=None, stderr=None, client=None):
@@ -2420,7 +2496,7 @@ def main(argv=None, stdout=None, stderr=None, client=None):
             home.require_current(defaults)
             # Commands that may migrate or write state share its canonical lock.
             # Dry runs, probes, and retrospective reads remain read-only.
-            readonly = args.command in {"probe-report", "marker-fit", "detect-triggers", "validate-partition", "verify-oracle", "retro-check", "retro-list", "retro-show", "capability-check", "capability-show", "supervision-gate", "load-set", "foreman-queue", "cost-report", "check-member", "verify-foreman", "report-gate-status"} or getattr(args, "dry_run", False)
+            readonly = args.command in {"probe-report", "marker-fit", "detect-triggers", "finding-churn", "validate-partition", "verify-oracle", "verify-ruling", "retro-check", "retro-list", "retro-show", "capability-check", "capability-show", "supervision-gate", "load-set", "foreman-queue", "cost-report", "check-member", "verify-foreman", "report-gate-status"} or getattr(args, "dry_run", False)
             # The deliverer starts while `foreman-reset` still holds the state lock;
             # it serializes on the reset record's own lock instead. close-member
             # writes only through the supervision owner's own lock.

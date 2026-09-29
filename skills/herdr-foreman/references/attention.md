@@ -85,6 +85,8 @@ Example answer event:
 
 Deferred entries resurface automatically at `until` using the caller's `--now` or current checkpoint. Readback reports `effective_status: open` and `resurfaced: true`; it does not rewrite the saved `status: deferred`. Showing a resurfaced entry still leaves it pending. No running scheduler or inactive-session wake is implied by the attention queue.
 
+A completed weighing that rules any finding `defer` or `decline` records an `update` obligation naming the ruling's report path and the follow-up issue. It gates no dispatch; the operator overrides the ruling like any other.
+
 ## Dispatch gate
 
 An open `decision` or `blocker` on a task refuses `apply` and `start-judge` for that task, dry runs included, until it is resolved with its required evidence or deferred with recorded rationale. A resurfaced deferral gates again. `present` never lifts the gate. An obligation without a task, and one on another task, gates nothing. The refusal names the obligation id and its resolution condition on stderr as `usage_error`, with every gating entry under `details.gating`; a malformed or unsupported attention history refuses as `state_error` rather than reading as clear, and a `--now` earlier than the latest saved attention event refuses as `usage_error`. Gating kinds and ordering are owned by `skills/herdr-foreman/foreman/attention.py`, `GATING_KINDS` and `dispatch_gate`. Report `waiting_for_operator` on the task while the gate holds; do not record the question at a non-gating kind to keep dispatching.

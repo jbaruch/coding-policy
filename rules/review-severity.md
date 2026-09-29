@@ -48,29 +48,33 @@ description: Review findings carry a severity — blocking gates the merge, advi
 
 ## Judge-Weighed Finding Carve-Out
 
-- Narrow exception for merging with a blocking finding the operator's weighing ruled `defer` or `decline`
-- Applies in standalone mode, when fixing the finding costs more than the failure it prevents
+- Narrow exception for merging with a blocking finding a weighing ruled `defer` or `decline`
+- Applies when fixing the finding costs more than the failure it prevents
 - A weighing asks whether fixing a finding is worth its cost, never whether the finding is real
-- The operator is the judge
-- The agent nominates a finding only when it sits on lines the previous fix push added, or with a cited reachability claim marking it marginal
-- The agent asks the operator one decision question per gate, carrying every nomination and its claim
+- The ruling file follows the format the `skills/release/dismiss-ruled-review.sh` header names
+- In a Herdr team round the pinned judge weighs under `rules/agent-team-operation.md` Judge Seat
+- In standalone mode the operator is the judge
+- The standalone agent nominates a finding only when it sits on lines the previous fix push added, or with a cited reachability claim marking it marginal
+- The standalone agent asks the operator one decision question per gate, carrying every nomination and its claim
 - The question never blocks the round
 - The agent keeps fixing until the answer arrives
 - No answer means `fix`
-- The agent records the answer verbatim as the ruling file, in the format the `skills/release/dismiss-ruled-review.sh` header names
+- The agent records the answer verbatim as the ruling file
 - Preconditions (all required):
-  1. The ruling file quotes the operator's answer verbatim and rules the finding `defer` or `decline`
-  2. The ruling names the finding at its `HEAD:`, and the finding's file is unchanged from that commit to the head
-  3. The finding is under no floor
-  4. The finding is entered in the task's follow-up issue citing the ruling, a `decline` labelled won't-fix
-  5. Every other release gate holds
+  1. The ruling rules the finding `defer` or `decline`
+  2. In standalone mode, the ruling file carries `AUTHORITY: operator` and quotes the operator's answer verbatim
+  3. In a team round, the ruling file carries `AUTHORITY: judge` and `foreman verify-ruling` binds it to the report supervision enrolled for the pinned judge's weighing
+  4. The ruling names the finding at its `HEAD:`, and the finding's file is unchanged from that commit to the head
+  5. The finding is under no floor
+  6. The finding is entered in the task's follow-up issue citing the ruling, a `decline` labelled won't-fix
+  7. Every other release gate holds
 - Floors:
   - a failing test, lint, diagnostic or required check
   - a security or data-loss defect reachable by normal inputs
   - a `no-secrets` or `ci-safety` finding
   - a carve-out's unmet precondition
   - an unmet acceptance criterion the operator stated
-- The operator rules `fix` on every floor
+- The judge rules `fix` on every floor
 - `skills/release/dismiss-ruled-review.sh` refuses the rule-id floors and a failing check
 - A ruling never skips, disables or removes a test
 - A gating policy review the ruling covers is dismissed per `rules/ci-safety.md` Judge-Ruled-Review Dismissal Carve-Out
