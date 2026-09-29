@@ -112,7 +112,7 @@ class Main(unittest.TestCase):
 
 
 class QueryLatestVersion(unittest.TestCase):
-    """query_latest_version degrades gracefully when the stamp step has no auth."""
+    """query_latest_version maps registry-version.sh's contract; failures raise."""
 
     def _run(self, returncode, stdout="", stderr=""):
         cp = subprocess.CompletedProcess(args=[], returncode=returncode, stdout=stdout, stderr=stderr)
@@ -125,17 +125,19 @@ class QueryLatestVersion(unittest.TestCase):
     def test_never_published_returns_none(self):
         self.assertIsNone(self._run(0, stdout='{"version":null}\n'))
 
-    def test_404_returns_none(self):
-        self.assertIsNone(self._run(1, stderr="request failed: HTTP 404"))
-
-    def test_auth_failure_returns_none(self):
-        # The regression: no auth in the stamp step must fall back, not raise (#207).
-        msg = "✘ Please authenticate with Tessl to continue. Run `tessl login` to sign up or log in."
-        self.assertIsNone(self._run(1, stderr=msg))
-
-    def test_non_auth_failure_still_raises(self):
+    def test_404_raises(self):
+        # Never-published is {"version": null} on exit 0; a 404 is a tool failure.
         with self.assertRaises(RuntimeError):
-            self._run(1, stderr="connection reset by peer")
+            self._run(2, stderr="request failed: HTTP 404")
+
+    def test_auth_failure_raises(self):
+        msg = "✘ Please authenticate with Tessl to continue. Run `tessl login` to sign up or log in."
+        with self.assertRaises(RuntimeError):
+            self._run(2, stderr=msg)
+
+    def test_network_failure_raises(self):
+        with self.assertRaises(RuntimeError):
+            self._run(2, stderr="connection reset by peer")
 
 
 _LAGGING_TESSL = """#!/usr/bin/env bash
