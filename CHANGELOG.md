@@ -1,5 +1,16 @@
 # Changelog
 
+### Fixed
+
+- **A version-13 recovery store keeps its task closures on upgrade (Closes #657).**
+  `_refuse_unowned_legacy` refused any older store carrying a `task_closed`
+  event with no version gate. Version 13 owns that event, so once version 14
+  added the dispatch-bound oracle, every v13 store that had ever closed a task
+  was refused as newer data, and every foreman command that loads state failed.
+  The check now applies below version 13 only, matching the sibling seat,
+  judge-mode and oracle guards. A new test migrates a v13 store with its
+  closure preserved; the v12 refusal still holds.
+
 ## 0.3.346 — 2026-09-30
 
 ### Changed

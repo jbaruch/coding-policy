@@ -513,6 +513,18 @@ class RecoveryCommandTests(fixture.CliCase):
         with self.assertRaisesRegex(UsageError, "task closure this version never wrote"):
             recovery_module.migrate_store(store)
 
+    def test_a_version_13_store_keeps_its_task_closures_on_upgrade(self):
+        # coding-policy#657: version 13 owns `task_closed`, so its closures migrate.
+        from foreman import recovery as recovery_module
+        store = recovery_module.empty_recovery()
+        store["schema_version"] = 13
+        closure = {"schema_version": 1, "sequence": 1, "at": AT, "kind": "task_closed",
+                   "task": TASK, "details": {"outcome": "merged", "evidence": "pr"}}
+        store["events"].append(dict(closure))
+        self.assertTrue(recovery_module.migrate_store(store))
+        self.assertEqual(store["schema_version"], recovery_module.RECOVERY_STORE_VERSION)
+        self.assertEqual(store["events"], [closure])
+
     def test_an_older_store_carrying_a_bound_oracle_is_refused_as_newer_data(self):
         # coding-policy#585: store version 14 owns the dispatch-bound oracle.
         from foreman import recovery as recovery_module
