@@ -29,6 +29,13 @@ alwaysApply: true
 - Non-owner reader skills must not migrate
 - On an older record, a reader treats it as read-only "no usable prior state" — the next owner-skill run upgrades it
 - On a record newer than it accepts, a reader is lagging, not awaiting migration — treat it as "no usable prior state" and update the reader to accept the new version (see Cross-Pipeline Schema Bumps when writer and readers deploy through separate pipelines)
+- Narrow exception for a gate store.
+- Applies when an open record in the artifact refuses an action, so "no usable prior state" reads as no gate
+- Preconditions (all required):
+  1. The owner module's schema documentation names the artifact and this exception
+  2. A reader meeting a version it does not accept refuses with an actionable diagnostic, never proceeding as if no record exists
+  3. The owner migrates and rewrites every older version it accepts, on read
+- Every other artifact's lagging reader treats a newer record as "no usable prior state"
 
 ## Rename / Removal
 

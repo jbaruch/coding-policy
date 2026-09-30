@@ -31,7 +31,10 @@
     A verdict gate clears on a re-check (a delivered report of the same
     responsibility, and specialty for a consultation, on the same task,
     dispatched after the gate, whose owner-parsed verdict at its current bytes
-    is `approved` and which carries no open classifier gate) or on the
+    is `approved` — recorded for that very dispatch: an assessment of it, or a
+    `record-report` receipt naming its task and reviewer, never the same bytes
+    approved under another dispatch — and which carries no open classifier
+    gate) or on the
     operator's resolved decision. A judge's report is refused: the owner
     cannot tell which side a ruling upheld without parsing brief text, so the
     ruling decides and the re-check that cites it clears. A clear on a report
@@ -41,10 +44,13 @@
     gate carries none of them. Every read goes through the owner, so the first
     read of a schema-1 document migrates and rewrites it under the sidecar
     lock (`rules/stateful-artifacts.md` Migration Policy: detect, upgrade,
-    rewrite). A lagging reader keeps refusing an unknown schema
-    — a stated exception to `rules/stateful-artifacts.md` Migration Policy,
-    since "no usable prior state" for a gate store would read as no gate,
-    which is fail-open.
+    rewrite). A lagging reader keeps refusing an unknown schema, since "no
+    usable prior state" for a gate store would read as no gate, which is
+    fail-open. The policy review ruled a reference file cannot grant that
+    exception, so `rules/stateful-artifacts.md` Migration Policy gains a
+    narrow gate-store carve-out: the owner's schema doc names the artifact, a
+    lagging reader refuses with a diagnostic, and the owner migrates every
+    older version it accepts on read.
   - Docs: `rules/agent-team-operation.md` Reports (a blocking verdict holds
     the release until an approved re-check or the operator clears it; a judge
     ruling decides but never clears), SKILL.md Steps 12 and 14, round-flow's

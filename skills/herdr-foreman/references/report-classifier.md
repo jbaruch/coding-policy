@@ -140,9 +140,9 @@ it: each gate becomes `source: classifier`, `dispatch: null`, its resolution's
 lock before it is returned. A read while another process holds that lock is
 refused and retried, never served unmigrated. A reader at schema 1 meeting
 a schema-2 document refuses it as unsupported rather than reading it as no
-gates: for a gate store, "no usable prior state" would read as no gate, so the
-lagging-reader default of `rules/stateful-artifacts.md` Migration Policy does
-not apply here.
+gates. The sidecar takes `rules/stateful-artifacts.md` Migration Policy's
+gate-store exception: an open gate refuses an action, so "no usable prior
+state" would read as no gate.
 
 ## Changing the Bands
 
