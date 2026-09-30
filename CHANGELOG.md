@@ -10,6 +10,20 @@
   Copilot's advisory on #662: the invocation test checked only the bootstrap
   block, so deleting a `--repo` would have left CI green.
 
+## 0.3.351 — 2026-09-30
+
+### Fixed
+
+- **`release` and `onboard-repo` open their PR in origin's repository (Closes #666).**
+  Both push the branch to `origin` and then ran a bare `gh pr create`, which
+  targets `gh repo set-default`. In a fork whose `gh` default is the upstream
+  parent, the PR could open in a repository the operator does not own. Release
+  Step 2 and onboard-repo Step 8 now resolve origin with
+  `skills/release/origin-repo.py` and pass `--repo <repo>`; a non-GitHub origin
+  stops the step with the helper's diagnostic.
+  `skills/release/tests/test_pr_create_repo_binding.py` fails if either step
+  drops the resolve or the `--repo`.
+
 ## 0.3.350 — 2026-09-30
 
 ### Changed
@@ -167,7 +181,6 @@
     Blocking Gate, Release Gate item 5 and Ruling Outcomes,
     `references/report-classifier.md` (Verdict Gates, Sidecar schema 2) and
     `state-schema.md`.
-||||||| 7f5eec1a
 
 ## 0.3.344 — 2026-09-30
 

@@ -150,7 +150,16 @@ Pushes the appropriate branch (`feat/add-coding-policy-review` in install mode, 
 
 ## Step 8 — Open PR
 
-`gh pr create` with title `ci(review): add jbaruch/coding-policy PR review setup` (install mode) or `ci(review): upgrade jbaruch/coding-policy PR review setup` (upgrade mode), and a body that follows the required content blocks (what this PR commits, how the review runs, the load indicator, conditional warnings section) defined at:
+Resolve origin's repository, so the PR opens in the repo Step 7 pushed to and never in `gh`'s own default (`gh repo set-default`):
+
+```bash
+CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"; [ -d "$CP" ] || case "$(git config --get remote.origin.url)" in git@github.com:jbaruch/coding-policy|git@github.com:jbaruch/coding-policy.git|https://github.com/jbaruch/coding-policy|https://github.com/jbaruch/coding-policy.git|ssh://git@github.com/jbaruch/coding-policy|ssh://git@github.com/jbaruch/coding-policy.git) CP=. ;; *) echo "coding-policy plugin not found: run tessl install jbaruch/coding-policy" >&2; exit 1 ;; esac
+python3 "$CP/skills/release/origin-repo.py" .
+```
+
+Contract: see `skills/release/origin-repo.py` — top-of-file docstring. Emits `{ "repo", "owner", "name" }`. A non-zero exit stops the skill with its stderr diagnostic.
+
+`gh pr create --repo <repo>`, `<repo>` from that output, with title `ci(review): add jbaruch/coding-policy PR review setup` (install mode) or `ci(review): upgrade jbaruch/coding-policy PR review setup` (upgrade mode), and a body that follows the required content blocks (what this PR commits, how the review runs, the load indicator, conditional warnings section) defined at:
 
 ```text
 skills/onboard-repo/PR_BODY_TEMPLATE.md
