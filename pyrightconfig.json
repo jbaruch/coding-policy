@@ -149,7 +149,8 @@
     "skills/release/tests/test_check_changelog_placement.py",
     "skills/release/tests/test_check_closing_issues.py",
     "skills/release/tests/test_origin_repo.py",
-    "skills/release/tests/test_stamp_changelog.py"
+    "skills/release/tests/test_stamp_changelog.py",
+    "skills/release/tests/test_pr_create_repo_binding.py"
   ],
   "executionEnvironments": [
     {
