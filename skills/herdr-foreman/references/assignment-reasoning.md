@@ -5,8 +5,9 @@ of findings before a correction. The foreman records the accepted behavior and
 dispatches the rest: composing a non-mechanical brief and assessing a report's
 substance each route to a worker under
 `skills/herdr-foreman/references/team-operation.md` Judgment Routes, and that
-worker applies the sections below. The foreman gates the route's report on its
-contract lines. The dispatch utility does not infer intent or causality from prose.
+worker applies the sections below. The route's report gates like every report
+under that file's Reports section, and the foreman adds no assessment of its
+own. The dispatch utility does not infer intent or causality from prose.
 
 ## Preserve the Accepted Behavior
 

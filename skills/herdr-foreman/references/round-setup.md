@@ -241,9 +241,10 @@ the assignment relies on. Include concise relevant lessons with source pointers
 in the role's task text; do not copy the whole memory store into every brief.
 A bug brief, a correction brief, or any brief applying
 `skills/herdr-foreman/references/assignment-reasoning.md` is non-mechanical: its
-task text comes from an advisor consultation under
+task framing comes from an advisor consultation under
 `skills/herdr-foreman/references/team-operation.md` Judgment Routes. Pass the
-accepted consultation's delivered text unchanged as the role's task value.
+absolute `report` path of the accepted consultation's `assess-specialist`
+record as the role's `SPECIALIST_CONTEXT` value; never copy its text.
 
 Resolve the policy artifacts before writing the values file:
 

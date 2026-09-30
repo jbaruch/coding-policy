@@ -405,11 +405,14 @@ authority, review evidence and brief completeness.
 
 - A bug brief, a correction brief, and any brief needing judgment on task
   content are non-mechanical
-- A non-mechanical brief's task text comes from an accepted advisor
-  consultation under `skills/herdr-foreman/references/team-operation.md`
-  Judgment Routes
+- A non-mechanical brief's task framing is an accepted advisor consultation's
+  report under `skills/herdr-foreman/references/team-operation.md` Judgment
+  Routes
 - Without one, return to Step 5 and plan that consultation first
-- Pass its delivered text unchanged; never write that text yourself
+- Set the role's `SPECIALIST_CONTEXT` value to the absolute `report` path of
+  that consultation's `assess-specialist` record
+- Never copy, excerpt or paraphrase that report into a value
+- Never write that framing yourself
 
 Proceed immediately to Step 8.
 
@@ -581,8 +584,10 @@ Then act on the checkpoint:
 - A `stall` is classified only when `--worktree` names the checkout
 - Act on a stall under `skills/herdr-foreman/references/team-operation.md` Stalled Workers
 - A stall the classification does not mark retryable goes to the investigator
-  under that file's Judgment Routes; plan it in Step 5 before re-dispatching or
-  discarding the work
+  under that file's Judgment Routes
+- Plan that investigator in Step 5
+- Attach its report path to the stall's attention obligation
+- The operator decides re-dispatch or discard of the stalled work
 - Record a stall's obligation through `references/attention.md`
 - Preserve the blocked/refusal and native-recovery paths in the references below
 - Never re-dispatch over uncertainty

@@ -9,21 +9,25 @@
   lines and classifier gates alone. What remained was naming where the
   judgment the foreman used to exercise itself goes. A new Judgment Routes
   section in `skills/herdr-foreman/references/team-operation.md` names four:
-  assessing a report's substance beyond its contract lines (finding scope,
-  whether a diagnosis explains its evidence, shared causes across findings)
-  routes to an advisor consultation, or the investigator for causality;
-  composing a non-mechanical brief (bug, correction, or any brief applying
-  `assignment-reasoning.md`) routes to an advisor whose deliverable is the
-  task text, passed unchanged through `compose-briefs`; diagnosing a stall
+  a finding's scope class routes to an advisor consultation, and causal
+  questions (does a diagnosis explain its evidence, do successive findings
+  share a cause) to the investigator; a non-mechanical brief (bug,
+  correction, or any brief applying `assignment-reasoning.md`) routes to an
+  advisor whose accepted report is the task framing, handed off by path,
+  never by text: the foreman puts the `report` path from its
+  `assess-specialist` record in the role's `SPECIALIST_CONTEXT` value and the
+  worker reads it, so nothing is retyped or paraphrased; diagnosing a stall
   the `wait-report.sh` classification does not mark retryable routes to the
-  investigator; a disputed finding stays with the judge. Route reports gate
-  on their contract lines and spend no developer fix round; a missing route
-  report is re-dispatched or recorded as a gap, never replaced by the
-  foreman's reading. `SKILL.md` Steps 7, 11 and 12,
-  `references/round-setup.md` Step 7, the Stalled Workers section and
-  `references/assignment-reasoning.md` now route to those workers instead
-  of asking the foreman to apply the reasoning itself. No new role, script
-  or state.
+  investigator, and the re-dispatch-or-discard choice goes to the operator
+  through the stall's attention item (the investigator decides nothing); a
+  disputed finding stays with the judge. Route reports gate like every report
+  (contract lines, classifier gates, judge rulings) with no foreman
+  assessment added, and spend no developer fix round; a missing route report
+  is re-dispatched or recorded as a gap, never replaced by the foreman's
+  reading. `SKILL.md` Steps 7, 11 and 12, `references/round-setup.md` Step
+  7, the Stalled Workers section and `references/assignment-reasoning.md` now
+  route to those workers instead of asking the foreman to apply the
+  reasoning itself. No new role, script or state.
 
 ## 0.3.345 — 2026-09-30
 
