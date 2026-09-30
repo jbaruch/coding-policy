@@ -11,6 +11,18 @@
   value. Removing the scrub fails the suite; it passes with `HERDR_ENV` set
   or unset outside it.
 
+## 0.3.349 — 2026-09-30
+
+### Fixed
+
+- **`adopt-fork-pr` classifies the PR it will adopt (Closes #656).** Steps 1,
+  2 and 4 ran a bare `gh pr view <N>`, which reads `gh repo set-default`, while
+  `adopt.sh` binds to origin since #655. In a fork whose `gh` default is the
+  upstream parent, the user approved upstream's PR #N and `adopt.sh` then acted
+  on origin's PR #N. Step 1 now resolves origin's repository with
+  `skills/release/origin-repo.py` and every `gh pr` call in those steps passes
+  `--repo`; a non-GitHub origin stops the skill with the helper's diagnostic.
+
 ## 0.3.348 — 2026-09-30
 
 ### Fixed
