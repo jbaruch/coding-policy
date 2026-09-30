@@ -1,5 +1,18 @@
 # Changelog
 
+### Added
+
+- **CI fails on a committed merge-conflict marker (Closes #668).** A diff3 base
+  marker from a hand-resolved CHANGELOG conflict shipped in the 0.3.345 entry
+  and passed every check, including `changelog-placement`.
+  `scripts/check-conflict-markers.py` scans every tracked text file for a line
+  opening with 7 of `<`, `|` or `>` followed by a space or end of line, and
+  `scripts/tests/test_conflict_markers.py` runs it against the live repo under
+  `scripts/run-tests.sh`, so no workflow edit was needed. A bare `=======` is
+  never flagged alone (Markdown heading underline); binary and untracked files
+  are skipped; exemptions are an explicit path list, empty today. Run against
+  the 0.3.351 tree, it reports the old marker at `CHANGELOG.md:174`.
+
 ## 0.3.352 — 2026-09-30
 
 ### Changed

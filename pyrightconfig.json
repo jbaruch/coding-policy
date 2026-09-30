@@ -4,6 +4,8 @@
     ".github/codex-accept/tests/test_contract.py",
     "scripts/tests/test_shipped_invocations.py",
     "scripts/tests/test_rules_budget.py",
+    "scripts/check-conflict-markers.py",
+    "scripts/tests/test_conflict_markers.py",
     "scripts/tests/test_source_index.py",
     "skills/herdr-standup/standup-render.py",
     "skills/herdr-standup/tests/test_standup_render.py",
