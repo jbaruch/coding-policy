@@ -33,6 +33,12 @@
   to gh; the agent-run `gh pr view` in `skills/adopt-fork-pr/SKILL.md`
   Steps 1-2 is tracked in #656.
 
+## 0.3.347 — 2026-09-30
+
+### Fixed
+
+- **A version-13 recovery store holding task closures migrates again (Closes #657).** The `task_closed` refusal in `_refuse_unowned_legacy` carried no version gate, so once store version 14 added the dispatch-bound oracle, every v13 ledger that had ever closed a task was refused as corrupt. Every state-loading foreman command failed, which bricked the round preflight, queue, plan and dispatch. The guard now fires only below version 13, the version that owns `task_closed`, matching its seat, judge-mode and oracle siblings. A new test covers a v13 store carrying a closure.
+
 ## 0.3.346 — 2026-09-30
 
 ### Changed
