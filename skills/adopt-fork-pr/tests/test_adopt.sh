@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # Tests for adopt.sh. Sources the script (the main() guard prevents auto-run),
 # mocks `gh` and `git` as functions dispatching on subcommand, and drives
-# scenarios through env vars. Deterministic: no network, no real git/gh.
+# scenarios through env vars. Deterministic: no network, no real gh. The one
+# real git read is origin-repo.py's `git remote get-url`, against a throwaway
+# `git init` whose origin is configured, never fetched.
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -10,6 +12,24 @@ source "$SCRIPT_DIR/adopt.sh"
 set +e  # relax errexit in the harness; each main() runs under its own set -e
 
 pass=0; fail=0
+
+# ---- fixture checkout: origin names owner/blog-writer ----------------------
+ORIGIN_REPO=owner/blog-writer
+FIXTURE_DIR=$(mktemp -d) || { echo "fatal: mktemp -d failed" >&2; exit 2; }
+fixture_cleanup() {
+  if ! rm -rf "$FIXTURE_DIR"; then echo "warn: could not remove $FIXTURE_DIR — remove it by hand" >&2; fi
+  return 0
+}
+trap fixture_cleanup EXIT
+: > "$FIXTURE_DIR/gitconfig" || { echo "fatal: cannot write an empty git config" >&2; exit 2; }
+# The operator's git config (insteadOf rewrites included) never reaches the fixture.
+export GIT_CONFIG_GLOBAL="$FIXTURE_DIR/gitconfig" GIT_CONFIG_NOSYSTEM=1
+if ! { command git init -q "$FIXTURE_DIR/repo" \
+  && command git -C "$FIXTURE_DIR/repo" remote add origin "https://github.com/${ORIGIN_REPO}.git" \
+  && cd "$FIXTURE_DIR/repo"; }; then
+  echo "fatal: cannot build the fixture checkout" >&2; exit 2
+fi
+GH_ARGV="$FIXTURE_DIR/gh-argv"
 ok()    { printf 'ok   - %s\n' "$1"; pass=$((pass+1)); }
 bad()   { printf 'FAIL - %s\n' "$1"; fail=$((fail+1)); }
 eq()    { if [ "$1" = "$2" ];   then ok "$3"; else bad "$3 (got: $1)"; fi; }
@@ -27,7 +47,17 @@ rc_is() { if [ "$1" -eq "$2" ]; then ok "$3"; else bad "$3 (rc=$1)"; fi; }
 : "${FIXTURE_COMMENT_EXISTS:=0}"      # 1 = original PR already links the adopted URL
 : "${FIXTURE_COMMENTSREAD_FAIL:=0}"   # 1 = gh pr view --json comments fails
 
+# Every call appends one line to GH_ARGV: "bound" or "UNBOUND", then its
+# subcommand. A call that does not name origin's repository with --repo
+# reaches gh's default repository, a different one, and fails.
 gh() {
+  local prev="" a bound=0
+  for a in "$@"; do
+    if [ "$prev" = "--repo" ] && [ "$a" = "$ORIGIN_REPO" ]; then bound=1; fi
+    prev="$a"
+  done
+  if [ "$bound" = 1 ]; then printf 'bound %s %s\n' "$1" "$2"; else printf 'UNBOUND %s %s\n' "$1" "$2"; fi >> "$GH_ARGV"
+  if [ "$bound" != 1 ]; then echo "fake gh: reached gh's default repository upstream/blog-writer: $*" >&2; return 9; fi
   case "$1 $2" in
     "pr view")
       if [[ "$*" == *"--json comments"* ]]; then
@@ -75,6 +105,11 @@ git() {
 
 run_main() { ( set -euo pipefail; main "$@" ); }  # subshell: capture exit + stdout
 
+# Every gh call since the last reset named origin's repository with --repo.
+all_gh_bound() {
+  [ -s "$GH_ARGV" ] && ! grep -q '^UNBOUND' "$GH_ARGV"
+}
+
 # ---- slugify (pure) ------------------------------------------------------
 eq "$(slugify 'feat/framework-md-persona-override')" "feat-framework-md-persona-override" "slugify keeps alnum, folds slash"
 eq "$(slugify 'Foo_Bar Baz!!')" "foo-bar-baz" "slugify lowercases and squeezes"
@@ -121,7 +156,21 @@ else
   bad "existing pointer link → idempotent skip (got: $out rc=$rc)"
 fi
 
+# ---- non-GitHub origin: refused before any gh call ------------------------
+: > "$GH_ARGV"
+command git remote set-url origin https://gitlab.com/owner/blog-writer.git \
+  || { echo "fatal: cannot point origin at gitlab" >&2; exit 2; }
+run_main 6 >/dev/null 2>&1; rc=$?
+if [ "$rc" -eq 1 ] && [ ! -s "$GH_ARGV" ]; then
+  ok "non-GitHub origin → exit 1, no gh call"
+else
+  bad "non-GitHub origin → exit 1, no gh call (rc=$rc calls=$(cat "$GH_ARGV"))"
+fi
+command git remote set-url origin "git@github.com:${ORIGIN_REPO}.git" \
+  || { echo "fatal: cannot point origin back at GitHub" >&2; exit 2; }
+
 # ---- happy path ----------------------------------------------------------
+: > "$GH_ARGV"
 out=$(run_main 6 2>/dev/null); rc=$?
 if [ "$rc" -eq 0 ] \
    && [ "$(jq -r '.state' <<<"$out")" = "adopted" ] \
@@ -132,6 +181,11 @@ if [ "$rc" -eq 0 ] \
   ok "happy path → adopted JSON with expected fields"
 else
   bad "happy path → adopted JSON with expected fields (got: $out rc=$rc)"
+fi
+if all_gh_bound; then
+  ok "happy path → every gh call names origin's repository"
+else
+  bad "happy path → every gh call names origin's repository (calls: $(cat "$GH_ARGV"))"
 fi
 
 # ---- idempotency: branch on origin AND an open PR exists → no-op ----------
@@ -145,6 +199,7 @@ else
 fi
 
 # ---- partial-run recovery: branch on origin but NO open PR → adopt --------
+: > "$GH_ARGV"
 out=$(FIXTURE_BRANCH_EXISTS=1 FIXTURE_OPEN_PR=0 run_main 6 2>/dev/null); rc=$?
 if [ "$rc" -eq 0 ] \
    && [ "$(jq -r '.state' <<<"$out")" = "adopted" ] \
@@ -152,6 +207,11 @@ if [ "$rc" -eq 0 ] \
   ok "branch but no PR → recovers by opening the PR"
 else
   bad "branch but no PR → recovers by opening the PR (got: $out rc=$rc)"
+fi
+if all_gh_bound; then
+  ok "recovery → every gh call names origin's repository"
+else
+  bad "recovery → every gh call names origin's repository (calls: $(cat "$GH_ARGV"))"
 fi
 
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
