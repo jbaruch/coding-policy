@@ -6,7 +6,7 @@
 # only sanctioned path for that dismissal; a hand dismissal is not.
 # Who ruled follows the mode: standalone (HERDR_ENV unset) the operator, in a
 # Herdr team round (HERDR_ENV set, any value) the pinned judge
-# (rules/agent-team-operation.md Judge Seat). The ruling's AUTHORITY line must
+# (skills/herdr-foreman/references/team-operation.md Judge Seat). The ruling's AUTHORITY line must
 # name the authority the mode requires, and a team-round ruling must be the
 # report the foreman's owner records enrolled for the pinned judge's weighing.
 #

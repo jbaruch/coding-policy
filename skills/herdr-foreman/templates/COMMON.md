@@ -63,7 +63,7 @@ to know goes in the report.
   and after (a hash listing, never a copy of a directory tree), copy only the
   single files the run is expected to change and restore those, stop on an
   unexpected change and report it unrestored, and
-  remove the root when you finish (`rules/agent-team-operation.md` Writers and
+  remove the root when you finish (`skills/herdr-foreman/references/team-operation.md` Writers and
   Checkouts carries the preconditions).
 - Write nowhere else — not the shared checkout, not your home directory, not a
   path no brief named. Restoring a user-level file from the pre-run copy you
@@ -78,6 +78,9 @@ to know goes in the report.
 - The resolved rule index is `{{POLICY_INDEX}}`; it links every rule file. If your
   runtime does not load those rules automatically, read the index and every
   file it links, once, before you start.
+- Required read, whatever your runtime loads: the team-round contract at
+  `{{TEAM_OPERATION}}`. Read it in full, once, before you start. It binds this
+  round as rule content; no rule file carries it.
 - Your runtime may have inherited a parent rule reference — a `.tessl/RULES.md`
   or similar — that does not resolve from your worktree. Expected. The index
   above is authoritative and complete. Do not chase the broken reference, do not

@@ -16,7 +16,7 @@
 # else is listed: no removals, no counts, no other repository.
 #
 # Never acts in a Herdr worker session (HERDR_ENV set, even empty, in a
-# linked worktree): workers never delete (rules/agent-team-operation.md
+# linked worktree): workers never delete (skills/herdr-foreman/references/team-operation.md
 # Writers and Checkouts). In portable mode (SESSION_START_MODE=portable, set
 # by hooks/session-start.sh under `tessl hook run`, which strips HERDR_ENV) a
 # linked worktree may be a worker's, so neither script runs there at all, and

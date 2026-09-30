@@ -4,7 +4,7 @@
 # A SessionStart hook for the foreman's own pane: when this session runs inside
 # Herdr alongside other NAMED agents, it names them and their lifecycle state
 # so the foreman opens knowing who is on the roster and who is mid-task, instead
-# of dispatching a round into a busy worker (rules/agent-team-operation.md
+# of dispatching a round into a busy worker (skills/herdr-foreman/references/team-operation.md
 # Dispatch Safety).
 #
 # Design choices, shared with the other SessionStart hooks:

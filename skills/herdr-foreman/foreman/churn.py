@@ -1,7 +1,7 @@
 """`foreman finding-churn`: which findings sit on lines the previous fix round added.
 
 A weighing nomination is deterministic screening, never judgment
-(`rules/agent-team-operation.md` Judge Seat). This module is the screening:
+(`skills/herdr-foreman/references/team-operation.md` Judge Seat). This module is the screening:
 given the previous fix round's head (`--from`) and the head under review
 (`--to`), it reports for each finding whether its line falls inside a hunk
 that round added, and whether its file changed at all between the two heads.

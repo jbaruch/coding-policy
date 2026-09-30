@@ -25,13 +25,15 @@
 #             template uses, a value that is not text, an invalid/reused REPORT
 #             path, a REPORT longer than FOREMAN_REPORT_PATH_MAX_COLS, or a reviewer/tester
 #             REVIEW_PACKAGE that is not an absolute readable non-empty file,
-#             or an unreadable POLICY_INDEX / RELEASE_SKILL artifact.
+#             or an unreadable POLICY_INDEX / RELEASE_SKILL / TEAM_OPERATION
+#             artifact.
 #             Nothing is written on a
 #             validation failure,
 #           3 a tool this depends on failed (the placeholder scan, or the
 #             renderable-text check in foreman/renderable.py). The answer is
 #             unknown, which is never reported as "no placeholders".
-#           A REPORT, POLICY_INDEX, RELEASE_SKILL or REVIEW_PACKAGE path, or a
+#           A REPORT, POLICY_INDEX, RELEASE_SKILL, TEAM_OPERATION or REVIEW_PACKAGE
+#           path, or a
 #           SLICE_PATHS glob, that foreman/renderable.py refuses is exit 2.
 #   env   : FOREMAN_REPORT_PATH_MAX_COLS overrides the REPORT length limit
 #           (tests, a fleet whose narrowest pane is wider); a non-integer or
@@ -87,7 +89,7 @@ SEATABLE_ROLES="reviewer tester"
 
 # The slice boundary a seat's brief carries, or empty for a plain role. Derived
 # from the seat, so a round cannot dispatch several full-surface verdicts by
-# forgetting to write the boundary by hand (rules/agent-team-operation.md
+# forgetting to write the boundary by hand (skills/herdr-foreman/references/team-operation.md
 # Review Before PR).
 slice_scope() { # <role-or-seat> <slice-paths-json> <digest>
   # Named paths, not just a slice name: a boundary a worker cannot resolve is
@@ -355,7 +357,7 @@ main() {
   # Resolver-produced policy paths are explicit brief inputs. Custom templates
   # need not carry them; any supplied artifact must remain readable at compose.
   local policy_key policy_path policy_present
-  for policy_key in POLICY_INDEX RELEASE_SKILL; do
+  for policy_key in POLICY_INDEX RELEASE_SKILL TEAM_OPERATION; do
     policy_present="$(printf '%s' "$shared" | jq -r --arg k "$policy_key" 'has($k)')" || return 2
     if [[ "$policy_present" == true ]]; then
       check_rc=0
@@ -385,9 +387,9 @@ main() {
   while IFS= read -r role; do
     role_tpl="$(template_for_role "$templates" "$role")"
     local policy_override
-    policy_override="$(printf '%s' "$values" | jq -r --arg r "$role" '.roles[$r] | has("POLICY_INDEX") or has("RELEASE_SKILL")')" || return 2
+    policy_override="$(printf '%s' "$values" | jq -r --arg r "$role" '.roles[$r] | has("POLICY_INDEX") or has("RELEASE_SKILL") or has("TEAM_OPERATION")')" || return 2
     if [[ "$policy_override" == true ]]; then
-      warn "policy artifact paths for role '${role}' belong only in .shared — remove per-role POLICY_INDEX and RELEASE_SKILL keys"
+      warn "policy artifact paths for role '${role}' belong only in .shared — remove per-role POLICY_INDEX, RELEASE_SKILL and TEAM_OPERATION keys"
       return 2
     fi
     merged="$(jq -c -n --argjson a "$shared" --argjson b "$(printf '%s' "$values" | jq -c --arg r "$role" '.roles[$r]')" '$a * $b')"

@@ -14,7 +14,7 @@
 #   - Herdr session (HERDR_ENV set, even empty), wherever it sits: nothing
 #     runs, nothing is printed. A worker may sit in any checkout, a read-only
 #     role in the shared one, and workers never delete
-#     (rules/agent-team-operation.md Writers and Checkouts); the operator's
+#     (skills/herdr-foreman/references/team-operation.md Writers and Checkouts); the operator's
 #     own sessions do the pruning.
 #   - Portable mode (SESSION_START_MODE=portable, set by
 #     hooks/session-start.sh under `tessl hook run`, which strips HERDR_ENV):

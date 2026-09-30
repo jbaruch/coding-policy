@@ -250,7 +250,8 @@ CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"; [ -d "$
 bash "$CP/skills/herdr-foreman/resolve-policy-paths.sh" <absolute-shared-checkout>
 ```
 
-Exit 0 emits `POLICY_INDEX` and `RELEASE_SKILL`; copy both into `shared`.
+Exit 0 emits `POLICY_INDEX`, `RELEASE_SKILL` and `TEAM_OPERATION`; copy all
+three into `shared`.
 On non-zero, report the diagnostic and repair the named input before composing.
 Lookup precedence and optional global-root input belong to the resolver's
 header contract. Never delegate path selection to a worker.
@@ -283,7 +284,8 @@ script's contract; see the header of
 What you decide, and it is the whole of your job here:
 
 - `SHARED_CHECKOUT` — the checkout the workers read.
-- `POLICY_INDEX` and `RELEASE_SKILL` — the resolver's absolute artifact paths.
+- `POLICY_INDEX`, `RELEASE_SKILL` and `TEAM_OPERATION` — the resolver's
+  absolute artifact paths.
 - `AUTHORITY_STATEMENT`, `TASK_AUTHORIZATION`, `AUTHORIZED_ACTIONS`, and
   `EXTERNAL_PERMISSION` — Step 3's verified ownership, actual operator source,
   bounded task actions, and any additional non-owner permission.
@@ -327,7 +329,7 @@ against. A report against an older tip does not gate anything.
 
 Name the issue, file, finding, and report path in full in every brief.
 Context retention follows Fix Loops or Specialist Consultations in
-`rules/agent-team-operation.md`. Fresh-worker fix briefs include
+`skills/herdr-foreman/references/team-operation.md`. Fresh-worker fix briefs include
 the prior attempt count and the ownership handoff that section requires.
 Reviewer and tester verification briefs name `full` or `scoped` review,
 the prior findings, and the follow-up issue for new advisories. The final
@@ -352,7 +354,7 @@ contract; see the header of
 `skills/herdr-foreman/provision-worktree.sh`.
 
 The foreman provisions every worktree a brief names, so a worker never runs git
-against the shared checkout (`rules/agent-team-operation.md` Writers and
+against the shared checkout (`skills/herdr-foreman/references/team-operation.md` Writers and
 Checkouts). A consultation inspecting artifacts without git needs none. Provision
 a read-only checkout if its evidence work requires git. Remove worktrees per
 `rules/agent-worktree-isolation.md` Cleanup once the branch lands.

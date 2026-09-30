@@ -39,7 +39,7 @@ description: Review findings carry a severity — blocking gates the merge, advi
 - Narrow exception for shipping with a blocking finding still open
 - Applies when a fix loop did not converge and the pinned judge's diagnosis answers it with `REMEDY: stop`
 - Preconditions (all required):
-  1. The task's current exhaustion carries a recorded `stop` diagnosis under `rules/agent-team-operation.md` Judge Seat
+  1. The task's current exhaustion carries a recorded `stop` diagnosis under `skills/herdr-foreman/references/team-operation.md` Judge Seat
   2. The remaining blocking finding is recorded as a tracked accepted defect with its issue reference
   3. The shipped scope excludes that defect's work, and what ships carries no other blocking finding
   4. Every other release gate holds: CI green, the external reviews, and independent reviewer and tester passes on the shipped tip
@@ -52,7 +52,7 @@ description: Review findings carry a severity — blocking gates the merge, advi
 - Applies when fixing the finding costs more than the failure it prevents
 - A weighing asks whether fixing a finding is worth its cost, never whether the finding is real
 - The ruling file follows the format the `skills/release/dismiss-ruled-review.sh` header names
-- In a Herdr team round the pinned judge weighs under `rules/agent-team-operation.md` Judge Seat
+- In a Herdr team round the pinned judge weighs under `skills/herdr-foreman/references/team-operation.md` Judge Seat
 - In standalone mode the operator is the judge
 - The standalone agent nominates a finding only when it sits on lines the previous fix push added, or with a cited reachability claim marking it marginal
 - The standalone agent asks the operator one decision question per gate, carrying every nomination and its claim

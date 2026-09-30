@@ -294,7 +294,7 @@ main() {
 
   # Every Herdr session reports only: a worker never writes on the hook's say-so,
   # and the foreman never edits the shared checkout
-  # (rules/agent-team-operation.md Writers and Checkouts).
+  # (skills/herdr-foreman/references/team-operation.md Writers and Checkouts).
   if [[ -n "${HERDR_ENV+x}" ]]; then
     [[ -z "$notes" ]] || emit "Session-start status — acr: ${notes}"
     return 0

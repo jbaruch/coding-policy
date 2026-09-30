@@ -173,7 +173,7 @@ JSON
 }
 JSON
   jq --arg p "$TMP/package.diff" \
-    '.shared += {POLICY_INDEX: $p, RELEASE_SKILL: $p, GATES: "- AGENTS.md\n- scripts/run-tests.sh"}
+    '.shared += {POLICY_INDEX: $p, RELEASE_SKILL: $p, TEAM_OPERATION: $p, GATES: "- AGENTS.md\n- scripts/run-tests.sh"}
      | .roles.reviewer += {REVIEW_PACKAGE: $p, REVIEW_BASE: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", REVIEW_HEAD: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}
      | .roles.tester += {REVIEW_PACKAGE: $p, REVIEW_BASE: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", REVIEW_HEAD: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}' \
     "$v6b" > "$TMP/packaged-values.json" || die "could not add packaged review paths"
@@ -182,6 +182,11 @@ JSON
   if [[ $RC -eq 0 ]] && grep -q 'cd /wt/dev && pwd' "$o6b/brief-release.md" \
      && grep -q 'Skill(skill: "release")' "$o6b/brief-release.md"; then
     pass; else fail "packaged templates: expected exit 0 and a filled release brief, got RC=$RC ERR=$ERRTEXT"; fi
+
+  # Every worker receives the team-round contract path through COMMON.md.
+  if [[ $RC -eq 0 ]] && grep -Fq "the team-round contract at" "$o6b/COMMON.md" \
+     && grep -Fq "\`$TMP/package.diff\`. Read it in full" "$o6b/COMMON.md"; then
+    pass; else fail "packaged COMMON.md must name TEAM_OPERATION as a required read"; fi
 
   # The actual packaged artifacts must distinguish the owner's shipping
   # authorization from additional permission needed in a non-owned repo.
@@ -224,7 +229,7 @@ JSON
   done
 
   local missing_policy
-  for missing_policy in POLICY_INDEX RELEASE_SKILL; do
+  for missing_policy in POLICY_INDEX RELEASE_SKILL TEAM_OPERATION; do
     jq --arg key "$missing_policy" '.shared[$key] = "/absent/policy-artifact.md"' "$v6b" > "$TMP/policy-missing.json" \
       || die "could not build absent policy fixture"
     run "$PKG" "$TMP/policy-missing.json" "$TMP/missing-$missing_policy"
@@ -235,7 +240,7 @@ JSON
   # Policy artifacts are shared inputs; role overrides cannot bypass their
   # validation, even when the override is readable or the shared key is absent.
   local override_case override_value
-  for missing_policy in POLICY_INDEX RELEASE_SKILL; do
+  for missing_policy in POLICY_INDEX RELEASE_SKILL TEAM_OPERATION; do
     for override_case in invalid readable role-only; do
       override_value="/absent/role-policy.md"
       if [[ "$override_case" == readable ]]; then override_value="$TMP/package.diff"; fi
@@ -525,7 +530,7 @@ JSON
 
   # 20. A seat's brief names its slice and forbids roaming, rendered from the
   #     seat rather than supplied, so a partitioned round cannot dispatch
-  #     several full-surface verdicts (rules/agent-team-operation.md).
+  #     several full-surface verdicts (skills/herdr-foreman/references/team-operation.md).
   local o20="$TMP/out20"
   run "$TPL" "$v16" "$o20"
   if [[ $RC -eq 0 ]] && grep -q "Your slice this round is \*\*core\*\*" "$o20/brief-tester#core.md" \
@@ -666,7 +671,7 @@ JSON
   jq -n --arg p "$TMP/package.diff" \
     '{shared: {SHARED_CHECKOUT: "/repo", AUTHORITY_STATEMENT: "owner of jbaruch/x", EXTERNAL_PERMISSION: "none",
                TASK_AUTHORIZATION: "Operator request: ship issue #7 in jbaruch/x", AUTHORIZED_ACTIONS: "none",
-               POLICY_INDEX: $p, RELEASE_SKILL: $p, GATES: "- AGENTS.md"},
+               POLICY_INDEX: $p, RELEASE_SKILL: $p, TEAM_OPERATION: $p, GATES: "- AGENTS.md"},
       roles: {"judge-weighing": {TASK: "issue-7", HEAD: "cccccccccccccccccccccccccccccccccccccccc",
                NOMINATIONS: "1. policy skills/x/run.sh:3 error-handling — churn: added by the last fix",
                INVESTIGATION_REPORT: "none", TREE: "/wt/judge", REPORT: "/r/judge-weighing.md"}}}' \
@@ -682,7 +687,7 @@ JSON
   jq -n --arg p "$TMP/package.diff" \
     '{shared: {SHARED_CHECKOUT: "/repo", AUTHORITY_STATEMENT: "owner of jbaruch/x", EXTERNAL_PERMISSION: "none",
                TASK_AUTHORIZATION: "Read-only consultation on issue #7", AUTHORIZED_ACTIONS: "none",
-               POLICY_INDEX: $p, RELEASE_SKILL: $p, GATES: "- AGENTS.md"},
+               POLICY_INDEX: $p, RELEASE_SKILL: $p, TEAM_OPERATION: $p, GATES: "- AGENTS.md"},
       roles: {advisor: {RESPONSIBILITY: "advisor", SPECIALTY: "security", TASK: "issue-7", ISSUE: "#7",
                BRANCH: "feat/x", OBJECTIVE: "Assess the boundary", SCOPE_LIMITS: "Read only",
                ACCEPTANCE_CRITERIA: "CRITERION 1: the boundary is named\nCRITERION 2: each input is classified",
