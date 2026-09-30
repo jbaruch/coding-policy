@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.340 — 2026-09-30
+
+### Fixed
+
+- `skills/release/dismiss-stale-reviews.sh` reported `failed to dismiss review <id>` and exited 1 when `gh api -X PUT .../dismissals` exited non-zero on an unparseable response (`unexpected end of JSON input`) after GitHub had already dismissed the review, so the merge queue reported `ship-incomplete` on reviews that were in fact dismissed (seen on #644). On a failed PUT the script now reads the review back: `DISMISSED` counts as dismissed with a stderr warning that the response could not be parsed; any other state, or a failed read, stays a failure carrying the PUT's captured error. Fixes #647.
+
+## 0.3.339 — 2026-09-29
+
 ### Fixed
 
 - **Copilot run state is read from the PR timeline, and a stuck request is

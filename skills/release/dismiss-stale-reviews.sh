@@ -102,12 +102,26 @@ is_ruled_dismissal() {
            and ((.dismissed_review.dismissal_message // "") | startswith($marker)))'
 }
 
+# A non-zero PUT is not proof the dismissal failed: `gh` can exit non-zero
+# on an unparseable response after GitHub already dismissed the review. On
+# a failed PUT, read the review back; DISMISSED is success with a warning,
+# any other state (or a failed read) is a failure carrying the PUT's error.
 dismiss_review() {
   local owner="$1" repo="$2" pr="$3" review_id="$4"
-  gh api -X PUT \
-    "repos/${owner}/${repo}/pulls/${pr}/reviews/${review_id}/dismissals" \
-    -f message="$DISMISS_MESSAGE" \
-    -f event="DISMISS" >/dev/null
+  local put_err state=""
+  if put_err=$(gh api -X PUT \
+      "repos/${owner}/${repo}/pulls/${pr}/reviews/${review_id}/dismissals" \
+      -f message="$DISMISS_MESSAGE" \
+      -f event="DISMISS" 2>&1 >/dev/null); then
+    return 0
+  fi
+  if state=$(gh api "repos/${owner}/${repo}/pulls/${pr}/reviews/${review_id}" | jq -r '.state') \
+      && [[ "$state" == "DISMISSED" ]]; then
+    echo "warning: dismissal response for review ${review_id} on ${owner}/${repo}#${pr} could not be parsed (${put_err}); the review reads back DISMISSED, treating it as dismissed" >&2
+    return 0
+  fi
+  echo "error: dismissal PUT for review ${review_id} on ${owner}/${repo}#${pr} failed (${put_err}); the review reads back ${state:-unreadable} — check 'gh auth status' and the review on the PR, then re-run" >&2
+  return 1
 }
 
 main() {
