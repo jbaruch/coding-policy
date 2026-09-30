@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.349 — 2026-09-30
+
 ### Fixed
 
 - **`adopt-fork-pr` classifies the PR it will adopt (Closes #656).** Steps 1,
