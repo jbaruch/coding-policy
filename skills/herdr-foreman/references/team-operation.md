@@ -93,9 +93,9 @@ The Herdr team round contract. `rules/agent-team-operation.md` Two Modes decides
 - The receiving worker reads that report as a required input
 - The foreman never copies, excerpts or paraphrases it
 - Paths, identifiers, authority, review evidence and the other resolver or Step 3 values stay mechanical and stay with the foreman
-- **Stalled round** — diagnosing a stall routes to the investigator, with the stall classification as its input
-- A stall the classification marks retryable needs no diagnosis
-- The re-dispatch-or-discard choice for a stalled worker's partial work belongs to the operator, through the stall's user-attention obligation, with the investigator's report attached by path
+- **Stalled round** — a `partial_work` stall routes to the investigator, with the stall classification as its input
+- Every other stall class follows Stalled Workers unchanged
+- The re-dispatch-or-discard choice for that partial work belongs to the operator, through the stall's user-attention obligation, with the investigator's report attached by path
 - **Disputed finding** — resolving it routes to the judge under Judge Seat
 - A route consultation's brief names its question, the recorded accepted behavior and the source reports by path, and carries no analysis of its own
 - A route's consultation is planned, dispatched, observed and assessed like every consultation, and spends no developer fix round

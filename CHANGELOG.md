@@ -16,15 +16,16 @@
   advisor whose accepted report is the task framing, handed off by path,
   never by text: the foreman puts the `report` path from its
   `assess-specialist` record in the role's `SPECIALIST_CONTEXT` value and the
-  worker reads it, so nothing is retyped or paraphrased; diagnosing a stall
-  the `wait-report.sh` classification does not mark retryable routes to the
-  investigator, and the re-dispatch-or-discard choice goes to the operator
+  worker reads it, so nothing is retyped or paraphrased; a `partial_work`
+  stall (the `wait-report.sh --worktree` class) routes to the investigator,
+  every other class keeps its Stalled Workers path, and the
+  re-dispatch-or-discard choice goes to the operator
   through the stall's attention item (the investigator decides nothing); a
   disputed finding stays with the judge. Route reports gate like every report
   (contract lines, classifier gates, judge rulings) with no foreman
   assessment added, and spend no developer fix round; a missing route report
   is re-dispatched or recorded as a gap, never replaced by the foreman's
-  reading. `SKILL.md` Steps 7, 11 and 12, `references/round-setup.md` Step
+  reading. `SKILL.md` Steps 7 and 12, `references/round-setup.md` Step
   7, the Stalled Workers section and `references/assignment-reasoning.md` now
   route to those workers instead of asking the foreman to apply the
   reasoning itself. No new role, script or state.
