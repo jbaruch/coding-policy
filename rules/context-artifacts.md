@@ -15,7 +15,7 @@ description: Plugin structure, rule/skill format, review pipeline, surface sync,
 - CHANGELOG Hygiene's publish-on-merge, stamp-step and `tesslio/patch-version-publish` bullets are Tessl-bound
 - Every other CHANGELOG Hygiene bullet is distribution-independent
 - An artifact published through another channel — a GitHub-tag-published ACR package — owes the distribution-independent sections plus `rules/skill-authoring.md`, `rules/testing-standards.md` and `rules/language-diagnostics.md` in full
-- It owes `rules/ci-safety.md` too, confirming each publication independently against the channel that carried it, mixed distribution included — see `rules/ci-safety.md` Always Watch CI
+- It owes `rules/ci-safety.md` too, confirming each publication independently against the channel that carried it, mixed distribution included — see `skills/release/references/release-contract.md` Publication Confirmation
 
 ## Artifact Layout
 
@@ -51,9 +51,7 @@ description: Plugin structure, rule/skill format, review pipeline, surface sync,
 - Deleting the Tessl manifest exempts nothing while the content still publishes through Tessl
 - Adding another channel's manifest exempts nothing either
 - A skill distributed through no Tessl path owes `rules/skill-authoring.md` in full, its repo's CI gates, and its external policy and Copilot review — never this command
-- Wire into CI as a changed-skills loop, not static per-skill steps. The loop iterates over `git diff --name-only <prev-sha>..HEAD -- 'skills/'`. Reference: `.github/actions/skill-review/action.yml` (consumers `uses: jbaruch/coding-policy/.github/actions/skill-review@<ref>`)
-- Fallback: review every skill when the diff base is absent (manual `workflow_dispatch`, initial push, all-zeros sentinel SHA); hard-fail when the base is set but unreachable
-- Rubric verifies: frontmatter validity, execution-mode preamble matching the skill's shape (sequential workflow or action router per `rules/skill-authoring.md`), flat step numbering, typed `Skill()` calls, silence-rule compliance, channel-appropriate formatting
+- CI wiring and the review rubric are binding: read `skills/release/references/skill-review-gate.md` CI Wiring before wiring or changing the review step
 - Act on concrete feedback (tighter triggers, extracted reference material, tightened descriptions); re-review until the gate passes
 - Credit-outage tolerance is opt-in and narrow — see Credit-Outage Review Carve-Out
 
@@ -61,27 +59,14 @@ description: Plugin structure, rule/skill format, review pipeline, surface sync,
 
 - Narrow exception for skipping review during a tessl out-of-credits (403) billing outage
 - Applies when `tessl review run` fails with the out-of-credits signature; never a below-threshold score
-- The `skill-review` action's `credit-outage: skip` input publishes the affected skill unreviewed rather than blocking every skill-changing merge until credits return
-- Preconditions (all required):
-  1. Opt-in explicit — the consumer sets `credit-outage: skip`; default `fail` preserves the gate. Classification is the action's decision contract — see `.github/actions/skill-review/review-skills.sh` `run_reviews`
-  2. Fail-safe — only the out-of-credits signature skips; every other non-zero exit still hard-fails the publish (below-threshold score, auth error, tooling bug)
-  3. Each unreviewed publish is flagged — a `::warning::` plus a `$GITHUB_STEP_SUMMARY` note names every skipped skill, surfaced on the `unreviewed-skills` action output
-  4. The gate self-heals — every publish re-attempts review; a credit top-up or the monthly reset restores it
-- The forbidden review-step bypass in Disagreeing With the Reviewer remains forbidden
+- Preconditions are binding: read `skills/release/references/skill-review-gate.md` Credit-Outage Review Carve-Out before relying on it
 - Every skill reviewed clean, and every non-credit failure, still blocks or passes exactly as Mandatory Review prescribes
 
 ## Disagreeing With the Reviewer
 
 - Never lower `--threshold 85` to make a failing skill pass. Bypassing CI by other means (local publish, `[skip ci]`, disabling the review step) is forbidden under `rules/ci-safety.md`
-- When you disagree with the reviewer's conclusions, run `tessl review fix <skill>` locally
-- Back up `SKILL.md` and any reference files before invoking the fix loop
-- The fix loop is a diagnostic signal, not a patch
-- Diff the applied changes against the backup
-- Keep the genuinely-improving moves (tighter triggers, less prose, better `Skill()` typing)
-- Reject the over-aggressive cuts
-- Re-run `tessl review run` until the gate passes
+- When you disagree with the reviewer's conclusions, run the fix loop per `skills/release/references/skill-review-gate.md` Fix Loop, a binding read before invoking it
 - Shipping the fix loop's output verbatim is forbidden even when the score improved
-- Curate the fixes manually with judgment
 
 ## Surface Sync
 
