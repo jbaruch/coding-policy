@@ -1,6 +1,6 @@
 # CI Safety Carve-Outs
 
-The full preconditions of each `rules/ci-safety.md` carve-out, moved out of the always-loaded rule (#642). They bind as rule content: the rule keeps each carve-out's trigger line and requires reading its section here before relying on it. Text is unchanged from the rule.
+The full preconditions of each `rules/ci-safety.md` carve-out, moved out of the always-loaded rule (#642). They bind as rule content: the rule keeps each carve-out's trigger line and requires reading its section here before relying on it. Each section carries only the moved detail; the trigger, applies-when and reset lines stay in the rule.
 
 ## Superseded-Bot-Review Dismissal Carve-Out
 
@@ -16,8 +16,6 @@ The full preconditions of each `rules/ci-safety.md` carve-out, moved out of the 
 
 ## Judge-Ruled-Review Dismissal Carve-Out
 
-- Narrow exception for dismissing the policy reviewer's latest `CHANGES_REQUESTED` on the PR head
-- Applies when a weighing ruling rules every blocking finding in that review `defer` or `decline` under `rules/review-severity.md` Judge-Weighed Finding Carve-Out
 - Preconditions (all required):
   1. The dismissal runs through `skills/release/dismiss-ruled-review.sh` — coverage predicate and rule-id floors in its header
   2. No check on the head is failing
@@ -28,21 +26,17 @@ The full preconditions of each `rules/ci-safety.md` carve-out, moved out of the 
 - The release scripts trust the marker and never detect a hand-written one
 - After a ruled dismissal, `skills/release/dismiss-stale-reviews.sh` sweeps the same policy identity's earlier `CHANGES_REQUESTED` reviews, the fleet reviewer included
 - Merging after a ruled dismissal is not a `Never Skip Tests` violation
-- Every other policy-review `CHANGES_REQUESTED` blocks the merge until resolved through review
 
 ## Publish-Pipeline Loop-Prevention Carve-Out
 
-- Narrow exception for `[skip ci]` on a commit the publish workflow pushes to the protected branch
 - Applies when that commit would otherwise re-trigger the same publish workflow (infinite publish loop)
 - Preconditions (all required):
   1. Commit is authored by the CI bot inside the publish workflow — never a human- or agent-authored PR commit
   2. Sole purpose is the workflow's own release bookkeeping — manifest version bump, CHANGELOG version stamp — carrying no source or test changes that need CI validation
   3. `[skip ci]` rides only on the commit pushed back to the protected branch, solely to stop self-retrigger
-- Every other commit still follows the rule: no `[skip ci]`, never to skip failing tests or unblock a merge
 
 ## Bootstrap-Red Carve-Out
 
-- Narrow exception for merging a PR with a failing required check whose failure is an explicit cache-binding or bootstrap guard, not a test assertion
 - Applies when the PR changes a key the CI cache is bound to (an interaction hash, a schema fingerprint) AND the rebuilt cache can only be seeded from the default branch after merge
 - Pre-merge gates (all required):
   1. The failing check's output names the guard explicitly (e.g., `InteractionMismatchError`) and shows zero test assertions executed
@@ -53,11 +47,9 @@ The full preconditions of each `rules/ci-safety.md` carve-out, moved out of the 
   5. The green re-seed result is verified and recorded on the PR or its tracking issue
 - Reviewers treat a PR as mergeable when it matches both Applies-when criteria and meets all three pre-merge gates — do not request changes on the red check alone
 - Open post-merge obligations block the next use of this carve-out — complete and record them first
-- Every other failing check still blocks the merge: fix the tests or fix the code
 
 ## Content-Only Direct-Push Carve-Out
 
-- Narrow exception for content-only edits within an explicit, narrowly scoped path-glob set
 - Applies when the edited paths are prose / data artifacts a human audience reads directly — not code, not context artifacts an agent loads (rules, skills, scripts, manifests, workflow files, configuration)
 - The push may go directly to `main` or `master` without a PR review cycle
 - Preconditions (each consuming repo, all required):
@@ -70,4 +62,3 @@ The full preconditions of each `rules/ci-safety.md` carve-out, moved out of the 
        - The gate enumerates the paths the push would change on the protected branch and direct-pushes only when every one matches a declared content glob
        - Any out-of-glob path forces an automatic branch + PR fallback — never an operator-say-so override
        - The authority-of-record rule (precondition 1) names the gate script
-- Every other branch / path in the repo still goes through pull requests

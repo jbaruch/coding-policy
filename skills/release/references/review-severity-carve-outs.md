@@ -1,23 +1,18 @@
 # Review Severity Carve-Outs
 
-The full preconditions of each `rules/review-severity.md` carve-out, moved out of the always-loaded rule (#642). They bind as rule content: the rule keeps each carve-out's trigger line and requires reading its section here before relying on it. Text is unchanged from the rule.
+The full preconditions of each `rules/review-severity.md` carve-out, moved out of the always-loaded rule (#642). They bind as rule content: the rule keeps each carve-out's trigger line and requires reading its section here before relying on it. Each section carries only the moved detail; the trigger, applies-when and reset lines stay in the rule.
 
 ## Judge-Accepted Defect Carve-Out
 
-- Narrow exception for shipping with a blocking finding still open
-- Applies when a fix loop did not converge and the pinned judge's diagnosis answers it with `REMEDY: stop`
 - Preconditions (all required):
   1. The task's current exhaustion carries a recorded `stop` diagnosis under `skills/herdr-foreman/references/team-operation.md` Judge Seat
   2. The remaining blocking finding is recorded as a tracked accepted defect with its issue reference
   3. The shipped scope excludes that defect's work, and what ships carries no other blocking finding
   4. Every other release gate holds: CI green, the external reviews, and independent reviewer and tester passes on the shipped tip
 - The operator overrides a `stop` like any ruling, by authorizing a plan over it
-- Every other blocking finding is fixed before merge
 
 ## Judge-Weighed Finding Carve-Out
 
-- Narrow exception for merging with a blocking finding a weighing ruled `defer` or `decline`
-- Applies when fixing the finding costs more than the failure it prevents
 - A weighing asks whether fixing a finding is worth its cost, never whether the finding is real
 - The ruling file follows the format the `skills/release/dismiss-ruled-review.sh` header names
 - In a Herdr team round the pinned judge weighs under `skills/herdr-foreman/references/team-operation.md` Judge Seat
@@ -46,4 +41,3 @@ The full preconditions of each `rules/review-severity.md` carve-out, moved out o
 - `skills/release/dismiss-ruled-review.sh` refuses the rule-id floors and a failing check
 - A ruling never skips, disables or removes a test
 - A gating policy review the ruling covers is dismissed per `rules/ci-safety.md` Judge-Ruled-Review Dismissal Carve-Out
-- Every other blocking finding is fixed before merge

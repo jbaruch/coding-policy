@@ -67,7 +67,7 @@ Moved from `rules/ci-safety.md` (#642) to keep the always-loaded rules under the
 - The publish step never blocks on org credit state
 - The artifact lands regardless of the credit balance
 - Credits can still fail a review or eval step and turn the run red (see `rules/context-artifacts.md` Credit-Outage Review Carve-Out)
-- A red run (credit-caused or not) is never proof that publishing was blocked
+- A credit-caused red run is no exception to `rules/ci-safety.md` Publish Outcomes
 - Whether the artifact published is answered by the registry advance plus moderation `pass`, independent of the run's color
 - A red run whose artifact landed means a step other than the publish failed, not a blocked publish
 - Never blame a red publish run on credits without confirming the artifact landing and naming the failing step from the logs
