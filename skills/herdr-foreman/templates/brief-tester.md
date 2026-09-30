@@ -101,6 +101,14 @@ Write `{{REPORT}}` covering:
 - Every finding with its severity label.
 - The patch path, when you produced one.
 
+End the report with exactly one `VERDICT: blocking` or `VERDICT: approved`
+line at the start of its own line: `blocking` when any finding above is
+blocking and not declined under a ruling, `approved` otherwise. A finding this
+brief lists as covered by a weighing ruling, marked `DECLINED — ruling <report
+path>`, leaves the verdict `approved`. Add at most one `CONTRIBUTION: design` or
+`CONTRIBUTION: implementation` line if you shaped the work under verification.
+A report missing the line, or repeating it, goes back to you with the gap named.
+
 Final chat message ends with exactly:
 
 ```

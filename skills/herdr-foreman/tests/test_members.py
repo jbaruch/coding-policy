@@ -16,10 +16,10 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from foreman import members
+from foreman import engagement, members, recovery
 from foreman import supervision as store
-from foreman.errors import UsageError
-from foreman.state import empty_state
+from foreman.errors import StateError, UsageError
+from foreman.state import add_assignment, empty_state, save_state
 
 AT = "2026-09-01T12:00:00+00:00"
 LATER = "2026-09-01T12:05:00+00:00"
@@ -71,7 +71,67 @@ class MembersCase(unittest.TestCase):
         store.transaction(self.path, lambda data: store.append_event(data, AT, "dispatch-a", "report", {"observation_only": True}))
 
 
+def seed_contract(case):
+    """Record the owner records an `accepted` closure reads (#625), over the report's current bytes.
+
+    The reviewer dispatch the enrollment is, and the contract lines of its report.
+    """
+    delivery = case.root / "delivery.json"
+    delivery.write_text(json.dumps({"found": True, "agent": "codex-a", "report_path": case.report}))
+    state = empty_state()
+    dispatch = {"id": "dispatch-a", "fingerprint": "a" * 64, "task": "task-a", "role": "reviewer", "agent": "codex-a",
+                "fix_round": None, "plan": None, "work": None, "reviewer_scope": "verification"}
+    recovery.reserve(state["recovery"], dispatch, AT)
+    add_assignment(state, AT, "reviewer", "codex-a", task="task-a", reviewer_scope="verification")
+    recovery.finish_dispatch(state["recovery"], "dispatch-a", {"task": "task-a", "role": "reviewer", "agent": "codex-a",
+                                                              "fix_round": None, "reviewer_scope": "verification",
+                                                              "status": "applied"}, 0, AT)
+    engagement.record_assessment(state, case.path, {"id": "assess-a", "dispatch": "dispatch-a",
+                                                    "report": case.report, "delivery": str(delivery)}, AT)
+    save_state(case.path, state)
+    return state, delivery
+
+
 class CloseMemberTest(MembersCase):
+    def setUp(self):
+        super().setUp()
+        Path(self.report).write_text("Reviewed the tip.\nVERDICT: approved\n")
+        self.state, self.delivery = seed_contract(self)
+
+    def assess(self):
+        engagement.record_assessment(self.state, self.path, {"id": "assess-b", "dispatch": "dispatch-a",
+                                                             "report": self.report, "delivery": str(self.delivery)}, AT)
+        save_state(self.path, self.state)
+
+    def test_accepted_needs_the_reports_recorded_contract_lines(self):
+        # #625: a reviewer's `accepted` rests on its recorded VERDICT line at
+        # the current bytes; `needs_work` is never refused on that ground.
+        self.emit()
+        self.write_ledger("accepted")
+        self.state["specialist_assessments"] = []
+        save_state(self.path, self.state)
+        with self.assertRaisesRegex(UsageError, "no report-contract assessment"):
+            members.close(self.path, "dispatch-a", self.ledger, LATER)
+        self.assertTrue(store.pending(store.load(self.path)))
+        self.assess()
+        Path(self.report).write_text("Reviewed the tip again.\nVERDICT: approved\n")
+        with self.assertRaisesRegex(UsageError, "changed since its assessment"):
+            members.close(self.path, "dispatch-a", self.ledger, LATER)
+        self.write_ledger("needs_work")
+        self.assertEqual(members.close(self.path, "dispatch-a", self.ledger, LATER)["decision"], "needs_work")
+
+    def test_accepted_without_an_owner_dispatch_is_refused(self):
+        save_state(self.path, empty_state())
+        self.write_ledger("accepted")
+        with self.assertRaisesRegex(UsageError, "no owner dispatch"):
+            members.close(self.path, "dispatch-a", self.ledger, LATER)
+
+    def test_accepted_on_an_unusable_state_is_refused(self):
+        self.write_ledger("accepted")
+        with patch("foreman.members.load_state_checked", return_value=(empty_state(), False)), \
+             self.assertRaisesRegex(StateError, "restore it"):
+            members.close(self.path, "dispatch-a", self.ledger, LATER)
+
     def test_refuses_before_the_ledger_records_an_assessed_outcome(self):
         self.emit()
         for decisions in ((), ("reported",), ("accepted", "reported")):

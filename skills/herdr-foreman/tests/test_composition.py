@@ -154,13 +154,14 @@ class EligibilityTest(unittest.TestCase):
         constraints = selection_constraints(["reviewer", "tester"], [worker("prior")], {}, history, "onboarding")
         self.assertEqual(constraints["exclude"], {"reviewer": [], "tester": []})
 
-    def test_predevelopment_tester_requires_contribution_assessment(self):
+    def test_predevelopment_tester_stays_excluded_whatever_its_assessment_says(self):
+        # Add-only (#625): a recorded `none` never lifts the exclusion.
         history = [assignment(role="tester", tier={"round": "test_plan"})]
         constraints = selection_constraints(["reviewer", "tester"], [worker("prior")], {}, history, "onboarding")
         self.assertEqual(constraints["exclude"], {"reviewer": ["prior"], "tester": ["prior"]})
         assessment = {"assignment_index": 0, "task": "onboarding", "agent": "prior", "contribution": "none"}
         constraints = selection_constraints(["reviewer", "tester"], [worker("prior")], {}, history, "onboarding", assessments=[assessment])
-        self.assertEqual(constraints["exclude"], {"reviewer": [], "tester": []})
+        self.assertEqual(constraints["exclude"], {"reviewer": ["prior"], "tester": ["prior"]})
 
     def test_migration_or_requirements_never_invent_verification_provenance(self):
         for scope in (None, "unknown", "design"):
@@ -171,7 +172,7 @@ class EligibilityTest(unittest.TestCase):
                     constraints = selection_constraints(["reviewer"], [worker("prior")], {}, history, "onboarding")
                     self.assertEqual(constraints["exclude"]["reviewer"], ["prior"])
 
-    def test_authored_tier_overrides_a_verification_label_until_assessed(self):
+    def test_authored_tier_overrides_a_verification_label_and_nothing_clears_it(self):
         for round_type in ("architect", "reconciliation"):
             with self.subTest(round_type=round_type):
                 history = [assignment(role="reviewer", reviewer_scope="verification", tier={"round": round_type})]
@@ -179,16 +180,25 @@ class EligibilityTest(unittest.TestCase):
                 self.assertEqual(constraints["exclude"]["reviewer"], ["prior"])
                 assessment = {"assignment_index": 0, "task": "onboarding", "agent": "prior", "contribution": "none"}
                 constraints = selection_constraints(["reviewer"], [worker("prior")], {}, history, "onboarding", assessments=[assessment])
-                self.assertEqual(constraints["exclude"]["reviewer"], [])
+                self.assertEqual(constraints["exclude"]["reviewer"], ["prior"])
 
-    def test_assessed_no_contribution_overrides_only_its_non_developer_dispatch(self):
+    def test_a_none_assessment_never_subtracts_a_contributor(self):
+        # Add-only (#625): a consultation worker stays excluded from verifying
+        # its own task whatever its assessment, worker-declared or legacy, says.
         assessment = {"assignment_index": 0, "task": "onboarding", "agent": "prior", "contribution": "none"}
-        constraints = selection_constraints(["reviewer"], [worker("prior")], {}, [assignment()], "onboarding",
-                                            dispatches=[assignment(assignment_index=0)], assessments=[assessment])
+        for history in ([assignment()], [assignment(role="developer")], [assignment(), assignment(role="architect")]):
+            with self.subTest(history=[row["role"] for row in history]):
+                constraints = selection_constraints(["reviewer"], [worker("prior")], {}, history, "onboarding",
+                                                    dispatches=[assignment(assignment_index=0)], assessments=[assessment])
+                self.assertEqual(constraints["exclude"]["reviewer"], ["prior"])
+
+    def test_a_declared_contribution_adds_an_exclusion_with_no_dispatch_history(self):
+        assessment = {"assignment_index": 0, "task": "onboarding", "agent": "verifier", "contribution": "design"}
+        history = [assignment(name="verifier", role="reviewer", reviewer_scope="verification")]
+        constraints = selection_constraints(["reviewer"], [worker("verifier")], {}, history, "onboarding")
         self.assertEqual(constraints["exclude"]["reviewer"], [])
-        for history in ([assignment(role="developer")], [assignment(), assignment(role="architect")]):
-            constraints = selection_constraints(["reviewer"], [worker("prior")], {}, history, "onboarding", assessments=[assessment])
-            self.assertEqual(constraints["exclude"]["reviewer"], ["prior"])
+        constraints = selection_constraints(["reviewer"], [worker("verifier")], {}, history, "onboarding", assessments=[assessment])
+        self.assertEqual(constraints["exclude"]["reviewer"], ["verifier"])
 
     def test_any_assessed_design_or_implementation_remains_a_contribution(self):
         for contribution in ("design", "implementation"):

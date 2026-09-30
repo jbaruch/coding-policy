@@ -77,6 +77,14 @@ def now_iso():
     return datetime.now(timezone.utc).isoformat()
 
 
+#: Recovery subcommands whose help says more than the generic line (#625).
+RECOVERY_HELP = {
+    "assess-specialist": "Record a delivered reviewer, tester or consultation report's contract lines "
+                         "(VERDICT, ACCEPTANCE, CONTRIBUTION); a gap records only a declared design or implementation contribution.",
+    "record-report": "Record a reviewer's verdict on a developer dispatch; the report's own VERDICT line must match it.",
+}
+
+
 def build_parser():
     # SUPPRESS keeps a subparser's copy of these flags from clobbering a value
     # given before the subcommand, so `foreman --state F plan` and
@@ -403,7 +411,7 @@ def build_parser():
     fit_parser.add_argument("--report", required=True)
 
     for command in ("task", "checkpoint", "authorize-corrections", "authorize-approach", "recover-context", "recover-role-clear", "record-report", "record-refusal", "authorize-refused-dispatch", "diagnose", "reconcile", "record-release-clear", "import-correction", "record-historical-review", "recover-report", "assess-specialist", "close-task"):
-        record_parser = sub.add_parser(command, parents=[common], help="Record owner-managed {} evidence.".format(command))
+        record_parser = sub.add_parser(command, parents=[common], help=RECOVERY_HELP.get(command, "Record owner-managed {} evidence.".format(command)))
         record_parser.add_argument("--record", required=True, metavar="FILE", help="Structured evidence JSON; see dispatch-recovery.md.")
         record_parser.add_argument("--now", metavar="ISO8601")
     sub.add_parser("status", parents=[common], help="Show implementation budgets and paused work separately from active audit workers.")
@@ -417,7 +425,7 @@ def build_parser():
     reconcile_parser.add_argument("--pane", required=True)
     reconcile_parser.add_argument("--stow", required=True)
     reconcile_parser.add_argument("--outcome", required=True, choices=["delivered", "failed"])
-    close_member = sub.add_parser("close-member", parents=[common], help="Acknowledge an enrollment's pending events and resolve it, once the task ledger records its assessed outcome.")
+    close_member = sub.add_parser("close-member", parents=[common], help="Acknowledge an enrollment's pending events and resolve it, once the task ledger records its assessed outcome; an `accepted` reviewer, tester or consultation outcome needs its report's recorded contract lines.")
     close_member.add_argument("--enrollment", required=True)
     close_member.add_argument("--ledger", required=True, help="Absolute path of the task's TASK-LEDGER.md.")
     close_member.add_argument("--now", metavar="ISO8601")
@@ -1870,9 +1878,10 @@ def _run_recovery(args, state_path, warn, client, trace):
             dispatch = next((item for item in store["dispatches"] if item["id"] == data.get("dispatch")), None)
             if dispatch is not None:
                 _require_independent_report(state, dispatch["task"], data.get("reviewer"))
-            if isinstance(data.get("report"), str) and data["report"]:
-                report_gates.require_clear(state_path, data["report"], data.get("verdict") == "approved")
+        # The report's contract lines first, then its classifier gates (#625);
+        # a refusal from either leaves the state unsaved.
         result = recovery.record_report(store, data, at)
+        report_gates.require_clear(state_path, data["report"], data["verdict"] == "approved")
     elif args.command == "authorize-refused-dispatch":
         result = recovery.authorize_refused_dispatch(store, data, at)
     elif args.command == "record-refusal":
@@ -1894,7 +1903,15 @@ def _run_recovery(args, state_path, warn, client, trace):
     elif args.command == "recover-report":
         result = report_delivery.recover(store, history, data, at)
     elif args.command == "assess-specialist":
-        result = engagement.record_assessment(state, state_path, data, at)
+        try:
+            result = engagement.record_assessment(state, state_path, data, at)
+        except engagement.ContractGap:
+            # The refused report's declared contribution is kept before the
+            # refusal propagates: an exclusion is never lost (#625).
+            recovery.validate_store(store, history)
+            engagement.validate_assessments(state)
+            save_state(state_path, state)
+            raise
     elif args.command == "import-correction":
         result = historical.import_attempt(store, history, data, at)
         if result["assignment_index"] == len(history):

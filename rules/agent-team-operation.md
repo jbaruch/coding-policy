@@ -97,13 +97,13 @@ description: Running a multi-agent team — task-based specialist composition, c
 - An available profile reserves no worker and creates no active assignment
 - Preserve useful specialist sessions for likely follow-up work
 - Persist specialist lessons through the existing scoped memory owner
-- Record delivered report evidence and the foreman's contribution assessment before relying on a consultation outcome
+- Record the delivered report's contract lines through `assess-specialist` before relying on a consultation outcome
 - Narrow exception for retaining an assessed consultation's context.
 - Preconditions (all required):
   1. The foreman requests `--retain-specialist` for one advisor, investigator or architect assignment
   2. The worker's latest assignment has the same task, responsibility and engagement requirements
   3. Live pane, native session and verified model tier match the preceding assignment
-  4. The prior report and delivery receipts match their saved foreman assessment
+  4. The prior report and delivery receipts match their saved report-contract assessment
   5. The prior supervision enrollment is resolved with no pending observations
   6. No correction count, correction plan or implementation work is carried through this mode
 - Every other consultation clears context under the normal retrospective and dispatch gates
@@ -112,7 +112,7 @@ description: Running a multi-agent team — task-based specialist composition, c
 ## Judge Seat
 
 - The reserved `judge` seat runs on the most capable model available and holds no other responsibility
-- The foreman dispatches the judge in adjudication mode for one of four triggers: a contested reviewer or tester verdict, a foreman override of a blocking finding, a bot finding the team disagrees with, or a weighing nomination
+- The foreman dispatches the judge in adjudication mode for one of four triggers: a contested reviewer or tester verdict, a report `VERDICT:` the classifier gate contradicts, a bot finding the team disagrees with, or a weighing nomination
 - The foreman dispatches the judge in diagnosis mode at an exhausted allowance with blocking work remaining, on the investigator's assessment
 - Every judge dispatch declares which mode it is for, at plan and at apply
 - An undeclared mode is refused, never defaulted
@@ -391,6 +391,27 @@ description: Running a multi-agent team — task-based specialist composition, c
 - A worker continues after recording it
 - A genuine block goes in a `## BLOCKED` section, then the worker stops
 - The foreman reads every report body in full before gating the round
+- The foreman gates a report on its required lines, its classifier gates and the judge's rulings, and on nothing else
+- The foreman never accepts, rejects or rates a finding on its own reading
+- A reviewer or tester report carries exactly one `VERDICT:` line
+- A consultation report carries one `ACCEPTANCE <k>/<N>:` line per criterion its brief states
+- `N` is the count of `CRITERION` lines in the brief `apply` sent
+- A `security`, `ux-product` or `documentation` consultation also carries one `VERDICT:` line
+- A blocking consultation `VERDICT:` gates the round like a reviewer's
+- A reviewer or tester assignment is accepted with any valid `VERDICT:`
+- A consultation assignment is accepted only when every `ACCEPTANCE` line is `met`
+- A blocking `VERDICT:` gates the round, never the assignment's acceptance
+- Every other consultation report carries its `ACCEPTANCE` lines and no `VERDICT:` line
+- A reviewer, tester or consultation report may carry one optional `CONTRIBUTION:` line
+- A developer report carries no required line
+- The reviewer's and tester's verdicts gate the developer's work
+- A report with a required line missing, extra or duplicated goes back to its responsibility with the gap named
+- The foreman never reads around the gap
+- Line formats and refusal classes are in `skills/herdr-foreman/foreman/report_contract.py`'s module docstring
+- A statement about task content in the ledger, retrospectives or memory cites the report it comes from
+- A completed adjudication (`uphold` or `amend`) settles a disputed blocking `VERDICT:` directly
+- A finding a weighing ruled `defer` or `decline` is settled only by the next reviewer or tester report at the tip, marking it DECLINED and recording `VERDICT: approved`
+- `foreman record-historical-review` is outside the report contract
 
 ## Dispatch Safety
 
@@ -580,10 +601,17 @@ description: Running a multi-agent team — task-based specialist composition, c
 - Slice boundaries that cannot be drawn without cutting through mutual dependencies are a structural finding for the architect trigger
 - The gate reads the post-push reports for the current branch tip
 - A pre-development report never satisfies the gate
-- Exclude actual design and implementation contributors from independent verification of that task
+- Exclude every possible contributor from independent verification of that task
+- A dispatch classified a possible contribution before its worker ran makes that worker a possible contributor
+- A report declaring a `design` or `implementation` contribution makes its worker a possible contributor
+- A contribution only adds an exclusion
+- Nothing clears an exclusion a recorded classification or a declared contribution adds
+- A foreman `--exclude` narrows the current plan alone and is never contribution history
+- A worker's own `CONTRIBUTION: none` changes nothing
+- Every consultation worker stays excluded from verifying its own task
 - A role, model or session change never erases contribution history
-- Treat unassessed possible contributions as unresolved independence evidence
-- Record legacy reviewer responsibilities as unknown until evidence establishes their contribution
+- A legacy reviewer responsibility reads as unknown
+- An unknown responsibility excludes its worker
 - Before a PR exists, the developer's own evidence is the branch CI its push triggered
 - On an open PR, the developer reads that evidence with `skills/release/poll-pr-reviews.sh`, never the pre-merge watch
 - The developer reports each reviewer lane's observed state, including whether a request is pending, whoever asked for it

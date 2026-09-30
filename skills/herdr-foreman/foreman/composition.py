@@ -99,7 +99,13 @@ def parse_requirements(payload, roles, task, *, allow_historical_architect=False
     return resolved
 
 
-def _contributor(row, assessment=None):
+def _contributor(row):
+    """Whether a dispatch's classification before its worker ran makes it a possible contributor.
+
+    Add-only (#625): an assessment adds a contributor through its own
+    `design` or `implementation` contribution, and nothing subtracts one. A
+    recorded `none`, the worker's or a migrated foreman's, changes nothing.
+    """
     if row.get("status", "unknown") not in POSSIBLE_CONTRIBUTION:
         return False
     # A dispatch keeps its SEAT (`reviewer#api`); the ledger keeps the
@@ -107,8 +113,6 @@ def _contributor(row, assessment=None):
     base = canonical_role(row.get("role"))
     if base == "developer":
         return True
-    if assessment is not None:
-        return assessment["contribution"] != "none"
     tier = row.get("tier")
     if tier is None and isinstance(row.get("result"), dict):
         tier = row["result"].get("tier")
@@ -122,7 +126,8 @@ def selection_constraints(roles, agents, requirements, history, task, dispatches
 
     Callers merge exclusions with explicit author exclusions and use the same
     result before planning and before an unsent apply. Same-task possible
-    contributors remain barred after a clear or model change. External work
+    contributors remain barred after a clear or model change, and no recorded
+    `none` lifts a bar (#625). External work
     and old rows without task/proposal provenance require the foreman's explicit
     exclusions; an empty history never proves independence.
     """
@@ -133,14 +138,10 @@ def selection_constraints(roles, agents, requirements, history, task, dispatches
         {"schema_version": REQUIREMENTS_SCHEMA_VERSION, "assignments": requirements} if requirements else None,
         roles, task,
     )
-    by_assignment = {row["assignment_index"]: row for row in assessments}
     contributors = {row["agent"] for row in assessments
                     if task and row.get("task") == task and row["contribution"] in {"design", "implementation"}}
-    for index, row in enumerate(history):
-        if task and row.get("task") == task and _contributor(row, by_assignment.get(index)):
-            contributors.add(row.get("agent"))
-    for row in dispatches:
-        if task and row.get("task") == task and _contributor(row, by_assignment.get(row.get("assignment_index"))):
+    for row in list(history) + list(dispatches):
+        if task and row.get("task") == task and _contributor(row):
             contributors.add(row.get("agent"))
     by_name = {agent.name: agent for agent in agents}
     names = sorted(by_name if candidate_names is None else set(candidate_names))

@@ -800,5 +800,47 @@ class SnapshotMigrationTest(unittest.TestCase):
         self._tmpdir.cleanup()
 
 
+class AssessmentSchemaTest(unittest.TestCase):
+    """Assessment records version independently of the document (#625)."""
+
+    def setUp(self):
+        from tests.test_engagement import EngagementTest
+
+        case = EngagementTest("test_duplicate_assessment_ids_are_invalid")
+        case.setUp()
+        self.addCleanup(case.doCleanups)
+        self.case = case
+
+    def test_a_mixed_schema_one_and_two_document_loads_migrated_once(self):
+        from tests.test_engagement import legacy_record
+
+        case = self.case
+        current = case.assess()
+        case.state["specialist_assessments"].insert(0, {**legacy_record(current), "id": "legacy-1"})
+        case.path.write_text(json.dumps(case.state))
+        loaded, usable = load_state_checked(case.path)
+        self.assertTrue(usable)
+        sources = [(row["id"], row["schema_version"], row["source"]) for row in loaded["specialist_assessments"]]
+        self.assertEqual(sources, [("legacy-1", 2, "foreman_assessment"), ("assessment-1", 2, "report")])
+        self.assertEqual(loaded["specialist_assessments"][1], current)
+        self.assertEqual(loaded["schema_version"], STATE_SCHEMA_VERSION)
+        rewritten = case.path.read_bytes()
+        self.assertEqual(load_state_checked(case.path)[0], loaded)
+        self.assertEqual(case.path.read_bytes(), rewritten)
+
+    def test_a_newer_assessment_record_is_the_lagging_reader_case(self):
+        case = self.case
+        case.assess()
+        case.state["specialist_assessments"][0]["schema_version"] = 3
+        case.path.write_text(json.dumps(case.state))
+        before = case.path.read_bytes()
+        warnings = []
+        loaded, usable = load_state_checked(case.path, warn=warnings.append)
+        self.assertFalse(usable)
+        self.assertEqual(loaded, empty_state())
+        self.assertTrue(warnings)
+        self.assertEqual(case.path.read_bytes(), before)
+
+
 if __name__ == "__main__":
     unittest.main()

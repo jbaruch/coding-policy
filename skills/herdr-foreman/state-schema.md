@@ -468,7 +468,7 @@ skills/herdr-foreman/references/retrospectives.md
 | `assignments[].requirements` | object or null | Normalized requirement object from the assigned role in the plan; null for legacy assignments |
 | `assignments[].reviewer_scope` | string or null | Reviewer participation recorded as `verification`, `design`, or `unknown`; null for other roles. Older reviewers migrate to `unknown` |
 | `assignments[].judge_mode` | string or null | The mode the judge seat was dispatched for: `adjudication`, `diagnosis`, or `unknown`; null for other roles. A weighing is an `adjudication`; its report is the ruling file `skills/release/dismiss-ruled-review.sh` reads, never a record this state owns. Older judge rows migrate to `unknown`, and a reconciled dispatch whose receipt predates the field records `unknown`. A live judge dispatch with no declared mode is refused, never defaulted |
-| `specialist_assessments` | array | Append-only foreman assessments with original dispatch and byte receipts; each record has its own schema version |
+| `specialist_assessments` | array | Append-only report-contract assessments with original dispatch and byte receipts; each record has its own schema version |
 
 `verified` contains `model`, `effort`, `argv`, `source` (`launch_argv` or
 `process_argv`), and `pane_id`; process proof also contains `pid`. Loading
@@ -561,24 +561,61 @@ identities remain unchanged.
 ### Specialist assessment records
 
 `assess-specialist` appends records to the main state's `specialist_assessments`.
-Each schema-1 record contains `id`, `at`, `dispatch`, `assignment_index`, `task`,
-`role`, `agent`, `report`, `delivery`, `outcome`, `contribution`, `summary`,
-`report_evidence`, and `delivery_evidence`. The evidence objects contain absolute
-`path` and SHA-256 `sha256`. The report is the supervised assignment's enrolled
-path; delivery is saved successful `wait-report` JSON for that worker and path,
-or the exact owner-recorded `recover-report` output for that dispatch and the
-same report bytes.
-`contribution` classifies actual work as `none`, `design`, or `implementation`.
-Outcome and summary are the foreman's nonempty assessment, not task acceptance.
+Its input is exactly `id`, `dispatch`, `report` and `delivery`; `outcome`,
+`summary` and `contribution` are refused by name. The owner is
+`skills/herdr-foreman/foreman/engagement.py`; the line parser is
+`skills/herdr-foreman/foreman/report_contract.py`, whose module docstring holds
+the line formats and refusal classes.
 
-The utility verifies the original confirmed dispatch, assignment and enrollment
-before appending. Exact ID/input retries preserve the original receipt, including
-after source cleanup; changed input requires a new ID. Historical reads validate
-schema and relationships without reopening sources. Warm follow-ups revalidate
-report and delivery bytes and prior supervision disposition. Authored assessments
-remain contribution evidence even after a later assessment, role or model change.
-Missing, corrupt or unsupported assessment history follows the main state's
-preserve-and-refuse writer contract. This first version has no earlier format.
+Each schema-2 record contains `schema_version: 2`, `id`, `at`, `dispatch`,
+`assignment_index`, `task`, `role`, `agent`, `report`, `delivery`,
+`report_evidence`, `delivery_evidence`, `source`, `brief_evidence`, `criteria`,
+`acceptance`, `verdict`, `contribution`, `legacy` and `gap`. The evidence objects
+contain absolute `path` and SHA-256 `sha256`. The report is the supervised
+assignment's enrolled path; delivery is saved successful `wait-report` JSON for
+that worker and path, or the exact owner-recorded `recover-report` output for
+that dispatch and the same report bytes.
+
+| Field | Meaning |
+| --- | --- |
+| `source` | `report` for a record parsed from the report's lines; `contribution_only` for the declared `design` or `implementation` contribution of a report refused for a contract gap; `foreman_assessment` for a migrated schema-1 record |
+| `brief_evidence` | Receipt of the frozen brief `apply` sent; a consultation's only, else null |
+| `criteria` | `N`, re-derived from that brief's `CRITERION` block; a consultation's only, else null |
+| `acceptance` | `[{k, state, evidence}]` for `k` in `1..N`, `state` `met` or `unmet`; a consultation's only, else null |
+| `verdict` | `blocking` or `approved` where the role or dispatch specialty requires the line, else null |
+| `contribution` | The report's optional `CONTRIBUTION:` value or null; a migrated record keeps its old value |
+| `legacy` | `{outcome, summary}` on a migrated record, else null |
+| `gap` | `{message, gaps}` on a `contribution_only` record: the refusal it replays on an identical retry (same input, same report bytes); else null |
+
+The role and specialty come from the owner dispatch, never from the caller. A
+report with a contract gap appends nothing, save a `contribution_only` entry
+when it declares `design` or `implementation`; that entry has null line fields
+and satisfies no reader below. The utility verifies the original
+confirmed dispatch, assignment, enrollment and frozen brief before appending.
+Exact ID/input retries preserve the original receipt, including after source
+cleanup; changed input requires a new ID. Historical reads validate schema and
+relationships without reopening sources.
+
+A report-sourced record gates three readers. `close-member` needs one matching
+the current report bytes before an `accepted` reviewer, tester or consultation
+closure, and for a consultation every criterion `met`. `diagnose` and the
+judge-investigation gate count only investigator records with every criterion
+`met` and no `blocking` verdict. Acceptance itself is contract completeness,
+whatever the verdict; a blocking verdict gates the round, never the assignment. A warm follow-up needs one for the preceding assignment and revalidates
+its report and delivery bytes and prior supervision disposition.
+
+A `design` or `implementation` contribution on any record adds a same-task
+independence exclusion; nothing subtracts one. Missing, corrupt or unsupported
+assessment history follows the main state's preserve-and-refuse writer contract.
+
+Migration `1 → 2` runs in the owner while state loads, and is idempotent. It
+moves `outcome` and `summary` under `legacy`, sets `source:
+foreman_assessment`, nulls the line fields and keeps `contribution`. A migrated
+record never satisfies `accepted`, a warm follow-up or the diagnose and judge
+gates; an in-flight consultation needs a fresh dispatch. A schema-1 record
+already carrying a schema-2 field is refused as corrupt. A record newer than 2
+takes the lagging-reader path: no usable prior state, the file left untouched.
+The document's own version is unchanged.
 
 Version 4 admits delivery record schema 2 alongside unchanged schema-1 receipts.
 The new record uses `basis: archived_grok_clear_source`, preserves `native_session`

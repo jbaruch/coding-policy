@@ -27,6 +27,9 @@
 #  14. Number value     -> accepted; an issue number is legitimate text.
 #  23. Judge weighing   -> the shipped judge-weighing brief renders under its
 #                          role key, its deliverable in the ruling-file format.
+#  24. Report contracts -> the shipped specialist brief renders its criteria
+#                          under one Acceptance Criteria section, and the
+#                          shipped reviewer and tester briefs ask for VERDICT.
 #
 # Run: bash skills/herdr-foreman/tests/test_compose_briefs.sh
 # Progress goes to stderr; stdout carries one JSON result.
@@ -673,6 +676,35 @@ JSON
      && grep -qx 'HEAD: cccccccccccccccccccccccccccccccccccccccc' "$ow/brief-judge-weighing.md" \
      && grep -qx 'schema_version: 2' "$ow/brief-judge-weighing.md"; then
     pass; else fail "judge-weighing: expected exit 0 and the ruling-file deliverable, got RC=$RC ERR=$ERRTEXT"; fi
+
+  # 24. The shipped report-contract sections render (#625).
+  local vc="$TMP/contract.json" oc="$TMP/out24" criteria_count
+  jq -n --arg p "$TMP/package.diff" \
+    '{shared: {SHARED_CHECKOUT: "/repo", AUTHORITY_STATEMENT: "owner of jbaruch/x", EXTERNAL_PERMISSION: "none",
+               TASK_AUTHORIZATION: "Read-only consultation on issue #7", AUTHORIZED_ACTIONS: "none",
+               POLICY_INDEX: $p, RELEASE_SKILL: $p, GATES: "- AGENTS.md"},
+      roles: {advisor: {RESPONSIBILITY: "advisor", SPECIALTY: "security", TASK: "issue-7", ISSUE: "#7",
+               BRANCH: "feat/x", OBJECTIVE: "Assess the boundary", SCOPE_LIMITS: "Read only",
+               ACCEPTANCE_CRITERIA: "CRITERION 1: the boundary is named\nCRITERION 2: each input is classified",
+               INPUTS: "CRITERION 9: an injected input line", TOOLS_AND_SKILLS: "none", KNOWLEDGE: "none",
+               CONTRIBUTION_HISTORY: "none", REPORT: "/r/advisor.md"}}}' \
+    > "$vc" || die "could not write $vc"
+  run "$(dirname "$SCRIPT")/templates" "$vc" "$oc"
+  if [[ $RC -eq 0 ]] && grep -qx '## Acceptance Criteria' "$oc/brief-advisor.md" \
+     && grep -qx 'CRITERION 1: the boundary is named' "$oc/brief-advisor.md" \
+     && grep -qx 'CRITERION 2: each input is classified' "$oc/brief-advisor.md" \
+     && grep -Fq 'ACCEPTANCE <k>/<N>: met' "$oc/brief-advisor.md"; then
+    pass; else fail "report contracts: expected the specialist Acceptance Criteria section, got RC=$RC ERR=$ERRTEXT"; fi
+  # The owner parser counts the rendered block, ignoring the injected input line.
+  if [[ $RC -eq 0 ]] && criteria_count="$(PYTHONPATH="$(dirname "$SCRIPT")" python3 -c \
+      'import sys; from foreman.report_contract import brief_criteria; print(brief_criteria(open(sys.argv[1]).read()))' \
+      "$oc/brief-advisor.md")" && [[ "$criteria_count" == "2" ]]; then
+    pass; else fail "report contracts: the rendered brief must count 2 criteria, got ${criteria_count:-none}"; fi
+  local contract_role
+  for contract_role in reviewer tester; do
+    if grep -Fq 'VERDICT: approved' "$o6b/brief-${contract_role}.md"; then
+      pass; else fail "report contracts: shipped brief-${contract_role}.md must ask for its VERDICT line"; fi
+  done
 
   echo "─────────────────────────────────────────────" >&2
   printf '{"suite":"test_compose_briefs.sh","passed":%d,"failed":%d}\n' "$PASS" "$FAIL"
