@@ -48,7 +48,8 @@ Sidecar (`<state>.report-gates.json`, schema in state-schema.md, Report Gates):
 Schema 1 held classifier gates alone. `load` is the owner migration: it
 upgrades a schema-1 document (every gate `source: classifier`, `dispatch:
 null`) and rewrites it under the sidecar lock before returning it. A document at any other version is refused, never read as no
-gates: for a gate store, "no usable prior state" would read as no gate.
+gates: for a gate store, "no usable prior state" would read as no gate
+(rules/stateful-artifacts.md Migration Policy, the gate-store exception).
 """
 
 import copy
@@ -557,20 +558,32 @@ def _ledger_state(state_path):
 def _verdicts(store, assessments):
     """Every owner-parsed verdict, keyed to the report bytes it was parsed from.
 
-    Sources: report-sourced specialist assessments, and `record-report`
-    receipts on developer dispatches.
+    Sources, each bound to who delivered it: a report-sourced specialist
+    assessment names the assessed `dispatch`; a `record-report` receipt names
+    the reviewed developer dispatch's `task` and the `reviewer` agent.
     """
     found = []
     for row in assessments:
         if row.get("source") == "report" and row.get("verdict") is not None:
             found.append({"path": _report_key(row["report"]), "sha256": row["report_evidence"]["sha256"],
-                          "verdict": row["verdict"]})
+                          "verdict": row["verdict"], "dispatch": row.get("dispatch"), "task": None, "agent": None})
     for row in store["dispatches"]:
         receipt = row.get("report")
         if isinstance(receipt, dict) and isinstance(receipt.get("evidence"), dict):
             found.append({"path": _report_key(receipt["report"]), "sha256": receipt["evidence"]["sha256"],
-                          "verdict": receipt["verdict"]})
+                          "verdict": receipt["verdict"], "dispatch": None, "task": row.get("task"),
+                          "agent": receipt.get("reviewer")})
     return found
+
+
+def _approves(row, path, digest, dispatch):
+    """Whether an owner-parsed verdict approves these report bytes as delivered by `dispatch`."""
+    if row["path"] != path or row["sha256"] != digest or row["verdict"] != "approved":
+        return False
+    if row["dispatch"] is not None:
+        return row["dispatch"] == dispatch["id"]
+    return (row["task"] is not None and row["task"] == dispatch.get("task")
+            and row["agent"] is not None and row["agent"] == dispatch.get("agent"))
 
 
 def ledger_view(state_path, judge_agent):
@@ -698,8 +711,9 @@ def _rechecked(view, owner, key, since, evidence, document):
 
     A re-check is a report delivered for an applied dispatch of the gated
     responsibility on the same task, reserved after the gate, whose
-    owner-parsed verdict at its current bytes is `approved`, and which carries
-    no open classifier gate. A judge ruling never qualifies.
+    owner-parsed verdict at its current bytes, recorded for that dispatch, is
+    `approved`, and which carries no open classifier gate. A judge ruling never
+    qualifies.
     """
     path = _report_key(evidence)
     if path == key:
@@ -725,11 +739,14 @@ def _rechecked(view, owner, key, since, evidence, document):
         _fail("Report {} is no re-check of this verdict gate: cite the current bytes of a report supervision observed "
               "(or `{}` recovered) for an applied dispatch of {}, reserved after the gate was recorded.".format(
                   path, runnable.command("recover-report"), held))
-    if not any(row["path"] == path and row["sha256"] == digest and row["verdict"] == "approved"
-               for row in view["verdicts"]):
-        _fail("Re-check {} carries no owner-parsed `VERDICT: approved` at its current bytes. Record it with `{}` or "
-              "`{}` first; a blocking or unrecorded re-check clears nothing.".format(
+    approved = [dispatch for dispatch in matching
+                if any(_approves(row, path, digest, dispatch) for row in view["verdicts"])]
+    if not approved:
+        _fail("Re-check {} carries no owner-parsed `VERDICT: approved` at its current bytes recorded for the "
+              "dispatch that delivered it. Record it with `{}` or `{}` first; a blocking, unrecorded or "
+              "foreign-dispatch verdict clears nothing.".format(
                   path, runnable.command("assess-specialist"), runnable.command("record-report")))
+    matching = approved
     if any(gate["report"] == path and gate["status"] == "open" and gate["source"] == "classifier"
            for gate in document["gates"]):
         _fail("Re-check {} carries an open classifier gate of its own; resolve it (`{}`) before it clears "

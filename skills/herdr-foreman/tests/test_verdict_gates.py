@@ -41,9 +41,9 @@ class VerdictCase(gate_fixture.LedgerCase):
         report = report or self.report
         return gates.record_verdict(self.state, str(report), digest(report), dispatch, at)
 
-    def parsed(self, path, verdict="approved"):
-        """An owner-parsed verdict, as a report-sourced assessment records it."""
-        self.assessments.append({"source": "report", "verdict": verdict, "report": str(path),
+    def parsed(self, path, dispatch, verdict="approved"):
+        """An owner-parsed verdict, as a report-sourced assessment of `dispatch` records it."""
+        self.assessments.append({"source": "report", "verdict": verdict, "report": str(path), "dispatch": dispatch,
                                  "report_evidence": {"path": str(path), "sha256": digest(path)}})
 
     def open_sources(self):
@@ -112,7 +112,7 @@ class RecheckTest(VerdictCase):
     def test_an_approved_recheck_of_the_same_responsibility_clears(self):
         self.verdict()
         self.dispatch("d-review-2", "reviewer", "codex-b", self.reread, AFTER, observed=AFTER)
-        self.parsed(self.reread)
+        self.parsed(self.reread, "d-review-2")
         resolution = self.clear(evidence=str(self.reread), reason="B1 resolved at the new tip")["resolved"][0]["resolution"]
         self.assertEqual((resolution["by"], resolution["evidence"]["dispatch"]), ("worker", "d-review-2"))
         self.assertEqual(gates.status(self.state)["open"], [])
@@ -122,15 +122,30 @@ class RecheckTest(VerdictCase):
         self.dispatch("d-review-2", "reviewer", "codex-b", self.reread, AFTER, observed=AFTER)
         with self.assertRaisesRegex(UsageError, "no owner-parsed `VERDICT: approved`"):
             self.clear(evidence=str(self.reread))
-        self.parsed(self.reread, "blocking")
+        self.parsed(self.reread, "d-review-2", "blocking")
         with self.assertRaisesRegex(UsageError, "no owner-parsed `VERDICT: approved`"):
+            self.clear(evidence=str(self.reread))
+        self.assertEqual(self.open_sources(), ["verdict"])
+
+    def test_an_approval_recorded_for_another_dispatch_clears_nothing(self):
+        self.verdict()
+        self.dispatch("d-review-2", "reviewer", "codex-b", self.reread, AFTER, observed=AFTER)
+        # The same bytes approved under another task's dispatch, and a
+        # record-report receipt naming another reviewer.
+        self.dispatch("d-elsewhere", "reviewer", "codex-z", self.reread, AFTER, task="task-b")
+        self.parsed(self.reread, "d-elsewhere")
+        self.dispatches.append({"id": "d-dev-x", "task": "task-a", "role": "developer", "agent": "grok-a",
+                                "status": "applied", "at": AFTER,
+                                "report": {"report": str(self.reread), "verdict": "approved", "reviewer": "codex-z",
+                                           "evidence": {"path": str(self.reread), "sha256": digest(self.reread)}}})
+        with self.assertRaisesRegex(UsageError, "recorded for the dispatch that delivered it"):
             self.clear(evidence=str(self.reread))
         self.assertEqual(self.open_sources(), ["verdict"])
 
     def test_a_recheck_carrying_its_own_classifier_gate_clears_nothing(self):
         self.verdict()
         self.dispatch("d-review-2", "reviewer", "codex-b", self.reread, AFTER, observed=AFTER)
-        self.parsed(self.reread)
+        self.parsed(self.reread, "d-review-2")
         gates.record(self.state, {"labels": [gate_fixture.label(self.reread, gate_fixture.HIGH)]}, AT)
         with self.assertRaisesRegex(UsageError, "open classifier gate of its own"):
             self.clear(evidence=str(self.reread))
@@ -144,7 +159,7 @@ class RecheckTest(VerdictCase):
             path = self.root / (name + ".md")
             path.write_text("Re-checked: B1 RESOLVED ({}).\nVERDICT: approved\n".format(name))
             self.dispatch("d-" + name, role, "codex-" + name, path, at, task=task, observed=AFTER)
-            self.parsed(path)
+            self.parsed(path, "d-" + name)
             cases[name] = path
         for name, path in cases.items():
             with self.subTest(name=name), self.assertRaisesRegex(UsageError, "no re-check of this verdict gate"):
@@ -162,8 +177,8 @@ class RecheckTest(VerdictCase):
         again.write_text("ACCEPTANCE 1/1: met — threat model re-checked\nVERDICT: approved\n")
         self.dispatch("d-ux", "advisor", "codex-u", other, AFTER, specialty="ux", observed=AFTER)
         self.dispatch("d-sec-2", "advisor", "codex-t", again, AFTER, specialty="security", observed=AFTER)
-        self.parsed(other)
-        self.parsed(again)
+        self.parsed(other, "d-ux")
+        self.parsed(again, "d-sec-2")
 
         def clear(evidence):
             return gates.resolve(self.state, str(consult), "clear", "Re-checked", AFTER, self.view(),
@@ -195,7 +210,7 @@ class RecheckTest(VerdictCase):
         self.dispatch("d-review-2", "reviewer", "codex-b", self.reread, AFTER, observed=AFTER)
         self.dispatches.append({"id": "d-dev-2", "task": "task-a", "role": "developer", "agent": "grok-a",
                                 "status": "applied", "at": AFTER,
-                                "report": {"report": str(self.reread), "verdict": "approved",
+                                "report": {"report": str(self.reread), "verdict": "approved", "reviewer": "codex-b",
                                            "evidence": {"path": str(self.reread), "sha256": digest(self.reread)}}})
         resolution = self.clear(evidence=str(self.reread))["resolved"][0]["resolution"]
         self.assertEqual(resolution["evidence"]["dispatch"], "d-review-2")
@@ -210,7 +225,7 @@ class RecheckTest(VerdictCase):
             self.clear(evidence=str(ruling))
         self.assertEqual(self.open_sources(), ["classifier", "verdict"])
         self.dispatch("d-review-2", "reviewer", "codex-b", self.reread, AFTER, observed=AFTER)
-        self.parsed(self.reread)
+        self.parsed(self.reread, "d-review-2")
         cleared = self.clear(evidence=str(self.reread))["resolved"]
         self.assertEqual(sorted((gate["source"], gate["resolution"]["by"]) for gate in cleared),
                          [("classifier", "worker"), ("verdict", "worker")])
