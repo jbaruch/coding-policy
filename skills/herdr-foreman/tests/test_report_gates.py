@@ -151,17 +151,21 @@ class LedgerCase(GateCase):
         who = supervision.identity("lead-session", str(self.root), "fixture", pane_id="lead-pane")
         supervision.bind(self.state, who, BEFORE, root=self.root / "bindings")
         self.dispatches = []
+        self.assessments = []
         self.dispatch("d-review", "reviewer", "codex-a", self.report, BEFORE)
-        recovery = mock.patch.object(gates, "_recovery_store",
-                                     lambda _path: {"dispatches": self.dispatches, "delivery_recoveries": []})
+        recovery = mock.patch.object(gates, "_ledger_state", lambda _path: (
+            {"dispatches": self.dispatches, "delivery_recoveries": []}, self.assessments))
         recovery.start()
         self.addCleanup(recovery.stop)
 
-    def dispatch(self, name, role, agent, report, at, *, task="task-a", judge_mode=None, observed=None):
-        """An applied dispatch, its enrollment, and (at `observed`) supervision seeing its report."""
-        row = {"id": name, "task": task, "role": role, "agent": agent, "status": "applied"}
+    def dispatch(self, name, role, agent, report, at, *, task="task-a", judge_mode=None, observed=None,
+                 specialty=None):
+        """An applied dispatch reserved at `at`, its enrollment, and (at `observed`) supervision seeing its report."""
+        row = {"id": name, "task": task, "role": role, "agent": agent, "status": "applied", "at": at}
         if judge_mode is not None:
             row["judge_mode"] = judge_mode
+        if specialty is not None:
+            row["requirements"] = {"specialty": specialty}
         self.dispatches.append(row)
         supervision.enroll(self.state, {"id": name, "agent": agent, "task": task, "report": str(report),
                                         "pane_id": None, "native_session": None}, at)
@@ -395,22 +399,22 @@ class ShapeTest(LedgerCase):
             "open with a resolution": lambda gate: gate.update(resolution={}),
             "cleared without a resolution": lambda gate: gate.update(status="cleared"),
             "resolution crosses levels": lambda gate: gate.update(status="reread", resolution={
-                "schema_version": 1, "at": AT, "action": "reread", "by": "worker", "reason": "r",
+                "schema_version": gates.SCHEMA_VERSION, "at": AT, "action": "reread", "by": "worker", "reason": "r",
                 "evidence": {"path": "/r.md", "sha256": "a" * 64, "dispatch": "d"}}),
             "resolution action disagrees": lambda gate: gate.update(status="cleared", resolution={
-                "schema_version": 1, "at": AT, "action": "reread", "by": "worker", "reason": "r",
+                "schema_version": gates.SCHEMA_VERSION, "at": AT, "action": "reread", "by": "worker", "reason": "r",
                 "evidence": {"path": "/r.md", "sha256": "a" * 64}}),
             "worker clear without evidence": lambda gate: gate.update(status="cleared", resolution={
-                "schema_version": 1, "at": AT, "action": "clear", "by": "worker", "reason": "r", "evidence": None}),
+                "schema_version": gates.SCHEMA_VERSION, "at": AT, "action": "clear", "by": "worker", "reason": "r", "evidence": None}),
             "worker clear without its dispatch": lambda gate: gate.update(status="cleared", resolution={
-                "schema_version": 1, "at": AT, "action": "clear", "by": "worker", "reason": "r",
+                "schema_version": gates.SCHEMA_VERSION, "at": AT, "action": "clear", "by": "worker", "reason": "r",
                 "evidence": {"path": "/r.md", "sha256": "a" * 64}}),
             "operator clear without a decision": lambda gate: gate.update(status="cleared", resolution={
-                "schema_version": 1, "at": AT, "action": "clear", "by": "operator", "reason": "r", "evidence": None}),
+                "schema_version": gates.SCHEMA_VERSION, "at": AT, "action": "clear", "by": "operator", "reason": "r", "evidence": None}),
             "resolution without schema_version": lambda gate: gate.update(status="cleared", resolution={
                 "at": AT, "action": "clear", "by": "operator", "reason": "r", "evidence": None}),
             "resolution with a newer schema_version": lambda gate: gate.update(status="cleared", resolution={
-                "schema_version": 2, "at": AT, "action": "clear", "by": "operator", "reason": "r",
+                "schema_version": gates.SCHEMA_VERSION + 1, "at": AT, "action": "clear", "by": "operator", "reason": "r",
                 "evidence": None}),
         }
         for name, breakage in breakages.items():
@@ -484,8 +488,8 @@ class CloseMemberGateTest(MembersCase):
         dispatches = [{"id": "dispatch-a", "task": "task-a", "role": "reviewer", "agent": "codex-a", "status": "applied"},
                       {"id": "dispatch-j", "task": "task-a", "role": "judge", "agent": JUDGE, "status": "applied",
                        "judge_mode": "adjudication"}]
-        with mock.patch.object(gates, "_recovery_store",
-                               lambda _path: {"dispatches": dispatches, "delivery_recoveries": []}):
+        with mock.patch.object(gates, "_ledger_state",
+                               lambda _path: ({"dispatches": dispatches, "delivery_recoveries": []}, [])):
             view = gates.ledger_view(self.path, JUDGE)
         gates.resolve(self.path, self.report, "clear", "The finding is out of scope per ruling R2.", LATER, view,
                       evidence=str(ruling))
