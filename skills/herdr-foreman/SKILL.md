@@ -724,11 +724,13 @@ Step 16. No implementation or release is inferred from the diagnostic result.
   by the next reviewer or tester report at the tip, marking it DECLINED with
   the ruling and recording `VERDICT: approved`. Never match rulings to
   findings yourself.
-- **Clearing a verdict gate** — once the same responsibility's re-check
-  records `VERDICT: approved`, run `report-gate-clear --report <blocking
-  report> --evidence <re-check> --reason <what it settled>` for each blocking
-  report. An operator's resolved decision clears it through `--decision`.
-  A judge's report is refused as evidence.
+- **Clearing a verdict gate by re-check** — once the same responsibility's
+  re-check records `VERDICT: approved`, run `report-gate-clear --report
+  <blocking report> --evidence <re-check> --reason <what it settled>` for each
+  blocking report.
+- **Clearing a verdict gate by decision** — an operator's resolved decision
+  clears it through `--decision`.
+- **No judge clear** — a judge's report is refused as evidence.
 - **A contradicting gate** — a classifier `block` gate on a `VERDICT: approved`
   report goes to Step 13 for adjudication.
 - **A weighing nomination** — a finding a worker report marks `MARGINAL:`, or

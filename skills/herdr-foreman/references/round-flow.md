@@ -287,8 +287,8 @@ Gate item 5) until an explicit clear, one per blocking report:
 
 Exit 0 prints the resolved gates; exit 1 names what the cited evidence lacks
 and records nothing. A clear on a report that also carries a classifier gate
-resolves both or neither. What qualifies as a re-check is `_rechecked`'s
-docstring in `skills/herdr-foreman/foreman/report_gates.py`.
+resolves both or neither. What qualifies as a re-check is in
+`skills/herdr-foreman/references/report-classifier.md` Verdict Gates.
 
 ## Branch-Changing Ruling
 
