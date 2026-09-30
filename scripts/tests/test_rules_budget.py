@@ -79,6 +79,24 @@ class FixtureRulesBudget(unittest.TestCase):
                 self.assertEqual(result.stdout, "")
                 self.assertIn(needle, result.stderr)
 
+    def test_unreadable_rule_file_exits_2_naming_it(self):
+        # A dangling symlink matches the glob but cannot be stat'ed, which is
+        # the same OSError an unreadable or vanished rule file raises.
+        (self.rules / "gone.md").symlink_to(self.rules / "absent-target.md")
+        result = run(str(self.rules), budget="1000")
+        self.assertEqual(result.returncode, 2)
+        self.assertEqual(result.stdout, "")
+        self.assertIn("gone.md", result.stderr)
+        self.assertIn("rerun", result.stderr)
+
+    def test_rules_path_that_is_a_file_exits_2(self):
+        blocker = Path(self.tmp.name) / "blocker"
+        blocker.write_text("not a directory")
+        result = run(str(blocker), budget="1000")
+        self.assertEqual(result.returncode, 2)
+        self.assertEqual(result.stdout, "")
+        self.assertIn("not found", result.stderr)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -20,8 +20,9 @@
 #           {"total_bytes": N, "budget_bytes": B, "within_budget": true|false,
 #            "files": [{"path": "<file>", "bytes": n}, ...]}  (largest first)
 # stderr: the actionable diagnostic when over budget or on a setup error.
-# Exit:   0 within budget, 1 over budget, 2 setup error (directory missing,
-#         no rule files, python3 absent, a non-integer budget override).
+# Exit:   0 within budget, 1 over budget, 2 setup error (directory missing or
+#         unreadable, no rule files, a rule file whose size cannot be read,
+#         python3 absent, a non-integer budget override).
 
 set -euo pipefail
 
@@ -53,11 +54,22 @@ import sys
 from pathlib import Path
 
 rules_dir, budget = Path(sys.argv[1]), int(sys.argv[2])
-files = sorted(rules_dir.glob("*.md"))
+try:
+    files = sorted(rules_dir.glob("*.md"))
+except OSError as err:
+    print("check-rules-budget: cannot list rule files under {}: {} — restore read access to the directory and rerun".format(rules_dir, err.strerror or err), file=sys.stderr)
+    sys.exit(2)
 if not files:
     print("check-rules-budget: no *.md rule files under {} — pass the directory holding the rule files".format(rules_dir), file=sys.stderr)
     sys.exit(2)
-sizes = sorted(((f.stat().st_size, f.name) for f in files), reverse=True)
+sizes = []
+for f in files:
+    try:
+        sizes.append((f.stat().st_size, f.name))
+    except OSError as err:
+        print("check-rules-budget: cannot read the size of {}: {} — fix or remove the file and rerun".format(f, err.strerror or err), file=sys.stderr)
+        sys.exit(2)
+sizes.sort(reverse=True)
 total = sum(size for size, _ in sizes)
 within = total <= budget
 print(json.dumps({
