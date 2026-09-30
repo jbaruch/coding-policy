@@ -42,7 +42,7 @@ fail() { FAIL=$((FAIL+1)); echo "  ✗ FAIL: $1" >&2; }
 
 mk_templates() { # <dir>
   mkdir -p "$1" || die "could not create $1"
-  printf 'Checkout: {{SHARED_CHECKOUT}}\nAuthority: {{AUTHORITY_STATEMENT}}\n' > "$1/COMMON.md" \
+  printf 'Checkout: {{SHARED_CHECKOUT}}\nAuthority: {{AUTHORITY_STATEMENT}}\nContract: {{TEAM_OPERATION}}\n' > "$1/COMMON.md" \
     || die "could not write COMMON.md"
   printf 'Dev on {{BRANCH}} in {{WORKTREE}} for {{ISSUE}}\nReport: {{REPORT}}\n' > "$1/brief-developer.md" \
     || die "could not write brief-developer.md"
@@ -60,6 +60,14 @@ run() { # <templates> <values-file> <outdir>
     jq --arg p "$TMP/package.diff" \
       'if .roles | has("tester") then .roles.tester += {REVIEW_PACKAGE: $p, REVIEW_BASE: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", REVIEW_HEAD: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"} else . end' \
       "$2" > "$values" || die "could not prepare rendering fixture"
+  fi
+  # Every fixture supplies the team-round contract path every composition
+  # requires; the dedicated TEAM_OPERATION cases call the CLI unwrapped.
+  if jq -e '(.shared | type) == "object" and (.shared | has("TEAM_OPERATION") | not)' "$values" >/dev/null 2>&1; then
+    local with_team="$TMP/values.$RUN_SEQ.team.json"
+    jq --arg p "$TMP/package.diff" '.shared.TEAM_OPERATION = $p' "$values" > "$with_team" \
+      || die "could not add TEAM_OPERATION to the rendering fixture"
+    values="$with_team"
   fi
   OUT="$(bash "$SCRIPT" "$1" "$values" "$3" 2>"$TMP/err.$RUN_SEQ")"
   RC=$?
@@ -88,6 +96,9 @@ run_suite() {
   }
 }
 JSON
+  # Direct CLI calls below read v1 unwrapped, so it carries the required path.
+  jq --arg p "$TMP/package.diff" '.shared.TEAM_OPERATION = $p' "$v1" > "$v1.tmp" && mv "$v1.tmp" "$v1" \
+    || die "could not add TEAM_OPERATION to $v1"
   run "$TPL" "$v1" "$o1"
   if [[ $RC -eq 0 ]] \
      && grep -q "Checkout: /repo" "$o1/COMMON.md" \
@@ -302,6 +313,27 @@ JSON
   if [[ $RC -eq 0 ]] && grep -q "Dev on feat/x in /wt/dev for #7" "$o1/brief-developer.md"; then
     pass; else fail "idempotent: second run changed the output (RC=$RC)"; fi
 
+  # 9b. TEAM_OPERATION is required for every composition: a values file
+  #     without it refuses before anything is written, whatever the templates.
+  jq 'del(.shared.TEAM_OPERATION)' "$v1" > "$TMP/v9b.json" || die "could not build the missing-contract fixture"
+  OUT="$(bash "$SCRIPT" "$TPL" "$TMP/v9b.json" "$TMP/out9b" 2>"$TMP/e9b")"; RC=$?
+  if [[ $RC -eq 2 && -z "$OUT" && ! -e "$TMP/out9b" ]] && grep -q "TEAM_OPERATION is required" "$TMP/e9b"; then
+    pass; else fail "missing TEAM_OPERATION: expected exit 2 and nothing written, got RC=$RC ERR=$(cat "$TMP/e9b")"; fi
+
+  # 9c. A custom common template that does not render the contract path is
+  #     refused, so no brief ships without the required read.
+  local nocontract="$TMP/nocontract-templates"
+  mk_templates "$nocontract"
+  printf 'Checkout: {{SHARED_CHECKOUT}}\nAuthority: {{AUTHORITY_STATEMENT}}\n' > "$nocontract/COMMON.md" \
+    || die "could not write the contract-less COMMON.md"
+  OUT="$(bash "$SCRIPT" "$nocontract" "$v1" "$TMP/out9c" 2>"$TMP/e9c")"; RC=$?
+  if [[ $RC -eq 2 && -z "$OUT" && ! -e "$TMP/out9c" ]] && grep -q "carries no {{TEAM_OPERATION}} placeholder" "$TMP/e9c"; then
+    pass; else fail "contract-less COMMON.md: expected exit 2 and nothing written, got RC=$RC ERR=$(cat "$TMP/e9c")"; fi
+
+  # 9d. A custom common template that carries the placeholder renders the path.
+  if [[ -f "$o1/COMMON.md" ]] && grep -Fq "Contract: $TMP/package.diff" "$o1/COMMON.md"; then
+    pass; else fail "custom COMMON.md must render the TEAM_OPERATION path"; fi
+
   # 10. Usage.
   OUT="$(bash "$SCRIPT" 2>"$TMP/e10")"; RC=$?
   if [[ $RC -eq 1 && -z "$OUT" ]] && grep -q "usage:" "$TMP/e10"; then
@@ -317,7 +349,7 @@ JSON
   chmod +x "$bin/grep" || die "could not chmod the failing grep"
   RUN_SEQ=$((RUN_SEQ+1))
   OUT="$(PATH="$bin:$PATH" bash "$SCRIPT" "$TPL" "$v1" "$TMP/out11" 2>"$TMP/e11")"; RC=$?
-  if [[ $RC -eq 3 && -z "$OUT" ]] && grep -q "placeholder scan failed" "$TMP/e11"; then
+  if [[ $RC -eq 3 && -z "$OUT" ]] && grep -Eq "placeholder scan failed|cannot scan placeholders" "$TMP/e11"; then
     pass; else fail "broken grep: expected exit 3 naming the scan, got RC=$RC ERR=$(cat "$TMP/e11")"; fi
   if [[ ! -e "$TMP/out11/COMMON.md" ]]; then
     pass; else fail "broken grep: nothing may be written when the scan failed"; fi

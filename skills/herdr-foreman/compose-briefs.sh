@@ -26,7 +26,8 @@
 #             path, a REPORT longer than FOREMAN_REPORT_PATH_MAX_COLS, or a reviewer/tester
 #             REVIEW_PACKAGE that is not an absolute readable non-empty file,
 #             or an unreadable POLICY_INDEX / RELEASE_SKILL / TEAM_OPERATION
-#             artifact.
+#             artifact, an absent TEAM_OPERATION key, or a common template
+#             with no {{TEAM_OPERATION}} placeholder.
 #             Nothing is written on a
 #             validation failure,
 #           3 a tool this depends on failed (the placeholder scan, or the
@@ -355,8 +356,21 @@ main() {
   local common_body scan_rc=0 check_rc=0
   validate_values "$shared" "the shared values" || return 2
   # Resolver-produced policy paths are explicit brief inputs. Custom templates
-  # need not carry them; any supplied artifact must remain readable at compose.
+  # need not carry POLICY_INDEX or RELEASE_SKILL; any supplied artifact must
+  # remain readable at compose. TEAM_OPERATION is different: every worker brief
+  # names the team-round contract as a required read (rules/agent-team-operation.md
+  # Team Round Contract), so the key is required and COMMON.md must render it,
+  # whichever templates the foreman passes.
   local policy_key policy_path policy_present
+  if ! printf '%s' "$shared" | jq -e 'has("TEAM_OPERATION")' >/dev/null; then
+    warn "TEAM_OPERATION is required in .shared — every worker brief names the team-round contract; run resolve-policy-paths.sh and copy its TEAM_OPERATION path"
+    return 2
+  fi
+  common_known="$(placeholders_in "$common_tpl")" || return 3
+  if [[ $'\n'"${common_known}"$'\n' != *$'\nTEAM_OPERATION\n'* ]]; then
+    warn "$(basename "$common_tpl") carries no {{TEAM_OPERATION}} placeholder — every worker brief must render the team-round contract path; add it to the common template"
+    return 2
+  fi
   for policy_key in POLICY_INDEX RELEASE_SKILL TEAM_OPERATION; do
     policy_present="$(printf '%s' "$shared" | jq -r --arg k "$policy_key" 'has($k)')" || return 2
     if [[ "$policy_present" == true ]]; then
