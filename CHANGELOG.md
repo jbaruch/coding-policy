@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.346 — 2026-09-30
+
 ### Changed
 
 - **The foreman's judgment routes are named (Closes #601).** #601 asked for
