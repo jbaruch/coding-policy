@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.353 — 2026-09-30
+
 ### Added
 
 - **CI fails on a committed merge-conflict marker (Closes #668).** A diff3 base
