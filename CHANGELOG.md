@@ -1,5 +1,65 @@
 # Changelog
 
+### Changed
+
+- **Always-loaded rules shrink from 157.4k to 92.8k bytes; workflow-only text
+  moves into skill references (Closes #642).** Agents warn once the
+  instruction files they load pass 150k characters, and coding-policy's
+  `rules/` alone was over that before any other plugin loaded. `applyTo:`
+  cannot help: Tessl passes rule files through byte-identical, so a scoped
+  rule costs its full size. The only lever is moving text into
+  `skills/<name>/references/`, which an agent reads only when it elects to.
+  Operator decisions of 2026-09-29 set the scope. Moved text is verbatim, so
+  the diff reviews as a move.
+  - `rules/agent-team-operation.md` (47.0k to 2.8k) keeps Two Modes and a
+    must-read pointer. Every section after Two Modes moves to
+    `skills/herdr-foreman/references/team-operation.md`. The foreman
+    `SKILL.md` reads it before any team-round action;
+    `resolve-policy-paths.sh` emits a third path, `TEAM_OPERATION`, which
+    `compose-briefs.sh` validates like the other two and `COMMON.md` names as
+    a required read in every worker brief. Cross-references in hooks,
+    scripts, tests and references repoint at the new file.
+  - `rules/ci-safety.md` (18.2k to 7.3k) keeps Hands Off CI Config, Never
+    Skip Tests, Install Don't Skip, Branch Naming, the Always Watch CI
+    principles, Checks Not Starting, Protected Branches and each carve-out's
+    trigger. The pre-merge watch mechanics, publication confirmation (the
+    Tessl release contract and per-channel evidence), Credits Never Block
+    Publishing and A Non-Zero Publish Exit move to
+    `skills/release/references/release-contract.md`, named as a required read
+    at release Steps 5 and 7. Carve-out preconditions move to
+    `skills/release/references/ci-safety-carve-outs.md`. A new Publish
+    Outcomes section keeps the two headline facts and the pointer.
+  - `rules/dependency-management.md` (12.0k to 5.8k): the five carve-outs'
+    preconditions and both consumer authority-of-record blocks move to
+    `skills/onboard-repo/references/dependency-carve-outs.md`.
+  - `rules/context-artifacts.md` (10.3k to 8.9k): the credit-outage carve-out
+    preconditions, the changed-skills CI wiring and rubric, and the
+    `tessl review fix` procedure move to
+    `skills/release/references/skill-review-gate.md`.
+  - `rules/review-severity.md` (5.3k to 3.0k): the judge-accepted defect and
+    judge-weighed finding preconditions, floors and standalone nomination
+    procedure move to `skills/release/references/review-severity-carve-outs.md`.
+  - `rules/context-writing-style.md` names the moved carve-out form: trigger
+    and applies-when line, `Preconditions are binding: read <path> <Section>
+    before relying on it`, and the reset stay in the rule; the preconditions
+    stay in full in the reference. This answers the issue's open question on
+    whether a pointer keeps preconditions binding: the rule text says so, and
+    both policy-reviewer prompts (`.github/codex-review/prompt.md`,
+    `fleet-prompt.md`) now read any reference a binding pointer names.
+  - The team-operation Fix Loops and Team Composition preconditions say
+    "accepted" investigator consultation, not "assessed":
+    `require_investigation_before_judge` counts only accepted records.
+  - `scripts/check-rules-budget.sh` owns a 95,000-byte budget for
+    `rules/*.md` and fails with the largest files named;
+    `scripts/tests/test_rules_budget.py` runs it against the live rules under
+    `scripts/run-tests.sh`, so CI gates on it with no workflow change.
+    `.herdr/triggers.json` counts the new policy references as trust
+    boundaries, as it does `rules/*`.
+  - Comments in `.github/workflows/publish.yml`, `publish-plugin.yml` and the
+    `smart-publish` / `publish-landed-gate` actions still cite
+    `rules/ci-safety.md "Credits Never Block Publishing"`; the rule's Publish
+    Outcomes section names that heading and points to where it now lives.
+
 ## 0.3.342 — 2026-09-30
 
 ### Changed
