@@ -402,6 +402,18 @@ Use a fresh absolute report path per role and attempt.
 
 Follow `references/round-setup.md` Step 7 for shared and role-specific values,
 authority, review evidence and brief completeness.
+
+- A bug brief, a correction brief, and any brief needing judgment on task
+  content are non-mechanical
+- A non-mechanical brief's task framing is an accepted advisor consultation's
+  report under `skills/herdr-foreman/references/team-operation.md` Judgment
+  Routes
+- Without one, return to Step 5 and plan that consultation first
+- Set the role's `SPECIALIST_CONTEXT` value to the absolute `report` path of
+  that consultation's `assess-specialist` record
+- Never copy, excerpt or paraphrase that report into a value
+- Never write that framing yourself
+
 Proceed immediately to Step 8.
 
 ## Step 8 — Provision the Worktrees
@@ -703,7 +715,9 @@ enrollment's pending events and resolves it, citing that ledger event; a repeat
 replays. Resolution stays
 separate from assignment acceptance and task completion.
 Resume Step 11's fleet watch for any enrollment still observed.
-Assess correction scope and bug evidence under `references/assignment-reasoning.md`.
+Route correction-scope and bug-evidence assessment to a worker under
+`skills/herdr-foreman/references/team-operation.md` Judgment Routes; never
+assess them yourself.
 Persist user-facing obligations under `references/attention.md` before presenting
 them; record an actual answer or resolution separately from showing the item.
 

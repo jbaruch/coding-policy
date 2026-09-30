@@ -1,9 +1,13 @@
 # Assignment Reasoning
 
-The foreman applies this reference at intake, when composing a bug-fix brief, and
-when assessing findings before a correction. The worker receives the relevant
-questions in its self-contained brief. Reasoning stays with the foreman and workers;
-the dispatch utility does not infer intent or causality from prose.
+This reference governs intake, a bug-fix or correction brief, and the assessment
+of findings before a correction. The foreman records the accepted behavior and
+dispatches the rest: composing a non-mechanical brief and assessing a report's
+substance each route to a worker under
+`skills/herdr-foreman/references/team-operation.md` Judgment Routes, and that
+worker applies the sections below. The route's report gates like every report
+under that file's Reports section, and the foreman adds no assessment of its
+own. The dispatch utility does not infer intent or causality from prose.
 
 ## Preserve the Accepted Behavior
 
@@ -84,7 +88,7 @@ both paths. Label facts, hypotheses, and unresolved uncertainties separately.
 
 ## Use the Evidence
 
-Before accepting a diagnosis, the foreman checks that its cause explains the
+Before a diagnosis is accepted, the assessing worker checks that its cause explains the
 reproduction and comparison evidence. A missing experiment is an explicit gap,
 not an invented pass. Obtain a focused investigation when the gap could change
 what should be fixed. Keep bounded research inside an already authorized bug

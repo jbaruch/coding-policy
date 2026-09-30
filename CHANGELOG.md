@@ -1,5 +1,35 @@
 # Changelog
 
+### Changed
+
+- **The foreman's judgment routes are named (Closes #601).** #601 asked for
+  a cheap foreman whose heavy lifting goes to workers. #616 already made the
+  foreman seat an operator-configured tier that `start-foreman` launches and
+  the preflight verifies, and #645 made the foreman gate reports on contract
+  lines and classifier gates alone. What remained was naming where the
+  judgment the foreman used to exercise itself goes. A new Judgment Routes
+  section in `skills/herdr-foreman/references/team-operation.md` names four:
+  a finding's scope class routes to an advisor consultation, and causal
+  questions (does a diagnosis explain its evidence, do successive findings
+  share a cause) to the investigator; a non-mechanical brief (bug,
+  correction, or any brief applying `assignment-reasoning.md`) routes to an
+  advisor whose accepted report is the task framing, handed off by path,
+  never by text: the foreman puts the `report` path from its
+  `assess-specialist` record in the role's `SPECIALIST_CONTEXT` value and the
+  worker reads it, so nothing is retyped or paraphrased; a `partial_work`
+  stall (the `wait-report.sh --worktree` class) routes to the investigator,
+  every other class keeps its Stalled Workers path, and the
+  re-dispatch-or-discard choice goes to the operator
+  through the stall's attention item (the investigator decides nothing); a
+  disputed finding stays with the judge. Route reports gate like every report
+  (contract lines, classifier gates, judge rulings) with no foreman
+  assessment added, and spend no developer fix round; a missing route report
+  is re-dispatched or recorded as a gap, never replaced by the foreman's
+  reading. `SKILL.md` Steps 7 and 12, `references/round-setup.md` Step
+  7, the Stalled Workers section and `references/assignment-reasoning.md` now
+  route to those workers instead of asking the foreman to apply the
+  reasoning itself. No new role, script or state.
+
 ## 0.3.345 — 2026-09-30
 
 ### Changed
