@@ -12,6 +12,8 @@
   `skills/release/tests/test_pr_create_repo_binding.py` fails if either step
   drops the resolve or the `--repo`.
 
+## 0.3.350 — 2026-09-30
+
 ### Changed
 
 - **The git-sync hook tests catch a dropped `HERDR_ENV` scrub (Closes #661).**
