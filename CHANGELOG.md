@@ -1,5 +1,15 @@
 # Changelog
 
+### Changed
+
+- **A test holds `adopt-fork-pr`'s `gh pr` instructions to origin (Closes #664).**
+  `skills/adopt-fork-pr/tests/test_skill_repo_binding.py` fails when any
+  inline `gh pr` command in the skill's `SKILL.md` lacks `--repo <repo>`, when
+  Step 1 stops resolving origin with `origin-repo.py` before classifying, or
+  when Step 4's Just-inspect branch drops its `--repo` binding. Deferred from
+  Copilot's advisory on #662: the invocation test checked only the bootstrap
+  block, so deleting a `--repo` would have left CI green.
+
 ## 0.3.351 — 2026-09-30
 
 ### Fixed
@@ -171,7 +181,6 @@
     Blocking Gate, Release Gate item 5 and Ruling Outcomes,
     `references/report-classifier.md` (Verdict Gates, Sidecar schema 2) and
     `state-schema.md`.
-||||||| 7f5eec1a
 
 ## 0.3.344 — 2026-09-30
 
