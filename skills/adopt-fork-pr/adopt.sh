@@ -167,8 +167,12 @@ resolve_repo() {
     || die "${helper} is not readable, so origin cannot be matched to a GitHub repository — reinstall the plugin." 1
   out=$(python3 "$helper" .) \
     || die "cannot name origin's GitHub repository — see the origin-repo error above; nothing falls back to gh's default repository." 1
-  repo=$(jq -r '.repo // empty' <<<"$out") && [ -n "$repo" ] \
-    || die "origin-repo.py answered without a repository — run 'python3 ${helper} .' to inspect it." 1
+  if ! repo=$(jq -r '.repo // empty' <<<"$out"); then
+    die "cannot read origin-repo.py's answer — run 'python3 ${helper} .' to inspect it." 1
+  fi
+  if [ -z "$repo" ]; then
+    die "origin-repo.py answered without a repository — run 'python3 ${helper} .' to inspect it." 1
+  fi
 }
 
 main() {
