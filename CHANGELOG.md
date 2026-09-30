@@ -1,5 +1,30 @@
 # Changelog
 
+### Changed
+
+- **The foreman's judgment routes are named (Closes #601).** #601 asked for
+  a cheap foreman whose heavy lifting goes to workers. #616 already made the
+  foreman seat an operator-configured tier that `start-foreman` launches and
+  the preflight verifies, and #645 made the foreman gate reports on contract
+  lines and classifier gates alone. What remained was naming where the
+  judgment the foreman used to exercise itself goes. A new Judgment Routes
+  section in `skills/herdr-foreman/references/team-operation.md` names four:
+  assessing a report's substance beyond its contract lines (finding scope,
+  whether a diagnosis explains its evidence, shared causes across findings)
+  routes to an advisor consultation, or the investigator for causality;
+  composing a non-mechanical brief (bug, correction, or any brief applying
+  `assignment-reasoning.md`) routes to an advisor whose deliverable is the
+  task text, passed unchanged through `compose-briefs`; diagnosing a stall
+  the `wait-report.sh` classification does not mark retryable routes to the
+  investigator; a disputed finding stays with the judge. Route reports gate
+  on their contract lines and spend no developer fix round; a missing route
+  report is re-dispatched or recorded as a gap, never replaced by the
+  foreman's reading. `SKILL.md` Steps 7, 11 and 12,
+  `references/round-setup.md` Step 7, the Stalled Workers section and
+  `references/assignment-reasoning.md` now route to those workers instead
+  of asking the foreman to apply the reasoning itself. No new role, script
+  or state.
+
 ## 0.3.345 — 2026-09-30
 
 ### Changed

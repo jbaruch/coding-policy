@@ -79,6 +79,25 @@ The Herdr team round contract. `rules/agent-team-operation.md` Two Modes decides
 - Every other consultation clears context under the normal retrospective and dispatch gates
 - Follow `skills/herdr-foreman/references/specialists.md` for profiles and assessment workflow
 
+## Judgment Routes
+
+- The foreman runs owner scripts, tracks the owner records and gates on the lines reports and scripts produce
+- Judgment on task content the foreman would otherwise exercise itself goes to a worker, through one of four routes
+- **Report substance** — assessing a report beyond its contract lines and classifier gates routes to an advisor consultation
+- That covers a finding's scope class, whether a diagnosis explains its evidence, and whether successive findings share a cause (`skills/herdr-foreman/references/assignment-reasoning.md`)
+- A question of causality in that assessment routes to the investigator instead
+- **Non-mechanical brief** — task text that needs judgment routes to an advisor consultation whose deliverable is that text
+- A bug brief, a correction brief, and any brief applying `skills/herdr-foreman/references/assignment-reasoning.md` are non-mechanical
+- The foreman passes the delivered text unchanged into the role's task value through `compose-briefs`
+- Paths, identifiers, authority, review evidence and the other resolver or Step 3 values stay mechanical and stay with the foreman
+- **Stalled round** — diagnosing a stall routes to the investigator, with the stall classification as its input
+- A stall the classification marks retryable needs no diagnosis
+- **Disputed finding** — resolving it routes to the judge under Judge Seat
+- A route consultation's brief names its question, the recorded accepted behavior and the source reports by path, and carries no analysis of its own
+- A route's consultation is planned, dispatched, observed and assessed like every consultation, and spends no developer fix round
+- Its report gates on its contract lines alone
+- A missing route report is re-dispatched or recorded as a gap, never replaced by the foreman's own reading
+
 ## Judge Seat
 
 - The reserved `judge` seat runs on the most capable model available and holds no other responsibility
@@ -418,7 +437,7 @@ The Herdr team round contract. `rules/agent-team-operation.md` Two Modes decides
 - Commits present and unpushed are completed work with a failed transport, recovered through `skills/herdr-foreman/references/dispatch-recovery.md`
 - Commits present and already pushed are completed work whose report did not arrive; they are recovery evidence, never a retryable dispatch
 - A stalled worker's output is unreviewed
-- Re-dispatch that work with the observed state described, or discard it
+- Re-dispatch that work with the observed state described, or discard it, on the investigator's stall diagnosis under Judgment Routes
 - Never commit a stalled worker's partial work on the strength of the tree building or the conflict count reaching zero
 - A stall records a user-attention obligation through `skills/herdr-foreman/references/attention.md`
 - The classification and its evidence shape are `skills/herdr-foreman/wait-report.sh`'s `--worktree` contract

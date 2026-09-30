@@ -402,6 +402,15 @@ Use a fresh absolute report path per role and attempt.
 
 Follow `references/round-setup.md` Step 7 for shared and role-specific values,
 authority, review evidence and brief completeness.
+
+- A bug brief, a correction brief, and any brief needing judgment on task
+  content are non-mechanical
+- A non-mechanical brief's task text comes from an accepted advisor
+  consultation under `skills/herdr-foreman/references/team-operation.md`
+  Judgment Routes
+- Without one, return to Step 5 and plan that consultation first
+- Pass its delivered text unchanged; never write that text yourself
+
 Proceed immediately to Step 8.
 
 ## Step 8 — Provision the Worktrees
@@ -571,6 +580,9 @@ Then act on the checkpoint:
 - An exit 1 carries either `reason: checkpoint_pending` or a `stall` object
 - A `stall` is classified only when `--worktree` names the checkout
 - Act on a stall under `skills/herdr-foreman/references/team-operation.md` Stalled Workers
+- A stall the classification does not mark retryable goes to the investigator
+  under that file's Judgment Routes; plan it in Step 5 before re-dispatching or
+  discarding the work
 - Record a stall's obligation through `references/attention.md`
 - Preserve the blocked/refusal and native-recovery paths in the references below
 - Never re-dispatch over uncertainty
@@ -703,7 +715,9 @@ enrollment's pending events and resolves it, citing that ledger event; a repeat
 replays. Resolution stays
 separate from assignment acceptance and task completion.
 Resume Step 11's fleet watch for any enrollment still observed.
-Assess correction scope and bug evidence under `references/assignment-reasoning.md`.
+Route correction-scope and bug-evidence assessment to a worker under
+`skills/herdr-foreman/references/team-operation.md` Judgment Routes; never
+assess them yourself.
 Persist user-facing obligations under `references/attention.md` before presenting
 them; record an actual answer or resolution separately from showing the item.
 

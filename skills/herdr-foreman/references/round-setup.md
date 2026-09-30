@@ -239,9 +239,11 @@ Proceed immediately to Step 7 with the printed path as `REVIEW_PACKAGE`.
 Consult the applicable working-memory lessons and verify any operational fact
 the assignment relies on. Include concise relevant lessons with source pointers
 in the role's task text; do not copy the whole memory store into every brief.
-Apply `skills/herdr-foreman/references/assignment-reasoning.md` when the task is
-a bug or the brief carries review corrections. Name the accepted behavior and
-the evidence questions that the worker must answer.
+A bug brief, a correction brief, or any brief applying
+`skills/herdr-foreman/references/assignment-reasoning.md` is non-mechanical: its
+task text comes from an advisor consultation under
+`skills/herdr-foreman/references/team-operation.md` Judgment Routes. Pass the
+accepted consultation's delivered text unchanged as the role's task value.
 
 Resolve the policy artifacts before writing the values file:
 
