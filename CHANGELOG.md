@@ -10,6 +10,19 @@
   Copilot's advisory on #662: the invocation test checked only the bootstrap
   block, so deleting a `--repo` would have left CI green.
 
+## 0.3.350 — 2026-09-30
+
+### Changed
+
+- **The git-sync hook tests catch a dropped `HERDR_ENV` scrub (Closes #661).**
+  CI starts with `HERDR_ENV` unset, so the `env -u HERDR_ENV` scrub #659 added
+  to `hooks/tests/test_check_git_sync.sh`'s `run` helper could be deleted with
+  every assertion still green. The suite now exports an ambient
+  `HERDR_ENV=1` before its cases, as a run from a Herdr pane would: every
+  non-Herdr case depends on the scrub, and each Herdr case passes its own
+  value. Removing the scrub fails the suite; it passes with `HERDR_ENV` set
+  or unset outside it.
+
 ## 0.3.349 — 2026-09-30
 
 ### Fixed
