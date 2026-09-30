@@ -18,6 +18,7 @@ from tests import test_cli as cli_fixture  # noqa: E402 -- the skill dir is on s
 from tests import test_engagement as engagement_fixture  # noqa: E402 -- the skill dir is on sys.path only from here
 from tests import test_recovery_cli as recovery_fixture  # noqa: E402 -- the skill dir is on sys.path only from here
 from tests import test_report_gates as gate_fixture  # noqa: E402 -- the skill dir is on sys.path only from here
+from tests.fakes import FakeRunner  # noqa: E402 -- the skill dir is on sys.path only from here
 
 AT, AFTER, BEFORE, JUDGE = gate_fixture.AT, gate_fixture.AFTER, gate_fixture.BEFORE, gate_fixture.JUDGE
 LATEST = "2026-09-27T12:20:00+00:00"
@@ -287,6 +288,11 @@ class SchemaTest(gate_fixture.GateCase):
 class AssessCommandTest(unittest.TestCase):
     """`assess-specialist` records the gate a blocking verdict earns, replay included."""
 
+    # Set by the borrowed engagement setUp.
+    root: Path
+    path: Path
+    state: dict
+
     setUp = engagement_fixture.EngagementTest.setUp
     seed = engagement_fixture.EngagementTest.seed
     seed_reviewer = engagement_fixture.EngagementTest.seed_reviewer
@@ -325,6 +331,8 @@ class ReleaseCommandTest(cli_fixture.CliCase):
     """`record-report` records the gate; `apply` holds a fresh release until it clears."""
 
     _client = cli_fixture.ApplyCommandTest._client
+    # Set by the borrowed `_client`.
+    runner: FakeRunner
 
     def setUp(self):
         super().setUp()
