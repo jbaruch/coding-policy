@@ -20,9 +20,13 @@ Before any finish with enrolled work, reconcile the whole fleet under
 or handoff covering every active assignment. Keep user attention visible under
 `references/attention.md`.
 
-Before any team-round action, read `references/team-operation.md` in full. It
-is the team-round contract `rules/agent-team-operation.md` points to, and it
-binds every step below. Every worker brief names it as a required read.
+Before any team-round action, read the team-round contract in full. It is the
+file `rules/agent-team-operation.md` points to, and it binds every step below.
+Every worker brief names it as a required read.
+
+```text
+skills/herdr-foreman/references/team-operation.md
+```
 
 You run on the foreman's selected tier: the operator's `coordination` row,
 resolved through `select_tier` and checked against the capability table
