@@ -15,8 +15,13 @@ SKILL = Path(__file__).resolve().parent.parent / "SKILL.md"
 COMMAND = re.compile(r"`(gh pr [^`]*)`")
 
 
+def flat(text):
+    """Whitespace-normalized text: a Markdown line wrap never changes an instruction."""
+    return " ".join(text.split())
+
+
 def commands(text):
-    return COMMAND.findall(text)
+    return [flat(cmd) for cmd in COMMAND.findall(text)]
 
 
 def step(text, number):
@@ -43,8 +48,8 @@ class SkillRepoBindingTest(unittest.TestCase):
         self.assertLess(body.index("origin-repo.py"), body.index("gh pr view"))
 
     def test_just_inspect_binds_its_gh_pr_calls(self):
-        body = step(self.text, 4)
-        self.assertRegex(body, r"\*\*Just inspect\*\*[^\n]*`--repo <repo>`[^\n]*`gh pr`")
+        body = flat(step(self.text, 4))
+        self.assertRegex(body, r"\*\*Just inspect\*\*[^.]*`--repo <repo>`[^.]*`gh pr`")
 
 
 if __name__ == "__main__":
