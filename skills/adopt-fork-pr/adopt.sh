@@ -4,7 +4,11 @@
 # policy reviewer (fork-guarded) can run on it.
 #
 # Usage:   adopt.sh <pr-number>
-# Repo:    operates on the current git repository (origin).
+# Repo:    operates on the current git repository (origin). Every gh call
+#          names origin's GitHub repository with --repo, resolved once per run
+#          by skills/release/origin-repo.py, never gh's default repository
+#          (`gh repo set-default`). An origin that names no GitHub repository
+#          exits 1 before any gh call.
 #
 # What it does (all deterministic):
 #   1. Reads PR metadata via `gh pr view` (including the PR body).
@@ -56,13 +60,28 @@
 # Exit codes:
 #   0  success (adopted, recovered, or already-adopted no-op)
 #   1  operational failure (dirty tree, gh/git failure, pointer-comment failure,
-#      PR not OPEN)
+#      PR not OPEN, origin not a GitHub repository)
 #   2  usage / invalid argument
 #   3  PR is not a fork PR (adoption does not apply)
 #
 set -euo pipefail
 
 orig_ref=""   # caller's branch; restored by the EXIT trap once fresh adoption starts
+repo=""       # origin's GitHub repository as <owner>/<repo>; every gh call names it
+
+# This script's directory, resolved when it is run or sourced. A sentinel
+# carries it across command substitution's trailing-newline strip.
+_adopt_src="${BASH_SOURCE[0]}"
+case "$_adopt_src" in
+  */*) _adopt_dir="${_adopt_src%/*}" ;;
+  *) _adopt_dir=. ;;
+esac
+if ! ADOPT_DIR="$(CDPATH='' cd -- "${_adopt_dir:-/}" && pwd && printf x)"; then
+  printf 'adopt.sh: cannot enter the script directory %s — reinstall the plugin\n' "${_adopt_dir:-/}" >&2
+  exit 1
+fi
+ADOPT_DIR="${ADOPT_DIR%x}"
+ADOPT_DIR="${ADOPT_DIR%$'\n'}"
 
 emit_jq_missing() {
   # jq is needed to format the normal envelope, so hand-roll the failure: a JSON
@@ -101,7 +120,7 @@ open_pr_url_for() {
   # echoes the URL of the open PR whose head is $1, or empty if none.
   # Exits non-zero (with gh's stderr intact) if the query itself fails, so the
   # caller can distinguish "no PR" from "couldn't ask".
-  gh pr list --head "$1" --state open --json url --jq '.[0].url // empty'
+  gh pr list --repo "$repo" --head "$1" --state open --json url --jq '.[0].url // empty'
 }
 
 ensure_pointer_comment() {
@@ -111,13 +130,13 @@ ensure_pointer_comment() {
   # capture the read first and die rather than letting a failed probe look like
   # "no comment" (which would duplicate the pointer on rerun).
   local original_pr="$1" adopted_url="$2" comment existing_comments
-  existing_comments=$(gh pr view "$original_pr" --json comments) \
+  existing_comments=$(gh pr view "$original_pr" --repo "$repo" --json comments) \
     || die "could not read comments on original #$original_pr to check for an existing pointer — see the gh error above." 1
   if grep -qF "$adopted_url" <<<"$existing_comments"; then
     return 0
   fi
   comment=$(printf 'Adopted into the base repo as %s so the policy reviewer can run — fork PRs are skipped by the reviewer'\''s fork-guard. Leaving this PR open; close it whenever you like, it'\''s your call.\n' "$adopted_url")
-  gh pr comment "$original_pr" --body "$comment" >/dev/null \
+  gh pr comment "$original_pr" --repo "$repo" --body "$comment" >/dev/null \
     || die "adopted PR ($adopted_url) exists but posting the pointer comment on original #$original_pr failed — see the gh error above; rerun to retry." 1
 }
 
@@ -128,7 +147,7 @@ create_adopted_pr() {
   local body new_url
   body=$(printf 'Adopted from #%s by @%s (fork %s/%s).\n\nCarries the contributor'\''s original commits unchanged — authorship is preserved. As a same-repo PR, it gets the policy review.\n\nOriginal PR: %s\n' \
     "$pr_n" "$author" "$fork_owner" "$fork_repo" "$orig_url")
-  new_url=$(gh pr create --base "$base" --head "$branch" --title "$title" --body "$body") \
+  new_url=$(gh pr create --repo "$repo" --base "$base" --head "$branch" --title "$title" --body "$body") \
     || die "gh pr create for branch $branch failed — see the gh error above (permissions, an existing PR for the branch, or validation)." 1
   ensure_pointer_comment "$pr_n" "$new_url"
   printf '%s' "$new_url"
@@ -140,19 +159,37 @@ emit() {
     '{state:$s,adopted_branch:$b,new_pr_url:$u,original_pr:$n,author:$a}'
 }
 
+resolve_repo() {
+  # Sets repo to origin's GitHub repository, or dies with origin-repo.py's
+  # own diagnostic above.
+  local helper="${ADOPT_DIR}/../release/origin-repo.py" out
+  [[ -f "$helper" && -r "$helper" ]] \
+    || die "${helper} is not readable, so origin cannot be matched to a GitHub repository — reinstall the plugin." 1
+  out=$(python3 "$helper" .) \
+    || die "cannot name origin's GitHub repository — see the origin-repo error above; nothing falls back to gh's default repository." 1
+  if ! repo=$(jq -r '.repo // empty' <<<"$out"); then
+    die "cannot read origin-repo.py's answer — run 'python3 ${helper} .' to inspect it." 1
+  fi
+  if [ -z "$repo" ]; then
+    die "origin-repo.py answered without a repository — run 'python3 ${helper} .' to inspect it." 1
+  fi
+}
+
 main() {
   command -v jq >/dev/null 2>&1 || { emit_jq_missing; exit 1; }
   command -v gh >/dev/null 2>&1 || die "GitHub CLI (gh) not found — install it and run 'gh auth login'." 1
   command -v git >/dev/null 2>&1 || die "git not found." 1
+  command -v python3 >/dev/null 2>&1 || die "python3 not found — install it and re-run." 1
 
   [ "$#" -eq 1 ] || die "usage: adopt.sh <pr-number>" 2
   local n="$1"
   [[ "$n" =~ ^[1-9][0-9]*$ ]] || die "PR number must be a positive integer, got: $n" 2
 
   git rev-parse --is-inside-work-tree >/dev/null 2>&1 || die "not inside a git work tree." 1
+  resolve_repo
 
   local meta
-  meta=$(gh pr view "$n" --json number,isCrossRepository,headRefName,headRepositoryOwner,headRepository,author,title,url,state,baseRefName) \
+  meta=$(gh pr view "$n" --repo "$repo" --json number,isCrossRepository,headRefName,headRepositoryOwner,headRepository,author,title,url,state,baseRefName) \
     || die "could not read PR #$n — see the gh error above; check the number and that 'gh auth status' is healthy." 1
 
   local is_fork state head_ref base_ref fork_owner fork_repo author title url
@@ -201,7 +238,7 @@ main() {
   orig_ref=$(git symbolic-ref --quiet --short HEAD 2>/dev/null || git rev-parse HEAD)
   trap restore_orig_ref EXIT   # restore the caller's branch even if a later step fails
 
-  gh pr checkout "$n" >/dev/null \
+  gh pr checkout "$n" --repo "$repo" >/dev/null \
     || die "gh pr checkout #$n failed — see the gh error above; the fork branch may be unavailable or your tree is not clean." 1
   git push origin "HEAD:refs/heads/$branch" >/dev/null \
     || die "push to origin/$branch failed — see the git error above; you need write access to the base repo." 1

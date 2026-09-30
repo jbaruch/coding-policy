@@ -1,5 +1,38 @@
 # Changelog
 
+### Fixed
+
+- **gh calls bind to origin, never to gh's default repository (Closes
+  #655).** `skills/herdr-foreman/prune-remote-branches.sh` deleted branches on
+  `origin` with git but read protection (`gh api 'repos/{owner}/{repo}/…'`)
+  and open pull requests (plain `gh pr list`) from whatever
+  `gh repo set-default` named. `jbaruch/nanoclaw` had its default pointed at
+  the retired `jbaruch/nanoclaw-public`; the 404 made the session-start hook
+  report `could_not_check` every session, which was the lucky outcome. Had
+  that repository still existed, the hook would have seen no protection and
+  no open pull requests there and pruned origin's merged branches, closing
+  any open PR whose head it deleted. `skills/adopt-fork-pr/adopt.sh` had the
+  same split: it pushed to `origin` but read, created and commented on pull
+  requests in the gh default, which in a fork is often the upstream parent,
+  a repository the operator does not own
+  (`rules/external-repo-contributions.md`). A new shared helper,
+  `skills/release/origin-repo.py`, names origin's `owner/repo` from
+  `git remote get-url origin` (https, `ssh://` and scp forms, with or without
+  `.git`), refuses a non-GitHub origin or any push URL (all of
+  `get-url --push --all`, compared case-insensitively) naming another
+  repository, and never echoes the URL, which can carry credentials. Both
+  scripts resolve it once per run: every `{owner}/{repo}` placeholder is now
+  the explicit path, and every `gh pr` call carries `--repo`. A non-GitHub
+  origin is a `could_not_check` with nothing deleted in the prune, and exit 1
+  before any gh call in the adoption, never a fallback to gh's default. The
+  questionable-branch `open_pr` command also names `--repo`. Fixture tests
+  pin gh's default elsewhere (a fake gh answers unbound calls as an empty
+  repository) and assert every gh call names origin's repository; the hook's
+  staged-plugin test proves the helper resolves from the hook's install
+  path. The sweep found no other executable `gh` call leaving the repository
+  to gh; the agent-run `gh pr view` in `skills/adopt-fork-pr/SKILL.md`
+  Steps 1-2 is tracked in #656.
+
 ## 0.3.347 — 2026-09-30
 
 ### Fixed
