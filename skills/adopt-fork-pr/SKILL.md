@@ -18,14 +18,23 @@ Classify a referenced pull request and, when it comes from a fork, adopt its bra
 
 ## Step 1 — Classify the PR
 
-Run `gh pr view <N> --json number,isCrossRepository,headRefName,headRepositoryOwner,headRepository,author,title,url,state`.
+Resolve origin's repository first; every `gh pr` call in this skill names it, never `gh`'s own default (`gh repo set-default`).
+
+```bash
+CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"; [ -d "$CP" ] || case "$(git config --get remote.origin.url)" in git@github.com:jbaruch/coding-policy|git@github.com:jbaruch/coding-policy.git|https://github.com/jbaruch/coding-policy|https://github.com/jbaruch/coding-policy.git|ssh://git@github.com/jbaruch/coding-policy|ssh://git@github.com/jbaruch/coding-policy.git) CP=. ;; *) echo "coding-policy plugin not found: run tessl install jbaruch/coding-policy" >&2; exit 1 ;; esac
+python3 "$CP/skills/release/origin-repo.py" .
+```
+
+Contract: see `skills/release/origin-repo.py` — top-of-file docstring. Emits `{ "repo", "owner", "name" }`. A non-zero exit means origin is not a GitHub repository this skill can act on: report its stderr diagnostic and finish here.
+
+Run `gh pr view <N> --repo <repo> --json number,isCrossRepository,headRefName,headRepositoryOwner,headRepository,author,title,url,state`, with `<repo>` from that output.
 
 - `isCrossRepository: false` — same-repo PR. Proceed to Step 2.
 - `isCrossRepository: true` — fork PR. Proceed to Step 3.
 
 ## Step 2 — Same-Repo Passthrough
 
-The policy reviewer already covers same-repo PRs. Report the PR's review and check status from `gh pr view <N> --json reviewDecision,statusCheckRollup` and finish here. Do not create branches, push, or open duplicate PRs.
+The policy reviewer already covers same-repo PRs. Report the PR's review and check status from `gh pr view <N> --repo <repo> --json reviewDecision,statusCheckRollup` and finish here. Do not create branches, push, or open duplicate PRs.
 
 ## Step 3 — Surface the Fork
 
@@ -38,7 +47,7 @@ Ask with `AskUserQuestion`:
 - **Adopt for review** — push the contributor's branch into the base repo as a reviewable same-repo PR.
 - **Just inspect** — read-only; no adoption.
 
-On **Just inspect**, report the diff and status, then finish here. On **Adopt for review**, proceed to Step 5.
+On **Just inspect**, report the diff and status, passing `--repo <repo>` to every `gh pr` call, then finish here. On **Adopt for review**, proceed to Step 5.
 
 ## Step 5 — Adopt the Branch
 
