@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.345 — 2026-09-30
+
 ### Changed
 
 - **A blocking `VERDICT:` holds the release in owner state, not in foreman
