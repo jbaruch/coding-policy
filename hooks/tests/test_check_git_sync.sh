@@ -106,6 +106,10 @@ main() {
   export GIT_CONFIG_NOSYSTEM=1
   export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t
 
+  # An ambient HERDR_ENV, as when the suite runs from a Herdr pane: every
+  # non-Herdr case now depends on run's scrub, and each Herdr case sets its own.
+  export HERDR_ENV=1
+
   FAIL=0; PASS=0
 
   # 1. Behind, read first from a linked worktree with HERDR_ENV set -- a Herdr
