@@ -49,7 +49,15 @@ Exit 0 clears the release. Exit 1 blocks it, with `blocking` naming each leftove
 
 - Once Step 1's readiness checks pass, create the PR automatically — the green readiness checks are the gate. Do not pause to ask a human whether to open it.
 - Push the branch: `git push -u origin <branch>`
-- Create the PR with `gh pr create`:
+- Resolve origin's repository, so the PR opens where the branch was pushed and never in `gh`'s own default (`gh repo set-default`):
+
+  ```bash
+  CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"; [ -d "$CP" ] || case "$(git config --get remote.origin.url)" in git@github.com:jbaruch/coding-policy|git@github.com:jbaruch/coding-policy.git|https://github.com/jbaruch/coding-policy|https://github.com/jbaruch/coding-policy.git|ssh://git@github.com/jbaruch/coding-policy|ssh://git@github.com/jbaruch/coding-policy.git) CP=. ;; *) echo "coding-policy plugin not found: run tessl install jbaruch/coding-policy" >&2; exit 1 ;; esac
+  python3 "$CP/skills/release/origin-repo.py" .
+  ```
+
+  Contract: see `skills/release/origin-repo.py` — top-of-file docstring. Emits `{ "repo", "owner", "name" }`. A non-zero exit stops the release with its stderr diagnostic
+- Create the PR with `gh pr create --repo <repo>`, `<repo>` from that output:
   - **Title**: `<type>(<scope>): <imperative summary>`
   - **Body**:
     ```
