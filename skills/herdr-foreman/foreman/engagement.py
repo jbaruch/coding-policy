@@ -265,8 +265,11 @@ def record_assessment(state, state_path, data, at):
     prior = next((row for row in state["specialist_assessments"] if row["id"] == data["id"]), None)
     if prior is not None:
         if prior["source"] == "contribution_only":
-            # An identical retry replays the same refusal; nothing new is recorded.
-            if all(prior[key] == data[key] for key in INPUT_FIELDS) and receipt(data["report"])[0] == prior["report_evidence"]:
+            # An identical retry replays the same refusal; nothing new is
+            # recorded. A cleaned-up report replays unread; a present one must
+            # still hold the refused bytes.
+            if all(prior[key] == data[key] for key in INPUT_FIELDS) and (
+                    not Path(data["report"]).exists() or receipt(data["report"])[0] == prior["report_evidence"]):
                 raise _gap_refusal(prior)
             raise UsageError("Assessment identity {} holds only the declared contribution of a report refused for a "
                              "contract gap; re-dispatch and assess the new report under a new id.".format(data["id"]), {})

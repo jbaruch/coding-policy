@@ -408,6 +408,14 @@ class EngagementTest(unittest.TestCase):
         self.assertEqual(replay.exception.message, caught.exception.message)
         self.assertEqual(replay.exception.details["gaps"], caught.exception.details["gaps"])
         self.assertEqual(self.state["specialist_assessments"], before)
+        # After source cleanup the retry replays without reading the report.
+        original = Path(data["report"]).read_bytes()
+        Path(data["report"]).unlink()
+        with self.assertRaises(engagement.ContractGap) as cleaned:
+            self.assess(data, at="2026-02-03T12:30:00+00:00")
+        self.assertEqual(cleaned.exception.message, caught.exception.message)
+        self.assertEqual(self.state["specialist_assessments"], before)
+        Path(data["report"]).write_bytes(original)
         # Different report bytes under that id are id reuse.
         Path(data["report"]).write_text("Reviewed again.\nVERDICT: approved\n")
         with self.assertRaisesRegex(UsageError, "new id") as reused:
