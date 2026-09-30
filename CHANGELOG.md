@@ -3,21 +3,25 @@
 ### Changed
 
 - **Always-loaded rules shrink from 157.4k to 92.8k bytes; workflow-only text
-  moves into skill references (Closes #642).** Agents warn once the
+  moves into skill references (Closes #642, closes #652).** Agents warn once the
   instruction files they load pass 150k characters, and coding-policy's
   `rules/` alone was over that before any other plugin loaded. `applyTo:`
   cannot help: Tessl passes rule files through byte-identical, so a scoped
   rule costs its full size. The only lever is moving text into
   `skills/<name>/references/`, which an agent reads only when it elects to.
   Operator decisions of 2026-09-29 set the scope. Moved text is verbatim, so
-  the diff reviews as a move.
-  - `rules/agent-team-operation.md` (47.0k to 2.8k) keeps Two Modes and a
-    must-read pointer. Every section after Two Modes moves to
+  the diff reviews as a move, save the review-driven edits named below.
+  - `rules/agent-team-operation.md` (47.0k to 2.8k) keeps Two Modes, a
+    Foreman Role section split out of it, and a must-read pointer. Every section after Two Modes moves to
     `skills/herdr-foreman/references/team-operation.md`. The foreman
     `SKILL.md` reads it before any team-round action;
     `resolve-policy-paths.sh` emits a third path, `TEAM_OPERATION`, which
-    `compose-briefs.sh` validates like the other two and `COMMON.md` names as
-    a required read in every worker brief. Cross-references in hooks,
+    `compose-briefs.sh` requires in every composition (a missing key, or a
+    common template without `{{TEAM_OPERATION}}`, exits 2) and `COMMON.md`
+    names as a required read in every worker brief. Script-owned values the
+    moved text stated as numbers (the fix allowance, the retained-context
+    rounds, the diagnosis bound, the blocked-read confirmation, the
+    retrospective cadence) now name their owning constants. Cross-references in hooks,
     scripts, tests and references repoint at the new file.
   - `rules/ci-safety.md` (18.2k to 7.3k) keeps Hands Off CI Config, Never
     Skip Tests, Install Don't Skip, Branch Naming, the Always Watch CI
@@ -35,7 +39,8 @@
   - `rules/context-artifacts.md` (10.3k to 8.9k): the credit-outage carve-out
     preconditions, the changed-skills CI wiring and rubric, and the
     `tessl review fix` procedure move to
-    `skills/release/references/skill-review-gate.md`.
+    `skills/release/references/skill-review-gate.md`, whose CI Wiring points
+    at the skill-review action for its diff and fallback logic.
   - `rules/review-severity.md` (5.3k to 3.0k): the judge-accepted defect and
     judge-weighed finding preconditions, floors and standalone nomination
     procedure move to `skills/release/references/review-severity-carve-outs.md`.
@@ -46,11 +51,15 @@
     whether a pointer keeps preconditions binding: the rule text says so, and
     both policy-reviewer prompts (`.github/codex-review/prompt.md`,
     `fleet-prompt.md`) now read any reference a binding pointer names.
+    The references carry only the moved detail, never the lines the rule
+    keeps. The foreman and release `SKILL.md` files list the new must-read
+    references in typed blocks.
   - The team-operation Fix Loops and Team Composition preconditions say
     "accepted" investigator consultation, not "assessed":
     `require_investigation_before_judge` counts only accepted records.
   - `scripts/check-rules-budget.sh` owns a 95,000-byte budget for
-    `rules/*.md` and fails with the largest files named;
+    `rules/*.md` and fails with the largest files named (an unreadable rule
+    file is a setup error, exit 2);
     `scripts/tests/test_rules_budget.py` runs it against the live rules under
     `scripts/run-tests.sh`, so CI gates on it with no workflow change.
     `.herdr/triggers.json` counts the new policy references as trust
