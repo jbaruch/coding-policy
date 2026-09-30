@@ -117,7 +117,7 @@ def resume_prompt(stow, state, *, config=None, herdr_bin=None):
 
 
 OPERATOR_RECOVERY = ("Do not run `{}` again for this stow. The operator recovers the foreman under "
-                     "rules/agent-team-operation.md Working Memory: clear the foreman's pane, then paste the "
+                     "skills/herdr-foreman/references/team-operation.md Working Memory: clear the foreman's pane, then paste the "
                      "resume prompt saved in this reset's record. The next round resets from a new stow.").format(
                          command("foreman-reset"))
 

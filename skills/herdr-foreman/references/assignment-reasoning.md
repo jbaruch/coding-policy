@@ -49,7 +49,7 @@ classification is friction-only routing: every outcome keeps the blocking
 finding in force, and an expansion only adds an operator decision. It never
 dismisses a blocking finding: a contested verdict, a report `VERDICT:` the
 classifier gate contradicts, a bot disagreement, or a weighing nomination
-follows the existing judge path in `rules/agent-team-operation.md`. The foreman cannot waive a finding by calling it
+follows the existing judge path in `skills/herdr-foreman/references/team-operation.md`. The foreman cannot waive a finding by calling it
 an expansion. An agreed correction still obeys the fix allowance and release
 gates; this reference adds no attempts or substitute judge trigger.
 

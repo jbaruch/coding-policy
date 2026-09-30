@@ -2,7 +2,7 @@
 """Headroom measurement and the foreman's tier proof, as one composite check.
 
 The foreman's tier selection reads the snapshot `foreman measure` writes and
-records its headroom (`rules/agent-team-operation.md` Foreman Seat), so the
+records its headroom (`skills/herdr-foreman/references/team-operation.md` Foreman Seat), so the
 two are one check: the
 round preflight runs this once and records its result. Config presence is read
 apart from the measurement, so an absent `foreman` block is always the

@@ -77,7 +77,7 @@ warn() { printf 'stop-handoff-hygiene: %s\n' "$1" >&2; }
 # The team rules reserve the shared checkout and every worktree operation for
 # the foreman: a worker "runs no git command against the shared checkout,
 # mutating or otherwise" and "never creates, moves, or removes a worktree"
-# (rules/agent-team-operation.md Writers and Checkouts). A hook that tells a
+# (skills/herdr-foreman/references/team-operation.md Writers and Checkouts). A hook that tells a
 # worker to fast-forward `main` or remove a worktree is instructing it to
 # break that rule -- which is exactly what happened in a live round, where the
 # worker reported the contradiction and then obeyed the hook.
@@ -157,7 +157,7 @@ main() {
   [[ "$inside" == "true" ]] || return 0
 
   # Branch and worktree cleanup is the foreman's, never a worker's
-  # (rules/agent-team-operation.md Writers and Checkouts). Blocking a worker's
+  # (skills/herdr-foreman/references/team-operation.md Writers and Checkouts). Blocking a worker's
   # stop over leftovers it is forbidden to remove would force it to either
   # disobey the rule or fail to hand off. The foreman's own teardown runs at the
   # end of its round.
@@ -311,7 +311,7 @@ PY
     return 0
   fi
   # A Herdr foreman removes worktrees only through the round's sweep
-  # (rules/agent-team-operation.md Writers and Checkouts); everyone else runs
+  # (skills/herdr-foreman/references/team-operation.md Writers and Checkouts); everyone else runs
   # the owner script for this repository.
   local remedy
   if [[ -n "${HERDR_ENV+x}" ]]; then

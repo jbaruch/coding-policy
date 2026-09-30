@@ -6,7 +6,7 @@ saturated when its seat reports clean at the current tip, and the
 responsibility has passed when every slice is saturated at one tip. A tester
 partition passes the tester gate, never the reviewer's.
 
-`rules/agent-team-operation.md` Review Before PR carries the contract this
+`skills/herdr-foreman/references/team-operation.md` Review Before PR carries the contract this
 format serves. Write the document only for a round filling several seats of one
 role; a single-seat round needs none.
 

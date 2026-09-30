@@ -107,7 +107,7 @@ main() {
   FAIL=0; PASS=0
 
   # 1. Behind, read first from a linked worktree with HERDR_ENV set -- a Herdr
-  # worker. The shared checkout is the foreman's (rules/agent-team-operation.md
+  # worker. The shared checkout is the foreman's (skills/herdr-foreman/references/team-operation.md
   # Writers and Checkouts), so the hook reports the drift and moves nothing.
   mk_origin o1
   clone_from "$BARE" "$TMP/r1"

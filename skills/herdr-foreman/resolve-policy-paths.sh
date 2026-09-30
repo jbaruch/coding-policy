@@ -3,9 +3,10 @@
 # argv: <absolute-shared-checkout> [absolute-global-tessl-root]
 #       Global root defaults to $HOME/.tessl; the optional argument supports
 #       nonstandard installations and isolated test fixtures.
-# stdout: {"POLICY_INDEX":"<absolute-path>","RELEASE_SKILL":"<absolute-path>"}
+# stdout: {"POLICY_INDEX":"<absolute-path>","RELEASE_SKILL":"<absolute-path>",
+#          "TEAM_OPERATION":"<absolute-path>"}
 # stderr: actionable diagnostic on failure; stdout stays empty.
-# exit: 0 both artifacts resolved, 1 usage/precondition, 2 lookup/tool failure.
+# exit: 0 every artifact resolved, 1 usage/precondition, 2 lookup/tool failure.
 # Each artifact independently prefers <shared-checkout>/.tessl, then the
 # global root. Only readable non-empty regular files qualify. No writes or network calls.
 set -euo pipefail
@@ -32,7 +33,7 @@ main() {
     echo 'resolve-policy-paths: usage: resolve-policy-paths.sh <absolute-shared-checkout> [absolute-global-tessl-root]' >&2
     return 1
   fi
-  local shared="$1" global_root="${2:-$HOME/.tessl}" policy release output
+  local shared="$1" global_root="${2:-$HOME/.tessl}" policy release team output
   if [[ "$shared" != /* || ! -d "$shared" || "$global_root" != /* || "$shared$global_root" == *[[:cntrl:]]* ]]; then
     echo 'resolve-policy-paths: pass an existing absolute shared checkout and an absolute global Tessl root' >&2
     return 1
@@ -43,7 +44,8 @@ main() {
   fi
   policy="$(resolve_artifact RULES.md "$shared/.tessl" "$global_root")" || return 2
   release="$(resolve_artifact plugins/jbaruch/coding-policy/skills/release/SKILL.md "$shared/.tessl" "$global_root")" || return 2
-  if ! output="$(jq -n --arg policy "$policy" --arg release "$release" '{POLICY_INDEX:$policy, RELEASE_SKILL:$release}')"; then
+  team="$(resolve_artifact plugins/jbaruch/coding-policy/skills/herdr-foreman/references/team-operation.md "$shared/.tessl" "$global_root")" || return 2
+  if ! output="$(jq -n --arg policy "$policy" --arg release "$release" --arg team "$team" '{POLICY_INDEX:$policy, RELEASE_SKILL:$release, TEAM_OPERATION:$team}')"; then
     echo 'resolve-policy-paths: cannot emit paths — check jq and retry before dispatch' >&2
     return 2
   fi

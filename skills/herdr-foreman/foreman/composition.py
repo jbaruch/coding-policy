@@ -71,7 +71,7 @@ def parse_requirements(payload, roles, task, *, allow_historical_architect=False
         # A seat's ROLE decides its requirement. Carrying both lets the seat
         # entry replace its role's, so a seat could require less than the
         # responsibility does and admit a worker the role's capabilities bar
-        # (rules/agent-team-operation.md Review Before PR).
+        # (skills/herdr-foreman/references/team-operation.md Review Before PR).
         both = sorted(key for key in assignments
                       if SEAT_SEPARATOR in key and canonical_role(key) in assignments)
         if both:

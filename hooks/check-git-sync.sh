@@ -90,7 +90,7 @@ emit_notice() { # <notice-text>
 # The team rules reserve the shared checkout and every worktree operation for
 # the foreman: a worker "runs no git command against the shared checkout,
 # mutating or otherwise" and "never creates, moves, or removes a worktree"
-# (rules/agent-team-operation.md Writers and Checkouts). A hook that tells a
+# (skills/herdr-foreman/references/team-operation.md Writers and Checkouts). A hook that tells a
 # worker to fast-forward `main` or remove a worktree is instructing it to
 # break that rule -- which is exactly what happened in a live round, where the
 # worker reported the contradiction and then obeyed the hook.
@@ -243,12 +243,12 @@ main() {
   role=0
   herdr_role || role=$?
   if (( role == 2 )); then
-    emit_notice "Session-start status — git: \`${db}\` sync not verified and not fetched or fast-forwarded here — ${ROLE_WHY} If this is a Herdr worker session, do not sync the shared checkout (rules/agent-team-operation.md Writers and Checkouts); if it is the foreman, run \`git fetch origin\`, then \`git status\` (rules/sync-before-work.md)."
+    emit_notice "Session-start status — git: \`${db}\` sync not verified and not fetched or fast-forwarded here — ${ROLE_WHY} If this is a Herdr worker session, do not sync the shared checkout (skills/herdr-foreman/references/team-operation.md Writers and Checkouts); if it is the foreman, run \`git fetch origin\`, then \`git status\` (rules/sync-before-work.md)."
     return 0
   fi
   if (( role == 0 )); then
     drift_counts "$db" || return 0
-    emit_notice "Session-start status — git: local \`${db}\` is ${DRIFT_BEHIND} behind / ${DRIFT_AHEAD} ahead of \`origin/${db}\` as last fetched (a Herdr worker session does not fetch). This is a Herdr worker session: the shared checkout is the foreman's (rules/agent-team-operation.md Writers and Checkouts). Do not sync it — work in this worktree and report the drift."
+    emit_notice "Session-start status — git: local \`${db}\` is ${DRIFT_BEHIND} behind / ${DRIFT_AHEAD} ahead of \`origin/${db}\` as last fetched (a Herdr worker session does not fetch). This is a Herdr worker session: the shared checkout is the foreman's (skills/herdr-foreman/references/team-operation.md Writers and Checkouts). Do not sync it — work in this worktree and report the drift."
     return 0
   fi
 

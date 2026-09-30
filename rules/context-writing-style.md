@@ -37,7 +37,7 @@ description: Prose discipline for rules, skills, and READMEs — what to cut, wh
 
 - File paths, command names, flag literals, version numbers, dates, function names, env vars, error codes
 - Constraint-bearing words: required, optional, mandatory, forbidden, deprecated
-- Carve-out preconditions in full (preconditions are the rule for edge cases)
+- Carve-out preconditions in full, in the rule or in the skill reference its binding pointer names (preconditions are the rule for edge cases)
 
 ## Reader-Side — Consult the CHANGELOGs
 
@@ -53,6 +53,7 @@ description: Prose discipline for rules, skills, and READMEs — what to cut, wh
 
 - Atomic bullets — one directive per bullet
 - Carve-outs: lead with "Narrow exception for X.", then numbered preconditions, then a one-line reset stating every other case follows the rule
+- A carve-out whose preconditions live in a skill reference keeps in the rule its trigger ("Narrow exception for X." plus one applies-when line), the pointer `Preconditions are binding: read <path> <Section> before relying on it`, and its reset
 - Never comma-splice preconditions with "; AND ...; AND ..."
 - 3–6 H2 sections per rule, ~25–40 lines total
 - At most one parenthetical clause per sentence — break out a second clause into its own bullet. Function-call notation (`Skill()`, `print()`, etc.), label tags inside lists, and other literal-syntax parens do not count as parenthetical clauses

@@ -61,7 +61,7 @@ JUDGE_DISPATCH_VERSION = 3
 #: Checkpoint record version. 1 carries a mandatory pinned-judge ruling; 2
 #: makes it optional. Version-1 rows keep their judge evidence and are never
 #: rewritten. The checkpoint now records the exhaustion the diagnosis brief is
-#: built from (rules/agent-team-operation.md Judge Seat).
+#: built from (skills/herdr-foreman/references/team-operation.md Judge Seat).
 #: The version `checkpoint` writes. A cited ruling at this version carries the
 #: `requested_by` receipt for the operator request it answers (#400).
 OPERATOR_CHECKPOINT_VERSION = 3
@@ -76,7 +76,7 @@ DISPATCH_METADATA_FIELDS = frozenset({"requirements", "reviewer_scope"})
 #: The judge's diagnosis remedies, descending. A task's next diagnosis sits
 #: below its last, or repeats that rung once against recorded progress, and
 #: `stop` is terminal, so a task takes at most five and cannot loop
-#: (rules/agent-team-operation.md Judge Seat).
+#: (skills/herdr-foreman/references/team-operation.md Judge Seat).
 DIAGNOSIS_LADDER = ("continue", "restructure", "stop")
 #: Diagnosis record version. 1 recorded the remedy alone. 2 adds `reissue` --
 #: whether this diagnosis repeats its predecessor's rung -- and
@@ -105,7 +105,7 @@ DIAGNOSIS_BOUND_CEILING = DEFAULT_FIX_LIMIT
 TASK_CLOSE_OUTCOMES = ("merged", "abandoned")
 #: Fix rounds whose developer stays reserved to its task: the initial
 #: implementation (0) and the retained-context early fixes. Round 4 onward
-#: takes a freshly cleared worker (rules/agent-team-operation.md Fix Loops).
+#: takes a freshly cleared worker (skills/herdr-foreman/references/team-operation.md Fix Loops).
 RETAINED_FIX_ROUNDS = frozenset({0, 1, 2, 3})
 PENDING_STATUSES = frozenset({"reserved", "sending", "sent_but_not_started"})
 DISPATCH_STATUSES = PENDING_STATUSES | {"applied", "not_sent"}
@@ -572,7 +572,7 @@ def _closed_after(store, task, instant):
 def developer_reservations(store, assignments):
     """`{agent: task}` for each developer held through its task's early fixes.
 
-    rules/agent-team-operation.md Fix Loops reserves the developer through
+    skills/herdr-foreman/references/team-operation.md Fix Loops reserves the developer through
     initial and early-fix verification. The owner ledger holds everything
     that decides it: a worker whose latest applied assignment is a developer
     round in `RETAINED_FIX_ROUNDS` is held to that task until a
@@ -623,7 +623,7 @@ def checkpoint(store, assignments, data, at, judge_agent):
         # One ruling per task, never one per allowance boundary: a re-granted
         # budget exhausts too, and citing a ruling at each boundary is the
         # per-round toll this routing removed
-        # (rules/agent-team-operation.md Judge Seat).
+        # (skills/herdr-foreman/references/team-operation.md Judge Seat).
         if any(row["task"] == data["task"] and row["id"] != data["id"] and "judge_evidence" in row
                for row in store["checkpoints"]):
             raise UsageError("This task already records an operator-requested ruling; the operator grants at most one per task. Record this checkpoint without judge_report.", {})
@@ -690,7 +690,7 @@ def investigated_after(assignments, row, task, developer_index):
             and assignment_after(assignments, row["assignment_index"], developer_index))
 
 
-#: The judge's two modes (`rules/agent-team-operation.md` Judge Seat). A
+#: The judge's two modes (`skills/herdr-foreman/references/team-operation.md` Judge Seat). A
 #: dispatch declares which it is for, so a gate can tell a diagnosis -- which
 #: rules on the investigator's assessment and follows the remedy ladder -- from
 #: an adjudication of a contested verdict, which does neither (#425).
@@ -861,7 +861,7 @@ def diagnose(store, assignments, data, at, judge_agent, enrolled_report, supervi
     clean and the remainder is tracked.
 
     A dispatch marked `applied` proves the send, never the delivery. Every
-    team round is supervised (`rules/agent-team-operation.md` Fleet
+    team round is supervised (`skills/herdr-foreman/references/team-operation.md` Fleet
     Supervision), so when the foreman is bound the cited report must be the one
     supervision enrolled for the pinned judge, and a bound foreman with no such
     enrollment has no diagnosis to record. `supervised` and `enrolled_report`
@@ -1075,7 +1075,7 @@ def authorize_plan(store, assignments, data, at):
         raise UsageError("Approval must match this task's current exhausted checkpoint; record a fresh operator checkpoint and correction proposal.", {})
     # The operator overrides a remedy; they do not stand in for one. Without a
     # recorded diagnosis this path would reopen the budget prompt the judge
-    # replaced (rules/agent-team-operation.md Judge Seat).
+    # replaced (skills/herdr-foreman/references/team-operation.md Judge Seat).
     if not any(row["fix_round"] == count for row in diagnoses_for(store, data["task"])):
         raise UsageError("This task has no diagnosis at fix round {}; an older remedy cannot authorize these attempts. Take the judge's diagnosis for this exhaustion with `{}` first.".format(
             count, runnable.command("diagnose")), {})

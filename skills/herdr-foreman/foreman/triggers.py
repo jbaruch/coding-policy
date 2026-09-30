@@ -49,7 +49,7 @@ DECISIONS_SCHEMA_VERSION = 1
 #: Repo-relative location of the consuming repo's trigger declaration.
 DECLARATION_FILE = ".herdr/triggers.json"
 
-#: The four triggers `rules/agent-team-operation.md` Team Composition states
+#: The four triggers `skills/herdr-foreman/references/team-operation.md` Team Composition states
 #: outside the exhaustion path, each mapped to the planned responsibility or
 #: requirements specialty that staffs it.
 TRIGGER_ROLES = {"architect": "architect"}
@@ -145,7 +145,7 @@ PLAN_FIELDS = frozenset({"schema_version", "added", "changed", "package_lines", 
 #: reads as True, so every plan written before it keeps its meaning and only an
 #: explicit `false` opens the no-surface path (#471).
 PLAN_OPTIONAL_FIELDS = frozenset({"writes_repository"})
-#: The responsibilities `rules/agent-team-operation.md` declares read-only on
+#: The responsibilities `skills/herdr-foreman/references/team-operation.md` declares read-only on
 #: repository content. A round claiming to write nothing seats these alone.
 READ_ONLY_ROLES = frozenset({"advisor", "investigator", "architect"})
 

@@ -2,7 +2,7 @@
 # Create one worker's worktree from the shared checkout.
 #
 # The foreman provisions; a worker never runs git against the shared checkout
-# (`rules/agent-team-operation.md` Writers and Checkouts). Fetching, branch and
+# (`skills/herdr-foreman/references/team-operation.md` Writers and Checkouts). Fetching, branch and
 # path validation, and the create-or-attach decision are one right answer per
 # input, so they live here rather than in the foreman's hands
 # (`rules/script-delegation.md`).

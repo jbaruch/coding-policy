@@ -23,7 +23,7 @@ alwaysApply: true
 - Raise each listed item with the user, one question at a time
 - Offer the choices push, commit, open a pull request, delete, or keep
 - Never push, commit, stash, delete or discard a listed item unasked
-- In a Herdr team round the operator carries out the chosen resolution (see `rules/agent-team-operation.md` Writers and Checkouts)
+- In a Herdr team round the operator carries out the chosen resolution (see `skills/herdr-foreman/references/team-operation.md` Writers and Checkouts)
 
 ## Reconciliation With `response-clarity`
 

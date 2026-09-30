@@ -10,7 +10,7 @@ burn out of an agent's remaining budget. `developer` is the heaviest seat and
 them with a `role_costs` map in config.json. Seats are filled heaviest first,
 whatever order `--roles` arrives in, and each seat goes to the eligible agent
 that leaves the round's minimum projected headroom highest -- the minimum
-across the agents holding a seat, per `rules/agent-team-operation.md`
+across the agents holding a seat, per `skills/herdr-foreman/references/team-operation.md`
 ("Headroom is the minimum remaining window per worker, never the average").
 An agent holding no seat burns nothing, so it is not part of that minimum.
 
@@ -230,7 +230,7 @@ def _costs_for(roles, role_costs):
     overrides = role_costs or {}
     # A seat costs what its RESPONSIBILITY costs. Weighing one seat apart would
     # make slices of one responsibility compete under different costs, and
-    # `rules/agent-team-operation.md` gives the role the weight (#434).
+    # `skills/herdr-foreman/references/team-operation.md` gives the role the weight (#434).
     seated = sorted(key for key in overrides if SEAT_SEPARATOR in key)
     if seated:
         raise PlanError(

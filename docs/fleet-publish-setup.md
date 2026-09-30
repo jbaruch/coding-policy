@@ -128,7 +128,7 @@ replaces that with `smart-publish` + the landed-gate reconciliation. Per repo:
    explicit CI-config change is the approval artifact (`rules/ci-safety.md` Hands Off CI
    Config forbids only *unannounced* CI edits).
 4. After merge, confirm the first publish via the full release contract, not "it ran" —
-   `rules/ci-safety.md` Always Watch CI requires the whole ordered conjunction:
+   `skills/release/references/release-contract.md` Publication Confirmation requires the whole ordered conjunction:
    - Capture the registry's `Latest Version` as a baseline **before** the merge.
    - Resolve the run by merge-commit SHA + `push` event (`skills/release/resolve-publish-run.sh`), watch it to terminal state, and require `conclusion == success`.
    - Confirm the registry advanced past the baseline (`skills/release/verify-publish-landed.sh`).

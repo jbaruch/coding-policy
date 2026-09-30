@@ -7,7 +7,7 @@ owner functions; neither reimplements them.
 
 `close-member` enforces the order the chain requires: the assessed outcome
 must already be in the task ledger before any event is acknowledged or the
-enrollment resolved (rules/agent-team-operation.md Fleet Supervision:
+enrollment resolved (skills/herdr-foreman/references/team-operation.md Fleet Supervision:
 acknowledging an observation never accepts the assignment). An `accepted`
 outcome for a reviewer, tester or consultation also needs the report's
 recorded contract lines (`engagement.require_accepted`, #625); `needs_work`

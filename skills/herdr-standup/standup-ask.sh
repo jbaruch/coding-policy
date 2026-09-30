@@ -35,7 +35,7 @@
 #           3 the worker is not idle or done at the first read, at the
 #             measurement, or at the last read just before the send — nothing
 #             was sent. A standup
-#             never interrupts a turn (`rules/agent-team-operation.md`
+#             never interrupts a turn (`skills/herdr-foreman/references/team-operation.md`
 #             Dispatch Safety),
 #           4 the worker's live pane is too narrow for its `REPORT: <path>`
 #             line — nothing was sent. A wrapped marker is one the wait can

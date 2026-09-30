@@ -2,7 +2,7 @@
 # Publish a tessl plugin, CAPTURING the publish command's output so a
 # post-publish out-of-credits exit can be told apart from any other failure.
 #
-# Why this exists (rules/ci-safety.md "Credits Never Block Publishing"): a
+# Why this exists (skills/release/references/release-contract.md "Credits Never Block Publishing"): a
 # tessl org out-of-credits makes `tessl plugin publish` exit non-zero AFTER
 # the artifact already published —
 #   ✔ Published …@X  ->  ✔ Uploaded evals  ->  ##[error]Out of credits  ->  exit 1
@@ -138,7 +138,7 @@ readonly CREDIT_SIGNATURE_REGEX='out of credits'
 # version appears on the registry afterwards: "the version is there" and "this
 # run put it there" are different claims, and only a known
 # publish-completed-then-exited failure makes the second safe to infer. Add a
-# class HERE, never by loosening the check; rules/ci-safety.md points at these
+# class HERE, never by loosening the check; skills/release/references/release-contract.md points at these
 # constants rather than restating them (rules/script-as-black-box.md).
 readonly TIMEOUT_SIGNATURE_REGEX='publish timed out'
 
