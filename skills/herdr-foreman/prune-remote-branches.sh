@@ -10,7 +10,7 @@
 # Decision predicate — a branch on origin, other than origin's default branch,
 # is:
 #   * NEVER TOUCHED OR LISTED when it is protected, or an open pull request
-#     has it as its head (`gh pr list --state open`);
+#     has it as its head (`gh pr list --repo <origin> --state open`);
 #   * DELETED when merged into origin's default branch: immediately before the
 #     deletion (and before a dry run's preview), the branch's tip, the default
 #     branch's tip, which branch origin's HEAD names, the open pull requests
@@ -23,9 +23,11 @@
 #     default branch, age, last author, and the commands to open a pull
 #     request or delete it, the delete leased to the tip judged here;
 #   * KEPT silently when unmerged and younger than that (not-idle).
-# Without the GitHub CLI, or when its first reads (protected branches, open
-# pull requests) fail, nothing is deleted or listed: `could_not_check` says
-# why. Each deletion stands on its own final re-read of origin, so a gh read
+# Every gh call names origin's GitHub repository, resolved once per run by
+# `skills/release/origin-repo.py`, never gh's default repository. Without the
+# GitHub CLI, when origin names no GitHub repository, or when the first gh
+# reads (protected branches, open pull requests) fail, nothing is deleted or
+# listed: `could_not_check` says why. Each deletion stands on its own final re-read of origin, so a gh read
 # that fails there keeps that branch alone (`failed`); a branch already
 # deleted passed its own re-read and is reported in `deleted`. A failed git or gh command that talks to origin
 # is reported by exit code and the command to rerun, never by its own
@@ -61,6 +63,8 @@ REMOTE_IDLE_HOURS="${PRUNE_REMOTE_IDLE_HOURS:-24}"
 WORKDIR=""
 ERRFILE=""
 ROWS=""
+#: origin's GitHub repository as <owner>/<repo>; every gh call names it.
+REPO=""
 
 warn() { printf 'prune-remote-branches: %s\n' "$1" >&2; }
 
@@ -98,9 +102,9 @@ remote_tip() { # <shared> <branch>
 # Echo the open pull requests' head branch names, one per line.
 open_pr_heads() { # <shared> [branch]
   local rc=0 out
-  local -a args=(pr list --state open --limit 1000 --json headRefName --jq '.[].headRefName')
+  local -a args=(pr list --repo "$REPO" --state open --limit 1000 --json headRefName --jq '.[].headRefName')
   [[ -n "${2:-}" ]] && args+=(--head "$2")
-  out="$(cd "$1" && GH_PROMPT_DISABLED=1 gh "${args[@]}" 2>"$ERRFILE")" || rc=$?
+  out="$(GH_PROMPT_DISABLED=1 gh "${args[@]}" 2>"$ERRFILE")" || rc=$?
   if (( rc != 0 )); then network_failure "$rc" "$1" gh "${args[@]}"; return 1; fi
   printf '%s' "$out"
 }
@@ -121,9 +125,34 @@ branch_protected() { # <shared> <branch>
   # One path segment: a branch named feat/add-auth would otherwise route as
   # two, and the lookup would fail for every such branch.
   segment="$(python3 -c 'import sys, urllib.parse; print(urllib.parse.quote(sys.argv[1], safe=""))' "$2")"
-  out="$(cd "$1" && GH_PROMPT_DISABLED=1 gh api "repos/{owner}/{repo}/branches/${segment}" --jq .protected 2>"$ERRFILE")" || rc=$?
-  if (( rc != 0 )); then network_failure "$rc" "$1" gh api "repos/{owner}/{repo}/branches/${segment}"; return 1; fi
+  out="$(GH_PROMPT_DISABLED=1 gh api "repos/${REPO}/branches/${segment}" --jq .protected 2>"$ERRFILE")" || rc=$?
+  if (( rc != 0 )); then network_failure "$rc" "$1" gh api "repos/${REPO}/branches/${segment}"; return 1; fi
   printf '%s' "$out"
+}
+
+# Set REPO to origin's GitHub repository, or return 1 with ERRFILE saying why.
+resolve_repo() { # <shared>
+  local src dir here helper out rc=0
+  src="${BASH_SOURCE[0]}"
+  case "$src" in
+    */*) dir="${src%/*}" ;;
+    *) dir=. ;;
+  esac
+  # A sentinel carries the directory across command substitution's newline strip.
+  if ! here="$(CDPATH='' cd -- "${dir:-/}" && pwd && printf x)"; then
+    printf 'the script directory %s cannot be entered — reinstall the plugin\n' "${dir:-/}" > "$ERRFILE"; return 1
+  fi
+  here="${here%x}"; here="${here%$'\n'}"
+  helper="${here}/../release/origin-repo.py"
+  if [[ ! -f "$helper" || ! -r "$helper" ]]; then
+    printf '%s is not readable, so origin cannot be matched to a GitHub repository — reinstall the plugin\n' "$helper" > "$ERRFILE"; return 1
+  fi
+  out="$(python3 "$helper" "$1" 2>"$ERRFILE")" || rc=$?
+  if (( rc != 0 )); then return 1; fi
+  if ! REPO="$(printf '%s' "$out" | python3 -c 'import json, sys; print(json.load(sys.stdin)["repo"])' 2>"$ERRFILE")" || [[ -z "$REPO" ]]; then
+    # shellcheck disable=SC2016  # The backticks are literal text in the message.
+    printf 'origin-repo.py answered without a repository — run `python3 %s %s` to inspect it\n' "$helper" "$1" > "$ERRFILE"; return 1
+  fi
 }
 
 main() {
@@ -175,11 +204,13 @@ main() {
   local could_not_check="" protected="" prs=""
   if ! command -v gh >/dev/null; then
     could_not_check="the GitHub CLI (gh) is not on PATH, so open pull requests and protected branches cannot be checked — install gh and run \`gh auth login\`"
+  elif ! resolve_repo "$shared"; then
+    could_not_check="$(cat "$ERRFILE")"
   else
     rc=0
-    protected="$(cd "$shared" && GH_PROMPT_DISABLED=1 gh api 'repos/{owner}/{repo}/branches?protected=true&per_page=100' --paginate --jq '.[].name' 2>"$ERRFILE")" || rc=$?
+    protected="$(GH_PROMPT_DISABLED=1 gh api "repos/${REPO}/branches?protected=true&per_page=100" --paginate --jq '.[].name' 2>"$ERRFILE")" || rc=$?
     if (( rc != 0 )); then
-      network_failure "$rc" "$shared" gh api 'repos/{owner}/{repo}/branches?protected=true'
+      network_failure "$rc" "$shared" gh api "repos/${REPO}/branches?protected=true"
       could_not_check="$(cat "$ERRFILE")"
     elif ! prs="$(open_pr_heads "$shared")"; then
       could_not_check="$(cat "$ERRFILE")"
@@ -210,9 +241,9 @@ main() {
   fi
 
   rc=0
-  python3 - "$shared" "$db" "$dry" "$ROWS" "$could_not_check" <<'PY' || rc=$?
+  python3 - "$shared" "$db" "$dry" "$ROWS" "$could_not_check" "$REPO" <<'PY' || rc=$?
 import json, shlex, sys
-shared, db, dry, rows_path, cannot = sys.argv[1], sys.argv[2], sys.argv[3] == "1", sys.argv[4], sys.argv[5]
+shared, db, dry, rows_path, cannot, repo = sys.argv[1], sys.argv[2], sys.argv[3] == "1", sys.argv[4], sys.argv[5], sys.argv[6]
 out = {"shared": shared, "default_branch": db, "dry_run": dry, "deleted": [], "questionable": [], "kept": [],
        "could_not_check": cannot or None, "failed": []}
 with open(rows_path, "rb") as handle:
@@ -228,7 +259,7 @@ for i in range(0, len(fields), 6):
     elif kind == "questionable":
         where = shlex.quote(shared)
         out["questionable"].append({"branch": branch, "ahead": int(a), "age_hours": int(b), "author": c,
-                                    "open_pr": "gh pr create --head {}".format(shlex.quote(branch)),
+                                    "open_pr": "gh pr create --repo {} --head {}".format(shlex.quote(repo), shlex.quote(branch)),
                                     "delete": "git -C {} push --force-with-lease={} origin --delete {}".format(
                                         where, shlex.quote("refs/heads/{}:{}".format(branch, d)),
                                         shlex.quote("refs/heads/" + branch))})

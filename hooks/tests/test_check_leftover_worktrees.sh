@@ -130,6 +130,28 @@ SH
   chmod +x "$CASE/bin/gh" || die "chmod the fake gh failed"
 }
 
+# A git first on PATH that answers `remote get-url` with a GitHub URL, so the
+# bare origin can pose as a GitHub repository for prune-remote-branches.sh;
+# every other call is the real git's.
+write_fake_git() {
+  local real
+  real="$(command -v git)" || die "git is required"
+  printf '#!/usr/bin/env bash\nREAL_GIT=%q\n' "$real" > "$CASE/bin/git" || die "cannot write the fake git"
+  cat >> "$CASE/bin/git" <<'SH' || die "cannot write the fake git"
+set -euo pipefail
+args=("$@")
+i=0
+if [[ "${args[0]:-}" == -C ]]; then i=2; fi
+if [[ "${args[i]:-}" == remote && "${args[i+1]:-}" == get-url ]]; then
+  # A missing origin still fails as git's own does.
+  "$REAL_GIT" "$@" >/dev/null
+  echo https://github.com/acme/widgets.git; exit 0
+fi
+exec "$REAL_GIT" "$@"
+SH
+  chmod +x "$CASE/bin/git" || die "chmod the fake git failed"
+}
+
 # Per case: origin, a shared clone, a worktree root and the fake gh. Sets
 # CASE, BARE, SHARED, ROOT.
 mk_case() { # <name>
@@ -144,6 +166,7 @@ mk_case() { # <name>
   quiet "push main" git -C "$SHARED" push -q -u origin main
   quiet "set-head" git -C "$SHARED" remote set-head origin --auto >/dev/null
   write_fake_gh
+  write_fake_git
 }
 
 commit_file() { # <checkout> <file>
@@ -538,6 +561,8 @@ main() {
     cp "${HERE}/../../skills/herdr-foreman/bounded-run.sh" "${HERE}/../../skills/herdr-foreman/prune-worktrees.sh" \
       "${HERE}/../../skills/herdr-foreman/prune-remote-branches.sh" "$stage16/skills/herdr-foreman/" \
       || die "stage the owner scripts failed"
+    mkdir -p "$stage16/skills/release" || die "mkdir the staged release skill failed"
+    cp "${HERE}/../../skills/release/origin-repo.py" "$stage16/skills/release/" || die "stage origin-repo.py failed"
     local real_hook16="$HOOK"
     HOOK="$stage16/hooks${nl}/$(basename "$real_hook16")"
     run_hook "$SHARED"

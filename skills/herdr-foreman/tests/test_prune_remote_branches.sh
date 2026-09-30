@@ -29,6 +29,9 @@
 #                                  path segment; feat/add-auth is deleted.
 #  15. Stale, changed           -> a pull request or protection arriving before
 #                                  the listing keeps it (changed), unlisted.
+#  18. gh default != origin     -> every gh call names origin's repository, so
+#                                  its open pull request and protection hold.
+#  19. Non-GitHub origin        -> nothing deleted, could_not_check, no gh call.
 #   3 also checks the reported delete command is leased to the judged tip.
 #
 # Run: bash skills/herdr-foreman/tests/test_prune_remote_branches.sh
@@ -64,16 +67,40 @@ quiet() { # <what> <command...>
   fi
 }
 
-# A fake gh answering from <dir>: `prs` lists open pull-request heads, one per
-# line; `protected` lists protected branches; `fail` makes every call exit 1;
-# `on-head` is a script run when `pr list --head` is asked (a race injector).
+#: The repository every case's origin names; the fake gh answers for it alone.
+ORIGIN_REPO=acme/widgets
+
+# A fake gh answering from <dir> for ORIGIN_REPO: `prs` lists open pull-request
+# heads, one per line; `protected` lists protected branches; `fail` makes every
+# call exit 1; `on-head` is a script run when `pr list --head` is asked (a race
+# injector). Every call's argv is appended to `argv`. A call that does not name
+# ORIGIN_REPO reaches gh's default repository, a different and empty one: no
+# protected branches, no open pull requests.
 write_fake_gh() { # <dir>
   mkdir -p "$1/bin" || die "cannot create $1/bin"
   cat > "$1/bin/gh" <<'SH' || die "cannot write the fake gh"
 #!/usr/bin/env bash
 set -euo pipefail
 d="${FAKE_GH_DIR:?}"
+origin=acme/widgets
+printf '%s\n' "$*" >> "$d/argv"
 if [[ -e "$d/fail" ]]; then echo "gh: HTTP 502 from https://token@example.invalid" >&2; exit 1; fi
+bound=0
+case "$1" in
+  api) if [[ "$2" == "repos/${origin}/"* ]]; then bound=1; fi ;;
+  pr)
+    prev=""
+    for a in "$@"; do
+      if [[ "$prev" == --repo && "$a" == "$origin" ]]; then bound=1; fi
+      prev="$a"
+    done ;;
+esac
+if (( ! bound )); then
+  case "$1" in
+    api) if [[ "$2" != *'?protected'* ]]; then echo false; fi ;;
+  esac
+  exit 0
+fi
 case "$1" in
   api)
     if [[ "$2" == *'?protected'* ]]; then
@@ -104,6 +131,28 @@ SH
   chmod +x "$1/bin/gh" || die "cannot make the fake gh executable"
 }
 
+# A git first on PATH that answers `remote get-url` from <dir>/origin-url, so
+# the bare origin can pose as a GitHub repository; every other call is the
+# real git's.
+write_fake_git() { # <dir>
+  local real
+  real="$(command -v git)" || die "git is required"
+  printf '#!/usr/bin/env bash\nREAL_GIT=%q\n' "$real" > "$1/bin/git" || die "cannot write the fake git"
+  cat >> "$1/bin/git" <<'SH' || die "cannot write the fake git"
+set -euo pipefail
+args=("$@")
+i=0
+if [[ "${args[0]:-}" == -C ]]; then i=2; fi
+if [[ "${args[i]:-}" == remote && "${args[i+1]:-}" == get-url ]]; then
+  # A missing origin still fails as git's own does.
+  "$REAL_GIT" "$@" >/dev/null
+  cat "${FAKE_GH_DIR:?}/origin-url"; exit 0
+fi
+exec "$REAL_GIT" "$@"
+SH
+  chmod +x "$1/bin/git" || die "cannot make the fake git executable"
+}
+
 # Per case: a bare origin with main, a clone as the shared checkout, and the
 # fake gh's directory. Sets CASE, BARE, SHARED.
 mk_case() { # <name>
@@ -116,6 +165,8 @@ mk_case() { # <name>
   commit_on "$SHARED" main base "$STALE_DATE"
   quiet "push main" git -C "$SHARED" push -q origin main
   write_fake_gh "$CASE"
+  write_fake_git "$CASE"
+  printf 'https://github.com/%s.git\n' "$ORIGIN_REPO" > "$CASE/origin-url" || die "write origin-url failed"
 }
 
 commit_on() { # <repo> <branch> <file> <date>
@@ -182,7 +233,7 @@ main() {
   run
   if [[ $RC -eq 0 ]] && on_origin feat/stale \
      && [[ "$(jq_py '[(q["branch"], q["ahead"], q["age_hours"], q["author"]) for q in doc["questionable"]]')" == "[('feat/stale', 1, 48, 'Ada')]" ]] \
-     && [[ "$(jq_py 'doc["questionable"][0]["open_pr"]')" == "gh pr create --head feat/stale" ]] \
+     && [[ "$(jq_py 'doc["questionable"][0]["open_pr"]')" == "gh pr create --repo ${ORIGIN_REPO} --head feat/stale" ]] \
      && [[ "$(jq_py 'doc["questionable"][0]["delete"]')" == "git -C $SHARED push --force-with-lease=refs/heads/feat/stale:$(git -C "$BARE" rev-parse feat/stale) origin --delete refs/heads/feat/stale" ]]; then pass
   else fail "c3: RC=$RC OUT=$OUT ERR=$ERR"; fi
 
@@ -314,6 +365,41 @@ SH
   if [[ $RC -eq 2 ]] && on_origin feat/done && [[ "$(jq_py 'doc["deleted"]')" == "[]" ]] \
      && [[ "$(jq_py '[f["target"] for f in doc["failed"]]')" == "['feat/done']" ]]; then pass
   else fail "c17: RC=$RC OUT=$OUT ERR=$ERR"; fi
+
+  echo "18. with gh's default repository elsewhere, every gh call names origin's"
+  mk_case c18
+  push_branch feat/open-pr "$STALE_DATE" 1
+  push_branch release/1 "$STALE_DATE" 1
+  push_branch feat/done "$STALE_DATE" 1
+  printf 'feat/open-pr\n' > "$CASE/prs" || die "write prs failed"
+  printf 'release/1\n' > "$CASE/protected" || die "write protected failed"
+  printf 'git@github.com:%s\n' "$ORIGIN_REPO" > "$CASE/origin-url" || die "write origin-url failed"
+  run
+  local unbound
+  unbound="$(python3 - "$CASE/argv" "$ORIGIN_REPO" <<'PY'
+import sys
+path, origin = sys.argv[1], sys.argv[2]
+with open(path, encoding="utf-8") as handle:
+    calls = [line.split() for line in handle if line.strip()]
+bad = [c for c in calls
+       if not ((c[0] == "api" and c[1].startswith("repos/{}/".format(origin)))
+               or (c[0] == "pr" and "--repo" in c and c[c.index("--repo") + 1] == origin))]
+print(len(calls) if not bad else "unbound: {}".format(bad))
+PY
+)"
+  if [[ $RC -eq 0 ]] && on_origin feat/open-pr && on_origin release/1 && ! on_origin feat/done \
+     && [[ "$(jq_py 'doc["deleted"]')" == "['feat/done']" ]] && [[ "$unbound" =~ ^[1-9][0-9]*$ ]]; then pass
+  else fail "c18: RC=$RC OUT=$OUT ERR=$ERR calls=$unbound"; fi
+
+  echo "19. an origin that names no GitHub repository deletes nothing and asks gh nothing"
+  mk_case c19
+  push_branch feat/done "$STALE_DATE" 1
+  printf 'https://token@gitlab.example.invalid/acme/widgets.git\n' > "$CASE/origin-url" || die "write origin-url failed"
+  run
+  if [[ $RC -eq 2 ]] && on_origin feat/done && [[ ! -e "$CASE/argv" ]] \
+     && [[ "$(jq_py '"not a GitHub repository URL" in doc["could_not_check"] and not doc["deleted"]')" == True ]] \
+     && [[ "$OUT$ERR" != *token@* ]]; then pass
+  else fail "c19: RC=$RC OUT=$OUT ERR=$ERR"; fi
 
   echo "11. usage is exit 1 with no JSON"
   RC=0
