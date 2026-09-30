@@ -165,7 +165,7 @@ a `## BLOCKED` section can sit under a report that otherwise reads as finished.
 
 ## Release Gate
 
-For an authorized implementation release, Step 12 requires all four:
+For an authorized implementation release, Step 12 requires all five:
 
 1. The developer's report names the branch and the commit SHA it pushed.
 2. A broad reviewer **Mode B** report reviews that same SHA and records
@@ -173,17 +173,24 @@ For an authorized implementation release, Step 12 requires all four:
 3. A broad tester **Mode C** report verifies that same SHA, with the repo's
    gates run, and records `VERDICT: approved`.
 4. Nothing has been pushed to the branch after those two reports.
+5. The task carries no open verdict gate (`report-gate-status`). `apply`
+   enforces this one itself: it refuses a fresh `release` dispatch, dry runs
+   included, while any is open. A completed release replay is exempt; fix,
+   re-check and judge dispatches are never held.
 
 A blocking `VERDICT:` from a `security`, `ux-product` or `documentation`
 consultation is a blocking finding for the round, taken through the Blocking
 Gate and fix loop like a reviewer's or tester's.
 
 A disputed blocking verdict settles one of two ways. A completed adjudication
-(`uphold` or `amend`) settles it directly. A finding a weighing ruled `defer`
-or `decline` is settled only by the next reviewer or tester report at the tip,
-which marks it DECLINED, citing the ruling, and records `VERDICT: approved`
-(see `skills/herdr-foreman/references/judge-round.md`). The foreman never
-matches rulings to findings.
+(`uphold` or `amend`) decides it, and the gated responsibility's next report at
+the tip, citing the ruling and recording `VERDICT: approved`, clears its gate.
+A finding a weighing ruled `defer` or `decline` is settled the same way: the
+next reviewer or tester report at the tip marks it DECLINED, citing the ruling,
+and records `VERDICT: approved` (see
+`skills/herdr-foreman/references/judge-round.md`). The foreman never matches
+rulings to findings, and `report-gate-clear` refuses a judge's report as
+evidence for a verdict gate.
 
 Under a recorded `stop` remedy, 2 and 3 read against what ships: the excluded
 defect is a tracked accepted defect and the shipped scope carries no other
@@ -262,6 +269,26 @@ as `awaiting_diagnosis`, consult the investigator with round context
 assessed report. Use the plan its
 remedy records for the bounded extra attempts; collect each preceding attempt's
 actual blocking review before continuing.
+
+The owners record the gate itself, never the foreman. `assess-specialist`
+(a replay included) and `record-report` write a verdict gate into the report-gate
+store whenever the report's parsed `VERDICT:` line is `blocking`, one gate per
+report bytes. The gate never refuses the assignment's acceptance: a blocking
+report is still an accepted assignment. It holds the task's release (Release
+Gate item 5) until an explicit clear, one per blocking report:
+
+- **Re-check** — `report-gate-clear --report <blocking report> --evidence
+  <re-check report> --reason <what it settled>`, citing the gated
+  responsibility's later report once its `VERDICT: approved` is recorded.
+- **Operator decision** — `report-gate-clear --report <blocking report>
+  --decision <resolved attention decision>`, as for a classifier gate.
+- **Judge ruling** — refused. The ruling decides; the re-check that cites it
+  clears.
+
+Exit 0 prints the resolved gates; exit 1 names what the cited evidence lacks
+and records nothing. A clear on a report that also carries a classifier gate
+resolves both or neither. What qualifies as a re-check is `_rechecked`'s
+docstring in `skills/herdr-foreman/foreman/report_gates.py`.
 
 ## Branch-Changing Ruling
 
@@ -506,7 +533,9 @@ authorization. A blocked ruling follows the operator-question path below.
 - **`uphold A` / `uphold B` / `amend`, `ACTION:` changing no branch content**
   — record the ruling. Proceed to Step 14 only with Step 12's broad reports
   against the current tip. Otherwise re-run Phase 2 with full briefs carrying
-  the ruling. Do not re-dispatch the judge for the same settled dispute.
+  the ruling. Do not re-dispatch the judge for the same settled dispute. The
+  ruling clears no verdict gate: the re-check that cites it and records
+  `VERDICT: approved` does, through the Blocking Gate's `report-gate-clear`.
 - **`uphold A` / `uphold B` / `amend`, `ACTION:` changing the branch** — apply
   the round-flow reference's Branch-Changing Ruling contract. Finish here while
   its required operator decision is pending; otherwise return to Step 12 with
@@ -529,7 +558,9 @@ authorization. A blocked ruling follows the operator-question path below.
   The change is the judge's to name and the foreman's to carry out.
 - **`REMEDY: stop`** — record the diagnosis, release what is clean, and record
   the remainder as a tracked accepted defect. The remedy carries that
-  authority; do not re-escalate it. Proceed to Step 14 for what ships. The
+  authority; do not re-escalate it. Proceed to Step 14 for what ships, once
+  the reviewer and tester passes on the shipped tip have cleared its verdict
+  gates as re-checks. The
   operator overrides it with a plan over the remedy or a different approach
   through `authorize-approach`, and the diagnosis path reopens with that
   approach's own ladder.

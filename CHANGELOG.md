@@ -1,5 +1,50 @@
 # Changelog
 
+### Changed
+
+- **A blocking `VERDICT:` holds the release in owner state, not in foreman
+  prose (Closes #646).** Deferred from #645 by the operator's standalone
+  weighing: after #625 the mapping from a blocking verdict to a round gate was
+  still SKILL.md Step 12 prose, and it is deterministic, so under
+  `rules/script-delegation.md` it belongs to the owners. The design note on
+  #646 was accepted with its three defaults as the operator's final answers: a
+  judge ruling never clears a verdict gate directly, clearing is explicit per
+  blocking report, and the release refusal covers verdict gates only.
+  - `foreman/report_gates.py`: the #617 store gains a second source.
+    `record_verdict` records a `source: verdict`, `level: block` gate naming
+    the dispatch the verdict was recorded against, idempotent per (source,
+    report, sha256). `assess-specialist` calls it on every blocking
+    report-sourced record, a replay included, so a crash between the
+    assessment and the gate heals on retry; `record-report` calls it under the
+    sidecar lock it already holds. `require_clear` ignores verdict gates: under
+    #625 a blocking report is still an accepted assignment.
+  - `apply` refuses a fresh `release` dispatch while the task carries an open
+    verdict gate, dry runs included; a completed release replay is exempt, and
+    fix, re-check and judge dispatches are never held. #617 classifier-gate
+    behaviour is unchanged.
+  - `report-gate-clear` is unchanged at the CLI; `resolve` splits by source.
+    A verdict gate clears on a re-check (a delivered report of the same
+    responsibility, and specialty for a consultation, on the same task,
+    dispatched after the gate, whose owner-parsed verdict at its current bytes
+    is `approved` and which carries no open classifier gate) or on the
+    operator's resolved decision. A judge's report is refused: the owner
+    cannot tell which side a ruling upheld without parsing brief text, so the
+    ruling decides and the re-check that cites it clears. A clear on a report
+    carrying both sources resolves both or neither.
+  - Sidecar schema 1 → 2: every gate carries `source` and `dispatch`; a
+    classifier gate keeps its label fields with `dispatch: null`, a verdict
+    gate carries none of them. The owner upgrades schema 1 in memory and the
+    next write persists it. A lagging reader keeps refusing an unknown schema
+    — a stated exception to `rules/stateful-artifacts.md` Migration Policy,
+    since "no usable prior state" for a gate store would read as no gate,
+    which is fail-open.
+  - Docs: `rules/agent-team-operation.md` Reports (a blocking verdict holds
+    the release until an approved re-check or the operator clears it; a judge
+    ruling decides but never clears), SKILL.md Steps 12 and 14, round-flow's
+    Blocking Gate, Release Gate item 5 and Ruling Outcomes,
+    `references/report-classifier.md` (Verdict Gates, Sidecar schema 2) and
+    `state-schema.md`.
+
 ## 0.3.342 — 2026-09-30
 
 ### Changed

@@ -409,7 +409,9 @@ description: Running a multi-agent team — task-based specialist composition, c
 - The foreman never reads around the gap
 - Line formats and refusal classes are in `skills/herdr-foreman/foreman/report_contract.py`'s module docstring
 - A statement about task content in the ledger, retrospectives or memory cites the report it comes from
-- A completed adjudication (`uphold` or `amend`) settles a disputed blocking `VERDICT:` directly
+- A blocking `VERDICT:` holds the task's release until the same responsibility's approved re-check or the operator's resolved decision clears it
+- A completed adjudication (`uphold` or `amend`) decides a disputed blocking `VERDICT:`
+- A judge ruling never clears that hold
 - A finding a weighing ruled `defer` or `decline` is settled only by the next reviewer or tester report at the tip, marking it DECLINED and recording `VERDICT: approved`
 - `foreman record-historical-review` is outside the report contract
 
