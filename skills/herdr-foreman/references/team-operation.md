@@ -120,7 +120,8 @@ The Herdr team round contract. `rules/agent-team-operation.md` Two Modes decides
 - A rung already repeated is spent
 - The ladder belongs to the approach, never the task lifetime
 - An approved new direction starts its ladder at `continue`
-- `stop` is terminal and never repeats; an approach takes at most five diagnoses
+- `stop` is terminal and never repeats
+- An approach's diagnosis count is bounded by `DIAGNOSIS_LADDER` plus one reissue per rung (`skills/herdr-foreman/foreman/recovery.py` `_remedy_options`)
 - No exhausted allowance waits on an operator decision
 - The judge is read-only: it never edits a repository file, never runs a mutating git or `gh` command, never posts to GitHub, never dispatches a subagent — its only output is its report file
 - A weighing has no positions
@@ -206,7 +207,7 @@ The Herdr team round contract. `rules/agent-team-operation.md` Two Modes decides
 
 - Count fix rounds per task after its initial implementation
 - Bound corrections per approach, never per task lifetime
-- Default each approach's allowance to five rounds
+- Default each approach's allowance to `DEFAULT_FIX_LIMIT` rounds (`skills/herdr-foreman/foreman/recovery.py`)
 - A task's original direction is its initial approach
 - Start a fresh allowance only for an evidenced change of approach
 - The investigator names the failed approach, its root cause and the discriminating experiment
@@ -223,7 +224,7 @@ The Herdr team round contract. `rules/agent-team-operation.md` Two Modes decides
 - Reserve the developer through initial and early-fix verification before assigning it another task or role
 - The planner derives reservations and busy workers from the owner records, never from the foreman's memory
 - Close a task through the owner utility when it merges or is abandoned
-- Fix rounds 1–3 retain the same developer's context when the retention preconditions hold
+- Fix rounds in `RETAIN_CONTEXT_ROUNDS` (`skills/herdr-foreman/foreman/assign.py`) retain the same developer's context when the retention preconditions hold
 - Narrow exception for retaining context on a same-role fix round.
 - Preconditions (all required):
   1. The worker remains the developer for the same task
@@ -232,7 +233,7 @@ The Herdr team round contract. `rules/agent-team-operation.md` Two Modes decides
   4. The foreman uses `--retain-context` with the task identifier and fix-round number
 - Every other developer assignment clears context
 - `--no-clear` records a hand-cleared pane, never retained context
-- Fix rounds 4 and later use a freshly cleared worker
+- Fix rounds past `RETAIN_CONTEXT_ROUNDS` use a freshly cleared worker
 - Narrow exception for a recorded fresh early correction.
 - Preconditions (all required):
   1. The owner ledger preserves the original task, base, preceding developer assignment, and actual next fix number
@@ -392,7 +393,7 @@ The Herdr team round contract. `rules/agent-team-operation.md` Two Modes decides
 - Every report wait runs through `skills/herdr-foreman/wait-report.sh`, never a hand-rolled loop
 - Each interval a wait reads the report file, the worker's status and the remaining budget, and ends on whichever settles first
 - The poll interval and the give-up budget are script-owned constants, never numbers the foreman picks per round
-- Confirm a `blocked` verdict across two reads and the pane before acting on it
+- Confirm a `blocked` verdict through `skills/herdr-foreman/wait-report.sh`'s blocked confirmation (`FOREMAN_BLOCKED_CONFIRM_SEC`) and the pane before acting on it
 - A blocked worker is surfaced to the operator, never answered on the operator's behalf beyond its brief
 - Record a terminal provider refusal against its dispatch before any replacement
 - Never resend a refused brief to the same provider
@@ -512,7 +513,7 @@ The Herdr team round contract. `rules/agent-team-operation.md` Two Modes decides
 
 ## Retrospectives
 
-- The foreman completes a retrospective at least every 24 hours during active team work
+- The foreman completes a retrospective at least once per `INTERVAL` (`skills/herdr-foreman/foreman/retrospective.py`) during active team work
 - Check the cadence on active resume, before planning or dispatch, and between report waits
 - Complete a retrospective before clearing or relaunching an existing worker, or changing its seat, model, or effort
 - Bind transition coverage to the outgoing work and session, source evidence, and proposed assignment

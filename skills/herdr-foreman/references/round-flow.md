@@ -398,7 +398,8 @@ holds nothing on the second pass they did not hold on the first. Re-entry
 moves down the ladder `continue` → `restructure` → `stop`, or repeats one rung
 once against a recorded `PROGRESS` line: a remedy that produced nothing is
 never reissued, the ladder never runs backwards, a rung already repeated is
-spent, and `stop` is terminal, so an approach takes at most five diagnoses. No
+spent, and `stop` is terminal, which bounds an approach's diagnoses (see
+`skills/herdr-foreman/foreman/recovery.py` `_remedy_options`). No
 operator sits in the path of any of them. The ladder is read per approach, so
 an approved new direction starts at `continue` rather than inheriting the rungs
 the approaches it replaced spent.
