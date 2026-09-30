@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.351 — 2026-09-30
+
 ### Fixed
 
 - **`release` and `onboard-repo` open their PR in origin's repository (Closes #666).**
