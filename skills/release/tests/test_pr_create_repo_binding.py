@@ -31,7 +31,8 @@ class PrCreateRepoBindingTest(unittest.TestCase):
     def test_each_pr_step_resolves_origin_then_names_it(self):
         for skill, number in PR_STEPS:
             with self.subTest(skill=skill):
-                body = step((SKILLS / skill / "SKILL.md").read_text(encoding="utf-8"), number)
+                # Whitespace-normalized: a Markdown line wrap never changes an instruction.
+                body = " ".join(step((SKILLS / skill / "SKILL.md").read_text(encoding="utf-8"), number).split())
                 found = COMMAND.findall(body)
                 self.assertTrue(found, "{} Step {} has no gh pr create command".format(skill, number))
                 self.assertIn(RESOLVE, body)
