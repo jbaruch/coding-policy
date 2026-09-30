@@ -19,7 +19,7 @@ import subprocess
 import sys
 from typing import NoReturn
 import time
-from contextlib import nullcontext
+from contextlib import ExitStack, nullcontext
 from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
@@ -1166,6 +1166,16 @@ def _require_bound_slices(document, seated, briefs, bodies=None, contents=None):
 
 
 def cmd_apply(args, client=None, warn=None, trace=None):
+    # A fresh release's verdict-gate check holds the report-gate lock until
+    # apply returns, so no verdict gate is recorded between the check and the
+    # send (#646; foreman/report_gates.py `holding`).
+    with ExitStack() as stack:
+        def hold_gates():
+            stack.enter_context(report_gates.holding(_state_path(args)))
+        return _apply(args, client, warn, trace, hold_gates)
+
+
+def _apply(args, client, warn, trace, hold_gates):
     agents = load_config(_config_path(args))
     agents_by_name = {agent.name: agent for agent in agents}
     document = _load_assignments(args.assignments, document=True)
@@ -1332,6 +1342,11 @@ def cmd_apply(args, client=None, warn=None, trace=None):
             # writes nothing. A batch of replays alone returns its saved
             # receipts unconsulted.
             attention.require_dispatch_clear(state_path, args.task, at)
+            # A fresh release waits for the task's open verdict gates; a
+            # completed release replay is not re-gated (#646).
+            if any(canonical_role(role) == "release" for role in fresh):
+                hold_gates()
+                report_gates.require_no_verdict_gate(state_path, args.task, store["dispatches"])
             moves = _refusal_moves(store, agents_by_name, assignments, fresh, args, paths, reports, contents)
         for role, name, identifier, fingerprint, prior in resolved:
             if supervised:
@@ -1366,6 +1381,9 @@ def cmd_apply(args, client=None, warn=None, trace=None):
     elif args.task:
         # A dry run rehearses a send and meets the same gates (#399).
         attention.require_dispatch_clear(state_path, args.task, at)
+        if any(canonical_role(role) == "release" for role in assignments):
+            hold_gates()
+            report_gates.require_no_verdict_gate(state_path, args.task, store["dispatches"])
         _refusal_moves(store, agents_by_name, assignments, list(assignments), args, paths, reports)
     # A fresh judge seat at an exhausted allowance waits for the assessment it
     # rules on, dry runs included. A completed replay has left `assignments`
@@ -1882,6 +1900,11 @@ def _run_recovery(args, state_path, warn, client, trace):
         # a refusal from either leaves the state unsaved.
         result = recovery.record_report(store, data, at)
         report_gates.require_clear(state_path, data["report"], data["verdict"] == "approved")
+        # A blocking verdict holds the task's release until a re-check clears
+        # it (#646); recorded under the lock this command already holds.
+        if result["verdict"] == "blocking":
+            report_gates.record_verdict(state_path, result["report"], result["evidence"]["sha256"],
+                                        result["dispatch"], at)
     elif args.command == "authorize-refused-dispatch":
         result = recovery.authorize_refused_dispatch(store, data, at)
     elif args.command == "record-refusal":
@@ -1912,6 +1935,11 @@ def _run_recovery(args, state_path, warn, client, trace):
             engagement.validate_assessments(state)
             save_state(state_path, state)
             raise
+        # A blocking verdict holds the task's release (#646). A replay records
+        # it too, so a crash between the two writes heals on retry.
+        if result["source"] == "report" and result["verdict"] == "blocking":
+            report_gates.record_verdict(state_path, result["report"], result["report_evidence"]["sha256"],
+                                        result["dispatch"], at)
     elif args.command == "import-correction":
         result = historical.import_attempt(store, history, data, at)
         if result["assignment_index"] == len(history):

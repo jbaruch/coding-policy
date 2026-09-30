@@ -625,6 +625,11 @@ bash "$CP/skills/herdr-foreman/foreman.sh" report-gate-record --labels <labels.j
 - Exit 0 prints one JSON object: `recorded`, `replayed` and `no_gate` lists
 - Exit 1: nothing is recorded; resolve the cause stderr names before gating any report
 - `close-member` and `record-report` refuse while a gate forbids the decision
+- `assess-specialist` and `record-report` record a verdict gate for every
+  `VERDICT: blocking` report
+- A verdict gate never refuses acceptance
+- `apply` refuses a fresh `release` dispatch while the task carries an open
+  verdict gate
 - A `block` gate clears only through `report-gate-clear`
 - A `reread` gate clears only through `report-gate-reread`
 - A label never approves, accepts or skips a check
@@ -721,10 +726,17 @@ Step 16. No implementation or release is inferred from the diagnostic result.
   Gate contract and `skills/herdr-foreman/references/team-operation.md` Fix Loops. Return to
   Step 4 for an authorized correction or Step 13 for a required judge ruling.
 - **A ruled blocking verdict** — a completed adjudication (`uphold` or `amend`)
-  settles it directly. A finding a weighing ruled `defer` or `decline` is
-  settled only by the next reviewer or tester report at the tip, marking it
-  DECLINED with the ruling and recording `VERDICT: approved`. Never match
-  rulings to findings yourself.
+  decides it. A finding a weighing ruled `defer` or `decline` is settled only
+  by the next reviewer or tester report at the tip, marking it DECLINED with
+  the ruling and recording `VERDICT: approved`. Never match rulings to
+  findings yourself.
+- **Clearing a verdict gate by re-check** — once the same responsibility's
+  re-check records `VERDICT: approved`, run `report-gate-clear --report
+  <blocking report> --evidence <re-check> --reason <what it settled>` for each
+  blocking report.
+- **Clearing a verdict gate by decision** — an operator's resolved decision
+  clears it through `--decision`.
+- **No judge clear** — a judge's report is refused as evidence.
 - **A contradicting gate** — a classifier `block` gate on a `VERDICT: approved`
   report goes to Step 13 for adjudication.
 - **A weighing nomination** — a finding a worker report marks `MARGINAL:`, or
@@ -783,7 +795,9 @@ existing context. Return to Step 7 with the role `release` for
 the developer's agent (template `templates/brief-release.md`, the same
 `WORKTREE` and `BRANCH`, a fresh `REPORT`), run Step 8 (it reports
 `already-provisioned`), dispatch through Step 10 so the context is cleared and
-the brief is fresh, and wait on the report in Step 11. A source-changing
+the brief is fresh, and wait on the report in Step 11. `apply` refuses the
+release dispatch, dry run included, while the task carries an open verdict
+gate: return to Step 12 and clear it first. A source-changing
 release finding returns to Step 12 for the next counted developer assignment.
 A blocking policy review returns there too, where its nominations go to a
 weighing. Fill `WEIGHING_RULING` with the judge's report and the follow-up

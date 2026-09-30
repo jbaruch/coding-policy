@@ -106,6 +106,7 @@
     "skills/herdr-foreman/tests/test_probe.py",
     "skills/herdr-foreman/tests/test_report_contract.py",
     "skills/herdr-foreman/tests/test_report_gates.py",
+    "skills/herdr-foreman/tests/test_verdict_gates.py",
     "skills/herdr-foreman/tests/test_report_verdict.py",
     "skills/herdr-foreman/tests/test_scoring.py",
     "skills/herdr-foreman/tests/test_typesafe_client.py",

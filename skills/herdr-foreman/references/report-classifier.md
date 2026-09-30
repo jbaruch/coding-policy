@@ -44,7 +44,7 @@ are the owners' contracts.
 
 - `foreman report-gate-record --labels <classify-reports output>` records the
   gate each label earns and prints
-  `{"schema_version": 1, "recorded": [...], "replayed": [...], "no_gate": [...]}`:
+  `{"schema_version": 2, "recorded": [...], "replayed": [...], "no_gate": [...]}`:
   `recorded` holds each new gate with its `report`, `level` and `reason`;
   `replayed` a gate already on record for the same report bytes and
   classification; `no_gate` each report its label leaves ungated, with the
@@ -92,22 +92,57 @@ cannot be resolved until the enrollment is restored.
   undoes it.
 - `foreman report-gate-status [--report <path>]` lists open and resolved gates.
 
-### Sidecar schema 1
+### Verdict Gates
+
+The same store holds a second gate source (#646): a report whose owner-parsed
+`VERDICT:` line is `blocking`. No label is involved and no label ever touches
+one.
+
+- `assess-specialist` (a replay included) and `record-report` record it,
+  `source: verdict`, `level: block`, with the dispatch the verdict was recorded
+  against. One gate per (report, bytes): a replay returns the existing gate
+  whatever its status; new bytes record a new gate.
+- It never refuses acceptance: `close-member` and `record-report` ignore it.
+- `apply` refuses a fresh `release` dispatch on its task while it is open, dry
+  runs included. A completed release replay is exempt.
+- `report-gate-clear` clears it with `--decision` as above, or with
+  `--evidence` naming the gated responsibility's approved re-check. A judge's
+  report is refused: a ruling decides, and the re-check that cites it clears.
+  The re-check predicate is `_rechecked`'s docstring.
+- A clear on a report carrying both sources resolves every pending gate by its
+  own source's rule, or none.
+
+### Sidecar schema 2
 
 `skills/herdr-foreman/foreman/report_gates.py` owns `<canonical selected state>.report-gates.json`:
-`{"schema_version": 1, "state_path", "gates": [...]}`. Each gate carries
-`schema_version`, `report` (resolved, canonical path), `sha256`, `level`, `reason`,
-`probabilities`, `model`, `question`, `bands`, `at`, `status`
+`{"schema_version": 2, "state_path", "gates": [...]}`. Each gate carries
+`schema_version`, `source` (`classifier`|`verdict`), `report` (resolved,
+canonical path), `sha256`, `level`, `reason`, `dispatch`, `at`, `status`
 (`open`|`cleared`|`reread`) and `resolution` (`null`, or `schema_version`, `at`, `action`, `by`
-(`worker`|`judge`|`operator`), `reason`, `evidence` (`attention` for an
-operator, or `path`, `sha256` and `dispatch`)). Every record is validated whole on every read. Writes
+(`worker`|`judge`|`operator`; `worker`|`operator` for a verdict gate), `reason`, `evidence` (`attention` for an
+operator, or `path`, `sha256` and `dispatch`)). A classifier gate also carries
+`probabilities`, `model`, `question` and `bands`, and `dispatch` is `null`. A
+verdict gate carries none of the four, is always `block`, and names its
+`dispatch`. Every record is validated whole on every read. Writes
 take the sidecar's own lock. `close-member` and `record-report` hold that lock
 from their gate check through their commit, so a gate recorded meanwhile is
-refused rather than slipped in between. A missing file is first use;
+refused rather than slipped in between; `record-report` writes its verdict
+gate under that same lock. A missing file is first use;
 an unreadable or unsupported one, or a symlink at its path, refuses every
-reader, never reading as no gates. A replay is the same report bytes under the
+reader, never reading as no gates. A classifier replay is the same report bytes under the
 same `model`, `question`, `bands` and `level`; any other classification of
-those bytes records a new gate. `close-member` and `record-report` read it and never write it.
+those bytes records a new gate. `close-member` reads it and never writes it.
+
+Schema 1 held classifier gates alone, without `source` or `dispatch`. Every
+read goes through the owner, so the first read of a schema-1 document migrates
+it: each gate becomes `source: classifier`, `dispatch: null`, its resolution's
+`schema_version` becomes 2, and the document is rewritten under the sidecar
+lock before it is returned. A read while another process holds that lock is
+refused and retried, never served unmigrated. A reader at schema 1 meeting
+a schema-2 document refuses it as unsupported rather than reading it as no
+gates. The sidecar takes `rules/stateful-artifacts.md` Migration Policy's
+gate-store exception: an open gate refuses an action, so "no usable prior
+state" would read as no gate.
 
 ## Changing the Bands
 
