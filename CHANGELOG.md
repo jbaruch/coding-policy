@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.352 — 2026-09-30
+
 ### Changed
 
 - **A test holds `adopt-fork-pr`'s `gh pr` instructions to origin (Closes #664).**
