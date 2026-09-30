@@ -18,7 +18,8 @@
   (`rules/external-repo-contributions.md`). A new shared helper,
   `skills/release/origin-repo.py`, names origin's `owner/repo` from
   `git remote get-url origin` (https, `ssh://` and scp forms, with or without
-  `.git`), refuses a non-GitHub origin or a push URL naming another
+  `.git`), refuses a non-GitHub origin or any push URL (all of
+  `get-url --push --all`, compared case-insensitively) naming another
   repository, and never echoes the URL, which can carry credentials. Both
   scripts resolve it once per run: every `{owner}/{repo}` placeholder is now
   the explicit path, and every `gh pr` call carries `--repo`. A non-GitHub

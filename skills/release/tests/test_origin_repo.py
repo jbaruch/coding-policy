@@ -116,6 +116,22 @@ class Script(unittest.TestCase):
         self.assertEqual(done.returncode, 0, done.stderr)
         self.assertEqual(json.loads(done.stdout)["repo"], "acme/widgets")
 
+    def test_second_push_url_elsewhere_refused(self):
+        self.git("-C", self.repo, "remote", "add", "origin", "https://github.com/acme/widgets.git")
+        self.git("-C", self.repo, "remote", "set-url", "--add", "--push", "origin", "https://github.com/acme/widgets.git")
+        self.git("-C", self.repo, "remote", "set-url", "--add", "--push", "origin", "https://github.com/other/widgets.git")
+        done = self.run_script(self.repo)
+        self.assertEqual(done.returncode, 2)
+        self.assertEqual(done.stdout, "")
+        self.assertIn("pushes elsewhere", done.stderr)
+
+    def test_case_only_push_difference_accepted_with_fetch_spelling(self):
+        self.git("-C", self.repo, "remote", "add", "origin", "https://github.com/Acme/Widgets")
+        self.git("-C", self.repo, "remote", "set-url", "--push", "origin", "git@github.com:acme/widgets.git")
+        done = self.run_script(self.repo)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(json.loads(done.stdout)["repo"], "Acme/Widgets")
+
     def test_no_origin_is_precondition(self):
         done = self.run_script(self.repo)
         self.assertEqual(done.returncode, 1)

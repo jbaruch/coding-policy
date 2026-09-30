@@ -12,8 +12,9 @@ Accepted origin URL forms, each with or without a trailing `.git` or `/`:
   ssh://[<user>@]github.com[:<port>]/<owner>/<repo>
   [<user>@]github.com:<owner>/<repo>         (scp form)
 Every other scheme, host or path shape is not a GitHub repository URL. The
-fetch URL and the push URL (`git remote get-url --push origin`) must name the
-same repository, or the script refuses.
+fetch URL and every push URL (`git remote get-url --push --all origin`) must
+name the same repository, compared case-insensitively as GitHub does, or the
+script refuses. The emitted names keep the fetch URL's spelling.
 
 Contract:
   argv  : <checkout>
@@ -63,9 +64,9 @@ def fail(code, message):
     return code
 
 
-def remote_url(checkout, push):
-    """origin's fetch (or push) URL; raises RuntimeError with the rerun command."""
-    command = ["git", "-C", checkout, "remote", "get-url"] + (["--push"] if push else []) + ["origin"]
+def remote_urls(checkout, push):
+    """origin's fetch URL, or every push URL; raises RuntimeError with the rerun command."""
+    command = ["git", "-C", checkout, "remote", "get-url"] + (["--push", "--all"] if push else []) + ["origin"]
     try:
         done = subprocess.run(command, capture_output=True, text=True, check=False)
     except FileNotFoundError:
@@ -75,7 +76,12 @@ def remote_url(checkout, push):
         raise RuntimeError("`{}` exited {} — run it to see why; add an origin with "
                            "`git -C {} remote add origin <github-url>` if there is none".format(
                                " ".join(command), done.returncode, checkout))
-    return done.stdout.strip()
+    return [line.strip() for line in done.stdout.splitlines() if line.strip()]
+
+
+def same_repo(a, b):
+    """GitHub owner and repository names compare case-insensitively."""
+    return a is not None and b is not None and (a[0].lower(), a[1].lower()) == (b[0].lower(), b[1].lower())
 
 
 def main(argv):
@@ -83,20 +89,19 @@ def main(argv):
         return fail(1, "usage: origin-repo.py <checkout>")
     checkout = argv[0]
     try:
-        fetch_url = remote_url(checkout, push=False)
-        push_url = remote_url(checkout, push=True)
+        fetch_urls = remote_urls(checkout, push=False)
+        push_urls = remote_urls(checkout, push=True)
     except RuntimeError as exc:
         return fail(1, str(exc))
-    fetch = parse_github_url(fetch_url)
+    fetch = parse_github_url(fetch_urls[0]) if fetch_urls else None
     if fetch is None:
         return fail(2, "origin in {} is not a GitHub repository URL (https://github.com/<owner>/<repo>, "
                        "ssh://git@github.com/<owner>/<repo> or git@github.com:<owner>/<repo>), so gh cannot be "
                        "bound to it — inspect it with `git -C {} remote get-url origin`; nothing falls back to "
                        "gh's default repository".format(checkout, checkout))
-    push = parse_github_url(push_url)
-    if push != fetch:
+    if not push_urls or not all(same_repo(parse_github_url(url), fetch) for url in push_urls):
         return fail(2, "origin in {} fetches from {}/{} but pushes elsewhere, so no single repository answers for "
-                       "it — inspect `git -C {} remote get-url --push origin` and align the push URL".format(
+                       "it — inspect `git -C {} remote get-url --push --all origin` and align every push URL".format(
                            checkout, fetch[0], fetch[1], checkout))
     owner, name = fetch
     print(json.dumps({"repo": "{}/{}".format(owner, name), "owner": owner, "name": name}, sort_keys=True))
