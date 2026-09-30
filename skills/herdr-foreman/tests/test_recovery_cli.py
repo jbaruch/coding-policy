@@ -533,6 +533,17 @@ class RecoveryCommandTests(fixture.CliCase):
         self.assertTrue(recovery_module.migrate_store(store))
         self.assertEqual(store["schema_version"], recovery_module.RECOVERY_STORE_VERSION)
 
+    def test_a_version_thirteen_store_carrying_its_own_task_closure_still_migrates(self):
+        # Store version 13 owns the task_closed event kind; v14's upgrade must keep it.
+        from foreman import recovery as recovery_module
+        store = recovery_module.empty_recovery()
+        store["schema_version"] = 13
+        store["events"].append({"schema_version": 1, "sequence": 1, "at": AT, "kind": "task_closed",
+                                "task": TASK, "details": {"outcome": "merged", "evidence": "pr"}})
+        self.assertTrue(recovery_module.migrate_store(store))
+        self.assertEqual(store["schema_version"], recovery_module.RECOVERY_STORE_VERSION)
+        self.assertEqual([row["kind"] for row in store["events"]], ["task_closed"])
+
     def test_a_malformed_bound_oracle_is_refused_on_load(self):
         from foreman import recovery as recovery_module
         for label, bound in (("digest with a pin", {"kind": "digest", "value": "a" * 64, "sha256": "a" * 64}),

@@ -243,7 +243,7 @@ def _refuse_unowned_legacy(store, version):
     events = store.get("events")
     if not isinstance(events, list):
         raise UsageError("Older recovery requires an events array; restore the original owner-written store.", {})
-    if any(isinstance(row, dict) and row.get("kind") == "task_closed" for row in events):
+    if version < 13 and any(isinstance(row, dict) and row.get("kind") == "task_closed" for row in events):
         raise UsageError("Older recovery contains a task closure this version never wrote; preserve it for owner recovery.", {})
     if version == 3:
         deliveries = store.get("delivery_recoveries")
