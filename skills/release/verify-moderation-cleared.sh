@@ -3,7 +3,7 @@
 # registry with exponential backoff. Moderation is a post-publish install
 # gate: a freshly published version can be blocked from `tessl install`
 # until its moderation state reaches "pass". This is the release
-# contract's third conjunct (rules/ci-safety.md) — a green publish run
+# contract's third conjunct (skills/release/references/release-contract.md) — a green publish run
 # plus a registry advance does NOT confirm a release on its own.
 #
 # Signal (machine-readable JSON, not the `tessl plugin info` human text):

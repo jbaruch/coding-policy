@@ -118,7 +118,7 @@ Proceed immediately to Step 5.
 
 ## Step 5 — Watch PR State to a Terminal Verdict
 
-Block until the PR reaches a merge-gate-relevant terminal state. The watcher polls `poll-pr-reviews.sh` at a script-owned interval up to a script-owned budget and watches exactly the fields the Step 7 merge gate reads — each gating bot's latest review state (resolved by bot login), CI status, and merge state. Do not hand-roll a poll loop, and do not wrap the watch in an invented wall-clock `timeout` (see `rules/ci-safety.md` "Always Watch CI"):
+Block until the PR reaches a merge-gate-relevant terminal state. The watcher polls `poll-pr-reviews.sh` at a script-owned interval up to a script-owned budget and watches exactly the fields the Step 7 merge gate reads — each gating bot's latest review state (resolved by bot login), CI status, and merge state. Do not hand-roll a poll loop, and do not wrap the watch in an invented wall-clock `timeout` (see `rules/ci-safety.md` "Always Watch CI"). Read `skills/release/references/release-contract.md` Pre-Merge Watch Mechanics first; it binds this step:
 
 ```bash
 CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"; [ -d "$CP" ] || case "$(git config --get remote.origin.url)" in git@github.com:jbaruch/coding-policy|git@github.com:jbaruch/coding-policy.git|https://github.com/jbaruch/coding-policy|https://github.com/jbaruch/coding-policy.git|ssh://git@github.com/jbaruch/coding-policy|ssh://git@github.com/jbaruch/coding-policy.git) CP=. ;; *) echo "coding-policy plugin not found: run tessl install jbaruch/coding-policy" >&2; exit 1 ;; esac
@@ -205,7 +205,7 @@ bash "$CP/skills/release/dismiss-stale-reviews.sh" <owner> <repo> <pr-number>
 
 Run it once Step 5's poll shows every bot's latest verdict clean, a `RULED` policy state included. It emits a JSON summary of what it dismissed and what it left active, exits non-zero on API failure, and is idempotent on re-run. Which reviews it dismisses and which it leaves is the script's decision contract — see `skills/release/dismiss-stale-reviews.sh` header, not restated here (`rules/script-as-black-box.md`).
 
-**Name this repo's publication channels before merging.** The confirmation a release owes is keyed on the publication, never on the package — a package that publishes through more than one channel owes the duty once per publication, each confirmed against the channel that carried it (`rules/ci-safety.md` Always Watch CI). Read the repo's publish workflow and its manifest, and name every channel it publishes on. How each channel is recognized, the command for every gate below, each helper's exit-code contract, and a walkthrough of the Tessl-only, tag/asset-only and mixed cases:
+**Name this repo's publication channels before merging.** The confirmation a release owes is keyed on the publication, never on the package — a package that publishes through more than one channel owes the duty once per publication, each confirmed against the channel that carried it (`skills/release/references/release-contract.md` Publication Confirmation, a required read before this step's gates). Read the repo's publish workflow and its manifest, and name every channel it publishes on. How each channel is recognized, the command for every gate below, each helper's exit-code contract, and a walkthrough of the Tessl-only, tag/asset-only and mixed cases:
 
 ```text
 skills/release/PUBLICATION.md
@@ -253,7 +253,7 @@ git remote prune origin
 
 Order in (B) is mandatory: `git branch -d` refuses to delete a branch that is checked out in any worktree, so the `git worktree remove` step must come before `git branch -d`. Reversing the order produces a "checked out at `<path>`" error and leaves a stranded branch.
 
-After merge — per `rules/ci-safety.md`'s Always Watch CI duty extended through release, run each gate its channels owe, in order:
+After merge — per the release contract in `skills/release/references/release-contract.md` Publication Confirmation, run each gate its channels owe, in order:
 
 - Verify the merge landed on main (`git pull --ff-only` succeeds; `git log -1 --oneline` shows the merge commit)
 - Confirm every closing issue closed:
