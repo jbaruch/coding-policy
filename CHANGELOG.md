@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.344 — 2026-09-30
+
 ### Changed
 
 - **Always-loaded rules shrink from 157.4k to 92.8k bytes; workflow-only text
