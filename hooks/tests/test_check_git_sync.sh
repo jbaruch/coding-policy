@@ -80,7 +80,9 @@ clone_from() { # <bare> <dest>: a working clone, checked explicitly
 # run <repo-dir> <state-dir> [extra env...] -> OUT, RC
 run() {
   local repo="$1" state="$2"; shift 2
-  OUT="$(cd "$repo" && env SYNC_STATE_DIR="$state" "$@" bash "$SCRIPT" </dev/null 2>/dev/null)"
+  # Scrub the ambient HERDR_ENV so a suite run from a Herdr pane still sees
+  # the non-Herdr cases as non-Herdr; a case opts in by passing it in "$@".
+  OUT="$(cd "$repo" && env -u HERDR_ENV SYNC_STATE_DIR="$state" "$@" bash "$SCRIPT" </dev/null 2>/dev/null)"
   RC=$?
 }
 
