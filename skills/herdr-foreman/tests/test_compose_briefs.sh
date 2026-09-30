@@ -97,8 +97,9 @@ run_suite() {
 }
 JSON
   # Direct CLI calls below read v1 unwrapped, so it carries the required path.
-  jq --arg p "$TMP/package.diff" '.shared.TEAM_OPERATION = $p' "$v1" > "$v1.tmp" && mv "$v1.tmp" "$v1" \
+  jq --arg p "$TMP/package.diff" '.shared.TEAM_OPERATION = $p' "$v1" > "$v1.tmp" \
     || die "could not add TEAM_OPERATION to $v1"
+  mv "$v1.tmp" "$v1" || die "could not replace $v1"
   run "$TPL" "$v1" "$o1"
   if [[ $RC -eq 0 ]] \
      && grep -q "Checkout: /repo" "$o1/COMMON.md" \
