@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.342 — 2026-09-30
+
 ### Changed
 
 - **The Herdr foreman gates on report contracts, never on its own reading
