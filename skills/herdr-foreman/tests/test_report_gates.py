@@ -446,9 +446,11 @@ class InterleavingTest(GateCase):
         attempts = []
 
         def racing(args, state_path, warn, client, trace):
-            # A second process records a gate between the check and the commit.
+            # A second process records a gate between the check and the commit;
+            # it holds none of this process's locks.
             try:
-                gates.record(state_path, {"labels": [label(self.report, HIGH)]}, AT)
+                with mock.patch.object(gates, "_HELD", set()):
+                    gates.record(state_path, {"labels": [label(self.report, HIGH)]}, AT)
                 attempts.append("recorded")
             except StateError as exc:
                 attempts.append(exc.message)
@@ -511,7 +513,9 @@ class CloseMemberGateTest(MembersCase):
 
         def racing(*args, **kwargs):
             try:
-                gates.record(self.path, {"labels": [label(self.report, HIGH)]}, LATER)
+                # Another process: it holds none of this process's locks.
+                with mock.patch.object(gates, "_HELD", set()):
+                    gates.record(self.path, {"labels": [label(self.report, HIGH)]}, LATER)
                 attempts.append("recorded")
             except StateError as exc:
                 attempts.append(exc.message)

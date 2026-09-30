@@ -8,12 +8,13 @@ import sys
 import unittest
 from datetime import datetime, timedelta
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from foreman import attention, cli, report_gates as gates  # noqa: E402 -- the skill dir is on sys.path only from here
+from foreman import assign, attention, cli, report_gates as gates  # noqa: E402 -- the skill dir is on sys.path only from here
 from foreman.errors import StateError, UsageError  # noqa: E402 -- the skill dir is on sys.path only from here
-from foreman.state import save_state  # noqa: E402 -- the skill dir is on sys.path only from here
+from foreman.state import save_state, state_lock  # noqa: E402 -- the skill dir is on sys.path only from here
 from tests import test_cli as cli_fixture  # noqa: E402 -- the skill dir is on sys.path only from here
 from tests import test_engagement as engagement_fixture  # noqa: E402 -- the skill dir is on sys.path only from here
 from tests import test_recovery_cli as recovery_fixture  # noqa: E402 -- the skill dir is on sys.path only from here
@@ -229,18 +230,31 @@ class SchemaTest(gate_fixture.GateCase):
         gates.storage_path(self.state).write_text(json.dumps(document))
         return document
 
-    def test_a_schema_one_sidecar_reads_upgraded_and_persists_on_the_next_write(self):
-        before = json.dumps(self.legacy())
+    def test_the_owner_rewrites_a_schema_one_sidecar_on_its_first_read(self):
+        self.legacy()
         gate = gates.status(self.state)["resolved"][0]
         self.assertEqual((gate["schema_version"], gate["source"], gate["dispatch"], gate["resolution"]["schema_version"]),
                          (2, "classifier", None, 2))
-        self.assertEqual(gates.storage_path(self.state).read_text(), before)
+        saved = json.loads(gates.storage_path(self.state).read_text())
+        self.assertEqual((saved["schema_version"], saved["gates"]), (2, [gate]))
         other = self.root / "other.md"
         other.write_text("VERDICT: blocking\n")
         gates.record_verdict(self.state, str(other), digest(other), "d-review", AFTER)
         saved = json.loads(gates.storage_path(self.state).read_text())
-        self.assertEqual((saved["schema_version"], [row["source"] for row in saved["gates"]]),
-                         (2, ["classifier", "verdict"]))
+        self.assertEqual([row["source"] for row in saved["gates"]], ["classifier", "verdict"])
+
+    def test_a_migration_inside_a_held_transaction_writes_once_under_that_lock(self):
+        self.legacy()
+        with gates.holding(self.state):
+            gates.require_clear(self.state, str(self.report), True)
+        self.assertEqual(json.loads(gates.storage_path(self.state).read_text())["schema_version"], 2)
+
+    def test_a_migration_while_another_process_holds_the_lock_is_refused(self):
+        before = json.dumps(self.legacy())
+        with state_lock(gates.storage_path(self.state)):
+            with self.assertRaisesRegex(StateError, "Another foreman command owns"):
+                gates.status(self.state)
+        self.assertEqual(gates.storage_path(self.state).read_text(), before)
 
     def test_an_unknown_schema_is_refused_never_read_as_no_gates(self):
         document = self.legacy()
@@ -395,6 +409,33 @@ class ReleaseCommandTest(cli_fixture.CliCase):
         code, _, err = self.invoke(self.apply_args("release") + ["--now", after_answer], self._client({"grok": "idle"}))
         self.assertEqual(code, 0, err)
         self.assertEqual(self.saved()["assignments"][-1]["role"], "release")
+
+    def test_a_verdict_gate_recorded_mid_release_is_refused(self):
+        self.register()
+        code, out, err = self.invoke(self.apply_args(), self.fresh_client("previous-task", "developer-0"))
+        self.assertEqual(code, 0, err)
+        review = self.tmp / "racing-review.md"
+        review.write_text("VERDICT: blocking\n")
+        attempts = []
+        real_send = assign.send_message
+
+        def racing(*args, **kwargs):
+            # Another process records a verdict gate after the release's gate
+            # check, before its send; it holds none of this process's locks.
+            try:
+                with mock.patch.object(gates, "_HELD", set()):
+                    gates.record_verdict(self.state, str(review), digest(review), "d-any", cli_fixture.AT)
+                attempts.append("recorded")
+            except StateError as exc:
+                attempts.append(exc.message)
+            return real_send(*args, **kwargs)
+
+        with mock.patch("foreman.assign.send_message", side_effect=racing):
+            code, _, err = self.invoke(self.apply_args("release"), self._client({"grok": "idle"}))
+        self.assertEqual(code, 0, err)
+        self.assertEqual(len(attempts), 1)
+        self.assertIn("Another foreman command owns", attempts[0])
+        self.assertEqual(gates.status(self.state)["open"], [])
 
     def test_a_recheck_dispatch_is_never_held(self):
         self.blocking_review()

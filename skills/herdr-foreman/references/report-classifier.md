@@ -133,10 +133,12 @@ reader, never reading as no gates. A classifier replay is the same report bytes 
 same `model`, `question`, `bands` and `level`; any other classification of
 those bytes records a new gate. `close-member` reads it and never writes it.
 
-Schema 1 held classifier gates alone, without `source` or `dispatch`. The owner
-upgrades a schema-1 document in memory on every read (each gate becomes
-`source: classifier`, `dispatch: null`, and its resolution's `schema_version`
-becomes 2) and the next write persists the upgrade. A reader at schema 1 meeting
+Schema 1 held classifier gates alone, without `source` or `dispatch`. Every
+read goes through the owner, so the first read of a schema-1 document migrates
+it: each gate becomes `source: classifier`, `dispatch: null`, its resolution's
+`schema_version` becomes 2, and the document is rewritten under the sidecar
+lock before it is returned. A read while another process holds that lock is
+refused and retried, never served unmigrated. A reader at schema 1 meeting
 a schema-2 document refuses it as unsupported rather than reading it as no
 gates: for a gate store, "no usable prior state" would read as no gate, so the
 lagging-reader default of `rules/stateful-artifacts.md` Migration Policy does

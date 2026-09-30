@@ -45,15 +45,15 @@ judge ruling decides a disputed verdict; it never clears the gate itself.
 
 Sidecar (`<state>.report-gates.json`, schema in state-schema.md, Report Gates):
   {"schema_version": 2, "state_path": "<canonical state>", "gates": [<gate>...]}
-Schema 1 held classifier gates alone. `load` upgrades a schema-1 document in
-memory (every gate `source: classifier`, `dispatch: null`) and the next write
-persists it. A document at any other version is refused, never read as no
+Schema 1 held classifier gates alone. `load` is the owner migration: it
+upgrades a schema-1 document (every gate `source: classifier`, `dispatch:
+null`) and rewrites it under the sidecar lock before returning it. A document at any other version is refused, never read as no
 gates: for a gate store, "no usable prior state" would read as no gate.
 """
 
 import copy
 import errno
-from contextlib import contextmanager, nullcontext
+from contextlib import contextmanager
 import hashlib
 import json
 import os
@@ -200,8 +200,44 @@ def _text(value, label):
     return value
 
 
+#: Sidecar paths this process holds the lock on, so an owner call inside a
+#: held transaction neither re-locks (the lock is not reentrant) nor skips a write.
+_HELD = set()
+
+
+@contextmanager
+def _locked(path):
+    """The sidecar lock, reentrant within this process."""
+    target = str(storage_path(path))
+    if target in _HELD:
+        yield
+        return
+    with state_lock(storage_path(path)):
+        _HELD.add(target)
+        try:
+            yield
+        finally:
+            _HELD.discard(target)
+
+
 def load(path):
-    """Read and validate only. Missing is first use; malformed never reads as empty."""
+    """Read and validate. Missing is first use; malformed never reads as empty.
+
+    A schema-1 document is the owner's to migrate: it is upgraded and
+    rewritten under the sidecar lock before it is returned.
+    """
+    document, migrated = _read(path)
+    if not migrated:
+        return document
+    with _locked(path):
+        document, migrated = _read(path)
+        if migrated:
+            save_state(storage_path(path), document)
+    return document
+
+
+def _read(path):
+    """The validated document, and whether it was upgraded from schema 1 in memory."""
     target = storage_path(path)
     empty = {"schema_version": SCHEMA_VERSION, "state_path": str(canonical_state(path)), "gates": []}
     linked = StateError("Report gate sidecar {} is a symlink, not the owner's file; restore the regular file at "
@@ -212,7 +248,7 @@ def load(path):
     try:
         descriptor = os.open(target, os.O_RDONLY | os.O_NOFOLLOW)
     except FileNotFoundError:
-        return empty
+        return empty, False
     except OSError as exc:
         if exc.errno == errno.ELOOP:
             raise linked from None
@@ -230,7 +266,8 @@ def load(path):
             or document["state_path"] != str(canonical_state(path)) or not isinstance(document["gates"], list)):
         raise StateError("Report gates {} has an unsupported schema or state identity; preserve it and update "
                          "the owner, never replace it with an empty record.".format(target), {})
-    if document["schema_version"] == LEGACY_SCHEMA_VERSION:
+    migrated = document["schema_version"] == LEGACY_SCHEMA_VERSION
+    if migrated:
         _migrate(document)
     for index, gate in enumerate(document["gates"]):
         problem = _gate_problem(gate)
@@ -238,7 +275,7 @@ def load(path):
             raise StateError("Report gates {} record {} is malformed ({}); preserve the file and restore or repair "
                              "that record; a malformed gate is never read as no gate.".format(target, index, problem),
                              {"record": index})
-    return document
+    return document, migrated
 
 
 #: Fields every schema-2 gate carries.
@@ -366,7 +403,7 @@ def holding(path):
     this for both, so no gate can be recorded in between. Writers take the
     same non-blocking lock and refuse while it is held.
     """
-    with state_lock(storage_path(path)):
+    with _locked(path):
         yield
 
 
@@ -419,7 +456,7 @@ def record(path, data, at):
         if _digest(label["report"]) != label["sha256"]:
             _fail("Report {} changed since it was classified; run classify-report(s).sh on it again.".format(label["report"]))
     recorded, replayed, ungated = [], [], []
-    with state_lock(storage_path(path)):
+    with _locked(path):
         document = load(path)
         for label in labels:
             key = _report_key(label["report"])
@@ -450,20 +487,19 @@ def record(path, data, at):
     return {"schema_version": SCHEMA_VERSION, "recorded": recorded, "replayed": replayed, "no_gate": ungated}
 
 
-def record_verdict(path, report, sha256, dispatch, at, held=False):
+def record_verdict(path, report, sha256, dispatch, at):
     """Record the verdict gate an owner-parsed `VERDICT: blocking` earns.
 
     `sha256` is the digest of the bytes the owner parsed and `dispatch` the
     dispatch that verdict was recorded against, both from the owner's own
     record. Idempotent per (source, report, sha256): a replay returns the
     existing gate whatever its status, and new bytes record a new gate.
-    `held` is True when the caller already holds the sidecar lock (`holding`).
     """
     at = _utc(at)
     key = _report_key(report)
     if not _sha(sha256) or not _nonempty(dispatch):
         _fail("A verdict gate needs the parsed report's sha256 and the dispatch its verdict was recorded against.")
-    with nullcontext() if held else state_lock(storage_path(path)):
+    with _locked(path):
         document = load(path)
         prior = next((gate for gate in document["gates"]
                       if gate["source"] == "verdict" and gate["report"] == key and gate["sha256"] == sha256), None)
@@ -723,7 +759,7 @@ def resolve(path, report, action, reason, at, view, evidence=None, decision=None
         _text(reason, "The re-read note" if action == "reread" else "The clear reason")
     elif reason is not None:
         _fail("An operator clear quotes the decision's recorded answer; drop --reason.")
-    with state_lock(storage_path(path)):
+    with _locked(path):
         document = load(path)
         open_gates_here = [gate for gate in document["gates"] if gate["report"] == key and gate["status"] == "open"]
         # Each command resolves its own level only: a clear never discharges a

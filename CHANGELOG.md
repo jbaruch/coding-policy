@@ -20,8 +20,13 @@
     #625 a blocking report is still an accepted assignment.
   - `apply` refuses a fresh `release` dispatch while the task carries an open
     verdict gate, dry runs included; a completed release replay is exempt, and
-    fix, re-check and judge dispatches are never held. #617 classifier-gate
-    behaviour is unchanged.
+    fix, re-check and judge dispatches are never held. The check holds the
+    sidecar lock until `apply` returns, so a verdict gate another process
+    records between the check and the send is refused, never slipped in (the
+    same transaction shape `close-member` and `record-report` already use).
+    The lock became reentrant within one process so an owner call inside a
+    held transaction neither re-locks nor skips its write. #617
+    classifier-gate behaviour is unchanged.
   - `report-gate-clear` is unchanged at the CLI; `resolve` splits by source.
     A verdict gate clears on a re-check (a delivered report of the same
     responsibility, and specialty for a consultation, on the same task,
@@ -33,8 +38,10 @@
     carrying both sources resolves both or neither.
   - Sidecar schema 1 → 2: every gate carries `source` and `dispatch`; a
     classifier gate keeps its label fields with `dispatch: null`, a verdict
-    gate carries none of them. The owner upgrades schema 1 in memory and the
-    next write persists it. A lagging reader keeps refusing an unknown schema
+    gate carries none of them. Every read goes through the owner, so the first
+    read of a schema-1 document migrates and rewrites it under the sidecar
+    lock (`rules/stateful-artifacts.md` Migration Policy: detect, upgrade,
+    rewrite). A lagging reader keeps refusing an unknown schema
     — a stated exception to `rules/stateful-artifacts.md` Migration Policy,
     since "no usable prior state" for a gate store would read as no gate,
     which is fail-open.
