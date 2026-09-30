@@ -489,14 +489,18 @@ class HistoricalCommandsTest(fixture.CliCase):
             "schema_version": 1, "at": "2026-03-01T13:00:00+00:00", "id": "investigator-dispatch",
             "fingerprint": "e" * 64, "role": "investigator", "agent": "grok", "task": TASK,
             "fix_round": None, "plan": None, "work": None, "status": "applied", "assignment_index": index,
+            "brief": "/reports/.dispatched/brief.0123456789abcdef.md",
             "result": {"schema_version": 1, "task": TASK, "role": "investigator", "agent": "grok",
                        "fix_round": None, "status": "applied"}, "report": None})
         state["specialist_assessments"].append({
-            "schema_version": 1, "at": "2026-03-01T14:00:00+00:00", "id": "inv-1",
+            "schema_version": 2, "at": "2026-03-01T14:00:00+00:00", "id": "inv-1",
             "dispatch": "investigator-dispatch", "assignment_index": index, "task": TASK,
             "role": "investigator", "agent": "grok", "report": self.investigation(),
-            "delivery": "/reports/delivery.json", "outcome": "delivered", "contribution": "design",
-            "summary": "The loop did not converge on surface area.",
+            "delivery": "/reports/delivery.json", "source": "report", "criteria": 1, "verdict": None,
+            "contribution": None, "legacy": None, "gap": None,
+            "brief_evidence": {"path": "/reports/.dispatched/brief.0123456789abcdef.md",
+                               "sha256": "0123456789abcdef" + "0" * 48},
+            "acceptance": [{"k": 1, "state": "met", "evidence": "the loop did not converge on surface area"}],
             "report_evidence": {"path": self.investigation(), "sha256": self.investigation_sha()},
             "delivery_evidence": {"path": "/reports/delivery.json", "sha256": "b" * 64}})
         save_state(self.state, state)

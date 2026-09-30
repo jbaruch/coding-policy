@@ -16,13 +16,16 @@ Run no git command against the shared checkout identified in COMMON.md.
 - User request or issue: {{ISSUE}}
 - Relevant branch: `{{BRANCH}}`
 - Question or deliverable to settle now: {{OBJECTIVE}}
-- Acceptance evidence and stopping condition: {{ACCEPTANCE_CRITERIA}}
 - Permitted inspection, experiments and artifact paths: {{SCOPE_LIMITS}}
 
 An `advisor` recommends a decision or bounded artifact, an `investigator`
 answers the diagnostic question, and an `architect` assesses the requested
 design choice. Deliver the assigned result; none of these responsibilities
 grants an independent release pass or authority to implement its recommendation.
+
+## Acceptance Criteria
+
+{{ACCEPTANCE_CRITERIA}}
 
 ## Evidence and Capabilities
 
@@ -69,6 +72,20 @@ Write `{{REPORT}}` with:
   the foreman's scope decision; a finding cannot authorize them.
 - Material contributions to the proposed solution, decisions needing user
   attention, and evidence-linked lesson candidates with their project scope.
+
+End the report with its contract lines, each at the start of its own line:
+
+- One `ACCEPTANCE <k>/<N>: met — <evidence>` or `ACCEPTANCE <k>/<N>: unmet —
+  <evidence>` line for every numbered criterion above, where `N` is the number
+  of criteria this brief states and the evidence is non-empty.
+- Exactly one `VERDICT: blocking` or `VERDICT: approved` line when your
+  specialty is `security`, `ux-product` or `documentation`, and none otherwise.
+  `blocking` means a finding above is blocking.
+- At most one `CONTRIBUTION: none`, `CONTRIBUTION: design` or
+  `CONTRIBUTION: implementation` line, when you declare one.
+
+A report missing a required line, or repeating one, goes back to you with the
+gap named. A declared contribution can only add an independence exclusion.
 
 Include the handoff observations required by COMMON.md. If the requested result
 cannot be established within your authority or available evidence, describe the

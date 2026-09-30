@@ -33,6 +33,7 @@ from foreman.assign import (
     native_context_session,
     dry_run,
     normalize_assignments,
+    require_criteria,
     resolve_paths,
 )
 from foreman.config import parse_config
@@ -429,6 +430,43 @@ class DryRunTest(unittest.TestCase):
     def test_dry_run_shows_the_prompt_text_that_would_be_sent(self):
         result = dry_run(self.client, {"developer": "grok"}, BY_NAME, self.paths)
         self.assertIn("DEVELOPER", result["steps"][0]["prompt"])
+
+
+class CriteriaGateTest(unittest.TestCase):
+    """A consultation brief carries a contiguous `CRITERION 1..N` block before it is sent (#625)."""
+
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.brief = Path(temporary.name) / "advisor.md"
+
+    def step(self, role="advisor"):
+        return {"role": role, "brief": str(self.brief)}
+
+    def test_contiguous_block_passes_and_verification_roles_are_not_read(self):
+        self.brief.write_text("# Brief\n\n## Acceptance Criteria\n\nCRITERION 1: a\nCRITERION 2: b\n")
+        require_criteria([self.step(), self.step("investigator"), self.step("architect")])
+        self.brief.write_text("No criteria here.\n")
+        require_criteria([self.step("reviewer#api"), self.step("tester"), self.step("developer")])
+
+    def test_missing_or_gapped_block_is_refused_naming_the_role(self):
+        for text in ("No criteria here.\n", "## Acceptance Criteria\n\nCRITERION 1: a\nCRITERION 3: c\n",
+                     "## Acceptance Criteria\n\nnothing numbered\n"):
+            with self.subTest(text=text):
+                self.brief.write_text(text)
+                with self.assertRaises(UsageError) as caught:
+                    require_criteria([self.step()])
+                self.assertIn("Brief for advisor", caught.exception.message)
+                self.assertEqual(caught.exception.details["role"], "advisor")
+
+    def test_verified_frozen_bytes_are_what_is_read(self):
+        self.brief.write_text("No criteria here.\n")
+        frozen = {str(self.brief): b"## Acceptance Criteria\n\nCRITERION 1: a\n"}
+        require_criteria([self.step()], frozen)
+
+    def test_an_unreadable_brief_is_refused(self):
+        with self.assertRaisesRegex(UsageError, "Cannot read brief"):
+            require_criteria([self.step()])
 
 
 class RefusalTest(unittest.TestCase):

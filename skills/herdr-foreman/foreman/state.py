@@ -22,7 +22,7 @@ Schema (schema_version 9)::
                        "requirements": <object> | null,
                        "reviewer_scope": <str> | null,
                        "judge_mode": <str> | null}, ... ],
-      "specialist_assessments": [ <immutable foreman assessment>, ... ],
+      "specialist_assessments": [ <immutable report-contract assessment>, ... ],
       "recovery": <owner-managed task, approval, dispatch and evidence ledger>
     }
 
@@ -41,6 +41,9 @@ never de-escalated, since nothing could: migration stamps null headroom and
 Version 9 adds the judge seat's declared mode, so an adjudication and a
 diagnosis are distinguishable in the ledger after the fact (#478).
 Version 6 adds specialist requirements and assessed contribution receipts.
+Each assessment record carries its own schema; `foreman/engagement.py`
+`migrate_assessments` upgrades a schema-1 record to 2 here, and the document
+version is unchanged (#625).
 Version 5 adds recovery history without inventing original authorization or
 session proof. Version 4 adds verified model-tier evidence.
 Version 3 records context handling, the task and the fix-round number.
@@ -418,7 +421,7 @@ def _validate(payload, path):
     instruction to the operator to delete their ledger.
     """
     from .composition import normalize_requirement
-    from .engagement import validate_assessments
+    from .engagement import migrate_assessments, validate_assessments
 
     if not isinstance(payload, dict):
         raise _NoUsableState("the document is not a JSON object")
@@ -541,6 +544,7 @@ def _validate(payload, path):
         store = payload.setdefault("recovery", empty_recovery())
         migrated = migrate_store(store) or migrated
         validate_store(store, rows)
+        migrated = migrate_assessments(payload) or migrated
         validate_assessments(payload)
     except UsageError as exc:
         raise _NoUsableState(str(exc)) from None

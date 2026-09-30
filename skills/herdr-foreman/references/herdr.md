@@ -81,8 +81,8 @@ Claude Code and Codex need no restart for them
 
 A screen-derived state flickers by construction: it is whatever the pane looked
 like at the moment of the read. The report file plus the `REPORT: ` marker is
-the report-delivery signal. The foreman assesses the actual work and records
-acceptance separately in `references/task-ledger.md`.
+the report-delivery signal. The report's recorded contract lines decide
+acceptance, which the foreman records separately in `references/task-ledger.md`.
 
 Observed in the 2026-09-01 round:
 

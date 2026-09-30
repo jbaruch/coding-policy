@@ -18,7 +18,7 @@ from unittest.mock import patch
 from foreman import report_gates, runnable
 from foreman.assign import FrozenPaths
 from foreman.errors import UsageError
-from foreman.state import add_assignment, empty_state, save_state, state_lock
+from foreman.state import add_assignment, empty_state, load_state_checked, save_state, state_lock
 from tests import test_cli as fixture
 from tests.fakes import FakeRunner, ScriptedReads, agent_json
 
@@ -70,8 +70,12 @@ class RecoveryCommandTests(fixture.CliCase):
         import pathlib
         return hashlib.sha256(pathlib.Path(self.investigation()).read_bytes()).hexdigest()
 
-    def record_investigation(self):
+    def record_investigation(self, legacy=False, criterion="met"):
         """Seed the assessed investigator consultation #408 requires.
+
+        `legacy` seeds the schema-1 foreman assessment #625 migrates, and
+        `criterion` the one ACCEPTANCE line's state; only a met report-sourced
+        record counts.
 
         The assessment machinery has its own suite; this fixture only needs
         the record the diagnosis gate reads.
@@ -85,16 +89,24 @@ class RecoveryCommandTests(fixture.CliCase):
             "schema_version": 1, "at": "2026-02-03T13:00:00+00:00", "id": "investigator-dispatch",
             "fingerprint": "e" * 64, "role": "investigator", "agent": "grok", "task": TASK,
             "fix_round": None, "plan": None, "work": None, "status": "applied",
-            "assignment_index": index,
+            "assignment_index": index, "brief": "/reports/.dispatched/brief.0123456789abcdef.md",
             "result": {"schema_version": 1, "task": TASK, "role": "investigator", "agent": "grok",
                        "fix_round": None, "status": "applied"}, "report": None})
-        state["specialist_assessments"].append({
-            "schema_version": 1, "at": "2026-02-03T14:00:00+00:00", "id": "inv-1", "dispatch": "investigator-dispatch",
+        record = {
+            "at": "2026-02-03T14:00:00+00:00", "id": "inv-1", "dispatch": "investigator-dispatch",
             "assignment_index": index, "task": TASK, "role": "investigator",
             "agent": "grok", "report": self.investigation(), "delivery": "/reports/delivery.json",
-            "outcome": "delivered", "contribution": "design", "summary": "The find-rate tracks review surface area.",
             "report_evidence": {"path": self.investigation(), "sha256": self.investigation_sha()},
-            "delivery_evidence": {"path": "/reports/delivery.json", "sha256": "b" * 64}})
+            "delivery_evidence": {"path": "/reports/delivery.json", "sha256": "b" * 64}}
+        if legacy:
+            record.update(schema_version=1, outcome="delivered", contribution="design",
+                          summary="The find-rate tracks review surface area.")
+        else:
+            record.update(schema_version=2, source="report", criteria=1, verdict=None, contribution=None, legacy=None, gap=None,
+                          brief_evidence={"path": "/reports/.dispatched/brief.0123456789abcdef.md",
+                                          "sha256": "0123456789abcdef" + "0" * 48},
+                          acceptance=[{"k": 1, "state": criterion, "evidence": "reproduction in section 1"}])
+        state["specialist_assessments"].append(record)
         save_state(self.state, state)
 
     def saved(self):
@@ -283,6 +295,19 @@ class RecoveryCommandTests(fixture.CliCase):
             self.assertEqual(code, 1)
             self.assertEqual(out, "")
             self.assertIn("consult the investigator", err)
+        # Only an accepted investigator record counts (#625): a migrated
+        # foreman assessment, or one with an unmet criterion, does not.
+        pristine = self.state.read_text()
+        for legacy, criterion in ((True, "met"), (False, "unmet")):
+            kwargs = {"legacy": legacy, "criterion": criterion}
+            self.state.write_text(pristine)
+            self.record_investigation(legacy=legacy, criterion=criterion)
+            # The owner migration a read-only preview asks for (#625).
+            self.assertTrue(load_state_checked(self.state)[1])
+            code, out, err = self.invoke(args + ["--dry-run"], self._client({}))
+            self.assertEqual(code, 1, kwargs)
+            self.assertIn("consult the investigator", err)
+        self.state.write_text(pristine)
         self.record_investigation()
         code, out, err = self.invoke(args + ["--dry-run"], self._client({}))
         self.assertEqual(code, 0, err)
@@ -854,7 +879,7 @@ class RecoveryCommandTests(fixture.CliCase):
         self.assertEqual(code, 0, err)
         dispatch = json.loads(out)["applied"][0]["dispatch_id"]
         review = self.tmp / "review-6.md"
-        review.write_text("Reviewed head " + HEAD + "\nBlocking F1: an escaped quote is still mishandled.\n")
+        review.write_text("Reviewed head " + HEAD + "\nBlocking F1: an escaped quote is still mishandled.\nVERDICT: blocking\n")
         # A medium-confidence classifier label forces a recorded re-read before
         # the review is gated at all, blocking verdict included.
         labels = self.tmp / "labels.json"
@@ -895,7 +920,7 @@ class RecoveryCommandTests(fixture.CliCase):
         self.assertIn("actual blocking review", err)
         self.assertEqual(self.runner.calls, [])
         review = self.tmp / "review-6.md"
-        review.write_text("Reviewed head " + HEAD + "\nBlocking F1: an escaped quote is still mishandled.\n")
+        review.write_text("Reviewed head " + HEAD + "\nBlocking F1: an escaped quote is still mishandled.\nVERDICT: blocking\n")
         code, _, err = self.owner("record-report", {"dispatch": dispatch, "head_revision": HEAD, "verdict": "blocking",
             "review_mode": "full", "reviewer": "codex", "report": str(review), "changed_paths": ["src/parser.py"]})
         self.assertEqual(code, 0, err)

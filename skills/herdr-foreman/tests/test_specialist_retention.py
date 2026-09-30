@@ -30,7 +30,8 @@ class SpecialistRetentionTest(unittest.TestCase):
         self.path = self.root / "state.json"
         self.paths = {"common": str(self.root / "COMMON.md"), "advisor": str(self.root / "brief.md")}
         for path in self.paths.values():
-            Path(path).write_text("Inspect the authorized interaction and report evidence.\n")
+            Path(path).write_text("Inspect the authorized interaction and report evidence.\n\n"
+                                  "## Acceptance Criteria\n\nCRITERION 1: the interaction is assessed\n")
         self.requirement = {"specialty": "ux", "required_capabilities": ["interaction-design"],
                             "independent": False, "engagement": "onboarding-design"}
         self.requirements = {"advisor": self.requirement}
