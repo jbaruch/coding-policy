@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.348 — 2026-09-30
+
 ### Fixed
 
 - **gh calls bind to origin, never to gh's default repository (Closes
