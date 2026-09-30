@@ -1,6 +1,6 @@
 """The foreman seat: declared like a worker, its tier selected, the selection proven.
 
-rules/agent-team-operation.md Foreman Seat: no model or effort is pinned for
+skills/herdr-foreman/references/team-operation.md Foreman Seat: no model or effort is pinned for
 the foreman. Its tier is the operator's `coordination` row, resolved through
 `select_tier` from its tier table (or its kind's worker table) and refused
 when the capability table records it inadequate; measured headroom is

@@ -166,7 +166,7 @@ number and fresh top-tier behavior. Each subsequent correction within a plan
 requires the preceding attempt's actual blocking review, recorded through
 `record-report`. Approved or absent findings do not justify another attempt.
 
-At budget exhaustion, record a new concrete checkpoint and take the judge's diagnosis through `diagnose`; its remedy supplies the bound under `rules/agent-team-operation.md` Judge Seat.
+At budget exhaustion, record a new concrete checkpoint and take the judge's diagnosis through `diagnose`; its remedy supplies the bound under `skills/herdr-foreman/references/team-operation.md` Judge Seat.
 A diagnosis whose report carries `APPROACH` and `VERIFICATION` approves a
 different direction: `BOUND` becomes that approach's allowance, no correction
 plan is recorded, and attempts inside the new allowance are dispatched with the

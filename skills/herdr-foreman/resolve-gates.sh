@@ -11,7 +11,7 @@
 # into a worker's context.
 #
 # THE REPO DECLARES ITS GATES. It already declares its trigger surfaces the same
-# way, in `.herdr/triggers.json` (rules/agent-team-operation.md: "The repo states
+# way, in `.herdr/triggers.json` (skills/herdr-foreman/references/team-operation.md: "The repo states
 # each trigger surface and its package size in its own trigger declaration"), so
 # this reads `.herdr/gates.json` and reports what it holds.
 #

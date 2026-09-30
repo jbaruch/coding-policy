@@ -218,10 +218,16 @@ class ReviewPackageTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout, "")
 
+    def team_operation(self):
+        """The team-round contract path every composition requires."""
+        path = self.root / "team-operation.md"
+        path.write_text("Team-round contract fixture\n", encoding="utf-8")
+        return path
+
     def test_package_gate_leaves_entire_round_unwritten(self):
         templates = self.root / "templates"
         templates.mkdir()
-        (templates / "COMMON.md").write_text("Common instructions\n", encoding="utf-8")
+        (templates / "COMMON.md").write_text("Common instructions\nContract: {{TEAM_OPERATION}}\n", encoding="utf-8")
         (templates / "brief-developer.md").write_text("Develop {{ISSUE}}\nREPORT: {{REPORT}}\n", encoding="utf-8")
         for role in ("reviewer", "tester"):
             (templates / f"brief-{role}.md").write_text(
@@ -236,7 +242,7 @@ class ReviewPackageTests(unittest.TestCase):
                     review_values = {"REVIEW_BASE": self.base, "REVIEW_HEAD": self.head, "REPORT": f"/r/{role}.md"}
                     if package is not None:
                         review_values["REVIEW_PACKAGE"] = package
-                    values.write_text(json.dumps({"shared": {"ISSUE": "#323"},
+                    values.write_text(json.dumps({"shared": {"ISSUE": "#323", "TEAM_OPERATION": str(self.team_operation())},
                         "roles": {"developer": {"REPORT": "/r/developer.md"}, role: review_values}}), encoding="utf-8")
                     outdir = self.root / "briefs"
                     result = subprocess.run(["bash", str(SKILL / "compose-briefs.sh"),
@@ -249,7 +255,7 @@ class ReviewPackageTests(unittest.TestCase):
         # A real generated package flows through the same gate into both briefs.
         result = self.package(self.base, self.head, self.output)
         self.assertEqual(result.returncode, 0, result.stderr)
-        values.write_text(json.dumps({"shared": {"ISSUE": "#323"}, "roles": {
+        values.write_text(json.dumps({"shared": {"ISSUE": "#323", "TEAM_OPERATION": str(self.team_operation())}, "roles": {
             role: {"REVIEW_PACKAGE": result.stdout.strip(), "REVIEW_BASE": self.base, "REVIEW_HEAD": self.head, "REPORT": f"/r/{role}.md"} for role in ("reviewer", "tester")
         }}), encoding="utf-8")
         outdir = self.root / "briefs"
@@ -264,7 +270,7 @@ class ReviewPackageTests(unittest.TestCase):
     def test_malformed_review_range_refuses_before_writing_any_brief(self):
         templates = self.root / "range-templates"
         templates.mkdir()
-        (templates / "COMMON.md").write_text("Common\n", encoding="utf-8")
+        (templates / "COMMON.md").write_text("Common\nContract: {{TEAM_OPERATION}}\n", encoding="utf-8")
         (templates / "brief-developer.md").write_text("Develop\nREPORT: {{REPORT}}\n", encoding="utf-8")
         for role in ("reviewer", "tester"):
             (templates / f"brief-{role}.md").write_text(
@@ -276,7 +282,7 @@ class ReviewPackageTests(unittest.TestCase):
                 for invalid in ("", "main", "abc123", " " + self.base, "G" * 40, 123):
                     with self.subTest(role=role, key=key, value=invalid):
                         fields = {"REVIEW_BASE": self.base, "REVIEW_HEAD": self.head, "REVIEW_PACKAGE": str(self.output), "REPORT": f"/r/{role}.md", key: invalid}
-                        values.write_text(json.dumps({"shared": {}, "roles": {"developer": {"REPORT": "/r/developer.md"}, role: fields}}))
+                        values.write_text(json.dumps({"shared": {"TEAM_OPERATION": str(self.team_operation())}, "roles": {"developer": {"REPORT": "/r/developer.md"}, role: fields}}))
                         outdir = self.root / "invalid-briefs"
                         result = subprocess.run(["bash", str(SKILL / "compose-briefs.sh"), str(templates), str(values), str(outdir)],
                                                 env=self.env, capture_output=True, text=True, check=False)

@@ -1004,7 +1004,7 @@ def check_all_ready(client, assignments, agents_by_name, warn=None):
 
     Returns `{agent: {"state": ..., "herdr_state": ..., "state_source": ...}}`.
     Raises AgentBusyError -- having sent nothing -- when any target is
-    `working` or `blocked`. There is no override: rules/agent-team-operation.md
+    `working` or `blocked`. There is no override: skills/herdr-foreman/references/team-operation.md
     Dispatch Safety is unconditional, and a keystroke into a working agent
     lands in the middle of somebody's turn.
     """

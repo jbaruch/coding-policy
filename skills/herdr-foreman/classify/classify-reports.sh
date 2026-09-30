@@ -2,7 +2,7 @@
 # Annotate a round's delivered reports in one call, so the foreman gates them together.
 #
 # The foreman reads every report body in full before gating
-# (rules/agent-team-operation.md Reports), and that does not change. What
+# (skills/herdr-foreman/references/team-operation.md Reports), and that does not change. What
 # changes is the turn structure: one call annotates every report, then the foreman
 # reads them all with their verdicts in hand and gates them in one turn, instead
 # of spending a full-context turn per report (#482).

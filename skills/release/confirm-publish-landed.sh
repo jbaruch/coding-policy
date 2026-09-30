@@ -2,7 +2,7 @@
 # Post-publish fail-SAFE gate: decide whether a publish step that exited
 # non-zero should still be treated as a landed release.
 #
-# The problem (rules/ci-safety.md "Credits Never Block Publishing"): a tessl
+# The problem (skills/release/references/release-contract.md "Credits Never Block Publishing"): a tessl
 # org running out of credits makes the publish step exit non-zero AFTER the
 # artifact already published —
 #   ✔ Published jbaruch/coding-policy@X  ->  ✔ Uploaded evals
@@ -144,7 +144,7 @@ main() {
   fi
 
   # The publish step's outcome is a HINT, never proof — the authority is the
-  # registry (rules/ci-safety.md "Credits Never Block Publishing"). So ALWAYS
+  # registry (skills/release/references/release-contract.md "Credits Never Block Publishing"). So ALWAYS
   # read and compare, including on `success`: a green no-op, a skipped publish,
   # or a publish that did not land must NOT pass just because the step reported
   # success.
@@ -184,7 +184,7 @@ main() {
     [[ "$credit_signature" == "true" ]] && cs_json="true"
     if [[ "$outcome" == "failure" && "$credit_signature" == "true" ]]; then
       emit_and_exit "pass" true "$current" "$baseline" true \
-        "confirm-publish-landed: publish step for ${workspace}/${plugin} exited non-zero (outcome=failure) but ${workspace}/${plugin}@${current} landed AND its terminal output was the out-of-credits signature — a post-publish billing exit AFTER the artifact shipped; treating as landed per rules/ci-safety.md Credits Never Block Publishing." 0
+        "confirm-publish-landed: publish step for ${workspace}/${plugin} exited non-zero (outcome=failure) but ${workspace}/${plugin}@${current} landed AND its terminal output was the out-of-credits signature — a post-publish billing exit AFTER the artifact shipped; treating as landed per skills/release/references/release-contract.md Credits Never Block Publishing." 0
     fi
     emit_and_exit "fail" true "$current" "$baseline" "$cs_json" \
       "confirm-publish-landed: publish step for ${workspace}/${plugin} exited without success (outcome=${outcome}, credit-signature=${credit_signature:-<none>}) and ${workspace}/${plugin}@${current} landed, but this is NOT a tolerated post-publish out-of-credits FAILURE — only outcome=failure WITH the terminal credit signature is tolerated; cancelled, skipped, and any non-credit failure stay red. Preserving RED; inspect the run's failing step." 1
@@ -193,7 +193,7 @@ main() {
   # The registry did NOT advance -> nothing landed, whatever the step reported.
   if [[ "$outcome" == "success" ]]; then
     emit_and_exit "fail" false "$current" "$baseline" null \
-      "confirm-publish-landed: publish step for ${workspace}/${plugin} reported outcome=success but the registry did NOT advance — still at baseline ${baseline:-<none>} (current ${current:-<none>}). A no-op, a skipped publish, or a publish that did not land — NOT a confirmed release (rules/ci-safety.md release contract requires the registry to advance). Inspect the publish step." 1
+      "confirm-publish-landed: publish step for ${workspace}/${plugin} reported outcome=success but the registry did NOT advance — still at baseline ${baseline:-<none>} (current ${current:-<none>}). A no-op, a skipped publish, or a publish that did not land — NOT a confirmed release (skills/release/references/release-contract.md release contract requires the registry to advance). Inspect the publish step." 1
   fi
   emit_and_exit "fail" false "$current" "$baseline" null \
     "confirm-publish-landed: publish step for ${workspace}/${plugin} failed (outcome=${outcome}) and nothing landed — the registry is still at baseline ${baseline:-<none>} (current ${current:-<none>}). A genuine publish failure; inspect the run's publish step, fix the cause, and re-run." 1

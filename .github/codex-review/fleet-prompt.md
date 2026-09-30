@@ -16,6 +16,10 @@ Do this:
    from every installed plugin, say which plugin you expected it in.
 3. Also read any `skills/*/SKILL.md` in this repo that governs a changed path, and check it
    against the installed `skill-authoring` rule.
+   When a policy rule's binding pointer (`Preconditions are binding: read <path> ...`, or a
+   must-read reference) names a `skills/*/references/*.md` file, read it under
+   `.tessl/plugins/jbaruch/coding-policy/` before judging the carve-out or contract it
+   carries; its text binds as rule content.
 4. Review the changes on this pull request — run the `git diff` named above (and
    `git log`/`git show` as needed) to see exactly what changed.
 5. For every changed line, check it against every rule. Flag concrete violations only:

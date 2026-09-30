@@ -135,7 +135,7 @@ a `## BLOCKED` section can sit under a report that otherwise reads as finished.
   the same responsibility a fresh brief naming the gap. A reviewer or tester
   re-dispatch spends no developer fix round. Never read around the gap.
 - **A recorded `VERDICT: blocking`** — take Step 12's bounded fix path under
-  `rules/agent-team-operation.md` Fix Loops. Keep a stable task identifier and
+  `skills/herdr-foreman/references/team-operation.md` Fix Loops. Keep a stable task identifier and
   advance its fix counter; changing worker or scope never restarts it.
   Name the findings and prior report in each brief. Re-check the findings
   with scoped briefs, then run full verification before release.
@@ -156,7 +156,7 @@ a `## BLOCKED` section can sit under a report that otherwise reads as finished.
   absent, the worker is terminal, and the budget measured from `--since` is
   spent. This is terminal for that wait: schedule no further recheck. Read the
   `stall.class`, record the user-attention obligation, and take the recovery
-  `rules/agent-team-operation.md` Stalled Workers names for that class. Never
+  `skills/herdr-foreman/references/team-operation.md` Stalled Workers names for that class. Never
   commit the partial work on the strength of the tree building.
 - Persist blocked dialogs, missing reports, and required operator decisions in
   the attention queue before presenting them. Keep observing unrelated work.
@@ -221,7 +221,7 @@ wrote a rule index missing a private dependency.
 The brief names a task-owned fixture root for that work, outside every ancestor
 that configures the tool, and the worker keeps every report, plan and patch
 artifact under the reports directory as usual
-(`rules/agent-team-operation.md` Writers and Checkouts carries the
+(`skills/herdr-foreman/references/team-operation.md` Writers and Checkouts carries the
 preconditions).
 
 The root is this assignment's own: created under a name no other assignment
@@ -341,7 +341,7 @@ The COMMENT state carries no gate, so the FOREMAN is the gate: a recorded
 ## The Judge
 
 A reserved seat outside ordinary staffing, on the most capable model
-available. It holds no other responsibility. `rules/agent-team-operation.md`
+available. It holds no other responsibility. `skills/herdr-foreman/references/team-operation.md`
 Judge Seat is the contract; this section is the operational detail for
 `skills/herdr-foreman/SKILL.md` Step 13, whose seven steps run from
 `skills/herdr-foreman/references/judge-round.md`.
@@ -425,12 +425,13 @@ holds nothing on the second pass they did not hold on the first. Re-entry
 moves down the ladder `continue` → `restructure` → `stop`, or repeats one rung
 once against a recorded `PROGRESS` line: a remedy that produced nothing is
 never reissued, the ladder never runs backwards, a rung already repeated is
-spent, and `stop` is terminal, so an approach takes at most five diagnoses. No
+spent, and `stop` is terminal, which bounds an approach's diagnoses (see
+`skills/herdr-foreman/foreman/recovery.py` `_remedy_options`). No
 operator sits in the path of any of them. The ladder is read per approach, so
 an approved new direction starts at `continue` rather than inheriting the rungs
 the approaches it replaced spent.
 
-`rules/agent-team-operation.md` Judge Seat carries the contract; the record
+`skills/herdr-foreman/references/team-operation.md` Judge Seat carries the contract; the record
 shapes are the owner's, in `references/dispatch-recovery.md`.
 
 It is read-only without exception in either mode: no file edit, no mutating

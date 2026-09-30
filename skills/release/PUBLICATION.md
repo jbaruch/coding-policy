@@ -4,7 +4,7 @@ Step 7 names the publication gates in order and leaves the mechanics here: how e
 
 Each command block resolves `CP` the same way SKILL.md does. Each block runs in a fresh shell, so a value one block prints reaches the next as a placeholder you fill in (`<pre>`, `<tessl-run-id>`, `<current>`), never as a shell variable.
 
-The confirmation a release owes is keyed on the publication, never on the package. A package that publishes through more than one channel owes the duty once per publication, each confirmed against the channel that carried it (`rules/ci-safety.md` Always Watch CI).
+The confirmation a release owes is keyed on the publication, never on the package. A package that publishes through more than one channel owes the duty once per publication, each confirmed against the channel that carried it (`skills/release/references/release-contract.md` Publication Confirmation).
 
 ## Recognizing the channels
 

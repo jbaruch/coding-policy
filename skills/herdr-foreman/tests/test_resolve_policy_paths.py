@@ -10,6 +10,7 @@ import unittest
 
 SCRIPT = Path(__file__).resolve().parents[1] / "resolve-policy-paths.sh"
 RELEASE = Path("plugins/jbaruch/coding-policy/skills/release/SKILL.md")
+TEAM = Path("plugins/jbaruch/coding-policy/skills/herdr-foreman/references/team-operation.md")
 
 
 class ResolvePolicyPaths(unittest.TestCase):
@@ -36,23 +37,27 @@ class ResolvePolicyPaths(unittest.TestCase):
 
     def test_local_precedes_global_and_spaces_survive(self):
         expected = {"POLICY_INDEX": self.artifact(self.local, Path("RULES.md")),
-                    "RELEASE_SKILL": self.artifact(self.local, RELEASE)}
+                    "RELEASE_SKILL": self.artifact(self.local, RELEASE),
+                    "TEAM_OPERATION": self.artifact(self.local, TEAM)}
         self.artifact(self.global_root, Path("RULES.md"))
         self.artifact(self.global_root, RELEASE)
+        self.artifact(self.global_root, TEAM)
         result = self.invoke()
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(json.loads(result.stdout), expected)
 
     def test_global_only_install(self):
         expected = {"POLICY_INDEX": self.artifact(self.global_root, Path("RULES.md")),
-                    "RELEASE_SKILL": self.artifact(self.global_root, RELEASE)}
+                    "RELEASE_SKILL": self.artifact(self.global_root, RELEASE),
+                    "TEAM_OPERATION": self.artifact(self.global_root, TEAM)}
         result = self.invoke()
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(json.loads(result.stdout), expected)
 
     def test_each_artifact_selects_its_own_available_root(self):
         expected = {"POLICY_INDEX": self.artifact(self.local, Path("RULES.md")),
-                    "RELEASE_SKILL": self.artifact(self.global_root, RELEASE)}
+                    "RELEASE_SKILL": self.artifact(self.global_root, RELEASE),
+                    "TEAM_OPERATION": self.artifact(self.local, TEAM)}
         result = self.invoke()
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(json.loads(result.stdout), expected)
@@ -64,6 +69,14 @@ class ResolvePolicyPaths(unittest.TestCase):
         self.assertEqual(result.stdout, "")
         self.assertIn("install or repair", result.stderr)
         self.assertIn(str(RELEASE), result.stderr)
+
+    def test_missing_team_operation_emits_no_partial_result(self):
+        self.artifact(self.local, Path("RULES.md"))
+        self.artifact(self.global_root, RELEASE)
+        result = self.invoke()
+        self.assertEqual(result.returncode, 2)
+        self.assertEqual(result.stdout, "")
+        self.assertIn(str(TEAM), result.stderr)
 
     def test_empty_or_directory_artifacts_cannot_supply_policy(self):
         self.artifact(self.local, Path("RULES.md"), "")

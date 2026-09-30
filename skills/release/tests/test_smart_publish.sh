@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Outcome-based tests for smart-publish.sh — the owned publish + credit-signature
 # capture that replaces tesslio/patch-version-publish so the confirm gate can
-# NAME the failing step (rules/ci-safety.md "Credits Never Block Publishing").
+# NAME the failing step (skills/release/references/release-contract.md "Credits Never Block Publishing").
 #
 # The load-bearing properties:
 #   - auto-bump computes the next version REGISTRY-aware (registry empty -> the

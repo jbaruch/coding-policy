@@ -4,7 +4,7 @@
 #
 # Why this exists, separate from registry-version.sh: a publish can exit
 # non-zero AFTER the artifact landed. The out-of-credits exit is one such case
-# (rules/ci-safety.md "Credits Never Block Publishing"); a client-side publish
+# (skills/release/references/release-contract.md "Credits Never Block Publishing"); a client-side publish
 # TIMEOUT is another — the tessl CLI gives up after ~20s while the server
 # finishes the upload, printing `✘ Failed to publish` for a publish that
 # succeeded (observed: jbaruch/nanoclaw-admin run 32450781941, 0.1.497 created

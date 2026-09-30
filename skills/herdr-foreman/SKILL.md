@@ -20,11 +20,17 @@ Before any finish with enrolled work, reconcile the whole fleet under
 or handoff covering every active assignment. Keep user attention visible under
 `references/attention.md`.
 
-Follow `rules/agent-team-operation.md` for round constraints.
+Before any team-round action, read the team-round contract in full. It is the
+file `rules/agent-team-operation.md` points to, and it binds every step below.
+Every worker brief names it as a required read.
+
+```text
+skills/herdr-foreman/references/team-operation.md
+```
 
 You run on the foreman's selected tier: the operator's `coordination` row,
 resolved through `select_tier` and checked against the capability table
-(`rules/agent-team-operation.md` Foreman Seat).
+(`skills/herdr-foreman/references/team-operation.md` Foreman Seat).
 
 Each command resolves `CP` to the local or home plugin, or to `.` in a
 coding-policy clone; anywhere else it stops with an install instruction. Repeat its resolver in every call. Prose `skills/...` paths are relative to that root.
@@ -564,7 +570,7 @@ Then act on the checkpoint:
 - Pass the worker's checkout as `--worktree` when it has one
 - An exit 1 carries either `reason: checkpoint_pending` or a `stall` object
 - A `stall` is classified only when `--worktree` names the checkout
-- Act on a stall under `rules/agent-team-operation.md` Stalled Workers
+- Act on a stall under `skills/herdr-foreman/references/team-operation.md` Stalled Workers
 - Record a stall's obligation through `references/attention.md`
 - Preserve the blocked/refusal and native-recovery paths in the references below
 - Never re-dispatch over uncertainty
@@ -717,7 +723,7 @@ Step 16. No implementation or release is inferred from the diagnostic result.
 - **Any blocking verdict** — a recorded `VERDICT: blocking` from a reviewer,
   tester, or `security`, `ux-product` or `documentation` consultation is a
   blocking finding for the round. Apply the round-flow reference's Blocking
-  Gate contract and `rules/agent-team-operation.md` Fix Loops. Return to
+  Gate contract and `skills/herdr-foreman/references/team-operation.md` Fix Loops. Return to
   Step 4 for an authorized correction or Step 13 for a required judge ruling.
 - **A ruled blocking verdict** — a completed adjudication (`uphold` or `amend`)
   decides it. A finding a weighing ruled `defer` or `decline` is settled only
@@ -805,7 +811,7 @@ Record that evidence in the task ledger.
 Fast-forward the shared checkout, remove the merged task's own worktree with
 `git worktree remove`, and delete the branch, in the post-merge order of
 `rules/agent-worktree-isolation.md` Cleanup. This is the one removal the
-foreman makes itself (`rules/agent-team-operation.md` Writers and Checkouts,
+foreman makes itself (`skills/herdr-foreman/references/team-operation.md` Writers and Checkouts,
 the merged-task exception). Then run Step 8's sweep again for the round's other
 worktrees. Proceed immediately to Step 16.
 

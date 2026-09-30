@@ -39,7 +39,7 @@ alwaysApply: true
 - It is reported once stale
 - A protected branch on origin is never touched or reported
 - A reported item follows `rules/hook-action-reporting.md` Act on What It Names
-- In a Herdr team round, see `rules/agent-team-operation.md` Writers and Checkouts
+- In a Herdr team round, see `skills/herdr-foreman/references/team-operation.md` Writers and Checkouts
 - Leave no orphans in `git worktree list`
 
 ## Exception — Single-Reader Inspection

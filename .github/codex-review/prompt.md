@@ -8,6 +8,9 @@ Do this:
    files you read — you surface that count in the `summary`.
 2. Also read any `skills/*/SKILL.md` that governs a changed path, and check it against
    `rules/skill-authoring.md`.
+   When a rule's binding pointer (`Preconditions are binding: read <path> ...`, or a
+   must-read reference) names a `skills/*/references/*.md` file, read that file before
+   judging the carve-out or contract it carries; its text binds as rule content.
 3. Review the changes on this pull request — run `git diff origin/main...HEAD` (and
    `git log`/`git show` as needed) to see exactly what changed.
 4. For every changed line, check it against every rule. Flag concrete violations only:
