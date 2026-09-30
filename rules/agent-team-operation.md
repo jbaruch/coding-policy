@@ -16,6 +16,10 @@ description: Standalone versus Herdr team round — the mode test, and where the
 - A standalone agent does the task directly
 - A standalone agent never simulates the roles, the briefs, or the reports
 - Standalone work is still governed by every other rule in this plugin
+
+## Foreman Role
+
+- This section governs a Herdr team round only
 - The foreman is a nonworking foreman
 - It assigns the work
 - It supervises the crew
