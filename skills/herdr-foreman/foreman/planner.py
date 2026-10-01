@@ -474,7 +474,7 @@ def _refuse_unaffordable_judge(judge_agent, headrooms, cost, groups):
         )
 
 
-def plan(roles, snapshot, counts=None, exclude=None, role_costs=None, snapshot_ref=None, warn=None, judge_agent=None, judge_tier=None, judge_mode=None, tier_candidates=None, rounds=None, familiarity=None, requirements=None, selection_rationale=None, roster=None, operator_exclude=None):
+def plan(roles, snapshot, counts=None, exclude=None, role_costs=None, snapshot_ref=None, warn=None, judge_agent=None, judge_tier=None, judge_mode=None, tier_candidates=None, rounds=None, familiarity=None, requirements=None, selection_rationale=None, roster=None, operator_exclude=None, reusable_agents=False):
     """Assign `roles` to the agents in `snapshot`, heaviest seat first.
 
     `counts` is `{role: {agent: times_held}}` from the state ledger; omit it
@@ -484,7 +484,10 @@ def plan(roles, snapshot, counts=None, exclude=None, role_costs=None, snapshot_r
     validated from `config.parse_role_costs`. `snapshot_ref` is echoed back so
     a caller can tell which measurement the plan was built on. `judge_agent`
     is the worker the `judge` block pins the seat to: the planner never ranks
-    that seat, and never gives the pinned worker any other one. `judge_tier`
+    that seat. Standing workers never receive another seat; with
+    `reusable_agents=True`, names are spawnable templates, so the pinned kind
+    remains eligible for other fresh identities and one kind may supply more
+    than one seat. `judge_tier`
     is that block's `{model, effort}`; when the judge seat is planned the
     document echoes it back as the tier the worker is started on, so a caller
     builds the launch flags from the config rather than typing them by hand.
@@ -498,8 +501,8 @@ def plan(roles, snapshot, counts=None, exclude=None, role_costs=None, snapshot_r
     generated bars into `exclude`; omit it when `exclude` carries only what
     the operator asked for.
 
-    Raises PlanError when there are no roles, no agents, fewer agents than
-    roles, an exclusion naming a role nobody is assigning, or a role whose
+    Raises PlanError when there are no roles, no agents, fewer standing agents
+    than roles, an exclusion naming a role nobody is assigning, or a role whose
     eligible field is empty -- silently dropping a role would hide work nobody
     is doing. Raises it again for a field nothing could have been ranked in: a
     snapshot missing a declared agent, an `--exclude` list naming nobody the
@@ -552,7 +555,7 @@ def plan(roles, snapshot, counts=None, exclude=None, role_costs=None, snapshot_r
     # panes until the count fits instead of measuring the roster the config
     # declares (#400). The field is wrong before the arithmetic is.
     _refuse_uncovered_roster(roster, agents)
-    if len(agents) < len(roles):
+    if not reusable_agents and len(agents) < len(roles):
         raise PlanError(
             "Cannot assign {} roles across {} agent(s) - measure more agents or "
             "pass fewer roles.".format(len(roles), len(agents)),
@@ -583,7 +586,8 @@ def plan(roles, snapshot, counts=None, exclude=None, role_costs=None, snapshot_r
         else _normalize_exclusions(operator_exclude, roles),
         agents,
     )
-    _refuse_degenerate_field(roles, agents, judge_agent, roster)
+    if not reusable_agents:
+        _refuse_degenerate_field(roles, agents, judge_agent, roster)
 
     # Expressed as exclusions so eligibility, fillability and the rationale all
     # read the same way they do for every other seat.
@@ -601,7 +605,7 @@ def plan(roles, snapshot, counts=None, exclude=None, role_costs=None, snapshot_r
                 excluded[role] = sorted(
                     name for name in agents if name != judge_agent
                 )
-            elif judge_agent in agents and judge_agent not in excluded[role]:
+            elif not reusable_agents and judge_agent in agents and judge_agent not in excluded[role]:
                 excluded[role] = sorted(set(excluded[role]) | {judge_agent})
     for role in roles:
         if all(name in excluded[role] for name in agents):
@@ -669,7 +673,7 @@ def plan(roles, snapshot, counts=None, exclude=None, role_costs=None, snapshot_r
             (
                 name
                 for name in ranked
-                if _fillable(later_roles, sorted(remaining - {name}), excluded)
+                if reusable_agents or _fillable(later_roles, sorted(remaining - {name}), excluded)
             ),
             None,
         )
@@ -684,7 +688,8 @@ def plan(roles, snapshot, counts=None, exclude=None, role_costs=None, snapshot_r
                     **({"eligibility": list(selection_rationale)} if selection_rationale else {}),
                 },
             )
-        remaining.discard(chosen)
+        if not reusable_agents:
+            remaining.discard(chosen)
         picks[role] = chosen
         cost = candidate_cost(role, chosen)
         rationale.append(
@@ -715,11 +720,12 @@ def plan(roles, snapshot, counts=None, exclude=None, role_costs=None, snapshot_r
     rationale.extend(_notes(excluded, agents, warn))
     rationale.extend(selection_rationale or [])
 
-    # The loop removes each pick from `remaining`, so a repeat is impossible
-    # by construction. Asserted anyway: `apply` briefs one pane per role, and
-    # a duplicate here would mean one role silently overwriting another.
+    # The standing-worker loop removes each pick from `remaining`, so a repeat
+    # is impossible by construction. Asserted anyway: legacy apply briefs one
+    # pane per name, and a duplicate would overwrite another role. Reusable
+    # names are templates; cmd_plan gives every picked seat a fresh live name.
     chosen_agents = list(picks.values())
-    if len(set(chosen_agents)) != len(chosen_agents):
+    if not reusable_agents and len(set(chosen_agents)) != len(chosen_agents):
         raise PlanError(
             "Planner produced a duplicate agent in {!r} - this is a bug in "
             "foreman, not in your snapshot. Please report it.".format(picks),

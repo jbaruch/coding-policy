@@ -26,11 +26,12 @@ listing every named live agent other than your own pane.
   Report the message verbatim and finish here.
 - **Exit 2** — herdr failed. Report the message verbatim and finish here.
 
-An unused worker kind needs no pane. When the next responsibilities outnumber
-eligible kinds, record a staffing decision: configure another kind or schedule
-separate bounded assignments. Combine compatible expertise
-inside one responsibility when justified. Never combine independent verification
-with the design or implementation it assesses, and never duplicate dispatch targets.
+An unused worker kind needs no pane. One eligible kind may supply several
+concurrent seats because every seat receives a different fresh identity and
+pane; the planner charges each seat against that kind's shared usage window.
+Combine compatible expertise inside one responsibility only when justified.
+Never combine independent verification with the design or implementation it
+assesses, and never duplicate live dispatch identities.
 
 ## Step 3 — Verify Authority for the Repo
 

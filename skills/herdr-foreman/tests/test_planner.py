@@ -777,6 +777,17 @@ class PinnedJudgeSeatTest(unittest.TestCase):
         result = plan(ROLES, payload, warn=lambda message: None, judge_agent="judge")
         self.assertNotIn("judge", result["assignments"].values())
 
+    def test_a_reusable_pinned_kind_can_supply_judge_and_another_fresh_seat(self):
+        result = plan(
+            ["developer", "judge"], snapshot(claude=100),
+            warn=lambda message: None, judge_agent="claude", reusable_agents=True,
+        )
+        self.assertEqual(result["assignments"], {"developer": "claude", "judge": "claude"})
+
+    def test_one_reusable_kind_can_supply_multiple_fresh_nonjudge_seats(self):
+        result = plan(ROLES, snapshot(claude=100), reusable_agents=True)
+        self.assertEqual(result["assignments"], {role: "claude" for role in ROLES})
+
     def test_a_pinned_worker_absent_from_the_snapshot_is_refused(self):
         payload = snapshot(claude=80, codex=70)
         with self.assertRaises(PlanError) as caught:

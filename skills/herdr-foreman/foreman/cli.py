@@ -680,7 +680,8 @@ PLAN_ONLY_TIER_FIELDS = frozenset({"capability", "cheaper_adequate"})
 
 
 
-def _candidate_tiers(roles, agents, rounds, fix_round=None, judge=None, excludes=None, headroom=None, table=None, refusals=None):
+def _candidate_tiers(roles, agents, rounds, fix_round=None, judge=None, excludes=None, headroom=None, table=None, refusals=None,
+                     reusable_agents=False):
     """Each role's candidate tiers; `refusals` collects a capability refusal per skipped candidate."""
     table = table if table is not None else capabilities.empty()
     tiered = any(agent.tiers for agent in agents)
@@ -706,7 +707,9 @@ def _candidate_tiers(roles, agents, rounds, fix_round=None, judge=None, excludes
                         # schema-9 tier entry carries both fields (#490).
                         "pressure_headroom": None, "de_escalated": False,
                         "capability": verdict, "cheaper_adequate": None}
-                continue
+                    continue
+                if not reusable_agents:
+                    continue
             if role == "judge":
                 continue
             if not agent.tiers:
@@ -913,6 +916,7 @@ def cmd_plan(args, client=None, warn=None, trace=None):
     judge = load_judge(_config_path(args))
     rounds = _round_inputs(args, canonical)
     agents = load_config(_config_path(args)) if _config_path(args).exists() else []
+    scoped = bool(agents) and all(agent.assignment_scoped for agent in agents)
     state_path = _state_path(args)
     state = load_state(state_path, warn=warn)
     requirements = composition.parse_requirements(_read_record(args.requirements) if args.requirements else None, canonical, args.task)
@@ -984,7 +988,7 @@ def cmd_plan(args, client=None, warn=None, trace=None):
     tier_candidates = _candidate_tiers(canonical, agents, rounds, args.fix_round, judge,
                                       excludes={role: names for role, names in excludes.items() if role in set(canonical)},
                                       headroom=measured_headroom, table=table,
-                                      refusals=capability_refusals)
+                                      refusals=capability_refusals, reusable_agents=scoped)
     constraints = {**constraints, "rationale": constraints["rationale"] + [
         "{} was not considered for {}: {}".format(row["agent"], row["role"], row["message"]) for row in capability_refusals]}
     # Each seat inherits its role's bars, tiers, round type and requirements.
@@ -1024,6 +1028,7 @@ def cmd_plan(args, client=None, warn=None, trace=None):
             selection_rationale=constraints["rationale"],
             roster=[agent.name for agent in agents],
             operator_exclude=operator_excludes,
+            reusable_agents=scoped,
         )
     result["task_context"] = ({"task": args.task, "fix_round": args.fix_round,
                                "plan": args.correction_plan, "work": work} if args.task else None)
@@ -1032,7 +1037,7 @@ def cmd_plan(args, client=None, warn=None, trace=None):
     result["selection"] = selection.records(
         result["assignments"], result.get("tiers"), {agent.name: agent for agent in agents},
         requirements, rounds, args.fix_round, table)
-    if agents and all(agent.assignment_scoped for agent in agents):
+    if scoped:
         # Planning ranks stable worker kinds. The saved plan then allocates a
         # fresh live identity per seat; retries reuse that identity, while a
         # new plan cannot accidentally discover and reuse an idle worker.

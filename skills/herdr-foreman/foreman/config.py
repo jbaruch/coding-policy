@@ -641,7 +641,7 @@ def parse_foreman(payload, source="<memory>"):
                 source, kind, " or ".join(sorted(TOP_MODELS))),
             {"source": source, "kind": kind})
     judge = parse_judge(payload, source=source)
-    if judge is not None and agent == judge.agent:
+    if version != 7 and judge is not None and agent == judge.agent:
         raise ConfigError(
             "Config at {}: `foreman.agent` is the pinned judge's worker {!r}; the judge holds no other seat. "
             "Give the foreman its own agent name.".format(source, agent),
@@ -649,7 +649,7 @@ def parse_foreman(payload, source="<memory>"):
     worker_field = "worker_kinds" if version == 7 else "agents"
     raw_workers = payload.get(worker_field)
     workers = raw_workers if isinstance(raw_workers, list) else []
-    if any(isinstance(entry, dict) and entry.get("name") == agent for entry in workers):
+    if version != 7 and any(isinstance(entry, dict) and entry.get("name") == agent for entry in workers):
         raise ConfigError(
             "Config at {}: `foreman.agent` {!r} is also a configured worker; the foreman seat is never planned as "
             "a worker. Give the foreman its own agent name.".format(source, agent),

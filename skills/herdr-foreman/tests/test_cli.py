@@ -421,6 +421,21 @@ class PlanCommandTest(CliCase):
                             and len(name) <= 32 for name in document["assignments"].values()))
         self.assertEqual(len(set(document["assignments"].values())), 2)
 
+    def test_schema_7_pinned_kind_can_supply_judge_and_developer_fresh_identities(self):
+        shipped = Path(__file__).resolve().parent.parent / "config.example.json"
+        payload = json.loads(shipped.read_text(encoding="utf-8"))
+        payload["worker_kinds"] = [row for row in payload["worker_kinds"] if row["name"] == "claude"]
+        self.config.write_text(json.dumps(payload), encoding="utf-8")
+        code, out, err = self.run_cli(
+            self.base() + ["plan", "--roles", "developer,judge", "--judge-mode", "adjudication",
+                           "--snapshot", str(self.snapshot)]
+        )
+        self.assertEqual(code, 0, err)
+        document = json.loads(out)
+        self.assertEqual(document["worker_kinds"], {"developer": "claude", "judge": "claude"})
+        self.assertEqual(len(set(document["assignments"].values())), 2)
+        self.assertTrue(all(name != "claude" for name in document["assignments"].values()))
+
     def test_schema_7_dry_run_shows_spawn_before_fresh_dispatch(self):
         shipped = Path(__file__).resolve().parent.parent / "config.example.json"
         self.config.write_text(shipped.read_text(encoding="utf-8"), encoding="utf-8")

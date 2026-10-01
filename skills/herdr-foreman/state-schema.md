@@ -87,7 +87,10 @@ template rather than a live Herdr agent. Schema 7 requires a `coordination`
 tier for the disposable usage probe. It also replaces `judge.agent` with
 `judge.worker_kind`; that kind must be declared. Schemas 1–6 remain readable
 as legacy standing-worker configurations, but a file may not mix the two
-collections or judge identity fields.
+collections or judge identity fields. Because worker-kind names are not live
+identities, a schema-7 foreman's live `agent` name may equal a kind name,
+including the pinned judge kind; every probe and assignment still launches
+under a separately allocated identity.
 See `skills/herdr-foreman/references/model-tiers.md` for billing evidence. A missing config is refused with the exact `cp` command to run. The
 optional `idle_markers` / `working_markers` per-agent keys carry the footer
 signatures the stale-state probe reads; an agent with neither is never probed.

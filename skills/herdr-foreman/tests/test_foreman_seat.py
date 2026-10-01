@@ -158,6 +158,14 @@ class ConfigTest(unittest.TestCase):
             parse_config(payload(agent="claude"))
         self.assertIn("also a configured worker", str(caught.exception))
 
+    def test_schema_7_foreman_live_name_may_match_a_worker_kind_and_the_pin(self):
+        scoped = json.loads(EXAMPLE.read_text(encoding="utf-8"))
+        scoped["foreman"]["agent"] = scoped["judge"]["worker_kind"]
+        self.assertTrue(parse_config(scoped))
+        seat = parse_foreman(scoped)
+        assert seat is not None
+        self.assertEqual(seat.agent, "claude")
+
     def test_a_model_override_in_launch_args_is_refused(self):
         with self.assertRaises(ConfigError):
             parse_foreman(payload(launch_args=["--model", "opus-5"]))
