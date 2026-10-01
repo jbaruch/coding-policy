@@ -51,7 +51,7 @@ from .measure import (
 from .planner import plan as build_plan
 from .planner import headroom_of
 from .tiers import (COORDINATION_ROUND, FOREMAN_ROLE, JUDGMENT_ROUNDS, MissingTierError,
-                    parse_launch_args, parse_tiers, select_tier)
+                    parse_launch_args, parse_tiers, select_tier, worker_launch_args)
 from . import cost_report, selection
 from .launch import configured_running_tier, restart_worker, start_foreman, start_worker, verify_foreman, verify_running
 from .state import (
@@ -63,6 +63,7 @@ from .state import (
     load_state_checked,
     role_counts,
     save_state,
+    STATUS_MAINTENANCE,
     state_lock,
 )
 
@@ -2058,9 +2059,10 @@ def cmd_relaunch_worker(args, client=None, warn=None, trace=None):
                              {"agent": agent.name, "state": live.get("agent_status"), "pane": pane})
     tier, previous = configured_running_tier(client, agent, pane)
     state_path = _state_path(args)
-    state = retrospective_runtime.read_history(state_path)
+    state = _load_state_for_write(state_path, warn)
     latest = chronology.latest_assignment(state["assignments"], agent=agent.name)
     if latest is None:
+        row = None
         role, task = "idle", None
     else:
         offset, row = latest
@@ -2071,15 +2073,31 @@ def cmd_relaunch_worker(args, client=None, warn=None, trace=None):
         "agent": agent.name, "role": role, "model": tier["model"], "effort": tier.get("effort"),
         "context": "clear", "task": task, "pane": pane,
     }]})["transitions"][0]
-    guard = retrospective_runtime.Guard(state_path, state, client, {agent.name: agent}, args.now or now_iso())
+    at = args.now or now_iso()
+    guard = retrospective_runtime.Guard(state_path, state, client, {agent.name: agent}, at)
     guard.prepare_relaunch(item)
     step = {"agent": agent.name}
     restart_worker(client, agent, pane, tier, before_transition=lambda: guard.before(step),
                    before_start=lambda: guard.before_launch(step), expected_process=previous)
     verified = verify_running(client, agent, pane, tier)
     guard.after_transition(step, launch_proof=verified)
+    tier_record = {**tier, "kind": agent.kind,
+                   "launch_args": worker_launch_args(agent.kind, agent.launch_args),
+                   "verified": verified}
+    add_assignment(
+        state, at, role, agent.name, status=STATUS_MAINTENANCE,
+        cleared=True, clear_reason="automatic", task=task,
+        fix_round=row.get("fix_round") if row else None,
+        context_session=native_context_session(client.agent_get(agent.name), agent.kind),
+        tier=tier_record,
+        requirements=row.get("requirements") if row else None,
+        reviewer_scope=row.get("reviewer_scope") if row else None,
+        judge_mode=row.get("judge_mode") if row and canonical_role(role) == "judge" else None,
+    )
+    save_state(state_path, state)
     return {"agent": agent.name, "pane": pane, "tier": tier, "previous": previous,
-            "argv_verified": True, "verified": verified, "dispatch": None}, None
+            "argv_verified": True, "verified": verified, "dispatch": None,
+            "assignment_index": len(state["assignments"]) - 1}, None
 
 
 #: The minimal `foreman` block the unconfigured warning tells the operator to add.

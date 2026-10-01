@@ -245,7 +245,9 @@ termination it requires the worker to be idle, its visible composer to be
 empty, and retrospective coverage for the outgoing assignment. It then starts
 the same configured pair with normalized `launch_args` and YOLO mode, reads
 the new foreground process, and returns `verified.source: process_argv` with
-`dispatch: null`. A working or blocked worker, an occupied composer, an
+`dispatch: null`. It appends a non-counting `maintenance` assignment-ledger row
+with the model, effort, configured launch arguments, verified pair, and live
+process-argv evidence source, but creates no dispatch. A working or blocked worker, an occupied composer, an
 unconfigured live pair, or a changed pane, PID, or argv refuses before termination.
 
 `--no-clear` and `--retain-context` verify the running foreground process

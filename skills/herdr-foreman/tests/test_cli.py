@@ -220,10 +220,15 @@ class RelaunchWorkerCommandTest(unittest.TestCase):
         agent = self.agent()
         client = Mock()
         client.agent_get.return_value = {"name": "claude", "agent": "claude", "agent_status": "idle", "pane_id": "w1:p2"}
-        state = {"assignments": [{"at": AT, "agent": "claude", "role": "developer", "task": "issue-673"}],
-                 "recovery": {"dispatches": []}}
+        state = empty_state()
+        add_assignment(state, AT, "developer", "claude", task="issue-673")
         tier = {"model": "sonnet-5", "effort": "high"}
-        prior = {"source": "process_argv", "argv": ["claude"], "model": "sonnet-5", "effort": "high"}
+        prior = {
+            "source": "process_argv",
+            "argv": ["claude", "--dangerously-skip-permissions", "--model", "sonnet-5", "--effort", "high"],
+            "model": "sonnet-5",
+            "effort": "high",
+        }
         verified = {**prior, "pid": 202, "pane_id": "w1:p2"}
         events = []
         guard = Mock()
@@ -239,17 +244,30 @@ class RelaunchWorkerCommandTest(unittest.TestCase):
             before_start()
 
         with patch("foreman.cli.load_config", return_value=[agent]), \
-                patch("foreman.cli.retrospective_runtime.read_history", return_value=state), \
+                patch("foreman.cli._load_state_for_write", return_value=state), \
                 patch("foreman.cli.retrospective_runtime.Guard", return_value=guard), \
                 patch("foreman.cli.configured_running_tier", return_value=(tier, prior)), \
                 patch("foreman.cli.restart_worker", side_effect=relaunch), \
-                patch("foreman.cli.verify_running", return_value=verified):
+                patch("foreman.cli.verify_running", return_value=verified), \
+                patch("foreman.cli.save_state") as saved:
             result, failure = cli.cmd_relaunch_worker(self.args(), client=client)
 
         self.assertIsNone(failure)
         self.assertIsNone(result["dispatch"])
         self.assertIs(result["argv_verified"], True)
         self.assertEqual(result["verified"], verified)
+        self.assertEqual(result["assignment_index"], 1)
+        maintenance = state["assignments"][1]
+        self.assertEqual((maintenance["status"], maintenance["role"], maintenance["task"]),
+                         ("maintenance", "developer", "issue-673"))
+        self.assertEqual(maintenance["tier"]["verified"], verified)
+        self.assertEqual(maintenance["tier"]["launch_args"], ["--dangerously-skip-permissions"])
+        saved.assert_called_once()
+        with tempfile.TemporaryDirectory(prefix="foreman-relaunch-state-") as directory:
+            state_path = Path(directory) / "state.json"
+            save_state(state_path, state)
+            _loaded, usable = load_state_checked(state_path, warn=lambda _message: None)
+            self.assertTrue(usable)
         self.assertEqual([event[0] for event in events], ["prepare", "before", "before_launch", "after"])
         transition = events[0][1]
         self.assertEqual((transition["role"], transition["task"], transition["context"]),

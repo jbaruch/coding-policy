@@ -215,7 +215,7 @@ class MigrationTest(unittest.TestCase):
     # -- newer: no usable prior state, file untouched ------------------------
 
     def test_v2_context_migration_preserves_counts_and_snapshot_version(self):
-        snapshot = {"schema_version": 2, "agents": {"grok": {"window_group": "pool"}}}
+        snapshot = {"schema_version": 2, "agents": {"grok": {"window_group": "pool"}}, "failed_agents": []}
         row = {"schema_version": 2, "at": "2026-01-01T00:00:00+00:00",
                "role": "developer", "agent": "grok", "status": "applied"}
         for version in (2, STATE_SCHEMA_VERSION):
@@ -224,7 +224,9 @@ class MigrationTest(unittest.TestCase):
                             "schema_version": version, "snapshots": [snapshot], "assignments": [row]})
                 migrated = self.load()
                 self.assertEqual(migrated["schema_version"], STATE_SCHEMA_VERSION)
-                self.assertEqual(migrated["snapshots"], [{"schema_version": SNAPSHOT_SCHEMA_VERSION, "agents": {"grok": {"window_group": "pool", "tier_billing": {}}}}])
+                self.assertEqual(migrated["snapshots"], [{"schema_version": SNAPSHOT_SCHEMA_VERSION,
+                                                          "agents": {"grok": {"window_group": "pool", "tier_billing": {}}},
+                                                          "failed_agents": []}])
                 self.assertEqual(migrated["assignments"], [dict(
                     row, schema_version=STATE_SCHEMA_VERSION, cleared=None,
                     clear_reason="unknown", task=None, fix_round=None, context_session=None, tier=None,
@@ -248,6 +250,21 @@ class MigrationTest(unittest.TestCase):
         self.assertEqual(snapshot["agents"]["claude"]["error"],
                          {"code": "parse_error", "message": "old failure", "details": {}})
         self.assertEqual(self.on_disk(), migrated)
+
+    def test_snapshot_v3_malformed_failed_error_is_refused_unchanged(self):
+        for error in (None, [], {"code": "parse_error"},
+                      {"code": "parse_error", "message": "old", "details": []},
+                      {"code": "parse_error", "message": "old", "details": {}}):
+            with self.subTest(error=error):
+                state = empty_state()
+                record = {} if error is None else {"error": error}
+                state["snapshots"] = [{"schema_version": 3, "agents": {"claude": record},
+                                       "failed_agents": ["claude"]}]
+                self.write(state)
+                before = self.path.read_text(encoding="utf-8")
+                _loaded, usable = load_state_checked(self.path, warn=self.warnings.append)
+                self.assertFalse(usable)
+                self.assertEqual(self.path.read_text(encoding="utf-8"), before)
 
     def test_context_modes_round_trip_without_conflating_their_evidence(self):
         state = empty_state()
@@ -607,6 +624,18 @@ class AssignmentStatusTest(unittest.TestCase):
         add_assignment(state, "a", "developer", "grok", status="sent_but_not_started")
         self.assertEqual(role_counts(state), {})
 
+    def test_a_maintenance_row_is_written_but_not_role_experience(self):
+        state = empty_state()
+        add_assignment(state, "a", "developer", "grok", status="maintenance")
+        self.assertEqual(state["assignments"][0]["status"], "maintenance")
+        self.assertEqual(role_counts(state), {})
+
+    def test_an_unknown_assignment_status_is_refused_before_write(self):
+        state = empty_state()
+        with self.assertRaisesRegex(UsageError, "assignment status"):
+            add_assignment(state, "a", "developer", "grok", status="typo")
+        self.assertEqual(state["assignments"], [])
+
     def test_applied_rows_count(self):
         state = empty_state()
         add_assignment(state, "a", "developer", "grok")
@@ -767,6 +796,7 @@ class SnapshotMigrationTest(unittest.TestCase):
                     "schema_version": 1,
                     "measured_at": "2026-02-03T10:00:00+00:00",
                     "agents": {"claude": {"headroom_pct": 90}},
+                    "failed_agents": [],
                 }
             ],
             "assignments": [],

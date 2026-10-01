@@ -167,7 +167,7 @@ Before following any route below, report the worktree sweep to the operator:
   A resumed foreman proceeds to the stow's continuation step instead (Step 17
   Resume Route).
   When `due` names the capability table, dispatch the refresh consultation under
-  `references/model-tiers.md`, then record its report and show the result:
+  `skills/herdr-foreman/references/model-tiers.md`, then record its report and show the result:
 
 ```bash
 CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"; [ -d "$CP" ] || case "$(git config --get remote.origin.url)" in git@github.com:jbaruch/coding-policy|git@github.com:jbaruch/coding-policy.git|https://github.com/jbaruch/coding-policy|https://github.com/jbaruch/coding-policy.git|ssh://git@github.com/jbaruch/coding-policy|ssh://git@github.com/jbaruch/coding-policy.git) CP=. ;; *) echo "coding-policy plugin not found: run tessl install jbaruch/coding-policy" >&2; exit 1 ;; esac
@@ -183,7 +183,8 @@ bash "$CP/skills/herdr-foreman/foreman.sh" capability-show
   that produced it; re-run that one, not the preflight. A `foreman_tier` block
   beside a failed `headroom` check waits on that measurement; fix it first.
   A named `foreman relaunch-worker <name>` recovery follows
-  `references/model-tiers.md` Maintenance Relaunch, then re-runs the preflight.
+  `skills/herdr-foreman/references/model-tiers.md` Maintenance Relaunch.
+  After that recovery, re-run the preflight.
   Otherwise it means this pane does not run the foreman's selected tier:
   record a user-attention blocker naming `start-foreman`
   (`skills/herdr-foreman/references/model-tiers.md` Foreman Seat) and finish here.
@@ -219,7 +220,8 @@ correcting `herdr agent rename <pane-id> <name>` command.
 
 Record staffing gaps under `references/round-setup.md`. Leave unused specialist
 profiles unlaunched. Never duplicate targets or fold verification onto a
-contributor. Start workers in YOLO mode under `references/model-tiers.md`;
+contributor. Start workers in YOLO mode under
+`skills/herdr-foreman/references/model-tiers.md`;
 preserve it on relaunch. Verify live permission flags before dispatch, including
 existing workers. Record task authorization and permitted actions under the
 round-setup reference. Create or resume the stable ledger under
@@ -260,7 +262,8 @@ bash "$CP/skills/herdr-foreman/foreman.sh" measure
 Emits and saves headroom, windows, state, `tier_billing`, and `failed_agents`.
 Busy workers are skipped. Unmeasured billing stays `unknown`. Report failed
 measurements and obtain their readings before relying on those seats. A pending
-CLI update follows `references/model-tiers.md` Maintenance Relaunch.
+CLI update follows `skills/herdr-foreman/references/model-tiers.md`
+Maintenance Relaunch.
 
 Usage and `--trace` contracts:
 

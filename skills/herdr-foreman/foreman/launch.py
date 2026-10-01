@@ -280,6 +280,12 @@ def restart_worker(client, agent, pane, tier, sleep=time.sleep, before_transitio
             or final.get("terminal_id") != info.get("terminal_id")
             or final.get("agent_session") != info.get("agent_session")):
         raise AgentBusyError("Worker changed during the retrospective relaunch check; no process was terminated.", {})
+    ensure_ready(client, agent, pane_id=pane, sleep=sleep)
+    final = client.agent_get(agent.name)
+    if (final.get("agent_status") not in READY_STATES or final.get("pane_id") != pane
+            or final.get("terminal_id") != info.get("terminal_id")
+            or final.get("agent_session") != info.get("agent_session")):
+        raise AgentBusyError("Worker changed during the final composer check; no process was terminated.", {})
     final_process = foreground_agent(client, pane, agent.kind)
     if (final_process.get("pid") != process.get("pid")
             or final_process.get("argv") != process.get("argv")):

@@ -5,14 +5,14 @@ looked like when it was measured; it never substitutes for reading the agent's
 live status before writing to it. `plan` may run off a stale snapshot on
 purpose (planning has no side effects); `apply` always re-checks live status.
 
-Schema (schema_version 9)::
+Schema (schema_version 10)::
 
     {
-      "schema_version": 9,
+      "schema_version": 10,
       "snapshots":  [ <measure output>, ... ],   # newest last, capped at 20
-      "assignments":[ {"schema_version": 9, "at": <ISO-8601>,
+      "assignments":[ {"schema_version": 10, "at": <ISO-8601>,
                        "role": <str>, "agent": <str>,
-                       "status": "applied" | "sent_but_not_started"
+                       "status": "applied" | "sent_but_not_started" | "maintenance"
                                  | "unknown",
                        "cleared": <bool> | null,
                        "clear_reason": "automatic" | "hand" | "retained" | "unknown",
@@ -27,7 +27,7 @@ Schema (schema_version 9)::
     }
 
 `status` records whether the hand-off was confirmed: `applied` counts toward
-an agent's role history, `sent_but_not_started` does not (see
+an agent's role history, `sent_but_not_started` and `maintenance` do not (see
 UNCOUNTED_STATUSES), and `unknown` marks a version-1 row migrated without the
 information. Version 1 documents and rows carry no `status`; the 1 -> 2
 migration below stamps them `unknown`.
@@ -40,6 +40,8 @@ never de-escalated, since nothing could: migration stamps null headroom and
 `de_escalated: false`.
 Version 9 adds the judge seat's declared mode, so an adjudication and a
 diagnosis are distinguishable in the ledger after the fact (#478).
+Version 10 adds the non-counting `maintenance` status for a verified worker
+relaunch that creates no dispatch.
 Version 6 adds specialist requirements and assessed contribution receipts.
 Each assessment record carries its own schema; `foreman/engagement.py`
 `migrate_assessments` upgrades a schema-1 record to 2 here, and the document
@@ -86,7 +88,7 @@ from .recovery import JUDGE_MODES, empty_recovery, migrate_store, validate_store
 
 #: The version this build writes for the document and assignment rows.
 #: Snapshots have their own version and migration chain below.
-STATE_SCHEMA_VERSION = 9
+STATE_SCHEMA_VERSION = 10
 
 CLEAR_REASONS = frozenset({"automatic", "hand", "retained", "unknown"})
 
@@ -105,14 +107,16 @@ LEDGER_JUDGE_MODES = frozenset(JUDGE_MODES) | {"unknown"}
 #: `unknown` -- written before rows carried a status.
 STATUS_APPLIED = "applied"
 STATUS_NOT_STARTED = "sent_but_not_started"
+STATUS_MAINTENANCE = "maintenance"
 STATUS_UNKNOWN = "unknown"
+ASSIGNMENT_STATUSES = frozenset({STATUS_APPLIED, STATUS_NOT_STARTED, STATUS_MAINTENANCE, STATUS_UNKNOWN})
 
 #: Statuses that do NOT count toward "held this role N times". A hand-off
 #: nobody started is not experience, and letting it count would push the next
 #: round's tie-break away from an agent that never did the work.
 #: Deny-list, not an allow-list: rows migrated from before the field are
 #: `unknown`, and those were real hand-offs whose history should not vanish.
-UNCOUNTED_STATUSES = frozenset({STATUS_NOT_STARTED})
+UNCOUNTED_STATUSES = frozenset({STATUS_NOT_STARTED, STATUS_MAINTENANCE})
 
 #: The version a document or record carries when it has no `schema_version` at
 #: all -- the pre-versioning shape. Reading an absent key as 0 is what lets the
@@ -305,6 +309,17 @@ def _migrate_document_8_to_9(payload):
     return payload
 
 
+def _migrate_record_9_to_10(record):
+    """Version 10 adds an allowed status; older assignment evidence is unchanged."""
+    record["schema_version"] = 10
+    return record
+
+
+def _migrate_document_9_to_10(payload):
+    payload["schema_version"] = 10
+    return payload
+
+
 def _migrate_snapshot_2_to_3(snapshot):
     """An older snapshot has no measured per-tier billing attribution."""
     snapshot["schema_version"] = 3
@@ -316,12 +331,24 @@ def _migrate_snapshot_2_to_3(snapshot):
 
 def _migrate_snapshot_3_to_4(snapshot):
     """Give older failed measurements their previously implicit details."""
-    snapshot["schema_version"] = 4
     agents = snapshot.get("agents")
-    if isinstance(agents, dict):
-        for record in agents.values():
-            if isinstance(record, dict) and isinstance(record.get("error"), dict):
-                record["error"].setdefault("details", {})
+    failed = snapshot.get("failed_agents")
+    if isinstance(agents, dict) and failed is None and not any(
+        isinstance(record, dict) and "error" in record for record in agents.values()
+    ):
+        # Earliest successful snapshot fixtures omitted the empty summary.
+        failed = snapshot["failed_agents"] = []
+    if not isinstance(agents, dict) or not isinstance(failed, list):
+        raise _NoUsableState("snapshot version 3 has malformed failed-agent evidence")
+    for name in failed:
+        record = agents.get(name) if isinstance(name, str) else None
+        error = record.get("error") if isinstance(record, dict) else None
+        if (not isinstance(error, dict) or set(error) != {"code", "message"}
+                or not isinstance(error.get("code"), str) or not error["code"]
+                or not isinstance(error.get("message"), str) or not error["message"]):
+            raise _NoUsableState("snapshot version 3 has malformed failed-agent error evidence")
+        error["details"] = {}
+    snapshot["schema_version"] = 4
     return snapshot
 
 
@@ -371,6 +398,7 @@ MIGRATIONS = {
     6: (7, _migrate_document_6_to_7),
     7: (8, _migrate_document_7_to_8),
     8: (9, _migrate_document_8_to_9),
+    9: (10, _migrate_document_9_to_10),
 }
 
 #: The same table for one assignment record, walked the same way.
@@ -384,6 +412,7 @@ RECORD_MIGRATIONS = {
     6: (7, _migrate_record_6_to_7),
     7: (8, _migrate_record_7_to_8),
     8: (9, _migrate_record_8_to_9),
+    9: (10, _migrate_record_9_to_10),
 }
 
 
@@ -449,6 +478,8 @@ def _validate(payload, path):
         if not isinstance(record, dict):
             raise _NoUsableState("an assignment row is not a JSON object")
         record, row_migrated = _apply_migrations(record, RECORD_MIGRATIONS, "an assignment row")
+        if record.get("status") not in ASSIGNMENT_STATUSES:
+            raise _NoUsableState("an assignment row has an invalid status")
         if "requirements" not in record:
             raise _NoUsableState("an assignment row is missing specialist requirements provenance")
         # The ledger row holds the RESPONSIBILITY; the seat lives on the
@@ -741,6 +772,13 @@ def add_assignment(state, at, role, agent, status=STATUS_APPLIED, *,
     which is what a slice's verdict is read back through (#434).
     """
     role = canonical_role(role)
+    if status not in ASSIGNMENT_STATUSES:
+        raise UsageError(
+            "An assignment status must be one of {}.".format(
+                " | ".join(sorted(ASSIGNMENT_STATUSES))
+            ),
+            {"status": status},
+        )
     if judge_mode is not None and not isinstance(judge_mode, str):
         raise UsageError("A judge mode is text, one of {}.".format(" | ".join(sorted(LEDGER_JUDGE_MODES))),
                          {"judge_mode": judge_mode})

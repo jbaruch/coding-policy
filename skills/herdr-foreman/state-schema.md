@@ -418,11 +418,11 @@ skills/herdr-foreman/references/retrospectives.md
 
 ```json
 {
-  "schema_version": 9,
+  "schema_version": 10,
   "snapshots": ["<measure output>, oldest first, ring capped at 20"],
   "assignments": [
     {
-      "schema_version": 9,
+      "schema_version": 10,
       "at": "2026-09-01T21:00:00+00:00",
       "role": "developer",
       "agent": "grok",
@@ -461,7 +461,7 @@ skills/herdr-foreman/references/retrospectives.md
 
 | Field | Type | Meaning |
 | ----- | ---- | ------- |
-| `schema_version` | integer | Currently `9`. Version 9 adds `judge_mode` to every row: the judge seat's declared mode, `unknown` for a judge row migrated from before it, null for other roles. Version 8 drops the retired qualification battery's summary from `tier`; migration removes it from older rows. Version 7 adds `pressure_headroom` and `de_escalated` to a row's `tier`; an older tier row migrates to null headroom and `de_escalated: false`, since nothing could de-escalate before it. Bumped on any shape change |
+| `schema_version` | integer | Currently `10`. Version 10 adds the non-counting assignment status `maintenance`; version 9 adds `judge_mode` to every row: the judge seat's declared mode, `unknown` for a judge row migrated from before it, null for other roles. Version 8 drops the retired qualification battery's summary from `tier`; migration removes it from older rows. Version 7 adds `pressure_headroom` and `de_escalated` to a row's `tier`; an older tier row migrates to null headroom and `de_escalated: false`, since nothing could de-escalate before it. Bumped on any shape change |
 | `snapshots` | array | Whole `measure` documents, oldest first; the ring holds the last 20 |
 | `assignments` | array | Append-only ledger of who held which role |
 | `snapshots[].schema_version` | integer | Currently `4`. Version 2 added `window_group`; version 3 adds per-round `tier_billing`; version 4 adds `error.details` to failed agent records. Older snapshots migrate on read, preserving headroom and shared-window membership |
@@ -470,7 +470,7 @@ skills/herdr-foreman/references/retrospectives.md
 | `assignments[].at` | string | ISO-8601 timestamp, from `--now` or the CLI's clock |
 | `assignments[].role` | string | The role handed out |
 | `assignments[].agent` | string | The agent that received it |
-| `assignments[].status` | string | `applied`, `sent_but_not_started`, or `unknown` |
+| `assignments[].status` | string | `applied`, `sent_but_not_started`, `maintenance`, or `unknown`. `maintenance` records a verified relaunch without a dispatch and does not count as role experience |
 | `assignments[].cleared` | boolean or null | Whether the dispatcher confirmed its automatic clear; null means historical evidence is unavailable |
 | `assignments[].clear_reason` | string | `automatic` with cleared true, `hand` or `retained` with cleared false, or `unknown` with cleared null |
 | `assignments[].task` | string or null | Non-empty stable task identifier; null for older or unlabelled assignments |
@@ -539,7 +539,7 @@ gains empty `hand_clearances` and `historical_attempts` arrays. Existing
 record shapes, contents and evidence remain unchanged. Recovery 4 → 5 changes
 only the enclosing version. Older stores containing future dispatch fields or
 versions are refused without rewriting. State and assignment versions migrate
-independently; snapshot schema 3 remains unchanged.
+independently; snapshot schema 4 carries failed-record details through its own 3 → 4 migration.
 Every record carries `at` and `task`. Authorizations contain the actual operator
 message `source` and `quote`; evidence receipts contain absolute `path` and
 `sha256` of the bytes read by the owner. Receipts are audit evidence, not a
@@ -868,7 +868,9 @@ Only the owner migrates, and it reads a version in one of three directions.
   `specialist_assessments`; assignment `5 → 6` adds null `requirements` and
   `reviewer_scope: unknown` for reviewers, null for other roles. Migration never
   assumes an older reviewer only verified work. Unexpected newer fields in an
-  older document or row refuse migration. Snapshot `2 → 3` independently adds
+  older document or row refuse migration. State and assignment `9 → 10` stamp
+  the new version without changing older assignment evidence; only new owner
+  writes may use `maintenance`. Snapshot `2 → 3` independently adds
   empty `tier_billing` maps, preserving window groups and readings. Snapshot
   `3 → 4` adds an empty `error.details` object to failed records, preserving
   their code and message. Each row is migrated even in

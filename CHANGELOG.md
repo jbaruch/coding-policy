@@ -6,7 +6,8 @@
   `foreman relaunch-worker <name>` preserves the live configured tier, requires
   retrospective transition coverage, refuses a busy worker or occupied
   composer, restarts with configured YOLO launch arguments, and proves the new
-  process argv. When measurement sees `Update installed · Restart`, round
+  process argv. A non-counting maintenance ledger row preserves that proof
+  without creating a dispatch. When measurement sees `Update installed · Restart`, round
   preflight names the affected worker's relaunch command in its headroom
   blocker.
 
