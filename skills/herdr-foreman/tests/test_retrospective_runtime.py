@@ -281,19 +281,19 @@ class RetrospectiveRuntimeTest(unittest.TestCase):
         self.assertFalse(result["due"])
         self.assertEqual(result["missing_coverage"], [])
 
-    def test_transition_bridge_accepts_receipts_after_home_migration(self):
+    def test_transition_completed_after_home_migration_reloads(self):
         environment = self.use_legacy_home()
         self.record(self.request([self.steps[0]]))
-        first = self.guard()
-        first.preflight([self.steps[0]])
-        self.runner.set("agent get grok", agent_json("grok", "done", "w4:p1", "own-clear"))
-        first.after_transition(self.steps[0])
         self.finish_home_migration(environment)
         retry = self.guard()
 
         result = retry.preflight([self.steps[0]])
+        self.runner.set("agent get grok", agent_json("grok", "done", "w4:p1", "own-clear"))
+        retry.after_transition(self.steps[0])
+        reloaded = notes.load(self.path)
 
         self.assertIsNone(result)
+        self.assertEqual(len(reloaded["transitions"]), 1)
 
     def test_a_retained_seat_is_not_read_as_a_role_change(self):
         # The ledger row records `reviewer` and the dispatch records

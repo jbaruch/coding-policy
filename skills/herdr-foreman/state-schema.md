@@ -372,8 +372,10 @@ unchanged; another location or changed bytes invalidates the authority.
 Each `transitions` entry has `schema_version: 1`, unique content-derived `id`,
 UTC `at`, `agent`, the original `descriptor` coverage, and the verified `incoming`
 observation. The descriptor must match saved retrospective coverage or prove an
-exempt first start. The transition receipt bridges only the utility's own recorded
-boundary to that incoming worker; it does not cover later outgoing work.
+exempt first start; a receipt through the retained legacy-home link is the same
+saved coverage under the migration rule above. The transition receipt bridges
+only the utility's own recorded boundary to that incoming worker; it does not
+cover later outgoing work.
 
 The cadence uses the latest completed retrospective, or the established first-work
 baseline when no retrospective exists. Failed checks and incomplete notes never

@@ -352,7 +352,9 @@ def load(path, *, allow_pending=False):
         if row["id"] in transition_ids:
             _malformed("duplicate transition")
         transition_ids.add(row["id"])
-        if not descriptor["first_start"] and not any(descriptor in record["coverage"] for record in result["records"]):
+        if (not descriptor["first_start"]
+                and not any(same_history(descriptor, saved) for record in result["records"]
+                            for saved in record["coverage"])):
             _malformed("transition coverage provenance")
     return result
 
