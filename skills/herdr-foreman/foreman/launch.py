@@ -264,17 +264,27 @@ def restart_worker(client, agent, pane, tier, sleep=time.sleep, before_transitio
     ):
         raise HerdrError("Worker process changed after its configured tier was proved; no process was terminated.",
                          {"agent": agent.name, "pane": pane})
-    # Recheck native occupant and readiness immediately before termination.
+    # Check native occupant and readiness before any transition callback.
     fresh = client.agent_get(agent.name)
     if (fresh.get("agent_status") not in READY_STATES or fresh.get("pane_id") != pane
             or fresh.get("terminal_id") != info.get("terminal_id")
             or fresh.get("agent_session") != info.get("agent_session")):
         raise AgentBusyError("Worker changed during relaunch checks; no process was terminated.", {})
-    if foreground_agent(client, pane, agent.kind).get("pid") != process.get("pid"):
-        raise HerdrError("Foreground PID changed during relaunch checks; inspect the pane.", {})
     if before_transition is not None:
         before_transition()
-    client.terminate_process(process.get("pid"))
+    # Retrospective I/O can take long enough for the worker to change. Bind the
+    # destructive operation to the same native occupant, PID, and argv after
+    # that callback, immediately before termination.
+    final = client.agent_get(agent.name)
+    if (final.get("agent_status") not in READY_STATES or final.get("pane_id") != pane
+            or final.get("terminal_id") != info.get("terminal_id")
+            or final.get("agent_session") != info.get("agent_session")):
+        raise AgentBusyError("Worker changed during the retrospective relaunch check; no process was terminated.", {})
+    final_process = foreground_agent(client, pane, agent.kind)
+    if (final_process.get("pid") != process.get("pid")
+            or final_process.get("argv") != process.get("argv")):
+        raise HerdrError("Foreground process changed during the retrospective relaunch check; no process was terminated.", {})
+    client.terminate_process(final_process.get("pid"))
     for attempt in range(SHELL_POLL_ATTEMPTS):
         if holds_only_shell(client.pane_process_info(pane)):
             return start_after_release(client, agent, pane, tier, sleep=sleep, before_start=before_start)

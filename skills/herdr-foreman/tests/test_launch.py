@@ -113,6 +113,16 @@ class LaunchTest(unittest.TestCase):
             restart_worker(client, agent, "w1:p2", tier, expected_process=selected, sleep=lambda _: None)
         self.assertFalse(client.terminated)
 
+    def test_process_is_rechecked_after_retrospective_before_termination(self):
+        client = Client()
+
+        def switch_argv():
+            client.process["argv"] = ["claude", "--dangerously-skip-permissions", "--model", "sonnet-5", "--effort", "high"]
+
+        with self.assertRaisesRegex(HerdrError, "changed during the retrospective relaunch check"):
+            restart_worker(client, worker(), "w1:p2", TIER, before_transition=switch_argv, sleep=lambda _: None)
+        self.assertFalse(client.terminated)
+
     def test_fresh_round_terminates_only_the_foreground_agent_and_starts_requested_flags(self):
         client = Client()
         proof = restart_worker(client, worker(), "w1:p2", TIER, sleep=lambda _: None)
