@@ -732,6 +732,13 @@ CODEX_RECALLED_MULTILINE = (
     "    {}Read /tmp/brief-developer.md and execute it exactly.{}\n"
     "    {}Finish with the REPORT line it specifies.{}\n"
 ).format(DIM, RESET, DIM, RESET, DIM, RESET)
+CODEX_PLACEHOLDER_FIRST_RECALL = (
+    "  Codex v1.2\n  ─────────\n"
+    "  › {}Ask Codex to do anything{}\n"
+    "    {}but keep this recalled continuation{}\n"
+    "\n"
+    "  gpt-5.6-sol high · ~/Projects/example\n"
+).format(DIM, RESET, DIM, RESET)
 
 
 class PlaceholderTest(unittest.TestCase):
@@ -772,6 +779,12 @@ class PlaceholderTest(unittest.TestCase):
         self.assertTrue(composer.occupied)
         self.assertIn("New assignment from the team lead", composer.content)
         self.assertTrue(composer.dim)
+
+    def test_a_placeholder_first_row_with_a_recalled_continuation_is_occupied(self):
+        composer = inspect_composer(CODEX_PLACEHOLDER_FIRST_RECALL, BY_NAME["codex"])
+        self.assertTrue(composer.occupied)
+        self.assertIn("recalled continuation", composer.content)
+        self.assertNotIn("gpt-5.6-sol", composer.content)
 
     def test_recovery_is_refused_for_a_placeholder(self):
         composer = inspect_composer(CODEX_PLACEHOLDER_PLAIN, BY_NAME["codex"])

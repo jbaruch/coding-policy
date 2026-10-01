@@ -195,17 +195,42 @@ def composer_text(pane_text, glyph, ignore_dim=False):
     if not prefix:
         return None
 
+    rows = pane_text.splitlines()
     found = None
-    for raw in pane_text.splitlines():
+    found_index = None
+    for index, raw in enumerate(rows):
         if strip_ansi(raw).strip().startswith(prefix):
             found = raw
+            found_index = index
     if found is None:
         return None
 
     chars = _trim(ansi_chars(found))[len(prefix) :]
     if ignore_dim:
         chars = [pair for pair in chars if not pair[1]]
-    return "".join(char for char, _ in _trim(chars, drop=BOX_FRAME))
+    parts = ["".join(char for char, _ in _trim(chars, drop=BOX_FRAME))]
+
+    # Codex wraps recalled multiline input onto indented rows below the glyph
+    # row. Those rows are still part of the composer: ignoring them can turn a
+    # recalled prompt whose first row equals the empty hint into an exact
+    # placeholder match. A continuation is contiguous and more indented than
+    # the glyph row; the blank before Codex's footer ends it.
+    visible_found = strip_ansi(found)
+    glyph_indent = len(visible_found) - len(visible_found.lstrip())
+    for raw in rows[(found_index or 0) + 1 :]:
+        visible = strip_ansi(raw)
+        if not visible.strip():
+            break
+        indent = len(visible) - len(visible.lstrip())
+        if indent <= glyph_indent:
+            break
+        continuation = _trim(ansi_chars(raw), drop=BOX_FRAME)
+        if ignore_dim:
+            continuation = [pair for pair in continuation if not pair[1]]
+        text = "".join(char for char, _ in _trim(continuation, drop=BOX_FRAME))
+        if text:
+            parts.append(text)
+    return "\n".join(parts)
 
 
 def screen_signature(pane_text, glyph):
