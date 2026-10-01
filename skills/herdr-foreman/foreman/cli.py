@@ -1198,6 +1198,14 @@ def _apply(args, client, warn, trace, hold_gates):
     document = _load_assignments(args.assignments, document=True)
     assignments = normalize_assignments(document)
     scoped = bool(templates) and all(agent.assignment_scoped for agent in templates)
+    worker_kinds = document.get("worker_kinds") if isinstance(document, dict) else None
+    if scoped and (not isinstance(worker_kinds, dict)
+                   or set(worker_kinds) != set(assignments)):
+        raise UsageError(
+            "This assignment-scoped plan needs a worker_kinds object with exactly one entry for every assigned seat; re-run `{}` rather than editing the plan.".format(
+                runnable.command("plan")),
+            {},
+        )
     if scoped and not args.dry_run and not (isinstance(args.task, str) and args.task.strip()):
         raise UsageError(
             "Assignment-scoped apply needs --task before it can create short-lived panes; the task owns their durable dispatch and closure records.",
@@ -1244,7 +1252,7 @@ def _apply(args, client, warn, trace, hold_gates):
         raise UsageError("Saved plan and apply name different task, count or correction bounds; replan from the current ledger.", {})
     if scoped and (args.retain_context or args.retain_specialist):
         assignments = _retained_scoped_identity(
-            assignments, document["worker_kinds"], state, args.task,
+            assignments, worker_kinds, state, args.task,
             args.fix_round, args.retain_context, args.retain_specialist,
             requirements,
         )
@@ -1581,6 +1589,12 @@ def _apply(args, client, warn, trace, hold_gates):
             _supervision_enrollment(state_path, result["dispatch_id"], args.task, result["role"], result["agent"], reports[result["role"]], at,
                                     pane_id=result["pane_id"], native=native, persist=True)
 
+    guard = retrospective_runtime.Guard(
+        state_path, state, client, agents_by_name, at,
+        task=args.task, retain=args.retain_context or args.retain_specialist,
+        no_clear=args.no_clear,
+    )
+
     spawned = {}
     enrolled = {}
     sending = set()
@@ -1593,7 +1607,18 @@ def _apply(args, client, warn, trace, hold_gates):
                 tier = tiers.get(role)
                 if not isinstance(tier, dict):
                     raise UsageError("Assignment-scoped seat {} has no selected tier; replan from the current config.".format(role), {})
-                pane = lifecycle.spawn(client, agents_by_name[name], tier, history=state["assignments"])
+                def preflight_start(pane, role=role, name=name, tier=tier):
+                    guard.before_start({
+                        "agent": name, "role": role,
+                        "model": tier.get("model"), "effort": tier.get("effort"),
+                        "context": "start", "task": args.task,
+                        "brief": paths[role], "common": paths["common"],
+                        "report": None, "unavailable": None, "pane": pane,
+                    })
+                pane = lifecycle.spawn(
+                    client, agents_by_name[name], tier,
+                    history=state["assignments"], before_start=preflight_start,
+                )
                 spawned[name] = pane
                 identifier = dispatches[role]["id"]
                 _supervision_enrollment(
@@ -1677,8 +1702,7 @@ def _apply(args, client, warn, trace, hold_gates):
             reserved=reserved,
             reports=reports,
             contents=contents,
-            retrospective_guard=retrospective_runtime.Guard(state_path, state, client, agents_by_name, at,
-                                                          task=args.task, retain=args.retain_context or args.retain_specialist, no_clear=args.no_clear),
+            retrospective_guard=guard,
             fresh=fresh_workers, assignment_scoped=scoped,
         )
         apply_complete = True
@@ -2065,7 +2089,19 @@ def _retained_scoped_identity(assignments, worker_kinds, state, task, fix_round,
     if not candidates:
         mode = "developer fix" if retain_context else "specialist consultation"
         raise UsageError("Cannot retain this {}: no preceding confirmed assignment preserves its task, role and engagement. Replan a fresh worker or restore the original history.".format(mode), {})
-    index, prior = candidates[-1]
+    timed = [
+        (chronology.timestamp(row.get("at"), "Assignment {} chronology".format(index)), index, row)
+        for index, row in candidates
+    ]
+    latest_time = max(item[0] for item in timed)
+    latest = [(index, row) for at, index, row in timed if at == latest_time]
+    if len(latest) != 1:
+        raise UsageError(
+            "Retained assignment chronology is uncertain at indices {}; restore the original event times before reusing a live pane.".format(
+                ", ".join(str(index) for index, _row in latest)),
+            {},
+        )
+    index, prior = latest[0]
     dispatch = next((row for row in state.get("recovery", {}).get("dispatches", [])
                      if isinstance(row, dict) and row.get("assignment_index") == index
                      and isinstance(row.get("worker_kind"), str)), None)

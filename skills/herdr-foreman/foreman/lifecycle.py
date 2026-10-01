@@ -66,7 +66,7 @@ def spawn_commands(client, worker, tier, *, cwd=None):
     return [split, client.argv_agent_start(worker.name, worker.kind, pane, flags)]
 
 
-def spawn(client, worker, tier, *, cwd=None, history=None):
+def spawn(client, worker, tier, *, cwd=None, history=None, before_start=None):
     """Split, prove a first-launch shell, start one worker, and prove its tier."""
     if not isinstance(history, (list, tuple)):
         raise UsageError(
@@ -87,6 +87,8 @@ def spawn(client, worker, tier, *, cwd=None, history=None):
         # history proof above establishes that no prior assignment can carry
         # context under this identity.
         require_empty_shell(client, pane)
+        if before_start is not None:
+            before_start(pane)
         start_worker(client, worker, pane, tier)
         verify_running(client, worker, pane, tier)
         completed = True
@@ -157,10 +159,13 @@ def measure_worker_kinds(client, templates, measured_at, **options):
 
     groups = {}
     for template in templates:
-        groups.setdefault(template.window_group or template.name, []).append(template)
+        key = (("shared", template.window_group) if template.window_group
+               else ("worker", template.name))
+        groups.setdefault(key, []).append(template)
     records, failures = {}, []
-    for group, members in groups.items():
+    for _group_key, members in groups.items():
         template = members[0]
+        group = template.window_group
         probe = assignment_worker(template, identity("probe-" + template.name))
         tier = template.tiers.get("coordination")
         pane = None
@@ -181,15 +186,22 @@ def measure_worker_kinds(client, templates, measured_at, **options):
             }
         finally:
             if pane is not None:
+                primary = sys.exc_info()[1]
                 try:
                     close(client, probe.name, pane)
                 except HerdrError as exc:
-                    record = {
-                        "kind": template.kind, "state": None, "herdr_state": None,
-                        "state_source": None, "windows": None, "credits": None,
-                        "plan": None, "headroom_pct": None, "window_group": group,
-                        "skipped": False, "error": snapshot_error(exc),
-                    }
+                    if primary is not None:
+                        action = "Probe cleanup also failed for pane {}: {}. Close it with `{}` before measuring again.".format(
+                            pane, exc, format_argv(client.argv_pane_close(pane)))
+                        if hasattr(primary, "add_note"):
+                            primary.add_note(action)
+                    else:
+                        record = {
+                            "kind": template.kind, "state": None, "herdr_state": None,
+                            "state_source": None, "windows": None, "credits": None,
+                            "plan": None, "headroom_pct": None, "window_group": group,
+                            "skipped": False, "error": snapshot_error(exc),
+                        }
         for member in members:
             copied = {**record, "kind": member.kind, "window_group": member.window_group,
                       "pane_id": None, "tier_billing": tier_billing(member.tiers)}

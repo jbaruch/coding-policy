@@ -114,6 +114,25 @@ class RetrospectiveRuntimeTest(unittest.TestCase):
         self.assertTrue(empty["due"])
         self.assertFalse(empty["coverage"][0]["first_start"])
 
+    def test_preflighted_first_start_stays_covered_after_the_worker_starts(self):
+        state = empty_state()
+        guard = runtime.Guard(self.path, state, self.client, self.agents, AT, task="new-task")
+        step = {**self.steps[0], "role": "developer"}
+        item = {**guard._item(step), "context": "start"}
+        descriptor = {
+            "agent": step["agent"], "first_start": True,
+            "transition_required": False,
+            "source": {"observation": {"readiness": "shell", "shell": True}},
+            "target": runtime.target(item),
+        }
+        with patch.object(guard, "_require", return_value=descriptor), \
+                patch.object(notes, "establish_baseline"):
+            guard.before_start(item)
+        with patch("foreman.retrospective_runtime.describe", side_effect=AssertionError("running worker was reclassified")), \
+                patch.object(guard, "_bridge", return_value=None):
+            guard.preflight([step])
+            guard.before(step)
+
     def test_batch_sibling_outcome_does_not_invalidate_remaining_worker(self):
         self.record()
         guard = self.guard()

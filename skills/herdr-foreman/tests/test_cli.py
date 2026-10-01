@@ -506,6 +506,26 @@ class PlanCommandTest(CliCase):
         self.assertIn("supervision-bind", err)
         spawn.assert_not_called()
 
+    def test_schema_7_apply_rejects_malformed_worker_kind_map_before_access(self):
+        shipped = Path(__file__).resolve().parent.parent / "config.example.json"
+        self.config.write_text(shipped.read_text(encoding="utf-8"), encoding="utf-8")
+        for worker_kinds in (None, ["claude"], {}):
+            with self.subTest(worker_kinds=worker_kinds):
+                plan = {"schema_version": 14, "assignments": {"developer": "developer-fixed"}}
+                if worker_kinds is not None:
+                    plan["worker_kinds"] = worker_kinds
+                self.out, self.err = io.StringIO(), io.StringIO()
+                code, out, err = self.run_cli(
+                    self.base() + ["apply", "--assignments", json.dumps(plan),
+                                   "--task", "t-malformed", "--common", str(self.common),
+                                   "--brief", "developer=" + str(self.briefs["developer"]),
+                                   "--retain-context", "--fix-round", "1", "--dry-run"],
+                    client=Mock(),
+                )
+                self.assertEqual(code, 1)
+                self.assertEqual(out, "")
+                self.assertIn("worker_kinds object", err)
+
     def _interrupt_plan(self):
         shipped = Path(__file__).resolve().parent.parent / "config.example.json"
         self.config.write_text(shipped.read_text(encoding="utf-8"), encoding="utf-8")
@@ -608,6 +628,42 @@ class PlanCommandTest(CliCase):
             ),
             {"developer": "developer-0000000001"},
         )
+
+    def test_scoped_retention_uses_assignment_chronology_not_append_order(self):
+        state = empty_state()
+        add_assignment(
+            state, "2026-02-03T11:00:00+00:00", "developer",
+            "developer-newer", task="t-retain", fix_round=None,
+        )
+        add_assignment(
+            state, "2026-02-03T09:00:00+00:00", "developer",
+            "developer-older", task="t-retain", fix_round=None,
+        )
+        state["recovery"]["dispatches"] = [
+            {"assignment_index": 0, "worker_kind": "claude"},
+            {"assignment_index": 1, "worker_kind": "claude"},
+        ]
+        self.assertEqual(
+            cli._retained_scoped_identity(
+                {"developer": "developer-fresh"}, {"developer": "claude"},
+                state, "t-retain", 1, True, False, {},
+            ),
+            {"developer": "developer-newer"},
+        )
+
+    def test_scoped_retention_refuses_tied_latest_chronology(self):
+        state = empty_state()
+        add_assignment(state, AT, "developer", "developer-one", task="t-retain")
+        add_assignment(state, AT, "developer", "developer-two", task="t-retain")
+        state["recovery"]["dispatches"] = [
+            {"assignment_index": 0, "worker_kind": "claude"},
+            {"assignment_index": 1, "worker_kind": "claude"},
+        ]
+        with self.assertRaisesRegex(UsageError, "chronology is uncertain"):
+            cli._retained_scoped_identity(
+                {"developer": "developer-fresh"}, {"developer": "claude"},
+                state, "t-retain", 1, True, False, {},
+            )
 
     def test_close_task_removes_every_retained_scoped_pane(self):
         record = self.tmp / "close-task.json"

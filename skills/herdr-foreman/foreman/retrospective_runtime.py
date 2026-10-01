@@ -255,12 +255,18 @@ class Guard:
 
     def preflight(self, steps, _statuses=None):
         for step in steps:
-            self.requests[step["agent"]] = self._item(step)
+            if not (step["agent"] in self.original
+                    and self.original[step["agent"]].get("first_start") is True):
+                self.requests[step["agent"]] = self._item(step)
         # Refuse the whole batch before its first reservation or input.
         notes.require_no_pending(self.path)
         index = notes.load(self.path)
         items = [self._known_report(item, index) for item in self.requests.values()]
-        current = [describe(self.state, self.client, self.agents, item, index) for item in items]
+        current = [self.original[item["agent"]]
+                   if (item["agent"] in self.original
+                       and self.original[item["agent"]].get("first_start") is True)
+                   else describe(self.state, self.client, self.agents, item, index)
+                   for item in items]
         daily = notes.cadence(index, self.at, existing_work=bool(self.state["assignments"]) or any(not row["first_start"] for row in current))
         missing = [row["agent"] for row in current if row["transition_required"] and not _usable_coverage(index, row) and not self._bridge(index, row)]
         if daily["due"] or missing:
@@ -270,6 +276,10 @@ class Guard:
         self.original = {row["agent"]: (self._bridge(index, row) or {}).get("descriptor", row) for row in current}
 
     def before(self, step):
+        original = self.original.get(step["agent"])
+        if original is not None and original.get("first_start") is True:
+            notes.require_no_pending(self.path)
+            return
         current = self._require(self.requests[step["agent"]])
         self.original.setdefault(step["agent"], current)
 

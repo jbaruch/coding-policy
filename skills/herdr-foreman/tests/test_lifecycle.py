@@ -70,6 +70,22 @@ class SpawnCloseTest(unittest.TestCase):
         start.assert_called_once_with(client, worker, "pane-new", tier)
         verify.assert_called_once_with(client, worker, "pane-new", tier)
 
+    def test_spawn_runs_first_start_preflight_while_the_pane_is_still_a_shell(self):
+        client = Mock()
+        client.pane_split.return_value = "pane-new"
+        client.pane_process_info.return_value = {
+            "shell_pid": 10, "foreground_processes": [{"pid": 10, "name": "zsh"}],
+        }
+        worker = template()
+        order = []
+        with patch("foreman.lifecycle.start_worker", side_effect=lambda *_args: order.append("start")), \
+                patch("foreman.lifecycle.verify_running", return_value={"pid": 1}):
+            spawn(
+                client, worker, worker.tiers["coordination"], history=[],
+                before_start=lambda pane: order.append("preflight:" + pane),
+            )
+        self.assertEqual(order, ["preflight:pane-new", "start"])
+
     def test_spawn_refuses_an_identity_with_prior_assignment_history(self):
         client = Mock()
         worker = template()
@@ -162,6 +178,40 @@ class WindowProbeTest(unittest.TestCase):
         self.assertEqual(stopped.call_count, 1)
         self.assertEqual(set(result["agents"]), {"claude", "codex"})
         self.assertTrue(all(row["pane_id"] is None for row in result["agents"].values()))
+
+    def test_implicit_self_window_does_not_collide_with_an_explicit_group_name(self):
+        workers = [template("foo", "claude", ""), template("bar", "codex", "foo")]
+        client = Mock()
+
+        def measured(_client, probes, measured_at, **_options):
+            probe = probes[0]
+            return {"schema_version": 4, "measured_at": measured_at,
+                    "agents": {probe.name: {"kind": probe.kind, "state": "idle",
+                        "herdr_state": "idle", "state_source": "herdr", "pane_id": "probe-pane",
+                        "windows": [], "credits": None, "plan": None, "headroom_pct": 90.0,
+                        "window_group": None, "skipped": False, "tier_billing": {}}},
+                    "failed_agents": []}
+
+        with patch("foreman.lifecycle.spawn", side_effect=["pane-foo", "pane-bar"]) as started, \
+                patch("foreman.lifecycle.identity", side_effect=["probe-foo-fixed", "probe-bar-fixed"]), \
+                patch("foreman.measure.measure", side_effect=measured) as usage, \
+                patch("foreman.lifecycle.close"):
+            measure_worker_kinds(client, workers, "2026-10-01T00:00:00+00:00")
+        self.assertEqual(started.call_count, 2)
+        self.assertEqual(usage.call_count, 2)
+
+    def test_probe_cleanup_failure_is_attached_to_an_interrupt(self):
+        client = Mock()
+        client.argv_pane_close.return_value = ["herdr", "pane", "close", "--pane", "probe-pane"]
+        with patch("foreman.lifecycle.spawn", return_value="probe-pane"), \
+                patch("foreman.lifecycle.identity", return_value="probe-fixed"), \
+                patch("foreman.measure.measure", side_effect=KeyboardInterrupt), \
+                patch("foreman.lifecycle.close", side_effect=failure("pane_busy", "cannot close")), \
+                self.assertRaises(KeyboardInterrupt) as caught:
+            measure_worker_kinds(client, [template()], "2026-10-01T00:00:00+00:00")
+        notes = " ".join(caught.exception.__notes__)
+        self.assertIn("Probe cleanup also failed", notes)
+        self.assertIn("herdr pane close --pane probe-pane", notes)
 
 
 if __name__ == "__main__":
