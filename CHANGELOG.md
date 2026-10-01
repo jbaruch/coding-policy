@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.357 — 2026-10-01
+
 ### Added
 
 - **Idle workers can be relaunched outside a dispatch (Closes #673).**
