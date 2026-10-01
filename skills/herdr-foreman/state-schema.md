@@ -364,6 +364,10 @@ record or review file invalidates its worker's coverage.
 An unreadable known review may have a null current `report` only with the source's
 explicit `unavailable` reason; its archived dispatch metadata remains bound by
 `sha256`. Restored readable bytes invalidate that recorded missing condition.
+After home migration, completed coverage and transition bridges accept a saved
+receipt path through the retained legacy-home link only when it resolves to the
+current path with the same byte digest and size. The historical spelling remains
+unchanged; another location or changed bytes invalidates the authority.
 
 Each `transitions` entry has `schema_version: 1`, unique content-derived `id`,
 UTC `at`, `agent`, the original `descriptor` coverage, and the verified `incoming`

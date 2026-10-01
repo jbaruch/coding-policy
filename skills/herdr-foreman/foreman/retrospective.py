@@ -77,7 +77,7 @@ def receipt(path):
 
 def current_receipt(record):
     validate_receipt(record)
-    return receipt(record["path"]) == record
+    return same_history(receipt(record["path"]), record)
 
 
 def _json(path):

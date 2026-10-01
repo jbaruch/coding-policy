@@ -172,7 +172,7 @@ def _usable_coverage(index, descriptor):
         return None
     for record in reversed(index["records"]):
         for saved in record["coverage"]:
-            if saved == descriptor:
+            if notes.same_history(saved, descriptor):
                 return record["id"]
     return None
 
@@ -219,17 +219,18 @@ class Guard:
         for row in reversed(index["transitions"]):
             original = row["descriptor"]
             if (row["agent"] != current["agent"] or original["source"]["assignment_digest"] != current["source"]["assignment_digest"]
-                    or original["source"]["dispatch_evidence"] != current["source"]["dispatch_evidence"]):
+                    or not notes.same_history(original["source"]["dispatch_evidence"], current["source"]["dispatch_evidence"])):
                 continue
             if {key: value for key, value in row["incoming"].items() if key != "readiness"} != {key: value for key, value in current["source"]["observation"].items() if key != "readiness"}:
                 continue
             desired, saved = current["target"], original["target"]
-            exact = saved == desired
+            exact = notes.same_history(saved, desired)
             judge_handoff = (saved["context"] == "start" and desired["context"] == "retain"
                              and saved["role"] == desired["role"] == "judge"
                              and all(saved[key] == desired[key] for key in ("model", "effort", "task")))
             report = original["source"]["report"]
-            if (exact or judge_handoff) and report == current["source"]["report"] and (report is None or notes.current_receipt(report)):
+            if ((exact or judge_handoff) and notes.same_history(report, current["source"]["report"])
+                    and (report is None or notes.current_receipt(report))):
                 return row
         return None
 
@@ -301,9 +302,13 @@ class Guard:
         _offset, row, _dispatch, _seat = _prior(self.state, item["agent"])
         current_report = notes.receipt(item["report"]) if item["report"] else None
         row_digest = notes.digest(row) if row else None
-        if row_digest != original["source"]["assignment_digest"] or _dispatch_evidence(self.state, _dispatch, item["unavailable"]) != original["source"]["dispatch_evidence"]:
+        if (row_digest != original["source"]["assignment_digest"]
+                or not notes.same_history(_dispatch_evidence(self.state, _dispatch, item["unavailable"]),
+                                          original["source"]["dispatch_evidence"])):
             raise UsageError("Outgoing assignment changed during relaunch; refresh retrospective coverage before starting.", {})
-        if target(item) != original["target"] or current_report != original["source"]["report"] or not _usable_coverage(index, original):
+        if (not notes.same_history(target(item), original["target"])
+                or not notes.same_history(current_report, original["source"]["report"])
+                or not _usable_coverage(index, original)):
             raise UsageError("Retrospective evidence changed during relaunch; refresh the note and target before starting.", {})
         observed = _observation(self.client, item["agent"], self.agents[item["agent"]].kind, item["pane"], starting=True)
         if not observed["shell"]:
