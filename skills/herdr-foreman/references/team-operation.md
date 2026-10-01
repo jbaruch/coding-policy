@@ -194,17 +194,17 @@ The Herdr team round contract. `rules/agent-team-operation.md` Two Modes decides
 - A finding a ruling covers is never re-nominated
 - A `fix` finding that stays open follows the fix loop and its exhaustion route, never a second weighing
 - The judge is declared in `config.json`, measured, and planned like every other seat
-- The judge worker and the `claude` worker authenticate as one Claude subscription and draw on one weekly window
-- `window_group` names the usage window an agent shares with other agents
+- The judge names a worker kind; its disposable probe and any other kind in the same `window_group` draw on one measured window
+- `window_group` names the usage window a worker kind shares with other kinds
 - A seat's cost reduces the projected headroom of every worker sharing its `window_group`
-- The `judge` block names the seat's agent, and the model and effort its worker is launched with
-- The planner seats the judge on the named agent and echoes the tier in its plan
+- The `judge` block names the seat's `worker_kind`, and the model and effort its fresh worker is launched with
+- The planner creates a fresh judge assignment identity on that worker kind and echoes the tier in its plan
 - The model and effort are the worker's launch flags, applied by starting that worker before the dispatch
 - Prove the requested model and effort from returned launch argv or the live foreground process argv
 - A banner, transcript, or remembered ledger row alone never proves the live tier
 - Refuse the judge dispatch when its launch arguments do not prove the requested pair
 - The planner never ranks the judge seat
-- The pinned judge worker never holds another seat
+- The pinned judge assignment identity never holds another seat; the worker kind may supply other fresh assignments
 - No exclusion bars the judge from a dispute involving its own model
 - A judge round the pinned worker's window cannot cover halts the round — no substitution, no fallback to another vendor's flagship, no degraded ruling
 - The most capable model is reserved for the judge

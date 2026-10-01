@@ -214,13 +214,14 @@ CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"; [ -d "$
 bash "$CP/skills/herdr-foreman/roster.sh"
 ```
 
-Emits the caller and live workers with kind, pane, and state. An empty roster on
-exit 0 means unnamed panes: report them from `herdr agent list` with the
-correcting `herdr agent rename <pane-id> <name>` command.
+Emits the caller and live workers with kind, pane, and state. Under schema 7 an
+empty worker roster is the expected idle state: apply creates workers only for
+planned assignments. If `herdr agent list` shows other unnamed panes, report
+them separately; never turn them into a standing roster.
 
 Record staffing gaps under `references/round-setup.md`. Leave unused specialist
 profiles unlaunched. Never duplicate targets or fold verification onto a
-contributor. Start workers in YOLO mode under
+contributor. Apply starts schema-7 workers in YOLO mode under
 `skills/herdr-foreman/references/model-tiers.md`;
 preserve it on relaunch. Verify live permission flags before dispatch, including
 existing workers. Record task authorization and permitted actions under the
@@ -260,7 +261,10 @@ bash "$CP/skills/herdr-foreman/foreman.sh" measure
 ```
 
 Emits and saves headroom, windows, state, `tier_billing`, and `failed_agents`.
-Busy workers are skipped. Unmeasured billing stays `unknown`. Report failed
+With schema 7 it starts and closes one disposable probe per `window_group`,
+copies that one reading to the kinds sharing the window, and sends no usage
+keystrokes to assignment panes. Legacy busy standing workers are skipped.
+Unmeasured billing stays `unknown`. Report failed
 measurements and obtain their readings before relying on those seats. A pending
 CLI update follows `skills/herdr-foreman/references/model-tiers.md`
 Maintenance Relaunch.
@@ -355,7 +359,10 @@ bash "$CP/skills/herdr-foreman/foreman.sh" plan \
   --task <task-id> [--fix-round <N>] [--correction-plan <id> --work <work.json>]
 ```
 
-Emits the role plan without worker contact; a partitioned role is seated once
+Emits the role plan without worker contact. Under config schema 7,
+`worker_kinds` records the ranked template and `assignments` records one fresh,
+plan-bound live identity per seat; a later plan creates different identities.
+A partitioned role is seated once
 per slice as `<role>#<slice>`, and Step 10 dispatches each seat with its own
 brief. A judge seat declares its mode:
 `adjudication` rules on a contested verdict, `diagnosis` on the investigator's
@@ -718,9 +725,11 @@ bash "$CP/skills/herdr-foreman/foreman.sh" close-member --enrollment <enrollment
 
 It refuses until the ledger's latest event for that worker and report carries
 an assessed decision, and refuses `accepted` without the report's recorded
-contract lines, checked before its classifier gates. It then acknowledges the
-enrollment's pending events and resolves it, citing that ledger event; a repeat
-replays. Resolution stays
+contract lines, checked before its classifier gates. It then verifies a
+schema-7 assignment pane is still bound to the recorded identity, closes that
+pane, proves the live agent is absent, acknowledges the enrollment's pending
+events and resolves it, citing that ledger event; a repeat accepts the
+already-absent identity and replays. Resolution stays
 separate from assignment acceptance and task completion.
 Resume Step 11's fleet watch for any enrollment still observed.
 Route correction-scope and bug-evidence assessment to a worker under
@@ -794,7 +803,7 @@ binds it in the judge round's last step; until then no `defer` or `decline`
 applies.
 
 Run the round's seven steps in order — compose the brief, re-measure the shared
-window, plan the pinned seat, start its worker on the pinned tier, dispatch,
+window, plan the pinned seat, let apply spawn its fresh worker on the pinned tier, dispatch,
 wait, act on the ruling:
 
 ```text

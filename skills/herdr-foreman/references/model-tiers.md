@@ -2,10 +2,12 @@
 
 ## Configuration and supported workers
 
-`config.example.json` is the operator-owned tier table. Config schema 2 adds
-per-agent `tiers` and `launch_args`; schema 1 remains readable without tiers.
+`config.example.json` is the operator-owned tier table. Config schema 7 replaces
+the live `agents` roster with `worker_kinds`: launch/UI templates that exist
+without a pane until a plan assigns them. Schemas 1–6 remain readable for
+legacy standing-worker recovery; new configurations use schema 7.
 The utility never rewrites the operator's config. Copy the example into a new
-file, preserve local agent names and UI options, then validate it with
+file, preserve local worker-kind names and UI options, then validate it with
 `foreman.sh plan` before replacing a working configuration.
 
 Each `tiers` entry maps a round type to:
@@ -33,8 +35,18 @@ declare an inactive agent or accept unused tier rows for it.
 
 The issue's requirement that reviewer/tester judgment stays at the top tier
 governs scoped rechecks too. This resolves the research table's conflicting
-lower-tier recheck examples. The separate pinned judge remains outside the
-rotating workers' tier tables and shares its configured usage window.
+lower-tier recheck examples. The pinned judge names one declared worker kind
+and overrides its model and effort for that seat. It shares that kind's
+configured usage window.
+
+Schema-7 measurement starts one disposable probe at the `coordination` tier
+for each distinct `window_group`, reads usage once, and closes the probe. It
+never types a usage command into an idle assignment pane. Planning ranks the
+stable worker-kind names, then records a fresh Herdr identity for every seat in
+`assignments` and the selected templates in `worker_kinds`. Apply splits a new
+pane, starts each identity at its selected tier, proves its launch argv, and
+only then dispatches the brief. The identity remains stable for recovery of
+that dispatch; it is never a reusable roster entry.
 
 Every team worker starts in YOLO mode, including the pinned judge and release
 worker. The foreman's assignment classifier checks each brief against the task's
@@ -50,9 +62,10 @@ and `verify_worker_permissions`). Tier flags, resume options, command
 strings, and prompt operands remain forbidden in `launch_args`; change the tier
 table to change the model or effort.
 
-For initial manual starts through Herdr, pass the runtime's YOLO options after
-`--`. Verify the resulting launch or foreground-process argv before sending a
-brief. Existing workers, including non-tiered workers, require that same proof.
+Legacy standing workers started manually through Herdr pass the runtime's YOLO
+options after `--`. Verify the resulting launch or foreground-process argv
+before sending a brief. Existing legacy workers, including non-tiered workers,
+require that same proof.
 A non-tiered existing process also proves permission in the documented resume
 form: the runtime's resume option or subcommand naming one explicit session
 UUID as a separate token, plus its explicit YOLO flags. Which selectors that
@@ -227,18 +240,18 @@ number. A fresh developer handoff after a required release clear uses the
 normal relaunch checks; verified retained fixes keep their
 existing compatible model and effort.
 
-Fresh tiered dispatch verifies the worker is idle in the expected pane and
-its composer is empty, identifies its foreground process, terminates that
-process, waits for the shell, and calls `herdr agent start` with the selected
-flags. The returned worker identity and argv must match before the brief is
-sent. A failure after termination may leave a shell or an unbriefed worker;
-inspect the named pane before retrying. No command is sent to a working or
-blocked worker.
+Schema-7 fresh dispatch splits an empty shell pane and calls `herdr agent
+start` under the plan-bound identity with the selected flags. The returned
+worker identity and argv must match before the brief is sent. A failed spawn
+closes its unused pane; after any prompt may have landed, recovery preserves
+the pane and recorded identity. Legacy tiered dispatch retains the prior
+idle/composer/process verification and relaunch path. No command is sent to a
+working or blocked worker.
 
 ### Maintenance Relaunch
 
-`foreman relaunch-worker <name>` is the owner route for the same verified
-relaunch outside a dispatch, including recovery from a pending CLI update that
+`foreman relaunch-worker <name>` is the legacy standing-worker owner route for
+the same verified relaunch outside a dispatch, including recovery from a pending CLI update that
 blocks measurement. It accepts no tier override: the old process argv must
 prove exactly one model/effort pair in that worker's current tier table. Before
 termination it requires the worker to be idle, its visible composer to be

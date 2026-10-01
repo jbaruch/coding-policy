@@ -1,5 +1,15 @@
 # Changelog
 
+### Added
+
+- **Herdr workers now live for exactly one assignment (Closes #674).** Config
+  schema 7 declares spawnable `worker_kinds` instead of a standing roster;
+  measurement uses one disposable probe per usage window, plans allocate fresh
+  live identities, apply creates and dispatches their panes, and
+  `close-member` removes each pane after its assessed outcome. Judge,
+  independence, reservation, and recovery evidence bind those assignment
+  identities while retaining schemas 1–6 for legacy recovery.
+
 ## 0.3.357 — 2026-10-01
 
 ### Added

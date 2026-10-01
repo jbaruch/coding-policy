@@ -81,6 +81,13 @@ unconfigured, the preflight warning that never blocks. A `foreman` block in a
 file below schema 6 is refused with the version it needs. Moving to schema 6 is
 the operator adding the block and bumping `schema_version`.
 Config schema 2 added per-agent `tiers` and `launch_args`.
+Config schema 7 replaces `agents` with `worker_kinds`. Each entry has the same
+launch, UI, tier, capability and metering fields, but its `name` identifies a
+template rather than a live Herdr agent. Schema 7 requires a `coordination`
+tier for the disposable usage probe. It also replaces `judge.agent` with
+`judge.worker_kind`; that kind must be declared. Schemas 1–6 remain readable
+as legacy standing-worker configurations, but a file may not mix the two
+collections or judge identity fields.
 See `skills/herdr-foreman/references/model-tiers.md` for billing evidence. A missing config is refused with the exact `cp` command to run. The
 optional `idle_markers` / `working_markers` per-agent keys carry the footer
 signatures the stale-state probe reads; an agent with neither is never probed.
@@ -93,12 +100,13 @@ exemptions, and the guarded one-shot recovery of a stuck composer.
 dispatch. All are documented in
 `skills/herdr-foreman/references/herdr.md`.
 
-`window_group` names the usage window an agent shares with other agents: two
-workers authenticating as one subscription declare the same value, `measure`
-copies it onto each record (introduced in snapshot schema 2; current schema 4), and `plan` charges a seat's cost against every
-worker in that window. An agent that declares none has a window to itself.
+`window_group` names the usage window a worker kind shares with other kinds.
+Schema-7 `measure` starts one short-lived probe per group, reads usage once,
+closes it, and copies the result onto every kind in that group (snapshot schema
+2 introduced the field; current schema 4). `plan` charges a seat's cost
+against every kind in that window. A kind declaring none has a window to itself.
 
-The optional top-level `judge` key pins the judge agent, model, and effort.
+The optional top-level `judge` key pins the judge worker kind, model, and effort.
 Plan schema 6 echoes them in a `judge` object, with `mode` — the seat's
 declared `adjudication` or `diagnosis` — beside them; a plan without that seat
 omits the object. Writer: `plan`, from its own `--judge-mode`. Readers:
@@ -107,7 +115,8 @@ one that differs from it. A version-5 plan carries no `mode`; its readers
 refuse the start rather than defaulting one, since the choice decides which
 pre-dispatch gate the seat is held to. Model and effort become explicit launch flags. Legacy `banner_pattern`
 values are ignored: proof comes from launch or live process argv. The planner
-never ranks the judge seat or gives its pinned worker another role.
+never ranks the judge seat. Schema 7 gives it a fresh assignment identity, so
+the pinned kind may independently supply another fresh seat.
 
 Plan schema 5 also carries `tiers` keyed by role and `rounds` with the foreman's
 round type and context inputs. Legacy non-tiered assignments have no tier
@@ -116,9 +125,11 @@ metadata. The operator's tier table, supported flags, and billing evidence are d
 `task`, cumulative `fix_round`, correction `plan` identity or null, and `work`
 bounds or null. Apply refuses different task context. Earlier plan shapes and
 plain role mappings remain accepted; live apply still checks current history,
-allowance, tiers, and readiness. Apply output schema 7 includes
+allowance, tiers, and readiness. Apply output schema 8 includes
 `context_transition`, persistent `dispatch_id` for labelled assignments, and
-`replayed: true` when returning an existing completed result.
+`replayed: true` when returning an existing completed result; a fresh
+schema-7-config dispatch also carries `assignment_scoped: true` and its
+`worker_kind`.
 Version 7 adds optional per-assignment specialist `requirements` and retained
 consultation handling. Version 6 added the verified role-clear transition. Version 5 adds verified hand-release and historical-correction transition
 variants; version 4 introduced the original recovery fields.
@@ -208,6 +219,15 @@ An untiered worker records `unknown` for every model-dependent field. The
 record builder is `skills/herdr-foreman/foreman/selection.py` (`records`); the
 conditions and their thresholds are `escalation_conditions` in
 `skills/herdr-foreman/foreman/tiers.py`, not restated here.
+
+Plan schema 14 adds assignment-scoped identities. `worker_kinds` maps every
+seat to the stable template selected from the snapshot; `assignments` maps the
+same seats to fresh Herdr-safe identities allocated by that plan. Apply
+requires both maps to have exactly the same keys, clones each template under
+its saved identity, and spawns it in a new pane. Replaying that plan preserves
+the identity; replanning allocates a different one. Selection explanations
+continue to name the ranked worker kind. Legacy plans and bare role mappings
+remain valid only with schemas 1–6 standing-worker configs.
 
 Plan schema 10 adds `capability` and `cheaper_adequate` to each entry in
 `tiers` (#520). Writer: `plan`, from the capability table beside the state.

@@ -29,7 +29,7 @@ from . import __version__
 from .assign import apply as apply_assignments
 from .assign import APPLY_SCHEMA_VERSION, dry_run, freeze_decision, freeze_paths, read_frozen, native_context_session, normalize_assignments, resolve_paths, validate_fix_history
 from . import renderable
-from . import attention, capabilities, chronology, churn, composition, engagement, foreman_queue, foreman_reset, historical, home, load_set, members, memory, oracle, partition, recovery, report_delivery, report_gates, restoration, role_clear, retrospective, retrospective_runtime, supervision, supervision_gate, supervision_runtime, triggers
+from . import attention, capabilities, chronology, churn, composition, engagement, foreman_queue, foreman_reset, historical, home, lifecycle, load_set, members, memory, oracle, partition, recovery, report_delivery, report_gates, restoration, role_clear, retrospective, retrospective_runtime, supervision, supervision_gate, supervision_runtime, triggers
 from .config import FOREMAN_CONFIG_VERSION, default_config_path, load_config, load_foreman, load_judge, load_role_costs, select_agents
 from .errors import AgentBusyError, PlanError, StateError, ForemanError, HerdrError, UsageError
 from .herdr import (
@@ -771,18 +771,12 @@ def _read_record(path):
 def cmd_measure(args, client=None, warn=None, trace=None):
     agents = select_agents(load_config(_config_path(args)), args.agents)
     client = client if client is not None else _client(args, trace=trace)
-    snapshot = measure(
-        client,
-        agents,
-        args.now or now_iso(),
-        marker_timeout_ms=args.marker_timeout,
-        read_lines=args.lines,
-        warn=warn,
-        poll_attempts=args.marker_poll_attempts,
-        poll_interval_sec=args.marker_poll_interval,
-        settle_sec=args.composer_settle,
-        allow_recovery=args.allow_recovery,
-    )
+    measure_fn = lifecycle.measure_worker_kinds if agents and all(agent.assignment_scoped for agent in agents) else measure
+    snapshot = measure_fn(
+        client, agents, args.now or now_iso(), marker_timeout_ms=args.marker_timeout,
+        read_lines=args.lines, warn=warn, poll_attempts=args.marker_poll_attempts,
+        poll_interval_sec=args.marker_poll_interval, settle_sec=args.composer_settle,
+        allow_recovery=args.allow_recovery)
     state_path = _state_path(args)
     state = _load_state_for_write(state_path, warn)
     add_snapshot(state, snapshot)
@@ -1037,6 +1031,16 @@ def cmd_plan(args, client=None, warn=None, trace=None):
     result["selection"] = selection.records(
         result["assignments"], result.get("tiers"), {agent.name: agent for agent in agents},
         requirements, rounds, args.fix_round, table)
+    if agents and all(agent.assignment_scoped for agent in agents):
+        # Planning ranks stable worker kinds. The saved plan then allocates a
+        # fresh live identity per seat; retries reuse that identity, while a
+        # new plan cannot accidentally discover and reuse an idle worker.
+        worker_kinds = dict(result["assignments"])
+        result["worker_kinds"] = worker_kinds
+        result["assignments"] = lifecycle.identities(result["assignments"])
+        if isinstance(result.get("judge"), dict) and "judge" in result["assignments"]:
+            result["judge"]["worker_kind"] = worker_kinds["judge"]
+            result["judge"]["agent"] = result["assignments"]["judge"]
     # A patch or fixture oracle is a path; pin the bytes behind it now, so
     # `verify-oracle` checks the round against the file it was licensed on (#488).
     pins = oracle.pin_oracles(result.get("rounds"))
@@ -1183,10 +1187,18 @@ def cmd_apply(args, client=None, warn=None, trace=None):
 
 
 def _apply(args, client, warn, trace, hold_gates):
-    agents = load_config(_config_path(args))
-    agents_by_name = {agent.name: agent for agent in agents}
+    templates = load_config(_config_path(args))
     document = _load_assignments(args.assignments, document=True)
     assignments = normalize_assignments(document)
+    scoped = bool(templates) and all(agent.assignment_scoped for agent in templates)
+    if scoped:
+        agents_by_name = lifecycle.materialize(assignments, document.get("worker_kinds"), templates)
+        agents = list(agents_by_name.values())
+    else:
+        if isinstance(document, dict) and "worker_kinds" in document:
+            raise UsageError("This assignment-scoped plan needs a schema-7 worker_kinds config; restore it or replan.", {})
+        agents = templates
+        agents_by_name = {agent.name: agent for agent in agents}
     # The ledger row records the responsibility and the DISPATCH records the
     # seat, and a dispatch exists only under a task. Without one, a seated
     # round would leave nothing that names the slice, so its verdict could
@@ -1209,10 +1221,13 @@ def _apply(args, client, warn, trace, hold_gates):
         if not isinstance(value, dict) or set(value) - {"type", "context"}:
             raise UsageError("Plan round inputs allow only type and context; model overrides are forbidden.", {})
     judge = load_judge(_config_path(args))
-    if "judge" in assignments and (judge is None or assignments["judge"] != judge.agent):
-        raise UsageError("Judge assignment must match the pinned judge in config.json.", {})
-    if judge and any(name == judge.agent and role != "judge" for role, name in assignments.items()):
+    judge_kind = document.get("worker_kinds", {}).get("judge") if scoped else assignments.get("judge")
+    if "judge" in assignments and (judge is None or judge_kind != judge.agent):
+        raise UsageError("Judge assignment must use the pinned judge worker kind in config.json.", {})
+    if not scoped and judge and any(name == judge.agent and role != "judge" for role, name in assignments.items()):
         raise UsageError("The pinned judge worker cannot hold another role.", {})
+    active_judge = (SimpleNamespace(agent=assignments["judge"], model=judge.model, effort=judge.effort)
+                    if scoped and judge and "judge" in assignments else judge)
     state_path = _state_path(args)
     state = _load_state_for_write(state_path, warn, persist_migration=not args.dry_run)
     store = state["recovery"]
@@ -1369,6 +1384,8 @@ def _apply(args, client, warn, trace, hold_gates):
                                     "plan": args.correction_plan, "work": work,
                                     "brief_identity": recovery.brief_identity(paths, role, reports.get(role), contents),
                                     "provider": agents_by_name[name].kind}
+                if scoped:
+                    dispatches[role]["worker_kind"] = document["worker_kinds"][role]
                 if role in moves:
                     dispatches[role]["refusal_move"] = moves[role]
                 if role in requirements:
@@ -1422,8 +1439,11 @@ def _apply(args, client, warn, trace, hold_gates):
     # plan's own `pressure_headroom`: a plan edited to claim scarcity would
     # otherwise recompute its own downgrade and pass the comparison below.
     planned_headroom = _planned_snapshot_headroom(document, state, state_path)
+    if scoped:
+        planned_headroom = {assignments[role]: planned_headroom.get(kind)
+                            for role, kind in document["worker_kinds"].items()}
     capability_refusals = []
-    candidates = _candidate_tiers(list(assignments), agents, rounds, args.fix_round, judge,
+    candidates = _candidate_tiers(list(assignments), agents, rounds, args.fix_round, active_judge,
                                   excludes=constraints["exclude"], headroom=planned_headroom,
                                   table=capabilities.load(state_path), refusals=capability_refusals)
     tiers = {}
@@ -1449,8 +1469,7 @@ def _apply(args, client, warn, trace, hold_gates):
         engagement.require_followup(state, state_path, assignments)
 
     if args.dry_run:
-        return (
-            dry_run(
+        rehearsal = dry_run(
                 client,
                 assignments,
                 agents_by_name,
@@ -1464,9 +1483,15 @@ def _apply(args, client, warn, trace, hold_gates):
                 recovery=store, history=state["assignments"], plan_id=args.correction_plan, work=work,
                 retain_specialist=args.retain_specialist, requirements=requirements,
                 reserved=reserved,
-            ),
-            None,
-        )
+                fresh=scoped,
+            )
+        if scoped:
+            rehearsal["spawns"] = [
+                {"role": role, "agent": name, "worker_kind": document["worker_kinds"][role],
+                 "commands": lifecycle.rendered_commands(client, agents_by_name[name], tiers.get(role))}
+                for role, name in assignments.items()
+            ]
+        return rehearsal, None
 
     prepared = []
 
@@ -1503,6 +1528,8 @@ def _apply(args, client, warn, trace, hold_gates):
     def record(result):
         seat = result["role"]
         base = canonical_role(seat)
+        if scoped:
+            result["worker_kind"] = document["worker_kinds"][seat]
         if base == "reviewer":
             result["reviewer_scope"] = "design" if rounds.get(seat, {}).get("type") in {"architect", "reconciliation"} else "verification"
         context = {key: result[key] for key in ("cleared", "clear_reason", "task", "fix_round", "context_session", "tier")}
@@ -1524,6 +1551,30 @@ def _apply(args, client, warn, trace, hold_gates):
             _supervision_enrollment(state_path, result["dispatch_id"], args.task, result["role"], result["agent"], reports[result["role"]], at,
                                     pane_id=result["pane_id"], native=native, persist=True)
 
+    spawned = {}
+    sending = set()
+    if scoped:
+        try:
+            for role, name in assignments.items():
+                tier = tiers.get(role)
+                if not isinstance(tier, dict):
+                    raise UsageError("Assignment-scoped seat {} has no selected tier; replan from the current config.".format(role), {})
+                spawned[name] = lifecycle.spawn(client, agents_by_name[name], tier)
+        except ForemanError:
+            for name, pane in spawned.items():
+                try:
+                    lifecycle.close(client, name, pane)
+                except HerdrError:
+                    pass
+            raise
+
+    original_before_send = before_send
+    def track_before_send(step, context):
+        original_before_send(step, context)
+        # From here onward the prompt transport may have written even when it
+        # returns an error, so cleanup preserves this pane for reconciliation.
+        sending.add(step["agent"])
+
     try:
         result = apply_assignments(
             client,
@@ -1537,7 +1588,7 @@ def _apply(args, client, warn, trace, hold_gates):
             judge_mode=judge_mode,
             history=state["assignments"],
             settle_timeout_ms=args.settle_timeout,
-            on_prepare=prepare, on_before_send=before_send, on_result=record,
+            on_prepare=prepare, on_before_send=track_before_send, on_result=record,
             recovery=store, plan_id=args.correction_plan, work=work,
             warn=warn,
             task=args.task,
@@ -1551,8 +1602,16 @@ def _apply(args, client, warn, trace, hold_gates):
             contents=contents,
             retrospective_guard=retrospective_runtime.Guard(state_path, state, client, agents_by_name, at,
                                                           task=args.task, retain=args.retain_context or args.retain_specialist, no_clear=args.no_clear),
+            fresh=scoped,
         )
     except ForemanError as exc:
+        for name, pane in spawned.items():
+            if name not in sending:
+                try:
+                    lifecycle.close(client, name, pane)
+                except HerdrError as cleanup:
+                    if warn is not None:
+                        warn("could not close unused assignment pane {} after dispatch refusal: {}".format(pane, cleanup))
         for identifier in prepared:
             recovery.abort_pre_send(store, identifier, at, str(exc))
         if prepared:
@@ -1741,7 +1800,8 @@ def cmd_foreman_reset_reconcile(args, client=None, warn=None, trace=None):
 
 
 def cmd_close_member(args, client=None, warn=None, trace=None):
-    return members.close(_state_path(args), args.enrollment, args.ledger, args.now or now_iso()), None
+    client = client if client is not None else _client(args, trace=trace)
+    return members.close(_state_path(args), args.enrollment, args.ledger, args.now or now_iso(), client=client), None
 
 
 def cmd_check_member(args, client=None, warn=None, trace=None):
@@ -1854,6 +1914,17 @@ def _record_stopped_task(state_path, diagnosis, at):
     }, at)
 
 
+def _pinned_judge_identity(store, task, judge):
+    """Latest live assignment identity supplied by the configured judge kind."""
+    if judge is None:
+        return None
+    matches = [row for row in store["dispatches"]
+               if canonical_role(row.get("role")) == "judge" and row.get("task") == task
+               and row.get("status") == "applied"
+               and (row.get("agent") == judge.agent or row.get("worker_kind") == judge.agent)]
+    return matches[-1]["agent"] if matches else judge.agent
+
+
 def cmd_recovery(args, client=None, warn=None, trace=None):
     state_path = _state_path(args)
     # A review receipt's gate check and its commit are one transaction: the
@@ -1873,7 +1944,8 @@ def _run_recovery(args, state_path, warn, client, trace):
         result = recovery.close_task(store, history, data, at)
     elif args.command == "checkpoint":
         judge = load_judge(_config_path(args))
-        result = recovery.checkpoint(store, history, data, at, judge.agent if judge else None)
+        task = data.get("task") if isinstance(data, dict) else None
+        result = recovery.checkpoint(store, history, data, at, _pinned_judge_identity(store, task, judge))
     elif args.command == "authorize-corrections":
         result = recovery.authorize_plan(store, history, data, at)
     elif args.command == "authorize-approach":
@@ -1886,14 +1958,15 @@ def _run_recovery(args, state_path, warn, client, trace):
         # enrollment for the same task and judge cannot stand in for it
         # (#412).
         enrolled = None
+        judge_identity = _pinned_judge_identity(store, data.get("task") if isinstance(data, dict) else None, judge)
         if judge is not None and isinstance(data, dict):
-            dispatch = recovery.applied_judge_dispatch(store, history, data.get("task"), judge.agent)
+            dispatch = recovery.applied_judge_dispatch(store, history, data.get("task"), judge_identity)
             if dispatch is not None:
                 member = next((item for item in supervision.load(state_path)["members"]
                                if item["id"] == dispatch["id"]), None)
                 if member is not None:
                     enrolled = supervision.expected_assignment(member)["report"]
-        result = recovery.diagnose(store, history, data, at, judge.agent if judge else None, enrolled,
+        result = recovery.diagnose(store, history, data, at, judge_identity, enrolled,
                                    supervision.dispatch_binding(state_path) is not None,
                                    state["specialist_assessments"])
         if result["remedy"] == "stop":
@@ -1917,7 +1990,9 @@ def _run_recovery(args, state_path, warn, client, trace):
     elif args.command == "record-refusal":
         agents_by_name = {agent.name: agent for agent in load_config(_config_path(args))}
         dispatch = next((item for item in store["dispatches"] if isinstance(data, dict) and item["id"] == data.get("dispatch")), None)
-        if dispatch is not None and dispatch["agent"] not in agents_by_name:
+        configured = dispatch.get("worker_kind") if dispatch is not None else None
+        configured = configured or (dispatch.get("agent") if dispatch is not None else None)
+        if dispatch is not None and configured not in agents_by_name:
             raise UsageError("Refused worker {} is not in config.json; restore its entry so the refusing provider is recorded.".format(dispatch["agent"]), {})
         member = next((row for row in supervision.load(state_path)["members"] if dispatch is not None and row["id"] == dispatch["id"]), None)
         # The refined assignment, not the original: supervision fills in a
@@ -1928,7 +2003,7 @@ def _run_recovery(args, state_path, warn, client, trace):
             expected = supervision.expected_assignment(member)
             report = expected["report"]
             aliases = (expected["pane_id"], member["assignment"]["pane_id"])
-        result = recovery.record_refusal(store, data, at, agents_by_name[dispatch["agent"]].kind if dispatch else None,
+        result = recovery.record_refusal(store, data, at, agents_by_name[configured].kind if dispatch else None,
                                          report, aliases=aliases)
     elif args.command == "recover-report":
         result = report_delivery.recover(store, history, data, at)
@@ -1958,8 +2033,14 @@ def _run_recovery(args, state_path, warn, client, trace):
                 _require_independent_report(state, attempt["task"], data.get("reviewer"))
         result = historical.record_review(store, data, at)
     else:
-        agents = {agent.name: agent for agent in load_config(_config_path(args))}
+        templates = load_config(_config_path(args))
+        agents = {agent.name: agent for agent in templates}
         name = recovery.recovery_agent(store, history, args.command, data)
+        if name not in agents and templates and all(agent.assignment_scoped for agent in templates):
+            dispatch = next((row for row in reversed(store["dispatches"])
+                             if row.get("agent") == name and isinstance(row.get("worker_kind"), str)), None)
+            if dispatch is not None:
+                agents = lifecycle.materialize({"recovery": name}, {"recovery": dispatch["worker_kind"]}, templates)
         if name not in agents:
             raise UsageError("The recorded worker is absent from config; restore its original identity before recovering.", {})
         client = client if client is not None else _client(args, trace=trace)
@@ -2009,6 +2090,9 @@ def _run_recovery(args, state_path, warn, client, trace):
 
 def cmd_start_judge(args, client=None, warn=None, trace=None):
     document = _load_assignments(args.assignments, document=True)
+    if isinstance(document, dict) and "worker_kinds" in document:
+        raise UsageError("Schema-7 plans spawn the pinned judge during `{}`; do not start a standing judge worker.".format(
+            runnable.command("apply")), {})
     tier = document.get("judge") if isinstance(document, dict) else None
     if not isinstance(tier, dict) or not isinstance(tier.get("agent"), str) or not tier["agent"].strip():
         raise UsageError("Plan has no usable judge tier; run `{}`.".format(runnable.command("plan --roles judge")), {})
@@ -2433,7 +2517,8 @@ def cmd_verify_ruling(args, client=None, warn=None, trace=None):
     if dispatch is None:
         raise UsageError("The enrollment for {} names dispatch {}, which the dispatch state does not hold; reconcile it "
                          "before verifying.".format(args.ruling, enrolled[0]["id"]), {})
-    if (canonical_role(dispatch.get("role")) != "judge" or dispatch.get("agent") != judge.agent
+    pinned = dispatch.get("agent") == judge.agent or dispatch.get("worker_kind") == judge.agent
+    if (canonical_role(dispatch.get("role")) != "judge" or not pinned
             or dispatch.get("task") != args.task or dispatch.get("status") != "applied"
             or dispatch.get("judge_mode") != "adjudication"):
         raise UsageError("Dispatch {} is not an applied adjudication of the pinned judge {} on task {!r}; the ruling is "
@@ -2455,11 +2540,14 @@ def cmd_verify_ruling(args, client=None, warn=None, trace=None):
     # dispatch, read through the same receipts report gates resolve against.
     key = str(ruling.resolve())
     if not any(row["dispatch"] == dispatch["id"] and row["path"] == key and row["sha256"] == digest
-               for row in report_gates.ledger_view(_state_path(args), judge.agent)["deliveries"]):
+               for row in report_gates.ledger_view(_state_path(args), dispatch["agent"])["deliveries"]):
         raise UsageError("The ruling's current bytes match no recorded delivery of the judge's report — re-deliver or "
                          "re-weigh.", {"dispatch": dispatch["id"], "sha256": digest})
-    return {"task": args.task, "dispatch": dispatch["id"], "judge": judge.agent, "report": str(ruling),
-            "sha256": digest}, None
+    verified = {"task": args.task, "dispatch": dispatch["id"], "judge": dispatch["agent"],
+                "report": str(ruling), "sha256": digest}
+    if dispatch.get("worker_kind") is not None:
+        verified["worker_kind"] = dispatch["worker_kind"]
+    return verified, None
 
 
 def cmd_verify_oracle(args, client=None, warn=None, trace=None):

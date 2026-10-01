@@ -141,13 +141,17 @@ class ParseConfigTest(unittest.TestCase):
 
     def test_shipped_example_config_is_valid(self):
         payload = json.loads((REPO_ROOT / "config.example.json").read_text(encoding="utf-8"))
+        self.assertEqual(payload["schema_version"], 7)
+        self.assertIn("worker_kinds", payload)
+        self.assertNotIn("agents", payload)
         agents = parse_config(payload, source="config.example.json")
         self.assertEqual(
-            [agent.name for agent in agents], ["claude", "codex", "grok", "judge"]
+            [agent.name for agent in agents], ["claude", "codex", "grok"]
         )
         self.assertEqual(
-            [agent.kind for agent in agents], ["claude", "codex", "grok", "claude"]
+            [agent.kind for agent in agents], ["claude", "codex", "grok"]
         )
+        self.assertTrue(all(agent.assignment_scoped for agent in agents))
         by_name = {agent.name: agent for agent in agents}
         # Grok renders /usage as a modal after a restart, so it reads the
         # viewport and dismisses the dialog just like claude does.
@@ -160,7 +164,7 @@ class ParseConfigTest(unittest.TestCase):
         # autocomplete popup.
         self.assertEqual(
             {agent.name: agent.slash_delivery for agent in agents},
-            {"claude": "paste", "codex": "type", "grok": "type", "judge": "paste"},
+            {"claude": "paste", "codex": "type", "grok": "type"},
         )
         # Every agent can be checked for a stuck composer.
         self.assertTrue(all(agent.composer_glyph for agent in agents))
@@ -177,6 +181,18 @@ class ParseConfigTest(unittest.TestCase):
         # Dim composer text is never typing, on every kind.
         self.assertTrue(all(agent.composer_ignore_dim for agent in agents))
         self.assertEqual(by_name["grok"].dialog_next_tab_keys, ("tab",))
+
+    def test_schema_7_refuses_a_standing_agents_roster(self):
+        payload = _example_config()
+        payload["agents"] = payload.pop("worker_kinds")
+        with self.assertRaisesRegex(ConfigError, "worker_kinds"):
+            parse_config(payload)
+
+    def test_schema_7_requires_a_coordination_probe_tier(self):
+        payload = _example_config()
+        payload["worker_kinds"][0]["tiers"].pop("coordination")
+        with self.assertRaisesRegex(ConfigError, "coordination"):
+            parse_config(payload)
 
     def test_wrong_schema_version_is_rejected(self):
         payload = dict(VALID, schema_version=7)
@@ -515,7 +531,7 @@ class ParseJudgeTest(unittest.TestCase):
     def test_the_shipped_example_pins_the_judge(self):
         judge = parse_judge(_example_config())
         assert judge is not None
-        self.assertEqual(judge.agent, "judge")
+        self.assertEqual(judge.agent, "claude")
         self.assertEqual(judge.effort, "max")
 
 
@@ -538,8 +554,7 @@ class WindowGroupTest(unittest.TestCase):
     def test_the_shipped_example_shares_one_window(self):
         agents = parse_config(_example_config())
         groups = {agent.name: agent.window_group for agent in agents}
-        self.assertTrue(groups["judge"])
-        self.assertEqual(groups["claude"], groups["judge"])
+        self.assertTrue(groups["claude"])
         self.assertEqual(groups["codex"], "")
 
 

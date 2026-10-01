@@ -14,7 +14,7 @@ import subprocess
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from foreman import engagement, members, recovery
 from foreman import supervision as store
@@ -163,6 +163,21 @@ class CloseMemberTest(MembersCase):
         again = members.close(self.path, "dispatch-a", self.ledger, LATER)
         self.assertEqual(again["resolved"], first["resolved"])
         self.assertEqual(again["acknowledged"], [])
+
+    def test_assignment_scoped_close_removes_the_pane_before_resolution(self):
+        dispatch = self.state["recovery"]["dispatches"][0]
+        dispatch["result"].update(assignment_scoped=True, pane_id="pane-a")
+        save_state(self.path, self.state)
+        self.emit()
+        self.write_ledger("needs_work")
+        client = Mock()
+        closure = {"pane_id": "pane-a", "agent": "codex-a", "closed": True, "replayed": False}
+        with patch("foreman.members.lifecycle.close", return_value=closure) as close_pane:
+            result = members.close(self.path, "dispatch-a", self.ledger, LATER, client=client)
+        close_pane.assert_called_once_with(client, "codex-a", "pane-a")
+        self.assertEqual(result["pane_closure"], closure)
+        self.assertFalse(next(row for row in store.load(self.path)["members"]
+                              if row["id"] == "dispatch-a")["active"])
 
     def test_a_ledger_for_another_task_is_refused(self):
         self.write_ledger("accepted", task="task-z")

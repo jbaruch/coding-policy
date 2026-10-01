@@ -75,6 +75,15 @@ class ArgvBuilderTest(unittest.TestCase):
             ["herdr", "agent", "wait", "claude", "--until", "idle", "--timeout", "1000"],
         )
 
+    def test_assignment_pane_split_and_close(self):
+        self.assertEqual(
+            self.client.argv_pane_split(current=True, cwd="/work", focus=False),
+            ["herdr", "pane", "split", "--current", "--direction", "right",
+             "--ratio", "0.5", "--cwd", "/work", "--no-focus"],
+        )
+        self.assertEqual(self.client.argv_pane_close("w2:p9"),
+                         ["herdr", "pane", "close", "w2:p9"])
+
     def test_pane_wait_output_with_regex(self):
         self.assertEqual(
             self.client.argv_pane_wait_output(

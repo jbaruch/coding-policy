@@ -115,7 +115,7 @@ class ConfigTest(unittest.TestCase):
         seat = parse_foreman(raw)
         assert seat is not None
         self.assertIn("coordination", seat.tiers)
-        self.assertEqual(seat.tier_source, "agents.claude")
+        self.assertEqual(seat.tier_source, "worker_kinds.claude")
 
     def test_an_absent_block_parses_to_none(self):
         self.assertIsNone(parse_foreman({"schema_version": 1, "agents": [WORKER]}))

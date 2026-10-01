@@ -98,7 +98,10 @@ from .tiers import SEAT_SEPARATOR, canonical_role
 #: capabilities, selected model and effort, capability-table evidence, cheaper
 #: candidates and escalation conditions (#602, foreman/selection.py). Additive
 #: and explanatory: no reader acts on it, so an older plan reads unchanged.
-PLAN_SCHEMA_VERSION = 13
+#: Version 14 is emitted by the CLI for config schema 7: `worker_kinds` keeps
+#: the ranked template per seat while `assignments` carries a fresh live
+#: identity. The pure planner still ranks the template names first.
+PLAN_SCHEMA_VERSION = 14
 
 #: What one round in each seat is expected to burn, in points of the agent's
 #: remaining headroom percentage. The ORDER is what the planner acts on:

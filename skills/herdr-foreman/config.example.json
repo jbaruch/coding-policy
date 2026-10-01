@@ -1,5 +1,5 @@
 {
-  "schema_version": 6,
+  "schema_version": 7,
   "role_costs": {
     "developer": 12,
     "tester": 10,
@@ -7,7 +7,7 @@
     "judge": 15
   },
   "judge": {
-    "agent": "judge",
+    "worker_kind": "claude",
     "model": "claude-fable-5-1",
     "effort": "max"
   },
@@ -19,7 +19,7 @@
       "--dangerously-skip-permissions"
     ]
   },
-  "agents": [
+  "worker_kinds": [
     {
       "name": "claude",
       "kind": "claude",
@@ -334,37 +334,6 @@
       },
       "launch_args": [
         "--always-approve"
-      ],
-      "capabilities": []
-    },
-    {
-      "name": "judge",
-      "kind": "claude",
-      "usage_prompt": "/usage",
-      "usage_marker": "Current week",
-      "usage_read_source": "visible",
-      "slash_delivery": "paste",
-      "composer_glyph": "\u276f ",
-      "composer_ignore_dim": true,
-      "composer_placeholders": [],
-      "recover_keys": [
-        "esc"
-      ],
-      "close_keys": [
-        "esc"
-      ],
-      "clear_prompt": "/clear",
-      "idle_markers": [
-        "\u23f5\u23f5 bypass permissions on",
-        "? for shortcuts"
-      ],
-      "working_markers": [
-        "Churned for"
-      ],
-      "model_label": "Fable 5.1",
-      "window_group": "claude-max-weekly",
-      "launch_args": [
-        "--dangerously-skip-permissions"
       ],
       "capabilities": []
     }

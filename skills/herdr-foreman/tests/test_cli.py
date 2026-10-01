@@ -390,6 +390,42 @@ class StateCommandTest(CliCase):
 
 
 class PlanCommandTest(CliCase):
+    def test_schema_7_plan_allocates_fresh_assignment_identities(self):
+        shipped = Path(__file__).resolve().parent.parent / "config.example.json"
+        self.config.write_text(shipped.read_text(encoding="utf-8"), encoding="utf-8")
+        code, out, err = self.run_cli(
+            self.base() + ["plan", "--roles", "developer,reviewer", "--snapshot", str(self.snapshot)]
+        )
+        self.assertEqual(code, 0, err)
+        document = json.loads(out)
+        self.assertEqual(document["schema_version"], 14)
+        self.assertEqual(set(document["worker_kinds"]), {"developer", "reviewer"})
+        self.assertTrue(set(document["worker_kinds"].values()) <= {"claude", "codex", "grok"})
+        self.assertTrue(all(name not in {"claude", "codex", "grok"}
+                            and len(name) <= 32 for name in document["assignments"].values()))
+        self.assertEqual(len(set(document["assignments"].values())), 2)
+
+    def test_schema_7_dry_run_shows_spawn_before_fresh_dispatch(self):
+        shipped = Path(__file__).resolve().parent.parent / "config.example.json"
+        self.config.write_text(shipped.read_text(encoding="utf-8"), encoding="utf-8")
+        code, out, err = self.run_cli(
+            self.base() + ["plan", "--roles", "developer", "--snapshot", str(self.snapshot)]
+        )
+        self.assertEqual(code, 0, err)
+        plan = json.loads(out)
+        self.out, self.err = io.StringIO(), io.StringIO()
+        code, out, err = self.run_cli(
+            self.base() + ["apply", "--assignments", json.dumps(plan), "--common", str(self.common),
+                           "--brief", "developer=" + str(self.briefs["developer"]), "--dry-run"]
+        )
+        self.assertEqual(code, 0, err)
+        result = json.loads(out)
+        self.assertTrue(result["assignment_scoped"])
+        self.assertEqual(result["steps"][0]["agent"], plan["assignments"]["developer"])
+        commands = result["spawns"][0]["commands"]
+        self.assertIn("pane split --current", commands[0]["shell"])
+        self.assertIn("agent start " + plan["assignments"]["developer"], commands[1]["shell"])
+
     def test_plans_from_a_snapshot_file(self):
         code, out, err = self.run_cli(
             self.base() + ["plan", "--roles", "developer,tester,reviewer", "--snapshot", str(self.snapshot)]
