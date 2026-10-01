@@ -161,9 +161,12 @@ class RetrospectiveTest(unittest.TestCase):
             self.assertEqual(retro.directory("~/state.json"), self.sidecar)
 
     def test_historical_note_path_through_home_symlink_loads_without_rewrite(self):
+        current = self.root / "foreman"
+        current.mkdir()
+        self.path = current / "state.json"
         self.record()
-        legacy = self.root / "legacy-home"
-        legacy.symlink_to(self.root, target_is_directory=True)
+        legacy = self.root / "teamlead"
+        legacy.symlink_to(current, target_is_directory=True)
         index = self.index()
         historical = legacy / self.sidecar.name / "retro-1.md"
         index["records"][0]["note"]["path"] = str(historical)
@@ -172,6 +175,17 @@ class RetrospectiveTest(unittest.TestCase):
 
         self.assertEqual(retro.show(self.path)["record"]["note"]["path"], str(historical))
         self.assertEqual((self.sidecar / "index.json").read_bytes(), before)
+
+    def test_unrelated_symlink_alias_is_not_migration_history(self):
+        self.record()
+        alias = self.root / "unrelated-alias"
+        alias.symlink_to(self.root, target_is_directory=True)
+        index = self.index()
+        index["records"][0]["note"]["path"] = str(alias / self.sidecar.name / "retro-1.md")
+        self.write_index(index)
+
+        with self.assertRaisesRegex(StateError, "note location"):
+            retro.show(self.path)
 
     def test_note_alias_must_resolve_to_the_owned_note(self):
         recorded = self.record()

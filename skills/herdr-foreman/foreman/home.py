@@ -11,8 +11,9 @@ make this more than a directory move:
 
 - Owner stores carry a `state_path` identity field that must equal the
   canonical state path, or the store refuses to load. `migrate` rewrites
-  every `state_path` field holding the old canonical path to the new one.
-  Nothing else in a record changes
+  every `state_path` field holding the old canonical path to the new one. A
+  pending retrospective journal's derived ancestry digest is rebased with
+  that identity; no record shape or version changes
 - Records also quote old absolute paths as history: stow required reads,
   retrospective notes, attention evidence. Rewriting history is forbidden, so
   the old home is left as a symlink to the new one and every quoted path

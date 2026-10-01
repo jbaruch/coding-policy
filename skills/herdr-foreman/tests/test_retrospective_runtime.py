@@ -114,21 +114,6 @@ class RetrospectiveRuntimeTest(unittest.TestCase):
         self.assertTrue(empty["due"])
         self.assertFalse(empty["coverage"][0]["first_start"])
 
-    def test_check_accepts_history_preserved_through_migrated_home_symlink(self):
-        self.record()
-        legacy = self.root / "legacy-home"
-        legacy.symlink_to(self.root, target_is_directory=True)
-        index_path = notes.directory(self.path) / "index.json"
-        index = json.loads(index_path.read_text(encoding="utf-8"))
-        historical = legacy / notes.directory(self.path).name / "retro-1.md"
-        index["records"][0]["note"]["path"] = str(historical)
-        index_path.write_text(json.dumps(index), encoding="utf-8")
-
-        check = runtime.check(self.path, self.state, self.client, self.agents, self.request(), AT)
-
-        self.assertFalse(check["due"])
-        self.assertEqual(check["cadence"]["last_completed_at"], AT)
-
     def test_batch_sibling_outcome_does_not_invalidate_remaining_worker(self):
         self.record()
         guard = self.guard()
@@ -305,14 +290,10 @@ class RetrospectiveRuntimeTest(unittest.TestCase):
         first.after_transition(self.steps[0])
         self.finish_home_migration(environment)
         retry = self.guard()
-        item = retry._known_report(retry._item(self.steps[0]), notes.load(self.path))
-        current = runtime.describe(self.state, self.client, self.agents, item, notes.load(self.path))
 
-        bridge = retry._bridge(notes.load(self.path), current)
+        result = retry.preflight([self.steps[0]])
 
-        if bridge is None:
-            self.fail("migrated transition bridge was not reusable")
-        self.assertTrue(notes.current_receipt(bridge["descriptor"]["source"]["report"]))
+        self.assertIsNone(result)
 
     def test_a_retained_seat_is_not_read_as_a_role_change(self):
         # The ledger row records `reviewer` and the dispatch records

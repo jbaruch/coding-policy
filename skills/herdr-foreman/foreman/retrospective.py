@@ -110,7 +110,20 @@ def same_location(recorded, expected):
     if recorded == str(expected):
         return True
     try:
-        return os.path.realpath(recorded) == os.path.realpath(expected)
+        left, right = Path(recorded), Path(expected)
+        if not left.is_absolute() or not right.is_absolute():
+            return False
+        for legacy, current in ((left, right), (right, left)):
+            for current_home in (current, *current.parents):
+                if current_home.name != "foreman":
+                    continue
+                legacy_home = current_home.with_name("teamlead")
+                if (legacy == legacy_home / current.relative_to(current_home)
+                        and legacy_home.is_symlink()
+                        and os.path.realpath(legacy_home) == os.path.realpath(current_home)
+                        and os.path.realpath(legacy) == os.path.realpath(current)):
+                    return True
+        return False
     except (OSError, TypeError, ValueError):
         return False
 
