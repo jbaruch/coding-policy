@@ -409,39 +409,47 @@ class PlanCommandTest(CliCase):
     def test_schema_7_plan_allocates_fresh_assignment_identities(self):
         shipped = Path(__file__).resolve().parent.parent / "config.example.json"
         self.config.write_text(shipped.read_text(encoding="utf-8"), encoding="utf-8")
-        code, out, err = self.run_cli(
-            self.base() + ["plan", "--roles", "developer,reviewer", "--snapshot", str(self.snapshot)]
-        )
+        with patch("foreman.lifecycle.identity", side_effect=[
+                "developer-0000000001", "reviewer-0000000002"]):
+            code, out, err = self.run_cli(
+                self.base() + ["plan", "--roles", "developer,reviewer", "--snapshot", str(self.snapshot)]
+            )
         self.assertEqual(code, 0, err)
         document = json.loads(out)
         self.assertEqual(document["schema_version"], 14)
         self.assertEqual(set(document["worker_kinds"]), {"developer", "reviewer"})
         self.assertTrue(set(document["worker_kinds"].values()) <= {"claude", "codex", "grok"})
-        self.assertTrue(all(name not in {"claude", "codex", "grok"}
-                            and len(name) <= 32 for name in document["assignments"].values()))
-        self.assertEqual(len(set(document["assignments"].values())), 2)
+        self.assertEqual(document["assignments"], {
+            "developer": "developer-0000000001",
+            "reviewer": "reviewer-0000000002",
+        })
 
     def test_schema_7_pinned_kind_can_supply_judge_and_developer_fresh_identities(self):
         shipped = Path(__file__).resolve().parent.parent / "config.example.json"
         payload = json.loads(shipped.read_text(encoding="utf-8"))
         payload["worker_kinds"] = [row for row in payload["worker_kinds"] if row["name"] == "claude"]
         self.config.write_text(json.dumps(payload), encoding="utf-8")
-        code, out, err = self.run_cli(
-            self.base() + ["plan", "--roles", "developer,judge", "--judge-mode", "adjudication",
-                           "--snapshot", str(self.snapshot)]
-        )
+        with patch("foreman.lifecycle.identity", side_effect=[
+                "developer-0000000003", "judge-0000000004"]):
+            code, out, err = self.run_cli(
+                self.base() + ["plan", "--roles", "developer,judge", "--judge-mode", "adjudication",
+                               "--snapshot", str(self.snapshot)]
+            )
         self.assertEqual(code, 0, err)
         document = json.loads(out)
         self.assertEqual(document["worker_kinds"], {"developer": "claude", "judge": "claude"})
-        self.assertEqual(len(set(document["assignments"].values())), 2)
-        self.assertTrue(all(name != "claude" for name in document["assignments"].values()))
+        self.assertEqual(document["assignments"], {
+            "developer": "developer-0000000003",
+            "judge": "judge-0000000004",
+        })
 
     def test_schema_7_dry_run_shows_spawn_before_fresh_dispatch(self):
         shipped = Path(__file__).resolve().parent.parent / "config.example.json"
         self.config.write_text(shipped.read_text(encoding="utf-8"), encoding="utf-8")
-        code, out, err = self.run_cli(
-            self.base() + ["plan", "--roles", "developer", "--snapshot", str(self.snapshot)]
-        )
+        with patch("foreman.lifecycle.identity", return_value="developer-0000000005"):
+            code, out, err = self.run_cli(
+                self.base() + ["plan", "--roles", "developer", "--snapshot", str(self.snapshot)]
+            )
         self.assertEqual(code, 0, err)
         plan = json.loads(out)
         self.out, self.err = io.StringIO(), io.StringIO()
@@ -460,9 +468,10 @@ class PlanCommandTest(CliCase):
     def test_schema_7_live_apply_requires_a_task_before_spawning(self):
         shipped = Path(__file__).resolve().parent.parent / "config.example.json"
         self.config.write_text(shipped.read_text(encoding="utf-8"), encoding="utf-8")
-        code, out, err = self.run_cli(
-            self.base() + ["plan", "--roles", "developer", "--snapshot", str(self.snapshot)]
-        )
+        with patch("foreman.lifecycle.identity", return_value="developer-0000000006"):
+            code, out, err = self.run_cli(
+                self.base() + ["plan", "--roles", "developer", "--snapshot", str(self.snapshot)]
+            )
         self.assertEqual(code, 0, err)
         plan = json.loads(out)
         self.out, self.err = io.StringIO(), io.StringIO()
@@ -473,6 +482,16 @@ class PlanCommandTest(CliCase):
         self.assertEqual(code, 1)
         self.assertEqual(out, "")
         self.assertIn("needs --task", err)
+
+    def test_scoped_headroom_maps_only_fresh_assignments_after_a_partial_retry(self):
+        self.assertEqual(
+            cli._scoped_headroom(
+                {"reviewer": "reviewer-0000000002"},
+                {"developer": "claude", "reviewer": "codex"},
+                {"claude": 80.0, "codex": 70.0},
+            ),
+            {"reviewer-0000000002": 70.0},
+        )
 
     def test_plans_from_a_snapshot_file(self):
         code, out, err = self.run_cli(

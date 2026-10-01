@@ -716,6 +716,11 @@ def plan(roles, snapshot, counts=None, exclude=None, role_costs=None, snapshot_r
             for name in headrooms:
                 if groups.get(name) == group and headrooms[name] is not None:
                     headrooms[name] -= cost
+        elif reusable_agents and headrooms[chosen] is not None:
+            # A kind without an explicit group owns an implicit window. It can
+            # supply several fresh identities, but every seat still spends
+            # that one window before the next seat is ranked.
+            headrooms[chosen] -= cost
 
     rationale.extend(_notes(excluded, agents, warn))
     rationale.extend(selection_rationale or [])

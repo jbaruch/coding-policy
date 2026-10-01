@@ -788,6 +788,13 @@ class PinnedJudgeSeatTest(unittest.TestCase):
         result = plan(ROLES, snapshot(claude=100), reusable_agents=True)
         self.assertEqual(result["assignments"], {role: "claude" for role in ROLES})
 
+    def test_reusable_standalone_kinds_are_charged_after_each_fresh_seat(self):
+        result = plan(
+            ["developer", "tester"], snapshot(claude=20, codex=15),
+            reusable_agents=True,
+        )
+        self.assertEqual(result["assignments"], {"developer": "claude", "tester": "codex"})
+
     def test_a_pinned_worker_absent_from_the_snapshot_is_refused(self):
         payload = snapshot(claude=80, codex=70)
         with self.assertRaises(PlanError) as caught:

@@ -129,6 +129,7 @@ class WindowProbeTest(unittest.TestCase):
                     "failed_agents": []}
 
         with patch("foreman.lifecycle.spawn", return_value="probe-pane") as started, \
+                patch("foreman.lifecycle.identity", return_value="probe-claude-fixed"), \
                 patch("foreman.measure.measure", side_effect=measured) as usage, \
                 patch("foreman.lifecycle.close") as stopped:
             result = measure_worker_kinds(client, workers, "2026-10-01T00:00:00+00:00")

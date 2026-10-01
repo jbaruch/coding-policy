@@ -1452,8 +1452,8 @@ def _apply(args, client, warn, trace, hold_gates):
     # otherwise recompute its own downgrade and pass the comparison below.
     planned_headroom = _planned_snapshot_headroom(document, state, state_path)
     if scoped:
-        planned_headroom = {assignments[role]: planned_headroom.get(kind)
-                            for role, kind in document["worker_kinds"].items()}
+        planned_headroom = _scoped_headroom(
+            assignments, document["worker_kinds"], planned_headroom)
     capability_refusals = []
     candidates = _candidate_tiers(list(assignments), agents, rounds, args.fix_round, active_judge,
                                   excludes=constraints["exclude"], headroom=planned_headroom,
@@ -1958,6 +1958,12 @@ def _pinned_judge_identity(store, history, task, judge):
             {},
         )
     return latest[0][1]["agent"]
+
+
+def _scoped_headroom(assignments, worker_kinds, headroom):
+    """Map current live identities to kind headroom after replay filtering."""
+    return {name: headroom.get(worker_kinds[role])
+            for role, name in assignments.items()}
 
 
 def cmd_recovery(args, client=None, warn=None, trace=None):
