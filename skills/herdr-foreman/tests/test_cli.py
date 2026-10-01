@@ -573,6 +573,36 @@ class PlanCommandTest(CliCase):
         self.assertTrue(usable)
         self.assertEqual(saved["recovery"]["dispatches"][0]["status"], "not_sent")
 
+    def test_scoped_apply_retries_a_cleaned_not_sent_dispatch_with_a_fresh_enrollment(self):
+        plan = self._interrupt_plan()
+        client = Mock()
+        command = (
+            self.base() + ["apply", "--assignments", json.dumps(plan),
+                           "--task", "t-interrupt", "--now", AT,
+                           "--common", str(self.common)]
+            + self.brief_args("developer", "reviewer") + self._interrupt_reports()
+        )
+        with patch("foreman.lifecycle.spawn", side_effect=["pane-developer", KeyboardInterrupt]), \
+                patch("foreman.lifecycle.close"), self.assertRaises(KeyboardInterrupt):
+            self.run_cli(command, client=client)
+
+        with patch("foreman.lifecycle.spawn", side_effect=["pane-developer-2", "pane-reviewer"]), \
+                patch("foreman.cli.apply_assignments", return_value={"applied": []}):
+            code, _, err = self.run_cli(command, client=client)
+
+        self.assertEqual(code, 0, err)
+        owner = supervision.load(self.state)
+        developer = [row for row in owner["members"]
+                     if row["assignment"]["agent"] == plan["assignments"]["developer"]]
+        self.assertEqual(len(developer), 2)
+        self.assertFalse(developer[0]["active"])
+        self.assertTrue(developer[1]["active"])
+        self.assertNotEqual(developer[0]["id"], developer[1]["id"])
+        self.assertEqual(
+            supervision.expected_assignment(developer[1])["pane_id"],
+            "pane-developer-2",
+        )
+
     def test_scoped_apply_closes_unused_panes_when_dispatch_is_interrupted(self):
         plan = self._interrupt_plan()
         client = Mock()
@@ -708,7 +738,9 @@ class PlanCommandTest(CliCase):
             state=str(self.state), config=str(self.config), trace=False,
         )
         client = Mock()
-        with patch("foreman.cli.recovery.close_task", return_value={"kind": "task_closed"}), \
+        closure = {"kind": "task_closed", "sequence": 1}
+        with patch("foreman.cli.recovery.close_task", return_value=closure), \
+                patch("foreman.cli.recovery.task_closure", return_value=closure), \
                 patch("foreman.cli.members.retained_task_panes", return_value=[
                     {"agent": "developer-one", "pane_id": "pane-one"},
                     {"agent": "advisor-one", "pane_id": "pane-two"},
@@ -721,6 +753,26 @@ class PlanCommandTest(CliCase):
         self.assertIsNone(error)
         self.assertEqual(len(result["pane_closures"]), 2)
         self.assertEqual(close_pane.call_count, 2)
+
+    def test_close_task_historical_replay_does_not_clean_a_reopened_tasks_panes(self):
+        record = self.tmp / "close-task.json"
+        record.write_text(json.dumps({
+            "task": "t-retain", "outcome": "merged", "evidence": "old-merge",
+        }))
+        args = SimpleNamespace(
+            command="close-task", record=str(record), now=AT,
+            state=str(self.state), config=str(self.config), trace=False,
+        )
+        historical = {"kind": "task_closed", "sequence": 1}
+        with patch("foreman.cli.recovery.close_task", return_value=historical), \
+                patch("foreman.cli.recovery.task_closure", return_value=None), \
+                patch("foreman.cli.members.retained_task_panes") as retained, \
+                patch("foreman.cli.lifecycle.close") as close_pane:
+            result, error = cli._run_recovery(args, self.state, None, Mock(), None)
+        self.assertIsNone(error)
+        self.assertEqual(result, historical)
+        retained.assert_not_called()
+        close_pane.assert_not_called()
 
     def test_plans_from_a_snapshot_file(self):
         code, out, err = self.run_cli(

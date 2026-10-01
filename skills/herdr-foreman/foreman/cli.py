@@ -540,6 +540,31 @@ def _supervision_enrollment(state_path, identifier, task, role, name, report, at
     return expected
 
 
+def _retryable_enrollment_identity(state_path, store, identifier, fingerprint):
+    """Give each supervised retry after a cleaned pre-send failure a fresh identity.
+
+    Recovery keeps an unsent dispatch retryable under its original identity,
+    while supervision correctly keeps the closed pane's enrollment resolved.
+    Reusing that identity would either reactivate accepted history or bind the
+    replacement worker to the closed pane. Walk the deterministic retry names
+    instead: an existing applied/pending attempt is replayed/reconciled, and
+    only a resolved ``not_sent`` attempt advances to the next name.
+    """
+    members_by_id = {row["id"]: row for row in supervision.load(state_path)["members"]}
+    base = identifier
+    attempt = 0
+    while True:
+        dispatch = next((row for row in store["dispatches"] if row["id"] == identifier), None)
+        if (dispatch is None or dispatch.get("fingerprint") != fingerprint
+                or dispatch.get("status") != "not_sent"):
+            return identifier
+        member = members_by_id.get(identifier)
+        if member is None or member["active"]:
+            return identifier
+        attempt += 1
+        identifier = "{}:transport-retry-{}".format(base, attempt)
+
+
 def _seat_holds(roles, task, state, state_path):
     """Developer reservations and busy workers, read from the owner records (#483)."""
     busy = {row["assignment"]["agent"]: row["assignment"]["task"]
@@ -1321,6 +1346,8 @@ def _apply(args, client, warn, trace, hold_gates):
             old = next((row for row in store["dispatches"] if row["id"] == identifier), None)
             if old is None or old["fingerprint"] != fingerprint:
                 fingerprint = supervision.report_bound_fingerprint(fingerprint, reports[role])
+            identifier = _retryable_enrollment_identity(
+                state_path, store, identifier, fingerprint)
         return identifier, fingerprint
 
     def legacy_judge_fingerprints(role, name, paths_now):
@@ -2150,7 +2177,9 @@ def _run_recovery(args, state_path, warn, client, trace):
         result = recovery.register_task(store, data, at)
     elif args.command == "close-task":
         result = recovery.close_task(store, history, data, at)
-        retained = members.retained_task_panes(state_path, state, data.get("task"))
+        current = recovery.task_closure(store, history, data.get("task"))
+        retained = (members.retained_task_panes(state_path, state, data.get("task"))
+                    if current is not None and current["sequence"] == result["sequence"] else [])
         if retained:
             client = client if client is not None else _client(args, trace=trace)
             closures = [lifecycle.close(client, row["agent"], row["pane_id"])
