@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.355 — 2026-10-01
+
 ### Fixed
 
 - **Judge rulings can cover same-line policy findings (Closes #672).**
