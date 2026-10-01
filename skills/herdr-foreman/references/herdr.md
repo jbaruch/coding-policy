@@ -207,16 +207,16 @@ the command text is gone from it:
 3. Still there — fail that worker, and never send the assignment. Pasting a
    brief onto a stuck command is the accident this exists to prevent.
 
-**Dim text is not occupied text.** Claude Code pre-fills its input box with a
+**Dim text is not always occupied text.** Claude Code pre-fills its input box with a
 ghost-text suggestion after a task (`check the other issues (#28, #30) for
 follow-up work`). Nobody typed it, Esc does not remove it, and the next
 keystroke replaces it. A plain-text read cannot tell it from a real command, so
 the composer is read with `--format ansi` and characters rendered dim or in the
-grey palette are dropped before the decision. Bold counts as deliberate, and
-normal-weight text typed after a suggestion still counts, which keeps a real
-command from hiding behind one. `composer_ignore_dim` turns this on per worker
-(`true` for claude, `false` elsewhere), and a herdr that cannot produce ANSI
-falls back to plain text with a warning. The SGR codes are in
+grey palette may be dropped before the decision. A worker that declares exact
+`composer_placeholders` drops only those values: Codex also renders a recalled
+previous prompt dim, so any other dim text remains occupied. Bold counts as
+deliberate, and normal-weight text typed after a suggestion still counts. A
+herdr that cannot produce ANSI falls back to plain text with a warning. The SGR codes are in
 `skills/herdr-foreman/foreman/composer.py`.
 
 **A runtime's empty-composer placeholder is not text either.** Codex draws
@@ -280,7 +280,7 @@ Three per-agent config keys drive it:
 | Key | Meaning |
 | --- | ------- |
 | `composer_glyph` | Prompt glyph starting the composer row (`"› "` Codex, `"❯ "` Claude, `"│ ❯"` Grok). Empty skips the check |
-| `composer_ignore_dim` | `true` (the default for every kind) reads dim/grey composer text as empty — ghost-text suggestions and placeholders alike |
+| `composer_ignore_dim` | `true` (the default) reads dim/grey composer text as empty only when the worker has no exact `composer_placeholders`; with that allowlist, every other dim value remains occupied |
 | `composer_placeholders` | Hint text a runtime draws in an empty composer, matched exactly after trimming (`["Ask Codex to do anything"]`). Always counts as empty |
 | `recover_keys` | Keys that clear a stuck composer, sent at most once and only under the five conditions above. **Empty for Codex**: its clear key is `ctrl+c`, which exits an idle Codex |
 | `model_label` | Model name shown on the worker's pane after a dispatch (`"gpt-5.6"`). Optional; empty leaves the label carrying the role alone |

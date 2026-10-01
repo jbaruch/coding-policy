@@ -101,9 +101,11 @@ class Agent:
         # The prompt glyph that marks the composer row, so foreman can see
         # whether a slash command was consumed. Empty disables the check.
         self.composer_glyph = composer_glyph
-        # Treat dim / grey composer text as empty. Claude Code pre-fills a
-        # ghost-text suggestion nobody typed; a runtime without ghost text
-        # leaves this off so every character still counts.
+        # Treat dim / grey composer text as empty when the runtime has no
+        # explicit placeholder allowlist. Claude Code pre-fills open-ended
+        # ghost-text suggestions nobody typed. A runtime such as Codex that
+        # declares exact placeholders stays fail-closed on every other dim
+        # value, including recalled prompts.
         self.composer_ignore_dim = composer_ignore_dim
         # How many Enters a typed slash command needs to submit. Codex's
         # autocomplete popup swallows the first one.

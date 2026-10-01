@@ -101,6 +101,8 @@ interrupted. A `working` verdict is confirmed against the pane before it counts:
 `state_source` names which signal decided, `herdr` or `probe`, and `herdr_state`
 carries what herdr claimed. Exit 1 means at least one agent could not be
 measured; the snapshot still prints and names it in `failed_agents`.
+An occupied, recalled or unverifiable composer is refused before the usage
+command is typed; the error names the pane to clear by hand.
 
 The usage marker is confirmed in the text that gets parsed, never in a wait
 alone. `--marker-poll-attempts` and `--marker-poll-interval` bound the

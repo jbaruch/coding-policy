@@ -726,6 +726,12 @@ CODEX_PLACEHOLDER_DIM = "  Codex v1.2\n  ─────────\n  › {}As
 )
 CODEX_PLACEHOLDER_PLAIN = "  Codex v1.2\n  ─────────\n  › Ask Codex to do anything\n"
 CODEX_PLACEHOLDER_THEN_TYPED = "  › {}Ask Codex to do anything{}/new\n".format(DIM, RESET)
+CODEX_RECALLED_MULTILINE = (
+    "  Codex v1.2\n  ─────────\n"
+    "  › {}New assignment from the team lead. Your role is DEVELOPER.{}\n"
+    "    {}Read /tmp/brief-developer.md and execute it exactly.{}\n"
+    "    {}Finish with the REPORT line it specifies.{}\n"
+).format(DIM, RESET, DIM, RESET, DIM, RESET)
 
 
 class PlaceholderTest(unittest.TestCase):
@@ -760,6 +766,12 @@ class PlaceholderTest(unittest.TestCase):
         composer = inspect_composer(CODEX_PLACEHOLDER_THEN_TYPED, BY_NAME["codex"])
         self.assertTrue(composer.occupied)
         self.assertEqual(composer.content, "/new")
+
+    def test_a_dim_recalled_multiline_prompt_is_occupied(self):
+        composer = inspect_composer(CODEX_RECALLED_MULTILINE, BY_NAME["codex"])
+        self.assertTrue(composer.occupied)
+        self.assertIn("New assignment from the team lead", composer.content)
+        self.assertTrue(composer.dim)
 
     def test_recovery_is_refused_for_a_placeholder(self):
         composer = inspect_composer(CODEX_PLACEHOLDER_PLAIN, BY_NAME["codex"])
@@ -829,6 +841,16 @@ class LiveKillSequenceTest(unittest.TestCase):
                 warn=lambda message: None,
             )
         self.assertEqual([c for c in runner.commands() if "ctrl+c" in c], [])
+
+    def test_a_slash_command_refuses_when_the_prompt_is_not_visible(self):
+        runner = self._runner("a modal with no prompt row")
+        with self.assertRaises(HerdrError) as caught:
+            send_command(
+                HerdrClient(runner=runner), BY_NAME["codex"], "w3:p1", "/status",
+                sleep=NO_SLEEP, warn=lambda message: None,
+            )
+        self.assertIn("prompt is not on screen", str(caught.exception))
+        self.assertEqual(runner.writes(), [])
 
 
 

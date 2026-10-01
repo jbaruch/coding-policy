@@ -358,7 +358,17 @@ def inspect_composer(pane_text, agent, ansi=True):
 
     lit = composer_text(pane_text, agent.composer_glyph, ignore_dim=True)
     all_dim = bool(literal) and not lit
-    judged = lit if agent.composer_ignore_dim else literal
+    # A runtime with an explicit placeholder allowlist gives us a stronger
+    # empty-composer signal than styling. Codex renders recalled prompts dim
+    # too; dropping every dim row let a recalled brief read as empty and the
+    # measurement `/status` was appended and submitted as a new turn (#670).
+    # For such runtimes only an exact declared placeholder is empty. Runtimes
+    # without that allowlist (Claude's open-ended ghost suggestions) retain
+    # the style-based filter.
+    if all_dim and agent.composer_placeholders:
+        judged = literal
+    else:
+        judged = lit if agent.composer_ignore_dim else literal
     placeholder = is_placeholder(literal, agent) or is_placeholder(judged, agent)
     content = "" if placeholder else judged
     return Composer(True, content, all_dim, placeholder, ansi, literal)
@@ -602,19 +612,21 @@ def send_command(client, agent, pane_id, command, session=None, sleep=time.sleep
     session = session if session is not None else DispatchSession()
     before, ansi = read_pane(client, agent, warn=warn)
     recovered = inspect_composer(before, agent, ansi=ansi).occupied
-    if recovered:
-        before = ensure_ready(
-            client,
-            agent,
-            pane_id=pane_id,
-            session=session,
-            sleep=sleep,
-            warn=warn,
-            settle_sec=settle_sec,
-            text=before,
-            ansi=ansi,
-            before_input=before_input,
-        )
+    # Slash commands need the same visibility gate as real messages even when
+    # the first classification looks empty. A clipped or modal-covered prompt
+    # is not permission to type into an unknown input surface.
+    before = ensure_ready(
+        client,
+        agent,
+        pane_id=pane_id,
+        session=session,
+        sleep=sleep,
+        warn=warn,
+        settle_sec=settle_sec,
+        text=before,
+        ansi=ansi,
+        before_input=before_input,
+    )
     before_signature = screen_signature(before, agent.composer_glyph)
 
     # Remembered before it is sent, so a command that fails to submit is one
