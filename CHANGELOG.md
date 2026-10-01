@@ -1,5 +1,13 @@
 # Changelog
 
+### Fixed
+
+- **Read-only Herdr rounds no longer require a trigger declaration (Closes
+  #671).** `detect-triggers` now validates an explicit `writes_repository:
+  false` plan before loading the repo's trigger surfaces. A genuinely absent
+  declaration is allowed only for that no-write path; malformed declarations
+  and every writing round still fail closed.
+
 ## 0.3.355 — 2026-10-01
 
 ### Fixed

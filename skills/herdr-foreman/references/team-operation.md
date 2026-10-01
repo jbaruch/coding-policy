@@ -41,7 +41,8 @@ The Herdr team round contract. `rules/agent-team-operation.md` Two Modes decides
 - A tracked diff refuses that declaration
 - A round that classifies neither is refused, never read as no trigger fired
 - The four non-exhaustion triggers fire from that detection, never from the foreman's reading of the diff
-- An absent or incomplete declaration is refused, never read as no trigger fired
+- An absent declaration is allowed only for an explicit, validated no-write
+  round; an incomplete declaration or any writing round without one is refused
 - A fired trigger is consulted, or recorded as a staffing decision with its reason the detector reads
 - Silence is never that decision
 - The exhaustion trigger has no such alternative: a diagnosis without its accepted consultation is refused

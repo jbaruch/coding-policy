@@ -297,8 +297,10 @@ against the repo's declaration first. For a pre-implementation round, pass
 `--planned` naming the surfaces the work will touch. A round that writes no
 repository content — an investigation, an architecture or advisory consultation
 — declares `writes_repository: false` in that file instead
-(`references/specialists.md`). A round with work already written classifies
-that work:
+(`references/specialists.md`). That explicit read-only plan does not require a
+repo trigger declaration because it has no surface any trigger can classify;
+an existing declaration must still be valid. A round with work already written
+classifies that work:
 
 ```bash
 CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"; [ -d "$CP" ] || case "$(git config --get remote.origin.url)" in git@github.com:jbaruch/coding-policy|git@github.com:jbaruch/coding-policy.git|https://github.com/jbaruch/coding-policy|https://github.com/jbaruch/coding-policy.git|ssh://git@github.com/jbaruch/coding-policy|ssh://git@github.com/jbaruch/coding-policy.git) CP=. ;; *) echo "coding-policy plugin not found: run tessl install jbaruch/coding-policy" >&2; exit 1 ;; esac
@@ -309,7 +311,8 @@ bash "$CP/skills/herdr-foreman/foreman.sh" detect-triggers \
 ```
 
 Exit 0 means every fired trigger is staffed or answered. On exit 1, read the
-stderr object: an absent declaration is written first (`references/specialists.md`),
+stderr object: an absent declaration for a writing round is written first
+(`references/specialists.md`),
 and an `unaddressed_trigger` is staffed in the roles below or answered by a
 recorded decision with its reason. Re-run the command with the updated
 declaration, roles, requirements and decisions after every such change, and

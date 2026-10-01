@@ -18,12 +18,14 @@ user-facing docs set.
 The declaration is the repo's, never this module's. The architect trigger reads
 "above the size the repo states", and a repo that states no size has a trigger
 that fires never or always depending on the reader (#415), so
-`package_change_lines` is required and a missing declaration is refused rather
-than silently treated as "nothing fires".
+`package_change_lines` is required for every writing round. A validated
+read-only round has no repository surface to classify and may proceed without
+a declaration (#671); an existing malformed declaration is still refused.
 
 Contract:
 
-* `load_declaration(repo)` reads `<repo>/.herdr/triggers.json`.
+* `load_declaration(repo)` reads `<repo>/.herdr/triggers.json`; callers may
+  tolerate only its absence for an already validated read-only round.
 * `detect(...)` is pure over the declaration and the diff facts.
 * `run_command(args, runner=...)` collects those facts through `runner`, a
   callable taking a git argument list and returning its stdout.
@@ -73,18 +75,24 @@ def _globs(value, label):
     return list(value)
 
 
-def load_declaration(repo):
+def load_declaration(repo, *, required=True):
     """Read and validate the consuming repo's trigger declaration.
 
-    A missing or incomplete declaration is refused, never defaulted: the
-    architect trigger's size and the other three surfaces are the repo's to
+    A missing or incomplete declaration is normally refused, never defaulted:
+    the architect trigger's size and the other three surfaces are the repo's to
     state, and an invented default would fire on repos it was never measured
-    against.
+    against. A caller that has already validated an explicit no-write plan may
+    set ``required=False``; only a genuinely absent file is tolerated, and the
+    returned path is sufficient for the all-quiet report.
     """
     root = Path(repo)
     path = root / DECLARATION_FILE
     try:
         raw = path.read_text(encoding="utf-8")
+    except FileNotFoundError as exc:
+        if not required:
+            return {"path": str(path)}
+        raise UsageError("No trigger declaration at {} ({}); state this repo's package roots and size, trust-boundary paths, CLI spec surface and user-facing docs paths there before composing a round.".format(path, exc.strerror), {}) from None
     except OSError as exc:
         raise UsageError("No trigger declaration at {} ({}); state this repo's package roots and size, trust-boundary paths, CLI spec surface and user-facing docs paths there before composing a round.".format(path, exc.strerror), {}) from None
     try:
@@ -426,10 +434,11 @@ def git_runner(repo):
 
 def run_command(args, runner=None):
     """Detect the triggers for one task's diff and gate on the unaddressed set."""
-    declaration = load_declaration(args.repo)
+    plan = load_plan(getattr(args, "planned", None))
+    writes = plan is None or plan["writes_repository"]
+    declaration = load_declaration(args.repo, required=writes)
     decisions = load_decisions(getattr(args, "decisions", None))
     specialties = load_requirements(getattr(args, "requirements", None))
-    plan = load_plan(getattr(args, "planned", None))
     roles = [role for role in (getattr(args, "roles", None) or "").split(",") if role]
     run = runner if runner is not None else git_runner(args.repo)
     head = getattr(args, "head", None)
@@ -440,7 +449,6 @@ def run_command(args, runner=None):
     common = ["diff", "--no-renames", *span]
     changes = parse_name_status(run([*common, "--name-status", "-z"]))
     churn = parse_numstat(run([*common, "--numstat", "-z"]))
-    writes = plan is None or plan["writes_repository"]
     untracked = {}
     # Untracked files are a working tree's added surface. A round that writes
     # nothing has no surface for them to belong to, so they are never read:
@@ -481,6 +489,7 @@ def run_command(args, runner=None):
         if not set(roles) <= READ_ONLY_ROLES:
             raise UsageError("Only {} write no repository content; this round seats {} and cannot declare writes_repository false.".format(
                 ", ".join(sorted(READ_ONLY_ROLES)), ", ".join(sorted(set(roles) - READ_ONLY_ROLES))), {})
+        return report(declaration, args.base, head or "worktree", {}, roles, specialties, decisions)
     # An empty plan classifies exactly as much as an absent one, so the guard
     # reads the combined inputs rather than the plan's presence: a vacuous
     # success here is the silence the triggers exist to end (#415).
