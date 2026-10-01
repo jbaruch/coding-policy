@@ -1,5 +1,15 @@
 # Changelog
 
+### Fixed
+
+- **Retrospective history survives the `teamlead` to `foreman` home move
+  (Closes #675).** `migrate-home` intentionally preserves quoted note paths
+  through its legacy-home symlink, but the retrospective loader compared those
+  paths as raw strings and refused the whole store. Completed records and
+  pending journals now accept paths that resolve to the owned note, retain the
+  historical spelling on replay, and still reject a different file even when
+  its bytes match.
+
 ## 0.3.353 — 2026-09-30
 
 ### Added

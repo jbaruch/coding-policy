@@ -89,6 +89,21 @@ class RetrospectiveRuntimeTest(unittest.TestCase):
         self.assertTrue(empty["due"])
         self.assertFalse(empty["coverage"][0]["first_start"])
 
+    def test_check_accepts_history_preserved_through_migrated_home_symlink(self):
+        self.record()
+        legacy = self.root / "legacy-home"
+        legacy.symlink_to(self.root, target_is_directory=True)
+        index_path = notes.directory(self.path) / "index.json"
+        index = json.loads(index_path.read_text(encoding="utf-8"))
+        historical = legacy / notes.directory(self.path).name / "retro-1.md"
+        index["records"][0]["note"]["path"] = str(historical)
+        index_path.write_text(json.dumps(index), encoding="utf-8")
+
+        check = runtime.check(self.path, self.state, self.client, self.agents, self.request(), AT)
+
+        self.assertFalse(check["due"])
+        self.assertEqual(check["cadence"]["last_completed_at"], AT)
+
     def test_batch_sibling_outcome_does_not_invalidate_remaining_worker(self):
         self.record()
         guard = self.guard()

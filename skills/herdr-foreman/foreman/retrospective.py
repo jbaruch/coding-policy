@@ -96,6 +96,26 @@ def _malformed(label) -> NoReturn:
     raise StateError("Malformed retrospective {}; preserve its bytes and restore the original artifact.".format(label), {})
 
 
+def _is_note_location(recorded, expected):
+    """Whether a record's quoted note path names the note at `expected`.
+
+    `migrate-home` keeps quoted paths as history and leaves the old home as
+    a symlink to the new one (`foreman/home.py`), so a note recorded under
+    the old home is the same file reached through that link. Equal text, or
+    both paths resolving to the same file, is the same location; anything
+    else is not.
+    """
+    return recorded == str(expected) or os.path.realpath(recorded) == os.path.realpath(expected)
+
+
+def _same_record(left, right):
+    """Whether retry records differ only by an equivalent historical note path."""
+    return (all(left[key] == right[key] for key in left if key != "note")
+            and left["note"]["sha256"] == right["note"]["sha256"]
+            and left["note"]["size"] == right["note"]["size"]
+            and _is_note_location(left["note"]["path"], right["note"]["path"]))
+
+
 def _nonempty(value):
     return isinstance(value, str) and bool(value.strip())
 
@@ -264,7 +284,7 @@ def load(path, *, allow_pending=False):
         if name in ids:
             raise StateError("Retrospective ids are duplicated; restore the original index before writing.", {})
         ids.add(name)
-        if record["note"]["path"] != str(root / (name + ".md")):
+        if not _is_note_location(record["note"]["path"], root / (name + ".md")):
             _malformed("note location")
         _read_note(record)
     transition_ids = set()
@@ -357,7 +377,7 @@ def _pending(root, index):
         _malformed("pending transaction")
     validate_record(pending["record"])
     row = pending["record"]
-    if row["note"]["path"] != str(root / (row["id"] + ".md")):
+    if not _is_note_location(row["note"]["path"], root / (row["id"] + ".md")):
         _malformed("pending note location")
     committed = next((entry for entry in index["records"] if entry["id"] == row["id"]), None)
     if committed:
@@ -431,13 +451,16 @@ def record(path, data, coverage, at):
         _unlink(pending_path)
         pending = None
     if prior:
-        if prior != item:
+        if not _same_record(prior, item):
             raise UsageError("Retrospective id already records different metadata; preserve it and use a new id.", {})
         return {**prior, "replayed": True}
     transaction = {"schema_version": SCHEMA_VERSION, "previous_index": digest(index), "record": item}
     if pending:
-        if pending != transaction:
+        if (pending["schema_version"] != transaction["schema_version"]
+                or pending["previous_index"] != transaction["previous_index"]
+                or not _same_record(pending["record"], transaction["record"])):
             raise StateError("A different retrospective transaction is pending; resume its original record before starting another.", {})
+        item = pending["record"]
     else:
         installed = root / (name + ".md")
         if installed.exists() and file_bytes(installed) != note_data:
