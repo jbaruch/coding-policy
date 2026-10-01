@@ -262,6 +262,10 @@ class RelaunchWorkerCommandTest(unittest.TestCase):
                          ("maintenance", "developer", "issue-673"))
         self.assertEqual(maintenance["tier"]["verified"], verified)
         self.assertEqual(maintenance["tier"]["launch_args"], ["--dangerously-skip-permissions"])
+        self.assertEqual(
+            set(maintenance["tier"]),
+            {"kind", "model", "effort", "launch_args", "pressure_headroom", "de_escalated", "verified"},
+        )
         saved.assert_called_once()
         with tempfile.TemporaryDirectory(prefix="foreman-relaunch-state-") as directory:
             state_path = Path(directory) / "state.json"

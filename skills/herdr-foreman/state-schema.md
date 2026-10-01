@@ -478,7 +478,7 @@ skills/herdr-foreman/references/retrospectives.md
 | `assignments[].context_session` | object or null | Verified native session reference scoped to a pane: `pane_id`, `source`, `agent`, `kind`, `value`, all non-empty strings; kind is `id` or `path`. Null means continuity was not established |
 
 | `snapshots[].agents[].tier_billing` | object | Round → `{model, effort, window}` for configured tiers; unmeasured attribution is `unknown`. Empty for older snapshots |
-| `assignments[].tier` | object or null | Requested `round`, selected config `tier_row`, `kind`, `model`, `effort`, declared/effective multipliers, billing window, launch options, input `prompt_hash`, `pressure_headroom` and `de_escalated` (the measured headroom the selection used, and whether the tier the worker runs at still falls short of a declined discretionary escalation), and `verified` proof. Null for old or non-tiered dispatches |
+| `assignments[].tier` | object or null | A tiered dispatch records requested `round`, selected config `tier_row`, `kind`, `model`, `effort`, declared/effective multipliers, billing window, launch options, input `prompt_hash`, `pressure_headroom`, `de_escalated`, and `verified` proof. A `maintenance` row is not a dispatch: it records only `kind`, `model`, `effort`, normalized `launch_args`, `pressure_headroom: null`, `de_escalated: false`, and `verified`; dispatch-only selection, billing, and prompt fields are absent. Null for old or non-tiered dispatches |
 | `assignments[].requirements` | object or null | Normalized requirement object from the assigned role in the plan; null for legacy assignments |
 | `assignments[].reviewer_scope` | string or null | Reviewer participation recorded as `verification`, `design`, or `unknown`; null for other roles. Older reviewers migrate to `unknown` |
 | `assignments[].judge_mode` | string or null | The mode the judge seat was dispatched for: `adjudication`, `diagnosis`, or `unknown`; null for other roles. A weighing is an `adjudication`; its report is the ruling file `skills/release/dismiss-ruled-review.sh` reads, never a record this state owns. Older judge rows migrate to `unknown`, and a reconciled dispatch whose receipt predates the field records `unknown`. A live judge dispatch with no declared mode is refused, never defaulted |
@@ -494,8 +494,9 @@ as length-framed byte strings; the generated metadata footer is excluded.
 Every hand-off is recorded, one that never started included: the ledger is what
 the tool did, and a round that went out and died is the thing worth looking up
 afterwards. `status` keeps that honesty out of the plan — `role_counts` skips
-rows marked `sent_but_not_started`, so an assignment nobody began never counts
-as experience of the role. The skip list is a deny-list: a version 1 row
+rows marked `sent_but_not_started` or `maintenance`, so an assignment nobody
+began and a relaunch that sent no assignment never count as experience of the
+role. The skip list is a deny-list: a version 1 row
 migrated forward carries `unknown` and still counts, which says the tool cannot
 prove the outcome rather than that the history should vanish.
 
@@ -700,6 +701,12 @@ informational plan name and never feeds headroom.
   clear/relaunch, persists sending before terminal input, and appends the
   confirmed or unconfirmed outcome before cosmetic labels. Owner commands
   manage task/approval/recovery records; all mutations preserve audit events.
+  `relaunch-worker` appends one `maintenance` row only after the replacement
+  process is live and its configured pair is verified. It preserves the latest
+  role, task, fix, requirements, reviewer, and judge provenance, plus the live
+  native session when available. Because it creates no dispatch, its `tier`
+  uses the maintenance variant above and carries no round selection, billing,
+  prompt hash, or dispatch receipt.
   Writes are atomic: temp file in the same directory, `fsync`,
   `os.replace`.
 - **Readers** — `plan` reads the newest snapshot plus the ledger (role history
@@ -721,6 +728,12 @@ informational plan name and never feeds headroom.
   report's attribution predicate holds. What each field counts, and that
   predicate, are the contract of `skills/herdr-foreman/foreman/cost_report.py`
   (module docstring), not restated here.
+  Readers identify the maintenance tier variant by `status: maintenance`.
+  `role_counts` excludes it from assignment experience; `cost-report` excludes
+  it from both work and `unstarted_assignments`; chronology may still use its
+  preserved role/task provenance as the latest owner event. Readers validate
+  its shared tier proof (`kind`, pair, launch arguments, pressure defaults and
+  `verified`) without inventing absent dispatch-only fields.
   `skills/herdr-foreman/prune-report-caches.py` reads `recovery.dispatches[]`
   `brief` and `common` paths to find reports directories, without writing or
   migrating; an unusable or unmigrated state file is its `could_not_check`,
