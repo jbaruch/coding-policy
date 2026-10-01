@@ -184,6 +184,15 @@ class RetrospectiveTest(unittest.TestCase):
         with self.assertRaisesRegex(StateError, "note location"):
             retro.show(self.path)
 
+    def test_unresolvable_note_alias_is_a_malformed_location(self):
+        self.record()
+        index = self.index()
+        index["records"][0]["note"]["path"] = "/absolute/invalid\0note.md"
+        self.write_index(index)
+
+        with self.assertRaisesRegex(StateError, "note location"):
+            retro.show(self.path)
+
     def test_sidecar_lock_serializes_aliases_and_releases_without_stale_flags(self):
         alias = self.root / "alias"
         alias.symlink_to(self.root, target_is_directory=True)

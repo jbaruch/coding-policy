@@ -105,7 +105,12 @@ def _is_note_location(recorded, expected):
     both paths resolving to the same file, is the same location; anything
     else is not.
     """
-    return recorded == str(expected) or os.path.realpath(recorded) == os.path.realpath(expected)
+    if recorded == str(expected):
+        return True
+    try:
+        return os.path.realpath(recorded) == os.path.realpath(expected)
+    except (OSError, ValueError):
+        return False
 
 
 def _same_record(left, right):
