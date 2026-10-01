@@ -16,10 +16,10 @@ command foreman reads the pane's composer row and confirms the text is gone:
 * composer non-empty before a dispatch -> recover once, then re-read
 
 The composer row is the last row starting with the agent's prompt glyph
-(`› ` for Codex, `❯ ` for Claude, `│ ❯` for Grok). A glyph that is absent from
-the read -- covered by a modal, scrolled away, or simply not configured --
-means foreman cannot see the composer, and an unverifiable composer is
-treated as consumed rather than invented into a failure.
+(`› ` for Codex, `❯ ` for Claude, `│ ❯` for Grok). A configured glyph that is
+absent from the read -- covered by a modal or scrolled away -- triggers a
+bounded wait and then refuses before input. An agent with no configured glyph
+keeps the legacy unchecked path.
 """
 
 import re
@@ -195,17 +195,49 @@ def composer_text(pane_text, glyph, ignore_dim=False):
     if not prefix:
         return None
 
+    rows = pane_text.splitlines()
     found = None
-    for raw in pane_text.splitlines():
-        if strip_ansi(raw).strip().startswith(prefix):
+    found_index = None
+    found_indent = None
+    for index, raw in enumerate(rows):
+        visible = strip_ansi(raw)
+        if visible.strip().startswith(prefix):
+            indent = len(visible) - len(visible.lstrip())
+            if found_indent is not None and indent > found_indent:
+                continue
             found = raw
+            found_index = index
+            found_indent = indent
     if found is None:
         return None
 
     chars = _trim(ansi_chars(found))[len(prefix) :]
     if ignore_dim:
         chars = [pair for pair in chars if not pair[1]]
-    return "".join(char for char, _ in _trim(chars, drop=BOX_FRAME))
+    parts = ["".join(char for char, _ in _trim(chars, drop=BOX_FRAME))]
+
+    # Codex wraps recalled multiline input onto indented rows below the glyph
+    # row. Those rows are still part of the composer: ignoring them can turn a
+    # recalled prompt whose first row equals the empty hint into an exact
+    # placeholder match. A continuation is more indented than the glyph row;
+    # blank rows may be part of recalled input, while Codex's footer returns to
+    # the glyph row's indentation and ends the scan.
+    visible_found = strip_ansi(found)
+    glyph_indent = len(visible_found) - len(visible_found.lstrip())
+    for raw in rows[(found_index or 0) + 1 :]:
+        visible = strip_ansi(raw)
+        if not visible.strip():
+            continue
+        indent = len(visible) - len(visible.lstrip())
+        if indent <= glyph_indent:
+            break
+        continuation = _trim(ansi_chars(raw), drop=BOX_FRAME)
+        if ignore_dim:
+            continuation = [pair for pair in continuation if not pair[1]]
+        text = "".join(char for char, _ in _trim(continuation, drop=BOX_FRAME))
+        if text:
+            parts.append(text)
+    return "\n".join(parts)
 
 
 def screen_signature(pane_text, glyph):
@@ -358,7 +390,17 @@ def inspect_composer(pane_text, agent, ansi=True):
 
     lit = composer_text(pane_text, agent.composer_glyph, ignore_dim=True)
     all_dim = bool(literal) and not lit
-    judged = lit if agent.composer_ignore_dim else literal
+    # A runtime with an explicit placeholder allowlist gives us a stronger
+    # empty-composer signal than styling. Codex renders recalled prompts dim
+    # too; dropping every dim row let a recalled brief read as empty and the
+    # measurement `/status` was appended and submitted as a new turn (#670).
+    # For such runtimes only an exact declared placeholder is empty. Runtimes
+    # without that allowlist (Claude's open-ended ghost suggestions) retain
+    # the style-based filter.
+    if agent.composer_placeholders:
+        judged = literal
+    else:
+        judged = lit if agent.composer_ignore_dim else literal
     placeholder = is_placeholder(literal, agent) or is_placeholder(judged, agent)
     content = "" if placeholder else judged
     return Composer(True, content, all_dim, placeholder, ansi, literal)
@@ -399,7 +441,7 @@ def recovery_allowed(agent, composer, session):
             "placeholder or a dim suggestion from text somebody typed"
         )
     if composer.dim:
-        return False, "the text is dim, which means nobody typed it"
+        return False, "dim text is never eligible for automatic recovery"
     if composer.placeholder:
         return False, "the text is this runtime's empty-composer placeholder"
     if not agent.recover_keys:
@@ -419,14 +461,14 @@ def recovery_allowed(agent, composer, session):
 
 def _stuck_composer_error(agent, pane_id, composer, reason):
     return HerdrError(
-        "{}'s composer holds {!r} and foreman will not clear it: {}. Look at "
+        "{}'s composer holds input and foreman will not clear it: {}. Look at "
         "pane {} yourself, clear it if it is safe to, then run this again.".format(
-            agent.name, composer.content, reason, pane_id or "(unknown)"
+            agent.name, reason, pane_id or "(unknown)"
         ),
         {
             "agent": agent.name,
             "pane_id": pane_id,
-            "composer": composer.content,
+            "composer_occupied": True,
             "reason": reason,
             "dim": composer.dim,
             "placeholder": composer.placeholder,
@@ -435,7 +477,26 @@ def _stuck_composer_error(agent, pane_id, composer, reason):
     )
 
 
-def ensure_ready(client, agent, pane_id=None, session=None, sleep=time.sleep, warn=None, settle_sec=COMPOSER_SETTLE_SEC, text=None, ansi=True, before_input=None):
+def _wait_for_visible_composer(client, agent, pane_id, text, ansi, sleep, warn):
+    """Return `(text, ansi, composer)` once a configured prompt is visible."""
+    composer = inspect_composer(text, agent, ansi=ansi)
+    if not checkable(agent) or composer.visible:
+        return text, ansi, composer
+    for attempt in range(1, COMPOSER_VISIBLE_ATTEMPTS + 1):
+        if attempt < COMPOSER_VISIBLE_ATTEMPTS:
+            sleep(COMPOSER_VISIBLE_INTERVAL)
+        text, ansi = read_pane(client, agent, warn=warn)
+        composer = inspect_composer(text, agent, ansi=ansi)
+        if composer.visible:
+            return text, ansi, composer
+    raise HerdrError(
+        "{}'s prompt is not on screen in pane {} after {} reads; something is drawn over it -- a startup review or permission dialog takes the input meant for the worker. Read the pane, clear what is on it, and retry. Nothing was sent.".format(
+            agent.name, pane_id, COMPOSER_VISIBLE_ATTEMPTS),
+        {"agent": agent.name, "pane": pane_id, "attempts": COMPOSER_VISIBLE_ATTEMPTS},
+    )
+
+
+def ensure_ready(client, agent, pane_id=None, session=None, sleep=time.sleep, warn=None, settle_sec=COMPOSER_SETTLE_SEC, text=None, ansi=True, before_input=None, recovery_state=None):
     """Return pane text once the worker's own composer is on screen and empty.
 
     Recovery keys are sent only when every condition in `recovery_allowed`
@@ -455,21 +516,9 @@ def ensure_ready(client, agent, pane_id=None, session=None, sleep=time.sleep, wa
     session = session if session is not None else DispatchSession()
     if text is None:
         text, ansi = read_pane(client, agent, warn=warn)
-    composer = inspect_composer(text, agent, ansi=ansi)
-    if checkable(agent) and not composer.visible:
-        for attempt in range(1, COMPOSER_VISIBLE_ATTEMPTS + 1):
-            if attempt < COMPOSER_VISIBLE_ATTEMPTS:
-                sleep(COMPOSER_VISIBLE_INTERVAL)
-            text, ansi = read_pane(client, agent, warn=warn)
-            composer = inspect_composer(text, agent, ansi=ansi)
-            if composer.visible:
-                break
-        else:
-            raise HerdrError(
-                "{}'s prompt is not on screen in pane {} after {} reads; something is drawn over it -- a startup review or permission dialog takes the input meant for the worker. Read the pane, clear what is on it, and retry. Nothing was sent.".format(
-                    agent.name, pane_id, COMPOSER_VISIBLE_ATTEMPTS),
-                {"agent": agent.name, "pane": pane_id, "attempts": COMPOSER_VISIBLE_ATTEMPTS},
-            )
+    text, ansi, composer = _wait_for_visible_composer(
+        client, agent, pane_id, text, ansi, sleep, warn
+    )
     if not composer.occupied:
         return text
 
@@ -478,17 +527,21 @@ def ensure_ready(client, agent, pane_id=None, session=None, sleep=time.sleep, wa
         raise _stuck_composer_error(agent, pane_id, composer, reason)
 
     warn(
-        "{}'s composer holds {!r}, which foreman sent earlier in "
-        "this run. Sending {} once to clear it.".format(
-            agent.name, composer.content, " ".join(agent.recover_keys)
+        "{}'s composer holds input foreman is allowed to recover. Sending {} "
+        "once to clear it.".format(
+            agent.name, " ".join(agent.recover_keys)
         )
     )
     if before_input is not None:
         before_input()
     client.agent_send_keys(agent.name, agent.recover_keys)
+    if recovery_state is not None:
+        recovery_state["sent"] = True
     sleep(settle_sec)
     text, ansi = read_pane(client, agent, warn=warn)
-    composer = inspect_composer(text, agent, ansi=ansi)
+    text, ansi, composer = _wait_for_visible_composer(
+        client, agent, pane_id, text, ansi, sleep, warn
+    )
     if composer.occupied:
         raise _stuck_composer_error(
             agent,
@@ -601,20 +654,24 @@ def send_command(client, agent, pane_id, command, session=None, sleep=time.sleep
     warn = warn or stderr_warn
     session = session if session is not None else DispatchSession()
     before, ansi = read_pane(client, agent, warn=warn)
-    recovered = inspect_composer(before, agent, ansi=ansi).occupied
-    if recovered:
-        before = ensure_ready(
-            client,
-            agent,
-            pane_id=pane_id,
-            session=session,
-            sleep=sleep,
-            warn=warn,
-            settle_sec=settle_sec,
-            text=before,
-            ansi=ansi,
-            before_input=before_input,
-        )
+    recovery_state = {"sent": False}
+    # Slash commands need the same visibility gate as real messages even when
+    # the first classification looks empty. A clipped or modal-covered prompt
+    # is not permission to type into an unknown input surface.
+    before = ensure_ready(
+        client,
+        agent,
+        pane_id=pane_id,
+        session=session,
+        sleep=sleep,
+        warn=warn,
+        settle_sec=settle_sec,
+        text=before,
+        ansi=ansi,
+        before_input=before_input,
+        recovery_state=recovery_state,
+    )
+    recovered = recovery_state["sent"]
     before_signature = screen_signature(before, agent.composer_glyph)
 
     # Remembered before it is sent, so a command that fails to submit is one
@@ -675,14 +732,14 @@ def send_command(client, agent, pane_id, command, session=None, sleep=time.sleep
 
     # Phase 2 -- the command is gone; NOW placeholder and dim rules decide
     # whether anything else is sitting there.
-    held = inspect_composer(text, agent, ansi=ansi).content
-    if held:
+    held = inspect_composer(text, agent, ansi=ansi)
+    if held.occupied:
         raise HerdrError(
-            "{} consumed {!r}, but its composer now holds {!r}. Nothing "
+            "{} consumed {!r}, but its composer now holds input. Nothing "
             "further was sent. Look at pane {} before assigning to it.".format(
-                agent.name, command, held, pane_id or "(unknown)"
+                agent.name, command, pane_id or "(unknown)"
             ),
-            {"agent": agent.name, "command": command, "composer": held},
+            {"agent": agent.name, "command": command, "composer_occupied": True},
         )
 
     screen_changed = screen_signature(text, agent.composer_glyph) != before_signature

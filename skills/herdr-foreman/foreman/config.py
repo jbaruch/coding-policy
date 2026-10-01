@@ -39,9 +39,9 @@ OPTIONAL_LIST_FIELDS = (
 #: one that works for claude and codex; grok needs `type`.
 DEFAULT_SLASH_DELIVERY = SLASH_DELIVERY_PASTE
 
-#: Dim composer text is never somebody's typing: it is a placeholder or a
-#: ghost-text suggestion. On for every kind, because reading dim hint text as
-#: occupied is what killed an idle Codex.
+#: A runtime without exact placeholders may use dim text for replaceable ghost
+#: suggestions. With an exact placeholder allowlist, only an exact match is
+#: empty; every other dim value stays occupied (Codex dims recalled prompts).
 DEFAULT_COMPOSER_IGNORE_DIM = True
 
 #: Enters sent with a typed slash command. Codex opens an autocomplete popup
@@ -101,9 +101,11 @@ class Agent:
         # The prompt glyph that marks the composer row, so foreman can see
         # whether a slash command was consumed. Empty disables the check.
         self.composer_glyph = composer_glyph
-        # Treat dim / grey composer text as empty. Claude Code pre-fills a
-        # ghost-text suggestion nobody typed; a runtime without ghost text
-        # leaves this off so every character still counts.
+        # Treat dim / grey composer text as empty when the runtime has no
+        # explicit placeholder allowlist. Claude Code pre-fills open-ended
+        # ghost-text suggestions nobody typed. A runtime such as Codex that
+        # declares exact placeholders stays fail-closed on every other dim
+        # value, including recalled prompts.
         self.composer_ignore_dim = composer_ignore_dim
         # How many Enters a typed slash command needs to submit. Codex's
         # autocomplete popup swallows the first one.

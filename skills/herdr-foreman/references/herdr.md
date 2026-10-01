@@ -207,26 +207,27 @@ the command text is gone from it:
 3. Still there — fail that worker, and never send the assignment. Pasting a
    brief onto a stuck command is the accident this exists to prevent.
 
-**Dim text is not occupied text.** Claude Code pre-fills its input box with a
+**Dim text is not always occupied text.** Claude Code pre-fills its input box with a
 ghost-text suggestion after a task (`check the other issues (#28, #30) for
 follow-up work`). Nobody typed it, Esc does not remove it, and the next
 keystroke replaces it. A plain-text read cannot tell it from a real command, so
 the composer is read with `--format ansi` and characters rendered dim or in the
-grey palette are dropped before the decision. Bold counts as deliberate, and
-normal-weight text typed after a suggestion still counts, which keeps a real
-command from hiding behind one. `composer_ignore_dim` turns this on per worker
-(`true` for claude, `false` elsewhere), and a herdr that cannot produce ANSI
-falls back to plain text with a warning. The SGR codes are in
+grey palette may be dropped before the decision. A worker that declares exact
+`composer_placeholders` drops only those values: Codex also renders a recalled
+previous prompt dim, so any other dim text remains occupied. Bold counts as
+deliberate, and normal-weight text typed after a suggestion still counts. A
+herdr that cannot produce ANSI falls back to plain text with a warning. The SGR codes are in
 `skills/herdr-foreman/foreman/composer.py`.
 
 **A runtime's empty-composer placeholder is not text either.** Codex draws
 `Ask Codex to do anything` whenever nothing is typed. Live, that read as
 somebody's input, the one recovery keystroke went out — `ctrl+c` — and ctrl+c
 on an empty Codex composer EXITS Codex. The process died and had to be
-restarted. Two independent guards stop it now: dim text is dropped, and
-`composer_placeholders` lists the hint verbatim so an exact match after
-trimming counts as empty even if the runtime stops drawing it dim. A command
-typed over a placeholder is still a command.
+restarted. `composer_placeholders` now supplies the sole empty signal for a
+runtime that declares exact hints: only a full-composer match after trimming
+counts as empty, even if the runtime stops drawing it dim. Continuation text
+or a command typed over a placeholder keeps the composer occupied. A runtime
+without exact placeholders may still drop dim ghost suggestions.
 
 ### Recovery Keys Are the Most Dangerous Thing the Foreman Sends
 
@@ -236,7 +237,9 @@ idle process. `recover_keys` go out only when every one of these holds:
 1. The composer is genuinely occupied — non-empty, not a placeholder.
 2. The read carried ANSI. A plain-text fallback can only refuse: without
    intensity, a placeholder is indistinguishable from typed text.
-3. The text is not dim. `--allow-recovery` cannot override this.
+3. The text is not dim. Dim non-placeholder text stays occupied for a runtime
+   with exact placeholders, but it is never eligible for automatic recovery;
+   `--allow-recovery` cannot override this.
 4. The worker configures `recover_keys` at all. **Codex ships with `[]`**.
 5. The text is a command the foreman itself sent earlier in this run, or the
    operator passed `--allow-recovery`.
@@ -280,20 +283,18 @@ Three per-agent config keys drive it:
 | Key | Meaning |
 | --- | ------- |
 | `composer_glyph` | Prompt glyph starting the composer row (`"› "` Codex, `"❯ "` Claude, `"│ ❯"` Grok). Empty skips the check |
-| `composer_ignore_dim` | `true` (the default for every kind) reads dim/grey composer text as empty — ghost-text suggestions and placeholders alike |
+| `composer_ignore_dim` | `true` (the default) reads dim/grey composer text as empty only when the worker has no exact `composer_placeholders`; with that allowlist, every other dim value remains occupied |
 | `composer_placeholders` | Hint text a runtime draws in an empty composer, matched exactly after trimming (`["Ask Codex to do anything"]`). Always counts as empty |
 | `recover_keys` | Keys that clear a stuck composer, sent at most once and only under the five conditions above. **Empty for Codex**: its clear key is `ctrl+c`, which exits an idle Codex |
 | `model_label` | Model name shown on the worker's pane after a dispatch (`"gpt-5.6"`). Optional; empty leaves the label carrying the role alone |
 | `slash_delivery` | `paste` or `type`, per the table above |
 
-The placeholder list is per runtime and hand-maintained: a Codex release that
-reworded its hint would reintroduce the failure, which is why the dim check
-sits in front of it rather than behind it. Two guards, either one sufficient.
-
-Dim detection is SGR parsing, not semantics: a runtime that draws a real draft
-in grey reads as empty, and one that draws its suggestion at normal weight
-reads as occupied. The per-worker setting keeps a runtime with no ghost text
-away from either.
+The placeholder list is per runtime and hand-maintained. A Codex release that
+rewords its hint fails closed: the new hint reads as occupied until config is
+updated. Dim detection is SGR parsing, not semantics, so it can authorize an
+empty reading only for a runtime without exact placeholders. With an exact
+allowlist, a real grey draft remains occupied and dimness only prevents
+automatic recovery.
 
 Glyph matching is signature matching: a TUI that restyles its prompt makes the
 composer unreadable, which surfaces as an unsent command going uncaught — the

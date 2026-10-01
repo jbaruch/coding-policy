@@ -108,6 +108,12 @@ CODEX_PANE = (
     "│  Account: jbaruch@sadogursky.com (Pro)  │\n"
     "│  Weekly limit: [███] 87% left (resets 17:26 on 7 Sep)  │\n"
 )
+CODEX_RECALLED_MULTILINE = (
+    "  Codex v1.2\n  ─────────\n"
+    "  › \x1b[2mNew assignment from the team lead. Your role is DEVELOPER.\x1b[0m\n"
+    "    \x1b[2mRead /tmp/brief-developer.md and execute it exactly.\x1b[0m\n"
+    "    \x1b[2mFinish with the REPORT line it specifies.\x1b[0m\n"
+)
 GROK_PANE = "     Weekly limit: 0%\n     Next reset: September 6, 12:55\n     Credits: $16.42\n"
 # Marker present, numbers absent: gets past the marker wait, fails the parse.
 GROK_UNPARSEABLE_PANE = "  Weekly limit is a thing this agent has, apparently\n"
@@ -215,6 +221,32 @@ class MeasureAgentTest(unittest.TestCase):
         self.assertEqual(runner.pasted_prompts(), [])
         self.assertIn("pane send-text w3:p1 /status", runner.commands())
         self.assertIn("pane send-keys w3:p1 enter", runner.commands())
+
+    def test_codex_recalled_prompt_refuses_before_status_is_typed(self):
+        runner = runner_with({"codex": "idle"}, {"codex": CODEX_PANE})
+        runner.responses[
+            "agent read codex --source visible --lines 20"
+        ] = ScriptedReads([CODEX_RECALLED_MULTILINE])
+        with self.assertRaises(HerdrError) as caught:
+            measure_agent(HerdrClient(runner=runner), BY_NAME["codex"])
+        message = str(caught.exception)
+        self.assertIn("w3:p1", message)
+        self.assertNotIn("New assignment from the team lead", message)
+        self.assertIn("holds input", message)
+        self.assertNotIn("pane send-text w3:p1 /status", runner.commands())
+        self.assertNotIn("pane send-keys w3:p1 enter", runner.commands())
+
+    def test_snapshot_names_the_recalled_prompt_pane_as_failed(self):
+        runner = runner_with({"codex": "idle"}, {"codex": CODEX_PANE})
+        runner.responses[
+            "agent read codex --source visible --lines 20"
+        ] = ScriptedReads([CODEX_RECALLED_MULTILINE])
+        snapshot = measure(HerdrClient(runner=runner), [BY_NAME["codex"]], AT)
+        error = snapshot["agents"]["codex"]["error"]
+        self.assertEqual(snapshot["failed_agents"], ["codex"])
+        self.assertEqual(error["code"], "herdr_error")
+        self.assertIn("w3:p1", error["message"])
+        self.assertEqual(runner.writes(), [])
 
     def test_each_kind_uses_the_path_its_config_names(self):
         expected = {

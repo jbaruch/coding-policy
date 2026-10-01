@@ -1,5 +1,14 @@
 # Changelog
 
+### Fixed
+
+- **Headroom measurement cannot resubmit a recalled Codex prompt (Closes
+  #670).** Codex's declared empty-placeholder allowlist now outranks dim
+  styling: an exact hint stays empty, while every other dim value—including a
+  recalled multiline brief—remains occupied. Slash commands also require a
+  visible composer before typing, and an occupied pane is refused by name
+  before `/status` or Enter is sent.
+
 ## 0.3.356 — 2026-10-01
 
 ### Fixed

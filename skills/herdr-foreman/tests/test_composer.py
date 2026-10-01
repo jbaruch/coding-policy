@@ -281,12 +281,19 @@ class EnsureReadyTest(unittest.TestCase):
             self._ready(runner, session=DispatchSession(allow_recovery=True))
         self.assertEqual(runner.writes(), ["agent send-keys recoverable esc"])
 
-    def test_the_refusal_names_the_pane_and_the_text(self):
+    def test_recovery_that_hides_the_prompt_refuses_before_later_input(self):
+        runner = self._runner([CODEX_HELD] + ["modal with no prompt"] * 25)
+        with self.assertRaisesRegex(HerdrError, "prompt is not on screen"):
+            self._ready(runner, session=DispatchSession(allow_recovery=True))
+        self.assertEqual(runner.writes(), ["agent send-keys recoverable esc"])
+
+    def test_the_refusal_names_the_pane_without_echoing_the_text(self):
         runner = self._runner([CODEX_HELD])
         with self.assertRaises(HerdrError) as caught:
             self._ready(runner, pane_id="w3:p1")
         message = str(caught.exception)
-        self.assertIn("/new", message)
+        self.assertNotIn("/new", message)
+        self.assertIn("holds input", message)
         self.assertIn("w3:p1", message)
 
     def test_an_agent_with_no_recover_keys_refuses_without_sending(self):
@@ -373,6 +380,15 @@ class SendCommandTest(unittest.TestCase):
             self._send(runner)
         self.assertEqual(runner.writes(), [])
 
+    def test_post_command_composer_text_is_redacted_from_the_error(self):
+        secret = "token-that-must-not-be-logged"
+        runner = self._runner([CODEX_EMPTY, "  › {}\n".format(secret)])
+        with self.assertRaises(HerdrError) as caught:
+            self._send(runner)
+        self.assertNotIn(secret, str(caught.exception))
+        self.assertNotIn(secret, repr(caught.exception.details))
+        self.assertTrue(caught.exception.details["composer_occupied"])
+
     def test_a_composer_holding_the_foremans_own_command_is_recovered_first(self):
         session = DispatchSession()
         session.remember("/new")
@@ -389,6 +405,24 @@ class SendCommandTest(unittest.TestCase):
         self.assertTrue(result["recovered"])
         self.assertTrue(result["consumed"])
         self.assertEqual(runner.commands()[1], "agent send-keys recoverable esc")
+
+    def test_recovery_discovered_after_a_visibility_wait_is_reported(self):
+        session = DispatchSession()
+        session.remember("/new")
+        runner = self._runner(
+            ["modal with no prompt", CODEX_HELD, CODEX_EMPTY, CODEX_FRESH],
+            name="recoverable",
+        )
+        result = send_command(
+            HerdrClient(runner=runner),
+            BY_NAME["recoverable"],
+            "w3:p1",
+            "/new",
+            session=session,
+            sleep=NO_SLEEP,
+            warn=lambda message: None,
+        )
+        self.assertTrue(result["recovered"])
 
     def test_an_unchanged_screen_is_reported_not_assumed(self):
         runner = self._runner([CODEX_EMPTY, CODEX_EMPTY])
@@ -726,6 +760,33 @@ CODEX_PLACEHOLDER_DIM = "  Codex v1.2\n  ─────────\n  › {}As
 )
 CODEX_PLACEHOLDER_PLAIN = "  Codex v1.2\n  ─────────\n  › Ask Codex to do anything\n"
 CODEX_PLACEHOLDER_THEN_TYPED = "  › {}Ask Codex to do anything{}/new\n".format(DIM, RESET)
+CODEX_DIM_TEXT_THEN_NORMAL_PLACEHOLDER = (
+    "  › {}stale draft{}Ask Codex to do anything\n"
+).format(DIM, RESET)
+CODEX_RECALLED_MULTILINE = (
+    "  Codex v1.2\n  ─────────\n"
+    "  › {}New assignment from the team lead. Your role is DEVELOPER.{}\n"
+    "    {}Read /tmp/brief-developer.md and execute it exactly.{}\n"
+    "    {}Finish with the REPORT line it specifies.{}\n"
+).format(DIM, RESET, DIM, RESET, DIM, RESET)
+CODEX_PLACEHOLDER_FIRST_RECALL = (
+    "  Codex v1.2\n  ─────────\n"
+    "  › {}Ask Codex to do anything{}\n"
+    "    {}but keep this recalled continuation{}\n"
+    "\n"
+    "  gpt-5.6-sol high · ~/Projects/example\n"
+).format(DIM, RESET, DIM, RESET)
+CODEX_GLYPH_FIRST_CONTINUATION = (
+    "  › {}Ask Codex to do anything{}\n"
+    "    {}› recalled continuation{}\n"
+).format(DIM, RESET, DIM, RESET)
+CODEX_BLANK_THEN_CONTINUATION = (
+    "  › {}Ask Codex to do anything{}\n"
+    "\n"
+    "    {}stale second paragraph{}\n"
+    "\n"
+    "  gpt-5.6-sol high · ~/Projects/example\n"
+).format(DIM, RESET, DIM, RESET)
 
 
 class PlaceholderTest(unittest.TestCase):
@@ -759,7 +820,37 @@ class PlaceholderTest(unittest.TestCase):
     def test_a_command_typed_over_the_placeholder_is_occupied(self):
         composer = inspect_composer(CODEX_PLACEHOLDER_THEN_TYPED, BY_NAME["codex"])
         self.assertTrue(composer.occupied)
-        self.assertEqual(composer.content, "/new")
+        self.assertEqual(composer.content, "Ask Codex to do anything/new")
+
+    def test_dim_text_before_a_normal_placeholder_is_occupied(self):
+        composer = inspect_composer(
+            CODEX_DIM_TEXT_THEN_NORMAL_PLACEHOLDER, BY_NAME["codex"]
+        )
+        self.assertTrue(composer.occupied)
+        self.assertIn("stale draft", composer.content)
+
+    def test_a_dim_recalled_multiline_prompt_is_occupied(self):
+        composer = inspect_composer(CODEX_RECALLED_MULTILINE, BY_NAME["codex"])
+        self.assertTrue(composer.occupied)
+        self.assertIn("New assignment from the team lead", composer.content)
+        self.assertTrue(composer.dim)
+
+    def test_a_placeholder_first_row_with_a_recalled_continuation_is_occupied(self):
+        composer = inspect_composer(CODEX_PLACEHOLDER_FIRST_RECALL, BY_NAME["codex"])
+        self.assertTrue(composer.occupied)
+        self.assertIn("recalled continuation", composer.content)
+        self.assertNotIn("gpt-5.6-sol", composer.content)
+
+    def test_an_indented_glyph_at_the_start_of_a_continuation_stays_occupied(self):
+        composer = inspect_composer(CODEX_GLYPH_FIRST_CONTINUATION, BY_NAME["codex"])
+        self.assertTrue(composer.occupied)
+        self.assertIn("recalled continuation", composer.content)
+
+    def test_an_embedded_blank_does_not_hide_later_recalled_text(self):
+        composer = inspect_composer(CODEX_BLANK_THEN_CONTINUATION, BY_NAME["codex"])
+        self.assertTrue(composer.occupied)
+        self.assertIn("stale second paragraph", composer.content)
+        self.assertNotIn("gpt-5.6-sol", composer.content)
 
     def test_recovery_is_refused_for_a_placeholder(self):
         composer = inspect_composer(CODEX_PLACEHOLDER_PLAIN, BY_NAME["codex"])
@@ -829,6 +920,16 @@ class LiveKillSequenceTest(unittest.TestCase):
                 warn=lambda message: None,
             )
         self.assertEqual([c for c in runner.commands() if "ctrl+c" in c], [])
+
+    def test_a_slash_command_refuses_when_the_prompt_is_not_visible(self):
+        runner = self._runner("a modal with no prompt row")
+        with self.assertRaises(HerdrError) as caught:
+            send_command(
+                HerdrClient(runner=runner), BY_NAME["codex"], "w3:p1", "/status",
+                sleep=NO_SLEEP, warn=lambda message: None,
+            )
+        self.assertIn("prompt is not on screen", str(caught.exception))
+        self.assertEqual(runner.writes(), [])
 
 
 
