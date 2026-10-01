@@ -66,6 +66,20 @@ class DeclarationTest(TempCase):
         self.assertIn("No trigger declaration at", caught.exception.message)
         self.assertIn("package roots", caught.exception.message)
 
+    def test_only_a_missing_optional_declaration_is_tolerated(self):
+        result = triggers.load_declaration(self.tmp, required=False)
+        self.assertEqual(result, {"path": str(self.path)})
+        self.path.write_text("{not json")
+        with self.assertRaises(UsageError) as caught:
+            triggers.load_declaration(self.tmp, required=False)
+        self.assertIn("invalid JSON", caught.exception.message)
+
+    def test_a_dangling_optional_declaration_is_refused(self):
+        self.path.symlink_to(self.tmp / "missing-declaration.json")
+        with self.assertRaises(UsageError) as caught:
+            triggers.load_declaration(self.tmp, required=False)
+        self.assertIn("No trigger declaration at", caught.exception.message)
+
     def test_invalid_json_is_refused(self):
         self.path.write_text("{not json")
         with self.assertRaises(UsageError) as caught:
@@ -437,6 +451,16 @@ class PlannedSurfacesTest(TempCase):
         self.assertEqual(payload["fired"], [])
         self.assertEqual(payload["unaddressed"], [])
         self.assertTrue(all(row["fired"] is False for row in payload["triggers"]))
+
+    def test_a_round_that_writes_nothing_needs_no_declaration(self):
+        (self.tmp / triggers.DECLARATION_FILE).unlink()
+        payload, failure = triggers.run_command(
+            namespace(repo=self.tmp, roles="investigator",
+                      planned=self.write(writes_repository=False)),
+            runner=self.runner())
+        self.assertIsNone(failure)
+        self.assertEqual(payload["declaration"], str(self.tmp / triggers.DECLARATION_FILE))
+        self.assertEqual(payload["fired"], [])
 
     def test_a_round_that_writes_nothing_never_lists_untracked_files(self):
         # coding-policy#499: untracked files are no surface of a round that
@@ -869,6 +893,20 @@ class DetectTriggersCommandTest(TempCase):
         code, _out, err = self.run_cli("--head", "HEAD")
         self.assertEqual(code, 1)
         self.assertIn("No trigger declaration at", json.loads(err)["message"])
+
+    def test_a_read_only_round_needs_no_declaration(self):
+        (self.tmp / triggers.DECLARATION_FILE).unlink()
+        self.git("add", "-A")
+        self.git("commit", "-qm", "drop declaration")
+        self.base = self.git("rev-parse", "HEAD").strip()
+        planned = self.tmp.parent / (self.tmp.name + "-planned-read-only.json")
+        planned.write_text(json.dumps({"schema_version": 1, "added": [], "changed": [],
+                                       "package_lines": {}, "cli_surface": [],
+                                       "writes_repository": False}))
+        self.addCleanup(planned.unlink)
+        code, out, err = self.run_cli("--roles", "investigator", "--planned", str(planned))
+        self.assertEqual(code, 0, err)
+        self.assertEqual(json.loads(out)["fired"], [])
 
     def test_a_rename_reads_as_a_delete_and_an_add(self):
         (self.tmp / "docs").mkdir()

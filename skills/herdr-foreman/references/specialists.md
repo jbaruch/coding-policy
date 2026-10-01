@@ -142,7 +142,9 @@ planned field must be empty, and a
 tracked diff against the base refuses it, since evidence outranks intent.
 Untracked files are never listed or read on such a round: scratch in the
 shared checkout is no surface of it, and an unreadable scratch file does not
-refuse it.
+refuse it. This explicit no-write plan needs no repo trigger declaration:
+there is no surface for one to classify. If the declaration exists it must
+still be valid; writing rounds still require the complete declaration.
 Omitting `writes_repository` reads as `true`, so a plan written before the
 field keeps its meaning.
 
