@@ -232,8 +232,9 @@ class RelaunchWorkerCommandTest(unittest.TestCase):
         guard.before_launch.side_effect = lambda step: events.append(("before_launch", step))
         guard.after_transition.side_effect = lambda step, **kwargs: events.append(("after", step, kwargs))
 
-        def relaunch(_client, _agent, _pane, _tier, before_transition, before_start):
+        def relaunch(_client, _agent, _pane, _tier, before_transition, before_start, expected_process):
             self.assertEqual(events[0][0], "prepare")
+            self.assertEqual(expected_process, prior)
             before_transition()
             before_start()
 

@@ -2075,7 +2075,7 @@ def cmd_relaunch_worker(args, client=None, warn=None, trace=None):
     guard.prepare_relaunch(item)
     step = {"agent": agent.name}
     restart_worker(client, agent, pane, tier, before_transition=lambda: guard.before(step),
-                   before_start=lambda: guard.before_launch(step))
+                   before_start=lambda: guard.before_launch(step), expected_process=previous)
     verified = verify_running(client, agent, pane, tier)
     guard.after_transition(step, launch_proof=verified)
     return {"agent": agent.name, "pane": pane, "tier": tier, "previous": previous,

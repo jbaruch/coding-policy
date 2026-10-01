@@ -102,6 +102,17 @@ class LaunchTest(unittest.TestCase):
         with self.assertRaisesRegex(HerdrError, "does not prove one configured tier"):
             configured_running_tier(client, agent, "w1:p2")
 
+    def test_maintenance_relaunch_is_bound_to_the_process_that_proved_the_tier(self):
+        client = Client()
+        agent = worker()
+        agent.tiers = {"build": {"model": "sonnet-5", "effort": "high"}}
+        client.process["argv"] = ["claude", "--dangerously-skip-permissions", "--model", "sonnet-5", "--effort", "high"]
+        tier, selected = configured_running_tier(client, agent, "w1:p2")
+        client.process["pid"] = 201
+        with self.assertRaisesRegex(HerdrError, "changed after its configured tier was proved"):
+            restart_worker(client, agent, "w1:p2", tier, expected_process=selected, sleep=lambda _: None)
+        self.assertFalse(client.terminated)
+
     def test_fresh_round_terminates_only_the_foreground_agent_and_starts_requested_flags(self):
         client = Client()
         proof = restart_worker(client, worker(), "w1:p2", TIER, sleep=lambda _: None)

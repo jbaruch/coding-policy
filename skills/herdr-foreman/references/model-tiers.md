@@ -246,7 +246,7 @@ empty, and retrospective coverage for the outgoing assignment. It then starts
 the same configured pair with normalized `launch_args` and YOLO mode, reads
 the new foreground process, and returns `verified.source: process_argv` with
 `dispatch: null`. A working or blocked worker, an occupied composer, an
-unconfigured live pair, or a changed pane/process refuses before termination.
+unconfigured live pair, or a changed pane, PID, or argv refuses before termination.
 
 `--no-clear` and `--retain-context` verify the running foreground process
 arguments, including YOLO mode, instead of restarting it. If the process record lacks argv, the

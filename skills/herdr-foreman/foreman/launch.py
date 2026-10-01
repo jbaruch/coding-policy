@@ -246,7 +246,8 @@ def start_after_release(client, agent, pane, tier, sleep=time.sleep, before_star
             retries += 1
 
 
-def restart_worker(client, agent, pane, tier, sleep=time.sleep, before_transition=None, before_start=None):
+def restart_worker(client, agent, pane, tier, sleep=time.sleep, before_transition=None, before_start=None,
+                   expected_process=None):
     worker_launch_args(agent.kind, agent.launch_args)
     if not isinstance(pane, str) or not pane or not agent.composer_glyph:
         raise HerdrError("Tier relaunch needs a live pane and configured composer glyph; fix the agent config.", {})
@@ -257,6 +258,12 @@ def restart_worker(client, agent, pane, tier, sleep=time.sleep, before_transitio
         raise AgentBusyError("Worker is no longer idle in the planned pane; wait before relaunch.", {})
     ensure_ready(client, agent, pane_id=pane, sleep=sleep)
     process = foreground_agent(client, pane, agent.kind)
+    if expected_process is not None and (
+        process.get("pid") != expected_process.get("pid")
+        or process.get("argv") != expected_process.get("argv")
+    ):
+        raise HerdrError("Worker process changed after its configured tier was proved; no process was terminated.",
+                         {"agent": agent.name, "pane": pane})
     # Recheck native occupant and readiness immediately before termination.
     fresh = client.agent_get(agent.name)
     if (fresh.get("agent_status") not in READY_STATES or fresh.get("pane_id") != pane
