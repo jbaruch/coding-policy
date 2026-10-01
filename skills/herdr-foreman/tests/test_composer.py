@@ -281,12 +281,13 @@ class EnsureReadyTest(unittest.TestCase):
             self._ready(runner, session=DispatchSession(allow_recovery=True))
         self.assertEqual(runner.writes(), ["agent send-keys recoverable esc"])
 
-    def test_the_refusal_names_the_pane_and_the_text(self):
+    def test_the_refusal_names_the_pane_without_echoing_the_text(self):
         runner = self._runner([CODEX_HELD])
         with self.assertRaises(HerdrError) as caught:
             self._ready(runner, pane_id="w3:p1")
         message = str(caught.exception)
-        self.assertIn("/new", message)
+        self.assertNotIn("/new", message)
+        self.assertIn("holds input", message)
         self.assertIn("w3:p1", message)
 
     def test_an_agent_with_no_recover_keys_refuses_without_sending(self):

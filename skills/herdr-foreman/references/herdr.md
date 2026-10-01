@@ -223,10 +223,11 @@ herdr that cannot produce ANSI falls back to plain text with a warning. The SGR 
 `Ask Codex to do anything` whenever nothing is typed. Live, that read as
 somebody's input, the one recovery keystroke went out — `ctrl+c` — and ctrl+c
 on an empty Codex composer EXITS Codex. The process died and had to be
-restarted. Two independent guards stop it now: dim text is dropped, and
-`composer_placeholders` lists the hint verbatim so an exact match after
-trimming counts as empty even if the runtime stops drawing it dim. A command
-typed over a placeholder is still a command.
+restarted. `composer_placeholders` now supplies the sole empty signal for a
+runtime that declares exact hints: only a full-composer match after trimming
+counts as empty, even if the runtime stops drawing it dim. Continuation text
+or a command typed over a placeholder keeps the composer occupied. A runtime
+without exact placeholders may still drop dim ghost suggestions.
 
 ### Recovery Keys Are the Most Dangerous Thing the Foreman Sends
 
@@ -236,7 +237,9 @@ idle process. `recover_keys` go out only when every one of these holds:
 1. The composer is genuinely occupied — non-empty, not a placeholder.
 2. The read carried ANSI. A plain-text fallback can only refuse: without
    intensity, a placeholder is indistinguishable from typed text.
-3. The text is not dim. `--allow-recovery` cannot override this.
+3. The text is not dim. Dim non-placeholder text stays occupied for a runtime
+   with exact placeholders, but it is never eligible for automatic recovery;
+   `--allow-recovery` cannot override this.
 4. The worker configures `recover_keys` at all. **Codex ships with `[]`**.
 5. The text is a command the foreman itself sent earlier in this run, or the
    operator passed `--allow-recovery`.
@@ -286,14 +289,12 @@ Three per-agent config keys drive it:
 | `model_label` | Model name shown on the worker's pane after a dispatch (`"gpt-5.6"`). Optional; empty leaves the label carrying the role alone |
 | `slash_delivery` | `paste` or `type`, per the table above |
 
-The placeholder list is per runtime and hand-maintained: a Codex release that
-reworded its hint would reintroduce the failure, which is why the dim check
-sits in front of it rather than behind it. Two guards, either one sufficient.
-
-Dim detection is SGR parsing, not semantics: a runtime that draws a real draft
-in grey reads as empty, and one that draws its suggestion at normal weight
-reads as occupied. The per-worker setting keeps a runtime with no ghost text
-away from either.
+The placeholder list is per runtime and hand-maintained. A Codex release that
+rewords its hint fails closed: the new hint reads as occupied until config is
+updated. Dim detection is SGR parsing, not semantics, so it can authorize an
+empty reading only for a runtime without exact placeholders. With an exact
+allowlist, a real grey draft remains occupied and dimness only prevents
+automatic recovery.
 
 Glyph matching is signature matching: a TUI that restyles its prompt makes the
 composer unreadable, which surfaces as an unsent command going uncaught — the

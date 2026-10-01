@@ -231,7 +231,8 @@ class MeasureAgentTest(unittest.TestCase):
             measure_agent(HerdrClient(runner=runner), BY_NAME["codex"])
         message = str(caught.exception)
         self.assertIn("w3:p1", message)
-        self.assertIn("New assignment from the team lead", message)
+        self.assertNotIn("New assignment from the team lead", message)
+        self.assertIn("holds input", message)
         self.assertNotIn("pane send-text w3:p1 /status", runner.commands())
         self.assertNotIn("pane send-keys w3:p1 enter", runner.commands())
 

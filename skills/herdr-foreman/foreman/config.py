@@ -39,9 +39,9 @@ OPTIONAL_LIST_FIELDS = (
 #: one that works for claude and codex; grok needs `type`.
 DEFAULT_SLASH_DELIVERY = SLASH_DELIVERY_PASTE
 
-#: Dim composer text is never somebody's typing: it is a placeholder or a
-#: ghost-text suggestion. On for every kind, because reading dim hint text as
-#: occupied is what killed an idle Codex.
+#: A runtime without exact placeholders may use dim text for replaceable ghost
+#: suggestions. With an exact placeholder allowlist, only an exact match is
+#: empty; every other dim value stays occupied (Codex dims recalled prompts).
 DEFAULT_COMPOSER_IGNORE_DIM = True
 
 #: Enters sent with a typed slash command. Codex opens an autocomplete popup

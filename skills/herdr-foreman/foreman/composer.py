@@ -16,10 +16,10 @@ command foreman reads the pane's composer row and confirms the text is gone:
 * composer non-empty before a dispatch -> recover once, then re-read
 
 The composer row is the last row starting with the agent's prompt glyph
-(`› ` for Codex, `❯ ` for Claude, `│ ❯` for Grok). A glyph that is absent from
-the read -- covered by a modal, scrolled away, or simply not configured --
-means foreman cannot see the composer, and an unverifiable composer is
-treated as consumed rather than invented into a failure.
+(`› ` for Codex, `❯ ` for Claude, `│ ❯` for Grok). A configured glyph that is
+absent from the read -- covered by a modal or scrolled away -- triggers a
+bounded wait and then refuses before input. An agent with no configured glyph
+keeps the legacy unchecked path.
 """
 
 import re
@@ -434,7 +434,7 @@ def recovery_allowed(agent, composer, session):
             "placeholder or a dim suggestion from text somebody typed"
         )
     if composer.dim:
-        return False, "the text is dim, which means nobody typed it"
+        return False, "dim text is never eligible for automatic recovery"
     if composer.placeholder:
         return False, "the text is this runtime's empty-composer placeholder"
     if not agent.recover_keys:
@@ -454,14 +454,14 @@ def recovery_allowed(agent, composer, session):
 
 def _stuck_composer_error(agent, pane_id, composer, reason):
     return HerdrError(
-        "{}'s composer holds {!r} and foreman will not clear it: {}. Look at "
+        "{}'s composer holds input and foreman will not clear it: {}. Look at "
         "pane {} yourself, clear it if it is safe to, then run this again.".format(
-            agent.name, composer.content, reason, pane_id or "(unknown)"
+            agent.name, reason, pane_id or "(unknown)"
         ),
         {
             "agent": agent.name,
             "pane_id": pane_id,
-            "composer": composer.content,
+            "composer_occupied": True,
             "reason": reason,
             "dim": composer.dim,
             "placeholder": composer.placeholder,
@@ -513,9 +513,9 @@ def ensure_ready(client, agent, pane_id=None, session=None, sleep=time.sleep, wa
         raise _stuck_composer_error(agent, pane_id, composer, reason)
 
     warn(
-        "{}'s composer holds {!r}, which foreman sent earlier in "
-        "this run. Sending {} once to clear it.".format(
-            agent.name, composer.content, " ".join(agent.recover_keys)
+        "{}'s composer holds input foreman is allowed to recover. Sending {} "
+        "once to clear it.".format(
+            agent.name, " ".join(agent.recover_keys)
         )
     )
     if before_input is not None:
