@@ -390,7 +390,7 @@ def inspect_composer(pane_text, agent, ansi=True):
     # For such runtimes only an exact declared placeholder is empty. Runtimes
     # without that allowlist (Claude's open-ended ghost suggestions) retain
     # the style-based filter.
-    if all_dim and agent.composer_placeholders:
+    if agent.composer_placeholders:
         judged = literal
     else:
         judged = lit if agent.composer_ignore_dim else literal
@@ -470,6 +470,25 @@ def _stuck_composer_error(agent, pane_id, composer, reason):
     )
 
 
+def _wait_for_visible_composer(client, agent, pane_id, text, ansi, sleep, warn):
+    """Return `(text, ansi, composer)` once a configured prompt is visible."""
+    composer = inspect_composer(text, agent, ansi=ansi)
+    if not checkable(agent) or composer.visible:
+        return text, ansi, composer
+    for attempt in range(1, COMPOSER_VISIBLE_ATTEMPTS + 1):
+        if attempt < COMPOSER_VISIBLE_ATTEMPTS:
+            sleep(COMPOSER_VISIBLE_INTERVAL)
+        text, ansi = read_pane(client, agent, warn=warn)
+        composer = inspect_composer(text, agent, ansi=ansi)
+        if composer.visible:
+            return text, ansi, composer
+    raise HerdrError(
+        "{}'s prompt is not on screen in pane {} after {} reads; something is drawn over it -- a startup review or permission dialog takes the input meant for the worker. Read the pane, clear what is on it, and retry. Nothing was sent.".format(
+            agent.name, pane_id, COMPOSER_VISIBLE_ATTEMPTS),
+        {"agent": agent.name, "pane": pane_id, "attempts": COMPOSER_VISIBLE_ATTEMPTS},
+    )
+
+
 def ensure_ready(client, agent, pane_id=None, session=None, sleep=time.sleep, warn=None, settle_sec=COMPOSER_SETTLE_SEC, text=None, ansi=True, before_input=None):
     """Return pane text once the worker's own composer is on screen and empty.
 
@@ -490,21 +509,9 @@ def ensure_ready(client, agent, pane_id=None, session=None, sleep=time.sleep, wa
     session = session if session is not None else DispatchSession()
     if text is None:
         text, ansi = read_pane(client, agent, warn=warn)
-    composer = inspect_composer(text, agent, ansi=ansi)
-    if checkable(agent) and not composer.visible:
-        for attempt in range(1, COMPOSER_VISIBLE_ATTEMPTS + 1):
-            if attempt < COMPOSER_VISIBLE_ATTEMPTS:
-                sleep(COMPOSER_VISIBLE_INTERVAL)
-            text, ansi = read_pane(client, agent, warn=warn)
-            composer = inspect_composer(text, agent, ansi=ansi)
-            if composer.visible:
-                break
-        else:
-            raise HerdrError(
-                "{}'s prompt is not on screen in pane {} after {} reads; something is drawn over it -- a startup review or permission dialog takes the input meant for the worker. Read the pane, clear what is on it, and retry. Nothing was sent.".format(
-                    agent.name, pane_id, COMPOSER_VISIBLE_ATTEMPTS),
-                {"agent": agent.name, "pane": pane_id, "attempts": COMPOSER_VISIBLE_ATTEMPTS},
-            )
+    text, ansi, composer = _wait_for_visible_composer(
+        client, agent, pane_id, text, ansi, sleep, warn
+    )
     if not composer.occupied:
         return text
 
@@ -523,7 +530,9 @@ def ensure_ready(client, agent, pane_id=None, session=None, sleep=time.sleep, wa
     client.agent_send_keys(agent.name, agent.recover_keys)
     sleep(settle_sec)
     text, ansi = read_pane(client, agent, warn=warn)
-    composer = inspect_composer(text, agent, ansi=ansi)
+    text, ansi, composer = _wait_for_visible_composer(
+        client, agent, pane_id, text, ansi, sleep, warn
+    )
     if composer.occupied:
         raise _stuck_composer_error(
             agent,
@@ -712,14 +721,14 @@ def send_command(client, agent, pane_id, command, session=None, sleep=time.sleep
 
     # Phase 2 -- the command is gone; NOW placeholder and dim rules decide
     # whether anything else is sitting there.
-    held = inspect_composer(text, agent, ansi=ansi).content
-    if held:
+    held = inspect_composer(text, agent, ansi=ansi)
+    if held.occupied:
         raise HerdrError(
-            "{} consumed {!r}, but its composer now holds {!r}. Nothing "
+            "{} consumed {!r}, but its composer now holds input. Nothing "
             "further was sent. Look at pane {} before assigning to it.".format(
-                agent.name, command, held, pane_id or "(unknown)"
+                agent.name, command, pane_id or "(unknown)"
             ),
-            {"agent": agent.name, "command": command, "composer": held},
+            {"agent": agent.name, "command": command, "composer_occupied": True},
         )
 
     screen_changed = screen_signature(text, agent.composer_glyph) != before_signature

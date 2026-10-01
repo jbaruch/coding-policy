@@ -781,7 +781,8 @@ class ComposerGateTest(unittest.TestCase):
                 warn=lambda message: None,
             )
         message = str(caught.exception)
-        self.assertIn("leftover text", message)
+        self.assertNotIn("leftover text", message)
+        self.assertIn("holds input", message)
         self.assertIn("w3:p1", message)  # the refusal names the pane
         self.assertEqual(runner.writes(), [])
 
@@ -801,7 +802,7 @@ class ComposerGateTest(unittest.TestCase):
             )
         message = str(caught.exception)
         self.assertIn("--allow-recovery", message)
-        self.assertIn("somebody's draft", message)
+        self.assertNotIn("somebody's draft", message)
         self.assertEqual(runner.writes(), [])
 
     def test_the_opt_in_lets_an_agent_with_keys_be_cleared(self):

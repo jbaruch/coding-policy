@@ -281,6 +281,12 @@ class EnsureReadyTest(unittest.TestCase):
             self._ready(runner, session=DispatchSession(allow_recovery=True))
         self.assertEqual(runner.writes(), ["agent send-keys recoverable esc"])
 
+    def test_recovery_that_hides_the_prompt_refuses_before_later_input(self):
+        runner = self._runner([CODEX_HELD] + ["modal with no prompt"] * 25)
+        with self.assertRaisesRegex(HerdrError, "prompt is not on screen"):
+            self._ready(runner, session=DispatchSession(allow_recovery=True))
+        self.assertEqual(runner.writes(), ["agent send-keys recoverable esc"])
+
     def test_the_refusal_names_the_pane_without_echoing_the_text(self):
         runner = self._runner([CODEX_HELD])
         with self.assertRaises(HerdrError) as caught:
@@ -373,6 +379,15 @@ class SendCommandTest(unittest.TestCase):
         with self.assertRaises(HerdrError):
             self._send(runner)
         self.assertEqual(runner.writes(), [])
+
+    def test_post_command_composer_text_is_redacted_from_the_error(self):
+        secret = "token-that-must-not-be-logged"
+        runner = self._runner([CODEX_EMPTY, "  › {}\n".format(secret)])
+        with self.assertRaises(HerdrError) as caught:
+            self._send(runner)
+        self.assertNotIn(secret, str(caught.exception))
+        self.assertNotIn(secret, repr(caught.exception.details))
+        self.assertTrue(caught.exception.details["composer_occupied"])
 
     def test_a_composer_holding_the_foremans_own_command_is_recovered_first(self):
         session = DispatchSession()
@@ -727,6 +742,9 @@ CODEX_PLACEHOLDER_DIM = "  Codex v1.2\n  ─────────\n  › {}As
 )
 CODEX_PLACEHOLDER_PLAIN = "  Codex v1.2\n  ─────────\n  › Ask Codex to do anything\n"
 CODEX_PLACEHOLDER_THEN_TYPED = "  › {}Ask Codex to do anything{}/new\n".format(DIM, RESET)
+CODEX_DIM_TEXT_THEN_NORMAL_PLACEHOLDER = (
+    "  › {}stale draft{}Ask Codex to do anything\n"
+).format(DIM, RESET)
 CODEX_RECALLED_MULTILINE = (
     "  Codex v1.2\n  ─────────\n"
     "  › {}New assignment from the team lead. Your role is DEVELOPER.{}\n"
@@ -773,7 +791,14 @@ class PlaceholderTest(unittest.TestCase):
     def test_a_command_typed_over_the_placeholder_is_occupied(self):
         composer = inspect_composer(CODEX_PLACEHOLDER_THEN_TYPED, BY_NAME["codex"])
         self.assertTrue(composer.occupied)
-        self.assertEqual(composer.content, "/new")
+        self.assertEqual(composer.content, "Ask Codex to do anything/new")
+
+    def test_dim_text_before_a_normal_placeholder_is_occupied(self):
+        composer = inspect_composer(
+            CODEX_DIM_TEXT_THEN_NORMAL_PLACEHOLDER, BY_NAME["codex"]
+        )
+        self.assertTrue(composer.occupied)
+        self.assertIn("stale draft", composer.content)
 
     def test_a_dim_recalled_multiline_prompt_is_occupied(self):
         composer = inspect_composer(CODEX_RECALLED_MULTILINE, BY_NAME["codex"])
