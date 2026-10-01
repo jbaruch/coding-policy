@@ -483,6 +483,55 @@ class PlanCommandTest(CliCase):
         self.assertEqual(out, "")
         self.assertIn("needs --task", err)
 
+    def _interrupt_plan(self):
+        shipped = Path(__file__).resolve().parent.parent / "config.example.json"
+        self.config.write_text(shipped.read_text(encoding="utf-8"), encoding="utf-8")
+        with patch("foreman.lifecycle.identity", side_effect=[
+                "developer-0000000007", "reviewer-0000000008"]):
+            code, out, err = self.run_cli(
+                self.base() + ["plan", "--roles", "developer,reviewer",
+                               "--task", "t-interrupt", "--snapshot", str(self.snapshot)]
+            )
+        self.assertEqual(code, 0, err)
+        self.out, self.err = io.StringIO(), io.StringIO()
+        return json.loads(out)
+
+    def test_scoped_apply_closes_earlier_panes_when_a_later_spawn_is_interrupted(self):
+        plan = self._interrupt_plan()
+        client = Mock()
+        with patch("foreman.lifecycle.spawn", side_effect=["pane-developer", KeyboardInterrupt]), \
+                patch("foreman.lifecycle.close") as close, \
+                self.assertRaises(KeyboardInterrupt):
+            self.run_cli(
+                self.base() + ["apply", "--assignments", json.dumps(plan),
+                               "--task", "t-interrupt", "--now", AT,
+                               "--common", str(self.common)]
+                + self.brief_args("developer", "reviewer"),
+                client=client,
+            )
+        close.assert_called_once_with(
+            client, plan["assignments"]["developer"], "pane-developer")
+
+    def test_scoped_apply_closes_unused_panes_when_dispatch_is_interrupted(self):
+        plan = self._interrupt_plan()
+        client = Mock()
+        with patch("foreman.lifecycle.spawn", side_effect=["pane-developer", "pane-reviewer"]), \
+                patch("foreman.lifecycle.close") as close, \
+                patch("foreman.cli.apply_assignments", side_effect=KeyboardInterrupt), \
+                self.assertRaises(KeyboardInterrupt):
+            self.run_cli(
+                self.base() + ["apply", "--assignments", json.dumps(plan),
+                               "--task", "t-interrupt", "--now", AT,
+                               "--common", str(self.common)]
+                + self.brief_args("developer", "reviewer"),
+                client=client,
+            )
+        self.assertEqual(close.call_count, 2)
+        close.assert_any_call(
+            client, plan["assignments"]["developer"], "pane-developer")
+        close.assert_any_call(
+            client, plan["assignments"]["reviewer"], "pane-reviewer")
+
     def test_scoped_headroom_maps_only_fresh_assignments_after_a_partial_retry(self):
         self.assertEqual(
             cli._scoped_headroom(

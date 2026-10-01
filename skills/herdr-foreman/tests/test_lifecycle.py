@@ -91,6 +91,17 @@ class SpawnCloseTest(unittest.TestCase):
         self.assertEqual(caught.exception.details["pane_id"], "pane-new")
         self.assertIn("pane close", str(caught.exception))
 
+    def test_spawn_closes_the_split_pane_before_reraising_an_interrupt(self):
+        client = Mock()
+        client.pane_split.return_value = "pane-new"
+        client.pane_process_info.return_value = {
+            "shell_pid": 10, "foreground_processes": [{"pid": 10}]}
+        worker = template()
+        with patch("foreman.lifecycle.start_worker", side_effect=KeyboardInterrupt), \
+                self.assertRaises(KeyboardInterrupt):
+            spawn(client, worker, worker.tiers["coordination"], history=[])
+        client.pane_close.assert_called_once_with("pane-new")
+
     def test_close_proves_the_assignment_disappeared(self):
         client = Mock()
         client.agent_get.side_effect = [{"pane_id": "pane-new"}, missing("reviewer-a1")]

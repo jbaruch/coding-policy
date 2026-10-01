@@ -1572,7 +1572,7 @@ def _apply(args, client, warn, trace, hold_gates):
                 if not isinstance(tier, dict):
                     raise UsageError("Assignment-scoped seat {} has no selected tier; replan from the current config.".format(role), {})
                 spawned[name] = lifecycle.spawn(client, agents_by_name[name], tier, history=state["assignments"])
-        except ForemanError as primary:
+        except BaseException as primary:
             cleanup_failures = []
             for name, pane in spawned.items():
                 try:
@@ -1581,11 +1581,14 @@ def _apply(args, client, warn, trace, hold_gates):
                     cleanup_failures.append({"agent": name, "pane_id": pane, "error": cleanup.to_dict()})
             if cleanup_failures:
                 commands = [format_argv(client.argv_pane_close(row["pane_id"])) for row in cleanup_failures]
+                primary_details = (primary.to_dict() if isinstance(primary, ForemanError)
+                                   else {"type": type(primary).__name__, "message": str(primary)})
                 raise HerdrError(
                     "Assignment spawn failed: {} Cleanup also failed for {}. Run {}, then retry only after every pane is absent.".format(
-                        primary, ", ".join(row["pane_id"] for row in cleanup_failures),
+                        str(primary) or type(primary).__name__,
+                        ", ".join(row["pane_id"] for row in cleanup_failures),
                         "; ".join("`{}`".format(command) for command in commands)),
-                    {"primary_error": primary.to_dict(), "cleanup_failures": cleanup_failures},
+                    {"primary_error": primary_details, "cleanup_failures": cleanup_failures},
                 ) from primary
             raise
 
@@ -1625,7 +1628,7 @@ def _apply(args, client, warn, trace, hold_gates):
                                                           task=args.task, retain=args.retain_context or args.retain_specialist, no_clear=args.no_clear),
             fresh=scoped,
         )
-    except ForemanError as exc:
+    except BaseException as exc:
         for name, pane in spawned.items():
             if name not in sending:
                 try:

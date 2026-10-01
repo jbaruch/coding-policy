@@ -87,16 +87,18 @@ def spawn(client, worker, tier, *, cwd=None, history=None):
         require_empty_shell(client, pane)
         start_worker(client, worker, pane, tier)
         verify_running(client, worker, pane, tier)
-    except ForemanError as primary:
+    except BaseException as primary:
         try:
             client.pane_close(pane)
         except ForemanError as cleanup:
+            primary_details = (primary.to_dict() if isinstance(primary, ForemanError)
+                               else {"type": type(primary).__name__, "message": str(primary)})
             raise HerdrError(
                 "Worker spawn failed for {} in pane {}: {} Cleanup also failed: {}. Close the pane with `{}` before retrying.".format(
-                    worker.name, pane, primary, cleanup,
+                    worker.name, pane, str(primary) or type(primary).__name__, cleanup,
                     format_argv(client.argv_pane_close(pane))),
                 {"agent": worker.name, "pane_id": pane,
-                 "primary_error": primary.to_dict(), "cleanup_error": cleanup.to_dict()},
+                 "primary_error": primary_details, "cleanup_error": cleanup.to_dict()},
             ) from primary
         raise
     return pane

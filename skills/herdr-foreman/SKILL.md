@@ -215,7 +215,7 @@ bash "$CP/skills/herdr-foreman/roster.sh"
 ```
 
 Emits the caller and live workers with kind, pane, and state. Under schema 7 an
-empty worker roster is the expected idle state: apply creates workers only for
+empty worker roster is the expected idle state. Apply creates workers only for
 planned assignments. If `herdr agent list` shows other unnamed panes, report
 them separately; never turn them into a standing roster.
 
@@ -261,9 +261,9 @@ bash "$CP/skills/herdr-foreman/foreman.sh" measure
 ```
 
 Emits and saves headroom, windows, state, `tier_billing`, and `failed_agents`.
-With schema 7 it starts and closes one disposable probe per `window_group`,
-copies that one reading to the kinds sharing the window, and sends no usage
-keystrokes to assignment panes. Legacy busy standing workers are skipped.
+With schema 7 it sends no usage keystrokes to assignment panes. Probe and
+window-group mechanics live in `foreman/lifecycle.py` (`measure_worker_kinds`).
+Legacy busy standing workers are skipped.
 Unmeasured billing stays `unknown`. Report failed
 measurements and obtain their readings before relying on those seats. A pending
 CLI update follows `skills/herdr-foreman/references/model-tiers.md`
