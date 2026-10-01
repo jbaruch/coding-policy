@@ -198,10 +198,19 @@ def composer_text(pane_text, glyph, ignore_dim=False):
     rows = pane_text.splitlines()
     found = None
     found_index = None
+    found_indent = None
     for index, raw in enumerate(rows):
-        if strip_ansi(raw).strip().startswith(prefix):
+        visible = strip_ansi(raw)
+        if visible.strip().startswith(prefix):
+            indent = len(visible) - len(visible.lstrip())
+            contiguous = found_index is not None and not any(
+                not strip_ansi(row).strip() for row in rows[found_index + 1 : index]
+            )
+            if contiguous and found_indent is not None and indent > found_indent:
+                continue
             found = raw
             found_index = index
+            found_indent = indent
     if found is None:
         return None
 
@@ -489,7 +498,7 @@ def _wait_for_visible_composer(client, agent, pane_id, text, ansi, sleep, warn):
     )
 
 
-def ensure_ready(client, agent, pane_id=None, session=None, sleep=time.sleep, warn=None, settle_sec=COMPOSER_SETTLE_SEC, text=None, ansi=True, before_input=None):
+def ensure_ready(client, agent, pane_id=None, session=None, sleep=time.sleep, warn=None, settle_sec=COMPOSER_SETTLE_SEC, text=None, ansi=True, before_input=None, recovery_state=None):
     """Return pane text once the worker's own composer is on screen and empty.
 
     Recovery keys are sent only when every condition in `recovery_allowed`
@@ -528,6 +537,8 @@ def ensure_ready(client, agent, pane_id=None, session=None, sleep=time.sleep, wa
     if before_input is not None:
         before_input()
     client.agent_send_keys(agent.name, agent.recover_keys)
+    if recovery_state is not None:
+        recovery_state["sent"] = True
     sleep(settle_sec)
     text, ansi = read_pane(client, agent, warn=warn)
     text, ansi, composer = _wait_for_visible_composer(
@@ -645,7 +656,7 @@ def send_command(client, agent, pane_id, command, session=None, sleep=time.sleep
     warn = warn or stderr_warn
     session = session if session is not None else DispatchSession()
     before, ansi = read_pane(client, agent, warn=warn)
-    recovered = inspect_composer(before, agent, ansi=ansi).occupied
+    recovery_state = {"sent": False}
     # Slash commands need the same visibility gate as real messages even when
     # the first classification looks empty. A clipped or modal-covered prompt
     # is not permission to type into an unknown input surface.
@@ -660,7 +671,9 @@ def send_command(client, agent, pane_id, command, session=None, sleep=time.sleep
         text=before,
         ansi=ansi,
         before_input=before_input,
+        recovery_state=recovery_state,
     )
+    recovered = recovery_state["sent"]
     before_signature = screen_signature(before, agent.composer_glyph)
 
     # Remembered before it is sent, so a command that fails to submit is one

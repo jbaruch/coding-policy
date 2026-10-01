@@ -406,6 +406,24 @@ class SendCommandTest(unittest.TestCase):
         self.assertTrue(result["consumed"])
         self.assertEqual(runner.commands()[1], "agent send-keys recoverable esc")
 
+    def test_recovery_discovered_after_a_visibility_wait_is_reported(self):
+        session = DispatchSession()
+        session.remember("/new")
+        runner = self._runner(
+            ["modal with no prompt", CODEX_HELD, CODEX_EMPTY, CODEX_FRESH],
+            name="recoverable",
+        )
+        result = send_command(
+            HerdrClient(runner=runner),
+            BY_NAME["recoverable"],
+            "w3:p1",
+            "/new",
+            session=session,
+            sleep=NO_SLEEP,
+            warn=lambda message: None,
+        )
+        self.assertTrue(result["recovered"])
+
     def test_an_unchanged_screen_is_reported_not_assumed(self):
         runner = self._runner([CODEX_EMPTY, CODEX_EMPTY])
         result = self._send(runner, screen_attempts=2)
@@ -758,6 +776,10 @@ CODEX_PLACEHOLDER_FIRST_RECALL = (
     "\n"
     "  gpt-5.6-sol high · ~/Projects/example\n"
 ).format(DIM, RESET, DIM, RESET)
+CODEX_GLYPH_FIRST_CONTINUATION = (
+    "  › {}Ask Codex to do anything{}\n"
+    "    {}› recalled continuation{}\n"
+).format(DIM, RESET, DIM, RESET)
 
 
 class PlaceholderTest(unittest.TestCase):
@@ -811,6 +833,11 @@ class PlaceholderTest(unittest.TestCase):
         self.assertTrue(composer.occupied)
         self.assertIn("recalled continuation", composer.content)
         self.assertNotIn("gpt-5.6-sol", composer.content)
+
+    def test_an_indented_glyph_at_the_start_of_a_continuation_stays_occupied(self):
+        composer = inspect_composer(CODEX_GLYPH_FIRST_CONTINUATION, BY_NAME["codex"])
+        self.assertTrue(composer.occupied)
+        self.assertIn("recalled continuation", composer.content)
 
     def test_recovery_is_refused_for_a_placeholder(self):
         composer = inspect_composer(CODEX_PLACEHOLDER_PLAIN, BY_NAME["codex"])
