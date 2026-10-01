@@ -30,7 +30,7 @@ from types import SimpleNamespace
 from foreman import attention, cli, runnable
 from foreman.report_delivery import marker_columns
 from foreman.cli import build_parser, main
-from foreman.errors import UsageError
+from foreman.errors import HerdrError, UsageError
 from foreman.herdr import HerdrClient
 from foreman.partition import slice_digest
 from foreman.state import STATE_SCHEMA_VERSION, add_assignment, empty_state, load_state_checked, save_state
@@ -219,7 +219,10 @@ class RelaunchWorkerCommandTest(unittest.TestCase):
     def test_relaunch_has_retrospective_coverage_and_no_dispatch(self):
         agent = self.agent()
         client = Mock()
-        client.agent_get.return_value = {"name": "claude", "agent": "claude", "agent_status": "idle", "pane_id": "w1:p2"}
+        client.agent_get.side_effect = [
+            {"name": "claude", "agent": "claude", "agent_status": "idle", "pane_id": "w1:p2"},
+            HerdrError("raw native lookup failed", {"stderr": "secret"}),
+        ]
         state = empty_state()
         add_assignment(state, AT, "developer", "claude", task="issue-673")
         tier = {"model": "sonnet-5", "effort": "high", "multiplier": 1.0}
@@ -248,6 +251,7 @@ class RelaunchWorkerCommandTest(unittest.TestCase):
             before_transition()
             before_start()
 
+        warnings = []
         with patch("foreman.cli.load_config", return_value=[agent]), \
                 patch("foreman.cli._load_state_for_write", return_value=state), \
                 patch("foreman.cli.retrospective_runtime.Guard", return_value=guard), \
@@ -255,7 +259,7 @@ class RelaunchWorkerCommandTest(unittest.TestCase):
                 patch("foreman.cli.restart_worker", side_effect=relaunch), \
                 patch("foreman.cli.verify_running", return_value=verified), \
                 patch("foreman.cli.save_state") as saved:
-            result, failure = cli.cmd_relaunch_worker(self.args(), client=client)
+            result, failure = cli.cmd_relaunch_worker(self.args(), client=client, warn=warnings.append)
 
         self.assertIsNone(failure)
         self.assertIsNone(result["dispatch"])
@@ -267,6 +271,10 @@ class RelaunchWorkerCommandTest(unittest.TestCase):
                          ("maintenance", "developer", "issue-673"))
         self.assertEqual(maintenance["tier"]["verified"], verified)
         self.assertEqual(maintenance["tier"]["launch_args"], ["--dangerously-skip-permissions"])
+        self.assertIsNone(maintenance["context_session"])
+        self.assertEqual(len(warnings), 1)
+        self.assertIn("context_session null", warnings[0])
+        self.assertNotIn("secret", warnings[0])
         self.assertEqual(
             set(maintenance["tier"]),
             {"kind", "model", "effort", "launch_args", "pressure_headroom", "de_escalated", "verified"},

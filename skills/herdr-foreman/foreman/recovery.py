@@ -2097,7 +2097,10 @@ def validate_store(store, assignments):
                 validate_receipt(evidence["evidence_receipt"])
                 authorization(evidence["input"]["authorization"])
         for index, row in enumerate(assignments):
-            if (row.get("fix_round") or 0) > DEFAULT_FIX_LIMIT and not any(
+            # State validates maintenance rows before recovery reaches them.
+            # A relaunch preserves the source assignment's correction number
+            # but intentionally creates no dispatch or historical attempt.
+            if (row.get("fix_round") or 0) > DEFAULT_FIX_LIMIT and row.get("status") != "maintenance" and not any(
                 index in [dispatch.get("assignment_index"), *dispatch.get("prior_assignment_indices", [])]
                 and canonical_role(dispatch["role"]) == row.get("role")
                 and all(dispatch[key] == row.get(key) for key in ("task", "agent", "fix_round"))

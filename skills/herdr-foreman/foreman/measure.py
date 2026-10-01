@@ -31,7 +31,7 @@ import time
 
 from .composer import COMPOSER_SETTLE_SEC, DispatchSession, send_command
 from .errors import HerdrError, ParseError
-from .herdr import BUSY_STATES, DEFAULT_MARKER_TIMEOUT_MS, READY_STATES, format_argv
+from .herdr import BUSY_STATES, DEFAULT_MARKER_TIMEOUT_MS, READY_STATES, format_argv, scrub_for_trace
 from .parsers import headroom_pct, parse_usage
 from .probe import resolve_status, stderr_warn
 from .state import SNAPSHOT_SCHEMA_VERSION
@@ -61,6 +61,18 @@ DEFAULT_MARKER_POLL_INTERVAL_SEC = 1.0
 #: info). Bounded so a dialog whose tabs do not cycle cannot spin forever.
 MAX_DIALOG_TABS = 3
 PENDING_CLI_UPDATE = "Update installed · Restart"
+
+
+def snapshot_error(exc):
+    """A bounded, redacted measurement failure safe for durable state/stdout."""
+    details = {}
+    if isinstance(exc.details, dict) and exc.details.get("pending_cli_update") is True:
+        details["pending_cli_update"] = True
+    return {
+        "code": exc.code,
+        "message": scrub_for_trace(exc.message),
+        "details": details,
+    }
 
 
 def wait_for_usage_report(client, agent, pane_id, marker_timeout_ms=DEFAULT_MARKER_TIMEOUT_MS, read_lines=DEFAULT_READ_LINES, poll_attempts=DEFAULT_MARKER_POLL_ATTEMPTS, poll_interval_sec=DEFAULT_MARKER_POLL_INTERVAL_SEC, sleep=time.sleep, warn=None, max_tabs=MAX_DIALOG_TABS):
@@ -304,7 +316,7 @@ def measure(client, agents, measured_at, marker_timeout_ms=DEFAULT_MARKER_TIMEOU
                 # measurement failed would then be judged against nobody.
                 "window_group": agent.window_group,
                 "skipped": False,
-                "error": {"code": exc.code, "message": exc.message, "details": exc.details},
+                "error": snapshot_error(exc),
             }
     return {
         "schema_version": MEASURE_SCHEMA_VERSION,

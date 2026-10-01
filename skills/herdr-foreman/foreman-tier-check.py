@@ -35,6 +35,7 @@ Exit codes -- the verdict, which the preflight gates on:
 
 import argparse
 import json
+import shlex
 import subprocess
 import sys
 from pathlib import Path
@@ -50,6 +51,12 @@ def run(args):
     result = subprocess.run(["bash", str(FOREMAN), *args], capture_output=True, text=True, check=False)
     sys.stderr.write(result.stderr)
     return result.returncode, result.stdout
+
+
+def owner_command(common, command, *values):
+    """Render the exact owner launcher invocation, preserving common paths."""
+    argv = ["bash", str(FOREMAN), *common, command, *values]
+    return " ".join(shlex.quote(value) for value in argv)
 
 
 def json_object(text):
@@ -78,7 +85,8 @@ def headroom_row(common, clock, measure):
         ]
         recovery = ("; relaunch the idle updated worker{} with {}".format(
             "s" if len(pending) != 1 else "",
-            ", ".join("`foreman relaunch-worker {}`".format(name) for name in sorted(pending)))
+            ", ".join("`{}`".format(owner_command(common, "relaunch-worker", name))
+                      for name in sorted(pending)))
                     if pending else "")
         return {"status": "failed",
                 "reason": "foreman measure exited {}; a seat cannot be ranked on an unmeasured roster{}".format(code, recovery),

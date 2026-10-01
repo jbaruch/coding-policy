@@ -31,7 +31,7 @@ from .assign import APPLY_SCHEMA_VERSION, dry_run, freeze_decision, freeze_paths
 from . import renderable
 from . import attention, capabilities, chronology, churn, composition, engagement, foreman_queue, foreman_reset, historical, home, load_set, members, memory, oracle, partition, recovery, report_delivery, report_gates, restoration, role_clear, retrospective, retrospective_runtime, supervision, supervision_gate, supervision_runtime, triggers
 from .config import FOREMAN_CONFIG_VERSION, default_config_path, load_config, load_foreman, load_judge, load_role_costs, select_agents
-from .errors import AgentBusyError, PlanError, StateError, ForemanError, UsageError
+from .errors import AgentBusyError, PlanError, StateError, ForemanError, HerdrError, UsageError
 from .herdr import (
     DEFAULT_MARKER_TIMEOUT_MS,
     DEFAULT_SETTLE_TIMEOUT_MS,
@@ -41,7 +41,7 @@ from .herdr import (
 )
 from .composer import COMPOSER_SETTLE_SEC, DEFAULT_START_TIMEOUT_MS
 from .tiers import SEAT_SEPARATOR, canonical_role, require_seatable
-from .diagnostics import PREFIX as DIAGNOSTIC_PREFIX
+from .diagnostics import PREFIX as DIAGNOSTIC_PREFIX, stderr_warn
 from .measure import (
     DEFAULT_MARKER_POLL_ATTEMPTS,
     DEFAULT_MARKER_POLL_INTERVAL_SEC,
@@ -2087,11 +2087,19 @@ def cmd_relaunch_worker(args, client=None, warn=None, trace=None):
     tier_record = {"kind": agent.kind, "model": tier["model"], "effort": tier.get("effort"),
                    "launch_args": worker_launch_args(agent.kind, agent.launch_args),
                    "verified": verified}
+    try:
+        context_session = native_context_session(client.agent_get(agent.name), agent.kind)
+    except HerdrError:
+        (warn or stderr_warn)(
+            "The worker restarted and its process tier was verified, but its optional native session "
+            "evidence could not be read; recording the maintenance relaunch with context_session null."
+        )
+        context_session = None
     add_assignment(
         state, at, role, agent.name, status=STATUS_MAINTENANCE,
         cleared=True, clear_reason="automatic", task=task,
         fix_round=row.get("fix_round") if row else None,
-        context_session=native_context_session(client.agent_get(agent.name), agent.kind),
+        context_session=context_session,
         tier=tier_record,
         requirements=row.get("requirements") if row else None,
         reviewer_scope=row.get("reviewer_scope") if row else None,

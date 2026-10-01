@@ -85,6 +85,20 @@ class RoundTripTest(unittest.TestCase):
         self.assertTrue(self.path.exists())
         self.assertEqual(load_state(self.path), state)
 
+    def test_maintenance_relaunch_preserves_an_authorized_later_fix_without_a_dispatch(self):
+        state = empty_state()
+        add_assignment(
+            state, "2026-01-02T03:04:05+00:00", "developer", "claude",
+            status="maintenance", cleared=True, clear_reason="automatic",
+            task="owner/repo#673", fix_round=recovery.DEFAULT_FIX_LIMIT + 1,
+            tier=maintenance_tier(),
+        )
+        save_state(self.path, state)
+        loaded, usable = load_state_checked(self.path, warn=lambda _message: None)
+        self.assertTrue(usable)
+        self.assertEqual(loaded["assignments"][0]["fix_round"], recovery.DEFAULT_FIX_LIMIT + 1)
+        self.assertEqual(loaded["recovery"]["dispatches"], [])
+
     def test_save_is_idempotent(self):
         state = empty_state()
         save_state(self.path, state)

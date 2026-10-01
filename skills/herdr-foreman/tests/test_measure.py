@@ -13,7 +13,9 @@ if _ROOT not in _sys.path:
 
 import inspect
 import copy
+import json
 import unittest
+from unittest.mock import Mock, patch
 
 from foreman.config import parse_config
 from foreman.errors import HerdrError, ParseError
@@ -772,6 +774,20 @@ class DialogAlwaysClosesTest(unittest.TestCase):
 
 
 class FailureTest(unittest.TestCase):
+    def test_snapshot_redacts_messages_and_whitelists_safe_error_details(self):
+        secret = "ghp_abcdefghijklmnopqrstuvwxyz123456"
+        failure = HerdrError(
+            "herdr failed with token={}".format(secret),
+            {"command": "herdr --token {}".format(secret), "stderr": secret,
+             "pending_cli_update": True},
+        )
+        with patch("foreman.measure.measure_agent", side_effect=failure):
+            snapshot = measure(Mock(), [BY_NAME["claude"]], AT)
+        error = snapshot["agents"]["claude"]["error"]
+        self.assertNotIn(secret, json.dumps(error))
+        self.assertIn("[redacted]", error["message"])
+        self.assertEqual(error["details"], {"pending_cli_update": True})
+
     def test_pending_cli_update_is_machine_readable_on_parse_failure(self):
         runner = runner_with({"claude": "idle"}, {"claude": CLAUDE_UPDATE_PANE})
         snapshot = measure(HerdrClient(runner=runner), [BY_NAME["claude"]], AT)

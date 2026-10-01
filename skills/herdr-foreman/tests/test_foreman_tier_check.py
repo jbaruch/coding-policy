@@ -9,6 +9,7 @@ import copy
 import importlib.util
 import io
 import json
+import shlex
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -111,9 +112,19 @@ class CompositeTest(unittest.TestCase):
             },
             "failed_agents": ["claude", "codex"],
         }
-        code, rows = self.verdict(PROVEN, measure=(1, measured))
+        state = "/tmp/state file.json"
+        config = "/tmp/config file.json"
+        code, rows = self.verdict(
+            PROVEN,
+            argv=["--state", state, "--config", config],
+            measure=(1, measured),
+        )
         self.assertEqual(code, 1)
-        self.assertIn("`foreman relaunch-worker claude`", rows["headroom"]["reason"])
+        command = " ".join(shlex.quote(value) for value in (
+            "bash", str(check.FOREMAN), "--state", state, "--config", config,
+            "relaunch-worker", "claude",
+        ))
+        self.assertIn("`{}`".format(command), rows["headroom"]["reason"])
         self.assertNotIn("relaunch-worker codex", rows["headroom"]["reason"])
         self.assertEqual(rows["headroom"]["detail"], measured)
 
