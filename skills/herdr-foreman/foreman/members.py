@@ -303,8 +303,17 @@ def retained_task_panes(state_path, state, task):
     """Unique retained scoped panes a task closure must remove."""
     dispatches = {row.get("id"): row for row in state["recovery"]["dispatches"]
                   if isinstance(row, dict)}
+    owner = supervision.load(state_path)
+    active = {}
+    for member in owner["members"]:
+        if not member["active"]:
+            continue
+        assignment = supervision.expected_assignment(member)
+        pane = assignment.get("pane_id")
+        if isinstance(pane, str) and pane:
+            active[(assignment["agent"], pane)] = member["id"]
     panes = {}
-    for member in supervision.load(state_path)["members"]:
+    for member in owner["members"]:
         assignment = supervision.expected_assignment(member)
         if assignment["task"] != task:
             continue
@@ -315,6 +324,13 @@ def retained_task_panes(state_path, state, task):
                   or isinstance(dispatch, dict) and isinstance(dispatch.get("worker_kind"), str))
         pane = assignment.get("pane_id") or result_record.get("pane_id")
         if scoped and _keeps_scoped_pane(dispatch, result_record) and isinstance(pane, str) and pane:
+            active_enrollment = active.get((assignment["agent"], pane))
+            if active_enrollment is not None:
+                raise UsageError(
+                    "Task {!r} still has active enrollment {} on retained pane {}; assess and close that member before `{}`.".format(
+                        task, active_enrollment, pane, runnable.command("close-task")),
+                    {"task": task, "enrollment": active_enrollment, "pane_id": pane},
+                )
             panes[(assignment["agent"], pane)] = {"agent": assignment["agent"], "pane_id": pane}
     return list(panes.values())
 

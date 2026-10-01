@@ -223,10 +223,27 @@ class CloseMemberTest(MembersCase):
             role="developer", fix_round=None,
         )
         save_state(self.path, self.state)
+        store.resolve(self.path, {
+            "id": "dispatch-a", "outcome": "assessed",
+            "evidence": [str(self.path)],
+        }, LATER)
         self.assertEqual(
             members.retained_task_panes(self.path, self.state, "task-a"),
             [{"agent": "codex-a", "pane_id": "pane-a"}],
         )
+
+    def test_task_closure_refuses_a_retained_pane_with_an_active_owner(self):
+        dispatch = self.state["recovery"]["dispatches"][0]
+        dispatch.update(schema_version=recovery.ASSIGNMENT_DISPATCH_VERSION,
+                        worker_kind="codex", role="developer")
+        dispatch["result"].update(
+            schema_version=recovery.ASSIGNMENT_DISPATCH_VERSION,
+            worker_kind="codex", assignment_scoped=True, pane_id="pane-a",
+            role="developer", fix_round=None,
+        )
+        save_state(self.path, self.state)
+        with self.assertRaisesRegex(UsageError, "active enrollment dispatch-a"):
+            members.retained_task_panes(self.path, self.state, "task-a")
 
     def test_reconciled_scoped_close_uses_the_dispatch_worker_kind_marker(self):
         dispatch = self.state["recovery"]["dispatches"][0]

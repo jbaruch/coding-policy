@@ -593,6 +593,39 @@ class PlanCommandTest(CliCase):
         close.assert_any_call(
             client, plan["assignments"]["reviewer"], "pane-reviewer")
 
+    def test_spawn_cleanup_state_failure_does_not_replace_an_interrupt(self):
+        plan = self._interrupt_plan()
+        client = Mock()
+        with patch("foreman.lifecycle.spawn", side_effect=["pane-developer", KeyboardInterrupt]), \
+                patch("foreman.lifecycle.close"), \
+                patch("foreman.cli.save_state", side_effect=[None, UsageError("cleanup save failed", {})]), \
+                self.assertRaises(KeyboardInterrupt) as caught:
+            self.run_cli(
+                self.base() + ["apply", "--assignments", json.dumps(plan),
+                               "--task", "t-interrupt", "--now", AT,
+                               "--common", str(self.common)]
+                + self.brief_args("developer", "reviewer") + self._interrupt_reports(),
+                client=client,
+            )
+        self.assertIn("save_state", " ".join(caught.exception.__notes__))
+
+    def test_dispatch_cleanup_recovery_failure_does_not_replace_an_interrupt(self):
+        plan = self._interrupt_plan()
+        client = Mock()
+        with patch("foreman.lifecycle.spawn", side_effect=["pane-developer", "pane-reviewer"]), \
+                patch("foreman.lifecycle.close"), \
+                patch("foreman.cli.apply_assignments", side_effect=KeyboardInterrupt), \
+                patch("foreman.cli.recovery.abort_pre_send", side_effect=UsageError("cleanup abort failed", {})), \
+                self.assertRaises(KeyboardInterrupt) as caught:
+            self.run_cli(
+                self.base() + ["apply", "--assignments", json.dumps(plan),
+                               "--task", "t-interrupt", "--now", AT,
+                               "--common", str(self.common)]
+                + self.brief_args("developer", "reviewer") + self._interrupt_reports(),
+                client=client,
+            )
+        self.assertIn("abort_pre_send", " ".join(caught.exception.__notes__))
+
     def test_scoped_headroom_maps_only_fresh_assignments_after_a_partial_retry(self):
         self.assertEqual(
             cli._scoped_headroom(

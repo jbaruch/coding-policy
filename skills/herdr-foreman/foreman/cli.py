@@ -1594,6 +1594,77 @@ def _apply(args, client, warn, trace, hold_gates):
         task=args.task, retain=args.retain_context or args.retain_specialist,
         no_clear=args.no_clear,
     )
+    cleanup_evidence = str(Path(state_path).expanduser().resolve())
+
+    def clean_pre_send(primary, names, reason):
+        """Best-effort cleanup that never replaces the active failure."""
+        failures = []
+        closed = []
+        for name in names:
+            pane = spawned[name]
+            try:
+                lifecycle.close(client, name, pane)
+                closed.append(name)
+            except ForemanError as cleanup:
+                failures.append({
+                    "operation": "close_pane", "target": pane,
+                    "error": cleanup.to_dict(),
+                    "repair": "Run `{}` before retrying.".format(
+                        format_argv(client.argv_pane_close(pane))),
+                })
+        for identifier in prepared:
+            try:
+                recovery.abort_pre_send(store, identifier, at, reason)
+            except ForemanError as cleanup:
+                failures.append({
+                    "operation": "abort_pre_send", "target": identifier,
+                    "error": cleanup.to_dict(),
+                    "repair": "Inspect dispatch {} in {} and reconcile its transport state before retrying.".format(
+                        identifier, state_path),
+                })
+        state_saved = True
+        if prepared or enrolled:
+            try:
+                save_state(state_path, state)
+            except ForemanError as cleanup:
+                state_saved = False
+                failures.append({
+                    "operation": "save_state", "target": str(state_path),
+                    "error": cleanup.to_dict(), "repair": str(cleanup),
+                })
+        if state_saved:
+            for name in closed:
+                if name not in enrolled:
+                    continue
+                identifier = enrolled[name]
+                try:
+                    supervision.resolve(
+                        state_path,
+                        {"id": identifier, "outcome": "Pre-send pane cleanup: " + reason,
+                         "evidence": [cleanup_evidence]},
+                        at,
+                    )
+                except ForemanError as cleanup:
+                    failures.append({
+                        "operation": "resolve_enrollment", "target": identifier,
+                        "error": cleanup.to_dict(),
+                        "repair": "Inspect `{}` and resolve enrollment {} with `{}` after its pending observations are handled.".format(
+                            runnable.command("supervision-status"), identifier,
+                            runnable.command("supervision-resolve")),
+                    })
+        if not failures:
+            return
+        action = "Cleanup also failed: " + " ".join(
+            "{} {}: {}".format(row["operation"], row["target"], row["repair"])
+            for row in failures)
+        if isinstance(primary, ForemanError):
+            primary.message = "{} {}".format(primary.message, action)
+            primary.args = (primary.message,)
+            primary.details = {**primary.details, "cleanup_failures": failures}
+        elif primary is not None and hasattr(primary, "add_note"):
+            primary.add_note(action)
+        elif primary is None:
+            raise HerdrError(action, {"cleanup_failures": failures})
 
     spawned = {}
     enrolled = {}
@@ -1635,39 +1706,8 @@ def _apply(args, client, warn, trace, hold_gates):
         finally:
             if not spawn_complete:
                 primary = sys.exc_info()[1]
-                cleanup_failures = []
-                closed = []
-                for name, pane in spawned.items():
-                    try:
-                        lifecycle.close(client, name, pane)
-                        closed.append(name)
-                    except ForemanError as cleanup:
-                        cleanup_failures.append({"agent": name, "pane_id": pane, "error": cleanup.to_dict()})
                 reason = (str(primary) or type(primary).__name__) if primary is not None else "spawn failed"
-                for identifier in prepared:
-                    recovery.abort_pre_send(store, identifier, at, reason)
-                if enrolled:
-                    save_state(state_path, state)
-                for name in closed:
-                    if name in enrolled:
-                        supervision.resolve(
-                            state_path,
-                            {"id": enrolled[name], "outcome": "Pre-send pane cleanup: " + reason,
-                             "evidence": [str(Path(state_path).expanduser().resolve())]},
-                            at,
-                        )
-                if cleanup_failures:
-                    commands = [format_argv(client.argv_pane_close(row["pane_id"])) for row in cleanup_failures]
-                    action = "Cleanup also failed for {}. Run {}, then retry only after every pane is absent.".format(
-                        ", ".join(row["pane_id"] for row in cleanup_failures),
-                        "; ".join("`{}`".format(command) for command in commands))
-                    if isinstance(primary, ForemanError):
-                        raise HerdrError(
-                            "Assignment spawn failed: {} {}".format(primary, action),
-                            {"primary_error": primary.to_dict(), "cleanup_failures": cleanup_failures},
-                        ) from primary
-                    if primary is not None and hasattr(primary, "add_note"):
-                        primary.add_note(action)
+                clean_pre_send(primary, list(spawned), reason)
 
     original_before_send = before_send
     def track_before_send(step, context):
@@ -1709,29 +1749,8 @@ def _apply(args, client, warn, trace, hold_gates):
     finally:
         if not apply_complete:
             primary = sys.exc_info()[1]
-            closed = []
-            for name, pane in spawned.items():
-                if name not in sending:
-                    try:
-                        lifecycle.close(client, name, pane)
-                        closed.append(name)
-                    except HerdrError as cleanup:
-                        if warn is not None:
-                            warn("could not close unused assignment pane {} after dispatch refusal: {}. Run `{}` before retrying.".format(
-                                pane, cleanup, format_argv(client.argv_pane_close(pane))))
             reason = (str(primary) or type(primary).__name__) if primary is not None else "dispatch failed"
-            for identifier in prepared:
-                recovery.abort_pre_send(store, identifier, at, reason)
-            if prepared:
-                save_state(state_path, state)
-            for name in closed:
-                if name in enrolled:
-                    supervision.resolve(
-                        state_path,
-                        {"id": enrolled[name], "outcome": "Pre-send pane cleanup: " + reason,
-                         "evidence": [str(Path(state_path).expanduser().resolve())]},
-                        at,
-                    )
+            clean_pre_send(primary, [name for name in spawned if name not in sending], reason)
     result["applied"] = replayed + result["applied"]
     not_started = [
         record["agent"]
