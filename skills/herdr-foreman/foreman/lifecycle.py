@@ -9,6 +9,7 @@ owner records.
 import os
 import re
 import secrets
+import sys
 
 from .config import assignment_worker
 from .errors import ForemanError, HerdrError, UsageError
@@ -79,6 +80,7 @@ def spawn(client, worker, tier, *, cwd=None, history=None):
             {"agent": worker.name},
         )
     pane = client.pane_split(current=True, cwd=cwd or os.getcwd(), focus=False)
+    completed = False
     try:
         # This is the lifecycle's first-launch carve-out: live process evidence
         # proves the newly-created pane holds only its shell, while the owner
@@ -87,20 +89,26 @@ def spawn(client, worker, tier, *, cwd=None, history=None):
         require_empty_shell(client, pane)
         start_worker(client, worker, pane, tier)
         verify_running(client, worker, pane, tier)
-    except BaseException as primary:
-        try:
-            client.pane_close(pane)
-        except ForemanError as cleanup:
-            primary_details = (primary.to_dict() if isinstance(primary, ForemanError)
-                               else {"type": type(primary).__name__, "message": str(primary)})
-            raise HerdrError(
-                "Worker spawn failed for {} in pane {}: {} Cleanup also failed: {}. Close the pane with `{}` before retrying.".format(
-                    worker.name, pane, str(primary) or type(primary).__name__, cleanup,
-                    format_argv(client.argv_pane_close(pane))),
-                {"agent": worker.name, "pane_id": pane,
-                 "primary_error": primary_details, "cleanup_error": cleanup.to_dict()},
-            ) from primary
-        raise
+        completed = True
+    finally:
+        if not completed:
+            primary = sys.exc_info()[1]
+            try:
+                client.pane_close(pane)
+            except ForemanError as cleanup:
+                action = "Cleanup also failed: {}. Close the pane with `{}` before retrying.".format(
+                    cleanup, format_argv(client.argv_pane_close(pane)))
+                if isinstance(primary, ForemanError):
+                    raise HerdrError(
+                        "Worker spawn failed for {} in pane {}: {} {}".format(
+                            worker.name, pane, primary, action),
+                        {"agent": worker.name, "pane_id": pane,
+                         "primary_error": primary.to_dict(), "cleanup_error": cleanup.to_dict()},
+                    ) from primary
+                # An interrupt or unexpected exception must remain the active
+                # failure. Attach the cleanup repair without replacing it.
+                if primary is not None and hasattr(primary, "add_note"):
+                    primary.add_note(action)
     return pane
 
 

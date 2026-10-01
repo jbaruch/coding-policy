@@ -102,6 +102,19 @@ class SpawnCloseTest(unittest.TestCase):
             spawn(client, worker, worker.tiers["coordination"], history=[])
         client.pane_close.assert_called_once_with("pane-new")
 
+    def test_cleanup_failure_does_not_replace_a_spawn_interrupt(self):
+        client = Mock()
+        client.pane_split.return_value = "pane-new"
+        client.pane_process_info.return_value = {
+            "shell_pid": 10, "foreground_processes": [{"pid": 10}]}
+        client.pane_close.side_effect = failure("pane_busy", "cannot close")
+        client.argv_pane_close.return_value = ["herdr", "pane", "close", "--pane", "pane-new"]
+        worker = template()
+        with patch("foreman.lifecycle.start_worker", side_effect=KeyboardInterrupt), \
+                self.assertRaises(KeyboardInterrupt) as caught:
+            spawn(client, worker, worker.tiers["coordination"], history=[])
+        self.assertIn("Cleanup also failed", " ".join(caught.exception.__notes__))
+
     def test_close_proves_the_assignment_disappeared(self):
         client = Mock()
         client.agent_get.side_effect = [{"pane_id": "pane-new"}, missing("reviewer-a1")]

@@ -1566,31 +1566,35 @@ def _apply(args, client, warn, trace, hold_gates):
     spawned = {}
     sending = set()
     if scoped:
+        spawn_complete = False
         try:
             for role, name in assignments.items():
                 tier = tiers.get(role)
                 if not isinstance(tier, dict):
                     raise UsageError("Assignment-scoped seat {} has no selected tier; replan from the current config.".format(role), {})
                 spawned[name] = lifecycle.spawn(client, agents_by_name[name], tier, history=state["assignments"])
-        except BaseException as primary:
-            cleanup_failures = []
-            for name, pane in spawned.items():
-                try:
-                    lifecycle.close(client, name, pane)
-                except ForemanError as cleanup:
-                    cleanup_failures.append({"agent": name, "pane_id": pane, "error": cleanup.to_dict()})
-            if cleanup_failures:
-                commands = [format_argv(client.argv_pane_close(row["pane_id"])) for row in cleanup_failures]
-                primary_details = (primary.to_dict() if isinstance(primary, ForemanError)
-                                   else {"type": type(primary).__name__, "message": str(primary)})
-                raise HerdrError(
-                    "Assignment spawn failed: {} Cleanup also failed for {}. Run {}, then retry only after every pane is absent.".format(
-                        str(primary) or type(primary).__name__,
+            spawn_complete = True
+        finally:
+            if not spawn_complete:
+                primary = sys.exc_info()[1]
+                cleanup_failures = []
+                for name, pane in spawned.items():
+                    try:
+                        lifecycle.close(client, name, pane)
+                    except ForemanError as cleanup:
+                        cleanup_failures.append({"agent": name, "pane_id": pane, "error": cleanup.to_dict()})
+                if cleanup_failures:
+                    commands = [format_argv(client.argv_pane_close(row["pane_id"])) for row in cleanup_failures]
+                    action = "Cleanup also failed for {}. Run {}, then retry only after every pane is absent.".format(
                         ", ".join(row["pane_id"] for row in cleanup_failures),
-                        "; ".join("`{}`".format(command) for command in commands)),
-                    {"primary_error": primary_details, "cleanup_failures": cleanup_failures},
-                ) from primary
-            raise
+                        "; ".join("`{}`".format(command) for command in commands))
+                    if isinstance(primary, ForemanError):
+                        raise HerdrError(
+                            "Assignment spawn failed: {} {}".format(primary, action),
+                            {"primary_error": primary.to_dict(), "cleanup_failures": cleanup_failures},
+                        ) from primary
+                    if primary is not None and hasattr(primary, "add_note"):
+                        primary.add_note(action)
 
     original_before_send = before_send
     def track_before_send(step, context):
@@ -1599,6 +1603,7 @@ def _apply(args, client, warn, trace, hold_gates):
         # returns an error, so cleanup preserves this pane for reconciliation.
         sending.add(step["agent"])
 
+    apply_complete = False
     try:
         result = apply_assignments(
             client,
@@ -1628,20 +1633,23 @@ def _apply(args, client, warn, trace, hold_gates):
                                                           task=args.task, retain=args.retain_context or args.retain_specialist, no_clear=args.no_clear),
             fresh=scoped,
         )
-    except BaseException as exc:
-        for name, pane in spawned.items():
-            if name not in sending:
-                try:
-                    lifecycle.close(client, name, pane)
-                except HerdrError as cleanup:
-                    if warn is not None:
-                        warn("could not close unused assignment pane {} after dispatch refusal: {}. Run `{}` before retrying.".format(
-                            pane, cleanup, format_argv(client.argv_pane_close(pane))))
-        for identifier in prepared:
-            recovery.abort_pre_send(store, identifier, at, str(exc))
-        if prepared:
-            save_state(state_path, state)
-        raise
+        apply_complete = True
+    finally:
+        if not apply_complete:
+            primary = sys.exc_info()[1]
+            for name, pane in spawned.items():
+                if name not in sending:
+                    try:
+                        lifecycle.close(client, name, pane)
+                    except HerdrError as cleanup:
+                        if warn is not None:
+                            warn("could not close unused assignment pane {} after dispatch refusal: {}. Run `{}` before retrying.".format(
+                                pane, cleanup, format_argv(client.argv_pane_close(pane))))
+            reason = (str(primary) or type(primary).__name__) if primary is not None else "dispatch failed"
+            for identifier in prepared:
+                recovery.abort_pre_send(store, identifier, at, reason)
+            if prepared:
+                save_state(state_path, state)
     result["applied"] = replayed + result["applied"]
     not_started = [
         record["agent"]
