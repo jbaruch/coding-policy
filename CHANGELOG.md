@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.354 — 2026-10-01
+
 ### Fixed
 
 - **Retrospective history survives the `teamlead` to `foreman` home move
