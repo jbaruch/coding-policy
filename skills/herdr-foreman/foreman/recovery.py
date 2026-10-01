@@ -49,8 +49,12 @@ RECOVERY_SCHEMA_VERSION = 1
 #: round was licensed on, a `patch` or `fixture` oracle with the sha256 its plan
 #: pinned, so `verify-oracle` checks the oracle the round was sent with rather
 #: than the plan file as it reads now (#585). An older store carrying the field
-#: is unowned newer data and is refused.
-RECOVERY_STORE_VERSION = 14
+#: is unowned newer data and is refused. Version 15 adds assignment-scoped
+#: dispatch version 4: `worker_kind` binds the reusable config template while
+#: the dispatch's `agent` remains the fresh live identity; an applied result
+#: also carries `assignment_scoped: true`. Older stores carrying either field
+#: are unowned newer data and are refused.
+RECOVERY_STORE_VERSION = 15
 REFUSAL_FIELDS = frozenset({"brief_identity", "refusal", "refusal_move", "provider"})
 SPECIALIST_DISPATCH_VERSION = 2
 #: Dispatch record version 3: a judge dispatch carrying the mode it was sent
@@ -58,6 +62,11 @@ SPECIALIST_DISPATCH_VERSION = 2
 #: never restamped; a judge dispatch recorded before it keeps no mode, and
 #: its ledger row reads `unknown`.
 JUDGE_DISPATCH_VERSION = 3
+#: Dispatch record version 4 owns the assignment-scoped lifecycle fields.
+#: It may also carry the version-2 composition fields and version-3 judge mode;
+#: the one version owns the combined shape instead of making the reader infer
+#: one incompatible record version from whichever optional field it sees first.
+ASSIGNMENT_DISPATCH_VERSION = 4
 #: Checkpoint record version. 1 carries a mandatory pinned-judge ruling; 2
 #: makes it optional. Version-1 rows keep their judge evidence and are never
 #: rewritten. The checkpoint now records the exhaustion the diagnosis brief is
@@ -73,6 +82,7 @@ CHECKPOINT_VERSIONS = frozenset({2, OPERATOR_CHECKPOINT_VERSION})
 #: optional at 2, so the stamp alone is the whole upgrade.
 MIGRATED_CHECKPOINT_VERSION = 2
 DISPATCH_METADATA_FIELDS = frozenset({"requirements", "reviewer_scope"})
+SCOPED_DISPATCH_FIELDS = frozenset({"worker_kind"})
 #: The judge's diagnosis remedies, descending. A task's next diagnosis sits
 #: below its last, or repeats that rung once against recorded progress, and
 #: `stop` is terminal, so a task takes at most five and cannot loop
@@ -227,6 +237,9 @@ def _refuse_unowned_legacy(store, version):
             raise UsageError("Older recovery contains a judge mode this version never wrote; preserve it for owner recovery.", {})
         if version < 14 and isinstance(row, dict) and "oracle" in row:
             raise UsageError("Older recovery contains a dispatch-bound oracle this version never wrote; preserve it for owner recovery.", {})
+        if version < 15 and any(
+                "worker_kind" in part or "assignment_scoped" in part for part in carriers):
+            raise UsageError("Older recovery contains assignment-scoped dispatch fields this version never wrote; preserve it for owner recovery.", {})
         allowed = ALLOWED_AT_6 if version == 6 else REFUSAL_FIELDS if version >= 7 else frozenset()
         if not isinstance(row, dict) or REFUSAL_FIELDS.intersection(row) - allowed:
             raise UsageError("Older recovery contains unowned newer refusal records; preserve it for owner recovery.", {})
@@ -1295,8 +1308,11 @@ def _dispatch_version(record):
     if judged and (canonical_role(record.get("role")) != "judge"
                    or not isinstance(record["judge_mode"], str) or record["judge_mode"] not in JUDGE_MODES):
         raise UsageError("A dispatch's judge_mode names adjudication or diagnosis, on a judge dispatch alone.", {})
-    if not DISPATCH_METADATA_FIELDS.intersection(record):
-        return JUDGE_DISPATCH_VERSION if judged else RECOVERY_SCHEMA_VERSION
+    scoped = bool(SCOPED_DISPATCH_FIELDS.intersection(record) or "assignment_scoped" in record)
+    if scoped:
+        text(record.get("worker_kind"), "dispatch worker_kind")
+        if "assignment_scoped" in record and record.get("assignment_scoped") is not True:
+            raise UsageError("An assignment-scoped dispatch result must record assignment_scoped: true.", {})
     if "requirements" in record:
         from .composition import normalize_requirement
         requirement = record["requirements"]
@@ -1307,11 +1323,16 @@ def _dispatch_version(record):
     if "reviewer_scope" in record and (canonical_role(record.get("role")) != "reviewer"
             or not isinstance(record["reviewer_scope"], str) or record["reviewer_scope"] not in {"verification", "design"}):
         raise UsageError("New reviewer_scope must name verification or design on a reviewer dispatch; preserve unknown scope only in legacy assignment history.", {})
-    return JUDGE_DISPATCH_VERSION if judged else SPECIALIST_DISPATCH_VERSION
+    if scoped:
+        return ASSIGNMENT_DISPATCH_VERSION
+    if DISPATCH_METADATA_FIELDS.intersection(record):
+        return JUDGE_DISPATCH_VERSION if judged else SPECIALIST_DISPATCH_VERSION
+    return JUDGE_DISPATCH_VERSION if judged else RECOVERY_SCHEMA_VERSION
 
 
 def _dispatch_metadata(record):
-    return {key: deepcopy(record[key]) for key in DISPATCH_METADATA_FIELDS if key in record}
+    fields = DISPATCH_METADATA_FIELDS | SCOPED_DISPATCH_FIELDS
+    return {key: deepcopy(record[key]) for key in fields if key in record}
 
 
 def _validate_dispatch_metadata(record):
@@ -1894,7 +1915,7 @@ def validate_store(store, assignments):
                 raise UsageError("Recovery {} must be an array; restore the owner-written ledger.".format(name), {})
             identifiers = []
             for row in store[name]:
-                versions = ({1, 2, JUDGE_DISPATCH_VERSION} if name == "dispatches"
+                versions = ({1, 2, JUDGE_DISPATCH_VERSION, ASSIGNMENT_DISPATCH_VERSION} if name == "dispatches"
                             else {1, 2} if name == "delivery_recoveries"
                             else CHECKPOINT_VERSIONS if name == "checkpoints"
                             else DIAGNOSIS_VERSIONS if name == "diagnoses"
@@ -2034,7 +2055,7 @@ def validate_store(store, assignments):
                                  "restore the original context_before_send.", {})
             # A mode-bearing dispatch past `reserved` went through
             # `mark_sending`; without that context reconcile recovers `unknown`.
-            if (row["schema_version"] == JUDGE_DISPATCH_VERSION and row["status"] in SENT_STATUSES
+            if (row.get("judge_mode") is not None and row["status"] in SENT_STATUSES
                     and not isinstance(context, dict)):
                 raise UsageError("A sent judge dispatch lost the pre-send context carrying its mode; "
                                  "restore the original context_before_send.", {})
@@ -2071,7 +2092,7 @@ def validate_store(store, assignments):
                     raise UsageError("Dispatch outcome disagrees with its assignment row.", {})
                 if row["schema_version"] >= SPECIALIST_DISPATCH_VERSION and any(assignment.get(key) != row.get(key) for key in DISPATCH_METADATA_FIELDS):
                     raise UsageError("Dispatch and assignment composition metadata disagree; restore their original shared engagement and reviewer scope before continuing.", {})
-                if row["schema_version"] == JUDGE_DISPATCH_VERSION and assignment.get("judge_mode") != row.get("judge_mode"):
+                if row.get("judge_mode") is not None and assignment.get("judge_mode") != row.get("judge_mode"):
                     raise UsageError("Dispatch and assignment judge modes disagree; restore the mode the judge was sent for.", {})
                 if not isinstance(row["result"], dict) or any(row["result"].get(key) != row[key] for key in ("task", "role", "agent", "fix_round", "status")):
                     raise UsageError("The saved dispatch result does not match its confirmed outcome; recover it before retrying.", {})

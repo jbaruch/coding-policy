@@ -18,7 +18,7 @@ from pathlib import Path
 from foreman import runnable
 from foreman.errors import UsageError
 from foreman.recovery import (
-    DIAGNOSIS_BOUND_CEILING, DIAGNOSIS_RECORD_VERSION, RECOVERY_STORE_VERSION,
+    ASSIGNMENT_DISPATCH_VERSION, DIAGNOSIS_BOUND_CEILING, DIAGNOSIS_RECORD_VERSION, RECOVERY_STORE_VERSION,
     approach_ceiling, authorize_approach, current_approach,
     abort_pre_send, active_plans, authorize_context, authorize_plan, authorize_refused_dispatch, brief_identity, checkpoint, confirmed_fix,
     diagnose, require_investigation_before_judge, require_judge_mode,
@@ -1240,6 +1240,40 @@ class RecoveryTests(unittest.TestCase):
         second = dispatch_identity(TASK, "developer", "worker", 1, paths_by_role, "try-1")
         self.assertEqual(first[0], second[0])
         self.assertNotEqual(first[1], second[1])
+
+    def test_assignment_scoped_dispatch_and_result_use_version_four(self):
+        record = {"id": "scoped-1", "task": TASK, "role": "reviewer", "agent": "reviewer-a1",
+                  "worker_kind": "codex", "fix_round": None, "fingerprint": "d" * 64,
+                  "plan": None, "work": None, "reviewer_scope": "verification"}
+        reserved = reserve(self.store, record, AT)
+        self.assertEqual(reserved["schema_version"], ASSIGNMENT_DISPATCH_VERSION)
+        mark_sending(self.store, record["id"], AT, {"cleared": True})
+        add_assignment(self.state, AT, "reviewer", "reviewer-a1", task=TASK,
+                       reviewer_scope="verification")
+        finish_dispatch(self.store, record["id"], {
+            "task": TASK, "role": "reviewer", "agent": "reviewer-a1",
+            "worker_kind": "codex", "assignment_scoped": True,
+            "fix_round": None, "reviewer_scope": "verification", "status": "applied",
+        }, len(self.history) - 1, AT)
+        self.assertEqual(reserved["result"]["schema_version"], ASSIGNMENT_DISPATCH_VERSION)
+        validate_store(self.store, self.history)
+
+    def test_store_version_fourteen_migrates_only_without_scoped_fields(self):
+        clean = copy.deepcopy(self.store)
+        clean["schema_version"] = 14
+        self.assertTrue(migrate_store(clean))
+        self.assertEqual(clean["schema_version"], RECOVERY_STORE_VERSION)
+
+        scoped = copy.deepcopy(self.store)
+        scoped["schema_version"] = 14
+        scoped["dispatches"].append({
+            "schema_version": ASSIGNMENT_DISPATCH_VERSION, "at": AT,
+            "id": "scoped", "task": TASK, "role": "reviewer", "agent": "reviewer-a1",
+            "worker_kind": "codex", "fix_round": None, "fingerprint": "e" * 64,
+            "plan": None, "work": None, "status": "reserved", "result": None, "report": None,
+        })
+        with self.assertRaisesRegex(UsageError, "assignment-scoped"):
+            migrate_store(scoped)
 
     REPORT = "/reports/tester.md"
     BRIEF = "brief-identity-tester"

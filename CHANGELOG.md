@@ -8,7 +8,10 @@
   live identities, apply creates and dispatches their panes, and
   `close-member` removes each pane after its assessed outcome. Judge,
   independence, reservation, and recovery evidence bind those assignment
-  identities while retaining schemas 1–6 for legacy recovery.
+  identities while retaining config schemas 1–6 for standing-worker installs.
+  Recovery store version 15 and dispatch/result version 4 own the new
+  `worker_kind` and pane-lifecycle evidence, with an explicit migration from
+  clean version-14 stores and refusal of unowned newer fields.
 
 ## 0.3.357 — 2026-10-01
 

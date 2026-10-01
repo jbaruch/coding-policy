@@ -37,6 +37,7 @@ from .herdr import (
     DEFAULT_SETTLE_TIMEOUT_MS,
     HerdrClient,
     READY_STATES,
+    format_argv,
     trace_enabled_in_env,
 )
 from .composer import COMPOSER_SETTLE_SEC, DEFAULT_START_TIMEOUT_MS
@@ -49,7 +50,7 @@ from .measure import (
     measure,
 )
 from .planner import plan as build_plan
-from .planner import headroom_of
+from .planner import ASSIGNMENT_PLAN_SCHEMA_VERSION, headroom_of
 from .tiers import (COORDINATION_ROUND, FOREMAN_ROLE, JUDGMENT_ROUNDS, MissingTierError,
                     parse_launch_args, parse_tiers, select_tier, worker_launch_args)
 from . import cost_report, selection
@@ -1036,6 +1037,7 @@ def cmd_plan(args, client=None, warn=None, trace=None):
         # fresh live identity per seat; retries reuse that identity, while a
         # new plan cannot accidentally discover and reuse an idle worker.
         worker_kinds = dict(result["assignments"])
+        result["schema_version"] = ASSIGNMENT_PLAN_SCHEMA_VERSION
         result["worker_kinds"] = worker_kinds
         result["assignments"] = lifecycle.identities(result["assignments"])
         if isinstance(result.get("judge"), dict) and "judge" in result["assignments"]:
@@ -1191,6 +1193,11 @@ def _apply(args, client, warn, trace, hold_gates):
     document = _load_assignments(args.assignments, document=True)
     assignments = normalize_assignments(document)
     scoped = bool(templates) and all(agent.assignment_scoped for agent in templates)
+    if scoped and not args.dry_run and not (isinstance(args.task, str) and args.task.strip()):
+        raise UsageError(
+            "Assignment-scoped apply needs --task before it can create short-lived panes; the task owns their durable dispatch and closure records.",
+            {},
+        )
     if scoped:
         agents_by_name = lifecycle.materialize(assignments, document.get("worker_kinds"), templates)
         agents = list(agents_by_name.values())
@@ -1559,13 +1566,22 @@ def _apply(args, client, warn, trace, hold_gates):
                 tier = tiers.get(role)
                 if not isinstance(tier, dict):
                     raise UsageError("Assignment-scoped seat {} has no selected tier; replan from the current config.".format(role), {})
-                spawned[name] = lifecycle.spawn(client, agents_by_name[name], tier)
-        except ForemanError:
+                spawned[name] = lifecycle.spawn(client, agents_by_name[name], tier, history=state["assignments"])
+        except ForemanError as primary:
+            cleanup_failures = []
             for name, pane in spawned.items():
                 try:
                     lifecycle.close(client, name, pane)
-                except HerdrError:
-                    pass
+                except ForemanError as cleanup:
+                    cleanup_failures.append({"agent": name, "pane_id": pane, "error": cleanup.to_dict()})
+            if cleanup_failures:
+                commands = [format_argv(client.argv_pane_close(row["pane_id"])) for row in cleanup_failures]
+                raise HerdrError(
+                    "Assignment spawn failed: {} Cleanup also failed for {}. Run {}, then retry only after every pane is absent.".format(
+                        primary, ", ".join(row["pane_id"] for row in cleanup_failures),
+                        "; ".join("`{}`".format(command) for command in commands)),
+                    {"primary_error": primary.to_dict(), "cleanup_failures": cleanup_failures},
+                ) from primary
             raise
 
     original_before_send = before_send
@@ -1611,7 +1627,8 @@ def _apply(args, client, warn, trace, hold_gates):
                     lifecycle.close(client, name, pane)
                 except HerdrError as cleanup:
                     if warn is not None:
-                        warn("could not close unused assignment pane {} after dispatch refusal: {}".format(pane, cleanup))
+                        warn("could not close unused assignment pane {} after dispatch refusal: {}. Run `{}` before retrying.".format(
+                            pane, cleanup, format_argv(client.argv_pane_close(pane))))
         for identifier in prepared:
             recovery.abort_pre_send(store, identifier, at, str(exc))
         if prepared:
@@ -1914,7 +1931,7 @@ def _record_stopped_task(state_path, diagnosis, at):
     }, at)
 
 
-def _pinned_judge_identity(store, task, judge):
+def _pinned_judge_identity(store, history, task, judge):
     """Latest live assignment identity supplied by the configured judge kind."""
     if judge is None:
         return None
@@ -1922,7 +1939,20 @@ def _pinned_judge_identity(store, task, judge):
                if canonical_role(row.get("role")) == "judge" and row.get("task") == task
                and row.get("status") == "applied"
                and (row.get("agent") == judge.agent or row.get("worker_kind") == judge.agent)]
-    return matches[-1]["agent"] if matches else judge.agent
+    if not matches:
+        return judge.agent
+    by_index = {row["assignment_index"]: row for row in matches}
+    timed = [(chronology.timestamp(history[index].get("at"), "Assignment {} chronology".format(index)), index, row)
+             for index, row in by_index.items()]
+    latest_time = max(item[0] for item in timed)
+    latest = [(index, row) for at, index, row in timed if at == latest_time]
+    if len(latest) != 1:
+        raise UsageError(
+            "Latest pinned-judge assignment chronology is uncertain at indices {}; recover the original event times before ruling.".format(
+                ", ".join(str(index) for index, _row in latest)),
+            {},
+        )
+    return latest[0][1]["agent"]
 
 
 def cmd_recovery(args, client=None, warn=None, trace=None):
@@ -1945,7 +1975,7 @@ def _run_recovery(args, state_path, warn, client, trace):
     elif args.command == "checkpoint":
         judge = load_judge(_config_path(args))
         task = data.get("task") if isinstance(data, dict) else None
-        result = recovery.checkpoint(store, history, data, at, _pinned_judge_identity(store, task, judge))
+        result = recovery.checkpoint(store, history, data, at, _pinned_judge_identity(store, history, task, judge))
     elif args.command == "authorize-corrections":
         result = recovery.authorize_plan(store, history, data, at)
     elif args.command == "authorize-approach":
@@ -1958,7 +1988,7 @@ def _run_recovery(args, state_path, warn, client, trace):
         # enrollment for the same task and judge cannot stand in for it
         # (#412).
         enrolled = None
-        judge_identity = _pinned_judge_identity(store, data.get("task") if isinstance(data, dict) else None, judge)
+        judge_identity = _pinned_judge_identity(store, history, data.get("task") if isinstance(data, dict) else None, judge)
         if judge is not None and isinstance(data, dict):
             dispatch = recovery.applied_judge_dispatch(store, history, data.get("task"), judge_identity)
             if dispatch is not None:
@@ -2065,6 +2095,9 @@ def _run_recovery(args, state_path, warn, client, trace):
                     recovered["requirements"] = result["requirements"]
                 if result.get("reviewer_scope") is not None:
                     recovered["reviewer_scope"] = result["reviewer_scope"]
+                if result.get("worker_kind") is not None:
+                    recovered["worker_kind"] = result["worker_kind"]
+                    recovered["assignment_scoped"] = True
                 if canonical_role(recovered["role"]) == "judge":
                     # The mode travels in the pre-send context and on the dispatch
                     # itself; `unknown` is only for a receipt older than both.

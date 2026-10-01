@@ -267,7 +267,7 @@ def parse_config(payload, source="<memory>"):
         name = entry["name"]
         if "tiers" in entry and version < 2:
             raise ConfigError("Tier tables need config schema_version 2; upgrade the operator-owned config.", {"source": source})
-        if version >= 5 and not entry.get("tiers") and entry.get("name") != pinned_judge:
+        if version >= 5 and not entry.get("tiers") and (version >= 7 or entry.get("name") != pinned_judge):
             # Without a table, tier selection returns nothing for this worker and
             # every round it takes records `tier: null`, unproven (#476).
             raise ConfigError(
@@ -279,7 +279,7 @@ def parse_config(payload, source="<memory>"):
                 "Config at {}: agents[{}] has a tier table without a `consultation` row, which config schema_version 4 "
                 "requires: investigator and advisor default to it. Copy the row from config.example.json; never "
                 "synthesize it from `build`.".format(source, index), {"source": source, "index": index})
-        if version >= 7 and entry.get("tiers") and "coordination" not in entry["tiers"]:
+        if version >= 7 and "coordination" not in entry.get("tiers", {}):
             raise ConfigError(
                 "Config at {}: {}[{}] has no `coordination` tier. Schema 7 starts one short-lived "
                 "usage probe per window_group at that tier; add the runtime's cheapest safe row.".format(

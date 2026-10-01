@@ -255,7 +255,11 @@ def close(state_path, enrollment, ledger, at, client=None):
     dispatch = next((row for row in state["recovery"]["dispatches"] if row.get("id") == enrollment), None)
     result = dispatch.get("result") if isinstance(dispatch, dict) else None
     result_record = result if isinstance(result, dict) else {}
-    scoped = result_record.get("assignment_scoped") is True
+    # A reconcile can reconstruct an older-shaped result from transport
+    # evidence, but the owner-written dispatch version still durably marks the
+    # assignment as short-lived through its worker kind.
+    scoped = (result_record.get("assignment_scoped") is True
+              or isinstance(dispatch, dict) and isinstance(dispatch.get("worker_kind"), str))
     pane_closure = None
     with report_gates.holding(state_path):
         report_gates.require_clear(state_path, assignment["report"], event["decision"] == "accepted")

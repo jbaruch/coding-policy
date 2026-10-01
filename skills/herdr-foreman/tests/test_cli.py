@@ -390,6 +390,22 @@ class StateCommandTest(CliCase):
 
 
 class PlanCommandTest(CliCase):
+    def test_pinned_judge_identity_uses_assignment_time_not_dispatch_append_order(self):
+        history = [
+            {"at": "2026-10-01T11:00:00+00:00", "role": "judge", "agent": "judge-new"},
+            {"at": "2026-10-01T10:00:00+00:00", "role": "judge", "agent": "judge-old"},
+        ]
+        store = {"dispatches": [
+            {"role": "judge", "task": "task-a", "status": "applied", "agent": "judge-new",
+             "worker_kind": "claude", "assignment_index": 0},
+            {"role": "judge", "task": "task-a", "status": "applied", "agent": "judge-old",
+             "worker_kind": "claude", "assignment_index": 1},
+        ]}
+        self.assertEqual(
+            cli._pinned_judge_identity(store, history, "task-a", SimpleNamespace(agent="claude")),
+            "judge-new",
+        )
+
     def test_schema_7_plan_allocates_fresh_assignment_identities(self):
         shipped = Path(__file__).resolve().parent.parent / "config.example.json"
         self.config.write_text(shipped.read_text(encoding="utf-8"), encoding="utf-8")
@@ -425,6 +441,23 @@ class PlanCommandTest(CliCase):
         commands = result["spawns"][0]["commands"]
         self.assertIn("pane split --current", commands[0]["shell"])
         self.assertIn("agent start " + plan["assignments"]["developer"], commands[1]["shell"])
+
+    def test_schema_7_live_apply_requires_a_task_before_spawning(self):
+        shipped = Path(__file__).resolve().parent.parent / "config.example.json"
+        self.config.write_text(shipped.read_text(encoding="utf-8"), encoding="utf-8")
+        code, out, err = self.run_cli(
+            self.base() + ["plan", "--roles", "developer", "--snapshot", str(self.snapshot)]
+        )
+        self.assertEqual(code, 0, err)
+        plan = json.loads(out)
+        self.out, self.err = io.StringIO(), io.StringIO()
+        code, out, err = self.run_cli(
+            self.base() + ["apply", "--assignments", json.dumps(plan), "--common", str(self.common),
+                           "--brief", "developer=" + str(self.briefs["developer"])]
+        )
+        self.assertEqual(code, 1)
+        self.assertEqual(out, "")
+        self.assertIn("needs --task", err)
 
     def test_plans_from_a_snapshot_file(self):
         code, out, err = self.run_cli(

@@ -166,7 +166,9 @@ class CloseMemberTest(MembersCase):
 
     def test_assignment_scoped_close_removes_the_pane_before_resolution(self):
         dispatch = self.state["recovery"]["dispatches"][0]
-        dispatch["result"].update(assignment_scoped=True, pane_id="pane-a")
+        dispatch.update(schema_version=recovery.ASSIGNMENT_DISPATCH_VERSION, worker_kind="codex")
+        dispatch["result"].update(schema_version=recovery.ASSIGNMENT_DISPATCH_VERSION,
+                                  worker_kind="codex", assignment_scoped=True, pane_id="pane-a")
         save_state(self.path, self.state)
         self.emit()
         self.write_ledger("needs_work")
@@ -178,6 +180,22 @@ class CloseMemberTest(MembersCase):
         self.assertEqual(result["pane_closure"], closure)
         self.assertFalse(next(row for row in store.load(self.path)["members"]
                               if row["id"] == "dispatch-a")["active"])
+
+    def test_reconciled_scoped_close_uses_the_dispatch_worker_kind_marker(self):
+        dispatch = self.state["recovery"]["dispatches"][0]
+        dispatch["schema_version"] = recovery.ASSIGNMENT_DISPATCH_VERSION
+        dispatch["worker_kind"] = "codex"
+        dispatch["result"]["schema_version"] = recovery.ASSIGNMENT_DISPATCH_VERSION
+        dispatch["result"]["worker_kind"] = "codex"
+        dispatch["result"]["pane_id"] = "pane-a"
+        dispatch["result"].pop("assignment_scoped", None)
+        save_state(self.path, self.state)
+        self.emit()
+        self.write_ledger("needs_work")
+        client = Mock()
+        with patch("foreman.members.lifecycle.close", return_value={"closed": True}) as close_pane:
+            members.close(self.path, "dispatch-a", self.ledger, LATER, client=client)
+        close_pane.assert_called_once_with(client, "codex-a", "pane-a")
 
     def test_a_ledger_for_another_task_is_refused(self):
         self.write_ledger("accepted", task="task-z")

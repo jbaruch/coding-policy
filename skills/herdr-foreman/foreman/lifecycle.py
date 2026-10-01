@@ -13,7 +13,7 @@ import secrets
 from .config import assignment_worker
 from .errors import ForemanError, HerdrError, UsageError
 from .herdr import error_code, format_argv
-from .launch import verify_running
+from .launch import require_empty_shell, start_worker, verify_running
 from . import runnable
 from .tiers import launch_flags, worker_launch_args
 
@@ -65,18 +65,39 @@ def spawn_commands(client, worker, tier, *, cwd=None):
     return [split, client.argv_agent_start(worker.name, worker.kind, pane, flags)]
 
 
-def spawn(client, worker, tier, *, cwd=None):
-    """Split from the foreman, start one worker, and prove its selected tier."""
-    flags = worker_launch_args(worker.kind, worker.launch_args) + launch_flags(worker.kind, tier)
+def spawn(client, worker, tier, *, cwd=None, history=None):
+    """Split, prove a first-launch shell, start one worker, and prove its tier."""
+    if not isinstance(history, (list, tuple)):
+        raise UsageError(
+            "Assignment spawn needs the owner's assignment history to prove this fresh identity has never held an earlier assignment.",
+            {"agent": worker.name},
+        )
+    if any(isinstance(row, dict) and row.get("agent") == worker.name for row in history):
+        raise UsageError(
+            "Assignment identity {!r} already appears in owner history; allocate a fresh identity before spawning it.".format(
+                worker.name),
+            {"agent": worker.name},
+        )
     pane = client.pane_split(current=True, cwd=cwd or os.getcwd(), focus=False)
     try:
-        client.agent_start(worker.name, worker.kind, pane, flags)
+        # This is the lifecycle's first-launch carve-out: live process evidence
+        # proves the newly-created pane holds only its shell, while the owner
+        # history proof above establishes that no prior assignment can carry
+        # context under this identity.
+        require_empty_shell(client, pane)
+        start_worker(client, worker, pane, tier)
         verify_running(client, worker, pane, tier)
-    except ForemanError:
+    except ForemanError as primary:
         try:
             client.pane_close(pane)
-        except HerdrError:
-            pass
+        except ForemanError as cleanup:
+            raise HerdrError(
+                "Worker spawn failed for {} in pane {}: {} Cleanup also failed: {}. Close the pane with `{}` before retrying.".format(
+                    worker.name, pane, primary, cleanup,
+                    format_argv(client.argv_pane_close(pane))),
+                {"agent": worker.name, "pane_id": pane,
+                 "primary_error": primary.to_dict(), "cleanup_error": cleanup.to_dict()},
+            ) from primary
         raise
     return pane
 
@@ -87,7 +108,13 @@ def close(client, agent, pane):
         live = client.agent_get(agent)
     except HerdrError as exc:
         if error_code(exc) == "agent_not_found":
-            return {"pane_id": pane, "agent": agent, "closed": True, "replayed": True}
+            try:
+                client.pane_close(pane)
+            except HerdrError as pane_exc:
+                if error_code(pane_exc) == "pane_not_found":
+                    return {"pane_id": pane, "agent": agent, "closed": True, "replayed": True}
+                raise
+            return {"pane_id": pane, "agent": agent, "closed": True, "replayed": False}
         raise
     if live.get("pane_id") != pane:
         raise HerdrError(
@@ -131,7 +158,7 @@ def measure_worker_kinds(client, templates, measured_at, **options):
         try:
             if not isinstance(tier, dict):
                 raise UsageError("Worker kind {!r} has no coordination tier for its disposable usage probe.".format(template.name), {})
-            pane = spawn(client, probe, tier)
+            pane = spawn(client, probe, tier, history=())
             snapshot = measure(client, [probe], measured_at, **options)
             record = dict(snapshot["agents"][probe.name])
             record.pop("tier_billing", None)

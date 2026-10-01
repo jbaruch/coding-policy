@@ -194,6 +194,13 @@ class ParseConfigTest(unittest.TestCase):
         with self.assertRaisesRegex(ConfigError, "coordination"):
             parse_config(payload)
 
+    def test_schema_7_does_not_exempt_the_pinned_judge_from_probe_tiers(self):
+        payload = _example_config()
+        judge_kind = payload["judge"]["worker_kind"]
+        next(row for row in payload["worker_kinds"] if row["name"] == judge_kind).pop("tiers")
+        with self.assertRaisesRegex(ConfigError, "no tier table"):
+            parse_config(payload)
+
     def test_wrong_schema_version_is_rejected(self):
         payload = dict(VALID, schema_version=7)
         with self.assertRaises(ConfigError) as caught:

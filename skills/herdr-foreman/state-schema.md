@@ -527,7 +527,7 @@ document and arrives already stamped.
 
 ## Recovery records
 
-The recovery document uses `schema_version: 14`; individual records retain their
+The recovery document uses `schema_version: 15`; individual records retain their
 independent versions. Version 6 adds the dispatch fields `brief_identity`, `refusal` and
 `refusal_move` and the `refusal_authorizations` collection; version 7 adds the
 dispatch's send-time `provider`; version 8 adds the `diagnoses` collection;
@@ -539,11 +539,17 @@ fingerprint, so an adjudication and a diagnosis of one brief are separate
 dispatches. Only judge dispatches carry the field. Version 13 adds the
 `task_closed` event kind. Version 14 adds `oracle` to a mechanical round's
 dispatch and binds a `patch` or `fixture` oracle's pin into the dispatch
-fingerprint (#585). The
+fingerprint (#585). Version 15 adds assignment-scoped dispatch version 4:
+`worker_kind` records the reusable config template separately from the fresh
+live `agent` identity, while the applied result records
+`assignment_scoped: true` so closure owns the short-lived pane. A version-4
+row may also carry composition metadata and `judge_mode`; those fields retain
+their existing meaning. The
 owner stamps an older store on load, adds the empty collections, and refuses one
 already carrying a field — or a seat-named dispatch — its version did not own. Generic records remain version 1; stale-Grok delivery and
 composition-bearing dispatch/result records use version 2; a judge
-dispatch/result carrying its `judge_mode` uses version 3. Version 1 and 2 rows
+dispatch/result carrying its `judge_mode` uses version 3; assignment-scoped
+dispatch/result records use version 4. Version 1, 2 and 3 rows
 are never restamped: a judge dispatch recorded before version 3 keeps no mode,
 and its ledger row reads `unknown`. A new judge reservation without a mode is
 refused, and so is a mode-less retry of a stored row; only stored rows keep
