@@ -70,6 +70,12 @@ class ReportTest(unittest.TestCase):
         coordination = only(state)["coordination"]
         self.assertEqual((coordination["unstarted_assignments"], coordination["unknown_outcome_assignments"]), (1, 1))
 
+    def test_a_maintenance_relaunch_is_not_an_unstarted_assignment(self):
+        state = delivered(close=None)
+        add_assignment(state, REVIEW, "developer", "codex", "maintenance", task="t")
+        coordination = only(state)["coordination"]
+        self.assertEqual((coordination["unstarted_assignments"], coordination["unknown_outcome_assignments"]), (1, 0))
+
     def test_every_unrecorded_field_is_named(self):
         self.assertEqual(report(delivered())["unrecorded"], list(UNRECORDED))
 

@@ -478,7 +478,8 @@ def _validate(payload, path):
         if not isinstance(record, dict):
             raise _NoUsableState("an assignment row is not a JSON object")
         record, row_migrated = _apply_migrations(record, RECORD_MIGRATIONS, "an assignment row")
-        if record.get("status") not in ASSIGNMENT_STATUSES:
+        status = record.get("status")
+        if not isinstance(status, str) or status not in ASSIGNMENT_STATUSES:
             raise _NoUsableState("an assignment row has an invalid status")
         if "requirements" not in record:
             raise _NoUsableState("an assignment row is missing specialist requirements provenance")
@@ -772,7 +773,7 @@ def add_assignment(state, at, role, agent, status=STATUS_APPLIED, *,
     which is what a slice's verdict is read back through (#434).
     """
     role = canonical_role(role)
-    if status not in ASSIGNMENT_STATUSES:
+    if not isinstance(status, str) or status not in ASSIGNMENT_STATUSES:
         raise UsageError(
             "An assignment status must be one of {}.".format(
                 " | ".join(sorted(ASSIGNMENT_STATUSES))

@@ -400,6 +400,16 @@ class MigrationTest(unittest.TestCase):
         self.write({"schema_version": STATE_SCHEMA_VERSION, "snapshots": [], "assignments": ["nope"]})
         self.assertEqual(self.load(), empty_state())
 
+    def test_an_unhashable_assignment_status_is_refused_unchanged(self):
+        state = empty_state()
+        add_assignment(state, "2026-01-01T00:00:00+00:00", "developer", "grok")
+        state["assignments"][0]["status"] = []
+        self.write(state)
+        before = self.path.read_text(encoding="utf-8")
+        _loaded, usable = load_state_checked(self.path, warn=self.warnings.append)
+        self.assertFalse(usable)
+        self.assertEqual(self.path.read_text(encoding="utf-8"), before)
+
     def test_a_non_integer_version_starts_empty(self):
         self.write({"schema_version": "1", "snapshots": [], "assignments": []})
         self.assertEqual(self.load(), empty_state())
