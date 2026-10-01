@@ -74,6 +74,12 @@ class DeclarationTest(TempCase):
             triggers.load_declaration(self.tmp, required=False)
         self.assertIn("invalid JSON", caught.exception.message)
 
+    def test_a_dangling_optional_declaration_is_refused(self):
+        self.path.symlink_to(self.tmp / "missing-declaration.json")
+        with self.assertRaises(UsageError) as caught:
+            triggers.load_declaration(self.tmp, required=False)
+        self.assertIn("No trigger declaration at", caught.exception.message)
+
     def test_invalid_json_is_refused(self):
         self.path.write_text("{not json")
         with self.assertRaises(UsageError) as caught:

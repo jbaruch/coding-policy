@@ -90,7 +90,7 @@ def load_declaration(repo, *, required=True):
     try:
         raw = path.read_text(encoding="utf-8")
     except FileNotFoundError as exc:
-        if not required:
+        if not required and not path.is_symlink():
             return {"path": str(path)}
         raise UsageError("No trigger declaration at {} ({}); state this repo's package roots and size, trust-boundary paths, CLI spec surface and user-facing docs paths there before composing a round.".format(path, exc.strerror), {}) from None
     except OSError as exc:
