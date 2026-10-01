@@ -1037,7 +1037,7 @@ def check_all_ready(client, assignments, agents_by_name, warn=None):
     return statuses
 
 
-def apply(client, assignments, agents_by_name, paths, at, no_clear=False, settle_timeout_ms=DEFAULT_SETTLE_TIMEOUT_MS, on_assigned=None, warn=None, sleep=time.sleep, settle_sec=COMPOSER_SETTLE_SEC, landing_attempts=LANDING_ATTEMPTS, start_timeout_ms=DEFAULT_START_TIMEOUT_MS, allow_recovery=False, task=None, retain_context=False, fix_round=None, judge_mode=None, history=None, tiers=None, recovery=None, plan_id=None, work=None, on_prepare=None, on_before_send=None, on_result=None, retrospective_guard=None, retain_specialist=False, requirements=None, reserved=None, reports=None, contents=None, fresh=False):
+def apply(client, assignments, agents_by_name, paths, at, no_clear=False, settle_timeout_ms=DEFAULT_SETTLE_TIMEOUT_MS, on_assigned=None, warn=None, sleep=time.sleep, settle_sec=COMPOSER_SETTLE_SEC, landing_attempts=LANDING_ATTEMPTS, start_timeout_ms=DEFAULT_START_TIMEOUT_MS, allow_recovery=False, task=None, retain_context=False, fix_round=None, judge_mode=None, history=None, tiers=None, recovery=None, plan_id=None, work=None, on_prepare=None, on_before_send=None, on_result=None, retrospective_guard=None, retain_specialist=False, requirements=None, reserved=None, reports=None, contents=None, fresh=False, assignment_scoped=False):
     """Hand each agent its brief using the selected context mode.
 
     `contents` carries a frozen dispatch's verified bytes, keyed by frozen
@@ -1064,8 +1064,6 @@ def apply(client, assignments, agents_by_name, paths, at, no_clear=False, settle
     specialist_prior = validate_specialist_history(assignments, history, task, requirements, tiers) if retain_specialist else None
     if prior is not None and tiers.get("developer"):
         tiers["developer"] = retained_tier(agents_by_name[assignments["developer"]], tiers["developer"], prior.get("tier"))
-    if fresh and (no_clear or retain_context or retain_specialist):
-        raise UsageError("Assignment-scoped workers are already fresh; omit --no-clear, --retain-context and --retain-specialist.", {})
     skip_clear = fresh or no_clear or retain_context or retain_specialist
     clear_reason = "retained" if retain_context or retain_specialist else "hand" if no_clear else "automatic"
     # Resolve the sink once. Every helper below defaults it too, but this
@@ -1272,7 +1270,7 @@ def apply(client, assignments, agents_by_name, paths, at, no_clear=False, settle
             "at": at,
             "context_transition": transition if step["role"] == "developer" else None,
         }
-        if fresh:
+        if assignment_scoped:
             record["assignment_scoped"] = True
         if "requirements" in step:
             record["requirements"] = step["requirements"]
@@ -1322,7 +1320,7 @@ def apply(client, assignments, agents_by_name, paths, at, no_clear=False, settle
     }
 
 
-def dry_run(client, assignments, agents_by_name, paths, no_clear=False, settle_timeout_ms=DEFAULT_SETTLE_TIMEOUT_MS, retain_context=False, task=None, fix_round=None, tiers=None, recovery=None, history=None, plan_id=None, work=None, retain_specialist=False, requirements=None, reserved=None, fresh=False):
+def dry_run(client, assignments, agents_by_name, paths, no_clear=False, settle_timeout_ms=DEFAULT_SETTLE_TIMEOUT_MS, retain_context=False, task=None, fix_round=None, tiers=None, recovery=None, history=None, plan_id=None, work=None, retain_specialist=False, requirements=None, reserved=None, fresh=False, assignment_scoped=False):
     """Print the plan without contacting herdr at all.
 
     Deliberately makes zero herdr calls, including the status check: a dry run
@@ -1332,8 +1330,6 @@ def dry_run(client, assignments, agents_by_name, paths, no_clear=False, settle_t
     transition = validate_context_mode(assignments, no_clear, retain_context, task, fix_round,
                                        recovery=recovery, history=history, plan_id=plan_id, work=work,
                                        retain_specialist=retain_specialist, requirements=requirements)
-    if fresh and (no_clear or retain_context or retain_specialist):
-        raise UsageError("Assignment-scoped workers are already fresh; omit --no-clear, --retain-context and --retain-specialist.", {})
     if retain_specialist:
         validate_specialist_history(assignments, history, task, requirements, tiers)
     refuse_reserved(assignments, task, reserved)
@@ -1342,7 +1338,7 @@ def dry_run(client, assignments, agents_by_name, paths, no_clear=False, settle_t
         "dry_run": True,
         "sent": False,
         "clear_reason": "retained" if retain_context or retain_specialist else "hand" if no_clear else "automatic",
-        "assignment_scoped": fresh,
+        "assignment_scoped": assignment_scoped,
         "task": task,
         "fix_round": fix_round,
         "context_transition": transition,

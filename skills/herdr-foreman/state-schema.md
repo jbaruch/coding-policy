@@ -228,7 +228,10 @@ seat to the stable template selected from the snapshot; `assignments` maps the
 same seats to fresh Herdr-safe identities allocated by that plan. Apply
 requires both maps to have exactly the same keys, clones each template under
 its saved identity, and spawns it in a new pane. Replaying that plan preserves
-the identity; replanning allocates a different one. Selection explanations
+the identity; replanning allocates a different one. An eligible
+`--retain-context` or `--retain-specialist` apply replaces the plan's fresh
+name with the preceding assignment's recorded live identity, after verifying
+that its stable worker kind is unchanged. Selection explanations
 continue to name the ranked worker kind. Legacy plans and bare role mappings
 remain valid only with schemas 1–6 standing-worker configs.
 
@@ -547,7 +550,10 @@ fingerprint (#585). Version 15 adds assignment-scoped dispatch version 4:
 live `agent` identity, while the applied result records
 `assignment_scoped: true` so closure owns the short-lived pane. A version-4
 row may also carry composition metadata and `judge_mode`; those fields retain
-their existing meaning. The
+their existing meaning. A new scoped worker is enrolled with its pane and its
+dispatch is reserved immediately after spawn, before another worker starts.
+Planner rotation counts map completed assignment indices back through these
+dispatches so fresh live names do not erase worker-kind history. The
 owner stamps an older store on load, adds the empty collections, and refuses one
 already carrying a field — or a seat-named dispatch — its version did not own. Generic records remain version 1; stale-Grok delivery and
 composition-bearing dispatch/result records use version 2; a judge

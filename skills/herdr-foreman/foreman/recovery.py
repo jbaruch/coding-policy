@@ -1420,6 +1420,19 @@ def mark_sending(store, identifier, at, context):
     _event(store, at, "dispatch_sending", record["task"], {"dispatch": identifier, "context": context})
 
 
+def observe_reserved(store, identifier, observed):
+    """Attach the pre-send observation to an already durable reservation."""
+    record = _item(store["dispatches"], identifier, "dispatch")
+    if record["status"] != "reserved" or not isinstance(observed, dict):
+        raise UsageError("Attach pre-send evidence only to a reserved dispatch; reconcile its current transport state first.",
+                         {"dispatch": identifier})
+    prior = record.get("observed_before")
+    if prior is not None and prior != observed:
+        raise UsageError("Reserved dispatch already carries different pre-send evidence; preserve it and reconcile before retrying.",
+                         {"dispatch": identifier})
+    record["observed_before"] = observed
+
+
 def finish_dispatch(store, identifier, result, assignment_index, at):
     record = _item(store["dispatches"], identifier, "dispatch")
     if "judge_mode" in result and result["judge_mode"] is None:

@@ -27,7 +27,7 @@ from pathlib import Path
 
 from types import SimpleNamespace
 
-from foreman import attention, cli, runnable
+from foreman import attention, cli, runnable, supervision
 from foreman.report_delivery import marker_columns
 from foreman.cli import build_parser, main
 from foreman.errors import HerdrError, UsageError
@@ -483,6 +483,29 @@ class PlanCommandTest(CliCase):
         self.assertEqual(out, "")
         self.assertIn("needs --task", err)
 
+    def test_schema_7_live_apply_requires_bound_pane_ownership(self):
+        shipped = Path(__file__).resolve().parent.parent / "config.example.json"
+        self.config.write_text(shipped.read_text(encoding="utf-8"), encoding="utf-8")
+        with patch("foreman.lifecycle.identity", return_value="developer-0000000009"):
+            code, out, err = self.run_cli(
+                self.base() + ["plan", "--roles", "developer", "--task", "t-owned",
+                               "--snapshot", str(self.snapshot)]
+            )
+        self.assertEqual(code, 0, err)
+        plan = json.loads(out)
+        self.out, self.err = io.StringIO(), io.StringIO()
+        with patch("foreman.lifecycle.spawn") as spawn:
+            code, out, err = self.run_cli(
+                self.base() + ["apply", "--assignments", json.dumps(plan),
+                               "--task", "t-owned", "--common", str(self.common),
+                               "--brief", "developer=" + str(self.briefs["developer"])],
+                client=Mock(),
+            )
+        self.assertEqual(code, 1)
+        self.assertEqual(out, "")
+        self.assertIn("supervision-bind", err)
+        spawn.assert_not_called()
+
     def _interrupt_plan(self):
         shipped = Path(__file__).resolve().parent.parent / "config.example.json"
         self.config.write_text(shipped.read_text(encoding="utf-8"), encoding="utf-8")
@@ -493,8 +516,16 @@ class PlanCommandTest(CliCase):
                                "--task", "t-interrupt", "--snapshot", str(self.snapshot)]
             )
         self.assertEqual(code, 0, err)
+        supervision.bind(self.state, {
+            "kind": "id", "value": "foreman-test", "cwd": str(self.tmp),
+            "herdr_env": "test", "pane_id": "foreman-pane",
+        }, AT, root=self.tmp / "bindings")
         self.out, self.err = io.StringIO(), io.StringIO()
         return json.loads(out)
+
+    def _interrupt_reports(self):
+        return [item for role in ("developer", "reviewer")
+                for item in ("--report", "{}={}".format(role, self.tmp / (role + "-report.md")))]
 
     def test_scoped_apply_closes_earlier_panes_when_a_later_spawn_is_interrupted(self):
         plan = self._interrupt_plan()
@@ -506,11 +537,21 @@ class PlanCommandTest(CliCase):
                 self.base() + ["apply", "--assignments", json.dumps(plan),
                                "--task", "t-interrupt", "--now", AT,
                                "--common", str(self.common)]
-                + self.brief_args("developer", "reviewer"),
+                + self.brief_args("developer", "reviewer") + self._interrupt_reports(),
                 client=client,
             )
         close.assert_called_once_with(
             client, plan["assignments"]["developer"], "pane-developer")
+        owner = supervision.load(self.state)
+        self.assertEqual(len(owner["members"]), 1)
+        self.assertFalse(owner["members"][0]["active"])
+        self.assertEqual(
+            supervision.expected_assignment(owner["members"][0])["pane_id"],
+            "pane-developer",
+        )
+        saved, usable = load_state_checked(self.state, persist_migration=False)
+        self.assertTrue(usable)
+        self.assertEqual(saved["recovery"]["dispatches"][0]["status"], "not_sent")
 
     def test_scoped_apply_closes_unused_panes_when_dispatch_is_interrupted(self):
         plan = self._interrupt_plan()
@@ -523,7 +564,7 @@ class PlanCommandTest(CliCase):
                 self.base() + ["apply", "--assignments", json.dumps(plan),
                                "--task", "t-interrupt", "--now", AT,
                                "--common", str(self.common)]
-                + self.brief_args("developer", "reviewer"),
+                + self.brief_args("developer", "reviewer") + self._interrupt_reports(),
                 client=client,
             )
         self.assertEqual(close.call_count, 2)
@@ -541,6 +582,56 @@ class PlanCommandTest(CliCase):
             ),
             {"reviewer-0000000002": 70.0},
         )
+
+    def test_scoped_rotation_provenance_maps_live_identities_back_to_kinds(self):
+        state = empty_state()
+        add_assignment(state, AT, "developer", "developer-0000000001")
+        state["recovery"]["dispatches"] = [
+            {"assignment_index": 0, "worker_kind": "claude"},
+            {"assignment_index": 9, "worker_kind": "ignored"},
+        ]
+        self.assertEqual(cli._worker_kind_provenance(state), {0: "claude"})
+
+    def test_scoped_retained_fix_reuses_the_live_identity_and_kind(self):
+        state = empty_state()
+        add_assignment(
+            state, AT, "developer", "developer-0000000001",
+            task="t-retain", fix_round=None,
+        )
+        state["recovery"]["dispatches"] = [
+            {"assignment_index": 0, "worker_kind": "claude"},
+        ]
+        self.assertEqual(
+            cli._retained_scoped_identity(
+                {"developer": "developer-fresh"}, {"developer": "claude"},
+                state, "t-retain", 1, True, False, {},
+            ),
+            {"developer": "developer-0000000001"},
+        )
+
+    def test_close_task_removes_every_retained_scoped_pane(self):
+        record = self.tmp / "close-task.json"
+        record.write_text(json.dumps({
+            "task": "t-retain", "outcome": "merged", "evidence": "merged-pr",
+        }))
+        args = SimpleNamespace(
+            command="close-task", record=str(record), now=AT,
+            state=str(self.state), config=str(self.config), trace=False,
+        )
+        client = Mock()
+        with patch("foreman.cli.recovery.close_task", return_value={"kind": "task_closed"}), \
+                patch("foreman.cli.members.retained_task_panes", return_value=[
+                    {"agent": "developer-one", "pane_id": "pane-one"},
+                    {"agent": "advisor-one", "pane_id": "pane-two"},
+                ]), \
+                patch("foreman.cli.lifecycle.close", side_effect=[
+                    {"closed": True, "pane_id": "pane-one"},
+                    {"closed": True, "pane_id": "pane-two"},
+                ]) as close_pane:
+            result, error = cli._run_recovery(args, self.state, None, client, None)
+        self.assertIsNone(error)
+        self.assertEqual(len(result["pane_closures"]), 2)
+        self.assertEqual(close_pane.call_count, 2)
 
     def test_plans_from_a_snapshot_file(self):
         code, out, err = self.run_cli(

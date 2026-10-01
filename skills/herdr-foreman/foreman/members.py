@@ -33,6 +33,10 @@ from . import lifecycle
 from .chronology import timestamp
 from .errors import StateError, UsageError
 from .state import load_state_checked
+from .tiers import canonical_role
+
+_CONSULTATION_ROLES = frozenset({"advisor", "investigator", "architect"})
+_RETAINED_FIX_ROUNDS = frozenset({1, 2})
 
 # Task-ledger schema 1 (#589). These constants ARE the ledger's field formats:
 # state-schema.md (Task Ledger) and references/task-ledger.md name them and
@@ -270,7 +274,10 @@ def close(state_path, enrollment, ledger, at, client=None):
             pane = assignment.get("pane_id") or result_record.get("pane_id")
             if not isinstance(pane, str) or not pane:
                 raise StateError("Assignment {} is scoped to a pane but its dispatch records no pane identity; reconcile the original dispatch before closure.".format(enrollment), {})
-            pane_closure = lifecycle.close(client, assignment["agent"], pane)
+            if _keeps_scoped_pane(dispatch, result_record):
+                pane_closure = {"retained": True, "agent": assignment["agent"], "pane_id": pane}
+            else:
+                pane_closure = lifecycle.close(client, assignment["agent"], pane)
         outcome = "Task ledger event {}: {}".format(event.get("id", "unknown"), event["decision"])
         drained = supervision.drain(state_path)
         mine = [row for row in drained["events"] if row["member"] == enrollment]
@@ -282,6 +289,34 @@ def close(state_path, enrollment, ledger, at, client=None):
     return {"schema_version": 1, "enrollment": enrollment, "ledger_event": event.get("id"),
             "decision": event["decision"], "acknowledged": acknowledged, "resolved": resolved,
             "pane_closure": pane_closure}
+
+
+def _keeps_scoped_pane(dispatch, result):
+    """Whether this assessed assignment keeps its pane for a contract retention path."""
+    role = canonical_role((dispatch or {}).get("role") or result.get("role"))
+    if role == "developer":
+        return result.get("fix_round") is None or result.get("fix_round") in _RETAINED_FIX_ROUNDS
+    return role in _CONSULTATION_ROLES and isinstance((dispatch or {}).get("requirements"), dict)
+
+
+def retained_task_panes(state_path, state, task):
+    """Unique retained scoped panes a task closure must remove."""
+    dispatches = {row.get("id"): row for row in state["recovery"]["dispatches"]
+                  if isinstance(row, dict)}
+    panes = {}
+    for member in supervision.load(state_path)["members"]:
+        assignment = supervision.expected_assignment(member)
+        if assignment["task"] != task:
+            continue
+        dispatch = dispatches.get(member["id"])
+        result = dispatch.get("result") if isinstance(dispatch, dict) else None
+        result_record = result if isinstance(result, dict) else {}
+        scoped = (result_record.get("assignment_scoped") is True
+                  or isinstance(dispatch, dict) and isinstance(dispatch.get("worker_kind"), str))
+        pane = assignment.get("pane_id") or result_record.get("pane_id")
+        if scoped and _keeps_scoped_pane(dispatch, result_record) and isinstance(pane, str) and pane:
+            panes[(assignment["agent"], pane)] = {"agent": assignment["agent"], "pane_id": pane}
+    return list(panes.values())
 
 
 def _require_contract(state_path, enrollment, report):
