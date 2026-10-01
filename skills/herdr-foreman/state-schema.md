@@ -36,8 +36,13 @@ and creates nothing at the new path; a command given explicit `--state` and
 - It moves each home to the `foreman` path and leaves the legacy path as a
   link to it, so absolute paths quoted in history still resolve
 - It rewrites each store's `state_path` identity field that names the legacy
-  canonical state path, and nothing else; record shapes and versions are
-  unchanged
+  canonical state path
+- When a retrospective `pending.json` hashes that index ancestry,
+  `migrate-home` rebases `previous_index` to the rewritten identity before the
+  index write. This derived digest is the only other changed JSON value
+- The rebase covers committed and uncommitted journals, including a first
+  record with no index. A retry accepts either side of an interrupted rebase
+- Every record shape and version remains unchanged
 - It refuses a home that exists at both paths, never merging them
 - A second run changes nothing; a run that finds the move done but the link
   or identity fields missing finishes them
@@ -377,6 +382,9 @@ a proposed transition is independent of the daily due decision.
   Writes serialize under the sidecar lock. Identical retries preserve the existing
   record and its completion time; conflicting IDs or pending transactions fail
   with a diagnostic. A journal preserves interrupted recording for reconciliation.
+  Home migration retains receipt path spellings, rebases the journal's ancestry
+  digest to the rewritten index identity, and resumes idempotently after a
+  failure between those two atomic writes.
 - **Readers** — `retro-list` and `retro-show` accept schema 1 and verify installed
   note digests. They read without Herdr, config, dispatch-state migration, or
   writes. `retro-list --since` includes records completed at or after its cutoff;

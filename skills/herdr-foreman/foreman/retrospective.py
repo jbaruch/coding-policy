@@ -96,7 +96,7 @@ def _malformed(label) -> NoReturn:
     raise StateError("Malformed retrospective {}; preserve its bytes and restore the original artifact.".format(label), {})
 
 
-def _is_note_location(recorded, expected):
+def same_location(recorded, expected):
     """Whether a record's quoted note path names the note at `expected`.
 
     `migrate-home` keeps quoted paths as history and leaves the old home as
@@ -105,11 +105,13 @@ def _is_note_location(recorded, expected):
     both paths resolving to the same file, is the same location; anything
     else is not.
     """
+    if not isinstance(recorded, (str, os.PathLike)) or not isinstance(expected, (str, os.PathLike)):
+        return False
     if recorded == str(expected):
         return True
     try:
         return os.path.realpath(recorded) == os.path.realpath(expected)
-    except (OSError, ValueError):
+    except (OSError, TypeError, ValueError):
         return False
 
 
@@ -122,7 +124,7 @@ def _same_record(left, right):
             if set(left_value) == {"path", "sha256", "size"}:
                 return (left_value["sha256"] == right_value["sha256"]
                         and left_value["size"] == right_value["size"]
-                        and _is_note_location(left_value["path"], right_value["path"]))
+                        and same_location(left_value["path"], right_value["path"]))
             return all(same(left_value[key], right_value[key]) for key in left_value)
         if isinstance(left_value, list) and isinstance(right_value, list):
             return len(left_value) == len(right_value) and all(
@@ -132,13 +134,18 @@ def _same_record(left, right):
     return same(left, right)
 
 
+def same_history(left, right):
+    """Whether saved history differs only by equivalent receipt path spellings."""
+    return _same_record(left, right)
+
+
 def _preserve_receipt_paths(current, historical):
     """Keep historical receipt spellings when current paths reach the same bytes."""
     if isinstance(current, dict) and isinstance(historical, dict) and set(current) == set(historical):
         if set(current) == {"path", "sha256", "size"}:
             if (current["sha256"] == historical["sha256"]
                     and current["size"] == historical["size"]
-                    and _is_note_location(current["path"], historical["path"])):
+                    and same_location(current["path"], historical["path"])):
                 return {**current, "path": historical["path"]}
             return current
         return {key: _preserve_receipt_paths(current[key], historical[key]) for key in current}
@@ -315,7 +322,7 @@ def load(path, *, allow_pending=False):
         if name in ids:
             raise StateError("Retrospective ids are duplicated; restore the original index before writing.", {})
         ids.add(name)
-        if not _is_note_location(record["note"]["path"], root / (name + ".md")):
+        if not same_location(record["note"]["path"], root / (name + ".md")):
             _malformed("note location")
         _read_note(record)
     transition_ids = set()
@@ -408,7 +415,7 @@ def _pending(root, index):
         _malformed("pending transaction")
     validate_record(pending["record"])
     row = pending["record"]
-    if not _is_note_location(row["note"]["path"], root / (row["id"] + ".md")):
+    if not same_location(row["note"]["path"], root / (row["id"] + ".md")):
         _malformed("pending note location")
     committed = next((entry for entry in index["records"] if entry["id"] == row["id"]), None)
     if committed:

@@ -2200,7 +2200,7 @@ def cmd_retrospective(args, client=None, warn=None, trace=None):
             raise UsageError("retro-record requires an absolute check receipt path in its metadata.", {})
         saved = _read_record(data["check"])
         if (not isinstance(saved, dict) or saved.get("schema_version") != retrospective.SCHEMA_VERSION
-                or saved.get("state_path") != str(retrospective.canonical_state(path))):
+                or not retrospective.same_location(saved.get("state_path"), retrospective.canonical_state(path))):
             raise UsageError("Retrospective check receipt belongs to another state or schema; rerun `{}` for this --state.".format(
                 runnable.command("retro-check")), {})
         retrospective.validate_coverage(saved.get("coverage"))
@@ -2216,7 +2216,7 @@ def cmd_retrospective(args, client=None, warn=None, trace=None):
     result = retrospective_runtime.check(path, state, client, agents, normalized, at, allow_pending=saved is not None)
     if saved is None:
         return result, None
-    if saved["coverage"] != result["coverage"]:
+    if not retrospective.same_history(saved["coverage"], result["coverage"]):
         raise UsageError("Retrospective worker, report, assignment or target changed since its check; refresh only the affected coverage and the foreman's synthesis before recording.", {})
     checked_at = retrospective.utc(saved.get("checked_at"))
     if checked_at > retrospective.utc(at) or retrospective.utc(data.get("period_end")) < checked_at:
