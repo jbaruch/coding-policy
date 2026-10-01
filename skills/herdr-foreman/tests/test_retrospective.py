@@ -160,6 +160,53 @@ class RetrospectiveTest(unittest.TestCase):
         with patch.dict(os.environ, {"HOME": str(self.root)}):
             self.assertEqual(retro.directory("~/state.json"), self.sidecar)
 
+    def test_historical_note_path_through_home_symlink_loads_without_rewrite(self):
+        current = self.root / "foreman"
+        current.mkdir()
+        self.path = current / "state.json"
+        self.record()
+        legacy = self.root / "teamlead"
+        legacy.symlink_to(current, target_is_directory=True)
+        index = self.index()
+        historical = legacy / self.sidecar.name / "retro-1.md"
+        index["records"][0]["note"]["path"] = str(historical)
+        self.write_index(index)
+        before = (self.sidecar / "index.json").read_bytes()
+
+        self.assertEqual(retro.show(self.path)["record"]["note"]["path"], str(historical))
+        self.assertEqual((self.sidecar / "index.json").read_bytes(), before)
+
+    def test_unrelated_symlink_alias_is_not_migration_history(self):
+        self.record()
+        alias = self.root / "unrelated-alias"
+        alias.symlink_to(self.root, target_is_directory=True)
+        index = self.index()
+        index["records"][0]["note"]["path"] = str(alias / self.sidecar.name / "retro-1.md")
+        self.write_index(index)
+
+        with self.assertRaisesRegex(StateError, "note location"):
+            retro.show(self.path)
+
+    def test_note_alias_must_resolve_to_the_owned_note(self):
+        recorded = self.record()
+        copy_path = self.root / "identical-copy.md"
+        copy_path.write_bytes(Path(recorded["note"]["path"]).read_bytes())
+        index = self.index()
+        index["records"][0]["note"]["path"] = str(copy_path)
+        self.write_index(index)
+
+        with self.assertRaisesRegex(StateError, "note location"):
+            retro.show(self.path)
+
+    def test_unresolvable_note_alias_is_a_malformed_location(self):
+        self.record()
+        index = self.index()
+        index["records"][0]["note"]["path"] = "/absolute/invalid\0note.md"
+        self.write_index(index)
+
+        with self.assertRaisesRegex(StateError, "note location"):
+            retro.show(self.path)
+
     def test_sidecar_lock_serializes_aliases_and_releases_without_stale_flags(self):
         alias = self.root / "alias"
         alias.symlink_to(self.root, target_is_directory=True)
@@ -343,6 +390,18 @@ except StateError:
         retro.require_no_pending(self.path)
         self.record(data={**self.data, "id": "retro-2"}, at=LATER)
         self.assertEqual(len(self.index()["records"]), 2)
+
+    def test_pending_note_alias_must_resolve_to_the_owned_note(self):
+        self.leave_committed_journal()
+        pending_path = self.sidecar / "pending.json"
+        pending = json.loads(pending_path.read_text(encoding="utf-8"))
+        copy_path = self.root / "identical-copy.md"
+        copy_path.write_bytes((self.sidecar / "retro-1.md").read_bytes())
+        pending["record"]["note"]["path"] = str(copy_path)
+        pending_path.write_text(json.dumps(pending), encoding="utf-8")
+
+        with self.assertRaisesRegex(StateError, "pending note location"):
+            self.record(at=LATER)
 
     def test_new_record_can_reconcile_previous_committed_journal(self):
         self.leave_committed_journal()

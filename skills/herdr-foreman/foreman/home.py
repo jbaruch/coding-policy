@@ -11,8 +11,9 @@ make this more than a directory move:
 
 - Owner stores carry a `state_path` identity field that must equal the
   canonical state path, or the store refuses to load. `migrate` rewrites
-  every `state_path` field holding the old canonical path to the new one.
-  Nothing else in a record changes
+  every `state_path` field holding the old canonical path to the new one. A
+  pending retrospective journal's derived ancestry digest is rebased with
+  that identity; no record shape or version changes
 - Records also quote old absolute paths as history: stow required reads,
   retrospective notes, attention evidence. Rewriting history is forbidden, so
   the old home is left as a symlink to the new one and every quoted path
@@ -45,7 +46,9 @@ A failed rename or link raises `StateError` naming what moved; a re-run
 finishes it.
 """
 
+import copy
 import fcntl
+import hashlib
 import json
 import os
 from contextlib import ExitStack, contextmanager
@@ -192,6 +195,68 @@ def _rewrite_identity(value, old, new):
     return value, 0
 
 
+def _digest(value):
+    return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+
+
+def _retrospective_ancestry(index, pending):
+    """Return the index state whose digest a valid pending journal records."""
+    record = pending.get("record") if isinstance(pending, dict) else None
+    records = index.get("records") if isinstance(index, dict) else None
+    if not isinstance(record, dict) or not isinstance(records, list):
+        return None
+    committed_index = next((offset for offset, entry in enumerate(records)
+                            if isinstance(entry, dict) and entry.get("id") == record.get("id")), None)
+    if committed_index is None:
+        return index
+    committed = records[committed_index]
+    if committed != record:
+        return None
+    return {**index, "records": records[:committed_index] + records[committed_index + 1:]}
+
+
+def _rebase_retrospective_pending(path, document, old_state, new_state):
+    """Rebase a retrospective journal across the index identity rewrite."""
+    if not path.parent.name.endswith(".retrospectives"):
+        return None
+    pending_path = path.parent / "pending.json"
+    if path.name == "index.json":
+        if not pending_path.is_file() or pending_path.is_symlink():
+            return None
+        try:
+            pending = json.loads(pending_path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise StateError("Cannot read {} while moving the state home: {}. Restore the file, then run `{}` "
+                             "again; files already rewritten stay valid.".format(
+                                 pending_path, exc, runnable.command("migrate-home")), {"path": str(pending_path)}) from None
+        index = document
+    elif path.name == "pending.json" and not (path.parent / "index.json").exists():
+        pending = document
+        index = {"schema_version": 1, "state_path": old_state,
+                 "baseline_at": None, "records": [], "transitions": []}
+    else:
+        return None
+    if not isinstance(pending, dict) or not isinstance(pending.get("previous_index"), str):
+        return None
+    legacy = copy.deepcopy(index)
+    current = copy.deepcopy(index)
+    legacy, _ = _rewrite_identity(legacy, new_state, old_state)
+    current, _ = _rewrite_identity(current, old_state, new_state)
+    legacy_ancestry = _retrospective_ancestry(legacy, pending)
+    current_ancestry = _retrospective_ancestry(current, pending)
+    if legacy_ancestry is None or current_ancestry is None:
+        return None
+    previous = pending["previous_index"]
+    current_digest = _digest(current_ancestry)
+    if previous == current_digest:
+        return None
+    if previous != _digest(legacy_ancestry):
+        return None
+    pending["previous_index"] = current_digest
+    save_state(pending_path, pending)
+    return {"path": str(pending_path), "fields": 1}
+
+
 def _rewrite_home(home, old_state, new_state):
     rewritten = []
     for path in sorted(home.rglob("*.json")):
@@ -202,6 +267,9 @@ def _rewrite_home(home, old_state, new_state):
         except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
             raise StateError("Cannot read {} while moving the state home: {}. Restore the file, then run `{}` "
                              "again; files already rewritten stay valid.".format(path, exc, runnable.command("migrate-home")), {"path": str(path)}) from None
+        rebased = _rebase_retrospective_pending(path, document, old_state, new_state)
+        if rebased:
+            rewritten.append(rebased)
         document, count = _rewrite_identity(document, old_state, new_state)
         if count:
             save_state(path, document)

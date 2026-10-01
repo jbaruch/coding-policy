@@ -77,7 +77,7 @@ def receipt(path):
 
 def current_receipt(record):
     validate_receipt(record)
-    return receipt(record["path"]) == record
+    return same_history(receipt(record["path"]), record)
 
 
 def _json(path):
@@ -94,6 +94,77 @@ def empty(path):
 
 def _malformed(label) -> NoReturn:
     raise StateError("Malformed retrospective {}; preserve its bytes and restore the original artifact.".format(label), {})
+
+
+def same_location(recorded, expected):
+    """Whether a record's quoted note path names the note at `expected`.
+
+    `migrate-home` keeps quoted paths as history and leaves the old home as
+    a symlink to the new one (`foreman/home.py`), so a note recorded under
+    the old home is the same file reached through that link. Equal text, or
+    both paths resolving to the same file, is the same location; anything
+    else is not.
+    """
+    if not isinstance(recorded, (str, os.PathLike)) or not isinstance(expected, (str, os.PathLike)):
+        return False
+    if recorded == str(expected):
+        return True
+    try:
+        left, right = Path(recorded), Path(expected)
+        if not left.is_absolute() or not right.is_absolute():
+            return False
+        for legacy, current in ((left, right), (right, left)):
+            for current_home in (current, *current.parents):
+                if current_home.name != "foreman":
+                    continue
+                legacy_home = current_home.with_name("teamlead")
+                if (legacy == legacy_home / current.relative_to(current_home)
+                        and legacy_home.is_symlink()
+                        and os.path.realpath(legacy_home) == os.path.realpath(current_home)
+                        and os.path.realpath(legacy) == os.path.realpath(current)):
+                    return True
+        return False
+    except (OSError, TypeError, ValueError):
+        return False
+
+
+def _same_record(left, right):
+    """Whether retry records differ only by equivalent historical receipt paths."""
+    def same(left_value, right_value):
+        if isinstance(left_value, dict) and isinstance(right_value, dict):
+            if set(left_value) != set(right_value):
+                return False
+            if set(left_value) == {"path", "sha256", "size"}:
+                return (left_value["sha256"] == right_value["sha256"]
+                        and left_value["size"] == right_value["size"]
+                        and same_location(left_value["path"], right_value["path"]))
+            return all(same(left_value[key], right_value[key]) for key in left_value)
+        if isinstance(left_value, list) and isinstance(right_value, list):
+            return len(left_value) == len(right_value) and all(
+                same(left_item, right_item) for left_item, right_item in zip(left_value, right_value))
+        return left_value == right_value
+
+    return same(left, right)
+
+
+def same_history(left, right):
+    """Whether saved history differs only by equivalent receipt path spellings."""
+    return _same_record(left, right)
+
+
+def _preserve_receipt_paths(current, historical):
+    """Keep historical receipt spellings when current paths reach the same bytes."""
+    if isinstance(current, dict) and isinstance(historical, dict) and set(current) == set(historical):
+        if set(current) == {"path", "sha256", "size"}:
+            if (current["sha256"] == historical["sha256"]
+                    and current["size"] == historical["size"]
+                    and same_location(current["path"], historical["path"])):
+                return {**current, "path": historical["path"]}
+            return current
+        return {key: _preserve_receipt_paths(current[key], historical[key]) for key in current}
+    if isinstance(current, list) and isinstance(historical, list) and len(current) == len(historical):
+        return [_preserve_receipt_paths(item, saved) for item, saved in zip(current, historical)]
+    return current
 
 
 def _nonempty(value):
@@ -264,7 +335,7 @@ def load(path, *, allow_pending=False):
         if name in ids:
             raise StateError("Retrospective ids are duplicated; restore the original index before writing.", {})
         ids.add(name)
-        if record["note"]["path"] != str(root / (name + ".md")):
+        if not same_location(record["note"]["path"], root / (name + ".md")):
             _malformed("note location")
         _read_note(record)
     transition_ids = set()
@@ -281,7 +352,9 @@ def load(path, *, allow_pending=False):
         if row["id"] in transition_ids:
             _malformed("duplicate transition")
         transition_ids.add(row["id"])
-        if not descriptor["first_start"] and not any(descriptor in record["coverage"] for record in result["records"]):
+        if (not descriptor["first_start"]
+                and not any(same_history(descriptor, saved) for record in result["records"]
+                            for saved in record["coverage"])):
             _malformed("transition coverage provenance")
     return result
 
@@ -357,7 +430,7 @@ def _pending(root, index):
         _malformed("pending transaction")
     validate_record(pending["record"])
     row = pending["record"]
-    if row["note"]["path"] != str(root / (row["id"] + ".md")):
+    if not same_location(row["note"]["path"], root / (row["id"] + ".md")):
         _malformed("pending note location")
     committed = next((entry for entry in index["records"] if entry["id"] == row["id"]), None)
     if committed:
@@ -419,6 +492,9 @@ def record(path, data, coverage, at):
     completed_at = original["completed_at"] if original else at
     if timestamp(completed_at, "Original completion") > timestamp(at, "Record retry"):
         raise UsageError("Retrospective retry precedes its original completion; use the current UTC checkpoint.", {})
+    if original:
+        sources = _preserve_receipt_paths(sources, original["sources"])
+        coverage = _preserve_receipt_paths(coverage, original["coverage"])
     metadata = {"schema_version": SCHEMA_VERSION, "id": name, "completed_at": completed_at,
                 "period_start": start, "period_end": end, "triggers": data["triggers"], "tasks": data["tasks"],
                 "participants": data["participants"], "unavailable": data["unavailable"], "sources": sources, "coverage": coverage}
@@ -431,13 +507,16 @@ def record(path, data, coverage, at):
         _unlink(pending_path)
         pending = None
     if prior:
-        if prior != item:
+        if not _same_record(prior, item):
             raise UsageError("Retrospective id already records different metadata; preserve it and use a new id.", {})
         return {**prior, "replayed": True}
     transaction = {"schema_version": SCHEMA_VERSION, "previous_index": digest(index), "record": item}
     if pending:
-        if pending != transaction:
+        if (pending["schema_version"] != transaction["schema_version"]
+                or pending["previous_index"] != transaction["previous_index"]
+                or not _same_record(pending["record"], transaction["record"])):
             raise StateError("A different retrospective transaction is pending; resume its original record before starting another.", {})
+        item = pending["record"]
     else:
         installed = root / (name + ".md")
         if installed.exists() and file_bytes(installed) != note_data:

@@ -11,7 +11,7 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from foreman import retrospective as notes, retrospective_runtime as runtime
+from foreman import home, retrospective as notes, retrospective_runtime as runtime
 from foreman.assign import apply
 from foreman.cli import main
 from foreman.config import load_config
@@ -76,6 +76,31 @@ class RetrospectiveRuntimeTest(unittest.TestCase):
         rc = main([command, "--state", str(self.path), "--config", str(self.config), *args],
                   stdout=out, stderr=err, client=client or self.client)
         return rc, out.getvalue(), err.getvalue()
+
+    def use_legacy_home(self):
+        state_root, config_root = self.root / "xdg-state", self.root / "xdg-config"
+        old_home, old_config_home = state_root / "teamlead", config_root / "teamlead"
+        old_home.mkdir(parents=True)
+        old_config_home.mkdir(parents=True)
+        self.path = old_home / "state.json"
+        self.config = old_config_home / "config.json"
+        self.config.write_text(json.dumps(cli_fixture.CONFIG), encoding="utf-8")
+        save_state(self.path, self.state)
+        common = old_home / "common.md"
+        common.write_text("Respect scope and report evidence.\n", encoding="utf-8")
+        for step in self.steps:
+            brief = old_home / (step["agent"] + "-brief.md")
+            report = old_home / (step["agent"] + "-report.md")
+            brief.write_text("Read authorized findings.\n", encoding="utf-8")
+            report.write_text("REPORT: completed with saved evidence.\n", encoding="utf-8")
+            step["brief"], step["common"] = str(brief), str(common)
+            self.reports[step["agent"]] = report
+        return {"XDG_STATE_HOME": str(state_root), "XDG_CONFIG_HOME": str(config_root)}
+
+    def finish_home_migration(self, environment):
+        home.migrate(environment)
+        self.path = Path(environment["XDG_STATE_HOME"]) / "foreman" / "state.json"
+        self.config = Path(environment["XDG_CONFIG_HOME"]) / "foreman" / "config.json"
 
     def test_check_is_read_only_and_unknown_running_worker_is_due(self):
         before = self.path.read_bytes()
@@ -215,6 +240,60 @@ class RetrospectiveRuntimeTest(unittest.TestCase):
         rc, _, err = self.invoke("retro-record", "--record", str(record), "--now", AT)
         self.assertEqual(rc, 1)
         self.assertIn("changed since", err)
+
+    def test_cli_resumes_migrated_pending_record_with_aliased_check_and_coverage(self):
+        environment = self.use_legacy_home()
+        request_path = self.root / "external-request.json"
+        request_path.write_text(json.dumps(self.request()), encoding="utf-8")
+        rc, out, err = self.invoke("retro-check", "--record", str(request_path), "--now", AT)
+        self.assertEqual(rc, 0, err)
+        check_path = self.root / "external-check.json"
+        check_path.write_text(out, encoding="utf-8")
+        record_path = self.root / "external-record.json"
+        record_path.write_text(json.dumps({
+            "id": "migrated", "note": str(self.note), "period_start": OLD, "period_end": AT,
+            "triggers": ["daily", "transition"], "tasks": ["old-task"],
+            "participants": ["grok", "codex"], "unavailable": {}, "sources": [],
+            "completed": True, "check": str(check_path),
+        }), encoding="utf-8")
+        with patch.object(notes, "_install_note", side_effect=StateError("interrupted", {})):
+            rc, _, _ = self.invoke("retro-record", "--record", str(record_path), "--now", AT)
+        self.assertEqual(rc, 1)
+
+        self.finish_home_migration(environment)
+        rc, out, err = self.invoke("retro-record", "--record", str(record_path), "--now", AT)
+
+        self.assertEqual(rc, 0, err)
+        self.assertEqual(json.loads(out)["id"], "migrated")
+        self.assertEqual(notes.show(self.path)["record"]["coverage"][0]["agent"], "grok")
+
+    def test_cli_accepts_completed_coverage_after_home_migration(self):
+        environment = self.use_legacy_home()
+        self.record()
+        self.finish_home_migration(environment)
+        request_path = self.root / "completed-request.json"
+        request_path.write_text(json.dumps(self.request()), encoding="utf-8")
+
+        rc, out, err = self.invoke("retro-check", "--record", str(request_path), "--now", AT)
+
+        self.assertEqual(rc, 0, err)
+        result = json.loads(out)
+        self.assertFalse(result["due"])
+        self.assertEqual(result["missing_coverage"], [])
+
+    def test_transition_completed_after_home_migration_reloads(self):
+        environment = self.use_legacy_home()
+        self.record(self.request([self.steps[0]]))
+        self.finish_home_migration(environment)
+        retry = self.guard()
+
+        result = retry.preflight([self.steps[0]])
+        self.runner.set("agent get grok", agent_json("grok", "done", "w4:p1", "own-clear"))
+        retry.after_transition(self.steps[0])
+        reloaded = notes.load(self.path)
+
+        self.assertIsNone(result)
+        self.assertEqual(len(reloaded["transitions"]), 1)
 
     def test_a_retained_seat_is_not_read_as_a_role_change(self):
         # The ledger row records `reviewer` and the dispatch records

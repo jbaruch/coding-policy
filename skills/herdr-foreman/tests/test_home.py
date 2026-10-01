@@ -12,7 +12,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from foreman import home, runnable
+from foreman import home, retrospective, runnable
 from foreman.cli import main
 from foreman.errors import StateError, UsageError
 
@@ -53,6 +53,22 @@ class HomeCase(unittest.TestCase):
 
 
 class MigrateTest(HomeCase):
+    def retrospective_record(self, old_state):
+        old_home = self.state_root / "teamlead"
+        draft = old_home / "draft.md"
+        source = old_home / "source.md"
+        check = old_home / "check.json"
+        draft.write_text("# Retrospective\n" + "".join(
+            "\n## {}\nRecorded outcome and next action.\n".format(section)
+            for section in retrospective.SECTIONS), encoding="utf-8")
+        source.write_text("Saved task evidence.\n", encoding="utf-8")
+        check.write_text("{}\n", encoding="utf-8")
+        data = {"id": "retro-1", "note": str(draft),
+                "period_start": "2026-09-01T10:00:00Z", "period_end": "2026-09-01T11:00:00Z",
+                "triggers": ["daily"], "tasks": ["owner/repo#1"], "participants": ["worker"],
+                "unavailable": {}, "sources": [str(source)], "completed": True, "check": str(check)}
+        return data
+
     def test_moves_both_homes_and_rewrites_only_identity_fields(self):
         old_state = self.legacy_home()
         new_state = str(self.state_root / "foreman" / "state.json")
@@ -78,6 +94,78 @@ class MigrateTest(HomeCase):
         again = home.migrate(self.env)
         self.assertEqual([row["moved"] for row in again["homes"]], [False, False])
         self.assertEqual(sorted((path, path.read_bytes()) for path in (self.state_root / "foreman").rglob("*.json")), before)
+
+    def test_committed_retrospective_journal_replays_after_migration(self):
+        old_state = self.legacy_home()
+        data = self.retrospective_record(old_state)
+        original_unlink = Path.unlink
+
+        def fail_pending(path, *args, **kwargs):
+            if path.name == "pending.json":
+                raise OSError("injected cleanup failure")
+            return original_unlink(path, *args, **kwargs)
+
+        with mock.patch.object(Path, "unlink", fail_pending):
+            with self.assertRaisesRegex(StateError, "reconcile"):
+                with retrospective.lock(old_state):
+                    retrospective.record(old_state, data, [], "2026-09-01T12:00:00Z")
+
+        home.migrate(self.env)
+        new_state = self.state_root / "foreman" / "state.json"
+        with retrospective.lock(new_state):
+            replay = retrospective.record(new_state, data, [], "2026-09-01T13:00:00Z")
+
+        self.assertTrue(replay["replayed"])
+        self.assertIn("/teamlead/", replay["note"]["path"])
+        self.assertFalse((retrospective.directory(new_state) / "pending.json").exists())
+
+    def test_uncommitted_retrospective_journal_resumes_after_migration(self):
+        old_state = self.legacy_home()
+        data = self.retrospective_record(old_state)
+        with mock.patch.object(retrospective, "_install_note", side_effect=StateError("injected install failure", {})):
+            with self.assertRaisesRegex(StateError, "injected install failure"):
+                with retrospective.lock(old_state):
+                    retrospective.record(old_state, data, [], "2026-09-01T12:00:00Z")
+
+        home.migrate(self.env)
+        new_state = self.state_root / "foreman" / "state.json"
+        with retrospective.lock(new_state):
+            saved = retrospective.record(new_state, data, [], "2026-09-01T13:00:00Z")
+
+        self.assertFalse(saved["replayed"])
+        self.assertIn("/teamlead/", saved["note"]["path"])
+        self.assertEqual(retrospective.show(new_state)["record"]["id"], "retro-1")
+
+    def test_pending_rebase_survives_failure_before_index_rewrite(self):
+        old_state = self.legacy_home()
+        data = self.retrospective_record(old_state)
+        original_unlink = Path.unlink
+
+        def fail_pending(path, *args, **kwargs):
+            if path.name == "pending.json":
+                raise OSError("injected cleanup failure")
+            return original_unlink(path, *args, **kwargs)
+
+        with mock.patch.object(Path, "unlink", fail_pending):
+            with self.assertRaisesRegex(StateError, "reconcile"):
+                with retrospective.lock(old_state):
+                    retrospective.record(old_state, data, [], "2026-09-01T12:00:00Z")
+        real_save = home.save_state
+
+        def fail_index(path, value):
+            if path.name == "index.json" and path.parent.name.endswith(".retrospectives"):
+                raise StateError("injected index rewrite failure", {})
+            return real_save(path, value)
+
+        with mock.patch.object(home, "save_state", side_effect=fail_index):
+            with self.assertRaisesRegex(StateError, "injected index rewrite failure"):
+                home.migrate(self.env)
+
+        home.migrate(self.env)
+        new_state = self.state_root / "foreman" / "state.json"
+        with retrospective.lock(new_state):
+            saved = retrospective.record(new_state, data, [], "2026-09-01T13:00:00Z")
+        self.assertEqual(saved["id"], "retro-1")
 
     def test_a_move_interrupted_before_its_link_is_finished_by_a_rerun(self):
         self.legacy_home()
