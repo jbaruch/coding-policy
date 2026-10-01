@@ -22,7 +22,7 @@ import json
 import shutil
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 from pathlib import Path
 
 from types import SimpleNamespace
@@ -202,6 +202,67 @@ class ParserTest(unittest.TestCase):
         with contextlib.redirect_stderr(io.StringIO()):
             with self.assertRaises(SystemExit):
                 build_parser().parse_args(["apply"])
+
+    def test_relaunch_worker_takes_one_configured_name(self):
+        args = build_parser().parse_args(["relaunch-worker", "claude", "--now", AT])
+        self.assertEqual((args.command, args.name, args.now), ("relaunch-worker", "claude", AT))
+
+
+class RelaunchWorkerCommandTest(unittest.TestCase):
+    def args(self):
+        return SimpleNamespace(name="claude", config="/tmp/config.json", state="/tmp/state.json", now=AT, trace=False)
+
+    def agent(self):
+        return SimpleNamespace(name="claude", kind="claude", tiers={"build": {"model": "sonnet-5", "effort": "high"}},
+                               launch_args=(), composer_glyph="❯ ")
+
+    def test_relaunch_has_retrospective_coverage_and_no_dispatch(self):
+        agent = self.agent()
+        client = Mock()
+        client.agent_get.return_value = {"name": "claude", "agent": "claude", "agent_status": "idle", "pane_id": "w1:p2"}
+        state = {"assignments": [{"at": AT, "agent": "claude", "role": "developer", "task": "issue-673"}],
+                 "recovery": {"dispatches": []}}
+        tier = {"model": "sonnet-5", "effort": "high"}
+        prior = {"source": "process_argv", "argv": ["claude"], "model": "sonnet-5", "effort": "high"}
+        verified = {**prior, "pid": 202, "pane_id": "w1:p2"}
+        events = []
+        guard = Mock()
+        guard.prepare_relaunch.side_effect = lambda item: events.append(("prepare", item))
+        guard.before.side_effect = lambda step: events.append(("before", step))
+        guard.before_launch.side_effect = lambda step: events.append(("before_launch", step))
+        guard.after_transition.side_effect = lambda step, **kwargs: events.append(("after", step, kwargs))
+
+        def relaunch(_client, _agent, _pane, _tier, before_transition, before_start):
+            self.assertEqual(events[0][0], "prepare")
+            before_transition()
+            before_start()
+
+        with patch("foreman.cli.load_config", return_value=[agent]), \
+                patch("foreman.cli.retrospective_runtime.read_history", return_value=state), \
+                patch("foreman.cli.retrospective_runtime.Guard", return_value=guard), \
+                patch("foreman.cli.configured_running_tier", return_value=(tier, prior)), \
+                patch("foreman.cli.restart_worker", side_effect=relaunch), \
+                patch("foreman.cli.verify_running", return_value=verified):
+            result, failure = cli.cmd_relaunch_worker(self.args(), client=client)
+
+        self.assertIsNone(failure)
+        self.assertIsNone(result["dispatch"])
+        self.assertIs(result["argv_verified"], True)
+        self.assertEqual(result["verified"], verified)
+        self.assertEqual([event[0] for event in events], ["prepare", "before", "before_launch", "after"])
+        transition = events[0][1]
+        self.assertEqual((transition["role"], transition["task"], transition["context"]),
+                         ("developer", "issue-673", "clear"))
+
+    def test_busy_worker_refuses_before_inspecting_or_terminating_process(self):
+        agent = self.agent()
+        client = Mock()
+        client.agent_get.return_value = {"name": "claude", "agent": "claude", "agent_status": "working", "pane_id": "w1:p2"}
+        with patch("foreman.cli.load_config", return_value=[agent]), \
+                patch("foreman.cli.configured_running_tier") as configured:
+            with self.assertRaisesRegex(cli.AgentBusyError, "not idle"):
+                cli.cmd_relaunch_worker(self.args(), client=client)
+        configured.assert_not_called()
 
 
 class TraceFlagTest(CliCase):

@@ -235,6 +235,19 @@ sent. A failure after termination may leave a shell or an unbriefed worker;
 inspect the named pane before retrying. No command is sent to a working or
 blocked worker.
 
+### Maintenance Relaunch
+
+`foreman relaunch-worker <name>` is the owner route for the same verified
+relaunch outside a dispatch, including recovery from a pending CLI update that
+blocks measurement. It accepts no tier override: the old process argv must
+prove exactly one model/effort pair in that worker's current tier table. Before
+termination it requires the worker to be idle, its visible composer to be
+empty, and retrospective coverage for the outgoing assignment. It then starts
+the same configured pair with normalized `launch_args` and YOLO mode, reads
+the new foreground process, and returns `verified.source: process_argv` with
+`dispatch: null`. A working or blocked worker, an occupied composer, an
+unconfigured live pair, or a changed pane/process refuses before termination.
+
 `--no-clear` and `--retain-context` verify the running foreground process
 arguments, including YOLO mode, instead of restarting it. If the process record lacks argv, the
 transport reads `ps` for that same foreground PID. Older Herdr builds that

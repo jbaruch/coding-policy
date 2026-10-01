@@ -87,6 +87,33 @@ def verify_running(client, agent, pane, tier):
     return {**proof, "source": "process_argv", "pid": process["pid"], "pane_id": pane}
 
 
+def configured_running_tier(client, agent, pane):
+    """Return the configured tier proved by this pane's live process argv.
+
+    A maintenance relaunch has no plan from which to select a tier. Preserve
+    the exact configured model/effort already running instead of silently
+    choosing a row or accepting an operator override.
+    """
+    launch_args = worker_launch_args(agent.kind, agent.launch_args)
+    process = foreground_agent(client, pane, agent.kind)
+    matches = []
+    for tier in agent.tiers.values():
+        try:
+            proof = verify_argv(agent.kind, tier, process["argv"], launch_args)
+        except HerdrError:
+            continue
+        key = (proof["model"], proof["effort"])
+        if all((row[0]["model"], row[0].get("effort")) != key for row in matches):
+            matches.append((dict(tier), proof))
+    if len(matches) != 1:
+        raise HerdrError(
+            "Worker {}'s live argv does not prove one configured tier; restore a configured model/effort before relaunching it.".format(agent.name),
+            {"agent": agent.name, "pane": pane, "configured_matches": len(matches)},
+        )
+    tier, proof = matches[0]
+    return tier, {**proof, "source": "process_argv", "pid": process["pid"], "pane_id": pane}
+
+
 def verify_running_permissions(client, agent, pane):
     worker_launch_args(agent.kind, agent.launch_args)
     process = foreground_agent(client, pane, agent.kind)

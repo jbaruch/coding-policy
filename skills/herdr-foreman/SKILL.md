@@ -4,7 +4,7 @@ description: >
   Run Herdr rounds as a nonworking foreman on a selected, verified tier:
   assign, supervise, accept or reject, never do the crew's work. Covers on-demand specialists, model tiers, bounded briefs,
   report verification, and release gates. Use for requests to dispatch the Herdr
-  team, balance worker usage, collect reports, run or retrieve retrospectives,
+  team, check worker capacity, restart or relaunch idle workers, collect reports, run or retrieve retrospectives,
   catch up on outstanding user attention, curate team lessons, save and resume
   foreman handoffs, or report a task's cost or resource use through acceptance.
   Live rounds require HERDR_ENV; saved memory, attention and cost reports work
@@ -182,6 +182,8 @@ bash "$CP/skills/herdr-foreman/foreman.sh" capability-show
 - **Exit 1** — report the `blocking` reasons verbatim. Each names the command
   that produced it; re-run that one, not the preflight. A `foreman_tier` block
   beside a failed `headroom` check waits on that measurement; fix it first.
+  A named `foreman relaunch-worker <name>` recovery follows
+  `references/model-tiers.md` Maintenance Relaunch, then re-runs the preflight.
   Otherwise it means this pane does not run the foreman's selected tier:
   record a user-attention blocker naming `start-foreman`
   (`skills/herdr-foreman/references/model-tiers.md` Foreman Seat) and finish here.
@@ -257,7 +259,8 @@ bash "$CP/skills/herdr-foreman/foreman.sh" measure
 
 Emits and saves headroom, windows, state, `tier_billing`, and `failed_agents`.
 Busy workers are skipped. Unmeasured billing stays `unknown`. Report failed
-measurements and obtain their readings before relying on those seats.
+measurements and obtain their readings before relying on those seats. A pending
+CLI update follows `references/model-tiers.md` Maintenance Relaunch.
 
 Usage and `--trace` contracts:
 

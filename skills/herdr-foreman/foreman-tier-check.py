@@ -68,8 +68,21 @@ def headroom_row(common, clock, measure):
         return {"status": "skipped"}
     code, out = run([*common, "measure", *clock])
     if code != 0:
+        payload, _problem = json_object(out)
+        records = payload.get("agents") if payload is not None else None
+        pending = [] if not isinstance(records, dict) else [
+            name for name, row in records.items()
+            if isinstance(row, dict) and isinstance(row.get("error"), dict)
+            and isinstance(row["error"].get("details"), dict)
+            and row["error"]["details"].get("pending_cli_update") is True
+        ]
+        recovery = ("; relaunch the idle updated worker{} with {}".format(
+            "s" if len(pending) != 1 else "",
+            ", ".join("`foreman relaunch-worker {}`".format(name) for name in sorted(pending)))
+                    if pending else "")
         return {"status": "failed",
-                "reason": "foreman measure exited {}; a seat cannot be ranked on an unmeasured roster".format(code)}
+                "reason": "foreman measure exited {}; a seat cannot be ranked on an unmeasured roster{}".format(code, recovery),
+                **({"detail": payload} if payload is not None else {})}
     payload, problem = json_object(out)
     if problem:
         return {"status": "blocked",

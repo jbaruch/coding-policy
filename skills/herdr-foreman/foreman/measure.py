@@ -60,6 +60,7 @@ DEFAULT_MARKER_POLL_INTERVAL_SEC = 1.0
 #: it opens with. Grok's has three (Context usage / Usage limit / Session
 #: info). Bounded so a dialog whose tabs do not cycle cannot spin forever.
 MAX_DIALOG_TABS = 3
+PENDING_CLI_UPDATE = "Update installed · Restart"
 
 
 def wait_for_usage_report(client, agent, pane_id, marker_timeout_ms=DEFAULT_MARKER_TIMEOUT_MS, read_lines=DEFAULT_READ_LINES, poll_attempts=DEFAULT_MARKER_POLL_ATTEMPTS, poll_interval_sec=DEFAULT_MARKER_POLL_INTERVAL_SEC, sleep=time.sleep, warn=None, max_tabs=MAX_DIALOG_TABS):
@@ -133,6 +134,15 @@ def wait_for_usage_report(client, agent, pane_id, marker_timeout_ms=DEFAULT_MARK
         text = read()
 
     if agent.usage_marker not in text:
+        details = {
+            "agent": agent.name,
+            "marker": agent.usage_marker,
+            "pane_id": pane_id,
+            "poll_attempts": poll_attempts,
+            "dialog_tabs_tried": tabs,
+        }
+        if PENDING_CLI_UPDATE in text:
+            details["pending_cli_update"] = True
         raise HerdrError(
             "{!r} never appeared in {}'s pane. Tried `herdr pane wait-output "
             "--match` for {}ms, then {} reads of `herdr agent read {} --source "
@@ -149,13 +159,7 @@ def wait_for_usage_report(client, agent, pane_id, marker_timeout_ms=DEFAULT_MARK
                 poll_interval_sec,
                 " Tabbed through the dialog {} times too.".format(tabs) if tabs else "",
             ),
-            {
-                "agent": agent.name,
-                "marker": agent.usage_marker,
-                "pane_id": pane_id,
-                "poll_attempts": poll_attempts,
-                "dialog_tabs_tried": tabs,
-            },
+            details,
         )
     return text
 
@@ -225,7 +229,12 @@ def measure_agent(client, agent, marker_timeout_ms=DEFAULT_MARKER_TIMEOUT_MS, re
             warn=warn,
             max_tabs=max_tabs,
         )
-        parsed = parse_usage(agent.kind, text)
+        try:
+            parsed = parse_usage(agent.kind, text)
+        except ParseError as exc:
+            if PENDING_CLI_UPDATE in text:
+                exc.details["pending_cli_update"] = True
+            raise
     finally:
         # Always dismiss the report, including when the wait timed out, the
         # read failed, or the parse failed. A usage dialog left open flips the
@@ -295,7 +304,7 @@ def measure(client, agents, measured_at, marker_timeout_ms=DEFAULT_MARKER_TIMEOU
                 # measurement failed would then be judged against nobody.
                 "window_group": agent.window_group,
                 "skipped": False,
-                "error": {"code": exc.code, "message": exc.message},
+                "error": {"code": exc.code, "message": exc.message, "details": exc.details},
             }
     return {
         "schema_version": MEASURE_SCHEMA_VERSION,

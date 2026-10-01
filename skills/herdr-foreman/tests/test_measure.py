@@ -118,6 +118,7 @@ GROK_PANE = "     Weekly limit: 0%\n     Next reset: September 6, 12:55\n     Cr
 # Marker present, numbers absent: gets past the marker wait, fails the parse.
 GROK_UNPARSEABLE_PANE = "  Weekly limit is a thing this agent has, apparently\n"
 CLAUDE_UNPARSEABLE_PANE = "  Current week was fine, no numbers though\n"
+CLAUDE_UPDATE_PANE = "  Update installed · Restart\n  Current week was fine, no numbers though\n"
 GROK_DIALOG_PANE = (
     "│  Weekly limit (X Premium+)      │\n"
     "│  ░░░░░░░░░░░░░░░░░░░░░░  1%     │\n"
@@ -771,6 +772,22 @@ class DialogAlwaysClosesTest(unittest.TestCase):
 
 
 class FailureTest(unittest.TestCase):
+    def test_pending_cli_update_is_machine_readable_on_parse_failure(self):
+        runner = runner_with({"claude": "idle"}, {"claude": CLAUDE_UPDATE_PANE})
+        snapshot = measure(HerdrClient(runner=runner), [BY_NAME["claude"]], AT)
+        error = snapshot["agents"]["claude"]["error"]
+        self.assertEqual(error["code"], "parse_error")
+        self.assertIs(error["details"]["pending_cli_update"], True)
+
+    def test_pending_cli_update_is_machine_readable_when_marker_never_appears(self):
+        pane = "  Update installed · Restart\n  Restart this worker to continue\n"
+        runner = runner_with({"claude": "idle"}, {"claude": pane})
+        snapshot = measure(HerdrClient(runner=runner), [BY_NAME["claude"]], AT,
+                           poll_attempts=0, poll_interval_sec=0)
+        error = snapshot["agents"]["claude"]["error"]
+        self.assertEqual(error["code"], "herdr_error")
+        self.assertIs(error["details"]["pending_cli_update"], True)
+
     def test_unparseable_pane_still_closes_the_dialog(self):
         runner = runner_with({"claude": "idle"}, {"claude": CLAUDE_UNPARSEABLE_PANE})
         snapshot = measure(HerdrClient(runner=runner), [BY_NAME["claude"]], AT)

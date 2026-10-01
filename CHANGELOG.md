@@ -1,5 +1,15 @@
 # Changelog
 
+### Added
+
+- **Idle workers can be relaunched outside a dispatch (Closes #673).**
+  `foreman relaunch-worker <name>` preserves the live configured tier, requires
+  retrospective transition coverage, refuses a busy worker or occupied
+  composer, restarts with configured YOLO launch arguments, and proves the new
+  process argv. When measurement sees `Update installed · Restart`, round
+  preflight names the affected worker's relaunch command in its headroom
+  blocker.
+
 ### Fixed
 
 - **Headroom measurement cannot resubmit a recalled Codex prompt (Closes
