@@ -780,6 +780,13 @@ CODEX_GLYPH_FIRST_CONTINUATION = (
     "  › {}Ask Codex to do anything{}\n"
     "    {}› recalled continuation{}\n"
 ).format(DIM, RESET, DIM, RESET)
+CODEX_BLANK_THEN_CONTINUATION = (
+    "  › {}Ask Codex to do anything{}\n"
+    "\n"
+    "    {}stale second paragraph{}\n"
+    "\n"
+    "  gpt-5.6-sol high · ~/Projects/example\n"
+).format(DIM, RESET, DIM, RESET)
 
 
 class PlaceholderTest(unittest.TestCase):
@@ -838,6 +845,12 @@ class PlaceholderTest(unittest.TestCase):
         composer = inspect_composer(CODEX_GLYPH_FIRST_CONTINUATION, BY_NAME["codex"])
         self.assertTrue(composer.occupied)
         self.assertIn("recalled continuation", composer.content)
+
+    def test_an_embedded_blank_does_not_hide_later_recalled_text(self):
+        composer = inspect_composer(CODEX_BLANK_THEN_CONTINUATION, BY_NAME["codex"])
+        self.assertTrue(composer.occupied)
+        self.assertIn("stale second paragraph", composer.content)
+        self.assertNotIn("gpt-5.6-sol", composer.content)
 
     def test_recovery_is_refused_for_a_placeholder(self):
         composer = inspect_composer(CODEX_PLACEHOLDER_PLAIN, BY_NAME["codex"])

@@ -203,10 +203,7 @@ def composer_text(pane_text, glyph, ignore_dim=False):
         visible = strip_ansi(raw)
         if visible.strip().startswith(prefix):
             indent = len(visible) - len(visible.lstrip())
-            contiguous = found_index is not None and not any(
-                not strip_ansi(row).strip() for row in rows[found_index + 1 : index]
-            )
-            if contiguous and found_indent is not None and indent > found_indent:
+            if found_indent is not None and indent > found_indent:
                 continue
             found = raw
             found_index = index
@@ -222,14 +219,15 @@ def composer_text(pane_text, glyph, ignore_dim=False):
     # Codex wraps recalled multiline input onto indented rows below the glyph
     # row. Those rows are still part of the composer: ignoring them can turn a
     # recalled prompt whose first row equals the empty hint into an exact
-    # placeholder match. A continuation is contiguous and more indented than
-    # the glyph row; the blank before Codex's footer ends it.
+    # placeholder match. A continuation is more indented than the glyph row;
+    # blank rows may be part of recalled input, while Codex's footer returns to
+    # the glyph row's indentation and ends the scan.
     visible_found = strip_ansi(found)
     glyph_indent = len(visible_found) - len(visible_found.lstrip())
     for raw in rows[(found_index or 0) + 1 :]:
         visible = strip_ansi(raw)
         if not visible.strip():
-            break
+            continue
         indent = len(visible) - len(visible.lstrip())
         if indent <= glyph_indent:
             break
