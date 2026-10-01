@@ -26,6 +26,18 @@ RESET_A = "reset-window-a"
 RESET_B = "reset-window-b"
 
 
+def maintenance_tier():
+    return {
+        "kind": "claude", "model": "sonnet-5", "effort": "high",
+        "launch_args": ["--dangerously-skip-permissions"],
+        "verified": {
+            "source": "process_argv", "pid": 202, "pane_id": "w1:p2",
+            "model": "sonnet-5", "effort": "high",
+            "argv": ["claude", "--dangerously-skip-permissions", "--model", "sonnet-5", "--effort", "high"],
+        },
+    }
+
+
 def snapshot(at, **agents):
     """`agents` maps a name to `(remaining_pct, resets, window_group)`."""
     return {"schema_version": 3, "measured_at": at, "agents": {
@@ -69,6 +81,13 @@ class ReportTest(unittest.TestCase):
         add_assignment(state, REVIEW, "release", "codex", "unknown", task="t")
         coordination = only(state)["coordination"]
         self.assertEqual((coordination["unstarted_assignments"], coordination["unknown_outcome_assignments"]), (1, 1))
+
+    def test_a_maintenance_relaunch_is_not_an_unstarted_assignment(self):
+        state = delivered(close=None)
+        add_assignment(state, REVIEW, "developer", "claude", "maintenance", task="t",
+                       cleared=True, clear_reason="automatic", tier=maintenance_tier())
+        coordination = only(state)["coordination"]
+        self.assertEqual((coordination["unstarted_assignments"], coordination["unknown_outcome_assignments"]), (1, 0))
 
     def test_every_unrecorded_field_is_named(self):
         self.assertEqual(report(delivered())["unrecorded"], list(UNRECORDED))

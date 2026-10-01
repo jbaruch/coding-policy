@@ -273,6 +273,11 @@ class Guard:
         current = self._require(self.requests[step["agent"]])
         self.original.setdefault(step["agent"], current)
 
+    def prepare_relaunch(self, item):
+        """Register and preflight one owner-command relaunch transition."""
+        self.requests[item["agent"]] = item
+        self.before({"agent": item["agent"]})
+
     def after_transition(self, step, *, launch_proof=None):
         """Bind only our submitted clear or verified launch to its resulting identity."""
         item = self.requests[step["agent"]]

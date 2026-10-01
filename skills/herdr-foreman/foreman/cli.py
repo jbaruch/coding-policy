@@ -31,16 +31,17 @@ from .assign import APPLY_SCHEMA_VERSION, dry_run, freeze_decision, freeze_paths
 from . import renderable
 from . import attention, capabilities, chronology, churn, composition, engagement, foreman_queue, foreman_reset, historical, home, load_set, members, memory, oracle, partition, recovery, report_delivery, report_gates, restoration, role_clear, retrospective, retrospective_runtime, supervision, supervision_gate, supervision_runtime, triggers
 from .config import FOREMAN_CONFIG_VERSION, default_config_path, load_config, load_foreman, load_judge, load_role_costs, select_agents
-from .errors import PlanError, StateError, ForemanError, UsageError
+from .errors import AgentBusyError, PlanError, StateError, ForemanError, HerdrError, UsageError
 from .herdr import (
     DEFAULT_MARKER_TIMEOUT_MS,
     DEFAULT_SETTLE_TIMEOUT_MS,
     HerdrClient,
+    READY_STATES,
     trace_enabled_in_env,
 )
 from .composer import COMPOSER_SETTLE_SEC, DEFAULT_START_TIMEOUT_MS
 from .tiers import SEAT_SEPARATOR, canonical_role, require_seatable
-from .diagnostics import PREFIX as DIAGNOSTIC_PREFIX
+from .diagnostics import PREFIX as DIAGNOSTIC_PREFIX, stderr_warn
 from .measure import (
     DEFAULT_MARKER_POLL_ATTEMPTS,
     DEFAULT_MARKER_POLL_INTERVAL_SEC,
@@ -50,9 +51,9 @@ from .measure import (
 from .planner import plan as build_plan
 from .planner import headroom_of
 from .tiers import (COORDINATION_ROUND, FOREMAN_ROLE, JUDGMENT_ROUNDS, MissingTierError,
-                    parse_launch_args, parse_tiers, select_tier)
+                    parse_launch_args, parse_tiers, select_tier, worker_launch_args)
 from . import cost_report, selection
-from .launch import start_foreman, start_worker, verify_foreman, verify_running
+from .launch import configured_running_tier, restart_worker, start_foreman, start_worker, verify_foreman, verify_running
 from .state import (
     add_assignment,
     add_snapshot,
@@ -62,6 +63,7 @@ from .state import (
     load_state_checked,
     role_counts,
     save_state,
+    STATUS_MAINTENANCE,
     state_lock,
 )
 
@@ -135,6 +137,11 @@ def build_parser():
     judge_parser.add_argument("--judge-mode", choices=recovery.JUDGE_MODES,
                               help="What this judge seat is for; the plan's recorded mode when omitted.")
     judge_parser.add_argument("--now", metavar="ISO")
+
+    relaunch = sub.add_parser("relaunch-worker", parents=[common],
+                              help="Relaunch one idle worker on its currently configured argv, outside a dispatch.")
+    relaunch.add_argument("name")
+    relaunch.add_argument("--now", metavar="ISO")
 
     start_foreman = sub.add_parser("start-foreman", parents=[common],
                                    help="Start the configured foreman seat in a shell pane and verify its launch argv.")
@@ -2041,6 +2048,69 @@ def cmd_start_judge(args, client=None, warn=None, trace=None):
             "pane": args.pane, "argv_verified": True, "verified": proof}, None
 
 
+def cmd_relaunch_worker(args, client=None, warn=None, trace=None):
+    """Relaunch one idle configured worker without creating a dispatch."""
+    agent = select_agents(load_config(_config_path(args)), [args.name])[0]
+    client = client if client is not None else _client(args, trace=trace)
+    live = client.agent_get(agent.name)
+    pane = live.get("pane_id")
+    if live.get("agent_status") not in READY_STATES or not isinstance(pane, str) or not pane:
+        raise AgentBusyError("Worker {!r} is not idle in a live pane; wait for readiness before relaunching it.".format(agent.name),
+                             {"agent": agent.name, "state": live.get("agent_status"), "pane": pane})
+    tier, previous = configured_running_tier(client, agent, pane)
+    state_path = _state_path(args)
+    state = _load_state_for_write(state_path, warn)
+    latest = chronology.latest_assignment(state["assignments"], agent=agent.name)
+    if latest is None:
+        row = None
+        role, task = "idle", None
+    else:
+        offset, row = latest
+        dispatch = next((entry for entry in reversed(state.get("recovery", {}).get("dispatches", []))
+                         if entry.get("assignment_index") == offset and entry.get("agent") == agent.name), None)
+        role, task = (dispatch or {}).get("role") or row.get("role") or "idle", row.get("task")
+    item = retrospective_runtime.request({"transitions": [{
+        "agent": agent.name, "role": role, "model": tier["model"], "effort": tier.get("effort"),
+        "context": "clear", "task": task, "pane": pane,
+    }]})["transitions"][0]
+    at = args.now or now_iso()
+    guard = retrospective_runtime.Guard(state_path, state, client, {agent.name: agent}, at)
+    guard.prepare_relaunch(item)
+    step = {"agent": agent.name}
+    restart_worker(client, agent, pane, tier, before_transition=lambda: guard.before(step),
+                   before_start=lambda: guard.before_launch(step), expected_process=previous,
+                   recovery_command=runnable.command(
+                       "relaunch-worker {}".format(shlex.quote(agent.name))
+                   ))
+    verified = verify_running(client, agent, pane, tier)
+    guard.after_transition(step, launch_proof=verified)
+    tier_record = {"kind": agent.kind, "model": tier["model"], "effort": tier.get("effort"),
+                   "launch_args": worker_launch_args(agent.kind, agent.launch_args),
+                   "verified": verified}
+    try:
+        context_session = native_context_session(client.agent_get(agent.name), agent.kind)
+    except HerdrError:
+        (warn or stderr_warn)(
+            "The worker restarted and its process tier was verified, but its optional native session "
+            "evidence could not be read; recording the maintenance relaunch with context_session null."
+        )
+        context_session = None
+    add_assignment(
+        state, at, role, agent.name, status=STATUS_MAINTENANCE,
+        cleared=True, clear_reason="automatic", task=task,
+        fix_round=row.get("fix_round") if row else None,
+        context_session=context_session,
+        tier=tier_record,
+        requirements=row.get("requirements") if row else None,
+        reviewer_scope=row.get("reviewer_scope") if row else None,
+        judge_mode=row.get("judge_mode") if row and canonical_role(role) == "judge" else None,
+    )
+    save_state(state_path, state)
+    return {"agent": agent.name, "pane": pane, "tier": tier, "previous": previous,
+            "argv_verified": True, "verified": verified, "dispatch": None,
+            "assignment_index": len(state["assignments"]) - 1}, None
+
+
 #: The minimal `foreman` block the unconfigured warning tells the operator to add.
 FOREMAN_BLOCK_SNIPPET = ('"foreman": {"agent": "foreman", "kind": "claude", "window_group": "<window-group>", '
                          '"tiers": {"coordination": {"model": "<model>", "effort": "<effort>"}}}')
@@ -2482,6 +2552,7 @@ COMMANDS = {
     "verify-oracle": cmd_verify_oracle,
     "verify-ruling": cmd_verify_ruling,
     "start-judge": cmd_start_judge,
+    "relaunch-worker": cmd_relaunch_worker,
     "start-foreman": cmd_start_foreman,
     "verify-foreman": cmd_verify_foreman,
     "probe-report": cmd_probe_report,
@@ -2548,7 +2619,7 @@ def main(argv=None, stdout=None, stderr=None, client=None):
             separate_owner = args.command in memory.COMMANDS | attention.COMMANDS | report_gates.COMMANDS | SUPERVISION_COMMANDS | restoration.COMMANDS | {"foreman-reset-deliver", "foreman-reset-reconcile", "close-member"}
             lock = nullcontext() if readonly or separate_owner else state_lock(retrospective.canonical_state(_state_path(args)))
             with lock:
-                retro_lock = retrospective.lock(_state_path(args)) if not readonly and args.command in {"apply", "start-judge", "retro-record"} else nullcontext()
+                retro_lock = retrospective.lock(_state_path(args)) if not readonly and args.command in {"apply", "start-judge", "relaunch-worker", "retro-record"} else nullcontext()
                 with retro_lock:
                     payload, failure = COMMANDS[args.command](args, client=client, warn=warn, trace=trace)
     except ForemanError as exc:

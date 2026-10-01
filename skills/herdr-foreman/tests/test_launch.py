@@ -10,7 +10,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from foreman.config import Agent
 from foreman.errors import AgentBusyError, ConfigError, HerdrError
-from foreman.launch import NAME_POLL_ATTEMPTS, NAME_TAKEN_RETRIES, restart_worker, start_worker, verify_running
+from foreman.launch import NAME_POLL_ATTEMPTS, NAME_TAKEN_RETRIES, configured_running_tier, restart_worker, start_worker, verify_running
 
 
 def herdr_error(code, message="refused"):
@@ -82,6 +82,70 @@ TIER = {"model": "opus-5", "effort": "high"}
 
 
 class LaunchTest(unittest.TestCase):
+    def test_live_configured_tier_is_selected_from_process_argv(self):
+        client = Client()
+        agent = worker()
+        agent.tiers = {
+            "build": {"model": "sonnet-5", "effort": "high"},
+            "review": TIER,
+        }
+        client.process["argv"] = ["claude", "--dangerously-skip-permissions", "--model", "sonnet-5", "--effort", "high"]
+        tier, proof = configured_running_tier(client, agent, "w1:p2")
+        self.assertEqual((tier["model"], tier["effort"]), ("sonnet-5", "high"))
+        self.assertEqual(proof["source"], "process_argv")
+
+    def test_unconfigured_live_argv_cannot_be_guessed_for_relaunch(self):
+        client = Client()
+        agent = worker()
+        agent.tiers = {"review": TIER}
+        client.process["argv"] = ["claude", "--dangerously-skip-permissions", "--model", "sonnet-5", "--effort", "high"]
+        with self.assertRaisesRegex(HerdrError, "does not prove one configured tier"):
+            configured_running_tier(client, agent, "w1:p2")
+
+    def test_maintenance_relaunch_is_bound_to_the_process_that_proved_the_tier(self):
+        client = Client()
+        agent = worker()
+        agent.tiers = {"build": {"model": "sonnet-5", "effort": "high"}}
+        client.process["argv"] = ["claude", "--dangerously-skip-permissions", "--model", "sonnet-5", "--effort", "high"]
+        tier, selected = configured_running_tier(client, agent, "w1:p2")
+        client.process["pid"] = 201
+        with self.assertRaisesRegex(HerdrError, "apply"):
+            restart_worker(client, agent, "w1:p2", tier, expected_process=selected, sleep=lambda _: None)
+        self.assertFalse(client.terminated)
+
+    def test_maintenance_caller_can_name_its_own_recovery_command(self):
+        client = Client()
+        client.process["pid"] = 201
+        with self.assertRaisesRegex(HerdrError, "relaunch-worker claude"):
+            restart_worker(
+                client, worker(), "w1:p2", TIER,
+                expected_process={**client.process, "pid": 200},
+                recovery_command="foreman-wrapper relaunch-worker claude",
+                sleep=lambda _: None,
+            )
+        self.assertFalse(client.terminated)
+
+    def test_process_is_rechecked_after_retrospective_before_termination(self):
+        client = Client()
+
+        def switch_argv():
+            client.process["argv"] = ["claude", "--dangerously-skip-permissions", "--model", "sonnet-5", "--effort", "high"]
+
+        with self.assertRaisesRegex(HerdrError, "changed during the retrospective relaunch check"):
+            restart_worker(client, worker(), "w1:p2", TIER, before_transition=switch_argv, sleep=lambda _: None)
+        self.assertFalse(client.terminated)
+
+    def test_composer_is_rechecked_after_retrospective_before_termination(self):
+        client = Client()
+
+        def occupy_composer():
+            client.composer = "❯ unfinished operator text"
+
+        with self.assertRaisesRegex(HerdrError, "composer holds input"):
+            restart_worker(client, worker(), "w1:p2", TIER,
+                           before_transition=occupy_composer, sleep=lambda _: None)
+        self.assertFalse(client.terminated)
+
     def test_fresh_round_terminates_only_the_foreground_agent_and_starts_requested_flags(self):
         client = Client()
         proof = restart_worker(client, worker(), "w1:p2", TIER, sleep=lambda _: None)

@@ -13,7 +13,9 @@ if _ROOT not in _sys.path:
 
 import inspect
 import copy
+import json
 import unittest
+from unittest.mock import Mock, patch
 
 from foreman.config import parse_config
 from foreman.errors import HerdrError, ParseError
@@ -118,6 +120,7 @@ GROK_PANE = "     Weekly limit: 0%\n     Next reset: September 6, 12:55\n     Cr
 # Marker present, numbers absent: gets past the marker wait, fails the parse.
 GROK_UNPARSEABLE_PANE = "  Weekly limit is a thing this agent has, apparently\n"
 CLAUDE_UNPARSEABLE_PANE = "  Current week was fine, no numbers though\n"
+CLAUDE_UPDATE_PANE = "  Update installed · Restart\n  Current week was fine, no numbers though\n"
 GROK_DIALOG_PANE = (
     "│  Weekly limit (X Premium+)      │\n"
     "│  ░░░░░░░░░░░░░░░░░░░░░░  1%     │\n"
@@ -771,6 +774,36 @@ class DialogAlwaysClosesTest(unittest.TestCase):
 
 
 class FailureTest(unittest.TestCase):
+    def test_snapshot_redacts_messages_and_whitelists_safe_error_details(self):
+        secret = "ghp_abcdefghijklmnopqrstuvwxyz123456"
+        failure = HerdrError(
+            "herdr failed with token={}".format(secret),
+            {"command": "herdr --token {}".format(secret), "stderr": secret,
+             "pending_cli_update": True},
+        )
+        with patch("foreman.measure.measure_agent", side_effect=failure):
+            snapshot = measure(Mock(), [BY_NAME["claude"]], AT)
+        error = snapshot["agents"]["claude"]["error"]
+        self.assertNotIn(secret, json.dumps(error))
+        self.assertIn("[redacted]", error["message"])
+        self.assertEqual(error["details"], {"pending_cli_update": True})
+
+    def test_pending_cli_update_is_machine_readable_on_parse_failure(self):
+        runner = runner_with({"claude": "idle"}, {"claude": CLAUDE_UPDATE_PANE})
+        snapshot = measure(HerdrClient(runner=runner), [BY_NAME["claude"]], AT)
+        error = snapshot["agents"]["claude"]["error"]
+        self.assertEqual(error["code"], "parse_error")
+        self.assertIs(error["details"]["pending_cli_update"], True)
+
+    def test_pending_cli_update_is_machine_readable_when_marker_never_appears(self):
+        pane = "  Update installed · Restart\n  Restart this worker to continue\n"
+        runner = runner_with({"claude": "idle"}, {"claude": pane})
+        snapshot = measure(HerdrClient(runner=runner), [BY_NAME["claude"]], AT,
+                           poll_attempts=0, poll_interval_sec=0)
+        error = snapshot["agents"]["claude"]["error"]
+        self.assertEqual(error["code"], "herdr_error")
+        self.assertIs(error["details"]["pending_cli_update"], True)
+
     def test_unparseable_pane_still_closes_the_dialog(self):
         runner = runner_with({"claude": "idle"}, {"claude": CLAUDE_UNPARSEABLE_PANE})
         snapshot = measure(HerdrClient(runner=runner), [BY_NAME["claude"]], AT)
@@ -805,7 +838,7 @@ class SnapshotTest(unittest.TestCase):
             {"claude": CLAUDE_PANE, "grok": GROK_PANE},
         )
         snapshot = measure(HerdrClient(runner=runner), AGENTS, AT)
-        self.assertEqual(snapshot["schema_version"], 3)
+        self.assertEqual(snapshot["schema_version"], 4)
         self.assertEqual(snapshot["measured_at"], AT)
         self.assertEqual(sorted(snapshot["agents"]), ["claude", "codex", "grok"])
         self.assertEqual(snapshot["failed_agents"], [])

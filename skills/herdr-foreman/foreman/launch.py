@@ -87,6 +87,33 @@ def verify_running(client, agent, pane, tier):
     return {**proof, "source": "process_argv", "pid": process["pid"], "pane_id": pane}
 
 
+def configured_running_tier(client, agent, pane):
+    """Return the configured tier proved by this pane's live process argv.
+
+    A maintenance relaunch has no plan from which to select a tier. Preserve
+    the exact configured model/effort already running instead of silently
+    choosing a row or accepting an operator override.
+    """
+    launch_args = worker_launch_args(agent.kind, agent.launch_args)
+    process = foreground_agent(client, pane, agent.kind)
+    matches = []
+    for tier in agent.tiers.values():
+        try:
+            proof = verify_argv(agent.kind, tier, process["argv"], launch_args)
+        except HerdrError:
+            continue
+        key = (proof["model"], proof["effort"])
+        if all((row[0]["model"], row[0].get("effort")) != key for row in matches):
+            matches.append((dict(tier), proof))
+    if len(matches) != 1:
+        raise HerdrError(
+            "Worker {}'s live argv does not prove one configured tier; restore a configured model/effort before relaunching it.".format(agent.name),
+            {"agent": agent.name, "pane": pane, "configured_matches": len(matches)},
+        )
+    tier, proof = matches[0]
+    return tier, {**proof, "source": "process_argv", "pid": process["pid"], "pane_id": pane}
+
+
 def verify_running_permissions(client, agent, pane):
     worker_launch_args(agent.kind, agent.launch_args)
     process = foreground_agent(client, pane, agent.kind)
@@ -219,8 +246,10 @@ def start_after_release(client, agent, pane, tier, sleep=time.sleep, before_star
             retries += 1
 
 
-def restart_worker(client, agent, pane, tier, sleep=time.sleep, before_transition=None, before_start=None):
+def restart_worker(client, agent, pane, tier, sleep=time.sleep, before_transition=None, before_start=None,
+                   expected_process=None, recovery_command=None):
     worker_launch_args(agent.kind, agent.launch_args)
+    rerun = recovery_command or runnable.command("apply")
     if not isinstance(pane, str) or not pane or not agent.composer_glyph:
         raise HerdrError("Tier relaunch needs a live pane and configured composer glyph; fix the agent config.", {})
     info = client.agent_get(agent.name)
@@ -230,17 +259,62 @@ def restart_worker(client, agent, pane, tier, sleep=time.sleep, before_transitio
         raise AgentBusyError("Worker is no longer idle in the planned pane; wait before relaunch.", {})
     ensure_ready(client, agent, pane_id=pane, sleep=sleep)
     process = foreground_agent(client, pane, agent.kind)
-    # Recheck native occupant and readiness immediately before termination.
+    if expected_process is not None and (
+        process.get("pid") != expected_process.get("pid")
+        or process.get("argv") != expected_process.get("argv")
+    ):
+        raise HerdrError(
+            "Worker process changed after its configured tier was proved; no process was terminated. "
+            "Inspect pane {}, wait for {} to stay idle, then rerun `{}` so its tier is proved "
+            "again.".format(pane, agent.name, rerun),
+            {"agent": agent.name, "pane": pane},
+        )
+    # Check native occupant and readiness before any transition callback.
     fresh = client.agent_get(agent.name)
     if (fresh.get("agent_status") not in READY_STATES or fresh.get("pane_id") != pane
             or fresh.get("terminal_id") != info.get("terminal_id")
             or fresh.get("agent_session") != info.get("agent_session")):
-        raise AgentBusyError("Worker changed during relaunch checks; no process was terminated.", {})
-    if foreground_agent(client, pane, agent.kind).get("pid") != process.get("pid"):
-        raise HerdrError("Foreground PID changed during relaunch checks; inspect the pane.", {})
+        raise AgentBusyError(
+            "Worker changed during relaunch checks; no process was terminated. Inspect pane {}, wait "
+            "for {} to stay idle, then rerun `{}`.".format(pane, agent.name, rerun),
+            {"agent": agent.name, "pane": pane},
+        )
     if before_transition is not None:
         before_transition()
-    client.terminate_process(process.get("pid"))
+    # Retrospective I/O can take long enough for the worker to change. Bind the
+    # destructive operation to the same native occupant, PID, and argv after
+    # that callback, immediately before termination.
+    final = client.agent_get(agent.name)
+    if (final.get("agent_status") not in READY_STATES or final.get("pane_id") != pane
+            or final.get("terminal_id") != info.get("terminal_id")
+            or final.get("agent_session") != info.get("agent_session")):
+        raise AgentBusyError(
+            "Worker changed during the retrospective relaunch check; no process was terminated. Wait "
+            "for {} to become idle, refresh retrospective coverage if requested, then rerun "
+            "`{}`.".format(agent.name, rerun),
+            {"agent": agent.name, "pane": pane},
+        )
+    ensure_ready(client, agent, pane_id=pane, sleep=sleep)
+    final = client.agent_get(agent.name)
+    if (final.get("agent_status") not in READY_STATES or final.get("pane_id") != pane
+            or final.get("terminal_id") != info.get("terminal_id")
+            or final.get("agent_session") != info.get("agent_session")):
+        raise AgentBusyError(
+            "Worker changed during the final composer check; no process was terminated. Inspect pane "
+            "{}, clear or wait out the composer or session change, then rerun `{}` only once {} is "
+            "idle.".format(pane, rerun, agent.name),
+            {"agent": agent.name, "pane": pane},
+        )
+    final_process = foreground_agent(client, pane, agent.kind)
+    if (final_process.get("pid") != process.get("pid")
+            or final_process.get("argv") != process.get("argv")):
+        raise HerdrError(
+            "Foreground process changed during the retrospective relaunch check; no process was "
+            "terminated. Inspect pane {}, confirm the intended process is stable, then rerun "
+            "`{}`.".format(pane, rerun),
+            {"agent": agent.name, "pane": pane},
+        )
+    client.terminate_process(final_process.get("pid"))
     for attempt in range(SHELL_POLL_ATTEMPTS):
         if holds_only_shell(client.pane_process_info(pane)):
             return start_after_release(client, agent, pane, tier, sleep=sleep, before_start=before_start)

@@ -95,7 +95,7 @@ dispatch. All are documented in
 
 `window_group` names the usage window an agent shares with other agents: two
 workers authenticating as one subscription declare the same value, `measure`
-copies it onto each record (snapshot `schema_version` 3), and `plan` charges a seat's cost against every
+copies it onto each record (introduced in snapshot schema 2; current schema 4), and `plan` charges a seat's cost against every
 worker in that window. An agent that declares none has a window to itself.
 
 The optional top-level `judge` key pins the judge agent, model, and effort.
@@ -418,11 +418,11 @@ skills/herdr-foreman/references/retrospectives.md
 
 ```json
 {
-  "schema_version": 9,
+  "schema_version": 10,
   "snapshots": ["<measure output>, oldest first, ring capped at 20"],
   "assignments": [
     {
-      "schema_version": 9,
+      "schema_version": 10,
       "at": "2026-09-01T21:00:00+00:00",
       "role": "developer",
       "agent": "grok",
@@ -461,16 +461,16 @@ skills/herdr-foreman/references/retrospectives.md
 
 | Field | Type | Meaning |
 | ----- | ---- | ------- |
-| `schema_version` | integer | Currently `9`. Version 9 adds `judge_mode` to every row: the judge seat's declared mode, `unknown` for a judge row migrated from before it, null for other roles. Version 8 drops the retired qualification battery's summary from `tier`; migration removes it from older rows. Version 7 adds `pressure_headroom` and `de_escalated` to a row's `tier`; an older tier row migrates to null headroom and `de_escalated: false`, since nothing could de-escalate before it. Bumped on any shape change |
+| `schema_version` | integer | Currently `10`. Version 10 adds the non-counting assignment status `maintenance`; version 9 adds `judge_mode` to every row: the judge seat's declared mode, `unknown` for a judge row migrated from before it, null for other roles. Version 8 drops the retired qualification battery's summary from `tier`; migration removes it from older rows. Version 7 adds `pressure_headroom` and `de_escalated` to a row's `tier`; an older tier row migrates to null headroom and `de_escalated: false`, since nothing could de-escalate before it. Bumped on any shape change |
 | `snapshots` | array | Whole `measure` documents, oldest first; the ring holds the last 20 |
 | `assignments` | array | Append-only ledger of who held which role |
-| `snapshots[].schema_version` | integer | Currently `3`. Version 2 added `window_group`; version 3 adds per-round `tier_billing`. Older snapshots migrate on read, preserving headroom and shared-window membership |
+| `snapshots[].schema_version` | integer | Currently `4`. Version 2 added `window_group`; version 3 adds per-round `tier_billing`; version 4 adds `error.details` to failed agent records. Older snapshots migrate on read, preserving headroom and shared-window membership |
 | `snapshots[].agents[].window_group` | string | The usage window this agent shares with others; empty means a window of its own. Present on every agent record, including skipped and failed ones — pool membership is config, not a measurement result |
 | `assignments[].schema_version` | integer | The row's own version, stamped on write |
 | `assignments[].at` | string | ISO-8601 timestamp, from `--now` or the CLI's clock |
 | `assignments[].role` | string | The role handed out |
 | `assignments[].agent` | string | The agent that received it |
-| `assignments[].status` | string | `applied`, `sent_but_not_started`, or `unknown` |
+| `assignments[].status` | string | `applied`, `sent_but_not_started`, `maintenance`, or `unknown`. `maintenance` records a verified relaunch without a dispatch and does not count as role experience |
 | `assignments[].cleared` | boolean or null | Whether the dispatcher confirmed its automatic clear; null means historical evidence is unavailable |
 | `assignments[].clear_reason` | string | `automatic` with cleared true, `hand` or `retained` with cleared false, or `unknown` with cleared null |
 | `assignments[].task` | string or null | Non-empty stable task identifier; null for older or unlabelled assignments |
@@ -478,7 +478,7 @@ skills/herdr-foreman/references/retrospectives.md
 | `assignments[].context_session` | object or null | Verified native session reference scoped to a pane: `pane_id`, `source`, `agent`, `kind`, `value`, all non-empty strings; kind is `id` or `path`. Null means continuity was not established |
 
 | `snapshots[].agents[].tier_billing` | object | Round → `{model, effort, window}` for configured tiers; unmeasured attribution is `unknown`. Empty for older snapshots |
-| `assignments[].tier` | object or null | Requested `round`, selected config `tier_row`, `kind`, `model`, `effort`, declared/effective multipliers, billing window, launch options, input `prompt_hash`, `pressure_headroom` and `de_escalated` (the measured headroom the selection used, and whether the tier the worker runs at still falls short of a declined discretionary escalation), and `verified` proof. Null for old or non-tiered dispatches |
+| `assignments[].tier` | object or null | A tiered dispatch records requested `round`, selected config `tier_row`, `kind`, `model`, `effort`, declared/effective multipliers, billing window, launch options, input `prompt_hash`, `pressure_headroom`, `de_escalated`, and `verified` proof. A `maintenance` row is not a dispatch: it records only `kind`, `model`, `effort`, normalized `launch_args`, `pressure_headroom: null`, `de_escalated: false`, and `verified`; dispatch-only selection, billing, and prompt fields are absent. Null for old or non-tiered dispatches |
 | `assignments[].requirements` | object or null | Normalized requirement object from the assigned role in the plan; null for legacy assignments |
 | `assignments[].reviewer_scope` | string or null | Reviewer participation recorded as `verification`, `design`, or `unknown`; null for other roles. Older reviewers migrate to `unknown` |
 | `assignments[].judge_mode` | string or null | The mode the judge seat was dispatched for: `adjudication`, `diagnosis`, or `unknown`; null for other roles. A weighing is an `adjudication`; its report is the ruling file `skills/release/dismiss-ruled-review.sh` reads, never a record this state owns. Older judge rows migrate to `unknown`, and a reconciled dispatch whose receipt predates the field records `unknown`. A live judge dispatch with no declared mode is refused, never defaulted |
@@ -494,8 +494,9 @@ as length-framed byte strings; the generated metadata footer is excluded.
 Every hand-off is recorded, one that never started included: the ledger is what
 the tool did, and a round that went out and died is the thing worth looking up
 afterwards. `status` keeps that honesty out of the plan — `role_counts` skips
-rows marked `sent_but_not_started`, so an assignment nobody began never counts
-as experience of the role. The skip list is a deny-list: a version 1 row
+rows marked `sent_but_not_started` or `maintenance`, so an assignment nobody
+began and a relaunch that sent no assignment never count as experience of the
+role. The skip list is a deny-list: a version 1 row
 migrated forward carries `unknown` and still counts, which says the tool cannot
 prove the outcome rather than that the history should vanish.
 
@@ -539,7 +540,7 @@ gains empty `hand_clearances` and `historical_attempts` arrays. Existing
 record shapes, contents and evidence remain unchanged. Recovery 4 → 5 changes
 only the enclosing version. Older stores containing future dispatch fields or
 versions are refused without rewriting. State and assignment versions migrate
-independently; snapshot schema 3 remains unchanged.
+independently; snapshot schema 4 carries failed-record details through its own 3 → 4 migration.
 Every record carries `at` and `task`. Authorizations contain the actual operator
 message `source` and `quote`; evidence receipts contain absolute `path` and
 `sha256` of the bytes read by the owner. Receipts are audit evidence, not a
@@ -686,7 +687,10 @@ proof and marks its result `recovered: true`; it preserves the original row.
 Each snapshot is one `measure` document: `schema_version`, `measured_at`, an
 `agents` object keyed by agent name (`kind`, `state`, `herdr_state`,
 `state_source`, `pane_id`, `windows`, `credits`, `plan`, `headroom_pct`,
-`skipped`), and `failed_agents`. `headroom_pct` is the minimum `remaining_pct`
+`skipped`), and `failed_agents`. A failed agent carries `error.code`,
+`error.message`, and `error.details`; a usage failure whose pane shows the
+pending-update banner sets `error.details.pending_cli_update` to true so the
+round preflight can name its maintenance relaunch command. `headroom_pct` is the minimum `remaining_pct`
 across that agent's windows. `state_source` is `herdr` or `probe`, naming which
 signal decided `state`; `herdr_state` carries what herdr claimed. `plan` is an
 informational plan name and never feeds headroom.
@@ -697,6 +701,12 @@ informational plan name and never feeds headroom.
   clear/relaunch, persists sending before terminal input, and appends the
   confirmed or unconfirmed outcome before cosmetic labels. Owner commands
   manage task/approval/recovery records; all mutations preserve audit events.
+  `relaunch-worker` appends one `maintenance` row only after the replacement
+  process is live and its configured pair is verified. It preserves the latest
+  role, task, fix, requirements, reviewer, and judge provenance, plus the live
+  native session when available. Because it creates no dispatch, its `tier`
+  uses the maintenance variant above and carries no round selection, billing,
+  prompt hash, or dispatch receipt.
   Writes are atomic: temp file in the same directory, `fsync`,
   `os.replace`.
 - **Readers** — `plan` reads the newest snapshot plus the ledger (role history
@@ -718,6 +728,12 @@ informational plan name and never feeds headroom.
   report's attribution predicate holds. What each field counts, and that
   predicate, are the contract of `skills/herdr-foreman/foreman/cost_report.py`
   (module docstring), not restated here.
+  Readers identify the maintenance tier variant by `status: maintenance`.
+  `role_counts` excludes it from assignment experience; `cost-report` excludes
+  it from both work and `unstarted_assignments`; chronology may still use its
+  preserved role/task provenance as the latest owner event. Readers validate
+  its shared tier proof (`kind`, pair, launch arguments, pressure defaults and
+  `verified`) without inventing absent dispatch-only fields.
   `skills/herdr-foreman/prune-report-caches.py` reads `recovery.dispatches[]`
   `brief` and `common` paths to find reports directories, without writing or
   migrating; an unusable or unmigrated state file is its `could_not_check`,
@@ -865,8 +881,12 @@ Only the owner migrates, and it reads a version in one of three directions.
   `specialist_assessments`; assignment `5 → 6` adds null `requirements` and
   `reviewer_scope: unknown` for reviewers, null for other roles. Migration never
   assumes an older reviewer only verified work. Unexpected newer fields in an
-  older document or row refuse migration. Snapshot `2 → 3` independently adds
-  empty `tier_billing` maps, preserving window groups and readings. Each row is migrated even in
+  older document or row refuse migration. State and assignment `9 → 10` stamp
+  the new version without changing older assignment evidence; only new owner
+  writes may use `maintenance`. Snapshot `2 → 3` independently adds
+  empty `tier_billing` maps, preserving window groups and readings. Snapshot
+  `3 → 4` adds an empty `error.details` object to failed records, preserving
+  their code and message. Each row is migrated even in
   a document already at the current version.
 - **Newer** — this build is the lagging reader, not the migrator. The caller
   gets an empty document in memory, the file on disk is left exactly as found,

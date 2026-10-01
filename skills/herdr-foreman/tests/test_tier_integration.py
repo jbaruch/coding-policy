@@ -511,7 +511,7 @@ class TierIntegrationTest(CliCase):
         rc, output, error = self.run_cli(["measure", *self.base(), "--now", AT], client=HerdrClient("herdr", runner))
         self.assertEqual(rc, 0, error)
         result = json.loads(output)
-        self.assertEqual(result["schema_version"], 3)
+        self.assertEqual(result["schema_version"], 4)
         self.assertEqual(result["agents"]["claude"]["tier_billing"]["build"]["window"], "unknown")
         self.assertTrue(result["agents"]["claude"]["skipped"])
 

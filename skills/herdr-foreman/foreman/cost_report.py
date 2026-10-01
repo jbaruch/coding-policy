@@ -39,7 +39,7 @@ from datetime import timezone
 from .chronology import timestamp
 from .errors import UsageError
 from .recovery import task_closure
-from .state import UNCOUNTED_STATUSES
+from .state import STATUS_NOT_STARTED, UNCOUNTED_STATUSES
 from .tiers import canonical_role, measured_pressure
 
 REPORT_SCHEMA_VERSION = 1
@@ -197,7 +197,9 @@ def _task_report(task, store, assignments, snapshots):
                                           for field, kind in COORDINATION_EVENTS.items()}
     # `unknown` is an unrecoverable outcome, not proof nothing started, so it
     # is counted apart from the hand-offs known never to have started.
-    coordination["unstarted_assignments"] = sum(1 for _at, row in rows if row.get("status") in UNCOUNTED_STATUSES)
+    coordination["unstarted_assignments"] = sum(
+        1 for _at, row in rows if row.get("status") == STATUS_NOT_STARTED
+    )
     coordination["unknown_outcome_assignments"] = sum(
         1 for _at, row in rows if row.get("status") not in UNCOUNTED_STATUSES and row.get("status") != "applied")
     coordination["foreman_tokens"] = UNKNOWN

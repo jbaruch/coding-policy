@@ -23,6 +23,7 @@ from foreman import recovery
 from foreman.state import (
     MAX_SNAPSHOTS,
     MIGRATIONS,
+    SNAPSHOT_SCHEMA_VERSION,
     STATE_SCHEMA_VERSION,
     UNVERSIONED,
     add_assignment,
@@ -35,6 +36,23 @@ from foreman.state import (
     role_counts,
     save_state,
 )
+
+
+def maintenance_tier():
+    return {
+        "kind": "claude",
+        "model": "sonnet-5",
+        "effort": "high",
+        "launch_args": ["--dangerously-skip-permissions"],
+        "verified": {
+            "source": "process_argv",
+            "pid": 202,
+            "pane_id": "w1:p2",
+            "model": "sonnet-5",
+            "effort": "high",
+            "argv": ["claude", "--dangerously-skip-permissions", "--model", "sonnet-5", "--effort", "high"],
+        },
+    }
 
 
 class EmptyStateTest(unittest.TestCase):
@@ -66,6 +84,20 @@ class RoundTripTest(unittest.TestCase):
         save_state(self.path, state)
         self.assertTrue(self.path.exists())
         self.assertEqual(load_state(self.path), state)
+
+    def test_maintenance_relaunch_preserves_an_authorized_later_fix_without_a_dispatch(self):
+        state = empty_state()
+        add_assignment(
+            state, "2026-01-02T03:04:05+00:00", "developer", "claude",
+            status="maintenance", cleared=True, clear_reason="automatic",
+            task="owner/repo#673", fix_round=recovery.DEFAULT_FIX_LIMIT + 1,
+            tier=maintenance_tier(),
+        )
+        save_state(self.path, state)
+        loaded, usable = load_state_checked(self.path, warn=lambda _message: None)
+        self.assertTrue(usable)
+        self.assertEqual(loaded["assignments"][0]["fix_round"], recovery.DEFAULT_FIX_LIMIT + 1)
+        self.assertEqual(loaded["recovery"]["dispatches"], [])
 
     def test_save_is_idempotent(self):
         state = empty_state()
@@ -214,7 +246,7 @@ class MigrationTest(unittest.TestCase):
     # -- newer: no usable prior state, file untouched ------------------------
 
     def test_v2_context_migration_preserves_counts_and_snapshot_version(self):
-        snapshot = {"schema_version": 2, "agents": {"grok": {"window_group": "pool"}}}
+        snapshot = {"schema_version": 2, "agents": {"grok": {"window_group": "pool"}}, "failed_agents": []}
         row = {"schema_version": 2, "at": "2026-01-01T00:00:00+00:00",
                "role": "developer", "agent": "grok", "status": "applied"}
         for version in (2, STATE_SCHEMA_VERSION):
@@ -223,7 +255,9 @@ class MigrationTest(unittest.TestCase):
                             "schema_version": version, "snapshots": [snapshot], "assignments": [row]})
                 migrated = self.load()
                 self.assertEqual(migrated["schema_version"], STATE_SCHEMA_VERSION)
-                self.assertEqual(migrated["snapshots"], [{"schema_version": 3, "agents": {"grok": {"window_group": "pool", "tier_billing": {}}}}])
+                self.assertEqual(migrated["snapshots"], [{"schema_version": SNAPSHOT_SCHEMA_VERSION,
+                                                          "agents": {"grok": {"window_group": "pool", "tier_billing": {}}},
+                                                          "failed_agents": []}])
                 self.assertEqual(migrated["assignments"], [dict(
                     row, schema_version=STATE_SCHEMA_VERSION, cleared=None,
                     clear_reason="unknown", task=None, fix_round=None, context_session=None, tier=None,
@@ -232,6 +266,82 @@ class MigrationTest(unittest.TestCase):
                 self.assertEqual(role_counts(migrated), {"developer": {"grok": 1}})
                 self.assertEqual(self.on_disk(), migrated)
                 self.assertEqual(self.load(), migrated)
+
+    def test_snapshot_v3_failure_migrates_with_empty_error_details(self):
+        state = empty_state()
+        state["snapshots"] = [{
+            "schema_version": 3,
+            "agents": {"claude": {"error": {"code": "parse_error", "message": "old failure"}}},
+            "failed_agents": ["claude"],
+        }]
+        self.write(state)
+        migrated = self.load()
+        snapshot = migrated["snapshots"][0]
+        self.assertEqual(snapshot["schema_version"], SNAPSHOT_SCHEMA_VERSION)
+        self.assertEqual(snapshot["agents"]["claude"]["error"],
+                         {"code": "parse_error", "message": "old failure", "details": {}})
+        self.assertEqual(self.on_disk(), migrated)
+
+    def test_snapshot_v3_malformed_failed_error_is_refused_unchanged(self):
+        for error in (None, [], {"code": "parse_error"},
+                      {"code": "parse_error", "message": "old", "details": []},
+                      {"code": "parse_error", "message": "old", "details": {}}):
+            with self.subTest(error=error):
+                state = empty_state()
+                record = {} if error is None else {"error": error}
+                state["snapshots"] = [{"schema_version": 3, "agents": {"claude": record},
+                                       "failed_agents": ["claude"]}]
+                self.write(state)
+                before = self.path.read_text(encoding="utf-8")
+                _loaded, usable = load_state_checked(self.path, warn=self.warnings.append)
+                self.assertFalse(usable)
+                self.assertEqual(self.path.read_text(encoding="utf-8"), before)
+
+    def test_snapshot_v3_unlisted_error_record_is_refused_unchanged(self):
+        state = empty_state()
+        state["snapshots"] = [{
+            "schema_version": 3,
+            "agents": {"claude": {"error": {"code": "parse_error", "message": "old"}}},
+            "failed_agents": [],
+        }]
+        self.write(state)
+        before = self.path.read_text(encoding="utf-8")
+        _loaded, usable = load_state_checked(self.path, warn=self.warnings.append)
+        self.assertFalse(usable)
+        self.assertEqual(self.path.read_text(encoding="utf-8"), before)
+
+    def test_malformed_current_maintenance_rows_are_refused_unchanged(self):
+        for mutation in ("no_tier", "dispatch_field", "nonautomatic"):
+            with self.subTest(mutation=mutation):
+                state = empty_state()
+                add_assignment(state, "2026-01-01T00:00:00+00:00", "developer", "claude",
+                               status="maintenance", cleared=True, clear_reason="automatic",
+                               tier=maintenance_tier())
+                row = state["assignments"][0]
+                if mutation == "no_tier":
+                    row["tier"] = None
+                elif mutation == "dispatch_field":
+                    row["tier"]["round"] = "build"
+                else:
+                    row.update(cleared=False, clear_reason="retained")
+                self.write(state)
+                before = self.path.read_text(encoding="utf-8")
+                _loaded, usable = load_state_checked(self.path, warn=self.warnings.append)
+                self.assertFalse(usable)
+                self.assertEqual(self.path.read_text(encoding="utf-8"), before)
+
+    def test_schema_nine_cannot_backfill_the_unowned_maintenance_status(self):
+        state = empty_state()
+        add_assignment(state, "2026-01-01T00:00:00+00:00", "developer", "claude",
+                       status="maintenance", cleared=True, clear_reason="automatic",
+                       tier=maintenance_tier())
+        state["schema_version"] = 9
+        state["assignments"][0]["schema_version"] = 9
+        self.write(state)
+        before = self.path.read_text(encoding="utf-8")
+        _loaded, usable = load_state_checked(self.path, warn=self.warnings.append)
+        self.assertFalse(usable)
+        self.assertEqual(self.path.read_text(encoding="utf-8"), before)
 
     def test_context_modes_round_trip_without_conflating_their_evidence(self):
         state = empty_state()
@@ -366,6 +476,16 @@ class MigrationTest(unittest.TestCase):
     def test_a_non_object_assignment_row_starts_empty(self):
         self.write({"schema_version": STATE_SCHEMA_VERSION, "snapshots": [], "assignments": ["nope"]})
         self.assertEqual(self.load(), empty_state())
+
+    def test_an_unhashable_assignment_status_is_refused_unchanged(self):
+        state = empty_state()
+        add_assignment(state, "2026-01-01T00:00:00+00:00", "developer", "grok")
+        state["assignments"][0]["status"] = []
+        self.write(state)
+        before = self.path.read_text(encoding="utf-8")
+        _loaded, usable = load_state_checked(self.path, warn=self.warnings.append)
+        self.assertFalse(usable)
+        self.assertEqual(self.path.read_text(encoding="utf-8"), before)
 
     def test_a_non_integer_version_starts_empty(self):
         self.write({"schema_version": "1", "snapshots": [], "assignments": []})
@@ -591,6 +711,32 @@ class AssignmentStatusTest(unittest.TestCase):
         add_assignment(state, "a", "developer", "grok", status="sent_but_not_started")
         self.assertEqual(role_counts(state), {})
 
+    def test_a_maintenance_row_is_written_but_not_role_experience(self):
+        state = empty_state()
+        add_assignment(state, "a", "developer", "grok", status="maintenance",
+                       cleared=True, clear_reason="automatic", tier=maintenance_tier())
+        self.assertEqual(state["assignments"][0]["status"], "maintenance")
+        self.assertEqual(role_counts(state), {})
+
+    def test_an_unknown_assignment_status_is_refused_before_write(self):
+        state = empty_state()
+        with self.assertRaisesRegex(UsageError, "assignment status"):
+            add_assignment(state, "a", "developer", "grok", status="typo")
+        self.assertEqual(state["assignments"], [])
+
+    def test_malformed_maintenance_evidence_is_refused_before_write(self):
+        state = empty_state()
+        for cleared, reason, tier in (
+            (True, "automatic", None),
+            (False, "retained", {"kind": "claude"}),
+        ):
+            with self.subTest(cleared=cleared, reason=reason), self.assertRaisesRegex(
+                UsageError, "maintenance assignment"
+            ):
+                add_assignment(state, "a", "developer", "grok", status="maintenance",
+                               cleared=cleared, clear_reason=reason, tier=tier)
+        self.assertEqual(state["assignments"], [])
+
     def test_applied_rows_count(self):
         state = empty_state()
         add_assignment(state, "a", "developer", "grok")
@@ -751,6 +897,7 @@ class SnapshotMigrationTest(unittest.TestCase):
                     "schema_version": 1,
                     "measured_at": "2026-02-03T10:00:00+00:00",
                     "agents": {"claude": {"headroom_pct": 90}},
+                    "failed_agents": [],
                 }
             ],
             "assignments": [],
@@ -761,7 +908,7 @@ class SnapshotMigrationTest(unittest.TestCase):
         path.write_text(json.dumps(self._state_with_v1_snapshot()), encoding="utf-8")
         state = load_state(path, warn=lambda message: None)
         snapshot = state["snapshots"][0]
-        self.assertEqual(snapshot["schema_version"], 3)
+        self.assertEqual(snapshot["schema_version"], SNAPSHOT_SCHEMA_VERSION)
         self.assertEqual(snapshot["agents"]["claude"]["window_group"], "")
 
     def test_the_upgrade_is_written_back(self):
@@ -769,7 +916,7 @@ class SnapshotMigrationTest(unittest.TestCase):
         path.write_text(json.dumps(self._state_with_v1_snapshot()), encoding="utf-8")
         load_state(path, warn=lambda message: None)
         on_disk = json.loads(path.read_text(encoding="utf-8"))
-        self.assertEqual(on_disk["snapshots"][0]["schema_version"], 3)
+        self.assertEqual(on_disk["snapshots"][0]["schema_version"], SNAPSHOT_SCHEMA_VERSION)
         self.assertEqual(
             on_disk["snapshots"][0]["agents"]["claude"]["window_group"], ""
         )

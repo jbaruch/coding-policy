@@ -224,6 +224,7 @@ The Herdr team round contract. `rules/agent-team-operation.md` Two Modes decides
 - A tier switch requires a worker relaunch at a cleared-round boundary
 - Retained fixes never change model or raise effort; preserve a verified compatible higher effort
 - Before relaunch, verify the idle worker, empty composer, pane occupant, and foreground PID
+- An idle maintenance relaunch outside dispatch preserves the tier proved by the live configured argv, takes retrospective transition coverage, restarts with configured YOLO arguments, and proves the replacement process argv
 - Record model, effort, launch argv, verified pair, and evidence source in the assignment ledger
 - Unmeasured tier billing windows remain `unknown`; no model name establishes free capacity
 - Metering contracts are in `skills/herdr-foreman/references/model-tiers.md`

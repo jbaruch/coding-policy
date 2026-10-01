@@ -35,6 +35,7 @@ Exit codes -- the verdict, which the preflight gates on:
 
 import argparse
 import json
+import shlex
 import subprocess
 import sys
 from pathlib import Path
@@ -50,6 +51,12 @@ def run(args):
     result = subprocess.run(["bash", str(FOREMAN), *args], capture_output=True, text=True, check=False)
     sys.stderr.write(result.stderr)
     return result.returncode, result.stdout
+
+
+def owner_command(common, command, *values):
+    """Render the exact owner launcher invocation, preserving common paths."""
+    argv = ["bash", str(FOREMAN), *common, command, *values]
+    return " ".join(shlex.quote(value) for value in argv)
 
 
 def json_object(text):
@@ -68,8 +75,22 @@ def headroom_row(common, clock, measure):
         return {"status": "skipped"}
     code, out = run([*common, "measure", *clock])
     if code != 0:
+        payload, _problem = json_object(out)
+        records = payload.get("agents") if payload is not None else None
+        pending = [] if not isinstance(records, dict) else [
+            name for name, row in records.items()
+            if isinstance(row, dict) and isinstance(row.get("error"), dict)
+            and isinstance(row["error"].get("details"), dict)
+            and row["error"]["details"].get("pending_cli_update") is True
+        ]
+        recovery = ("; relaunch the idle updated worker{} with {}".format(
+            "s" if len(pending) != 1 else "",
+            ", ".join("`{}`".format(owner_command(common, "relaunch-worker", name))
+                      for name in sorted(pending)))
+                    if pending else "")
         return {"status": "failed",
-                "reason": "foreman measure exited {}; a seat cannot be ranked on an unmeasured roster".format(code)}
+                "reason": "foreman measure exited {}; a seat cannot be ranked on an unmeasured roster{}".format(code, recovery),
+                **({"detail": payload} if payload is not None else {})}
     payload, problem = json_object(out)
     if problem:
         return {"status": "blocked",

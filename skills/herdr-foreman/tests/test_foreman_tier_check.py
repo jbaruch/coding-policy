@@ -9,6 +9,7 @@ import copy
 import importlib.util
 import io
 import json
+import shlex
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -101,6 +102,31 @@ class CompositeTest(unittest.TestCase):
         code, rows = self.verdict(PROVEN, measure=(3, {}))
         self.assertEqual(code, 1)
         self.assertEqual(rows["headroom"]["status"], "failed")
+
+    def test_pending_updates_name_each_owner_relaunch_command(self):
+        measured = {
+            "agents": {
+                "claude": {"error": {"code": "parse_error", "message": "bad usage",
+                                      "details": {"pending_cli_update": True}}},
+                "codex": {"error": {"code": "parse_error", "message": "other", "details": {}}},
+            },
+            "failed_agents": ["claude", "codex"],
+        }
+        state = "/tmp/state file.json"
+        config = "/tmp/config file.json"
+        code, rows = self.verdict(
+            PROVEN,
+            argv=["--state", state, "--config", config],
+            measure=(1, measured),
+        )
+        self.assertEqual(code, 1)
+        command = " ".join(shlex.quote(value) for value in (
+            "bash", str(check.FOREMAN), "--state", state, "--config", config,
+            "relaunch-worker", "claude",
+        ))
+        self.assertIn("`{}`".format(command), rows["headroom"]["reason"])
+        self.assertNotIn("relaunch-worker codex", rows["headroom"]["reason"])
+        self.assertEqual(rows["headroom"]["detail"], measured)
 
 
 if __name__ == "__main__":
