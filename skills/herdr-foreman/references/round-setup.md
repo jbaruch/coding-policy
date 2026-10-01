@@ -103,12 +103,12 @@ carries what herdr claimed. Exit 1 means at least one agent could not be
 measured; the snapshot still prints and names it in `failed_agents`.
 An occupied, recalled or unverifiable composer is refused before the usage
 command is typed; the error names the pane to clear by hand.
-When otherwise unparseable usage text contains `Update installed · Restart`,
-the failed record marks `error.details.pending_cli_update: true`. The round
+When a failed record marks `error.details.pending_cli_update: true`, the round
 preflight turns that evidence into the exact
 `foreman relaunch-worker <name>` owner command. Complete its retrospective
 gate, run it only on the idle worker it names, and re-measure; do not create a
-dispatch merely to restart the process.
+dispatch merely to restart the process. The detection predicate is owned by
+`skills/herdr-foreman/foreman/measure.py` (`PENDING_CLI_UPDATE`).
 
 The usage marker is confirmed in the text that gets parsed, never in a wait
 alone. `--marker-poll-attempts` and `--marker-poll-interval` bound the

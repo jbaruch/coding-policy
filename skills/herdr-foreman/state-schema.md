@@ -95,7 +95,7 @@ dispatch. All are documented in
 
 `window_group` names the usage window an agent shares with other agents: two
 workers authenticating as one subscription declare the same value, `measure`
-copies it onto each record (snapshot `schema_version` 3), and `plan` charges a seat's cost against every
+copies it onto each record (introduced in snapshot schema 2; current schema 4), and `plan` charges a seat's cost against every
 worker in that window. An agent that declares none has a window to itself.
 
 The optional top-level `judge` key pins the judge agent, model, and effort.
@@ -464,7 +464,7 @@ skills/herdr-foreman/references/retrospectives.md
 | `schema_version` | integer | Currently `9`. Version 9 adds `judge_mode` to every row: the judge seat's declared mode, `unknown` for a judge row migrated from before it, null for other roles. Version 8 drops the retired qualification battery's summary from `tier`; migration removes it from older rows. Version 7 adds `pressure_headroom` and `de_escalated` to a row's `tier`; an older tier row migrates to null headroom and `de_escalated: false`, since nothing could de-escalate before it. Bumped on any shape change |
 | `snapshots` | array | Whole `measure` documents, oldest first; the ring holds the last 20 |
 | `assignments` | array | Append-only ledger of who held which role |
-| `snapshots[].schema_version` | integer | Currently `3`. Version 2 added `window_group`; version 3 adds per-round `tier_billing`. Older snapshots migrate on read, preserving headroom and shared-window membership |
+| `snapshots[].schema_version` | integer | Currently `4`. Version 2 added `window_group`; version 3 adds per-round `tier_billing`; version 4 adds `error.details` to failed agent records. Older snapshots migrate on read, preserving headroom and shared-window membership |
 | `snapshots[].agents[].window_group` | string | The usage window this agent shares with others; empty means a window of its own. Present on every agent record, including skipped and failed ones — pool membership is config, not a measurement result |
 | `assignments[].schema_version` | integer | The row's own version, stamped on write |
 | `assignments[].at` | string | ISO-8601 timestamp, from `--now` or the CLI's clock |
@@ -869,7 +869,9 @@ Only the owner migrates, and it reads a version in one of three directions.
   `reviewer_scope: unknown` for reviewers, null for other roles. Migration never
   assumes an older reviewer only verified work. Unexpected newer fields in an
   older document or row refuse migration. Snapshot `2 → 3` independently adds
-  empty `tier_billing` maps, preserving window groups and readings. Each row is migrated even in
+  empty `tier_billing` maps, preserving window groups and readings. Snapshot
+  `3 → 4` adds an empty `error.details` object to failed records, preserving
+  their code and message. Each row is migrated even in
   a document already at the current version.
 - **Newer** — this build is the lagging reader, not the migrator. The caller
   gets an empty document in memory, the file on disk is left exactly as found,

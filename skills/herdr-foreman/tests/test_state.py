@@ -23,6 +23,7 @@ from foreman import recovery
 from foreman.state import (
     MAX_SNAPSHOTS,
     MIGRATIONS,
+    SNAPSHOT_SCHEMA_VERSION,
     STATE_SCHEMA_VERSION,
     UNVERSIONED,
     add_assignment,
@@ -223,7 +224,7 @@ class MigrationTest(unittest.TestCase):
                             "schema_version": version, "snapshots": [snapshot], "assignments": [row]})
                 migrated = self.load()
                 self.assertEqual(migrated["schema_version"], STATE_SCHEMA_VERSION)
-                self.assertEqual(migrated["snapshots"], [{"schema_version": 3, "agents": {"grok": {"window_group": "pool", "tier_billing": {}}}}])
+                self.assertEqual(migrated["snapshots"], [{"schema_version": SNAPSHOT_SCHEMA_VERSION, "agents": {"grok": {"window_group": "pool", "tier_billing": {}}}}])
                 self.assertEqual(migrated["assignments"], [dict(
                     row, schema_version=STATE_SCHEMA_VERSION, cleared=None,
                     clear_reason="unknown", task=None, fix_round=None, context_session=None, tier=None,
@@ -232,6 +233,21 @@ class MigrationTest(unittest.TestCase):
                 self.assertEqual(role_counts(migrated), {"developer": {"grok": 1}})
                 self.assertEqual(self.on_disk(), migrated)
                 self.assertEqual(self.load(), migrated)
+
+    def test_snapshot_v3_failure_migrates_with_empty_error_details(self):
+        state = empty_state()
+        state["snapshots"] = [{
+            "schema_version": 3,
+            "agents": {"claude": {"error": {"code": "parse_error", "message": "old failure"}}},
+            "failed_agents": ["claude"],
+        }]
+        self.write(state)
+        migrated = self.load()
+        snapshot = migrated["snapshots"][0]
+        self.assertEqual(snapshot["schema_version"], SNAPSHOT_SCHEMA_VERSION)
+        self.assertEqual(snapshot["agents"]["claude"]["error"],
+                         {"code": "parse_error", "message": "old failure", "details": {}})
+        self.assertEqual(self.on_disk(), migrated)
 
     def test_context_modes_round_trip_without_conflating_their_evidence(self):
         state = empty_state()
@@ -761,7 +777,7 @@ class SnapshotMigrationTest(unittest.TestCase):
         path.write_text(json.dumps(self._state_with_v1_snapshot()), encoding="utf-8")
         state = load_state(path, warn=lambda message: None)
         snapshot = state["snapshots"][0]
-        self.assertEqual(snapshot["schema_version"], 3)
+        self.assertEqual(snapshot["schema_version"], SNAPSHOT_SCHEMA_VERSION)
         self.assertEqual(snapshot["agents"]["claude"]["window_group"], "")
 
     def test_the_upgrade_is_written_back(self):
@@ -769,7 +785,7 @@ class SnapshotMigrationTest(unittest.TestCase):
         path.write_text(json.dumps(self._state_with_v1_snapshot()), encoding="utf-8")
         load_state(path, warn=lambda message: None)
         on_disk = json.loads(path.read_text(encoding="utf-8"))
-        self.assertEqual(on_disk["snapshots"][0]["schema_version"], 3)
+        self.assertEqual(on_disk["snapshots"][0]["schema_version"], SNAPSHOT_SCHEMA_VERSION)
         self.assertEqual(
             on_disk["snapshots"][0]["agents"]["claude"]["window_group"], ""
         )

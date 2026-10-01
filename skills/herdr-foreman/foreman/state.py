@@ -314,6 +314,17 @@ def _migrate_snapshot_2_to_3(snapshot):
     return snapshot
 
 
+def _migrate_snapshot_3_to_4(snapshot):
+    """Give older failed measurements their previously implicit details."""
+    snapshot["schema_version"] = 4
+    agents = snapshot.get("agents")
+    if isinstance(agents, dict):
+        for record in agents.values():
+            if isinstance(record, dict) and isinstance(record.get("error"), dict):
+                record["error"].setdefault("details", {})
+    return snapshot
+
+
 #: Document migrations, keyed by the version being upgraded FROM. Each value is
 #: (version_produced, upgrade_callable). `_apply_migrations` walks the chain
 #: until it reaches STATE_SCHEMA_VERSION, so a future 1->2 is one entry.
@@ -342,11 +353,12 @@ def _migrate_snapshot_1_to_2(snapshot):
 SNAPSHOT_MIGRATIONS = {
     1: (2, _migrate_snapshot_1_to_2),
     2: (3, _migrate_snapshot_2_to_3),
+    3: (4, _migrate_snapshot_3_to_4),
 }
 
 #: The snapshot version this build owns. Kept beside the migration table so
 #: the two move together; `measure.MEASURE_SCHEMA_VERSION` writes it.
-SNAPSHOT_SCHEMA_VERSION = 3
+SNAPSHOT_SCHEMA_VERSION = 4
 
 
 MIGRATIONS = {
