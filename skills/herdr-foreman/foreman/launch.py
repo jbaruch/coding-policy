@@ -17,7 +17,6 @@ seat reads Idle -- a fresh judge dispatch lost an attempt to exactly that
 retried a bounded number of times, each time re-proving the pane and the name.
 """
 
-import shlex
 import time
 from pathlib import PurePath
 
@@ -248,9 +247,9 @@ def start_after_release(client, agent, pane, tier, sleep=time.sleep, before_star
 
 
 def restart_worker(client, agent, pane, tier, sleep=time.sleep, before_transition=None, before_start=None,
-                   expected_process=None):
+                   expected_process=None, recovery_command=None):
     worker_launch_args(agent.kind, agent.launch_args)
-    rerun = runnable.command("relaunch-worker {}".format(shlex.quote(agent.name)))
+    rerun = recovery_command or runnable.command("apply")
     if not isinstance(pane, str) or not pane or not agent.composer_glyph:
         raise HerdrError("Tier relaunch needs a live pane and configured composer glyph; fix the agent config.", {})
     info = client.agent_get(agent.name)

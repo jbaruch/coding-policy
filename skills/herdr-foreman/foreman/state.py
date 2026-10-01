@@ -336,6 +336,8 @@ def _migrate_document_8_to_9(payload):
 
 def _migrate_record_9_to_10(record):
     """Version 10 adds an allowed status; older assignment evidence is unchanged."""
+    if record.get("status") == STATUS_MAINTENANCE:
+        raise _NoUsableState("schema-9 assignment contains the unowned maintenance status")
     record["schema_version"] = 10
     return record
 

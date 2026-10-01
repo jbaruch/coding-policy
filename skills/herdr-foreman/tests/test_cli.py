@@ -222,7 +222,7 @@ class RelaunchWorkerCommandTest(unittest.TestCase):
         client.agent_get.return_value = {"name": "claude", "agent": "claude", "agent_status": "idle", "pane_id": "w1:p2"}
         state = empty_state()
         add_assignment(state, AT, "developer", "claude", task="issue-673")
-        tier = {"model": "sonnet-5", "effort": "high"}
+        tier = {"model": "sonnet-5", "effort": "high", "multiplier": 1.0}
         prior = {
             "source": "process_argv",
             "argv": ["claude", "--dangerously-skip-permissions", "--model", "sonnet-5", "--effort", "high"],
@@ -237,9 +237,14 @@ class RelaunchWorkerCommandTest(unittest.TestCase):
         guard.before_launch.side_effect = lambda step: events.append(("before_launch", step))
         guard.after_transition.side_effect = lambda step, **kwargs: events.append(("after", step, kwargs))
 
-        def relaunch(_client, _agent, _pane, _tier, before_transition, before_start, expected_process):
+        def relaunch(_client, _agent, _pane, _tier, before_transition, before_start,
+                     expected_process, recovery_command):
             self.assertEqual(events[0][0], "prepare")
             self.assertEqual(expected_process, prior)
+            self.assertEqual(
+                recovery_command,
+                runnable.command("relaunch-worker claude"),
+            )
             before_transition()
             before_start()
 

@@ -109,8 +109,20 @@ class LaunchTest(unittest.TestCase):
         client.process["argv"] = ["claude", "--dangerously-skip-permissions", "--model", "sonnet-5", "--effort", "high"]
         tier, selected = configured_running_tier(client, agent, "w1:p2")
         client.process["pid"] = 201
-        with self.assertRaisesRegex(HerdrError, "changed after its configured tier was proved"):
+        with self.assertRaisesRegex(HerdrError, "apply"):
             restart_worker(client, agent, "w1:p2", tier, expected_process=selected, sleep=lambda _: None)
+        self.assertFalse(client.terminated)
+
+    def test_maintenance_caller_can_name_its_own_recovery_command(self):
+        client = Client()
+        client.process["pid"] = 201
+        with self.assertRaisesRegex(HerdrError, "relaunch-worker claude"):
+            restart_worker(
+                client, worker(), "w1:p2", TIER,
+                expected_process={**client.process, "pid": 200},
+                recovery_command="foreman-wrapper relaunch-worker claude",
+                sleep=lambda _: None,
+            )
         self.assertFalse(client.terminated)
 
     def test_process_is_rechecked_after_retrospective_before_termination(self):

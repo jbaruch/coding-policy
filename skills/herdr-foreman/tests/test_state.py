@@ -316,6 +316,19 @@ class MigrationTest(unittest.TestCase):
                 self.assertFalse(usable)
                 self.assertEqual(self.path.read_text(encoding="utf-8"), before)
 
+    def test_schema_nine_cannot_backfill_the_unowned_maintenance_status(self):
+        state = empty_state()
+        add_assignment(state, "2026-01-01T00:00:00+00:00", "developer", "claude",
+                       status="maintenance", cleared=True, clear_reason="automatic",
+                       tier=maintenance_tier())
+        state["schema_version"] = 9
+        state["assignments"][0]["schema_version"] = 9
+        self.write(state)
+        before = self.path.read_text(encoding="utf-8")
+        _loaded, usable = load_state_checked(self.path, warn=self.warnings.append)
+        self.assertFalse(usable)
+        self.assertEqual(self.path.read_text(encoding="utf-8"), before)
+
     def test_context_modes_round_trip_without_conflating_their_evidence(self):
         state = empty_state()
         for cleared, reason in ((True, "automatic"), (False, "hand"),

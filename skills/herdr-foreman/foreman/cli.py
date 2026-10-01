@@ -2078,10 +2078,13 @@ def cmd_relaunch_worker(args, client=None, warn=None, trace=None):
     guard.prepare_relaunch(item)
     step = {"agent": agent.name}
     restart_worker(client, agent, pane, tier, before_transition=lambda: guard.before(step),
-                   before_start=lambda: guard.before_launch(step), expected_process=previous)
+                   before_start=lambda: guard.before_launch(step), expected_process=previous,
+                   recovery_command=runnable.command(
+                       "relaunch-worker {}".format(shlex.quote(agent.name))
+                   ))
     verified = verify_running(client, agent, pane, tier)
     guard.after_transition(step, launch_proof=verified)
-    tier_record = {**tier, "kind": agent.kind,
+    tier_record = {"kind": agent.kind, "model": tier["model"], "effort": tier.get("effort"),
                    "launch_args": worker_launch_args(agent.kind, agent.launch_args),
                    "verified": verified}
     add_assignment(
