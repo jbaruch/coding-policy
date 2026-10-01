@@ -1,5 +1,12 @@
 # Changelog
 
+### Fixed
+
+- **Judge rulings can cover same-line policy findings (Closes #672).**
+  `dismiss-ruled-review.sh` now pairs repeated `path:line:rule` findings by
+  count when every matching ruling uses the same outcome. Missing, surplus,
+  unmatched, or mixed-verdict lines still refuse the dismissal.
+
 ## 0.3.354 — 2026-10-01
 
 ### Fixed

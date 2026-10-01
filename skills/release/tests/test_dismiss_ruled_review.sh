@@ -108,6 +108,10 @@ BODY_TWO=$(golden_body '{"summary":"Policy loaded: 26 rule files. Two violations
 BODY_FLOOR=$(golden_body '{"summary":"Policy loaded: 26 rule files. Secret.","findings":[
   {"path":"a.sh","line":1,"rule":"no-secrets","severity":"blocking","message":"hardcoded token"}]}') \
   || exit 2
+BODY_DUPLICATE=$(golden_body '{"summary":"Policy loaded: 26 rule files. Same anchor.","findings":[
+  {"path":"rules/b.md","line":7,"rule":"context-writing-style","severity":"blocking","message":"colon attaches a rationale"},
+  {"path":"rules/b.md","line":7,"rule":"context-writing-style","severity":"blocking","message":"semicolon attaches another"}]}') \
+  || exit 2
 
 # One policy review fixture. Args: <state> <commit> <body>
 set_review() {
@@ -324,17 +328,35 @@ t_unmatched_finding_line_refuses() {
   assert_eq "no dismissal" "0" "$(dismissals)"
 }
 
-t_duplicate_review_finding_refuses() {
-  local body
-  body=$(golden_body '{"summary":"Policy loaded: 26 rule files. Twice.","findings":[
-    {"path":"rules/b.md","line":7,"rule":"context-writing-style","severity":"blocking","message":"colon attaches a rationale"},
-    {"path":"rules/b.md","line":7,"rule":"context-writing-style","severity":"blocking","message":"semicolon attaches another"}]}') || return 1
-  set_review CHANGES_REQUESTED "$HEAD_SHA" "$body"
+t_duplicate_review_finding_needs_matching_count() {
+  set_review CHANGES_REQUESTED "$HEAD_SHA" "$BODY_DUPLICATE"
   write_ruling "$HEAD_SHA" "$DECLINE_TWO"
   invoke_ruled
   assert_eq "exit" "1" "$RC" || return 1
-  assert_unmet "duplicate blocking findings" "the duplicate review finding" || return 1
+  assert_eq "one uncovered" "1" "$(jq '.uncovered | length' <<<"$OUT")" || return 1
   assert_eq "nothing posted" "0" "$(wc -l < "$EVENTS" | tr -d ' ')"
+}
+
+t_duplicate_review_findings_with_same_verdict_dismiss() {
+  set_review CHANGES_REQUESTED "$HEAD_SHA" "$BODY_DUPLICATE"
+  write_ruling "$HEAD_SHA" "$DECLINE_TWO" \
+    "FINDING: policy rules/b.md:7 context-writing-style — decline — second presentation finding"
+  invoke_ruled
+  assert_eq "exit" "0" "$RC" || return 1
+  assert_eq "dismissed" "dismissed" "$(jq -r .result <<<"$OUT")" || return 1
+  assert_eq "two findings" "2" "$(jq '.findings | length' <<<"$OUT")" || return 1
+  assert_eq "two follow-up entries" "2" "$(grep -c 'rules/b.md:7' "$COMMENT_BODY")" || return 1
+  assert_eq "one dismissal" "1" "$(dismissals)"
+}
+
+t_duplicate_review_findings_with_mixed_verdicts_refuse() {
+  set_review CHANGES_REQUESTED "$HEAD_SHA" "$BODY_DUPLICATE"
+  write_ruling "$HEAD_SHA" "$DECLINE_TWO" \
+    "FINDING: policy rules/b.md:7 context-writing-style — defer — track the second finding"
+  invoke_ruled
+  assert_eq "exit" "1" "$RC" || return 1
+  assert_unmet "different verdicts" "the ambiguous outcomes" || return 1
+  assert_eq "no dismissal" "0" "$(dismissals)"
 }
 
 t_floor_rule_refuses() {
@@ -783,7 +805,9 @@ run_suite() {
   run "same path, different rule refuses"             t_same_path_different_rule_refuses
   run "a duplicate FINDING line refuses"              t_duplicate_finding_line_refuses
   run "an unmatched FINDING line refuses"             t_unmatched_finding_line_refuses
-  run "duplicate findings in the review refuse"      t_duplicate_review_finding_refuses
+  run "same-line findings need matching ruling count" t_duplicate_review_finding_needs_matching_count
+  run "same-line findings with one verdict dismiss"   t_duplicate_review_findings_with_same_verdict_dismiss
+  run "same-line findings with mixed verdicts refuse"  t_duplicate_review_findings_with_mixed_verdicts_refuse
   run "a floor rule refuses"                          t_floor_rule_refuses
   run "a failing check refuses"                       t_failing_check_refuses
   run "pending checks do not refuse"                  t_pending_checks_do_not_refuse

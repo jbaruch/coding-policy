@@ -78,9 +78,8 @@
 #   3. Its `## Blocking findings` section parses in post-review.sh format, one
 #      "- `<path>:<line>` — **<rule>** — <message>" line per finding.
 #   4. FINDING lines and blocking findings pair one-to-one on path, line and
-#      rule: no two blocking findings in the review share an identity, no two
-#      FINDING lines share an identity, and every FINDING line names a
-#      blocking finding in the review.
+#      rule. Repeated review identities require the same number of FINDING
+#      lines, all with the same verdict; surplus or unmatched lines refuse.
 #   5. Every blocking finding's FINDING line is defer or decline, and either the
 #      ruling's HEAD is the live head, or the compare API shows the path
 #      unchanged from the ruling's HEAD to the live head (status ahead or
@@ -165,6 +164,7 @@ import json
 import os
 import re
 import sys
+from collections import Counter, defaultdict
 
 tmp, pr, head, ruling_path, issue, repo_slug, marker, schema, mode, n_logins = sys.argv[1:11]
 logins = sys.argv[11:11 + int(n_logins)]
@@ -273,7 +273,6 @@ schemas = [ln[len("schema_version:"):].strip() for ln in ruling_lines if ln.star
 answers = [ln[len("ANSWER:"):].strip() for ln in ruling_lines if ln.startswith("ANSWER:")]
 authorities = [ln[len("AUTHORITY:"):].strip() for ln in ruling_lines if ln.startswith("AUTHORITY:")]
 entries, malformed = {}, []
-duplicates = []
 for ln in ruling_lines:
     if not ln.startswith("FINDING:"):
         continue
@@ -282,10 +281,7 @@ for ln in ruling_lines:
         malformed.append(ln)
         continue
     key = (m["path"], int(m["line"]), m["rule"])
-    if key in entries:
-        duplicates.append(f"{key[0]}:{key[1]} {key[2]}")
-        continue
-    entries[key] = m.groupdict()
+    entries.setdefault(key, []).append(m.groupdict())
 if not ruling_lines or ruling_lines[0].strip() != "RULING: weighed":
     out["unmet"].append("the ruling's first line is not 'RULING: weighed'")
 if len(schemas) == 1 and schemas[0].isdecimal() and int(schemas[0]) > int(schema):
@@ -316,26 +312,24 @@ else:
         out["unmet"].append("ruling changed since verification — re-run")
 if malformed:
     out["unmet"].append(f"unparseable FINDING line(s): {malformed}")
-if duplicates:
-    out["unmet"].append(f"duplicate FINDING line(s): {duplicates}")
 if not entries and not malformed:
     out["unmet"].append("the ruling carries no FINDING line")
 if out["unmet"]:
     finish("unmet", "malformed ruling", 1)
 ruling_head = heads[0]
 
-finding_keys = {(f["path"], f["line"], f["rule"]) for f in findings}
-if len(finding_keys) != len(findings):
-    seen, repeated = set(), set()
-    for f in findings:
-        key = (f["path"], f["line"], f["rule"])
-        if key in seen:
-            repeated.add(f"{key[0]}:{key[1]} {key[2]}")
-        seen.add(key)
-    out["unmet"].append(f"the review carries duplicate blocking findings (same path, line and rule): {sorted(repeated)} — no ruling line can pair with each; fix them")
-unmatched = sorted(f"{k[0]}:{k[1]} {k[2]}" for k in entries if k not in finding_keys)
+finding_counts = Counter((f["path"], f["line"], f["rule"]) for f in findings)
+unmatched = sorted(f"{k[0]}:{k[1]} {k[2]}" for k in entries if k not in finding_counts)
 if unmatched:
     out["unmet"].append(f"FINDING line(s) naming no blocking finding in the review: {unmatched}")
+surplus = sorted(f"{key[0]}:{key[1]} {key[2]}" for key, rows in entries.items()
+                 if len(rows) > finding_counts.get(key, 0))
+if surplus:
+    out["unmet"].append(f"duplicate FINDING line(s) exceed the matching blocking findings: {surplus}")
+mixed = sorted(f"{key[0]}:{key[1]} {key[2]}" for key, count in finding_counts.items()
+               if count > 1 and len({row["verdict"] for row in entries.get(key, [])}) > 1)
+if mixed:
+    out["unmet"].append(f"same-identity FINDING lines use different verdicts: {mixed}")
 
 floor_hits = sorted({f["rule"] for f in findings if f["rule"] in floors})
 if floor_hits:
@@ -370,8 +364,13 @@ if not at_head:
                 changed.add(f["previous_filename"])
 
 ruled = []
+used = defaultdict(int)
 for f in findings:
-    e = entries.get((f["path"], f["line"], f["rule"]))
+    key = (f["path"], f["line"], f["rule"])
+    candidates = entries.get(key, [])
+    e = candidates[used[key]] if used[key] < len(candidates) else None
+    if e is not None:
+        used[key] += 1
     carried = at_head or (changed is not None and f["path"] not in changed)
     if e is None or e["verdict"] == "fix" or not carried:
         out["uncovered"].append({"path": f["path"], "line": f["line"], "rule": f["rule"]})
