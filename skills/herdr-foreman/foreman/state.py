@@ -110,6 +110,10 @@ STATUS_NOT_STARTED = "sent_but_not_started"
 STATUS_MAINTENANCE = "maintenance"
 STATUS_UNKNOWN = "unknown"
 ASSIGNMENT_STATUSES = frozenset({STATUS_APPLIED, STATUS_NOT_STARTED, STATUS_MAINTENANCE, STATUS_UNKNOWN})
+MAINTENANCE_TIER_FIELDS = frozenset({
+    "kind", "model", "effort", "launch_args", "pressure_headroom",
+    "de_escalated", "verified",
+})
 
 #: Statuses that do NOT count toward "held this role N times". A hand-off
 #: nobody started is not experience, and letting it count would push the next
@@ -124,6 +128,27 @@ UNCOUNTED_STATUSES = frozenset({STATUS_NOT_STARTED, STATUS_MAINTENANCE})
 UNVERSIONED = 0
 
 MAX_SNAPSHOTS = 20
+
+
+def _maintenance_tier_is_valid(tier):
+    """Whether `tier` is the exact live-process proof a maintenance row owns."""
+    if not isinstance(tier, dict) or set(tier) != MAINTENANCE_TIER_FIELDS:
+        return False
+    proof = tier.get("verified")
+    if (tier.get("pressure_headroom") is not None or tier.get("de_escalated") is not False
+            or not isinstance(proof, dict) or proof.get("source") != "process_argv"
+            or not isinstance(proof.get("pid"), int) or isinstance(proof.get("pid"), bool)
+            or proof["pid"] <= 0 or not isinstance(proof.get("pane_id"), str)
+            or not proof["pane_id"] or proof.get("model") != tier.get("model")
+            or proof.get("effort") != tier.get("effort")):
+        return False
+    try:
+        parse_tiers({"build": {"model": tier.get("model"), "effort": tier.get("effort")}}, tier.get("kind"))
+        launch_args = parse_launch_args(tier.get("launch_args"), tier.get("kind"))
+        verify_argv(tier.get("kind"), tier, proof.get("argv"), launch_args)
+    except (ConfigError, HerdrError, UsageError):
+        return False
+    return True
 
 
 def default_state_path():
@@ -340,8 +365,14 @@ def _migrate_snapshot_3_to_4(snapshot):
         failed = snapshot["failed_agents"] = []
     if not isinstance(agents, dict) or not isinstance(failed, list):
         raise _NoUsableState("snapshot version 3 has malformed failed-agent evidence")
+    if (any(not isinstance(name, str) for name in failed) or len(failed) != len(set(failed))
+            or any(not isinstance(record, dict) for record in agents.values())):
+        raise _NoUsableState("snapshot version 3 has malformed failed-agent evidence")
+    error_names = {name for name, record in agents.items() if "error" in record}
+    if set(failed) != error_names:
+        raise _NoUsableState("snapshot version 3 failed_agents does not match its error records")
     for name in failed:
-        record = agents.get(name) if isinstance(name, str) else None
+        record = agents.get(name)
         error = record.get("error") if isinstance(record, dict) else None
         if (not isinstance(error, dict) or set(error) != {"code", "message"}
                 or not isinstance(error.get("code"), str) or not error["code"]
@@ -551,6 +582,10 @@ def _validate(payload, path):
                 verify_argv(tier["kind"], tier, proof.get("argv"), launch_args)
             except (ConfigError, HerdrError, UsageError):
                 raise _NoUsableState("an assignment row's launch arguments do not prove its tier") from None
+        if status == STATUS_MAINTENANCE and (
+            cleared is not True or reason != "automatic" or not _maintenance_tier_is_valid(tier)
+        ):
+            raise _NoUsableState("a maintenance assignment row lacks its exact verified relaunch evidence")
         if session is not None and (
             not isinstance(session, dict)
             or any(not isinstance(session.get(key), str) or not session[key].strip()
@@ -795,6 +830,14 @@ def add_assignment(state, at, role, agent, status=STATUS_APPLIED, *,
         # A tier that never met pressure (a judge start, an unmeasured round)
         # still carries both fields, so every current row reads one shape.
         tier = {"pressure_headroom": None, "de_escalated": False, **tier}
+    if status == STATUS_MAINTENANCE and (
+        cleared is not True or clear_reason != "automatic" or not _maintenance_tier_is_valid(tier)
+    ):
+        raise UsageError(
+            "A maintenance assignment requires automatic clear evidence and the exact verified "
+            "process tier; record it only after a successful relaunch.",
+            {"status": status},
+        )
     state.setdefault("assignments", []).append(
         {
             "schema_version": STATE_SCHEMA_VERSION,

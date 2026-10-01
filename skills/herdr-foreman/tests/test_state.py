@@ -38,6 +38,23 @@ from foreman.state import (
 )
 
 
+def maintenance_tier():
+    return {
+        "kind": "claude",
+        "model": "sonnet-5",
+        "effort": "high",
+        "launch_args": ["--dangerously-skip-permissions"],
+        "verified": {
+            "source": "process_argv",
+            "pid": 202,
+            "pane_id": "w1:p2",
+            "model": "sonnet-5",
+            "effort": "high",
+            "argv": ["claude", "--dangerously-skip-permissions", "--model", "sonnet-5", "--effort", "high"],
+        },
+    }
+
+
 class EmptyStateTest(unittest.TestCase):
     def test_shape(self):
         self.assertEqual(
@@ -260,6 +277,39 @@ class MigrationTest(unittest.TestCase):
                 record = {} if error is None else {"error": error}
                 state["snapshots"] = [{"schema_version": 3, "agents": {"claude": record},
                                        "failed_agents": ["claude"]}]
+                self.write(state)
+                before = self.path.read_text(encoding="utf-8")
+                _loaded, usable = load_state_checked(self.path, warn=self.warnings.append)
+                self.assertFalse(usable)
+                self.assertEqual(self.path.read_text(encoding="utf-8"), before)
+
+    def test_snapshot_v3_unlisted_error_record_is_refused_unchanged(self):
+        state = empty_state()
+        state["snapshots"] = [{
+            "schema_version": 3,
+            "agents": {"claude": {"error": {"code": "parse_error", "message": "old"}}},
+            "failed_agents": [],
+        }]
+        self.write(state)
+        before = self.path.read_text(encoding="utf-8")
+        _loaded, usable = load_state_checked(self.path, warn=self.warnings.append)
+        self.assertFalse(usable)
+        self.assertEqual(self.path.read_text(encoding="utf-8"), before)
+
+    def test_malformed_current_maintenance_rows_are_refused_unchanged(self):
+        for mutation in ("no_tier", "dispatch_field", "nonautomatic"):
+            with self.subTest(mutation=mutation):
+                state = empty_state()
+                add_assignment(state, "2026-01-01T00:00:00+00:00", "developer", "claude",
+                               status="maintenance", cleared=True, clear_reason="automatic",
+                               tier=maintenance_tier())
+                row = state["assignments"][0]
+                if mutation == "no_tier":
+                    row["tier"] = None
+                elif mutation == "dispatch_field":
+                    row["tier"]["round"] = "build"
+                else:
+                    row.update(cleared=False, clear_reason="retained")
                 self.write(state)
                 before = self.path.read_text(encoding="utf-8")
                 _loaded, usable = load_state_checked(self.path, warn=self.warnings.append)
@@ -636,7 +686,8 @@ class AssignmentStatusTest(unittest.TestCase):
 
     def test_a_maintenance_row_is_written_but_not_role_experience(self):
         state = empty_state()
-        add_assignment(state, "a", "developer", "grok", status="maintenance")
+        add_assignment(state, "a", "developer", "grok", status="maintenance",
+                       cleared=True, clear_reason="automatic", tier=maintenance_tier())
         self.assertEqual(state["assignments"][0]["status"], "maintenance")
         self.assertEqual(role_counts(state), {})
 
@@ -644,6 +695,19 @@ class AssignmentStatusTest(unittest.TestCase):
         state = empty_state()
         with self.assertRaisesRegex(UsageError, "assignment status"):
             add_assignment(state, "a", "developer", "grok", status="typo")
+        self.assertEqual(state["assignments"], [])
+
+    def test_malformed_maintenance_evidence_is_refused_before_write(self):
+        state = empty_state()
+        for cleared, reason, tier in (
+            (True, "automatic", None),
+            (False, "retained", {"kind": "claude"}),
+        ):
+            with self.subTest(cleared=cleared, reason=reason), self.assertRaisesRegex(
+                UsageError, "maintenance assignment"
+            ):
+                add_assignment(state, "a", "developer", "grok", status="maintenance",
+                               cleared=cleared, clear_reason=reason, tier=tier)
         self.assertEqual(state["assignments"], [])
 
     def test_applied_rows_count(self):
