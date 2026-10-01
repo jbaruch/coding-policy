@@ -6,9 +6,11 @@
   (Closes #675).** `migrate-home` intentionally preserves quoted note paths
   through its legacy-home symlink, but the retrospective loader compared those
   paths as raw strings and refused the whole store. Completed records and
-  pending journals now accept paths that resolve to the owned note, retain the
-  historical spelling on replay, and still reject a different file even when
-  its bytes match.
+  pending journals now accept paths that resolve to their owned receipts,
+  retain historical spellings on replay, and still reject a different file
+  even when its bytes match. Migration rebases a pending journal's ancestry
+  digest when it rewrites the index identity, including crash-resume and a
+  first record whose index does not exist yet.
 
 ## 0.3.353 — 2026-09-30
 

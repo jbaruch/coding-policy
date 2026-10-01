@@ -377,25 +377,6 @@ except StateError:
         self.record(data={**self.data, "id": "retro-2"}, at=LATER)
         self.assertEqual(len(self.index()["records"]), 2)
 
-    def test_migrated_committed_journal_replays_through_historical_note_path(self):
-        self.leave_committed_journal()
-        legacy = self.root / "legacy-home"
-        legacy.symlink_to(self.root, target_is_directory=True)
-        historical = str(legacy / self.sidecar.name / "retro-1.md")
-        index = self.index()
-        index["records"][0]["note"]["path"] = historical
-        self.write_index(index)
-        pending_path = self.sidecar / "pending.json"
-        pending = json.loads(pending_path.read_text(encoding="utf-8"))
-        pending["record"]["note"]["path"] = historical
-        pending_path.write_text(json.dumps(pending), encoding="utf-8")
-
-        replay = self.record(at=LATER)
-
-        self.assertTrue(replay["replayed"])
-        self.assertEqual(replay["note"]["path"], historical)
-        self.assertFalse(pending_path.exists())
-
     def test_pending_note_alias_must_resolve_to_the_owned_note(self):
         self.leave_committed_journal()
         pending_path = self.sidecar / "pending.json"

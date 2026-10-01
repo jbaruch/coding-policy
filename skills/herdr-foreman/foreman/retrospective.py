@@ -114,11 +114,37 @@ def _is_note_location(recorded, expected):
 
 
 def _same_record(left, right):
-    """Whether retry records differ only by an equivalent historical note path."""
-    return (all(left[key] == right[key] for key in left if key != "note")
-            and left["note"]["sha256"] == right["note"]["sha256"]
-            and left["note"]["size"] == right["note"]["size"]
-            and _is_note_location(left["note"]["path"], right["note"]["path"]))
+    """Whether retry records differ only by equivalent historical receipt paths."""
+    def same(left_value, right_value):
+        if isinstance(left_value, dict) and isinstance(right_value, dict):
+            if set(left_value) != set(right_value):
+                return False
+            if set(left_value) == {"path", "sha256", "size"}:
+                return (left_value["sha256"] == right_value["sha256"]
+                        and left_value["size"] == right_value["size"]
+                        and _is_note_location(left_value["path"], right_value["path"]))
+            return all(same(left_value[key], right_value[key]) for key in left_value)
+        if isinstance(left_value, list) and isinstance(right_value, list):
+            return len(left_value) == len(right_value) and all(
+                same(left_item, right_item) for left_item, right_item in zip(left_value, right_value))
+        return left_value == right_value
+
+    return same(left, right)
+
+
+def _preserve_receipt_paths(current, historical):
+    """Keep historical receipt spellings when current paths reach the same bytes."""
+    if isinstance(current, dict) and isinstance(historical, dict) and set(current) == set(historical):
+        if set(current) == {"path", "sha256", "size"}:
+            if (current["sha256"] == historical["sha256"]
+                    and current["size"] == historical["size"]
+                    and _is_note_location(current["path"], historical["path"])):
+                return {**current, "path": historical["path"]}
+            return current
+        return {key: _preserve_receipt_paths(current[key], historical[key]) for key in current}
+    if isinstance(current, list) and isinstance(historical, list) and len(current) == len(historical):
+        return [_preserve_receipt_paths(item, saved) for item, saved in zip(current, historical)]
+    return current
 
 
 def _nonempty(value):
@@ -444,6 +470,9 @@ def record(path, data, coverage, at):
     completed_at = original["completed_at"] if original else at
     if timestamp(completed_at, "Original completion") > timestamp(at, "Record retry"):
         raise UsageError("Retrospective retry precedes its original completion; use the current UTC checkpoint.", {})
+    if original:
+        sources = _preserve_receipt_paths(sources, original["sources"])
+        coverage = _preserve_receipt_paths(coverage, original["coverage"])
     metadata = {"schema_version": SCHEMA_VERSION, "id": name, "completed_at": completed_at,
                 "period_start": start, "period_end": end, "triggers": data["triggers"], "tasks": data["tasks"],
                 "participants": data["participants"], "unavailable": data["unavailable"], "sources": sources, "coverage": coverage}
