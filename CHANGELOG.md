@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.356 — 2026-10-01
+
 ### Fixed
 
 - **Read-only Herdr rounds no longer require a trigger declaration (Closes
