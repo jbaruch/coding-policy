@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.358 — 2026-10-02
+
 ### Added
 
 - **Herdr workers now live for exactly one assignment (Closes #674).** Config
