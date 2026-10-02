@@ -55,7 +55,7 @@ The Herdr team round contract. `rules/agent-team-operation.md` Two Modes decides
 - Measure the declared roster before planning
 - A snapshot missing a declared worker plans no seat
 - A ranked seat measured against one worker is a forced pick, never a headroom ranking
-- Each assignment clears context except the retained rounds under Fix Loops or Specialist Consultations
+- Each assignment-scoped worker starts fresh and its assessed pane closes; legacy standing-worker installs retain context only under Fix Loops or Specialist Consultations
 - Every assignment sends a self-contained role brief
 - Fewer eligible workers than required responsibilities is a staffing decision to record
 - Never fold independent verification onto a contributor to satisfy that staffing decision
@@ -66,10 +66,10 @@ The Herdr team round contract. `rules/agent-team-operation.md` Two Modes decides
 - Route implementation through the developer role under the original task and correction allowance
 - Give every consultation an explicit engagement identity and specialty requirements
 - An available profile reserves no worker and creates no active assignment
-- Preserve useful specialist sessions for likely follow-up work
+- On legacy standing-worker installs, preserve useful specialist sessions for likely follow-up work
 - Persist specialist lessons through the existing scoped memory owner
 - Record the delivered report's contract lines through `assess-specialist` before relying on a consultation outcome
-- Narrow exception for retaining an assessed consultation's context.
+- Legacy standing-worker exception for retaining an assessed consultation's context. Assignment-scoped configs refuse this mode and plan a fresh identity.
 - Preconditions (all required):
   1. The foreman requests `--retain-specialist` for one advisor, investigator or architect assignment
   2. The worker's latest assignment has the same task, responsibility and engagement requirements
@@ -250,8 +250,8 @@ The Herdr team round contract. `rules/agent-team-operation.md` Two Modes decides
 - Reserve the developer through initial and early-fix verification before assigning it another task or role
 - The planner derives reservations and busy workers from the owner records, never from the foreman's memory
 - Close a task through the owner utility when it merges or is abandoned
-- Fix rounds in `RETAIN_CONTEXT_ROUNDS` (`skills/herdr-foreman/foreman/assign.py`) retain the same developer's context when the retention preconditions hold
-- Narrow exception for retaining context on a same-role fix round.
+- On legacy standing-worker installs, fix rounds in `RETAIN_CONTEXT_ROUNDS` (`skills/herdr-foreman/foreman/assign.py`) retain the same developer's context when the retention preconditions hold
+- Legacy standing-worker exception for retaining context on a same-role fix round. Assignment-scoped configs refuse this mode and plan a fresh identity.
 - Preconditions (all required):
   1. The worker remains the developer for the same task
   2. The assignment follows that worker's confirmed preceding developer round

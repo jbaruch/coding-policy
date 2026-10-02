@@ -9,9 +9,9 @@
   `close-member` removes each pane after its assessed outcome. Judge,
   independence, reservation, and recovery evidence bind those assignment
   identities while retaining config schemas 1–6 for standing-worker installs.
-  Retainable developer and specialist panes survive their assessed closure for
-  the documented follow-up rounds and are removed at task closure. Each new
-  pane is enrolled and reserved before another spawn begins, live scoped apply
+  Assignment-scoped retention flags are refused: follow-up rounds carry prior
+  evidence in a fresh brief and use a fresh identity and pane. Each new pane is
+  enrolled and reserved before another spawn begins, live scoped apply
   refuses an unbound foreman, and planner rotation maps disposable identities
   back to their stable worker kinds.
   Recovery store version 15 and dispatch/result version 4 own the new

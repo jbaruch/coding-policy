@@ -339,8 +339,9 @@ Phase 2 briefs name the branch AND the commit SHA the worker must report
 against. A report against an older tip does not gate anything.
 
 Name the issue, file, finding, and report path in full in every brief.
-Context retention follows Fix Loops or Specialist Consultations in
-`skills/herdr-foreman/references/team-operation.md`. Fresh-worker fix briefs include
+Legacy standing-worker context retention follows Fix Loops or Specialist
+Consultations in `skills/herdr-foreman/references/team-operation.md`.
+Assignment-scoped rounds always use a fresh identity and pane. Fresh-worker fix briefs include
 the prior attempt count and the ownership handoff that section requires.
 Reviewer and tester verification briefs name `full` or `scoped` review,
 the prior findings, and the follow-up issue for new advisories. The final

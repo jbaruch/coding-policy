@@ -732,13 +732,11 @@ bash "$CP/skills/herdr-foreman/foreman.sh" close-member --enrollment <enrollment
 It refuses until the ledger's latest event for that worker and report carries
 an assessed decision, and refuses `accepted` without the report's recorded
 contract lines, checked before its classifier gates. It verifies a schema-7
-assignment pane remains bound to the recorded identity. Non-retainable roles
-and developer fix round 3 close here, with live absence proved before the
-enrollment resolves. The developer's initial assignment and retained fix
-rounds 1–2 keep their pane for the next eligible fix; assessed consultations
-keep theirs for an eligible `--retain-specialist` follow-up. `close-task`
-closes every such retained pane. A repeated close accepts an already-absent
-identity and replays. Resolution stays
+assignment pane remains bound to the recorded identity, then closes it with
+live absence proved before the enrollment resolves. Schema-7 workers never
+retain a pane across assignments; a follow-up round carries prior evidence in
+its self-contained brief and receives a fresh identity. A repeated close
+accepts an already-absent identity and replays. Resolution stays
 separate from assignment acceptance and task completion.
 Resume Step 11's fleet watch for any enrollment still observed.
 Route correction-scope and bug-evidence assessment to a worker under

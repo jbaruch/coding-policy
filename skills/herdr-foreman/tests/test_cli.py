@@ -465,6 +465,28 @@ class PlanCommandTest(CliCase):
         self.assertIn("pane split --current", commands[0]["shell"])
         self.assertIn("agent start " + plan["assignments"]["developer"], commands[1]["shell"])
 
+    def test_schema_7_refuses_cross_assignment_retention(self):
+        shipped = Path(__file__).resolve().parent.parent / "config.example.json"
+        self.config.write_text(shipped.read_text(encoding="utf-8"), encoding="utf-8")
+        with patch("foreman.lifecycle.identity", return_value="developer-0000000006"):
+            code, out, err = self.run_cli(
+                self.base() + ["plan", "--roles", "developer", "--snapshot", str(self.snapshot)]
+            )
+        self.assertEqual(code, 0, err)
+        plan = json.loads(out)
+        for flag in ("--retain-context", "--retain-specialist"):
+            with self.subTest(flag=flag):
+                self.out, self.err = io.StringIO(), io.StringIO()
+                code, out, err = self.run_cli(
+                    self.base() + ["apply", "--assignments", json.dumps(plan),
+                                   "--common", str(self.common),
+                                   "--brief", "developer=" + str(self.briefs["developer"]),
+                                   "--dry-run", flag]
+                )
+                self.assertEqual(code, 1)
+                self.assertEqual(out, "")
+                self.assertIn("live for one assignment", err)
+
     def test_schema_7_live_apply_requires_a_task_before_spawning(self):
         shipped = Path(__file__).resolve().parent.parent / "config.example.json"
         self.config.write_text(shipped.read_text(encoding="utf-8"), encoding="utf-8")
@@ -674,105 +696,6 @@ class PlanCommandTest(CliCase):
             {"assignment_index": 9, "worker_kind": "ignored"},
         ]
         self.assertEqual(cli._worker_kind_provenance(state), {0: "claude"})
-
-    def test_scoped_retained_fix_reuses_the_live_identity_and_kind(self):
-        state = empty_state()
-        add_assignment(
-            state, AT, "developer", "developer-0000000001",
-            task="t-retain", fix_round=None,
-        )
-        state["recovery"]["dispatches"] = [
-            {"assignment_index": 0, "worker_kind": "claude"},
-        ]
-        self.assertEqual(
-            cli._retained_scoped_identity(
-                {"developer": "developer-fresh"}, {"developer": "claude"},
-                state, "t-retain", 1, True, False, {},
-            ),
-            {"developer": "developer-0000000001"},
-        )
-
-    def test_scoped_retention_uses_assignment_chronology_not_append_order(self):
-        state = empty_state()
-        add_assignment(
-            state, "2026-02-03T11:00:00+00:00", "developer",
-            "developer-newer", task="t-retain", fix_round=None,
-        )
-        add_assignment(
-            state, "2026-02-03T09:00:00+00:00", "developer",
-            "developer-older", task="t-retain", fix_round=None,
-        )
-        state["recovery"]["dispatches"] = [
-            {"assignment_index": 0, "worker_kind": "claude"},
-            {"assignment_index": 1, "worker_kind": "claude"},
-        ]
-        self.assertEqual(
-            cli._retained_scoped_identity(
-                {"developer": "developer-fresh"}, {"developer": "claude"},
-                state, "t-retain", 1, True, False, {},
-            ),
-            {"developer": "developer-newer"},
-        )
-
-    def test_scoped_retention_refuses_tied_latest_chronology(self):
-        state = empty_state()
-        add_assignment(state, AT, "developer", "developer-one", task="t-retain")
-        add_assignment(state, AT, "developer", "developer-two", task="t-retain")
-        state["recovery"]["dispatches"] = [
-            {"assignment_index": 0, "worker_kind": "claude"},
-            {"assignment_index": 1, "worker_kind": "claude"},
-        ]
-        with self.assertRaisesRegex(UsageError, "chronology is uncertain"):
-            cli._retained_scoped_identity(
-                {"developer": "developer-fresh"}, {"developer": "claude"},
-                state, "t-retain", 1, True, False, {},
-            )
-
-    def test_close_task_removes_every_retained_scoped_pane(self):
-        record = self.tmp / "close-task.json"
-        record.write_text(json.dumps({
-            "task": "t-retain", "outcome": "merged", "evidence": "merged-pr",
-        }))
-        args = SimpleNamespace(
-            command="close-task", record=str(record), now=AT,
-            state=str(self.state), config=str(self.config), trace=False,
-        )
-        client = Mock()
-        closure = {"kind": "task_closed", "sequence": 1}
-        with patch("foreman.cli.recovery.close_task", return_value=closure), \
-                patch("foreman.cli.recovery.task_closure", return_value=closure), \
-                patch("foreman.cli.members.retained_task_panes", return_value=[
-                    {"agent": "developer-one", "pane_id": "pane-one"},
-                    {"agent": "advisor-one", "pane_id": "pane-two"},
-                ]), \
-                patch("foreman.cli.lifecycle.close", side_effect=[
-                    {"closed": True, "pane_id": "pane-one"},
-                    {"closed": True, "pane_id": "pane-two"},
-                ]) as close_pane:
-            result, error = cli._run_recovery(args, self.state, None, client, None)
-        self.assertIsNone(error)
-        self.assertEqual(len(result["pane_closures"]), 2)
-        self.assertEqual(close_pane.call_count, 2)
-
-    def test_close_task_historical_replay_does_not_clean_a_reopened_tasks_panes(self):
-        record = self.tmp / "close-task.json"
-        record.write_text(json.dumps({
-            "task": "t-retain", "outcome": "merged", "evidence": "old-merge",
-        }))
-        args = SimpleNamespace(
-            command="close-task", record=str(record), now=AT,
-            state=str(self.state), config=str(self.config), trace=False,
-        )
-        historical = {"kind": "task_closed", "sequence": 1}
-        with patch("foreman.cli.recovery.close_task", return_value=historical), \
-                patch("foreman.cli.recovery.task_closure", return_value=None), \
-                patch("foreman.cli.members.retained_task_panes") as retained, \
-                patch("foreman.cli.lifecycle.close") as close_pane:
-            result, error = cli._run_recovery(args, self.state, None, Mock(), None)
-        self.assertIsNone(error)
-        self.assertEqual(result, historical)
-        retained.assert_not_called()
-        close_pane.assert_not_called()
 
     def test_plans_from_a_snapshot_file(self):
         code, out, err = self.run_cli(

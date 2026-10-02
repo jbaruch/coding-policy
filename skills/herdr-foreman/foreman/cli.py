@@ -1276,12 +1276,10 @@ def _apply(args, client, warn, trace, hold_gates):
     if document.get("task_context") is not None and document["task_context"] != task_context:
         raise UsageError("Saved plan and apply name different task, count or correction bounds; replan from the current ledger.", {})
     if scoped and (args.retain_context or args.retain_specialist):
-        assignments = _retained_scoped_identity(
-            assignments, worker_kinds, state, args.task,
-            args.fix_round, args.retain_context, args.retain_specialist,
-            requirements,
+        raise UsageError(
+            "Assignment-scoped workers live for one assignment, so their panes cannot be retained. Re-run without --retain-context or --retain-specialist; the follow-up plan already names a fresh worker identity.",
+            {},
         )
-        document = {**document, "assignments": dict(assignments)}
     if scoped:
         agents_by_name = lifecycle.materialize(assignments, document.get("worker_kinds"), templates)
         agents = list(agents_by_name.values())
@@ -1528,7 +1526,7 @@ def _apply(args, client, warn, trace, hold_gates):
     if args.retain_specialist:
         engagement.require_followup(state, state_path, assignments)
 
-    fresh_workers = scoped and not (args.retain_context or args.retain_specialist)
+    fresh_workers = scoped
 
     if args.dry_run:
         rehearsal = dry_run(
@@ -2117,49 +2115,6 @@ def _worker_kind_provenance(state):
     }
 
 
-def _retained_scoped_identity(assignments, worker_kinds, state, task, fix_round,
-                              retain_context, retain_specialist, requirements):
-    """Replace a planned fresh name with the eligible retained live identity."""
-    role = next(iter(assignments)) if len(assignments) == 1 else None
-    history = state.get("assignments", [])
-    candidates = []
-    for index, row in enumerate(history):
-        if (not isinstance(row, dict) or row.get("status") != "applied"
-                or row.get("task") != task or row.get("role") != role):
-            continue
-        if retain_context and (role != "developer" or (row.get("fix_round") or 0) + 1 != fix_round):
-            continue
-        if retain_specialist and row.get("requirements") != (requirements or {}).get(role):
-            continue
-        candidates.append((index, row))
-    if not candidates:
-        mode = "developer fix" if retain_context else "specialist consultation"
-        raise UsageError("Cannot retain this {}: no preceding confirmed assignment preserves its task, role and engagement. Replan a fresh worker or restore the original history.".format(mode), {})
-    timed = [
-        (chronology.timestamp(row.get("at"), "Assignment {} chronology".format(index)), index, row)
-        for index, row in candidates
-    ]
-    latest_time = max(item[0] for item in timed)
-    latest = [(index, row) for at, index, row in timed if at == latest_time]
-    if len(latest) != 1:
-        raise UsageError(
-            "Retained assignment chronology is uncertain at indices {}; restore the original event times before reusing a live pane.".format(
-                ", ".join(str(index) for index, _row in latest)),
-            {},
-        )
-    index, prior = latest[0]
-    dispatch = next((row for row in state.get("recovery", {}).get("dispatches", [])
-                     if isinstance(row, dict) and row.get("assignment_index") == index
-                     and isinstance(row.get("worker_kind"), str)), None)
-    if dispatch is None:
-        raise UsageError("Cannot retain {}: its preceding assignment has no worker-kind provenance. Recover that dispatch before reusing its pane.".format(
-            prior.get("agent")), {"assignment_index": index})
-    if worker_kinds.get(role) != dispatch["worker_kind"]:
-        raise UsageError("Retained {} uses worker kind {!r}, but this plan chose {!r}. Replan the role with exclusions that preserve the original worker kind.".format(
-            prior.get("agent"), dispatch["worker_kind"], worker_kinds.get(role)), {"role": role})
-    return {role: prior["agent"]}
-
-
 def cmd_recovery(args, client=None, warn=None, trace=None):
     state_path = _state_path(args)
     # A review receipt's gate check and its commit are one transaction: the
@@ -2177,14 +2132,6 @@ def _run_recovery(args, state_path, warn, client, trace):
         result = recovery.register_task(store, data, at)
     elif args.command == "close-task":
         result = recovery.close_task(store, history, data, at)
-        current = recovery.task_closure(store, history, data.get("task"))
-        retained = (members.retained_task_panes(state_path, state, data.get("task"))
-                    if current is not None and current["sequence"] == result["sequence"] else [])
-        if retained:
-            client = client if client is not None else _client(args, trace=trace)
-            closures = [lifecycle.close(client, row["agent"], row["pane_id"])
-                        for row in retained]
-            result = {**result, "pane_closures": closures}
     elif args.command == "checkpoint":
         judge = load_judge(_config_path(args))
         task = data.get("task") if isinstance(data, dict) else None

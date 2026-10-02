@@ -181,17 +181,7 @@ class CloseMemberTest(MembersCase):
         self.assertFalse(next(row for row in store.load(self.path)["members"]
                               if row["id"] == "dispatch-a")["active"])
 
-    def test_retention_eligible_scoped_panes_stay_until_retention_ends(self):
-        self.assertTrue(members._keeps_scoped_pane(
-            {"role": "developer"}, {"fix_round": None}))
-        self.assertTrue(members._keeps_scoped_pane(
-            {"role": "developer"}, {"fix_round": 2}))
-        self.assertFalse(members._keeps_scoped_pane(
-            {"role": "developer"}, {"fix_round": 3}))
-        self.assertTrue(members._keeps_scoped_pane(
-            {"role": "advisor", "requirements": {"specialty": "api"}}, {}))
-
-    def test_close_member_retains_an_early_developer_pane(self):
+    def test_close_member_removes_an_initial_developer_pane(self):
         dispatch = self.state["recovery"]["dispatches"][0]
         dispatch.update(schema_version=recovery.ASSIGNMENT_DISPATCH_VERSION,
                         worker_kind="codex", role="developer")
@@ -207,43 +197,12 @@ class CloseMemberTest(MembersCase):
         self.state["specialist_assessments"] = []
         save_state(self.path, self.state)
         self.write_ledger("needs_work", fields={"role": "developer"})
-        with patch("foreman.members.lifecycle.close") as close_pane:
-            result = members.close(self.path, "dispatch-a", self.ledger, LATER, client=Mock())
-        close_pane.assert_not_called()
-        self.assertEqual(result["pane_closure"], {
-            "retained": True, "agent": "codex-a", "pane_id": "pane-a"})
-
-    def test_task_closure_discovers_retained_scoped_panes(self):
-        dispatch = self.state["recovery"]["dispatches"][0]
-        dispatch.update(schema_version=recovery.ASSIGNMENT_DISPATCH_VERSION,
-                        worker_kind="codex", role="developer")
-        dispatch["result"].update(
-            schema_version=recovery.ASSIGNMENT_DISPATCH_VERSION,
-            worker_kind="codex", assignment_scoped=True, pane_id="pane-a",
-            role="developer", fix_round=None,
-        )
-        save_state(self.path, self.state)
-        store.resolve(self.path, {
-            "id": "dispatch-a", "outcome": "assessed",
-            "evidence": [str(self.path)],
-        }, LATER)
-        self.assertEqual(
-            members.retained_task_panes(self.path, self.state, "task-a"),
-            [{"agent": "codex-a", "pane_id": "pane-a"}],
-        )
-
-    def test_task_closure_refuses_a_retained_pane_with_an_active_owner(self):
-        dispatch = self.state["recovery"]["dispatches"][0]
-        dispatch.update(schema_version=recovery.ASSIGNMENT_DISPATCH_VERSION,
-                        worker_kind="codex", role="developer")
-        dispatch["result"].update(
-            schema_version=recovery.ASSIGNMENT_DISPATCH_VERSION,
-            worker_kind="codex", assignment_scoped=True, pane_id="pane-a",
-            role="developer", fix_round=None,
-        )
-        save_state(self.path, self.state)
-        with self.assertRaisesRegex(UsageError, "active enrollment dispatch-a"):
-            members.retained_task_panes(self.path, self.state, "task-a")
+        closure = {"pane_id": "pane-a", "agent": "codex-a", "closed": True}
+        client = Mock()
+        with patch("foreman.members.lifecycle.close", return_value=closure) as close_pane:
+            result = members.close(self.path, "dispatch-a", self.ledger, LATER, client=client)
+        close_pane.assert_called_once_with(client, "codex-a", "pane-a")
+        self.assertEqual(result["pane_closure"], closure)
 
     def test_reconciled_scoped_close_uses_the_dispatch_worker_kind_marker(self):
         dispatch = self.state["recovery"]["dispatches"][0]
