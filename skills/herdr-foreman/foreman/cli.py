@@ -588,17 +588,19 @@ def _cleanup_reconciled_scoped_not_sent(state_path, dispatch, record, at, client
                 dispatch["id"]),
             {"dispatch": dispatch["id"]},
         )
-    if not member["active"]:
-        return {"pane_id": pane, "agent": assignment["agent"], "closed": True, "replayed": True}
     try:
         closure = lifecycle.close(client, assignment["agent"], pane)
-        supervision.resolve(
-            state_path,
-            {"id": dispatch["id"],
-             "outcome": "Reconciled not_sent: " + record["reason"],
-             "evidence": [str(Path(record["evidence"]).expanduser().resolve())]},
-            at,
-        )
+        # An operator may resolve supervision independently; inactive is not
+        # evidence that the assignment pane was closed. Always prove closure,
+        # and skip only the already-recorded sidecar transition.
+        if member["active"]:
+            supervision.resolve(
+                state_path,
+                {"id": dispatch["id"],
+                 "outcome": "Reconciled not_sent: " + record["reason"],
+                 "evidence": [str(Path(record["evidence"]).expanduser().resolve())]},
+                at,
+            )
         return closure
     except ForemanError as cleanup:
         raise HerdrError(
@@ -1779,10 +1781,11 @@ def _apply(args, client, warn, trace, hold_gates):
 
     original_before_send = before_send
     def track_before_send(step, context):
-        original_before_send(step, context)
-        # From here onward the prompt transport may have written even when it
-        # returns an error, so cleanup preserves this pane for reconciliation.
+        # Protect the pane before entering the durable sending transition. An
+        # interrupt after that transition mutates memory but before it returns
+        # must not let cleanup destroy the evidence reconciliation needs.
         sending.add(step["agent"])
+        original_before_send(step, context)
 
     apply_complete = False
     try:
