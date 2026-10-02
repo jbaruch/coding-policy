@@ -30,7 +30,7 @@ from types import SimpleNamespace
 from foreman import attention, cli, runnable, supervision
 from foreman.report_delivery import marker_columns
 from foreman.cli import build_parser, main
-from foreman.errors import HerdrError, UsageError
+from foreman.errors import HerdrError, StateError, UsageError
 from foreman.herdr import HerdrClient
 from foreman.partition import slice_digest
 from foreman.state import STATE_SCHEMA_VERSION, add_assignment, empty_state, load_state_checked, save_state
@@ -685,6 +685,81 @@ class PlanCommandTest(CliCase):
         self.assertTrue(usable)
         self.assertEqual(next(row for row in saved["recovery"]["dispatches"]
                               if row["id"] == pending["id"])["status"], "not_sent")
+
+    def test_scoped_not_sent_cleanup_replays_after_pane_disappears(self):
+        plan = self._interrupt_plan()
+        command = (
+            self.base() + ["apply", "--assignments", json.dumps(plan),
+                           "--task", "t-interrupt", "--now", AT,
+                           "--common", str(self.common)]
+            + self.brief_args("developer", "reviewer") + self._interrupt_reports()
+        )
+
+        def interrupt_after_send_started(*_args, **kwargs):
+            kwargs["on_before_send"](
+                {"role": "developer", "agent": plan["assignments"]["developer"],
+                 "pane_id": "pane-developer"},
+                {"cleared": True, "clear_reason": "automatic", "context_session": None},
+            )
+            raise KeyboardInterrupt
+
+        client = Mock()
+        with patch("foreman.lifecycle.spawn", side_effect=["pane-developer", "pane-reviewer"]), \
+                patch("foreman.lifecycle.close"), \
+                patch("foreman.cli.apply_assignments", side_effect=interrupt_after_send_started), \
+                self.assertRaises(KeyboardInterrupt):
+            self.run_cli(command, client=client)
+        saved, usable = load_state_checked(self.state, persist_migration=False)
+        self.assertTrue(usable)
+        pending = next(row for row in saved["recovery"]["dispatches"]
+                       if row["agent"] == plan["assignments"]["developer"])
+
+        evidence = self.tmp / "not-sent-replay-evidence.md"
+        evidence.write_text("Transport trace proves no worker prompt was delivered.\n")
+        record = self.tmp / "reconcile-not-sent-replay.json"
+        record.write_text(json.dumps({
+            "dispatch": pending["id"], "outcome": "not_sent",
+            "reason": "Transport trace proves no prompt was delivered",
+            "authorization": {"source": "fixture", "quote": "Reconcile this send"},
+            "evidence": str(evidence),
+        }))
+        recovery_client = Mock()
+        recovery_client.agent_get.return_value = {
+            "agent_status": "idle", "agent_session": "session-a",
+        }
+        with patch("foreman.cli.lifecycle.close", return_value={"closed": True}), \
+                patch("foreman.cli.supervision.resolve",
+                      side_effect=StateError("sidecar write failed", {})):
+            code, _out, err = self.run_cli(
+                self.base() + ["reconcile", "--record", str(record), "--now", AT],
+                client=recovery_client,
+            )
+        self.assertEqual(code, 1)
+        self.assertIn("durably not_sent", err)
+        saved, usable = load_state_checked(self.state, persist_migration=False)
+        self.assertTrue(usable)
+        self.assertEqual(next(row for row in saved["recovery"]["dispatches"]
+                              if row["id"] == pending["id"])["status"], "not_sent")
+        member = next(row for row in supervision.load(self.state)["members"]
+                      if row["id"] == pending["id"])
+        self.assertTrue(member["active"])
+
+        recovery_client.reset_mock()
+        recovery_client.agent_get.side_effect = AssertionError(
+            "an exact durable not_sent replay must not require a live worker")
+        replayed = {"pane_id": "pane-developer", "closed": True, "replayed": True}
+        self.out, self.err = io.StringIO(), io.StringIO()
+        with patch("foreman.cli.lifecycle.close", return_value=replayed):
+            code, out, err = self.run_cli(
+                self.base() + ["reconcile", "--record", str(record), "--now", AT],
+                client=recovery_client,
+            )
+        self.assertEqual(code, 0, err)
+        self.assertEqual(json.loads(out)["pane_closure"], replayed)
+        recovery_client.agent_get.assert_not_called()
+        member = next(row for row in supervision.load(self.state)["members"]
+                      if row["id"] == pending["id"])
+        self.assertFalse(member["active"])
 
     def test_scoped_apply_closes_unused_panes_when_dispatch_is_interrupted(self):
         plan = self._interrupt_plan()

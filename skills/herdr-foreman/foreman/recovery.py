@@ -1891,6 +1891,24 @@ def recovery_agent(store, assignments, command, data):
     return _item(store["dispatches"], data.get("dispatch"), "dispatch")["agent"]
 
 
+def scoped_not_sent_replay(store, data):
+    """Return an exact scoped ``not_sent`` replay before live inspection.
+
+    Its first reconciliation already proved and durably recorded the transport
+    outcome. The assignment pane may therefore be absent while owner-sidecar
+    cleanup still needs to finish.
+    """
+    if not isinstance(data, dict):
+        return None
+    record = next((row for row in store["dispatches"]
+                   if row["id"] == data.get("dispatch")), None)
+    if (record is not None and record["status"] == "not_sent"
+            and isinstance(record.get("worker_kind"), str)
+            and record.get("reconciliation", {}).get("input") == data):
+        return record
+    return None
+
+
 def reconcile(store, assignments, data, at, live_info):
     required = {"dispatch", "outcome", "reason", "authorization", "evidence"}
     if not isinstance(data, dict) or set(data) != required or not isinstance(data.get("outcome"), str) or data["outcome"] not in {"applied", "not_sent"}:

@@ -2277,8 +2277,12 @@ def _run_recovery(args, state_path, warn, client, trace):
         if name not in agents:
             raise UsageError("The recorded worker is absent from config; restore its original identity before recovering.", {})
         client = client if client is not None else _client(args, trace=trace)
-        live = client.agent_get(name)
-        recovery.require_recovery_ready(live)
+        scoped_not_sent_replay = (recovery.scoped_not_sent_replay(store, data)
+                                  if args.command == "reconcile" else None)
+        live = None
+        if scoped_not_sent_replay is None:
+            live = client.agent_get(name)
+            recovery.require_recovery_ready(live)
         if args.command == "recover-context":
             result = recovery.authorize_context(store, history, data, at, native_context_session(live, agents[name].kind))
         elif args.command == "recover-role-clear":
@@ -2286,7 +2290,7 @@ def _run_recovery(args, state_path, warn, client, trace):
         elif args.command == "record-release-clear":
             result = historical.record_release_clear(store, history, data, at, native_context_session(live, agents[name].kind))
         else:
-            result = recovery.reconcile(store, history, data, at, live)
+            result = scoped_not_sent_replay or recovery.reconcile(store, history, data, at, live)
             if result["status"] == "not_sent" and isinstance(result.get("worker_kind"), str):
                 # The transport fact becomes durable before destructive pane
                 # cleanup. An interrupted or failed close can be replayed
