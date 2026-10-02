@@ -134,7 +134,9 @@ allowance, tiers, and readiness. Apply output schema 8 includes
 schema-7-config dispatch also carries `assignment_scoped: true` and its
 `worker_kind`.
 Version 7 adds optional per-assignment specialist `requirements` and retained
-consultation handling. Version 6 added the verified role-clear transition. Version 5 adds verified hand-release and historical-correction transition
+consultation handling for legacy standing-worker configs. Assignment-scoped
+configs reject retention and give every follow-up a fresh identity and pane.
+Version 6 added the verified role-clear transition. Version 5 adds verified hand-release and historical-correction transition
 variants; version 4 introduced the original recovery fields.
 
 Plan schema 5 adds an optional `requirements` map keyed by assigned responsibility.
@@ -228,12 +230,13 @@ seat to the stable template selected from the snapshot; `assignments` maps the
 same seats to fresh Herdr-safe identities allocated by that plan. Apply
 requires both maps to have exactly the same keys, clones each template under
 its saved identity, and spawns it in a new pane. Replaying that plan preserves
-the identity; replanning allocates a different one. An eligible
-`--retain-context` or `--retain-specialist` apply replaces the plan's fresh
-name with the preceding assignment's recorded live identity, after verifying
-that its stable worker kind is unchanged. Selection explanations
-continue to name the ranked worker kind. Legacy plans and bare role mappings
-remain valid only with schemas 1–6 standing-worker configs.
+the identity; replanning allocates a different one. Assignment-scoped apply
+rejects `--retain-context` and `--retain-specialist`: after the assessed pane
+closes, a follow-up plan allocates a fresh identity and its self-contained
+brief carries the prior evidence. Selection explanations continue to name the
+ranked worker kind. Legacy plans and bare role mappings remain valid only with
+schemas 1–6 standing-worker configs, where the existing retention modes remain
+available.
 
 Plan schema 10 adds `capability` and `cheaper_adequate` to each entry in
 `tiers` (#520). Writer: `plan`, from the capability table beside the state.
@@ -604,9 +607,10 @@ Requirements contain the assigned role's normalized object; reviewer scope is
 are omitted, not null. The result preserves the dispatch's exact metadata and
 matches its assignment row. Version-1 dispatches/results retain their original
 shape and cannot carry these fields. Unknown-send reconciliation preserves the
-metadata without inventing native continuity. Optional requirements and retained
-specialist intent enter the dispatch fingerprint only when present; legacy retry
-identities remain unchanged.
+metadata without inventing native continuity. Optional requirements and legacy
+standing-worker retained-specialist intent enter the dispatch fingerprint only
+when present; legacy retry identities remain unchanged. Assignment-scoped
+dispatches never carry retained-specialist intent.
 
 ### Specialist assessment records
 
@@ -747,8 +751,10 @@ informational plan name and never feeds headroom.
 - **Readers** — `plan` reads the newest snapshot plus the ledger (role history
   breaks a headroom tie), and the config's `role_costs` for its seat weights;
   `state` prints the document. Neither appends records; their shared loader performs owner migrations. Live `apply` reads the most
-  recent assignment for the named worker before retaining context; Step 10
-  documents the retained-dispatch contract. `status` derives budgets and paused
+  recent assignment for a named legacy standing worker before retaining
+  context; Step 10 documents that retained-dispatch contract. An
+  assignment-scoped apply instead validates its fresh planned identity and
+  spawns its pane. `status` derives budgets and paused
   implementation separately from active audit work. `apply --dry-run` reads
   current recovery bounds without writes; an older ledger requires an owner
   `state` command first. Dry-run never proves live continuity.
@@ -798,11 +804,14 @@ informational plan name and never feeds headroom.
   The recovery reference names the delivery continuation.
   Unproven correlation is null without losing
   the confirmed dispatch. An unchanged pre-clear reference cannot prove a new conversation. A
-  retained dispatch checks the recorded identity against the live source at
-  readiness and immediately before sending. Missing, changed, malformed, or
-  non-native identity is a refusal with no terminal writes. Other assignments
-  and unlabelled development record null. Requirement-bearing consultations also
-  preserve verified native context for the specialist follow-up contract. The official integration must report
+  retained legacy standing-worker dispatch checks the recorded identity against
+  the live source at readiness and immediately before sending. Missing,
+  changed, malformed, or non-native identity is a refusal with no terminal
+  writes. Other assignments and unlabelled development record null.
+  Requirement-bearing legacy consultations also preserve verified native
+  context for the specialist follow-up contract. Assignment-scoped follow-ups
+  preserve no session continuity across assignments; they use a fresh identity
+  and pane. The official integration must report
   native session changes; check its installation when continuity is unavailable.
 - **Serialization** — CLI owner transactions use a live OS lock at the state
   path plus `.lock`, including readers that may migrate. Contention refuses
