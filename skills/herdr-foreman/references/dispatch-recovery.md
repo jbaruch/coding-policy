@@ -4,10 +4,12 @@
 
 Keep the same `--task` identifier from initial development through all its
 fixes. Omit `--fix-round` on the initial assignment; supply it on every fix.
-Never trim or merge legacy identities. Retained fixes dispatch developer alone
-with `--retain-context`; other roles use their own dispatch context. Developer retention
-requires matching confirmed history, live native-session continuity, and a
-compatible verified tier. Missing evidence requires owner recovery, preserving
+Never trim or merge legacy identities. On schemas 1–6 standing-worker configs,
+retained fixes dispatch developer alone with `--retain-context`; other roles
+use their own dispatch context. That legacy developer retention requires
+matching confirmed history, live native-session continuity, and a compatible
+verified tier. Schema-7 assignment-scoped configs reject retention and plan a
+fresh identity and pane. Missing evidence requires owner recovery, preserving
 the original record and counter.
 
 After a recorded release clear, dispatch the next developer correction fresh
@@ -22,10 +24,12 @@ Reuse an approved bounded correction plan while its scope and budget hold.
 An unknown dispatch outcome pauses implementation for evidence-based recovery.
 An identical completed retry returns its recorded result without sending again.
 
-## Warm specialist follow-up
+## Legacy warm specialist follow-up
 
-Use `--retain-specialist` for a bounded follow-up to an assessed advisor,
-investigator or architect consultation. First record its report-contract
+On schemas 1–6 standing-worker configs, use `--retain-specialist` for a bounded
+follow-up to an assessed advisor, investigator or architect consultation.
+Schema-7 assignment-scoped configs reject this flag; plan a fresh consultation
+whose self-contained brief cites the preceding report instead. First record its report-contract
 assessment and complete the
 observation lifecycle in `references/specialists.md`. Keep the previous report
 and successful delivery receipt as immutable source files. A session kept idle
@@ -145,7 +149,7 @@ instruction into permission to exceed an exhausted correction budget.
 | `recover-context` | `task`, original `assignment_index`, `reason`, `authorization`, absolute `evidence` | For the latest confirmed developer row with null native-session proof. Records a live observation separately and permits the next fresh handoff. The original null stays null. |
 | `recover-role-clear` | Fields under Verified role-clear recovery below | Record a fresh handoff after another authorized role automatically cleared the developer. Preserve known original proof and reuse existing correction bounds. |
 | `close-task` | `task`, `outcome` (`merged` or `abandoned`), `evidence` | Append a `task_closed` event once the task merged or was abandoned, which releases its developer's reservation for `plan`. `--now` must follow the task's latest developer assignment; a tied or earlier time is refused. A later developer assignment reopens the task. The same closure replays from anywhere in history, even after the task reopened; closing a reopened task needs new evidence. A different closure of a still-closed task is refused. |
-| `reconcile` | `dispatch`, `outcome` (`applied` or `not_sent`), `reason`, `authorization`, absolute `evidence` | Resolve an interrupted send from actual evidence and an idle/done live worker. `applied` appends recovered assignment evidence without fabricating contemporaneous session proof; `not_sent` permits a transport retry. |
+| `reconcile` | `dispatch`, `outcome` (`applied` or `not_sent`), `reason`, `authorization`, absolute `evidence` | Resolve an interrupted send from actual evidence and an idle/done live worker. `applied` appends recovered assignment evidence without fabricating contemporaneous session proof. `not_sent` permits a transport retry; for an assignment-scoped dispatch it first saves that outcome, then closes the pane and resolves its enrollment. A cleanup failure leaves `not_sent` durable, and replaying the identical record retries cleanup without rewriting the transport fact. |
 | `record-release-clear` | Fields under Verified release hand-clear below | Record existing required-clear evidence for a successful release `--no-clear` row. No new context-change permission is required. |
 | `import-correction` | Fields under Historical manual corrections below | Import an already authorized, completed manual attempt without sending input or granting future attempts. |
 | `record-historical-review` | unique `id`, `historical_attempt`, full `head_revision`, `verdict`, `review_mode`, independent `reviewer`, absolute `report` | Append an actual review receipt for an imported correction. Full review is required for approval; other verification gates remain separate. |
@@ -185,8 +189,10 @@ permits its next early developer fix in a fresh session. Register the task's
 original metadata if legacy history lacks it, then omit `--retain-context`
 and `--no-clear`. Include the release result, current findings, prior reports,
 original base, and cumulative fix count in the fresh brief. No additional
-context-change permission is needed. The following fix may retain that new
-session when the normal same-role continuity preconditions hold.
+context-change permission is needed. On a legacy standing-worker config, the
+following fix may retain that new session when the normal same-role continuity
+preconditions hold. An assignment-scoped follow-up instead plans another fresh
+identity and pane.
 
 Fresh developer dispatch correlates the official native session after the
 first prompt, including delayed IDs. A stale pre-clear identity, changed pane

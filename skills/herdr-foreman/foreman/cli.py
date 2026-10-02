@@ -565,6 +565,49 @@ def _retryable_enrollment_identity(state_path, store, identifier, fingerprint):
         identifier = "{}:transport-retry-{}".format(base, attempt)
 
 
+def _cleanup_reconciled_scoped_not_sent(state_path, dispatch, record, at, client):
+    """Close and resolve a scoped send proven not to have reached its worker.
+
+    The caller saves the ``not_sent`` reconciliation before entering here. A
+    pane or sidecar failure therefore cannot erase the terminal transport fact;
+    replaying the identical reconciliation retries only this cleanup.
+    """
+    member = next((row for row in supervision.load(state_path)["members"]
+                   if row["id"] == dispatch["id"]), None)
+    if member is None:
+        raise StateError(
+            "Dispatch {} is durably not_sent, but its assignment-scoped supervision enrollment is missing. Restore the owner sidecar, then replay the identical reconciliation to close its pane.".format(
+                dispatch["id"]),
+            {"dispatch": dispatch["id"]},
+        )
+    assignment = supervision.expected_assignment(member)
+    pane = assignment.get("pane_id")
+    if not isinstance(pane, str) or not pane:
+        raise StateError(
+            "Dispatch {} is durably not_sent, but its assignment-scoped enrollment records no pane. Restore the original pane identity, then replay the identical reconciliation.".format(
+                dispatch["id"]),
+            {"dispatch": dispatch["id"]},
+        )
+    if not member["active"]:
+        return {"pane_id": pane, "agent": assignment["agent"], "closed": True, "replayed": True}
+    try:
+        closure = lifecycle.close(client, assignment["agent"], pane)
+        supervision.resolve(
+            state_path,
+            {"id": dispatch["id"],
+             "outcome": "Reconciled not_sent: " + record["reason"],
+             "evidence": [str(Path(record["evidence"]).expanduser().resolve())]},
+            at,
+        )
+        return closure
+    except ForemanError as cleanup:
+        raise HerdrError(
+            "Dispatch {} is durably not_sent, but assignment-scoped pane/enrollment cleanup failed: {} Replay the identical reconciliation after repairing the cleanup failure; its transport outcome will not be rewritten.".format(
+                dispatch["id"], cleanup),
+            {"dispatch": dispatch["id"], "cleanup_error": cleanup.to_dict()},
+        ) from cleanup
+
+
 def _seat_holds(roles, task, state, state_path):
     """Developer reservations and busy workers, read from the owner records (#483)."""
     busy = {row["assignment"]["agent"]: row["assignment"]["task"]
@@ -2244,6 +2287,15 @@ def _run_recovery(args, state_path, warn, client, trace):
             result = historical.record_release_clear(store, history, data, at, native_context_session(live, agents[name].kind))
         else:
             result = recovery.reconcile(store, history, data, at, live)
+            if result["status"] == "not_sent" and isinstance(result.get("worker_kind"), str):
+                # The transport fact becomes durable before destructive pane
+                # cleanup. An interrupted or failed close can be replayed
+                # without changing the reconciled outcome.
+                recovery.validate_store(store, history)
+                engagement.validate_assessments(state)
+                save_state(state_path, state)
+                result = {**result, "pane_closure": _cleanup_reconciled_scoped_not_sent(
+                    state_path, result, data, at, client)}
             if result["status"] == "applied" and (result.get("result") or {}).get("status") != "applied":
                 context = result.get("context_before_send", {})
                 recovered = {"role": result["role"], "agent": name, "task": result["task"],
