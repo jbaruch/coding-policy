@@ -15,8 +15,8 @@ from .errors import ConfigError, ForemanError
 from .herdr import SLASH_DELIVERIES, SLASH_DELIVERY_PASTE
 from .tiers import TOP_MODELS, parse_launch_args, parse_tiers
 
-CONFIG_SCHEMA_VERSION = 6
-READABLE_CONFIG_VERSIONS = frozenset({1, 2, 3, 4, 5, 6})
+CONFIG_SCHEMA_VERSION = 7
+READABLE_CONFIG_VERSIONS = frozenset({1, 2, 3, 4, 5, 6, 7})
 #: The first config version that may declare the top-level `foreman` block.
 FOREMAN_CONFIG_VERSION = 6
 CAPABILITY_ID = re.compile(r"[a-z][a-z0-9_-]*\Z")
@@ -63,9 +63,10 @@ class Agent:
         "tiers",
         "launch_args",
         "capabilities",
+        "assignment_scoped",
     )
 
-    def __init__(self, name, kind, usage_prompt, usage_marker, usage_read_source, clear_prompt, close_keys=(), idle_markers=(), working_markers=(), dialog_next_tab_keys=(), recover_keys=(), composer_placeholders=(), slash_delivery=DEFAULT_SLASH_DELIVERY, composer_glyph="", composer_ignore_dim=DEFAULT_COMPOSER_IGNORE_DIM, slash_enter_count=DEFAULT_SLASH_ENTER_COUNT, model_label="", window_group="", tiers=None, launch_args=(), capabilities=()):
+    def __init__(self, name, kind, usage_prompt, usage_marker, usage_read_source, clear_prompt, close_keys=(), idle_markers=(), working_markers=(), dialog_next_tab_keys=(), recover_keys=(), composer_placeholders=(), slash_delivery=DEFAULT_SLASH_DELIVERY, composer_glyph="", composer_ignore_dim=DEFAULT_COMPOSER_IGNORE_DIM, slash_enter_count=DEFAULT_SLASH_ENTER_COUNT, model_label="", window_group="", tiers=None, launch_args=(), capabilities=(), assignment_scoped=False):
         self.name = name
         self.kind = kind
         self.usage_prompt = usage_prompt
@@ -96,6 +97,7 @@ class Agent:
         self.tiers = tiers or {}
         self.launch_args = tuple(launch_args)
         self.capabilities = tuple(capabilities)
+        self.assignment_scoped = assignment_scoped
         # "paste" (agent prompt) or "type" (pane send-text plus Enter).
         self.slash_delivery = slash_delivery
         # The prompt glyph that marks the composer row, so foreman can see
@@ -133,7 +135,27 @@ class Agent:
             record["launch_args"] = list(self.launch_args)
         if self.capabilities:
             record["capabilities"] = list(self.capabilities)
+        if self.assignment_scoped:
+            record["assignment_scoped"] = True
         return record
+
+
+def assignment_worker(template, name):
+    """Clone a schema-7 worker kind under one plan-bound live identity."""
+    return Agent(
+        name=name, kind=template.kind, usage_prompt=template.usage_prompt,
+        usage_marker=template.usage_marker, usage_read_source=template.usage_read_source,
+        clear_prompt=template.clear_prompt, close_keys=template.close_keys,
+        idle_markers=template.idle_markers, working_markers=template.working_markers,
+        dialog_next_tab_keys=template.dialog_next_tab_keys, recover_keys=template.recover_keys,
+        composer_placeholders=template.composer_placeholders,
+        slash_delivery=template.slash_delivery, composer_glyph=template.composer_glyph,
+        composer_ignore_dim=template.composer_ignore_dim,
+        slash_enter_count=template.slash_enter_count, model_label=template.model_label,
+        window_group=template.window_group, tiers=template.tiers,
+        launch_args=template.launch_args, capabilities=template.capabilities,
+        assignment_scoped=True,
+    )
 
 
 def parse_capabilities(value, source="capabilities", error_type: type[ForemanError] = ConfigError):
@@ -187,11 +209,21 @@ def parse_config(payload, source="<memory>"):
             {"source": source, "found": version, "expected": CONFIG_SCHEMA_VERSION},
         )
 
-    raw_agents = payload.get("agents")
+    collection = "worker_kinds" if version >= 7 else "agents"
+    retired = "agents" if version >= 7 else "worker_kinds"
+    if retired in payload:
+        raise ConfigError(
+            "Config at {} schema_version {} uses `{}`; use `{}` {}.".format(
+                source, version, retired, collection,
+                "templates that are spawned for each assignment" if version >= 7 else "only after upgrading to schema 7",
+            ),
+            {"source": source, "field": retired},
+        )
+    raw_agents = payload.get(collection)
     if not isinstance(raw_agents, list) or not raw_agents:
         raise ConfigError(
-            "Config at {} has no `agents` array - add at least one agent entry "
-            "shaped like the ones in config.example.json.".format(source),
+            "Config at {} has no `{}` array - add at least one worker entry "
+            "shaped like the ones in config.example.json.".format(source, collection),
             {"source": source},
         )
 
@@ -209,17 +241,17 @@ def parse_config(payload, source="<memory>"):
     for index, entry in enumerate(raw_agents):
         if not isinstance(entry, dict):
             raise ConfigError(
-                "Config at {}: agents[{}] is not a JSON object - each agent is "
+                "Config at {}: {}[{}] is not a JSON object - each worker is "
                 "an object with the fields {}.".format(
-                    source, index, ", ".join(REQUIRED_AGENT_FIELDS)
+                    source, collection, index, ", ".join(REQUIRED_AGENT_FIELDS)
                 ),
                 {"source": source, "index": index},
             )
         missing = [field for field in REQUIRED_AGENT_FIELDS if not entry.get(field)]
         if missing:
             raise ConfigError(
-                "Config at {}: agents[{}] is missing {} - add {} to that entry.".format(
-                    source, index, ", ".join(missing), " and ".join(missing)
+                "Config at {}: {}[{}] is missing {} - add {} to that entry.".format(
+                    source, collection, index, ", ".join(missing), " and ".join(missing)
                 ),
                 {"source": source, "index": index, "missing": missing},
             )
@@ -235,7 +267,7 @@ def parse_config(payload, source="<memory>"):
         name = entry["name"]
         if "tiers" in entry and version < 2:
             raise ConfigError("Tier tables need config schema_version 2; upgrade the operator-owned config.", {"source": source})
-        if version >= 5 and not entry.get("tiers") and entry.get("name") != pinned_judge:
+        if version >= 5 and not entry.get("tiers") and (version >= 7 or entry.get("name") != pinned_judge):
             # Without a table, tier selection returns nothing for this worker and
             # every round it takes records `tier: null`, unproven (#476).
             raise ConfigError(
@@ -247,6 +279,11 @@ def parse_config(payload, source="<memory>"):
                 "Config at {}: agents[{}] has a tier table without a `consultation` row, which config schema_version 4 "
                 "requires: investigator and advisor default to it. Copy the row from config.example.json; never "
                 "synthesize it from `build`.".format(source, index), {"source": source, "index": index})
+        if version >= 7 and "coordination" not in entry.get("tiers", {}):
+            raise ConfigError(
+                "Config at {}: {}[{}] has no `coordination` tier. Schema 7 starts one short-lived "
+                "usage probe per window_group at that tier; add the runtime's cheapest safe row.".format(
+                    source, collection, index), {"source": source, "index": index})
         if "capabilities" in entry and version < 3:
             raise ConfigError("Capability declarations need config schema_version 3; upgrade the operator-owned config without changing its existing launch or tier settings.", {"source": source})
         capabilities = parse_capabilities(entry.get("capabilities", []), "{}: agents[{}].capabilities".format(source, index))
@@ -353,10 +390,15 @@ def parse_config(payload, source="<memory>"):
                 tiers=parse_tiers(entry.get("tiers"), entry["kind"]),
                 launch_args=parse_launch_args(entry.get("launch_args", []), entry["kind"]),
                 capabilities=capabilities,
+                assignment_scoped=version >= 7,
                 slash_enter_count=enters,
                 **lists
             )
         )
+    if version >= 7 and judge is not None and judge.agent not in seen:
+        raise ConfigError(
+            "Config at {} pins judge.worker_kind {!r}, which is not declared in worker_kinds.".format(
+                source, judge.agent), {"source": source, "worker_kind": judge.agent})
     return agents
 
 
@@ -447,7 +489,18 @@ def parse_judge(payload, source="<memory>"):
             ),
             {"source": source, "judge_type": type(raw).__name__},
         )
-    for field in ("agent", "model"):
+    version = payload.get("schema_version")
+    identity_field = "worker_kind" if version == 7 else "agent"
+    retired_field = "agent" if version == 7 else "worker_kind"
+    if retired_field in raw:
+        raise ConfigError(
+            "Config at {}: schema_version {} judge uses `{}`; use `{}` so the pinned seat names {}.".format(
+                source, version, retired_field, identity_field,
+                "a spawnable worker kind" if version == 7 else "the standing worker",
+            ),
+            {"source": source, "field": retired_field},
+        )
+    for field in (identity_field, "model"):
         value = raw.get(field)
         if not isinstance(value, str) or not value:
             raise ConfigError(
@@ -456,6 +509,7 @@ def parse_judge(payload, source="<memory>"):
                     source,
                     field,
                     value,
+                    "worker kind that supplies the seat" if field == "worker_kind" else
                     "agent that holds the seat" if field == "agent" else "model it is pinned to",
                 ),
                 {"source": source, "field": field, "value": value},
@@ -479,7 +533,7 @@ def parse_judge(payload, source="<memory>"):
         )
     # Legacy banner_pattern is ignored: a screen cannot prove launch flags.
     return Judge(
-        agent=raw["agent"],
+        agent=raw[identity_field],
         model=raw["model"],
         effort=effort,
     )
@@ -587,14 +641,15 @@ def parse_foreman(payload, source="<memory>"):
                 source, kind, " or ".join(sorted(TOP_MODELS))),
             {"source": source, "kind": kind})
     judge = parse_judge(payload, source=source)
-    if judge is not None and agent == judge.agent:
+    if version != 7 and judge is not None and agent == judge.agent:
         raise ConfigError(
             "Config at {}: `foreman.agent` is the pinned judge's worker {!r}; the judge holds no other seat. "
             "Give the foreman its own agent name.".format(source, agent),
             {"source": source, "agent": agent})
-    raw_workers = payload.get("agents")
+    worker_field = "worker_kinds" if version == 7 else "agents"
+    raw_workers = payload.get(worker_field)
     workers = raw_workers if isinstance(raw_workers, list) else []
-    if any(isinstance(entry, dict) and entry.get("name") == agent for entry in workers):
+    if version != 7 and any(isinstance(entry, dict) and entry.get("name") == agent for entry in workers):
         raise ConfigError(
             "Config at {}: `foreman.agent` {!r} is also a configured worker; the foreman seat is never planned as "
             "a worker. Give the foreman its own agent name.".format(source, agent),
@@ -605,7 +660,7 @@ def parse_foreman(payload, source="<memory>"):
         tier_source = ""
         for entry in workers:
             if isinstance(entry, dict) and entry.get("kind") == kind and entry.get("tiers"):
-                tiers, tier_source = parse_tiers(entry["tiers"], kind), "agents.{}".format(entry.get("name"))
+                tiers, tier_source = parse_tiers(entry["tiers"], kind), "{}.{}".format(worker_field, entry.get("name"))
                 break
     launch_args = parse_launch_args(raw.get("launch_args", []), kind)
     window_group = raw.get("window_group", "")

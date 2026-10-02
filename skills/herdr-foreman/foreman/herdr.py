@@ -285,6 +285,23 @@ class HerdrClient:
     def argv_pane_send_keys(self, pane_id, keys):
         return [self.binary, "pane", "send-keys", pane_id] + list(keys)
 
+    def argv_pane_split(self, pane_id=None, *, current=False, direction="right", ratio=0.5, cwd=None, focus=False):
+        if (pane_id is None) == (not current):
+            raise HerdrError("pane split needs exactly one parent pane or --current.", {})
+        argv = [self.binary, "pane", "split"]
+        if pane_id is not None:
+            argv.append(pane_id)
+        else:
+            argv.append("--current")
+        argv += ["--direction", direction, "--ratio", str(ratio)]
+        if cwd:
+            argv += ["--cwd", cwd]
+        argv.append("--focus" if focus else "--no-focus")
+        return argv
+
+    def argv_pane_close(self, pane_id):
+        return [self.binary, "pane", "close", pane_id]
+
     def argv_send_slash_command(self, pane_id, text, enter_count=1):
         """The argv lists `send_slash_command` runs, in order.
 
@@ -476,6 +493,17 @@ class HerdrClient:
 
     def agent_start(self, name, kind, pane_id, flags):
         return self._run_json(self.argv_agent_start(name, kind, pane_id, flags))
+
+    def pane_split(self, pane_id=None, *, current=False, direction="right", ratio=0.5, cwd=None, focus=False):
+        result = self._run_json_object(self.argv_pane_split(
+            pane_id, current=current, direction=direction, ratio=ratio, cwd=cwd, focus=focus))
+        pane = result.get("pane")
+        if not isinstance(pane, dict) or not isinstance(pane.get("pane_id"), str) or not pane["pane_id"]:
+            raise HerdrError("herdr pane split returned no pane identity; close any visible orphan before retrying.", {})
+        return pane["pane_id"]
+
+    def pane_close(self, pane_id):
+        return self._run_optional_json(self.argv_pane_close(pane_id))
 
     def argv_pane_process_info(self, pane_id):
         return [self.binary, "pane", "process-info", "--pane", pane_id]

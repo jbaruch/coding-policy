@@ -466,14 +466,14 @@ diagnosis remedy waits on an operator for the task to reach a terminal state.
 A `blocked` adjudication is the one ruling that does: it stops the round and
 sends its named question to the operator, as it always has.
 
-The judge worker is declared in the main `config.json` and is measured and
+The judge worker kind is declared in the main `config.json` and is measured and
 planned like every other seat, but its seat is pinned rather than ranked: the
-`judge` block names the agent, model and effort, the planner never chooses who
-judges, and the pinned worker never holds another seat.
+`judge` block names the kind, model and effort, and the planner creates a fresh
+assignment identity on that kind.
 
-It runs on the same Claude subscription as the `claude` worker, so both
-declare the same `window_group` and the planner charges a seat's cost against
-every worker sharing that window. When that window is exhausted the round
+Kinds on the same subscription declare the same `window_group`; measurement
+uses one disposable probe for the group and the planner charges a seat's cost
+against every kind sharing that window. When that window is exhausted the round
 halts: there is no substitute judge, no fallback to another vendor's flagship,
 and no degraded ruling.
 

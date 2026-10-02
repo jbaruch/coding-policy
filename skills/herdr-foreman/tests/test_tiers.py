@@ -188,7 +188,8 @@ class SelectionTest(unittest.TestCase):
     def test_the_shipped_example_is_the_documented_template(self):
         # coding-policy#518/#519: the example is what operators copy.
         example = json.loads((Path(__file__).resolve().parents[1] / "config.example.json").read_text())
-        agents = example["agents"] if isinstance(example["agents"], list) else list(example["agents"].values())
+        workers = example.get("worker_kinds", example.get("agents"))
+        agents = workers if isinstance(workers, list) else list(workers.values())
         tiered = [worker for worker in agents if worker.get("tiers")]
         self.assertEqual(sorted(worker["kind"] for worker in tiered), ["claude", "codex", "grok"])
         for worker in tiered:

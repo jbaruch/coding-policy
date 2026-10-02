@@ -4,7 +4,8 @@ description: >
   Run Herdr rounds as a nonworking foreman on a selected, verified tier:
   assign, supervise, accept or reject, never do the crew's work. Covers on-demand specialists, model tiers, bounded briefs,
   report verification, and release gates. Use for requests to dispatch the Herdr
-  team, check worker capacity, restart or relaunch idle workers, collect reports, run or retrieve retrospectives,
+  team, plan or run implementation, review, fix, judge, and release rounds,
+  check worker capacity, restart or relaunch idle workers, collect reports, run or retrieve retrospectives,
   catch up on outstanding user attention, curate team lessons, save and resume
   foreman handoffs, or report a task's cost or resource use through acceptance.
   Live rounds require HERDR_ENV; saved memory, attention and cost reports work
@@ -16,9 +17,9 @@ description: >
 Process steps in order. Do not skip ahead.
 
 Before any finish with enrolled work, reconcile the whole fleet under
-`references/supervision.md`. Continue observation or persist an authorized pause
+`skills/herdr-foreman/references/supervision.md`. Continue observation or persist an authorized pause
 or handoff covering every active assignment. Keep user attention visible under
-`references/attention.md`.
+`skills/herdr-foreman/references/attention.md`.
 
 Before any team-round action, read the team-round contract in full. It is the
 file `rules/agent-team-operation.md` points to, and it binds every step below.
@@ -83,6 +84,10 @@ skills/herdr-foreman/references/supervision.md
 skills/herdr-foreman/references/assignment-reasoning.md
 skills/herdr-foreman/references/specialists.md
 skills/herdr-foreman/references/judge-round.md
+skills/herdr-foreman/references/model-tiers.md
+skills/herdr-foreman/references/dispatch-recovery.md
+skills/herdr-foreman/references/report-classifier.md
+skills/herdr-foreman/references/review-partition.md
 skills/herdr-foreman/state-schema.md
 ```
 
@@ -100,11 +105,11 @@ their contracts. Use the recorded state override or default, report any non-zero
 diagnostic, and never fabricate missing history. They grant no new task
 authority.
 
-- **Catch-up or saved attention** — `references/attention.md`. Read all
+- **Catch-up or saved attention** — `skills/herdr-foreman/references/attention.md`. Read all
   attention pages before claiming completeness.
 - **Lesson curation, saved foreman context, or a foreman handoff** —
-  `references/working-memory.md`.
-- **A saved retrospective** — `references/retrospectives.md`. Report the note's
+  `skills/herdr-foreman/references/working-memory.md`.
+- **A saved retrospective** — `skills/herdr-foreman/references/retrospectives.md`. Report the note's
   date, coverage, conclusions, and path.
 - **A task's cost or resource use** — run the read-only report, omitting
   `--task` for every task:
@@ -214,21 +219,22 @@ CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"; [ -d "$
 bash "$CP/skills/herdr-foreman/roster.sh"
 ```
 
-Emits the caller and live workers with kind, pane, and state. An empty roster on
-exit 0 means unnamed panes: report them from `herdr agent list` with the
-correcting `herdr agent rename <pane-id> <name>` command.
+Emits the caller and live workers with kind, pane, and state. Under schema 7 an
+empty worker roster is the expected idle state. Apply creates workers only for
+planned assignments. If `herdr agent list` shows other unnamed panes, report
+them separately; never turn them into a standing roster.
 
-Record staffing gaps under `references/round-setup.md`. Leave unused specialist
+Record staffing gaps under `skills/herdr-foreman/references/round-setup.md`. Leave unused specialist
 profiles unlaunched. Never duplicate targets or fold verification onto a
-contributor. Start workers in YOLO mode under
+contributor. Apply starts schema-7 workers in YOLO mode under
 `skills/herdr-foreman/references/model-tiers.md`;
 preserve it on relaunch. Verify live permission flags before dispatch, including
 existing workers. Record task authorization and permitted actions under the
 round-setup reference. Create or resume the stable ledger under
-`references/task-ledger.md`; record its absolute path before dispatch. Apply the
+`skills/herdr-foreman/references/task-ledger.md`; record its absolute path before dispatch. Apply the
 round-setup accepted-behavior, resume and supervision binding requirements.
 
-Run `references/retrospectives.md` on resume, before planning, or for an
+Run `skills/herdr-foreman/references/retrospectives.md` on resume, before planning, or for an
 explicit retrospective request. For an explicit request, complete a new
 retrospective and finish here.
 
@@ -244,7 +250,7 @@ bash "$CP/skills/herdr-foreman/verify-authority.sh" <owner/repo>
 ```
 
 Record the emitted namespace ownership evidence using Step 3 of
-`references/round-setup.md`. For a non-owned repo, reuse explicit per-action
+`skills/herdr-foreman/references/round-setup.md`. For a non-owned repo, reuse explicit per-action
 operator permission; absent permission, remain read-only or finish here.
 On non-zero, report the diagnostic and finish here.
 
@@ -260,7 +266,11 @@ bash "$CP/skills/herdr-foreman/foreman.sh" measure
 ```
 
 Emits and saves headroom, windows, state, `tier_billing`, and `failed_agents`.
-Busy workers are skipped. Unmeasured billing stays `unknown`. Report failed
+With schema 7 it sends no usage keystrokes to assignment panes. Probe and
+window-group mechanics live in
+`skills/herdr-foreman/foreman/lifecycle.py` (`measure_worker_kinds`).
+Legacy busy standing workers are skipped.
+Unmeasured billing stays `unknown`. Report failed
 measurements and obtain their readings before relying on those seats. A pending
 CLI update follows `skills/herdr-foreman/references/model-tiers.md`
 Maintenance Relaunch.
@@ -290,7 +300,7 @@ active worker are omitted. A partitioned verifier stays listed with its
 dispatched slices; check them against the validated partition. The order is a
 default; choose another when the round needs it.
 
-Choose the responsibilities needed next under `references/specialists.md`.
+Choose the responsibilities needed next under `skills/herdr-foreman/references/specialists.md`.
 Supply its requirements file for specialized work. Schedule consultation and
 verification as the task needs them. `plan` bars a developer reserved to
 another task and a worker with an active enrollment, and names each bar in its
@@ -303,7 +313,7 @@ against the repo's declaration first. For a pre-implementation round, pass
 `--planned` naming the surfaces the work will touch. A round that writes no
 repository content — an investigation, an architecture or advisory consultation
 — declares `writes_repository: false` in that file instead
-(`references/specialists.md`). That explicit read-only plan requires no repo
+(`skills/herdr-foreman/references/specialists.md`). That explicit read-only plan requires no repo
 trigger declaration. An existing declaration must still be valid. A round with
 work already written classifies that work:
 
@@ -317,7 +327,7 @@ bash "$CP/skills/herdr-foreman/foreman.sh" detect-triggers \
 
 Exit 0 means every fired trigger is staffed or answered. On exit 1, read the
 stderr object: an absent declaration for a writing round is written first
-(`references/specialists.md`),
+(`skills/herdr-foreman/references/specialists.md`),
 and an `unaddressed_trigger` is staffed in the roles below or answered by a
 recorded decision with its reason. Re-run the command with the updated
 declaration, roles, requirements and decisions after every such change, and
@@ -355,12 +365,15 @@ bash "$CP/skills/herdr-foreman/foreman.sh" plan \
   --task <task-id> [--fix-round <N>] [--correction-plan <id> --work <work.json>]
 ```
 
-Emits the role plan without worker contact; a partitioned role is seated once
+Emits the role plan without worker contact. Under config schema 7,
+`worker_kinds` records the ranked template and `assignments` records one fresh,
+plan-bound live identity per seat; a later plan creates different identities.
+A partitioned role is seated once
 per slice as `<role>#<slice>`, and Step 10 dispatches each seat with its own
 brief. A judge seat declares its mode:
 `adjudication` rules on a contested verdict, `diagnosis` on the investigator's
 assessment at an exhausted allowance. Pass the same `--judge-mode` to `apply`.
-On exit 1, resolve the diagnostic before continuing. Apply the Step 5 constraints in `references/round-setup.md`:
+On exit 1, resolve the diagnostic before continuing. Apply the Step 5 constraints in `skills/herdr-foreman/references/round-setup.md`:
 exclude contributors from verification, reserve the developer through early fixes,
 preserve task identity and fix count, and reuse recorded correction bounds.
 Tier contracts:
@@ -384,7 +397,7 @@ bash "$CP/skills/herdr-foreman/review-package.sh" \
 ```
 
 Apply the Step 6 base, range, and rebuild requirements in
-`references/round-setup.md`. Success prints the absolute review-package path;
+`skills/herdr-foreman/references/round-setup.md`. Success prints the absolute review-package path;
 set it as `REVIEW_PACKAGE`. On non-zero, fix the diagnostic and retry before
 composing verification briefs. Other roles need no package.
 Proceed immediately to Step 7.
@@ -408,7 +421,7 @@ Emits common and role-brief paths. On non-zero, fix the diagnostic before
 dispatch. Validates composition inputs and review evidence before writing.
 Use a fresh absolute report path per role and attempt.
 
-Follow `references/round-setup.md` Step 7 for shared and role-specific values,
+Follow `skills/herdr-foreman/references/round-setup.md` Step 7 for shared and role-specific values,
 authority, review evidence and brief completeness.
 
 - A bug brief, a correction brief, and any brief needing judgment on task
@@ -524,7 +537,7 @@ developer alone. Warm consultations use the recovery reference's
 `--retain-specialist` path. Reconcile unknown outcomes
 before retrying. Reuse existing correction authorization within its bounds.
 
-Follow the Dispatch Results contract in `references/round-flow.md` for busy,
+Follow the Dispatch Results contract in `skills/herdr-foreman/references/round-flow.md` for busy,
 uncertain, failed, and dry-run outcomes. Preserve all already enrolled work.
 
 Dispatch references:
@@ -591,7 +604,7 @@ Then act on the checkpoint:
 - An exit 1 carries either `reason: checkpoint_pending` or a `stall` object
 - A `stall` is classified only when `--worktree` names the checkout
 - Act on a stall under `skills/herdr-foreman/references/team-operation.md` Stalled Workers
-- Record a stall's obligation through `references/attention.md`
+- Record a stall's obligation through `skills/herdr-foreman/references/attention.md`
 - Preserve the blocked/refusal and native-recovery paths in the references below
 - Never re-dispatch over uncertainty
 - Never resend a refused brief to its provider
@@ -603,9 +616,9 @@ skills/herdr-foreman/references/dispatch-recovery.md
 
 Save each reviewer, tester and consultation report's successful delivery
 receipt and record its contract lines with `assess-specialist` under
-`references/specialists.md` before retiring its enrollment. A refusal names
+`skills/herdr-foreman/references/specialists.md` before retiring its enrollment. A refusal names
 the report's gap; what it saves is the `assess-specialist` contract in
-`references/dispatch-recovery.md`. Record `needs_work` in Step 12 and
+`skills/herdr-foreman/references/dispatch-recovery.md`. Record `needs_work` in Step 12 and
 re-dispatch the same responsibility with that gap named. A reviewer or tester
 re-dispatch spends no developer fix round.
 
@@ -718,15 +731,18 @@ bash "$CP/skills/herdr-foreman/foreman.sh" close-member --enrollment <enrollment
 
 It refuses until the ledger's latest event for that worker and report carries
 an assessed decision, and refuses `accepted` without the report's recorded
-contract lines, checked before its classifier gates. It then acknowledges the
-enrollment's pending events and resolves it, citing that ledger event; a repeat
-replays. Resolution stays
+contract lines, checked before its classifier gates. It verifies a schema-7
+assignment pane remains bound to the recorded identity, then closes it with
+live absence proved before the enrollment resolves. Schema-7 workers never
+retain a pane across assignments; a follow-up round carries prior evidence in
+its self-contained brief and receives a fresh identity. A repeated close
+accepts an already-absent identity and replays. Resolution stays
 separate from assignment acceptance and task completion.
 Resume Step 11's fleet watch for any enrollment still observed.
 Route correction-scope and bug-evidence assessment to a worker under
 `skills/herdr-foreman/references/team-operation.md` Judgment Routes; never
 assess them yourself.
-Persist user-facing obligations under `references/attention.md` before presenting
+Persist user-facing obligations under `skills/herdr-foreman/references/attention.md` before presenting
 them; record an actual answer or resolution separately from showing the item.
 
 Every return to Step 4 is a round boundary: run Step 16 to log the round and
@@ -767,8 +783,8 @@ Step 16. No implementation or release is inferred from the diagnostic result.
 - **Nominate, never weigh** — the foreman nominates a finding and never weighs
   it.
 - **An exhausted approach allowance** — record the checkpoint through
-  `references/dispatch-recovery.md`, consult the investigator under
-  `references/specialists.md` with round context `{"investigator":
+  `skills/herdr-foreman/references/dispatch-recovery.md`, consult the investigator under
+  `skills/herdr-foreman/references/specialists.md` with round context `{"investigator":
   {"diagnosis_input": true}}`, and take its assessed report to Step 13 for the
   diagnosis.
 - **No operator wait at exhaustion** — no operator decision is awaited.
@@ -794,7 +810,7 @@ binds it in the judge round's last step; until then no `defer` or `decline`
 applies.
 
 Run the round's seven steps in order — compose the brief, re-measure the shared
-window, plan the pinned seat, start its worker on the pinned tier, dispatch,
+window, plan the pinned seat, let apply spawn its fresh worker on the pinned tier, dispatch,
 wait, act on the ruling:
 
 ```text

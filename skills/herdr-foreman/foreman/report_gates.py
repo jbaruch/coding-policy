@@ -593,7 +593,8 @@ def ledger_view(state_path, judge_agent):
     store's `delivery_recoveries`; roles and tasks are the recovery store's
     dispatches; operator decisions are the attention sidecar's entries;
     owner-parsed verdicts are the assessments and `record-report` receipts.
-    `judge_agent` is the pinned judge from config.json, or None.
+    `judge_agent` is the legacy pinned agent or schema-7 pinned worker kind
+    from config.json, or None.
     """
     store, assessments = _ledger_state(state_path)
     data = supervision.load(state_path)
@@ -633,7 +634,9 @@ def _resolver(view, owner, dispatch):
     """The resolving role a delivered report's dispatch holds, or None."""
     if dispatch.get("status") != "applied" or dispatch.get("task") != owner["task"]:
         return None
-    if (view["judge"] is not None and dispatch.get("agent") == view["judge"] and dispatch.get("role") == "judge"
+    if (view["judge"] is not None
+            and (dispatch.get("agent") == view["judge"] or dispatch.get("worker_kind") == view["judge"])
+            and dispatch.get("role") == "judge"
             and dispatch.get("judge_mode") == "adjudication"):
         return "judge"
     if dispatch.get("role") == owner["role"] and dispatch["id"] != owner["id"]:

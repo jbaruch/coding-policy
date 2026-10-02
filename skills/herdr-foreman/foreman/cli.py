@@ -29,7 +29,7 @@ from . import __version__
 from .assign import apply as apply_assignments
 from .assign import APPLY_SCHEMA_VERSION, dry_run, freeze_decision, freeze_paths, read_frozen, native_context_session, normalize_assignments, resolve_paths, validate_fix_history
 from . import renderable
-from . import attention, capabilities, chronology, churn, composition, engagement, foreman_queue, foreman_reset, historical, home, load_set, members, memory, oracle, partition, recovery, report_delivery, report_gates, restoration, role_clear, retrospective, retrospective_runtime, supervision, supervision_gate, supervision_runtime, triggers
+from . import attention, capabilities, chronology, churn, composition, engagement, foreman_queue, foreman_reset, historical, home, lifecycle, load_set, members, memory, oracle, partition, recovery, report_delivery, report_gates, restoration, role_clear, retrospective, retrospective_runtime, supervision, supervision_gate, supervision_runtime, triggers
 from .config import FOREMAN_CONFIG_VERSION, default_config_path, load_config, load_foreman, load_judge, load_role_costs, select_agents
 from .errors import AgentBusyError, PlanError, StateError, ForemanError, HerdrError, UsageError
 from .herdr import (
@@ -37,6 +37,7 @@ from .herdr import (
     DEFAULT_SETTLE_TIMEOUT_MS,
     HerdrClient,
     READY_STATES,
+    format_argv,
     trace_enabled_in_env,
 )
 from .composer import COMPOSER_SETTLE_SEC, DEFAULT_START_TIMEOUT_MS
@@ -49,7 +50,7 @@ from .measure import (
     measure,
 )
 from .planner import plan as build_plan
-from .planner import headroom_of
+from .planner import ASSIGNMENT_PLAN_SCHEMA_VERSION, headroom_of
 from .tiers import (COORDINATION_ROUND, FOREMAN_ROLE, JUDGMENT_ROUNDS, MissingTierError,
                     parse_launch_args, parse_tiers, select_tier, worker_launch_args)
 from . import cost_report, selection
@@ -539,6 +540,76 @@ def _supervision_enrollment(state_path, identifier, task, role, name, report, at
     return expected
 
 
+def _retryable_enrollment_identity(state_path, store, identifier, fingerprint):
+    """Give each supervised retry after a cleaned pre-send failure a fresh identity.
+
+    Recovery keeps an unsent dispatch retryable under its original identity,
+    while supervision correctly keeps the closed pane's enrollment resolved.
+    Reusing that identity would either reactivate accepted history or bind the
+    replacement worker to the closed pane. Walk the deterministic retry names
+    instead: an existing applied/pending attempt is replayed/reconciled, and
+    only a resolved ``not_sent`` attempt advances to the next name.
+    """
+    members_by_id = {row["id"]: row for row in supervision.load(state_path)["members"]}
+    base = identifier
+    attempt = 0
+    while True:
+        dispatch = next((row for row in store["dispatches"] if row["id"] == identifier), None)
+        if (dispatch is None or dispatch.get("fingerprint") != fingerprint
+                or dispatch.get("status") != "not_sent"):
+            return identifier
+        member = members_by_id.get(identifier)
+        if member is None or member["active"]:
+            return identifier
+        attempt += 1
+        identifier = "{}:transport-retry-{}".format(base, attempt)
+
+
+def _cleanup_reconciled_scoped_not_sent(state_path, dispatch, record, at, client):
+    """Close and resolve a scoped send proven not to have reached its worker.
+
+    The caller saves the ``not_sent`` reconciliation before entering here. A
+    pane or sidecar failure therefore cannot erase the terminal transport fact;
+    replaying the identical reconciliation retries only this cleanup.
+    """
+    member = next((row for row in supervision.load(state_path)["members"]
+                   if row["id"] == dispatch["id"]), None)
+    if member is None:
+        raise StateError(
+            "Dispatch {} is durably not_sent, but its assignment-scoped supervision enrollment is missing. Restore the owner sidecar, then replay the identical reconciliation to close its pane.".format(
+                dispatch["id"]),
+            {"dispatch": dispatch["id"]},
+        )
+    assignment = supervision.expected_assignment(member)
+    pane = assignment.get("pane_id")
+    if not isinstance(pane, str) or not pane:
+        raise StateError(
+            "Dispatch {} is durably not_sent, but its assignment-scoped enrollment records no pane. Restore the original pane identity, then replay the identical reconciliation.".format(
+                dispatch["id"]),
+            {"dispatch": dispatch["id"]},
+        )
+    try:
+        closure = lifecycle.close(client, assignment["agent"], pane)
+        # An operator may resolve supervision independently; inactive is not
+        # evidence that the assignment pane was closed. Always prove closure,
+        # and skip only the already-recorded sidecar transition.
+        if member["active"]:
+            supervision.resolve(
+                state_path,
+                {"id": dispatch["id"],
+                 "outcome": "Reconciled not_sent: " + record["reason"],
+                 "evidence": [str(Path(record["evidence"]).expanduser().resolve())]},
+                at,
+            )
+        return closure
+    except ForemanError as cleanup:
+        raise HerdrError(
+            "Dispatch {} is durably not_sent, but assignment-scoped pane/enrollment cleanup failed: {} Replay the identical reconciliation after repairing the cleanup failure; its transport outcome will not be rewritten.".format(
+                dispatch["id"], cleanup),
+            {"dispatch": dispatch["id"], "cleanup_error": cleanup.to_dict()},
+        ) from cleanup
+
+
 def _seat_holds(roles, task, state, state_path):
     """Developer reservations and busy workers, read from the owner records (#483)."""
     busy = {row["assignment"]["agent"]: row["assignment"]["task"]
@@ -679,7 +750,8 @@ PLAN_ONLY_TIER_FIELDS = frozenset({"capability", "cheaper_adequate"})
 
 
 
-def _candidate_tiers(roles, agents, rounds, fix_round=None, judge=None, excludes=None, headroom=None, table=None, refusals=None):
+def _candidate_tiers(roles, agents, rounds, fix_round=None, judge=None, excludes=None, headroom=None, table=None, refusals=None,
+                     reusable_agents=False):
     """Each role's candidate tiers; `refusals` collects a capability refusal per skipped candidate."""
     table = table if table is not None else capabilities.empty()
     tiered = any(agent.tiers for agent in agents)
@@ -705,7 +777,9 @@ def _candidate_tiers(roles, agents, rounds, fix_round=None, judge=None, excludes
                         # schema-9 tier entry carries both fields (#490).
                         "pressure_headroom": None, "de_escalated": False,
                         "capability": verdict, "cheaper_adequate": None}
-                continue
+                    continue
+                if not reusable_agents:
+                    continue
             if role == "judge":
                 continue
             if not agent.tiers:
@@ -771,18 +845,12 @@ def _read_record(path):
 def cmd_measure(args, client=None, warn=None, trace=None):
     agents = select_agents(load_config(_config_path(args)), args.agents)
     client = client if client is not None else _client(args, trace=trace)
-    snapshot = measure(
-        client,
-        agents,
-        args.now or now_iso(),
-        marker_timeout_ms=args.marker_timeout,
-        read_lines=args.lines,
-        warn=warn,
-        poll_attempts=args.marker_poll_attempts,
-        poll_interval_sec=args.marker_poll_interval,
-        settle_sec=args.composer_settle,
-        allow_recovery=args.allow_recovery,
-    )
+    measure_fn = lifecycle.measure_worker_kinds if agents and all(agent.assignment_scoped for agent in agents) else measure
+    snapshot = measure_fn(
+        client, agents, args.now or now_iso(), marker_timeout_ms=args.marker_timeout,
+        read_lines=args.lines, warn=warn, poll_attempts=args.marker_poll_attempts,
+        poll_interval_sec=args.marker_poll_interval, settle_sec=args.composer_settle,
+        allow_recovery=args.allow_recovery)
     state_path = _state_path(args)
     state = _load_state_for_write(state_path, warn)
     add_snapshot(state, snapshot)
@@ -918,6 +986,7 @@ def cmd_plan(args, client=None, warn=None, trace=None):
     judge = load_judge(_config_path(args))
     rounds = _round_inputs(args, canonical)
     agents = load_config(_config_path(args)) if _config_path(args).exists() else []
+    scoped = bool(agents) and all(agent.assignment_scoped for agent in agents)
     state_path = _state_path(args)
     state = load_state(state_path, warn=warn)
     requirements = composition.parse_requirements(_read_record(args.requirements) if args.requirements else None, canonical, args.task)
@@ -989,7 +1058,7 @@ def cmd_plan(args, client=None, warn=None, trace=None):
     tier_candidates = _candidate_tiers(canonical, agents, rounds, args.fix_round, judge,
                                       excludes={role: names for role, names in excludes.items() if role in set(canonical)},
                                       headroom=measured_headroom, table=table,
-                                      refusals=capability_refusals)
+                                      refusals=capability_refusals, reusable_agents=scoped)
     constraints = {**constraints, "rationale": constraints["rationale"] + [
         "{} was not considered for {}: {}".format(row["agent"], row["role"], row["message"]) for row in capability_refusals]}
     # Each seat inherits its role's bars, tiers, round type and requirements.
@@ -1008,7 +1077,7 @@ def cmd_plan(args, client=None, warn=None, trace=None):
     result = _build_plan_with_refusals(build_plan, capability_refusals,
             roles,
             snapshot,
-            role_counts(state),
+            role_counts(state, _worker_kind_provenance(state) if scoped else None),
             exclude=excludes,
             role_costs=role_costs,
             judge_agent=judge.agent if judge else None,
@@ -1029,6 +1098,7 @@ def cmd_plan(args, client=None, warn=None, trace=None):
             selection_rationale=constraints["rationale"],
             roster=[agent.name for agent in agents],
             operator_exclude=operator_excludes,
+            reusable_agents=scoped,
         )
     result["task_context"] = ({"task": args.task, "fix_round": args.fix_round,
                                "plan": args.correction_plan, "work": work} if args.task else None)
@@ -1037,6 +1107,17 @@ def cmd_plan(args, client=None, warn=None, trace=None):
     result["selection"] = selection.records(
         result["assignments"], result.get("tiers"), {agent.name: agent for agent in agents},
         requirements, rounds, args.fix_round, table)
+    if scoped:
+        # Planning ranks stable worker kinds. The saved plan then allocates a
+        # fresh live identity per seat; retries reuse that identity, while a
+        # new plan cannot accidentally discover and reuse an idle worker.
+        worker_kinds = dict(result["assignments"])
+        result["schema_version"] = ASSIGNMENT_PLAN_SCHEMA_VERSION
+        result["worker_kinds"] = worker_kinds
+        result["assignments"] = lifecycle.identities(result["assignments"])
+        if isinstance(result.get("judge"), dict) and "judge" in result["assignments"]:
+            result["judge"]["worker_kind"] = worker_kinds["judge"]
+            result["judge"]["agent"] = result["assignments"]["judge"]
     # A patch or fixture oracle is a path; pin the bytes behind it now, so
     # `verify-oracle` checks the round against the file it was licensed on (#488).
     pins = oracle.pin_oracles(result.get("rounds"))
@@ -1183,10 +1264,25 @@ def cmd_apply(args, client=None, warn=None, trace=None):
 
 
 def _apply(args, client, warn, trace, hold_gates):
-    agents = load_config(_config_path(args))
-    agents_by_name = {agent.name: agent for agent in agents}
+    templates = load_config(_config_path(args))
     document = _load_assignments(args.assignments, document=True)
     assignments = normalize_assignments(document)
+    scoped = bool(templates) and all(agent.assignment_scoped for agent in templates)
+    worker_kinds = document.get("worker_kinds") if isinstance(document, dict) else None
+    if scoped and (not isinstance(worker_kinds, dict)
+                   or set(worker_kinds) != set(assignments)):
+        raise UsageError(
+            "This assignment-scoped plan needs a worker_kinds object with exactly one entry for every assigned seat; re-run `{}` rather than editing the plan.".format(
+                runnable.command("plan")),
+            {},
+        )
+    if scoped and not args.dry_run and not (isinstance(args.task, str) and args.task.strip()):
+        raise UsageError(
+            "Assignment-scoped apply needs --task before it can create short-lived panes; the task owns their durable dispatch and closure records.",
+            {},
+        )
+    if not scoped and isinstance(document, dict) and "worker_kinds" in document:
+        raise UsageError("This assignment-scoped plan needs a schema-7 worker_kinds config; restore it or replan.", {})
     # The ledger row records the responsibility and the DISPATCH records the
     # seat, and a dispatch exists only under a task. Without one, a seated
     # round would leave nothing that names the slice, so its verdict could
@@ -1209,10 +1305,13 @@ def _apply(args, client, warn, trace, hold_gates):
         if not isinstance(value, dict) or set(value) - {"type", "context"}:
             raise UsageError("Plan round inputs allow only type and context; model overrides are forbidden.", {})
     judge = load_judge(_config_path(args))
-    if "judge" in assignments and (judge is None or assignments["judge"] != judge.agent):
-        raise UsageError("Judge assignment must match the pinned judge in config.json.", {})
-    if judge and any(name == judge.agent and role != "judge" for role, name in assignments.items()):
+    judge_kind = document.get("worker_kinds", {}).get("judge") if scoped else assignments.get("judge")
+    if "judge" in assignments and (judge is None or judge_kind != judge.agent):
+        raise UsageError("Judge assignment must use the pinned judge worker kind in config.json.", {})
+    if not scoped and judge and any(name == judge.agent and role != "judge" for role, name in assignments.items()):
         raise UsageError("The pinned judge worker cannot hold another role.", {})
+    active_judge = (SimpleNamespace(agent=assignments["judge"], model=judge.model, effort=judge.effort)
+                    if scoped and judge and "judge" in assignments else judge)
     state_path = _state_path(args)
     state = _load_state_for_write(state_path, warn, persist_migration=not args.dry_run)
     store = state["recovery"]
@@ -1221,9 +1320,26 @@ def _apply(args, client, warn, trace, hold_gates):
     task_context = {"task": args.task, "fix_round": args.fix_round, "plan": args.correction_plan, "work": work}
     if document.get("task_context") is not None and document["task_context"] != task_context:
         raise UsageError("Saved plan and apply name different task, count or correction bounds; replan from the current ledger.", {})
+    if scoped and (args.retain_context or args.retain_specialist):
+        raise UsageError(
+            "Assignment-scoped workers live for one assignment, so their panes cannot be retained. Re-run without --retain-context or --retain-specialist; the follow-up plan already names a fresh worker identity.",
+            {},
+        )
+    if scoped:
+        agents_by_name = lifecycle.materialize(assignments, document.get("worker_kinds"), templates)
+        agents = list(agents_by_name.values())
+    else:
+        agents = templates
+        agents_by_name = {agent.name: agent for agent in agents}
     paths = resolve_paths(assignments, _parse_briefs(args.briefs), args.common)
     reports = _parse_reports(args.reports, assignments)
     supervised = supervision.dispatch_binding(state_path) is not None
+    if scoped and not args.dry_run and not supervised:
+        raise UsageError(
+            "Assignment-scoped live apply requires a bound foreman so every short-lived pane has a durable closure record. Run `{}` first.".format(
+                runnable.command("supervision-bind")),
+            {},
+        )
     if requirements and not args.dry_run and not supervised:
         raise UsageError("Bind the foreman with `{}` before dispatching specialist requirements; every specialist needs durable observation ownership.".format(runnable.command("supervision-bind")), {})
     if supervised and (not args.task or set(reports) != set(assignments)):
@@ -1273,6 +1389,8 @@ def _apply(args, client, warn, trace, hold_gates):
             old = next((row for row in store["dispatches"] if row["id"] == identifier), None)
             if old is None or old["fingerprint"] != fingerprint:
                 fingerprint = supervision.report_bound_fingerprint(fingerprint, reports[role])
+            identifier = _retryable_enrollment_identity(
+                state_path, store, identifier, fingerprint)
         return identifier, fingerprint
 
     def legacy_judge_fingerprints(role, name, paths_now):
@@ -1369,6 +1487,8 @@ def _apply(args, client, warn, trace, hold_gates):
                                     "plan": args.correction_plan, "work": work,
                                     "brief_identity": recovery.brief_identity(paths, role, reports.get(role), contents),
                                     "provider": agents_by_name[name].kind}
+                if scoped:
+                    dispatches[role]["worker_kind"] = document["worker_kinds"][role]
                 if role in moves:
                     dispatches[role]["refusal_move"] = moves[role]
                 if role in requirements:
@@ -1422,8 +1542,11 @@ def _apply(args, client, warn, trace, hold_gates):
     # plan's own `pressure_headroom`: a plan edited to claim scarcity would
     # otherwise recompute its own downgrade and pass the comparison below.
     planned_headroom = _planned_snapshot_headroom(document, state, state_path)
+    if scoped:
+        planned_headroom = _scoped_headroom(
+            assignments, document["worker_kinds"], planned_headroom)
     capability_refusals = []
-    candidates = _candidate_tiers(list(assignments), agents, rounds, args.fix_round, judge,
+    candidates = _candidate_tiers(list(assignments), agents, rounds, args.fix_round, active_judge,
                                   excludes=constraints["exclude"], headroom=planned_headroom,
                                   table=capabilities.load(state_path), refusals=capability_refusals)
     tiers = {}
@@ -1448,9 +1571,10 @@ def _apply(args, client, warn, trace, hold_gates):
     if args.retain_specialist:
         engagement.require_followup(state, state_path, assignments)
 
+    fresh_workers = scoped
+
     if args.dry_run:
-        return (
-            dry_run(
+        rehearsal = dry_run(
                 client,
                 assignments,
                 agents_by_name,
@@ -1464,9 +1588,15 @@ def _apply(args, client, warn, trace, hold_gates):
                 recovery=store, history=state["assignments"], plan_id=args.correction_plan, work=work,
                 retain_specialist=args.retain_specialist, requirements=requirements,
                 reserved=reserved,
-            ),
-            None,
-        )
+                fresh=fresh_workers, assignment_scoped=scoped,
+            )
+        if fresh_workers:
+            rehearsal["spawns"] = [
+                {"role": role, "agent": name, "worker_kind": document["worker_kinds"][role],
+                 "commands": lifecycle.rendered_commands(client, agents_by_name[name], tiers.get(role))}
+                for role, name in assignments.items()
+            ]
+        return rehearsal, None
 
     prepared = []
 
@@ -1478,9 +1608,12 @@ def _apply(args, client, warn, trace, hold_gates):
         if supervised:
             _supervision_enrollment(state_path, record["id"], args.task, step["role"], step["agent"], reports[step["role"]], at,
                                     pane_id=step["pane_id"], persist=True)
-        recovery.reserve(store, record, at)
+        if record["id"] in prepared:
+            recovery.observe_reserved(store, record["id"], observed)
+        else:
+            recovery.reserve(store, record, at)
+            prepared.append(record["id"])
         save_state(state_path, state)
-        prepared.append(record["id"])
 
     def observed_native(role, name, context):
         native = context.get("context_session")
@@ -1503,6 +1636,8 @@ def _apply(args, client, warn, trace, hold_gates):
     def record(result):
         seat = result["role"]
         base = canonical_role(seat)
+        if scoped:
+            result["worker_kind"] = document["worker_kinds"][seat]
         if base == "reviewer":
             result["reviewer_scope"] = "design" if rounds.get(seat, {}).get("type") in {"architect", "reconciliation"} else "verification"
         context = {key: result[key] for key in ("cleared", "clear_reason", "task", "fix_round", "context_session", "tier")}
@@ -1524,6 +1659,135 @@ def _apply(args, client, warn, trace, hold_gates):
             _supervision_enrollment(state_path, result["dispatch_id"], args.task, result["role"], result["agent"], reports[result["role"]], at,
                                     pane_id=result["pane_id"], native=native, persist=True)
 
+    guard = retrospective_runtime.Guard(
+        state_path, state, client, agents_by_name, at,
+        task=args.task, retain=args.retain_context or args.retain_specialist,
+        no_clear=args.no_clear,
+    )
+    cleanup_evidence = str(Path(state_path).expanduser().resolve())
+
+    def clean_pre_send(primary, names, reason):
+        """Best-effort cleanup that never replaces the active failure."""
+        failures = []
+        closed = []
+        for name in names:
+            pane = spawned[name]
+            try:
+                lifecycle.close(client, name, pane)
+                closed.append(name)
+            except ForemanError as cleanup:
+                failures.append({
+                    "operation": "close_pane", "target": pane,
+                    "error": cleanup.to_dict(),
+                    "repair": "Run `{}` before retrying.".format(
+                        format_argv(client.argv_pane_close(pane))),
+                })
+        for identifier in prepared:
+            try:
+                recovery.abort_pre_send(store, identifier, at, reason)
+            except ForemanError as cleanup:
+                failures.append({
+                    "operation": "abort_pre_send", "target": identifier,
+                    "error": cleanup.to_dict(),
+                    "repair": "Inspect dispatch {} in {} and reconcile its transport state before retrying.".format(
+                        identifier, state_path),
+                })
+        state_saved = True
+        if prepared or enrolled:
+            try:
+                save_state(state_path, state)
+            except ForemanError as cleanup:
+                state_saved = False
+                failures.append({
+                    "operation": "save_state", "target": str(state_path),
+                    "error": cleanup.to_dict(), "repair": str(cleanup),
+                })
+        if state_saved:
+            for name in closed:
+                if name not in enrolled:
+                    continue
+                identifier = enrolled[name]
+                try:
+                    supervision.resolve(
+                        state_path,
+                        {"id": identifier, "outcome": "Pre-send pane cleanup: " + reason,
+                         "evidence": [cleanup_evidence]},
+                        at,
+                    )
+                except ForemanError as cleanup:
+                    failures.append({
+                        "operation": "resolve_enrollment", "target": identifier,
+                        "error": cleanup.to_dict(),
+                        "repair": "Inspect `{}` and resolve enrollment {} with `{}` after its pending observations are handled.".format(
+                            runnable.command("supervision-status"), identifier,
+                            runnable.command("supervision-resolve")),
+                    })
+        if not failures:
+            return
+        action = "Cleanup also failed: " + " ".join(
+            "{} {}: {}".format(row["operation"], row["target"], row["repair"])
+            for row in failures)
+        if isinstance(primary, ForemanError):
+            primary.message = "{} {}".format(primary.message, action)
+            primary.args = (primary.message,)
+            primary.details = {**primary.details, "cleanup_failures": failures}
+        elif primary is not None and hasattr(primary, "add_note"):
+            primary.add_note(action)
+        elif primary is None:
+            raise HerdrError(action, {"cleanup_failures": failures})
+
+    spawned = {}
+    enrolled = {}
+    sending = set()
+    if fresh_workers:
+        spawn_complete = False
+        try:
+            for role, name in assignments.items():
+                if not isinstance(role, str):
+                    raise UsageError("Assignment role must be text; replan from an unedited document.", {})
+                tier = tiers.get(role)
+                if not isinstance(tier, dict):
+                    raise UsageError("Assignment-scoped seat {} has no selected tier; replan from the current config.".format(role), {})
+                def preflight_start(pane, role=role, name=name, tier=tier):
+                    guard.before_start({
+                        "agent": name, "role": role,
+                        "model": tier.get("model"), "effort": tier.get("effort"),
+                        "context": "start", "task": args.task,
+                        "brief": paths[role], "common": paths["common"],
+                        "report": None, "unavailable": None, "pane": pane,
+                    })
+                pane = lifecycle.spawn(
+                    client, agents_by_name[name], tier,
+                    history=state["assignments"], before_start=preflight_start,
+                )
+                spawned[name] = pane
+                identifier = dispatches[role]["id"]
+                _supervision_enrollment(
+                    state_path, identifier, args.task, role, name, reports[role], at,
+                    pane_id=pane, persist=True)
+                enrolled[name] = identifier
+                recovery.reserve(store, {
+                    **dispatches[role], "observed_before": None,
+                    "brief": paths[role], "common": paths["common"],
+                }, at)
+                prepared.append(identifier)
+                save_state(state_path, state)
+            spawn_complete = True
+        finally:
+            if not spawn_complete:
+                primary = sys.exc_info()[1]
+                reason = (str(primary) or type(primary).__name__) if primary is not None else "spawn failed"
+                clean_pre_send(primary, list(spawned), reason)
+
+    original_before_send = before_send
+    def track_before_send(step, context):
+        # Protect the pane before entering the durable sending transition. An
+        # interrupt after that transition mutates memory but before it returns
+        # must not let cleanup destroy the evidence reconciliation needs.
+        sending.add(step["agent"])
+        original_before_send(step, context)
+
+    apply_complete = False
     try:
         result = apply_assignments(
             client,
@@ -1537,7 +1801,7 @@ def _apply(args, client, warn, trace, hold_gates):
             judge_mode=judge_mode,
             history=state["assignments"],
             settle_timeout_ms=args.settle_timeout,
-            on_prepare=prepare, on_before_send=before_send, on_result=record,
+            on_prepare=prepare, on_before_send=track_before_send, on_result=record,
             recovery=store, plan_id=args.correction_plan, work=work,
             warn=warn,
             task=args.task,
@@ -1549,15 +1813,15 @@ def _apply(args, client, warn, trace, hold_gates):
             reserved=reserved,
             reports=reports,
             contents=contents,
-            retrospective_guard=retrospective_runtime.Guard(state_path, state, client, agents_by_name, at,
-                                                          task=args.task, retain=args.retain_context or args.retain_specialist, no_clear=args.no_clear),
+            retrospective_guard=guard,
+            fresh=fresh_workers, assignment_scoped=scoped,
         )
-    except ForemanError as exc:
-        for identifier in prepared:
-            recovery.abort_pre_send(store, identifier, at, str(exc))
-        if prepared:
-            save_state(state_path, state)
-        raise
+        apply_complete = True
+    finally:
+        if not apply_complete:
+            primary = sys.exc_info()[1]
+            reason = (str(primary) or type(primary).__name__) if primary is not None else "dispatch failed"
+            clean_pre_send(primary, [name for name in spawned if name not in sending], reason)
     result["applied"] = replayed + result["applied"]
     not_started = [
         record["agent"]
@@ -1741,7 +2005,8 @@ def cmd_foreman_reset_reconcile(args, client=None, warn=None, trace=None):
 
 
 def cmd_close_member(args, client=None, warn=None, trace=None):
-    return members.close(_state_path(args), args.enrollment, args.ledger, args.now or now_iso()), None
+    client = client if client is not None else _client(args, trace=trace)
+    return members.close(_state_path(args), args.enrollment, args.ledger, args.now or now_iso(), client=client), None
 
 
 def cmd_check_member(args, client=None, warn=None, trace=None):
@@ -1854,6 +2119,48 @@ def _record_stopped_task(state_path, diagnosis, at):
     }, at)
 
 
+def _pinned_judge_identity(store, history, task, judge):
+    """Latest live assignment identity supplied by the configured judge kind."""
+    if judge is None:
+        return None
+    matches = [row for row in store["dispatches"]
+               if canonical_role(row.get("role")) == "judge" and row.get("task") == task
+               and row.get("status") == "applied"
+               and (row.get("agent") == judge.agent or row.get("worker_kind") == judge.agent)]
+    if not matches:
+        return judge.agent
+    by_index = {row["assignment_index"]: row for row in matches}
+    timed = [(chronology.timestamp(history[index].get("at"), "Assignment {} chronology".format(index)), index, row)
+             for index, row in by_index.items()]
+    latest_time = max(item[0] for item in timed)
+    latest = [(index, row) for at, index, row in timed if at == latest_time]
+    if len(latest) != 1:
+        raise UsageError(
+            "Latest pinned-judge assignment chronology is uncertain at indices {}; recover the original event times before ruling.".format(
+                ", ".join(str(index) for index, _row in latest)),
+            {},
+        )
+    return latest[0][1]["agent"]
+
+
+def _scoped_headroom(assignments, worker_kinds, headroom):
+    """Map current live identities to kind headroom after replay filtering."""
+    return {name: headroom.get(worker_kinds[role])
+            for role, name in assignments.items()}
+
+
+def _worker_kind_provenance(state):
+    """Stable planner names keyed by the assignment rows their dispatches produced."""
+    assignments = state.get("assignments", [])
+    return {
+        row["assignment_index"]: row["worker_kind"]
+        for row in state.get("recovery", {}).get("dispatches", [])
+        if (isinstance(row, dict) and isinstance(row.get("worker_kind"), str)
+            and type(row.get("assignment_index")) is int
+            and 0 <= row["assignment_index"] < len(assignments))
+    }
+
+
 def cmd_recovery(args, client=None, warn=None, trace=None):
     state_path = _state_path(args)
     # A review receipt's gate check and its commit are one transaction: the
@@ -1873,7 +2180,8 @@ def _run_recovery(args, state_path, warn, client, trace):
         result = recovery.close_task(store, history, data, at)
     elif args.command == "checkpoint":
         judge = load_judge(_config_path(args))
-        result = recovery.checkpoint(store, history, data, at, judge.agent if judge else None)
+        task = data.get("task") if isinstance(data, dict) else None
+        result = recovery.checkpoint(store, history, data, at, _pinned_judge_identity(store, history, task, judge))
     elif args.command == "authorize-corrections":
         result = recovery.authorize_plan(store, history, data, at)
     elif args.command == "authorize-approach":
@@ -1886,14 +2194,15 @@ def _run_recovery(args, state_path, warn, client, trace):
         # enrollment for the same task and judge cannot stand in for it
         # (#412).
         enrolled = None
+        judge_identity = _pinned_judge_identity(store, history, data.get("task") if isinstance(data, dict) else None, judge)
         if judge is not None and isinstance(data, dict):
-            dispatch = recovery.applied_judge_dispatch(store, history, data.get("task"), judge.agent)
+            dispatch = recovery.applied_judge_dispatch(store, history, data.get("task"), judge_identity)
             if dispatch is not None:
                 member = next((item for item in supervision.load(state_path)["members"]
                                if item["id"] == dispatch["id"]), None)
                 if member is not None:
                     enrolled = supervision.expected_assignment(member)["report"]
-        result = recovery.diagnose(store, history, data, at, judge.agent if judge else None, enrolled,
+        result = recovery.diagnose(store, history, data, at, judge_identity, enrolled,
                                    supervision.dispatch_binding(state_path) is not None,
                                    state["specialist_assessments"])
         if result["remedy"] == "stop":
@@ -1917,7 +2226,9 @@ def _run_recovery(args, state_path, warn, client, trace):
     elif args.command == "record-refusal":
         agents_by_name = {agent.name: agent for agent in load_config(_config_path(args))}
         dispatch = next((item for item in store["dispatches"] if isinstance(data, dict) and item["id"] == data.get("dispatch")), None)
-        if dispatch is not None and dispatch["agent"] not in agents_by_name:
+        configured = dispatch.get("worker_kind") if dispatch is not None else None
+        configured = configured or (dispatch.get("agent") if dispatch is not None else None)
+        if dispatch is not None and configured not in agents_by_name:
             raise UsageError("Refused worker {} is not in config.json; restore its entry so the refusing provider is recorded.".format(dispatch["agent"]), {})
         member = next((row for row in supervision.load(state_path)["members"] if dispatch is not None and row["id"] == dispatch["id"]), None)
         # The refined assignment, not the original: supervision fills in a
@@ -1928,7 +2239,7 @@ def _run_recovery(args, state_path, warn, client, trace):
             expected = supervision.expected_assignment(member)
             report = expected["report"]
             aliases = (expected["pane_id"], member["assignment"]["pane_id"])
-        result = recovery.record_refusal(store, data, at, agents_by_name[dispatch["agent"]].kind if dispatch else None,
+        result = recovery.record_refusal(store, data, at, agents_by_name[configured].kind if dispatch else None,
                                          report, aliases=aliases)
     elif args.command == "recover-report":
         result = report_delivery.recover(store, history, data, at)
@@ -1958,13 +2269,23 @@ def _run_recovery(args, state_path, warn, client, trace):
                 _require_independent_report(state, attempt["task"], data.get("reviewer"))
         result = historical.record_review(store, data, at)
     else:
-        agents = {agent.name: agent for agent in load_config(_config_path(args))}
+        templates = load_config(_config_path(args))
+        agents = {agent.name: agent for agent in templates}
         name = recovery.recovery_agent(store, history, args.command, data)
+        if name not in agents and templates and all(agent.assignment_scoped for agent in templates):
+            dispatch = next((row for row in reversed(store["dispatches"])
+                             if row.get("agent") == name and isinstance(row.get("worker_kind"), str)), None)
+            if dispatch is not None:
+                agents = lifecycle.materialize({"recovery": name}, {"recovery": dispatch["worker_kind"]}, templates)
         if name not in agents:
             raise UsageError("The recorded worker is absent from config; restore its original identity before recovering.", {})
         client = client if client is not None else _client(args, trace=trace)
-        live = client.agent_get(name)
-        recovery.require_recovery_ready(live)
+        scoped_not_sent_replay = (recovery.scoped_not_sent_replay(store, data)
+                                  if args.command == "reconcile" else None)
+        live = None
+        if scoped_not_sent_replay is None:
+            live = client.agent_get(name)
+            recovery.require_recovery_ready(live)
         if args.command == "recover-context":
             result = recovery.authorize_context(store, history, data, at, native_context_session(live, agents[name].kind))
         elif args.command == "recover-role-clear":
@@ -1972,7 +2293,16 @@ def _run_recovery(args, state_path, warn, client, trace):
         elif args.command == "record-release-clear":
             result = historical.record_release_clear(store, history, data, at, native_context_session(live, agents[name].kind))
         else:
-            result = recovery.reconcile(store, history, data, at, live)
+            result = scoped_not_sent_replay or recovery.reconcile(store, history, data, at, live)
+            if result["status"] == "not_sent" and isinstance(result.get("worker_kind"), str):
+                # The transport fact becomes durable before destructive pane
+                # cleanup. An interrupted or failed close can be replayed
+                # without changing the reconciled outcome.
+                recovery.validate_store(store, history)
+                engagement.validate_assessments(state)
+                save_state(state_path, state)
+                result = {**result, "pane_closure": _cleanup_reconciled_scoped_not_sent(
+                    state_path, result, data, at, client)}
             if result["status"] == "applied" and (result.get("result") or {}).get("status") != "applied":
                 context = result.get("context_before_send", {})
                 recovered = {"role": result["role"], "agent": name, "task": result["task"],
@@ -1984,6 +2314,9 @@ def _run_recovery(args, state_path, warn, client, trace):
                     recovered["requirements"] = result["requirements"]
                 if result.get("reviewer_scope") is not None:
                     recovered["reviewer_scope"] = result["reviewer_scope"]
+                if result.get("worker_kind") is not None:
+                    recovered["worker_kind"] = result["worker_kind"]
+                    recovered["assignment_scoped"] = True
                 if canonical_role(recovered["role"]) == "judge":
                     # The mode travels in the pre-send context and on the dispatch
                     # itself; `unknown` is only for a receipt older than both.
@@ -2009,6 +2342,9 @@ def _run_recovery(args, state_path, warn, client, trace):
 
 def cmd_start_judge(args, client=None, warn=None, trace=None):
     document = _load_assignments(args.assignments, document=True)
+    if isinstance(document, dict) and "worker_kinds" in document:
+        raise UsageError("Schema-7 plans spawn the pinned judge during `{}`; do not start a standing judge worker.".format(
+            runnable.command("apply")), {})
     tier = document.get("judge") if isinstance(document, dict) else None
     if not isinstance(tier, dict) or not isinstance(tier.get("agent"), str) or not tier["agent"].strip():
         raise UsageError("Plan has no usable judge tier; run `{}`.".format(runnable.command("plan --roles judge")), {})
@@ -2433,7 +2769,8 @@ def cmd_verify_ruling(args, client=None, warn=None, trace=None):
     if dispatch is None:
         raise UsageError("The enrollment for {} names dispatch {}, which the dispatch state does not hold; reconcile it "
                          "before verifying.".format(args.ruling, enrolled[0]["id"]), {})
-    if (canonical_role(dispatch.get("role")) != "judge" or dispatch.get("agent") != judge.agent
+    pinned = dispatch.get("agent") == judge.agent or dispatch.get("worker_kind") == judge.agent
+    if (canonical_role(dispatch.get("role")) != "judge" or not pinned
             or dispatch.get("task") != args.task or dispatch.get("status") != "applied"
             or dispatch.get("judge_mode") != "adjudication"):
         raise UsageError("Dispatch {} is not an applied adjudication of the pinned judge {} on task {!r}; the ruling is "
@@ -2455,11 +2792,14 @@ def cmd_verify_ruling(args, client=None, warn=None, trace=None):
     # dispatch, read through the same receipts report gates resolve against.
     key = str(ruling.resolve())
     if not any(row["dispatch"] == dispatch["id"] and row["path"] == key and row["sha256"] == digest
-               for row in report_gates.ledger_view(_state_path(args), judge.agent)["deliveries"]):
+               for row in report_gates.ledger_view(_state_path(args), dispatch["agent"])["deliveries"]):
         raise UsageError("The ruling's current bytes match no recorded delivery of the judge's report — re-deliver or "
                          "re-weigh.", {"dispatch": dispatch["id"], "sha256": digest})
-    return {"task": args.task, "dispatch": dispatch["id"], "judge": judge.agent, "report": str(ruling),
-            "sha256": digest}, None
+    verified = {"task": args.task, "dispatch": dispatch["id"], "judge": dispatch["agent"],
+                "report": str(ruling), "sha256": digest}
+    if dispatch.get("worker_kind") is not None:
+        verified["worker_kind"] = dispatch["worker_kind"]
+    return verified, None
 
 
 def cmd_verify_oracle(args, client=None, warn=None, trace=None):

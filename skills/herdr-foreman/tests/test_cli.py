@@ -27,10 +27,10 @@ from pathlib import Path
 
 from types import SimpleNamespace
 
-from foreman import attention, cli, runnable
+from foreman import attention, cli, runnable, supervision
 from foreman.report_delivery import marker_columns
 from foreman.cli import build_parser, main
-from foreman.errors import HerdrError, UsageError
+from foreman.errors import HerdrError, StateError, UsageError
 from foreman.herdr import HerdrClient
 from foreman.partition import slice_digest
 from foreman.state import STATE_SCHEMA_VERSION, add_assignment, empty_state, load_state_checked, save_state
@@ -390,6 +390,555 @@ class StateCommandTest(CliCase):
 
 
 class PlanCommandTest(CliCase):
+    def test_pinned_judge_identity_uses_assignment_time_not_dispatch_append_order(self):
+        history = [
+            {"at": "2026-10-01T11:00:00+00:00", "role": "judge", "agent": "judge-new"},
+            {"at": "2026-10-01T10:00:00+00:00", "role": "judge", "agent": "judge-old"},
+        ]
+        store = {"dispatches": [
+            {"role": "judge", "task": "task-a", "status": "applied", "agent": "judge-new",
+             "worker_kind": "claude", "assignment_index": 0},
+            {"role": "judge", "task": "task-a", "status": "applied", "agent": "judge-old",
+             "worker_kind": "claude", "assignment_index": 1},
+        ]}
+        self.assertEqual(
+            cli._pinned_judge_identity(store, history, "task-a", SimpleNamespace(agent="claude")),
+            "judge-new",
+        )
+
+    def test_schema_7_plan_allocates_fresh_assignment_identities(self):
+        shipped = Path(__file__).resolve().parent.parent / "config.example.json"
+        self.config.write_text(shipped.read_text(encoding="utf-8"), encoding="utf-8")
+        with patch("foreman.lifecycle.identity", side_effect=[
+                "developer-0000000001", "reviewer-0000000002"]):
+            code, out, err = self.run_cli(
+                self.base() + ["plan", "--roles", "developer,reviewer", "--snapshot", str(self.snapshot)]
+            )
+        self.assertEqual(code, 0, err)
+        document = json.loads(out)
+        self.assertEqual(document["schema_version"], 14)
+        self.assertEqual(set(document["worker_kinds"]), {"developer", "reviewer"})
+        self.assertTrue(set(document["worker_kinds"].values()) <= {"claude", "codex", "grok"})
+        self.assertEqual(document["assignments"], {
+            "developer": "developer-0000000001",
+            "reviewer": "reviewer-0000000002",
+        })
+
+    def test_schema_7_pinned_kind_can_supply_judge_and_developer_fresh_identities(self):
+        shipped = Path(__file__).resolve().parent.parent / "config.example.json"
+        payload = json.loads(shipped.read_text(encoding="utf-8"))
+        payload["worker_kinds"] = [row for row in payload["worker_kinds"] if row["name"] == "claude"]
+        self.config.write_text(json.dumps(payload), encoding="utf-8")
+        with patch("foreman.lifecycle.identity", side_effect=[
+                "developer-0000000003", "judge-0000000004"]):
+            code, out, err = self.run_cli(
+                self.base() + ["plan", "--roles", "developer,judge", "--judge-mode", "adjudication",
+                               "--snapshot", str(self.snapshot)]
+            )
+        self.assertEqual(code, 0, err)
+        document = json.loads(out)
+        self.assertEqual(document["worker_kinds"], {"developer": "claude", "judge": "claude"})
+        self.assertEqual(document["assignments"], {
+            "developer": "developer-0000000003",
+            "judge": "judge-0000000004",
+        })
+
+    def test_schema_7_dry_run_shows_spawn_before_fresh_dispatch(self):
+        shipped = Path(__file__).resolve().parent.parent / "config.example.json"
+        self.config.write_text(shipped.read_text(encoding="utf-8"), encoding="utf-8")
+        with patch("foreman.lifecycle.identity", return_value="developer-0000000005"):
+            code, out, err = self.run_cli(
+                self.base() + ["plan", "--roles", "developer", "--snapshot", str(self.snapshot)]
+            )
+        self.assertEqual(code, 0, err)
+        plan = json.loads(out)
+        self.out, self.err = io.StringIO(), io.StringIO()
+        code, out, err = self.run_cli(
+            self.base() + ["apply", "--assignments", json.dumps(plan), "--common", str(self.common),
+                           "--brief", "developer=" + str(self.briefs["developer"]), "--dry-run"]
+        )
+        self.assertEqual(code, 0, err)
+        result = json.loads(out)
+        self.assertTrue(result["assignment_scoped"])
+        self.assertEqual(result["steps"][0]["agent"], plan["assignments"]["developer"])
+        commands = result["spawns"][0]["commands"]
+        self.assertIn("pane split --current", commands[0]["shell"])
+        self.assertIn("agent start " + plan["assignments"]["developer"], commands[1]["shell"])
+
+    def test_schema_7_refuses_cross_assignment_retention(self):
+        shipped = Path(__file__).resolve().parent.parent / "config.example.json"
+        self.config.write_text(shipped.read_text(encoding="utf-8"), encoding="utf-8")
+        with patch("foreman.lifecycle.identity", return_value="developer-0000000006"):
+            code, out, err = self.run_cli(
+                self.base() + ["plan", "--roles", "developer", "--snapshot", str(self.snapshot)]
+            )
+        self.assertEqual(code, 0, err)
+        plan = json.loads(out)
+        for flag in ("--retain-context", "--retain-specialist"):
+            with self.subTest(flag=flag):
+                self.out, self.err = io.StringIO(), io.StringIO()
+                code, out, err = self.run_cli(
+                    self.base() + ["apply", "--assignments", json.dumps(plan),
+                                   "--common", str(self.common),
+                                   "--brief", "developer=" + str(self.briefs["developer"]),
+                                   "--dry-run", flag]
+                )
+                self.assertEqual(code, 1)
+                self.assertEqual(out, "")
+                self.assertIn("live for one assignment", err)
+
+    def test_schema_7_live_apply_requires_a_task_before_spawning(self):
+        shipped = Path(__file__).resolve().parent.parent / "config.example.json"
+        self.config.write_text(shipped.read_text(encoding="utf-8"), encoding="utf-8")
+        with patch("foreman.lifecycle.identity", return_value="developer-0000000006"):
+            code, out, err = self.run_cli(
+                self.base() + ["plan", "--roles", "developer", "--snapshot", str(self.snapshot)]
+            )
+        self.assertEqual(code, 0, err)
+        plan = json.loads(out)
+        self.out, self.err = io.StringIO(), io.StringIO()
+        code, out, err = self.run_cli(
+            self.base() + ["apply", "--assignments", json.dumps(plan), "--common", str(self.common),
+                           "--brief", "developer=" + str(self.briefs["developer"])]
+        )
+        self.assertEqual(code, 1)
+        self.assertEqual(out, "")
+        self.assertIn("needs --task", err)
+
+    def test_schema_7_live_apply_requires_bound_pane_ownership(self):
+        shipped = Path(__file__).resolve().parent.parent / "config.example.json"
+        self.config.write_text(shipped.read_text(encoding="utf-8"), encoding="utf-8")
+        with patch("foreman.lifecycle.identity", return_value="developer-0000000009"):
+            code, out, err = self.run_cli(
+                self.base() + ["plan", "--roles", "developer", "--task", "t-owned",
+                               "--snapshot", str(self.snapshot)]
+            )
+        self.assertEqual(code, 0, err)
+        plan = json.loads(out)
+        self.out, self.err = io.StringIO(), io.StringIO()
+        with patch("foreman.lifecycle.spawn") as spawn:
+            code, out, err = self.run_cli(
+                self.base() + ["apply", "--assignments", json.dumps(plan),
+                               "--task", "t-owned", "--common", str(self.common),
+                               "--brief", "developer=" + str(self.briefs["developer"])],
+                client=Mock(),
+            )
+        self.assertEqual(code, 1)
+        self.assertEqual(out, "")
+        self.assertIn("supervision-bind", err)
+        spawn.assert_not_called()
+
+    def test_schema_7_apply_rejects_malformed_worker_kind_map_before_access(self):
+        shipped = Path(__file__).resolve().parent.parent / "config.example.json"
+        self.config.write_text(shipped.read_text(encoding="utf-8"), encoding="utf-8")
+        for worker_kinds in (None, ["claude"], {}):
+            with self.subTest(worker_kinds=worker_kinds):
+                plan = {"schema_version": 14, "assignments": {"developer": "developer-fixed"}}
+                if worker_kinds is not None:
+                    plan["worker_kinds"] = worker_kinds
+                self.out, self.err = io.StringIO(), io.StringIO()
+                code, out, err = self.run_cli(
+                    self.base() + ["apply", "--assignments", json.dumps(plan),
+                                   "--task", "t-malformed", "--common", str(self.common),
+                                   "--brief", "developer=" + str(self.briefs["developer"]),
+                                   "--retain-context", "--fix-round", "1", "--dry-run"],
+                    client=Mock(),
+                )
+                self.assertEqual(code, 1)
+                self.assertEqual(out, "")
+                self.assertIn("worker_kinds object", err)
+
+    def _interrupt_plan(self):
+        shipped = Path(__file__).resolve().parent.parent / "config.example.json"
+        self.config.write_text(shipped.read_text(encoding="utf-8"), encoding="utf-8")
+        with patch("foreman.lifecycle.identity", side_effect=[
+                "developer-0000000007", "reviewer-0000000008"]):
+            code, out, err = self.run_cli(
+                self.base() + ["plan", "--roles", "developer,reviewer",
+                               "--task", "t-interrupt", "--snapshot", str(self.snapshot)]
+            )
+        self.assertEqual(code, 0, err)
+        supervision.bind(self.state, {
+            "kind": "id", "value": "foreman-test", "cwd": str(self.tmp),
+            "herdr_env": "test", "pane_id": "foreman-pane",
+        }, AT, root=self.tmp / "bindings")
+        self.out, self.err = io.StringIO(), io.StringIO()
+        return json.loads(out)
+
+    def _interrupt_reports(self):
+        return [item for role in ("developer", "reviewer")
+                for item in ("--report", "{}={}".format(role, self.tmp / (role + "-report.md")))]
+
+    def test_scoped_apply_closes_earlier_panes_when_a_later_spawn_is_interrupted(self):
+        plan = self._interrupt_plan()
+        client = Mock()
+        with patch("foreman.lifecycle.spawn", side_effect=["pane-developer", KeyboardInterrupt]), \
+                patch("foreman.lifecycle.close") as close, \
+                self.assertRaises(KeyboardInterrupt):
+            self.run_cli(
+                self.base() + ["apply", "--assignments", json.dumps(plan),
+                               "--task", "t-interrupt", "--now", AT,
+                               "--common", str(self.common)]
+                + self.brief_args("developer", "reviewer") + self._interrupt_reports(),
+                client=client,
+            )
+        close.assert_called_once_with(
+            client, plan["assignments"]["developer"], "pane-developer")
+        owner = supervision.load(self.state)
+        self.assertEqual(len(owner["members"]), 1)
+        self.assertFalse(owner["members"][0]["active"])
+        self.assertEqual(
+            supervision.expected_assignment(owner["members"][0])["pane_id"],
+            "pane-developer",
+        )
+        saved, usable = load_state_checked(self.state, persist_migration=False)
+        self.assertTrue(usable)
+        self.assertEqual(saved["recovery"]["dispatches"][0]["status"], "not_sent")
+
+    def test_scoped_apply_retries_a_cleaned_not_sent_dispatch_with_a_fresh_enrollment(self):
+        plan = self._interrupt_plan()
+        client = Mock()
+        command = (
+            self.base() + ["apply", "--assignments", json.dumps(plan),
+                           "--task", "t-interrupt", "--now", AT,
+                           "--common", str(self.common)]
+            + self.brief_args("developer", "reviewer") + self._interrupt_reports()
+        )
+        with patch("foreman.lifecycle.spawn", side_effect=["pane-developer", KeyboardInterrupt]), \
+                patch("foreman.lifecycle.close"), self.assertRaises(KeyboardInterrupt):
+            self.run_cli(command, client=client)
+
+        with patch("foreman.lifecycle.spawn", side_effect=["pane-developer-2", "pane-reviewer"]), \
+                patch("foreman.cli.apply_assignments", return_value={"applied": []}):
+            code, _, err = self.run_cli(command, client=client)
+
+        self.assertEqual(code, 0, err)
+        owner = supervision.load(self.state)
+        developer = [row for row in owner["members"]
+                     if row["assignment"]["agent"] == plan["assignments"]["developer"]]
+        self.assertEqual(len(developer), 2)
+        self.assertFalse(developer[0]["active"])
+        self.assertTrue(developer[1]["active"])
+        self.assertNotEqual(developer[0]["id"], developer[1]["id"])
+        self.assertEqual(
+            supervision.expected_assignment(developer[1])["pane_id"],
+            "pane-developer-2",
+        )
+
+    def test_scoped_not_sent_reconciliation_closes_and_resolves_before_retry(self):
+        plan = self._interrupt_plan()
+        command = (
+            self.base() + ["apply", "--assignments", json.dumps(plan),
+                           "--task", "t-interrupt", "--now", AT,
+                           "--common", str(self.common)]
+            + self.brief_args("developer", "reviewer") + self._interrupt_reports()
+        )
+
+        def interrupt_after_send_started(*_args, **kwargs):
+            kwargs["on_before_send"](
+                {"role": "developer", "agent": plan["assignments"]["developer"],
+                 "pane_id": "pane-developer"},
+                {"cleared": True, "clear_reason": "automatic", "context_session": None},
+            )
+            raise KeyboardInterrupt
+
+        client = Mock()
+        with patch("foreman.lifecycle.spawn", side_effect=["pane-developer", "pane-reviewer"]), \
+                patch("foreman.lifecycle.close"), \
+                patch("foreman.cli.apply_assignments", side_effect=interrupt_after_send_started), \
+                self.assertRaises(KeyboardInterrupt):
+            self.run_cli(command, client=client)
+        saved, usable = load_state_checked(self.state, persist_migration=False)
+        self.assertTrue(usable)
+        pending = next(row for row in saved["recovery"]["dispatches"]
+                       if row["agent"] == plan["assignments"]["developer"])
+        self.assertEqual(pending["status"], "sending")
+
+        evidence = self.tmp / "not-sent-evidence.md"
+        evidence.write_text("Transport trace proves no worker prompt was delivered.\n")
+        record = self.tmp / "reconcile-not-sent.json"
+        record.write_text(json.dumps({
+            "dispatch": pending["id"], "outcome": "not_sent",
+            "reason": "Transport trace proves no prompt was delivered",
+            "authorization": {"source": "fixture", "quote": "Reconcile this send"},
+            "evidence": str(evidence),
+        }))
+        recovery_client = Mock()
+        recovery_client.agent_get.return_value = {
+            "agent_status": "idle", "agent_session": "session-a",
+        }
+        closure = {"pane_id": "pane-developer", "closed": True, "replayed": False}
+        self.out, self.err = io.StringIO(), io.StringIO()
+        with patch("foreman.cli.lifecycle.close", return_value=closure) as close_pane:
+            code, out, err = self.run_cli(
+                self.base() + ["reconcile", "--record", str(record), "--now", AT],
+                client=recovery_client,
+            )
+        self.assertEqual(code, 0, err)
+        self.assertEqual(json.loads(out)["pane_closure"], closure)
+        close_pane.assert_called_once_with(
+            recovery_client, plan["assignments"]["developer"], "pane-developer")
+        owner = supervision.load(self.state)
+        member = next(row for row in owner["members"] if row["id"] == pending["id"])
+        self.assertFalse(member["active"])
+        saved, usable = load_state_checked(self.state, persist_migration=False)
+        self.assertTrue(usable)
+        self.assertEqual(next(row for row in saved["recovery"]["dispatches"]
+                              if row["id"] == pending["id"])["status"], "not_sent")
+
+    def test_scoped_not_sent_cleanup_replays_after_pane_disappears(self):
+        plan = self._interrupt_plan()
+        command = (
+            self.base() + ["apply", "--assignments", json.dumps(plan),
+                           "--task", "t-interrupt", "--now", AT,
+                           "--common", str(self.common)]
+            + self.brief_args("developer", "reviewer") + self._interrupt_reports()
+        )
+
+        def interrupt_after_send_started(*_args, **kwargs):
+            kwargs["on_before_send"](
+                {"role": "developer", "agent": plan["assignments"]["developer"],
+                 "pane_id": "pane-developer"},
+                {"cleared": True, "clear_reason": "automatic", "context_session": None},
+            )
+            raise KeyboardInterrupt
+
+        client = Mock()
+        with patch("foreman.lifecycle.spawn", side_effect=["pane-developer", "pane-reviewer"]), \
+                patch("foreman.lifecycle.close"), \
+                patch("foreman.cli.apply_assignments", side_effect=interrupt_after_send_started), \
+                self.assertRaises(KeyboardInterrupt):
+            self.run_cli(command, client=client)
+        saved, usable = load_state_checked(self.state, persist_migration=False)
+        self.assertTrue(usable)
+        pending = next(row for row in saved["recovery"]["dispatches"]
+                       if row["agent"] == plan["assignments"]["developer"])
+
+        evidence = self.tmp / "not-sent-replay-evidence.md"
+        evidence.write_text("Transport trace proves no worker prompt was delivered.\n")
+        record = self.tmp / "reconcile-not-sent-replay.json"
+        record.write_text(json.dumps({
+            "dispatch": pending["id"], "outcome": "not_sent",
+            "reason": "Transport trace proves no prompt was delivered",
+            "authorization": {"source": "fixture", "quote": "Reconcile this send"},
+            "evidence": str(evidence),
+        }))
+        recovery_client = Mock()
+        recovery_client.agent_get.return_value = {
+            "agent_status": "idle", "agent_session": "session-a",
+        }
+        with patch("foreman.cli.lifecycle.close", return_value={"closed": True}), \
+                patch("foreman.cli.supervision.resolve",
+                      side_effect=StateError("sidecar write failed", {})):
+            code, _out, err = self.run_cli(
+                self.base() + ["reconcile", "--record", str(record), "--now", AT],
+                client=recovery_client,
+            )
+        self.assertEqual(code, 1)
+        self.assertIn("durably not_sent", err)
+        saved, usable = load_state_checked(self.state, persist_migration=False)
+        self.assertTrue(usable)
+        self.assertEqual(next(row for row in saved["recovery"]["dispatches"]
+                              if row["id"] == pending["id"])["status"], "not_sent")
+        member = next(row for row in supervision.load(self.state)["members"]
+                      if row["id"] == pending["id"])
+        self.assertTrue(member["active"])
+
+        recovery_client.reset_mock()
+        recovery_client.agent_get.side_effect = AssertionError(
+            "an exact durable not_sent replay must not require a live worker")
+        replayed = {"pane_id": "pane-developer", "closed": True, "replayed": True}
+        self.out, self.err = io.StringIO(), io.StringIO()
+        with patch("foreman.cli.lifecycle.close", return_value=replayed):
+            code, out, err = self.run_cli(
+                self.base() + ["reconcile", "--record", str(record), "--now", AT],
+                client=recovery_client,
+            )
+        self.assertEqual(code, 0, err)
+        self.assertEqual(json.loads(out)["pane_closure"], replayed)
+        recovery_client.agent_get.assert_not_called()
+        member = next(row for row in supervision.load(self.state)["members"]
+                      if row["id"] == pending["id"])
+        self.assertFalse(member["active"])
+
+    def test_scoped_not_sent_closes_pane_for_independently_resolved_enrollment(self):
+        plan = self._interrupt_plan()
+        command = (
+            self.base() + ["apply", "--assignments", json.dumps(plan),
+                           "--task", "t-interrupt", "--now", AT,
+                           "--common", str(self.common)]
+            + self.brief_args("developer", "reviewer") + self._interrupt_reports()
+        )
+
+        def interrupt_after_send_started(*_args, **kwargs):
+            kwargs["on_before_send"](
+                {"role": "developer", "agent": plan["assignments"]["developer"],
+                 "pane_id": "pane-developer"},
+                {"cleared": True, "clear_reason": "automatic", "context_session": None},
+            )
+            raise KeyboardInterrupt
+
+        client = Mock()
+        with patch("foreman.lifecycle.spawn", side_effect=["pane-developer", "pane-reviewer"]), \
+                patch("foreman.lifecycle.close"), \
+                patch("foreman.cli.apply_assignments", side_effect=interrupt_after_send_started), \
+                self.assertRaises(KeyboardInterrupt):
+            self.run_cli(command, client=client)
+        saved, usable = load_state_checked(self.state, persist_migration=False)
+        self.assertTrue(usable)
+        pending = next(row for row in saved["recovery"]["dispatches"]
+                       if row["agent"] == plan["assignments"]["developer"])
+        supervision.resolve(
+            self.state,
+            {"id": pending["id"], "outcome": "Operator stopped observation",
+             "evidence": [str(self.common.resolve())]},
+            AT,
+        )
+
+        evidence = self.tmp / "inactive-not-sent-evidence.md"
+        evidence.write_text("Transport trace proves no worker prompt was delivered.\n")
+        record = self.tmp / "reconcile-inactive-not-sent.json"
+        record.write_text(json.dumps({
+            "dispatch": pending["id"], "outcome": "not_sent",
+            "reason": "Transport trace proves no prompt was delivered",
+            "authorization": {"source": "fixture", "quote": "Reconcile this send"},
+            "evidence": str(evidence),
+        }))
+        recovery_client = Mock()
+        recovery_client.agent_get.return_value = {
+            "agent_status": "idle", "agent_session": "session-a",
+        }
+        closure = {"pane_id": "pane-developer", "closed": True, "replayed": False}
+        self.out, self.err = io.StringIO(), io.StringIO()
+        with patch("foreman.cli.lifecycle.close", return_value=closure) as close_pane, \
+                patch("foreman.cli.supervision.resolve") as resolve_again:
+            code, out, err = self.run_cli(
+                self.base() + ["reconcile", "--record", str(record), "--now", AT],
+                client=recovery_client,
+            )
+        self.assertEqual(code, 0, err)
+        self.assertEqual(json.loads(out)["pane_closure"], closure)
+        close_pane.assert_called_once_with(
+            recovery_client, plan["assignments"]["developer"], "pane-developer")
+        resolve_again.assert_not_called()
+
+    def test_scoped_apply_closes_unused_panes_when_dispatch_is_interrupted(self):
+        plan = self._interrupt_plan()
+        client = Mock()
+        with patch("foreman.lifecycle.spawn", side_effect=["pane-developer", "pane-reviewer"]), \
+                patch("foreman.lifecycle.close") as close, \
+                patch("foreman.cli.apply_assignments", side_effect=KeyboardInterrupt), \
+                self.assertRaises(KeyboardInterrupt):
+            self.run_cli(
+                self.base() + ["apply", "--assignments", json.dumps(plan),
+                               "--task", "t-interrupt", "--now", AT,
+                               "--common", str(self.common)]
+                + self.brief_args("developer", "reviewer") + self._interrupt_reports(),
+                client=client,
+            )
+        self.assertEqual(close.call_count, 2)
+        close.assert_any_call(
+            client, plan["assignments"]["developer"], "pane-developer")
+        close.assert_any_call(
+            client, plan["assignments"]["reviewer"], "pane-reviewer")
+
+    def test_scoped_apply_preserves_sending_pane_when_state_save_is_interrupted(self):
+        plan = self._interrupt_plan()
+        client = Mock()
+        real_save = cli.save_state
+        interrupted = False
+
+        def interrupt_first_sending_save(path, state):
+            nonlocal interrupted
+            if (not interrupted and any(row["status"] == "sending"
+                                        for row in state["recovery"]["dispatches"])):
+                interrupted = True
+                raise KeyboardInterrupt
+            return real_save(path, state)
+
+        def enter_sending(*_args, **kwargs):
+            kwargs["on_before_send"](
+                {"role": "developer", "agent": plan["assignments"]["developer"],
+                 "pane_id": "pane-developer"},
+                {"cleared": True, "clear_reason": "automatic", "context_session": None},
+            )
+
+        with patch("foreman.lifecycle.spawn", side_effect=["pane-developer", "pane-reviewer"]), \
+                patch("foreman.lifecycle.close") as close, \
+                patch("foreman.cli.apply_assignments", side_effect=enter_sending), \
+                patch("foreman.cli.save_state", side_effect=interrupt_first_sending_save), \
+                self.assertRaises(KeyboardInterrupt):
+            self.run_cli(
+                self.base() + ["apply", "--assignments", json.dumps(plan),
+                               "--task", "t-interrupt", "--now", AT,
+                               "--common", str(self.common)]
+                + self.brief_args("developer", "reviewer") + self._interrupt_reports(),
+                client=client,
+            )
+        close.assert_called_once_with(
+            client, plan["assignments"]["reviewer"], "pane-reviewer")
+        owner = supervision.load(self.state)
+        developer = next(row for row in owner["members"]
+                         if row["assignment"]["agent"] == plan["assignments"]["developer"])
+        self.assertTrue(developer["active"])
+        saved, usable = load_state_checked(self.state, persist_migration=False)
+        self.assertTrue(usable)
+        dispatch = next(row for row in saved["recovery"]["dispatches"]
+                        if row["agent"] == plan["assignments"]["developer"])
+        self.assertEqual(dispatch["status"], "sending")
+
+    def test_spawn_cleanup_state_failure_does_not_replace_an_interrupt(self):
+        plan = self._interrupt_plan()
+        client = Mock()
+        with patch("foreman.lifecycle.spawn", side_effect=["pane-developer", KeyboardInterrupt]), \
+                patch("foreman.lifecycle.close"), \
+                patch("foreman.cli.save_state", side_effect=[None, UsageError("cleanup save failed", {})]), \
+                self.assertRaises(KeyboardInterrupt) as caught:
+            self.run_cli(
+                self.base() + ["apply", "--assignments", json.dumps(plan),
+                               "--task", "t-interrupt", "--now", AT,
+                               "--common", str(self.common)]
+                + self.brief_args("developer", "reviewer") + self._interrupt_reports(),
+                client=client,
+            )
+        self.assertIn("save_state", " ".join(caught.exception.__notes__))
+
+    def test_dispatch_cleanup_recovery_failure_does_not_replace_an_interrupt(self):
+        plan = self._interrupt_plan()
+        client = Mock()
+        with patch("foreman.lifecycle.spawn", side_effect=["pane-developer", "pane-reviewer"]), \
+                patch("foreman.lifecycle.close"), \
+                patch("foreman.cli.apply_assignments", side_effect=KeyboardInterrupt), \
+                patch("foreman.cli.recovery.abort_pre_send", side_effect=UsageError("cleanup abort failed", {})), \
+                self.assertRaises(KeyboardInterrupt) as caught:
+            self.run_cli(
+                self.base() + ["apply", "--assignments", json.dumps(plan),
+                               "--task", "t-interrupt", "--now", AT,
+                               "--common", str(self.common)]
+                + self.brief_args("developer", "reviewer") + self._interrupt_reports(),
+                client=client,
+            )
+        self.assertIn("abort_pre_send", " ".join(caught.exception.__notes__))
+
+    def test_scoped_headroom_maps_only_fresh_assignments_after_a_partial_retry(self):
+        self.assertEqual(
+            cli._scoped_headroom(
+                {"reviewer": "reviewer-0000000002"},
+                {"developer": "claude", "reviewer": "codex"},
+                {"claude": 80.0, "codex": 70.0},
+            ),
+            {"reviewer-0000000002": 70.0},
+        )
+
+    def test_scoped_rotation_provenance_maps_live_identities_back_to_kinds(self):
+        state = empty_state()
+        add_assignment(state, AT, "developer", "developer-0000000001")
+        state["recovery"]["dispatches"] = [
+            {"assignment_index": 0, "worker_kind": "claude"},
+            {"assignment_index": 9, "worker_kind": "ignored"},
+        ]
+        self.assertEqual(cli._worker_kind_provenance(state), {0: "claude"})
+
     def test_plans_from_a_snapshot_file(self):
         code, out, err = self.run_cli(
             self.base() + ["plan", "--roles", "developer,tester,reviewer", "--snapshot", str(self.snapshot)]

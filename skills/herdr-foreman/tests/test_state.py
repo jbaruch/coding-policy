@@ -743,6 +743,15 @@ class AssignmentStatusTest(unittest.TestCase):
         add_assignment(state, "b", "developer", "grok")
         self.assertEqual(role_counts(state), {"developer": {"grok": 2}})
 
+    def test_assignment_scoped_history_counts_stable_worker_kinds(self):
+        state = empty_state()
+        add_assignment(state, "a", "developer", "developer-random-a")
+        add_assignment(state, "b", "developer", "developer-random-b")
+        self.assertEqual(
+            role_counts(state, {0: "claude", 1: "claude"}),
+            {"developer": {"claude": 2}},
+        )
+
     def test_a_mixed_ledger_counts_only_the_started_rounds(self):
         state = empty_state()
         add_assignment(state, "a", "developer", "grok")

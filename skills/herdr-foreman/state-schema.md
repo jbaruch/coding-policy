@@ -81,6 +81,16 @@ unconfigured, the preflight warning that never blocks. A `foreman` block in a
 file below schema 6 is refused with the version it needs. Moving to schema 6 is
 the operator adding the block and bumping `schema_version`.
 Config schema 2 added per-agent `tiers` and `launch_args`.
+Config schema 7 replaces `agents` with `worker_kinds`. Each entry has the same
+launch, UI, tier, capability and metering fields, but its `name` identifies a
+template rather than a live Herdr agent. Schema 7 requires a `coordination`
+tier for the disposable usage probe. It also replaces `judge.agent` with
+`judge.worker_kind`; that kind must be declared. Schemas 1–6 remain readable
+as legacy standing-worker configurations, but a file may not mix the two
+collections or judge identity fields. Because worker-kind names are not live
+identities, a schema-7 foreman's live `agent` name may equal a kind name,
+including the pinned judge kind; every probe and assignment still launches
+under a separately allocated identity.
 See `skills/herdr-foreman/references/model-tiers.md` for billing evidence. A missing config is refused with the exact `cp` command to run. The
 optional `idle_markers` / `working_markers` per-agent keys carry the footer
 signatures the stale-state probe reads; an agent with neither is never probed.
@@ -93,12 +103,13 @@ exemptions, and the guarded one-shot recovery of a stuck composer.
 dispatch. All are documented in
 `skills/herdr-foreman/references/herdr.md`.
 
-`window_group` names the usage window an agent shares with other agents: two
-workers authenticating as one subscription declare the same value, `measure`
-copies it onto each record (introduced in snapshot schema 2; current schema 4), and `plan` charges a seat's cost against every
-worker in that window. An agent that declares none has a window to itself.
+`window_group` names the usage window a worker kind shares with other kinds.
+Schema-7 `measure` starts one short-lived probe per group, reads usage once,
+closes it, and copies the result onto every kind in that group (snapshot schema
+2 introduced the field; current schema 4). `plan` charges a seat's cost
+against every kind in that window. A kind declaring none has a window to itself.
 
-The optional top-level `judge` key pins the judge agent, model, and effort.
+The optional top-level `judge` key pins the judge worker kind, model, and effort.
 Plan schema 6 echoes them in a `judge` object, with `mode` — the seat's
 declared `adjudication` or `diagnosis` — beside them; a plan without that seat
 omits the object. Writer: `plan`, from its own `--judge-mode`. Readers:
@@ -107,7 +118,8 @@ one that differs from it. A version-5 plan carries no `mode`; its readers
 refuse the start rather than defaulting one, since the choice decides which
 pre-dispatch gate the seat is held to. Model and effort become explicit launch flags. Legacy `banner_pattern`
 values are ignored: proof comes from launch or live process argv. The planner
-never ranks the judge seat or gives its pinned worker another role.
+never ranks the judge seat. Schema 7 gives it a fresh assignment identity, so
+the pinned kind may independently supply another fresh seat.
 
 Plan schema 5 also carries `tiers` keyed by role and `rounds` with the foreman's
 round type and context inputs. Legacy non-tiered assignments have no tier
@@ -116,11 +128,15 @@ metadata. The operator's tier table, supported flags, and billing evidence are d
 `task`, cumulative `fix_round`, correction `plan` identity or null, and `work`
 bounds or null. Apply refuses different task context. Earlier plan shapes and
 plain role mappings remain accepted; live apply still checks current history,
-allowance, tiers, and readiness. Apply output schema 7 includes
+allowance, tiers, and readiness. Apply output schema 8 includes
 `context_transition`, persistent `dispatch_id` for labelled assignments, and
-`replayed: true` when returning an existing completed result.
+`replayed: true` when returning an existing completed result; a fresh
+schema-7-config dispatch also carries `assignment_scoped: true` and its
+`worker_kind`.
 Version 7 adds optional per-assignment specialist `requirements` and retained
-consultation handling. Version 6 added the verified role-clear transition. Version 5 adds verified hand-release and historical-correction transition
+consultation handling for legacy standing-worker configs. Assignment-scoped
+configs reject retention and give every follow-up a fresh identity and pane.
+Version 6 added the verified role-clear transition. Version 5 adds verified hand-release and historical-correction transition
 variants; version 4 introduced the original recovery fields.
 
 Plan schema 5 adds an optional `requirements` map keyed by assigned responsibility.
@@ -208,6 +224,19 @@ An untiered worker records `unknown` for every model-dependent field. The
 record builder is `skills/herdr-foreman/foreman/selection.py` (`records`); the
 conditions and their thresholds are `escalation_conditions` in
 `skills/herdr-foreman/foreman/tiers.py`, not restated here.
+
+Plan schema 14 adds assignment-scoped identities. `worker_kinds` maps every
+seat to the stable template selected from the snapshot; `assignments` maps the
+same seats to fresh Herdr-safe identities allocated by that plan. Apply
+requires both maps to have exactly the same keys, clones each template under
+its saved identity, and spawns it in a new pane. Replaying that plan preserves
+the identity; replanning allocates a different one. Assignment-scoped apply
+rejects `--retain-context` and `--retain-specialist`: after the assessed pane
+closes, a follow-up plan allocates a fresh identity and its self-contained
+brief carries the prior evidence. Selection explanations continue to name the
+ranked worker kind. Legacy plans and bare role mappings remain valid only with
+schemas 1–6 standing-worker configs, where the existing retention modes remain
+available.
 
 Plan schema 10 adds `capability` and `cheaper_adequate` to each entry in
 `tiers` (#520). Writer: `plan`, from the capability table beside the state.
@@ -507,7 +536,7 @@ document and arrives already stamped.
 
 ## Recovery records
 
-The recovery document uses `schema_version: 14`; individual records retain their
+The recovery document uses `schema_version: 15`; individual records retain their
 independent versions. Version 6 adds the dispatch fields `brief_identity`, `refusal` and
 `refusal_move` and the `refusal_authorizations` collection; version 7 adds the
 dispatch's send-time `provider`; version 8 adds the `diagnoses` collection;
@@ -519,11 +548,20 @@ fingerprint, so an adjudication and a diagnosis of one brief are separate
 dispatches. Only judge dispatches carry the field. Version 13 adds the
 `task_closed` event kind. Version 14 adds `oracle` to a mechanical round's
 dispatch and binds a `patch` or `fixture` oracle's pin into the dispatch
-fingerprint (#585). The
+fingerprint (#585). Version 15 adds assignment-scoped dispatch version 4:
+`worker_kind` records the reusable config template separately from the fresh
+live `agent` identity, while the applied result records
+`assignment_scoped: true` so closure owns the short-lived pane. A version-4
+row may also carry composition metadata and `judge_mode`; those fields retain
+their existing meaning. A new scoped worker is enrolled with its pane and its
+dispatch is reserved immediately after spawn, before another worker starts.
+Planner rotation counts map completed assignment indices back through these
+dispatches so fresh live names do not erase worker-kind history. The
 owner stamps an older store on load, adds the empty collections, and refuses one
 already carrying a field — or a seat-named dispatch — its version did not own. Generic records remain version 1; stale-Grok delivery and
 composition-bearing dispatch/result records use version 2; a judge
-dispatch/result carrying its `judge_mode` uses version 3. Version 1 and 2 rows
+dispatch/result carrying its `judge_mode` uses version 3; assignment-scoped
+dispatch/result records use version 4. Version 1, 2 and 3 rows
 are never restamped: a judge dispatch recorded before version 3 keeps no mode,
 and its ledger row reads `unknown`. A new judge reservation without a mode is
 refused, and so is a mode-less retry of a stored row; only stored rows keep
@@ -569,9 +607,10 @@ Requirements contain the assigned role's normalized object; reviewer scope is
 are omitted, not null. The result preserves the dispatch's exact metadata and
 matches its assignment row. Version-1 dispatches/results retain their original
 shape and cannot carry these fields. Unknown-send reconciliation preserves the
-metadata without inventing native continuity. Optional requirements and retained
-specialist intent enter the dispatch fingerprint only when present; legacy retry
-identities remain unchanged.
+metadata without inventing native continuity. Optional requirements and legacy
+standing-worker retained-specialist intent enter the dispatch fingerprint only
+when present; legacy retry identities remain unchanged. Assignment-scoped
+dispatches never carry retained-specialist intent.
 
 ### Specialist assessment records
 
@@ -712,8 +751,10 @@ informational plan name and never feeds headroom.
 - **Readers** — `plan` reads the newest snapshot plus the ledger (role history
   breaks a headroom tie), and the config's `role_costs` for its seat weights;
   `state` prints the document. Neither appends records; their shared loader performs owner migrations. Live `apply` reads the most
-  recent assignment for the named worker before retaining context; Step 10
-  documents the retained-dispatch contract. `status` derives budgets and paused
+  recent assignment for a named legacy standing worker before retaining
+  context; Step 10 documents that retained-dispatch contract. An
+  assignment-scoped apply instead validates its fresh planned identity and
+  spawns its pane. `status` derives budgets and paused
   implementation separately from active audit work. `apply --dry-run` reads
   current recovery bounds without writes; an older ledger requires an owner
   `state` command first. Dry-run never proves live continuity.
@@ -763,11 +804,14 @@ informational plan name and never feeds headroom.
   The recovery reference names the delivery continuation.
   Unproven correlation is null without losing
   the confirmed dispatch. An unchanged pre-clear reference cannot prove a new conversation. A
-  retained dispatch checks the recorded identity against the live source at
-  readiness and immediately before sending. Missing, changed, malformed, or
-  non-native identity is a refusal with no terminal writes. Other assignments
-  and unlabelled development record null. Requirement-bearing consultations also
-  preserve verified native context for the specialist follow-up contract. The official integration must report
+  retained legacy standing-worker dispatch checks the recorded identity against
+  the live source at readiness and immediately before sending. Missing,
+  changed, malformed, or non-native identity is a refusal with no terminal
+  writes. Other assignments and unlabelled development record null.
+  Requirement-bearing legacy consultations also preserve verified native
+  context for the specialist follow-up contract. Assignment-scoped follow-ups
+  preserve no session continuity across assignments; they use a fresh identity
+  and pane. The official integration must report
   native session changes; check its installation when continuity is unavailable.
 - **Serialization** — CLI owner transactions use a live OS lock at the state
   path plus `.lock`, including readers that may migrate. Contention refuses

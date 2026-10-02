@@ -9,7 +9,7 @@ SHA. Fixes carry the prior attempt count and required ownership handoff.
 Verification names `full` or `scoped`, prior findings, and the follow-up for new
 advisories. Final release verification is `full`.
 
-## Step 2 — Verify Herdr and the Roster
+## Step 2 — Verify Herdr and Live Assignments
 
 ```bash
 CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"; [ -d "$CP" ] || case "$(git config --get remote.origin.url)" in git@github.com:jbaruch/coding-policy|git@github.com:jbaruch/coding-policy.git|https://github.com/jbaruch/coding-policy|https://github.com/jbaruch/coding-policy.git|ssh://git@github.com/jbaruch/coding-policy|ssh://git@github.com/jbaruch/coding-policy.git) CP=. ;; *) echo "coding-policy plugin not found: run tessl install jbaruch/coding-policy" >&2; exit 1 ;; esac
@@ -19,19 +19,19 @@ bash "$CP/skills/herdr-foreman/roster.sh"
 Takes no arguments. Emits `{"caller":{"pane_id":...},"agents":[{"name","kind","pane_id","state"}]}`,
 listing every named live agent other than your own pane.
 
-- **Exit 0 with a populated `agents`** — proceed to Step 3.
-- **Exit 0 with `agents: []`** — nobody is named. Report the unnamed panes from
-  `herdr agent list` and the `herdr agent rename <pane-id> <name>` command that
-  fixes it, then finish here.
+- **Exit 0** — proceed to Step 3. With schema 7, `agents: []` is the normal
+  between-assignment state; a populated list contains only assignments not yet
+  assessed and closed. Never require or create a standing worker roster.
 - **Exit 1** — the precondition failed (outside Herdr, or `herdr` absent).
   Report the message verbatim and finish here.
 - **Exit 2** — herdr failed. Report the message verbatim and finish here.
 
-An unused specialist profile needs no pane. When the next responsibilities
-outnumber eligible workers, record a staffing decision: name another configured
-worker or schedule separate bounded assignments. Combine compatible expertise
-inside one responsibility when justified. Never combine independent verification
-with the design or implementation it assesses, and never duplicate dispatch targets.
+An unused worker kind needs no pane. One eligible kind may supply several
+concurrent seats because every seat receives a different fresh identity and
+pane; the planner charges each seat against that kind's shared usage window.
+Combine compatible expertise inside one responsibility only when justified.
+Never combine independent verification with the design or implementation it
+assesses, and never duplicate live dispatch identities.
 
 ## Step 3 — Verify Authority for the Repo
 
@@ -339,8 +339,9 @@ Phase 2 briefs name the branch AND the commit SHA the worker must report
 against. A report against an older tip does not gate anything.
 
 Name the issue, file, finding, and report path in full in every brief.
-Context retention follows Fix Loops or Specialist Consultations in
-`skills/herdr-foreman/references/team-operation.md`. Fresh-worker fix briefs include
+Legacy standing-worker context retention follows Fix Loops or Specialist
+Consultations in `skills/herdr-foreman/references/team-operation.md`.
+Assignment-scoped rounds always use a fresh identity and pane. Fresh-worker fix briefs include
 the prior attempt count and the ownership handoff that section requires.
 Reviewer and tester verification briefs name `full` or `scoped` review,
 the prior findings, and the follow-up issue for new advisories. The final

@@ -29,6 +29,7 @@ from pathlib import Path
 from . import report_gates
 from . import runnable
 from . import supervision
+from . import lifecycle
 from .chronology import timestamp
 from .errors import StateError, UsageError
 from .state import load_state_checked
@@ -237,7 +238,7 @@ def _member(data, enrollment):
     return member
 
 
-def close(state_path, enrollment, ledger, at):
+def close(state_path, enrollment, ledger, at, client=None):
     """Acknowledge this enrollment's pending events and resolve it, once its outcome is in the ledger."""
     ledger = str(Path(ledger).expanduser().resolve())
     member = _member(supervision.load(state_path), enrollment)
@@ -248,8 +249,28 @@ def close(state_path, enrollment, ledger, at):
     # A classifier gate only adds friction: an open re-read refuses any
     # closure, an open block refuses an accepted one (foreman/report_gates.py).
     # The gate lock is held through the closure, so no gate lands in between.
+    state, usable = load_state_checked(state_path, persist_migration=False)
+    if not usable:
+        raise StateError("The dispatch state at {} is unusable, so assignment lifecycle evidence cannot be read; restore it before closing.".format(state_path), {})
+    dispatch = next((row for row in state["recovery"]["dispatches"] if row.get("id") == enrollment), None)
+    result = dispatch.get("result") if isinstance(dispatch, dict) else None
+    result_record = result if isinstance(result, dict) else {}
+    # A reconcile can reconstruct an older-shaped result from transport
+    # evidence, but the owner-written dispatch version still durably marks the
+    # assignment as short-lived through its worker kind.
+    scoped = (result_record.get("assignment_scoped") is True
+              or isinstance(dispatch, dict) and isinstance(dispatch.get("worker_kind"), str))
+    pane_closure = None
     with report_gates.holding(state_path):
         report_gates.require_clear(state_path, assignment["report"], event["decision"] == "accepted")
+        if scoped:
+            if client is None:
+                raise UsageError("This assignment owns a short-lived pane; `{}` needs a Herdr client to remove it.".format(
+                    runnable.command("close-member")), {})
+            pane = assignment.get("pane_id") or result_record.get("pane_id")
+            if not isinstance(pane, str) or not pane:
+                raise StateError("Assignment {} is scoped to a pane but its dispatch records no pane identity; reconcile the original dispatch before closure.".format(enrollment), {})
+            pane_closure = lifecycle.close(client, assignment["agent"], pane)
         outcome = "Task ledger event {}: {}".format(event.get("id", "unknown"), event["decision"])
         drained = supervision.drain(state_path)
         mine = [row for row in drained["events"] if row["member"] == enrollment]
@@ -259,7 +280,8 @@ def close(state_path, enrollment, ledger, at):
                 {"event": row["id"], "outcome": outcome, "evidence": [ledger]} for row in mine]}, at)["acknowledged"]
         resolved = supervision.resolve(state_path, {"id": enrollment, "outcome": outcome, "evidence": [ledger]}, at)
     return {"schema_version": 1, "enrollment": enrollment, "ledger_event": event.get("id"),
-            "decision": event["decision"], "acknowledged": acknowledged, "resolved": resolved}
+            "decision": event["decision"], "acknowledged": acknowledged, "resolved": resolved,
+            "pane_closure": pane_closure}
 
 
 def _require_contract(state_path, enrollment, report):

@@ -1,5 +1,23 @@
 # Changelog
 
+### Added
+
+- **Herdr workers now live for exactly one assignment (Closes #674).** Config
+  schema 7 declares spawnable `worker_kinds` instead of a standing roster;
+  measurement uses one disposable probe per usage window, plans allocate fresh
+  live identities, apply creates and dispatches their panes, and
+  `close-member` removes each pane after its assessed outcome. Judge,
+  independence, reservation, and recovery evidence bind those assignment
+  identities while retaining config schemas 1–6 for standing-worker installs.
+  Assignment-scoped retention flags are refused: follow-up rounds carry prior
+  evidence in a fresh brief and use a fresh identity and pane. Each new pane is
+  enrolled and reserved before another spawn begins, live scoped apply
+  refuses an unbound foreman, and planner rotation maps disposable identities
+  back to their stable worker kinds.
+  Recovery store version 15 and dispatch/result version 4 own the new
+  `worker_kind` and pane-lifecycle evidence, with an explicit migration from
+  clean version-14 stores and refusal of unowned newer fields.
+
 ## 0.3.357 — 2026-10-01
 
 ### Added

@@ -867,10 +867,12 @@ def latest_snapshot(state):
     return snapshots[-1] if snapshots else None
 
 
-def role_counts(state):
+def role_counts(state, agent_provenance=None):
     """How many times each agent has previously held each role.
 
-    Returns ``{role: {agent: count}}``. The planner uses it to break headroom
+    Returns ``{role: {agent: count}}``. `agent_provenance`, when supplied,
+    maps assignment indices to stable worker-kind names for assignment-scoped
+    history. The planner uses it to break headroom
     ties toward the agent that has held the role least often, which spreads
     roles around instead of pinning one agent to `developer` forever.
 
@@ -879,13 +881,14 @@ def role_counts(state):
     would steer the next round away from the agent that never did the work.
     """
     counts = {}
-    for record in state.get("assignments", []):
+    provenance = agent_provenance or {}
+    for index, record in enumerate(state.get("assignments", [])):
         if not isinstance(record, dict):
             continue
         if record.get("status") in UNCOUNTED_STATUSES:
             continue
         role = record.get("role")
-        agent = record.get("agent")
+        agent = provenance.get(index, record.get("agent"))
         if role is None or agent is None:
             continue
         per_role = counts.setdefault(role, {})

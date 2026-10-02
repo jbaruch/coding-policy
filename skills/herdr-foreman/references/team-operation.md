@@ -55,7 +55,7 @@ The Herdr team round contract. `rules/agent-team-operation.md` Two Modes decides
 - Measure the declared roster before planning
 - A snapshot missing a declared worker plans no seat
 - A ranked seat measured against one worker is a forced pick, never a headroom ranking
-- Each assignment clears context except the retained rounds under Fix Loops or Specialist Consultations
+- Each assignment-scoped worker starts fresh and its assessed pane closes; legacy standing-worker installs retain context only under Fix Loops or Specialist Consultations
 - Every assignment sends a self-contained role brief
 - Fewer eligible workers than required responsibilities is a staffing decision to record
 - Never fold independent verification onto a contributor to satisfy that staffing decision
@@ -66,10 +66,10 @@ The Herdr team round contract. `rules/agent-team-operation.md` Two Modes decides
 - Route implementation through the developer role under the original task and correction allowance
 - Give every consultation an explicit engagement identity and specialty requirements
 - An available profile reserves no worker and creates no active assignment
-- Preserve useful specialist sessions for likely follow-up work
+- On legacy standing-worker installs, preserve useful specialist sessions for likely follow-up work
 - Persist specialist lessons through the existing scoped memory owner
 - Record the delivered report's contract lines through `assess-specialist` before relying on a consultation outcome
-- Narrow exception for retaining an assessed consultation's context.
+- Legacy standing-worker exception for retaining an assessed consultation's context. Assignment-scoped configs refuse this mode and plan a fresh identity.
 - Preconditions (all required):
   1. The foreman requests `--retain-specialist` for one advisor, investigator or architect assignment
   2. The worker's latest assignment has the same task, responsibility and engagement requirements
@@ -194,17 +194,17 @@ The Herdr team round contract. `rules/agent-team-operation.md` Two Modes decides
 - A finding a ruling covers is never re-nominated
 - A `fix` finding that stays open follows the fix loop and its exhaustion route, never a second weighing
 - The judge is declared in `config.json`, measured, and planned like every other seat
-- The judge worker and the `claude` worker authenticate as one Claude subscription and draw on one weekly window
-- `window_group` names the usage window an agent shares with other agents
+- The judge names a worker kind; its disposable probe and any other kind in the same `window_group` draw on one measured window
+- `window_group` names the usage window a worker kind shares with other kinds
 - A seat's cost reduces the projected headroom of every worker sharing its `window_group`
-- The `judge` block names the seat's agent, and the model and effort its worker is launched with
-- The planner seats the judge on the named agent and echoes the tier in its plan
+- The `judge` block names the seat's `worker_kind`, and the model and effort its fresh worker is launched with
+- The planner creates a fresh judge assignment identity on that worker kind and echoes the tier in its plan
 - The model and effort are the worker's launch flags, applied by starting that worker before the dispatch
 - Prove the requested model and effort from returned launch argv or the live foreground process argv
 - A banner, transcript, or remembered ledger row alone never proves the live tier
 - Refuse the judge dispatch when its launch arguments do not prove the requested pair
 - The planner never ranks the judge seat
-- The pinned judge worker never holds another seat
+- The pinned judge assignment identity never holds another seat; the worker kind may supply other fresh assignments
 - No exclusion bars the judge from a dispute involving its own model
 - A judge round the pinned worker's window cannot cover halts the round — no substitution, no fallback to another vendor's flagship, no degraded ruling
 - The most capable model is reserved for the judge
@@ -250,8 +250,8 @@ The Herdr team round contract. `rules/agent-team-operation.md` Two Modes decides
 - Reserve the developer through initial and early-fix verification before assigning it another task or role
 - The planner derives reservations and busy workers from the owner records, never from the foreman's memory
 - Close a task through the owner utility when it merges or is abandoned
-- Fix rounds in `RETAIN_CONTEXT_ROUNDS` (`skills/herdr-foreman/foreman/assign.py`) retain the same developer's context when the retention preconditions hold
-- Narrow exception for retaining context on a same-role fix round.
+- On legacy standing-worker installs, fix rounds in `RETAIN_CONTEXT_ROUNDS` (`skills/herdr-foreman/foreman/assign.py`) retain the same developer's context when the retention preconditions hold
+- Legacy standing-worker exception for retaining context on a same-role fix round. Assignment-scoped configs refuse this mode and plan a fresh identity.
 - Preconditions (all required):
   1. The worker remains the developer for the same task
   2. The assignment follows that worker's confirmed preceding developer round
