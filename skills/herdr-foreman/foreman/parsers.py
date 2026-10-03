@@ -31,13 +31,21 @@ from .errors import ParseError
 
 # --- claude -----------------------------------------------------------------
 
-# A window header is a line that is exactly "Current session" or
-# "Current week (<something>)". The "(<something>)" form covers both
-# "(all models)" and a per-model line such as "(Fable)".
-_CLAUDE_HEADER_RE = re.compile(r"^(Current session|Current week \(.+\))$")
+# Known window labels may carry inline reset metadata in current CLI builds.
+# The suffix is specifically the middle-dot/Resets form, never arbitrary prose.
+_CLAUDE_HEADER_RE = re.compile(
+    r"^(?P<label>Current session|Current week \([^)]+\))"
+    r"(?:\s+·\s+Resets(?:\s+(?P<resets>.+))?)?$"
+)
 # "████        8% used" -- the bar glyphs are decoration, only the number counts.
-_CLAUDE_USED_RE = re.compile(r"(\d+(?:\.\d+)?)\s*%\s+used\b")
+_CLAUDE_USED_RE = re.compile(r"^[█░▒▓▏▎▍▌▋▊▉\s]*(-?\d+(?:\.\d+)?)\s*%\s+used$")
 _CLAUDE_RESETS_RE = re.compile(r"^Resets\s+(.+)$")
+# Only the evidenced narrow-view reset continuations: a timezone, or a time
+# after an inline reset ending in " at". No date inference or prose joining.
+_CLAUDE_ZONE = r"\((?:[A-Za-z_+-]+(?:/[A-Za-z_+-]+)+|UTC|GMT(?:[+-]\d{1,2}(?::\d{2})?)?)\)"
+_CLAUDE_ZONE_RE = re.compile(r"^" + _CLAUDE_ZONE + r"$")
+_CLAUDE_TIME_RE = re.compile(r"^\d{1,2}(?::\d{2})?(?:am|pm)(?:\s+" + _CLAUDE_ZONE + r")?$")
+_CLAUDE_USAGE_END = frozenset({"What's contributing to your limits usage?"})
 
 # --- codex ------------------------------------------------------------------
 
@@ -137,9 +145,16 @@ def parse_claude_usage(text):
     label = None
     pending_used = None
     pending_resets = None
+    collecting_inline_reset = False
 
     def flush():
         if label is not None and pending_used is not None:
+            if not 0 <= float(pending_used) <= 100:
+                raise ParseError(
+                    "Claude usage percentage for {} is outside 0..100; reopen /usage and read the complete "
+                    "dialog before measuring again.".format(label),
+                    {"kind": "claude", "window": label},
+                )
             windows[label] = _window(pending_used, pending_resets)
 
     for raw in text.splitlines():
@@ -147,13 +162,29 @@ def parse_claude_usage(text):
         header = _CLAUDE_HEADER_RE.match(line)
         if header:
             flush()
-            label = header.group(1)
+            label = header.group("label")
             pending_used = None
-            pending_resets = None
+            pending_resets = header.group("resets")
+            collecting_inline_reset = pending_resets is not None
+            continue
+        if line in _CLAUDE_USAGE_END or line.startswith(("Current session", "Current week")):
+            flush()
+            label = None
+            collecting_inline_reset = False
             continue
         if label is None:
             continue
-        used = _CLAUDE_USED_RE.search(line)
+        if collecting_inline_reset:
+            if pending_resets is not None and not pending_resets.endswith(")") and (
+                _CLAUDE_ZONE_RE.fullmatch(line)
+                or (pending_resets.endswith(" at") and _CLAUDE_TIME_RE.fullmatch(line))
+            ):
+                pending_resets += " " + line
+                continue
+            # A blank, progress bar, percentage or any unrecognized row ends
+            # metadata collection, without swallowing it into the reset text.
+            collecting_inline_reset = False
+        used = _CLAUDE_USED_RE.match(line)
         if used and pending_used is None:
             pending_used = used.group(1)
             continue

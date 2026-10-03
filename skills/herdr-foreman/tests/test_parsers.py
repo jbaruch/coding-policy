@@ -93,6 +93,88 @@ GROK_OVERLAID_SAMPLE = """\
 
 
 class ClaudeParserTest(unittest.TestCase):
+    def test_inline_reset_headings_keep_labels_percent_used_and_reset_text(self):
+        text = (
+            "Current session · Resets 6:30pm (America/Chicago)\n▍ 1% used\n"
+            "Current week (all models) · Resets Sep 5 at 5pm (America/Chicago)\n██ 96% used\n"
+        )
+        result = parse_claude_usage(text)
+        self.assertEqual(result, {"windows": {
+            "Current session": {"used_pct": 1.0, "remaining_pct": 99.0,
+                "resets": "6:30pm (America/Chicago)"},
+            "Current week (all models)": {"used_pct": 96.0, "remaining_pct": 4.0,
+                "resets": "Sep 5 at 5pm (America/Chicago)"}}, "credits": None, "plan": None})
+        self.assertEqual(headroom_pct(result["windows"]), 4.0)
+
+    def test_narrow_reset_and_bar_wrapping_preserves_available_metadata(self):
+        text = (
+            "Current session · Resets 6:30pm\n(America/Chicago)\n▍\n\n1% used\n\n"
+            "Current week (all models) · Resets Sep 5 at\n5pm (America/Chicago)\n████\n██\n96% used\n"
+            "What's contributing to your limits usage?\nOther sessions\n72% used\n"
+        )
+        windows = parse_claude_usage(text)["windows"]
+        self.assertEqual(windows["Current session"]["resets"], "6:30pm (America/Chicago)")
+        self.assertEqual(windows["Current week (all models)"]["resets"], "Sep 5 at 5pm (America/Chicago)")
+        self.assertEqual(windows["Current week (all models)"]["remaining_pct"], 4.0)
+
+    def test_mixed_old_new_and_per_model_windows_keep_decimal_associations(self):
+        text = (
+            "Unrelated 99% used\nCurrent session\n▍ 1.5% used\nResets 6:30pm (UTC)\n"
+            "Current week (all models) · Resets Sep 5 at 5pm (UTC)\n96.25% used\n"
+            "Current week (Fable) · Resets Sep 5 at 5pm (UTC)\n20% used\n"
+        )
+        result = parse_claude_usage(text)
+        self.assertEqual(result["windows"]["Current session"]["used_pct"], 1.5)
+        self.assertEqual(result["windows"]["Current week (Fable)"]["remaining_pct"], 80.0)
+        self.assertEqual(headroom_pct(result["windows"]), 3.75)
+
+    def test_false_header_prefixes_and_suffixes_do_not_establish_windows(self):
+        for header in ("Current session forecast", "Current session · unrelated text",
+                "Current week (all models)foo", "This is Current session",
+                "Current week (all models) · unsupported suffix", "Current session Resets 5pm"):
+            with self.subTest(header=header):
+                with self.assertRaises(ParseError):
+                    parse_claude_usage(header + "\n1% used\n")
+
+    def test_invalid_next_header_cannot_assign_its_percentage_to_prior_window(self):
+        with self.assertRaises(ParseError):
+            parse_claude_usage("Current session\nCurrent week (all models)foo\n96% used\n")
+
+    def test_unrelated_prose_percentages_are_not_window_usage(self):
+        for row in ("Other clients show 50% used", "What's contributing to your limits usage?\n50% used"):
+            with self.subTest(row=row):
+                with self.assertRaises(ParseError):
+                    parse_claude_usage("Current session · Resets 6:30pm (UTC)\n" + row + "\n")
+
+    def test_reset_continuation_stops_at_blank_bar_percentage_or_section(self):
+        for boundary in ("", "████", "1% used", "What's contributing to your limits usage?", "Unrelated UI section"):
+            with self.subTest(boundary=boundary):
+                text = "Current session · Resets 6:30pm\n" + boundary + "\n(UTC)\n1% used\n"
+                text += "Current week (all models) · Resets Sep 5 at 5pm (UTC)\n96% used\n"
+                windows = parse_claude_usage(text)["windows"]
+                if "Current session" in windows:
+                    self.assertEqual(windows["Current session"]["resets"], "6:30pm")
+                self.assertEqual(windows["Current week (all models)"]["resets"], "Sep 5 at 5pm (UTC)")
+
+    def test_wrapped_reset_cannot_consume_another_window(self):
+        text = "Current session · Resets 6:30pm\n1% used\nCurrent week (all models) · Resets 5pm (UTC)\n96% used\n"
+        windows = parse_claude_usage(text)["windows"]
+        self.assertEqual(windows["Current session"]["resets"], "6:30pm")
+        self.assertEqual(windows["Current week (all models)"]["used_pct"], 96.0)
+
+    def test_truncated_or_missing_inline_metadata_is_not_invented(self):
+        for metadata, expected in (("", None), (" Sep", "Sep"), (" Sep 5 at", "Sep 5 at")):
+            with self.subTest(metadata=metadata):
+                result = parse_claude_usage("Current session · Resets" + metadata + "\n1% used\n")
+                self.assertEqual(result["windows"]["Current session"]["resets"], expected)
+
+    def test_claude_out_of_range_percentages_are_refused_in_both_layouts(self):
+        for header in ("Current session", "Current session · Resets 5pm (UTC)"):
+            for value in ("101", "100.000001", "-1"):
+                with self.subTest(header=header, value=value):
+                    with self.assertRaisesRegex(ParseError, "outside 0..100"):
+                        parse_claude_usage(header + "\n" + value + "% used\n")
+
     def test_captures_every_window_in_order(self):
         result = parse_claude_usage(CLAUDE_SAMPLE)
         self.assertEqual(

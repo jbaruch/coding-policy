@@ -4,7 +4,7 @@ import json
 import os as _os
 import sys as _sys
 import unittest
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, call, patch
 
 _ROOT = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
 if _ROOT not in _sys.path:
@@ -12,7 +12,7 @@ if _ROOT not in _sys.path:
 
 from foreman.config import Agent
 from foreman.errors import HerdrError, UsageError
-from foreman.lifecycle import close, identity, materialize, measure_worker_kinds, spawn
+from foreman.lifecycle import FRESH_SHELL_POLL_ATTEMPTS, close, identity, materialize, measure_worker_kinds, spawn
 
 
 def template(name="claude", kind="claude", group="shared"):
@@ -64,9 +64,9 @@ class SpawnCloseTest(unittest.TestCase):
         tier = worker.tiers["coordination"]
         with patch("foreman.lifecycle.start_worker", return_value={"pane_id": "pane-new"}) as start, \
                 patch("foreman.lifecycle.verify_running", return_value={"pid": 1}) as verify:
-            self.assertEqual(spawn(client, worker, tier, cwd="/work", history=[]), "pane-new")
+            self.assertEqual(spawn(client, worker, tier, cwd="/work", history=[], sleep=lambda _: None), "pane-new")
         client.pane_split.assert_called_once_with(current=True, cwd="/work", focus=False)
-        client.pane_process_info.assert_called_once_with("pane-new")
+        self.assertEqual(client.pane_process_info.call_args_list, [call("pane-new")] * 3)
         start.assert_called_once_with(client, worker, "pane-new", tier)
         verify.assert_called_once_with(client, worker, "pane-new", tier)
 
@@ -82,7 +82,7 @@ class SpawnCloseTest(unittest.TestCase):
                 patch("foreman.lifecycle.verify_running", return_value={"pid": 1}):
             spawn(
                 client, worker, worker.tiers["coordination"], history=[],
-                before_start=lambda pane: order.append("preflight:" + pane),
+                before_start=lambda pane: order.append("preflight:" + pane), sleep=lambda _: None,
             )
         self.assertEqual(order, ["preflight:pane-new", "start"])
 
@@ -103,7 +103,7 @@ class SpawnCloseTest(unittest.TestCase):
         worker = template()
         with patch("foreman.lifecycle.start_worker", side_effect=failure("start_failed", "cannot start")), \
                 self.assertRaisesRegex(HerdrError, "Cleanup also failed") as caught:
-            spawn(client, worker, worker.tiers["coordination"], history=[])
+            spawn(client, worker, worker.tiers["coordination"], history=[], sleep=lambda _: None)
         self.assertEqual(caught.exception.details["pane_id"], "pane-new")
         self.assertIn("pane close", str(caught.exception))
 
@@ -115,7 +115,7 @@ class SpawnCloseTest(unittest.TestCase):
         worker = template()
         with patch("foreman.lifecycle.start_worker", side_effect=KeyboardInterrupt), \
                 self.assertRaises(KeyboardInterrupt):
-            spawn(client, worker, worker.tiers["coordination"], history=[])
+            spawn(client, worker, worker.tiers["coordination"], history=[], sleep=lambda _: None)
         client.pane_close.assert_called_once_with("pane-new")
 
     def test_cleanup_failure_does_not_replace_a_spawn_interrupt(self):
@@ -128,7 +128,7 @@ class SpawnCloseTest(unittest.TestCase):
         worker = template()
         with patch("foreman.lifecycle.start_worker", side_effect=KeyboardInterrupt), \
                 self.assertRaises(KeyboardInterrupt) as caught:
-            spawn(client, worker, worker.tiers["coordination"], history=[])
+            spawn(client, worker, worker.tiers["coordination"], history=[], sleep=lambda _: None)
         self.assertIn("Cleanup also failed", " ".join(caught.exception.__notes__))
 
     def test_close_proves_the_assignment_disappeared(self):
@@ -154,7 +154,212 @@ class SpawnCloseTest(unittest.TestCase):
         self.assertTrue(result["replayed"])
 
 
+class FreshShellStartupTest(unittest.TestCase):
+    SHELL = {"shell_pid": 52704, "foreground_processes": [{"pid": 52704, "name": "-zsh"}]}
+    INITIALIZING = {"shell_pid": 52704, "foreground_processes": [
+        {"pid": 52707, "name": "-zsh"}, {"pid": 52704, "name": "-zsh"}]}
+    ARGV = ["claude", "--dangerously-skip-permissions", "--model", "sonnet-5", "--effort", "low"]
+
+    def client(self, observations):
+        client = Mock()
+        client.pane_split.return_value = "pane-new"
+        client.pane_process_info.side_effect = observations
+        client.agent_start.return_value = {"agent": {"pane_id": "pane-new", "name": "claude",
+            "agent": "claude", "agent_status": "idle"}, "argv": self.ARGV}
+        client.argv_pane_close.return_value = ["herdr", "pane", "close", "--pane", "pane-new"]
+        return client
+
+    def running(self):
+        return {"shell_pid": 52704, "foreground_processes": [{"pid": 53000, "name": "claude", "argv": self.ARGV}]}
+
+    def test_recorded_shell_child_settles_before_one_verified_start(self):
+        client = self.client([self.INITIALIZING, self.SHELL, self.SHELL, self.SHELL, self.running()])
+        sleeps = Mock()
+        worker = template()
+        self.assertEqual(spawn(client, worker, worker.tiers["coordination"], history=[], sleep=sleeps), "pane-new")
+        self.assertEqual(sleeps.call_count, 2)
+        client.agent_start.assert_called_once_with("claude", "claude", "pane-new", self.ARGV[1:])
+        client.pane_close.assert_not_called()
+
+    def test_ready_shell_needs_spaced_confirmation_before_start(self):
+        client = self.client([self.SHELL, self.SHELL, self.SHELL, self.running()])
+        sleeps = Mock()
+        worker = template()
+        spawn(client, worker, worker.tiers["coordination"], history=[], sleep=sleeps)
+        self.assertEqual(sleeps.call_count, 1)
+        client.agent_start.assert_called_once()
+
+    def test_persistent_extra_process_exhausts_without_callback_or_start(self):
+        client = self.client([self.INITIALIZING] * FRESH_SHELL_POLL_ATTEMPTS)
+        sleeps, callback = Mock(), Mock()
+        worker = template()
+        with self.assertRaisesRegex(HerdrError, "inspect the shell startup") as caught:
+            spawn(client, worker, worker.tiers["coordination"], history=[], before_start=callback, sleep=sleeps)
+        self.assertEqual(client.pane_process_info.call_count, FRESH_SHELL_POLL_ATTEMPTS)
+        self.assertEqual(sleeps.call_count, FRESH_SHELL_POLL_ATTEMPTS - 1)
+        self.assertEqual(caught.exception.details["foreground_pids"], [52707, 52704])
+        self.assertEqual(caught.exception.details["pane"], "pane-new")
+        callback.assert_not_called()
+        client.agent_start.assert_not_called()
+        client.pane_close.assert_called_once_with("pane-new")
+
+    def test_malformed_process_records_fail_without_waiting_or_start(self):
+        invalid = [None, {}, {**self.SHELL, "shell_pid": None}, {**self.SHELL, "shell_pid": 0},
+            {**self.SHELL, "shell_pid": -1}, {**self.SHELL, "shell_pid": True},
+            {**self.SHELL, "foreground_processes": None}, {**self.SHELL, "foreground_processes": {}},
+            {**self.SHELL, "foreground_processes": [None]}, {**self.SHELL, "foreground_processes": [{}]},
+            {**self.SHELL, "foreground_processes": [{"pid": True}]},
+            {**self.SHELL, "foreground_processes": [{"pid": 0}]},
+            {**self.SHELL, "foreground_processes": [{"pid": "52704"}]},
+            {**self.SHELL, "pane_id": "other-pane"}]
+        worker = template()
+        for info in invalid:
+            with self.subTest(info=info):
+                client = self.client([info])
+                sleeps = Mock()
+                with self.assertRaisesRegex(HerdrError, "malformed"):
+                    spawn(client, worker, worker.tiers["coordination"], history=[], sleep=sleeps)
+                sleeps.assert_not_called()
+                client.agent_start.assert_not_called()
+                client.pane_close.assert_called_once_with("pane-new")
+
+    def test_process_info_failure_is_not_retried_as_shell_readiness(self):
+        client = self.client([failure("read_failed", "unavailable")])
+        worker, sleeps = template(), Mock()
+        with self.assertRaisesRegex(HerdrError, "Cannot read fresh pane"):
+            spawn(client, worker, worker.tiers["coordination"], history=[], sleep=sleeps)
+        sleeps.assert_not_called()
+        client.agent_start.assert_not_called()
+        client.pane_close.assert_called_once_with("pane-new")
+
+    def test_replaced_shell_is_refused_even_when_the_replacement_is_alone(self):
+        replacement = {"shell_pid": 52708, "foreground_processes": [{"pid": 52708}]}
+        for observations in ([self.INITIALIZING, replacement], [self.SHELL, replacement]):
+            with self.subTest(observations=observations):
+                client, worker = self.client(observations), template()
+                with self.assertRaisesRegex(HerdrError, "shell changed"):
+                    spawn(client, worker, worker.tiers["coordination"], history=[], sleep=lambda _: None)
+                client.agent_start.assert_not_called()
+                client.pane_close.assert_called_once_with("pane-new")
+
+    def test_wait_interrupt_preserves_interrupt_and_cleanup_failure_note(self):
+        for cleanup_fails in (False, True):
+            with self.subTest(cleanup_fails=cleanup_fails):
+                client, worker = self.client([self.INITIALIZING]), template()
+                if cleanup_fails:
+                    client.pane_close.side_effect = failure("pane_busy", "cannot close")
+                with self.assertRaises(KeyboardInterrupt) as caught:
+                    spawn(client, worker, worker.tiers["coordination"], history=[],
+                          sleep=Mock(side_effect=KeyboardInterrupt))
+                client.pane_close.assert_called_once_with("pane-new")
+                client.agent_start.assert_not_called()
+                if cleanup_fails:
+                    self.assertIn("Cleanup also failed", " ".join(caught.exception.__notes__))
+
+    def test_callback_occupies_ready_shell_and_final_proof_refuses(self):
+        client = self.client([self.SHELL, self.SHELL, self.INITIALIZING])
+        worker, callback, sleeps = template(), Mock(), Mock()
+        with self.assertRaisesRegex(HerdrError, "occupied"):
+            spawn(client, worker, worker.tiers["coordination"], history=[], before_start=callback, sleep=sleeps)
+        callback.assert_called_once_with("pane-new")
+        self.assertEqual(sleeps.call_count, 1)
+        client.agent_start.assert_not_called()
+        client.pane_close.assert_called_once_with("pane-new")
+
+    def test_new_startup_child_after_initial_readiness_settles_before_launch(self):
+        # Live startup briefly reports the root alone, then a later init child.
+        client = self.client([self.SHELL, self.INITIALIZING, self.SHELL, self.SHELL, self.SHELL, self.running()])
+        worker, sleeps = template(), Mock()
+        spawn(client, worker, worker.tiers["coordination"], history=[], sleep=sleeps)
+        self.assertEqual(sleeps.call_count, 3)
+        client.agent_start.assert_called_once_with("claude", "claude", "pane-new", self.ARGV[1:])
+        client.pane_close.assert_not_called()
+
+    def test_intermittent_sole_shell_never_satisfies_stable_readiness(self):
+        observations = [self.SHELL, self.INITIALIZING] * (FRESH_SHELL_POLL_ATTEMPTS // 2)
+        client, worker, callback = self.client(observations), template(), Mock()
+        with self.assertRaisesRegex(HerdrError, "did not settle"):
+            spawn(client, worker, worker.tiers["coordination"], history=[],
+                  before_start=callback, sleep=lambda _: None)
+        callback.assert_not_called()
+        client.agent_start.assert_not_called()
+        client.pane_close.assert_called_once_with("pane-new")
+
+    def test_final_proof_still_binds_original_shell_identity(self):
+        replacement = {"shell_pid": 52708, "foreground_processes": [{"pid": 52708}]}
+        client = self.client([self.SHELL, self.SHELL, replacement])
+        worker = template()
+        with self.assertRaisesRegex(HerdrError, "shell changed"):
+            spawn(client, worker, worker.tiers["coordination"], history=[], sleep=lambda _: None)
+        client.agent_start.assert_not_called()
+        client.pane_close.assert_called_once_with("pane-new")
+
+    def test_interrupt_during_confirmation_keeps_cleanup_and_primary_interrupt(self):
+        client = self.client([self.SHELL])
+        client.pane_close.side_effect = failure("pane_busy", "cannot close")
+        worker = template()
+        with self.assertRaises(KeyboardInterrupt) as caught:
+            spawn(client, worker, worker.tiers["coordination"], history=[], sleep=Mock(side_effect=KeyboardInterrupt))
+        client.agent_start.assert_not_called()
+        client.pane_close.assert_called_once_with("pane-new")
+        self.assertIn("Cleanup also failed", " ".join(caught.exception.__notes__))
+
+    def test_callback_executes_between_ready_and_final_proof(self):
+        client = self.client([self.SHELL, self.SHELL, self.SHELL, self.running()])
+        worker, order = template(), []
+        reads = client.pane_process_info.side_effect
+        def observe(_pane):
+            order.append("read")
+            return next(reads)
+        client.pane_process_info.side_effect = observe
+        spawn(client, worker, worker.tiers["coordination"], history=[],
+              before_start=lambda _pane: order.append("callback"), sleep=lambda _: None)
+        self.assertEqual(order[:4], ["read", "read", "callback", "read"])
+
+    def test_timeout_diagnostic_does_not_include_process_command_secrets(self):
+        secret = "sensitive-token-must-stay-private"
+        info = {"shell_pid": 52704, "foreground_processes": [
+            {"pid": 52707, "argv": [secret], "cmdline": secret, "environment": {"TOKEN": secret}}]}
+        client, worker = self.client([info] * FRESH_SHELL_POLL_ATTEMPTS), template()
+        with self.assertRaises(HerdrError) as caught:
+            spawn(client, worker, worker.tiers["coordination"], history=[], sleep=lambda _: None)
+        self.assertNotIn(secret, str(caught.exception))
+        self.assertNotIn(secret, json.dumps(caught.exception.details))
+
+
 class WindowProbeTest(unittest.TestCase):
+    def test_settled_probe_keeps_a_measurement_failure_and_closes_its_pane(self):
+        fixture = FreshShellStartupTest()
+        client = fixture.client([fixture.INITIALIZING, fixture.SHELL, fixture.SHELL, fixture.SHELL, fixture.running()])
+        client.agent_start.return_value["agent"]["name"] = "probe-fixed"
+        client.agent_get.side_effect = [{"pane_id": "pane-new"}, missing("probe-fixed")]
+        sleeps = Mock()
+        def measured(_client, probes, measured_at, **_options):
+            return {"agents": {probes[0].name: {"windows": None, "headroom_pct": None,
+                "error": {"code": "parse_error", "message": "usage unavailable"}}}}
+        with patch("foreman.lifecycle.identity", return_value="probe-fixed"), \
+                patch("foreman.measure.measure", side_effect=measured) as usage:
+            result = measure_worker_kinds(client, [template()], "2026-10-01T00:00:00+00:00", sleep=sleeps)
+        self.assertEqual(sleeps.call_count, 2)
+        usage.assert_called_once()
+        self.assertEqual(result["failed_agents"], ["claude"])
+        self.assertIsNone(result["agents"]["claude"]["headroom_pct"])
+        self.assertEqual(result["agents"]["claude"]["error"]["code"], "parse_error")
+        client.pane_close.assert_called_once_with("pane-new")
+
+    def test_probe_startup_exhaustion_reports_failure_without_usage_read(self):
+        fixture = FreshShellStartupTest()
+        client = fixture.client([fixture.INITIALIZING] * FRESH_SHELL_POLL_ATTEMPTS)
+        with patch("foreman.lifecycle.identity", return_value="probe-fixed"), \
+                patch("foreman.measure.measure") as usage:
+            result = measure_worker_kinds(client, [template()], "2026-10-01T00:00:00+00:00", sleep=lambda _: None)
+        usage.assert_not_called()
+        client.agent_start.assert_not_called()
+        client.pane_close.assert_called_once_with("pane-new")
+        self.assertEqual(result["failed_agents"], ["claude"])
+        self.assertIsNone(result["agents"]["claude"]["headroom_pct"])
+        self.assertIn("did not settle", result["agents"]["claude"]["error"]["message"])
+
     def test_one_probe_measurement_is_shared_by_one_window_group(self):
         workers = [template("claude", "claude"), template("codex", "codex")]
         client = Mock()

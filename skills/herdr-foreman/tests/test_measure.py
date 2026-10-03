@@ -107,6 +107,11 @@ CLAUDE_PANE = (
     "   Current session\n   ████    8% used\n   Resets 12:49am (Europe/Oslo)\n"
     "   Current week (all models)\n   █    2% used\n   Resets Sep 5 at 11:59pm (Europe/Oslo)\n"
 )
+CLAUDE_INLINE_RESET_PANE = (
+    "Current session · Resets 6:30pm\n(America/Chicago)\n▍\n\n1% used\n\n"
+    "Current week (all models) · Resets Sep 5 at\n5pm (America/Chicago)\n████\n██\n96% used\n"
+    "What's contributing to your limits usage?\nOther clients show 70% used\n"
+)
 CODEX_PANE = (
     "│  Account: jbaruch@sadogursky.com (Pro)  │\n"
     "│  Weekly limit: [███] 87% left (resets 17:26 on 7 Sep)  │\n"
@@ -167,6 +172,22 @@ def runner_with(statuses, panes, footers=None):
 
 
 class MeasureAgentTest(unittest.TestCase):
+    def test_current_claude_inline_usage_is_measured_and_dialog_closed(self):
+        runner = runner_with({"claude": "idle"}, {"claude": CLAUDE_INLINE_RESET_PANE})
+        record = measure_agent(HerdrClient(runner=runner), BY_NAME["claude"])
+        self.assertEqual(record["headroom_pct"], 4.0)
+        self.assertEqual(record["windows"]["Current session"]["remaining_pct"], 99.0)
+        self.assertEqual(record["windows"]["Current week (all models)"]["resets"], "Sep 5 at 5pm (America/Chicago)")
+        self.assertIn("agent send-keys claude esc", runner.commands())
+
+    def test_invalid_inline_usage_is_failed_measurement_with_dialog_cleanup(self):
+        text = CLAUDE_INLINE_RESET_PANE.replace("96% used", "101% used")
+        runner = runner_with({"claude": "idle"}, {"claude": text})
+        snapshot = measure(HerdrClient(runner=runner), [BY_NAME["claude"]], AT)
+        self.assertEqual(snapshot["failed_agents"], ["claude"])
+        self.assertIn("outside 0..100", snapshot["agents"]["claude"]["error"]["message"])
+        self.assertIn("agent send-keys claude esc", runner.commands())
+
     def test_idle_claude_is_measured_and_the_dialog_is_closed(self):
         runner = runner_with({"claude": "idle"}, {"claude": CLAUDE_PANE})
         record = measure_agent(HerdrClient(runner=runner), BY_NAME["claude"])

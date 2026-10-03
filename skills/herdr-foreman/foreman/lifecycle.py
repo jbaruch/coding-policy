@@ -10,16 +10,84 @@ import os
 import re
 import secrets
 import sys
+import time
 
 from .config import assignment_worker
 from .errors import ForemanError, HerdrError, UsageError
 from .herdr import error_code, format_argv
-from .launch import require_empty_shell, start_worker, verify_running
+from .launch import holds_only_shell, require_empty_shell, start_worker, verify_running
 from . import runnable
 from .tiers import launch_flags, worker_launch_args
 
 MAX_AGENT_NAME = 32
 _SAFE = re.compile(r"[^a-z0-9-]+")
+
+#: Freshly split panes may still hold shell-initialization subprocesses.
+#: Poll only owner-created panes, without input; existing panes keep their
+#: one-shot occupancy refusal. The same shell must survive every observation.
+FRESH_SHELL_POLL_ATTEMPTS = 30
+FRESH_SHELL_POLL_INTERVAL = 0.2
+#: A sole-shell read can precede a later startup child. Confirm consecutive
+#: reads before preflight; after preflight retain the strict single proof.
+FRESH_SHELL_READY_READS = 2
+
+
+def _fresh_shell_info(client, pane, expected_shell=None):
+    """Read a fresh pane's process evidence, rejecting malformed/replaced shells.
+
+    Diagnostics carry PID shapes alone, never argv, cmdline or environment.
+    Herdr transport failures remain failures, not transient occupied reads.
+    """
+    try:
+        info = client.pane_process_info(pane)
+    except HerdrError as exc:
+        raise HerdrError(
+            "Cannot read fresh pane {}'s shell process information; inspect Herdr's process-info command "
+            "and retry the spawn after restoring that read. Nothing was started.".format(pane),
+            {"pane": pane, "expected_shell_pid": expected_shell},
+        ) from exc
+    shell = info.get("shell_pid") if isinstance(info, dict) else None
+    foreground = info.get("foreground_processes") if isinstance(info, dict) else None
+    pids = [row.get("pid") if isinstance(row, dict) else None for row in foreground] if isinstance(foreground, list) else None
+    valid_pid = lambda pid: isinstance(pid, int) and not isinstance(pid, bool) and pid > 0
+    evidence = {"pane": pane, "shell_pid": shell if valid_pid(shell) else None,
+                "foreground_pids": [pid if valid_pid(pid) else None for pid in pids] if pids is not None else None}
+    if (not valid_pid(shell) or pids is None or any(not valid_pid(pid) for pid in pids)
+            or (isinstance(info, dict) and info.get("pane_id", pane) != pane)):
+        raise HerdrError(
+            "Fresh pane {} returned malformed shell/foreground process evidence; inspect `herdr pane "
+            "process-info --pane {}` and update Herdr before retrying. Nothing was started.".format(pane, pane),
+            evidence,
+        )
+    if expected_shell is not None and shell != expected_shell:
+        raise HerdrError(
+            "Fresh pane {}'s shell changed from PID {} to {}; inspect its startup and retry with a new pane. "
+            "Nothing was started.".format(pane, expected_shell, shell),
+            {**evidence, "expected_shell_pid": expected_shell},
+        )
+    return info, evidence
+
+
+def _await_fresh_shell(client, pane, sleep):
+    """Confirm the same sole shell across reads after owner pane_split only."""
+    shell = None
+    ready_reads = 0
+    evidence = {}
+    for attempt in range(1, FRESH_SHELL_POLL_ATTEMPTS + 1):
+        info, evidence = _fresh_shell_info(client, pane, shell)
+        shell = info["shell_pid"]
+        ready_reads = ready_reads + 1 if holds_only_shell(info) else 0
+        if ready_reads >= FRESH_SHELL_READY_READS:
+            return shell
+        if attempt < FRESH_SHELL_POLL_ATTEMPTS:
+            sleep(FRESH_SHELL_POLL_INTERVAL)
+    raise HerdrError(
+        "Fresh pane {} did not settle to its shell alone after {} process reads (shell PID {}, foreground "
+        "PIDs {}); inspect the shell startup or extra process, then retry the spawn. Nothing was started.".format(
+            pane, FRESH_SHELL_POLL_ATTEMPTS, shell, evidence.get("foreground_pids")),
+        {**evidence, "attempts": FRESH_SHELL_POLL_ATTEMPTS,
+         "ready_reads": ready_reads, "required_ready_reads": FRESH_SHELL_READY_READS},
+    )
 
 
 def identity(role, token=None):
@@ -66,7 +134,7 @@ def spawn_commands(client, worker, tier, *, cwd=None):
     return [split, client.argv_agent_start(worker.name, worker.kind, pane, flags)]
 
 
-def spawn(client, worker, tier, *, cwd=None, history=None, before_start=None):
+def spawn(client, worker, tier, *, cwd=None, history=None, before_start=None, sleep=time.sleep):
     """Split, prove a first-launch shell, start one worker, and prove its tier."""
     if not isinstance(history, (list, tuple)):
         raise UsageError(
@@ -86,9 +154,13 @@ def spawn(client, worker, tier, *, cwd=None, history=None, before_start=None):
         # proves the newly-created pane holds only its shell, while the owner
         # history proof above establishes that no prior assignment can carry
         # context under this identity.
-        require_empty_shell(client, pane)
+        shell = _await_fresh_shell(client, pane, sleep)
         if before_start is not None:
             before_start(pane)
+        # A callback may take time or change the occupant. Re-prove the same
+        # sole shell immediately before launch, with no post-callback retry.
+        final, _evidence = _fresh_shell_info(client, pane, shell)
+        require_empty_shell(client, pane, final)
         start_worker(client, worker, pane, tier)
         verify_running(client, worker, pane, tier)
         completed = True
@@ -173,7 +245,7 @@ def measure_worker_kinds(client, templates, measured_at, **options):
         try:
             if not isinstance(tier, dict):
                 raise UsageError("Worker kind {!r} has no coordination tier for its disposable usage probe.".format(template.name), {})
-            pane = spawn(client, probe, tier, history=())
+            pane = spawn(client, probe, tier, history=(), sleep=options.get("sleep", time.sleep))
             snapshot = measure(client, [probe], measured_at, **options)
             record = dict(snapshot["agents"][probe.name])
             record.pop("tier_billing", None)
