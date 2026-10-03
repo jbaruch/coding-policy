@@ -18,7 +18,8 @@ Preconditions, all checked before anything is scheduled:
 - its id is not `latest`, the memory-show selector the resume prompt cannot name exactly
 - the caller runs in the bound foreman's own Herdr pane
 - the foreman could stop now: no unhandled supervision event, and either no
-  active enrollment or a hold covering the current ones (the Stop hook's rule)
+  active enrollment or a handoff hold whose id matches the stow. The scheduled
+  live deliverer becomes the Stop proof after this preflight succeeds
 
 The foreman's runtime mechanics (clear command, slash delivery, composer
 glyphs) come from a configured worker of the same kind; Herdr names the kind
@@ -671,11 +672,47 @@ def finish(state_path, plan, status, result):
         save_state(path, document)
 
 
-def _handoff_held(data):
+def _handoff_held(data, stow=None):
     """A current, unresumed `handoff` hold covers the active work; a user pause does not."""
-    return supervision.held(data) and any(
-        row["resumed_at"] is None and row["kind"] == "handoff" and row["through"] == len(data["events"])
-        and row["members"] == supervision.active_digest(data) for row in data["holds"])
+    return any(stow is None or row["id"] == stow for row in supervision.current_holds(data, "handoff"))
+
+
+def stop_coverage(state_path, supervision_data, *, probe=process_identity):
+    """Read-only proof that a current handoff has a live matching reset deliverer.
+
+    A handoff hold prepares reset preflight. It authorizes Stop only after the
+    reset record binds the same hold/stow id, pane, native session, and exact
+    live deliverer process. `_load` migrates old shapes in memory only; this
+    Stop-path reader never rewrites the record.
+    """
+    holds = supervision.current_holds(supervision_data, "handoff")
+    if not holds:
+        return {"eligible": False, "state": "handoff_missing"}
+    binding = supervision_data.get("binding") or {}
+    identity = binding.get("identity") or {}
+    pane = identity.get("pane_id")
+    native_session = {key: identity.get(key) for key in ("kind", "value")}
+    path = record_path(state_path)
+    document, _migrated = _load(path)
+    stows = {row["id"] for row in holds}
+    matching_stow = [row for row in document["resets"] if row["stow"] in stows]
+    if not matching_stow:
+        return {"eligible": False, "state": "reset_missing", "record": str(path)}
+    matching_pane = [row for row in matching_stow if row["pane_id"] == pane]
+    if not matching_pane:
+        return {"eligible": False, "state": "reset_pane_mismatch", "record": str(path)}
+    row = matching_pane[-1]
+    if row["native_session"] != native_session:
+        return {"eligible": False, "state": "reset_native_session_mismatch", "record": str(path),
+                "stow": row["stow"]}
+    if row["status"] not in ("scheduled", "delivering"):
+        return {"eligible": False, "state": "reset_" + row["status"], "record": str(path),
+                "stow": row["stow"]}
+    if not _alive(row["process"], probe):
+        return {"eligible": False, "state": "reset_deliverer_not_live", "record": str(path),
+                "stow": row["stow"]}
+    return {"eligible": True, "state": "scheduled_continuation", "record": str(path),
+            "stow": row["stow"], "process": row["process"]}
 
 
 def preflight(stow, supervision_data, caller_pane):
@@ -706,8 +743,9 @@ def preflight(stow, supervision_data, caller_pane):
         raise UsageError("A user pause is still open ({}); the reset's resume sequence would resume it without the user. "
                          "Record the user's answer and resume that hold before resetting.".format(", ".join(map(str, waiting))),
                          {"holds": waiting})
-    if events or (active and not _handoff_held(supervision_data)):
-        raise UsageError("The foreman cannot stop yet: {} unhandled event(s), {} active assignment(s) without a covering hold. Handle the events and save a handoff hold with `{}` (a user pause does not qualify) before resetting.".format(
+    matching_handoff = _handoff_held(supervision_data, stow["id"])
+    if events or (active and not matching_handoff):
+        raise UsageError("The foreman cannot prepare this reset yet: {} unhandled event(s), {} active assignment(s) without a matching handoff hold. Handle the events and save a handoff hold whose id is the stow id with `{}` (a user pause does not qualify) before resetting.".format(
             len(events), len(active), command("supervision-hold")), {"events": len(events), "active": active})
     return {"pane_id": pane, "stow": stow["id"]}
 

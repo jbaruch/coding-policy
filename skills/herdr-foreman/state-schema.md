@@ -890,6 +890,9 @@ store requires recovery of its history before rebinding or writing.
   the handled event boundary and `members` hashes the active assignments.
   `dispositions` contains `{schema_version, member, outcome, evidence}` for
   every active enrollment. New events or assignments invalidate that coverage.
+  A reset-preparation handoff uses the reset stow id as its `id`. A current
+  `waiting_for_user` hold may authorize Stop. A current `handoff` hold does not
+  authorize Stop until its exact live reset continuation is verified.
 - `watchers`: `{schema_version, id, at, heartbeat, deadline, process, status,
   reason, ended_at}`. `process` contains positive `pid` and an `identity` digest
   of its observed start time and argv. `status` is `running|stopped`; `reason`
@@ -904,6 +907,12 @@ The native Stop reader performs local read-only checks for the exact bound forem
 It never migrates state, acknowledges events, clears attention, or marks task
 completion. Its normal no-binding result applies only to a session never bound
 as foreman; missing or unreadable bound-owner history cannot release obligations.
+For active work, it accepts a handoff only when the reset record has a
+`scheduled` or `delivering` row whose `stow` equals the current handoff id,
+whose pane and native session equal the binding, and whose full process
+identity is still live. Reset-record migration remains owner-only; the Stop
+reader validates an older shape in memory and treats its absent native proof as
+ineligible.
 
 ## Migration
 
@@ -1001,7 +1010,9 @@ records.
 
 `<canonical-state-path>.foreman-reset.json` is owned by
 `skills/herdr-foreman/foreman/foreman_reset.py`, which is its only writer and
-reader. It writes under the file's own state lock, never the main state lock.
+reset-lifecycle reader. The native Stop evaluator also performs the bounded
+read-only eligibility check documented below. The owner writes under the
+file's own state lock, never the main state lock.
 `foreman-reset` appends a row and starts the deliverer. The reader
 checks every field, and the `result` shape each `status` requires.
 `foreman-reset-deliver` claims that row and finishes it.
@@ -1077,3 +1088,10 @@ and an `interrupted` row the operator saw resume (`delivered` only): `failed` re
 own `options`, `delivered` records `reconciled`. An identical retry returns
 the recorded row with `replayed: true`; a row that already ended any other
 way, or whose deliverer is still running, is refused.
+
+The Stop evaluator reads this record without rewriting it. Only a current
+handoff whose id equals `stow` can use a `scheduled` or `delivering` row. The
+row's pane and `native_session` must equal the exact supervision binding, and
+its recorded process identity must still be live. A missing, wrong-stow,
+wrong-pane, wrong-session, dead, reused-process, failed, interrupted,
+delivered, or reconciled row supplies no Stop authorization.

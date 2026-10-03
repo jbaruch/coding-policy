@@ -536,7 +536,9 @@ The Herdr team round contract. `rules/agent-team-operation.md` Two Modes decides
 - Preserve wake events until the foreman records their handling
 - Acknowledging an observation never accepts the assignment or completes the task
 - Reconcile interrupted supervision against its saved events and live process evidence
-- Never finish a foreman turn with active work lacking continued supervision or an explicit recorded pause or handoff
+- Continue the foreground watch after a quiet deadline while authorized work remains
+- A saved handoff prepares reset preflight and never proves a transferred continuation
+- Never finish a foreman turn with active work unless a genuine user pause, a successor binding, or a matching live reset deliverer satisfies the Stop gate
 - Follow `skills/herdr-foreman/references/supervision.md`
 
 ## Retrospectives

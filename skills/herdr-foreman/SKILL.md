@@ -892,7 +892,9 @@ the continuation step, the step the round's outcome routes to:
 - Only `foreman-queue` seats remaining — Step 5
 
 Handle every pending supervision event, and save `supervision-hold` kind
-`handoff` covering each active enrollment. Then schedule the reset:
+`handoff` covering each active enrollment. Use the stow id as the hold id.
+This prepares reset preflight; it does not permit Stop on its own. Then
+schedule the reset:
 
 ```bash
 CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"; [ -d "$CP" ] || case "$(git config --get remote.origin.url)" in git@github.com:jbaruch/coding-policy|git@github.com:jbaruch/coding-policy.git|https://github.com/jbaruch/coding-policy|https://github.com/jbaruch/coding-policy.git|ssh://git@github.com/jbaruch/coding-policy|ssh://git@github.com/jbaruch/coding-policy.git) CP=. ;; *) echo "coding-policy plugin not found: run tessl install jbaruch/coding-policy" >&2; exit 1 ;; esac
@@ -916,7 +918,8 @@ under.
     - Never re-run `foreman-reset` for this stow
     - Record a user-attention blocker quoting `details.resume_prompt` and
       `details.record`
-    - End the turn
+    - Keep the current turn and foreground supervision active; the failed
+      reset supplies no Stop-authorizing continuation
     - The operator recovers under the Working Memory carve-out, first
       confirming the pane is not already running a resumed foreman
     - The next round resets from a new stow
@@ -941,7 +944,8 @@ under.
   - Any other error means the record could not be updated; the operator
     closes the reset with the complete `foreman-reset-reconcile` command
     catch-up prints for that row, before any recovery
-- Never end the turn with active work that has no hold
+- Never end the turn with active work unless a genuine user pause or verified
+  successor/reset continuation satisfies the Stop gate
 
 **Resume Route** — the next context follows one route:
 

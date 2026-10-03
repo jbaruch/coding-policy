@@ -157,12 +157,22 @@ events. Persist the user's decision or recipient/continuation handoff, then run
 }
 ```
 
-Use `kind: handoff` for a saved transfer. Every active enrollment needs its own
+Use `kind: handoff` to prepare a planned `foreman-reset`. Set the hold `id` to
+the exact stow id the reset resumes. Every active enrollment needs its own
 named disposition and evidence; a global pause cannot hide unrelated work.
-The foreman judges whether the saved authority and handoff are real. The utility
-checks coverage and evidence receipts, not the meaning of the prose. A hold
-changes no task state, worker state, acceptance, or user-question resolution.
-New assignments or events invalidate its covered boundary.
+The hold alone does not transfer supervision and does not permit Stop. Stop
+requires either a successor that committed the newer supervision binding or a
+matching reset row whose pane, stow, bound native session, and exact live
+deliverer process verify the scheduled continuation. A saved progress file,
+future-continuation promise, foreground watcher, or expired watch deadline is
+not continuation proof. Continue `supervision-watch` after every quiet deadline
+while authorized work remains.
+
+`kind: waiting_for_user` remains the Stop boundary for a genuine scoped user
+pause. It needs no reset deliverer. The utility checks coverage and evidence
+receipts, not the meaning of the pause prose. A hold changes no task state,
+worker state, acceptance, or user-question resolution. New assignments or
+events invalidate its covered boundary.
 
 If the foreman changes its native working directory, rebind from that directory
 before continuing supervision; the prior exact-directory binding does not gate
@@ -182,8 +192,9 @@ at `<canonical selected state>.supervision.json` through the existing locked,
 atomic state helpers. Discovery records live under
 `<default state directory>/supervision-bindings/<identity digest>.json`.
 `skills/herdr-foreman/foreman/supervision_hook.py` and display readers are read-only, perform no migrations,
-and acknowledge nothing. Dispatch state and the Markdown task ledger retain
-their own authority. The full shape is documented in
+and acknowledge nothing. The Stop reader checks reset records in memory only;
+it never performs the reset owner's legacy rewrite. Dispatch state and the
+Markdown task ledger retain their own authority. The full shape is documented in
 `skills/herdr-foreman/state-schema.md`.
 
 All commands support the common `--state` and injected `--now` timestamp. Bind
