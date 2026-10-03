@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.359 — 2026-10-03
+
 ### Fixed
 
 - **Codex's indented status footer no longer blocks Herdr measurement.**
