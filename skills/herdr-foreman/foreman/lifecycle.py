@@ -27,6 +27,9 @@ _SAFE = re.compile(r"[^a-z0-9-]+")
 #: one-shot occupancy refusal. The same shell must survive every observation.
 FRESH_SHELL_POLL_ATTEMPTS = 30
 FRESH_SHELL_POLL_INTERVAL = 0.2
+#: A sole-shell read can precede a later startup child. Confirm consecutive
+#: reads before preflight; after preflight retain the strict single proof.
+FRESH_SHELL_READY_READS = 2
 
 
 def _fresh_shell_info(client, pane, expected_shell=None):
@@ -66,13 +69,15 @@ def _fresh_shell_info(client, pane, expected_shell=None):
 
 
 def _await_fresh_shell(client, pane, sleep):
-    """Wait for the same shell alone, only immediately after owner pane_split."""
+    """Confirm the same sole shell across reads after owner pane_split only."""
     shell = None
+    ready_reads = 0
     evidence = {}
     for attempt in range(1, FRESH_SHELL_POLL_ATTEMPTS + 1):
         info, evidence = _fresh_shell_info(client, pane, shell)
         shell = info["shell_pid"]
-        if holds_only_shell(info):
+        ready_reads = ready_reads + 1 if holds_only_shell(info) else 0
+        if ready_reads >= FRESH_SHELL_READY_READS:
             return shell
         if attempt < FRESH_SHELL_POLL_ATTEMPTS:
             sleep(FRESH_SHELL_POLL_INTERVAL)
@@ -80,7 +85,8 @@ def _await_fresh_shell(client, pane, sleep):
         "Fresh pane {} did not settle to its shell alone after {} process reads (shell PID {}, foreground "
         "PIDs {}); inspect the shell startup or extra process, then retry the spawn. Nothing was started.".format(
             pane, FRESH_SHELL_POLL_ATTEMPTS, shell, evidence.get("foreground_pids")),
-        {**evidence, "attempts": FRESH_SHELL_POLL_ATTEMPTS},
+        {**evidence, "attempts": FRESH_SHELL_POLL_ATTEMPTS,
+         "ready_reads": ready_reads, "required_ready_reads": FRESH_SHELL_READY_READS},
     )
 
 
@@ -152,7 +158,7 @@ def spawn(client, worker, tier, *, cwd=None, history=None, before_start=None, sl
         if before_start is not None:
             before_start(pane)
         # A callback may take time or change the occupant. Re-prove the same
-        # sole shell immediately before launch, with no second readiness wait.
+        # sole shell immediately before launch, with no post-callback retry.
         final, _evidence = _fresh_shell_info(client, pane, shell)
         require_empty_shell(client, pane, final)
         start_worker(client, worker, pane, tier)

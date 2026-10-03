@@ -10,7 +10,7 @@
 
 - **Fresh Herdr worker panes wait for shell startup before launching.**
   Assignment-scoped workers and disposable usage probes poll only their own
-  new pane until the same shell is its sole foreground process. Malformed or
+  new pane until consecutive reads confirm the same sole shell. Malformed or
   replaced shell evidence refuses launch; a final proof after the preflight
   callback preserves occupancy safety and failed-spawn cleanup.
 
