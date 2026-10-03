@@ -2,6 +2,12 @@
 
 ### Fixed
 
+- **Claude's current inline reset headings are recognized by usage probes.**
+  Known session/week labels keep their established keys, with bounded time
+  and timezone wrap handling. Percentage rows stay separate from unrelated
+  prose, and Claude percentages outside 0..100 fail measurement rather than
+  producing invalid remaining headroom.
+
 - **Fresh Herdr worker panes wait for shell startup before launching.**
   Assignment-scoped workers and disposable usage probes poll only their own
   new pane until the same shell is its sole foreground process. Malformed or
