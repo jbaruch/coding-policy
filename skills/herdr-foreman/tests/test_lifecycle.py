@@ -280,6 +280,19 @@ class FreshShellStartupTest(unittest.TestCase):
         client.agent_start.assert_not_called()
         client.pane_close.assert_called_once_with("pane-new")
 
+    def test_retrospective_start_refusal_cleans_only_created_pane_without_fresh_lookup(self):
+        from foreman.retrospective_runtime import _observation
+        client = self.client([self.SHELL, self.SHELL, self.INITIALIZING])
+        worker = template()
+        def callback(pane):
+            _observation(client, worker.name, worker.kind, pane, starting=True)
+        with self.assertRaisesRegex(HerdrError, "sole shell"):
+            spawn(client, worker, worker.tiers["coordination"], history=(),
+                  before_start=callback, sleep=lambda _: None)
+        client.agent_get.assert_not_called()
+        client.agent_start.assert_not_called()
+        client.pane_close.assert_called_once_with("pane-new")
+
     def test_new_startup_child_after_initial_readiness_settles_before_launch(self):
         # Live startup briefly reports the root alone, then a later init child.
         client = self.client([self.SHELL, self.INITIALIZING, self.SHELL, self.SHELL, self.SHELL, self.running()])

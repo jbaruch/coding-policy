@@ -482,6 +482,31 @@ class RetrospectiveRuntimeTest(unittest.TestCase):
         self.assertFalse(notes.directory(self.path).exists())
         self.assertEqual(self.runner.writes(), [])
 
+    def test_start_observation_never_looks_up_an_absent_fresh_worker(self):
+        info = {"pane_id": "newpane", "shell_pid": 10,
+                "foreground_processes": [{"pid": 10, "argv": ["zsh"]}]}
+        with patch.object(self.client, "pane_process_info", return_value=info), \
+                patch.object(self.client, "agent_get", side_effect=AssertionError("fresh lookup")) as lookup:
+            result = runtime._observation(self.client, "fresh-worker", "grok", "newpane", starting=True)
+        lookup.assert_not_called()
+        self.assertTrue(result["shell"])
+        self.assertIsNone(result["native"])
+
+    def test_changed_or_malformed_start_shell_refuses_with_pids_without_agent_lookup(self):
+        for info in (None, {}, {"shell_pid": True, "foreground_processes": [{"pid": 1}]},
+                     {"shell_pid": 10, "foreground_processes": "unknown"},
+                     {"shell_pid": 10, "foreground_processes": [{"pid": 11, "argv": ["secret=private"]}]},
+                     {"shell_pid": 1, "foreground_processes": [{"pid": True}]},
+                     {"pane_id": "another", "shell_pid": 10, "foreground_processes": [{"pid": 10}]}):
+            with self.subTest(info=info), \
+                    patch.object(self.client, "pane_process_info", return_value=info), \
+                    patch.object(self.client, "agent_get", side_effect=AssertionError("fresh lookup")) as lookup:
+                with self.assertRaisesRegex(HerdrError, "sole shell") as caught:
+                    runtime._observation(self.client, "fresh-worker", "grok", "newpane", starting=True)
+                lookup.assert_not_called()
+                self.assertEqual(caught.exception.details["pane_id"], "newpane")
+                self.assertNotIn("private", json.dumps(caught.exception.to_dict()))
+
     def test_pending_note_refuses_dispatch_before_reservation(self):
         self.record()
         pending = notes.directory(self.path) / "pending.json"

@@ -40,6 +40,13 @@
 
 ### Fixed
 
+- **Fresh assignment corrections use schema-7 context rules before launch.**
+  Early fixes keep their original task and cumulative count while receiving a
+  fresh identity; legacy retained-session requirements no longer reject them.
+  Pure correction checks run before workspace creation. A changed or malformed
+  pre-start shell refuses with PID evidence, without looking up the absent new
+  worker or weakening the final occupancy proof.
+
 - **Assignment workers and usage probes launch outside the foreman workspace.**
   The owner creates a separate workspace labeled with the fresh agent identity,
   without changing focus, and starts only in its returned root pane. Existing

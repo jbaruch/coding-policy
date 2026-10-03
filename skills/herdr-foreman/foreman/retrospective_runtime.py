@@ -110,19 +110,27 @@ def _dispatch_evidence(state, identifier, unavailable=None):
 def _observation(client, name, kind, pane=None, *, starting=False, agent=None):
     if starting:
         info = client.pane_process_info(pane)
-        processes = info.get("foreground_processes", [])
-        if not isinstance(processes, list):
-            raise HerdrError("Retrospective start needs readable foreground processes; inspect the shell pane before starting.", {})
-        shell = info.get("shell_pid")
-        if (isinstance(shell, int) and not isinstance(shell, bool) and shell > 0 and len(processes) == 1
-                and isinstance(processes[0], dict) and processes[0].get("pid") == shell):
-            argv = processes[0].get("argv")
-            if argv is None:
-                argv = client.process_args(shell)
-            result = {"pane_id": pane, "native": None, "process": {"pid": shell, "argv": argv},
-                      "readiness": "shell", "shell": True}
-            notes.validate_observation(result)
-            return result
+        processes = info.get("foreground_processes") if isinstance(info, dict) else None
+        shell = info.get("shell_pid") if isinstance(info, dict) else None
+        valid_pid = lambda pid: isinstance(pid, int) and not isinstance(pid, bool) and pid > 0
+        pids = ([row.get("pid") if isinstance(row, dict) else None for row in processes]
+                if isinstance(processes, list) else None)
+        if (not isinstance(info, dict) or not isinstance(processes, list) or pids is None
+                or not valid_pid(shell) or pids != [shell] or not all(valid_pid(pid) for pid in pids)
+                or info.get("pane_id", pane) != pane):
+            raise HerdrError(
+                "Retrospective start requires the target pane's sole shell; inspect its startup or occupant "
+                "and retry only after restoring that proof. No fresh worker was looked up or started.",
+                {"pane_id": pane, "shell_pid": shell if valid_pid(shell) else None,
+                 "foreground_pids": [pid if valid_pid(pid) else None for pid in pids] if pids is not None else None},
+            )
+        argv = processes[0].get("argv")
+        if argv is None:
+            argv = client.process_args(shell)
+        result = {"pane_id": pane, "native": None, "process": {"pid": shell, "argv": argv},
+                  "readiness": "shell", "shell": True}
+        notes.validate_observation(result)
+        return result
     live = client.agent_get(name)
     actual_pane = live.get("pane_id")
     if not isinstance(actual_pane, str) or not actual_pane or (pane and pane != actual_pane):
