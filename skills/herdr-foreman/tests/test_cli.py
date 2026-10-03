@@ -462,7 +462,11 @@ class PlanCommandTest(CliCase):
         self.assertTrue(result["assignment_scoped"])
         self.assertEqual(result["steps"][0]["agent"], plan["assignments"]["developer"])
         commands = result["spawns"][0]["commands"]
-        self.assertIn("pane split --current", commands[0]["shell"])
+        self.assertIn("workspace create", commands[0]["shell"])
+        self.assertIn("--label " + plan["assignments"]["developer"], commands[0]["shell"])
+        self.assertIn("--no-focus", commands[0]["argv"])
+        self.assertNotIn("--current", commands[0]["argv"])
+        self.assertIn("ROOT-PANE-ID-RETURNED-BY-WORKSPACE-CREATE", commands[1]["argv"])
         self.assertIn("agent start " + plan["assignments"]["developer"], commands[1]["shell"])
 
     def test_schema_7_refuses_cross_assignment_retention(self):

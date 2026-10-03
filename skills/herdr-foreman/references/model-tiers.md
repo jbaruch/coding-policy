@@ -40,11 +40,13 @@ and overrides its model and effort for that seat. It shares that kind's
 configured usage window.
 
 Schema-7 measurement starts one disposable probe at the `coordination` tier
-for each distinct `window_group`, reads usage once, and closes the probe. It
-never types a usage command into an idle assignment pane. Planning ranks the
+for each distinct `window_group` in a separate unfocused workspace, reads
+usage once, and closes the probe's root pane. It never types a usage command
+into an idle assignment pane. Planning ranks the
 stable worker-kind names, then records a fresh Herdr identity for every seat in
-`assignments` and the selected templates in `worker_kinds`. Apply splits a new
-pane, starts each identity at its selected tier, proves its launch argv, and
+`assignments` and the selected templates in `worker_kinds`. Apply creates a
+separate unfocused workspace for each identity, starts it in the returned root
+pane at its selected tier, proves its launch argv, and
 only then dispatches the brief. The identity remains stable for recovery of
 that dispatch; it is never a reusable roster entry.
 
@@ -240,10 +242,12 @@ number. A fresh developer handoff after a required release clear uses the
 normal relaunch checks; verified retained fixes keep their
 existing compatible model and effort.
 
-Schema-7 fresh dispatch splits an empty shell pane and calls `herdr agent
-start` under the plan-bound identity with the selected flags. The returned
+Schema-7 fresh dispatch creates a separate workspace without changing focus
+and calls `herdr agent start` in its returned root pane under the plan-bound
+identity with the selected flags. The returned
 worker identity and argv must match before the brief is sent. A failed spawn
-closes its unused pane; after any prompt may have landed, recovery preserves
+closes only its created root pane; after any prompt may have landed, recovery
+preserves
 the pane and recorded identity. Legacy tiered dispatch retains the prior
 idle/composer/process verification and relaunch path. No command is sent to a
 working or blocked worker.

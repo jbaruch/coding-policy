@@ -22,7 +22,7 @@ from .tiers import launch_flags, worker_launch_args
 MAX_AGENT_NAME = 32
 _SAFE = re.compile(r"[^a-z0-9-]+")
 
-#: Freshly split panes may still hold shell-initialization subprocesses.
+#: Freshly created workspace root panes may still hold shell-initialization subprocesses.
 #: Poll only owner-created panes, without input; existing panes keep their
 #: one-shot occupancy refusal. The same shell must survive every observation.
 FRESH_SHELL_POLL_ATTEMPTS = 30
@@ -69,7 +69,7 @@ def _fresh_shell_info(client, pane, expected_shell=None):
 
 
 def _await_fresh_shell(client, pane, sleep):
-    """Confirm the same sole shell across reads after owner pane_split only."""
+    """Confirm the same sole shell across reads after owner workspace_create only."""
     shell = None
     ready_reads = 0
     evidence = {}
@@ -127,15 +127,15 @@ def materialize(assignments, worker_kinds, templates):
 
 
 def spawn_commands(client, worker, tier, *, cwd=None):
-    """The exact split/start commands a live spawn executes."""
-    pane = "PANE-ID-RETURNED-BY-SPLIT"
-    split = client.argv_pane_split(current=True, cwd=cwd or os.getcwd(), focus=False)
+    """The exact workspace-create/start commands a live spawn executes."""
+    pane = "ROOT-PANE-ID-RETURNED-BY-WORKSPACE-CREATE"
+    create = client.argv_workspace_create(cwd=cwd or os.getcwd(), label=worker.name, focus=False)
     flags = worker_launch_args(worker.kind, worker.launch_args) + launch_flags(worker.kind, tier)
-    return [split, client.argv_agent_start(worker.name, worker.kind, pane, flags)]
+    return [create, client.argv_agent_start(worker.name, worker.kind, pane, flags)]
 
 
 def spawn(client, worker, tier, *, cwd=None, history=None, before_start=None, sleep=time.sleep):
-    """Split, prove a first-launch shell, start one worker, and prove its tier."""
+    """Create an unfocused workspace, prove a first-launch shell, start one worker, and prove its tier."""
     if not isinstance(history, (list, tuple)):
         raise UsageError(
             "Assignment spawn needs the owner's assignment history to prove this fresh identity has never held an earlier assignment.",
@@ -147,7 +147,7 @@ def spawn(client, worker, tier, *, cwd=None, history=None, before_start=None, sl
                 worker.name),
             {"agent": worker.name},
         )
-    pane = client.pane_split(current=True, cwd=cwd or os.getcwd(), focus=False)
+    pane = client.workspace_create(cwd=cwd or os.getcwd(), label=worker.name, focus=False)
     completed = False
     try:
         # This is the lifecycle's first-launch carve-out: live process evidence

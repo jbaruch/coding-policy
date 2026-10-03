@@ -12,6 +12,8 @@ if _ROOT not in _sys.path:
 
 from foreman.config import Agent
 from foreman.errors import HerdrError, UsageError
+from foreman.herdr import HerdrClient
+from tests.fakes import FakeCompleted
 from foreman.lifecycle import FRESH_SHELL_POLL_ATTEMPTS, close, identity, materialize, measure_worker_kinds, spawn
 
 
@@ -54,9 +56,9 @@ class IdentityTest(unittest.TestCase):
 
 
 class SpawnCloseTest(unittest.TestCase):
-    def test_spawn_splits_starts_and_verifies_one_fresh_worker(self):
+    def test_spawn_creates_unfocused_workspace_and_verifies_its_root_worker(self):
         client = Mock()
-        client.pane_split.return_value = "pane-new"
+        client.workspace_create.return_value = "pane-new"
         client.pane_process_info.return_value = {
             "shell_pid": 10, "foreground_processes": [{"pid": 10, "name": "zsh"}],
         }
@@ -65,14 +67,15 @@ class SpawnCloseTest(unittest.TestCase):
         with patch("foreman.lifecycle.start_worker", return_value={"pane_id": "pane-new"}) as start, \
                 patch("foreman.lifecycle.verify_running", return_value={"pid": 1}) as verify:
             self.assertEqual(spawn(client, worker, tier, cwd="/work", history=[], sleep=lambda _: None), "pane-new")
-        client.pane_split.assert_called_once_with(current=True, cwd="/work", focus=False)
+        client.workspace_create.assert_called_once_with(cwd="/work", label=worker.name, focus=False)
+        client.pane_split.assert_not_called()
         self.assertEqual(client.pane_process_info.call_args_list, [call("pane-new")] * 3)
         start.assert_called_once_with(client, worker, "pane-new", tier)
         verify.assert_called_once_with(client, worker, "pane-new", tier)
 
     def test_spawn_runs_first_start_preflight_while_the_pane_is_still_a_shell(self):
         client = Mock()
-        client.pane_split.return_value = "pane-new"
+        client.workspace_create.return_value = "pane-new"
         client.pane_process_info.return_value = {
             "shell_pid": 10, "foreground_processes": [{"pid": 10, "name": "zsh"}],
         }
@@ -92,11 +95,22 @@ class SpawnCloseTest(unittest.TestCase):
         with self.assertRaisesRegex(UsageError, "already appears"):
             spawn(client, worker, worker.tiers["coordination"],
                   history=[{"agent": worker.name, "role": "reviewer"}])
-        client.pane_split.assert_not_called()
+        client.workspace_create.assert_not_called()
+
+    def test_unknown_workspace_creation_never_starts_or_closes_an_unproved_surface(self):
+        client = Mock()
+        client.workspace_create.side_effect = HerdrError("create result unknown; inspect orphan workspace", {})
+        worker = template()
+        with self.assertRaisesRegex(HerdrError, "unknown"):
+            spawn(client, worker, worker.tiers["coordination"], history=())
+        client.workspace_create.assert_called_once()
+        client.pane_process_info.assert_not_called()
+        client.agent_start.assert_not_called()
+        client.pane_close.assert_not_called()
 
     def test_spawn_reports_primary_and_cleanup_failures_with_pane_action(self):
         client = Mock()
-        client.pane_split.return_value = "pane-new"
+        client.workspace_create.return_value = "pane-new"
         client.pane_process_info.return_value = {"shell_pid": 10, "foreground_processes": [{"pid": 10}]}
         client.argv_pane_close.return_value = ["herdr", "pane", "close", "--pane", "pane-new"]
         client.pane_close.side_effect = failure("pane_busy", "cannot close")
@@ -107,9 +121,9 @@ class SpawnCloseTest(unittest.TestCase):
         self.assertEqual(caught.exception.details["pane_id"], "pane-new")
         self.assertIn("pane close", str(caught.exception))
 
-    def test_spawn_closes_the_split_pane_before_reraising_an_interrupt(self):
+    def test_spawn_closes_the_created_root_pane_before_reraising_an_interrupt(self):
         client = Mock()
-        client.pane_split.return_value = "pane-new"
+        client.workspace_create.return_value = "pane-new"
         client.pane_process_info.return_value = {
             "shell_pid": 10, "foreground_processes": [{"pid": 10}]}
         worker = template()
@@ -120,7 +134,7 @@ class SpawnCloseTest(unittest.TestCase):
 
     def test_cleanup_failure_does_not_replace_a_spawn_interrupt(self):
         client = Mock()
-        client.pane_split.return_value = "pane-new"
+        client.workspace_create.return_value = "pane-new"
         client.pane_process_info.return_value = {
             "shell_pid": 10, "foreground_processes": [{"pid": 10}]}
         client.pane_close.side_effect = failure("pane_busy", "cannot close")
@@ -162,7 +176,7 @@ class FreshShellStartupTest(unittest.TestCase):
 
     def client(self, observations):
         client = Mock()
-        client.pane_split.return_value = "pane-new"
+        client.workspace_create.return_value = "pane-new"
         client.pane_process_info.side_effect = observations
         client.agent_start.return_value = {"agent": {"pane_id": "pane-new", "name": "claude",
             "agent": "claude", "agent_status": "idle"}, "argv": self.ARGV}
@@ -417,6 +431,95 @@ class WindowProbeTest(unittest.TestCase):
         notes = " ".join(caught.exception.__notes__)
         self.assertIn("Probe cleanup also failed", notes)
         self.assertIn("herdr pane close --pane probe-pane", notes)
+
+
+class WorkspacePlacementTest(unittest.TestCase):
+    """Stateful transport replay preserves the focused foreman workspace."""
+
+    def client(self, *, unknown_start=False):
+        focused = "w1"
+        created = {}
+        calls = []
+        flags = ["claude", "--dangerously-skip-permissions", "--model", "sonnet-5", "--effort", "low"]
+
+        def runner(argv):
+            nonlocal focused
+            calls.append(argv)
+            op = argv[1:3]
+            if op == ["workspace", "create"]:
+                if "--focus" in argv:
+                    focused = "w9"
+                created["w9:p7"] = False
+                result = {"workspace": {"workspace_id": "w9"}, "tab": {"tab_id": "w9:t2"},
+                          "root_pane": {"pane_id": "w9:p7", "workspace_id": "w9"}}
+            elif op == ["pane", "process-info"]:
+                pane = argv[-1]
+                if pane not in created:
+                    raise AssertionError("read outside created surface")
+                result = {"process_info": {"pane_id": pane, "shell_pid": 10,
+                    "foreground_processes": [{"pid": 20, "name": "claude", "argv": flags}]
+                    if created[pane] else [{"pid": 10, "name": "zsh"}]}}
+            elif op == ["agent", "start"]:
+                pane = argv[argv.index("--pane") + 1]
+                if pane not in created:
+                    raise AssertionError("start outside created surface")
+                created[pane] = True
+                if unknown_start:
+                    return FakeCompleted(stdout="truncated start response")
+                result = {"agent": {"name": argv[3], "agent": "claude", "pane_id": pane, "agent_status": "idle"}, "argv": flags}
+            elif op == ["pane", "close"]:
+                if argv[-1] not in created:
+                    raise AssertionError("cleanup outside created surface")
+                del created[argv[-1]]
+                result = {"closed": True}
+            elif op == ["agent", "get"]:
+                return FakeCompleted(1, "", json.dumps({"error": {"code": "agent_not_found"}}))
+            else:
+                raise AssertionError("unexpected command: " + str(argv))
+            return FakeCompleted(stdout=json.dumps({"result": result}))
+
+        return HerdrClient(binary="herdr", runner=runner), calls, created, lambda: focused
+
+    def test_worker_starts_only_in_returned_workspace_root_and_preserves_focus(self):
+        client, calls, created, focus = self.client()
+        worker = template()
+        preflight = Mock()
+        pane = spawn(client, worker, worker.tiers["coordination"], cwd="/owned checkout", history=(),
+                     before_start=preflight, sleep=lambda _: None)
+        self.assertEqual(pane, "w9:p7")
+        self.assertEqual(focus(), "w1")
+        self.assertEqual(set(created), {"w9:p7"})
+        preflight.assert_called_once_with("w9:p7")
+        self.assertEqual(calls[0], ["herdr", "workspace", "create", "--cwd", "/owned checkout",
+                                   "--label", "claude", "--no-focus"])
+        self.assertFalse(any(argv[1:3] == ["pane", "split"] for argv in calls))
+
+    def test_unknown_start_never_retries_and_cleans_only_created_root(self):
+        client, calls, created, focus = self.client(unknown_start=True)
+        worker = template()
+        with self.assertRaises(HerdrError):
+            spawn(client, worker, worker.tiers["coordination"], history=(), sleep=lambda _: None)
+        self.assertEqual(focus(), "w1")
+        self.assertEqual(created, {})
+        self.assertEqual(sum(argv[1:3] == ["agent", "start"] for argv in calls), 1)
+        self.assertEqual(calls[-1], ["herdr", "pane", "close", "w9:p7"])
+
+    def test_probe_measurement_uses_separate_root_without_changing_focus_and_closes_it(self):
+        client, calls, created, focus = self.client()
+        def measured(_client, probes, measured_at, **_options):
+            self.assertEqual(set(created), {"w9:p7"})
+            self.assertEqual(focus(), "w1")
+            return {"agents": {probes[0].name: {"headroom_pct": 90, "pane_id": "w9:p7"}}}
+        with patch("foreman.lifecycle.identity", return_value="probe-claude-fixed"), \
+                patch("foreman.measure.measure", side_effect=measured):
+            result = measure_worker_kinds(client, [template()], "2026-10-01T00:00:00+00:00", sleep=lambda _: None)
+        self.assertEqual(result["failed_agents"], [])
+        self.assertEqual(result["agents"]["claude"]["headroom_pct"], 90)
+        self.assertEqual(created, {})
+        self.assertEqual(focus(), "w1")
+        self.assertIn("probe-claude-fixed", calls[0])
+        self.assertIn("--no-focus", calls[0])
+        self.assertFalse(any(argv[1:3] == ["pane", "split"] for argv in calls))
 
 
 if __name__ == "__main__":

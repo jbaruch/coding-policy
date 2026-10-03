@@ -84,6 +84,29 @@ class ArgvBuilderTest(unittest.TestCase):
         self.assertEqual(self.client.argv_pane_close("w2:p9"),
                          ["herdr", "pane", "close", "w2:p9"])
 
+    def test_workspace_create_returns_the_supplied_root_pane_without_focus(self):
+        runner = FakeRunner()
+        runner.set("workspace create", json.dumps({"result": {
+            "workspace": {"workspace_id": "w7"}, "tab": {"tab_id": "w7:t3"},
+            "root_pane": {"pane_id": "w7:p9", "workspace_id": "w7"}}}))
+        client = HerdrClient(binary="herdr", runner=runner)
+        self.assertEqual(client.workspace_create(cwd="/work tree", label="developer-fixed"), "w7:p9")
+        self.assertEqual(runner.calls, [["herdr", "workspace", "create", "--cwd", "/work tree",
+                                      "--label", "developer-fixed", "--no-focus"]])
+
+    def test_workspace_create_unknown_result_never_retries_or_guesses_a_pane(self):
+        for result in (None, {}, {"pane": {"pane_id": "w1:p1"}},
+                       {"root_pane": None}, {"root_pane": {"pane_id": " "}},
+                       {"root_pane": {"pane_id": 4}}):
+            with self.subTest(result=result):
+                runner = FakeRunner()
+                runner.set("workspace create", json.dumps({"result": result}))
+                client = HerdrClient(binary="herdr", runner=runner)
+                with self.assertRaises(HerdrError):
+                    client.workspace_create(cwd="/work", label="developer-fixed")
+                self.assertEqual(len(runner.calls), 1)
+                self.assertEqual(runner.calls[0][1:3], ["workspace", "create"])
+
     def test_pane_wait_output_with_regex(self):
         self.assertEqual(
             self.client.argv_pane_wait_output(
