@@ -41,7 +41,7 @@ from foreman.config import parse_config
 from foreman.errors import HerdrError
 from foreman.herdr import HerdrClient
 
-from tests.fakes import FakeRunner, ScriptedReads, composer_screen, ok_json
+from tests.fakes import FakeRunner, ScriptedReads, composer_screen, ok_json, painted_codex_composer
 
 
 def NO_SLEEP(seconds):
@@ -790,6 +790,76 @@ CODEX_BLANK_THEN_CONTINUATION = (
 
 
 class PlaceholderTest(unittest.TestCase):
+    def test_painted_placeholder_excludes_indented_status_and_shortcuts(self):
+        for background in ("48;2;62;64;81", "48;5;235", "44", "104"):
+            with self.subTest(background=background):
+                composer = inspect_composer(painted_codex_composer(background=background), BY_NAME["codex"])
+                self.assertFalse(composer.occupied)
+                self.assertTrue(composer.placeholder)
+
+    def test_painted_recalled_paragraphs_remain_occupied(self):
+        draft = "Ask Codex to do anything\n\nkeep this recalled continuation\n  › nested glyph"
+        composer = inspect_composer(painted_codex_composer(draft), BY_NAME["codex"])
+        self.assertTrue(composer.occupied)
+        self.assertTrue(composer.dim)
+        self.assertIn("keep this recalled continuation", composer.content)
+        self.assertIn("› nested glyph", composer.content)
+        self.assertNotIn("gpt-6-astra", composer.content)
+
+    def test_footer_looking_recalled_text_is_still_input(self):
+        draft = "Ask Codex to do anything\ngpt-6-astra high · ~/Projects/example\n← for agents · ? for shortcuts"
+        composer = inspect_composer(painted_codex_composer(draft), BY_NAME["codex"])
+        self.assertTrue(composer.occupied)
+        self.assertIn("← for agents", composer.content)
+
+    def test_plain_text_footer_ambiguity_remains_occupied(self):
+        composer = inspect_composer(strip_ansi(painted_codex_composer()), BY_NAME["codex"])
+        self.assertTrue(composer.occupied)
+
+    def test_foreground_palette_operands_do_not_create_a_composer_boundary(self):
+        # RGB components overlap background SGR codes but are color operands.
+        for color in ("38;2;48;2;62", "38;5;48", "38;2;40;49;104", "58;5;44", "58;2;44;44;44"):
+            with self.subTest(color=color):
+                screen = "› \x1b[{}mAsk Codex to do anything\x1b[0m\n  keep this draft\n".format(color)
+                self.assertTrue(inspect_composer(screen, BY_NAME["codex"]).occupied)
+
+    def test_underline_color_operands_do_not_reset_inherited_background(self):
+        for color in ("58;2;0;49;0", "58;5;49"):
+            with self.subTest(color=color):
+                screen = (
+                    "\x1b[44m› Ask Codex to do anything\n"
+                    "\x1b[{}m  actual content\x1b[0m\n  footer\n"
+                ).format(color)
+                composer = inspect_composer(screen, BY_NAME["codex"])
+                self.assertTrue(composer.occupied)
+                self.assertIn("actual content", composer.content)
+
+    def test_background_inherited_across_rows_preserves_recalled_text(self):
+        for reset in ("0", "49"):
+            with self.subTest(reset=reset):
+                screen = (
+                    "\x1b[48;2;62;64;81m› Ask Codex to do anything\n"
+                    "\n  do more\x1b[{}m\n  gpt-6-astra high\n"
+                ).format(reset)
+                composer = inspect_composer(screen, BY_NAME["codex"])
+                self.assertTrue(composer.occupied)
+                self.assertIn("do more", composer.content)
+                self.assertNotIn("gpt-6-astra", composer.content)
+
+    def test_reset_before_footer_ends_the_painted_composer(self):
+        screen = "\x1b[44m› Ask Codex to do anything\n   \n\x1b[49m  gpt-6-astra high\n"
+        self.assertFalse(inspect_composer(screen, BY_NAME["codex"]).occupied)
+
+    def test_unsupported_colon_sgr_cannot_hide_a_recalled_continuation(self):
+        screen = (
+            "\x1b[48;2;62;64;81m› Ask Codex to do anything\x1b[0m\n"
+            "\x1b[48:2::62:64:81m  do more\x1b[0m\n"
+            "  gpt-6-astra high\n"
+        )
+        composer = inspect_composer(screen, BY_NAME["codex"])
+        self.assertTrue(composer.occupied)
+        self.assertIn("do more", composer.content)
+
     def test_the_hint_matches_exactly_after_trimming(self):
         self.assertTrue(is_placeholder("  Ask Codex to do anything  ", BY_NAME["codex"]))
 
@@ -875,6 +945,11 @@ class LiveKillSequenceTest(unittest.TestCase):
 
     def test_the_placeholder_sends_no_keys_at_all(self):
         runner = self._runner(CODEX_PLACEHOLDER_DIM)
+        ensure_ready(HerdrClient(runner=runner), BY_NAME["codex"], sleep=NO_SLEEP)
+        self.assertEqual(runner.writes(), [])
+
+    def test_painted_placeholder_with_footer_sends_no_recovery_keys(self):
+        runner = self._runner(painted_codex_composer())
         ensure_ready(HerdrClient(runner=runner), BY_NAME["codex"], sleep=NO_SLEEP)
         self.assertEqual(runner.writes(), [])
 

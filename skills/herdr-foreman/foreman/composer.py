@@ -76,6 +76,9 @@ UNKNOWN_SKILL_MARKERS = ("unknown skill", "Unrecognized command")
 
 #: One SGR sequence: ESC [ params m.
 _SGR_RE = re.compile(r"\x1b\[([0-9;]*)m")
+#: Colon-separated SGR is valid but not decoded by the existing ANSI parser.
+#: Such a read cannot safely establish the new painted-composer boundary.
+_UNSUPPORTED_SGR_RE = re.compile(r"\x1b\[[0-9;:]*:[0-9;:]*m")
 #: Any other escape sequence, dropped before spanning: CSI (cursor moves,
 #: erases) and OSC strings (titles).
 _OTHER_ESC_RE = re.compile(r"\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b\[[0-9;?]*[A-Za-ln-z]|\x1b[()][B0]")
@@ -173,6 +176,40 @@ def _trim(chars, drop=""):
     return chars[start:end]
 
 
+def _row_background(line, background=False):
+    """Return (painted cells present, final background state) for one row.
+
+    Codex paints its composer, including blank padding and recalled-input
+    rows, with a background. The model/status footer is outside that box.
+    Read SGR parameters rather than color names or footer wording; skip RGB
+    and palette operands so a foreground color cannot look like a background.
+    """
+    line = _OTHER_ESC_RE.sub("", line)
+    painted = False
+    position = 0
+    for match in _SGR_RE.finditer(line):
+        if background and match.start() > position:
+            painted = True
+        codes = [int(part) if part.isdigit() else 0 for part in match.group(1).split(";")]
+        index = 0
+        while index < len(codes):
+            code = codes[index]
+            if code in (0, 49):
+                background = False
+            elif 40 <= code <= 47 or 100 <= code <= 107:
+                background = True
+            elif code in (38, 48, 58) and index + 1 < len(codes):
+                mode = codes[index + 1]
+                operands = 2 if mode == 5 else 4 if mode == 2 else 0
+                if operands and index + operands < len(codes):
+                    if code == 48:
+                        background = True
+                    index += operands
+            index += 1
+        position = match.end()
+    return painted or (background and position < len(line)), background
+
+
 def composer_text(pane_text, glyph, ignore_dim=False):
     """Return what sits in the composer, or None when it is not visible.
 
@@ -196,6 +233,11 @@ def composer_text(pane_text, glyph, ignore_dim=False):
         return None
 
     rows = pane_text.splitlines()
+    painted_rows = []
+    background = False
+    for raw in rows:
+        painted, background = _row_background(raw, background)
+        painted_rows.append(painted)
     found = None
     found_index = None
     found_indent = None
@@ -220,14 +262,26 @@ def composer_text(pane_text, glyph, ignore_dim=False):
     # row. Those rows are still part of the composer: ignoring them can turn a
     # recalled prompt whose first row equals the empty hint into an exact
     # placeholder match. A continuation is more indented than the glyph row;
-    # blank rows may be part of recalled input, while Codex's footer returns to
-    # the glyph row's indentation and ends the scan.
+    # blank rows may be part of recalled input. Modern Codex paints the entire
+    # composer box but leaves its footer unpainted; its footer can be just as
+    # indented as recalled input. Without that ANSI evidence, retain the
+    # conservative indentation scan rather than guessing from footer text.
     visible_found = strip_ansi(found)
     glyph_indent = len(visible_found) - len(visible_found.lstrip())
-    for raw in rows[(found_index or 0) + 1 :]:
-        visible = strip_ansi(raw)
+    painted_composer = (
+        prefix == "›"
+        and painted_rows[found_index or 0]
+        and not _UNSUPPORTED_SGR_RE.search(pane_text)
+    )
+    for index in range((found_index or 0) + 1, len(rows)):
+        raw = rows[index]
+        # Unknown SGR still has zero display width. Keep its text as occupied
+        # input, without letting an escape before spaces hide the indentation.
+        visible = _UNSUPPORTED_SGR_RE.sub("", strip_ansi(raw))
         if not visible.strip():
             continue
+        if painted_composer and not painted_rows[index]:
+            break
         indent = len(visible) - len(visible.lstrip())
         if indent <= glyph_indent:
             break

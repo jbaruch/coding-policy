@@ -33,6 +33,7 @@ from tests.fakes import (
     composer_reads,
     composer_screen,
     ok_json,
+    painted_codex_composer,
 )
 
 AT = "2026-02-03T10:00:00+00:00"
@@ -224,6 +225,23 @@ class MeasureAgentTest(unittest.TestCase):
         self.assertEqual(runner.pasted_prompts(), [])
         self.assertIn("pane send-text w3:p1 /status", runner.commands())
         self.assertIn("pane send-keys w3:p1 enter", runner.commands())
+
+    def test_codex_painted_placeholder_and_footer_allow_measurement(self):
+        runner = runner_with({"codex": "idle"}, {"codex": CODEX_PANE})
+        runner.responses["agent read codex --source visible --lines 20"] = ScriptedReads([painted_codex_composer()])
+        record = measure_agent(HerdrClient(runner=runner), BY_NAME["codex"])
+        self.assertEqual(record["headroom_pct"], 87.0)
+        self.assertFalse(record["skipped"])
+        self.assertIn("pane send-text w3:p1 /status", runner.commands())
+        self.assertFalse(any("ctrl+c" in command for command in runner.commands()))
+
+    def test_painted_placeholder_first_recalled_draft_refuses_measurement(self):
+        runner = runner_with({"codex": "idle"}, {"codex": CODEX_PANE})
+        screen = painted_codex_composer("Ask Codex to do anything\n\nkeep this recalled draft")
+        runner.responses["agent read codex --source visible --lines 20"] = ScriptedReads([screen])
+        with self.assertRaises(HerdrError):
+            measure_agent(HerdrClient(runner=runner), BY_NAME["codex"])
+        self.assertEqual(runner.writes(), [])
 
     def test_codex_recalled_prompt_refuses_before_status_is_typed(self):
         runner = runner_with({"codex": "idle"}, {"codex": CODEX_PANE})

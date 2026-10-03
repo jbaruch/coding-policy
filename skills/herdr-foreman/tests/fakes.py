@@ -206,3 +206,18 @@ def agent_json(name, status, pane_id, session_id=None):
 def ok_json(kind="ok"):
     """A generic successful control response."""
     return '{"id":"cli:test","result":{"type":"%s"}}' % kind
+
+
+def painted_codex_composer(content="Ask Codex to do anything", background="48;2;62;64;81"):
+    """Codex's painted input box and unpainted status/shortcut footer."""
+    paint = "\x1b[{}m".format(background)
+    reset = "\x1b[0m"
+    lines = content.split("\n")
+    rows = [paint + " " * 80 + reset, paint + "› " + reset + "\x1b[2m" + paint + lines[0] + reset]
+    rows.extend(paint + "  " + "\x1b[2m" + line + reset for line in lines[1:])
+    rows.extend([
+        paint + " " * 80 + reset,
+        "  \x1b[38;2;213;144;48mgpt-6-astra high" + reset + " · ~/Projects/example · Example task",
+        "  ← for agents · ? for shortcuts",
+    ])
+    return "\n".join(rows) + "\n"

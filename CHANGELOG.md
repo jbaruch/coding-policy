@@ -1,5 +1,13 @@
 # Changelog
 
+### Fixed
+
+- **Codex's indented status footer no longer blocks Herdr measurement.**
+  Composer inspection uses the ANSI background of the input box to keep
+  footer rows out of the draft, while retaining dim recalled input and blank
+  paragraphs. Plain-text reads without that boundary evidence remain
+  conservative; no recovery keys are sent to an empty Codex composer.
+
 ## 0.3.358 — 2026-10-02
 
 ### Added
