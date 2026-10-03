@@ -32,11 +32,14 @@ from foreman.assign import (
     check_all_ready,
     native_context_session,
     dry_run,
+    validate_context_mode,
+    validate_fix_history,
     normalize_assignments,
     require_criteria,
     resolve_paths,
 )
 from foreman.config import parse_config
+from foreman.recovery import empty_recovery, register_task
 from foreman.errors import AgentBusyError, HerdrError, UsageError
 from foreman.herdr import HerdrClient
 
@@ -1505,6 +1508,75 @@ class NativeContextSessionTest(unittest.TestCase):
                     dict(valid, value=""), dict(valid, value=5)):
             self.assertIsNone(native_context_session({"pane_id": "w1:p2", "agent_session": ref}, "grok"))
         self.assertIsNone(native_context_session({"agent_session": valid}, "grok"))
+
+
+class FreshScopedCorrectionTest(unittest.TestCase):
+    def setUp(self):
+        self.store = empty_recovery()
+        register_task(self.store, {"task": "original-task", "base_revision": "a" * 40,
+            "scope": "Repair original parser", "allowed_paths": ["src/*"],
+            "authorization": {"source": "operator", "quote": "Repair parser within its original scope"}}, AT)
+        self.history = [{"agent": "old-developer", "role": "developer", "task": "original-task",
+                         "fix_round": None, "status": "applied", "at": AT}]
+        self.paths = {"common": "/w/COMMON.md", "developer": "/w/dev.md"}
+
+    def validate(self, number, **options):
+        return validate_context_mode({"developer": "grok"}, False, False, "original-task", number,
+                                     recovery=self.store, history=self.history, **options)
+
+    def test_fresh_scoped_fixes_one_to_three_preserve_base_and_cumulative_history(self):
+        original = json.dumps(self.store["tasks"], sort_keys=True)
+        for number in (1, 2, 3):
+            before = json.dumps(self.history, sort_keys=True)
+            self.assertIsNone(self.validate(number, assignment_scoped=True, fresh=True))
+            runner = runner_with({"grok": "idle"})
+            result = apply(HerdrClient(runner=runner), {"developer": "grok"}, BY_NAME, self.paths, AT,
+                           task="original-task", fix_round=number, history=self.history, recovery=self.store,
+                           assignment_scoped=True, fresh=True)
+            row = result["applied"][0]
+            self.assertEqual((row["task"], row["fix_round"], row["status"]), ("original-task", number, "applied"))
+            self.assertIsNone(row["context_transition"])
+            self.assertEqual(json.dumps(self.history, sort_keys=True), before)
+            self.history.append({"agent": "prior-" + str(number), "role": "developer", "task": "original-task",
+                                 "fix_round": number, "status": "applied", "at": "2026-02-03T10:00:0{}+00:00".format(number)})
+        self.assertEqual(json.dumps(self.store["tasks"], sort_keys=True), original)
+
+    def test_scoped_mode_without_fresh_lifecycle_keeps_legacy_retention_requirement(self):
+        for options in ({}, {"assignment_scoped": True}, {"fresh": True}):
+            with self.subTest(options=options), self.assertRaisesRegex(UsageError, "retain-context"):
+                self.validate(1, **options)
+
+    def test_scoped_fix_still_requires_original_task_record(self):
+        self.store["tasks"].clear()
+        with self.assertRaisesRegex(UsageError, "base/scope"):
+            self.validate(1, assignment_scoped=True, fresh=True)
+
+    def test_scoped_dry_run_checks_count_with_zero_transport_and_no_history_change(self):
+        for number in (1, 2, 6):
+            runner = FakeRunner()
+            before = json.dumps(self.history)
+            if number == 1:
+                result = dry_run(HerdrClient(runner=runner), {"developer": "grok"}, BY_NAME, self.paths,
+                                 task="original-task", fix_round=number, history=self.history, recovery=self.store,
+                                 assignment_scoped=True, fresh=True)
+                self.assertTrue(result["dry_run"])
+            else:
+                with self.assertRaises(UsageError):
+                    dry_run(HerdrClient(runner=runner), {"developer": "grok"}, BY_NAME, self.paths,
+                            task="original-task", fix_round=number, history=self.history, recovery=self.store,
+                            assignment_scoped=True, fresh=True)
+            self.assertEqual(runner.calls, [])
+            self.assertEqual(json.dumps(self.history), before)
+
+    def test_failed_pre_send_does_not_change_fix_history(self):
+        runner = runner_with({"grok": "working"}, footers={"grok": GROK_WORKING_FOOTER})
+        before = json.dumps(self.history)
+        with self.assertRaises(AgentBusyError):
+            apply(HerdrClient(runner=runner), {"developer": "grok"}, BY_NAME, self.paths, AT,
+                  task="original-task", fix_round=1, history=self.history, recovery=self.store,
+                  assignment_scoped=True, fresh=True)
+        self.assertEqual(json.dumps(self.history), before)
+        self.assertEqual(runner.writes(), [])
 
 
 if __name__ == "__main__":

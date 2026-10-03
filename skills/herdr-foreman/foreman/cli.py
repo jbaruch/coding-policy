@@ -27,7 +27,7 @@ from types import SimpleNamespace
 from . import runnable
 from . import __version__
 from .assign import apply as apply_assignments
-from .assign import APPLY_SCHEMA_VERSION, dry_run, freeze_decision, freeze_paths, read_frozen, native_context_session, normalize_assignments, resolve_paths, validate_fix_history
+from .assign import APPLY_SCHEMA_VERSION, dry_run, freeze_decision, freeze_paths, read_frozen, native_context_session, normalize_assignments, resolve_paths, validate_context_mode, validate_fix_history
 from . import renderable
 from . import attention, capabilities, chronology, churn, composition, engagement, foreman_queue, foreman_reset, historical, home, lifecycle, load_set, members, memory, oracle, partition, recovery, report_delivery, report_gates, restoration, role_clear, retrospective, retrospective_runtime, supervision, supervision_gate, supervision_runtime, triggers
 from .config import FOREMAN_CONFIG_VERSION, default_config_path, load_config, load_foreman, load_judge, load_role_costs, select_agents
@@ -1572,6 +1572,15 @@ def _apply(args, client, warn, trace, hold_gates):
         engagement.require_followup(state, state_path, assignments)
 
     fresh_workers = scoped
+    # Pure context and cumulative-count gates precede any fresh surface.
+    if fresh_workers:
+        validate_context_mode(
+            assignments, args.no_clear, args.retain_context, args.task, args.fix_round,
+            recovery=store, history=state["assignments"], plan_id=args.correction_plan, work=work,
+            retain_specialist=args.retain_specialist, requirements=requirements,
+            assignment_scoped=scoped, fresh=fresh_workers,
+        )
+        validate_fix_history(assignments, state["assignments"], args.task, args.fix_round)
 
     if args.dry_run:
         rehearsal = dry_run(

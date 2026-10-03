@@ -27,12 +27,13 @@ from pathlib import Path
 
 from types import SimpleNamespace
 
-from foreman import attention, cli, runnable, supervision
+from foreman import attention, cli, recovery, runnable, supervision
 from foreman.report_delivery import marker_columns
 from foreman.cli import build_parser, main
 from foreman.errors import HerdrError, StateError, UsageError
 from foreman.herdr import HerdrClient
 from foreman.partition import slice_digest
+from foreman.tiers import launch_flags, verify_argv, worker_launch_args
 from foreman.state import STATE_SCHEMA_VERSION, add_assignment, empty_state, load_state_checked, save_state
 
 from tests.fakes import (
@@ -572,6 +573,79 @@ class PlanCommandTest(CliCase):
     def _interrupt_reports(self):
         return [item for role in ("developer", "reviewer")
                 for item in ("--report", "{}={}".format(role, self.tmp / (role + "-report.md")))]
+
+    def test_scoped_fix_success_counts_once_and_completed_replay_never_spawns_or_sends(self):
+        plan = self._interrupt_plan()
+        del plan["tiers"]
+        plan["assignments"] = {"developer": plan["assignments"]["developer"]}
+        plan["worker_kinds"] = {"developer": plan["worker_kinds"]["developer"]}
+        plan["task_context"]["fix_round"] = 1
+        saved, _usable = load_state_checked(self.state)
+        recovery.register_task(saved["recovery"], {"task": "t-interrupt", "base_revision": "a" * 40,
+            "scope": "Repair original parser", "allowed_paths": ["src/*"],
+            "authorization": {"source": "operator", "quote": "Repair parser"}}, AT)
+        add_assignment(saved, "2026-02-03T09:00:00+00:00", "developer", "original-worker", task="t-interrupt")
+        save_state(self.state, saved)
+        command = self.base() + ["apply", "--assignments", json.dumps(plan), "--task", "t-interrupt",
+                                 "--fix-round", "1", "--dispatch-id", "fresh-fix-1", "--now", AT,
+                                 "--common", str(self.common)] + self.brief_args("developer") + [
+                                     "--report", "developer=" + str(self.tmp / "fix-report.md")]
+        def sent(_client, _assignments, _agents, _paths, _at, **options):
+            owner, _usable = load_state_checked(self.state)
+            row = dict(owner["recovery"]["dispatches"][-1])
+            wanted = options["tiers"]["developer"]
+            worker = _agents[row["agent"]]
+            flags = worker_launch_args(worker.kind, worker.launch_args)
+            proof = verify_argv(worker.kind, wanted, [worker.kind] + flags + launch_flags(worker.kind, wanted), flags)
+            row.update(pane_id="new-root", cleared=True, clear_reason="automatic", context_session=None,
+                       tier={**wanted, "launch_args": flags, "verified": {**proof, "pane_id": "new-root"}, "prompt_hash": "a" * 64},
+                       status="applied", assignment_scoped=True)
+            options["on_before_send"]({"role": "developer", "agent": row["agent"], "pane_id": "new-root"}, row)
+            options["on_result"](row)
+            return {"applied": [row]}
+        client = Mock()
+        with patch("foreman.lifecycle.spawn", return_value="new-root") as spawn, \
+                patch("foreman.cli.apply_assignments", side_effect=sent) as send:
+            code, out, err = self.run_cli(command, client=client)
+            self.assertEqual(code, 0, err)
+            self.out, self.err = io.StringIO(), io.StringIO()
+            code, replay, err = self.run_cli(command, client=client)
+            self.assertEqual(code, 0, err)
+        self.assertEqual(spawn.call_count, 1)
+        self.assertEqual(send.call_count, 1)
+        self.assertTrue(json.loads(replay)["applied"][0]["replayed"])
+        final, _usable = load_state_checked(self.state)
+        self.assertEqual([row["fix_round"] for row in final["assignments"]], [None, 1])
+        self.assertEqual(final["assignments"][0], saved["assignments"][0])
+        self.assertEqual(final["recovery"]["tasks"], saved["recovery"]["tasks"])
+
+    def test_scoped_invalid_fix_counts_refuse_before_workspace_creation(self):
+        plan = self._interrupt_plan()
+        del plan["tiers"]
+        plan["assignments"] = {"developer": plan["assignments"]["developer"]}
+        plan["worker_kinds"] = {"developer": plan["worker_kinds"]["developer"]}
+        saved, _usable = load_state_checked(self.state)
+        recovery.register_task(saved["recovery"], {"task": "t-interrupt", "base_revision": "a" * 40,
+            "scope": "Repair original parser", "allowed_paths": ["src/*"],
+            "authorization": {"source": "operator", "quote": "Repair parser"}}, AT)
+        add_assignment(saved, AT, "developer", "original-worker", task="t-interrupt")
+        save_state(self.state, saved)
+        for number in (2, 6):
+            plan["task_context"]["fix_round"] = number
+            with self.subTest(number=number), patch("foreman.lifecycle.spawn") as spawn:
+                self.out, self.err = io.StringIO(), io.StringIO()
+                code, out, err = self.run_cli(
+                    self.base() + ["apply", "--assignments", json.dumps(plan), "--task", "t-interrupt",
+                                   "--fix-round", str(number), "--now", AT, "--common", str(self.common)]
+                    + self.brief_args("developer") + ["--report", "developer=" + str(self.tmp / "fix-report.md")],
+                    client=Mock())
+                self.assertEqual(code, 1)
+                self.assertEqual(out, "")
+                self.assertTrue("next fix number" in err or "allowance is exhausted" in err, err)
+                spawn.assert_not_called()
+        final, _usable = load_state_checked(self.state)
+        self.assertEqual(final["assignments"], saved["assignments"])
+        self.assertEqual(final["recovery"]["tasks"], saved["recovery"]["tasks"])
 
     def test_scoped_apply_closes_earlier_panes_when_a_later_spawn_is_interrupted(self):
         plan = self._interrupt_plan()

@@ -593,7 +593,7 @@ def refuse_reserved(assignments, task, reserved):
                 name, reserved[name], runnable.command("close-task")), {"agent": name, "task": reserved[name]})
 
 
-def validate_context_mode(assignments, no_clear, retain_context, task, fix_round, *, recovery=None, history=None, plan_id=None, work=None, retain_specialist=False, requirements=None):
+def validate_context_mode(assignments, no_clear, retain_context, task, fix_round, *, recovery=None, history=None, plan_id=None, work=None, retain_specialist=False, requirements=None, assignment_scoped=False, fresh=False):
     """Validate the explicit context choice before any herdr operation."""
     parse_requirements(
         {"schema_version": 1, "assignments": requirements} if requirements else None,
@@ -638,6 +638,8 @@ def validate_context_mode(assignments, no_clear, retain_context, task, fix_round
         raise UsageError("Pass --task with --fix-round to identify the task.", {})
     store = recovery if recovery is not None else empty_recovery()
     validate_work(store, history or [], task, fix_round, plan_id, work, implementation="developer" in assignments)
+    if assignment_scoped and fresh and "developer" in assignments and fix_round is not None:
+        task_record(store, task)
     transition = fresh_transition(store, history or [], task, fix_round)
     if retain_context and (
         set(assignments) != {"developer"} or fix_round not in RETAIN_CONTEXT_ROUNDS
@@ -645,7 +647,8 @@ def validate_context_mode(assignments, no_clear, retain_context, task, fix_round
         raise UsageError(
             "--retain-context requires one developer assignment and --fix-round 1, 2 or 3.", {}
         )
-    if "developer" in assignments and fix_round in RETAIN_CONTEXT_ROUNDS and not retain_context:
+    if ("developer" in assignments and fix_round in RETAIN_CONTEXT_ROUNDS and not retain_context
+            and not (assignment_scoped and fresh)):
         if transition is None:
             raise UsageError("Early developer fixes require --retain-context or a recorded fresh handoff. Use `{}` for a verified automatic role clear, or follow dispatch-recovery.md for other causes; never reset the task.".format(runnable.command("recover-role-clear")), {})
         task_record(store, task)
@@ -653,7 +656,7 @@ def validate_context_mode(assignments, no_clear, retain_context, task, fix_round
             raise UsageError("A replacement developer session requires an automatic clear; omit --no-clear.", {})
     if no_clear and fix_round is not None and fix_round not in RETAIN_CONTEXT_ROUNDS:
         raise UsageError("Fresh fix rounds require an automatic clear; omit --no-clear.", {})
-    return transition if not retain_context and "developer" in assignments else None
+    return transition if not retain_context and "developer" in assignments and not (assignment_scoped and fresh) else None
 
 
 def validate_fix_history(assignments, history, task, fix_round):
@@ -1052,7 +1055,8 @@ def apply(client, assignments, agents_by_name, paths, at, no_clear=False, settle
     validate_agents(assignments, agents_by_name)
     transition = validate_context_mode(assignments, no_clear, retain_context, task, fix_round,
                                        recovery=recovery, history=history, plan_id=plan_id, work=work,
-                                       retain_specialist=retain_specialist, requirements=requirements)
+                                       retain_specialist=retain_specialist, requirements=requirements,
+                                       assignment_scoped=assignment_scoped, fresh=fresh)
     # Every judge dispatch declares its mode, whichever caller reaches here; an
     # undeclared mode is refused, never defaulted (#478).
     if any(canonical_role(role) == "judge" for role in assignments) and judge_mode not in JUDGE_MODES:
@@ -1329,7 +1333,10 @@ def dry_run(client, assignments, agents_by_name, paths, no_clear=False, settle_t
     """
     transition = validate_context_mode(assignments, no_clear, retain_context, task, fix_round,
                                        recovery=recovery, history=history, plan_id=plan_id, work=work,
-                                       retain_specialist=retain_specialist, requirements=requirements)
+                                       retain_specialist=retain_specialist, requirements=requirements,
+                                       assignment_scoped=assignment_scoped, fresh=fresh)
+    if assignment_scoped and fresh:
+        validate_fix_history(assignments, history, task, fix_round)
     if retain_specialist:
         validate_specialist_history(assignments, history, task, requirements, tiers)
     refuse_reserved(assignments, task, reserved)
