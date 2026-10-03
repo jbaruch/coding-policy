@@ -1,5 +1,17 @@
 # Changelog
 
+### Fixed
+
+- **Quoted Markdown examples are no longer report contract lines.**
+  Blockquotes, fenced code, and balanced inline-code spans that cover a
+  reserved `VERDICT`/`ACCEPTANCE`/`CONTRIBUTION`/`CRITERION` token are
+  body text: they add no verdict, acceptance, criterion, or contribution.
+  Active declarations keep the existing strict grammar, counts, and
+  refusal classes. Leading whitespace and list markers still mark real
+  lines. An unmatched backtick or an unmarked line after a quote stays
+  active, so a quoted example cannot hide or satisfy a required
+  declaration.
+
 ## 0.3.361 — 2026-10-03
 
 ### Fixed

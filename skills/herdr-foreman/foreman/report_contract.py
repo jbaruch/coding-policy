@@ -6,8 +6,27 @@ text and returns what the lines say, or refuses naming every gap. It decides
 nothing about the round; callers pass the role and specialty from the owner
 dispatch, never from the caller's own reading.
 
-Line forms (one per line; leading `-`, `*`, `>`, whitespace or backtick markup,
-and trailing backticks, are tolerated):
+Line forms (one per line). Leading whitespace and a list marker (`-` or `*`)
+are tolerated on an active declaration. An explicit Markdown quoted example is
+report body text: it supplies no verdict, acceptance, criterion, or contribution
+declaration. Quote contexts are structural, not semantic:
+
+  - a line whose own prefix is a blockquote marker (`>`), including nested
+    markers and list or code content inside the quote. An unmarked following
+    line is not a lazy continuation of that quote; it remains an active
+    candidate when it starts with a reserved keyword
+  - a line inside a Markdown backtick or tilde fence (opening indent of at
+    most three spaces, a delimiter of three or more, optional info text; a
+    shorter or mismatched delimiter does not close; an unclosed fence runs to
+    the end, so declarations hidden inside it cannot satisfy required lines).
+    A blockquoted fence opener does not start a document fence
+  - a balanced inline-code span that covers the leading reserved token,
+    including multi-backtick delimiters and a list-prefixed code example.
+    An unmatched opening backtick is not a quote: the line stays an active
+    candidate. Four-space indentation alone is not a code block; it remains
+    leading whitespace on an active declaration
+
+Plain active declarations may still contain inline code in their evidence.
 
   VERDICT: blocking | approved
       Exactly one on a reviewer or tester report, and on a consultation whose
@@ -25,13 +44,17 @@ and trailing backticks, are tolerated):
       Brief-side only, inside the brief's single `## Acceptance Criteria`
       section. `brief_criteria` counts them; a CRITERION line anywhere else in
       the brief is ignored. In a report, every CRITERION candidate is extra.
+      A fenced `## Acceptance Criteria` heading does not create a section.
 
 Refusal classes, each naming the gap: missing, duplicate (an identical repeat
-included), extra, N mismatch, malformed candidate. A candidate is any line whose
-unmarked text starts with one of the upper-case keywords above.
+included), extra, N mismatch, malformed candidate. A candidate is any active
+(unquoted) line whose unmarked text starts with one of the upper-case keywords
+above. Quoted examples never satisfy a required line, never add a contribution
+exclusion, and never increase a brief's dispatched N.
 
 `declared_contributions` reads the well-formed CONTRIBUTION values alone, gap or
-no gap, so a declared contribution is never lost to a refusal elsewhere.
+no gap, so a declared contribution is never lost to a refusal elsewhere. It
+uses the same candidate interpretation as `report_lines`.
 """
 
 import re
@@ -53,24 +76,114 @@ VERDICT_SPECIALTIES = frozenset({"security", "ux-product", "documentation"})
 #: The brief heading the CRITERION block lives under, matched as a whole line.
 CRITERIA_HEADING = "## Acceptance Criteria"
 
-_MARKUP = re.compile(r"^[\s>*`-]*")
 _KEYWORD = re.compile(r"^(VERDICT|ACCEPTANCE|CONTRIBUTION|CRITERION)\b")
 _VERDICT = re.compile(r"^VERDICT: (\S+)$")
 _CONTRIBUTION = re.compile(r"^CONTRIBUTION: (\S+)$")
 _ACCEPTANCE = re.compile(r"^ACCEPTANCE ([0-9]+)/([0-9]+): (met|unmet)\s+[—–-]\s*(.*)$")
 _CRITERION = re.compile(r"^CRITERION ([0-9]+): (\S.*)$")
+_BLOCKQUOTE = re.compile(r"^[ \t]*>")
+_LIST_MARKER = re.compile(r"^[-*][ \t]+")
+_FENCE_OPEN = re.compile(r"^( {0,3})(`{3,}|~{3,})(.*)$")
+_FENCE_CLOSE = re.compile(r"^( {0,3})(`{3,}|~{3,})[ \t]*$")
+
+
+def _open_fence(line):
+    """(`char`, length) when `line` opens a fence, else None."""
+    match = _FENCE_OPEN.match(line)
+    if match is None:
+        return None
+    delim, info = match.group(2), match.group(3)
+    if delim[0] == "`" and "`" in info:
+        return None
+    return delim[0], len(delim)
+
+
+def _closes_fence(line, char, length):
+    """Whether `line` closes a fence opened with `char` repeated `length` times."""
+    match = _FENCE_CLOSE.match(line)
+    if match is None:
+        return False
+    delim = match.group(2)
+    return delim[0] == char and len(delim) >= length
+
+
+def _fenced_indexes(lines):
+    """0-based indexes of lines inside a fence, including the opening and closing rows.
+
+    A blockquoted fence opener does not start a document fence, so an unmarked
+    reserved-prefix line after a quoted opener stays an active candidate.
+    """
+    fenced, fence = set(), None
+    for index, line in enumerate(lines):
+        if fence is None:
+            if _BLOCKQUOTE.match(line):
+                continue
+            opened = _open_fence(line)
+            if opened is not None:
+                fence = opened
+                fenced.add(index)
+            continue
+        fenced.add(index)
+        if _BLOCKQUOTE.match(line):
+            continue
+        if _closes_fence(line, fence[0], fence[1]):
+            fence = None
+    return fenced
+
+
+def _quoted(lines):
+    """True for each line that is a Markdown quote example, not an active declaration."""
+    fenced = _fenced_indexes(lines)
+    return [index in fenced or _BLOCKQUOTE.match(line) is not None for index, line in enumerate(lines)]
+
+
+def _code_span_covers_keyword(text):
+    """Whether a balanced inline-code span covers a leading reserved token."""
+    if not text.startswith("`"):
+        return False
+    n = 0
+    while n < len(text) and text[n] == "`":
+        n += 1
+    i = n
+    while i < len(text):
+        if text[i] != "`":
+            i += 1
+            continue
+        run = 0
+        while i + run < len(text) and text[i + run] == "`":
+            run += 1
+        if run == n:
+            return _KEYWORD.match(text[n:i].lstrip()) is not None
+        i += run
+    return False
 
 
 def _unmarked(line):
-    """The line's text with tolerated leading markup and trailing backticks removed."""
-    return _MARKUP.sub("", line).rstrip().rstrip("`").rstrip()
+    """Active declaration text, or None when a balanced inline-code example covers the keyword.
+
+    An unmatched opening backtick is stripped so a declaration is not hidden;
+    it is never itself a quote exemption.
+    """
+    text = line.lstrip()
+    listed = _LIST_MARKER.match(text)
+    if listed is not None:
+        text = text[listed.end():].lstrip()
+    if _code_span_covers_keyword(text):
+        return None
+    if text.startswith("`"):
+        text = text.lstrip("`").lstrip()
+    return text.rstrip()
 
 
 def _candidates(lines, keywords):
-    """(line number, unmarked text) for every line starting with one of `keywords`."""
+    """(line number, unmarked text) for every active line starting with one of `keywords`."""
     found = []
-    for number, line in enumerate(lines, 1):
+    for number, (line, is_quoted) in enumerate(zip(lines, _quoted(lines)), 1):
+        if is_quoted:
+            continue
         text = _unmarked(line)
+        if text is None:
+            continue
         match = _KEYWORD.match(text)
         if match and match.group(1) in keywords:
             found.append((number, match.group(1), text))
@@ -99,14 +212,17 @@ def brief_criteria(text):
     `## Acceptance Criteria` section, which runs to the next `#`-heading.
     """
     lines = text.splitlines()
-    headings = [index for index, line in enumerate(lines) if line.strip() == CRITERIA_HEADING]
+    quoted = _quoted(lines)
+    headings = [index for index, line in enumerate(lines)
+                if not quoted[index] and line.strip() == CRITERIA_HEADING]
     if len(headings) != 1:
         raise UsageError("The consultation brief carries {} `{}` sections; compose it with exactly one, holding "
                          "`CRITERION <k>: <text>` lines numbered from 1.".format(len(headings), CRITERIA_HEADING),
                          {"gaps": ["criteria section count {}".format(len(headings))]})
     section = []
-    for line in lines[headings[0] + 1:]:
-        if line.startswith("#"):
+    for index in range(headings[0] + 1, len(lines)):
+        line = lines[index]
+        if not quoted[index] and line.startswith("#"):
             break
         section.append(line)
     gaps, seen = [], {}
