@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.360 — 2026-10-03
+
 ### Fixed
 
 - **Claude's current inline reset headings are recognized by usage probes.**
