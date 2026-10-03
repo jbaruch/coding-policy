@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.361 — 2026-10-03
+
 ### Fixed
 
 - **Assignment workers and usage probes launch outside the foreman workspace.**
