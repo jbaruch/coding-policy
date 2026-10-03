@@ -299,6 +299,10 @@ class HerdrClient:
         argv.append("--focus" if focus else "--no-focus")
         return argv
 
+    def argv_workspace_create(self, *, cwd, label, focus=False):
+        return [self.binary, "workspace", "create", "--cwd", cwd, "--label", label,
+                "--focus" if focus else "--no-focus"]
+
     def argv_pane_close(self, pane_id):
         return [self.binary, "pane", "close", pane_id]
 
@@ -500,6 +504,16 @@ class HerdrClient:
         pane = result.get("pane")
         if not isinstance(pane, dict) or not isinstance(pane.get("pane_id"), str) or not pane["pane_id"]:
             raise HerdrError("herdr pane split returned no pane identity; close any visible orphan before retrying.", {})
+        return pane["pane_id"]
+
+    def workspace_create(self, *, cwd, label, focus=False):
+        """Return the root pane supplied by a new workspace, never a guessed ID."""
+        result = self._run_json_object(self.argv_workspace_create(cwd=cwd, label=label, focus=focus))
+        pane = result.get("root_pane")
+        if not isinstance(pane, dict) or not isinstance(pane.get("pane_id"), str) or not pane["pane_id"].strip():
+            raise HerdrError(
+                "Herdr workspace create returned no root pane identity; inspect and close any created "
+                "orphan workspace before retrying. Nothing was started.", {})
         return pane["pane_id"]
 
     def pane_close(self, pane_id):

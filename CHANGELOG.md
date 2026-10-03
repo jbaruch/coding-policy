@@ -1,5 +1,13 @@
 # Changelog
 
+### Fixed
+
+- **Assignment workers and usage probes launch outside the foreman workspace.**
+  The owner creates a separate workspace labeled with the fresh agent identity,
+  without changing focus, and starts only in its returned root pane. Existing
+  shell readiness, tier and permission verification, marker preflight and
+  failed-spawn cleanup remain in place.
+
 ## 0.3.360 — 2026-10-03
 
 ### Fixed
