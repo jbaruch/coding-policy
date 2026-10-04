@@ -17,6 +17,7 @@ if _ROOT not in _sys.path:
     _sys.path.insert(0, _ROOT)
 
 import contextlib
+import copy
 import io
 import json
 import shutil
@@ -688,6 +689,8 @@ class PlanCommandTest(CliCase):
 
         with patch("foreman.lifecycle.spawn", side_effect=["pane-developer-2", "pane-reviewer"]), \
                 patch("foreman.cli.apply_assignments", return_value={"applied": []}):
+            client.agent_get.side_effect = HerdrError("absent", {"stderr": json.dumps({"error": {"code": "agent_not_found"}})})
+            client.pane_get.side_effect = HerdrError("absent", {"stderr": json.dumps({"error": {"code": "pane_not_found"}})})
             code, _, err = self.run_cli(command, client=client)
 
         self.assertEqual(code, 0, err)
@@ -702,6 +705,106 @@ class PlanCommandTest(CliCase):
             supervision.expected_assignment(developer[1])["pane_id"],
             "pane-developer-2",
         )
+
+    def test_closed_no_send_retry_requires_complete_immutable_negative_evidence(self):
+        plan = self._interrupt_plan()
+        command = (self.base() + ["apply", "--assignments", json.dumps(plan),
+                   "--task", "t-interrupt", "--now", AT, "--common", str(self.common)]
+                   + self.brief_args("developer", "reviewer") + self._interrupt_reports())
+        with patch("foreman.lifecycle.spawn", side_effect=["old-pane", KeyboardInterrupt]), \
+                patch("foreman.lifecycle.close"), self.assertRaises(KeyboardInterrupt):
+            self.run_cli(command, client=Mock())
+        state, _ = load_state_checked(self.state)
+        member = supervision.load(self.state)["members"][0]
+        row = state["recovery"]["dispatches"][0]
+        tier = row["context_before_send"]["tier"]
+        paths = {"developer": row["brief"], "common": row["common"]}
+        client = Mock()
+        client.agent_get.side_effect = HerdrError("absent", {"stderr": json.dumps({"error": {"code": "agent_not_found"}})})
+        client.pane_get.side_effect = HerdrError("absent", {"stderr": json.dumps({"error": {"code": "pane_not_found"}})})
+        proof = cli._closed_no_send_retry(self.state, state, client, row, tier, paths)
+        assert proof is not None
+        self.assertEqual(proof["classification"], "reconciled_not_sent")
+        self.assertNotIn(row["agent"], {agent["name"] for agent in CONFIG["agents"]})
+        original = copy.deepcopy(state)
+        cases = [("status", value) for value in ("sending", "applied", "unknown")]
+        cases += [("result", {"landed": True}), ("report", {"path": "report"}),
+                  ("task", "different"), ("role", "tester"), ("brief_identity", "changed"),
+                  ("judge_mode", "ModeB"), ("fingerprint", "changed"), ("fix_round", 3)]
+        for field, value in cases:
+            changed = copy.deepcopy(original)
+            changed["recovery"]["dispatches"][0][field] = value
+            with self.subTest(field=field, value=value), self.assertRaises(UsageError):
+                cli._closed_no_send_retry(self.state, changed, client, row, tier, paths)
+        changed = copy.deepcopy(original)
+        changed["recovery"]["events"] = []
+        with self.assertRaises(UsageError):
+            cli._closed_no_send_retry(self.state, changed, client, row, tier, paths)
+        changed = copy.deepcopy(original)
+        changed["assignments"].append({"agent": row["agent"], "role": "developer"})
+        with self.assertRaises(UsageError):
+            cli._closed_no_send_retry(self.state, changed, client, row, tier, paths)
+        with patch.object(client, "pane_get", side_effect=HerdrError("unreadable", {})), self.assertRaises(HerdrError):
+            cli._closed_no_send_retry(self.state, original, client, row, tier, paths)
+        for changed_members in ([], [{**member, "active": True}]):
+            with patch("foreman.cli.supervision.load", return_value={"members": changed_members}), self.assertRaises(UsageError):
+                cli._closed_no_send_retry(self.state, original, client, row, tier, paths)
+        with self.assertRaises(UsageError):
+            cli._closed_no_send_retry(self.state, original, client, row, {**tier, "model": "changed"}, paths)
+        with patch("foreman.cli.supervision.expected_assignment", return_value={"pane_id": None, "report": str(self.tmp / "missing.md")}), self.assertRaises(UsageError):
+            cli._closed_no_send_retry(self.state, original, client, row, tier, paths)
+        evidence = self.tmp / "no-send-receipt.md"
+        evidence.write_text("Owner verified no assignment input and closed the old surface.\n")
+        receipt, _ = recovery.receipt(str(evidence))
+        reconciled = copy.deepcopy(original)
+        reconciled["recovery"]["dispatches"][0]["reconciliation"] = {
+            "input": {"outcome": "not_sent", "evidence": str(evidence)}, "evidence_receipt": receipt}
+        self.assertIsNotNone(cli._closed_no_send_retry(self.state, reconciled, client, row, tier, paths))
+        evidence.write_text("Changed receipt")
+        with self.assertRaises(UsageError):
+            cli._closed_no_send_retry(self.state, reconciled, client, row, tier, paths)
+        for method in ("agent_get", "pane_get"):
+            with patch.object(client, method, return_value={}, side_effect=None), self.assertRaises(UsageError):
+                cli._closed_no_send_retry(self.state, original, client, row, tier, paths)
+        report = Path(supervision.expected_assignment(member)["report"])
+        report.write_text("Possibly completed work")
+        with self.assertRaises(UsageError):
+            cli._closed_no_send_retry(self.state, original, client, row, tier, paths)
+        self.assertEqual(state, original)
+        client.agent_prompt.assert_not_called()
+        client.pane_send_keys.assert_not_called()
+
+    def test_fresh_composer_timeout_automatically_aborts_and_closes_only_owned_panes(self):
+        from foreman import composer
+        from foreman.config import load_config
+        plan = self._interrupt_plan()
+        client = Mock()
+        worker = next(agent for agent in load_config(self.config) if agent.kind == "codex")
+        worker = copy.copy(worker)
+        worker.name = plan["assignments"]["developer"]
+        animated = "\x1b[2m" + worker.composer_glyph + worker.composer_placeholders[0] + " ✦\x1b[0m"
+        def apply_without_native(*_args, **options):
+            composer.send_message(client, worker, "brief", "assignment", pane_id="developer-pane",
+                startup_observe=lambda: ("developer-pane", 123, "fixed-model", "high"),
+                before_prompt=lambda: options["on_before_send"](
+                    {"agent": worker.name, "role": "developer"}, {}), sleep=lambda _: None)
+        with patch("foreman.lifecycle.spawn", side_effect=["developer-pane", "reviewer-pane"]), \
+                patch("foreman.lifecycle.close") as close, \
+                patch("foreman.cli.apply_assignments", side_effect=apply_without_native), \
+                patch("foreman.composer.read_pane", return_value=(animated, True)):
+            code, out, err = self.run_cli(self.base() + ["apply", "--assignments", json.dumps(plan),
+                "--task", "t-interrupt", "--now", AT, "--common", str(self.common)]
+                + self.brief_args("developer", "reviewer") + self._interrupt_reports(), client=client)
+        self.assertEqual(code, 1, err)
+        self.assertIn("read-only startup bound", err)
+        self.assertEqual(out, "")
+        client.agent_prompt.assert_not_called()
+        client.pane_send_keys.assert_not_called()
+        self.assertEqual({call.args[2] for call in close.call_args_list}, {"developer-pane", "reviewer-pane"})
+        saved, _ = load_state_checked(self.state)
+        self.assertEqual([row["status"] for row in saved["recovery"]["dispatches"]], ["not_sent", "not_sent"])
+        self.assertEqual(saved["assignments"], [])
+        self.assertTrue(all(not member["active"] for member in supervision.load(self.state)["members"]))
 
     def test_scoped_not_sent_reconciliation_closes_and_resolves_before_retry(self):
         plan = self._interrupt_plan()

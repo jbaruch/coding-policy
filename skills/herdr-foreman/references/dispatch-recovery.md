@@ -109,6 +109,17 @@ produce a report, so Step 11 waits on exactly the roles that landed here.
   `--task <label>` puts the round's task in the label. A hand-off that never
   started is left unlabelled.
 
+Fresh assignment-scoped startup receives a bounded read-only settling window
+before the assignment send. Two consecutive exact empty composer observations
+must agree with the worker's unchanged pane, process and selected tier. Only
+single-line dim configured-placeholder decoration may wait; real input, dialogs,
+missing ANSI and identity changes refuse immediately. Waiting sends no keys.
+The `sending` marker is persisted at the guarded prompt boundary. Earlier
+failures automatically record `not_sent`, close only created panes and resolve
+their enrollments. A proven closed, immutable no-brief retry is classified as
+`reconciled_not_sent`, without a retrospective for nonexistent outgoing work.
+Unknown transport outcomes still require reconciliation and preserve the pane.
+
 The delivery mechanics behind those outcomes — composer confirmation, recovery
 keys, ghost text, the rejection strings, the settle knobs — are in:
 

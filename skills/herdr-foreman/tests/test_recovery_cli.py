@@ -28,6 +28,12 @@ BASE = "a" * 40
 HEAD = "b" * 40
 AUTH = {"source": "fixture operator message", "quote": "Approve this task and the stated correction bounds."}
 REQUEST = {"source": "fixture operator message", "quote": "Ask the judge to rule on this exhaustion."}
+def interrupt_at_prompt(*_args, **options):
+    """Transport interruption occurs after the actual guarded send boundary."""
+    options["before_prompt"]()
+    raise KeyboardInterrupt
+
+
 WORK = {"base_revision": BASE, "scope": "Correct parser findings", "paths": ["src/parser.py"], "findings": ["F1"]}
 
 
@@ -342,7 +348,7 @@ class RecoveryCommandTests(fixture.CliCase):
         # confirmed, or reconciliation records the dispatch as `unknown`.
         client = self.seat_judge()
         args = self.judge_args("diagnosis", "--dispatch-id", "interrupted-judge")
-        with patch("foreman.assign.send_message", side_effect=KeyboardInterrupt), self.assertRaises(KeyboardInterrupt):
+        with patch("foreman.assign.send_message", side_effect=interrupt_at_prompt), self.assertRaises(KeyboardInterrupt):
             self.invoke(args, client)
         dispatch = self.saved()["recovery"]["dispatches"][-1]
         self.assertEqual((dispatch["status"], dispatch["judge_mode"]), ("sending", "diagnosis"))
@@ -935,7 +941,7 @@ class RecoveryCommandTests(fixture.CliCase):
         code, _, err = self.owner("record-report", {"dispatch": dispatch, "head_revision": HEAD, "verdict": "blocking",
             "review_mode": "full", "reviewer": "codex", "report": str(review), "changed_paths": ["src/parser.py"]})
         self.assertEqual(code, 0, err)
-        with patch("foreman.assign.send_message", side_effect=KeyboardInterrupt), self.assertRaises(KeyboardInterrupt):
+        with patch("foreman.assign.send_message", side_effect=interrupt_at_prompt), self.assertRaises(KeyboardInterrupt):
             self.invoke(self.apply_args("developer", 7, *extra), self.fresh_client("fix-6", "fix-7-interrupted"))
         pending = self.saved()["recovery"]["dispatches"][-1]
         self.assertEqual(pending["status"], "sending")
@@ -1017,7 +1023,7 @@ class RecoveryCommandTests(fixture.CliCase):
         self.register()
         args = self.apply_args("developer", None, "--dispatch-id", "interrupted")
         client = self.fresh_client("old", "started-session")
-        with patch("foreman.assign.send_message", side_effect=KeyboardInterrupt), self.assertRaises(KeyboardInterrupt):
+        with patch("foreman.assign.send_message", side_effect=interrupt_at_prompt), self.assertRaises(KeyboardInterrupt):
             self.invoke(args, client)
         self.assertEqual(self.saved()["assignments"], [])
         self.assertEqual(self.saved()["recovery"]["dispatches"][0]["status"], "sending")

@@ -205,6 +205,12 @@ class Guard:
         self.task, self.retain, self.no_clear = task, retain, no_clear
         self.requests = {}
         self.original = {}
+        self.retries = {}
+
+    def _no_outgoing_work(self, name):
+        original = self.original.get(name)
+        return original is not None and (original.get("first_start") is True or
+                name in self.retries and original.get("transition_required") is False)
 
     def _item(self, step):
         tier = step.get("tier") or {}
@@ -247,6 +253,12 @@ class Guard:
         index = notes.load(self.path)
         item = self._known_report(item, index)
         current = describe(self.state, self.client, self.agents, item, index)
+        retry = self.retries.get(item["agent"])
+        if item["context"] == "start" and retry is not None:
+            if (current["source"]["assignment_index"] is not None or not current["source"]["observation"]["shell"]
+                    or not notes.same_history(current["target"], retry["target"])):
+                raise UsageError("No-send retry changed its exact target or has outgoing work; nothing was started.", {})
+            current = {**current, "first_start": False, "transition_required": False}
         daily = notes.cadence(index, self.at, existing_work=bool(self.state["assignments"]) or not current["first_start"])
         covered = not current["transition_required"] or _usable_coverage(index, current)
         if allow_bridge and self._bridge(index, current):
@@ -263,16 +275,14 @@ class Guard:
 
     def preflight(self, steps, _statuses=None):
         for step in steps:
-            if not (step["agent"] in self.original
-                    and self.original[step["agent"]].get("first_start") is True):
+            if not self._no_outgoing_work(step["agent"]):
                 self.requests[step["agent"]] = self._item(step)
         # Refuse the whole batch before its first reservation or input.
         notes.require_no_pending(self.path)
         index = notes.load(self.path)
         items = [self._known_report(item, index) for item in self.requests.values()]
         current = [self.original[item["agent"]]
-                   if (item["agent"] in self.original
-                       and self.original[item["agent"]].get("first_start") is True)
+                   if self._no_outgoing_work(item["agent"])
                    else describe(self.state, self.client, self.agents, item, index)
                    for item in items]
         daily = notes.cadence(index, self.at, existing_work=bool(self.state["assignments"]) or any(not row["first_start"] for row in current))
@@ -285,7 +295,7 @@ class Guard:
 
     def before(self, step):
         original = self.original.get(step["agent"])
-        if original is not None and original.get("first_start") is True:
+        if self._no_outgoing_work(step["agent"]):
             notes.require_no_pending(self.path)
             return
         current = self._require(self.requests[step["agent"]])

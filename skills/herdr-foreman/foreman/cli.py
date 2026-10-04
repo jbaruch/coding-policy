@@ -33,6 +33,7 @@ from . import attention, capabilities, chronology, churn, composition, engagemen
 from .config import FOREMAN_CONFIG_VERSION, default_config_path, load_config, load_foreman, load_judge, load_role_costs, select_agents
 from .errors import AgentBusyError, PlanError, StateError, ForemanError, HerdrError, UsageError
 from .herdr import (
+    error_code,
     DEFAULT_MARKER_TIMEOUT_MS,
     DEFAULT_SETTLE_TIMEOUT_MS,
     HerdrClient,
@@ -563,6 +564,54 @@ def _retryable_enrollment_identity(state_path, store, identifier, fingerprint):
             return identifier
         attempt += 1
         identifier = "{}:transport-retry-{}".format(base, attempt)
+
+
+def _closed_no_send_retry(state_path, state, client, dispatch, tier, paths):
+    """Prove an immutable, closed no-brief attempt without changing history."""
+    name = dispatch["agent"]
+    previous = [row for row in state["recovery"]["dispatches"] if row.get("agent") == name]
+    if not previous:
+        return None
+    row = previous[-1]
+    members = supervision.load(state_path)["members"]
+    member = next((entry for entry in members if entry["id"] == row["id"]), None)
+    saved_tier = (row.get("context_before_send") or {}).get("tier") or (row.get("observed_before") or {}).get("tier")
+    same = (row.get("status") == "not_sent" and row.get("fingerprint") == dispatch["fingerprint"]
+            and all(row.get(key) == dispatch.get(key) for key in
+                    ("task", "role", "agent", "fix_round", "brief_identity", "judge_mode", "provider", "worker_kind"))
+            and isinstance(saved_tier, dict) and all(saved_tier.get(key) == value for key, value in tier.items())
+            and row.get("result") is None and row.get("report") is None
+            and not any(item.get("agent") == name for item in state["assignments"])
+            and member is not None and member["active"] is False
+            and not any(entry["active"] and entry["assignment"]["agent"] == name for entry in members))
+    if not same:
+        raise UsageError("Fresh retry cannot prove identical closed no-send inputs; preserve the previous attempt and its work.", {"agent": name})
+    assignment = supervision.expected_assignment(member)
+    pane, report = assignment.get("pane_id"), assignment.get("report")
+    if not pane or not report or Path(report).exists() or Path(report).is_symlink():
+        raise UsageError("Fresh retry has report evidence or no recorded closure surface; preserve the prior attempt.", {"agent": name})
+    reconciled = row.get("reconciliation")
+    if reconciled is not None:
+        if reconciled.get("input", {}).get("outcome") != "not_sent":
+            raise UsageError("Fresh retry lacks an authoritative not_sent reconciliation.", {"agent": name})
+        receipt, _body = recovery.receipt(reconciled["input"]["evidence"])
+        if receipt != reconciled.get("evidence_receipt"):
+            raise UsageError("Fresh retry reconciliation evidence changed; preserve the prior attempt.", {"agent": name})
+    elif not any(event.get("kind") == "dispatch_not_sent" and event.get("details", {}).get("dispatch") == row["id"]
+                 for event in state["recovery"]["events"]):
+        raise UsageError("Fresh retry lacks the owner's pre-send abort evidence.", {"agent": name})
+    for read, identifier, absent in ((client.agent_get, name, "agent_not_found"), (client.pane_get, pane, "pane_not_found")):
+        try:
+            read(identifier)
+        except HerdrError as exc:
+            if error_code(exc) != absent:
+                raise
+        else:
+            raise UsageError("Fresh retry's old agent or pane is still live; nothing was started.", {"agent": name, "pane_id": pane})
+    item = {"role": dispatch["role"], "task": dispatch["task"], "model": tier.get("model"),
+            "effort": tier.get("effort"), "context": "start", "brief": paths[dispatch["role"]], "common": paths["common"]}
+    return {"classification": "reconciled_not_sent", "dispatch": row["id"],
+            "target": retrospective_runtime.target(item)}
 
 
 def _cleanup_reconciled_scoped_not_sent(state_path, dispatch, record, at, client):
@@ -1639,6 +1688,9 @@ def _apply(args, client, warn, trace, hold_gates):
                 native = observed_native(step["role"], step["agent"], context)
                 _supervision_enrollment(state_path, dispatches[step["role"]]["id"], args.task, step["role"], step["agent"], reports[step["role"]], at,
                                         pane_id=step["pane_id"], native=native, persist=True)
+            # Protect uncertain persistence/transport only once all pre-send
+            # observation and enrollment work has completed.
+            sending.add(step["agent"])
             recovery.mark_sending(store, dispatches[step["role"]]["id"], at, context)
             save_state(state_path, state)
 
@@ -1673,6 +1725,9 @@ def _apply(args, client, warn, trace, hold_gates):
         task=args.task, retain=args.retain_context or args.retain_specialist,
         no_clear=args.no_clear,
     )
+    if fresh_workers:
+        guard.retries = {name: proof for role, name in assignments.items()
+                         if (proof := _closed_no_send_retry(state_path, state, client, dispatches[role], tiers[role], paths)) is not None}
     cleanup_evidence = str(Path(state_path).expanduser().resolve())
 
     def clean_pre_send(primary, names, reason):
@@ -1778,6 +1833,7 @@ def _apply(args, client, warn, trace, hold_gates):
                 recovery.reserve(store, {
                     **dispatches[role], "observed_before": None,
                     "brief": paths[role], "common": paths["common"],
+                    "context_before_send": {"tier": tier, **({"judge_mode": judge_mode} if canonical_role(role) == "judge" else {})},
                 }, at)
                 prepared.append(identifier)
                 save_state(state_path, state)
@@ -1787,14 +1843,6 @@ def _apply(args, client, warn, trace, hold_gates):
                 primary = sys.exc_info()[1]
                 reason = (str(primary) or type(primary).__name__) if primary is not None else "spawn failed"
                 clean_pre_send(primary, list(spawned), reason)
-
-    original_before_send = before_send
-    def track_before_send(step, context):
-        # Protect the pane before entering the durable sending transition. An
-        # interrupt after that transition mutates memory but before it returns
-        # must not let cleanup destroy the evidence reconciliation needs.
-        sending.add(step["agent"])
-        original_before_send(step, context)
 
     apply_complete = False
     try:
@@ -1810,7 +1858,7 @@ def _apply(args, client, warn, trace, hold_gates):
             judge_mode=judge_mode,
             history=state["assignments"],
             settle_timeout_ms=args.settle_timeout,
-            on_prepare=prepare, on_before_send=track_before_send, on_result=record,
+            on_prepare=prepare, on_before_send=before_send, on_result=record,
             recovery=store, plan_id=args.correction_plan, work=work,
             warn=warn,
             task=args.task,

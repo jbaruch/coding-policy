@@ -1,6 +1,7 @@
 """Live retrospective boundaries with deterministic worker and file evidence."""
 
 import io
+import copy
 import json
 import os
 import sys
@@ -132,6 +133,52 @@ class RetrospectiveRuntimeTest(unittest.TestCase):
                 patch.object(guard, "_bridge", return_value=None):
             guard.preflight([step])
             guard.before(step)
+
+    def test_closed_no_brief_generated_retry_needs_no_retrospective_and_sends_once(self):
+        from foreman import composer
+        from unittest.mock import Mock
+        # Reproduce the saved media pre-brief receipt's generated identity,
+        # task and pinned tier; paths/processes are deterministic test-owned ones.
+        name = "judge-b4f5e9e65a"
+        agent = copy.copy(self.agents["codex"])
+        agent.name = name
+        state = empty_state()
+        step = {**self.steps[1], "agent": name, "role": "judge", "pane_id": "new-pane",
+                "tier": {"model": "gpt-6-astra", "effort": "high"}}
+        guard = runtime.Guard(self.path, state, self.client, {name: agent}, AT, task="media-77")
+        item = {**guard._item(step), "context": "start"}
+        shell = {"pane_id": "old-pane", "native": None, "process": {"pid": 123, "argv": ["zsh"]},
+                 "readiness": "shell", "shell": True}
+        worker = {"pane_id": "old-pane", "native": {"agent_session_id": "old-session"},
+                  "process": {"pid": 124, "argv": ["codex"]}, "readiness": "idle", "shell": False}
+        # A genuine prior owner start recorded a transition, but no brief was sent.
+        with patch("foreman.retrospective_runtime._observation", return_value=shell):
+            guard.before_start(item)
+        with patch("foreman.retrospective_runtime._observation", return_value=worker):
+            guard.after_transition(step, launch_proof={"pid": 124, "argv": ["codex"]})
+        retry = runtime.Guard(self.path, state, self.client, {name: agent}, AT, task="media-77")
+        retry.retries[name] = {"classification": "reconciled_not_sent", "target": runtime.target(item)}
+        with patch("foreman.retrospective_runtime._observation", return_value={**shell, "pane_id": "new-pane"}):
+            retry.before_start(item)
+        self.assertFalse(retry.original[name]["first_start"])
+        self.assertFalse(retry.original[name]["transition_required"])
+        with patch("foreman.retrospective_runtime.describe", side_effect=AssertionError("generated TUI cannot require retro-check")):
+            retry.preflight([step])
+            retry.before(step)
+        client = Mock()
+        empty = "\x1b[2m" + agent.composer_glyph + agent.composer_placeholders[0] + "\x1b[0m"
+        with patch("foreman.composer.read_pane", return_value=(empty, True)), \
+                patch("foreman.composer._left_idle", return_value=True):
+            result = composer.send_message(client, agent, "same immutable brief", "assignment", pane_id="new-pane",
+                startup_observe=lambda: ("new-pane", 456, "gpt-6-astra", "high"), before_input=lambda: retry.before(step),
+                sleep=lambda _: None, attempts=1)
+        self.assertTrue(result["started"])
+        client.agent_prompt.assert_called_once_with(name, "same immutable brief")
+        client.pane_send_keys.assert_not_called()
+        changed = runtime.Guard(self.path, state, self.client, {name: agent}, AT, task="changed-task")
+        changed.retries = retry.retries
+        with patch("foreman.retrospective_runtime._observation", return_value={**shell, "pane_id": "new-pane"}), self.assertRaises(UsageError):
+            changed.before_start({**item, "task": "changed-task"})
 
     def test_batch_sibling_outcome_does_not_invalidate_remaining_worker(self):
         self.record()

@@ -586,6 +586,10 @@ refuse only the stage whose harm it prevents.
   1. The owner has no preceding assignment for that worker
   2. Live process evidence proves the target pane holds only its shell
   3. No outgoing worker context or work needs a handoff
+- A closed no-brief transport retry also has no outgoing work, but is recorded as `reconciled_not_sent`, never as a first launch
+- The owner proves durable `not_sent`, unchanged task, role, frozen brief/common bytes, tier and judge mode, inactive old enrollment, old native agent and pane absent, no report or assignment input evidence, and an exact sole-shell new pane
+- The owner performs this proof and retry bookkeeping; executors need no manual reconciliation for pre-send refusal and no `retro-check` for a generated identity absent from static config
+- Unknown, possibly sent, live, changed or partially closed attempts preserve their work and fail closed
 - Every other worker transition requires retrospective coverage
 - Unknown worker history alone never proves a first launch
 - Collect observations from saved reports and read-only evidence

@@ -23,6 +23,15 @@
 
 ### Fixed
 
+- **Fresh worker dispatch owns pre-brief recovery.** Startup may settle through
+  dim placeholder decoration with read-only checks, but sends only after stable
+  exact empty-composer evidence under unchanged pane, process and tier. The
+  durable sending marker now follows that gate, so earlier failures automatically
+  record `not_sent` and clean up owned panes/enrollments. Exact closed no-brief
+  retries preserve their task, frozen inputs, mode and correction count without
+  requiring a retrospective for outgoing work that never existed. Uncertain,
+  live, changed or partially closed attempts still refuse and preserve evidence.
+
 - **Fresh workspace startup waits for available foreground evidence.** Herdr
   omits an empty foreground-process list. The owner now waits for that field
   within its existing startup bound, requiring consecutive explicit same-shell

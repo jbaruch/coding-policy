@@ -1129,5 +1129,66 @@ class SlashEnterCountTest(unittest.TestCase):
         )
 
 
+
+class FreshStartupDeliveryTest(unittest.TestCase):
+    EMPTY = "\x1b[2m› Ask Codex to do anything\x1b[0m"
+    ANIMATED = "\x1b[2m› Ask Codex to do anything ✦\x1b[0m"
+
+    def run_send(self, frames, *, observe=None):
+        from unittest.mock import Mock, patch
+        client = Mock()
+        writes = []
+        client.agent_prompt.side_effect = lambda *args: writes.append(args)
+        boundary = Mock()
+        reads = iter(frames)
+        with patch("foreman.composer.read_pane", side_effect=lambda *_a, **_k: next(reads)), \
+                patch("foreman.composer._left_idle", return_value=True):
+            result = send_message(client, BY_NAME["codex"], "immutable brief", "immutable brief", pane_id="p1",
+                                  startup_observe=observe or (lambda: ("p1", 42, "model", "high")),
+                                  before_prompt=boundary, sleep=NO_SLEEP, attempts=1)
+        return client, boundary, writes, result
+
+    def test_animation_settles_before_exactly_one_prompt_without_keys(self):
+        client, boundary, writes, result = self.run_send([
+            (self.ANIMATED, True), (self.EMPTY, True), (self.EMPTY, True), ("immutable brief", True)])
+        self.assertEqual(writes, [("codex", "immutable brief")])
+        boundary.assert_called_once()
+        self.assertTrue(result["landed"])
+        client.pane_send_keys.assert_not_called()
+        client.pane_send_text.assert_not_called()
+
+    def test_unsafe_startup_frames_never_reach_prompt_or_sending_boundary(self):
+        from unittest.mock import Mock, patch
+        for frame in [("\x1b[2m› recalled draft\x1b[0m", True),
+                      (self.EMPTY + "\n  real continuation", True), ("permission dialog", True),
+                      (self.EMPTY, False), ("› /new", True)]:
+            with self.subTest(frame=frame):
+                client, boundary = Mock(), Mock()
+                with patch("foreman.composer.read_pane", return_value=frame), self.assertRaises(HerdrError):
+                    send_message(client, BY_NAME["codex"], "brief", "brief", before_prompt=boundary,
+                                 startup_observe=lambda: ("p1", 42), sleep=NO_SLEEP)
+                boundary.assert_not_called()
+                client.agent_prompt.assert_not_called()
+                client.pane_send_keys.assert_not_called()
+
+    def test_animation_timeout_preserves_classification_and_sends_nothing(self):
+        from unittest.mock import Mock, patch
+        client, boundary = Mock(), Mock()
+        with patch("foreman.composer.read_pane", return_value=(self.ANIMATED, True)), self.assertRaises(HerdrError) as caught:
+            send_message(client, BY_NAME["codex"], "brief", "brief", before_prompt=boundary,
+                         startup_observe=lambda: ("p1", 42), sleep=NO_SLEEP)
+        self.assertTrue(caught.exception.details["dim"])
+        self.assertFalse(caught.exception.details["placeholder"])
+        boundary.assert_not_called()
+        client.agent_prompt.assert_not_called()
+        client.pane_send_keys.assert_not_called()
+
+    def test_changed_startup_identity_refuses_before_input(self):
+        from unittest.mock import Mock
+        for changed in [("other-pane", 42, "model", "high"), ("p1", 43, "model", "high"),
+                        ("p1", 42, "other-model", "high"), ("p1", 42, "model", "low")]:
+            with self.subTest(changed=changed), self.assertRaises(HerdrError):
+                self.run_send([(self.EMPTY, True)], observe=Mock(side_effect=[("p1", 42, "model", "high"), changed]))
+
 if __name__ == "__main__":
     unittest.main()
