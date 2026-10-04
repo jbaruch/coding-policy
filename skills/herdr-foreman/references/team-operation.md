@@ -491,13 +491,13 @@ The Herdr team round contract. `rules/agent-team-operation.md` Two Modes decides
 - Before the reset, curate the round's lessons
 - Before the reset, save a reset-ready stow
 - The reset runs through `foreman foreman-reset`, never by typing into the foreman's pane
-- Narrow exception for recovering a reset that failed or was interrupted.
+- A never-typed failed reset (`scheduled` or `failed` before any keystroke) is recovered by the owner: one `deliver()` under the same idle, native-session, empty-composer and process-identity checks as a healthy deliverer. That recovery is not a second `foreman-reset`. Catch-up names recovering or failed state. The notice is a non-gating `failure`.
+- Narrow exception for recovering a reset the owner must not type into.
 - Preconditions (all required):
-  1. The reset record shows the reset `failed` or `interrupted`
-  2. The operator, never the foreman, clears the foreman's pane
-  3. The operator pastes the resume prompt the reset record saved for that reset
-  4. Before clearing, the operator confirms the pane is not already running a foreman resumed from that reset
-  5. A pane already running that resumed foreman is reconciled as delivered, never cleared
+  1. The reset record shows the reset `interrupted`, or owner recovery refused because the pane is working, blocked, replaced, occupied, or already the post-clear resume session
+  2. The operator looks at the pane first
+  3. A pane already running a foreman resumed from that reset is reconciled as delivered, never cleared
+  4. Otherwise the operator clears the pane and pastes the resume prompt the reset record saved
 - Every other reset runs through `foreman foreman-reset`
 - A reset foreman resumes from the stow, the supervision resume sequence, and the foreman queue
 - Save conversation-only knowledge and open work before a planned foreman reset, compaction, or replacement

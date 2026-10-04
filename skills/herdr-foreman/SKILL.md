@@ -904,21 +904,27 @@ Pass the same `--state`, `--config` and `--herdr-bin` the stow was recorded
 under.
 
 - **Exit 0** — stdout names the scheduled `pane_id`, `stow`, deliverer `pid`
-  and `log`
+  and `log`. The pid is a deliverer whose **runtime** identity is saved, or
+  the command has already recorded `failed` before returning
   - `replayed: true` means this exact reset was already scheduled, and
     nothing new started
   - End the turn now
   - Once the pane is idle, the deliverer clears it and sends the resume
     prompt naming that stow; the next context takes the Resume Route below
 - **Exit 1** — stderr is one JSON object; route on its `error` field:
-  - `reset_ended` — this stow's one reset attempt failed or was
-    interrupted, including a deliverer that could not start
+  - `reset_ended` — this stow's one `foreman-reset` ended
     - Never re-run `foreman-reset` for this stow
-    - Record a user-attention blocker quoting `details.resume_prompt` and
-      `details.record`
+    - A never-typed failure (`failed` before any keystroke, including a
+      deliverer that could not start or could not claim) schedules owner
+      recovery; catch-up names recovering or failed state; the next context
+      still takes the Resume Route if recovery delivered
+    - Record a non-gating user-attention `failure` quoting
+      `details.resume_prompt` and `details.record` only when the owner has
+      not already recorded that notice
+    - An `interrupted` reset, or owner recovery that refused to type
+      (working, blocked, replaced, occupied, already-resumed), is operator
+      look-first under the Working Memory carve-out
     - End the turn
-    - The operator recovers under the Working Memory carve-out, first
-      confirming the pane is not already running a resumed foreman
     - The next round resets from a new stow
   - `reset_record_newer` — a newer build wrote the reset record
     - Record a user-attention blocker to update the plugin

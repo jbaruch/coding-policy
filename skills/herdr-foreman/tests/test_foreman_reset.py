@@ -1,5 +1,6 @@
 """The foreman resets its own context only when nothing would be lost (#483)."""
 
+import hashlib
 import io
 import os
 import re
@@ -17,7 +18,7 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from foreman import foreman_reset, retrospective, runnable, supervision_runtime
+from foreman import attention, foreman_reset, retrospective, runnable, supervision_runtime
 from foreman.herdr import HerdrClient
 from foreman.state import state_lock
 from foreman.errors import HerdrError, StateError, UsageError
@@ -562,7 +563,11 @@ class RecordTest(unittest.TestCase):
                 with self.assertRaises(foreman_reset.ResetEnded) as caught:
                     self.schedule("2026-09-24T10:05:00+00:00", False)
                 self.assertEqual(caught.exception.code, "reset_ended")
-                self.assertIn(foreman_reset.OPERATOR_RECOVERY, caught.exception.message)
+                # A never-claimed `scheduled` row becomes eligible owner recovery;
+                # a claimed failure or interruption stays operator look-first.
+                copy = (foreman_reset.OWNER_RECOVERY if status == "scheduled"
+                        else foreman_reset.OPERATOR_RECOVERY)
+                self.assertIn(copy, caught.exception.message)
                 expected = "resume" if status in ("failed", "interrupted") else "memory-show --state"
                 self.assertIn(expected, caught.exception.details["resume_prompt"])
                 row = json.loads(foreman_reset.record_path(self.state).read_text())["resets"][-1]
@@ -590,8 +595,10 @@ class RecordTest(unittest.TestCase):
             foreman_reset.schedule(self.state, self.plan, "2026-09-24T10:00:00+00:00", broken, native_session=SESSION)
         row = json.loads(foreman_reset.record_path(self.state).read_text())["resets"][-1]
         self.assertEqual((row["status"], row["process"]), ("failed", None))
+        self.assertEqual(row["result"]["details"]["recovery"], foreman_reset.RECOVERY_ELIGIBLE)
         self.assertIn("memory-show", row["result"]["resume_prompt"])
         self.assertEqual(caught.exception.details["resume_prompt"], row["result"]["resume_prompt"])
+        self.assertIn(foreman_reset.OWNER_RECOVERY, caught.exception.message)
 
     def test_a_deliverer_gone_before_identification_fails_the_row(self):
         with self.assertRaisesRegex(foreman_reset.ResetEnded, "exited before it could be identified"):
@@ -1076,14 +1083,27 @@ class ResetCommandTest(CliCase):
         assert replayed is not None, "a reconciled reset replays"
         self.assertEqual(replayed["status"], "reconciled")
 
-    def test_outstanding_names_the_reconcile_command(self):
+    def test_outstanding_finalizes_a_dead_scheduled_row_for_owner_recovery(self):
         plan = {"pane_id": PANE, "stow": "round-7"}
         foreman_reset.schedule(self.state, plan, "2026-09-24T10:00:00+00:00", os.getpid, native_session=SESSION)
+        item = foreman_reset.outstanding(self.state, alive=lambda process: False)[0]
+        row = json.loads(foreman_reset.record_path(self.state).read_text())["resets"][-1]
+        self.assertEqual((item["status"], item["recovery"], row["status"]),
+                         ("failed", foreman_reset.RECOVERY_ELIGIBLE, "failed"))
+        self.assertEqual(row["result"]["details"]["recovery"], foreman_reset.RECOVERY_ELIGIBLE)
+        self.assertIn("recovers it automatically", item["needed"])
+        self.assertNotIn("foreman-reset-reconcile", item["needed"])
+        self.assertIn("bash {}".format(runnable.launcher()), item["needed"])
+        self.assertTrue(Path(runnable.launcher()).is_file())
+
+    def test_outstanding_names_the_reconcile_command_for_a_dead_delivery(self):
+        plan = {"pane_id": PANE, "stow": "round-7"}
+        foreman_reset.schedule(self.state, plan, "2026-09-24T10:00:00+00:00", os.getpid, native_session=SESSION)
+        foreman_reset.claim(self.state, plan, supervision_runtime.process_identity(os.getpid()))
         needed = foreman_reset.outstanding(self.state, alive=lambda process: False)[0]["needed"]
         self.assertIn("foreman-reset-reconcile --state {} --pane {} --stow round-7 --outcome failed".format(
             self.state.resolve(), PANE), needed)
         self.assertIn("bash {}".format(runnable.launcher()), needed)
-        self.assertTrue(Path(runnable.launcher()).is_file())
 
     def test_a_caller_outside_herdr_is_not_the_foreman_pane(self):
         with patch("foreman.cli.memory.show", return_value={"record": READY}), \
@@ -1208,6 +1228,79 @@ class ResetCommandTest(CliCase):
         self.assertEqual(code, 0, err)
         self.assertIn("not the scheduled owner", json.loads(out)["skipped"])
 
+    def test_a_deliverer_for_another_pid_sends_nothing_and_leaves_the_row(self):
+        foreman_reset.schedule(self.state, {"pane_id": PANE, "stow": "round-7"}, RESET_AT, lambda: 9999,
+                               probe=lambda pid: {"pid": pid, "identity": "other"}, native_session=SESSION)
+        code, out, err = self.run_cli(self.base() + ["foreman-reset-deliver", "--pane", PANE, "--stow", "round-7"],
+                                      client=object())
+        self.assertEqual(code, 0, err)
+        self.assertIn("not the scheduled owner", json.loads(out)["skipped"])
+        row = json.loads(foreman_reset.record_path(self.state).read_text())["resets"][-1]
+        self.assertEqual((row["status"], row["process"]["pid"]), ("scheduled", 9999))
+
+    def test_a_same_pid_identity_mismatch_fails_visibly_and_recovers_once(self):
+        delivered = {"schema_version": foreman_reset.RESET_SCHEMA_VERSION, "pane_id": PANE, "stow": "round-7",
+                     "agent": "foreman", "cleared": True, "resume": {"landed": True, "started": True}}
+        foreman_reset.schedule(self.state, {"pane_id": PANE, "stow": "round-7"}, RESET_AT, os.getpid,
+                               probe=lambda pid: {"pid": pid, "identity": "launcher-argv"}, native_session=SESSION)
+        with patch("foreman.foreman_reset.deliver", return_value=delivered), \
+             patch("foreman.cli.memory.show", return_value={"record": READY}):
+            code, out, err = self.run_cli(self.base() + ["foreman-reset-deliver", "--pane", PANE, "--stow", "round-7"],
+                                          client=object())
+        self.assertEqual(code, 0, err)
+        self.assertEqual(json.loads(out)["cleared"], True)
+        row = json.loads(foreman_reset.record_path(self.state).read_text())["resets"][-1]
+        self.assertEqual(row["status"], "delivered")
+        notice = attention.show(self.state, "reset-fail-" + hashlib.sha256(
+            "{}:{}".format(PANE, "round-7").encode("utf-8")).hexdigest()[:16])["entry"]
+        self.assertEqual(notice["kind"], "failure")
+        self.assertNotIn(notice["kind"], attention.GATING_KINDS)
+        self.assertEqual(notice["status"], "resolved")
+        started = []
+        again = foreman_reset.schedule(self.state, {"pane_id": PANE, "stow": "round-7"}, RESET_AT,
+                                       lambda: started.append(1) or 1, native_session=SESSION)
+        self.assertEqual((again["status"], again["replayed"], started), ("delivered", True, []))
+
+    def test_owner_recovery_refuses_a_working_pane_without_typing(self):
+        plan = {"pane_id": PANE, "stow": "round-7"}
+        foreman_reset.schedule(self.state, plan, RESET_AT, os.getpid, native_session=SESSION)
+        outcome = foreman_reset.failure(
+            StateError("Reset deliverer process identity does not match the scheduled owner; nothing was sent.",
+                       {"pid": os.getpid()}),
+            "round-7", str(self.state.resolve()), config=str(self.config))
+        self.assertEqual(foreman_reset.fail_unclaimed(self.state, plan, outcome), "failed")
+        with patch("foreman.cli.load_config", return_value=[worker("claude-a", "claude")]), \
+             patch("foreman.foreman_reset.deliver",
+                   side_effect=HerdrError("The foreman's pane {} stayed working; nothing was sent.".format(PANE),
+                                          {"pane_id": PANE})):
+            code, _, err = self.run_cli(
+                self.base() + ["foreman-reset-deliver", "--recover", "--pane", PANE, "--stow", "round-7"],
+                client=object())
+        self.assertEqual(code, 1)
+        self.assertEqual(json.loads(err)["error"], "reset_ended")
+        row = json.loads(foreman_reset.record_path(self.state).read_text())["resets"][-1]
+        self.assertEqual((row["status"], row["result"]["details"]["recovery"]),
+                         ("failed", foreman_reset.RECOVERY_REFUSED))
+
+    def test_a_launch_failure_records_a_non_gating_failure_notice(self):
+        with patch("foreman.cli.memory.show", return_value={"record": READY}), \
+             patch("foreman.cli.supervision.load", return_value=supervision_data()[0]), \
+             patch.dict("os.environ", {"HERDR_PANE_ID": PANE, "HERDR_ENV": "1"}), \
+             patch("foreman.cli._spawn_detached", side_effect=StateError("spawn failed", {})):
+            code, _, err = self.run_cli(self.base() + ["foreman-reset", "--now", RESET_AT])
+        self.assertEqual(code, 1)
+        emitted = json.loads(err)
+        self.assertEqual(emitted["error"], "reset_ended")
+        row = json.loads(foreman_reset.record_path(self.state).read_text())["resets"][-1]
+        self.assertEqual(row["status"], "failed")
+        self.assertIn(row["result"]["details"]["recovery"],
+                      (foreman_reset.RECOVERY_ELIGIBLE, foreman_reset.RECOVERY_FAILED))
+        notice = attention.show(self.state, "reset-fail-" + hashlib.sha256(
+            "{}:{}".format(PANE, "round-7").encode("utf-8")).hexdigest()[:16])["entry"]
+        self.assertEqual(notice["kind"], "failure")
+        self.assertNotIn(notice["kind"], attention.GATING_KINDS)
+        self.assertEqual(notice["status"], "open")
+
     def test_a_refused_preflight_spawns_nothing(self):
         with patch("foreman.cli.memory.show", return_value={"record": {"id": "s", "kind": "stow", "reset_ready": False}}), \
              patch("foreman.cli.supervision.load", return_value=supervision_data()[0]), \
@@ -1217,6 +1310,221 @@ class ResetCommandTest(CliCase):
             code, _, err = self.run_cli(self.base() + ["foreman-reset", "--now", RESET_AT])
         self.assertEqual(code, 1)
         self.assertIn("not reset-ready", err)
+
+
+class ReadyHandshakeTest(unittest.TestCase):
+    def test_announce_ready_is_a_noop_without_the_pipe(self):
+        os.environ.pop(foreman_reset.READY_FD_ENV, None)
+        self.assertIsNone(foreman_reset.announce_ready(probe=lambda pid: {"pid": pid, "identity": "x"}))
+
+    def test_announce_ready_writes_pid_and_identity(self):
+        read_fd, write_fd = os.pipe()
+        self.addCleanup(lambda: os.close(read_fd) if read_fd >= 0 else None)
+        os.environ[foreman_reset.READY_FD_ENV] = str(write_fd)
+        identity = {"pid": os.getpid(), "identity": "runtime-argv"}
+        announced = foreman_reset.announce_ready(probe=lambda pid: identity)
+        payload = json.loads(os.read(read_fd, 4096).decode("ascii"))
+        self.assertEqual(announced, identity)
+        self.assertEqual(payload, {"pid": os.getpid(), "identity": "runtime-argv"})
+        self.assertNotIn(foreman_reset.READY_FD_ENV, os.environ)
+
+    def test_read_ready_identity_proves_the_live_process(self):
+        read_fd, write_fd = os.pipe()
+        os.write(write_fd, b'{"pid":7,"identity":"runtime"}\n')
+        os.close(write_fd)
+        self.addCleanup(lambda: os.close(read_fd))
+        got = foreman_reset.read_ready_identity(
+            read_fd, 7, probe=lambda pid: {"pid": 7, "identity": "runtime"},
+            wait=lambda fd, remaining: os.read(fd, 4096), clock=lambda: 0.0, budget_sec=5)
+        self.assertEqual(got, {"pid": 7, "identity": "runtime"})
+
+    def test_read_ready_identity_refuses_a_closed_pipe(self):
+        read_fd, write_fd = os.pipe()
+        os.close(write_fd)
+        self.addCleanup(lambda: os.close(read_fd))
+        with self.assertRaisesRegex(StateError, "closed its ready pipe"):
+            foreman_reset.read_ready_identity(
+                read_fd, 7, probe=lambda pid: {"pid": 7, "identity": "runtime"},
+                wait=lambda fd, remaining: os.read(fd, 4096), clock=lambda: 0.0, budget_sec=5)
+
+    def test_read_ready_identity_refuses_a_malformed_line(self):
+        read_fd, write_fd = os.pipe()
+        os.write(write_fd, b"not-json\n")
+        os.close(write_fd)
+        self.addCleanup(lambda: os.close(read_fd))
+        with self.assertRaisesRegex(StateError, "malformed ready identity"):
+            foreman_reset.read_ready_identity(
+                read_fd, 7, probe=lambda pid: {"pid": 7, "identity": "runtime"},
+                wait=lambda fd, remaining: os.read(fd, 4096), clock=lambda: 0.0, budget_sec=5)
+
+    def test_read_ready_identity_refuses_a_pid_mismatch(self):
+        read_fd, write_fd = os.pipe()
+        os.write(write_fd, b'{"pid":8,"identity":"runtime"}\n')
+        os.close(write_fd)
+        self.addCleanup(lambda: os.close(read_fd))
+        with self.assertRaisesRegex(StateError, "mismatched ready identity"):
+            foreman_reset.read_ready_identity(
+                read_fd, 7, probe=lambda pid: {"pid": 7, "identity": "runtime"},
+                wait=lambda fd, remaining: os.read(fd, 4096), clock=lambda: 0.0, budget_sec=5)
+
+    def test_read_ready_identity_refuses_a_live_mismatch(self):
+        read_fd, write_fd = os.pipe()
+        os.write(write_fd, b'{"pid":7,"identity":"announced"}\n')
+        os.close(write_fd)
+        self.addCleanup(lambda: os.close(read_fd))
+        with self.assertRaisesRegex(StateError, "live process is"):
+            foreman_reset.read_ready_identity(
+                read_fd, 7, probe=lambda pid: {"pid": 7, "identity": "actual"},
+                wait=lambda fd, remaining: os.read(fd, 4096), clock=lambda: 0.0, budget_sec=5)
+
+    def test_read_ready_identity_times_out(self):
+        read_fd, write_fd = os.pipe()
+        self.addCleanup(lambda: os.close(read_fd))
+        self.addCleanup(lambda: os.close(write_fd))
+        with self.assertRaisesRegex(StateError, "did not announce a ready identity"):
+            foreman_reset.read_ready_identity(
+                read_fd, 7, probe=lambda pid: {"pid": 7, "identity": "runtime"},
+                clock=lambda: 0.0, budget_sec=0)
+
+    def test_read_ready_identity_refuses_child_death_before_a_line(self):
+        read_fd, write_fd = os.pipe()
+        self.addCleanup(lambda: os.close(read_fd))
+        self.addCleanup(lambda: os.close(write_fd))
+        child = SimpleNamespace(poll=lambda: 1)
+        with self.assertRaisesRegex(StateError, "exited 1 before announcing"):
+            foreman_reset.read_ready_identity(
+                read_fd, 7, probe=lambda pid: {"pid": 7, "identity": "runtime"},
+                child=child, clock=lambda: 0.0, budget_sec=5)
+
+
+class ResetRecoveryTest(unittest.TestCase):
+    def setUp(self):
+        self.dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self.dir.cleanup)
+        self.state = Path(self.dir.name) / "state.json"
+        self.plan = {"pane_id": PANE, "stow": "round-7"}
+
+    def me(self, pid=1001, identity="proc-1001"):
+        return {"pid": pid, "identity": identity}
+
+    def scheduled(self, pid=1001):
+        return foreman_reset.schedule(
+            self.state, self.plan, "2026-09-24T10:00:00+00:00", lambda: pid,
+            probe=lambda value: self.me(value), native_session=SESSION)
+
+    def test_outstanding_on_a_missing_record_creates_nothing(self):
+        root = Path(self.dir.name)
+        before = list(root.iterdir())
+        self.assertEqual(foreman_reset.outstanding(self.state), [])
+        self.assertEqual(list(root.iterdir()), before)
+
+    def test_unclaimed_reason_splits_same_pid_mismatch_from_another_pid(self):
+        self.scheduled()
+        self.assertEqual(foreman_reset.unclaimed_reason(self.state, self.plan, self.me(1001, "runtime")),
+                         "identity_mismatch")
+        self.assertEqual(foreman_reset.unclaimed_reason(self.state, self.plan, self.me(9999)), "not_owner")
+
+    def test_fail_unclaimed_marks_a_scheduled_row_eligible(self):
+        self.scheduled()
+        outcome = {"error": "state_error", "message": "mismatch", "details": {"pid": 1001}, "resume_prompt": "p"}
+        self.assertEqual(foreman_reset.fail_unclaimed(self.state, self.plan, outcome), "failed")
+        row = json.loads(foreman_reset.record_path(self.state).read_text())["resets"][-1]
+        self.assertEqual((row["status"], row["result"]["details"]["recovery"]),
+                         ("failed", foreman_reset.RECOVERY_ELIGIBLE))
+
+    def test_claim_recovery_overwrites_process_and_can_run_once(self):
+        self.scheduled()
+        outcome = {"error": "state_error", "message": "mismatch", "details": {}, "resume_prompt": "p"}
+        foreman_reset.fail_unclaimed(self.state, self.plan, outcome)
+        recoverer = self.me(2002, "recoverer")
+        claimed = foreman_reset.claim_recovery(self.state, self.plan, recoverer)
+        assert claimed is not None
+        self.assertEqual((claimed["status"], claimed["process"]), ("delivering", recoverer))
+        self.assertIsNone(foreman_reset.claim_recovery(self.state, self.plan, recoverer))
+
+    def test_claim_recovery_accepts_the_spawned_recoverer(self):
+        self.scheduled()
+        outcome = {"error": "state_error", "message": "mismatch", "details": {}, "resume_prompt": "p"}
+        foreman_reset.fail_unclaimed(self.state, self.plan, outcome)
+        recoverer = self.me(2002, "recoverer")
+        spawned = []
+
+        def start(row):
+            spawned.append(row["stow"])
+            return recoverer["pid"]
+
+        items = foreman_reset.outstanding(self.state, alive=lambda process: False, start_recovery=start,
+                                          probe=lambda pid: recoverer)
+        self.assertEqual(spawned, ["round-7"])
+        self.assertEqual(items[0]["recovery"], foreman_reset.RECOVERY_SCHEDULED)
+        claimed = foreman_reset.claim_recovery(self.state, self.plan, recoverer)
+        assert claimed is not None
+        self.assertEqual(claimed["process"], recoverer)
+        again = foreman_reset.outstanding(self.state, alive=lambda process: True, start_recovery=start,
+                                          probe=lambda pid: recoverer)
+        self.assertEqual((again, spawned), ([], ["round-7"]))
+
+    def test_a_historical_failed_row_is_not_recovered(self):
+        self.scheduled()
+        foreman_reset.claim(self.state, self.plan, self.me())
+        foreman_reset.finish(self.state, self.plan, "failed",
+                             {"error": "herdr_error", "message": "boom", "details": {}, "resume_prompt": "p"})
+        spawned = []
+        items = foreman_reset.outstanding(self.state, start_recovery=lambda row: spawned.append(row) or 1)
+        self.assertEqual(spawned, [])
+        self.assertEqual(items[0]["recovery"], None)
+        self.assertIn("Look at the pane first", items[0]["needed"])
+        self.assertIsNone(foreman_reset.claim_recovery(self.state, self.plan, self.me(2002, "recoverer")))
+
+    def test_a_dead_recoverer_spends_the_one_attempt(self):
+        self.scheduled()
+        outcome = {"error": "state_error", "message": "mismatch", "details": {}, "resume_prompt": "p"}
+        foreman_reset.fail_unclaimed(self.state, self.plan, outcome)
+        recoverer = self.me(2002, "recoverer")
+        foreman_reset.outstanding(self.state, alive=lambda process: False,
+                                  start_recovery=lambda row: recoverer["pid"], probe=lambda pid: recoverer)
+        items = foreman_reset.outstanding(self.state, alive=lambda process: False)
+        self.assertEqual(items[0]["recovery"], foreman_reset.RECOVERY_FAILED)
+        self.assertIsNone(foreman_reset.claim_recovery(self.state, self.plan, recoverer))
+        self.assertIn("Look at the pane first", items[0]["needed"])
+
+    def test_owner_recovery_delivers_once_on_an_idle_bound_pane(self):
+        self.scheduled()
+        outcome = {"error": "state_error", "message": "mismatch", "details": {}, "resume_prompt": "p"}
+        foreman_reset.fail_unclaimed(self.state, self.plan, outcome)
+        recoverer = self.me(os.getpid(), "recoverer")
+        claimed = foreman_reset.claim_recovery(self.state, self.plan, recoverer)
+        assert claimed is not None
+        client = FakeClient(["idle", "idle", "idle"], pids=[4242], starts=["started-once"])
+        ticks = iter(range(0, 10000, 5))
+        with patch("foreman.foreman_reset.send_command",
+                   side_effect=lambda c, agent, pane, text, **kw: kw["before_input"]() or c.__dict__.update(cleared=True) or {"screen_changed": True}), \
+             patch("foreman.foreman_reset.send_message",
+                   side_effect=lambda c, agent, text, needle, **kw: kw["before_input"]() or {"landed": True, "started": True}), \
+             patch("foreman.foreman_reset.process_identity", side_effect=client.identify):
+            result = foreman_reset.deliver(
+                client, [worker("claude-a", "claude")], PANE, "round-7", str(self.state),
+                still_ready=lambda: True, sleep=lambda seconds: None, clock=lambda: next(ticks),
+                budget_sec=30, poll_sec=5, native_session=SESSION)
+        self.assertEqual((result["cleared"], result["resume"]), (True, {"landed": True, "started": True}))
+        foreman_reset.finish(self.state, self.plan, "delivered", result)
+        started = []
+        again = foreman_reset.schedule(self.state, self.plan, "2026-09-24T11:00:00+00:00",
+                                       lambda: started.append(1) or 1, native_session=SESSION)
+        self.assertEqual((again["status"], again["replayed"], started), ("delivered", True, []))
+
+    def test_catch_up_forwards_start_recovery_and_names_recovering(self):
+        from foreman import attention_view
+        self.scheduled()
+        outcome = {"error": "state_error", "message": "mismatch", "details": {}, "resume_prompt": "paste me"}
+        foreman_reset.fail_unclaimed(self.state, self.plan, outcome)
+        spawned = []
+        result = attention_view.catch_up(
+            self.state, "2026-09-24T11:00:00+00:00",
+            start_recovery=lambda row: spawned.append(row["stow"]) or os.getpid())
+        self.assertEqual(spawned, ["round-7"])
+        self.assertEqual(result["foreman_resets"][0]["recovery"], foreman_reset.RECOVERY_SCHEDULED)
+        self.assertIn("Foreman reset recovering", result["attention_markdown"])
 
 
 if __name__ == "__main__":

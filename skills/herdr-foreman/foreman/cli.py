@@ -429,6 +429,8 @@ def build_parser():
     deliver_parser = sub.add_parser("foreman-reset-deliver", parents=[common], help="Internal: wait for the foreman pane to idle, then clear it and send the resume prompt.")
     deliver_parser.add_argument("--pane", required=True)
     deliver_parser.add_argument("--stow", required=True)
+    deliver_parser.add_argument("--recover", action="store_true",
+                                help="Internal: claim one owner recovery of a never-typed failed reset, never a new foreman-reset.")
     reconcile_parser = sub.add_parser("foreman-reset-reconcile", parents=[common], help="Close a reset whose deliverer stopped without an outcome, as delivered or failed.")
     reconcile_parser.add_argument("--pane", required=True)
     reconcile_parser.add_argument("--stow", required=True)
@@ -1878,19 +1880,25 @@ def cmd_foreman_reset(args, client=None, warn=None, trace=None, spawn=None):
     herdr_bin = _herdr_bin_setting(args)
     if herdr_bin:
         argv += ["--herdr-bin", herdr_bin]
+    recover_argv = list(argv) + ["--recover"]
 
-    def start():
+    def start(child_argv=argv):
         try:
             # No-follow, like the reset record: a planted link would send Herdr
             # diagnostics into another file.
             descriptor = os.open(log, os.O_WRONLY | os.O_APPEND | os.O_CREAT | os.O_NOFOLLOW, 0o600)
             with os.fdopen(descriptor, "ab") as sink:
-                return (spawn or _spawn_detached)(argv, sink)
+                return (spawn or _spawn_detached)(child_argv, sink)
         except OSError as exc:
             raise StateError("Could not start the reset deliverer ({}); nothing was sent.".format(exc),
                              {"log": str(log)}) from None
 
-    row = foreman_reset.schedule(state_path, plan, at, start, native_session=native_session, options=options)
+    try:
+        row = foreman_reset.schedule(state_path, plan, at, start, native_session=native_session, options=options,
+                                     start_recovery=lambda row: start(recover_argv))
+    except foreman_reset.ResetEnded as exc:
+        _record_reset_failure_notice(state_path, plan, {"error": exc.code, "message": exc.message}, at)
+        raise
     return {"schema_version": foreman_reset.RESET_SCHEMA_VERSION, "scheduled": True, **row, "log": str(log),
             "next": "End this turn now; the deliverer clears the pane once it is idle."}, None
 
@@ -1911,11 +1919,41 @@ def _herdr_bin_setting(args):
     return _absolute_executable(value) if value else None
 
 
-def _spawn_detached(argv, sink):
-    """Start `argv` in its own session so it outlives the foreman's turn."""
-    process = subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=sink, stderr=sink,
-                               start_new_session=True, cwd=str(Path(__file__).resolve().parents[1]))
-    return process.pid
+def _spawn_detached(argv, sink, *, wait_ready=True, probe=None, budget_sec=None):
+    """Start `argv` in its own session so it outlives the foreman's turn.
+
+    When `wait_ready` is true (production), the parent passes a ready pipe and
+    waits until the child has announced its runtime identity, then proves that
+    identity against `Popen.pid` and a live process probe. Tests that patch this
+    function skip the handshake; tests that inject `start()` on `schedule` do too.
+    """
+    cwd = str(Path(__file__).resolve().parents[1])
+    if not wait_ready:
+        process = subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=sink, stderr=sink,
+                                   start_new_session=True, cwd=cwd)
+        return process.pid
+    read_fd, write_fd = os.pipe()
+    env = os.environ.copy()
+    env[foreman_reset.READY_FD_ENV] = str(write_fd)
+    try:
+        process = subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=sink, stderr=sink,
+                                   start_new_session=True, cwd=cwd, env=env, pass_fds=(write_fd,))
+    except Exception:
+        os.close(read_fd)
+        os.close(write_fd)
+        raise
+    os.close(write_fd)
+    try:
+        foreman_reset.read_ready_identity(
+            read_fd, process.pid, probe=probe or supervision_runtime.process_identity,
+            budget_sec=budget_sec if budget_sec is not None else foreman_reset.READY_BUDGET_SEC, child=process)
+        return process.pid
+    except ForemanError:
+        process.kill()
+        process.wait()
+        raise
+    finally:
+        os.close(read_fd)
 
 
 def _resume_options(args):
@@ -1956,22 +1994,53 @@ def _log_safe(warn):
     return sink
 
 
-def cmd_foreman_reset_deliver(args, client=None, warn=None, trace=None):
+def _reset_failure_attention_id(pane_id, stow):
+    return "reset-fail-" + hashlib.sha256("{}:{}".format(pane_id, stow).encode("utf-8")).hexdigest()[:16]
+
+
+def _record_reset_failure_notice(state_path, plan, outcome, at):
+    """A non-gating `failure` that fleet resume did not start; catch-up still lists the row."""
+    record = str(foreman_reset.record_path(state_path))
+    return attention.write(state_path, "record", {
+        "id": _reset_failure_attention_id(plan["pane_id"], plan["stow"]),
+        "kind": "failure",
+        "priority": 80,
+        "title": "Fleet resume from stow {} did not start".format(plan["stow"])[:300],
+        "context": "The round-boundary reset for pane {} ended before any keystroke ({})".format(
+            plan["pane_id"], outcome["error"]),
+        "consequence": "The foreman in that pane still holds its old context. Owner recovery delivers the saved resume prompt once the pane is idle with the bound session and an empty composer; the operator looks first only if recovery refuses.",
+        "resolution_condition": "A verified delivered reset for this pane and stow, or verified recovery of the still-old session.",
+        "sources": [{"schema_version": attention.SCHEMA_VERSION, "kind": "artifact", "ref": record}],
+    }, at)
+
+
+def _close_reset_failure_notice(state_path, plan, at):
+    """Close the never-typed failure notice once owner recovery delivered."""
+    name = _reset_failure_attention_id(plan["pane_id"], plan["stow"])
+    try:
+        shown = attention.show(state_path, name)
+    except UsageError:
+        return None
+    entry = shown["entry"]
+    if entry["status"] in attention.CLOSED:
+        return shown
+    return attention.write(state_path, "update", {
+        "event_id": name + "-delivered",
+        "id": name,
+        "expected_revision": entry["revision"],
+        "action": "resolve",
+        "reason": "Owner recovery delivered the reset resume prompt.",
+        "evidence": {"schema_version": attention.SCHEMA_VERSION, "kind": "verified_outcome",
+                     "ref": str(foreman_reset.record_path(state_path)),
+                     "summary": "Reset delivered; the foreman resumed from the saved prompt."},
+    }, at)
+
+
+def _deliver_claimed_reset(args, client, warn, trace, claimed, options, recovering):
+    """Run `deliver` for a claimed (or recovery-claimed) row and record its outcome."""
     state_path = Path(_state_path(args)).expanduser().resolve()
     plan = {"pane_id": args.pane, "stow": args.stow}
-    options = _resume_options(args)
     try:
-        claimed = foreman_reset.claim(state_path, plan, supervision_runtime.process_identity(os.getpid()))
-    except ForemanError as exc:
-        # Nothing was typed. The row must show a terminal failure before the
-        # operator's recovery is authorized.
-        outcome = foreman_reset.failure(exc, args.stow, str(state_path), **options)
-        _raise_reset_failure(state_path, args.stow, outcome,
-                             lambda: foreman_reset.fail_unclaimed(state_path, plan, outcome))
-    if not claimed:
-        return {"schema_version": foreman_reset.RESET_SCHEMA_VERSION, **plan, "skipped": "not the scheduled owner of this reset"}, None
-    try:
-        # Setup runs after the claim, so its failure must finish the row too.
         client = client if client is not None else _client(args, trace=trace)
         result = foreman_reset.deliver(
             client, load_config(_config_path(args)), args.pane, args.stow, str(state_path), warn=_log_safe(warn), options=options,
@@ -1980,7 +2049,12 @@ def cmd_foreman_reset_deliver(args, client=None, warn=None, trace=None):
     except ForemanError as exc:
         status = "interrupted" if isinstance(exc, foreman_reset.DeliveryInterrupted) else "failed"
         outcome = foreman_reset.failure(exc, args.stow, str(state_path), **options)
+        if recovering and status == "failed":
+            outcome["details"]["recovery"] = foreman_reset.RECOVERY_REFUSED
 
+            def record_refusal():
+                return foreman_reset.refuse_recovery(state_path, plan, outcome)
+            _raise_reset_failure(state_path, args.stow, outcome, record_refusal)
         def record():
             foreman_reset.finish(state_path, plan, status, outcome)
             return status
@@ -1988,14 +2062,60 @@ def cmd_foreman_reset_deliver(args, client=None, warn=None, trace=None):
     try:
         foreman_reset.finish(state_path, plan, "delivered", result)
     except ForemanError as exc:
-        # The pane is resumed; only the record lags. Catch-up shows the row as a
-        # delivery with no outcome, and this says which way it actually went.
         raise StateError("The reset from stow {} was delivered and the foreman resumed, but the record could not say so: "
                          "{} Once the record is readable, run `{}`; do not recover the pane.".format(
                              args.stow, exc.message,
                              foreman_reset.reconcile_command(state_path, args.pane, args.stow, "delivered")),
                          {"record": str(foreman_reset.record_path(state_path)), "delivered": result}) from None
+    if recovering:
+        _close_reset_failure_notice(state_path, plan, now_iso())
     return result, None
+
+
+def cmd_foreman_reset_deliver(args, client=None, warn=None, trace=None):
+    state_path = Path(_state_path(args)).expanduser().resolve()
+    plan = {"pane_id": args.pane, "stow": args.stow}
+    options = _resume_options(args)
+    foreman_reset.announce_ready()
+    recovering = bool(getattr(args, "recover", False))
+    try:
+        process = supervision_runtime.process_identity(os.getpid())
+        if process is None:
+            raise StateError("This reset deliverer (pid {}) is not visible to ps; nothing was sent.".format(os.getpid()),
+                             {"pid": os.getpid()})
+        claimed = (foreman_reset.claim_recovery(state_path, plan, process) if recovering
+                   else foreman_reset.claim(state_path, plan, process))
+    except ForemanError as exc:
+        outcome = foreman_reset.failure(exc, args.stow, str(state_path), **options)
+        if recovering:
+            _raise_reset_failure(state_path, args.stow, outcome,
+                                 lambda: foreman_reset.refuse_recovery(state_path, plan, outcome))
+        _raise_reset_failure(state_path, args.stow, outcome,
+                             lambda: foreman_reset.fail_unclaimed(state_path, plan, outcome))
+    if claimed:
+        return _deliver_claimed_reset(args, client, warn, trace, claimed, options, recovering)
+    if recovering:
+        return {"schema_version": foreman_reset.RESET_SCHEMA_VERSION, **plan,
+                "skipped": "not the recovery owner of this reset"}, None
+    reason = foreman_reset.unclaimed_reason(state_path, plan, process)
+    if reason != "identity_mismatch":
+        return {"schema_version": foreman_reset.RESET_SCHEMA_VERSION, **plan,
+                "skipped": "not the scheduled owner of this reset"}, None
+    outcome = foreman_reset.failure(
+        StateError("Reset deliverer process identity does not match the scheduled owner; nothing was sent.",
+                   {"pid": process["pid"]}),
+        args.stow, str(state_path), **options)
+    status = foreman_reset.fail_unclaimed(state_path, plan, outcome)
+    if status not in foreman_reset.TERMINAL_FAILURES:
+        raise StateError("The reset for stow {} failed here, but its record shows {!r}, which another process set; this "
+                         "deliverer authorizes no recovery. Inspect {}.".format(
+                             args.stow, status, foreman_reset.record_path(state_path)),
+                         {"record": str(foreman_reset.record_path(state_path)), "status": status})
+    _record_reset_failure_notice(state_path, plan, outcome, now_iso())
+    recovered = foreman_reset.claim_recovery(state_path, plan, process)
+    if recovered:
+        return _deliver_claimed_reset(args, client, warn, trace, recovered, options, True)
+    _raise_reset_failure(state_path, args.stow, outcome, lambda: status)
 
 
 def cmd_foreman_reset_reconcile(args, client=None, warn=None, trace=None):
@@ -2843,7 +2963,32 @@ def cmd_report_gates(args, client=None, warn=None, trace=None):
     return report_gates.run_command(args, _state_path(args), now_iso(), judge), None
 
 
+def _spawn_reset_recoverer(state_path, row, args, spawn=None):
+    """Start one `--recover` deliverer for a never-typed failed reset; handshake lives in `_spawn_detached`."""
+    options = row.get("options") or {}
+    log = Path(str(Path(state_path).expanduser().resolve()) + ".foreman-reset.log")
+    argv = [sys.executable, "-m", "foreman", "foreman-reset-deliver", "--recover",
+            "--pane", row["pane_id"], "--stow", row["stow"],
+            "--state", str(Path(state_path).expanduser().resolve()),
+            "--config", options.get("config") or str(Path(_config_path(args)).expanduser().resolve())]
+    if options.get("herdr_bin"):
+        argv += ["--herdr-bin", options["herdr_bin"]]
+    try:
+        descriptor = os.open(log, os.O_WRONLY | os.O_APPEND | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+        with os.fdopen(descriptor, "ab") as sink:
+            return (spawn or _spawn_detached)(argv, sink)
+    except OSError as exc:
+        raise StateError("Could not start the reset recoverer ({}); nothing was sent.".format(exc),
+                         {"log": str(log)}) from None
+
+
 def cmd_attention(args, client=None, warn=None, trace=None):
+    if args.command == "catch-up":
+        from .attention_view import catch_up
+        state_path = _state_path(args)
+        return catch_up(state_path, args.now or now_iso(), task=args.task, limit=args.limit,
+                        offset=args.offset, since=args.since, include_closed=args.include_closed,
+                        start_recovery=lambda row: _spawn_reset_recoverer(state_path, row, args)), None
     return attention.run_command(args, _state_path(args), args.now or now_iso()), None
 
 

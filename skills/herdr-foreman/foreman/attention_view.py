@@ -50,7 +50,9 @@ def _pagination(page, label):
 def _render(result):
     lines = ["# Needs your attention", ""]
     for reset in result["foreman_resets"]:
-        lines.extend(["## Foreman reset {} needs you".format(reset["status"]), "",
+        heading = ("Foreman reset recovering" if reset.get("recovery") == "scheduled"
+                   else "Foreman reset {} needs you".format(reset["status"]))
+        lines.extend(["## " + heading, "",
                       _short(reset["needed"]), "", "Record: {}".format(reset["record"]), ""])
     queue = result["attention"]
     needs_you = bool(queue["total"] or result["foreman_resets"])
@@ -101,7 +103,7 @@ def _render(result):
     return "\n".join(lines).rstrip() + "\n"
 
 
-def catch_up(path, at, *, task=None, limit=10, offset=0, since=None, include_closed=False):
+def catch_up(path, at, *, task=None, limit=10, offset=0, since=None, include_closed=False, start_recovery=None):
     if type(limit) is not int or not 1 <= limit <= 50 or type(offset) is not int or offset < 0:
         raise UsageError("Catch-up needs --limit 1–50 and a nonnegative --offset; follow next_offset to read remaining obligations.", {})
     now = timestamp(at, "Catch-up checkpoint")
@@ -135,7 +137,7 @@ def catch_up(path, at, *, task=None, limit=10, offset=0, since=None, include_clo
               "closed": _page(closed, offset, limit) if include_closed else None,
               "retrospective_index": str(attention.canonical_state(path)) + ".retrospectives/index.json", "sources": [],
               # The reset record is the durable blocker for a failed foreman reset.
-              "foreman_resets": foreman_reset.outstanding(path)}
+              "foreman_resets": foreman_reset.outstanding(path, start_recovery=start_recovery)}
     sources = []
     for section in ("attention", "deferred", "progress", "closed"):
         page = result[section]

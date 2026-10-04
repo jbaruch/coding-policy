@@ -24,15 +24,18 @@ The foreman's runtime mechanics (clear command, slash delivery, composer
 glyphs) come from a configured worker of the same kind; Herdr names the kind
 and the foreman's agent name from its own pane.
 
-One delivery attempt per pane and stow, never retried automatically.
-`<state>.foreman-reset.json` records each scheduled reset (`schedule`), and
-the deliverer claims it before sending anything (`claim`). A retry of a live,
-delivered or reconciled reset replays the record and spawns nothing. Any
-other reset is finalized `failed` (nothing typed) or `interrupted` (typing began) with the
-resume prompt the operator pastes, under the Working Memory recovery
-carve-out; the next round resets from a new stow. Before every keystroke the
-deliverer re-reads the stow and the pane, and refuses unless the stow is
-still reset-ready and the same agent is still idle.
+One `foreman-reset` per pane and stow, never retried. `<state>.foreman-reset.json`
+records each scheduled reset (`schedule`), and the deliverer claims it before
+sending anything (`claim`). A retry of a live, delivered or reconciled reset
+replays the record and spawns nothing. A never-typed failure (`scheduled` or
+`failed` before any keystroke) is recovered by the owner with one `deliver()`
+under the same idle, native-session, empty-composer and process-identity
+checks; that recovery is not a second `foreman-reset`. An `interrupted` reset,
+a replaced pane, a busy or occupied composer, or a session that is already the
+post-clear resume session stays operator look-first. The next round resets
+from a new stow. Before every keystroke the deliverer re-reads the stow and
+the pane, and refuses unless the stow is still reset-ready and the same agent
+is still idle.
 
 The pane's name and runtime kind do not identify the foreman: the operator can
 replace the process in that pane with another session of the same name and
@@ -51,7 +54,9 @@ replacement is a new one.
 
 import copy
 import fcntl
+import json
 import os
+import select
 import shlex
 import time
 from contextlib import contextmanager
@@ -85,10 +90,24 @@ RESET_STABLE_READS = 3
 #: native session the clear started, and how often it looks.
 CLEAR_SESSION_BUDGET_SEC = 30
 CLEAR_SESSION_POLL_SEC = 1
+#: How long the scheduler waits for the child's ready identity after spawn.
+#: Script-owned and injectable (rules/ci-safety.md Always Watch CI).
+READY_BUDGET_SEC = 15
+READY_MAX_BYTES = 4096
+READY_FD_ENV = "FOREMAN_RESET_READY_FD"
+#: Owner-recovery markers stored in a failure `details` object. Missing means
+#: the row is not in the never-typed recovery class (a claimed delivery already
+#: ran, or a historical failure recorded before this contract).
+RECOVERY_ELIGIBLE = "eligible"
+RECOVERY_SCHEDULED = "scheduled"
+RECOVERY_REFUSED = "refused"
+RECOVERY_FAILED = "failed"
+RECOVERY_TERMINAL = frozenset({RECOVERY_REFUSED, RECOVERY_FAILED})
 #: The detail keys a failure record keeps. Herdr and composer errors can carry
 #: raw subprocess output or pane text; the record keeps identifiers only.
 FAILURE_DETAIL_KEYS = frozenset({"pane_id", "stow", "record", "status", "pid", "lock", "kind", "reconciled",
-                                 "reconciled_at", "schema_version", "reason"})
+                                 "reconciled_at", "schema_version", "reason", "recovery", "recovery_pid",
+                                 "recovery_identity"})
 RESUME_OPENING = "Foreman resume after a planned round-boundary reset."
 RESUME_TEMPLATE = (
     RESUME_OPENING + " Your earlier conversation is gone by design. Run the "
@@ -116,14 +135,19 @@ def resume_prompt(stow, state, *, config=None, herdr_bin=None):
     return RESUME_TEMPLATE.format(tl="bash " + shlex.quote(launcher()), stow=shlex.quote(stow), flags=flags)
 
 
-OPERATOR_RECOVERY = ("Do not run `{}` again for this stow. The operator recovers the foreman under "
-                     "skills/herdr-foreman/references/team-operation.md Working Memory: clear the foreman's pane, then paste the "
-                     "resume prompt saved in this reset's record. The next round resets from a new stow.").format(
-                         command("foreman-reset"))
+OWNER_RECOVERY = ("Do not run `{}` again for this stow. The owner recovers a never-typed failed reset "
+                  "automatically under the same idle, native-session, empty-composer and process-identity "
+                  "checks as a healthy deliverer; `{}` names the recovery state. The next round resets "
+                  "from a new stow.").format(command("foreman-reset"), command("catch-up"))
+OPERATOR_RECOVERY = ("Do not run `{}` again for this stow. Look at the pane first: if a foreman resumed "
+                     "from this reset is running there, run the printed reconcile command and clear nothing. "
+                     "Otherwise recover under skills/herdr-foreman/references/team-operation.md Working Memory: "
+                     "clear the foreman's pane, then paste the resume prompt saved in this reset's record. "
+                     "The next round resets from a new stow.").format(command("foreman-reset"))
 
 
 class ResetEnded(UsageError):
-    """This stow's one reset attempt failed or was interrupted; only the operator recovers it."""
+    """This stow's one `foreman-reset` ended; owner recovery or operator look-first follows the row."""
 
     code = "reset_ended"
 
@@ -148,6 +172,120 @@ class SessionChanged(HerdrError):
 
 def record_path(state_path):
     return Path(str(Path(state_path).expanduser().resolve()) + ".foreman-reset.json")
+
+
+def announce_ready(*, probe=process_identity):
+    """Write this process's runtime identity to the scheduler's ready pipe, if one was given.
+
+    No-op when `FOREMAN_RESET_READY_FD` is unset, so in-process CLI tests and a
+    recoverer started without a handshake still run. The child closes the write
+    descriptor after one JSON line; a missing, unreadable or unannouncable
+    identity fails visibly rather than hanging the parent.
+    """
+    raw = os.environ.pop(READY_FD_ENV, None)
+    if raw is None:
+        return None
+    try:
+        fd = int(raw)
+    except ValueError:
+        raise StateError("Reset ready descriptor {} is not an integer; the deliverer did not announce identity.".format(raw),
+                         {"pid": os.getpid()}) from None
+    try:
+        identity = probe(os.getpid())
+        if identity is None:
+            raise StateError("This reset deliverer (pid {}) exited before it could announce a ready identity; nothing was sent.".format(
+                os.getpid()), {"pid": os.getpid()})
+        payload = json.dumps({"pid": os.getpid(), "identity": identity["identity"]}, separators=(",", ":")) + "\n"
+        os.write(fd, payload.encode("ascii"))
+    except OSError as exc:
+        raise StateError("Cannot write reset ready identity for pid {}: {}.".format(os.getpid(), exc),
+                         {"pid": os.getpid()}) from None
+    finally:
+        os.close(fd)
+    return identity
+
+
+def read_ready_identity(read_fd, expected_pid, *, probe=process_identity, budget_sec=READY_BUDGET_SEC,
+                        clock=time.monotonic, child=None, wait=None):
+    """Read the child's `{pid, identity}` line, then prove it matches `Popen.pid` and a live probe.
+
+    `wait(fd, remaining)` replaces `select` in tests. `child.poll` is checked when
+    given so a death before readiness fails instead of waiting out the budget.
+    """
+    deadline = clock() + budget_sec
+    chunks = []
+    while True:
+        remaining = deadline - clock()
+        if remaining <= 0:
+            raise StateError("Reset deliverer (pid {}) did not announce a ready identity within {}s; nothing was sent.".format(
+                expected_pid, budget_sec), {"pid": expected_pid})
+        if child is not None:
+            ended = child.poll()
+            if ended is not None and not chunks:
+                raise StateError("Reset deliverer (pid {}) exited {} before announcing a ready identity; nothing was sent.".format(
+                    expected_pid, ended), {"pid": expected_pid})
+        if wait is None:
+            readable, _, _ = select.select([read_fd], [], [], max(remaining, 0))
+            if not readable:
+                raise StateError("Reset deliverer (pid {}) did not announce a ready identity within {}s; nothing was sent.".format(
+                    expected_pid, budget_sec), {"pid": expected_pid})
+            data = os.read(read_fd, READY_MAX_BYTES)
+        else:
+            data = wait(read_fd, remaining)
+        if not data:
+            break
+        chunks.append(data)
+        if b"\n" in data or sum(len(part) for part in chunks) >= READY_MAX_BYTES:
+            break
+    raw = b"".join(chunks).strip()
+    if not raw:
+        raise StateError("Reset deliverer (pid {}) closed its ready pipe without an identity; nothing was sent.".format(
+            expected_pid), {"pid": expected_pid})
+    try:
+        payload = json.loads(raw.decode("ascii"))
+    except (UnicodeDecodeError, ValueError) as exc:
+        raise StateError("Reset deliverer (pid {}) announced a malformed ready identity; nothing was sent.".format(
+            expected_pid), {"pid": expected_pid}) from None
+    if (not isinstance(payload, dict) or set(payload) != {"pid", "identity"}
+            or type(payload["pid"]) is not int or payload["pid"] != expected_pid
+            or not isinstance(payload["identity"], str) or not payload["identity"]):
+        raise StateError("Reset deliverer (pid {}) announced a mismatched ready identity; nothing was sent.".format(
+            expected_pid), {"pid": expected_pid})
+    announced = {"pid": expected_pid, "identity": payload["identity"]}
+    live = probe(expected_pid)
+    if live is None:
+        raise StateError("Reset deliverer (pid {}) exited before its ready identity could be proved live; nothing was sent.".format(
+            expected_pid), {"pid": expected_pid})
+    if live != announced:
+        raise StateError("Reset deliverer (pid {}) announced {} but the live process is {}; nothing was sent.".format(
+            expected_pid, announced, live), {"pid": expected_pid})
+    return announced
+
+
+def _failure_copy(row):
+    """The recovery instruction an ended row carries: owner while never-typed recovery is open, operator otherwise."""
+    if row["status"] == "failed" and _recovery_state(row) in {RECOVERY_ELIGIBLE, RECOVERY_SCHEDULED}:
+        return OWNER_RECOVERY
+    return OPERATOR_RECOVERY
+
+
+def _recovery_state(row):
+    result = row.get("result") or {}
+    details = result.get("details") if isinstance(result, dict) else None
+    if not isinstance(details, dict):
+        return None
+    value = details.get("recovery")
+    return value if isinstance(value, str) else None
+
+
+def _recovery_open(row):
+    """A never-typed `failed` row that has not yet spent its one owner-recovery attempt."""
+    return row["status"] == "failed" and _recovery_state(row) == RECOVERY_ELIGIBLE
+
+
+def _mark_eligible(result):
+    result["details"]["recovery"] = RECOVERY_ELIGIBLE
+    return result
 
 
 #: `interrupted` is a delivery that failed after its first keystroke: the
@@ -336,14 +474,18 @@ def _settle(document, row, state_path, alive):
     changed = row["status"] in ("scheduled", "delivering")
     if changed:
         lost = StateError("The reset deliverer for stow {} exited without finishing.".format(row["stow"]), {"process": row["process"]})
-        row.update(status="failed" if row["status"] == "scheduled" else "interrupted",
-                   result=failure(lost, row["stow"], state, **row["options"]))
+        result = failure(lost, row["stow"], state, **row["options"])
+        if row["status"] == "scheduled":
+            _mark_eligible(result)
+            row.update(status="failed", result=result)
+        else:
+            row.update(status="interrupted", result=result)
     return None, changed
 
 
 def _refuse(row, state_path, cause=None):
     raise ResetEnded("The reset from stow {} ended {}{}; the pane may already be cleared. {}".format(
-        row["stow"], row["status"], " ({})".format(cause) if cause else "", OPERATOR_RECOVERY),
+        row["stow"], row["status"], " ({})".format(cause) if cause else "", _failure_copy(row)),
         {"record": str(record_path(state_path)), "resume_prompt": row["result"]["resume_prompt"]})
 
 
@@ -372,16 +514,19 @@ def replay(state_path, plan, *, alive=_alive):
     return live
 
 
-def schedule(state_path, plan, at, start, *, native_session, alive=_alive, probe=None, options=None):
+def schedule(state_path, plan, at, start, *, native_session, alive=_alive, probe=None, options=None,
+             start_recovery=None):
     """Record one reset for (pane, stow) and start its deliverer exactly once.
 
     `native_session` is the foreman's session bound at supervision-bind
     (`bound_session`); the deliverer types only while the pane still holds it.
-    `start()` launches the deliverer and returns its pid. The record lock is
-    held until the deliverer's process identity is saved, and a deliverer
-    claims only the row carrying its own identity. A launch failure, or a
-    deliverer that is already gone when probed, finishes the row `failed`
-    with the resume prompt before re-raising.
+    `start()` launches the deliverer and returns its pid after the child-ready
+    handshake. The record lock is held until the deliverer's process identity
+    is saved, and a deliverer claims only the row carrying its own identity. A
+    launch or handshake failure, or a deliverer that is already gone when
+    probed, finishes the row `failed` with the resume prompt, marks it eligible
+    for one owner recovery, and optionally starts that recoverer (`start_recovery`)
+    before re-raising.
     """
     try:
         timestamp(at, "Reset scheduled_at")
@@ -413,16 +558,46 @@ def schedule(state_path, plan, at, start, *, native_session, alive=_alive, probe
         try:
             pid = start()
             # The deliverer waits on this lock to claim, so it is alive to be identified.
+            # `start()` has already waited for the child's ready identity; this probe
+            # is the fresh live proof saved on the row.
             identity = (probe or process_identity)(pid)
             if identity is None:
                 raise StateError("The reset deliverer (pid {}) exited before it could be identified; nothing was sent.".format(pid), {"pid": pid})
             row["process"] = identity
         except ForemanError as exc:
-            row.update(status="failed", result=failure(exc, plan["stow"], str(Path(state_path).expanduser().resolve()), **(options or {})))
+            result = failure(exc, plan["stow"], str(Path(state_path).expanduser().resolve()), **(options or {}))
+            _mark_eligible(result)
+            row.update(status="failed", result=result)
+            save_state(path, document)
+            _begin_recovery(row, start_recovery, probe or process_identity)
             save_state(path, document)
             _refuse(row, state_path, exc.message)
         save_state(path, document)
         return {**row, "replayed": False}
+
+
+def _begin_recovery(row, start_recovery, probe):
+    """Spawn the one owner recoverer for an eligible never-typed failure, while the caller holds the record lock.
+
+    The recoverer announces ready without taking this lock, then waits to claim.
+    A spawn or handshake failure records `recovery: failed` and does not raise:
+    the original failure stays the durable outcome, and catch-up names it.
+    """
+    if start_recovery is None or not _recovery_open(row):
+        return
+    try:
+        pid = start_recovery(row)
+        identity = probe(pid)
+        details = row["result"]["details"]
+        details["recovery"] = RECOVERY_SCHEDULED
+        details["recovery_pid"] = pid
+        if identity is not None:
+            details["recovery_identity"] = identity["identity"]
+            row["process"] = identity
+        else:
+            details["recovery"] = RECOVERY_FAILED
+    except ForemanError:
+        row["result"]["details"]["recovery"] = RECOVERY_FAILED
 
 
 #: Error codes whose messages this owner writes itself. Any other error, a
@@ -455,64 +630,146 @@ def reconcile_command(state_path, pane_id, stow, outcome):
 TERMINAL_FAILURES = frozenset({"failed", "interrupted"})
 
 
-def outstanding(state_path, *, alive=_alive):
-    """The foreman resets that still need the operator, read from the record alone.
+def _recovery_needed(state_path, row):
+    """Catch-up copy for a never-typed `failed` row, including in-flight owner recovery."""
+    state = _recovery_state(row)
+    if state == RECOVERY_SCHEDULED:
+        return ("Owner recovery is in progress for pane {}: a recoverer is delivering the saved resume prompt. "
+                "Do not paste it and do not run `{}` again for this stow.".format(
+                    row["pane_id"], command("foreman-reset")))
+    if state == RECOVERY_REFUSED:
+        reason = (row["result"]["details"] or {}).get("reason")
+        return ("Owner recovery refused to type into pane {} ({}). The old context is untouched. "
+                "Look at the pane first: {}".format(row["pane_id"], reason or "busy, replaced, occupied or interrupted",
+                                                    OPERATOR_RECOVERY))
+    if state == RECOVERY_FAILED:
+        return ("Owner recovery of the never-typed reset in pane {} failed. Look at the pane first: {}".format(
+            row["pane_id"], OPERATOR_RECOVERY))
+    if state == RECOVERY_ELIGIBLE:
+        return ("The deliverer stopped before typing in pane {}, so the old context is still there. "
+                "The owner recovers it automatically; do not run `{}` again for this stow. {}".format(
+                    row["pane_id"], command("foreman-reset"), OWNER_RECOVERY))
+    return OPERATOR_RECOVERY
+
+
+def _outstanding_would_rewrite(row, alive, start_recovery):
+    """Whether catch-up must take the record lock to finalize or spawn recovery for this latest row."""
+    if row["status"] == "scheduled" and not alive(row["process"]):
+        return True
+    if start_recovery is not None and _recovery_open(row):
+        return True
+    return (row["status"] == "failed" and _recovery_state(row) == RECOVERY_SCHEDULED
+            and not alive(row["process"]))
+
+
+def _finalize_outstanding_row(row, state_path, alive, start_recovery, probe):
+    """Rewrite a latest row that catch-up can close or recover; True when the record changed."""
+    if row["status"] == "scheduled" and not alive(row["process"]):
+        lost = StateError("The reset deliverer for stow {} exited without finishing.".format(row["stow"]),
+                          {"process": row["process"]})
+        result = failure(lost, row["stow"], str(Path(state_path).expanduser().resolve()), **row["options"])
+        _mark_eligible(result)
+        row.update(status="failed", result=result)
+        _begin_recovery(row, start_recovery, probe)
+        return True
+    if _recovery_open(row):
+        _begin_recovery(row, start_recovery, probe)
+        return _recovery_state(row) != RECOVERY_ELIGIBLE
+    if (row["status"] == "failed" and _recovery_state(row) == RECOVERY_SCHEDULED
+            and not alive(row["process"])):
+        # The one recoverer died before claiming; that attempt is spent.
+        row["result"]["details"]["recovery"] = RECOVERY_FAILED
+        return True
+    return False
+
+
+def _outstanding_item(state_path, path, row, alive):
+    """One catch-up row, or None when this latest reset does not need attention."""
+    if row["status"] in TERMINAL_FAILURES:
+        prompt = row["result"]["resume_prompt"]
+        if row["status"] == "interrupted":
+            needed = ("Look at pane {} first: if a foreman resumed from this reset is running there, run `{}` "
+                      "and clear nothing. Otherwise: {}".format(
+                          row["pane_id"], reconcile_command(state_path, row["pane_id"], row["stow"], "delivered"),
+                          OPERATOR_RECOVERY))
+        else:
+            needed = _recovery_needed(state_path, row)
+    elif row["status"] == "delivering" and not alive(row["process"]):
+        prompt = None
+        failed = reconcile_command(state_path, row["pane_id"], row["stow"], "failed")
+        delivered = reconcile_command(state_path, row["pane_id"], row["stow"], "delivered")
+        needed = ("The deliverer stopped mid-delivery and its outcome is unknown. Look at pane {}: if a resumed "
+                  "foreman is running there, run `{}`; otherwise run `{}` "
+                  "and recover from the saved resume prompt.".format(row["pane_id"], delivered, failed))
+    else:
+        return None
+    return {"pane_id": row["pane_id"], "stow": row["stow"], "status": row["status"], "record": str(path),
+            "needed": needed, "resume_prompt": prompt, "recovery": _recovery_state(row)}
+
+
+def _unusable_outstanding(path, exc):
+    return [{"pane_id": None, "stow": None, "status": "record_unusable", "record": str(path),
+             "needed": exc.message, "resume_prompt": None, "recovery": None}]
+
+
+def outstanding(state_path, *, alive=_alive, start_recovery=None, probe=None):
+    """The foreman resets that still need attention, from the record.
 
     The record is the durable blocker: `foreman-reset` writes the row before
     anything else can fail, and every later failure lands on it. For each pane,
-    the latest reset needs the operator when it ended `failed` or
-    `interrupted`, or when it never reached an outcome and its deliverer is
-    gone. A later `delivered` or `reconciled` reset for the pane supersedes an older failure.
-    An unreadable record is itself outstanding. Nothing is written except the
-    owner's rewrite of a schema-1 record (`_open`).
+    the latest reset is listed when it ended `failed` or `interrupted`, or when
+    it never reached an outcome and its deliverer is gone. A later `delivered`
+    or `reconciled` reset for the pane supersedes an older failure. An unreadable
+    record is itself outstanding.
+
+    A dead `scheduled` row typed nothing: this finalizes it `failed` and marks
+    it eligible for one owner recovery. `start_recovery`, when given, spawns
+    that recoverer while the record lock is held (the child announces ready
+    without taking the lock, then waits to claim). A dead `delivering` row may
+    have typed and stays operator look-first, named with the reconcile command.
+
+    The record lock is taken only when a row must be rewritten (dead scheduled,
+    owner-recovery spawn, dead recoverer) or a schema-1 record must be upgraded.
+    A missing record is a no-op read: no lock file, no directory created.
     """
     path = record_path(state_path)
+    probe = probe or process_identity
     try:
-        try:
-            document, migrated = _load(path)
-        except ResetRecordNewer:
-            document, migrated = None, False
-        if migrated:
-            # Only a schema-1 record takes the owner lock, to be rewritten; any
-            # other read writes nothing, not even a lock file.
-            with state_lock(path):
-                document = _readable(path)
-    except ResetRecordUnusable as exc:
-        return [{"pane_id": None, "stow": None, "status": "record_unusable", "record": str(path),
-                 "needed": exc.message, "resume_prompt": None}]
-    if document is None:
+        document, migrated = _load(path)
+    except ResetRecordNewer:
         return []
+    except ResetRecordUnusable as exc:
+        return _unusable_outstanding(path, exc)
     latest = {}
     for row in document["resets"]:
         latest[row["pane_id"]] = row
+    if migrated or any(_outstanding_would_rewrite(row, alive, start_recovery) for row in latest.values()):
+        try:
+            with state_lock(path):
+                document = _readable(path)
+                if document is None:
+                    return []
+                latest = {}
+                for row in document["resets"]:
+                    latest[row["pane_id"]] = row
+                changed = False
+                items = []
+                for row in latest.values():
+                    if _finalize_outstanding_row(row, state_path, alive, start_recovery, probe):
+                        changed = True
+                    item = _outstanding_item(state_path, path, row, alive)
+                    if item is not None:
+                        items.append(item)
+                if changed:
+                    save_state(path, document)
+                return items
+        except ResetRecordUnusable as exc:
+            return _unusable_outstanding(path, exc)
     items = []
     for row in latest.values():
-        if row["status"] in TERMINAL_FAILURES:
-            prompt = row["result"]["resume_prompt"]
-            needed = OPERATOR_RECOVERY
-            if row["status"] == "interrupted":
-                # Typing began, so the pane may already hold a resumed foreman:
-                # the record alone cannot say, and clearing it would erase that context.
-                needed = ("Look at pane {} first: if a foreman resumed from this reset is running there, run `{}` "
-                          "and clear nothing. Otherwise: {}".format(
-                              row["pane_id"], reconcile_command(state_path, row["pane_id"], row["stow"], "delivered"),
-                              OPERATOR_RECOVERY))
-        elif row["status"] in ("scheduled", "delivering") and not alive(row["process"]):
-            prompt = None
-            failed = reconcile_command(state_path, row["pane_id"], row["stow"], "failed")
-            delivered = reconcile_command(state_path, row["pane_id"], row["stow"], "delivered")
-            if row["status"] == "scheduled":
-                needed = ("The deliverer stopped before claiming the reset, so nothing was typed and the foreman in pane {} "
-                          "still holds its old context. Run `{}`; `{}` then shows the saved resume "
-                          "prompt for recovery.".format(row["pane_id"], failed, command("catch-up")))
-            else:
-                needed = ("The deliverer stopped mid-delivery and its outcome is unknown. Look at pane {}: if a resumed "
-                          "foreman is running there, run `{}`; otherwise run `{}` "
-                          "and recover from the saved resume prompt.".format(row["pane_id"], delivered, failed))
-        else:
-            continue
-        items.append({"pane_id": row["pane_id"], "stow": row["stow"], "status": row["status"], "record": str(path),
-                      "needed": needed, "resume_prompt": prompt})
+        item = _outstanding_item(state_path, path, row, alive)
+        if item is not None:
+            items.append(item)
     return items
 
 
@@ -582,8 +839,11 @@ def _reconciled_outcome(row):
 def delivery_failed(state_path, stow, result):
     """The error a deliverer exits with once its failure is recorded: where the record and the prompt are."""
     record = record_path(state_path)
+    copy = OWNER_RECOVERY if (result.get("details") or {}).get("recovery") == RECOVERY_ELIGIBLE else OPERATOR_RECOVERY
+    if (result.get("details") or {}).get("recovery") in RECOVERY_TERMINAL:
+        copy = OPERATOR_RECOVERY
     return ResetEnded("The reset from stow {} did not complete ({}); {} holds the cause and the resume prompt. {}".format(
-        stow, result["error"], record, OPERATOR_RECOVERY),
+        stow, result["error"], record, copy),
         {"record": str(record), "resume_prompt": result["resume_prompt"], "cause": {"error": result["error"], "message": result["message"]}})
 
 
@@ -631,6 +891,71 @@ def claim(state_path, plan, process, *, sleep=time.sleep, clock=time.monotonic):
         return copy.deepcopy(row)
 
 
+def unclaimed_reason(state_path, plan, process, *, sleep=time.sleep, clock=time.monotonic):
+    """Why `claim` returned None: same-pid identity mismatch vs any other non-owner.
+
+    A duplicate deliverer with another pid must not fail the scheduled owner's
+    row. The scheduled child whose argv changed after spawn is that owner: its
+    pid matches and its identity does not.
+    """
+    path = record_path(state_path)
+    with _waiting_lock(path, sleep=sleep, clock=clock):
+        document = _records(path)
+        row = _row(document, plan)
+        if row is None or row["status"] != "scheduled" or row["process"] is None:
+            return "not_owner"
+        if row["process"]["pid"] == process["pid"] and row["process"] != process:
+            return "identity_mismatch"
+        return "not_owner"
+
+
+def claim_recovery(state_path, plan, process, *, sleep=time.sleep, clock=time.monotonic):
+    """Move an eligible never-typed `failed` reset to `delivering` under this recoverer's identity.
+
+    Overwrites `process` with the recoverer's runtime identity so a launcher→runtime
+    argv change can still own the one recovery attempt. A spawned recoverer whose
+    identity was saved as `recovery: scheduled` claims only as that process. A row
+    that is no longer recoverable, or already delivering, is left alone.
+    """
+    path = record_path(state_path)
+    with _waiting_lock(path, sleep=sleep, clock=clock):
+        document = _records(path)
+        row = _row(document, plan)
+        if row is None or row["status"] != "failed":
+            return None
+        state = _recovery_state(row)
+        if state == RECOVERY_ELIGIBLE:
+            pass
+        elif state == RECOVERY_SCHEDULED and row.get("process") == process:
+            pass
+        else:
+            return None
+        row.update(status="delivering", process=dict(process), result=None)
+        if not _valid_row(row):
+            raise ResetRecordUnusable("The recovery claim for stow {} does not match the reset record's shape; it was not recorded.".format(
+                plan["stow"]), {"record": str(path)})
+        save_state(path, document)
+        return copy.deepcopy(row)
+
+
+def refuse_recovery(state_path, plan, result, *, sleep=time.sleep, clock=time.monotonic):
+    """Record that owner recovery did not type; the row stays `failed` with `recovery` terminal."""
+    path = record_path(state_path)
+    with _waiting_lock(path, sleep=sleep, clock=clock):
+        document = _records(path)
+        row = _row(document, plan)
+        if row is None:
+            raise ResetRecordUnusable("Reset record {} holds no reset for stow {} in pane {}; the recovery refusal was not recorded.".format(
+                path, plan["stow"], plan["pane_id"]), {"record": str(path)})
+        if row["status"] == "delivering":
+            row.update(status="failed", result=result)
+            if not _valid_row(row):
+                raise ResetRecordUnusable("The recovery refusal for stow {} does not match the reset record's shape; it was not recorded.".format(
+                    plan["stow"]), {"record": str(path)})
+            save_state(path, document)
+        return row["status"]
+
+
 def fail_unclaimed(state_path, plan, result, *, sleep=time.sleep, clock=time.monotonic):
     """Finalize a still-`scheduled` row `failed`; return the row's status afterwards.
 
@@ -649,7 +974,9 @@ def fail_unclaimed(state_path, plan, result, *, sleep=time.sleep, clock=time.mon
                                       "The operator reconciles the record before any recovery.".format(path, plan["stow"], plan["pane_id"]),
                                       {"record": str(path)})
         if row["status"] == "scheduled":
-            row.update(status="failed", result=result)
+            stored = copy.deepcopy(result)
+            _mark_eligible(stored)
+            row.update(status="failed", result=stored)
             save_state(path, document)
         return row["status"]
 

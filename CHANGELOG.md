@@ -1,5 +1,18 @@
 # Changelog
 
+### Fixed
+
+- **Never-typed foreman-reset failures recover automatically.** The detached
+  deliverer announces its runtime process identity over a ready pipe before the
+  scheduler saves ownership, so a macOS launcher→framework argv rewrite can
+  still claim. A same-pid identity mismatch fails the row visibly instead of
+  returning exit 0 skipped. Dead `scheduled` rows finalize `failed`, and one
+  owner recovery reuses `deliver()` under the idle, native-session,
+  empty-composer and process-identity checks. Interrupted, busy, replaced,
+  occupied or already-resumed panes stay operator look-first. The original
+  stow is never retried. Catch-up names recovering or failed state; the notice
+  is a non-gating `failure`.
+
 ## 0.3.360 — 2026-10-03
 
 ### Fixed
