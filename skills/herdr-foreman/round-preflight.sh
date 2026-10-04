@@ -303,6 +303,23 @@ PY
     record capability failed "foreman capability-check exited ${rc}; the table's cadence is unknown" 0 ""
   fi
 
+  # 5b. Model-catalog cadence. Independent of the capability table: due is not
+  #     blocking, and a missing catalog comes due immediately.
+  bash "${HERE}/foreman.sh" "${common[@]+"${common[@]}"}" catalog-check "${clock[@]+"${clock[@]}"}" \
+    > "${scratch}/catalog.json" 2>"${scratch}/catalog.err"
+  rc=$?
+  cat "${scratch}/catalog.err" >&2
+  if [ "$rc" -eq 0 ]; then
+    local catalog_due
+    if catalog_due="$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); d=d if isinstance(d, dict) else {}; print("1" if d.get("due") is True else "0" if d.get("due") is False else sys.exit("due is not a boolean"))' "${scratch}/catalog.json")"; then
+      record catalog ok "" "$catalog_due" "${scratch}/catalog.json" "foreman catalog-check"
+    else
+      record catalog failed "foreman catalog-check exited 0 without a readable due flag; the catalog's cadence is unknown" 0 ""
+    fi
+  else
+    record catalog failed "foreman catalog-check exited ${rc}; the catalog's cadence is unknown" 0 ""
+  fi
+
   # 6. Where this repo records its gates. Resolved once here so five workers do
   #    not each spend turns finding the same files.
   bash "${HERE}/resolve-gates.sh" "$checkout" > "${scratch}/gates.json" 2>"${scratch}/gates.err"

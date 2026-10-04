@@ -74,8 +74,8 @@ shadow() { # <dir> [roster-rc] [authority-rc] [prune-rc] [capability-due] [autho
   stub "$dir" resolve-gates.sh 0 '{"instructions":["AGENTS.md"],"workflows":[],"runners":[]}'
   # The stub's `$*` and `$FOREMAN_TIER_*` expand when the stub runs, not here.
   # shellcheck disable=SC2016
-  printf '#!/usr/bin/env bash\nset -euo pipefail\ncase "$*" in\n  *capability-check*) printf %s; exit 0 ;;\n  *measure*) printf %s; exit 0 ;;\n  *verify-foreman*) printf %%s "$FOREMAN_TIER_OUT"; exit "$FOREMAN_TIER_RC" ;;\nesac\nexit 9\n' \
-    "'{\"due\":$due,\"entries\":0}'" "'{\"agents\":{}}'" > "$dir/foreman.sh" || die "write foreman stub"
+  printf '#!/usr/bin/env bash\nset -euo pipefail\ncase "$*" in\n  *catalog-check*) printf %s; exit 0 ;;\n  *capability-check*) printf %s; exit 0 ;;\n  *measure*) printf %s; exit 0 ;;\n  *verify-foreman*) printf %%s "$FOREMAN_TIER_OUT"; exit "$FOREMAN_TIER_RC" ;;\nesac\nexit 9\n' \
+    "'{\"due\":false,\"entries\":0}'" "'{\"due\":$due,\"entries\":0}'" "'{\"agents\":{}}'" > "$dir/foreman.sh" || die "write foreman stub"
   chmod +x "$dir/foreman.sh" || die "chmod foreman stub"
 }
 
@@ -229,8 +229,8 @@ main() {
   shadow "$TMP/shape-capability"
   # The stub's `$*` and `$FOREMAN_TIER_*` expand when the stub runs, not here.
   # shellcheck disable=SC2016
-  printf '#!/usr/bin/env bash\nset -euo pipefail\ncase "$*" in\n  *capability-check*) printf %s; exit 0 ;;\n  *measure*) printf %s; exit 0 ;;\n  *verify-foreman*) printf %%s "$FOREMAN_TIER_OUT"; exit "$FOREMAN_TIER_RC" ;;\nesac\nexit 9\n' \
-    "'[]'" "'{\"agents\":{}}'" > "$TMP/shape-capability/foreman.sh" || die "write foreman stub"
+  printf '#!/usr/bin/env bash\nset -euo pipefail\ncase "$*" in\n  *catalog-check*) printf %s; exit 0 ;;\n  *capability-check*) printf %s; exit 0 ;;\n  *measure*) printf %s; exit 0 ;;\n  *verify-foreman*) printf %%s "$FOREMAN_TIER_OUT"; exit "$FOREMAN_TIER_RC" ;;\nesac\nexit 9\n' \
+    "'{\"due\":false,\"entries\":0}'" "'[]'" "'{\"agents\":{}}'" > "$TMP/shape-capability/foreman.sh" || die "write foreman stub"
   run "$TMP/shape-capability"
   if [[ $RC -eq 1 ]] && [[ "$(field "$OUT" 'd["checks"]["capability"]["status"]')" == '"failed"' ]] \
      && ! printf '%s' "$ERRTEXT" | grep -q 'Traceback'; then
@@ -258,8 +258,8 @@ main() {
   shadow "$TMP/measurefails"
   # The stub's `$*` and `$FOREMAN_TIER_*` expand when the stub runs, not here.
   # shellcheck disable=SC2016
-  printf '#!/usr/bin/env bash\nset -euo pipefail\ncase "$*" in\n  *capability-check*) printf %s; exit 0 ;;\n  *measure*) echo "measure: probe failed" >&2; exit 3 ;;\n  *verify-foreman*) printf %%s "$FOREMAN_TIER_OUT"; exit "$FOREMAN_TIER_RC" ;;\nesac\nexit 9\n' \
-    "'{\"due\":false,\"entries\":0}'" > "$TMP/measurefails/foreman.sh" || die "write foreman stub"
+  printf '#!/usr/bin/env bash\nset -euo pipefail\ncase "$*" in\n  *catalog-check*) printf %s; exit 0 ;;\n  *capability-check*) printf %s; exit 0 ;;\n  *measure*) echo "measure: probe failed" >&2; exit 3 ;;\n  *verify-foreman*) printf %%s "$FOREMAN_TIER_OUT"; exit "$FOREMAN_TIER_RC" ;;\nesac\nexit 9\n' \
+    "'{\"due\":false,\"entries\":0}'" "'{\"due\":false,\"entries\":0}'" > "$TMP/measurefails/foreman.sh" || die "write foreman stub"
   run "$TMP/measurefails"
   if [[ $RC -eq 1 ]] && [[ "$(field "$OUT" 'd["checks"]["headroom"]["status"]')" == '"failed"' ]] \
      && [[ "$(field "$OUT" 'd["checks"]["foreman_tier"]["status"]')" == '"failed"' ]] \
@@ -282,8 +282,8 @@ main() {
   shadow "$TMP/measurebadjson"
   # The stub's `$*` and `$FOREMAN_TIER_*` expand when the stub runs, not here.
   # shellcheck disable=SC2016
-  printf '#!/usr/bin/env bash\nset -euo pipefail\ncase "$*" in\n  *capability-check*) printf %s; exit 0 ;;\n  *measure*) printf not-json; exit 0 ;;\n  *verify-foreman*) printf %%s "$FOREMAN_TIER_OUT"; exit "$FOREMAN_TIER_RC" ;;\nesac\nexit 9\n' \
-    "'{\"due\":false,\"entries\":0}'" > "$TMP/measurebadjson/foreman.sh" || die "write foreman stub"
+  printf '#!/usr/bin/env bash\nset -euo pipefail\ncase "$*" in\n  *catalog-check*) printf %s; exit 0 ;;\n  *capability-check*) printf %s; exit 0 ;;\n  *measure*) printf not-json; exit 0 ;;\n  *verify-foreman*) printf %%s "$FOREMAN_TIER_OUT"; exit "$FOREMAN_TIER_RC" ;;\nesac\nexit 9\n' \
+    "'{\"due\":false,\"entries\":0}'" "'{\"due\":false,\"entries\":0}'" > "$TMP/measurebadjson/foreman.sh" || die "write foreman stub"
   run "$TMP/measurebadjson"
   if [[ $RC -eq 1 ]] && [[ "$(field "$OUT" 'd["checks"]["headroom"]["status"]')" == '"blocked"' ]] \
      && [[ "$(field "$OUT" 'd["checks"]["foreman_tier"]["status"]')" == '"failed"' ]] \

@@ -58,9 +58,10 @@ class TierConfigTest(unittest.TestCase):
 
     def test_judgment_cannot_be_lowered_by_config(self):
         for round_type in ("review", "critic", "recheck", "hostile_verify", "architect", "reconciliation", "release_adjudication"):
-            for entry in ({"model": "sonnet-5", "effort": "high"}, {"model": "opus-5", "effort": "medium"}):
-                with self.subTest(round_type=round_type, entry=entry), self.assertRaises(ConfigError):
-                    parse_tiers({round_type: entry}, "claude")
+            with self.subTest(round_type=round_type):
+                parse_tiers({round_type: {"model": "sonnet-5", "effort": "high"}}, "claude")
+                with self.assertRaises(ConfigError):
+                    parse_tiers({round_type: {"model": "opus-5", "effort": "medium"}}, "claude")
 
     def test_dead_rounds_kinds_and_bad_costs_are_refused(self):
         with self.assertRaises(ConfigError):
@@ -106,14 +107,14 @@ class SelectionTest(unittest.TestCase):
                     with self.assertRaisesRegex(UsageError, "cannot perform role"):
                         select_tier(worker, role, forbidden, mechanical_context())
 
-    def test_consultation_and_test_plan_accept_a_non_top_row_and_gates_do_not(self):
-        for round_type in ("consultation", "test_plan"):
+    def test_consultation_test_plan_and_judgment_parse_a_non_top_id_at_high(self):
+        # Exact IDs left the Python allowlist: parse_tiers keeps the high-or-above
+        # effort floor. Catalog judgment_family is the remaining gate.
+        for round_type in ("consultation", "test_plan", "reconciliation", "architect",
+                           "hostile_verify", "recheck"):
             with self.subTest(round_type=round_type):
                 self.assertEqual(parse_tiers({round_type: {"model": "sonnet-5", "effort": "high"}}, "claude")[round_type]["model"],
                                  "sonnet-5")
-        for round_type in ("reconciliation", "architect", "hostile_verify", "recheck"):
-            with self.subTest(round_type=round_type), self.assertRaises(ConfigError):
-                parse_tiers({round_type: {"model": "sonnet-5", "effort": "high"}}, "claude")
 
     def test_scarcity_declines_a_consultation_bump_but_never_an_escalated_round(self):
         worker = agent("codex")

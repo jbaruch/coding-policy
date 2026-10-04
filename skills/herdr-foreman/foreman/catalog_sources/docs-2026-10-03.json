@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "dated": "2026-10-03",
+  "sources": [
+    {
+      "adapter": "claude",
+      "kind": "docs",
+      "ref": "https://code.claude.com/docs/en/model-config",
+      "dated": "2026-10-03",
+      "aliases": ["opus", "sonnet", "haiku", "fable", "best", "default", "opusplan", "opus[1m]", "sonnet[1m]"],
+      "models": ["claude-opus-5-5"]
+    },
+    {
+      "adapter": "codex",
+      "kind": "docs",
+      "ref": "https://learn.chatgpt.com/docs/models",
+      "dated": "2026-10-03",
+      "models": ["gpt-6.1-sol", "gpt-6-astra", "gpt-5.6-sol"],
+      "deprecated": [
+        {"model": "gpt-5.3-codex-spark", "retired": "2026-09-14"}
+      ]
+    },
+    {
+      "adapter": "grok",
+      "kind": "docs",
+      "ref": "https://docs.x.ai/developers/models",
+      "dated": "2026-10-03",
+      "models": ["grok-4.7", "grok-4.6"]
+    }
+  ]
+}

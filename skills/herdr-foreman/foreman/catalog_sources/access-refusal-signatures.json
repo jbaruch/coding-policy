@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "dated": "2026-10-03",
+  "signatures": [
+    {
+      "adapter": "claude",
+      "class": "request_refused",
+      "pattern": "There's an issue with the selected model \\(([^)]+)\\)\\. It may not exist or you may not have access"
+    },
+    {
+      "adapter": "*",
+      "class": "quota",
+      "pattern": "rate limit|quota exceeded|usage limit|out of credits"
+    },
+    {
+      "adapter": "*",
+      "class": "transport",
+      "pattern": "network error|connection refused|ECONNRESET|timed out|timeout"
+    }
+  ]
+}

@@ -1,5 +1,13 @@
 # Changelog
 
+### Added
+
+- **Herdr now keeps a maintained model catalog beside the capability table.**
+  Discovery reads local CLI cache formats plus dated docs; selection refuses
+  recorded access failures and documented retirements without rewriting
+  `config.json`. Exact version IDs leave the Python allowlist. Follow-up work
+  owns candidate-file reconcile and readiness probes.
+
 ## 0.3.361 — 2026-10-03
 
 ### Fixed

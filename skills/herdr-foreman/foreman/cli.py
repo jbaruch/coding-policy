@@ -29,7 +29,7 @@ from . import __version__
 from .assign import apply as apply_assignments
 from .assign import APPLY_SCHEMA_VERSION, dry_run, freeze_decision, freeze_paths, read_frozen, native_context_session, normalize_assignments, resolve_paths, validate_fix_history
 from . import renderable
-from . import attention, capabilities, chronology, churn, composition, engagement, foreman_queue, foreman_reset, historical, home, lifecycle, load_set, members, memory, oracle, partition, recovery, report_delivery, report_gates, restoration, role_clear, retrospective, retrospective_runtime, supervision, supervision_gate, supervision_runtime, triggers
+from . import attention, capabilities, catalog, chronology, churn, composition, engagement, foreman_queue, foreman_reset, historical, home, lifecycle, load_set, members, memory, oracle, partition, recovery, report_delivery, report_gates, restoration, role_clear, retrospective, retrospective_runtime, supervision, supervision_gate, supervision_runtime, triggers
 from .config import FOREMAN_CONFIG_VERSION, default_config_path, load_config, load_foreman, load_judge, load_role_costs, select_agents
 from .errors import AgentBusyError, PlanError, StateError, ForemanError, HerdrError, UsageError
 from .herdr import (
@@ -166,6 +166,24 @@ def build_parser():
     capability_record.add_argument("--now", metavar="ISO")
     capability_show = sub.add_parser("capability-show", parents=[common],
                                      help="Read the saved capability table without contacting Herdr.")
+    catalog_check = sub.add_parser("catalog-check", parents=[common],
+                                   help="Whether the model catalog is due a refresh. Read-only.")
+    catalog_check.add_argument("--now", metavar="ISO")
+    catalog_discover = sub.add_parser("catalog-discover", parents=[common],
+                                      help="Read local CLI caches and dated docs into the model catalog.")
+    catalog_discover.add_argument("--now", metavar="ISO")
+    catalog_discover.add_argument("--cache", action="append", dest="caches", metavar="ADAPTER=PATH",
+                                  help="Inject a CLI cache path (repeatable). Adapter is claude, codex or grok.")
+    catalog_record = sub.add_parser("catalog-record", parents=[common],
+                                    help="Record judgment-family flags into matching catalog rows.")
+    catalog_record.add_argument("--record", required=True, metavar="FILE")
+    catalog_record.add_argument("--now", metavar="ISO")
+    catalog_access = sub.add_parser("catalog-record-access", parents=[common],
+                                    help="Record a scoped access, quota or transport observation.")
+    catalog_access.add_argument("--record", required=True, metavar="FILE")
+    catalog_access.add_argument("--now", metavar="ISO")
+    sub.add_parser("catalog-show", parents=[common],
+                   help="Read the saved model catalog without contacting Herdr.")
     sub.add_parser("supervision-gate", parents=[common],
                    help="Which pending supervision events need the foreman. Read-only.")
 
@@ -733,11 +751,15 @@ def _planned_snapshot_headroom(document, state, state_path):
     return _snapshot_headroom(snapshot)
 
 
-def _build_plan_with_refusals(build, refusals, *args, **kwargs):
-    """Plan, naming every capability refusal when no candidate is left to plan."""
+def _build_plan_with_refusals(build, refusals, *args, catalog_refusals=None, **kwargs):
+    """Plan, naming every capability or catalog refusal when no candidate is left to plan."""
     try:
         return build(*args, **kwargs)
     except PlanError as exc:
+        if catalog_refusals:
+            raise catalog.CatalogRefusal("{} Catalog refusals: {}".format(exc.message, " ".join(
+                "{} for {}: {}".format(row["agent"], row["role"], row["message"]) for row in catalog_refusals)),
+                {**exc.details, "catalog_refusals": catalog_refusals}) from None
         if not refusals:
             raise
         raise PlanError("{} Capability refusals: {}".format(exc.message, " ".join(
@@ -751,9 +773,10 @@ PLAN_ONLY_TIER_FIELDS = frozenset({"capability", "cheaper_adequate"})
 
 
 def _candidate_tiers(roles, agents, rounds, fix_round=None, judge=None, excludes=None, headroom=None, table=None, refusals=None,
-                     reusable_agents=False):
+                     reusable_agents=False, catalog_document=None, catalog_refusals=None):
     """Each role's candidate tiers; `refusals` collects a capability refusal per skipped candidate."""
     table = table if table is not None else capabilities.empty()
+    catalog_document = catalog_document if catalog_document is not None else catalog.empty()
     tiered = any(agent.tiers for agent in agents)
     if not tiered and not (judge and "judge" in roles):
         if rounds:
@@ -770,6 +793,16 @@ def _candidate_tiers(roles, agents, rounds, fix_round=None, judge=None, excludes
                     # The pinned judge has no substitute, so an inadequate pin refuses the plan.
                     verdict = capabilities.assess(table, judge.model, judge.effort or None,
                                                   capabilities.required("judge", "judge", JUDGMENT_ROUNDS))
+                    fingerprint = catalog.pair_fingerprint(catalog_document, agent.kind)
+                    try:
+                        catalog.assess_pair(
+                            catalog_document, agent.kind, judge.model, judge.effort or None,
+                            fingerprint, judgment=True, judge=True)
+                    except catalog.CatalogRefusal as exc:
+                        if catalog_refusals is not None:
+                            catalog_refusals.append(
+                                {"role": role, "agent": agent.name, "message": exc.message, **exc.details})
+                        continue
                     candidates[role][agent.name] = {"round": "judge", "tier_row": "judge", "kind": agent.kind,
                         "model": judge.model, "effort": judge.effort or None,
                         "billing_window": "unknown", "multiplier": 1.0, "effective_multiplier": 1.0,
@@ -800,6 +833,16 @@ def _candidate_tiers(roles, agents, rounds, fix_round=None, judge=None, excludes
             except capabilities.InadequateCapability as exc:
                 if refusals is not None:
                     refusals.append({"role": role, "agent": agent.name, "message": exc.message, **exc.details})
+                continue
+            fingerprint = catalog.pair_fingerprint(catalog_document, agent.kind)
+            try:
+                catalog.assess_pair(
+                    catalog_document, agent.kind, tier["model"], tier["effort"], fingerprint,
+                    judgment=tier["round"] in JUDGMENT_ROUNDS, judge=False)
+            except catalog.CatalogRefusal as exc:
+                if catalog_refusals is not None:
+                    catalog_refusals.append(
+                        {"role": role, "agent": agent.name, "message": exc.message, **exc.details})
                 continue
             candidates[role][agent.name] = {key: tier[key] for key in (
                 "round", "tier_row", "kind", "model", "effort", "multiplier", "billing_window",
@@ -1054,13 +1097,17 @@ def cmd_plan(args, client=None, warn=None, trace=None):
     # what keeps its recomputed tiers equal to the planned ones (#477).
     measured_headroom = _snapshot_headroom(snapshot)
     capability_refusals = []
+    catalog_refusals = []
     table = capabilities.load(_state_path(args))
+    catalog_document = catalog.load(_state_path(args))
     tier_candidates = _candidate_tiers(canonical, agents, rounds, args.fix_round, judge,
                                       excludes={role: names for role, names in excludes.items() if role in set(canonical)},
                                       headroom=measured_headroom, table=table,
-                                      refusals=capability_refusals, reusable_agents=scoped)
+                                      refusals=capability_refusals, reusable_agents=scoped,
+                                      catalog_document=catalog_document, catalog_refusals=catalog_refusals)
     constraints = {**constraints, "rationale": constraints["rationale"] + [
-        "{} was not considered for {}: {}".format(row["agent"], row["role"], row["message"]) for row in capability_refusals]}
+        "{} was not considered for {}: {}".format(row["agent"], row["role"], row["message"])
+        for row in capability_refusals + catalog_refusals]}
     # Each seat inherits its role's bars, tiers, round type and requirements.
     # `role_costs` is not fanned out: the planner resolves a seat's default
     # weight and rotation history through its role (#434).
@@ -1078,6 +1125,7 @@ def cmd_plan(args, client=None, warn=None, trace=None):
             roles,
             snapshot,
             role_counts(state, _worker_kind_provenance(state) if scoped else None),
+            catalog_refusals=catalog_refusals,
             exclude=excludes,
             role_costs=role_costs,
             judge_agent=judge.agent if judge else None,
@@ -1546,12 +1594,17 @@ def _apply(args, client, warn, trace, hold_gates):
         planned_headroom = _scoped_headroom(
             assignments, document["worker_kinds"], planned_headroom)
     capability_refusals = []
+    catalog_refusals = []
     candidates = _candidate_tiers(list(assignments), agents, rounds, args.fix_round, active_judge,
                                   excludes=constraints["exclude"], headroom=planned_headroom,
-                                  table=capabilities.load(state_path), refusals=capability_refusals)
+                                  table=capabilities.load(state_path), refusals=capability_refusals,
+                                  catalog_document=catalog.load(state_path), catalog_refusals=catalog_refusals)
     tiers = {}
     if candidates is not None:
         for role, name in assignments.items():
+            refused = next((row for row in catalog_refusals if (row["role"], row["agent"]) == (role, name)), None)
+            if refused is not None:
+                raise catalog.CatalogRefusal(refused["message"], {key: refused[key] for key in refused if key != "message"})
             refused = next((row for row in capability_refusals if (row["role"], row["agent"]) == (role, name)), None)
             if refused is not None:
                 raise capabilities.InadequateCapability(refused["message"], {key: refused[key] for key in refused if key != "message"})
@@ -2368,6 +2421,10 @@ def cmd_start_judge(args, client=None, warn=None, trace=None):
     # inadequate refuses the start, before anything launches (#476).
     capabilities.assess(capabilities.load(state_path), parsed["model"], parsed["effort"],
                         capabilities.required("judge", "judge", JUDGMENT_ROUNDS))
+    catalog_document = catalog.load(state_path)
+    catalog.assess_pair(
+        catalog_document, args.kind, parsed["model"], parsed["effort"],
+        catalog.pair_fingerprint(catalog_document, args.kind), judgment=True, judge=True)
     # The judge rules on the investigator's assessment, so the seat is never
     # started at an exhausted allowance before that assessment exists (#408).
     full = _load_state_for_write(state_path, warn, persist_migration=False)
@@ -2588,6 +2645,53 @@ def cmd_capability(args, client=None, warn=None, trace=None):
                 "entries": len(document["entries"])}, None
     refreshed = capabilities.record(path, _read_record(args.record), at)
     return {"schema_version": capabilities.SCHEMA_VERSION,
+            "refreshed_at": refreshed["refreshed_at"],
+            "entries": len(refreshed["entries"])}, None
+
+
+def _cache_map(values):
+    if not values:
+        return None
+    parsed = {}
+    for item in values:
+        if not isinstance(item, str) or "=" not in item:
+            raise UsageError(
+                "Each --cache is ADAPTER=PATH with adapter one of {}.".format(", ".join(catalog.ADAPTERS)), {})
+        adapter, raw = item.split("=", 1)
+        if adapter not in catalog.ADAPTERS:
+            raise UsageError(
+                "Unknown catalog adapter {!r}; use one of {}.".format(adapter, ", ".join(catalog.ADAPTERS)),
+                {"adapter": adapter})
+        parsed[adapter] = Path(raw)
+    result = {name: None for name in catalog.ADAPTERS}
+    result.update(parsed)
+    return result
+
+
+def cmd_catalog(args, client=None, warn=None, trace=None):
+    """The model catalog's cadence, discovery, family/access records, and a read."""
+    path = _state_path(args)
+    document = catalog.load(path)
+    if args.command == "catalog-show":
+        return document, None
+    at = args.now or now_iso()
+    if args.command == "catalog-check":
+        result = catalog.cadence(document, at, caches=catalog.default_cache_paths())
+        return {"schema_version": catalog.SCHEMA_VERSION, **result,
+                "entries": len(document["entries"])}, None
+    if args.command == "catalog-discover":
+        refreshed = catalog.discover(path, at, caches=_cache_map(getattr(args, "caches", None)))
+        return {"schema_version": catalog.SCHEMA_VERSION,
+                "refreshed_at": refreshed["refreshed_at"],
+                "entries": len(refreshed["entries"])}, None
+    if args.command == "catalog-record-access":
+        refreshed = catalog.record_access(path, _read_record(args.record), at)
+        return {"schema_version": catalog.SCHEMA_VERSION,
+                "refreshed_at": refreshed["refreshed_at"],
+                "entries": len(refreshed["entries"]),
+                "observations": len(refreshed["observations"])}, None
+    refreshed = catalog.record(path, _read_record(args.record), at)
+    return {"schema_version": catalog.SCHEMA_VERSION,
             "refreshed_at": refreshed["refreshed_at"],
             "entries": len(refreshed["entries"])}, None
 
@@ -2899,6 +3003,8 @@ COMMANDS = {
     "marker-fit": cmd_marker_fit,
     **{command: cmd_retrospective for command in ("retro-check", "retro-record", "retro-list", "retro-show")},
     **{command: cmd_capability for command in ("capability-check", "capability-record", "capability-show")},
+    **{command: cmd_catalog for command in (
+        "catalog-check", "catalog-discover", "catalog-record", "catalog-record-access", "catalog-show")},
     "supervision-gate": cmd_supervision_gate,
     **{command: cmd_memory for command in memory.COMMANDS},
     **{command: cmd_attention for command in attention.COMMANDS},
@@ -2952,7 +3058,7 @@ def main(argv=None, stdout=None, stderr=None, client=None):
             home.require_current(defaults)
             # Commands that may migrate or write state share its canonical lock.
             # Dry runs, probes, and retrospective reads remain read-only.
-            readonly = args.command in {"probe-report", "marker-fit", "detect-triggers", "finding-churn", "validate-partition", "verify-oracle", "verify-ruling", "retro-check", "retro-list", "retro-show", "capability-check", "capability-show", "supervision-gate", "load-set", "foreman-queue", "cost-report", "check-member", "verify-foreman", "report-gate-status"} or getattr(args, "dry_run", False)
+            readonly = args.command in {"probe-report", "marker-fit", "detect-triggers", "finding-churn", "validate-partition", "verify-oracle", "verify-ruling", "retro-check", "retro-list", "retro-show", "capability-check", "capability-show", "catalog-check", "catalog-show", "supervision-gate", "load-set", "foreman-queue", "cost-report", "check-member", "verify-foreman", "report-gate-status"} or getattr(args, "dry_run", False)
             # The deliverer starts while `foreman-reset` still holds the state lock;
             # it serializes on the reset record's own lock instead. close-member
             # writes only through the supervision owner's own lock.

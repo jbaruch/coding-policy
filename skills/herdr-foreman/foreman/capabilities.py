@@ -50,10 +50,10 @@ VERDICTS = ("adequate", "inadequate", "unknown")
 
 #: The table's vocabulary, owned here so what a consultation records is what
 #: routing reads (#520). `ROUND_CAPABILITIES` names what each round needs a
-#: model to do; a judgment round on a rotating worker also needs
-#: `JUDGMENT_TIER`, and a consultation needs what its role does.
-#: `RECORDED_ONLY` names are facts the table keeps without routing on them.
-#: `record` refuses any other name.
+#: model to do; a consultation needs what its role does. `JUDGMENT_TIER` is
+#: recorded-only: family membership lives in the catalog sidecar, and
+#: `required()` no longer inserts it. `RECORDED_ONLY` names are facts the
+#: table keeps without routing on them. `record` refuses any other name.
 JUDGMENT_TIER = "rotating-worker-judgment-tier"
 JUDGE_CAPABILITY = "pinned-judge-launch"
 ROUND_CAPABILITIES = {
@@ -75,7 +75,7 @@ ROUND_CAPABILITIES = {
     "coordination": ("mechanical-execution",),
 }
 CONSULTATION_CAPABILITIES = {"investigator": "causal-investigation", "advisor": "advisory-synthesis"}
-RECORDED_ONLY = frozenset({"context-window-1m", "report-verdict-classification"})
+RECORDED_ONLY = frozenset({"context-window-1m", "report-verdict-classification", JUDGMENT_TIER})
 VOCABULARY = frozenset(
     {JUDGMENT_TIER, JUDGE_CAPABILITY} | set(CONSULTATION_CAPABILITIES.values()) | RECORDED_ONLY
     | {name for names in ROUND_CAPABILITIES.values() for name in names})
@@ -254,14 +254,17 @@ def lookup(document, model, effort, capability):
 
 
 def required(role, round_type, judgment_rounds):
-    """The capabilities a round asks of the model that runs it, in vocabulary order."""
+    """The capabilities a round asks of the model that runs it, in vocabulary order.
+
+    `judgment_rounds` is kept so callers stay unchanged; family membership is
+    the catalog's `judgment_family`, not a capability-table insert.
+    """
+    del judgment_rounds
     if round_type == "judge":
         return (JUDGE_CAPABILITY,)
     names = list(ROUND_CAPABILITIES[round_type])
     if round_type == "consultation":
         names.append(CONSULTATION_CAPABILITIES[role])
-    if round_type in judgment_rounds:
-        names.insert(0, JUDGMENT_TIER)
     return tuple(names)
 
 

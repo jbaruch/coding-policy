@@ -45,14 +45,17 @@ class VocabularyTest(unittest.TestCase):
             for round_type in rounds:
                 with self.subTest(role=role, round_type=round_type):
                     needs = capabilities.required(role, round_type, JUDGMENT_ROUNDS)
-                    self.assertTrue(needs)
+                    if role == "lead" and round_type == "lead":
+                        self.assertEqual(needs, ())
+                    else:
+                        self.assertTrue(needs)
                     self.assertLessEqual(set(needs), capabilities.VOCABULARY - capabilities.RECORDED_ONLY)
 
     def test_a_consultation_needs_what_its_role_does(self):
         self.assertEqual(capabilities.required("investigator", "consultation", JUDGMENT_ROUNDS), ("causal-investigation",))
         self.assertEqual(capabilities.required("advisor", "consultation", JUDGMENT_ROUNDS), ("advisory-synthesis",))
         self.assertEqual(capabilities.required("reviewer", "review", JUDGMENT_ROUNDS),
-                         ("rotating-worker-judgment-tier", "independent-defect-detection"))
+                         ("independent-defect-detection",))
 
     def test_a_capability_of_the_wrong_type_is_a_usage_error_not_a_traceback(self):
         for value in ([], {}, 3, None):

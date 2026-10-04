@@ -833,6 +833,7 @@ The independent continuity stores do not change this dispatch-state schema.
 | User attention and recorded progress | `<selected-state>.attention.json` | `skills/herdr-foreman/references/attention.md`, Commands and files |
 | Fleet observations and supervision | `<selected-state>.supervision.json` | `skills/herdr-foreman/references/supervision.md` |
 | Model capabilities, sourced and dated | `<selected-state>.capabilities.json` | `skills/herdr-foreman/references/model-tiers.md`, Capability table |
+| Model catalog, listed IDs and scoped availability | `<selected-state>.catalog.json` | `skills/herdr-foreman/references/model-tiers.md`, Model catalog |
 | Report gates from classifier labels and blocking verdicts | `<selected-state>.report-gates.json` | `skills/herdr-foreman/references/report-classifier.md`, Sidecar schema 2 |
 
 Resolve the selected state path before deriving these locations. Each store and

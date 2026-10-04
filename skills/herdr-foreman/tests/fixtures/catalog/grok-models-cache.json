@@ -1,0 +1,61 @@
+{
+  "fetched_at": "2026-10-03T22:59:10+00:00",
+  "grok_version": "1.0.46",
+  "identity": "328cefbfaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "origin": "https://cli-chat-proxy.grok.com/v1/models",
+  "etag": "fixture",
+  "models": {
+    "grok-4.9": {
+      "info": {
+        "id": "grok-4.9",
+        "reasoning_efforts": [
+          {"id": "low"},
+          {"id": "medium"},
+          {"id": "high"},
+          {"id": "xhigh"}
+        ]
+      }
+    },
+    "grok-4.7": {
+      "info": {
+        "id": "grok-4.7",
+        "reasoning_efforts": [
+          {"id": "low"},
+          {"id": "medium"},
+          {"id": "high"},
+          {"id": "xhigh"}
+        ]
+      }
+    },
+    "grok-4.7-build-fast": {
+      "info": {
+        "id": "grok-4.7-build-fast",
+        "reasoning_efforts": [
+          {"id": "low"},
+          {"id": "medium"}
+        ]
+      }
+    },
+    "grok-4.6": {
+      "info": {
+        "id": "grok-4.6",
+        "reasoning_efforts": [
+          {"id": "low"},
+          {"id": "medium"},
+          {"id": "high"},
+          {"id": "xhigh"}
+        ]
+      }
+    },
+    "grok-4.5": {
+      "info": {
+        "id": "grok-4.5",
+        "reasoning_efforts": [
+          {"id": "low"},
+          {"id": "medium"},
+          {"id": "high"}
+        ]
+      }
+    }
+  }
+}

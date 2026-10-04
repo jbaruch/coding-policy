@@ -368,6 +368,44 @@ and returns a report at the path its brief names; the foreman records it. A refr
 replaces the rows it covers and leaves every other row untouched, so one report
 about two models never retires the rest of the table.
 
+## Model catalog
+
+Listed IDs, scoped availability, and judgment family. A sidecar beside the
+capability table. Discovery reads local CLI metadata; selection refuses a
+recorded access failure and a documented retirement. Listing is not access;
+this build never writes `available`. Exact version allowlists do not live in
+Python.
+
+Saved at `<selected-state>.catalog.json`. Owner:
+`skills/herdr-foreman/foreman/catalog.py`. Writers: `catalog-discover`,
+`catalog-record`, `catalog-record-access`. Readers: `catalog-check`,
+`catalog-show`, the round preflight, `plan`, `apply` and `start-judge`.
+`plan` and `apply` read it read-only through `catalog.load`: a missing file is
+an empty catalog, a catalog written by a newer build is read as empty with a
+warning and left untouched, and an unreadable or malformed one refuses the
+command naming the file. A symlink at the catalog's path, live or dangling,
+refuses the command and is left as found. The owner never rewrites
+`config.json`.
+
+An absent file reads as an empty catalog: `refreshed_at: null`, no scopes,
+entries or observations. Unknown, unlisted and listed-without-access leave a
+configured row, the way capability `unknown` does. A recorded `unavailable`
+from `request_refused` or `invalid_id` is scoped to a fingerprint. Quota and
+transport observations append history and leave availability unchanged.
+`judgment_family` true rests on a benchmark, evaluation or project source.
+The pinned judge skips the family check and has no fallback ID.
+
+The round preflight reports catalog cadence under `due` independently of the
+capability table. SKILL.md Step 2 carries `catalog-check`, `catalog-discover`,
+`catalog-record`, `catalog-record-access` and `catalog-show`. A catalog never
+refreshed comes due immediately. The interval is
+`skills/herdr-foreman/foreman/catalog.py`'s decision contract, not restated
+here (`rules/script-as-black-box.md`).
+
+Candidate-file reconcile (a dated config sibling) and readiness probes that
+write `available` are later deliverables. This owner refuses a config rewrite
+and never invents a replacement slug.
+
 ## Billing-window evidence
 
 Collect billing evidence before assigning a tier a separate pool. Run an
@@ -427,8 +465,9 @@ Contract); what each field counts is `skills/herdr-foreman/foreman/cost_report.p
 No per-model, per-effort, per-role battery gates a tier. Three things already
 cover what one would catch:
 
-1. Judgment rounds run on the pinned top model; `parse_tiers` in
-   `skills/herdr-foreman/foreman/tiers.py` refuses a lower one.
+1. Judgment rounds run a recorded judgment-family model at high or above;
+   `parse_tiers` in `skills/herdr-foreman/foreman/tiers.py` refuses a lower
+   effort, and the catalog refuses a listed non-family pair at selection.
 2. Every other round's output passes independent review and testing before
    release.
 3. Which model suits which job is the capability table above: sourced, dated

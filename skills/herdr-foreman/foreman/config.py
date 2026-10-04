@@ -13,7 +13,7 @@ from pathlib import Path
 
 from .errors import ConfigError, ForemanError
 from .herdr import SLASH_DELIVERIES, SLASH_DELIVERY_PASTE
-from .tiers import TOP_MODELS, parse_launch_args, parse_tiers
+from .tiers import SUPPORTED_KINDS, parse_launch_args, parse_tiers
 
 CONFIG_SCHEMA_VERSION = 7
 READABLE_CONFIG_VERSIONS = frozenset({1, 2, 3, 4, 5, 6, 7})
@@ -635,10 +635,10 @@ def parse_foreman(payload, source="<memory>"):
                     source, field, value, FOREMAN_EXAMPLE),
                 {"source": source, "field": field, "value": value})
     agent, kind = raw["agent"], raw["kind"]
-    if kind not in TOP_MODELS:
+    if kind not in SUPPORTED_KINDS:
         raise ConfigError(
             "Config at {}: `foreman.kind` is {!r}; the seat launches through the {} adapter.".format(
-                source, kind, " or ".join(sorted(TOP_MODELS))),
+                source, kind, " or ".join(sorted(SUPPORTED_KINDS))),
             {"source": source, "kind": kind})
     judge = parse_judge(payload, source=source)
     if version != 7 and judge is not None and agent == judge.agent:

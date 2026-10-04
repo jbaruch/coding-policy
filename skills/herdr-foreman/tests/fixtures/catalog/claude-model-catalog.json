@@ -1,0 +1,75 @@
+{
+  "version": 1,
+  "fetchedAt": "2026-10-03T20:00:00+00:00",
+  "staleAt": "2026-10-10T20:00:00+00:00",
+  "catalog": {
+    "config": {
+      "id": "2fe11c8d-8a42-4ddb-9de1-189de01b063a",
+      "models": [
+        {
+          "id": "claude-opus-5-5",
+          "name": "Opus 5.5",
+          "short_name": "Opus",
+          "thinking": {
+            "type": "effort",
+            "effort_options": [
+              {"id": "low"},
+              {"id": "medium"},
+              {"id": "high"},
+              {"id": "xhigh"},
+              {"id": "max"}
+            ]
+          }
+        },
+        {
+          "id": "claude-opus-5",
+          "name": "Opus 5",
+          "short_name": "Opus",
+          "thinking": {
+            "type": "effort",
+            "effort_options": [
+              {"id": "low"},
+              {"id": "medium"},
+              {"id": "high"},
+              {"id": "xhigh"},
+              {"id": "max"}
+            ]
+          }
+        },
+        {
+          "id": "claude-sonnet-5-5",
+          "name": "Sonnet 5.5",
+          "short_name": "Sonnet",
+          "thinking": {
+            "type": "effort",
+            "effort_options": [
+              {"id": "low"},
+              {"id": "medium"},
+              {"id": "high"}
+            ]
+          }
+        },
+        {
+          "id": "claude-haiku-4-5",
+          "name": "Haiku 4.5",
+          "short_name": "Haiku",
+          "thinking": {
+            "type": "effort",
+            "effort_options": []
+          }
+        },
+        {
+          "id": "claude-haiku-4-9",
+          "name": "Haiku 4.9",
+          "short_name": "Haiku",
+          "thinking": {
+            "type": "effort",
+            "effort_options": []
+          }
+        }
+      ]
+    },
+    "state": {"id": "fixture"},
+    "surface": "fixture"
+  }
+}

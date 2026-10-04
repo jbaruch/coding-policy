@@ -18,10 +18,12 @@ from .billing import billing_window, effective_multiplier
 from .errors import ConfigError, HerdrError, UsageError
 
 
-#: The pinned top model per adapter. Review these ids whenever
-#: `capability-check` reports the capability table due (`capabilities.INTERVAL`),
-#: and bump one only with a CHANGELOG note citing the table entry that moved it;
-#: never rewrite this set from a model's own report (#520).
+#: The pinned top model per adapter. High-risk escalation (`_escalated`) and
+#: cheaper-candidate `barred_by_floor` still seed from this set. Exact IDs
+#: otherwise leave this module: listing and judgment family live in the catalog
+#: sidecar. Review these ids whenever `catalog-check` reports the catalog due,
+#: and bump one only with a CHANGELOG note citing the catalog entry that moved
+#: it; never rewrite this set from a model's own report (#520).
 TOP_MODELS = {
     "claude": frozenset({"opus-5", "claude-opus-5"}),
     "codex": frozenset({"gpt-5.6-sol"}),
@@ -30,7 +32,7 @@ TOP_MODELS = {
 EFFORTS = {
     "claude": frozenset({"low", "medium", "high", "xhigh", "max"}),
     "codex": frozenset({"low", "medium", "high", "xhigh"}),
-    "grok": frozenset({"low", "medium", "high"}),
+    "grok": frozenset({"low", "medium", "high", "xhigh"}),
 }
 NO_EFFORT_MODELS = frozenset({"claude-haiku-4-5", "haiku-4.5"})
 JUDGMENT_ROUNDS = frozenset({
@@ -198,6 +200,8 @@ YOLO_FLAGS = {
     "codex": "--dangerously-bypass-approvals-and-sandbox",
     "grok": "--always-approve",
 }
+#: Installed CLI kinds with a launch adapter. Exact model IDs are not this set.
+SUPPORTED_KINDS = frozenset(YOLO_FLAGS)
 YOLO_OPTION_VALUES = {
     "--permission-mode": "bypassPermissions",
     "-a": "never", "--ask-for-approval": "never",
@@ -365,14 +369,47 @@ def verify_worker_permissions(kind, argv):
         raise HerdrError("Worker launch arguments do not prove YOLO mode. " + recovery, {})
 
 
-def parse_tiers(raw, kind):
-    """Validate an optional per-agent {round: tier} table; never invent rows."""
+def _catalog_no_effort(document, kind):
+    """Models whose catalog row records an empty effort list. Inspects a dict."""
+    entries = document.get("entries") if isinstance(document, dict) else None
+    if not isinstance(entries, list):
+        return frozenset()
+    found = []
+    for entry in entries:
+        if (isinstance(entry, dict) and entry.get("adapter") == kind
+                and entry.get("effort") is None and isinstance(entry.get("model"), str)
+                and isinstance(entry.get("efforts"), list) and list(entry["efforts"]) == []):
+            found.append(entry["model"])
+    return frozenset(found)
+
+
+def _catalog_efforts(document, kind, model):
+    """Listed efforts for one model, or None when the catalog has no row."""
+    entries = document.get("entries") if isinstance(document, dict) else None
+    if not isinstance(entries, list):
+        return None
+    for entry in entries:
+        if (isinstance(entry, dict) and entry.get("adapter") == kind
+                and entry.get("model") == model and entry.get("effort") is None
+                and isinstance(entry.get("efforts"), list)):
+            return [item for item in entry["efforts"] if isinstance(item, str)]
+    return None
+
+
+def parse_tiers(raw, kind, catalog=None):
+    """Validate an optional per-agent {round: tier} table; never invent rows.
+
+    `catalog` is an optional catalog document. Config load omits it, so a new
+    no-effort id still needs `NO_EFFORT_MODELS` until a caller passes the
+    catalog. Tests and selection pass it to accept a complete catalog row.
+    """
     if raw is None:
         return {}
-    if kind not in TOP_MODELS:
+    if kind not in SUPPORTED_KINDS:
         _error("Tier launches are supported for claude, codex, and grok; {!r} has no adapter.".format(kind))
     if not isinstance(raw, dict) or not raw:
         _error("tiers must be a non-empty object keyed by round type.")
+    no_effort = NO_EFFORT_MODELS | (_catalog_no_effort(catalog, kind) if catalog is not None else frozenset())
     result = {}
     for round_type, entry in raw.items():
         if round_type not in ROUNDS:
@@ -383,15 +420,18 @@ def parse_tiers(raw, kind):
         if not isinstance(model, str) or not MODEL_ID.fullmatch(model):
             _error("Tier {!r} needs a model identifier, not a flag or command.".format(round_type))
         effort = entry.get("effort")
-        if model in NO_EFFORT_MODELS:
+        allowed = set(EFFORTS[kind])
+        if catalog is not None:
+            listed = _catalog_efforts(catalog, kind, model)
+            if listed:
+                allowed.update(listed)
+        if model in no_effort:
             if kind != "claude" or effort is not None:
                 _error("Haiku accepts no effort flag; omit effort for its Claude tier.")
-        elif not isinstance(effort, str) or effort not in EFFORTS[kind]:
-            _error("Tier {!r} needs an explicit effort from {}.".format(round_type, sorted(EFFORTS[kind])))
-        if round_type in JUDGMENT_ROUNDS and (
-            model not in TOP_MODELS[kind] or effort not in {"high", "xhigh", "max"}
-        ):
-            _error("Judgment round {!r} must use the pinned top model at high or above.".format(round_type))
+        elif not isinstance(effort, str) or effort not in allowed:
+            _error("Tier {!r} needs an explicit effort from {}.".format(round_type, sorted(allowed)))
+        if round_type in JUDGMENT_ROUNDS and effort not in {"high", "xhigh", "max"}:
+            _error("Judgment round {!r} must use high or above.".format(round_type))
         multiplier = entry.get("multiplier", 1.0)
         if isinstance(multiplier, bool) or not isinstance(multiplier, (int, float)):
             _error("Tier multiplier must be a finite positive number.")
