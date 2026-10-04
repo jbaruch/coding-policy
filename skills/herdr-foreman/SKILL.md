@@ -169,12 +169,18 @@ Before following any route below, report the worktree sweep to the operator:
 - Raise each `dirty` or `unpushed` item the report lists per
   `rules/hook-action-reporting.md` Act on What It Names; the operator carries
   out the resolution chosen, and the foreman runs none of it
+- An item outside the selected checkout remains visible in attention but never
+  blocks this task; `ready` already carries any hygiene failure that affects the
+  selected checkout
 
-- **Exit 0** — read `due`, satisfy any cadence it names, and proceed to Step 5.
+- **Exit 0** — record `due` as maintenance and proceed to Step 5 without waiting
+  on it.
   A resumed foreman proceeds to the stow's continuation step instead (Step 17
   Resume Route).
-  When `due` names the capability table, dispatch the refresh consultation under
-  `skills/herdr-foreman/references/model-tiers.md`, then record its report and show the result:
+  Refresh a due capability table at the next maintenance checkpoint under
+  `skills/herdr-foreman/references/model-tiers.md`. A selection-time fact about
+  a seat this task needs may block that seat; cadence alone never does. The
+  maintenance commands record the report and show the result:
 
 ```bash
 CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"; [ -d "$CP" ] || case "$(git config --get remote.origin.url)" in git@github.com:jbaruch/coding-policy|git@github.com:jbaruch/coding-policy.git|https://github.com/jbaruch/coding-policy|https://github.com/jbaruch/coding-policy.git|ssh://git@github.com/jbaruch/coding-policy|ssh://git@github.com/jbaruch/coding-policy.git) CP=. ;; *) echo "coding-policy plugin not found: run tessl install jbaruch/coding-policy" >&2; exit 1 ;; esac
@@ -236,9 +242,11 @@ round-setup reference. Create or resume the stable ledger under
 `skills/herdr-foreman/references/task-ledger.md`; record its absolute path before dispatch. Apply the
 round-setup accepted-behavior, resume and supervision binding requirements.
 
-Run `skills/herdr-foreman/references/retrospectives.md` on resume, before planning, or for an
-explicit retrospective request. For an explicit request, complete a new
-retrospective and finish here.
+Check `skills/herdr-foreman/references/retrospectives.md` on resume, before
+planning, or for an explicit retrospective request. Daily cadence is visible
+maintenance and never blocks the selected task. Missing coverage still blocks
+the exact worker transition it protects. For an explicit request, complete a
+new retrospective and finish here.
 
 Proceed immediately to Step 5, or on a resume to the stow's continuation step.
 
@@ -324,12 +332,13 @@ CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"; [ -d "$
 bash "$CP/skills/herdr-foreman/foreman.sh" detect-triggers \
   --repo <repo-path> --base <recorded-base> [--head <pushed-head>] \
   --roles <role[,role...]> [--requirements <requirements.json>] \
-  [--planned <planned.json>] [--decisions <decisions.json>]
+  [--planned <planned.json>] [--decisions <decisions.json>] \
+  [--bootstrap-declaration <reviewed-triggers.json>]
 ```
 
 Exit 0 means every fired trigger is staffed or answered. On exit 1, read the
-stderr object: an absent declaration for a writing round is written first
-(`skills/herdr-foreman/references/specialists.md`),
+stderr object. A writing repo with no declaration uses the one-time reviewed
+bootstrap contract in `skills/herdr-foreman/references/specialists.md`;
 and an `unaddressed_trigger` is staffed in the roles below or answered by a
 recorded decision with its reason. Re-run the command with the updated
 declaration, roles, requirements and decisions after every such change, and
@@ -759,8 +768,8 @@ Step 16. No implementation or release is inferred from the diagnostic result.
   diagnosis.
 - **No operator wait at exhaustion** — no operator decision is awaited.
 - **`VERDICT: approved` with advisory findings** — record them in the round
-  log and fold them into the next round that is already happening. Never spend
-  a round on a lone advisory.
+  log. They create no push, round, issue, pull request or target-task
+  prerequisite. Fold one only under `rules/review-severity.md`.
 
 Apply the release gate in this reference; obtain broad independent reviewer and
 tester passes against the current pushed tip before release:

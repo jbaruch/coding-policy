@@ -259,8 +259,8 @@ non-tiered worker, its `pane`, and its outgoing `report` — and record the
 completed note with `triggers` including `transition` under
 `references/retrospectives.md`. That is the only retrospective the restoration
 carries: the later `apply --retain-context` targets the same role, task, and
-tier, so it demands no new transition coverage; only the daily cadence can
-refuse it.
+tier, so it demands no new transition coverage. A due daily cadence remains a
+visible maintenance observation and does not refuse the restoration.
 
 1. Inspect and archive under the task's evidence directory: `herdr agent get
    <name>` (state, `pane_id`, `agent_session`), `herdr pane process-info --pane

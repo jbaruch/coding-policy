@@ -243,8 +243,8 @@ class Guard:
         covered = not current["transition_required"] or _usable_coverage(index, current)
         if allow_bridge and self._bridge(index, current):
             covered = True
-        if daily["due"] or not covered:
-            raise UsageError("A retrospective is due before this worker transition. Run `{}` with the provided request, write the foreman's synthesis, and use `{}` before retrying the same dispatch.".format(
+        if not covered:
+            raise UsageError("Retrospective transition coverage is required before this worker transition. Run `{}` with the provided request, write the foreman's synthesis, and use `{}` before retrying the same dispatch.".format(
                 runnable.command("retro-check"), runnable.command("retro-record")),
                              {"daily": daily, "request": {"transitions": [item]}, "coverage": [current]})
         if current["source"]["observation"]["readiness"] not in READY_STATES | {"shell"}:
@@ -269,8 +269,8 @@ class Guard:
                    for item in items]
         daily = notes.cadence(index, self.at, existing_work=bool(self.state["assignments"]) or any(not row["first_start"] for row in current))
         missing = [row["agent"] for row in current if row["transition_required"] and not _usable_coverage(index, row) and not self._bridge(index, row)]
-        if daily["due"] or missing:
-            raise UsageError("A retrospective is due before dispatch. Save the provided request, run `{}`, record the foreman's completed synthesis with `{}`, then retry this dispatch.".format(
+        if missing:
+            raise UsageError("Retrospective transition coverage is required before dispatch. Save the provided request, run `{}`, record the foreman's completed synthesis with `{}`, then retry this dispatch.".format(
                 runnable.command("retro-check"), runnable.command("retro-record")),
                              {"daily": daily, "missing_coverage": missing, "request": {"transitions": items}, "coverage": current})
         self.original = {row["agent"]: (self._bridge(index, row) or {}).get("descriptor", row) for row in current}

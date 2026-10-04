@@ -95,7 +95,7 @@ root, is `skills/herdr-foreman/SKILL.md` Step 5:
 ```text
 foreman detect-triggers --repo <dir> --base <ref> [--head <ref>] \
   --roles <role[,role...]> [--requirements <file>] [--planned <file>] \
-  [--decisions <file>]
+  [--decisions <file>] [--bootstrap-declaration <reviewed-file>]
 ```
 
 ## Declare a pre-implementation round's surfaces
@@ -121,6 +121,35 @@ architect trigger's size. `cli_surface` names the declared CLI spec paths the
 round will add a command, flag or refusal to; a path outside
 `cli_spec_paths` is refused. State `[]` or `{}` for what this round has none
 of. A later round classifies its diff, which is evidence rather than intent.
+
+### Bootstrap the first declaration
+
+When the recorded base has no `.herdr/triggers.json`, an accepted consultation
+may deliver the first declaration as an external report artifact. Keep those
+reviewed bytes outside the repo until the developer round. Add the declaration
+path and its exact digest to the planned surfaces:
+
+```json
+{
+  "schema_version": 1,
+  "added": [".herdr/triggers.json"],
+  "changed": [],
+  "package_lines": {},
+  "cli_surface": [],
+  "bootstrap_declaration_sha256": "<lowercase SHA-256 of the reviewed bytes>"
+}
+```
+
+Pass that artifact with `--bootstrap-declaration`. The detector validates it,
+confirms the recorded base lacks the declaration, verifies the plan's digest,
+and classifies the planned task with those surfaces. The developer installs
+those bytes unchanged. Re-run the same command with `--head` after the first
+push; it refuses a missing or non-identical committed declaration. A changed
+artifact or plan returns to consultation acceptance and trigger classification.
+
+When the repo or pushed head already contains `.herdr/triggers.json`, its own
+committed declaration is the sole authority. Omit `--bootstrap-declaration` on
+later rounds. A bootstrap artifact never overrides existing repo content.
 
 A round that writes no repository content at all — an investigation, an
 architecture consultation, an advisory question — has no surface to declare and

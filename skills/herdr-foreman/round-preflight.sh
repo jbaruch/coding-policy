@@ -21,8 +21,9 @@
 #      "due": ["<cadence>", ...], "checks": {"<name>": {...}}}
 #   stderr: each check's own diagnostic, relayed verbatim.
 #
-# `ready` is false when any check blocks a dispatch. `due` names a cadence the
-# foreman owes before planning; it does not block. A blocking check is reported
+# `ready` is false when any check blocks the authorized stage. `due` names
+# visible maintenance for a later checkpoint; it does not block planning or
+# replace a genuine stage-local failure. A blocking check is reported
 # with the command that produced it, so the foreman re-runs that one rather than
 # the whole preflight.
 #

@@ -1,6 +1,7 @@
 """Diff-time Team Composition trigger detection and its unaddressed-trigger gate."""
 
 import io
+import hashlib
 import json
 import subprocess
 import sys
@@ -27,7 +28,8 @@ DECLARATION = {
 
 
 def declaration(**overrides):
-    return {**DECLARATION, **overrides, "path": ".herdr/triggers.json"}
+    return {**DECLARATION, **overrides, "path": ".herdr/triggers.json",
+            "authority": {"kind": "repository", "revision": "fixture"}}
 
 
 class TempCase(unittest.TestCase):
@@ -40,7 +42,7 @@ class TempCase(unittest.TestCase):
 
 def namespace(**overrides):
     fields = {"repo": ".", "base": "BASE", "head": None, "roles": None,
-              "requirements": None, "decisions": None}
+              "requirements": None, "decisions": None, "bootstrap_declaration": None}
     return SimpleNamespace(**{**fields, **overrides})
 
 
@@ -68,7 +70,8 @@ class DeclarationTest(TempCase):
 
     def test_only_a_missing_optional_declaration_is_tolerated(self):
         result = triggers.load_declaration(self.tmp, required=False)
-        self.assertEqual(result, {"path": str(self.path)})
+        self.assertEqual(result, {"path": str(self.path),
+                                  "authority": {"kind": "repository", "revision": "worktree"}})
         self.path.write_text("{not json")
         with self.assertRaises(UsageError) as caught:
             triggers.load_declaration(self.tmp, required=False)
@@ -416,6 +419,10 @@ class PlannedSurfacesTest(TempCase):
         responses = responses or {}
         def run(arguments):
             self.calls.append(arguments)
+            if arguments[0] == "show" and arguments[1].endswith(":" + triggers.DECLARATION_FILE):
+                return (self.tmp / triggers.DECLARATION_FILE).read_text()
+            if arguments[0] == "ls-tree" and arguments[-1] == triggers.DECLARATION_FILE:
+                return triggers.DECLARATION_FILE + "\n"
             for key, value in responses.items():
                 if key in arguments:
                     return value
@@ -651,6 +658,10 @@ class RunCommandTest(TempCase):
     def runner(self, responses):
         def run(arguments):
             self.calls.append(arguments)
+            if arguments[0] == "show" and arguments[1].endswith(":" + triggers.DECLARATION_FILE):
+                return (self.tmp / triggers.DECLARATION_FILE).read_text()
+            if arguments[0] == "ls-tree" and arguments[-1] == triggers.DECLARATION_FILE:
+                return triggers.DECLARATION_FILE + "\n"
             for key, value in responses.items():
                 if key in arguments:
                     return value
@@ -669,8 +680,8 @@ class RunCommandTest(TempCase):
         responses = {"merge-base": "MERGEBASE\n", "--name-status": "A\0src/new/mod.py\0",
                      "--numstat": "9\t0\tsrc/new/mod.py\0"}
         triggers.run_command(namespace(repo=self.tmp, head="HEAD"), runner=self.runner(responses))
-        self.assertEqual(self.calls[0], ["merge-base", "BASE", "HEAD"])
-        self.assertIn("BASE...HEAD", self.calls[1])
+        self.assertIn(["merge-base", "BASE", "HEAD"], self.calls)
+        self.assertTrue(any("BASE...HEAD" in call for call in self.calls))
         # "Absent from the base" is read at the merge base, not at BASE.
         self.assertIn(["ls-tree", "--name-only", "MERGEBASE", "--", "src/new/"], self.calls)
 
@@ -920,6 +931,156 @@ class DetectTriggersCommandTest(TempCase):
         self.assertEqual(code, 1)
         self.assertEqual(json.loads(out)["triggers"][1]["trigger"], "documentation")
         self.assertEqual(self.base, moved)
+
+
+class BootstrapDeclarationCommandTest(TempCase):
+    """The first declaration is externally reviewed, exact, and one-time."""
+
+    def setUp(self):
+        self.tmp = self.temp_dir()
+        self.git("init", "-q", "-b", "main")
+        self.git("config", "core.autocrlf", "false")
+        self.git("config", "user.email", "tests@example.invalid")
+        self.git("config", "user.name", "Tests")
+        (self.tmp / "README.md").write_text("start\n")
+        self.git("add", "-A")
+        self.git("commit", "-qm", "base")
+        self.base = self.git("rev-parse", "HEAD").strip()
+        self.artifact = self.tmp.parent / (self.tmp.name + "-reviewed-triggers.json")
+        self.artifact.write_text(json.dumps(DECLARATION), encoding="utf-8")
+        self.addCleanup(lambda: self.artifact.exists() and self.artifact.unlink())
+        self.plan = self.tmp.parent / (self.tmp.name + "-bootstrap-plan.json")
+        self.addCleanup(lambda: self.plan.exists() and self.plan.unlink())
+
+    def git(self, *arguments):
+        completed = subprocess.run(["git", "-C", str(self.tmp), *arguments],
+                                   capture_output=True, text=True, check=True)
+        return completed.stdout
+
+    def write_plan(self, *, digest=None):
+        digest = digest or hashlib.sha256(self.artifact.read_bytes()).hexdigest()
+        self.plan.write_text(json.dumps({
+            "schema_version": 1,
+            "added": [triggers.DECLARATION_FILE],
+            "changed": [],
+            "package_lines": {},
+            "cli_surface": [],
+            "bootstrap_declaration_sha256": digest,
+        }), encoding="utf-8")
+
+    def run_cli(self, *arguments):
+        out, err = io.StringIO(), io.StringIO()
+        code = cli.main(["detect-triggers", "--repo", str(self.tmp), "--base", self.base,
+                         "--planned", str(self.plan), "--bootstrap-declaration", str(self.artifact),
+                         *arguments], stdout=out, stderr=err)
+        return code, out.getvalue(), err.getvalue()
+
+    def test_absent_base_accepts_the_byte_identical_reviewed_artifact(self):
+        self.write_plan()
+        code, out, err = self.run_cli()
+        self.assertEqual(code, 0, err)
+        authority = json.loads(out)["declaration_authority"]
+        self.assertEqual(authority["kind"], "bootstrap")
+        self.assertEqual(authority["sha256"], hashlib.sha256(self.artifact.read_bytes()).hexdigest())
+
+    def test_altered_artifact_is_refused(self):
+        self.write_plan()
+        self.artifact.write_text(json.dumps({**DECLARATION, "package_change_lines": 51}), encoding="utf-8")
+        code, out, err = self.run_cli()
+        self.assertEqual(code, 1)
+        self.assertEqual(out, "")
+        self.assertIn("plan binds", err)
+
+    def test_stale_base_with_an_existing_declaration_is_refused(self):
+        (self.tmp / ".herdr").mkdir()
+        (self.tmp / triggers.DECLARATION_FILE).write_text(json.dumps(DECLARATION), encoding="utf-8")
+        self.git("add", "-A")
+        self.git("commit", "-qm", "declare triggers")
+        self.base = self.git("rev-parse", "HEAD").strip()
+        (self.tmp / triggers.DECLARATION_FILE).unlink()
+        self.write_plan()
+        code, out, err = self.run_cli()
+        self.assertEqual(code, 1)
+        self.assertEqual(out, "")
+        self.assertIn("bootstrap is stale", err)
+
+    def test_missing_artifact_is_refused(self):
+        self.write_plan()
+        self.artifact.unlink()
+        code, out, err = self.run_cli()
+        self.assertEqual(code, 1)
+        self.assertEqual(out, "")
+        self.assertIn("Cannot read reviewed bootstrap declaration", err)
+
+    def test_artifact_inside_the_target_repo_is_refused(self):
+        inside = self.tmp / "reviewed-triggers.json"
+        inside.write_bytes(self.artifact.read_bytes())
+        self.write_plan(digest=hashlib.sha256(inside.read_bytes()).hexdigest())
+        out, err = io.StringIO(), io.StringIO()
+        code = cli.main(["detect-triggers", "--repo", str(self.tmp), "--base", self.base,
+                         "--planned", str(self.plan), "--bootstrap-declaration", str(inside)],
+                        stdout=out, stderr=err)
+        self.assertEqual(code, 1)
+        self.assertEqual(out.getvalue(), "")
+        self.assertIn("outside the target repository", err.getvalue())
+
+    def test_first_committed_declaration_must_match_the_reviewed_bytes(self):
+        self.write_plan()
+        (self.tmp / ".herdr").mkdir()
+        altered = {**DECLARATION, "package_change_lines": 51}
+        (self.tmp / triggers.DECLARATION_FILE).write_text(json.dumps(altered), encoding="utf-8")
+        self.git("add", "-A")
+        self.git("commit", "-qm", "install altered declaration")
+        code, out, err = self.run_cli("--head", "HEAD")
+        self.assertEqual(code, 1)
+        self.assertEqual(out, "")
+        self.assertIn("byte-identical installation", err)
+
+    def test_first_committed_declaration_accepts_the_reviewed_bytes(self):
+        self.artifact.write_bytes(json.dumps(DECLARATION, indent=2).replace("\n", "\r\n").encode("utf-8"))
+        self.write_plan()
+        (self.tmp / ".herdr").mkdir()
+        (self.tmp / triggers.DECLARATION_FILE).write_bytes(self.artifact.read_bytes())
+        self.git("add", "-A")
+        self.git("commit", "-qm", "install reviewed declaration")
+        code, out, err = self.run_cli("--head", "HEAD")
+        self.assertEqual(code, 0, err)
+        authority = json.loads(out)["declaration_authority"]
+        self.assertEqual(authority["kind"], "repository")
+        self.assertEqual(authority["bootstrap_sha256"], hashlib.sha256(self.artifact.read_bytes()).hexdigest())
+
+    def test_existing_declaration_is_authoritative_without_bootstrap_artifact(self):
+        (self.tmp / ".herdr").mkdir()
+        (self.tmp / triggers.DECLARATION_FILE).write_text(json.dumps(DECLARATION), encoding="utf-8")
+        self.plan.write_text(json.dumps({
+            "schema_version": 1, "added": [], "changed": ["README.md"],
+            "package_lines": {}, "cli_surface": [],
+        }), encoding="utf-8")
+        self.artifact.unlink()
+        code, out, err = self.run_cli()
+        self.assertEqual(code, 0, err)
+        authority = json.loads(out)["declaration_authority"]
+        self.assertEqual(authority, {"kind": "repository", "revision": "worktree"})
+
+    def test_pushed_head_declaration_is_authoritative_over_the_checkout(self):
+        (self.tmp / ".herdr").mkdir()
+        branch_declaration = {**DECLARATION, "user_doc_paths": ["guides/*"]}
+        (self.tmp / triggers.DECLARATION_FILE).write_text(json.dumps(branch_declaration), encoding="utf-8")
+        (self.tmp / "guides").mkdir()
+        (self.tmp / "guides" / "install.md").write_text("install\n", encoding="utf-8")
+        self.git("add", "-A")
+        self.git("commit", "-qm", "install declaration and guide")
+        head = self.git("rev-parse", "HEAD").strip()
+        self.git("checkout", "-q", self.base)
+        out_stream, err_stream = io.StringIO(), io.StringIO()
+        code = cli.main(["detect-triggers", "--repo", str(self.tmp), "--base", self.base,
+                         "--head", head], stdout=out_stream, stderr=err_stream)
+        out, _err = out_stream.getvalue(), err_stream.getvalue()
+        self.assertEqual(code, 1)
+        payload = json.loads(out)
+        self.assertEqual(payload["fired"], ["documentation"])
+        self.assertEqual(payload["declaration_authority"]["kind"], "repository")
+        self.assertEqual(payload["declaration_authority"]["revision"], head)
 
 
 if __name__ == "__main__":

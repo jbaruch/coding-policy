@@ -143,6 +143,11 @@ plan only once it exits 0. The declaration's fields, the
 decisions file and the answers each trigger accepts are in
 `references/specialists.md`.
 
+For a repo whose recorded base lacks its first declaration, use the reviewed
+artifact, digest-bound plan and `--bootstrap-declaration` contract in
+`references/specialists.md`. The first pushed head must install those bytes
+unchanged. Existing and later declarations remain in-repo authority.
+
 ```bash
 CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"; [ -d "$CP" ] || case "$(git config --get remote.origin.url)" in git@github.com:jbaruch/coding-policy|git@github.com:jbaruch/coding-policy.git|https://github.com/jbaruch/coding-policy|https://github.com/jbaruch/coding-policy.git|ssh://git@github.com/jbaruch/coding-policy|ssh://git@github.com/jbaruch/coding-policy.git) CP=. ;; *) echo "coding-policy plugin not found: run tessl install jbaruch/coding-policy" >&2; exit 1 ;; esac
 bash "$CP/skills/herdr-foreman/foreman.sh" plan \
@@ -344,7 +349,7 @@ Consultations in `skills/herdr-foreman/references/team-operation.md`.
 Assignment-scoped rounds always use a fresh identity and pane. Fresh-worker fix briefs include
 the prior attempt count and the ownership handoff that section requires.
 Reviewer and tester verification briefs name `full` or `scoped` review,
-the prior findings, and the follow-up issue for new advisories. The final
+the prior findings, and the round-log destination for new advisories. The final
 release-gating verification is `full`. Proceed immediately to Step 8.
 
 ## Step 8 — Provision the Worktrees

@@ -174,6 +174,16 @@ class RetrospectiveRuntimeTest(unittest.TestCase):
         self.assertEqual(calls, [])
         self.assertEqual(self.runner.writes(), [])
 
+    def test_daily_maintenance_due_does_not_block_covered_dispatch(self):
+        self.record()
+        later = "2026-09-11T10:00:00+00:00"
+        check = runtime.check(self.path, self.state, self.client, self.agents, self.request(), later)
+        self.assertTrue(check["cadence"]["due"])
+        self.assertEqual(check["missing_coverage"], [])
+        guard = runtime.Guard(self.path, self.state, self.client, self.agents, later)
+        guard.preflight(self.steps)
+        self.assertEqual(set(guard.original), {"grok", "codex"})
+
     def dispatch(self, steps, guard, **kwargs):
         return apply(self.client, {row["role"]: row["agent"] for row in steps}, self.agents,
                      {"common": steps[0]["common"], **{row["role"]: row["brief"] for row in steps}}, AT,

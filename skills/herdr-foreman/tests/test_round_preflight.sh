@@ -17,7 +17,8 @@
 #   3. Roster fails             -> blocks, names roster.sh and its code.
 #   4. Authority fails          -> blocks; an unanswerable check is not permission.
 #   5. Two checks fail          -> both reported; neither hides the other.
-#   6. Capability due           -> surfaces in `due`, does NOT block.
+#   6. Capability due           -> surfaces in `due`, does NOT block or hide a
+#                                  genuine stage check that is blocking.
 #   7. Prune exit 1 vs 2        -> distinct statuses, both blocking; a sweep
 #                                  past its budget (a stand-in runner's 124)
 #                                  blocks too.
@@ -243,6 +244,14 @@ main() {
   if [[ $RC -eq 0 ]] && [[ "$(field "$OUT" 'd["ready"]')" == "true" ]] \
      && printf '%s' "$OUT" | grep -q '"due": \["capability"\]'; then
     pass; else fail "a due cadence surfaces without blocking the round, got RC=$RC OUT=$OUT"; fi
+
+  shadow "$TMP/due-and-authority" 0 2 0 true
+  run "$TMP/due-and-authority"
+  if [[ $RC -eq 1 ]] && [[ "$(field "$OUT" 'd["ready"]')" == "false" ]] \
+     && [[ "$(field "$OUT" 'd["due"]')" == '["capability"]' ]] \
+     && [[ "$(field "$OUT" 'len(d["blocking"])')" == "1" ]] \
+     && printf '%s' "$OUT" | grep -q 'verify-authority.sh exited 2'; then
+    pass; else fail "maintenance due must stay visible without replacing the authority block, got RC=$RC OUT=$OUT"; fi
 
   echo "▶ options and usage" >&2
 

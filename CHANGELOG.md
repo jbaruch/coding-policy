@@ -1,5 +1,26 @@
 # Changelog
 
+### Changed
+
+- **Herdr delivery gates are stage-local.** Authorized, built, independently
+  verified and released are the four durable decisions. Authority, selected
+  checkout/seat integrity, current-tip tests and independent reports, hosted
+  gates and publication still fail closed at the stage they protect. Due
+  capability or retrospective maintenance, unrelated checkout observations
+  and advisory findings stay visible without delaying the selected delivery.
+  Transition-specific retrospective coverage remains blocking. Team workers
+  consume the foreman's recorded fresh base instead of syncing the shared
+  checkout themselves, and a fully evidenced bounded bug correction no longer
+  requires an extra advisor round.
+
+- **A repo can bootstrap its first trigger declaration without bypassing
+  classification.** `detect-triggers --bootstrap-declaration` accepts reviewed
+  external bytes only when the recorded base lacks `.herdr/triggers.json` and
+  the planned surfaces bind its path and SHA-256. The first pushed declaration
+  must be byte-identical. Existing declarations and later pushed heads are read
+  from the repository as sole authority. Missing, changed and stale artifacts
+  fail closed.
+
 ## 0.3.364 — 2026-10-06
 
 ### Fixed
