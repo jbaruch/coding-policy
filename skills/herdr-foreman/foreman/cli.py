@@ -488,6 +488,17 @@ def _state_path(args):
     return retrospective.canonical_state(Path(value) if value else default_state_path())
 
 
+def _catalog_document(args):
+    return catalog.load(_state_path(args))
+
+
+def _configured_agents(args, *, optional=False):
+    path = _config_path(args)
+    if optional and not path.exists():
+        return []
+    return load_config(path, catalog=_catalog_document(args))
+
+
 def _client(args, trace=None):
     tracing = getattr(args, "trace", False) or trace_enabled_in_env()
     return HerdrClient(
@@ -886,7 +897,7 @@ def _read_record(path):
 
 
 def cmd_measure(args, client=None, warn=None, trace=None):
-    agents = select_agents(load_config(_config_path(args)), args.agents)
+    agents = select_agents(_configured_agents(args), args.agents)
     client = client if client is not None else _client(args, trace=trace)
     measure_fn = lifecycle.measure_worker_kinds if agents and all(agent.assignment_scoped for agent in agents) else measure
     snapshot = measure_fn(
@@ -1028,7 +1039,7 @@ def cmd_plan(args, client=None, warn=None, trace=None):
     role_costs = load_role_costs(_config_path(args))
     judge = load_judge(_config_path(args))
     rounds = _round_inputs(args, canonical)
-    agents = load_config(_config_path(args)) if _config_path(args).exists() else []
+    agents = _configured_agents(args, optional=True)
     scoped = bool(agents) and all(agent.assignment_scoped for agent in agents)
     state_path = _state_path(args)
     state = load_state(state_path, warn=warn)
@@ -1312,7 +1323,7 @@ def cmd_apply(args, client=None, warn=None, trace=None):
 
 
 def _apply(args, client, warn, trace, hold_gates):
-    templates = load_config(_config_path(args))
+    templates = _configured_agents(args)
     document = _load_assignments(args.assignments, document=True)
     assignments = normalize_assignments(document)
     scoped = bool(templates) and all(agent.assignment_scoped for agent in templates)
@@ -2027,7 +2038,7 @@ def cmd_foreman_reset_deliver(args, client=None, warn=None, trace=None):
         # Setup runs after the claim, so its failure must finish the row too.
         client = client if client is not None else _client(args, trace=trace)
         result = foreman_reset.deliver(
-            client, load_config(_config_path(args)), args.pane, args.stow, str(state_path), warn=_log_safe(warn), options=options,
+            client, _configured_agents(args), args.pane, args.stow, str(state_path), warn=_log_safe(warn), options=options,
             native_session=claimed["native_session"],
             still_ready=lambda: memory.show(state_path, now_iso(), args.stow)["record"].get("reset_ready") is True)
     except ForemanError as exc:
@@ -2277,7 +2288,7 @@ def _run_recovery(args, state_path, warn, client, trace):
     elif args.command == "authorize-refused-dispatch":
         result = recovery.authorize_refused_dispatch(store, data, at)
     elif args.command == "record-refusal":
-        agents_by_name = {agent.name: agent for agent in load_config(_config_path(args))}
+        agents_by_name = {agent.name: agent for agent in _configured_agents(args)}
         dispatch = next((item for item in store["dispatches"] if isinstance(data, dict) and item["id"] == data.get("dispatch")), None)
         configured = dispatch.get("worker_kind") if dispatch is not None else None
         configured = configured or (dispatch.get("agent") if dispatch is not None else None)
@@ -2322,7 +2333,7 @@ def _run_recovery(args, state_path, warn, client, trace):
                 _require_independent_report(state, attempt["task"], data.get("reviewer"))
         result = historical.record_review(store, data, at)
     else:
-        templates = load_config(_config_path(args))
+        templates = _configured_agents(args)
         agents = {agent.name: agent for agent in templates}
         name = recovery.recovery_agent(store, history, args.command, data)
         if name not in agents and templates and all(agent.assignment_scoped for agent in templates):
@@ -2406,11 +2417,16 @@ def cmd_start_judge(args, client=None, warn=None, trace=None):
     # The plan carries the mode the foreman declared; the flag overrides it, and
     # neither present is a refusal rather than a default (#425).
     judge_mode = recovery.require_judge_mode(_judge_mode_for(args, document))
-    parsed = parse_tiers({"build": {"model": tier.get("model"), "effort": tier.get("effort")}}, args.kind)["build"]
+    state_path = _state_path(args)
+    catalog_document = catalog.load(state_path)
+    parsed = parse_tiers({"build": {"model": tier.get("model"), "effort": tier.get("effort")}},
+                         args.kind, catalog=catalog_document)["build"]
+    catalog.assess_pair(
+        catalog_document, args.kind, parsed["model"], parsed["effort"],
+        catalog.pair_fingerprint(catalog_document, args.kind), judgment=True, judge=True)
     agent = SimpleNamespace(name=tier["agent"], kind=args.kind, idle_markers=(), working_markers=(),
                             launch_args=parse_launch_args(tier.get("launch_args", []), args.kind))
     client = client if client is not None else _client(args, trace=trace)
-    state_path = _state_path(args)
     state = retrospective_runtime.read_history(state_path)
     planned_task = (document.get("task_context") or {}).get("task")
     if args.task is not None and planned_task is not None and args.task != planned_task:
@@ -2421,10 +2437,6 @@ def cmd_start_judge(args, client=None, warn=None, trace=None):
     # inadequate refuses the start, before anything launches (#476).
     capabilities.assess(capabilities.load(state_path), parsed["model"], parsed["effort"],
                         capabilities.required("judge", "judge", JUDGMENT_ROUNDS))
-    catalog_document = catalog.load(state_path)
-    catalog.assess_pair(
-        catalog_document, args.kind, parsed["model"], parsed["effort"],
-        catalog.pair_fingerprint(catalog_document, args.kind), judgment=True, judge=True)
     # The judge rules on the investigator's assessment, so the seat is never
     # started at an exhausted allowance before that assessment exists (#408).
     full = _load_state_for_write(state_path, warn, persist_migration=False)
@@ -2443,7 +2455,7 @@ def cmd_start_judge(args, client=None, warn=None, trace=None):
 
 def cmd_relaunch_worker(args, client=None, warn=None, trace=None):
     """Relaunch one idle configured worker without creating a dispatch."""
-    agent = select_agents(load_config(_config_path(args)), [args.name])[0]
+    agent = select_agents(_configured_agents(args), [args.name])[0]
     client = client if client is not None else _client(args, trace=trace)
     live = client.agent_get(agent.name)
     pane = live.get("pane_id")
@@ -2584,7 +2596,7 @@ def _foreman_seat_result(args, seat, pane, tier, proof):
 
 
 def cmd_start_foreman(args, client=None, warn=None, trace=None):
-    seat = load_foreman(_config_path(args))
+    seat = load_foreman(_config_path(args), catalog=_catalog_document(args))
     if seat is None:
         raise UsageError(_foreman_unconfigured(_config_path(args)), {"config": str(_config_path(args))})
     tier = _select_foreman_tier(args, seat, warn, persist_migration=True)
@@ -2596,7 +2608,7 @@ def cmd_verify_foreman(args, client=None, warn=None, trace=None):
     if getattr(args, "config_only", False):
         # The preflight's view when headroom did not pass: whether the seat is
         # configured is independent of any measurement.
-        seat = load_foreman(_config_path(args))
+        seat = load_foreman(_config_path(args), catalog=_catalog_document(args))
         if seat is None:
             return {"configured": False, "warning": _foreman_unconfigured(_config_path(args))}, None
         return {"configured": True, "agent": seat.agent}, None
@@ -2607,7 +2619,7 @@ def cmd_verify_foreman(args, client=None, warn=None, trace=None):
     if not pane:
         raise UsageError("verify-foreman reads the foreman's own pane; run it from the foreman's Herdr pane or pass "
                          "--pane <pane-id>.", {})
-    seat = load_foreman(_config_path(args))
+    seat = load_foreman(_config_path(args), catalog=_catalog_document(args))
     if seat is None:
         # A visible warning, never a round block: the operator has not opted
         # the seat into tier selection yet.
@@ -2721,7 +2733,7 @@ def cmd_retrospective(args, client=None, warn=None, trace=None):
     state = retrospective_runtime.read_history(path)
     agents = {}
     if normalized["transitions"]:
-        agents = {agent.name: agent for agent in load_config(_config_path(args))}
+        agents = {agent.name: agent for agent in _configured_agents(args)}
         client = client if client is not None else _client(args, trace=trace)
     result = retrospective_runtime.check(path, state, client, agents, normalized, at, allow_pending=saved is not None)
     if saved is None:

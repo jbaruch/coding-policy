@@ -186,11 +186,12 @@ def _missing_config_error(path):
     )
 
 
-def parse_config(payload, source="<memory>"):
+def parse_config(payload, source="<memory>", catalog=None):
     """Validate an already-decoded config mapping and return a list of Agents.
 
     Pure apart from the `source` string used in error messages, so tests build
-    configs inline instead of writing files.
+    configs inline instead of writing files. `catalog` is the loaded sidecar
+    document; a complete row owns that model's effort set at parse time.
     """
     if not isinstance(payload, dict):
         raise ConfigError(
@@ -234,7 +235,7 @@ def parse_config(payload, source="<memory>"):
     judge = parse_judge(payload, source=source)
     pinned_judge = judge.agent if judge is not None else None
     # Validates the foreman block with the rest of the file; it seats no worker.
-    parse_foreman(payload, source=source)
+    parse_foreman(payload, source=source, catalog=catalog)
 
     agents = []
     seen = set()
@@ -387,7 +388,7 @@ def parse_config(payload, source="<memory>"):
                 composer_ignore_dim=ignore_dim,
                 model_label=model_label,
                 window_group=window_group,
-                tiers=parse_tiers(entry.get("tiers"), entry["kind"]),
+                tiers=parse_tiers(entry.get("tiers"), entry["kind"], catalog=catalog),
                 launch_args=parse_launch_args(entry.get("launch_args", []), entry["kind"]),
                 capabilities=capabilities,
                 assignment_scoped=version >= 7,
@@ -441,10 +442,10 @@ def _read_config(path):
         ) from None
 
 
-def load_config(path):
+def load_config(path, catalog=None):
     """Read and validate the config file at `path`."""
     path = Path(path)
-    return parse_config(_read_config(path), source=str(path))
+    return parse_config(_read_config(path), source=str(path), catalog=catalog)
 
 
 #: Reasoning-effort levels `claude --effort` accepts. A tier may name no
@@ -588,7 +589,7 @@ class Foreman:
                 "tier_source": self.tier_source, "window_group": self.window_group}
 
 
-def parse_foreman(payload, source="<memory>"):
+def parse_foreman(payload, source="<memory>", catalog=None):
     """Validate the optional top-level `foreman` block, `None` when absent.
 
     The block names the seat like a worker: its Herdr agent name, kind,
@@ -654,13 +655,13 @@ def parse_foreman(payload, source="<memory>"):
             "Config at {}: `foreman.agent` {!r} is also a configured worker; the foreman seat is never planned as "
             "a worker. Give the foreman its own agent name.".format(source, agent),
             {"source": source, "agent": agent})
-    tiers = parse_tiers(raw.get("tiers"), kind)
+    tiers = parse_tiers(raw.get("tiers"), kind, catalog=catalog)
     tier_source = "foreman"
     if not tiers:
         tier_source = ""
         for entry in workers:
             if isinstance(entry, dict) and entry.get("kind") == kind and entry.get("tiers"):
-                tiers, tier_source = parse_tiers(entry["tiers"], kind), "{}.{}".format(worker_field, entry.get("name"))
+                tiers, tier_source = parse_tiers(entry["tiers"], kind, catalog=catalog), "{}.{}".format(worker_field, entry.get("name"))
                 break
     launch_args = parse_launch_args(raw.get("launch_args", []), kind)
     window_group = raw.get("window_group", "")
@@ -673,7 +674,7 @@ def parse_foreman(payload, source="<memory>"):
                    window_group=window_group)
 
 
-def load_foreman(path):
+def load_foreman(path, catalog=None):
     """The validated `foreman` block from the config at `path`, `None` when absent.
 
     A missing config reads as no block, like `load_judge`; a config that
@@ -683,8 +684,8 @@ def load_foreman(path):
     if not path.exists():
         return None
     payload = _read_config(path)
-    parse_config(payload, source=str(path))
-    return parse_foreman(payload, source=str(path))
+    parse_config(payload, source=str(path), catalog=catalog)
+    return parse_foreman(payload, source=str(path), catalog=catalog)
 
 
 def parse_role_costs(payload, source="<memory>"):

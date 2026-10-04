@@ -16,9 +16,10 @@ _ROOT = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
 if _ROOT not in _sys.path:
     _sys.path.insert(0, _ROOT)
 
-from foreman import capabilities, catalog
+from foreman import capabilities, catalog, supervision_runtime
 from foreman.cli import main
-from foreman.errors import UsageError
+from foreman.config import parse_config
+from foreman.errors import ConfigError, UsageError
 from foreman.tiers import NO_EFFORT_MODELS, TOP_MODELS, parse_tiers, verify_argv
 from tests.test_cli import CliCase
 from tests.test_capability_routing import CONFIG as _UNUSED_CONFIG  # noqa: F401
@@ -144,6 +145,34 @@ class CatalogStoreTest(unittest.TestCase):
             with self.subTest(when=when):
                 self.assertEqual(catalog.cadence(document, when)["due"], due)
 
+    def test_cadence_is_due_for_client_cache_and_refusal_changes(self):
+        catalog.discover(self.state, AT, caches=caches())
+        document = catalog.load(self.state)
+        grok = next(scope for scope in document["scopes"] if scope["adapter"] == "grok")
+        cache = Path(self.tmp.name) / "grok-client.json"
+        payload = json.loads(GROK_CACHE.read_text(encoding="utf-8"))
+        payload["grok_version"] = grok["cli_version"] + "-next"
+        cache.write_text(json.dumps(payload), encoding="utf-8")
+        client = catalog.cadence(document, AT, caches={"grok": cache})
+        self.assertTrue(client["due"])
+        self.assertEqual(client["reason"], "client_changed")
+
+        payload["grok_version"] = grok["cli_version"]
+        payload["fetched_at"] = instant(seconds=1)
+        cache.write_text(json.dumps(payload), encoding="utf-8")
+        changed = catalog.cadence(document, AT, caches={"grok": cache})
+        self.assertTrue(changed["due"])
+        self.assertEqual(changed["reason"], "cache_changed")
+
+        catalog.record_access(self.state, {
+            "adapter": "claude", "model": "opus-5", "effort": "high",
+            "fingerprint": catalog.pair_fingerprint(document, "claude"),
+            "class": "request_refused", "text": REFUSAL_TEXT,
+        }, instant(seconds=1))
+        refused = catalog.cadence(catalog.load(self.state), AT)
+        self.assertTrue(refused["due"])
+        self.assertEqual(refused["reason"], "refusal_recorded")
+
     def test_t9_the_owner_has_no_config_writer(self):
         config = Path(self.tmp.name) / "config.json"
         config.write_text("{}", encoding="utf-8")
@@ -237,6 +266,35 @@ class CatalogDiscoveryTest(unittest.TestCase):
         parsed = parse_tiers({"mechanical": {"model": "claude-haiku-4-9"}}, "claude", catalog=document)
         self.assertIsNone(parsed["mechanical"]["effort"])
         self.assertIsNone(parse_tiers({"mechanical": {"model": "claude-haiku-4-5"}}, "claude")["mechanical"]["effort"])
+        with self.assertRaises(ConfigError):
+            parse_config({
+                "schema_version": 2,
+                "agents": [{
+                    "name": "claude", "kind": "claude", "usage_prompt": "/usage",
+                    "usage_marker": "Current week", "usage_read_source": "visible",
+                    "slash_delivery": "paste", "composer_glyph": "> ",
+                    "recover_keys": ["esc"], "close_keys": ["esc"], "clear_prompt": "/clear",
+                    "tiers": {"mechanical": {"model": "claude-haiku-4-9"}},
+                }],
+            })
+        agents = parse_config({
+            "schema_version": 2,
+            "agents": [{
+                "name": "claude", "kind": "claude", "usage_prompt": "/usage",
+                "usage_marker": "Current week", "usage_read_source": "visible",
+                "slash_delivery": "paste", "composer_glyph": "> ",
+                "recover_keys": ["esc"], "close_keys": ["esc"], "clear_prompt": "/clear",
+                "tiers": {"build": {"model": "claude-haiku-4-9"}},
+            }],
+        }, catalog=document)
+        self.assertIsNone(agents[0].tiers["build"]["effort"])
+
+    def test_discover_does_not_store_poisoned_grok_cache_secrets(self):
+        catalog.discover(self.state, AT, caches=caches())
+        saved = catalog.storage_path(self.state).read_text(encoding="utf-8")
+        self.assertNotIn("SHOULD_NOT_LEAK", saved)
+        self.assertNotIn("api_key", saved)
+        self.assertNotIn("GROK_API_KEY", saved)
 
     def test_t14_spark_is_deprecated_from_docs_with_no_replacement_slug(self):
         catalog.discover(self.state, AT, caches=caches())
@@ -308,6 +366,25 @@ class CatalogAccessTest(unittest.TestCase):
         self.assertEqual(matched["class"], "request_refused")
         self.assertEqual(matched["model"], "opus-5")
 
+    def test_supervision_classifies_visible_output_without_storing_it(self):
+        client = mock.Mock()
+        client.agent_get.return_value = {
+            "pane_id": "fixture-pane", "agent_status": "blocked", "agent_session": None,
+        }
+        client.agent_read.return_value = REFUSAL_TEXT
+        observed = supervision_runtime.observe(client, {
+            "assignment": {
+                "id": "dispatch-catalog", "agent": "claude", "task": "catalog",
+                "report": str(self.tmp.name + "/absent.md"), "pane_id": "fixture-pane",
+                "native_session": None,
+            },
+            "refinements": [],
+        })
+        serialized = json.dumps(observed)
+        self.assertEqual(observed["catalog_access"]["class"], "request_refused")
+        self.assertIn("catalog-record-access", observed["catalog_access"]["command"])
+        self.assertNotIn(REFUSAL_TEXT, serialized)
+
     def test_t11_empty_catalog_leaves_opus5_seed_keeps_it_refusal_bars_it(self):
         document = catalog.empty()
         self.assertEqual(catalog.assess_pair(document, "claude", "opus-5", "high", "unknown",
@@ -360,14 +437,19 @@ class CatalogSelectionTest(CliCase):
         }
         self.config.write_text(json.dumps(self.settings), encoding="utf-8")
 
-    def plan(self, role="developer"):
-        rc, output, error = self.run_cli(
-            ["plan", *self.base(), "--roles", role, "--snapshot", str(self.snapshot), "--now", AT])
+    def plan(self, role="developer", task=None):
+        self.out, self.err = io.StringIO(), io.StringIO()
+        args = ["plan", *self.base(), "--roles", role, "--snapshot", str(self.snapshot), "--now", AT]
+        if task:
+            args += ["--task", task]
+        rc, output, error = self.run_cli(args)
         document = json.loads(output) if output.strip() else None
         return rc, document, error
 
     def test_t6_an_access_refusal_makes_plan_and_apply_refuse_opus5(self):
         catalog.discover(self.state, AT, caches=caches())
+        rc, planned, error = self.plan(task="catalog-t6")
+        self.assertEqual(rc, 0, error)
         fingerprint = catalog.pair_fingerprint(catalog.load(self.state), "claude")
         catalog.record_access(self.state, {
             "adapter": "claude", "model": "opus-5", "effort": "high",
@@ -381,6 +463,54 @@ class CatalogSelectionTest(CliCase):
         self.assertIn("opus-5", payload["message"])
         self.assertNotIn("claude-opus-5-5", payload["message"])
         self.assertNotIn('"opus"', payload["message"])
+        self.out, self.err = io.StringIO(), io.StringIO()
+        rc, output, apply_error = self.run_cli(
+            ["apply", *self.base(), "--assignments", json.dumps(planned),
+             "--common", str(self.common), "--brief", "developer=" + str(self.briefs["developer"]),
+             "--task", "catalog-t6", "--dry-run", "--now", AT])
+        self.assertEqual(rc, 1, apply_error)
+        self.assertEqual(output, "")
+        apply_payload = json.loads(apply_error)
+        self.assertEqual(apply_payload["error"], "catalog_refused")
+        self.assertNotIn("claude-opus-5-5", apply_error)
+
+    def test_t12_load_config_and_plan_accept_a_catalog_no_effort_id(self):
+        catalog.discover(self.state, AT, caches=caches())
+        self.settings["agents"][0]["tiers"] = {"build": {"model": "claude-haiku-4-9"}}
+        self.config.write_text(json.dumps(self.settings), encoding="utf-8")
+        rc, document, error = self.plan("developer")
+        self.assertEqual(rc, 0, error)
+        assert document is not None
+        self.assertEqual(document["tiers"]["developer"]["model"], "claude-haiku-4-9")
+
+    def test_t10_start_judge_refuses_an_unavailable_pin_before_native_calls(self):
+        catalog.discover(self.state, AT, caches=caches())
+        fingerprint = catalog.pair_fingerprint(catalog.load(self.state), "codex")
+        catalog.record_access(self.state, {
+            "adapter": "codex", "model": "gpt-6-astra", "effort": "high",
+            "fingerprint": fingerprint, "class": "request_refused",
+            "text": "There's an issue with the selected model (gpt-6-astra).",
+        }, AT)
+        native = mock.Mock()
+        self.out, self.err = io.StringIO(), io.StringIO()
+        rc, output, error = self.run_cli([
+            "start-judge", *self.base(), "--assignments", json.dumps({
+                "assignments": {"judge": "judge"},
+                "judge": {
+                    "agent": "judge", "model": "gpt-6-astra", "effort": "high",
+                    "mode": "adjudication",
+                    "launch_args": ["--dangerously-bypass-approvals-and-sandbox"],
+                },
+                "task_context": {"task": "catalog-t10"},
+            }),
+            "--pane", "fixture:pane", "--kind", "codex", "--judge-mode", "adjudication",
+            "--task", "catalog-t10", "--now", AT,
+        ], client=native)
+        self.assertEqual(rc, 1, error)
+        self.assertEqual(output, "")
+        self.assertIn("request_refused", error)
+        self.assertNotIn("gpt-5.6-sol", error)
+        self.assertEqual(native.mock_calls, [])
 
     def test_t1_a_configured_grok_49_build_row_plans_without_an_allowlist_edit(self):
         self.settings["agents"][0]["kind"] = "grok"

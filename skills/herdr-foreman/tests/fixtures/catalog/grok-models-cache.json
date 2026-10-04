@@ -48,13 +48,17 @@
       }
     },
     "grok-4.5": {
+      "api_key": "SHOULD_NOT_LEAK",
+      "env_key": "GROK_API_KEY",
+      "api_base_url": "https://example.invalid",
       "info": {
         "id": "grok-4.5",
         "reasoning_efforts": [
           {"id": "low"},
           {"id": "medium"},
           {"id": "high"}
-        ]
+        ],
+        "extra_headers": {"Authorization": "Bearer SHOULD_NOT_LEAK"}
       }
     }
   }

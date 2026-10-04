@@ -17,7 +17,7 @@ from datetime import timedelta
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-from . import runnable
+from . import catalog, runnable
 from . import supervision as store
 from .errors import HerdrError, StateError, ForemanError, UsageError
 from .herdr import HerdrClient, scrub_for_trace
@@ -151,6 +151,15 @@ def observe(client, member):
             observations["observation_error"] = observation_error(exc, "herdr agent read --source visible", assignment["agent"])
         else:
             observations["visible"] = {"sha256": store.digest(visible)}
+            adapter = assignment.get("agent")
+            matched = catalog.match_output(visible, adapter=adapter if adapter in catalog.ADAPTERS else None)
+            if matched is not None:
+                observations["catalog_access"] = {
+                    "class": matched["class"],
+                    "model": matched.get("model"),
+                    "adapter": matched.get("adapter") or adapter,
+                    "command": runnable.command("catalog-record-access"),
+                }
     return observations
 
 

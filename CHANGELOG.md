@@ -5,8 +5,12 @@
 - **Herdr now keeps a maintained model catalog beside the capability table.**
   Discovery reads local CLI cache formats plus dated docs; selection refuses
   recorded access failures and documented retirements without rewriting
-  `config.json`. Exact version IDs leave the Python allowlist. Follow-up work
-  owns candidate-file reconcile and readiness probes.
+  `config.json`. Adapter kinds and parse-time judgment ID membership leave
+  Python; `TOP_MODELS` remains the high-risk escalation seed and cheaper
+  candidate floor, and `NO_EFFORT_MODELS` is a fallback used only when the
+  catalog has no row. Config load, `plan`, `apply`, and `start-judge` read the
+  sidecar so a complete Claude catalog can define a new no-effort ID.
+  Follow-up work owns candidate-file reconcile and readiness probes.
 
 ## 0.3.361 — 2026-10-03
 

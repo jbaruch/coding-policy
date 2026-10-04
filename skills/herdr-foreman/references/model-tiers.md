@@ -2,7 +2,10 @@
 
 ## Configuration and supported workers
 
-`config.example.json` is the operator-owned tier table. Config schema 7 replaces
+`config.example.json` is a dated snapshot of operator-owned tier rows in this
+build. Refresh ownership for those IDs is the later candidate-file reconcile;
+copy the example into a new file rather than treating it as an updater.
+Config schema 7 replaces
 the live `agents` roster with `worker_kinds`: launch/UI templates that exist
 without a pane until a plan assigns them. Schemas 1–6 remain readable for
 legacy standing-worker recovery; new configurations use schema 7.
@@ -373,8 +376,10 @@ about two models never retires the rest of the table.
 Listed IDs, scoped availability, and judgment family. A sidecar beside the
 capability table. Discovery reads local CLI metadata; selection refuses a
 recorded access failure and a documented retirement. Listing is not access;
-this build never writes `available`. Exact version allowlists do not live in
-Python.
+this build never writes `available`. Adapter kinds and parse-time judgment ID
+membership left Python. `TOP_MODELS` remains the high-risk escalation seed
+and cheaper-candidate floor. `NO_EFFORT_MODELS` is a fallback used only when
+the catalog has no row for that model. Config load reads the sidecar.
 
 Saved at `<selected-state>.catalog.json`. Owner:
 `skills/herdr-foreman/foreman/catalog.py`. Writers: `catalog-discover`,

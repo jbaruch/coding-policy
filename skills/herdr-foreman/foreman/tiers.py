@@ -369,20 +369,6 @@ def verify_worker_permissions(kind, argv):
         raise HerdrError("Worker launch arguments do not prove YOLO mode. " + recovery, {})
 
 
-def _catalog_no_effort(document, kind):
-    """Models whose catalog row records an empty effort list. Inspects a dict."""
-    entries = document.get("entries") if isinstance(document, dict) else None
-    if not isinstance(entries, list):
-        return frozenset()
-    found = []
-    for entry in entries:
-        if (isinstance(entry, dict) and entry.get("adapter") == kind
-                and entry.get("effort") is None and isinstance(entry.get("model"), str)
-                and isinstance(entry.get("efforts"), list) and list(entry["efforts"]) == []):
-            found.append(entry["model"])
-    return frozenset(found)
-
-
 def _catalog_efforts(document, kind, model):
     """Listed efforts for one model, or None when the catalog has no row."""
     entries = document.get("entries") if isinstance(document, dict) else None
@@ -399,9 +385,9 @@ def _catalog_efforts(document, kind, model):
 def parse_tiers(raw, kind, catalog=None):
     """Validate an optional per-agent {round: tier} table; never invent rows.
 
-    `catalog` is an optional catalog document. Config load omits it, so a new
-    no-effort id still needs `NO_EFFORT_MODELS` until a caller passes the
-    catalog. Tests and selection pass it to accept a complete catalog row.
+    `catalog` is an optional catalog document. A complete catalog row owns
+    that model's effort set, including an empty list for no-effort IDs.
+    `NO_EFFORT_MODELS` is the fallback used only when the catalog has no row.
     """
     if raw is None:
         return {}
@@ -409,7 +395,6 @@ def parse_tiers(raw, kind, catalog=None):
         _error("Tier launches are supported for claude, codex, and grok; {!r} has no adapter.".format(kind))
     if not isinstance(raw, dict) or not raw:
         _error("tiers must be a non-empty object keyed by round type.")
-    no_effort = NO_EFFORT_MODELS | (_catalog_no_effort(catalog, kind) if catalog is not None else frozenset())
     result = {}
     for round_type, entry in raw.items():
         if round_type not in ROUNDS:
@@ -421,11 +406,11 @@ def parse_tiers(raw, kind, catalog=None):
             _error("Tier {!r} needs a model identifier, not a flag or command.".format(round_type))
         effort = entry.get("effort")
         allowed = set(EFFORTS[kind])
-        if catalog is not None:
-            listed = _catalog_efforts(catalog, kind, model)
-            if listed:
-                allowed.update(listed)
-        if model in no_effort:
+        listed = _catalog_efforts(catalog, kind, model) if catalog is not None else None
+        if listed:
+            allowed.update(listed)
+        no_effort = listed == [] if listed is not None else model in NO_EFFORT_MODELS
+        if no_effort:
             if kind != "claude" or effort is not None:
                 _error("Haiku accepts no effort flag; omit effort for its Claude tier.")
         elif not isinstance(effort, str) or effort not in allowed:

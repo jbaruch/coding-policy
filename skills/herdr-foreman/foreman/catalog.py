@@ -393,6 +393,13 @@ def assess_pair(document, adapter, model, effort, fingerprint, *, judgment=False
     return "ok"
 
 
+def _due(reference, reason, **extra):
+    payload = {"due": True, "last_refreshed_at": reference.isoformat(),
+               "next_due_at": (reference + INTERVAL).isoformat(), "reason": reason}
+    payload.update(extra)
+    return payload
+
+
 def cadence(document, at, *, caches=None, configured_adapters=ADAPTERS):
     """Whether the catalog is due a refresh, and why."""
     now = timestamp(_utc(at), "Catalog checkpoint")
@@ -404,29 +411,39 @@ def cadence(document, at, *, caches=None, configured_adapters=ADAPTERS):
         _fail("Catalog checkpoint precedes the saved refresh; use the current UTC checkpoint "
               "without rewriting history.")
     if now >= reference + INTERVAL:
-        return {"due": True, "last_refreshed_at": reference.isoformat(),
-                "next_due_at": (reference + INTERVAL).isoformat(), "reason": "interval_elapsed"}
+        return _due(reference, "interval_elapsed")
     covered = {scope["adapter"] for scope in document["scopes"] if scope["complete"]}
     missing = [name for name in configured_adapters if name not in covered]
     if missing:
-        return {"due": True, "last_refreshed_at": reference.isoformat(),
-                "next_due_at": (reference + INTERVAL).isoformat(),
-                "reason": "incomplete_scope", "incomplete": missing}
+        return _due(reference, "incomplete_scope", incomplete=missing)
+    for observation in document.get("observations") or []:
+        klass = observation.get("availability_class")
+        recorded = observation.get("recorded_at")
+        if klass not in ACCESS_CLASSES or not isinstance(recorded, str):
+            continue
+        when = timestamp(recorded, "Catalog access observation")
+        if when > reference:
+            return _due(reference, "refusal_recorded")
     if caches:
         for adapter, path in caches.items():
             if path is None:
                 continue
-            identity = cache_identity(adapter, Path(path))
-            if identity is None:
+            facts = cache_facts(adapter, Path(path))
+            if facts is None:
                 continue
-            stored = None
-            for scope in document["scopes"]:
-                if scope["adapter"] == adapter:
-                    stored = scope["fingerprint"]
-            if stored is not None and stored != identity:
-                return {"due": True, "last_refreshed_at": reference.isoformat(),
-                        "next_due_at": (reference + INTERVAL).isoformat(),
-                        "reason": "identity_changed", "adapter": adapter}
+            stored = next((scope for scope in document["scopes"] if scope["adapter"] == adapter), None)
+            if stored is None:
+                continue
+            if stored["fingerprint"] != facts["fingerprint"]:
+                return _due(reference, "identity_changed", adapter=adapter)
+            if stored["cli_version"] != facts["cli_version"]:
+                return _due(reference, "client_changed", adapter=adapter)
+            fetched = facts.get("fetched_at")
+            if isinstance(fetched, str) and fetched:
+                fetched_at = timestamp(fetched, "Catalog cache fetch")
+                checked = timestamp(stored["checked_at"], "Catalog scope check")
+                if fetched_at > checked:
+                    return _due(reference, "cache_changed", adapter=adapter)
     return {"due": False, "last_refreshed_at": reference.isoformat(),
             "next_due_at": (reference + INTERVAL).isoformat(), "reason": "not_due"}
 
@@ -515,11 +532,16 @@ def parse_grok_cache(path):
     fetched = data.get("fetched_at")
     if not isinstance(fetched, str):
         fetched = None
+    revision = data.get("cache_revision")
+    if not isinstance(revision, str) or not revision:
+        revision = data.get("etag") if isinstance(data.get("etag"), str) else None
+    version = data.get("grok_version")
     return {
         "adapter": "grok",
-        "cli_version": data.get("grok_version") or "unknown",
+        "cli_version": version if isinstance(version, str) and version else "unknown",
         "fingerprint": identity,
         "fetched_at": fetched,
+        "revision": revision,
         "origin": data.get("origin") or "https://cli-chat-proxy.grok.com/v1/models",
         "models": models,
     }
@@ -550,9 +572,10 @@ def parse_codex_cache(path):
     fetched = data.get("fetched_at")
     if not isinstance(fetched, str):
         fetched = None
+    version = data.get("client_version")
     return {
         "adapter": "codex",
-        "cli_version": data.get("client_version") or "unknown",
+        "cli_version": version if isinstance(version, str) and version else "unknown",
         "fingerprint": identity,
         "fetched_at": fetched,
         "origin": "codex models_cache",
@@ -563,7 +586,15 @@ def parse_codex_cache(path):
 def parse_claude_catalog(path):
     """`path` is a catalog JSON file, or the model-catalog directory."""
     target = Path(path)
-    if target.is_dir():
+    try:
+        info = os.lstat(target)
+    except FileNotFoundError:
+        return None
+    except OSError as exc:
+        _fail("Cannot inspect Claude catalog {}: {}.".format(target, exc))
+    if stat.S_ISLNK(info.st_mode):
+        _fail("Claude catalog {} is a symlink; pass the owner's regular file or directory, not a redirect.".format(target))
+    if stat.S_ISDIR(info.st_mode):
         target = newest_regular_file(target)
         if target is None:
             return None
@@ -614,9 +645,13 @@ def parse_claude_catalog(path):
     }
 
 
-def cache_identity(adapter, path):
+def cache_facts(adapter, path):
     parsers = {"grok": parse_grok_cache, "codex": parse_codex_cache, "claude": parse_claude_catalog}
-    parsed = parsers[adapter](path)
+    return parsers[adapter](path)
+
+
+def cache_identity(adapter, path):
+    parsed = cache_facts(adapter, path)
     if parsed is None:
         return None
     return parsed["fingerprint"]
