@@ -117,7 +117,7 @@ boundary. Earlier failures automatically record `not_sent` and clean only owned
 surfaces. A proved closed immutable no-brief retry needs no retrospective for
 nonexistent outgoing work; unknown sends preserve the pane and reconciliation.
 The exact settling predicate and bounds are owned by
-`foreman/composer.py` (`FRESH_COMPOSER_*`, `_settle_fresh_composer`), rather than
+`skills/herdr-foreman/foreman/composer.py` (`FRESH_COMPOSER_*`, `_settle_fresh_composer`), rather than
 restated here.
 
 The delivery mechanics behind those outcomes — composer confirmation, recovery
@@ -129,7 +129,32 @@ skills/herdr-foreman/references/herdr.md
 
 The prompt text, the refusal predicate, and every constant are the utility's
 own contract; see `skills/herdr-foreman/foreman/composer.py` (`send_message`,
-`_settle_fresh_composer`) and `foreman/assign.py` (`apply`, `before_prompt`).
+`_settle_fresh_composer`) and `skills/herdr-foreman/foreman/assign.py` (`apply`, `before_prompt`).
+
+Failure JSON carries `details.failure_kind` and `details.recovery`: its outcome,
+normal owner operation, evidence condition and recorded surfaces. A retryable
+closed `not_sent` outcome means repeat the identical normal apply. A blocked
+outcome preserves unknown/sent work and names the supported owner operation;
+no pane/config/receipt workaround substitutes for proof.
+
+For owner-recorded assignment-scoped `not_sent` cleanup, including a failed
+cleanup whose surface must still be proved empty, use the existing dispatch ID:
+
+```bash
+CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"; [ -d "$CP" ] || case "$(git config --get remote.origin.url)" in git@github.com:jbaruch/coding-policy|git@github.com:jbaruch/coding-policy.git|https://github.com/jbaruch/coding-policy|https://github.com/jbaruch/coding-policy.git|ssh://git@github.com/jbaruch/coding-policy|ssh://git@github.com/jbaruch/coding-policy.git) CP=. ;; *) echo "coding-policy plugin not found: run tessl install jbaruch/coding-policy" >&2; exit 1 ;; esac
+bash "$CP/skills/herdr-foreman/foreman.sh" reconcile --state <state-path> --dispatch <recorded-dispatch-id>
+```
+
+This selector reads the stored reconciliation or owner pre-send abort proof;
+it creates no transport receipt, authorization or native history. It performs
+only proved owned empty-surface cleanup and returns the unchanged transport row
+with `cleanup_replayed` and `pane_closure` on stdout, exit 0. Missing/changed
+proof, report/work evidence, an uncertain/live changed identity or cleanup
+failure emits structured refusal on stderr, exit 1. Once closure is proved,
+repeat unchanged normal apply. Unknown sends still require the existing
+actual-evidence `reconcile --record` route; the selector cannot infer no-send.
+The guard is owned by `skills/herdr-foreman/foreman/cli.py`
+(`_recorded_no_send_cleanup`, `_run_recovery`).
 
 Proceed to Step 11 with the roles that were dispatched.
 

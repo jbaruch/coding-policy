@@ -23,7 +23,9 @@
 #           `created` cut a new branch, `attached` checked out one that already
 #           existed, `already-provisioned` found the path already on that
 #           branch and did nothing (idempotent re-run).
-#   stderr: diagnostics only.
+#   stderr: diagnostics and structured provenance refusal objects. Their
+#           details.failure_kind and details.recovery name the normal owner
+#           operation and evidence condition; never repair private Git by hand.
 #   exit  : 0 the worktree exists at <worktree-path> on <branch>,
 #           1 precondition unmet (usage, git absent, not a repo, no origin,
 #             invalid branch name, path outside the worktree root),
@@ -47,6 +49,14 @@ record_base() {
 }
 
 warn() { printf 'provision-worktree: %s\n' "$1" >&2; }
+
+provenance_failure() {
+  jq -n --arg kind "$1" --arg message "$2" --arg path "$path" --arg branch "$branch" \
+    --arg operation "bash ${SKILL_DIR}/provision-worktree.sh" \
+    '{error: "provision_refused", message: ($message + " Retry the same normal provisioning invocation when its owner can establish origin and the recorded base; existing work is preserved."),
+      details: {failure_kind: $kind, recovery: {outcome: "blocked", operation: $operation,
+        condition: "The owner must complete the authorized fetch/lookup without replacing the original worktree or base.", evidence: {path: $path, branch: $branch}}}}' >&2
+}
 
 # Echo the ABSOLUTE common git dir for the work tree at <dir>, or return 1.
 #
@@ -117,7 +127,7 @@ main() {
     return 1
   fi
   if ! git -C "$shared" fetch --quiet origin 2>"$ERRFILE"; then
-    warn "git fetch origin failed: $(tr '\n' ' ' < "$ERRFILE") — no worktree was provisioned"
+    provenance_failure "provision_fetch_failed" "git fetch origin failed: $(tr '\n' ' ' < "$ERRFILE") — no worktree was provisioned"
     return 2
   fi
   local default_ref default_revision base_revision db=""

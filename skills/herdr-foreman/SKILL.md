@@ -815,7 +815,7 @@ The reset foreman takes Step 17's Resume Route.
 The release is one more assignment, never a prompt into the developer's
 existing context. Return to Step 7 (it reports `already-provisioned`), then
 Step 8 with the role `release` for the developer's agent (template
-`templates/brief-release.md`, the same `WORKTREE` and `BRANCH`, a fresh
+`skills/herdr-foreman/templates/brief-release.md`, the same `WORKTREE` and `BRANCH`, a fresh
 `REPORT`), dispatch through Step 10 so the context is cleared and
 the brief is fresh, and wait on the report in Step 11. `apply` refuses the
 release dispatch, dry run included, while the task carries an open verdict

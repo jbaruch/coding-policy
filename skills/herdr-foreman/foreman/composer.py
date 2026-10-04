@@ -25,7 +25,8 @@ keeps the legacy unchecked path.
 import re
 import time
 
-from .errors import HerdrError
+from .errors import HerdrError, owner_recovery
+from . import runnable
 from .parsers import BOX_FRAME
 from .probe import stderr_warn
 
@@ -553,6 +554,12 @@ def _wait_for_visible_composer(client, agent, pane_id, text, ansi, sleep, warn):
     )
 
 
+def _fresh_startup_error(kind, message, evidence):
+    return owner_recovery(HerdrError(message, evidence), kind,
+        runnable.command("apply"),
+        "The apply owner must prove owned pre-send cleanup and durable not_sent before retrying the unchanged assignment; unknown input remains blocked.")
+
+
 def _settle_fresh_composer(client, agent, pane_id, observe, sleep, warn):
     """Read only; decorative startup evidence never authorizes input itself."""
     original = observe()
@@ -562,9 +569,9 @@ def _settle_fresh_composer(client, agent, pane_id, observe, sleep, warn):
         text, ansi = read_pane(client, agent, warn=warn)
         composer = inspect_composer(text, agent, ansi=ansi)
         if observe() != original:
-            raise HerdrError("Fresh worker changed pane, process or tier during startup; nothing was sent.", {"pane_id": pane_id})
+            raise _fresh_startup_error("startup_identity_changed", "Fresh worker changed pane, process or tier during startup; nothing was sent.", {"pane_id": pane_id})
         if not ansi or not composer.visible:
-            raise HerdrError("Fresh startup lacks ANSI composer evidence; nothing was sent.", {"pane_id": pane_id, "ansi_read": ansi})
+            raise _fresh_startup_error("startup_evidence_missing", "Fresh startup lacks ANSI composer evidence; nothing was sent.", {"pane_id": pane_id, "ansi_read": ansi})
         exact = composer.placeholder or composer.literal == ""
         # Only a single placeholder row with decorative non-word marks may
         # settle. Recalled paragraphs and arbitrary dim input remain drafts.
@@ -575,13 +582,14 @@ def _settle_fresh_composer(client, agent, pane_id, observe, sleep, warn):
                     (composer.literal or "").strip()[len(hint.strip()):])
             for hint in agent.composer_placeholders))
         if not exact and not decorated:
-            raise _stuck_composer_error(agent, pane_id, composer, "fresh startup contains a draft or dialog; no input was sent")
+            raise _fresh_startup_error("startup_input_occupied", "Fresh startup contains a draft or dialog; no input was sent.",
+                {"pane_id": pane_id, "composer_occupied": True, "dim": composer.dim, "placeholder": composer.placeholder, "ansi_read": composer.ansi})
         stable = stable + 1 if exact else 0
         if stable >= FRESH_COMPOSER_STABLE_READS:
             return text
         if attempt + 1 < FRESH_COMPOSER_ATTEMPTS:
             sleep(FRESH_COMPOSER_INTERVAL)
-    raise HerdrError("Fresh composer did not settle within its read-only startup bound; nothing was sent.",
+    raise _fresh_startup_error("startup_settle_timeout", "Fresh composer did not settle within its read-only startup bound; nothing was sent.",
                     {"pane_id": pane_id, "attempts": FRESH_COMPOSER_ATTEMPTS,
                      "dim": composer.dim, "placeholder": composer.placeholder, "ansi_read": composer.ansi})
 

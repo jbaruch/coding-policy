@@ -50,7 +50,7 @@ from .composer import (
     send_command,
     send_message,
 )
-from .errors import AgentBusyError, HerdrError, UsageError
+from .errors import AgentBusyError, HerdrError, UsageError, owner_recovery
 from .herdr import (
     READY_STATES,
     BUSY_STATES,
@@ -1155,7 +1155,9 @@ def apply(client, assignments, agents_by_name, paths, at, no_clear=False, settle
             if (live.get("pane_id") != step["pane_id"] or live.get("agent_status") not in READY_STATES
                     or type(proof.get("pid")) is not int or proof["pid"] <= 0
                     or (startup_identity is not None and identity != startup_identity)):
-                raise HerdrError("Fresh worker changed its startup identity; nothing was sent.", {"pane_id": step["pane_id"]})
+                raise owner_recovery(HerdrError("Fresh worker changed its startup identity; nothing was sent.", {"pane_id": step["pane_id"]}),
+                    "startup_identity_changed", runnable.command("apply"),
+                    "The apply owner must close only its proved pre-send surface and record not_sent before retrying the unchanged plan.")
             startup_identity = identity
             return identity
 

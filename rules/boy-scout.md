@@ -13,7 +13,7 @@ alwaysApply: true
 ## How to Apply
 
 - **In-scope defect** — fix it in the current change and test the outcome
-- **Unrelated blocking risk** — record it once in the task report with evidence, consequence, owner if known, and required next decision
+- **Unrelated blocking risk** — record it once with evidence, consequence, owner if known, and required next decision: in the existing task/round record in a Herdr round, or the current conversation standalone
 - **Advisory** — use the mode-aware acknowledgment contract in `rules/review-severity.md` Split Reading From Acting; it creates no delivery obligation
 - Open an issue, pull request, or other external record only when the task or operator separately authorizes that action
 

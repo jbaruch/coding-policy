@@ -485,6 +485,20 @@ rules = root.parent / "rules"
 boy_scout = (rules / "boy-scout.md").read_text()
 severity = (rules / "review-severity.md").read_text()
 advisory_directive = next(line for line in boy_scout.splitlines() if line.startswith("- **Advisory**"))
+risk_directive = next(line for line in boy_scout.splitlines() if line.startswith("- **Unrelated blocking risk**"))
+assert "Herdr round" in risk_directive and "current conversation standalone" in risk_directive
+references = {
+    "herdr-foreman/SKILL.md": ["skills/herdr-foreman/templates/brief-release.md"],
+    "herdr-foreman/references/dispatch-recovery.md": ["skills/herdr-foreman/foreman/composer.py", "skills/herdr-foreman/foreman/assign.py"],
+    "herdr-foreman/references/judge-round.md": ["skills/herdr-foreman/templates/brief-judge.md", "skills/herdr-foreman/templates/brief-judge-diagnosis.md"],
+    "herdr-foreman/references/round-setup.md": ["skills/herdr-foreman/references/specialists.md"],
+    "herdr-foreman/state-schema.md": ["skills/herdr-foreman/provision-worktree.sh", "skills/herdr-foreman/foreman/provision.py"],
+}
+for source, paths in references.items():
+    content = (root / source).read_text()
+    for target in paths:
+        assert "`" + target + "`" in content and (root.parent / target).is_file(), (source, target)
+assert "reconcile --state <state-path> --dispatch <recorded-dispatch-id>" in (root / "herdr-foreman/references/dispatch-recovery.md").read_text()
 assert "rules/review-severity.md" in advisory_directive
 assert "task report" not in advisory_directive and "round log" not in advisory_directive
 assert "in a team round" in severity and "standalone, note it directly" in severity

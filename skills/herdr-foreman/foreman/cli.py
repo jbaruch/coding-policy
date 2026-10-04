@@ -31,7 +31,7 @@ from .assign import APPLY_SCHEMA_VERSION, dry_run, freeze_decision, freeze_paths
 from . import renderable
 from . import attention, capabilities, chronology, churn, composition, engagement, foreman_queue, foreman_reset, historical, home, lifecycle, load_set, members, memory, oracle, partition, recovery, report_delivery, report_gates, restoration, role_clear, retrospective, retrospective_runtime, supervision, supervision_gate, supervision_runtime, triggers
 from .config import FOREMAN_CONFIG_VERSION, default_config_path, load_config, load_foreman, load_judge, load_role_costs, select_agents
-from .errors import AgentBusyError, PlanError, StateError, ForemanError, HerdrError, UsageError
+from .errors import AgentBusyError, PlanError, StateError, ForemanError, HerdrError, UsageError, owner_recovery
 from .herdr import (
     error_code,
     DEFAULT_MARKER_TIMEOUT_MS,
@@ -41,7 +41,7 @@ from .herdr import (
     format_argv,
     trace_enabled_in_env,
 )
-from .composer import COMPOSER_SETTLE_SEC, DEFAULT_START_TIMEOUT_MS
+from .composer import COMPOSER_SETTLE_SEC, DEFAULT_START_TIMEOUT_MS, ensure_ready
 from .tiers import SEAT_SEPARATOR, canonical_role, require_seatable
 from .diagnostics import PREFIX as DIAGNOSTIC_PREFIX, stderr_warn
 from .measure import (
@@ -55,7 +55,7 @@ from .planner import ASSIGNMENT_PLAN_SCHEMA_VERSION, headroom_of
 from .tiers import (COORDINATION_ROUND, FOREMAN_ROLE, JUDGMENT_ROUNDS, MissingTierError,
                     parse_launch_args, parse_tiers, select_tier, worker_launch_args)
 from . import cost_report, selection
-from .launch import configured_running_tier, restart_worker, start_foreman, start_worker, verify_foreman, verify_running
+from .launch import configured_running_tier, restart_worker, start_foreman, start_worker, verify_foreman, verify_running, require_empty_shell
 from .state import (
     add_assignment,
     add_snapshot,
@@ -421,7 +421,12 @@ def build_parser():
 
     for command in ("task", "checkpoint", "authorize-corrections", "authorize-approach", "recover-context", "recover-role-clear", "record-report", "record-refusal", "authorize-refused-dispatch", "diagnose", "reconcile", "record-release-clear", "import-correction", "record-historical-review", "recover-report", "assess-specialist", "close-task"):
         record_parser = sub.add_parser(command, parents=[common], help=RECOVERY_HELP.get(command, "Record owner-managed {} evidence.".format(command)))
-        record_parser.add_argument("--record", required=True, metavar="FILE", help="Structured evidence JSON; see dispatch-recovery.md.")
+        if command == "reconcile":
+            source = record_parser.add_mutually_exclusive_group(required=True)
+            source.add_argument("--record", metavar="FILE", help="Actual transport evidence JSON; see dispatch-recovery.md.")
+            source.add_argument("--dispatch", metavar="ID", help="Replay only the owner's recorded authoritative not_sent cleanup; never infer a transport outcome.")
+        else:
+            record_parser.add_argument("--record", required=True, metavar="FILE", help="Structured evidence JSON; see dispatch-recovery.md.")
         record_parser.add_argument("--now", metavar="ISO8601")
     sub.add_parser("status", parents=[common], help="Show implementation budgets and paused work separately from active audit workers.")
     reset_parser = sub.add_parser("foreman-reset", parents=[common], help="Schedule the foreman's round-boundary context reset from a reset-ready stow.")
@@ -569,6 +574,12 @@ def _retryable_enrollment_identity(state_path, store, identifier, fingerprint):
 def _closed_no_send_retry(state_path, state, client, dispatch, tier, paths):
     """Prove an immutable, closed no-brief attempt without changing history."""
     name = dispatch["agent"]
+    def refuse(kind, message, operation="reconcile", **evidence):
+        return owner_recovery(UsageError(message, {"agent": name}), kind,
+            runnable.command(operation + " --state " + shlex.quote(str(state_path))
+                + (" --dispatch " + shlex.quote(row["id"]) if operation == "reconcile" else "")),
+            "The owner must establish unchanged authoritative not_sent evidence and closure of the recorded identity before normal apply may retry; preserve prior work and never invent config or receipts.",
+            agent=name, dispatch=row["id"], **evidence)
     previous = [row for row in state["recovery"]["dispatches"] if row.get("agent") == name]
     if not previous:
         return None
@@ -585,33 +596,77 @@ def _closed_no_send_retry(state_path, state, client, dispatch, tier, paths):
             and member is not None and member["active"] is False
             and not any(entry["active"] and entry["assignment"]["agent"] == name for entry in members))
     if not same:
-        raise UsageError("Fresh retry cannot prove identical closed no-send inputs; preserve the previous attempt and its work.", {"agent": name})
+        raise refuse("retry_inputs_unproved", "Fresh retry cannot prove identical closed no-send inputs; preserve the previous attempt and its work.")
     assignment = supervision.expected_assignment(member)
     pane, report = assignment.get("pane_id"), assignment.get("report")
     if not pane or not report or Path(report).exists() or Path(report).is_symlink():
-        raise UsageError("Fresh retry has report evidence or no recorded closure surface; preserve the prior attempt.", {"agent": name})
+        raise refuse("retry_closure_unproved", "Fresh retry has report evidence or no recorded closure surface; preserve the prior attempt.")
     reconciled = row.get("reconciliation")
     if reconciled is not None:
         if reconciled.get("input", {}).get("outcome") != "not_sent":
-            raise UsageError("Fresh retry lacks an authoritative not_sent reconciliation.", {"agent": name})
-        receipt, _body = recovery.receipt(reconciled["input"]["evidence"])
+            raise refuse("retry_transport_unproved", "Fresh retry lacks an authoritative not_sent reconciliation.")
+        try:
+            receipt, _body = recovery.receipt(reconciled["input"]["evidence"])
+        except ForemanError as exc:
+            raise refuse("retry_evidence_unavailable", "Fresh retry cannot read its authoritative reconciliation evidence.", cause=exc.to_dict()) from exc
         if receipt != reconciled.get("evidence_receipt"):
-            raise UsageError("Fresh retry reconciliation evidence changed; preserve the prior attempt.", {"agent": name})
+            raise refuse("retry_evidence_changed", "Fresh retry reconciliation evidence changed; preserve the prior attempt.")
     elif not any(event.get("kind") == "dispatch_not_sent" and event.get("details", {}).get("dispatch") == row["id"]
                  for event in state["recovery"]["events"]):
-        raise UsageError("Fresh retry lacks the owner's pre-send abort evidence.", {"agent": name})
+        raise refuse("retry_transport_unproved", "Fresh retry lacks the owner's pre-send abort evidence.")
     for read, identifier, absent in ((client.agent_get, name, "agent_not_found"), (client.pane_get, pane, "pane_not_found")):
         try:
             read(identifier)
         except HerdrError as exc:
             if error_code(exc) != absent:
-                raise
+                raise owner_recovery(exc, "retry_identity_unavailable", runnable.command("supervision-status"),
+                    "The owner must observe the recorded identity and prove absence before retrying unchanged apply.", agent=name, pane_id=pane, dispatch=row["id"])
         else:
-            raise UsageError("Fresh retry's old agent or pane is still live; nothing was started.", {"agent": name, "pane_id": pane})
+            raise refuse("retry_identity_live", "Fresh retry's old agent or pane is still live; nothing was started.", "supervision-status", pane_id=pane)
     item = {"role": dispatch["role"], "task": dispatch["task"], "model": tier.get("model"),
             "effort": tier.get("effort"), "context": "start", "brief": paths[dispatch["role"]], "common": paths["common"]}
     return {"classification": "reconciled_not_sent", "dispatch": row["id"],
             "target": retrospective_runtime.target(item)}
+
+
+def _recorded_no_send_cleanup(state_path, state, identifier):
+    """Select existing owner proof, without creating a reconciliation receipt."""
+    row = next((item for item in state["recovery"]["dispatches"] if item["id"] == identifier), None)
+    def blocked(kind, message):
+        return owner_recovery(UsageError(message, {}), kind,
+            runnable.command("supervision-status --state " + shlex.quote(str(state_path))),
+            "The owner must establish actual transport evidence and the recorded empty identity before reconciliation can close it; preserve unknown or completed work.", dispatch=identifier)
+    if (row is None or row["status"] != "not_sent" or not isinstance(row.get("worker_kind"), str)
+            or row.get("result") is not None or row.get("report") is not None
+            or any(item.get("agent") == row["agent"] for item in state["assignments"])):
+        raise blocked("retry_transport_unproved", "No authoritative assignment-scoped no-send outcome is available.")
+    member = next((item for item in supervision.load(state_path)["members"] if item["id"] == identifier), None)
+    if member is None:
+        raise blocked("retry_closure_unproved", "No original enrollment is available for no-send cleanup.")
+    assignment = supervision.expected_assignment(member)
+    report = assignment.get("report")
+    if (assignment["agent"] != row["agent"] or assignment["task"] != row["task"]
+            or not assignment.get("pane_id") or not report or Path(report).exists() or Path(report).is_symlink()):
+        raise blocked("retry_closure_unproved", "The original closure identity is missing, changed or has report work.")
+    reconciled = row.get("reconciliation")
+    if reconciled is not None:
+        record = reconciled["input"]
+        if record.get("outcome") != "not_sent":
+            raise blocked("retry_transport_unproved", "Saved reconciliation does not prove no-send.")
+        try:
+            evidence, _ = recovery.receipt(record["evidence"])
+        except ForemanError as exc:
+            raise blocked("retry_evidence_unavailable", "Saved reconciliation evidence is unavailable.") from exc
+        if evidence != reconciled["evidence_receipt"]:
+            raise blocked("retry_evidence_changed", "Saved reconciliation evidence changed.")
+    else:
+        abort = next((event for event in state["recovery"]["events"]
+            if event["kind"] == "dispatch_not_sent" and event.get("task") == row["task"]
+            and event.get("details", {}).get("dispatch") == identifier), None)
+        if abort is None:
+            raise blocked("retry_transport_unproved", "The owner's pre-send abort evidence is unavailable.")
+        record = {"reason": abort["details"]["reason"], "evidence": str(state_path)}
+    return row, record, assignment
 
 
 def _cleanup_reconciled_scoped_not_sent(state_path, dispatch, record, at, client):
@@ -1743,8 +1798,6 @@ def _apply(args, client, warn, trace, hold_gates):
                 failures.append({
                     "operation": "close_pane", "target": pane,
                     "error": cleanup.to_dict(),
-                    "repair": "Run `{}` before retrying.".format(
-                        format_argv(client.argv_pane_close(pane))),
                 })
         for identifier in prepared:
             try:
@@ -1753,8 +1806,6 @@ def _apply(args, client, warn, trace, hold_gates):
                 failures.append({
                     "operation": "abort_pre_send", "target": identifier,
                     "error": cleanup.to_dict(),
-                    "repair": "Inspect dispatch {} in {} and reconcile its transport state before retrying.".format(
-                        identifier, state_path),
                 })
         state_saved = True
         if prepared or enrolled:
@@ -1764,7 +1815,7 @@ def _apply(args, client, warn, trace, hold_gates):
                 state_saved = False
                 failures.append({
                     "operation": "save_state", "target": str(state_path),
-                    "error": cleanup.to_dict(), "repair": str(cleanup),
+                    "error": cleanup.to_dict(),
                 })
         if state_saved:
             for name in closed:
@@ -1782,23 +1833,30 @@ def _apply(args, client, warn, trace, hold_gates):
                     failures.append({
                         "operation": "resolve_enrollment", "target": identifier,
                         "error": cleanup.to_dict(),
-                        "repair": "Inspect `{}` and resolve enrollment {} with `{}` after its pending observations are handled.".format(
-                            runnable.command("supervision-status"), identifier,
-                            runnable.command("supervision-resolve")),
                     })
-        if not failures:
-            return
-        action = "Cleanup also failed: " + " ".join(
-            "{} {}: {}".format(row["operation"], row["target"], row["repair"])
-            for row in failures)
         if isinstance(primary, ForemanError):
-            primary.message = "{} {}".format(primary.message, action)
-            primary.args = (primary.message,)
-            primary.details = {**primary.details, "cleanup_failures": failures}
-        elif primary is not None and hasattr(primary, "add_note"):
-            primary.add_note(action)
-        elif primary is None:
-            raise HerdrError(action, {"cleanup_failures": failures})
+            known_closed = (bool(names) and bool(prepared) and not failures and not sending
+                and state_saved and all(next(row for row in store["dispatches"] if row["id"] == identifier)["status"] == "not_sent" for identifier in prepared))
+            cleanup_id = next((identifier for identifier in prepared if any(row["id"] == identifier and row["status"] == "not_sent" for row in store["dispatches"])), None)
+            operation = "apply" if known_closed else ("reconcile --dispatch " + shlex.quote(cleanup_id) if cleanup_id and not sending else "supervision-status")
+            owner_recovery(primary, primary.details.get("failure_kind", primary.code),
+                runnable.command(operation + " --state " + shlex.quote(str(state_path))),
+                ("Owned pre-send surfaces are closed and not_sent is durable. Repeat the identical normal apply; no retrospective, configuration or receipt repair is required."
+                 if known_closed else "The owner must complete recorded transport/cleanup reconciliation before the unchanged apply may retry; unknown or sent work is preserved."),
+                outcome="retryable" if known_closed else "blocked",
+                closed_agents=closed, dispatches=list(prepared), cleanup_failures=failures,
+                state_saved=state_saved, sending_agents=sorted(sending))
+            if failures:
+                primary.details["cleanup_failures"] = failures
+        elif failures:
+            action = "Owner cleanup remains blocked; reconcile the recorded transport before retrying normal apply."
+            action += " Cleanup failures: " + json.dumps(failures, sort_keys=True)
+            if primary is not None and hasattr(primary, "add_note"):
+                primary.add_note(action)
+            elif primary is None:
+                raise owner_recovery(HerdrError(action, {"cleanup_failures": failures}),
+                    "pre_send_cleanup_failed", runnable.command("reconcile"),
+                    "The owner must prove closure and durable not_sent; preserve unknown or sent work.")
 
     spawned = {}
     enrolled = {}
@@ -2230,7 +2288,9 @@ def cmd_recovery(args, client=None, warn=None, trace=None):
 def _run_recovery(args, state_path, warn, client, trace):
     state = _load_state_for_write(state_path, warn)
     store, history = state["recovery"], state["assignments"]
-    data, at = _read_record(args.record), args.now or now_iso()
+    cleanup_dispatch = getattr(args, "dispatch", None) if args.command == "reconcile" else None
+    selected_cleanup = _recorded_no_send_cleanup(state_path, state, cleanup_dispatch) if cleanup_dispatch else None
+    data, at = (_read_record(args.record) if args.record is not None else {}), args.now or now_iso()
     if args.command == "task":
         result = recovery.register_task(store, data, at)
     elif args.command == "close-task":
@@ -2328,7 +2388,7 @@ def _run_recovery(args, state_path, warn, client, trace):
     else:
         templates = load_config(_config_path(args))
         agents = {agent.name: agent for agent in templates}
-        name = recovery.recovery_agent(store, history, args.command, data)
+        name = selected_cleanup[0]["agent"] if selected_cleanup else recovery.recovery_agent(store, history, args.command, data)
         if name not in agents and templates and all(agent.assignment_scoped for agent in templates):
             dispatch = next((row for row in reversed(store["dispatches"])
                              if row.get("agent") == name and isinstance(row.get("worker_kind"), str)), None)
@@ -2337,6 +2397,47 @@ def _run_recovery(args, state_path, warn, client, trace):
         if name not in agents:
             raise UsageError("The recorded worker is absent from config; restore its original identity before recovering.", {})
         client = client if client is not None else _client(args, trace=trace)
+        if selected_cleanup:
+            dispatch, proof_record, assignment = selected_cleanup
+            pane = assignment["pane_id"]
+            try:
+                try:
+                    live = client.agent_get(name)
+                except HerdrError as exc:
+                    if error_code(exc) != "agent_not_found":
+                        raise
+                    try:
+                        client.pane_get(pane)
+                    except HerdrError as pane_error:
+                        if error_code(pane_error) != "pane_not_found":
+                            raise
+                    else:
+                        require_empty_shell(client, pane)
+                else:
+                    recovery.require_recovery_ready(live)
+                    tier = (dispatch.get("context_before_send") or {}).get("tier") or (dispatch.get("observed_before") or {}).get("tier")
+                    if not isinstance(tier, dict):
+                        raise UsageError("No original tier is available for cleanup; preserve the worker.", {})
+                    cleanup_identity = None
+                    def observe_cleanup():
+                        nonlocal cleanup_identity
+                        current = client.agent_get(name)
+                        running = verify_running(client, agents[name], pane, tier)
+                        identity = (current.get("agent_session"), running)
+                        if (current.get("pane_id") != pane or current.get("agent_status") not in READY_STATES
+                                or (cleanup_identity is not None and identity != cleanup_identity)):
+                            raise HerdrError("Recorded cleanup identity changed; preserve the worker.", {})
+                        cleanup_identity = identity
+                        return identity
+                    ensure_ready(client, agents[name], pane, startup_observe=observe_cleanup)
+                    observe_cleanup()
+                closure = _cleanup_reconciled_scoped_not_sent(state_path, dispatch, proof_record, at, client)
+            except ForemanError as exc:
+                raise owner_recovery(exc, exc.details.get("failure_kind", "retry_cleanup_unproved"),
+                    runnable.command("supervision-status --state " + shlex.quote(str(state_path))),
+                    "The owner must observe the original identity and retain any draft, changed tier or unknown work; repeat recorded no-send reconciliation only when this surface is proved empty.",
+                    dispatch=dispatch["id"], pane_id=pane)
+            return {**dispatch, "pane_closure": closure, "cleanup_replayed": True}, None
         scoped_not_sent_replay = (recovery.scoped_not_sent_replay(store, data)
                                   if args.command == "reconcile" else None)
         live = None

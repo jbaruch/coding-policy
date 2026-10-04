@@ -8,23 +8,60 @@ fetch never changes the original task base. See state-schema.md.
 import hashlib
 import json
 import os
+import shlex
 import subprocess
 import sys
 import tempfile
 from pathlib import Path
 
-from .errors import ForemanError, UsageError
+from .errors import ForemanError, UsageError, owner_recovery
 from .state import default_state_path, load_state_checked
 
 FIELDS = {"schema_version", "path", "branch", "base_ref", "base_revision",
           "fetched_default_ref", "fetched_default_revision"}
 
 
+def refuse(kind, message, *, path=None, base_revision=None, **evidence):
+    operation = "bash " + shlex.quote(str(Path(__file__).resolve().parents[1] / "provision-worktree.sh"))
+    return owner_recovery(UsageError(message, {}), kind, operation,
+        "Use the same normal provisioning invocation. The owner fetches recorded commits when available; it must preserve this worktree and original base and stop while identity, commit availability or ancestry remains unproved.",
+        path=str(path) if path is not None else None, base_revision=base_revision, **evidence)
+
+
+def ensure_commit(path, revision, *, fetch=False, worktree=None, base_revision=None):
+    selected = worktree or path
+    original_base = base_revision or revision
+    try:
+        resolved = git(path, "rev-parse", "--verify", revision + "^{commit}")
+    except UsageError as lookup:
+        if not fetch:
+            raise refuse("provision_commit_unavailable", "Recorded worktree commit is unavailable.",
+                path=selected, base_revision=original_base, commit_revision=revision, lookup=lookup.to_dict()) from lookup
+        try:
+            git(path, "fetch", "--quiet", "origin", revision)
+            resolved = git(path, "rev-parse", "--verify", revision + "^{commit}")
+        except UsageError as exc:
+            raise refuse("provision_commit_unavailable", "Authorized fetch could not establish the recorded original commit; existing work is preserved.",
+                path=selected, base_revision=original_base, commit_revision=revision, cause=exc.to_dict()) from exc
+    if resolved != revision:
+        raise refuse("provision_commit_unavailable", "Recorded commit did not resolve exactly.", path=selected, base_revision=original_base, commit_revision=revision)
+
+
+def require_ancestor(path, revision):
+    try:
+        git(path, "merge-base", "--is-ancestor", revision, "HEAD")
+    except UsageError as exc:
+        if exc.details.get("recovery", {}).get("evidence", {}).get("git_exit") != 1:
+            raise
+        raise refuse("provision_ancestry_conflict", "Worktree does not descend from its recorded task base; existing work is preserved.",
+            path=path, base_revision=revision) from exc
+
+
 def git(path, *args):
     result = subprocess.run(["git", "-C", str(path), *args], capture_output=True, text=True, check=False)
     if result.returncode:
-        raise UsageError("Cannot read worktree provenance: git {} failed: {}".format(
-            " ".join(args), result.stderr.strip()), {})
+        raise refuse("provision_git_failed", "Cannot read worktree provenance: git {} failed: {}".format(
+            " ".join(args), result.stderr.strip()), path=path, git_args=list(args), git_exit=result.returncode)
     return result.stdout.strip()
 
 
@@ -50,7 +87,7 @@ def persist(location, saved):
             os.fsync(stream.fileno())
         temporary.replace(location)
     except OSError as exc:
-        raise UsageError("Cannot persist worktree base provenance: {}; restore writable Git metadata and rerun normal provisioning. Existing work is preserved.".format(exc), {}) from None
+        raise refuse("provision_persistence_failed", "Cannot persist worktree base provenance: {}; existing work is preserved.".format(exc), path=saved["path"], base_revision=saved["base_revision"]) from None
     finally:
         if temporary is not None:
             try:
@@ -74,9 +111,9 @@ def prepare(shared, path, branch, base_ref, base_revision, default_ref, default_
             saved = validate(json.loads(candidate.read_text(encoding="utf-8")))
     if saved is not None:
         if saved["path"] != path or saved["branch"] != branch:
-            raise UsageError("Provisioning intent does not match this path and branch; preserve existing work.", {})
-        if git(shared, "rev-parse", "--verify", saved["base_revision"] + "^{commit}") != saved["base_revision"]:
-            raise UsageError("Original provisioning base is unavailable; preserve existing work.", {})
+            raise refuse("provision_identity_changed", "Provisioning intent does not match this path and branch; preserve existing work.", path=path)
+        for key in ("base_revision", "fetched_default_revision"):
+            ensure_commit(shared, saved[key], fetch=True, worktree=path, base_revision=saved["base_revision"])
     else:
         saved = validate({"schema_version": 1, "path": path, "branch": branch,
                           "base_ref": base_ref, "base_revision": base_revision,
@@ -106,12 +143,10 @@ def read(path):
     except (OSError, ValueError) as exc:
         raise UsageError("Cannot read worktree base receipt {}: {}; provision through the normal owner before composing.".format(location, exc), {}) from None
     if record["path"] != str(Path(path).resolve()) or record["branch"] != git(path, "symbolic-ref", "--short", "HEAD"):
-        raise UsageError("Worktree base receipt no longer matches its path and branch; preserve the original task worktree.", {})
+        raise refuse("provision_identity_changed", "Worktree base receipt no longer matches its path and branch; preserve the original task worktree.", path=path)
     for key in ("base_revision", "fetched_default_revision"):
-        if git(path, "rev-parse", "--verify", record[key] + "^{commit}") != record[key]:
-            raise UsageError("Worktree base receipt names an unavailable commit.", {})
-    if git(path, "merge-base", "--is-ancestor", record["base_revision"], "HEAD"):
-        raise UsageError("Worktree does not descend from its recorded task base.", {})
+        ensure_commit(path, record[key], base_revision=record["base_revision"])
+    require_ancestor(path, record["base_revision"])
     return record
 
 
@@ -120,14 +155,13 @@ def record(path, branch, base_ref, base_revision, default_ref, default_revision)
     if location.exists():
         saved = read(path)
         if saved["branch"] != branch or saved["base_revision"] != base_revision:
-            raise UsageError("Provisioning cannot change the original worktree base; preserve the recorded task.", {})
+            raise refuse("provision_base_changed", "Provisioning cannot change the original worktree base; preserve the recorded task.", path=path)
         saved.update(fetched_default_ref=default_ref, fetched_default_revision=default_revision)
     else:
         saved = validate({"schema_version": 1, "path": str(Path(path).resolve()), "branch": branch,
                           "base_ref": base_ref, "base_revision": base_revision,
                           "fetched_default_ref": default_ref, "fetched_default_revision": default_revision})
-    if git(path, "merge-base", "--is-ancestor", base_revision, "HEAD"):
-        raise UsageError("Attached branch does not descend from the supplied task base.", {})
+    require_ancestor(path, base_revision)
     persist(location, saved)
     # The authoritative worktree receipt now carries the same original base.
     # Retire only our matching pending intent, so normal worktree cleanup can
@@ -136,7 +170,7 @@ def record(path, branch, base_ref, base_revision, default_ref, default_revision)
     if intent.exists():
         pending = validate(json.loads(intent.read_text(encoding="utf-8")))
         if any(pending[key] != saved[key] for key in ("path", "branch", "base_revision")):
-            raise UsageError("Pending provisioning intent changed; preserve existing work.", {})
+            raise refuse("provision_identity_changed", "Pending provisioning intent changed; preserve existing work.", path=path)
         intent.unlink()
     return saved
 
@@ -186,8 +220,14 @@ def main():
             raise UsageError("Use provision compose, record PATH BRANCH BASE_REF BASE_SHA DEFAULT_REF DEFAULT_SHA, or prepare SHARED PATH BRANCH BASE_REF BASE_SHA DEFAULT_REF DEFAULT_SHA.", {})
         print(json.dumps(result))
         return 0
-    except (ForemanError, OSError, ValueError) as exc:
-        print("provision: {}".format(exc), file=sys.stderr)
+    except ForemanError as exc:
+        if "recovery" not in exc.details:
+            exc = owner_recovery(exc, "provision_inputs_unproved", "bash " + shlex.quote(str(Path(__file__).resolve().parents[1] / "provision-worktree.sh")),
+                "The owner must use the recorded task/worktree inputs and supported provenance before retrying normal provisioning; preserve existing work.")
+        print(json.dumps(exc.to_dict()), file=sys.stderr)
+        return 2
+    except (OSError, ValueError) as exc:
+        print(json.dumps(refuse("provision_evidence_unreadable", "Cannot read provisioning evidence: {}.".format(exc)).to_dict()), file=sys.stderr)
         return 2
 
 

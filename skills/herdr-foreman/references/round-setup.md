@@ -129,7 +129,7 @@ before relying on its role. Proceed immediately to Step 5.
 ## Step 5 — Plan the Roles
 
 Choose the next needed responsibilities before selecting workers. Consult the
-profiles and requirement contract in `references/specialists.md`; available
+profiles and requirement contract in `skills/herdr-foreman/references/specialists.md`; available
 profiles need no activation until a bounded question or deliverable warrants it.
 
 Run `detect-triggers` against the task's base first, with the roles and
@@ -141,11 +141,11 @@ classifies neither a diff nor a plan is refused. Each invocation reads only the 
 it is given, so re-run it after staffing a role or recording a decision and
 plan only once it exits 0. The declaration's fields, the
 decisions file and the answers each trigger accepts are in
-`references/specialists.md`.
+`skills/herdr-foreman/references/specialists.md`.
 
 For a repo whose recorded base lacks its first declaration, use the reviewed
 artifact, digest-bound plan and `--bootstrap-declaration` contract in
-`references/specialists.md`. The first pushed head must install those bytes
+`skills/herdr-foreman/references/specialists.md`. The first pushed head must install those bytes
 unchanged. Existing and later declarations remain in-repo authority.
 
 ```bash
@@ -167,7 +167,7 @@ Exit 1 names the reason it could not plan.
 The owner applies recorded contribution exclusions to task-bound reviewer and
 tester assignments. Add explicit exclusions for external contributors and
 authorship missing from the ledger; a clear, model switch or new label never
-establishes independence. See `references/specialists.md` for assessed contribution
+establishes independence. See `skills/herdr-foreman/references/specialists.md` for assessed contribution
 history. Exit 1 covers an unknown role, missing capability or tier, and any field
 that cannot fill the requested responsibilities. Resolve the actual diagnostic;
 never weaken required independence to fill a seat.
@@ -263,7 +263,8 @@ fetched_default_revision and state, where `state` is `created`,
 `attached`, or `already-provisioned`. Exit 1 is a precondition (an invalid
 branch name, a path outside the worktree root); exit 2 means Git or provenance validation/persistence failed, or
 the path holds something else. A failed persistence emits no success object;
-a normal retry preserves the original base and recovers interrupted receipt
+a normal retry preserves the original base, attempts authorized recorded-commit
+fetch/lookup, and recovers interrupted receipt
 writes without deleting private Git metadata or existing work. Branch-name and path rules are the script's
 contract; see the header of
 `skills/herdr-foreman/provision-worktree.sh`.
@@ -348,7 +349,7 @@ What you decide, and it is the whole of your job here:
   from Step 6. Missing, empty, or non-file package paths refuse composition
   before any brief is written.
 - For advisor, investigator or architect: the bounded consultation values in
-  `references/specialists.md`; the composer selects `brief-specialist.md`.
+  `skills/herdr-foreman/references/specialists.md`; the composer selects `brief-specialist.md`.
 - For specialist developer, reviewer or tester work: `SPECIALIST_CONTEXT` in
   the normal role brief, with the applicable expertise, inputs and capability gaps.
 - For a judge adjudication: `DISPUTE_KIND`, `QUESTION`, `POSITION_A`,

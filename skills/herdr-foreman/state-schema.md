@@ -1101,7 +1101,7 @@ delivered, or reconciled row supplies no Stop authorization.
 
 ## Worktree provisioning provenance
 
-Owner: Herdr `provision-worktree.sh` and `foreman/provision.py`. Each worktree's
+Owner: Herdr `skills/herdr-foreman/provision-worktree.sh` and `skills/herdr-foreman/foreman/provision.py`. Each worktree's
 private Git directory holds `foreman-provision.json`, schema 1. Writer fields:
 `schema_version`, absolute `path`, `branch`, `base_ref`, exact `base_revision`,
 `fetched_default_ref`, exact `fetched_default_revision`. The writer fetches and
