@@ -435,16 +435,18 @@ Use a fresh absolute report path per role and attempt.
 Follow `skills/herdr-foreman/references/round-setup.md` Step 7 for shared and role-specific values,
 authority, review evidence and brief completeness.
 
-- A bug brief, a correction brief, and any brief needing judgment on task
-  content are non-mechanical
-- A non-mechanical brief's task framing is an accepted advisor consultation's
-  report under `skills/herdr-foreman/references/team-operation.md` Judgment
-  Routes
-- Without one, return to Step 5 and plan that consultation first
-- Set the role's `SPECIALIST_CONTEXT` value to the absolute `report` path of
-  that consultation's `assess-specialist` record
-- Never copy, excerpt or paraphrase that report into a value
-- Never write that framing yourself
+- Follow `skills/herdr-foreman/references/team-operation.md` Judgment Routes
+- When accepted behavior, reproducible failure and a bounded correction are
+  already recorded, compose the development brief directly from that evidence;
+  no additional advisor report is required
+- Unsettled behavior, evidence, scope or correction choice requires the named
+  consultation; substantive foreman judgment remains prohibited
+- When consultation is required, return to Step 5 until its framing is accepted,
+  then set `SPECIALIST_CONTEXT` to its assessed report's absolute path
+- Otherwise leave `SPECIALIST_CONTEXT` empty; do not invent a consultation report
+- Never copy, excerpt or paraphrase a consultation report into a value
+- Triggered specialty work, causal uncertainty, changed scope and exhaustion keep
+  their required consultation routes
 
 Proceed immediately to Step 8.
 

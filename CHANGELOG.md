@@ -31,6 +31,11 @@
   retries preserve their task, frozen inputs, mode and correction count without
   requiring a retrospective for outgoing work that never existed. Uncertain,
   live, changed or partially closed attempts still refuse and preserve evidence.
+  State schema 11 owns this retry provenance and preserves older valid history
+  on upgrade, so successful retries remain readable and completed replay sends
+  nothing again. Briefing, retained restoration and release instructions now
+  follow the same conditional consultation, advisory cadence and report-only
+  advisory obligations throughout the delivery path.
 
 - **Fresh workspace startup waits for available foreground evidence.** Herdr
   omits an empty foreground-process list. The owner now waits for that field

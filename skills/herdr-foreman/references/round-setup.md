@@ -252,12 +252,15 @@ Proceed immediately to Step 7 with the printed path as `REVIEW_PACKAGE`.
 Consult the applicable working-memory lessons and verify any operational fact
 the assignment relies on. Include concise relevant lessons with source pointers
 in the role's task text; do not copy the whole memory store into every brief.
-A bug brief, a correction brief, or any brief applying
-`skills/herdr-foreman/references/assignment-reasoning.md` is non-mechanical: its
-task framing comes from an advisor consultation under
-`skills/herdr-foreman/references/team-operation.md` Judgment Routes. Pass the
-absolute `report` path of the accepted consultation's `assess-specialist`
-record as the role's `SPECIALIST_CONTEXT` value; never copy its text.
+Follow `skills/herdr-foreman/references/team-operation.md` Judgment Routes.
+Recorded accepted behavior, reproducible failure and a bounded correction route
+directly to development without another advisor. Unsettled behavior, evidence,
+scope or correction choice requires the applicable consultation; substantive
+foreman judgment, triggered specialty work, causal uncertainty, changed scope
+and exhaustion retain their required routes. When consultation is required,
+pass its accepted `assess-specialist` report's absolute path as
+`SPECIALIST_CONTEXT`, never its text. Otherwise leave that value empty; never
+invent an advisor report to satisfy a settled correction.
 
 Resolve the policy artifacts before writing the values file:
 

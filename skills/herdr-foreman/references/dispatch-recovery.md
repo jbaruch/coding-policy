@@ -56,8 +56,9 @@ This mode carries no developer correction parameters and cannot replace the
 developer's retained-fix path. A dry run checks recorded prerequisites but proves
 no live session or permission flags.
 
-Live apply still enforces the retrospective cadence, YOLO launch proof, readiness,
-and composer gates. Its successful result records retained context
+Live apply still enforces transition-specific retrospective coverage, YOLO
+launch proof, readiness and composer gates. Daily cadence remains visible
+maintenance and does not refuse dispatch. Its successful result records retained context
 and the original requirements; it proves dispatch only. Use normal report
 observation and a new assessment for the follow-up.
 
@@ -341,8 +342,9 @@ visible maintenance observation and does not refuse the restoration.
    hand, edit owner state, or prime a different task.
 4. Dispatch normally with `apply --retain-context --task <task> --fix-round
    <N>`. It verifies the resumed argv (`verify_worker_permissions`), the
-   ledger's preceding confirmed round, retrospective cadence, and live native
-   continuity before any input, then records `cleared: false, clear_reason:
+   ledger's preceding confirmed round, required transition coverage, and live
+   native continuity before any input. Due daily cadence remains visible without
+   refusing restoration. It then records `cleared: false, clear_reason:
    retained` with the unchanged session. Never edit state.json, an assignment
    row, or the session value by hand.
 

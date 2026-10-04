@@ -447,11 +447,11 @@ skills/herdr-foreman/references/retrospectives.md
 
 ```json
 {
-  "schema_version": 10,
+  "schema_version": 11,
   "snapshots": ["<measure output>, oldest first, ring capped at 20"],
   "assignments": [
     {
-      "schema_version": 10,
+      "schema_version": 11,
       "at": "2026-09-01T21:00:00+00:00",
       "role": "developer",
       "agent": "grok",
@@ -490,7 +490,7 @@ skills/herdr-foreman/references/retrospectives.md
 
 | Field | Type | Meaning |
 | ----- | ---- | ------- |
-| `schema_version` | integer | Currently `10`. Version 10 adds the non-counting assignment status `maintenance`; version 9 adds `judge_mode` to every row: the judge seat's declared mode, `unknown` for a judge row migrated from before it, null for other roles. Version 8 drops the retired qualification battery's summary from `tier`; migration removes it from older rows. Version 7 adds `pressure_headroom` and `de_escalated` to a row's `tier`; an older tier row migrates to null headroom and `de_escalated: false`, since nothing could de-escalate before it. Bumped on any shape change |
+| `schema_version` | integer | Currently `11`. Version 11 adds `reconciled_not_sent` context provenance with cleared true for an owner-proved closed immutable no-brief retry; older records migrate without inventing that proof. Version 10 adds the non-counting assignment status `maintenance`; version 9 adds `judge_mode` to every row: the judge seat's declared mode, `unknown` for a judge row migrated from before it, null for other roles. Version 8 drops the retired qualification battery's summary from `tier`; migration removes it from older rows. Version 7 adds `pressure_headroom` and `de_escalated` to a row's `tier`; an older tier row migrates to null headroom and `de_escalated: false`, since nothing could de-escalate before it. Bumped on any shape change |
 | `snapshots` | array | Whole `measure` documents, oldest first; the ring holds the last 20 |
 | `assignments` | array | Append-only ledger of who held which role |
 | `snapshots[].schema_version` | integer | Currently `4`. Version 2 added `window_group`; version 3 adds per-round `tier_billing`; version 4 adds `error.details` to failed agent records. Older snapshots migrate on read, preserving headroom and shared-window membership |
@@ -501,7 +501,7 @@ skills/herdr-foreman/references/retrospectives.md
 | `assignments[].agent` | string | The agent that received it |
 | `assignments[].status` | string | `applied`, `sent_but_not_started`, `maintenance`, or `unknown`. `maintenance` records a verified relaunch without a dispatch and does not count as role experience |
 | `assignments[].cleared` | boolean or null | Whether the dispatcher confirmed its automatic clear; null means historical evidence is unavailable |
-| `assignments[].clear_reason` | string | `automatic` with cleared true, `hand` or `retained` with cleared false, or `unknown` with cleared null |
+| `assignments[].clear_reason` | string | `automatic` or `reconciled_not_sent` with cleared true, `hand` or `retained` with cleared false, or `unknown` with cleared null |
 | `assignments[].task` | string or null | Non-empty stable task identifier; null for older or unlabelled assignments |
 | `assignments[].fix_round` | positive integer or null | Task's fix number; null for initial development or non-fix work |
 | `assignments[].context_session` | object or null | Verified native session reference scoped to a pane: `pane_id`, `source`, `agent`, `kind`, `value`, all non-empty strings; kind is `id` or `path`. Null means continuity was not established |

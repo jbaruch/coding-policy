@@ -3045,5 +3045,155 @@ class ReportPathTests(unittest.TestCase):
                          {"developer": "/r/報告 1.md"})
 
 
+class FreshOwnerNative(HerdrClient):
+    """In-memory transport for the actual public owner lifecycle and guards."""
+    EMPTY = "\x1b[2m› Ask Codex to do anything\x1b[0m"
+    ANIMATION = "\x1b[2m› Ask Codex to do anything ✧\x1b[0m"
+
+    def __init__(self):
+        super().__init__(runner=lambda *_: (_ for _ in ()).throw(AssertionError("Unexpected native command")))
+        self.panes = {}
+        self.agents = {}
+        self.events = []
+        self.frames = [self.ANIMATION]
+        self.ordinal = 0
+        self.sent_text = None
+
+    def workspace_create(self, *, cwd, label, focus=False):
+        self.ordinal += 1
+        pane = "fixture-pane-" + str(self.ordinal)
+        self.panes[pane] = 300 + self.ordinal
+        self.events.append(("create", pane, focus))
+        return pane
+
+    def pane_process_info(self, pane_id):
+        self.events.append(("process_info", pane_id))
+        worker = next((item for item in self.agents.values() if item["pane_id"] == pane_id), None)
+        foreground = ({"pid": worker["pid"], "argv": worker["argv"], "name": worker["agent"]}
+                      if worker else {"pid": self.panes[pane_id], "argv": ["zsh"], "name": "zsh"})
+        return {"pane_id": pane_id, "shell_pid": self.panes[pane_id], "foreground_processes": [foreground]}
+
+    def agent_start(self, name, kind, pane_id, flags):
+        worker = {"name": name, "agent": kind, "pane_id": pane_id, "agent_status": "idle",
+                  "pid": 500 + self.ordinal, "argv": [kind] + list(flags),
+                  "agent_session": {"source": "herdr:" + kind, "agent": kind, "kind": "id",
+                                    "value": "fixture-session-" + str(self.ordinal)}}
+        self.agents[name] = worker
+        self.events.append(("start", name, pane_id))
+        return {"agent": dict(worker), "argv": worker["argv"]}
+
+    def agent_get(self, name):
+        self.events.append(("agent_get", name))
+        if name not in self.agents:
+            raise HerdrError("absent", {"stderr": json.dumps({"error": {"code": "agent_not_found"}})})
+        return dict(self.agents[name])
+
+    def pane_get(self, pane_id):
+        self.events.append(("pane_get", pane_id))
+        if pane_id not in self.panes:
+            raise HerdrError("absent", {"stderr": json.dumps({"error": {"code": "pane_not_found"}})})
+        return {"pane_id": pane_id}
+
+    def pane_width(self, pane_id):
+        self.events.append(("width", pane_id))
+        return 400
+
+    def process_args(self, pid):
+        self.events.append(("process_args", pid))
+        return ["zsh"]
+
+    def pane_close(self, pane_id):
+        self.events.append(("close", pane_id))
+        self.panes.pop(pane_id, None)
+        self.agents = {name: worker for name, worker in self.agents.items() if worker["pane_id"] != pane_id}
+
+    def agent_read(self, name, source=None, lines=None, fmt=None):
+        self.events.append(("read", name, fmt))
+        if self.sent_text is not None:
+            return self.sent_text + "\n" + self.EMPTY
+        return self.frames.pop(0) if len(self.frames) > 1 else self.frames[0]
+
+    def agent_prompt(self, name, text, wait=False, until=(), timeout_ms=None):
+        self.events.append(("prompt", name, text))
+        self.sent_text = text
+        return {}
+
+    def agent_wait(self, name, until=(), timeout_ms=None):
+        self.events.append(("wait", name))
+        return {"agent_status": "working"}
+
+    def pane_rename(self, pane_id, label):
+        self.events.append(("rename", pane_id, label))
+
+    def pane_send_keys(self, pane_id, keys):
+        raise AssertionError("Startup/retry must send no keys")
+
+    def agent_send_keys(self, name, keys):
+        raise AssertionError("Startup/retry must send no keys")
+
+    def pane_send_text(self, pane_id, text):
+        raise AssertionError("Startup/retry must send no text")
+
+
+class PublicOwnerRetryTest(unittest.TestCase):
+    def test_closed_retry_persists_reloadable_history_and_completed_replay_uses_no_native_access(self):
+        from foreman import assign, lifecycle, retrospective
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            config, state, snapshot = (root / name for name in ("config.json", "state.json", "snapshot.json"))
+            common, brief, report = (root / name for name in ("common.md", "judge.md", "report.md"))
+            payload = json.loads((Path(_ROOT) / "config.example.json").read_text())
+            payload["judge"] = {"worker_kind": "codex", "model": "gpt-6-astra", "effort": "high"}
+            config.write_text(json.dumps(payload))
+            snapshot.write_text(json.dumps(SNAPSHOT))
+            common.write_text("Common immutable instructions\n")
+            brief.write_text("Judge immutable task\nREPORT: " + str(report) + "\n")
+            base = ["--config", str(config), "--state", str(state)]
+            def invoke(arguments, native=None):
+                out, err = io.StringIO(), io.StringIO()
+                code = main(base + arguments, stdout=out, stderr=err, client=native)
+                return code, out.getvalue(), err.getvalue()
+            with patch("foreman.lifecycle.identity", return_value="judge-b4f5e9e65a"):
+                code, text, err = invoke(["plan", "--roles", "judge", "--judge-mode", "adjudication",
+                                         "--task", "media-77", "--snapshot", str(snapshot)])
+            self.assertEqual(code, 0, err)
+            plan = json.loads(text)
+            supervision.bind(state, {"kind": "id", "value": "fixture-foreman", "cwd": str(root),
+                "herdr_env": "fixture", "pane_id": "foreman-pane"}, AT, root=root / "bindings")
+            arguments = ["apply", "--assignments", json.dumps(plan), "--judge-mode", "adjudication",
+                "--task", "media-77", "--now", AT, "--common", str(common), "--brief", "judge=" + str(brief),
+                "--report", "judge=" + str(report), "--composer-settle", "0"]
+            native = FreshOwnerNative()
+            real_spawn, real_apply = lifecycle.spawn, assign.apply
+            with patch("foreman.cli.lifecycle.spawn", side_effect=lambda *a, **kw: real_spawn(*a, **kw, sleep=lambda _: None)), \
+                    patch("foreman.cli.apply_assignments", side_effect=lambda *a, **kw: real_apply(*a, **kw, sleep=lambda _: None)):
+                code, text, err = invoke(arguments, native)
+                self.assertEqual(code, 1, err)
+                self.assertEqual(native.panes, {})
+                self.assertEqual(native.agents, {})
+                saved, usable = load_state_checked(state)
+                self.assertTrue(usable)
+                self.assertEqual(saved["recovery"]["dispatches"][0]["status"], "not_sent")
+                self.assertTrue(retrospective.load(state)["transitions"])
+                self.assertFalse(supervision.load(state)["members"][0]["active"])
+                native.frames = [native.ANIMATION, native.EMPTY, native.EMPTY]
+                code, text, err = invoke(arguments, native)
+                self.assertEqual(code, 0, err)
+                self.assertEqual(json.loads(text)["applied"][0]["clear_reason"], "reconciled_not_sent")
+                saved, usable = load_state_checked(state)
+                self.assertTrue(usable, "A successful retry must not make owner history unreadable")
+                self.assertEqual(saved["assignments"][0]["clear_reason"], "reconciled_not_sent")
+                self.assertEqual(saved["assignments"][0]["task"], "media-77")
+                self.assertEqual([row["status"] for row in saved["recovery"]["dispatches"]], ["not_sent", "applied"])
+                self.assertEqual([row["active"] for row in supervision.load(state)["members"]], [False, True])
+                self.assertEqual(len([event for event in native.events if event[0] == "prompt"]), 1)
+                events, persisted = list(native.events), state.read_bytes()
+                code, text, err = invoke(arguments, native)
+                self.assertEqual(code, 0, err)
+                self.assertTrue(json.loads(text)["applied"][0]["replayed"])
+                self.assertEqual(native.events, events, "Completed replay must make no new native access")
+                self.assertEqual(state.read_bytes(), persisted)
+
+
 if __name__ == "__main__":
     unittest.main()
