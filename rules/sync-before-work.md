@@ -24,13 +24,10 @@ description: Start from the fresh remote default; in Herdr rounds the foreman re
 
 ## Herdr Team Rounds
 
-- Narrow exception for a worker consuming a foreman-provisioned task worktree.
-- Preconditions (all required):
-  1. The foreman fetches the target repository and records the fresh default revision before provisioning
-  2. The worker brief names that recorded base and an isolated worktree provisioned from it
-  3. The worker runs Git only in that worktree and never against the shared checkout
-- The foreman owns shared-checkout sync; the worker consumes the recorded revision and reports drift without trying to repair the shared checkout
-- Every other task follows Sync Before Reading and Land on the Fresh Default
+- A worker consumes the foreman-provisioned task worktree under the narrow exception in `skills/herdr-foreman/references/team-operation.md` Writers and Checkouts.
+- The provisioning owner must successfully fetch, resolve and record the exact fetched default commit before dispatch. A failed fetch stops provisioning.
+- Brief composition consumes the original registered task base and validates the provisioned worktree against it automatically. It names the exact base; an explicitly authorized existing task base remains distinct from the latest fetched default.
+- The worker reports drift through the normal report path and never repairs the shared checkout. Every other task follows Sync Before Reading and Land on the Fresh Default.
 
 ## Working Against a Pinned Ref
 

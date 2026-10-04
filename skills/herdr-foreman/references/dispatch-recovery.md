@@ -110,16 +110,15 @@ produce a report, so Step 11 waits on exactly the roles that landed here.
   `--task <label>` puts the round's task in the label. A hand-off that never
   started is left unlabelled.
 
-Fresh assignment-scoped startup receives a bounded read-only settling window
-before the assignment send. Two consecutive exact empty composer observations
-must agree with the worker's unchanged pane, process and selected tier. Only
-single-line dim configured-placeholder decoration may wait; real input, dialogs,
-missing ANSI and identity changes refuse immediately. Waiting sends no keys.
-The `sending` marker is persisted at the guarded prompt boundary. Earlier
-failures automatically record `not_sent`, close only created panes and resolve
-their enrollments. A proven closed, immutable no-brief retry is classified as
-`reconciled_not_sent`, without a retrospective for nonexistent outgoing work.
-Unknown transport outcomes still require reconciliation and preserve the pane.
+Fresh assignment-scoped startup waits read-only for proved readiness under an
+unchanged pane, process and tier; real input or uncertain identity refuses.
+Waiting sends no keys. The owner records `sending` at the guarded prompt
+boundary. Earlier failures automatically record `not_sent` and clean only owned
+surfaces. A proved closed immutable no-brief retry needs no retrospective for
+nonexistent outgoing work; unknown sends preserve the pane and reconciliation.
+The exact settling predicate and bounds are owned by
+`foreman/composer.py` (`FRESH_COMPOSER_*`, `_settle_fresh_composer`), rather than
+restated here.
 
 The delivery mechanics behind those outcomes — composer confirmation, recovery
 keys, ghost text, the rejection strings, the settle knobs — are in:
@@ -129,7 +128,8 @@ skills/herdr-foreman/references/herdr.md
 ```
 
 The prompt text, the refusal predicate, and every constant are the utility's
-own contract; see `skills/herdr-foreman/foreman/assign.py`.
+own contract; see `skills/herdr-foreman/foreman/composer.py` (`send_message`,
+`_settle_fresh_composer`) and `foreman/assign.py` (`apply`, `before_prompt`).
 
 Proceed to Step 11 with the roles that were dispatched.
 
@@ -546,7 +546,7 @@ lock file can remain after exit; do not delete it to bypass an active lock.
     report recovery below. Otherwise record no report and continue to the next
     worker. Never re-dispatch on top of it. The
     marker may be wrapped, quoted, absent, or identify another attempt. Do
-    not join rows or use a matching filename as proof. Step 7 requires a fresh
+    not join rows or use a matching filename as proof. Brief composition requires a fresh
     report destination and bounds its length; narrow panes can still wrap it.
 - **Exit 3** — the worker is blocked at an approval or question dialog,
   confirmed across two reads and the pane. Read the dialog with

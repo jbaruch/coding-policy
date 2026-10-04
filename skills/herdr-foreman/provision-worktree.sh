@@ -13,7 +13,12 @@
 #           the branch has to be created.
 #   stdout: one JSON object —
 #           {"path":"<abs>","branch":"<name>","base_ref":"<ref>",
-#            "state":"created|attached|already-provisioned"}
+#            "base_revision":"<exact task base commit>",
+#            "fetched_default_ref":"origin/<default>",
+#            "fetched_default_revision":"<exact fetched commit>",
+#            "schema_version":1,"state":"created|attached|already-provisioned"}
+#           The provenance is persisted in the worktree private Git directory;
+#           reruns preserve its original base while recording the fresh fetch.
 #           `created` cut a new branch, `attached` checked out one that already
 #           existed, `already-provisioned` found the path already on that
 #           branch and did nothing (idempotent re-run).
@@ -31,6 +36,11 @@ set -euo pipefail
 BRANCH_RE='^[a-z]+(/[a-z0-9]+(-[a-z0-9]+)*|-[0-9]+)$'
 
 ERRFILE=""
+SKILL_DIR="$(CDPATH='' cd -- "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+record_base() {
+  PYTHONPATH="${SKILL_DIR}${PYTHONPATH:+:${PYTHONPATH}}" python3 -m foreman.provision record "$@"
+}
 
 warn() { printf 'provision-worktree: %s\n' "$1" >&2; }
 
@@ -80,6 +90,10 @@ main() {
   fi
   ERRFILE="$(mktemp)"
   trap cleanup EXIT
+  if ! command -v python3 >/dev/null 2>&1; then
+    warn "python3 not found on PATH — install Python 3.11+ for base provenance"
+    return 1
+  fi
   if ! command -v jq >/dev/null 2>&1; then
     warn "jq not found on PATH — install it (\`brew install jq\`) to emit the result"
     return 1
@@ -91,6 +105,39 @@ main() {
   if ! [[ "$branch" =~ $BRANCH_RE ]]; then
     warn "branch '${branch}' does not follow <type>/<description> or <type>-<number>, lowercase with hyphens (rules/ci-safety.md Branch Naming)"
     return 1
+  fi
+
+  # Fail before creating any worker directory or branch on a failed fetch.
+  if ! git -C "$shared" remote get-url origin >/dev/null 2>&1; then
+    warn "${shared} has no origin remote — provisioning needs one to fetch from"
+    return 1
+  fi
+  if ! git -C "$shared" fetch --quiet origin 2>"$ERRFILE"; then
+    warn "git fetch origin failed: $(tr '\n' ' ' < "$ERRFILE") — no worktree was provisioned"
+    return 2
+  fi
+  local default_ref default_revision base_revision db=""
+  if db="$(git -C "$shared" symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null)"; then
+    default_ref="$db"
+  else
+    local cand
+    for cand in main master; do
+      if git -C "$shared" show-ref --verify --quiet "refs/remotes/origin/$cand"; then db="$cand"; break; fi
+    done
+    if [[ -z "$db" ]]; then
+      warn "cannot resolve origin's default branch — set origin/HEAD before provisioning"
+      return 1
+    fi
+    default_ref="origin/$db"
+  fi
+  if ! default_revision="$(git -C "$shared" rev-parse --verify "${default_ref}^{commit}" 2>"$ERRFILE")"; then
+    warn "cannot resolve fetched default commit: $(tr '\n' ' ' < "$ERRFILE")"
+    return 2
+  fi
+  base="${base:-$default_ref}"
+  if ! base_revision="$(git -C "$shared" rev-parse --verify "${base}^{commit}" 2>"$ERRFILE")"; then
+    warn "cannot resolve task base commit: $(tr '\n' ' ' < "$ERRFILE")"
+    return 2
   fi
 
   # A worktree lives under the worktree root and nowhere else: a path inside a
@@ -118,33 +165,6 @@ main() {
   local abs_path base_name
   base_name="$(basename "$path")"
   abs_path="${abs_parent}/${base_name}"
-
-  if ! git -C "$shared" remote get-url origin >/dev/null 2>&1; then
-    warn "${shared} has no origin remote — provisioning needs one to fetch from"
-    return 1
-  fi
-  if ! git -C "$shared" fetch --quiet origin 2>"$ERRFILE"; then
-    warn "\`git -C ${shared} fetch origin\` failed: $(tr '\n' ' ' < "$ERRFILE") — check connectivity; provisioning from possibly stale refs"
-  fi
-
-  # Resolve the default branch for the base ref, when the caller gave none.
-  if [[ -z "$base" ]]; then
-    local db=""
-    if db="$(git -C "$shared" symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null)"; then
-      db="${db#origin/}"
-    else
-      db=""
-      local cand
-      for cand in main master; do
-        if git -C "$shared" show-ref --verify --quiet "refs/remotes/origin/$cand"; then db="$cand"; break; fi
-      done
-    fi
-    if [[ -z "$db" ]]; then
-      warn "cannot resolve origin's default branch — pass a base-ref explicitly, or run \`git -C ${shared} remote set-head origin --auto\`"
-      return 1
-    fi
-    base="origin/${db}"
-  fi
 
   # An existing path is either this exact worktree (idempotent re-run) or
   # something this must not touch. "Same branch name" is not identity: two
@@ -183,8 +203,16 @@ main() {
       warn "'${abs_path}' is a work tree on '${on}', not '${branch}' — choose another path, or remove it with \`git worktree remove\`"
       return 2
     fi
-    jq -n --arg path "$abs_path" --arg branch "$branch" --arg base "$base" \
-      '{path: $path, branch: $branch, base_ref: $base, state: "already-provisioned"}'
+    local receipt prior_base
+    receipt="$(git -C "$abs_path" rev-parse --path-format=absolute --git-path foreman-provision.json)" || return 2
+    if [[ -f "$receipt" && $# -eq 3 ]]; then
+      prior_base="$(jq -er '.base_revision' "$receipt")" || return 2
+      base_revision="$prior_base"
+      base="$(jq -er '.base_ref' "$receipt")" || return 2
+    fi
+    local provenance
+    provenance="$(record_base "$abs_path" "$branch" "$base" "$base_revision" "$default_ref" "$default_revision")" || return 2
+    printf '%s' "$provenance" | jq '. + {state: "already-provisioned"}'
     return 0
   fi
 
@@ -197,15 +225,16 @@ main() {
     state="attached"
     git -C "$shared" worktree add --track -b "$branch" "$abs_path" "origin/${branch}" >/dev/null 2>"$ERRFILE" || rc=$?
   else
-    git -C "$shared" worktree add -b "$branch" "$abs_path" "$base" >/dev/null 2>"$ERRFILE" || rc=$?
+    git -C "$shared" worktree add -b "$branch" "$abs_path" "$base_revision" >/dev/null 2>"$ERRFILE" || rc=$?
   fi
   if (( rc != 0 )); then
     warn "\`git worktree add\` failed (exit ${rc}) for ${abs_path} on ${branch}: $(tr '\n' ' ' < "$ERRFILE")"
     return 2
   fi
 
-  jq -n --arg path "$abs_path" --arg branch "$branch" --arg base "$base" --arg state "$state" \
-    '{path: $path, branch: $branch, base_ref: $base, state: $state}'
+  local provenance
+  provenance="$(record_base "$abs_path" "$branch" "$base" "$base_revision" "$default_ref" "$default_revision")" || return 2
+  printf '%s' "$provenance" | jq --arg state "$state" '. + {state: $state}'
   return 0
 }
 

@@ -126,7 +126,23 @@ of. A later round classifies its diff, which is evidence rather than intent.
 
 When the recorded base has no `.herdr/triggers.json`, an accepted consultation
 may deliver the first declaration as an external report artifact. Keep those
-reviewed bytes outside the repo until the developer round. Add the declaration
+reviewed bytes outside the repo until the developer round. The first consultation
+uses the ordinary no-write plan below: no declaration is required for that
+read-only round. Its report supplies one structured evidence line:
+
+```text
+TRIGGER_DECLARATION: {"repo":"/absolute/target/repo","base_revision":"<exact recorded task commit>","path":"/absolute/external/triggers.json","sha256":"<SHA-256 of reviewed bytes>"}
+```
+
+The consultation worker records the artifact it actually reviewed; the foreman
+never writes approval evidence on its behalf. Normal `assess-specialist`
+validates the artifact and digest while recording the delivered report's
+existing contract and receipts. Every criterion must be met and the verdict
+must not be blocking. `detect-triggers` automatically consumes those existing
+owner assessments from its normal `--state`; no separate acceptance receipt or
+approval flag exists. Changed report bytes, artifact, repository or task base
+establish no authority. Missing historical reports establish no authority and
+require no unrelated maintenance. Add the declaration
 path and its exact digest to the planned surfaces:
 
 ```json
@@ -141,14 +157,16 @@ path and its exact digest to the planned surfaces:
 ```
 
 Pass that artifact with `--bootstrap-declaration`. The detector validates it,
-confirms the recorded base lacks the declaration, verifies the plan's digest,
+confirms the recorded base lacks the declaration, verifies the plan's digest and
+the accepted consultation's unchanged report binding,
 and classifies the planned task with those surfaces. The developer installs
 those bytes unchanged. Re-run the same command with `--head` after the first
 push; it refuses a missing or non-identical committed declaration. A changed
 artifact or plan returns to consultation acceptance and trigger classification.
 
-When the repo or pushed head already contains `.herdr/triggers.json`, its own
-committed declaration is the sole authority. Omit `--bootstrap-declaration` on
+When the recorded task base already contains `.herdr/triggers.json`, its own
+committed declaration is the sole authority. A first declaration at the head or
+in the worktree still requires the bootstrap proof; omitting the flag refuses. Omit `--bootstrap-declaration` on
 later rounds. A bootstrap artifact never overrides existing repo content.
 
 A round that writes no repository content at all — an investigation, an

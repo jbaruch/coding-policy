@@ -4,6 +4,9 @@ import io
 import hashlib
 import json
 import subprocess
+import os
+import shlex
+import shutil
 import sys
 import tempfile
 import unittest
@@ -13,6 +16,8 @@ from types import SimpleNamespace
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from foreman import cli, triggers
+from tests import test_specialist_cli as consultation_fixture
+from foreman.state import save_state
 from foreman.errors import UsageError
 
 
@@ -951,6 +956,26 @@ class BootstrapDeclarationCommandTest(TempCase):
         self.addCleanup(lambda: self.artifact.exists() and self.artifact.unlink())
         self.plan = self.tmp.parent / (self.tmp.name + "-bootstrap-plan.json")
         self.addCleanup(lambda: self.plan.exists() and self.plan.unlink())
+        self.owner = consultation_fixture.SpecialistCliTest("test_assess_command_retrieves_real_receipts_without_worker_calls")
+        self.owner.setUp()
+        self.addCleanup(self.owner.doCleanups)
+        self.owner.seed_warm_consultation(assess=False, retire=False)
+        self.assess_artifact()
+
+    def assess_artifact(self, *, binding_changes=None, acceptance="met"):
+        report = self.owner.tmp / "prior-report.md"
+        binding = {"repo": str(self.tmp.resolve()), "base_revision": self.base,
+                   "path": str(self.artifact.resolve()),
+                   "sha256": hashlib.sha256(self.artifact.read_bytes()).hexdigest()}
+        binding.update(binding_changes or {})
+        report.write_text("ACCEPTANCE 1/1: " + acceptance + " — declaration review evidence\nTRIGGER_DECLARATION: " + json.dumps(binding) + "\n")
+        record = self.owner.tmp / "assessment.json"
+        state = self.owner.saved()
+        record.write_text(json.dumps({"id": "declaration-" + str(len(state["specialist_assessments"])),
+            "dispatch": "prior:advisor", "report": str(report),
+            "delivery": str(self.owner.tmp / "prior-delivery.json")}))
+        code, _, err = self.owner.invoke(["assess-specialist", "--record", str(record), "--now", "2026-01-08T12:00:00Z"], self.owner._client({}))
+        self.assertEqual(code, 0, err)
 
     def git(self, *arguments):
         completed = subprocess.run(["git", "-C", str(self.tmp), *arguments],
@@ -972,7 +997,7 @@ class BootstrapDeclarationCommandTest(TempCase):
         out, err = io.StringIO(), io.StringIO()
         code = cli.main(["detect-triggers", "--repo", str(self.tmp), "--base", self.base,
                          "--planned", str(self.plan), "--bootstrap-declaration", str(self.artifact),
-                         *arguments], stdout=out, stderr=err)
+                         "--state", str(self.owner.state), *arguments], stdout=out, stderr=err)
         return code, out.getvalue(), err.getvalue()
 
     def test_absent_base_accepts_the_byte_identical_reviewed_artifact(self):
@@ -1038,6 +1063,7 @@ class BootstrapDeclarationCommandTest(TempCase):
 
     def test_first_committed_declaration_accepts_the_reviewed_bytes(self):
         self.artifact.write_bytes(json.dumps(DECLARATION, indent=2).replace("\n", "\r\n").encode("utf-8"))
+        self.assess_artifact()
         self.write_plan()
         (self.tmp / ".herdr").mkdir()
         (self.tmp / triggers.DECLARATION_FILE).write_bytes(self.artifact.read_bytes())
@@ -1052,12 +1078,18 @@ class BootstrapDeclarationCommandTest(TempCase):
     def test_existing_declaration_is_authoritative_without_bootstrap_artifact(self):
         (self.tmp / ".herdr").mkdir()
         (self.tmp / triggers.DECLARATION_FILE).write_text(json.dumps(DECLARATION), encoding="utf-8")
+        self.git("add", "-A")
+        self.git("commit", "-qm", "existing authority")
+        self.base = self.git("rev-parse", "HEAD").strip()
         self.plan.write_text(json.dumps({
             "schema_version": 1, "added": [], "changed": ["README.md"],
             "package_lines": {}, "cli_surface": [],
         }), encoding="utf-8")
         self.artifact.unlink()
-        code, out, err = self.run_cli()
+        stream, errors = io.StringIO(), io.StringIO()
+        code = cli.main(["detect-triggers", "--repo", str(self.tmp), "--base", self.base,
+                         "--planned", str(self.plan)], stdout=stream, stderr=errors)
+        out, err = stream.getvalue(), errors.getvalue()
         self.assertEqual(code, 0, err)
         authority = json.loads(out)["declaration_authority"]
         self.assertEqual(authority, {"kind": "repository", "revision": "worktree"})
@@ -1077,10 +1109,200 @@ class BootstrapDeclarationCommandTest(TempCase):
                          "--head", head], stdout=out_stream, stderr=err_stream)
         out, _err = out_stream.getvalue(), err_stream.getvalue()
         self.assertEqual(code, 1)
-        payload = json.loads(out)
-        self.assertEqual(payload["fired"], ["documentation"])
-        self.assertEqual(payload["declaration_authority"]["kind"], "repository")
-        self.assertEqual(payload["declaration_authority"]["revision"], head)
+        self.assertEqual(out, "")
+        self.assertIn("requires --bootstrap-declaration", _err)
+
+    def test_digest_alone_without_accepted_consultation_refuses(self):
+        self.write_plan()
+        state = self.owner.saved()
+        state["specialist_assessments"] = []
+        save_state(self.owner.state, state)
+        code, out, err = self.run_cli()
+        self.assertEqual((code, out), (1, ""))
+        self.assertIn("no accepted consultation", err)
+
+    def test_changed_assessed_report_refuses(self):
+        self.write_plan()
+        report = self.owner.tmp / "prior-report.md"
+        report.write_text(report.read_text() + "altered after assessment\n")
+        code, out, err = self.run_cli()
+        self.assertEqual((code, out), (1, ""))
+        self.assertIn("no accepted consultation", err)
+
+    def test_first_worktree_declaration_cannot_omit_bootstrap_proof(self):
+        self.write_plan()
+        (self.tmp / ".herdr").mkdir()
+        (self.tmp / triggers.DECLARATION_FILE).write_bytes(self.artifact.read_bytes())
+        out, err = io.StringIO(), io.StringIO()
+        code = cli.main(["detect-triggers", "--repo", str(self.tmp), "--base", self.base,
+                         "--planned", str(self.plan)], stdout=out, stderr=err)
+        self.assertEqual((code, out.getvalue()), (1, ""))
+        self.assertIn("requires --bootstrap-declaration", err.getvalue())
+
+    def test_first_consultation_classifies_without_declaration_or_bootstrap(self):
+        self.plan.write_text(json.dumps({"schema_version": 1, "added": [], "changed": [],
+            "package_lines": {}, "cli_surface": [], "writes_repository": False}))
+        out, err = io.StringIO(), io.StringIO()
+        code = cli.main(["detect-triggers", "--repo", str(self.tmp), "--base", self.base,
+                         "--planned", str(self.plan), "--roles", "advisor"], stdout=out, stderr=err)
+        self.assertEqual(code, 0, err.getvalue())
+        self.assertEqual(json.loads(out.getvalue())["fired"], [])
+
+    def test_unmet_consultation_establishes_no_bootstrap_authority(self):
+        self.write_plan()
+        self.assess_artifact(acceptance="unmet")
+        code, out, err = self.run_cli()
+        self.assertEqual((code, out), (1, ""))
+        self.assertIn("no accepted consultation", err)
+
+    def test_accepted_artifact_for_a_different_repository_or_base_is_refused(self):
+        self.write_plan()
+        for changed in ({"repo": str(self.owner.tmp)}, {"base_revision": "a" * 40}):
+            with self.subTest(changed=changed):
+                self.assess_artifact(binding_changes=changed)
+                code, out, err = self.run_cli()
+                self.assertEqual((code, out), (1, ""))
+                self.assertIn("no accepted consultation", err)
+
+
+class WorktreeBaseCommandTest(TempCase):
+    """Normal provision -> registered task -> packaged brief provenance."""
+
+    def setUp(self):
+        self.root = self.temp_dir()
+        self.skill = Path(__file__).resolve().parents[1]
+        self.origin = self.root / "origin.git"
+        self.shared = self.root / "shared"
+        self.worktree = self.root / "worktrees" / "developer"
+        self.state = self.root / "owner-state.json"
+        self.environment = {**os.environ, "WORKTREE_ROOT": str(self.root / "worktrees"),
+            "GIT_AUTHOR_NAME": "Fixture", "GIT_COMMITTER_NAME": "Fixture",
+            "GIT_AUTHOR_EMAIL": "fixture@example.invalid", "GIT_COMMITTER_EMAIL": "fixture@example.invalid"}
+        self.git("init", "--bare", "-q", "-b", "main", str(self.origin))
+        self.git("clone", "-q", str(self.origin), str(self.shared))
+        (self.shared / "README.md").write_text("Base\n")
+        self.git("-C", str(self.shared), "add", "-A")
+        self.git("-C", str(self.shared), "commit", "-qm", "Base")
+        self.git("-C", str(self.shared), "push", "-q", "origin", "main")
+        self.base = self.git("-C", str(self.shared), "rev-parse", "HEAD").strip()
+        self.policy = self.root / "policy.md"
+        self.policy.write_text("Fixture policy and team contract\n")
+
+    def git(self, *args):
+        return subprocess.run(["git", *args], env=self.environment,
+            capture_output=True, text=True, check=True).stdout
+
+    def provision(self, *base, environment=None):
+        return subprocess.run(["bash", str(self.skill / "provision-worktree.sh"), str(self.shared),
+            "fix/fixture", str(self.worktree), *base], env=environment or self.environment,
+            capture_output=True, text=True, check=False)
+
+    def register(self, base=None, task="fixture-task"):
+        record = self.root / "task.json"
+        record.write_text(json.dumps({"task": task, "base_revision": base or self.base,
+            "scope": "Fixture work", "allowed_paths": ["*"],
+            "authorization": {"source": "fixture operator request", "quote": "Implement the fixture"}}))
+        out, err = io.StringIO(), io.StringIO()
+        code = cli.main(["task", "--state", str(self.state), "--record", str(record),
+                         "--now", "2026-01-08T12:00:00Z"], stdout=out, stderr=err)
+        self.assertEqual(code, 0, err.getvalue())
+
+    def compose(self, *, task: str | None = "fixture-task", mutate=None):
+        values = {"task": task, "state": str(self.state), "shared": {
+            "SHARED_CHECKOUT": str(self.shared), "AUTHORITY_STATEMENT": "Owned fixture",
+            "TASK_AUTHORIZATION": "Implement fixture", "AUTHORIZED_ACTIONS": "Implement fixture",
+            "EXTERNAL_PERMISSION": "none", "POLICY_INDEX": str(self.policy), "RELEASE_SKILL": str(self.policy),
+            "TEAM_OPERATION": str(self.policy), "GATES": "- Fixture gates", "ISSUE": "Fixture", "BRANCH": "fix/fixture"},
+            "roles": {"developer": {"WORKTREE": str(self.worktree), "REPORTS_DIR": str(self.root),
+                                     "REPORT": str(self.root / "developer-report.md")}}}
+        if mutate:
+            mutate(values)
+        source = self.root / "values.json"
+        source.write_text(json.dumps(values))
+        return subprocess.run(["bash", str(self.skill / "compose-briefs.sh"), str(self.skill / "templates"),
+                               str(source), str(self.root / "briefs")], env=self.environment,
+                              capture_output=True, text=True, check=False)
+
+    def test_failed_fetch_creates_no_directory_branch_or_worktree(self):
+        shim = self.root / "bin"
+        shim.mkdir()
+        executable = shim / "git"
+        real_git = shutil.which("git")
+        assert real_git is not None
+        executable.write_text("#!/bin/sh\nfor arg do\n  if [ \"$arg\" = fetch ]; then echo 'fixture fetch failure' >&2; exit 73; fi\ndone\nexec " + shlex.quote(real_git) + " \"$@\"\n")
+        executable.chmod(0o755)
+        result = self.provision(environment={**self.environment, "PATH": str(shim) + os.pathsep + self.environment["PATH"]})
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(result.stdout, "")
+        self.assertFalse(self.worktree.parent.exists())
+        branches = self.git("-C", str(self.shared), "branch", "--list", "fix/fixture")
+        self.assertEqual(branches, "")
+
+    def test_normal_owner_records_exact_base_and_composes_it_automatically(self):
+        result = self.provision()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        proof = json.loads(result.stdout)
+        self.assertEqual((proof["base_revision"], proof["fetched_default_revision"]), (self.base, self.base))
+        self.register()
+        before = self.state.read_bytes()
+        result = self.compose()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        common = (self.root / "briefs" / "COMMON.md").read_text()
+        brief = (self.root / "briefs" / "brief-developer.md").read_text()
+        self.assertIn(self.base, common)
+        self.assertIn(self.base, brief)
+        self.assertNotIn("{{", common + brief)
+        self.assertEqual(self.state.read_bytes(), before)
+
+    def test_pinned_task_base_survives_new_default_and_idempotent_provision(self):
+        self.git("-C", str(self.shared), "commit", "--allow-empty", "-qm", "New default")
+        new_default = self.git("-C", str(self.shared), "rev-parse", "HEAD").strip()
+        self.git("-C", str(self.shared), "push", "-q", "origin", "main")
+        result = self.provision(self.base)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        proof = json.loads(result.stdout)
+        self.assertEqual(proof["base_revision"], self.base)
+        self.assertEqual(proof["fetched_default_revision"], new_default)
+        again = self.provision()
+        self.assertEqual(again.returncode, 0, again.stderr)
+        self.assertEqual(json.loads(again.stdout)["base_revision"], self.base)
+        self.register()
+        result = self.compose()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn(new_default, (self.root / "briefs" / "brief-developer.md").read_text())
+        self.assertEqual(json.loads(self.state.read_text())["recovery"]["tasks"]["fixture-task"]["base_revision"], self.base)
+        self.assertEqual(self.git("-C", str(self.worktree), "rev-parse", "HEAD").strip(), self.base)
+
+    def test_composition_refuses_missing_or_mismatched_task_without_outputs(self):
+        self.assertEqual(self.provision().returncode, 0)
+        self.register()
+        for task in ("missing-task", None):
+            with self.subTest(task=task):
+                result = self.compose(task=task)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertEqual(result.stdout, "")
+                self.assertFalse((self.root / "briefs").exists())
+        self.git("-C", str(self.shared), "commit", "--allow-empty", "-qm", "Other base")
+        other_base = self.git("-C", str(self.shared), "rev-parse", "HEAD").strip()
+        self.register(base=other_base, task="other-task")
+        result = self.compose(task="other-task")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertFalse((self.root / "briefs").exists())
+
+    def test_composition_refuses_caller_base_override_and_future_receipt(self):
+        self.assertEqual(self.provision().returncode, 0)
+        self.register()
+        result = self.compose(mutate=lambda values: values["shared"].update(BASE_REVISION=self.base))
+        self.assertNotEqual(result.returncode, 0)
+        self.assertFalse((self.root / "briefs").exists())
+        location = Path(self.git("-C", str(self.worktree), "rev-parse", "--path-format=absolute", "--git-path", "foreman-provision.json").strip())
+        record = json.loads(location.read_text())
+        record["schema_version"] = 2
+        location.write_text(json.dumps(record))
+        result = self.compose()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertFalse((self.root / "briefs").exists())
+        self.assertEqual(json.loads(location.read_text())["schema_version"], 2)
 
 
 if __name__ == "__main__":

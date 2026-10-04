@@ -40,6 +40,9 @@ to know goes in the report.
 
 ## Checkouts
 
+- The original task base is exact commit `{{BASE_REVISION}}`. The owner reads
+  this from the registered task; a later fetch never changes that task base.
+
 - The shared checkout is `{{SHARED_CHECKOUT}}`. It stays on the default branch,
   and the foreman alone touches it.
 - Run NO git command against it. Not `worktree add`, not `stash`, not `fetch`,

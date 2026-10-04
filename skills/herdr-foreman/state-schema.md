@@ -1098,3 +1098,32 @@ row's pane and `native_session` must equal the exact supervision binding, and
 its recorded process identity must still be live. A missing, wrong-stow,
 ambiguous-handoff, wrong-pane, wrong-session, dead, reused-process, failed, interrupted,
 delivered, or reconciled row supplies no Stop authorization.
+
+## Worktree provisioning provenance
+
+Owner: Herdr `provision-worktree.sh` and `foreman/provision.py`. Each worktree's
+private Git directory holds `foreman-provision.json`, schema 1. Writer fields:
+`schema_version`, absolute `path`, `branch`, `base_ref`, exact `base_revision`,
+`fetched_default_ref`, exact `fetched_default_revision`. The writer fetches and
+resolves commits before worktree creation, creates new branches at the resolved
+commit, then persists provenance before returning success. Reruns preserve the
+original base and update fetched-default evidence; they never reset task history.
+Existing task corrections supply their authorized base rather than changing it
+to a newer default. An attachment must descend from that base.
+
+The composition reader takes top-level `task` and optional `state` in values,
+reads the already registered task's exact original base, and validates each
+WORKTREE against its receipt and current Git path/branch/commit ancestry. It
+renders the exact task base in COMMON and the fetched-default evidence in the
+developer brief automatically. Missing or unsupported receipts refuse composing
+a worktree-bearing packaged brief; no caller-authored SHA substitutes. Read-only
+consultations need no worktree receipt. No older format exists to migrate; a
+future format refuses with an update diagnostic. Custom rendering templates
+without the provenance placeholder retain their rendering-only contract.
+
+A first trigger consultation's `TRIGGER_DECLARATION` line is report content,
+not a new owner-state schema or acceptance record. Ordinary schema-2 specialist
+assessment receipts bind its exact bytes; the assessment owner checks its
+absolute repository/artifact, exact task base and reviewed digest. Detection
+reads all-met, non-blocking consultation records and rechecks the report digest
+before relying on that binding. No operator-written approval or receipt is read.

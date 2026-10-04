@@ -45,12 +45,12 @@ The Herdr team round contract. `rules/agent-team-operation.md` Two Modes decides
 - Narrow exception for the first trigger declaration in a writing round.
 - Preconditions (all required):
   1. The recorded base has no `.herdr/triggers.json`
-  2. An existing consultation reviewed the external declaration artifact
+  2. An existing accepted consultation reviewed the external declaration artifact; the owner assessment binds its unchanged report to the artifact digest
   3. The planned surfaces add `.herdr/triggers.json` and bind the artifact's SHA-256
   4. `detect-triggers --bootstrap-declaration` validates and classifies the artifact before dispatch
   5. The planned installation is byte-identical to the bound artifact
 - A changed artifact returns to trigger classification before dispatch
-- A pushed head and every repo with an existing declaration use only their in-repo declaration
+- A pushed head uses its in-repo declaration and must prove the accepted byte-identical bootstrap when the recorded task base lacks one; an existing declaration at the task base is sole authority
 - Every other incomplete or absent writing declaration is refused
 - A fired trigger is consulted, or recorded as a staffing decision with its reason the detector reads
 - Silence is never that decision
@@ -341,7 +341,9 @@ refuse only the stage whose harm it prevents.
 - One writer per worktree
 - The shared checkout stays on the default branch
 - The foreman reads the shared checkout and never edits it
-- The foreman fetches the target repo, records its fresh default revision and provisions task worktrees from that revision
+- The foreman successfully fetches the target repo and resolves its exact fresh default commit before provisioning; the provisioning owner persists it before returning success
+- New task worktrees start from that commit; an existing explicitly authorized task keeps its original registered base, distinct from the latest fetched default
+- Brief composition reads the original task base and Git-owned worktree provenance automatically; callers supply task identity, never an asserted base SHA
 - The foreman provisions every worktree a brief names, before dispatch
 - A read-only role that writes no repository content needs no worktree
 - A worker never creates, moves, or removes a worktree

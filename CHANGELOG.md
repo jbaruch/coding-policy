@@ -1,5 +1,9 @@
 # Changelog
 
+### Fixed
+
+- Herdr first-declaration bootstrap now requires the existing accepted consultation bound to reviewed bytes, including first declarations already installed at head. Provisioning refuses fetch failures and persists exact base commits; packaged briefs consume the original task base automatically.
+
 ### Changed
 
 - **Herdr delivery gates are stage-local.** Authorized, built, independently

@@ -45,7 +45,9 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
-from . import runnable
+from . import runnable, engagement
+from .recovery import receipt
+from .state import default_state_path, load_state_checked
 from .composition import REQUIREMENTS_SCHEMA_VERSION
 from .errors import UsageError
 
@@ -234,7 +236,67 @@ def load_revision_declaration(run, repo, revision, *, required=True):
                                               "sha256": digest})
 
 
-def load_bootstrap_declaration(repo, base, artifact, plan, run):
+def validate_bootstrap_binding(raw):
+    """Validate the specialist's structured evidence at ordinary assessment."""
+    try:
+        binding = json.loads(raw)
+    except json.JSONDecodeError:
+        raise UsageError("TRIGGER_DECLARATION evidence must be a JSON object naming repo, base_revision, path and sha256.", {}) from None
+    if (not isinstance(binding, dict) or set(binding) != {"repo", "base_revision", "path", "sha256"}
+            or any(not isinstance(value, str) for value in binding.values())
+            or not Path(binding["repo"]).is_absolute() or not Path(binding["path"]).is_absolute()
+            or len(binding["base_revision"]) not in (40, 64)
+            or any(char not in "0123456789abcdef" for char in binding["base_revision"])
+            or len(binding["sha256"]) != 64
+            or any(char not in "0123456789abcdef" for char in binding["sha256"])):
+        raise UsageError("TRIGGER_DECLARATION requires absolute repo/path, exact base commit and SHA-256 of reviewed bytes.", {})
+    artifact = Path(binding["path"])
+    if artifact.resolve().is_relative_to(Path(binding["repo"]).resolve()):
+        raise UsageError("Reviewed declaration artifact must be outside the target repository.", {})
+    evidence, body = receipt(str(artifact))
+    if evidence["sha256"] != binding["sha256"]:
+        raise UsageError("Reviewed declaration artifact changed before assessment; the consultation must review its actual bytes.", {})
+    _declaration(body, artifact, authority={"kind": "bootstrap"})
+    return binding
+
+
+def accepted_bootstrap(repo, base, artifact, digest, state_path):
+    """Read an existing accepted consultation's immutable artifact evidence.
+
+    The specialist report supplies the exact binding, not an operator approval
+    flag. Its ordinary assessment binds those report bytes and delivered role.
+    No state is written and no native call is made during classification.
+    """
+    state, usable = load_state_checked(state_path or default_state_path(), persist_migration=False)
+    if not usable:
+        raise UsageError("Bootstrap consultation history is unreadable; restore the existing owner ledger.", {})
+    expected = {"repo": str(Path(repo).resolve()), "base_revision": base,
+                "path": str(Path(artifact).resolve()), "sha256": digest}
+    for record in reversed(state["specialist_assessments"]):
+        if record["role"] not in engagement.CONSULTATION_ROLES or not engagement.investigated(record):
+            continue
+        try:
+            evidence, body = receipt(record["report"])
+        except UsageError:
+            # Missing historical reports establish no authority; they do not
+            # impose unrelated restoration work on a first integration.
+            continue
+        if evidence != record["report_evidence"]:
+            continue
+        bindings = [line.removeprefix("TRIGGER_DECLARATION: ") for line in body.splitlines()
+                    if line.startswith("TRIGGER_DECLARATION: ")]
+        if len(bindings) != 1:
+            continue
+        try:
+            binding = json.loads(bindings[0])
+        except json.JSONDecodeError:
+            continue
+        if binding == expected:
+            return record["id"]
+    raise UsageError("The first trigger declaration has no accepted consultation bound to these exact artifact bytes, repository and task base. Dispatch the read-only declaration consultation and assess its delivered report through the normal owner path.", {})
+
+
+def load_bootstrap_declaration(repo, base, artifact, plan, run, state_path=None):
     """Load the one-time reviewed declaration bound to an absent base and plan."""
     if plan is None or not plan["writes_repository"]:
         raise UsageError("--bootstrap-declaration requires a writing --planned record that binds the reviewed artifact's installation.", {})
@@ -265,7 +327,9 @@ def load_bootstrap_declaration(repo, base, artifact, plan, run):
     except UnicodeDecodeError as exc:
         raise UsageError("Reviewed bootstrap declaration {} is not UTF-8 ({}); restore the accepted JSON artifact.".format(
             artifact_path, exc.reason), {}) from None
-    return _declaration(raw, artifact_path, authority={"kind": "bootstrap", "artifact": str(artifact_path), "sha256": actual})
+    assessment = accepted_bootstrap(repo, run(["rev-parse", "--verify", base + "^{commit}"]).strip(), artifact, actual, state_path)
+    return _declaration(raw, artifact_path, authority={"kind": "bootstrap", "artifact": str(artifact_path),
+                                                      "sha256": actual, "assessment": assessment})
 
 
 def load_requirements(path):
@@ -513,26 +577,35 @@ def run_command(args, runner=None):
     run = runner if runner is not None else git_runner(args.repo)
     head = getattr(args, "head", None)
     declaration_path = Path(args.repo) / DECLARATION_FILE
+    bootstrap = None
+    artifact = getattr(args, "bootstrap_declaration", None)
+    base_has_declaration = bool(run(["ls-tree", "--name-only", args.base, "--", DECLARATION_FILE]).strip()) if writes else False
+    if writes and not base_has_declaration:
+        if artifact is None:
+            raise UsageError("The recorded base lacks a trigger declaration; the first writing round requires --bootstrap-declaration and its accepted consultation, including when --head or the worktree already contains a declaration.", {})
+        bootstrap = load_bootstrap_declaration(
+            args.repo, args.base, artifact, plan, run, getattr(args, "state", None))
+    elif artifact is not None:
+        # A stale bootstrap cannot override a committed authority.
+        bootstrap = load_bootstrap_declaration(
+            args.repo, args.base, artifact, plan, run, getattr(args, "state", None))
     if head:
-        bootstrap = None
-        if getattr(args, "bootstrap_declaration", None) is not None:
-            bootstrap = load_bootstrap_declaration(
-                args.repo, args.base, args.bootstrap_declaration, plan, run)
         declaration = load_revision_declaration(run, args.repo, head, required=writes)
-        if bootstrap is not None:
-            expected = bootstrap["authority"]["sha256"]
-            actual = declaration["authority"]["sha256"]
-            if actual != expected:
-                raise UsageError("The first committed {} is {} but the reviewed bootstrap artifact is {}; restore the byte-identical installation or return to classification.".format(
-                    DECLARATION_FILE, actual, expected), {})
-            declaration["authority"]["bootstrap_sha256"] = expected
     elif declaration_path.exists() or declaration_path.is_symlink():
         declaration = load_declaration(args.repo, required=writes)
-    elif getattr(args, "bootstrap_declaration", None) is not None:
-        declaration = load_bootstrap_declaration(
-            args.repo, args.base, args.bootstrap_declaration, plan, run)
+        if bootstrap is not None:
+            data = declaration_path.read_bytes()
+            declaration["authority"]["sha256"] = hashlib.sha256(data).hexdigest()
+    elif bootstrap is not None:
+        declaration = bootstrap
     else:
         declaration = load_declaration(args.repo, required=writes)
+    if bootstrap is not None and declaration is not bootstrap:
+        expected = bootstrap["authority"]["sha256"]
+        if declaration["authority"].get("sha256") != expected:
+            raise UsageError("The first installed declaration differs from the accepted bootstrap artifact; restore the byte-identical installation or return to classification.", {})
+        declaration["authority"]["bootstrap_sha256"] = expected
+        declaration["authority"]["bootstrap_assessment"] = bootstrap["authority"]["assessment"]
     decisions = load_decisions(getattr(args, "decisions", None))
     specialties = load_requirements(getattr(args, "requirements", None))
     roles = [role for role in (getattr(args, "roles", None) or "").split(",") if role]

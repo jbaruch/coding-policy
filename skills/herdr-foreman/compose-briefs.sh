@@ -8,7 +8,10 @@
 #
 # Contract:
 #   argv  : <templates-dir> <values-json-file> <output-dir>
-#   values: {"shared": {"KEY": "value", ...},
+#   values: packaged templates also take top-level task (existing owner task id)
+#           and optional state (non-default ledger path). Exact base values are
+#           derived automatically, never supplied as SHA approval assertions.
+#           {"shared": {"KEY": "value", ...},
 #            "roles":  {"<role>": {"KEY": "value", ...}, ...}}
 #           `shared` fills COMMON.md and every brief; a role's own values win
 #           on a collision. Roles map to `brief-<role>.md` in the templates dir;
@@ -286,6 +289,16 @@ main() {
   if [[ -n "$bad_key" ]]; then
     warn "values file ${values_file} has a role key that cannot name the brief it writes — a key carrying a path separator, '=', ',' or a control character does not read back through the output path and the CLI keys"
     return 2
+  fi
+
+  # Packaged provenance comes from the already-registered task and Git-owned
+  # worktree receipts. Custom templates remain a pure rendering interface.
+  local provenance_keys=""
+  if [[ -r "${templates}/COMMON.md" ]]; then
+    provenance_keys="$(placeholders_in "${templates}/COMMON.md")" || return 3
+    if [[ $'\n'"$provenance_keys"$'\n' == *$'\nBASE_REVISION\n'* ]]; then
+      values="$(printf '%s' "$values" | PYTHONPATH="${SKILL_DIR}${PYTHONPATH:+:${PYTHONPATH}}" python3 -m foreman.provision compose)" || return 2
+    fi
   fi
 
   local shared

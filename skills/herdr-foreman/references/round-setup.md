@@ -3,7 +3,7 @@
 Detailed setup contracts and examples for Steps 2–9 of `skills/herdr-foreman/SKILL.md`.
 The skill retains the execution order and continuation gates.
 
-Step 7's brief-completeness requirements apply to every composed brief: identify
+Step 8's brief-completeness requirements apply to every composed brief: identify
 every issue, finding, file, and prior report in full. Phase 2 names the pushed
 SHA. Fixes carry the prior attempt count and required ownership handoff.
 Verification names `full` or `scoped`, prior findings, and the follow-up for new
@@ -247,7 +247,35 @@ completed package. Existing different content is preserved.
 
 Proceed immediately to Step 7 with the printed path as `REVIEW_PACKAGE`.
 
-## Step 7 — Compose the Briefs
+## Step 7 — Provision the Worktrees
+
+Run the sweep in the skill's Step 7 first, every round. Then one call per
+worker that writes anything:
+
+```bash
+CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"; [ -d "$CP" ] || case "$(git config --get remote.origin.url)" in git@github.com:jbaruch/coding-policy|git@github.com:jbaruch/coding-policy.git|https://github.com/jbaruch/coding-policy|https://github.com/jbaruch/coding-policy.git|ssh://git@github.com/jbaruch/coding-policy|ssh://git@github.com/jbaruch/coding-policy.git) CP=. ;; *) echo "coding-policy plugin not found: run tessl install jbaruch/coding-policy" >&2; exit 1 ;; esac
+bash "$CP/skills/herdr-foreman/provision-worktree.sh" \
+  <shared-checkout> <branch> <worktree-path> [base-ref]
+```
+
+Emits path, branch, base_ref, exact base_revision, fetched_default_ref,
+fetched_default_revision and state, where `state` is `created`,
+`attached`, or `already-provisioned`. Exit 1 is a precondition (an invalid
+branch name, a path outside the worktree root); exit 2 means git refused, or
+the path holds something else. Branch-name and path rules are the script's
+contract; see the header of
+`skills/herdr-foreman/provision-worktree.sh`.
+
+The foreman provisions every worktree a brief names, so a worker never runs git
+against the shared checkout (`skills/herdr-foreman/references/team-operation.md` Writers and
+Checkouts). A consultation inspecting artifacts without git needs none. Provision
+a read-only checkout if its evidence work requires git. Remove worktrees per
+`rules/agent-worktree-isolation.md` Cleanup once the branch lands.
+
+On any non-zero exit, fix the input it names and re-run this step; do not
+dispatch a brief whose worktree does not exist. Proceed immediately to Step 8.
+
+## Step 8 — Compose the Briefs
 
 Consult the applicable working-memory lessons and verify any operational fact
 the assignment relies on. Include concise relevant lessons with source pointers
@@ -284,7 +312,10 @@ bash "$CP/skills/herdr-foreman/compose-briefs.sh" \
   <values.json> <round-reports-dir>
 ```
 
-The values file is `{"shared": {...}, "roles": {"<role>": {...}}}`; a role's
+The packaged values file is `{"task":"<existing registered task id>", "state":"<owner state path when non-default>", "shared": {...}, "roles": {"<role>": {...}}}`;
+composition reads the original registered task base and Git-owned provisioning
+receipt automatically. Omit caller-supplied BASE_REVISION or BASE_PROVENANCE.
+A first read-only consultation has no WORKTREE and needs no provisioning receipt; a role's
 own value beats the shared one. Emits
 `{"common":"<path>","briefs":{"<role>":"<path>"}}`. Exit 2 means validation
 failed and nothing was written — an absent or unreadable policy artifact or review package,
@@ -353,34 +384,7 @@ Assignment-scoped rounds always use a fresh identity and pane. Fresh-worker fix 
 the prior attempt count and the ownership handoff that section requires.
 Reviewer and tester verification briefs name `full` or `scoped` review,
 the prior findings, and the round-log destination for new advisories. The final
-release-gating verification is `full`. Proceed immediately to Step 8.
-
-## Step 8 — Provision the Worktrees
-
-Run the sweep in the skill's Step 8 first, every round. Then one call per
-worker that writes anything:
-
-```bash
-CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"; [ -d "$CP" ] || case "$(git config --get remote.origin.url)" in git@github.com:jbaruch/coding-policy|git@github.com:jbaruch/coding-policy.git|https://github.com/jbaruch/coding-policy|https://github.com/jbaruch/coding-policy.git|ssh://git@github.com/jbaruch/coding-policy|ssh://git@github.com/jbaruch/coding-policy.git) CP=. ;; *) echo "coding-policy plugin not found: run tessl install jbaruch/coding-policy" >&2; exit 1 ;; esac
-bash "$CP/skills/herdr-foreman/provision-worktree.sh" \
-  <shared-checkout> <branch> <worktree-path> [base-ref]
-```
-
-Emits `{"path","branch","base_ref","state"}`, where `state` is `created`,
-`attached`, or `already-provisioned`. Exit 1 is a precondition (an invalid
-branch name, a path outside the worktree root); exit 2 means git refused, or
-the path holds something else. Branch-name and path rules are the script's
-contract; see the header of
-`skills/herdr-foreman/provision-worktree.sh`.
-
-The foreman provisions every worktree a brief names, so a worker never runs git
-against the shared checkout (`skills/herdr-foreman/references/team-operation.md` Writers and
-Checkouts). A consultation inspecting artifacts without git needs none. Provision
-a read-only checkout if its evidence work requires git. Remove worktrees per
-`rules/agent-worktree-isolation.md` Cleanup once the branch lands.
-
-On any non-zero exit, fix the input it names and re-run this step; do not
-dispatch a brief whose worktree does not exist. Proceed immediately to Step 9.
+release-gating verification is `full`. Proceed immediately to Step 9.
 
 ## Step 9 — Label the Layout (optional, once per team)
 

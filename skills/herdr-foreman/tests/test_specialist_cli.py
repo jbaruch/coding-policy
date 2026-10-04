@@ -374,6 +374,13 @@ class SpecialistCliTest(fixture.CliCase):
                 "INPUTS": "Read the accepted interaction", "TOOLS_AND_SKILLS": "Available browser fixture",
                 "KNOWLEDGE": "Saved project conventions", "CONTRIBUTION_HISTORY": "No prior contributions",
                 "REPORT": "/r/" + role + ".md"}
+        task_record = self.tmp / "task-record.json"
+        task_record.write_text(json.dumps({"task": "task-1", "base_revision": "a" * 40,
+            "scope": "Read-only consultation", "allowed_paths": ["*"],
+            "authorization": {"source": "fixture operator request", "quote": "Assess onboarding"}}))
+        code, _, err = self.invoke(["task", "--record", str(task_record), "--now", AT], self._client({}))
+        self.assertEqual(code, 0, err)
+        values.update(task="task-1", state=str(self.state))
         record = self.tmp / "values.json"
         record.write_text(json.dumps(values))
         output = self.tmp / "composed"

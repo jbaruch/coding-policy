@@ -53,7 +53,7 @@ bash "$CP/skills/herdr-foreman/foreman.sh" load-set --decision wake --enrollment
 | Decision | Step | Target |
 | --- | --- | --- |
 | `plan` | Step 5 | `--task` |
-| `brief` | Step 7 | `--task` |
+| `brief` | Step 8 | `--task` |
 | `wake` | Step 11, per `wake` event | `--enrollment` |
 | `gate` | Step 12 | `--task` |
 | `diagnose` | Step 13, diagnosis mode | `--task` |
@@ -413,44 +413,7 @@ set it as `REVIEW_PACKAGE`. On non-zero, fix the diagnostic and retry before
 composing verification briefs. Other roles need no package.
 Proceed immediately to Step 7.
 
-## Step 7 — Compose the Briefs
-
-Resolve policy paths through the Step 7 reference first. Write its outputs in
-`shared` within `{"shared": {...}, "roles": {"<role>": {...}}}` and run:
-
-`GATES` is shared: Step 2's `checks.gates.detail.brief`, verbatim. On a
-non-empty `checks.gates.detail.missing`, name those paths in the round's report.
-
-```bash
-CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"; [ -d "$CP" ] || case "$(git config --get remote.origin.url)" in git@github.com:jbaruch/coding-policy|git@github.com:jbaruch/coding-policy.git|https://github.com/jbaruch/coding-policy|https://github.com/jbaruch/coding-policy.git|ssh://git@github.com/jbaruch/coding-policy|ssh://git@github.com/jbaruch/coding-policy.git) CP=. ;; *) echo "coding-policy plugin not found: run tessl install jbaruch/coding-policy" >&2; exit 1 ;; esac
-bash "$CP/skills/herdr-foreman/compose-briefs.sh" \
-  "$CP/skills/herdr-foreman/templates" \
-  <values.json> <round-reports-dir>
-```
-
-Emits common and role-brief paths. On non-zero, fix the diagnostic before
-dispatch. Validates composition inputs and review evidence before writing.
-Use a fresh absolute report path per role and attempt.
-
-Follow `skills/herdr-foreman/references/round-setup.md` Step 7 for shared and role-specific values,
-authority, review evidence and brief completeness.
-
-- Follow `skills/herdr-foreman/references/team-operation.md` Judgment Routes
-- When accepted behavior, reproducible failure and a bounded correction are
-  already recorded, compose the development brief directly from that evidence;
-  no additional advisor report is required
-- Unsettled behavior, evidence, scope or correction choice requires the named
-  consultation; substantive foreman judgment remains prohibited
-- When consultation is required, return to Step 5 until its framing is accepted,
-  then set `SPECIALIST_CONTEXT` to its assessed report's absolute path
-- Otherwise leave `SPECIALIST_CONTEXT` empty; do not invent a consultation report
-- Never copy, excerpt or paraphrase a consultation report into a value
-- Triggered specialty work, causal uncertainty, changed scope and exhaustion keep
-  their required consultation routes
-
-Proceed immediately to Step 8.
-
-## Step 8 — Provision the Worktrees
+## Step 7 — Provision the Worktrees
 
 Step 2's preflight swept every repository with a worktree directory under
 the root, every round, and Step 2 reported its outcomes. Route on its
@@ -501,10 +464,50 @@ bash "$CP/skills/herdr-foreman/provision-worktree.sh" \
   <shared-checkout> <branch> <worktree-path> [base-ref]
 ```
 
-Emits path, branch, base, and `created|attached|already-provisioned`. On any
+Emits path, branch, exact base and fetched-default commits, and
+`created|attached|already-provisioned`; it persists their Git-owned provenance.
+Fetch failure stops before worktree creation. Pass an existing task's original
+authorized base as `base-ref`; never refresh that task base for a correction. On any
 non-zero exit, fix the diagnostic and retry. Never dispatch a missing
 worktree. Read-only consultations need none. Clean up after merge per
-`rules/agent-worktree-isolation.md`. Proceed immediately to Step 9.
+`rules/agent-worktree-isolation.md`. Proceed immediately to Step 8.
+
+## Step 8 — Compose the Briefs
+
+Resolve policy paths through the Step 8 reference first. Write its outputs in
+`shared` within `{"task":"<existing task id>", "state":"<owner state path when non-default>", "shared": {...}, "roles": {"<role>": {...}}}` and run:
+
+`GATES` is shared: Step 2's `checks.gates.detail.brief`, verbatim. On a
+non-empty `checks.gates.detail.missing`, name those paths in the round's report.
+
+```bash
+CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"; [ -d "$CP" ] || case "$(git config --get remote.origin.url)" in git@github.com:jbaruch/coding-policy|git@github.com:jbaruch/coding-policy.git|https://github.com/jbaruch/coding-policy|https://github.com/jbaruch/coding-policy.git|ssh://git@github.com/jbaruch/coding-policy|ssh://git@github.com/jbaruch/coding-policy.git) CP=. ;; *) echo "coding-policy plugin not found: run tessl install jbaruch/coding-policy" >&2; exit 1 ;; esac
+bash "$CP/skills/herdr-foreman/compose-briefs.sh" \
+  "$CP/skills/herdr-foreman/templates" \
+  <values.json> <round-reports-dir>
+```
+
+Emits common and role-brief paths. On non-zero, fix the diagnostic before
+dispatch. Validates composition inputs and review evidence before writing.
+Use a fresh absolute report path per role and attempt.
+
+Follow `skills/herdr-foreman/references/round-setup.md` Step 8 for shared and role-specific values,
+authority, review evidence and brief completeness.
+
+- Follow `skills/herdr-foreman/references/team-operation.md` Judgment Routes
+- When accepted behavior, reproducible failure and a bounded correction are
+  already recorded, compose the development brief directly from that evidence;
+  no additional advisor report is required
+- Unsettled behavior, evidence, scope or correction choice requires the named
+  consultation; substantive foreman judgment remains prohibited
+- When consultation is required, return to Step 5 until its framing is accepted,
+  then set `SPECIALIST_CONTEXT` to its assessed report's absolute path
+- Otherwise leave `SPECIALIST_CONTEXT` empty; do not invent a consultation report
+- Never copy, excerpt or paraphrase a consultation report into a value
+- Triggered specialty work, causal uncertainty, changed scope and exhaustion keep
+  their required consultation routes
+
+Proceed immediately to Step 9.
 
 ## Step 9 — Label the Layout
 
@@ -688,7 +691,7 @@ bash "$CP/skills/herdr-foreman/foreman.sh" verify-partition \
 - Run Step 16, then Step 17, with Step 4 as the stow's continuation step
 - The reset foreman resumes at Step 4 and re-validates the partition at the
   tip in Step 5, replanning from that result
-- The new plan then takes Step 7 composition, Step 10 dispatch, Step 11
+- The new plan then takes Step 8 composition, Step 10 dispatch, Step 11
   observation, and this step's gate
 
 Only now, with every report's gates recorded, record each assignment's outcome
@@ -798,7 +801,7 @@ wait, act on the ruling:
 skills/herdr-foreman/references/judge-round.md
 ```
 
-The judge is read-only, so Step 8 is skipped for it. Never substitute a judge,
+The judge is read-only, so Step 7 is skipped for it. Never substitute a judge,
 lower its tier, or hand-write an assignment to bypass a refusal. Its last step
 names where to continue.
 
@@ -810,10 +813,10 @@ The reset foreman takes Step 17's Resume Route.
 ## Step 14 — Release the Pull Request
 
 The release is one more assignment, never a prompt into the developer's
-existing context. Return to Step 7 with the role `release` for
-the developer's agent (template `templates/brief-release.md`, the same
-`WORKTREE` and `BRANCH`, a fresh `REPORT`), run Step 8 (it reports
-`already-provisioned`), dispatch through Step 10 so the context is cleared and
+existing context. Return to Step 7 (it reports `already-provisioned`), then
+Step 8 with the role `release` for the developer's agent (template
+`templates/brief-release.md`, the same `WORKTREE` and `BRANCH`, a fresh
+`REPORT`), dispatch through Step 10 so the context is cleared and
 the brief is fresh, and wait on the report in Step 11. `apply` refuses the
 release dispatch, dry run included, while the task carries an open verdict
 gate: return to Step 12 and clear it first. A source-changing
@@ -831,7 +834,7 @@ Fast-forward the shared checkout, remove the merged task's own worktree with
 `git worktree remove`, and delete the branch, in the post-merge order of
 `rules/agent-worktree-isolation.md` Cleanup. This is the one removal the
 foreman makes itself (`skills/herdr-foreman/references/team-operation.md` Writers and Checkouts,
-the merged-task exception). Then run Step 8's sweep again for the round's other
+the merged-task exception). Then run Step 7's sweep again for the round's other
 worktrees. Proceed immediately to Step 16.
 
 ## Step 16 — Log the Round
