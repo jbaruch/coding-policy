@@ -385,9 +385,8 @@ t_toplevel_comments_by_returns_zero_for_no_comments() {
 
 # Copilot authors its REVIEW as `copilot-pull-request-reviewer[bot]` but its
 # INLINE COMMENTS as `Copilot`. Counting comments against the review login
-# matched nothing, so `inline_comments.copilot` read 0 on every PR — vacuously
-# satisfying the release skill's Step 7 "every inline comment has a reply" gate
-# and letting a real Copilot finding merge unanswered.
+# matched nothing, so `inline_comments.copilot` read 0 on every PR — hiding real comments from the
+# full reading required by the release skill.
 t_toplevel_comments_by_counts_copilot_login() {
   MOCK_COMMENTS_BODY='[{"user":{"login":"Copilot"},"in_reply_to_id":null,"path":"a/b.md","body":"Real finding."}]'
   local count

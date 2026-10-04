@@ -470,6 +470,32 @@ check_cleanup_retry() {
   [[ -z "$INSTALL_FIXTURE" ]] || die "cleanup retry fixture remains; the exit trap will retry"
 }
 
+# Exercise the actual release entrypoints together: standalone has no simulated
+# team artifact, and ordinary advisory replies cannot become merge predicates.
+check_release_advisory_contract() {
+  local skills_root="$1"
+  if python3 - "$skills_root" <<'PYCONTRACT'
+import sys
+from pathlib import Path
+root = Path(sys.argv[1])
+release = (root / "release/SKILL.md").read_text()
+brief = (root / "herdr-foreman/templates/brief-release.md").read_text()
+mechanics = (root / "release/SCRIPTING.md").read_text()
+assert "Acknowledged — advisory noted" in release
+assert "never simulate a team report" in release
+assert "outside merge prerequisites" in release
+assert "outside the merge predicate" in release and "outside the merge predicate" in mechanics
+assert "Every inline comment must also be read" in release
+assert "no follow-up issue or reference is required" in brief
+assert "ruling obligations below" in brief
+for content in (release, mechanics, brief):
+    for contradiction in ("Reply on EVERY thread", "every thread has a reply",
+                          "no review thread is unresolved", "existing follow-up references"):
+        assert contradiction not in content, contradiction
+PYCONTRACT
+  then pass; else fail "release advisory routes contradict standalone/team merge contracts"; fi
+}
+
 # Progress and failures go to stderr; stdout carries one JSON result.
 run_suite() {
   local skills_root skill name
@@ -489,6 +515,7 @@ run_suite() {
     check_invocations "$ref" "$skills_root/$ref"
   done
   check_cleanup_retry
+  check_release_advisory_contract "$skills_root"
 
   skill="${skills_root}/${MODE_GATE_SKILL}/SKILL.md"
   check_mode_gate "$MODE_GATE_SKILL" "$skill"

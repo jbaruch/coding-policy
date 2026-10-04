@@ -261,8 +261,10 @@ bash "$CP/skills/herdr-foreman/provision-worktree.sh" \
 Emits path, branch, base_ref, exact base_revision, fetched_default_ref,
 fetched_default_revision and state, where `state` is `created`,
 `attached`, or `already-provisioned`. Exit 1 is a precondition (an invalid
-branch name, a path outside the worktree root); exit 2 means git refused, or
-the path holds something else. Branch-name and path rules are the script's
+branch name, a path outside the worktree root); exit 2 means Git or provenance validation/persistence failed, or
+the path holds something else. A failed persistence emits no success object;
+a normal retry preserves the original base and recovers interrupted receipt
+writes without deleting private Git metadata or existing work. Branch-name and path rules are the script's
 contract; see the header of
 `skills/herdr-foreman/provision-worktree.sh`.
 
@@ -272,7 +274,8 @@ Checkouts). A consultation inspecting artifacts without git needs none. Provisio
 a read-only checkout if its evidence work requires git. Remove worktrees per
 `rules/agent-worktree-isolation.md` Cleanup once the branch lands.
 
-On any non-zero exit, fix the input it names and re-run this step; do not
+On a non-zero exit, follow its diagnostic and re-run this step after the named
+condition clears; interrupted persistence uses the same normal invocation. Do not
 dispatch a brief whose worktree does not exist. Proceed immediately to Step 8.
 
 ## Step 8 — Compose the Briefs

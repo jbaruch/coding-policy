@@ -1105,8 +1105,17 @@ Owner: Herdr `provision-worktree.sh` and `foreman/provision.py`. Each worktree's
 private Git directory holds `foreman-provision.json`, schema 1. Writer fields:
 `schema_version`, absolute `path`, `branch`, `base_ref`, exact `base_revision`,
 `fetched_default_ref`, exact `fetched_default_revision`. The writer fetches and
-resolves commits before worktree creation, creates new branches at the resolved
-commit, then persists provenance before returning success. Reruns preserve the
+resolves commits before worktree creation. The common Git directory holds an
+owner intent named `foreman-provision-<sha256 of absolute path>.json`, with the
+same schema-1 fields, persisted before creating a branch or tree. It binds the
+original path, branch and base across failed receipt persistence and later
+default movement. The owner creates branches at that base and atomically
+persists the private worktree receipt before returning success, then removes
+only its matching pending intent. Normal retries
+recover a complete legacy `foreman-provision.tmp` receipt when no intent exists;
+unsupported or identity-mismatched evidence is preserved and refused. Unique
+scratch files do not strand retries; interrupted writes do not authorize
+composition before the authoritative private receipt exists. Reruns preserve the
 original base and update fetched-default evidence; they never reset task history.
 Existing task corrections supply their authorized base rather than changing it
 to a newer default. An attachment must descend from that base.

@@ -124,9 +124,8 @@ fi
 # PR can never mask an active block.
 #
 # Counting Copilot's comments against its REVIEW login matches nothing, so
-# `inline_comments.copilot` reads 0 on every PR — which vacuously satisfies the
-# release skill's Step 7 "every inline comment has a reply" merge gate and lets
-# a real Copilot finding merge unanswered. Comment counting therefore matches a
+# `inline_comments.copilot` reads 0 on every PR — which hides real comments from the
+# full reading required by the release skill. Comment counting therefore matches a
 # SET of logins per reviewer. A comment carries exactly one author, so listing
 # multiple logins cannot double-count.
 CODEX_REVIEW_LOGINS=("github-actions[bot]" "coding-policy-fleet-reviewer[bot]")

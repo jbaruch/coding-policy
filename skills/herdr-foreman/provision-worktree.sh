@@ -9,8 +9,9 @@
 #
 # Contract:
 #   argv  : <shared-checkout> <branch> <worktree-path> [base-ref]
-#           base-ref defaults to origin's default branch. It is used only when
-#           the branch has to be created.
+#           base-ref defaults to origin's fetched default branch for a new
+#           provision. Reruns retain the original owner-recorded task base;
+#           an explicit base must match it.
 #   stdout: one JSON object —
 #           {"path":"<abs>","branch":"<name>","base_ref":"<ref>",
 #            "base_revision":"<exact task base commit>",
@@ -26,7 +27,10 @@
 #   exit  : 0 the worktree exists at <worktree-path> on <branch>,
 #           1 precondition unmet (usage, git absent, not a repo, no origin,
 #             invalid branch name, path outside the worktree root),
-#           2 git refused the operation, or the path exists as something else.
+#           2 Git, provenance validation or persistence failed, or the path is
+#             occupied. No success object is emitted. A normal rerun recovers
+#             interrupted receipt writes using the durable original-base intent;
+#             existing branches, trees and work are preserved.
 #   env   : WORKTREE_ROOT overrides the required parent dir (default
 #           $HOME/.worktrees); the tests point it at a temp dir.
 set -euo pipefail
@@ -203,13 +207,22 @@ main() {
       warn "'${abs_path}' is a work tree on '${on}', not '${branch}' — choose another path, or remove it with \`git worktree remove\`"
       return 2
     fi
-    local receipt prior_base
-    receipt="$(git -C "$abs_path" rev-parse --path-format=absolute --git-path foreman-provision.json)" || return 2
-    if [[ -f "$receipt" && $# -eq 3 ]]; then
-      prior_base="$(jq -er '.base_revision' "$receipt")" || return 2
-      base_revision="$prior_base"
-      base="$(jq -er '.base_ref' "$receipt")" || return 2
-    fi
+
+  fi
+
+  # Bind the base before creating any worker surface. A retry after a failed
+  # receipt write consumes this same intent even when origin has advanced.
+  local intent original_revision="$base_revision"
+  intent="$(PYTHONPATH="${SKILL_DIR}${PYTHONPATH:+:${PYTHONPATH}}" python3 -m foreman.provision prepare \
+    "$shared" "$abs_path" "$branch" "$base" "$base_revision" "$default_ref" "$default_revision")" || return 2
+  base_revision="$(printf '%s' "$intent" | jq -er '.base_revision')" || return 2
+  base="$(printf '%s' "$intent" | jq -er '.base_ref')" || return 2
+  if (( $# == 4 )) && [[ "$base_revision" != "$original_revision" ]]; then
+    warn "explicit base differs from the original provisioning intent — preserve the original task base"
+    return 2
+  fi
+
+  if [[ -e "$abs_path" ]]; then
     local provenance
     provenance="$(record_base "$abs_path" "$branch" "$base" "$base_revision" "$default_ref" "$default_revision")" || return 2
     printf '%s' "$provenance" | jq '. + {state: "already-provisioned"}'

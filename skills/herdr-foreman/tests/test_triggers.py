@@ -1273,6 +1273,78 @@ class WorktreeBaseCommandTest(TempCase):
         self.assertEqual(json.loads(self.state.read_text())["recovery"]["tasks"]["fixture-task"]["base_revision"], self.base)
         self.assertEqual(self.git("-C", str(self.worktree), "rev-parse", "HEAD").strip(), self.base)
 
+    def test_interrupted_and_failed_receipt_retry_preserves_original_base(self):
+        for failure in ("KeyboardInterrupt", "OSError"):
+            with self.subTest(failure=failure):
+                fixture = WorktreeBaseCommandTest()
+                fixture.setUp()
+                try:
+                    hook = fixture.root / "hook"
+                    hook.mkdir()
+                    (hook / "sitecustomize.py").write_text(
+                        "from pathlib import Path\n"
+                        "original = Path.replace\n"
+                        "def interrupted(self, target):\n"
+                        "    if Path(target).name == 'foreman-provision.json':\n"
+                        "        raise " + failure + "('fixture persistence failure')\n"
+                        "    return original(self, target)\n"
+                        "Path.replace = interrupted\n")
+                    failed = fixture.provision(environment={**fixture.environment, "PYTHONPATH": str(hook)})
+                    self.assertNotEqual(failed.returncode, 0)
+                    self.assertEqual(failed.stdout, "")
+                    self.assertTrue(fixture.worktree.exists())
+                    (fixture.worktree / "operator-work.txt").write_text("Preserve this work\n")
+                    fixture.git("-C", str(fixture.shared), "commit", "--allow-empty", "-qm", "Moved default")
+                    moved = fixture.git("-C", str(fixture.shared), "rev-parse", "HEAD").strip()
+                    fixture.git("-C", str(fixture.shared), "push", "-q", "origin", "main")
+                    for _ in range(2):
+                        retried = fixture.provision()
+                        self.assertEqual(retried.returncode, 0, retried.stderr)
+                        proof = json.loads(retried.stdout)
+                        common = Path(fixture.git("-C", str(fixture.shared), "rev-parse", "--path-format=absolute", "--git-common-dir").strip())
+                        self.assertEqual(list(common.glob("foreman-provision-*.json")), [])
+                        self.assertEqual(proof["base_revision"], fixture.base)
+                        self.assertEqual(proof["fetched_default_revision"], moved)
+                        self.assertEqual((fixture.worktree / "operator-work.txt").read_text(), "Preserve this work\n")
+                    fixture.register()
+                    composed = fixture.compose()
+                    self.assertEqual(composed.returncode, 0, composed.stderr)
+                    self.assertIn(fixture.base, (fixture.root / "briefs" / "COMMON.md").read_text())
+                finally:
+                    fixture.doCleanups()
+
+    def test_legacy_interrupted_receipt_recovers_without_manual_git_cleanup(self):
+        self.assertEqual(self.provision().returncode, 0)
+        location = Path(self.git("-C", str(self.worktree), "rev-parse", "--path-format=absolute", "--git-path", "foreman-provision.json").strip())
+        location.replace(location.with_suffix(".tmp"))
+        common = Path(self.git("-C", str(self.shared), "rev-parse", "--path-format=absolute", "--git-common-dir").strip())
+        for intent in common.glob("foreman-provision-*.json"):
+            intent.unlink()
+        self.git("-C", str(self.shared), "commit", "--allow-empty", "-qm", "Moved default")
+        self.git("-C", str(self.shared), "push", "-q", "origin", "main")
+        result = self.provision()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout)["base_revision"], self.base)
+        self.assertTrue(location.exists())
+
+    def test_changed_explicit_base_and_unsupported_intent_preserve_work(self):
+        self.assertEqual(self.provision().returncode, 0)
+        (self.worktree / "work.txt").write_text("Keep\n")
+        self.git("-C", str(self.shared), "commit", "--allow-empty", "-qm", "Moved default")
+        self.git("-C", str(self.shared), "push", "-q", "origin", "main")
+        self.assertEqual(self.provision("origin/main").returncode, 2)
+        common = Path(self.git("-C", str(self.shared), "rev-parse", "--path-format=absolute", "--git-common-dir").strip())
+        import hashlib
+        intent = common / ("foreman-provision-" + hashlib.sha256(str(self.worktree.resolve()).encode()).hexdigest() + ".json")
+        location = Path(self.git("-C", str(self.worktree), "rev-parse", "--path-format=absolute", "--git-path", "foreman-provision.json").strip())
+        saved = json.loads(location.read_text())
+        saved["schema_version"] = 2
+        intent.write_text(json.dumps(saved))
+        before = intent.read_bytes()
+        self.assertEqual(self.provision().returncode, 2)
+        self.assertEqual(intent.read_bytes(), before)
+        self.assertEqual((self.worktree / "work.txt").read_text(), "Keep\n")
+
     def test_composition_refuses_missing_or_mismatched_task_without_outputs(self):
         self.assertEqual(self.provision().returncode, 0)
         self.register()

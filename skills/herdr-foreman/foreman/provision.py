@@ -1,13 +1,16 @@
 """Git-owned worktree base receipts and automatic brief provenance.
 
 Herdr owns schema 1 in each worktree's private Git directory. Provisioning
-writes once; composition reads without modifying Git or owner state. A later
+records the original base; composition reads without modifying Git or owner state. A later
 fetch never changes the original task base. See state-schema.md.
 """
 
+import hashlib
 import json
+import os
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 from .errors import ForemanError, UsageError
@@ -27,6 +30,60 @@ def git(path, *args):
 
 def receipt_path(path):
     return Path(git(path, "rev-parse", "--path-format=absolute", "--git-path", "foreman-provision.json"))
+
+
+def intent_path(shared, path):
+    common = Path(git(shared, "rev-parse", "--path-format=absolute", "--git-common-dir"))
+    identity = hashlib.sha256(str(Path(path).resolve()).encode()).hexdigest()
+    return common / ("foreman-provision-" + identity + ".json")
+
+
+def persist(location, saved):
+    """Replace atomically without sharing or stranding a fixed scratch name."""
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=location.parent,
+                                         prefix=location.name + ".", delete=False) as stream:
+            temporary = Path(stream.name)
+            stream.write(json.dumps(saved, indent=2) + "\n")
+            stream.flush()
+            os.fsync(stream.fileno())
+        temporary.replace(location)
+    except OSError as exc:
+        raise UsageError("Cannot persist worktree base provenance: {}; restore writable Git metadata and rerun normal provisioning. Existing work is preserved.".format(exc), {}) from None
+    finally:
+        if temporary is not None:
+            try:
+                temporary.unlink(missing_ok=True)
+            except OSError as exc:
+                print("provision: cannot clean owned scratch {}: {}; normal retries use a new scratch file.".format(temporary, exc), file=sys.stderr)
+
+
+def prepare(shared, path, branch, base_ref, base_revision, default_ref, default_revision):
+    """Persist the original base before any branch or worktree is created."""
+    path = str(Path(path).resolve())
+    location = intent_path(shared, path)
+    saved = None
+    if location.exists():
+        saved = validate(json.loads(location.read_text(encoding="utf-8")))
+    elif Path(path).exists():
+        receipt = receipt_path(path)
+        # Recover the complete scratch receipt left by older provisioning owners.
+        candidate = receipt if receipt.exists() else receipt.with_suffix(".tmp")
+        if candidate.exists():
+            saved = validate(json.loads(candidate.read_text(encoding="utf-8")))
+    if saved is not None:
+        if saved["path"] != path or saved["branch"] != branch:
+            raise UsageError("Provisioning intent does not match this path and branch; preserve existing work.", {})
+        if git(shared, "rev-parse", "--verify", saved["base_revision"] + "^{commit}") != saved["base_revision"]:
+            raise UsageError("Original provisioning base is unavailable; preserve existing work.", {})
+    else:
+        saved = validate({"schema_version": 1, "path": path, "branch": branch,
+                          "base_ref": base_ref, "base_revision": base_revision,
+                          "fetched_default_ref": default_ref, "fetched_default_revision": default_revision})
+    saved.update(fetched_default_ref=default_ref, fetched_default_revision=default_revision)
+    persist(location, saved)
+    return saved
 
 
 def validate(record):
@@ -71,13 +128,16 @@ def record(path, branch, base_ref, base_revision, default_ref, default_revision)
                           "fetched_default_ref": default_ref, "fetched_default_revision": default_revision})
     if git(path, "merge-base", "--is-ancestor", base_revision, "HEAD"):
         raise UsageError("Attached branch does not descend from the supplied task base.", {})
-    temporary = location.with_suffix(".tmp")
-    try:
-        with temporary.open("x", encoding="utf-8") as stream:
-            stream.write(json.dumps(saved, indent=2) + "\n")
-        temporary.replace(location)
-    except OSError as exc:
-        raise UsageError("Cannot persist worktree base provenance: {}.".format(exc), {}) from None
+    persist(location, saved)
+    # The authoritative worktree receipt now carries the same original base.
+    # Retire only our matching pending intent, so normal worktree cleanup can
+    # later reuse the path without an obsolete common-directory reservation.
+    intent = intent_path(path, path)
+    if intent.exists():
+        pending = validate(json.loads(intent.read_text(encoding="utf-8")))
+        if any(pending[key] != saved[key] for key in ("path", "branch", "base_revision")):
+            raise UsageError("Pending provisioning intent changed; preserve existing work.", {})
+        intent.unlink()
     return saved
 
 
@@ -120,8 +180,10 @@ def main():
             result = compose(json.load(sys.stdin))
         elif len(sys.argv) == 8 and sys.argv[1] == "record":
             result = record(*sys.argv[2:])
+        elif len(sys.argv) == 9 and sys.argv[1] == "prepare":
+            result = prepare(*sys.argv[2:])
         else:
-            raise UsageError("Use provision compose or record PATH BRANCH BASE_REF BASE_SHA DEFAULT_REF DEFAULT_SHA.", {})
+            raise UsageError("Use provision compose, record PATH BRANCH BASE_REF BASE_SHA DEFAULT_REF DEFAULT_SHA, or prepare SHARED PATH BRANCH BASE_REF BASE_SHA DEFAULT_REF DEFAULT_SHA.", {})
         print(json.dumps(result))
         return 0
     except (ForemanError, OSError, ValueError) as exc:
