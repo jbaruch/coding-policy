@@ -32,7 +32,7 @@ FRESH_SHELL_POLL_INTERVAL = 0.2
 FRESH_SHELL_READY_READS = 2
 
 
-def _fresh_shell_info(client, pane, expected_shell=None):
+def _fresh_shell_info(client, pane, expected_shell=None, *, allow_absent_foreground=False):
     """Read a fresh pane's process evidence, rejecting malformed/replaced shells.
 
     Diagnostics carry PID shapes alone, never argv, cmdline or environment.
@@ -48,11 +48,15 @@ def _fresh_shell_info(client, pane, expected_shell=None):
         ) from exc
     shell = info.get("shell_pid") if isinstance(info, dict) else None
     foreground = info.get("foreground_processes") if isinstance(info, dict) else None
+    # Herdr omits an empty process vector. Only pre-callback fresh-pane
+    # polling tolerates that unavailable evidence; it never proves readiness.
+    absent_foreground = isinstance(info, dict) and "foreground_processes" not in info
     pids = [row.get("pid") if isinstance(row, dict) else None for row in foreground] if isinstance(foreground, list) else None
     valid_pid = lambda pid: isinstance(pid, int) and not isinstance(pid, bool) and pid > 0
     evidence = {"pane": pane, "shell_pid": shell if valid_pid(shell) else None,
                 "foreground_pids": [pid if valid_pid(pid) else None for pid in pids] if pids is not None else None}
-    if (not valid_pid(shell) or pids is None or any(not valid_pid(pid) for pid in pids)
+    if (not valid_pid(shell) or (pids is None and not (allow_absent_foreground and absent_foreground))
+            or any(not valid_pid(pid) for pid in (pids or []))
             or (isinstance(info, dict) and info.get("pane_id", pane) != pane)):
         raise HerdrError(
             "Fresh pane {} returned malformed shell/foreground process evidence; inspect `herdr pane "
@@ -74,7 +78,7 @@ def _await_fresh_shell(client, pane, sleep):
     ready_reads = 0
     evidence = {}
     for attempt in range(1, FRESH_SHELL_POLL_ATTEMPTS + 1):
-        info, evidence = _fresh_shell_info(client, pane, shell)
+        info, evidence = _fresh_shell_info(client, pane, shell, allow_absent_foreground=True)
         shell = info["shell_pid"]
         ready_reads = ready_reads + 1 if holds_only_shell(info) else 0
         if ready_reads >= FRESH_SHELL_READY_READS:

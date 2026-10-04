@@ -21,6 +21,21 @@
   from the repository as sole authority. Missing, changed and stale artifacts
   fail closed.
 
+### Fixed
+
+- **Fresh workspace startup waits for available foreground evidence.** Herdr
+  omits an empty foreground-process list. The owner now waits for that field
+  within its existing startup bound, requiring consecutive explicit same-shell
+  observations before preflight. Explicit null, malformed evidence and a changed
+  shell still refuse, and the final proof before launch remains strict.
+
+- **Fresh assignment corrections use schema-7 context rules before launch.**
+  Early fixes keep their original task and cumulative count while receiving a
+  fresh identity; legacy retained-session requirements no longer reject them.
+  Pure correction checks run before workspace creation. A changed or malformed
+  pre-start shell refuses with PID evidence, without looking up the absent new
+  worker or weakening the final occupancy proof.
+
 ## 0.3.364 — 2026-10-06
 
 ### Fixed
@@ -39,13 +54,6 @@
 ## 0.3.361 — 2026-10-03
 
 ### Fixed
-
-- **Fresh assignment corrections use schema-7 context rules before launch.**
-  Early fixes keep their original task and cumulative count while receiving a
-  fresh identity; legacy retained-session requirements no longer reject them.
-  Pure correction checks run before workspace creation. A changed or malformed
-  pre-start shell refuses with PID evidence, without looking up the absent new
-  worker or weakening the final occupancy proof.
 
 - **Assignment workers and usage probes launch outside the foreman workspace.**
   The owner creates a separate workspace labeled with the fresh agent identity,
