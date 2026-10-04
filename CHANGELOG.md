@@ -2,7 +2,7 @@
 
 ### Fixed
 
-- Herdr provisioning retries preserve the original base after interrupted or failed receipt persistence. Release templates and standalone/team acknowledgments consistently keep ordinary advisory thread replies outside merge prerequisites.
+- Herdr provisioning retries preserve the original base after interrupted or failed receipt persistence. Release templates and standalone/team acknowledgments consistently keep ordinary advisory thread replies outside merge prerequisites; the governing Boy Scout directive follows that same mode-aware contract.
 
 - Herdr first-declaration bootstrap now requires the existing accepted consultation bound to reviewed bytes, including first declarations already installed at head. Provisioning refuses fetch failures and persists exact base commits; packaged briefs consume the original task base automatically.
 
