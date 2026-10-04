@@ -179,6 +179,13 @@ class ReportLinesTest(unittest.TestCase):
 
 A2_QUOTE = "`CONTRIBUTION declared below as design.`"
 A_UNQUOTED = "CONTRIBUTION declared below as `design`."
+A2_ARTIFACT = Path(__file__).resolve().parent / "fixtures" / "corrected-advisor-report-a2-20261003.md"
+UNMATCHED_KEYWORDS = (
+    ("VERDICT", "VERDICT: approved"),
+    ("ACCEPTANCE", "ACCEPTANCE 1/2: met — a"),
+    ("CONTRIBUTION", "CONTRIBUTION: implementation"),
+    ("CRITERION", "CRITERION 1: active"),
+)
 MET3 = (
     "ACCEPTANCE 1/3: met — inventory tables name paths, triggers, and class",
     "ACCEPTANCE 2/3: met — bounded repair keeps identity checks",
@@ -216,6 +223,14 @@ class QuotedExampleTest(unittest.TestCase):
 
     def test_corrected_artifact_yields_three_met_criteria_and_design(self):
         text = consultation(A2_QUOTE, *MET3, "CONTRIBUTION: design")
+        lines = report_contract.report_lines(text, "advisor", None, 3)
+        self.assertEqual([row["state"] for row in lines["acceptance"]], ["met", "met", "met"])
+        self.assertEqual(lines["contribution"], "design")
+        self.assertIsNone(lines["verdict"])
+        self.assertEqual(report_contract.declared_contributions(text), {"design"})
+
+    def test_complete_corrected_artifact_replays_three_met_and_design(self):
+        text = A2_ARTIFACT.read_text()
         lines = report_contract.report_lines(text, "advisor", None, 3)
         self.assertEqual([row["state"] for row in lines["acceptance"]], ["met", "met", "met"])
         self.assertEqual(lines["contribution"], "design")
@@ -282,7 +297,57 @@ class QuotedExampleTest(unittest.TestCase):
     def test_unmatched_backtick_is_not_a_quote_exemption(self):
         self.assertIn("malformed CONTRIBUTION",
                       self.gaps(consultation(*MET, "`CONTRIBUTION declared below as design."), "advisor", None, 2))
-        self.assertEqual(report_contract.report_lines("`VERDICT: approved\n", "reviewer")["verdict"], "approved")
+        self.assertIn("malformed VERDICT", self.gaps("`VERDICT: approved\n", "reviewer"))
+
+    def test_unmatched_openings_are_malformed_for_each_reserved_keyword(self):
+        for keyword, valid in UNMATCHED_KEYWORDS:
+            for ticks in ("`", "``"):
+                unmatched = ticks + valid
+                balanced = ticks + valid + ticks
+                with self.subTest(keyword=keyword, ticks=len(ticks), form="unmatched"):
+                    if keyword == "VERDICT":
+                        self.assertIn("malformed VERDICT", self.gaps(unmatched + "\n", "reviewer"))
+                    elif keyword == "ACCEPTANCE":
+                        self.assertIn("malformed ACCEPTANCE",
+                                      self.gaps(consultation(unmatched, MET[1]), "advisor", None, 2))
+                    elif keyword == "CONTRIBUTION":
+                        self.assertIn("malformed CONTRIBUTION",
+                                      self.gaps(consultation(*MET, unmatched), "advisor", None, 2))
+                        self.assertEqual(report_contract.declared_contributions(unmatched), set())
+                    else:
+                        text = "# Brief\n\n## Acceptance Criteria\n\n{}\n".format(unmatched)
+                        with self.assertRaises(UsageError) as caught:
+                            report_contract.brief_criteria(text)
+                        self.assertTrue(any("malformed CRITERION" in gap for gap in caught.exception.details["gaps"]))
+                with self.subTest(keyword=keyword, ticks=len(ticks), form="balanced"):
+                    if keyword == "VERDICT":
+                        self.assertIn("missing VERDICT", self.gaps(balanced + "\n", "reviewer"))
+                    elif keyword == "ACCEPTANCE":
+                        self.assertIn("missing ACCEPTANCE",
+                                      self.gaps(consultation(balanced, MET[1]), "advisor", None, 2))
+                    elif keyword == "CONTRIBUTION":
+                        text = consultation(*MET, balanced, "CONTRIBUTION: design")
+                        self.assertEqual(report_contract.report_lines(text, "architect", None, 2)["contribution"],
+                                         "design")
+                        self.assertEqual(report_contract.declared_contributions(balanced), set())
+                    else:
+                        text = ("# Brief\n\n## Acceptance Criteria\n\n{}\nCRITERION 1: the flow is named\n"
+                                "CRITERION 2: the alternatives are compared\n".format(balanced))
+                        self.assertEqual(report_contract.brief_criteria(text), 2)
+
+    def test_blockquoted_fence_opener_does_not_hide_following_active_declaration(self):
+        text = "> ```\nVERDICT: approved\n"
+        self.assertEqual(report_contract.report_lines(text, "reviewer")["verdict"], "approved")
+
+    def test_blockquoted_delimiter_inside_an_active_fence_does_not_close(self):
+        self.assertIn("missing VERDICT", self.gaps("```\n> ```\nVERDICT: approved\n", "reviewer"))
+
+    def test_longer_matching_closer_closes_the_fence(self):
+        text = "```\nVERDICT: blocking\n````\nVERDICT: approved\n"
+        self.assertEqual(report_contract.report_lines(text, "reviewer")["verdict"], "approved")
+
+    def test_closer_with_non_whitespace_suffix_does_not_close(self):
+        self.assertIn("missing VERDICT", self.gaps("```\nVERDICT: approved\n``` still open\n", "reviewer"))
 
     def test_lazy_quote_continuation_does_not_hide_an_unmarked_declaration(self):
         text = "> quoted intro\nVERDICT: approved\n"

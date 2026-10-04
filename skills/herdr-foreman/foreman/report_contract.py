@@ -23,8 +23,10 @@ declaration. Quote contexts are structural, not semantic:
   - a balanced inline-code span that covers the leading reserved token,
     including multi-backtick delimiters and a list-prefixed code example.
     An unmatched opening backtick is not a quote: the line stays an active
-    candidate. Four-space indentation alone is not a code block; it remains
-    leading whitespace on an active declaration
+    candidate, and the unmatched delimiter stays on the text presented to
+    the declaration grammar so the line is malformed rather than valid.
+    Four-space indentation alone is not a code block; it remains leading
+    whitespace on an active declaration
 
 Plain active declarations may still contain inline code in their evidence.
 
@@ -161,8 +163,9 @@ def _code_span_covers_keyword(text):
 def _unmarked(line):
     """Active declaration text, or None when a balanced inline-code example covers the keyword.
 
-    An unmatched opening backtick is stripped so a declaration is not hidden;
-    it is never itself a quote exemption.
+    An unmatched opening backtick is never a quote exemption. The delimiter
+    stays on the candidate so the declaration grammar refuses it as malformed
+    instead of accepting a stripped line.
     """
     text = line.lstrip()
     listed = _LIST_MARKER.match(text)
@@ -170,8 +173,6 @@ def _unmarked(line):
         text = text[listed.end():].lstrip()
     if _code_span_covers_keyword(text):
         return None
-    if text.startswith("`"):
-        text = text.lstrip("`").lstrip()
     return text.rstrip()
 
 
@@ -184,7 +185,8 @@ def _candidates(lines, keywords):
         text = _unmarked(line)
         if text is None:
             continue
-        match = _KEYWORD.match(text)
+        discovery = text.lstrip("`").lstrip() if text.startswith("`") else text
+        match = _KEYWORD.match(discovery)
         if match and match.group(1) in keywords:
             found.append((number, match.group(1), text))
     return found

@@ -8,9 +8,10 @@
   body text: they add no verdict, acceptance, criterion, or contribution.
   Active declarations keep the existing strict grammar, counts, and
   refusal classes. Leading whitespace and list markers still mark real
-  lines. An unmatched backtick or an unmarked line after a quote stays
-  active, so a quoted example cannot hide or satisfy a required
-  declaration.
+  lines. An unmatched opening backtick stays an active malformed
+  candidate rather than a stripped valid declaration. An unmarked line
+  after a quote stays active, so a quoted example cannot hide or satisfy
+  a required declaration.
 
 ## 0.3.361 — 2026-10-03
 

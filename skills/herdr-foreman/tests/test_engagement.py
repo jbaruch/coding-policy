@@ -382,6 +382,28 @@ class EngagementTest(unittest.TestCase):
         self.seed(seat)
         return {"id": "review-assessment", "dispatch": "review-1", "report": str(report), "delivery": str(delivery)}
 
+    def test_quoted_implementation_examples_add_no_exclusion_while_genuine_survives_gap(self):
+        quoted = ("`CONTRIBUTION: implementation`\n"
+                  "> CONTRIBUTION: implementation\n"
+                  "```\nCONTRIBUTION: implementation\n```\n"
+                  "Reviewed the tip; no verdict here.\n")
+        data = self.seed_reviewer(quoted)
+        with self.assertRaises(UsageError) as caught:
+            self.assess(data)
+        self.assertNotIsInstance(caught.exception, engagement.ContractGap)
+        self.assertEqual(self.state["specialist_assessments"], [])
+        Path(data["report"]).write_text(quoted + "CONTRIBUTION: design\n")
+        with self.assertRaises(engagement.ContractGap) as gapped:
+            self.assess(data)
+        record = self.state["specialist_assessments"][-1]
+        self.assertIs(gapped.exception.record, record)
+        self.assertEqual((record["source"], record["contribution"], record["verdict"]),
+                         ("contribution_only", "design", None))
+        constraints = composition.selection_constraints(
+            ["reviewer"], [], {}, self.state["assignments"], "task-1",
+            assessments=self.state["specialist_assessments"], candidate_names=["verifier"])
+        self.assertEqual(constraints["exclude"]["reviewer"], ["verifier"])
+
     def test_a_gapped_report_still_records_its_declared_contribution(self):
         # #625 review: add-only survives a refusal. A reviewer report missing
         # its VERDICT but declaring implementation keeps the worker excluded.
