@@ -346,6 +346,7 @@ class SupervisionTest(unittest.TestCase):
         self.assertEqual(blocked["decision"], "block")
         self.assertIn("prepares a reset but does not transfer supervision", blocked["reason"])
         self.assertIn("quiet watch deadline", blocked["reason"])
+        self.assertIn("Schedule its exact live continuation", blocked["reason"])
 
     def test_matching_live_scheduled_reset_releases_the_handoff_boundary(self):
         self.member()
@@ -402,6 +403,8 @@ class SupervisionTest(unittest.TestCase):
         blocked = self.stop()
         self.assertEqual(blocked["decision"], "block")
         self.assertIn("reset_failed", blocked["reason"])
+        self.assertIn("do not retry this stow", blocked["reason"])
+        self.assertNotIn("Schedule its exact live continuation", blocked["reason"])
         with self.assertRaises(foreman_reset.ResetEnded):
             self.schedule_reset()
 

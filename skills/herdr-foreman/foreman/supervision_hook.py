@@ -25,6 +25,22 @@ def block(reason):
     return {"decision": "block", "reason": "Herdr supervision — " + reason}
 
 
+def _ineligible_handoff_clause(continuation):
+    """Next action for an ineligible current handoff, keyed by continuation state."""
+    state = continuation["state"]
+    prefix = (" The saved handoff prepares a reset but does not transfer supervision "
+              "({}).".format(state))
+    if state == "reset_missing":
+        return prefix + " Schedule its exact live continuation with `{}`.".format(
+            runnable.command("foreman-reset"))
+    if state == "reset_deliverer_not_live":
+        return prefix + " Reconcile that reset row with `{}`; do not schedule another attempt for this stow.".format(
+            runnable.command("foreman-reset-reconcile"))
+    if state in ("reset_failed", "reset_interrupted", "reset_delivered", "reset_reconciled"):
+        return prefix + " Keep the current turn and foreground watch; do not retry this stow."
+    return prefix + " Keep the current turn and foreground watch."
+
+
 def check(payload, environ, at, *, root=None, probe=runtime.process_identity):
     if not environ.get("HERDR_ENV") or not environ.get("HERDR_PANE_ID") or not isinstance(payload, dict):
         return None
@@ -66,9 +82,7 @@ def check(payload, environ, at, *, root=None, probe=runtime.process_identity):
             health = runtime.health(data, at, probe)
             handoff = ""
             if continuation is not None:
-                handoff = (" The saved handoff prepares a reset but does not transfer supervision "
-                           "({}). Schedule its exact live continuation with `{}`; do not retry a failed stow.".format(
-                               continuation["state"], runnable.command("foreman-reset")))
+                handoff = _ineligible_handoff_clause(continuation)
             return block("{} active assignment(s), {} unhandled event(s); watcher is {}.{} Run `{}`, reconcile report/ledger evidence, acknowledge handled outcomes, and keep awaiting the foreground `{}` handle. A quiet watch deadline is a checkpoint: start the next foreground watch while authorized work remains. A genuine user-requested pause may use `{}`; a handoff permits Stop only after its matching reset continuation is live. State: {}".format(
                 len(active), len(events), health["state"], handoff, runnable.command("supervision-drain"), runnable.command("supervision-watch"),
                 runnable.command("supervision-hold"),

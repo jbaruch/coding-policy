@@ -17,9 +17,11 @@ description: >
 Process steps in order. Do not skip ahead.
 
 Before any finish with enrolled work, reconcile the whole fleet under
-`skills/herdr-foreman/references/supervision.md`. Continue observation or persist an authorized pause
-or handoff covering every active assignment. Keep user attention visible under
-`skills/herdr-foreman/references/attention.md`.
+`skills/herdr-foreman/references/supervision.md`. Continue observation while
+authorized work remains. Finish only after a genuine user pause or a verified
+successor/reset continuation satisfies the Stop gate. A saved handoff hold
+prepares reset preflight; it does not permit Stop on its own. Keep user
+attention visible under `skills/herdr-foreman/references/attention.md`.
 
 Before any team-round action, read the team-round contract in full. It is the
 file `rules/agent-team-operation.md` points to, and it binds every step below.
