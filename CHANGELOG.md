@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.364 — 2026-10-06
+
 ### Fixed
 
 - **Saved progress no longer lets an active foreman stop without a verified
