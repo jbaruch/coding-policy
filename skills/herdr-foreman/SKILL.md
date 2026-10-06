@@ -586,43 +586,11 @@ bash "$CP/skills/herdr-foreman/foreman.sh" check-member --enrollment <enrollment
   [--worktree <worker-checkout>]
 ```
 
-It reads the agent, report, recorded base and send time from the owner
-records and runs `wait-report.sh --once` with them
-(`skills/herdr-foreman/foreman/members.py`). Its JSON carries the
-checkpoint's `exit` and delivery JSON as `wait`:
-
-- `exit` 0 confirms delivery, 1 remains pending, 3 confirms blocked, 4 lacks
-  confirmed delivery, and 5 proves terminal refusal; record it with
-  `record-refusal`
-- The command itself exits non-zero when the dispatch has no recorded send
-  time, or when the wait ran without a verdict (`wait_failed`, carrying the
-  wait's own exit, 2 included); resolve the diagnostic stderr names, then run
-  it again
-
-Then act on the checkpoint:
-
-- Read delivered reports in full
-- Pass the worker's checkout as `--worktree` when it has one
-- An exit 1 carries either `reason: checkpoint_pending` or a `stall` object
-- A `stall` is classified only when `--worktree` names the checkout
-- Act on a stall under `skills/herdr-foreman/references/team-operation.md` Stalled Workers
-- Record a stall's obligation through `skills/herdr-foreman/references/attention.md`
-- Preserve the blocked/refusal and native-recovery paths in the references below
-- Never re-dispatch over uncertainty
-- Never resend a refused brief to its provider
+Before checking a member, read and follow the checkpoint contract:
 
 ```text
-skills/herdr-foreman/references/supervision.md
-skills/herdr-foreman/references/dispatch-recovery.md
+skills/herdr-foreman/references/round-flow.md — Report Checkpoint Outcomes
 ```
-
-Save each reviewer, tester and consultation report's successful delivery
-receipt and record its contract lines with `assess-specialist` under
-`skills/herdr-foreman/references/specialists.md` before retiring its enrollment. A refusal names
-the report's gap; what it saves is the `assess-specialist` contract in
-`skills/herdr-foreman/references/dispatch-recovery.md`. Record `needs_work` in Step 12 and
-re-dispatch the same responsibility with that gap named. A reviewer or tester
-re-dispatch spends no developer fix round.
 
 Record user-facing obligations in the attention queue. Acknowledge only handled
 event IDs through the saved snapshot; schedule pending rechecks. Record no
