@@ -313,6 +313,14 @@ def record_assessment(state, state_path, data, at):
     try:
         brief_evidence, criteria = _brief_criteria(dispatch) if role in CONSULTATION_ROLES else (None, None)
         lines = report_contract.report_lines(body, role, specialty(dispatch), criteria)
+        # Binding refusals preserve declared contributions just like line gaps.
+        bindings = [line.removeprefix("TRIGGER_DECLARATION: ") for line in body.splitlines()
+                    if line.startswith("TRIGGER_DECLARATION: ")]
+        if bindings:
+            from .triggers import validate_bootstrap_binding
+            if role not in CONSULTATION_ROLES or len(bindings) != 1:
+                raise UsageError("Trigger declaration evidence belongs to one consultation report binding.", {})
+            validate_bootstrap_binding(bindings[0])
     except UsageError as exc:
         declared = report_contract.declared_contributions(body) & EXCLUDING_CONTRIBUTIONS
         if not declared:
@@ -328,17 +336,6 @@ def record_assessment(state, state_path, data, at):
     result = {**bound, "source": "report", "brief_evidence": brief_evidence, "criteria": criteria,
               "acceptance": lines["acceptance"], "verdict": lines["verdict"],
               "contribution": lines["contribution"], "legacy": None, "gap": None}
-    # A consultation can review the first declaration without repository
-    # writes. Its delivered report, already receipt-bound, names the reviewed
-    # bytes; assessment checks them automatically rather than taking approval
-    # prose or an operator-manufactured artifact receipt.
-    bindings = [line.removeprefix("TRIGGER_DECLARATION: ") for line in body.splitlines()
-                if line.startswith("TRIGGER_DECLARATION: ")]
-    if bindings:
-        from .triggers import validate_bootstrap_binding
-        if role not in CONSULTATION_ROLES or len(bindings) != 1:
-            raise UsageError("Trigger declaration evidence belongs to one consultation report binding.", {})
-        validate_bootstrap_binding(bindings[0])
     state["specialist_assessments"].append(result)
     return result
 

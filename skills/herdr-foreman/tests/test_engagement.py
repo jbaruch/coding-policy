@@ -1,6 +1,7 @@
 """Delivered report-contract evidence survives replay, migrates from schema 1, and gates warm follow-ups."""
 
 import copy
+import io
 import json
 import os
 import sys
@@ -11,7 +12,7 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from foreman import composition, engagement, recovery, report_delivery, supervision
+from foreman import cli, composition, engagement, recovery, report_delivery, supervision
 from foreman.assign import freeze_paths
 from foreman.errors import UsageError
 from foreman.state import STATE_SCHEMA_VERSION, add_assignment, empty_state, load_state_checked, save_state
@@ -425,6 +426,43 @@ class EngagementTest(unittest.TestCase):
         self.assertEqual(recovery.accepted(self.state["specialist_assessments"]), [])
         save_state(self.path, self.state)
         self.assertTrue(load_state_checked(self.path)[1])
+
+    def test_invalid_trigger_binding_persists_declared_contribution_without_acceptance(self):
+        for contribution in ("design", "implementation"):
+            with self.subTest(contribution=contribution):
+                self.report.write_text(CONSULT_REPORT + "CONTRIBUTION: " + contribution +
+                                       "\nTRIGGER_DECLARATION: not-json\n")
+                save_state(self.path, self.state)
+                request = self.root / "assessment-input.json"
+                request.write_text(json.dumps(self.data))
+                output, errors = io.StringIO(), io.StringIO()
+                code = cli.main(["assess-specialist", "--state", str(self.path),
+                                 "--record", str(request), "--now", LATER],
+                                stdout=output, stderr=errors)
+                self.assertEqual(code, 1)
+                self.assertEqual(output.getvalue(), "")
+                self.assertIn("TRIGGER_DECLARATION", errors.getvalue())
+                persisted, usable = load_state_checked(self.path)
+                self.assertTrue(usable)
+                records = persisted["specialist_assessments"]
+                self.assertEqual(len(records), 1)
+                self.assertEqual((records[0]["source"], records[0]["contribution"]),
+                                 ("contribution_only", contribution))
+                self.assertEqual(recovery.accepted(records), [])
+                with self.assertRaises(UsageError):
+                    engagement.require_accepted(persisted, "consult-1", str(self.report))
+
+    def test_wrong_role_trigger_binding_keeps_reviewer_contribution_exclusion(self):
+        data = self.seed_reviewer("VERDICT: approved\nCONTRIBUTION: design\nTRIGGER_DECLARATION: {}\n")
+        with self.assertRaises(engagement.ContractGap):
+            self.assess(data)
+        constraints = composition.selection_constraints(
+            ["reviewer"], [], {}, self.state["assignments"], "task-1",
+            assessments=self.state["specialist_assessments"], candidate_names=["verifier"])
+        self.assertEqual(constraints["exclude"]["reviewer"], ["verifier"])
+        self.assertEqual(self.state["specialist_assessments"][-1]["source"], "contribution_only")
+        with self.assertRaises(UsageError):
+            engagement.require_accepted(self.state, "review-1", data["report"])
 
     def test_a_blocking_verdict_is_an_accepted_assignment_that_still_gates_the_round(self):
         # #625 note section 3: acceptance is contract completeness; the

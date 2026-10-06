@@ -24,7 +24,8 @@
   declaration already installed at head. The first pushed declaration
   must be byte-identical. Existing declarations and later pushed heads are read
   from the repository as sole authority. Missing, changed and stale artifacts
-  fail closed.
+  fail closed. A refused trigger binding still preserves a declared contribution
+  as an independent-verification exclusion, without accepting the report.
 
 ### Fixed
 
