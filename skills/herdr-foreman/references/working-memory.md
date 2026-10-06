@@ -104,6 +104,53 @@ The output supplies `memory_path`, the stow record and receipts for each require
 
 `reset_ready` is false if any required file has changed or become unavailable, or if a gap names the task `unrecorded`. Any other gap names its own recovery and does not block a reset. A true value covers only the saved local capture and its unchanged required files. It does not prove that the foreman captured every conversation fact, reconcile a fleet, satisfy the supervision gate, authorize interruption, or accept tasks. The foreman must still apply the separate handoff and supervision rules. New unresolved knowledge after the stow requires a new stow id.
 
+## Reset Outcome Routing
+
+Pass the same `--state`, `--config` and `--herdr-bin` the stow was recorded
+under when running Step 17's `foreman-reset` command.
+
+- **Exit 0** — stdout names the scheduled `pane_id`, `stow`, deliverer `pid`
+  and `log`
+  - `replayed: true` means this exact reset was already scheduled, and
+    nothing new started
+  - End the turn now
+  - Once the pane is idle, the deliverer clears it and sends the resume
+    prompt naming that stow; the next context takes Step 17's Resume Route
+- **Exit 1** — stderr is one JSON object; route on its `error` field:
+  - `reset_ended` — this stow's one reset attempt failed or was
+    interrupted, including a deliverer that could not start
+    - Never re-run `foreman-reset` for this stow
+    - Record a user-attention blocker quoting `details.resume_prompt` and
+      `details.record`
+    - Keep the current turn and foreground supervision active
+    - The failed reset supplies no Stop-authorizing continuation
+    - The operator recovers under the Working Memory carve-out, first
+      confirming the pane is not already running a resumed foreman
+    - The next round resets from a new stow
+  - `reset_record_newer` — a newer build wrote the reset record
+    - Record a user-attention blocker to update the plugin
+    - Leave the file untouched
+  - `reset_record_unusable` — the reset record is a link, unreadable or
+    malformed
+    - Record a user-attention blocker naming `details.record`
+    - Never edit or delete the file
+    - The operator restores it
+  - any other `error` — a refused precondition: an unready stow, the wrong
+    pane, supervision work still unheld, or an unreadable stow or state
+    - Fix the cause stderr names
+    - Re-run `foreman-reset`
+- A deliverer that fails after scheduling leaves its outcome on the reset
+  record
+- `catch-up` surfaces that outcome ahead of the attention queue
+  (`foreman_resets`)
+- The deliverer writes its error JSON to the `log` named at exit 0
+  - `reset_ended` there means the row shows `failed` or `interrupted`
+  - Any other error means the record could not be updated
+    - The operator closes the reset with the complete
+      `foreman-reset-reconcile` command catch-up prints for that row before recovery
+- Never end the turn with active work unless a genuine user pause or verified
+  successor/reset continuation satisfies the Stop gate
+
 ## Load a decision's records
 
 `foreman load-set` lists the durable records one foreman decision depends on,

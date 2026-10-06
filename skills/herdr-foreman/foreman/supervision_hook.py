@@ -6,8 +6,8 @@ unhandled events, active observation obligations, or unreadable owner state.
 Workers, other native sessions, and never-bound sessions produce no output.
 No writes, worker contact, process termination, or acknowledgement occurs.
 
-stop_hook_active does not waive supervision: an explicit evidence-backed hold
-with dispositions for every active assignment is the supported pause boundary.
+stop_hook_active does not waive supervision. A genuine user pause remains a
+supported boundary. A handoff also needs a matching live reset continuation.
 """
 
 import json
@@ -15,6 +15,7 @@ import os
 import sys
 
 from . import runnable
+from . import foreman_reset
 from . import supervision as store
 from . import supervision_runtime as runtime
 from .errors import ForemanError
@@ -22,6 +23,22 @@ from .errors import ForemanError
 
 def block(reason):
     return {"decision": "block", "reason": "Herdr supervision — " + reason}
+
+
+def _ineligible_handoff_clause(continuation):
+    """Next action for an ineligible current handoff, keyed by continuation state."""
+    state = continuation["state"]
+    prefix = (" The saved handoff prepares a reset but does not transfer supervision "
+              "({}).".format(state))
+    if state == "reset_missing":
+        return prefix + " Schedule its exact live continuation with `{}`.".format(
+            runnable.command("foreman-reset"))
+    if state == "reset_deliverer_not_live":
+        return prefix + " Run `{}` for this owner state to inspect the reset and obtain its reconciliation command; do not schedule another attempt for this stow.".format(
+            runnable.command("catch-up"))
+    if state in ("reset_failed", "reset_interrupted", "reset_delivered", "reset_reconciled"):
+        return prefix + " Keep the current turn and foreground watch; do not retry this stow."
+    return prefix + " Keep the current turn and foreground watch."
 
 
 def check(payload, environ, at, *, root=None, probe=runtime.process_identity):
@@ -53,13 +70,21 @@ def check(payload, environ, at, *, root=None, probe=runtime.process_identity):
                 continue
             events = store.pending(data)
             active = [row["id"] for row in data["members"] if row["active"]]
-            if not events and store.held(data):
-                return None
             if not events and not active:
                 return None
+            if not events and store.current_holds(data, "waiting_for_user"):
+                return None
+            continuation = None
+            if not events and store.current_holds(data, "handoff"):
+                continuation = foreman_reset.stop_coverage(binding["state_path"], data, probe=probe)
+                if continuation["eligible"]:
+                    return None
             health = runtime.health(data, at, probe)
-            return block("{} active assignment(s), {} unhandled event(s); watcher is {}. Run `{}`, reconcile report/ledger evidence, acknowledge handled outcomes, and keep awaiting the foreground `{}` handle. To pause for the user or hand off, save a hold with `{}` with a disposition and evidence for every active assignment. State: {}".format(
-                len(active), len(events), health["state"], runnable.command("supervision-drain"), runnable.command("supervision-watch"),
+            handoff = ""
+            if continuation is not None:
+                handoff = _ineligible_handoff_clause(continuation)
+            return block("{} active assignment(s), {} unhandled event(s); watcher is {}.{} Run `{}`, reconcile report/ledger evidence, acknowledge handled outcomes, and keep awaiting the foreground `{}` handle. A quiet watch deadline is a checkpoint: start the next foreground watch while authorized work remains. A genuine user-requested pause may use `{}`; a handoff permits Stop only after its matching reset continuation is live. State: {}".format(
+                len(active), len(events), health["state"], handoff, runnable.command("supervision-drain"), runnable.command("supervision-watch"),
                 runnable.command("supervision-hold"),
                 binding["state_path"]))
         except ForemanError as exc:

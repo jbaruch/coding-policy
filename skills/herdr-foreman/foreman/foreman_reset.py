@@ -18,7 +18,8 @@ Preconditions, all checked before anything is scheduled:
 - its id is not `latest`, the memory-show selector the resume prompt cannot name exactly
 - the caller runs in the bound foreman's own Herdr pane
 - the foreman could stop now: no unhandled supervision event, and either no
-  active enrollment or a hold covering the current ones (the Stop hook's rule)
+  active enrollment or a handoff hold whose id matches the stow. The scheduled
+  live deliverer becomes the Stop proof after this preflight succeeds
 
 The foreman's runtime mechanics (clear command, slash delivery, composer
 glyphs) come from a configured worker of the same kind; Herdr names the kind
@@ -134,6 +135,12 @@ class ResetRecordNewer(StateError):
     code = "reset_record_newer"
 
 
+class ResetRecordOlder(StateError):
+    """A read-only evaluator cannot use or migrate a legacy reset record."""
+
+    code = "reset_record_older"
+
+
 class ResetRecordUnusable(StateError):
     """The reset record is unreadable or fails validation; preserved untouched."""
 
@@ -200,12 +207,13 @@ def _alive(process, probe=None):
     return process is not None and (probe or process_identity)(process["pid"]) == process
 
 
-def _load(path):
+def _load(path, *, migrate_legacy=True):
     """The reset record in this build's shape, and whether it was migrated from schema 1.
 
     A newer `schema_version` is data this build lags, not corruption
     (rules/stateful-artifacts.md Migration Policy). A write refuses it;
-    `_readable` takes it as no usable prior reset.
+    `_readable` takes it as no usable prior reset. Read-only evaluators
+    disable legacy migration and refuse the old shape before transforming it.
     """
     unusable = ("Reset record {} is {}. It is left untouched; the operator restores a valid file from its own backup "
                 "before any reset.")
@@ -227,6 +235,16 @@ def _load(path):
                                                                           command("foreman-reset")),
                                {"record": str(path), "schema_version": version})
     migrated = _version(version, 1)
+    if migrated and not migrate_legacy:
+        rows = document.get("resets")
+        if (not isinstance(rows, list) or not all(_valid_row(row, 1) for row in rows)
+                or len({(row["pane_id"], row["stow"]) for row in rows}) != len(rows)):
+            raise ResetRecordUnusable("Reset record {} is malformed. It is left untouched; the operator restores a valid file "
+                                      "from its own backup before any reset.".format(path), {"record": str(path)})
+        raise ResetRecordOlder("Reset record {} is schema 1 and supplies no usable Stop proof. It is left untouched; "
+                               "run `{}` for the same owner state to migrate and rewrite it before resetting.".format(
+                                   path, command("catch-up")),
+                               {"record": str(path), "schema_version": version})
     if migrated and not _migrate(document):
         raise ResetRecordUnusable("Reset record {} is malformed. It is left untouched; the operator restores a valid file "
                                   "from its own backup before any reset.".format(path), {"record": str(path)})
@@ -671,11 +689,50 @@ def finish(state_path, plan, status, result):
         save_state(path, document)
 
 
-def _handoff_held(data):
-    """A current, unresumed `handoff` hold covers the active work; a user pause does not."""
-    return supervision.held(data) and any(
-        row["resumed_at"] is None and row["kind"] == "handoff" and row["through"] == len(data["events"])
-        and row["members"] == supervision.active_digest(data) for row in data["holds"])
+def _handoff_held(data, stow=None):
+    """Exactly one current handoff covers the active work and matches the stow."""
+    holds = supervision.current_holds(data, "handoff")
+    return len(holds) == 1 and (stow is None or holds[0]["id"] == stow)
+
+
+def stop_coverage(state_path, supervision_data, *, probe=process_identity):
+    """Read-only proof that a current handoff has a live matching reset deliverer.
+
+    A handoff hold prepares reset preflight. It authorizes Stop only after the
+    reset record binds the same hold/stow id, pane, native session, and exact
+    live deliverer process. Legacy records supply no usable prior state;
+    this Stop-path reader never migrates or rewrites the record.
+    """
+    holds = supervision.current_holds(supervision_data, "handoff")
+    if not holds:
+        return {"eligible": False, "state": "handoff_missing"}
+    if len(holds) != 1:
+        return {"eligible": False, "state": "handoff_ambiguous"}
+    binding = supervision_data.get("binding") or {}
+    identity = binding.get("identity") or {}
+    pane = identity.get("pane_id")
+    native_session = {key: identity.get(key) for key in ("kind", "value")}
+    path = record_path(state_path)
+    document, _migrated = _load(path, migrate_legacy=False)
+    stow = holds[0]["id"]
+    matching_stow = [row for row in document["resets"] if row["stow"] == stow]
+    if not matching_stow:
+        return {"eligible": False, "state": "reset_missing", "record": str(path)}
+    matching_pane = [row for row in matching_stow if row["pane_id"] == pane]
+    if not matching_pane:
+        return {"eligible": False, "state": "reset_pane_mismatch", "record": str(path)}
+    row = matching_pane[-1]
+    if row["native_session"] != native_session:
+        return {"eligible": False, "state": "reset_native_session_mismatch", "record": str(path),
+                "stow": row["stow"]}
+    if row["status"] not in ("scheduled", "delivering"):
+        return {"eligible": False, "state": "reset_" + row["status"], "record": str(path),
+                "stow": row["stow"]}
+    if not _alive(row["process"], probe):
+        return {"eligible": False, "state": "reset_deliverer_not_live", "record": str(path),
+                "stow": row["stow"]}
+    return {"eligible": True, "state": "scheduled_continuation", "record": str(path),
+            "stow": row["stow"], "process": row["process"]}
 
 
 def preflight(stow, supervision_data, caller_pane):
@@ -706,8 +763,9 @@ def preflight(stow, supervision_data, caller_pane):
         raise UsageError("A user pause is still open ({}); the reset's resume sequence would resume it without the user. "
                          "Record the user's answer and resume that hold before resetting.".format(", ".join(map(str, waiting))),
                          {"holds": waiting})
-    if events or (active and not _handoff_held(supervision_data)):
-        raise UsageError("The foreman cannot stop yet: {} unhandled event(s), {} active assignment(s) without a covering hold. Handle the events and save a handoff hold with `{}` (a user pause does not qualify) before resetting.".format(
+    matching_handoff = _handoff_held(supervision_data, stow["id"])
+    if events or (active and not matching_handoff):
+        raise UsageError("The foreman cannot prepare this reset yet: {} unhandled event(s), {} active assignment(s) without a matching handoff hold. Handle the events and save a handoff hold whose id is the stow id with `{}` (a user pause does not qualify) before resetting.".format(
             len(events), len(active), command("supervision-hold")), {"events": len(events), "active": active})
     return {"pane_id": pane, "stow": stow["id"]}
 

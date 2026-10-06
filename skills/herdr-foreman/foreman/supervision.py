@@ -413,9 +413,16 @@ def resume(state_path, at):
     return transaction(state_path, mutate)
 
 
+def current_holds(data, kind=None):
+    """Unresumed holds covering the exact current event and enrollment boundary."""
+    return [row for row in data["holds"]
+            if row["resumed_at"] is None and row["through"] == len(data["events"])
+            and row["members"] == active_digest(data) and (kind is None or row["kind"] == kind)]
+
+
 def held(data):
-    return any(row["resumed_at"] is None and row["through"] == len(data["events"])
-               and row["members"] == active_digest(data) for row in data["holds"])
+    """Whether any hold covers the current boundary, including reset preparation."""
+    return bool(current_holds(data))
 
 
 def identity(value, cwd, environment, *, kind="id", pane_id):

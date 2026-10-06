@@ -23,6 +23,7 @@ from typing import Callable
 from foreman import supervision as store
 from foreman import supervision_runtime as runtime
 from foreman import supervision_hook as hook
+from foreman import foreman_reset
 from foreman.errors import HerdrError, StateError, UsageError
 
 AT = "2026-09-01T12:00:00+00:00"
@@ -105,15 +106,21 @@ class SupervisionTest(unittest.TestCase):
             {"event": row["id"], "outcome": "Reconciled source; no acceptance inferred.", "evidence": [str(self.evidence)]}
             for row in result["events"]]}, AT)
 
-    def stop(self, payload=None, environ=None):
+    def stop(self, payload=None, environ=None, probe=None):
         return hook.check(payload or self.payload, self.environ if environ is None else environ,
-                          self.clock.now(), root=self.bindings, probe=self.probe)
+                          self.clock.now(), root=self.bindings, probe=probe or self.probe)
 
-    def hold(self, members):
-        return store.hold(self.path, {"id": "hold-1", "kind": "waiting_for_user", "resume_condition": "User supplies the named decision.",
+    def hold(self, members, *, kind="waiting_for_user", hold_id="hold-1"):
+        condition = "User supplies the named decision." if kind == "waiting_for_user" else "The scheduled reset resumes this saved stow."
+        return store.hold(self.path, {"id": hold_id, "kind": kind, "resume_condition": condition,
             "evidence": [str(self.evidence)], "dispositions": [
-                {"member": member, "outcome": "Explicit user-held decision recorded in the ledger.", "evidence": [str(self.evidence)]}
+                {"member": member, "outcome": "The assignment remains covered by the saved boundary.", "evidence": [str(self.evidence)]}
                 for member in members]}, AT)
+
+    def schedule_reset(self, *, stow="hold-1", pane="lead-pane", native=None):
+        return foreman_reset.schedule(
+            self.path, {"pane_id": pane, "stow": stow}, AT, lambda: PROCESS["pid"],
+            native_session=native or {"kind": "id", "value": "lead-session"}, probe=self.probe)
 
     def test_worker_b_event_is_returned_while_a_is_still_working(self):
         self.member("a")
@@ -329,6 +336,132 @@ class SupervisionTest(unittest.TestCase):
         self.assertIsNone(self.stop())
         store.resume(self.path, AT)
         self.assertEqual(self.stop()["decision"], "block")
+
+    def test_nominal_handoff_does_not_release_stop_after_a_quiet_watch_deadline(self):
+        self.member()
+        result = self.watch()
+        self.assertEqual(result["reason"], "deadline")
+        self.hold(["dispatch-a"], kind="handoff")
+        blocked = self.stop()
+        self.assertEqual(blocked["decision"], "block")
+        self.assertIn("prepares a reset but does not transfer supervision", blocked["reason"])
+        self.assertIn("quiet watch deadline", blocked["reason"])
+        self.assertIn("Schedule its exact live continuation", blocked["reason"])
+
+    def test_matching_live_scheduled_reset_releases_the_handoff_boundary(self):
+        self.member()
+        self.hold(["dispatch-a"], kind="handoff")
+        self.schedule_reset()
+        self.assertIsNone(self.stop())
+
+    def test_multiple_current_handoffs_refuse_an_older_live_reset(self):
+        self.member()
+        self.hold(["dispatch-a"], kind="handoff", hold_id="older-stow")
+        self.schedule_reset(stow="older-stow")
+        self.hold(["dispatch-a"], kind="handoff", hold_id="newer-stow")
+        blocked = self.stop()
+        self.assertEqual(blocked["decision"], "block")
+        self.assertIn("handoff_ambiguous", blocked["reason"])
+
+    def test_schema_1_reset_cannot_release_stop_or_rewrite_the_record(self):
+        self.member()
+        self.hold(["dispatch-a"], kind="handoff")
+        path = foreman_reset.record_path(self.path)
+        row = {"schema_version": 1, "pane_id": "lead-pane", "stow": "hold-1",
+               "status": "scheduled", "scheduled_at": AT, "options": {},
+               "process": PROCESS, "result": None}
+        original = json.dumps({"schema_version": 1, "resets": [row]})
+        path.write_text(original, encoding="utf-8")
+        blocked = self.stop()
+        self.assertEqual(blocked["decision"], "block")
+        self.assertIn("no usable Stop proof", blocked["reason"])
+        self.assertIn("catch-up", blocked["reason"])
+        self.assertEqual(path.read_text(encoding="utf-8"), original)
+
+    def test_malformed_legacy_reset_requires_restoration_without_rewriting(self):
+        self.member()
+        self.hold(["dispatch-a"], kind="handoff")
+        path = foreman_reset.record_path(self.path)
+        row = {"schema_version": 1, "pane_id": "lead-pane", "stow": "hold-1",
+               "status": "scheduled", "scheduled_at": AT, "options": {},
+               "process": PROCESS, "result": None}
+        cases = ({"schema_version": 1}, {"schema_version": 1, "resets": [None]},
+                 {"schema_version": 1, "resets": [dict(row, status="unknown")]},
+                 {"schema_version": 1, "resets": [row, row]})
+        for document in cases:
+            with self.subTest(document=document):
+                original = json.dumps(document)
+                path.write_text(original, encoding="utf-8")
+                blocked = self.stop()
+                self.assertEqual(blocked["decision"], "block")
+                self.assertIn("restores a valid file", blocked["reason"])
+                self.assertNotIn("catch-up", blocked["reason"])
+                self.assertEqual(path.read_text(encoding="utf-8"), original)
+
+    def test_dead_reset_deliverer_routes_recovery_through_catch_up(self):
+        self.member()
+        self.hold(["dispatch-a"], kind="handoff")
+        self.schedule_reset()
+        blocked = self.stop(probe=lambda _pid: None)
+        self.assertEqual(blocked["decision"], "block")
+        self.assertIn("reset_deliverer_not_live", blocked["reason"])
+        self.assertIn("catch-up", blocked["reason"])
+        self.assertIn("obtain its reconciliation command", blocked["reason"])
+        self.assertIn("do not schedule another attempt", blocked["reason"])
+
+    def test_handoff_rejects_wrong_reset_identity_and_dead_or_reused_deliverer(self):
+        cases = (
+            ("wrong stow", {"stow": "another-stow"}, self.probe),
+            ("wrong pane", {"pane": "another-pane"}, self.probe),
+            ("wrong native", {"native": {"kind": "id", "value": "another-session"}}, self.probe),
+            ("dead deliverer", {}, lambda _pid: None),
+            ("reused pid", {}, lambda pid: {"pid": pid, "identity": "replacement-process"}),
+        )
+        for label, reset, probe in cases:
+            with self.subTest(label=label):
+                with tempfile.TemporaryDirectory(prefix="handoff-case-") as raw:
+                    root = Path(raw).resolve()
+                    state, bindings = root / "owner.json", root / "bindings"
+                    evidence = root / "evidence.md"
+                    evidence.write_text("authorized work remains active\n", encoding="utf-8")
+                    who = store.identity("lead-session", str(root), "fixture", pane_id="lead-pane")
+                    store.bind(state, who, AT, root=bindings)
+                    store.enroll(state, {"id": "dispatch-a", "agent": "a", "task": "task-a",
+                                        "report": str(root / "a.md"), "pane_id": "pane-a",
+                                        "native_session": NATIVE}, AT)
+                    store.hold(state, {"id": "hold-1", "kind": "handoff",
+                                      "resume_condition": "The scheduled reset resumes this saved stow.",
+                                      "evidence": [str(evidence)], "dispositions": [{"member": "dispatch-a",
+                                      "outcome": "The assignment remains covered by the saved boundary.",
+                                      "evidence": [str(evidence)]}]}, AT)
+                    foreman_reset.schedule(
+                        state, {"pane_id": reset.get("pane", "lead-pane"),
+                                "stow": reset.get("stow", "hold-1")}, AT, lambda: PROCESS["pid"],
+                        native_session=reset.get("native", {"kind": "id", "value": "lead-session"}),
+                        probe=self.probe)
+                    stopped = hook.check(
+                        {"cwd": str(root), "session_id": "lead-session"},
+                        {"HERDR_ENV": "fixture", "HERDR_PANE_ID": "lead-pane"}, AT,
+                        root=bindings, probe=probe)
+                    self.assertEqual(stopped["decision"], "block")
+
+    def test_failed_reset_does_not_release_handoff_or_retry_the_stow(self):
+        self.member()
+        self.hold(["dispatch-a"], kind="handoff")
+        def fail_launch():
+            raise StateError("launch failed", {})
+        with self.assertRaises(foreman_reset.ResetEnded):
+            foreman_reset.schedule(
+                self.path, {"pane_id": "lead-pane", "stow": "hold-1"}, AT,
+                fail_launch,
+                native_session={"kind": "id", "value": "lead-session"})
+        blocked = self.stop()
+        self.assertEqual(blocked["decision"], "block")
+        self.assertIn("reset_failed", blocked["reason"])
+        self.assertIn("do not retry this stow", blocked["reason"])
+        self.assertNotIn("Schedule its exact live continuation", blocked["reason"])
+        with self.assertRaises(foreman_reset.ResetEnded):
+            self.schedule_reset()
 
     def test_new_event_or_assignment_invalidates_held_boundary(self):
         self.member()

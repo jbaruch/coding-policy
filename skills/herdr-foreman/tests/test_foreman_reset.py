@@ -42,7 +42,7 @@ def supervision_data(*, active=False, events=False, held=False, hold_kind="hando
     data = {"binding": {"identity": {"pane_id": PANE, **SESSION}}, "members": [member],
             "events": [{"id": "e1", "seq": 1, "member": "d1"}] if events else [], "acknowledgements": [], "holds": []}
     if held:
-        data["holds"].append({"kind": hold_kind, "resumed_at": None, "through": len(data["events"]),
+        data["holds"].append({"id": READY["id"], "kind": hold_kind, "resumed_at": None, "through": len(data["events"]),
                               "members": supervision.active_digest(data)})
     return data, held
 
@@ -64,9 +64,16 @@ class PreflightTest(unittest.TestCase):
         self.assertEqual(check(), {"pane_id": PANE, "stow": "round-7"})
 
     def test_active_work_needs_a_covering_hold(self):
-        with self.assertRaisesRegex(UsageError, "cannot stop yet"):
+        with self.assertRaisesRegex(UsageError, "cannot prepare this reset yet"):
             check(active=True)
         self.assertEqual(check(active=True, held=True)["pane_id"], PANE)
+
+    def test_multiple_current_handoffs_refuse_preflight(self):
+        data, _ = supervision_data(active=True, held=True)
+        other = dict(data["holds"][0], id="another-stow")
+        data["holds"].append(other)
+        with self.assertRaisesRegex(UsageError, "without a matching handoff hold"):
+            foreman_reset.preflight(READY, data, PANE)
 
     def test_unhandled_events_always_refuse(self):
         with self.assertRaisesRegex(UsageError, "1 unhandled event"):
@@ -210,6 +217,12 @@ class HandoffHoldTest(unittest.TestCase):
         self.assertEqual(check(active=True, held=True, hold_kind="handoff")["pane_id"], PANE)
         with self.assertRaisesRegex(UsageError, "user pause is still open"):
             check(active=True, held=True, hold_kind="waiting_for_user")
+
+    def test_handoff_hold_must_name_the_stow_it_prepares(self):
+        data, _ = supervision_data(active=True, held=True, hold_kind="handoff")
+        data["holds"][0]["id"] = "another-stow"
+        with self.assertRaisesRegex(UsageError, "matching handoff hold"):
+            foreman_reset.preflight(READY, data, PANE)
 
 
 class DeliverTest(unittest.TestCase):

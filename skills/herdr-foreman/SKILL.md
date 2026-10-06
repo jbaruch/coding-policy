@@ -17,9 +17,11 @@ description: >
 Process steps in order. Do not skip ahead.
 
 Before any finish with enrolled work, reconcile the whole fleet under
-`skills/herdr-foreman/references/supervision.md`. Continue observation or persist an authorized pause
-or handoff covering every active assignment. Keep user attention visible under
-`skills/herdr-foreman/references/attention.md`.
+`skills/herdr-foreman/references/supervision.md`. Continue observation while
+authorized work remains. Finish only after a genuine user pause or a verified
+successor/reset continuation satisfies the Stop gate. A saved handoff hold
+prepares reset preflight; it does not permit Stop on its own. Keep user
+attention visible under `skills/herdr-foreman/references/attention.md`.
 
 Before any team-round action, read the team-round contract in full. It is the
 file `rules/agent-team-operation.md` points to, and it binds every step below.
@@ -584,43 +586,11 @@ bash "$CP/skills/herdr-foreman/foreman.sh" check-member --enrollment <enrollment
   [--worktree <worker-checkout>]
 ```
 
-It reads the agent, report, recorded base and send time from the owner
-records and runs `wait-report.sh --once` with them
-(`skills/herdr-foreman/foreman/members.py`). Its JSON carries the
-checkpoint's `exit` and delivery JSON as `wait`:
-
-- `exit` 0 confirms delivery, 1 remains pending, 3 confirms blocked, 4 lacks
-  confirmed delivery, and 5 proves terminal refusal; record it with
-  `record-refusal`
-- The command itself exits non-zero when the dispatch has no recorded send
-  time, or when the wait ran without a verdict (`wait_failed`, carrying the
-  wait's own exit, 2 included); resolve the diagnostic stderr names, then run
-  it again
-
-Then act on the checkpoint:
-
-- Read delivered reports in full
-- Pass the worker's checkout as `--worktree` when it has one
-- An exit 1 carries either `reason: checkpoint_pending` or a `stall` object
-- A `stall` is classified only when `--worktree` names the checkout
-- Act on a stall under `skills/herdr-foreman/references/team-operation.md` Stalled Workers
-- Record a stall's obligation through `skills/herdr-foreman/references/attention.md`
-- Preserve the blocked/refusal and native-recovery paths in the references below
-- Never re-dispatch over uncertainty
-- Never resend a refused brief to its provider
+Before checking a member, read and follow the checkpoint contract:
 
 ```text
-skills/herdr-foreman/references/supervision.md
-skills/herdr-foreman/references/dispatch-recovery.md
+skills/herdr-foreman/references/round-flow.md — Report Checkpoint Outcomes
 ```
-
-Save each reviewer, tester and consultation report's successful delivery
-receipt and record its contract lines with `assess-specialist` under
-`skills/herdr-foreman/references/specialists.md` before retiring its enrollment. A refusal names
-the report's gap; what it saves is the `assess-specialist` contract in
-`skills/herdr-foreman/references/dispatch-recovery.md`. Record `needs_work` in Step 12 and
-re-dispatch the same responsibility with that gap named. A reviewer or tester
-re-dispatch spends no developer fix round.
 
 Record user-facing obligations in the attention queue. Acknowledge only handled
 event IDs through the saved snapshot; schedule pending rechecks. Record no
@@ -892,7 +862,9 @@ the continuation step, the step the round's outcome routes to:
 - Only `foreman-queue` seats remaining — Step 5
 
 Handle every pending supervision event, and save `supervision-hold` kind
-`handoff` covering each active enrollment. Then schedule the reset:
+`handoff` covering each active enrollment. Use the stow id as the hold id.
+This prepares reset preflight; it does not permit Stop on its own. Then
+schedule the reset:
 
 ```bash
 CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"; [ -d "$CP" ] || case "$(git config --get remote.origin.url)" in git@github.com:jbaruch/coding-policy|git@github.com:jbaruch/coding-policy.git|https://github.com/jbaruch/coding-policy|https://github.com/jbaruch/coding-policy.git|ssh://git@github.com/jbaruch/coding-policy|ssh://git@github.com/jbaruch/coding-policy.git) CP=. ;; *) echo "coding-policy plugin not found: run tessl install jbaruch/coding-policy" >&2; exit 1 ;; esac
@@ -900,48 +872,14 @@ bash "$CP/skills/herdr-foreman/foreman.sh" foreman-reset --stow <stow-id> \
   [--state <state-file>] [--config <config-file>] [--herdr-bin <path>]
 ```
 
-Pass the same `--state`, `--config` and `--herdr-bin` the stow was recorded
-under.
+Before running the reset, read:
 
-- **Exit 0** — stdout names the scheduled `pane_id`, `stow`, deliverer `pid`
-  and `log`
-  - `replayed: true` means this exact reset was already scheduled, and
-    nothing new started
-  - End the turn now
-  - Once the pane is idle, the deliverer clears it and sends the resume
-    prompt naming that stow; the next context takes the Resume Route below
-- **Exit 1** — stderr is one JSON object; route on its `error` field:
-  - `reset_ended` — this stow's one reset attempt failed or was
-    interrupted, including a deliverer that could not start
-    - Never re-run `foreman-reset` for this stow
-    - Record a user-attention blocker quoting `details.resume_prompt` and
-      `details.record`
-    - End the turn
-    - The operator recovers under the Working Memory carve-out, first
-      confirming the pane is not already running a resumed foreman
-    - The next round resets from a new stow
-  - `reset_record_newer` — a newer build wrote the reset record
-    - Record a user-attention blocker to update the plugin
-    - Leave the file untouched
-  - `reset_record_unusable` — the reset record is a link, unreadable or
-    malformed
-    - Record a user-attention blocker naming `details.record`
-    - Never edit or delete the file
-    - The operator restores it
-  - any other `error` — a refused precondition: an unready stow, the wrong
-    pane, supervision work still unheld, or an unreadable stow or state
-    - Fix the cause stderr names
-    - Re-run `foreman-reset`
-- A deliverer that fails after scheduling leaves its outcome on the reset
-  record
-- `catch-up` surfaces that outcome ahead of the attention queue
-  (`foreman_resets`)
-- The deliverer writes its error JSON to the `log` named at exit 0
-  - `reset_ended` there means the row shows `failed` or `interrupted`
-  - Any other error means the record could not be updated; the operator
-    closes the reset with the complete `foreman-reset-reconcile` command
-    catch-up prints for that row, before any recovery
-- Never end the turn with active work that has no hold
+```text
+skills/herdr-foreman/references/working-memory.md — Reset Outcome Routing
+```
+
+Follow its exit and asynchronous-failure routes. A
+failed reset never permits Stop with active work.
 
 **Resume Route** — the next context follows one route:
 

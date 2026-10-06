@@ -1,5 +1,18 @@
 # Changelog
 
+### Fixed
+
+- **Saved progress no longer lets an active foreman stop without a verified
+  continuation.** Handoff holds now prepare reset preflight only. The Stop
+  gate requires the matching stow, pane, native session, and live reset
+  deliverer, while genuine user-requested pauses retain their supported
+  boundary. Multiple current handoffs refuse ambiguous continuation instead
+  of accepting an older reset, and reset preflight refuses that same ambiguity.
+  Legacy reset records supply no Stop proof and remain untouched until the
+  owner migrates and rewrites them. Quiet watch deadlines direct the foreman back
+  into foreground supervision, and failed reset attempts remain terminal
+  without waiving it.
+
 ## 0.3.361 — 2026-10-03
 
 ### Fixed
