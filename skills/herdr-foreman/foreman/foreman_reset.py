@@ -236,6 +236,11 @@ def _load(path, *, migrate_legacy=True):
                                {"record": str(path), "schema_version": version})
     migrated = _version(version, 1)
     if migrated and not migrate_legacy:
+        rows = document.get("resets")
+        if (not isinstance(rows, list) or not all(_valid_row(row, 1) for row in rows)
+                or len({(row["pane_id"], row["stow"]) for row in rows}) != len(rows)):
+            raise ResetRecordUnusable("Reset record {} is malformed. It is left untouched; the operator restores a valid file "
+                                      "from its own backup before any reset.".format(path), {"record": str(path)})
         raise ResetRecordOlder("Reset record {} is schema 1 and supplies no usable Stop proof. It is left untouched; "
                                "run `{}` for the same owner state to migrate and rewrite it before resetting.".format(
                                    path, command("catch-up")),

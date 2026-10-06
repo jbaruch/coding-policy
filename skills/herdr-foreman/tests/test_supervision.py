@@ -372,12 +372,42 @@ class SupervisionTest(unittest.TestCase):
                "process": PROCESS, "result": None}
         original = json.dumps({"schema_version": 1, "resets": [row]})
         path.write_text(original, encoding="utf-8")
-        with patch.object(foreman_reset, "_migrate", side_effect=AssertionError("Stop must not migrate")):
-            blocked = self.stop()
+        blocked = self.stop()
         self.assertEqual(blocked["decision"], "block")
         self.assertIn("no usable Stop proof", blocked["reason"])
         self.assertIn("catch-up", blocked["reason"])
         self.assertEqual(path.read_text(encoding="utf-8"), original)
+
+    def test_malformed_legacy_reset_requires_restoration_without_rewriting(self):
+        self.member()
+        self.hold(["dispatch-a"], kind="handoff")
+        path = foreman_reset.record_path(self.path)
+        row = {"schema_version": 1, "pane_id": "lead-pane", "stow": "hold-1",
+               "status": "scheduled", "scheduled_at": AT, "options": {},
+               "process": PROCESS, "result": None}
+        cases = ({"schema_version": 1}, {"schema_version": 1, "resets": [None]},
+                 {"schema_version": 1, "resets": [dict(row, status="unknown")]},
+                 {"schema_version": 1, "resets": [row, row]})
+        for document in cases:
+            with self.subTest(document=document):
+                original = json.dumps(document)
+                path.write_text(original, encoding="utf-8")
+                blocked = self.stop()
+                self.assertEqual(blocked["decision"], "block")
+                self.assertIn("restores a valid file", blocked["reason"])
+                self.assertNotIn("catch-up", blocked["reason"])
+                self.assertEqual(path.read_text(encoding="utf-8"), original)
+
+    def test_dead_reset_deliverer_routes_recovery_through_catch_up(self):
+        self.member()
+        self.hold(["dispatch-a"], kind="handoff")
+        self.schedule_reset()
+        blocked = self.stop(probe=lambda _pid: None)
+        self.assertEqual(blocked["decision"], "block")
+        self.assertIn("reset_deliverer_not_live", blocked["reason"])
+        self.assertIn("catch-up", blocked["reason"])
+        self.assertIn("obtain its reconciliation command", blocked["reason"])
+        self.assertIn("do not schedule another attempt", blocked["reason"])
 
     def test_handoff_rejects_wrong_reset_identity_and_dead_or_reused_deliverer(self):
         cases = (

@@ -34,8 +34,8 @@ def _ineligible_handoff_clause(continuation):
         return prefix + " Schedule its exact live continuation with `{}`.".format(
             runnable.command("foreman-reset"))
     if state == "reset_deliverer_not_live":
-        return prefix + " Reconcile that reset row with `{}`; do not schedule another attempt for this stow.".format(
-            runnable.command("foreman-reset-reconcile"))
+        return prefix + " Run `{}` for this owner state to inspect the reset and obtain its reconciliation command; do not schedule another attempt for this stow.".format(
+            runnable.command("catch-up"))
     if state in ("reset_failed", "reset_interrupted", "reset_delivered", "reset_reconciled"):
         return prefix + " Keep the current turn and foreground watch; do not retry this stow."
     return prefix + " Keep the current turn and foreground watch."
