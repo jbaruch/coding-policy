@@ -501,7 +501,8 @@ for source, paths in references.items():
 assert "reconcile --state <state-path> --dispatch <recorded-dispatch-id>" in (root / "herdr-foreman/references/dispatch-recovery.md").read_text()
 assert "rules/review-severity.md" in advisory_directive
 assert "task report" not in advisory_directive and "round log" not in advisory_directive
-assert "in a team round" in severity and "standalone, note it directly" in severity
+assert "Advisory in a team round → acknowledge in the existing task report or round log" in severity
+assert "Advisory standalone → note it directly in the existing review conversation" in severity
 assert "Acknowledged — advisory noted" in release
 assert "never simulate a team report" in release
 assert "outside merge prerequisites" in release
