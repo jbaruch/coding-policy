@@ -13,7 +13,9 @@
   checkout themselves, and a fully evidenced bounded bug correction no longer
   requires an extra advisor round. Standalone acknowledgments use the existing
   review conversation; team acknowledgments use the existing round record.
-  Ordinary advisory thread replies remain outside merge prerequisites. Release
+  Unfixed rule-audit drift uses the same scoped observation contract rather than
+  automatically creating a follow-up issue. Ordinary advisory thread replies
+  remain outside merge prerequisites. Release
   snapshots now carry every inline comment body and reply for required reading.
 
 - **A repo can bootstrap its first trigger declaration without bypassing
