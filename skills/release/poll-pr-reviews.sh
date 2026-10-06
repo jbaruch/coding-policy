@@ -26,6 +26,8 @@
 #                   "stale": bool, "requested": bool}
 #     },
 #     "inline_comments": {"codex": N, "copilot": N},
+#     "inline_comment_bodies": [{"id", "in_reply_to_id", "path", "line",
+#                                "body", "html_url", "author"}],
 #     "merge_state": {"status": "CLEAN|DIRTY|BLOCKED|BEHIND|UNSTABLE|...",
 #                     "mergeable": "MERGEABLE|CONFLICTING|UNKNOWN"}
 #   }
@@ -355,7 +357,7 @@ main() {
     copilot_started_at=$(printf '%s' "$flight" | jq -r '.started_at // empty')
   fi
 
-  local codex_review copilot_review codex_comments copilot_comments
+  local codex_review copilot_review codex_comments copilot_comments comment_bodies
   codex_review=$(latest_review_by   "$owner" "$repo" "$pr_number" "${CODEX_REVIEW_LOGINS[@]}") \
     || { echo "error: failed to fetch Codex review state" >&2; exit 1; }
   copilot_review=$(latest_review_by "$owner" "$repo" "$pr_number" "$COPILOT_REVIEW_LOGIN") \
@@ -379,6 +381,9 @@ main() {
     || { echo "error: failed to count Codex inline comments" >&2; exit 1; }
   copilot_comments=$(toplevel_comments_by "$owner" "$repo" "$pr_number" "${COPILOT_COMMENT_LOGINS[@]}") \
     || { echo "error: failed to count Copilot inline comments" >&2; exit 1; }
+  comment_bodies=$(slurp_api_array "repos/${owner}/${repo}/pulls/${pr_number}/comments?per_page=100" "inline comment" \
+    | jq '[.[] | {id, in_reply_to_id, path, line, body, html_url, author: .user.login}]') \
+    || { echo "error: failed to read inline comment bodies — restore GitHub API access and rerun this snapshot before merging" >&2; exit 1; }
 
   jq -n \
     --argjson pr_number "$pr_number" \
@@ -389,6 +394,7 @@ main() {
     --argjson copilot "$copilot_review" \
     --argjson codex_comments "$codex_comments" \
     --argjson copilot_comments "$copilot_comments" \
+    --argjson comment_bodies "$comment_bodies" \
     --argjson merge_state "$merge_state" \
     '{
       pr_number: $pr_number,
@@ -396,6 +402,7 @@ main() {
       ci: {status: $ci_status, checks: $checks},
       reviews: {codex: $codex, copilot: $copilot},
       inline_comments: {codex: $codex_comments, copilot: $copilot_comments},
+      inline_comment_bodies: $comment_bodies,
       merge_state: ($merge_state | {status, mergeable})
     }'
 }

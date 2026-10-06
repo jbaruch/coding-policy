@@ -72,7 +72,7 @@ run() { # <templates> <values-file> <outdir>
   if [[ "$1" == "$(dirname "$SCRIPT")/templates" ]]; then
     local with_base="$TMP/values.$RUN_SEQ.base.json"
     jq --arg state "$TMP/owner-state.json" --arg worktree "$TMP/worktrees/compose" \
-      '. + {task: "compose-fixture", state: $state} | .roles |= with_entries(if .value | has("WORKTREE") then .value.WORKTREE = $worktree else . end)' \
+      '. + {task: "compose-fixture", state: $state} | .roles |= with_entries(if .value | has("WORKTREE") then .value += {WORKTREE: $worktree, BRANCH: "feat/compose"} else . end)' \
       "$values" > "$with_base" || die "could not add owner task/worktree metadata"
     values="$with_base"
   fi

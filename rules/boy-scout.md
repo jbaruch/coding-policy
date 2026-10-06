@@ -14,14 +14,14 @@ alwaysApply: true
 
 - **In-scope defect** — fix it in the current change and test the outcome
 - **Unrelated blocking risk** — record it once with evidence, consequence, owner if known, and required next decision: in the existing task/round record in a Herdr round, or the current conversation standalone
-- **Advisory** — use the mode-aware acknowledgment contract in `rules/review-severity.md` Split Reading From Acting; it creates no delivery obligation
+- **Advisory** — use `rules/review-severity.md` Split Reading From Acting
 - Open an issue, pull request, or other external record only when the task or operator separately authorizes that action
 
 ## Fold Into a Round Already in Flight
 
-- Fold an adjacent advisory only when an already-required correction touches the same surface and the advisory adds no push or verification round
-- Never spin up a round, push, issue, or pull request solely for an advisory
-- Maintenance due in another repository and unrelated checkout hygiene stay observations; they never become prerequisites for the selected task
+- Advisory folding follows `rules/review-severity.md` Split Reading From Acting
+- Maintenance due in another repository and unrelated checkout hygiene stay observations
+- These observations never become prerequisites for the selected task
 
 ## Reconciliation With `commit-conventions`
 

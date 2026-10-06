@@ -150,7 +150,7 @@ It returns the full `poll-pr-reviews.sh` snapshot plus a `watch` object — `{"r
 
 ## Step 6 — Address Feedback
 
-- **Read every review in full first.** Read each reviewer's `reviews.*.body` and every inline comment body before judging any item — a `COMMENTED` state or zero inline comments is not a license to skip the body (see `rules/reviewer-feedback-reading.md`)
+- **Read every review in full first.** Read each reviewer's `reviews.*.body` and every `inline_comment_bodies[].body` in Step 5's snapshot before judging any item — a `COMMENTED` state or zero inline comments is not a license to skip the body (see `rules/reviewer-feedback-reading.md`)
 - **Then act by severity** (see `rules/review-severity.md`): blocking findings — fix now; advisory findings — acknowledge in the existing team task report or round log, or note them directly in standalone review replies.
 - Fold an advisory only when an already-required blocking correction touches the same surface and adds no push or verification round. It creates no obligation for an issue, follow-up, push or delivery prerequisite; never run an advisory-only re-review round
 - **CI failures**: Fix every one
@@ -205,7 +205,7 @@ It returns the full `poll-pr-reviews.sh` snapshot plus a `watch` object — `{"r
 Only proceed when:
 - Step 5's watcher returned `.watch.result` as `ready` — its exit-0 readiness conjunction (mergeable, CI `success`/`none`, both bots posted, no Copilot review still owed, the policy reviewer not `CHANGES_REQUESTED`); the field predicate is the watcher's, not restated here (`rules/script-as-black-box.md` — see `skills/release/watch-pr-reviews.sh` header). `ready` already requires each bot's `state` to have left `none`, so a reviewer that never ran cannot satisfy the gate vacuously, AND
 - Every non-empty `reviews.*.body` in the returned snapshot has been read in full — a `COMMENTED` state with zero inline comments is not a license to skip the body (see `rules/reviewer-feedback-reading.md`), AND
-- Every inline comment body has been read in full and any blocking finding has been addressed per Step 6. Ordinary advisory acknowledgments and thread resolution are outside the merge predicate, AND
+- Every `inline_comment_bodies[].body` in Step 5's snapshot has been read in full and any blocking finding has been addressed per Step 6. Ordinary advisory acknowledgments and thread resolution are outside the merge predicate, AND
 - A ruled finding's reply cites its ruling, per Step 6.
 
 A `COMMENTED` review never gates the merge on its state alone — but its body must be read before merge, zero inline comments included. Every inline comment must also be read. Advisory findings (the reviewer's `## Advisory findings` section, and every Copilot comment) do not block the merge or require thread closure; use Step 6's standalone or team acknowledgment form during the existing review work. Only a blocking finding gates.

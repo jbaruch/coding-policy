@@ -714,10 +714,23 @@ t_ci_status_fail_with_cancel_is_failure() {
 
 # --- driver ---
 
+t_main_reads_inline_bodies_and_replies_from_every_page() {
+  local MOCK_MERGE_STATE=clean MOCK_REQUESTED_BODY='[]' MOCK_REVIEWS_BODY='[]' MOCK_TIMELINE_BODY='[]'
+  local MOCK_COMMENTS_BODY='[{"id":1,"user":{"login":"Copilot"},"body":"First finding","path":"a.py","line":4}]
+[{"id":2,"user":{"login":"human"},"body":"Second finding","path":"b.py","line":8},{"id":3,"in_reply_to_id":1,"user":{"login":"owner"},"body":"Fixed in abc"}]'
+  local out
+  out=$(main owner repo 1) || return 1
+  assert_eq "all comment bodies including replies" '["First finding","Second finding","Fixed in abc"]' \
+    "$(printf '%s' "$out" | jq -c '[.inline_comment_bodies[].body]')" || return 1
+  assert_eq "second-page location" 'b.py:8' \
+    "$(printf '%s' "$out" | jq -r '.inline_comment_bodies[1] | .path + ":" + (.line | tostring)')"
+}
+
 # `run_suite`, not `main`: the sourced script under test owns `main`.
 # Progress goes to stderr; stdout carries one JSON result.
 run_suite() {
   echo "== poll-pr-reviews.sh tests ==" >&2
+  run "main reads all inline bodies and replies across pages" t_main_reads_inline_bodies_and_replies_from_every_page
   run "fetch_merge_state returns {CLEAN, MERGEABLE} for a clean PR"     t_fetch_merge_state_clean_returns_mergeable_envelope
   run "fetch_merge_state returns {DIRTY, CONFLICTING} on conflict"      t_fetch_merge_state_dirty_returns_conflicting_envelope
   run "fetch_merge_state propagates UNKNOWN/UNKNOWN while computing"    t_fetch_merge_state_unknown_returns_unknown_envelope

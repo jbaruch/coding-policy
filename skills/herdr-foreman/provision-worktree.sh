@@ -127,7 +127,7 @@ main() {
     return 1
   fi
   if ! git -C "$shared" fetch --quiet origin 2>"$ERRFILE"; then
-    provenance_failure "provision_fetch_failed" "git fetch origin failed: $(tr '\n' ' ' < "$ERRFILE") — no worktree was provisioned"
+    provenance_failure "provision_fetch_failed" "git fetch origin failed — verify origin connectivity and credentials before retrying; Git stderr is withheld to protect credentials"
     return 2
   fi
   local default_ref default_revision base_revision db=""
@@ -145,12 +145,12 @@ main() {
     default_ref="origin/$db"
   fi
   if ! default_revision="$(git -C "$shared" rev-parse --verify "${default_ref}^{commit}" 2>"$ERRFILE")"; then
-    warn "cannot resolve fetched default commit: $(tr '\n' ' ' < "$ERRFILE")"
+    warn "cannot resolve fetched default commit — restore origin's default ref with git remote set-head origin --auto and fetch origin, then rerun provisioning; Git stderr is withheld to protect credentials"
     return 2
   fi
   base="${base:-$default_ref}"
   if ! base_revision="$(git -C "$shared" rev-parse --verify "${base}^{commit}" 2>"$ERRFILE")"; then
-    warn "cannot resolve task base commit: $(tr '\n' ' ' < "$ERRFILE")"
+    warn "cannot resolve task base commit — fetch the recorded original commit or pass a resolvable authorized base-ref, then rerun provisioning; Git stderr is withheld to protect credentials"
     return 2
   fi
 

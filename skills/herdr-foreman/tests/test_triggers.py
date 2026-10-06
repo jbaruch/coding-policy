@@ -1229,7 +1229,7 @@ class WorktreeBaseCommandTest(TempCase):
         executable = shim / "git"
         real_git = shutil.which("git")
         assert real_git is not None
-        executable.write_text("#!/bin/sh\nfor arg do\n  if [ \"$arg\" = fetch ]; then echo 'fixture fetch failure' >&2; exit 73; fi\ndone\nexec " + shlex.quote(real_git) + " \"$@\"\n")
+        executable.write_text("#!/bin/sh\nfor arg do\n  if [ \"$arg\" = fetch ]; then echo 'fatal: https://fixture-user:fixture-password@example.invalid/repo' >&2; exit 73; fi\ndone\nexec " + shlex.quote(real_git) + " \"$@\"\n")
         executable.chmod(0o755)
         result = self.provision(environment={**self.environment, "PATH": str(shim) + os.pathsep + self.environment["PATH"]})
         self.assertNotEqual(result.returncode, 0)
@@ -1238,8 +1238,48 @@ class WorktreeBaseCommandTest(TempCase):
         refused = json.loads(result.stderr)
         self.assertEqual(refused["details"]["failure_kind"], "provision_fetch_failed")
         self.assertEqual(refused["details"]["recovery"]["outcome"], "blocked")
+        self.assertNotIn("fixture-password", result.stderr)
+        self.assertNotIn("fixture-user", result.stderr)
         branches = self.git("-C", str(self.shared), "branch", "--list", "fix/fixture")
         self.assertEqual(branches, "")
+
+    def test_recorded_commit_fetch_failure_does_not_expose_git_credentials(self):
+        from foreman import provision
+        from unittest.mock import patch
+        failure = subprocess.CompletedProcess([], 73, "", "fatal: https://fixture-user:fixture-password@example.invalid/repo")
+        with patch("foreman.provision.subprocess.run", return_value=failure):
+            with self.assertRaises(UsageError) as caught:
+                provision.ensure_commit(self.shared, "f" * 40, fetch=True)
+        diagnostic = json.dumps(caught.exception.to_dict())
+        self.assertNotIn("fixture-password", diagnostic)
+        self.assertNotIn("fixture-user", diagnostic)
+        self.assertIn("provision_commit_unavailable", diagnostic)
+        self.assertIn("origin", diagnostic)
+
+    def test_existing_receiptless_worktree_is_preserved_without_invented_provenance(self):
+        self.worktree.parent.mkdir()
+        self.git("-C", str(self.shared), "worktree", "add", "-b", "fix/fixture", str(self.worktree), self.base)
+        (self.worktree / "work.txt").write_text("Preserve original work\n")
+        result = self.provision()
+        self.assertEqual(result.returncode, 2)
+        self.assertEqual(result.stdout, "")
+        self.assertEqual(json.loads(result.stderr)["details"]["failure_kind"], "provision_base_unproved")
+        self.assertEqual((self.worktree / "work.txt").read_text(), "Preserve original work\n")
+        location = Path(self.git("-C", str(self.worktree), "rev-parse", "--path-format=absolute", "--git-path", "foreman-provision.json").strip())
+        self.assertFalse(location.exists())
+
+    def test_composition_refuses_shared_and_role_branch_mismatches(self):
+        self.assertEqual(self.provision().returncode, 0)
+        self.register()
+        for scope in ("shared", "role"):
+            with self.subTest(scope=scope):
+                def mutate(values):
+                    target = values["shared"] if scope == "shared" else values["roles"]["developer"]
+                    target["BRANCH"] = "fix/wrong-branch"
+                result = self.compose(mutate=mutate)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("Brief branch", result.stderr)
+                self.assertFalse((self.root / "briefs").exists())
 
     def test_normal_owner_records_exact_base_and_composes_it_automatically(self):
         result = self.provision()

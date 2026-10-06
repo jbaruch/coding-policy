@@ -60,8 +60,10 @@ def require_ancestor(path, revision):
 def git(path, *args):
     result = subprocess.run(["git", "-C", str(path), *args], capture_output=True, text=True, check=False)
     if result.returncode:
-        raise refuse("provision_git_failed", "Cannot read worktree provenance: git {} failed: {}".format(
-            " ".join(args), result.stderr.strip()), path=path, git_args=list(args), git_exit=result.returncode)
+        # Git network errors may echo credential-bearing remote URLs. Keep the
+        # operation and exit code as evidence, never Git's untrusted stderr.
+        raise refuse("provision_git_failed", "Cannot read worktree provenance: git {} failed (exit {}). Git stderr is withheld to protect credentials; restore repository metadata, origin access and recorded commit availability before retrying normal provisioning.".format(
+            " ".join(args), result.returncode), path=path, git_args=list(args), git_exit=result.returncode)
     return result.stdout.strip()
 
 
@@ -109,6 +111,8 @@ def prepare(shared, path, branch, base_ref, base_revision, default_ref, default_
         candidate = receipt if receipt.exists() else receipt.with_suffix(".tmp")
         if candidate.exists():
             saved = validate(json.loads(candidate.read_text(encoding="utf-8")))
+        else:
+            raise refuse("provision_base_unproved", "Existing worktree has no owner-recorded original base; preserve it and select a worktree with its original receipt or recover its supported owner-written receipt before retrying.", path=path)
     if saved is not None:
         if saved["path"] != path or saved["branch"] != branch:
             raise refuse("provision_identity_changed", "Provisioning intent does not match this path and branch; preserve existing work.", path=path)
@@ -198,6 +202,9 @@ def compose(values):
         path = inputs.get("WORKTREE", shared.get("WORKTREE"))
         if path is not None:
             saved = read(path)
+            branch = inputs.get("BRANCH", shared.get("BRANCH"))
+            if branch != saved["branch"]:
+                raise UsageError("Brief branch does not match the provisioned worktree; set its effective BRANCH to {} before composing.".format(saved["branch"]), {})
             if role == "developer":
                 if "BASE_PROVENANCE" in inputs:
                     raise UsageError("BASE_PROVENANCE is owner-derived; omit it from role values.", {})

@@ -1,13 +1,5 @@
 # Changelog
 
-### Fixed
-
-- Herdr startup/provisioning refusals now return structured owner recovery outcomes. Durable closed no-send dispatches retry unchanged apply; `reconcile --dispatch` consumes only existing owner proof for guarded cleanup. Recorded-commit fetches preserve original work/base, and standalone risk recording and operational references follow the actual consumer mode/path.
-
-- Herdr provisioning retries preserve the original base after interrupted or failed receipt persistence. Release templates and standalone/team acknowledgments consistently keep ordinary advisory thread replies outside merge prerequisites; the governing Boy Scout directive follows that same mode-aware contract.
-
-- Herdr first-declaration bootstrap now requires the existing accepted consultation bound to reviewed bytes, including first declarations already installed at head. Provisioning refuses fetch failures and persists exact base commits; packaged briefs consume the original task base automatically.
-
 ### Changed
 
 - **Herdr delivery gates are stage-local.** Authorized, built, independently
@@ -19,17 +11,32 @@
   Transition-specific retrospective coverage remains blocking. Team workers
   consume the foreman's recorded fresh base instead of syncing the shared
   checkout themselves, and a fully evidenced bounded bug correction no longer
-  requires an extra advisor round.
+  requires an extra advisor round. Standalone acknowledgments use the existing
+  review conversation; team acknowledgments use the existing round record.
+  Ordinary advisory thread replies remain outside merge prerequisites. Release
+  snapshots now carry every inline comment body and reply for required reading.
 
 - **A repo can bootstrap its first trigger declaration without bypassing
   classification.** `detect-triggers --bootstrap-declaration` accepts reviewed
   external bytes only when the recorded base lacks `.herdr/triggers.json` and
-  the planned surfaces bind its path and SHA-256. The first pushed declaration
+  the planned surfaces bind its path and SHA-256. An existing accepted
+  consultation must be bound to those reviewed bytes, including a first
+  declaration already installed at head. The first pushed declaration
   must be byte-identical. Existing declarations and later pushed heads are read
   from the repository as sole authority. Missing, changed and stale artifacts
   fail closed.
 
 ### Fixed
+
+- **Worktree provisioning preserves original-base evidence across retries.**
+  Fetch failures stop creation. The owner persists exact task and fetched-default
+  commits, recovers interrupted receipt writes from durable intent or supported
+  legacy scratch, and refuses to invent provenance for receiptless existing
+  worktrees. Packaged briefs consume the registered original task base and
+  validate the rendered branch against the actual worktree branch. Recorded
+  commit fetches preserve existing work, and Git error diagnostics withhold raw
+  stderr that can contain credential-bearing remote URLs. Refusals name the
+  owner recovery operation and the evidence needed before retrying.
 
 - **Fresh worker dispatch owns pre-brief recovery.** Startup may settle through
   dim placeholder decoration with read-only checks, but sends only after stable
@@ -39,6 +46,8 @@
   retries preserve their task, frozen inputs, mode and correction count without
   requiring a retrospective for outgoing work that never existed. Uncertain,
   live, changed or partially closed attempts still refuse and preserve evidence.
+  `reconcile --dispatch` consumes existing owner proof for guarded cleanup;
+  startup refusals return structured recovery outcomes.
   State schema 11 owns this retry provenance and preserves older valid history
   on upgrade, so successful retries remain readable and completed replay sends
   nothing again. Briefing, retained restoration and release instructions now

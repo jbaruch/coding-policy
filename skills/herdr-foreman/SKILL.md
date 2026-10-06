@@ -170,8 +170,8 @@ Before following any route below, report the worktree sweep to the operator:
   `rules/hook-action-reporting.md` Act on What It Names; the operator carries
   out the resolution chosen, and the foreman runs none of it
 - An item outside the selected checkout remains visible in attention but never
-  blocks this task; `ready` already carries any hygiene failure that affects the
-  selected checkout
+  blocks this task
+- `ready` carries any hygiene failure that affects the selected checkout
 
 - **Exit 0** — record `due` as maintenance and proceed to Step 5 without waiting
   on it.
@@ -499,7 +499,8 @@ authority, review evidence and brief completeness.
   already recorded, compose the development brief directly from that evidence;
   no additional advisor report is required
 - Unsettled behavior, evidence, scope or correction choice requires the named
-  consultation; substantive foreman judgment remains prohibited
+  consultation
+- Substantive foreman judgment remains prohibited
 - When consultation is required, return to Step 5 until its framing is accepted,
   then set `SPECIALIST_CONTEXT` to its assessed report's absolute path
 - Otherwise leave `SPECIALIST_CONTEXT` empty; do not invent a consultation report
@@ -773,8 +774,7 @@ Step 16. No implementation or release is inferred from the diagnostic result.
   diagnosis.
 - **No operator wait at exhaustion** — no operator decision is awaited.
 - **`VERDICT: approved` with advisory findings** — record them in the round
-  log. They create no push, round, issue, pull request or target-task
-  prerequisite. Fold one only under `rules/review-severity.md`.
+  log under `rules/review-severity.md` Split Reading From Acting.
 
 Apply the release gate in this reference; obtain broad independent reviewer and
 tester passes against the current pushed tip before release:

@@ -1115,14 +1115,17 @@ only its matching pending intent. Normal retries
 recover a complete legacy `foreman-provision.tmp` receipt when no intent exists;
 unsupported or identity-mismatched evidence is preserved and refused. Unique
 scratch files do not strand retries; interrupted writes do not authorize
-composition before the authoritative private receipt exists. Reruns preserve the
+composition before the authoritative private receipt exists. An existing worktree
+without an intent, receipt or supported legacy scratch refuses provisioning;
+its present HEAD does not establish original-base provenance. Reruns preserve the
 original base and update fetched-default evidence; they never reset task history.
 Existing task corrections supply their authorized base rather than changing it
 to a newer default. An attachment must descend from that base.
 
 The composition reader takes top-level `task` and optional `state` in values,
 reads the already registered task's exact original base, and validates each
-WORKTREE against its receipt and current Git path/branch/commit ancestry. It
+WORKTREE against its receipt and current Git path/branch/commit ancestry. The
+effective role/shared BRANCH must match the receipt's actual branch. It
 renders the exact task base in COMMON and the fetched-default evidence in the
 developer brief automatically. Missing or unsupported receipts refuse composing
 a worktree-bearing packaged brief; no caller-authored SHA substitutes. Read-only
