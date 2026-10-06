@@ -904,8 +904,13 @@ bash "$CP/skills/herdr-foreman/foreman.sh" foreman-reset --stow <stow-id> \
   [--state <state-file>] [--config <config-file>] [--herdr-bin <path>]
 ```
 
-Before running the reset, read `skills/herdr-foreman/references/working-memory.md`
-Reset Outcome Routing. Follow its exit and asynchronous-failure routes. A
+Before running the reset, read:
+
+```text
+skills/herdr-foreman/references/working-memory.md — Reset Outcome Routing
+```
+
+Follow its exit and asynchronous-failure routes. A
 failed reset never permits Stop with active work.
 
 **Resume Route** — the next context follows one route:

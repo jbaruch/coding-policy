@@ -1090,7 +1090,9 @@ own `options`, `delivered` records `reconciled`. An identical retry returns
 the recorded row with `replayed: true`; a row that already ended any other
 way, or whose deliverer is still running, is refused.
 
-The Stop evaluator reads this record without rewriting it. Only the sole current
+The Stop evaluator reads this record without migrating or rewriting it. A schema-1
+record supplies no usable prior state and refuses Stop with `reset_record_older`;
+the diagnostic names the owner's `catch-up` migration and rewrite. Only the sole current
 handoff whose id equals `stow` can use a `scheduled` or `delivering` row. The
 row's pane and `native_session` must equal the exact supervision binding, and
 its recorded process identity must still be live. A missing, wrong-stow,

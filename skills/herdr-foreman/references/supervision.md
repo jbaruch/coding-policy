@@ -192,8 +192,8 @@ at `<canonical selected state>.supervision.json` through the existing locked,
 atomic state helpers. Discovery records live under
 `<default state directory>/supervision-bindings/<identity digest>.json`.
 `skills/herdr-foreman/foreman/supervision_hook.py` and display readers are read-only, perform no migrations,
-and acknowledge nothing. The Stop reader checks reset records in memory only;
-it never performs the reset owner's legacy rewrite. Dispatch state and the
+and acknowledge nothing. The Stop reader rejects legacy reset records as no
+usable prior state, without migrating or rewriting them. Dispatch state and the
 Markdown task ledger retain their own authority. The full shape is documented in
 `skills/herdr-foreman/state-schema.md`.
 

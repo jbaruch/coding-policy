@@ -372,9 +372,11 @@ class SupervisionTest(unittest.TestCase):
                "process": PROCESS, "result": None}
         original = json.dumps({"schema_version": 1, "resets": [row]})
         path.write_text(original, encoding="utf-8")
-        blocked = self.stop()
+        with patch.object(foreman_reset, "_migrate", side_effect=AssertionError("Stop must not migrate")):
+            blocked = self.stop()
         self.assertEqual(blocked["decision"], "block")
-        self.assertIn("reset_native_session_mismatch", blocked["reason"])
+        self.assertIn("no usable Stop proof", blocked["reason"])
+        self.assertIn("catch-up", blocked["reason"])
         self.assertEqual(path.read_text(encoding="utf-8"), original)
 
     def test_handoff_rejects_wrong_reset_identity_and_dead_or_reused_deliverer(self):

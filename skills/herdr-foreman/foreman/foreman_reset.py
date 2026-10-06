@@ -135,6 +135,12 @@ class ResetRecordNewer(StateError):
     code = "reset_record_newer"
 
 
+class ResetRecordOlder(StateError):
+    """A read-only evaluator cannot use or migrate a legacy reset record."""
+
+    code = "reset_record_older"
+
+
 class ResetRecordUnusable(StateError):
     """The reset record is unreadable or fails validation; preserved untouched."""
 
@@ -201,12 +207,13 @@ def _alive(process, probe=None):
     return process is not None and (probe or process_identity)(process["pid"]) == process
 
 
-def _load(path):
+def _load(path, *, migrate_legacy=True):
     """The reset record in this build's shape, and whether it was migrated from schema 1.
 
     A newer `schema_version` is data this build lags, not corruption
     (rules/stateful-artifacts.md Migration Policy). A write refuses it;
-    `_readable` takes it as no usable prior reset.
+    `_readable` takes it as no usable prior reset. Read-only evaluators
+    disable legacy migration and refuse the old shape before transforming it.
     """
     unusable = ("Reset record {} is {}. It is left untouched; the operator restores a valid file from its own backup "
                 "before any reset.")
@@ -228,6 +235,11 @@ def _load(path):
                                                                           command("foreman-reset")),
                                {"record": str(path), "schema_version": version})
     migrated = _version(version, 1)
+    if migrated and not migrate_legacy:
+        raise ResetRecordOlder("Reset record {} is schema 1 and supplies no usable Stop proof. It is left untouched; "
+                               "run `{}` for the same owner state to migrate and rewrite it before resetting.".format(
+                                   path, command("catch-up")),
+                               {"record": str(path), "schema_version": version})
     if migrated and not _migrate(document):
         raise ResetRecordUnusable("Reset record {} is malformed. It is left untouched; the operator restores a valid file "
                                   "from its own backup before any reset.".format(path), {"record": str(path)})
@@ -673,8 +685,9 @@ def finish(state_path, plan, status, result):
 
 
 def _handoff_held(data, stow=None):
-    """A current, unresumed `handoff` hold covers the active work; a user pause does not."""
-    return any(stow is None or row["id"] == stow for row in supervision.current_holds(data, "handoff"))
+    """Exactly one current handoff covers the active work and matches the stow."""
+    holds = supervision.current_holds(data, "handoff")
+    return len(holds) == 1 and (stow is None or holds[0]["id"] == stow)
 
 
 def stop_coverage(state_path, supervision_data, *, probe=process_identity):
@@ -682,8 +695,8 @@ def stop_coverage(state_path, supervision_data, *, probe=process_identity):
 
     A handoff hold prepares reset preflight. It authorizes Stop only after the
     reset record binds the same hold/stow id, pane, native session, and exact
-    live deliverer process. `_load` migrates old shapes in memory only; this
-    Stop-path reader never rewrites the record.
+    live deliverer process. Legacy records supply no usable prior state;
+    this Stop-path reader never migrates or rewrites the record.
     """
     holds = supervision.current_holds(supervision_data, "handoff")
     if not holds:
@@ -695,7 +708,7 @@ def stop_coverage(state_path, supervision_data, *, probe=process_identity):
     pane = identity.get("pane_id")
     native_session = {key: identity.get(key) for key in ("kind", "value")}
     path = record_path(state_path)
-    document, _migrated = _load(path)
+    document, _migrated = _load(path, migrate_legacy=False)
     stow = holds[0]["id"]
     matching_stow = [row for row in document["resets"] if row["stow"] == stow]
     if not matching_stow:

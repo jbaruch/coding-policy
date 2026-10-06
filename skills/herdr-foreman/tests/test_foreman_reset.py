@@ -68,6 +68,13 @@ class PreflightTest(unittest.TestCase):
             check(active=True)
         self.assertEqual(check(active=True, held=True)["pane_id"], PANE)
 
+    def test_multiple_current_handoffs_refuse_preflight(self):
+        data, _ = supervision_data(active=True, held=True)
+        other = dict(data["holds"][0], id="another-stow")
+        data["holds"].append(other)
+        with self.assertRaisesRegex(UsageError, "without a matching handoff hold"):
+            foreman_reset.preflight(READY, data, PANE)
+
     def test_unhandled_events_always_refuse(self):
         with self.assertRaisesRegex(UsageError, "1 unhandled event"):
             check(events=True, held=True)
