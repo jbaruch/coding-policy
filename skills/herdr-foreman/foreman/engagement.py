@@ -257,8 +257,8 @@ def _brief_criteria(dispatch):
 def record_assessment(state, state_path, data, at):
     """Append the contract lines of a delivered enrollment's report, bound to its bytes.
 
-    A report missing a required line, or carrying an extra, duplicate or
-    malformed one, records nothing.
+    A refused report retains only a declared excluding contribution;
+    neither a line gap nor an invalid trigger binding grants acceptance.
     """
     _input(data)
     supervision.timestamp(at)
