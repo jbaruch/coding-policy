@@ -892,7 +892,8 @@ store requires recovery of its history before rebinding or writing.
   every active enrollment. New events or assignments invalidate that coverage.
   A reset-preparation handoff uses the reset stow id as its `id`. A current
   `waiting_for_user` hold may authorize Stop. A current `handoff` hold does not
-  authorize Stop until its exact live reset continuation is verified.
+  authorize Stop until its exact live reset continuation is verified. More
+  than one current handoff is ambiguous and authorizes no Stop.
 - `watchers`: `{schema_version, id, at, heartbeat, deadline, process, status,
   reason, ended_at}`. `process` contains positive `pid` and an `identity` digest
   of its observed start time and argv. `status` is `running|stopped`; `reason`
@@ -907,7 +908,7 @@ The native Stop reader performs local read-only checks for the exact bound forem
 It never migrates state, acknowledges events, clears attention, or marks task
 completion. Its normal no-binding result applies only to a session never bound
 as foreman; missing or unreadable bound-owner history cannot release obligations.
-For active work, it accepts a handoff only when the reset record has a
+For active work, it accepts the sole current handoff only when the reset record has a
 `scheduled` or `delivering` row whose `stow` equals the current handoff id,
 whose pane and native session equal the binding, and whose full process
 identity is still live. Reset-record migration remains owner-only; the Stop
@@ -1089,9 +1090,9 @@ own `options`, `delivered` records `reconciled`. An identical retry returns
 the recorded row with `replayed: true`; a row that already ended any other
 way, or whose deliverer is still running, is refused.
 
-The Stop evaluator reads this record without rewriting it. Only a current
+The Stop evaluator reads this record without rewriting it. Only the sole current
 handoff whose id equals `stow` can use a `scheduled` or `delivering` row. The
 row's pane and `native_session` must equal the exact supervision binding, and
 its recorded process identity must still be live. A missing, wrong-stow,
-wrong-pane, wrong-session, dead, reused-process, failed, interrupted,
+ambiguous-handoff, wrong-pane, wrong-session, dead, reused-process, failed, interrupted,
 delivered, or reconciled row supplies no Stop authorization.

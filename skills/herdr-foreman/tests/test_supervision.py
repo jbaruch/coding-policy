@@ -354,6 +354,29 @@ class SupervisionTest(unittest.TestCase):
         self.schedule_reset()
         self.assertIsNone(self.stop())
 
+    def test_multiple_current_handoffs_refuse_an_older_live_reset(self):
+        self.member()
+        self.hold(["dispatch-a"], kind="handoff", hold_id="older-stow")
+        self.schedule_reset(stow="older-stow")
+        self.hold(["dispatch-a"], kind="handoff", hold_id="newer-stow")
+        blocked = self.stop()
+        self.assertEqual(blocked["decision"], "block")
+        self.assertIn("handoff_ambiguous", blocked["reason"])
+
+    def test_schema_1_reset_cannot_release_stop_or_rewrite_the_record(self):
+        self.member()
+        self.hold(["dispatch-a"], kind="handoff")
+        path = foreman_reset.record_path(self.path)
+        row = {"schema_version": 1, "pane_id": "lead-pane", "stow": "hold-1",
+               "status": "scheduled", "scheduled_at": AT, "options": {},
+               "process": PROCESS, "result": None}
+        original = json.dumps({"schema_version": 1, "resets": [row]})
+        path.write_text(original, encoding="utf-8")
+        blocked = self.stop()
+        self.assertEqual(blocked["decision"], "block")
+        self.assertIn("reset_native_session_mismatch", blocked["reason"])
+        self.assertEqual(path.read_text(encoding="utf-8"), original)
+
     def test_handoff_rejects_wrong_reset_identity_and_dead_or_reused_deliverer(self):
         cases = (
             ("wrong stow", {"stow": "another-stow"}, self.probe),

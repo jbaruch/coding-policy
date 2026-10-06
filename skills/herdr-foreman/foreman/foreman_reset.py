@@ -688,14 +688,16 @@ def stop_coverage(state_path, supervision_data, *, probe=process_identity):
     holds = supervision.current_holds(supervision_data, "handoff")
     if not holds:
         return {"eligible": False, "state": "handoff_missing"}
+    if len(holds) != 1:
+        return {"eligible": False, "state": "handoff_ambiguous"}
     binding = supervision_data.get("binding") or {}
     identity = binding.get("identity") or {}
     pane = identity.get("pane_id")
     native_session = {key: identity.get(key) for key in ("kind", "value")}
     path = record_path(state_path)
     document, _migrated = _load(path)
-    stows = {row["id"] for row in holds}
-    matching_stow = [row for row in document["resets"] if row["stow"] in stows]
+    stow = holds[0]["id"]
+    matching_stow = [row for row in document["resets"] if row["stow"] == stow]
     if not matching_stow:
         return {"eligible": False, "state": "reset_missing", "record": str(path)}
     matching_pane = [row for row in matching_stow if row["pane_id"] == pane]

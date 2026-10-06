@@ -6,8 +6,10 @@
   continuation.** Handoff holds now prepare reset preflight only. The Stop
   gate requires the matching stow, pane, native session, and live reset
   deliverer, while genuine user-requested pauses retain their supported
-  boundary. Quiet watch deadlines direct the foreman back into foreground
-  supervision, and failed reset attempts remain terminal without waiving it.
+  boundary. Multiple current handoffs refuse ambiguous continuation instead
+  of accepting an older reset. Quiet watch deadlines direct the foreman back
+  into foreground supervision, and failed reset attempts remain terminal
+  without waiving it.
 
 ## 0.3.361 — 2026-10-03
 

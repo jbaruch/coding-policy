@@ -162,7 +162,7 @@ the exact stow id the reset resumes. Every active enrollment needs its own
 named disposition and evidence; a global pause cannot hide unrelated work.
 The hold alone does not transfer supervision and does not permit Stop. Stop
 requires either a successor that committed the newer supervision binding or a
-matching reset row whose pane, stow, bound native session, and exact live
+sole current handoff with a matching reset row whose pane, stow, bound native session, and exact live
 deliverer process verify the scheduled continuation. A saved progress file,
 future-continuation promise, foreground watcher, or expired watch deadline is
 not continuation proof. Continue `supervision-watch` after every quiet deadline
