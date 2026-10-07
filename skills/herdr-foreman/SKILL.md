@@ -332,7 +332,8 @@ window-group mechanics live in
 `skills/herdr-foreman/foreman/lifecycle.py` (`measure_worker_kinds`).
 Legacy busy standing workers are skipped.
 Unmeasured billing stays `unknown`. Report failed
-measurements and obtain their readings before relying on those seats. A pending
+measurements and follow Step 4's Probe and startup recovery route in
+`skills/herdr-foreman/references/round-setup.md` before relying on those seats. A pending
 CLI update follows `skills/herdr-foreman/references/model-tiers.md`
 Maintenance Relaunch.
 

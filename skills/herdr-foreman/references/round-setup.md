@@ -123,8 +123,10 @@ redacted for credential shapes and capped per field with a `[truncated N bytes]`
 marker. The tracing contract is in
 `skills/herdr-foreman/references/herdr.md`, "Tracing a Live Run".
 
-Report a `failed_agents` entry to the user and measure that worker by hand
-before relying on its role. Proceed immediately to Step 5.
+Report each `failed_agents` entry and follow
+`skills/herdr-foreman/references/dispatch-recovery.md` Probe and startup recovery.
+Obtain the affected seat's fresh reading before relying on it.
+Proceed immediately to Step 5 for independently eligible work.
 
 ## Step 5 — Plan the Roles
 

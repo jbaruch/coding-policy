@@ -1,9 +1,9 @@
 """Assignment-scoped worker panes for config schema 7.
 
 Worker-kind names are planning inputs, never live Herdr identities.  A plan
-creates one stable identity per seat; apply materializes it in a new pane and
-close-member removes that pane after the assessed outcome is accepted by the
-owner records.
+creates one stable identity per seat; apply creates an unfocused workspace and
+starts it in the returned root pane. Close-member removes that pane after the
+assessed outcome is accepted by the owner records.
 """
 
 import os
@@ -13,9 +13,9 @@ import sys
 import time
 
 from .config import assignment_worker
-from .errors import ForemanError, HerdrError, UsageError
+from .errors import ForemanError, HerdrError, StartShellNotReadyError, UsageError
 from .herdr import error_code, format_argv
-from .launch import holds_only_shell, require_empty_shell, start_worker, verify_running
+from .launch import holds_initializing_shell, holds_only_shell, require_empty_shell, start_worker, verify_running
 from . import runnable
 from .tiers import launch_flags, worker_launch_args
 
@@ -28,7 +28,7 @@ _SAFE = re.compile(r"[^a-z0-9-]+")
 FRESH_SHELL_POLL_ATTEMPTS = 30
 FRESH_SHELL_POLL_INTERVAL = 0.2
 #: A sole-shell read can precede a later startup child. Confirm consecutive
-#: reads before preflight; after preflight retain the strict single proof.
+#: reads before preflight. Late initialization stays inside the fresh owner.
 FRESH_SHELL_READY_READS = 2
 
 
@@ -48,8 +48,8 @@ def _fresh_shell_info(client, pane, expected_shell=None, *, allow_absent_foregro
         ) from exc
     shell = info.get("shell_pid") if isinstance(info, dict) else None
     foreground = info.get("foreground_processes") if isinstance(info, dict) else None
-    # Herdr omits an empty process vector. Only pre-callback fresh-pane
-    # polling tolerates that unavailable evidence; it never proves readiness.
+    # Herdr omits an empty process vector. Only owner-created fresh-pane
+    # readiness polling tolerates that absence; it never proves readiness.
     absent_foreground = isinstance(info, dict) and "foreground_processes" not in info
     pids = [row.get("pid") if isinstance(row, dict) else None for row in foreground] if isinstance(foreground, list) else None
     valid_pid = lambda pid: isinstance(pid, int) and not isinstance(pid, bool) and pid > 0
@@ -91,6 +91,55 @@ def _await_fresh_shell(client, pane, sleep):
             pane, FRESH_SHELL_POLL_ATTEMPTS, shell, evidence.get("foreground_pids")),
         {**evidence, "attempts": FRESH_SHELL_POLL_ATTEMPTS,
          "ready_reads": ready_reads, "required_ready_reads": FRESH_SHELL_READY_READS},
+    )
+
+
+def _start_fresh_worker(client, worker, pane, tier, shell, before_start, sleep):
+    """Bound late login-shell forks and Herdr's atomic pre-input busy refusal.
+
+    Herdr 0.9.2 checks agent_pane_busy before registering an agent or writing
+    bytes (src/app/agents.rs start_managed_agent). No other native failure is
+    retried: startup timeout, transport failure and unknown readiness may
+    already have sent input. Every retry rechecks the same root and authority.
+    """
+    evidence = {"pane": pane, "shell_pid": shell}
+    for attempt in range(1, FRESH_SHELL_POLL_ATTEMPTS + 1):
+        if attempt > 1:
+            info, evidence = _fresh_shell_info(client, pane, shell, allow_absent_foreground=True)
+            if not holds_only_shell(info):
+                if "foreground_processes" in info and not holds_initializing_shell(info):
+                    require_empty_shell(client, pane, info)
+                if attempt < FRESH_SHELL_POLL_ATTEMPTS:
+                    sleep(FRESH_SHELL_POLL_INTERVAL)
+                continue
+        try:
+            if before_start is not None:
+                before_start(pane)
+        except StartShellNotReadyError as exc:
+            if exc.details.get("pane_id") != pane or exc.details.get("shell_pid") != shell:
+                raise
+            evidence = {"pane": pane, "shell_pid": shell,
+                        "foreground_pids": exc.details.get("foreground_pids")}
+        else:
+            info, evidence = _fresh_shell_info(client, pane, shell, allow_absent_foreground=True)
+            if not holds_only_shell(info):
+                if "foreground_processes" in info and not holds_initializing_shell(info):
+                    require_empty_shell(client, pane, info)
+            else:
+                try:
+                    start_worker(client, worker, pane, tier)
+                except HerdrError as exc:
+                    if error_code(exc) != "agent_pane_busy":
+                        raise
+                else:
+                    return
+        if attempt < FRESH_SHELL_POLL_ATTEMPTS:
+            sleep(FRESH_SHELL_POLL_INTERVAL)
+    raise HerdrError(
+        "Fresh pane {} did not settle through preflight and native start after {} attempts; inspect "
+        "its shell startup or Herdr's available-shell check, then retry the owner spawn. No worker input "
+        "was sent.".format(pane, FRESH_SHELL_POLL_ATTEMPTS),
+        {**evidence, "attempts": FRESH_SHELL_POLL_ATTEMPTS},
     )
 
 
@@ -159,13 +208,7 @@ def spawn(client, worker, tier, *, cwd=None, history=None, before_start=None, sl
         # history proof above establishes that no prior assignment can carry
         # context under this identity.
         shell = _await_fresh_shell(client, pane, sleep)
-        if before_start is not None:
-            before_start(pane)
-        # A callback may take time or change the occupant. Re-prove the same
-        # sole shell immediately before launch, with no post-callback retry.
-        final, _evidence = _fresh_shell_info(client, pane, shell)
-        require_empty_shell(client, pane, final)
-        start_worker(client, worker, pane, tier)
+        _start_fresh_worker(client, worker, pane, tier, shell, before_start, sleep)
         verify_running(client, worker, pane, tier)
         completed = True
     finally:

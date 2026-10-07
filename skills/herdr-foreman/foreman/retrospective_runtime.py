@@ -10,9 +10,9 @@ from pathlib import Path
 from . import runnable
 from . import retrospective as notes
 from .chronology import latest_assignment
-from .errors import AgentBusyError, HerdrError, StateError, UsageError
+from .errors import AgentBusyError, HerdrError, StartShellNotReadyError, StateError, UsageError
 from .herdr import READY_STATES
-from .launch import foreground_agent
+from .launch import foreground_agent, holds_initializing_shell
 from .probe import resolve_status
 from .state import STATE_SCHEMA_VERSION, save_state
 
@@ -118,7 +118,10 @@ def _observation(client, name, kind, pane=None, *, starting=False, agent=None):
         if (not isinstance(info, dict) or not isinstance(processes, list) or pids is None
                 or not valid_pid(shell) or pids != [shell] or not all(valid_pid(pid) for pid in pids)
                 or info.get("pane_id", pane) != pane):
-            raise HerdrError(
+            sparse = (isinstance(info, dict) and "foreground_processes" not in info
+                      and valid_pid(shell) and info.get("pane_id", pane) == pane)
+            error = StartShellNotReadyError if sparse or holds_initializing_shell(info) else HerdrError
+            raise error(
                 "Retrospective start requires the target pane's sole shell; inspect its startup or occupant "
                 "and retry only after restoring that proof. No fresh worker was looked up or started.",
                 {"pane_id": pane, "shell_pid": shell if valid_pid(shell) else None,

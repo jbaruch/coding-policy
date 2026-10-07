@@ -68,6 +68,33 @@ def holds_only_shell(info):
             and isinstance(foreground[0], dict) and foreground[0].get("pid") == shell)
 
 
+def holds_initializing_shell(info):
+    """Recognize captured login-shell forks, never an arbitrary busy command.
+
+    Every process must retain the root login shell's exact one-item argv in
+    its original foreground group. Missing evidence proves no initialization.
+    """
+    if not isinstance(info, dict):
+        return False
+    shell = info.get("shell_pid")
+    processes = info.get("foreground_processes")
+    if (type(shell) is not int or shell <= 0 or info.get("foreground_process_group_id") != shell
+            or not isinstance(processes, list) or len(processes) < 2
+            or any(not isinstance(row, dict) or type(row.get("pid")) is not int or row["pid"] <= 0
+                   for row in processes)):
+        return False
+    roots = [row for row in processes if row["pid"] == shell]
+    if len(roots) != 1:
+        return False
+    argv = roots[0].get("argv")
+    if (not isinstance(argv, list) or len(argv) != 1 or not isinstance(argv[0], str)
+            or argv[0] not in {"-zsh", "-bash", "-sh", "-fish", "-ksh", "-dash"}):
+        return False
+    return all(row.get("argv") == argv and isinstance(row.get("name"), str)
+               and row["name"].lstrip("-") == argv[0][1:]
+               for row in processes)
+
+
 def require_empty_shell(client, pane, info=None):
     """Refuse a pane whose foreground holds anything but its shell.
 
