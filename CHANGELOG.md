@@ -1,5 +1,12 @@
 # Changelog
 
+### Fixed
+
+- Worker brief values now preserve literal ampersands, backslashes, quotes and
+  trailing newlines. Packaged specialist briefs accept shell examples such as
+  `cd /worktree && command` without reintroducing `{{INPUTS}}` placeholders
+  (#702).
+
 ## 0.3.368 — 2026-10-07
 
 ### Changed

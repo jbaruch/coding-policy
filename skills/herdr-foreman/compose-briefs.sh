@@ -219,13 +219,26 @@ validate_review_package() { # <merged-values-json> <role-or-seat>
 
 # Echo <template> with every KEY=VALUE pair in the given JSON object applied.
 substitute() { # <template-file> <values-json>
-  local content key value
-  content="$(cat "$1")"
+  local content key value keys
+  if ! content="$(cat "$1")"; then
+    warn "cannot read template $1 — restore its read access before composing"
+    return 3
+  fi
+  if ! keys="$(printf '%s' "$2" | jq -r 'keys[]')"; then
+    warn "cannot enumerate template values — repair the JSON values and jq installation before composing"
+    return 3
+  fi
   while IFS= read -r key; do
     [[ -n "$key" ]] || continue
-    value="$(printf '%s' "$2" | jq -r --arg k "$key" '.[$k]')"
-    content="${content//\{\{$key\}\}/$value}"
-  done < <(printf '%s' "$2" | jq -r 'keys[]')
+    # The sentinel preserves the value's trailing newlines across command
+    # substitution. Quoting the replacement disables Bash's ampersand syntax.
+    if ! value="$(printf '%s' "$2" | jq -rj --arg k "$key" '.[$k]' && printf x)"; then
+      warn "cannot read template value $key — repair the JSON values and jq installation before composing"
+      return 3
+    fi
+    value="${value%x}"
+    content="${content//\{\{$key\}\}/"$value"}"
+  done <<< "$keys"
   printf '%s\n' "$content"
 }
 
@@ -401,7 +414,7 @@ main() {
       fi
     fi
   done
-  common_body="$(substitute "$common_tpl" "$shared")"
+  common_body="$(substitute "$common_tpl" "$shared")" || return 3
   leftovers="$(leftover_placeholders "$common_body")" || scan_rc=$?
   if (( scan_rc != 0 )); then return 3; fi
   if [[ -n "${leftovers// /}" ]]; then
@@ -524,7 +537,7 @@ main() {
       warn "REPORT for role '${role}' is ${#report} characters; the limit is ${FOREMAN_REPORT_PATH_MAX_COLS}, a coarse bound on the worker's \`REPORT: <path>\` line (\`foreman apply\` checks the live pane width before dispatch) — use a shorter reports directory (e.g. one under \$HOME/.local/state) and re-run"
       return 2
     fi
-    rendered="$(substitute "$role_tpl" "$merged")"
+    rendered="$(substitute "$role_tpl" "$merged")" || return 3
     scan_rc=0
     leftovers="$(leftover_placeholders "$rendered")" || scan_rc=$?
     if (( scan_rc != 0 )); then return 3; fi
