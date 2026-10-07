@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.370 — 2026-10-07
+
 ### Fixed
 
 - Claude usage parsing now ends a window at unrecognized wrapped prose rather
