@@ -8,6 +8,8 @@
   (#702). Placeholder-like value text is never reinterpreted; template and
   value trailing newlines remain intact through file output.
 
+## 0.3.371 — 2026-10-07
+
 ### Changed
 
 - **Verified model successors inherit their authorized operating spot provisionally.**
