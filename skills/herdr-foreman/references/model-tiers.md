@@ -5,7 +5,8 @@
 `config.example.json` is the operator-owned tier table. Config schema 7 replaces
 the live `agents` roster with `worker_kinds`: launch/UI templates that exist
 without a pane until a plan assigns them. Schemas 1–6 remain readable for
-legacy standing-worker recovery; new configurations use schema 7.
+legacy standing-worker recovery. Schema 8 adds optional minimum-adequate worker
+routing below; schema 7 remains the unchanged default in the shipped example.
 The utility never rewrites the operator's config. Copy the example into a new
 file, preserve local worker-kind names and UI options, then validate it with
 `foreman.sh plan` before replacing a working configuration.
@@ -32,6 +33,51 @@ unknown rounds and unsupported adapters. Claude Code, Codex CLI, and Grok
 Build have launch adapters verified against their installed CLI help.
 Antigravity's research column remains a future adapter; the example does not
 declare an inactive agent or accept unused tier rows for it.
+
+## Minimum Adequate Routing
+
+Operator opt-in: set config `schema_version` to 8 and add `tier_routing` to a
+worker kind. Keep its existing rows and account/window identity. Missing
+`tier_routing` preserves configured-row behavior; `mode: pinned` is an
+explicit operator override, recorded as such. The pinned judge and judgment
+floor never opt down. Evidenced risk escalation is not lowered by this route.
+
+`tier_routing` contains `mode` (`minimum_adequate` or `pinned`) and `evidence`,
+an object keyed by configured tier row. Each evidence value carries:
+
+| Field | Evidence required |
+| ----- | ----------------- |
+| `model`, `effort` | The observed pair; changing a row never rebinds old proof |
+| `launch` | `status`: supported/unsupported/unknown; `ref`: provider catalog **and installed CLI launch support**; `checked_at`: actual timezone-bearing observation |
+| `access` | `status`: accessible/unavailable/unknown; `ref`: actual launch/API result on this logged-in account; `checked_at`: actual observation; `window_group`: this configured account/window identity |
+
+Use non-secret references to the observations, never login tokens. A configured
+model ID, provider listing, quota percentage or another account's success
+does not prove account access. Missing, stale, future or mismatched proof is
+recorded and skipped, not fabricated. Config is operator-owned; the utility
+validates and reads it, never writes or migrates it.
+
+The existing capability table supplies dated qualification for the **requested
+round**, not the row's usual round. A build may borrow a mechanical row's pair
+only when it is qualified for implementation; the task never becomes
+mechanical and receives no oracle or authority waiver. Existing contribution
+and worker-capability exclusions still run before tier candidacy.
+
+The bound measurement supplies current remaining capacity and its account
+identity independently of access proof. Selection chooses the minimum eligible
+pair by declared resource weight, then adequate effort, with stable tie breaks.
+These weights are proxies, not prices or monetary savings; unknown billing
+attribution retains its conservative weight. Facts and freshness limits are
+owned by `skills/herdr-foreman/foreman/tier_routing.py`. Apply rereads the bound
+measurement, current config and qualification before native actions; stale
+capacity or changed selection refuses and asks for replanning.
+
+The existing selection record includes every candidate's four evidence classes,
+rejection reasons and override. Refresh only stale/unknown facts relevant to
+this task's candidates. Unrelated catalog or table maintenance remains a
+separate maintenance task, never a delivery prerequisite. Existing sourced
+benchmarks, evaluations and project results suffice; no new per-model role
+validation programme is required.
 
 The issue's requirement that reviewer/tester judgment stays at the top tier
 governs scoped rechecks too. This resolves the research table's conflicting
@@ -411,7 +457,9 @@ about provider billing. Do not copy test evidence into a live configuration.
 Every plan records, per assignment, why it got its model and effort: the
 required capabilities, the selected pair, the capability-table evidence, each
 cheaper candidate with its verdict or an unknown cost, and the escalation
-conditions. The record shape is plan schema 13 in `state-schema.md`; it
+conditions. Opted-in routing also records separate launch support, account
+access, qualification and capacity, candidate refusals and overrides. The
+record shape is plan schemas 15/16 in `state-schema.md`; it
 explains a selection and never changes one.
 
 `cost-report` reports each task's resource use through acceptance from the
@@ -434,8 +482,9 @@ cover what one would catch:
 3. Which model suits which job is the capability table above: sourced, dated
    rows, refreshed on a cadence. Tier selection reads it for every candidate:
    an `inadequate` entry for the selected model and effort refuses that
-   candidate, naming its source, and `unknown` leaves the configured row in
-   place. Which capabilities each round needs, and the only names
+   candidate, naming its source. Legacy configured routing keeps its row on
+   `unknown`; minimum-adequate routing skips an unknown or stale candidate.
+   Which capabilities each round needs, and the only names
    `capability-record` accepts, are `ROUND_CAPABILITIES` and `VOCABULARY` in
    `skills/herdr-foreman/foreman/capabilities.py`
 

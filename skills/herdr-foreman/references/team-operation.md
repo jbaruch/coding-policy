@@ -282,7 +282,9 @@ refuse only the stage whose harm it prevents.
 - A round escalates on recorded evidence, never on its own round type or role name
 - Measured headroom resolves a seat's round, not only which worker fills it
 - Under measured scarcity a non-judgment round declines a discretionary escalation and records the round de-escalated
-- De-escalation never selects below the operator's configured row
+- Configured-row routing never selects below that row; operator-opted minimum-adequate routing follows `skills/herdr-foreman/references/model-tiers.md` Minimum Adequate Routing
+- Minimum-adequate routing changes the pair, never the task's responsibility, authority, round or required qualification
+- Explicit operator pins, judgment floors and evidenced risk escalation remain overrides
 - Unmeasured headroom reads as neither scarcity nor capacity
 - The scarcity threshold is a script-owned constant, never a number the foreman picks per round
 - A tier switch requires a worker relaunch at a cleared-round boundary

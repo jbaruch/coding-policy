@@ -103,6 +103,15 @@ exemptions, and the guarded one-shot recovery of a stuck composer.
 dispatch. All are documented in
 `skills/herdr-foreman/references/herdr.md`.
 
+Config schema 8 adds optional per-worker `tier_routing`: `{mode, evidence}`.
+Mode is `minimum_adequate` or `pinned`; absence preserves legacy configured-row
+selection. Evidence maps configured rows to `{model, effort, launch, access}`.
+Launch is `{status, ref, checked_at}`; access adds `window_group`. Status enums,
+pair/account binding, timezone and freshness checks are owned by
+`foreman/tier_routing.py`; their meaning is in `references/model-tiers.md`
+Minimum Adequate Routing. The operator remains the only writer. Schemas 1–7
+remain readable without rewriting; they may not carry the new field.
+
 `window_group` names the usage window a worker kind shares with other kinds.
 Schema-7 `measure` starts one short-lived probe per group, reads usage once,
 closes it, and copies the result onto every kind in that group (snapshot schema
@@ -224,6 +233,25 @@ An untiered worker records `unknown` for every model-dependent field. The
 record builder is `skills/herdr-foreman/foreman/selection.py` (`records`); the
 conditions and their thresholds are `escalation_conditions` in
 `skills/herdr-foreman/foreman/tiers.py`, not restated here.
+
+Plan schemas 15 (pure/legacy planner) and 16 (assignment-scoped CLI) add
+selection-record schema 2. Writer: `plan`; reader: explanation consumers.
+Records add `routing`, unknown for legacy routing or an untiered seat, otherwise
+`{mode, override, ordering, monetary_cost, candidates}`. Each candidate carries
+`tier_row`, `model`, `effort`, `resource_weight`, `launch`, `access`,
+`qualification`, `capacity` and `rejected`. Launch/access each carry `status`
+and original `evidence` or null. Qualification carries `status` and `sources`;
+capacity carries `status`, `remaining_pct`, `measured_at` and `window_group`.
+`rejected` lists concrete machine-readable reasons. `monetary_cost` remains
+unknown; declared weights and billing attribution are not currency.
+The builder and routing owner define enums and ordering. Older explanatory
+records remain readable with `routing` unknown; no history is backfilled.
+Apply ignores the selection explanation and independently recomputes current
+eligibility and routing from config, qualification and the bound measurement.
+An explanatory rejected-candidate change alone does not invalidate an unchanged
+launch; selected pair, row, cost and context drift still require replanning.
+Plan `tiers` adds optional `routing` only for opted-in workers; it is stripped
+before recording a dispatch, so assignment/recovery shapes stay unchanged.
 
 Plan schema 14 adds assignment-scoped identities. `worker_kinds` maps every
 seat to the stable template selected from the snapshot; `assignments` maps the

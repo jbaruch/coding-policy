@@ -98,12 +98,13 @@ from .tiers import SEAT_SEPARATOR, canonical_role
 #: capabilities, selected model and effort, capability-table evidence, cheaper
 #: candidates and escalation conditions (#602, foreman/selection.py). Additive
 #: and explanatory: no reader acts on it, so an older plan reads unchanged.
-#: The pure planner's document stays version 13: it ranks the stable candidate
-#: names it was given and has no assignment-lifecycle fields. The CLI upgrades
-#: only a schema-7 result to version 14 when it adds `worker_kinds` and replaces
-#: those candidates with fresh live identities.
-PLAN_SCHEMA_VERSION = 13
-ASSIGNMENT_PLAN_SCHEMA_VERSION = 14
+#: Version 14 added `worker_kinds` and fresh live identities in the CLI's
+#: assignment-scoped result; the pure planner has no lifecycle fields.
+#: Versions 15/16 add selection-record schema 2: separate launch/account,
+#: qualification and capacity facts, routing mode and rejection reasons (#695).
+#: Version 15 is the pure planner; 16 adds assignment-scoped identities.
+PLAN_SCHEMA_VERSION = 15
+ASSIGNMENT_PLAN_SCHEMA_VERSION = 16
 
 #: What one round in each seat is expected to burn, in points of the agent's
 #: remaining headroom percentage. The ORDER is what the planner acts on:

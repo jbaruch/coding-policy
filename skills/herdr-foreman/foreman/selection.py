@@ -1,8 +1,8 @@
 """Why each planned assignment got its model and effort, as plan data (#602).
 
 `plan` writes one record per assignment under the plan's `selection` key. The
-record explains a choice `select_tier` and the planner already made; nothing
-here selects, lowers or raises a tier. A value the owner records cannot
+record explains a choice `select_tier`, `tier_routing` and the planner already
+made; this record never changes it. A value the owner records cannot
 establish is the literal `unknown`, never a guess:
 
 - an untiered worker runs whatever model is already live, so its model, effort,
@@ -21,7 +21,7 @@ from .tiers import JUDGMENT_ROUNDS, ROLE_ROUNDS, TOP_MODELS, canonical_role, esc
 
 #: Selection record version, stamped on every record so a reader can tell the
 #: shape it holds apart from the plan document's own version.
-SELECTION_SCHEMA_VERSION = 1
+SELECTION_SCHEMA_VERSION = 2
 
 
 def _verdict(table, model, effort, needs):
@@ -37,8 +37,8 @@ def cheaper_candidates(agent, role, tier, needs, table):
 
     Sorted by row name. `sources` cites the table entries behind the verdict;
     an `inadequate` or `unknown` row is why the cheaper row cannot stand in, and
-    an `adequate` one is recorded, never selected: the operator owns the table
-    and the config (#520).
+    an `adequate` one explains the legacy configured-row route. Opted-in
+    minimum routing's complete candidate facts are in `routing` (#695).
     """
     cost = tier["effective_multiplier"]
     allowed = ROLE_ROUNDS.get(canonical_role(role), frozenset())
@@ -93,6 +93,7 @@ def _untiered(name, requirement):
         "cost": {"billing_window": UNKNOWN, "effective_multiplier": UNKNOWN, "known": False},
         "cheaper": {"floor": None, "candidates": UNKNOWN},
         "escalation": UNKNOWN,
+        "routing": UNKNOWN,
     }
 
 
@@ -141,5 +142,6 @@ def records(assignments, tiers, agents_by_name, requirements, rounds, fix_round,
                      "known": window != UNKNOWN},
             "cheaper": {"floor": floor, "candidates": candidates},
             "escalation": escalation_conditions(role, tier, context, fix_round),
+            "routing": tier.get("routing", UNKNOWN),
         }
     return out

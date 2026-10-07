@@ -1,5 +1,17 @@
 # Changelog
 
+### Changed
+
+- **Operator-opted minimum-adequate worker routing selects the pair.** Config
+  schema 8 can choose a qualified, accessible supported pair and its minimum
+  adequate effort for non-judgment work. Existing selection records separate
+  launch support, account access, dated qualification and current capacity,
+  including candidate rejection reasons. Explicit pins, contribution/task
+  authority, judgment floors and risk escalation remain intact. Apply rechecks
+  the bound facts before native actions. Unknown cost stays unknown; declared
+  weights imply no monetary savings. Refresh is candidate-scoped, with no new
+  per-model role-validation programme (#695).
+
 ## 0.3.367 — 2026-10-07
 
 ### Changed
