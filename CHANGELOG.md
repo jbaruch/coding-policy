@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.371 — 2026-10-07
+
 ### Changed
 
 - **Verified model successors inherit their authorized operating spot provisionally.**
