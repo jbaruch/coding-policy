@@ -5,7 +5,8 @@ description: >
   assign, supervise, accept or reject, never do the crew's work. Covers on-demand specialists, model tiers, bounded briefs,
   report verification, and release gates. Use for requests to dispatch the Herdr
   team, plan or run implementation, review, fix, judge, and release rounds,
-  check worker capacity, restart or relaunch idle workers, collect reports, run or retrieve retrospectives,
+  measure Herdr worker capacity, recover refused dispatches, restart or relaunch
+  idle workers, collect reports, run or retrieve retrospectives,
   catch up on outstanding user attention, curate team lessons, save and resume
   foreman handoffs, or report a task's cost or resource use through acceptance.
   Live rounds require HERDR_ENV; saved memory, attention and cost reports work
@@ -73,25 +74,27 @@ decision's records".
 - Record such a sequence as a follow-up
 - Never script such a sequence locally
 
-References:
+Reference routing:
 
 ```text
-skills/herdr-foreman/references/herdr.md
-skills/herdr-foreman/references/round-flow.md
-skills/herdr-foreman/references/round-setup.md
-skills/herdr-foreman/references/task-ledger.md
-skills/herdr-foreman/references/retrospectives.md
-skills/herdr-foreman/references/working-memory.md
-skills/herdr-foreman/references/attention.md
-skills/herdr-foreman/references/supervision.md
-skills/herdr-foreman/references/assignment-reasoning.md
-skills/herdr-foreman/references/specialists.md
-skills/herdr-foreman/references/judge-round.md
-skills/herdr-foreman/references/model-tiers.md
-skills/herdr-foreman/references/dispatch-recovery.md
-skills/herdr-foreman/references/report-classifier.md
-skills/herdr-foreman/references/review-partition.md
-skills/herdr-foreman/state-schema.md
+skills/herdr-foreman/references/herdr.md — native session, pane and agent control
+skills/herdr-foreman/references/team-operation.md — team roles, authority and fix loops
+skills/herdr-foreman/references/round-flow.md — round gates and dispatch outcomes
+skills/herdr-foreman/references/round-setup.md — setup and brief contracts
+skills/herdr-foreman/references/task-ledger.md — durable task events
+skills/herdr-foreman/references/retrospectives.md — cadence, notes and transition coverage
+skills/herdr-foreman/references/working-memory.md — lessons, handoffs and reset recovery
+skills/herdr-foreman/references/attention.md — user obligations and catch-up
+skills/herdr-foreman/references/supervision.md — fleet observation and Stop reconciliation
+skills/herdr-foreman/references/assignment-reasoning.md — intake and bounded corrections
+skills/herdr-foreman/references/specialists.md — on-demand team composition
+skills/herdr-foreman/references/judge-round.md — adjudication and diagnosis rounds
+skills/herdr-foreman/references/model-tiers.md — tier selection and maintenance relaunch
+skills/herdr-foreman/references/successor-placement.md — provisional model successors
+skills/herdr-foreman/references/dispatch-recovery.md — startup, retry and exhaustion recovery
+skills/herdr-foreman/references/report-classifier.md — labels and reversible report gates
+skills/herdr-foreman/references/review-partition.md — independent verification slices
+skills/herdr-foreman/state-schema.md — owner records and migration contracts
 ```
 
 ## Step 1 — Determine the Mode
