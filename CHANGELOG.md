@@ -16,7 +16,9 @@
   Unfixed rule-audit drift uses the same scoped observation contract rather than
   automatically creating a follow-up issue. Ordinary advisory thread replies
   remain outside merge prerequisites. Release
-  snapshots now carry every inline comment body and reply for required reading.
+  snapshots now carry all review bodies from every author and page, plus every
+  inline comment and reply for required reading. Large snapshot payloads stream
+  through stdin instead of exceeding process-argument limits.
 
 - **A repo can bootstrap its first trigger declaration without bypassing
   classification.** `detect-triggers --bootstrap-declaration` accepts reviewed

@@ -726,11 +726,54 @@ t_main_reads_inline_bodies_and_replies_from_every_page() {
     "$(printf '%s' "$out" | jq -r '.inline_comment_bodies[1] | .path + ":" + (.line | tostring)')"
 }
 
+t_main_reads_every_review_body_without_changing_bot_verdicts() {
+  local MOCK_MERGE_STATE=clean MOCK_REQUESTED_BODY='[]' MOCK_COMMENTS_BODY='[]' MOCK_TIMELINE_BODY='[]'
+  local MOCK_REVIEWS_BODY='[{"id":1,"user":{"login":"github-actions[bot]"},"state":"COMMENTED","body":"Policy clear","commit_id":"'"$HEAD_SHA"'","submitted_at":"2026-10-07T00:00:00Z"},{"id":2,"user":{"login":"human"},"state":"APPROVED","body":"Read my concern","commit_id":"'"$OLD_SHA"'"}]
+[{"id":3,"user":{"login":"other-bot"},"state":"DISMISSED","body":"Historical concern"},{"id":4,"user":{"login":"human"},"state":"PENDING","body":"Pending concern"},{"id":5,"body":""},{"id":6,"body":null}]'
+  local out
+  out=$(main owner repo 1) || return 1
+  assert_eq "all nonempty bodies across authors, states and pages" \
+    '["Policy clear","Read my concern","Historical concern","Pending concern"]' \
+    "$(printf '%s' "$out" | jq -c '[.review_bodies[].body]')" || return 1
+  assert_eq "human identity and reviewed commit retained" "2:human:$OLD_SHA" \
+    "$(printf '%s' "$out" | jq -r '.review_bodies[1] | (.id | tostring) + ":" + .author + ":" + .commit_id')" || return 1
+  assert_eq "policy verdict still bot-specific" COMMENTED \
+    "$(printf '%s' "$out" | jq -r '.reviews.codex.state')" || return 1
+  assert_eq "other reviewers never fabricate a Copilot verdict" none \
+    "$(printf '%s' "$out" | jq -r '.reviews.copilot.state')"
+}
+
+t_main_streams_large_review_and_comment_bodies() (
+  local MOCK_MERGE_STATE=clean MOCK_REQUESTED_BODY='[]' MOCK_TIMELINE_BODY='[]'
+  local MOCK_REVIEWS_BODY MOCK_COMMENTS_BODY out
+  MOCK_REVIEWS_BODY=$(jq -n '[{id:1, user:{login:"human"}, state:"COMMENTED", body:("r" * 160000)}]') || return 1
+  MOCK_COMMENTS_BODY=$(jq -n '[{id:2, user:{login:"human"}, body:("c" * 160000)}]') || return 1
+  # Model Linux's per-argument bound on every jq invocation, also on macOS.
+  # The public snapshot must deliver both bodies intact without a large argv.
+  jq() {
+    local arg
+    for arg in "$@"; do
+      if [[ ${#arg} -gt 131072 ]]; then
+        echo "fixture: JSON exceeds per-argument limit — stream it on stdin" >&2
+        return 99
+      fi
+    done
+    command jq "$@"
+  }
+  out=$(main owner repo 1) || return 1
+  assert_eq "large review preserved" 160000 \
+    "$(printf '%s' "$out" | jq '.review_bodies[0].body | length')" || return 1
+  assert_eq "large inline comment preserved" 160000 \
+    "$(printf '%s' "$out" | jq '.inline_comment_bodies[0].body | length')"
+)
+
 # `run_suite`, not `main`: the sourced script under test owns `main`.
 # Progress goes to stderr; stdout carries one JSON result.
 run_suite() {
   echo "== poll-pr-reviews.sh tests ==" >&2
   run "main reads all inline bodies and replies across pages" t_main_reads_inline_bodies_and_replies_from_every_page
+  run "main reads every review body while preserving bot verdict routing" t_main_reads_every_review_body_without_changing_bot_verdicts
+  run "main streams large review and comment bodies without argv limits" t_main_streams_large_review_and_comment_bodies
   run "fetch_merge_state returns {CLEAN, MERGEABLE} for a clean PR"     t_fetch_merge_state_clean_returns_mergeable_envelope
   run "fetch_merge_state returns {DIRTY, CONFLICTING} on conflict"      t_fetch_merge_state_dirty_returns_conflicting_envelope
   run "fetch_merge_state propagates UNKNOWN/UNKNOWN while computing"    t_fetch_merge_state_unknown_returns_unknown_envelope

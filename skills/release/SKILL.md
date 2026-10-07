@@ -141,7 +141,7 @@ bash "$CP/skills/release/watch-pr-reviews.sh" <owner> <repo> <pr-number>
 
 It returns the full `poll-pr-reviews.sh` snapshot plus a `watch` object — `{"result": ..., "attempts": N, "elapsed_seconds": N}`. The interval/budget constants and the result contract are the script's, not restated here (`rules/script-as-black-box.md` — see the header's result matrix). Branch on `.watch.result`:
 
-- `ready` (exit 0) — mergeable, CI `success`/`none`, both bots posted, no Copilot review still owed, the policy reviewer not `CHANGES_REQUESTED` (Copilot may be, and this still reaches ready — it is always advisory). Read every non-empty `reviews.*.body` (a `COMMENTED` verdict with zero inline comments still carries a body per `rules/reviewer-feedback-reading.md`), then proceed to Step 6.
+- `ready` (exit 0) — mergeable, CI `success`/`none`, both bots posted, no Copilot review still owed, the policy reviewer not `CHANGES_REQUESTED` (Copilot may be, and this still reaches ready — it is always advisory). Read every `review_bodies[].body`, from every author and page, then proceed to Step 6.
 - `changes_requested` (exit 0) — the policy reviewer requested changes (a blocking finding). Go to Step 6, address it, push; the next push re-fires the review, so re-run the watcher.
 - `ci_failure` (exit 0) — a check failed. Fix it (Step 6), push, re-run the watcher.
 - `dirty` (exit 0) — the branch conflicts with `main` and GitHub skipped the `pull_request:` workflows. Rebase onto current `main`, resolve, force-push, then re-run the watcher — the push re-fires the missed workflows.
@@ -150,9 +150,11 @@ It returns the full `poll-pr-reviews.sh` snapshot plus a `watch` object — `{"r
 
 ## Step 6 — Address Feedback
 
-- **Read every review in full first.** Read each reviewer's `reviews.*.body` and every `inline_comment_bodies[].body` in Step 5's snapshot before judging any item — a `COMMENTED` state or zero inline comments is not a license to skip the body (see `rules/reviewer-feedback-reading.md`)
+- **Read every review in full first.** Read every `review_bodies[].body` and `inline_comment_bodies[].body` in Step 5's snapshot, including human, other-bot and historical reviews, before judging any item (see `rules/reviewer-feedback-reading.md`). The bot-specific `reviews` fields route verdicts, never limit reading
 - **Then act by severity** (see `rules/review-severity.md`): blocking findings — fix now; advisory findings — acknowledge in the existing team task report or round log, or note them directly in standalone review replies.
-- Fold an advisory only when an already-required blocking correction touches the same surface and adds no push or verification round. It creates no obligation for an issue, follow-up, push or delivery prerequisite; never run an advisory-only re-review round
+- Fold an advisory only when an already-required blocking correction touches the same surface and adds no push or verification round
+- An advisory creates no obligation for an issue, follow-up, push or delivery prerequisite
+- Never run an advisory-only re-review round
 - **CI failures**: Fix every one
 - **Review suggestions**: Apply what's right. Push back on anything that misreads scope — cite concrete evidence (file:line, log line, spec quote) when declining
 - **Reply to addressed blocking findings.** Ordinary advisory replies may accompany the existing review work, but are outside merge prerequisites. Use these opening literals:
@@ -204,7 +206,7 @@ It returns the full `poll-pr-reviews.sh` snapshot plus a `watch` object — `{"r
 
 Only proceed when:
 - Step 5's watcher returned `.watch.result` as `ready` — its exit-0 readiness conjunction (mergeable, CI `success`/`none`, both bots posted, no Copilot review still owed, the policy reviewer not `CHANGES_REQUESTED`); the field predicate is the watcher's, not restated here (`rules/script-as-black-box.md` — see `skills/release/watch-pr-reviews.sh` header). `ready` already requires each bot's `state` to have left `none`, so a reviewer that never ran cannot satisfy the gate vacuously, AND
-- Every non-empty `reviews.*.body` in the returned snapshot has been read in full — a `COMMENTED` state with zero inline comments is not a license to skip the body (see `rules/reviewer-feedback-reading.md`), AND
+- Every `review_bodies[].body` in the returned snapshot has been read in full, from every author, page and review state, and any blocking finding has been addressed per Step 6, AND
 - Every `inline_comment_bodies[].body` in Step 5's snapshot has been read in full and any blocking finding has been addressed per Step 6. Ordinary advisory acknowledgments and thread resolution are outside the merge predicate, AND
 - A ruled finding's reply cites its ruling, per Step 6.
 
