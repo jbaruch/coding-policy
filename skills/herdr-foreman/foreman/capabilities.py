@@ -119,6 +119,9 @@ def load(path, *, for_write=False):
     A symlink at the table's path is refused, live or dangling, the way the
     reset record refuses one.
 
+    Schema 1 is no usable prior state for a read-only consumer. Owner callers
+    hold the table lock and migrate/rewrite that envelope before using it.
+
     A table stamped with a newer schema than this build owns was written by a
     newer owner. A reader treats it as no usable prior state and says so; a
     writer refuses, so an older build never overwrites what it cannot read
@@ -171,7 +174,24 @@ def load(path, *, for_write=False):
                   target, version, SCHEMA_VERSION))
         return empty()
     validate(document)
+    if version == 1:
+        if not for_write:
+            _warn("capability table {} is schema 1; reading it as no usable prior state. "
+                  "Run `{}` to migrate with the owner; the file is left untouched.".format(
+                      target, runnable.command("capability-migrate")))
+            return empty()
+        # Owner callers hold the table lock. Persist the envelope upgrade on
+        # read, before any report is applied; never restamp historical entries.
+        document = {**document, "schema_version": SCHEMA_VERSION, "successors": []}
+        validate(document)
+        save_state(target, document)
     return document
+
+
+def migrate(path):
+    """Owner-only upgrade on read; absent and current tables are not rewritten."""
+    with state_lock(storage_path(path)):
+        return load(path, for_write=True)
 
 
 def validate(document):

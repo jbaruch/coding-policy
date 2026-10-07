@@ -171,6 +171,8 @@ def build_parser():
     successor_record.add_argument("--now", metavar="ISO")
     capability_show = sub.add_parser("capability-show", parents=[common],
                                      help="Read the saved capability table without contacting Herdr.")
+    sub.add_parser("capability-migrate", parents=[common],
+                   help="Owner upgrade of an older capability table, preserving historical evidence.")
     sub.add_parser("supervision-gate", parents=[common],
                    help="Which pending supervision events need the foreman. Read-only.")
 
@@ -2784,6 +2786,8 @@ def cmd_capability(args, client=None, warn=None, trace=None):
     stays quiet on a fleet that has dispatched nothing (#481).
     """
     path = _state_path(args)
+    if args.command == "capability-migrate":
+        return capabilities.migrate(path), None
     document = capabilities.load(path)
     if args.command == "capability-show":
         return document, None
@@ -3118,7 +3122,7 @@ COMMANDS = {
     "probe-report": cmd_probe_report,
     "marker-fit": cmd_marker_fit,
     **{command: cmd_retrospective for command in ("retro-check", "retro-record", "retro-list", "retro-show")},
-    **{command: cmd_capability for command in ("capability-check", "capability-record", "capability-show", "capability-successor")},
+    **{command: cmd_capability for command in ("capability-check", "capability-record", "capability-show", "capability-successor", "capability-migrate")},
     "supervision-gate": cmd_supervision_gate,
     **{command: cmd_memory for command in memory.COMMANDS},
     **{command: cmd_attention for command in attention.COMMANDS},

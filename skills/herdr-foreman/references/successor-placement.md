@@ -6,7 +6,7 @@ Use the capability-maintenance owner for an authorized version replacement.
 Do not start per-role qualification tests or request another operator approval.
 Provider identity evidence is not operating adequacy. The existing maintenance
 consultation reads the provider's explicit successor relationship and reports
-its meaning. The owner checks identities, trusted hosts and quoted bytes; it
+its meaning. The owner checks exact directed structured mappings, trusted hosts and quoted bytes; it
 does not infer succession from a prefix or classify prose by keywords.
 
 1. Before editing config, identify the exact configured worker kind,
@@ -14,7 +14,7 @@ does not infer succession from a prefix or classify prose by keywords.
    declared weight. Task authority and contributor exclusion stay separate.
 2. Read the provider's catalog/publication. Verify exact predecessor and
    successor IDs, family, versions and the explicit same-family relationship.
-   Cite one to three official sources, including any separate identity/alias
+   Cite official sources, including any separate identity/alias
    catalog. A model self-report, matching prefixes, a weaker family or a mere
    listing of two models does not establish succession. A retired successor
    refuses inheritance. Preserve predecessor retirement as historical provenance;
@@ -24,7 +24,7 @@ does not infer succession from a prefix or classify prose by keywords.
 3. Prepare the report below. Run `capability-successor --record <report.json>`
    through SKILL.md Step 2's installed-plugin command. Config must still name
    the predecessor. The owner rereads official sources with bounded HTTPS
-   reads, refuses absent quotes or mismatched identity, and snapshots the
+   reads, refuses absent quotes or unverified directed mappings, and snapshots the
    authorized row and original qualification, including missing/unknown facts.
    Explicit negative capability evidence prevents inheritance.
 4. Replace only that row's model in operator-owned config. Keep effort and
@@ -61,7 +61,12 @@ Report shape, with placeholders rather than live provider claims:
 
 The report carries no qualification verdict or savings claim. The provider/
 adapter and trusted-host inventory, read limits, field validation and refusal
-contract belong to `skills/herdr-foreman/foreman/successors.py`. A new assignment gets a new ID;
+contract belong to `skills/herdr-foreman/foreman/successors.py` (`verify_relationship`,
+`PROVIDERS` and `BODY_LIMIT`). The owner accepts provider-owned structured
+successor data or the published migration table format that verifier supports;
+an ordinary model listing or a reporter-selected prose quote cannot authorize
+inheritance. Read a supported official mapping, not a new role qualification
+campaign. A new assignment gets a new ID;
 an existing ID's origin cannot be rewritten.
 
 ## Maintenance checkpoint
@@ -83,7 +88,7 @@ Maintenance reports may contain `entries`, `recalibrations`, or both:
 ```json
 {
   "recalibrations": [{
-    "id": "upgrade-identity", "action": "keep", "verdict": "unknown",
+    "id": "upgrade-identity", "event_id": "maintenance-observation-identity", "action": "keep", "verdict": "unknown",
     "source": {"kind": "project", "ref": "<actual recorded outcome/report>", "dated": "<actual YYYY-MM-DD reading>"},
     "provider_status": "active"
   }]
@@ -113,19 +118,28 @@ is never a seat veto. This is a due detector plus foreman maintenance
 instruction, not an unattended recalibration scheduler. It creates no automatic
 job or always-on service.
 
+Keep `event_id` stable when retrying one maintenance observation; a new
+observation gets a new ID. Replaying an identical event preserves its original
+timestamp and due date, including after a later event. Reusing its ID for a
+different outcome refuses without rewriting history.
+
 ## Saved schema and readers
 
 Artifact: `<selected-state>.capabilities.json`. Owner: `herdr-foreman`, through
 `skills/herdr-foreman/foreman/capabilities.py` and
 `skills/herdr-foreman/foreman/successors.py`. Capability-table schema 2
 adds required `successors`, an array. Entry schema stays 1: upgrade does not
-rewrite or restamp model/effort/capability evidence. Readers accept schemas
-1/2; schema 1 has no placements and remains read-only. The next owner write
-migrates its envelope to 2, preserving all entries. Missing/newer, unreadable,
+rewrite or restamp model/effort/capability evidence. Read-only readers treat
+schema 1 as no usable prior state and leave it untouched, with an owner-upgrade
+diagnostic. SKILL.md Step 2 runs `capability-migrate` before preflight; the owner
+rewrites the older envelope on read, preserving all entries and refresh time.
+Both record commands perform that owner migration under their table lock too.
+Missing/newer, unreadable,
 malformed and symlink behavior remains the capability-table contract in
 `skills/herdr-foreman/references/model-tiers.md`.
 
-Writer: `capability-successor` creates a placement; `capability-record` appends
+Writer: `capability-migrate` upgrades only the envelope;
+`capability-successor` creates a placement; `capability-record` appends
 maintenance outcomes and updates only entries its report covers. Readers:
 `capability-show`, `capability-check`, preflight, plan and apply. Neither writer
 rewrites operator-owned config; no reader persists migration.
@@ -138,12 +152,12 @@ and these owner fields:
 | `kind`, `window_group` | Exact adapter and account identity of the authorized spot |
 | `authorized_row` | Original parsed row, excluding model-bound billing evidence |
 | `needs` | Capability names of the responsibility and requested round |
-| `provider_sha256` | SHA-256 of JSON-serialized normalized owner-read source bodies |
+| `provider_sha256` | SHA-256 of JSON-serialized owner-read text, table cells and catalog data |
 | `origin` | Original aggregate `verdict` and untouched `entries`; missing evidence stays missing |
 | `assigned_at` | Owner-stamped timezone-bearing assignment timestamp |
 | `history` | Append-only maintenance results, initially empty |
 
-Each history record carries `schema_version: 1`, `recorded_at`, `id`, `action`,
+Each history record carries `schema_version: 2`, `recorded_at`, `id`, `event_id`, `action`,
 `verdict`, `source`, `provider_status`. No field is backfilled with invented
 evidence. The owner validates chronology and the originating exact pair.
 Due dates derive from assignment or last maintenance checkpoint using the

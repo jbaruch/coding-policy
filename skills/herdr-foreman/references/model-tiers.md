@@ -352,7 +352,10 @@ than assumed.
 
 Saved at `<selected-state>.capabilities.json`. Schema 2 adds provisional
 placements under `skills/herdr-foreman/references/successor-placement.md`; entry schema remains 1.
-Schema 1 below remains readable without placements. Owner:
+Schema 1 below is the prior envelope. The owner upgrades it on read through
+`capability-migrate` or either record command; entries and refresh time remain
+untouched. Read-only readers treat it as no usable prior state until that
+upgrade and emit the owner-command diagnostic. Owner:
 `skills/herdr-foreman/foreman/capabilities.py`. Writer: `capability-record`,
 and `capability-successor` for placements. Readers: `capability-check`, `capability-show`, the round preflight,
 `plan`, `apply` and `start-judge`, which refuses a pinned judge the table

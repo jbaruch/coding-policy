@@ -24,6 +24,7 @@ from .state import save_state, state_lock
 from .tiers import JUDGMENT_ROUNDS, ROLE_ROUNDS, canonical_role
 
 SCHEMA_VERSION = 1
+RECALIBRATION_SCHEMA_VERSION = 2
 PROVIDERS = {
     "anthropic": ("claude", frozenset({"anthropic.com", "www.anthropic.com", "docs.anthropic.com", "platform.claude.com"})),
     "openai": ("codex", frozenset({"openai.com", "www.openai.com", "platform.openai.com", "developers.openai.com"})),
@@ -73,22 +74,56 @@ class PageText(HTMLParser):
         super().__init__(convert_charrefs=True)
         self.parts = []
         self.hidden = 0
+        self.tables = []
+        self.table = None
+        self.row = None
+        self.cell = None
+        self.code = None
 
     def handle_starttag(self, tag, attrs):
         if tag in {"script", "style"}:
             self.hidden += 1
+        if self.hidden:
+            return
+        if tag == "table":
+            self.table = []
+        elif tag == "tr" and self.table is not None:
+            self.row = []
+        elif tag in {"td", "th"} and self.row is not None:
+            self.cell = {"text": [], "codes": []}
+        elif tag == "code" and self.cell is not None:
+            self.code = []
 
     def handle_endtag(self, tag):
         if tag in {"script", "style"} and self.hidden:
             self.hidden -= 1
+            return
+        if self.hidden:
+            return
+        if tag == "code" and self.code is not None and self.cell is not None:
+            self.cell["codes"].append("".join(self.code).strip())
+            self.code = None
+        elif tag in {"td", "th"} and self.cell is not None and self.row is not None:
+            self.row.append({"text": " ".join("".join(self.cell["text"]).split()), "codes": self.cell["codes"]})
+            self.cell = None
+        elif tag == "tr" and self.row is not None and self.table is not None:
+            self.table.append(self.row)
+            self.row = None
+        elif tag == "table" and self.table is not None:
+            self.tables.append(self.table)
+            self.table = None
 
     def handle_data(self, data):
         if not self.hidden:
             self.parts.append(data)
+            if self.cell is not None:
+                self.cell["text"].append(data)
+            if self.code is not None:
+                self.code.append(data)
 
 
 def read_provider(ref, provider):
-    """Bounded HTTPS read. Caller validates the exact source quote, not its meaning."""
+    """Bounded HTTPS read, retaining structured cells instead of guessing prose."""
     provider_url(ref, provider)
     try:
         with build_opener(ProviderRedirect(provider)).open(
@@ -100,9 +135,50 @@ def read_provider(ref, provider):
             decoded = body.decode("utf-8")
     except (OSError, URLError, UnicodeError) as exc:
         fail("cannot read provider evidence: {}. Restore access or cite a reachable official source; nothing was recorded.".format(exc))
+    if decoded.lstrip().startswith("{"):
+        try:
+            catalog = json.loads(decoded)
+        except json.JSONDecodeError:
+            fail("provider catalog is malformed JSON; cite a readable official catalog.")
+        return {"text": decoded, "tables": [], "catalog": catalog}
     page = PageText()
     page.feed(decoded)
-    return " ".join(page.parts)
+    return {"text": " ".join(page.parts), "tables": page.tables, "catalog": None}
+
+
+def verify_relationship(proof, sources):
+    """Exact directed data only: provider JSON or Anthropic's migration table.
+
+    JSON catalog records carry the same typed identities as the report, with
+    an explicit same_family_successor edge. Anthropic's published migration
+    format binds direction through the target URL and ordered version columns;
+    API model IDs must be complete code-cell values, never substrings.
+    """
+    before, after = proof["predecessor"], proof["successor"]
+    edge = {key: proof[key] for key in ("relationship", "predecessor", "successor")}
+    for source in sources:
+        catalog = source.get("catalog")
+        if isinstance(catalog, dict) and isinstance(catalog.get("successors"), list):
+            if edge in catalog["successors"]:
+                return
+    if proof["provider"] == "anthropic":
+        target = after["family"].lower() + "-" + after["version"].replace(".", "-")
+        expected_path = "/docs/en/models/" + target + "/migration-guide"
+        headers = ["Platform", "Claude " + before["family"] + " " + before["version"],
+                   "Claude " + after["family"] + " " + after["version"]]
+        for citation, source in zip(proof["citations"], sources):
+            url = urlsplit(citation["ref"])
+            if url.hostname != "platform.claude.com" or url.path != expected_path:
+                continue
+            for table in source["tables"]:
+                if not table or [cell["text"] for cell in table[0]] != headers:
+                    continue
+                for row in table[1:]:
+                    if (len(row) == 3 and row[0]["text"] == "Claude API"
+                            and before["model"] in row[1]["codes"] and after["model"] in row[2]["codes"]):
+                        return
+    fail("trusted sources do not establish this exact directed successor relationship. Cite a provider-owned "
+         "structured successor catalog or the official migration model-ID table; a quote, prefix or listing is insufficient.")
 
 
 def provenance(proof, at=None, kind=None):
@@ -134,9 +210,6 @@ def provenance(proof, at=None, kind=None):
     before, after = proof["predecessor"], proof["successor"]
     if before["family"] != after["family"] or before["version"] == after["version"] or before["model"] == after["model"]:
         fail("the exact models must be distinct versions in the same provider family.")
-    quote = " ".join(citation["quote"] for citation in citations)
-    if not all(value in quote for value in (before["model"], after["model"], before["family"], before["version"], after["version"])):
-        fail("the cited provider evidence must bind both exact model IDs and their family/versions.")
 
 
 def row_binding(row):
@@ -191,8 +264,12 @@ def validate(row):
     if not isinstance(row["history"], list):
         fail("recalibration history must be an array.")
     previous = row["assigned_at"]
+    event_ids = set()
     for event in row["history"]:
         validate_recalibration(event, saved=True)
+        if event["event_id"] in event_ids:
+            fail("maintenance event_id must be unique within a placement's history.")
+        event_ids.add(event["event_id"])
         if event["id"] != row["id"] or timestamp(event["recorded_at"], "Recalibration") < timestamp(previous, "Previous checkpoint"):
             fail("recalibration cannot rewrite placement chronology.")
         previous = event["recorded_at"]
@@ -225,10 +302,12 @@ def record(path, data, at, agent):
     validate(row)
     observed = []
     for citation in proof["citations"]:
-        body = " ".join(read_provider(citation["ref"], proof["provider"]).split())
+        source = read_provider(citation["ref"], proof["provider"])
+        body = " ".join(source["text"].split())
         if " ".join(citation["quote"].split()) not in body:
             fail("the cited quote is absent from the trusted provider source; no inheritance recorded.")
-        observed.append(body)
+        observed.append(source)
+    verify_relationship(proof, observed)
     row["provider_sha256"] = hashlib.sha256(json.dumps(observed, ensure_ascii=False).encode("utf-8")).hexdigest()
     with state_lock(capabilities.storage_path(path)):
         document = capabilities.load(path, for_write=True)
@@ -254,7 +333,8 @@ def record(path, data, at, agent):
 
 
 def validate_recalibration(event, saved=False):
-    fields(event, {"id", "action", "verdict", "source", "provider_status"} | ({"schema_version", "recorded_at"} if saved else set()), "recalibration")
+    fields(event, {"id", "event_id", "action", "verdict", "source", "provider_status"} | ({"schema_version", "recorded_at"} if saved else set()), "recalibration")
+    capabilities._name(event["event_id"], "Recalibration event_id")
     if not isinstance(event["action"], str) or event["action"] not in {"keep", "revise", "withdraw"}:
         fail("recalibration action is keep, revise or withdraw.")
     if event["verdict"] not in capabilities.VERDICTS:
@@ -268,7 +348,7 @@ def validate_recalibration(event, saved=False):
         fail("contrary evidence, retirement or unknown provider status requires withdrawal, not inherited permission.")
     if event["action"] == "revise" and event["verdict"] != "adequate":
         fail("revise confirms measured placement only with adequate evidence; unknown stays provisional on keep.")
-    if saved and event["schema_version"] != SCHEMA_VERSION:
+    if saved and event["schema_version"] != RECALIBRATION_SCHEMA_VERSION:
         fail("unsupported recalibration schema.")
 
 
@@ -278,9 +358,6 @@ def recalibrate(document, events, at):
     seen = set()
     for event in events:
         validate_recalibration(event)
-        observed = timestamp(event["source"]["dated"] + "T00:00:00Z", "Recalibration source")
-        if not timedelta(0) <= timestamp(at, "Recalibration checkpoint") - observed < capabilities.INTERVAL:
-            fail("recalibration needs current dated outcome evidence; unknown results remain unknown.")
         identity = text(event["id"], "Recalibration id")
         if identity in seen:
             fail("one maintenance report cannot recalibrate the same placement twice.")
@@ -288,10 +365,16 @@ def recalibrate(document, events, at):
         row = next((item for item in document.get("successors", []) if item["id"] == identity), None)
         if row is None:
             fail("unknown placement id {}; inspect `{}`.".format(identity, runnable.command("capability-show")))
-        stamped = {**copy.deepcopy(event), "schema_version": SCHEMA_VERSION,
-                   "recorded_at": timestamp(at, "Recalibration checkpoint").isoformat()}
-        if row["history"] and row["history"][-1] == stamped:
+        replay = next((old for old in row["history"] if old["event_id"] == event["event_id"]), None)
+        if replay is not None:
+            if {key: value for key, value in replay.items() if key not in {"schema_version", "recorded_at"}} != event:
+                fail("maintenance event_id already records a different outcome; never rewrite history.")
             continue
+        observed = timestamp(event["source"]["dated"] + "T00:00:00Z", "Recalibration source")
+        if not timedelta(0) <= timestamp(at, "Recalibration checkpoint") - observed < capabilities.INTERVAL:
+            fail("recalibration needs current dated outcome evidence; unknown results remain unknown.")
+        stamped = {**copy.deepcopy(event), "schema_version": RECALIBRATION_SCHEMA_VERSION,
+                   "recorded_at": timestamp(at, "Recalibration checkpoint").isoformat()}
         if row["history"] and row["history"][-1]["action"] == "withdraw":
             fail("a withdrawn placement cannot be revived by maintenance; record a new authorized assignment.")
         if event["action"] != "withdraw":

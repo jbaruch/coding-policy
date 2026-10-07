@@ -7,6 +7,7 @@ import sys
 import unittest
 from datetime import timedelta
 from http.client import HTTPMessage
+from html import escape
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 from urllib.request import Request
@@ -49,19 +50,33 @@ class SuccessorTest(CliCase):
             "id": "sonnet-upgrade", "worker": self.worker["name"], "role": "developer",
             "round": "build", "tier_row": "build", "successor": "sonnet-5.1",
             "provenance": {
-                "provider": "anthropic", "citations": [{"ref": "https://www.anthropic.com/fixture-successor", "quote": self.quote}],
+                "provider": "anthropic", "citations": [{"ref": "https://platform.claude.com/docs/en/models/sonnet-5-1/migration-guide", "quote": self.quote}],
                 "checked_at": AT, "relationship": "same_family_successor",
                 "predecessor": {"model": "sonnet-5", "family": "Sonnet", "version": "5", "status": "active"},
                 "successor": {"model": "sonnet-5.1", "family": "Sonnet", "version": "5.1", "status": "active"},
             },
         }
 
+    def provider_fixture(self, report=None):
+        proof = (report or self.report)["provenance"]
+        before, after = proof["predecessor"], proof["successor"]
+        page = successors.PageText()
+        page.feed("<p>" + escape(self.quote) + "</p><table><tr><th>Platform</th><th>Claude "
+                  + escape(before["family"] + " " + before["version"]) + "</th><th>Claude "
+                  + escape(after["family"] + " " + after["version"]) + "</th></tr>"
+                  + "<tr><td>Claude API</td><td><code>" + escape(before["model"]) + "</code></td>"
+                  + "<td><code>" + escape(after["model"]) + "</code></td></tr></table>")
+        return {"text": " ".join(page.parts), "tables": page.tables, "catalog": None}
+
     def successor_record(self, report=None, expected=0, observed=None):
         self.config.write_text(json.dumps(self.settings))
         report_path = self.tmp / "successor-report.json"
         report_path.write_text(json.dumps(report or self.report))
         self.out, self.err = io.StringIO(), io.StringIO()
-        with patch("foreman.successors.read_provider", return_value=self.quote if observed is None else observed):
+        source = self.provider_fixture(report) if observed is None else observed
+        if isinstance(source, str):
+            source = {"text": source, "tables": [], "catalog": None}
+        with patch("foreman.successors.read_provider", return_value=source):
             rc, out, err = self.run_cli(["capability-successor", *self.base(),
                                        "--record", str(report_path), "--now", AT])
         self.assertEqual(rc, expected, err)
@@ -131,6 +146,7 @@ class SuccessorTest(CliCase):
         self.report["provenance"]["successor"] = {"model": "haiku-5.5", "family": "Haiku", "version": "5.5", "status": "active"}
         self.quote = "Fixture only: haiku-4.5 (Haiku 4.5) is replaced by haiku-5.5 (Haiku 5.5)."
         self.report["provenance"]["citations"][0]["quote"] = self.quote
+        self.report["provenance"]["citations"][0]["ref"] = "https://platform.claude.com/docs/en/models/haiku-5-5/migration-guide"
         self.successor_record()
         self.upgrade()
         self.worker["tiers"]["build"]["model"] = "haiku-5.5"
@@ -155,13 +171,41 @@ class SuccessorTest(CliCase):
         self.assertEqual(native.events, [])
 
     def test_older_table_is_read_only_until_owner_records_migration(self):
+        legacy = capabilities.load(self.state)
+        legacy.pop("successors")
+        legacy["schema_version"] = 1
+        capabilities.storage_path(self.state).write_text(json.dumps(legacy))
         before = capabilities.storage_path(self.state).read_bytes()
-        self.assertEqual(capabilities.load(self.state)["schema_version"], 1)
+        self.assertEqual(capabilities.load(self.state), capabilities.empty())
         self.assertEqual(capabilities.storage_path(self.state).read_bytes(), before)
+        self.out, self.err = io.StringIO(), io.StringIO()
+        rc, out, err = self.run_cli(["capability-migrate", *self.base()])
+        self.assertEqual(rc, 0, err)
+        self.assertEqual(json.loads(out)["entries"], legacy["entries"])
         self.successor_record()
         document = capabilities.load(self.state)
         self.assertEqual(document["schema_version"], 2)
         self.assertEqual(document["entries"], json.loads(before)["entries"])
+
+    def test_successor_owner_migrates_on_read_before_preserving_unknown_origin(self):
+        legacy = capabilities.load(self.state)
+        legacy.pop("successors")
+        legacy["schema_version"] = 1
+        capabilities.storage_path(self.state).write_text(json.dumps(legacy))
+        placement = self.successor_record()
+        self.assertEqual(placement["origin"]["verdict"], "unknown")
+        self.assertEqual(placement["origin"]["entries"], legacy["entries"])
+        upgraded = capabilities.load(self.state)
+        self.assertEqual(upgraded["entries"], legacy["entries"])
+        self.assertEqual(upgraded["refreshed_at"], legacy["refreshed_at"])
+
+    def test_migration_does_not_create_a_missing_table_or_rewrite_current_one(self):
+        before = capabilities.storage_path(self.state).read_bytes()
+        capabilities.migrate(self.state)
+        self.assertEqual(capabilities.storage_path(self.state).read_bytes(), before)
+        missing = self.tmp / "missing-state.json"
+        self.assertEqual(capabilities.migrate(missing), capabilities.empty())
+        self.assertFalse(capabilities.storage_path(missing).exists())
 
     def test_malformed_report_is_an_actionable_refusal_not_a_traceback(self):
         for field in ("id", "tier_row", "role", "round", "successor"):
@@ -177,6 +221,51 @@ class SuccessorTest(CliCase):
         before = capabilities.storage_path(self.state).read_bytes()
         self.recalibrate("withdraw", status="retired")
         self.assertEqual(capabilities.storage_path(self.state).read_bytes(), before)
+
+    def test_retry_with_new_clock_does_not_postpone_due_or_duplicate_history(self):
+        self.successor_record()
+        self.recalibrate("keep")
+        before = capabilities.storage_path(self.state).read_bytes()
+        report = {"recalibrations": [{"id": self.report["id"], "event_id": "checkpoint-" + AT[:10],
+                  "action": "keep", "verdict": "unknown", "provider_status": "active",
+                  "source": {"kind": "project", "ref": "fixture: recorded outcome", "dated": AT[:10]}}]}
+        report_path = self.tmp / "maintenance.json"
+        report_path.write_text(json.dumps(report))
+        self.out, self.err = io.StringIO(), io.StringIO()
+        later = (timestamp(AT, "Fixture") + timedelta(hours=1)).isoformat()
+        rc, _, err = self.run_cli(["capability-record", *self.base(), "--record", str(report_path), "--now", later])
+        self.assertEqual(rc, 0, err)
+        self.assertEqual(capabilities.storage_path(self.state).read_bytes(), before)
+        much_later = (timestamp(AT, "Fixture") + timedelta(days=8)).isoformat()
+        capabilities.record(self.state, report, much_later)
+        self.assertEqual(capabilities.storage_path(self.state).read_bytes(), before)
+        report["recalibrations"][0]["source"]["ref"] = "fixture: different outcome"
+        with self.assertRaisesRegex(UsageError, "different outcome"):
+            capabilities.record(self.state, report, later)
+
+    def test_provider_listing_reversal_substrings_and_wrong_version_columns_refuse(self):
+        for cause in ("listing", "reverse", "substring", "version", "direction"):
+            with self.subTest(cause=cause):
+                source = self.provider_fixture()
+                if cause == "listing":
+                    source["tables"] = []
+                elif cause == "reverse":
+                    row = source["tables"][0][1]
+                    row[1], row[2] = row[2], row[1]
+                elif cause == "substring":
+                    source["tables"][0][1][1]["codes"] = ["sonnet-5.1"]
+                elif cause == "version":
+                    source["tables"][0][0][1]["text"] = "Claude Sonnet 5.1"
+                else:
+                    source["tables"][0][0].reverse()
+                before = capabilities.storage_path(self.state).read_bytes()
+                self.successor_record(expected=1, observed=source)
+                self.assertEqual(capabilities.storage_path(self.state).read_bytes(), before)
+
+    def test_structured_provider_catalog_binds_exact_directed_identities(self):
+        source = {"text": self.quote, "tables": [], "catalog": {"successors": [{key: self.report["provenance"][key]
+                  for key in ("relationship", "predecessor", "successor")}]}}
+        self.successor_record(observed=source)
 
     def test_missing_evidence_wrong_capability_and_future_provenance_do_not_record(self):
         for cause in ("missing", "capability", "future", "stale"):
@@ -272,7 +361,7 @@ class SuccessorTest(CliCase):
                 self.record(model, "low", "unknown")
 
     def recalibrate(self, action, verdict="unknown", status="active", at=AT, entries=None):
-        report = {"recalibrations": [{"id": self.report["id"], "action": action, "verdict": verdict,
+        report = {"recalibrations": [{"id": self.report["id"], "event_id": "checkpoint-" + at[:10], "action": action, "verdict": verdict,
                   "source": {"kind": "project", "ref": "fixture: recorded outcome", "dated": at[:10]},
                   "provider_status": status}]}
         if entries is not None:
@@ -364,6 +453,18 @@ class SuccessorTest(CliCase):
 
 
 class ProviderReadTest(unittest.TestCase):
+    def test_structured_catalog_and_malformed_json_transport(self):
+        response = MagicMock()
+        response.geturl.return_value = "https://www.anthropic.com/fixture.json"
+        response.__enter__.return_value = response
+        with patch("foreman.successors.build_opener") as opener:
+            opener.return_value.open.return_value = response
+            response.read.return_value = b'{"successors": []}'
+            self.assertEqual(successors.read_provider(response.geturl(), "anthropic")["catalog"], {"successors": []})
+            response.read.return_value = b'{broken'
+            with self.assertRaisesRegex(UsageError, "malformed JSON"):
+                successors.read_provider(response.geturl(), "anthropic")
+
     def test_bounded_official_read_extracts_visible_quote(self):
         response = MagicMock()
         response.geturl.return_value = "https://www.anthropic.com/fixture"
@@ -371,7 +472,7 @@ class ProviderReadTest(unittest.TestCase):
         response.__enter__.return_value = response
         with patch("foreman.successors.build_opener") as opener:
             opener.return_value.open.return_value = response
-            self.assertEqual(successors.read_provider(response.geturl(), "anthropic"), "Fixture provider & catalog")
+            self.assertEqual(successors.read_provider(response.geturl(), "anthropic")["text"], "Fixture provider & catalog")
 
     def test_wrong_host_credentials_port_or_redirect_are_refused(self):
         for ref in ("http://www.anthropic.com/x", "https://www.anthropic.com.evil.example/x",
