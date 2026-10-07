@@ -426,6 +426,23 @@ class SuccessorTest(CliCase):
                 self.recalibrate("withdraw", verdict)
         self.recalibrate("withdraw", "inadequate")
 
+    def test_saved_history_cannot_restore_a_withdrawn_placement_before_native_actions(self):
+        self.successor_record()
+        self.upgrade()
+        plan = self.plan()
+        document = self.recalibrate("withdraw", status="retired")
+        event = copy.deepcopy(document["successors"][0]["history"][-1])
+        event.update(event_id="invalid-after-withdrawal", action="keep", provider_status="active")
+        document["successors"][0]["history"].append(event)
+        target = capabilities.storage_path(self.state)
+        target.write_text(json.dumps(document))
+        before = target.read_bytes()
+        rc, _, err, native = self.apply(plan)
+        self.assertEqual(rc, 1)
+        self.assertIn("history cannot continue after withdrawal", err)
+        self.assertEqual(native.events, [])
+        self.assertEqual(target.read_bytes(), before)
+
     def test_schema_one_negative_gate_is_not_discarded_before_owner_migration(self):
         self.record("sonnet-5", "low", "inadequate")
         legacy = capabilities.load(self.state)

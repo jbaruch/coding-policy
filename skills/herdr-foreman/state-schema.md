@@ -259,7 +259,9 @@ provisional/confirmed/withdrawn status, provenance and maintenance timing/histor
 documented in `skills/herdr-foreman/references/successor-placement.md`. Qualification stays separate
 and unchanged by inheritance. Older explanation records remain readable without
 placement; no history is backfilled. Apply independently rereads capability-table
-schema 1/2 and the current live fact owners, not the plan's claimed placement.
+schema 2 and the current live fact owners, not the plan's claimed placement.
+Schema 1 must first undergo the capability owner's `capability-migrate` upgrade;
+read-only consumers refuse it without discarding negative gates.
 
 Plan schema 14 adds assignment-scoped identities. `worker_kinds` maps every
 seat to the stable template selected from the snapshot; `assignments` maps the

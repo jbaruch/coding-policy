@@ -266,7 +266,10 @@ def validate(row):
         fail("recalibration history must be an array.")
     previous = row["assigned_at"]
     event_ids = set()
+    withdrawn = False
     for event in row["history"]:
+        if withdrawn:
+            fail("recalibration history cannot continue after withdrawal; restore the last owner-written capability table before retrying.")
         validate_recalibration(event, saved=True)
         if event["event_id"] in event_ids:
             fail("maintenance event_id must be unique within a placement's history.")
@@ -274,6 +277,7 @@ def validate(row):
         if event["id"] != row["id"] or timestamp(event["recorded_at"], "Recalibration") < timestamp(previous, "Previous checkpoint"):
             fail("recalibration cannot rewrite placement chronology.")
         previous = event["recorded_at"]
+        withdrawn = event["action"] == "withdraw"
 
 
 def record(path, data, at, agent):
