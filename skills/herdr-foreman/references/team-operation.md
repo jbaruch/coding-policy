@@ -2,6 +2,41 @@
 
 The Herdr team round contract. `rules/agent-team-operation.md` Two Modes decides when it applies: a Herdr team round (`HERDR_ENV` set) follows every section below, and a standalone session follows none of it. The foreman reads this file through `skills/herdr-foreman/SKILL.md`, and every worker brief names it as a required read.
 
+## Bounded Factual Lookup
+
+Narrow exception for a foreman answering a read-only fact request without a
+consultation round. Preconditions, all required:
+
+1. The requested output is a factual chat answer, not a durable document,
+   recommendation, assessment, design, security judgment, edit, acceptance or
+   release decision.
+2. The answer is already in the foreman's context, or one named source/file or
+   one bounded read-only query can establish it. State the source and the
+   observed revision or observation time when relevant.
+3. The lookup changes no repository, owner record, native session or external
+   resource. It sends no worker input and performs no cleanup or recovery.
+4. Missing evidence stays unknown. Conflicting evidence, causal analysis,
+   specialist judgment or a broader search returns to normal consultation.
+5. The answer grants no task authority, capacity assumption, contributor
+   clearance, acceptance, gate waiver or release permission.
+
+Every other lookup follows the normal team-round contract. A durable output
+or substantive judgment requested alongside a fact uses its required
+responsibility and gates; splitting off the fact never bypasses them.
+
+The flow is `bounded source read → cited chat fact`; a failed boundary goes to
+normal consultation or implementation delivery. This route needs no roster
+measurement, unrelated provider availability, brief, enrollment, worker
+report, round log or context reset. Existing enrolled work still follows Fleet
+Supervision; answering a fact neither resolves it nor permits stopping its
+watch. Context already holding a factual answer needs no extra source read.
+
+Trade-off: the foreman may retrieve facts but may not interpret their adequacy
+or safety. Revisit the boundary if repeated requests need synthesis; that work
+is consultation, not an expanded lookup exception. Report action counts or
+token/cost reductions only from measured executions. Unmeasured token use and
+monetary savings remain unknown.
+
 ## Foreman Seat
 
 - The operator's `config.json` `foreman` block declares the seat like a worker: its agent, kind, launch options and an optional tier table
@@ -22,6 +57,7 @@ The Herdr team round contract. `rules/agent-team-operation.md` Two Modes decides
 
 ## Team Composition
 
+- Bounded factual lookup follows Bounded Factual Lookup and creates no specialist assignment
 - The foreman selects the responsibilities needed at each stage of the task
 - Preserve developer, reviewer, tester and release responsibilities for implementation delivery
 - Activate a specialist consultation for a bounded question or deliverable the task needs, and whenever a trigger below fires

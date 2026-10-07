@@ -1,5 +1,16 @@
 # Changelog
 
+### Changed
+
+- **Bounded factual lookups need no Herdr round.** A foreman may answer from
+  existing context or one bounded read-only source lookup, with a citation,
+  while unrelated workers remain unmeasured. The exception permits no durable
+  artifact, mutation, judgment, acceptance or release. Assessments, design,
+  security judgments and edits keep their required roles and gates. Existing
+  fleet supervision remains active; no worker input, cleanup, simulated report
+  or mandatory reset is introduced. Runtime action/token savings have not been
+  measured and remain unknown (#694).
+
 ## 0.3.366 — 2026-10-07
 
 ### Fixed
