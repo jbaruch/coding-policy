@@ -632,7 +632,7 @@ def _closed_no_send_retry(state_path, state, client, dispatch, tier, paths):
     item = {"role": dispatch["role"], "task": dispatch["task"], "model": tier.get("model"),
             "effort": tier.get("effort"), "context": "start", "brief": paths[dispatch["role"]], "common": paths["common"]}
     return {"classification": "reconciled_not_sent", "dispatch": row["id"],
-            "target": retrospective_runtime.target(item)}
+            "pane_id": pane, "target": retrospective_runtime.target(item)}
 
 
 def _recorded_no_send_cleanup(state_path, state, identifier):
@@ -1822,6 +1822,10 @@ def _apply(args, client, warn, trace, hold_gates):
     if fresh_workers:
         guard.retries = {name: proof for role, name in assignments.items()
                          if (proof := _closed_no_send_retry(state_path, state, client, dispatches[role], tiers[role], paths)) is not None}
+        repaired = retrospective.recover_no_send_transitions(state_path, guard.retries)
+        if repaired:
+            warn("Restored original retrospective start provenance for proved closed no-input retries: {}. "
+                 "Incoming identities, timestamps and immutable targets are preserved.".format(", ".join(repaired)))
     cleanup_evidence = str(Path(state_path).expanduser().resolve())
 
     def clean_pre_send(primary, names, reason):

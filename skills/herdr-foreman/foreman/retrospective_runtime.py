@@ -253,11 +253,24 @@ class Guard:
         index = notes.load(self.path)
         item = self._known_report(item, index)
         current = describe(self.state, self.client, self.agents, item, index)
+        original = current
         retry = self.retries.get(item["agent"])
         if item["context"] == "start" and retry is not None:
             if (current["source"]["assignment_index"] is not None or not current["source"]["observation"]["shell"]
                     or not notes.same_history(current["target"], retry["target"])):
                 raise UsageError("No-send retry changed its exact target or has outgoing work; nothing was started.", {})
+            if not current["first_start"]:
+                original = next((row["descriptor"] for row in reversed(index["transitions"])
+                                 if row["agent"] == item["agent"]
+                                 and row["descriptor"]["source"]["assignment_index"] is None
+                                 and notes.same_history(row["descriptor"]["target"], retry["target"])), None)
+                if original is None:
+                    raise UsageError("No-send retry lacks its original start provenance; preserve the owner records "
+                                     "and inspect `{}` before retrying unchanged apply.".format(
+                                         runnable.command("supervision-status")), {})
+            # The live retry is not a first launch. Its durable transition
+            # retains the original, validated coverage rather than persisting
+            # a synthetic non-first descriptor with no retrospective source.
             current = {**current, "first_start": False, "transition_required": False}
         daily = notes.cadence(index, self.at, existing_work=bool(self.state["assignments"]) or not current["first_start"])
         covered = not current["transition_required"] or _usable_coverage(index, current)
@@ -270,7 +283,7 @@ class Guard:
         if current["source"]["observation"]["readiness"] not in READY_STATES | {"shell"}:
             raise AgentBusyError("Retrospective cannot authorize input to a busy or blocked worker; wait for readiness without interrupting it.", {})
         bridge = self._bridge(index, current) if allow_bridge else None
-        self.original[item["agent"]] = bridge["descriptor"] if bridge else current
+        self.original[item["agent"]] = bridge["descriptor"] if bridge else original
         return current
 
     def preflight(self, steps, _statuses=None):
@@ -355,7 +368,7 @@ class Guard:
         if not current["source"]["observation"]["shell"]:
             raise UsageError("start-judge requires a shell pane; use `{}` for an existing worker's verified relaunch instead of starting into its TUI.".format(
                 runnable.command("apply")), {})
-        self.original[item["agent"]] = current
+        self.original.setdefault(item["agent"], current)
         if current["first_start"]:
             notes.require_no_pending(self.path)
             index = notes.load(self.path)

@@ -1,5 +1,15 @@
 # Changelog
 
+### Fixed
+
+- Consecutive proved-no-input startups preserve their original retrospective
+  provenance instead of saving a synthetic descriptor the reader rejects.
+  Normal apply restores the older writer's damaged retry receipt only after
+  owner proof of unchanged inputs, not-sent transport and closed surfaces;
+  unrelated corruption and unknown sends still refuse. Original notes,
+  launch identities, timestamps, frozen briefs and pinned tiers stay intact
+  (#710).
+
 ### Changed
 
 - **Verified model successors inherit their authorized operating spot provisionally.**

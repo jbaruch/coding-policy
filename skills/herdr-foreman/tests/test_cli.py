@@ -3264,8 +3264,9 @@ class PublicOwnerRetryTest(unittest.TestCase):
                     self.assertEqual((native.agents, native.panes), surfaces)
                     self.assertEqual({path: path.read_bytes() for path in before}, before)
 
-    def test_closed_retry_persists_reloadable_history_and_completed_replay_uses_no_native_access(self):
-        for failure in ("timeout", "draft", "ansi", "identity"):
+    def test_consecutive_closed_retries_preserve_history_and_send_the_same_plan_once(self):
+        for failure in ("timeout", "draft", "ansi", "identity", "legacy", "legacy_wrong_target",
+                        "legacy_missing_origin", "legacy_malformed_sibling"):
             with self.subTest(failure=failure):
                 from foreman import assign, lifecycle, retrospective
                 with tempfile.TemporaryDirectory() as temporary:
@@ -3363,6 +3364,45 @@ class PublicOwnerRetryTest(unittest.TestCase):
                             self.assertEqual(len([event for event in native.events if event[0] == "create"]), creates)
                             native.agents.pop(dispatch["agent"])
                             native.panes.pop(pane)
+                        frozen = {path: path.read_bytes() for path in (config, common, brief)}
+                        native.frames = ["\x1b[2m› recalled work\x1b[0m"]
+                        code, _, err = invoke(arguments, native)
+                        self.assertEqual(code, 1, err)
+                        self.assertIn("startup_input_occupied", err)
+                        self.assertEqual(native.panes, {})
+                        self.assertEqual(native.agents, {})
+                        self.assertEqual(len([event for event in native.events if event[0] == "prompt"]), 0)
+                        self.assertEqual({path: path.read_bytes() for path in frozen}, frozen)
+                        retrospective.load(state)
+                        if failure.startswith("legacy"):
+                            index = retrospective.load(state)
+                            row = index["transitions"][-1]
+                            row["descriptor"] = {**row["descriptor"], "first_start": False,
+                                "source": {**row["descriptor"]["source"], "observation": {
+                                    "pane_id": "fixture-pane-2", "native": None,
+                                    "process": {"pid": 302, "argv": ["zsh"]},
+                                    "readiness": "shell", "shell": True}}}
+                            if failure == "legacy_wrong_target":
+                                row["descriptor"]["target"] = {**row["descriptor"]["target"], "task": "another-task"}
+                            row["id"] = retrospective.digest({key: value for key, value in row.items() if key not in {"at", "id"}})
+                            if failure == "legacy_missing_origin":
+                                index["transitions"].pop(0)
+                            if failure == "legacy_malformed_sibling":
+                                index["transitions"].append({"schema_version": 1})
+                            index_path = retrospective.directory(state) / "index.json"
+                            save_state(index_path, index)
+                            damaged = index_path.read_bytes()
+                            with self.assertRaises(StateError):
+                                retrospective.load(state)
+                            self.assertEqual(index_path.read_bytes(), damaged, "Readers never repair")
+                            if failure != "legacy":
+                                events = list(native.events)
+                                code, _, err = invoke(arguments, native)
+                                self.assertEqual(code, 1, err)
+                                self.assertEqual(index_path.read_bytes(), damaged)
+                                self.assertEqual([event for event in native.events if event[0] in {"create", "start", "prompt"}],
+                                                 [event for event in events if event[0] in {"create", "start", "prompt"}])
+                                continue
                         native.frames = [native.ANIMATION, native.EMPTY, native.EMPTY]
                         code, text, err = invoke(arguments, native)
                         self.assertEqual(code, 0, err)
@@ -3371,9 +3411,15 @@ class PublicOwnerRetryTest(unittest.TestCase):
                         self.assertTrue(usable, "A successful retry must not make owner history unreadable")
                         self.assertEqual(saved["assignments"][0]["clear_reason"], "reconciled_not_sent")
                         self.assertEqual(saved["assignments"][0]["task"], "media-77")
-                        self.assertEqual([row["status"] for row in saved["recovery"]["dispatches"]], ["not_sent", "applied"])
-                        self.assertEqual([row["active"] for row in supervision.load(state)["members"]], [False, True])
+                        self.assertEqual([row["status"] for row in saved["recovery"]["dispatches"]], ["not_sent", "not_sent", "applied"])
+                        self.assertEqual([row["active"] for row in supervision.load(state)["members"]], [False, False, True])
                         self.assertEqual(len([event for event in native.events if event[0] == "prompt"]), 1)
+                        index = retrospective.load(state)
+                        self.assertTrue(all(row["descriptor"] == index["transitions"][0]["descriptor"]
+                                            for row in index["transitions"]))
+                        self.assertEqual([row["incoming"]["pane_id"] for row in index["transitions"]],
+                                         ["fixture-pane-1", "fixture-pane-2", "fixture-pane-3"])
+                        self.assertEqual({path: path.read_bytes() for path in frozen}, frozen)
                         events, persisted = list(native.events), state.read_bytes()
                         code, text, err = invoke(arguments, native)
                         self.assertEqual(code, 0, err)
