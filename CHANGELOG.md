@@ -1,5 +1,15 @@
 # Changelog
 
+### Fixed
+
+- Reset scheduling now verifies the loaded Python runtime's identity and
+  durable claim before reporting a live continuation. A private handshake
+  avoids macOS launcher's same-PID executable change. Owner-managed bounded
+  recovery reaps only unclaimed children under the record lock and retains
+  each startup loss in the private log; claimed or uncertain deliveries never
+  retry. Stow, native-session, PID-reuse and per-keystroke guards remain intact
+  (#707).
+
 ## 0.3.377 — 2026-10-08
 
 ### Changed

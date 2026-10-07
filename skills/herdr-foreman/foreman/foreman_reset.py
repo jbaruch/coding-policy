@@ -25,7 +25,11 @@ The foreman's runtime mechanics (clear command, slash delivery, composer
 glyphs) come from a configured worker of the same kind; Herdr names the kind
 and the foreman's agent name from its own pane.
 
-One delivery attempt per pane and stow, never retried automatically.
+One claimed delivery attempt per pane and stow, never retried automatically.
+The scheduler verifies the loaded child's identity and durable claim before
+returning success. Lost preclaim children are reaped and replaced within the
+startup allowance while the record lock prevents them from ever claiming;
+the private reset log retains their identity and failure reason.
 `<state>.foreman-reset.json` records each scheduled reset (`schedule`), and
 the deliverer claims it before sending anything (`claim`). A retry of a live,
 delivered or reconciled reset replays the record and spawns nothing. Any
@@ -52,8 +56,11 @@ replacement is a new one.
 
 import copy
 import fcntl
+import json
 import os
+import select
 import shlex
+import subprocess
 import time
 from contextlib import contextmanager
 from pathlib import Path
@@ -69,6 +76,12 @@ from .supervision_runtime import process_identity
 from .state import save_state, state_lock
 
 RESET_SCHEMA_VERSION = 2
+#: Startup is acknowledged by the loaded child, not guessed from its launcher
+#: PID. A macOS Python launcher execs the framework runtime in the same PID.
+STARTUP_BUDGET_SEC = 10
+STARTUP_ATTEMPTS = 2
+STARTUP_MESSAGE_BYTES = 1024
+STARTUP_REAP_SEC = 5
 #: How long the deliverer waits for the foreman's turn to end, and how often
 #: it looks. Script-owned constants (rules/ci-safety.md Always Watch CI).
 IDLE_BUDGET_SEC = 1800
@@ -151,6 +164,141 @@ class SessionChanged(HerdrError):
     """The foreman's pane no longer holds the native session bound at supervision-bind."""
 
     code = "reset_session_changed"
+
+
+class StartupFailed(StateError):
+    """The detached child supplied no verified startup/claim acknowledgment."""
+
+    code = "reset_startup_failed"
+
+
+def startup_notify(fd, phase, process):
+    """Send the child's post-import identity and, later, its durable claim proof.
+
+    The inherited pipe is private to this launch. No argv, pane text or
+    provider output crosses it. The child closes it after the second message.
+    """
+    if fd is None:
+        return
+    try:
+        payload = json.dumps({"phase": phase, "process": process}).encode("ascii") + b"\n"
+        if os.write(fd, payload) != len(payload):
+            raise StartupFailed("The reset startup acknowledgment was incomplete; continue foreground supervision and inspect the reset log.", {})
+    except OSError:
+        raise StartupFailed("The reset startup pipe is unavailable; continue foreground supervision and inspect the reset log.", {}) from None
+    finally:
+        if phase != "ready":
+            os.close(fd)
+
+
+class DetachedReset:
+    """One owned detached child, with readiness and post-lock claim handshakes.
+
+    `ready` validates the child's final runtime identity against a live probe.
+    `claimed` waits for the owner-record claim after the scheduler unlocks.
+    `abort` is called only while that record is locked and still unclaimed;
+    an unreaped Popen child cannot have its PID reused during termination.
+    Failed pre-claim attempts are appended to the existing private reset log.
+    """
+
+    def __init__(self, argv, sink, cwd):
+        self.sink = os.fdopen(os.dup(sink.fileno()), "ab")
+        self.buffer = b""
+        self.identity = None
+        self.fd, writer = os.pipe()
+        try:
+            self.child = subprocess.Popen([*argv, "--startup-fd", str(writer)],
+                                          stdin=subprocess.DEVNULL, stdout=sink, stderr=sink,
+                                          start_new_session=True, cwd=cwd, pass_fds=(writer,))
+        except OSError:
+            os.close(self.fd)
+            self.sink.close()
+            raise
+        finally:
+            os.close(writer)
+
+    def _failed(self, reason):
+        return StartupFailed("Reset child {} did not establish continuation ({}); continue foreground supervision and inspect the reset log.".format(
+            self.child.pid, reason), {"pid": self.child.pid, "reason": reason})
+
+    def _receive(self):
+        if self.fd is None:
+            raise self._failed("startup_pipe_closed")
+        deadline = time.monotonic() + STARTUP_BUDGET_SEC
+        while b"\n" not in self.buffer:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise self._failed("startup_timeout")
+            try:
+                readable, _, _ = select.select([self.fd], [], [], remaining)
+                if not readable:
+                    raise self._failed("startup_timeout")
+                chunk = os.read(self.fd, STARTUP_MESSAGE_BYTES)
+            except OSError:
+                raise self._failed("startup_pipe_unavailable") from None
+            if not chunk:
+                raise self._failed("startup_child_exited")
+            self.buffer += chunk
+            if len(self.buffer) > STARTUP_MESSAGE_BYTES:
+                raise self._failed("startup_message_oversized")
+        line, self.buffer = self.buffer.split(b"\n", 1)
+        try:
+            return json.loads(line)
+        except (ValueError, UnicodeDecodeError):
+            raise self._failed("startup_message_invalid") from None
+
+    def ready(self, probe):
+        message = self._receive()
+        identity = message.get("process") if isinstance(message, dict) else None
+        if (not isinstance(message, dict) or set(message) != {"phase", "process"} or message["phase"] != "ready"
+                or not isinstance(identity, dict) or set(identity) != {"pid", "identity"}
+                or type(identity["pid"]) is not int or identity["pid"] != self.child.pid
+                or not isinstance(identity["identity"], str) or len(identity["identity"]) != 64
+                or any(ch not in "0123456789abcdef" for ch in identity["identity"])
+                or probe(self.child.pid) != identity):
+            raise self._failed("startup_identity_unverified")
+        self.identity = identity
+        return identity
+
+    def claimed(self):
+        if self._receive() != {"phase": "claimed", "process": self.identity}:
+            raise self._failed("startup_claim_unverified")
+
+    def abort(self):
+        if self.child.poll() is None:
+            try:
+                self.child.terminate()
+            except ProcessLookupError:
+                pass  # The owned child exited between poll and terminate; wait reaps it.
+            try:
+                self.child.wait(timeout=STARTUP_REAP_SEC)
+            except subprocess.TimeoutExpired:
+                self.child.kill()
+                self.child.wait(timeout=STARTUP_REAP_SEC)
+        self.close()
+
+    def close(self):
+        if self.fd is not None:
+            os.close(self.fd)
+            self.fd = None
+        self.sink.close()
+
+    def record_loss(self, attempt, exc):
+        try:
+            self.sink.write(json.dumps({"startup_attempt": attempt, "phase": "preclaim", "process": self.identity,
+                                       "pid": self.child.pid, "reason": exc.details.get("reason", exc.code)}).encode("ascii") + b"\n")
+            self.sink.flush()
+            os.fsync(self.sink.fileno())
+        except OSError:
+            raise StateError("Could not retain reset startup evidence; restore access to the reset log before another scheduling call. Continue foreground supervision.",
+                             {"pid": self.child.pid, "reason": "startup_log_unavailable"}) from None
+
+    def abandon(self, attempt, exc):
+        """Retain preclaim loss evidence and reap even when logging fails."""
+        try:
+            self.record_loss(attempt, exc)
+        finally:
+            self.abort()
 
 
 def record_path(state_path):
@@ -391,15 +539,16 @@ def replay(state_path, plan, *, alive=_alive):
 
 
 def schedule(state_path, plan, at, start, *, native_session, alive=_alive, probe=None, options=None):
-    """Record one reset for (pane, stow) and start its deliverer exactly once.
+    """Record one reset for (pane, stow), with bounded proved-preclaim recovery.
 
     `native_session` is the foreman's session bound at supervision-bind
     (`bound_session`); the deliverer types only while the pane still holds it.
-    `start()` launches the deliverer and returns its pid. The record lock is
-    held until the deliverer's process identity is saved, and a deliverer
-    claims only the row carrying its own identity. A launch failure, or a
-    deliverer that is already gone when probed, finishes the row `failed`
-    with the resume prompt before re-raising.
+    Production `start()` returns a DetachedReset. Its loaded runtime sends
+    its identity before waiting for this lock, then acknowledges the durable
+    claim after unlock. Preclaim loss revokes the identity under the lock,
+    reaps only that owned child, and retries within STARTUP_ATTEMPTS. The log
+    retains each lost attempt. Once claimed, no automatic retry is possible.
+    Injected PID-only launchers retain the existing test/embedder contract.
     """
     try:
         timestamp(at, "Reset scheduled_at")
@@ -411,43 +560,92 @@ def schedule(state_path, plan, at, start, *, native_session, alive=_alive, probe
                          "Nothing was scheduled.".format(plan.get("stow"), command("supervision-bind"), command("foreman-reset")),
                          {"stow": plan.get("stow")})
     path = record_path(state_path)
-    with state_lock(path):
-        document = _records(path)
-        prior = _row(document, plan)
-        if prior is not None:
-            live, changed = _settle(document, prior, state_path, alive)
-            if changed:
+    managed = None
+    for attempt in range(1, STARTUP_ATTEMPTS + 1):
+        with state_lock(path):
+            document = _records(path)
+            row = _row(document, plan)
+            if attempt == 1:
+                if row is not None:
+                    live, changed = _settle(document, row, state_path, alive)
+                    if changed:
+                        save_state(path, document)
+                    if live is not None:
+                        return live
+                    _refuse(row, state_path)
+                row = {"schema_version": RESET_SCHEMA_VERSION, **plan, "status": "scheduled", "scheduled_at": at,
+                       "options": dict(options or {}), "process": None, "result": None, "native_session": dict(native_session)}
+                if not _valid_row(row):
+                    raise UsageError("The reset for stow {} would not validate as a reset row; nothing was scheduled.".format(
+                        plan.get("stow")), {"row": row})
+                document["resets"].append(row)
                 save_state(path, document)
-            if live is not None:
-                return live
-            _refuse(prior, state_path)
-        row = {"schema_version": RESET_SCHEMA_VERSION, **plan, "status": "scheduled", "scheduled_at": at,
-               "options": dict(options or {}), "process": None, "result": None, "native_session": dict(native_session)}
-        if not _valid_row(row):
-            raise UsageError("The reset for stow {} would not validate as a reset row; nothing was scheduled.".format(
-                plan.get("stow")), {"row": row})
-        document["resets"].append(row)
-        save_state(path, document)
-        try:
-            pid = start()
-            # The deliverer waits on this lock to claim, so it is alive to be identified.
-            identity = (probe or process_identity)(pid)
-            if identity is None:
-                raise StateError("The reset deliverer (pid {}) exited before it could be identified; nothing was sent.".format(pid), {"pid": pid})
-            row["process"] = identity
-        except ForemanError as exc:
-            row.update(status="failed", result=failure(exc, plan["stow"], str(Path(state_path).expanduser().resolve()), **(options or {})))
+            if row is None or row["status"] != "scheduled" or row["process"] is not None:
+                raise StateError("Reset startup ownership changed; continue foreground supervision and inspect {} before any retry.".format(path),
+                                 {"record": str(path)})
+            managed = None
+            try:
+                started = start()
+                managed = started if isinstance(started, DetachedReset) else None
+                if managed is not None:
+                    identity = managed.ready(probe or process_identity)
+                else:
+                    identity = (probe or process_identity)(started)
+                    if identity is None:
+                        raise StateError("The reset deliverer (pid {}) exited before it could be identified; nothing was sent.".format(started), {"pid": started})
+                row["process"] = identity
+            except ForemanError as exc:
+                if managed is not None:
+                    managed.abandon(attempt, exc)
+                if isinstance(exc, StartupFailed) and managed is not None and attempt < STARTUP_ATTEMPTS:
+                    continue
+                row.update(status="failed", result=failure(exc, plan["stow"], str(Path(state_path).expanduser().resolve()), **(options or {})))
+                save_state(path, document)
+                _refuse(row, state_path, exc.message)
             save_state(path, document)
-            _refuse(row, state_path, exc.message)
-        save_state(path, document)
-        return {**row, "replayed": False}
+            scheduled = copy.deepcopy(row)
+        if managed is None:
+            return {**scheduled, "replayed": False}
+        claim_error = None
+        try:
+            managed.claimed()
+        except StartupFailed as exc:
+            claim_error = exc
+        with state_lock(path):
+            document = _records(path)
+            row = _row(document, plan)
+            if row is None or row["process"] != scheduled["process"]:
+                managed.close()
+                raise StateError("Reset startup ownership changed; continue foreground supervision and inspect {} before any retry.".format(path),
+                                 {"record": str(path)})
+            if row["status"] == "delivered" or (row["status"] == "delivering" and alive(row["process"])):
+                managed.close()
+                return {**copy.deepcopy(row), "replayed": False}
+            if row["status"] != "scheduled":
+                managed.close()
+                _live, changed = _settle(document, row, state_path, alive)
+                if changed:
+                    save_state(path, document)
+                _refuse(row, state_path)
+            # No claim occurred. Holding the same lock bars the old child
+            # from ever claiming while it is reaped and its identity revoked.
+            exc = claim_error or managed._failed("startup_claim_not_recorded")
+            managed.abandon(attempt, exc)
+            row["process"] = None
+            if attempt == STARTUP_ATTEMPTS:
+                row.update(status="failed", result=failure(exc, plan["stow"], str(Path(state_path).expanduser().resolve()), **(options or {})))
+            save_state(path, document)
+            if row["status"] == "failed":
+                _refuse(row, state_path, exc.message)
+    raise StateError("Reset startup exhausted its owner recovery; continue foreground supervision and inspect {}.".format(path),
+                     {"record": str(path)})
 
 
 #: Error codes whose messages this owner writes itself. Any other error, a
 #: Herdr or composer failure above all, can carry raw subprocess output or pane
 #: text in its message; the record keeps a generic line and the log keeps it.
 OWN_MESSAGE_CODES = frozenset({"usage_error", "state_error", "reset_ended", "reset_record_newer", "reset_record_unusable",
-                               "reset_session_changed"})
+                               "reset_session_changed", "reset_startup_failed"})
 
 
 def failure(exc, stow, state, **options):

@@ -1232,5 +1232,182 @@ class ResetCommandTest(CliCase):
         self.assertIn("not reset-ready", err)
 
 
+# The fixture uses the real detached process, identity probe, record lock and
+# claim. Only native pane input is replaced with a controlled journal. No
+# default Herdr session or production owner state is reachable.
+STARTUP_CHILD = r'''
+import json, os, sys, time
+from pathlib import Path
+from foreman import foreman_reset, supervision_runtime
+from foreman.state import state_lock
+state, mode, release, journal = sys.argv[1:5]
+fd = int(sys.argv[-1])
+plan = {"pane_id": "w9:p1", "stow": "round-7"}
+process = supervision_runtime.process_identity(os.getpid())
+if mode == "before_ready":
+    raise SystemExit(7)
+if mode == "wrong_identity":
+    foreman_reset.startup_notify(fd, "ready", {**process, "identity": "0" * 64})
+else:
+    foreman_reset.startup_notify(fd, "ready", process)
+if mode == "before_claim":
+    with foreman_reset._waiting_lock(foreman_reset.record_path(state)):
+        raise SystemExit(7)
+if mode == "false_claim":
+    foreman_reset.startup_notify(fd, "claimed", process)
+else:
+    claimed = foreman_reset.claim(state, plan, process)
+    if not claimed:
+        foreman_reset.startup_notify(fd, "unclaimed", process)
+        raise SystemExit(9)
+    if mode == "claimed_failure":
+        foreman_reset.finish(state, plan, "failed", {
+            "error": "state_error", "message": "fixture failure after claim", "details": {},
+            "resume_prompt": foreman_reset.resume_prompt("round-7", state)})
+    foreman_reset.startup_notify(fd, "claimed", process)
+    if mode == "claimed_failure":
+        raise SystemExit(7)
+for _ in range(300):
+    if Path(release).exists():
+        with Path(journal).open("a") as handle:
+            handle.write("clear\nresume\n")
+        foreman_reset.finish(state, plan, "delivered", {
+            "schema_version": 2, **plan, "agent": "fixture-foreman", "cleared": True,
+            "resume": {"landed": True, "started": True}})
+        raise SystemExit(0)
+    time.sleep(0.02)
+raise SystemExit(8)
+'''
+
+
+class DetachedStartupTest(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory(prefix="reset-startup-")
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+        self.state = self.root / "owner state.json"
+        self.release = self.root / "release"
+        self.journal = self.root / "input"
+        self.log = self.root / "reset.log"
+        self.child_script = self.root / "child.py"
+        self.child_script.write_text(STARTUP_CHILD, encoding="utf-8")
+        self.children = []
+        self.addCleanup(self.reap)
+        self.package = str(Path(__file__).resolve().parents[1])
+        self.plan = {"pane_id": PANE, "stow": "round-7"}
+
+    def reap(self):
+        # These are Popen-owned fixture children, never native pane processes.
+        for child in self.children:
+            if child.child.poll() is None:
+                child.child.terminate()
+            child.child.wait(timeout=5)
+            child.close()
+
+    def start(self, mode):
+        with self.log.open("ab") as sink:
+            child = foreman_reset.DetachedReset(
+                [sys.executable, str(self.child_script), str(self.state), mode, str(self.release), str(self.journal)],
+                sink, self.package)
+        self.children.append(child)
+        return child
+
+    def schedule(self, modes):
+        choices = iter(modes)
+        with patch.dict(os.environ, {"PYTHONPATH": self.package}):
+            return foreman_reset.schedule(self.state, self.plan, RESET_AT, lambda: self.start(next(choices)),
+                                          native_session=SESSION)
+
+    def finish_once(self):
+        self.release.write_text("release", encoding="utf-8")
+        for child in self.children:
+            child.child.wait(timeout=5)
+        self.assertEqual(self.journal.read_text(), "clear\nresume\n")
+        document = json.loads(foreman_reset.record_path(self.state).read_text())
+        self.assertEqual(len(document["resets"]), 1)
+        row = document["resets"][0]
+        self.assertEqual((row["status"], row["native_session"], row["scheduled_at"]), ("delivered", SESSION, RESET_AT))
+
+    def test_loaded_identity_and_durable_claim_precede_success(self):
+        row = self.schedule(["healthy"])
+        self.assertEqual(row["status"], "delivering")
+        self.assertEqual(row["process"], supervision_runtime.process_identity(self.children[0].child.pid))
+        self.assertFalse(self.journal.exists())
+        self.finish_once()
+
+    def test_preclaim_loss_recovers_once_without_duplicate_input(self):
+        for mode in ("before_ready", "before_claim", "wrong_identity", "false_claim"):
+            with self.subTest(mode=mode):
+                # Each subcase gets independent owner records and fixture control.
+                foreman_reset.record_path(self.state).unlink(missing_ok=True)
+                self.release.unlink(missing_ok=True)
+                self.journal.unlink(missing_ok=True)
+                self.log.unlink(missing_ok=True)
+                before = len(self.children)
+                row = self.schedule([mode, "healthy"])
+                launched = self.children[before:]
+                self.assertEqual(len(launched), 2)
+                self.assertIsNotNone(launched[0].child.poll())
+                self.assertEqual(row["process"]["pid"], launched[1].child.pid)
+                self.assertFalse(self.journal.exists())
+                losses = [json.loads(line) for line in self.log.read_text().splitlines()]
+                self.assertEqual(len(losses), 1)
+                self.assertEqual((losses[0]["startup_attempt"], losses[0]["pid"], losses[0]["phase"]),
+                                 (1, launched[0].child.pid, "preclaim"))
+                self.finish_once()
+
+    def test_exhausted_preclaim_recovery_preserves_a_terminal_no_input_receipt(self):
+        with self.assertRaises(foreman_reset.ResetEnded):
+            self.schedule(["before_claim", "before_claim"])
+        self.assertEqual(len(self.children), foreman_reset.STARTUP_ATTEMPTS)
+        self.assertFalse(self.journal.exists())
+        row = json.loads(foreman_reset.record_path(self.state).read_text())["resets"][0]
+        self.assertEqual((row["status"], row["process"], row["result"]["error"]), ("failed", None, "reset_startup_failed"))
+        self.assertIn("memory-show", row["result"]["resume_prompt"])
+        self.assertEqual(len(self.log.read_text().splitlines()), 2)
+        with self.assertRaises(foreman_reset.ResetEnded):
+            self.schedule(["healthy"])
+        self.assertEqual(len(self.children), foreman_reset.STARTUP_ATTEMPTS)
+
+    def test_a_claimed_failure_never_starts_another_child(self):
+        with self.assertRaises(foreman_reset.ResetEnded):
+            self.schedule(["claimed_failure", "healthy"])
+        self.assertEqual(len(self.children), 1)
+        self.assertFalse(self.journal.exists())
+        row = json.loads(foreman_reset.record_path(self.state).read_text())["resets"][0]
+        self.assertEqual((row["status"], row["result"]["message"]), ("failed", "fixture failure after claim"))
+
+    def test_continuation_survives_the_scheduling_parent_process(self):
+        parent_script = self.root / "parent.py"
+        parent_script.write_text(
+            "import json, sys\nfrom pathlib import Path\nfrom foreman import foreman_reset\n"
+            "state, child, release, journal, log, package = sys.argv[1:]\n"
+            "with Path(log).open('ab') as sink:\n"
+            "    row = foreman_reset.schedule(state, {'pane_id':'w9:p1','stow':'round-7'}, " + repr(RESET_AT) + ",\n"
+            "        lambda: foreman_reset.DetachedReset([sys.executable, child, state, 'healthy', release, journal], sink, package),\n"
+            "        native_session=" + repr(SESSION) + ")\n"
+            "print(json.dumps(row))\n", encoding="utf-8")
+        env = {**os.environ, "PYTHONPATH": self.package}
+        result = subprocess.run([sys.executable, str(parent_script), str(self.state), str(self.child_script),
+                                 str(self.release), str(self.journal), str(self.log), self.package],
+                                env=env, capture_output=True, text=True, check=False, timeout=20)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        row = json.loads(result.stdout)
+        self.assertEqual(row["status"], "delivering")
+        self.assertEqual(supervision_runtime.process_identity(row["process"]["pid"]), row["process"])
+        self.assertFalse(self.journal.exists())
+        # The scheduling tool/process is gone; release the same detached child.
+        self.release.write_text("release", encoding="utf-8")
+        final = json.loads(foreman_reset.record_path(self.state).read_text())["resets"][0]
+        for _ in range(100):
+            final = json.loads(foreman_reset.record_path(self.state).read_text())["resets"][0]
+            if final["status"] == "delivered":
+                break
+            import time
+            time.sleep(0.02)
+        self.assertEqual(final["status"], "delivered")
+        self.assertEqual(self.journal.read_text(), "clear\nresume\n")
+
+
 if __name__ == "__main__":
     unittest.main()

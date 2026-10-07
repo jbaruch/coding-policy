@@ -111,14 +111,17 @@ under when running Step 17's `foreman-reset` command.
 
 - **Exit 0** — stdout names the scheduled `pane_id`, `stow`, deliverer `pid`
   and `log`
+  - A fresh schedule confirms the loaded child's identity and saved claim
+  - Preclaim loss is recovered within the owner's startup allowance;
+    failed starts remain in the private log
   - `replayed: true` means this exact reset was already scheduled, and
     nothing new started
   - End the turn now
   - Once the pane is idle, the deliverer clears it and sends the resume
     prompt naming that stow; the next context takes Step 17's Resume Route
 - **Exit 1** — stderr is one JSON object; route on its `error` field:
-  - `reset_ended` — this stow's one reset attempt failed or was
-    interrupted, including a deliverer that could not start
+  - `reset_ended` — this stow's delivery failed or was interrupted,
+    including exhausted preclaim startup recovery
     - Never re-run `foreman-reset` for this stow
     - Record a user-attention blocker quoting `details.resume_prompt` and
       `details.record`

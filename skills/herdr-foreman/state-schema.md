@@ -1115,7 +1115,18 @@ could not take.
 | `native_session` | `{"kind": "id" \| "path", "value": non-empty string}`, or null | The foreman's native session as `supervision-bind` recorded it (the binding's `identity` `kind` and `value`); `foreman-reset` refuses to schedule without one. Every keystroke of the clear command, extra Enters included, refuses unless `herdr pane get` still reports that session for the pane, finishing the row `failed` before any keystroke and `interrupted` after one, both with error `reset_session_changed` and `details.reason` `native_session_changed`. The clear starts a new session by design: once the composer confirms it consumed, the deliverer waits up to `CLEAR_SESSION_BUDGET_SEC` for Herdr to report a new session for the pane and pins it, and every keystroke of the resume prompt refuses unless the pane still holds the pinned session. The pin also requires the pane's foreground processes (`herdr pane process-info`) to be the ones the first keystroke found, compared by pid, start time and command line (`supervision_runtime.process_identity`); a new session under another process is a replacement, refused with `native_session_changed`. A pane that reports no new session in that budget finishes the row `interrupted` with `details.reason` `clear_session_unchanged`. A transcript path that cannot be resolved matches no session. Null means no session was recorded: the migration writes it on every schema-1 row, and `foreman-reset` never writes it. The reader accepts null on any row; a deliverer that claims a null row refuses before any keystroke |
 | `result` | null, the delivery object, or the failure object | `scheduled` and `delivering` hold null. `delivered` holds exactly `{"schema_version", "pane_id", "stow", "agent", "cleared": true, "resume": {"landed": true, "started": true}}`, whose `schema_version`, `pane_id` and `stow` equal the row's. `failed` and `interrupted` hold exactly `{"error": string, "message": string, "details": object, "resume_prompt": string}`; `resume_prompt` is what the operator pastes. `reconciled` holds exactly `{"outcome": "delivered", "reconciled_at": ISO-8601 string}` |
 
-One delivery attempt per pane and stow, never retried automatically. A
+One claimed delivery attempt per pane and stow, never retried automatically.
+Production startup uses a private inherited pipe: the loaded child supplies
+its identity before waiting on the record lock, and acknowledges its durable
+claim after the scheduler saves that identity and unlocks. Scheduling returns
+success only with a live recorded claim or completed delivery. Bounded
+preclaim recovery follows `foreman_reset.py` (`schedule`, `DetachedReset`,
+`STARTUP_ATTEMPTS`): under the record lock the owner proves its row remains
+unclaimed, reaps only its own child and revokes that process identity before
+another start. The private reset log retains each lost startup's attempt,
+process identity and fixed failure reason. No row shape changes. Exhaustion
+finishes `failed`; a claimed failure or uncertain send never retries.
+A
 retry replays before every precondition the reset itself changes (stow
 readiness, supervision work); reading the stow and supervision, and checking
 the caller's pane, still come first. A `delivered` or `reconciled` row,
