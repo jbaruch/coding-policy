@@ -146,6 +146,20 @@ class ClaudeParserTest(unittest.TestCase):
                 with self.assertRaises(ParseError):
                     parse_claude_usage("Current session · Resets 6:30pm (UTC)\n" + row + "\n")
 
+    def test_wrapped_unknown_prose_ends_the_window_before_unrelated_percentages(self):
+        for prose in ("Other clients show", "What's contributing to your", "Unrecognized section"):
+            with self.subTest(prose=prose), self.assertRaises(ParseError):
+                parse_claude_usage("Current session · Resets 6:30pm (UTC)\n" + prose + "\n50% used\n")
+
+    def test_unknown_boundary_preserves_complete_windows_and_accepts_next_header(self):
+        text = ("Current session\n8% used\nResets 6:30pm (UTC)\n"
+                "Unknown wrapped section\n50% used\n"
+                "Current week (all models)\n████\n\n2% used\n")
+        windows = parse_claude_usage(text)["windows"]
+        self.assertEqual(windows["Current session"]["used_pct"], 8.0)
+        self.assertEqual(windows["Current session"]["resets"], "6:30pm (UTC)")
+        self.assertEqual(windows["Current week (all models)"]["used_pct"], 2.0)
+
     def test_reset_continuation_stops_at_blank_bar_percentage_or_section(self):
         for boundary in ("", "████", "1% used", "What's contributing to your limits usage?", "Unrelated UI section"):
             with self.subTest(boundary=boundary):
