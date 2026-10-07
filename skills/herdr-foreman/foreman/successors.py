@@ -17,7 +17,7 @@ from urllib.error import URLError
 from urllib.parse import urlsplit
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
-from . import capabilities
+from . import capabilities, runnable
 from .chronology import timestamp
 from .errors import UsageError
 from .state import save_state, state_lock
@@ -237,7 +237,8 @@ def record(path, data, at, agent):
             if all(existing[key] == value for key, value in data.items()) and all(
                     existing[key] == row[key] for key in ("kind", "window_group", "authorized_row", "needs")):
                 return existing
-            fail("placement id already exists with different evidence/authority; recalibrate through capability-record, never rewrite its origin.")
+            fail("placement id already exists with different evidence/authority; recalibrate through `{}`, never rewrite its origin.".format(
+                runnable.command("capability-record --record FILE")))
         needs = row["needs"]
         row["origin"] = {"verdict": capabilities.assess(document, predecessor["model"], predecessor.get("effort"), needs),
                          "entries": [copy.deepcopy(entry) for entry in document["entries"]
@@ -286,7 +287,7 @@ def recalibrate(document, events, at):
         seen.add(identity)
         row = next((item for item in document.get("successors", []) if item["id"] == identity), None)
         if row is None:
-            fail("unknown placement id {}; inspect capability-show.".format(identity))
+            fail("unknown placement id {}; inspect `{}`.".format(identity, runnable.command("capability-show")))
         stamped = {**copy.deepcopy(event), "schema_version": SCHEMA_VERSION,
                    "recorded_at": timestamp(at, "Recalibration checkpoint").isoformat()}
         if row["history"] and row["history"][-1] == stamped:
