@@ -175,7 +175,8 @@ def validate(row):
     if not isinstance(digest, str) or len(digest) != 64 or any(ch not in "0123456789abcdef" for ch in digest):
         fail("provider_sha256 needs the owner-stamped source digest.")
     fields(row["origin"], {"verdict", "entries"}, "qualification origin")
-    if row["origin"]["verdict"] not in {"adequate", "unknown"} or not isinstance(row["origin"]["entries"], list):
+    if (not isinstance(row["origin"]["verdict"], str) or row["origin"]["verdict"] not in {"adequate", "unknown"}
+            or not isinstance(row["origin"]["entries"], list)):
         fail("origin must preserve adequate or unknown evidence, never negative qualification.")
     for entry in row["origin"]["entries"]:
         capabilities.validate_entry(entry)
@@ -305,6 +306,8 @@ def inspect(row, at):
     last = row["history"][-1] if row["history"] else None
     status = "withdrawn" if last and last["action"] == "withdraw" else "confirmed" if last and last["action"] == "revise" else "provisional"
     checked = last["recorded_at"] if last else row["assigned_at"]
+    if timestamp(checked, "Placement checkpoint") > timestamp(at, "Placement read"):
+        status = "future"
     due_at = timestamp(checked, "Placement checkpoint") + capabilities.INTERVAL
     return {"id": row["id"], "status": status, "origin": copy.deepcopy(row["origin"]),
             "provenance": copy.deepcopy(row["provenance"]), "assigned_at": row["assigned_at"],
