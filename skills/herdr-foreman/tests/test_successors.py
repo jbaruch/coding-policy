@@ -194,6 +194,16 @@ class SuccessorTest(CliCase):
         self.record("sonnet-5", "low", "inadequate")
         self.successor_record(expected=1)
 
+    def test_retired_predecessor_can_be_replaced_but_its_status_is_preserved(self):
+        self.report["provenance"]["predecessor"]["status"] = "retired"
+        self.successor_record()
+        self.upgrade()
+        plan = self.plan()
+        candidate = next(row for row in plan["selection"]["developer"]["routing"]["candidates"]
+                         if row["tier_row"] == "build")
+        self.assertEqual(candidate["placement"]["provenance"]["predecessor"]["status"], "retired")
+        self.assertEqual(plan["tiers"]["developer"]["model"], "sonnet-5.1")
+
     def test_future_maintenance_checkpoint_remains_visible_and_refuses_inheritance(self):
         self.successor_record()
         self.upgrade()

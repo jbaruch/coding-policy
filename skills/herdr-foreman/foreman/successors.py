@@ -214,8 +214,8 @@ def record(path, data, at, agent):
         fail("name an existing authorized role and round, not a new responsibility.")
     proof = data["provenance"]
     provenance(proof, at, agent.kind)
-    if any(proof[name]["status"] != "active" for name in ("predecessor", "successor")):
-        fail("provider retirement prevents inheritance; preserve it in maintenance evidence.")
+    if proof["successor"]["status"] != "active":
+        fail("successor retirement prevents inheritance; preserve it in maintenance evidence.")
     now = timestamp(at, "Successor assignment").isoformat()
     row = {**copy.deepcopy(data), "schema_version": SCHEMA_VERSION, "kind": agent.kind,
            "window_group": agent.window_group, "authorized_row": row_binding(predecessor),
@@ -326,7 +326,7 @@ def placement(document, agent, role, round_type, name, configured, needs, at, wo
         result = inspect(row, at)
         if timestamp(at, "Placement read") < timestamp(row["assigned_at"], "Assignment"):
             result["status"] = "future"
-        if any(row["provenance"][key]["status"] == "retired" for key in ("predecessor", "successor")):
+        if row["provenance"]["successor"]["status"] == "retired":
             result["status"] = "retired"
         try:
             capabilities.assess(document, row["authorized_row"]["model"], configured.get("effort"), needs)

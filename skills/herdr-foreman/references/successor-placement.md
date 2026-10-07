@@ -16,8 +16,10 @@ does not infer succession from a prefix or classify prose by keywords.
    successor IDs, family, versions and the explicit same-family relationship.
    Cite one to three official sources, including any separate identity/alias
    catalog. A model self-report, matching prefixes, a weaker family or a mere
-   listing of two models does not establish succession. Report retirement
-   rather than inheritance. No architectural or judgment round is implied by
+   listing of two models does not establish succession. A retired successor
+   refuses inheritance. Preserve predecessor retirement as historical provenance;
+   it does not prevent replacing that model with an active successor. No
+   architectural or judgment round is implied by
    this factual lookup; actual specialist triggers retain their normal route.
 3. Prepare the report below. Run `capability-successor --record <report.json>`
    through SKILL.md Step 2's installed-plugin command. Config must still name
@@ -100,6 +102,10 @@ Maintenance reports may contain `entries`, `recalibrations`, or both:
   placement even if later evidence marks the pair adequate. A keep cannot
   revive it; a new assignment requires new provenance and still-authorized
   predecessor config.
+
+`provider_status` in a recalibration refers to the successor that would run,
+not the historical predecessor; the predecessor's provider status stays in
+the original provenance.
 
 The owner appends dated history without rewriting origins. Current negative
 capability evidence vetoes inheritance before maintenance too. Cadence alone
