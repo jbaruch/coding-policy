@@ -18,6 +18,13 @@
   hide its due date. No automatic scheduler, per-role qualification campaign,
   additional approval or invented savings is introduced (#700).
 
+### Fixed
+
+- Claude usage parsing now ends a window at unrecognized wrapped prose rather
+  than borrowing an unrelated later percentage. Captured old and narrow-view
+  layouts retain blank rows, wrapped progress bars and supported reset metadata;
+  failed measurements still close the usage dialog (#686).
+
 ## 0.3.368 — 2026-10-07
 
 ### Changed

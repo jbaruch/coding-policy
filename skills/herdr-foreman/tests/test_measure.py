@@ -188,6 +188,16 @@ class MeasureAgentTest(unittest.TestCase):
         self.assertIn("outside 0..100", snapshot["agents"]["claude"]["error"]["message"])
         self.assertIn("agent send-keys claude esc", runner.commands())
 
+    def test_wrapped_unrelated_percentage_is_failed_measurement_with_cleanup(self):
+        text = ("Current session · Resets 6:30pm (UTC)\nOther clients show\n50% used\n"
+                "Current week (all models)\n")
+        runner = runner_with({"claude": "idle"}, {"claude": text})
+        snapshot = measure(HerdrClient(runner=runner), [BY_NAME["claude"]], AT)
+        self.assertEqual(snapshot["failed_agents"], ["claude"])
+        self.assertIsNone(snapshot["agents"]["claude"]["headroom_pct"])
+        self.assertIn("No usage windows found", snapshot["agents"]["claude"]["error"]["message"])
+        self.assertIn("agent send-keys claude esc", runner.commands())
+
     def test_idle_claude_is_measured_and_the_dialog_is_closed(self):
         runner = runner_with({"claude": "idle"}, {"claude": CLAUDE_PANE})
         record = measure_agent(HerdrClient(runner=runner), BY_NAME["claude"])
