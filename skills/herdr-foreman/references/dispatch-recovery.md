@@ -156,14 +156,22 @@ actual-evidence `reconcile --record` route; the selector cannot infer no-send.
 The guard is owned by `skills/herdr-foreman/foreman/cli.py`
 (`_recorded_no_send_cleanup`, `_run_recovery`).
 
+A live surface must match the original recorded native session and verified
+foreground process, not merely remain stable across current reads. Missing
+original identity proof preserves the live surface. An absent agent permits
+cleanup only when the recorded pane is absent or holds only its shell.
+
 Proceed to Step 11 with the roles that were dispatched.
 
 ## Owner-managed recovery
 
 Resolve the plugin root for each call as in the skill's command blocks, then
 use `bash "$CP/skills/herdr-foreman/foreman.sh"` for the commands below,
-with the same `--state FILE` throughout. Every owner
-mutation takes `--record FILE` containing a JSON object and optional `--now`.
+with the same `--state FILE` throughout. Record-submitting owner mutations
+take `--record FILE` containing a JSON object and optional `--now`.
+`reconcile` requires exactly one mutually exclusive input: `--record FILE`
+for actual transport evidence, or `--dispatch ID` for the stored-proof cleanup
+selector above. Never combine the two or invent a receipt for that selector.
 Success prints the recorded object on stdout, exit 0. Exit 1 prints an
 actionable JSON error on stderr; resolve that cause before proceeding. Do not
 edit state.json or a prior assignment row by hand.

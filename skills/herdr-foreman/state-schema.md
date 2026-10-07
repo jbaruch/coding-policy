@@ -566,6 +566,15 @@ are never restamped: a judge dispatch recorded before version 3 keeps no mode,
 and its ledger row reads `unknown`. A new judge reservation without a mode is
 refused, and so is a mode-less retry of a stored row; only stored rows keep
 the mode-less shape.
+
+Assignment-scoped spawn reservations can record the existing
+`context_before_send.tier.verified` process proof before startup settling.
+Stored-dispatch cleanup binds that proof and `observed_before.context_session`
+to the live surface before closing. Older rows lacking either proof remain
+readable but cannot authorize closing a live agent. No historical proof is
+backfilled from a later observation; absent-agent cleanup still requires an
+absent recorded pane or its sole shell.
+
 `context_before_send`, wherever present, is an object. On a mode-bearing dispatch it carries
 `judge_mode` equal to the dispatch's own; on any other dispatch it carries no
 `judge_mode` key, null included. This holds from the send onward, pending or

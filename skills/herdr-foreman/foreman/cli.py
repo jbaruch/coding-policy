@@ -669,7 +669,7 @@ def _recorded_no_send_cleanup(state_path, state, identifier):
     return row, record, assignment
 
 
-def _cleanup_reconciled_scoped_not_sent(state_path, dispatch, record, at, client):
+def _cleanup_reconciled_scoped_not_sent(state_path, dispatch, record, at, client, before_close=None):
     """Close and resolve a scoped send proven not to have reached its worker.
 
     The caller saves the ``not_sent`` reconciliation before entering here. A
@@ -693,7 +693,8 @@ def _cleanup_reconciled_scoped_not_sent(state_path, dispatch, record, at, client
             {"dispatch": dispatch["id"]},
         )
     try:
-        closure = lifecycle.close(client, assignment["agent"], pane)
+        closure = lifecycle.close(client, assignment["agent"], pane,
+                                  **({"before_close": before_close} if before_close is not None else {}))
         # An operator may resolve supervision independently; inactive is not
         # evidence that the assignment pane was closed. Always prove closure,
         # and skip only the already-recorded sidecar transition.
@@ -1891,7 +1892,8 @@ def _apply(args, client, warn, trace, hold_gates):
                 recovery.reserve(store, {
                     **dispatches[role], "observed_before": None,
                     "brief": paths[role], "common": paths["common"],
-                    "context_before_send": {"tier": tier, **({"judge_mode": judge_mode} if canonical_role(role) == "judge" else {})},
+                    "context_before_send": {"tier": {**tier, "verified": verify_running(client, agents_by_name[name], pane, tier)},
+                                            **({"judge_mode": judge_mode} if canonical_role(role) == "judge" else {})},
                 }, at)
                 prepared.append(identifier)
                 save_state(state_path, state)
@@ -2400,6 +2402,37 @@ def _run_recovery(args, state_path, warn, client, trace):
         if selected_cleanup:
             dispatch, proof_record, assignment = selected_cleanup
             pane = assignment["pane_id"]
+            tier = (dispatch.get("context_before_send") or {}).get("tier") or (dispatch.get("observed_before") or {}).get("tier")
+            original_session = (dispatch.get("observed_before") or {}).get("context_session")
+            original_process = tier.get("verified") if isinstance(tier, dict) else None
+            cleanup_identity = None
+            def observe_cleanup():
+                nonlocal cleanup_identity
+                try:
+                    current = client.agent_get(name)
+                except HerdrError as exc:
+                    if error_code(exc) != "agent_not_found":
+                        raise
+                    try:
+                        client.pane_get(pane)
+                    except HerdrError as pane_error:
+                        if error_code(pane_error) != "pane_not_found":
+                            raise
+                    else:
+                        require_empty_shell(client, pane)
+                    return None
+                if (not isinstance(original_session, dict) or not isinstance(original_process, dict)
+                        or original_process.get("source") != "process_argv"
+                        or type(original_process.get("pid")) is not int or original_process["pid"] <= 0):
+                    raise UsageError("No original native-session/process proof is available for cleanup; preserve the worker and inspect its recorded evidence.", {})
+                running = verify_running(client, agents[name], pane, tier)
+                identity = (native_context_session(current, agents[name].kind), running)
+                if (current.get("pane_id") != pane or current.get("agent_status") not in READY_STATES
+                        or identity != (original_session, original_process)
+                        or (cleanup_identity is not None and identity != cleanup_identity)):
+                    raise HerdrError("Recorded cleanup identity differs from the original session/process; preserve the worker and inspect its recorded evidence.", {})
+                cleanup_identity = identity
+                return identity
             try:
                 try:
                     live = client.agent_get(name)
@@ -2415,23 +2448,10 @@ def _run_recovery(args, state_path, warn, client, trace):
                         require_empty_shell(client, pane)
                 else:
                     recovery.require_recovery_ready(live)
-                    tier = (dispatch.get("context_before_send") or {}).get("tier") or (dispatch.get("observed_before") or {}).get("tier")
-                    if not isinstance(tier, dict):
-                        raise UsageError("No original tier is available for cleanup; preserve the worker.", {})
-                    cleanup_identity = None
-                    def observe_cleanup():
-                        nonlocal cleanup_identity
-                        current = client.agent_get(name)
-                        running = verify_running(client, agents[name], pane, tier)
-                        identity = (current.get("agent_session"), running)
-                        if (current.get("pane_id") != pane or current.get("agent_status") not in READY_STATES
-                                or (cleanup_identity is not None and identity != cleanup_identity)):
-                            raise HerdrError("Recorded cleanup identity changed; preserve the worker.", {})
-                        cleanup_identity = identity
-                        return identity
                     ensure_ready(client, agents[name], pane, startup_observe=observe_cleanup)
                     observe_cleanup()
-                closure = _cleanup_reconciled_scoped_not_sent(state_path, dispatch, proof_record, at, client)
+                closure = _cleanup_reconciled_scoped_not_sent(state_path, dispatch, proof_record, at, client,
+                                                            before_close=observe_cleanup)
             except ForemanError as exc:
                 raise owner_recovery(exc, exc.details.get("failure_kind", "retry_cleanup_unproved"),
                     runnable.command("supervision-status --state " + shlex.quote(str(state_path))),

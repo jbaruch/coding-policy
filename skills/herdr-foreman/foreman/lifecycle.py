@@ -190,12 +190,14 @@ def spawn(client, worker, tier, *, cwd=None, history=None, before_start=None, sl
     return pane
 
 
-def close(client, agent, pane):
+def close(client, agent, pane, before_close=None):
     """Close one assignment pane, accepting a replay only when its agent is absent."""
     try:
         live = client.agent_get(agent)
     except HerdrError as exc:
         if error_code(exc) == "agent_not_found":
+            if before_close is not None:
+                before_close()
             try:
                 client.pane_close(pane)
             except HerdrError as pane_exc:
@@ -210,6 +212,8 @@ def close(client, agent, pane):
                 agent, pane, live.get("pane_id")),
             {"agent": agent, "recorded_pane": pane, "live_pane": live.get("pane_id")},
         )
+    if before_close is not None:
+        before_close()
     client.pane_close(pane)
     try:
         client.agent_get(agent)
