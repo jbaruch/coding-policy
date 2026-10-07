@@ -141,7 +141,7 @@ bash "$CP/skills/release/watch-pr-reviews.sh" <owner> <repo> <pr-number>
 
 It returns the full `poll-pr-reviews.sh` snapshot plus a `watch` object — `{"result": ..., "attempts": N, "elapsed_seconds": N}`. The interval/budget constants and the result contract are the script's, not restated here (`rules/script-as-black-box.md` — see the header's result matrix). Branch on `.watch.result`:
 
-- `ready` (exit 0) — mergeable, CI `success`/`none`, both bots posted, no Copilot review still owed, the policy reviewer not `CHANGES_REQUESTED` (Copilot may be, and this still reaches ready — it is always advisory). Read every non-empty `reviews.*.body` (a `COMMENTED` verdict with zero inline comments still carries a body per `rules/reviewer-feedback-reading.md`), then proceed to Step 6.
+- `ready` (exit 0) — mergeable, CI `success`/`none`, both bots posted, no Copilot review still owed, the policy reviewer not `CHANGES_REQUESTED` (Copilot may be, and this still reaches ready — it is always advisory). Read every `review_bodies[].body`, from every author and page, then proceed to Step 6.
 - `changes_requested` (exit 0) — the policy reviewer requested changes (a blocking finding). Go to Step 6, address it, push; the next push re-fires the review, so re-run the watcher.
 - `ci_failure` (exit 0) — a check failed. Fix it (Step 6), push, re-run the watcher.
 - `dirty` (exit 0) — the branch conflicts with `main` and GitHub skipped the `pull_request:` workflows. Rebase onto current `main`, resolve, force-push, then re-run the watcher — the push re-fires the missed workflows.
@@ -150,14 +150,18 @@ It returns the full `poll-pr-reviews.sh` snapshot plus a `watch` object — `{"r
 
 ## Step 6 — Address Feedback
 
-- **Read every review in full first.** Read each reviewer's `reviews.*.body` and every inline comment body before judging any item — a `COMMENTED` state or zero inline comments is not a license to skip the body (see `rules/reviewer-feedback-reading.md`)
-- **Then act by severity** (see `rules/review-severity.md`): blocking findings — fix now; advisory findings — acknowledge, fold in only when a blocking round is already happening, else defer to a follow-up. Never burn a dedicated re-review round on a lone advisory
+- **Read every review in full first.** Read every `review_bodies[].body` and `inline_comment_bodies[].body` in Step 5's snapshot, including human, other-bot and historical reviews, before judging any item (see `rules/reviewer-feedback-reading.md`). The bot-specific `reviews` fields route verdicts, never limit reading
+- **Then act by severity** (see `rules/review-severity.md`): blocking findings — fix now; advisory findings — acknowledge in the existing team task report or round log, or note them directly in standalone review replies.
+- Fold an advisory only when an already-required blocking correction touches the same surface and adds no push or verification round
+- An advisory creates no obligation for an issue, follow-up, push or delivery prerequisite
+- Never run an advisory-only re-review round
 - **CI failures**: Fix every one
 - **Review suggestions**: Apply what's right. Push back on anything that misreads scope — cite concrete evidence (file:line, log line, spec quote) when declining
-- **Reply on EVERY thread.** Use these exact opening literals:
+- **Reply to addressed blocking findings.** Ordinary advisory replies may accompany the existing review work, but are outside merge prerequisites. Use these opening literals:
   - Accepted: `Fixed in <sha>` (literal phrase; `Done` / `Accepted and fixed` do not satisfy)
   - Declined: `Declining — <reason with cited evidence>` (em dash `—`, not hyphen or period)
-  - Advisory deferred: `Acknowledged — deferred to <follow-up ref>` (em dash `—`; names where it is tracked)
+  - Advisory: standalone, `Acknowledged — advisory noted`; in a team round, `Acknowledged — recorded in <task report or round-log ref>`. Use the existing record; never simulate a team report or create a new follow-up obligation
+  - Judge-weighed deferral keeps `Acknowledged — deferred to #<follow-up issue> (judge ruling <digest>)` under `skills/release/REVIEW_DETAILS.md`; its ruling and issue obligations are unchanged
 - **Marginal blocking finding:** a nominated finding may go to a weighing instead of a fix (`rules/review-severity.md` Judge-Weighed Finding Carve-Out)
   - Standalone, the operator is the judge
   - Standalone, nominate a finding only when it sits on lines the previous fix push added, or with a cited reachability claim marking it marginal
@@ -196,17 +200,17 @@ It returns the full `poll-pr-reviews.sh` snapshot plus a `watch` object — `{"r
 - Push fixes to the same branch
 - **Re-request Copilot after every push** with Step 4's command block. Copilot does not re-post on its own.
 - The policy reviewer re-runs automatically on every push (coding-policy via `review-codex.yml` `pull_request: synchronize`; consumers via `review-trigger.yml` re-dispatching the fleet App). No manual re-request.
-- Repeat Step 5 until the policy reviewer carries no blocking finding — `APPROVED`, `COMMENTED` with its body read and only advisories, or `RULED` after a ruled dismissal — and every thread has a reply. Proceed immediately to Step 7.
+- Repeat Step 5 until the policy reviewer carries no blocking finding — `APPROVED`, `COMMENTED` with its body read and only advisories, or `RULED` after a ruled dismissal — with addressed blocking findings replied to. Proceed immediately to Step 7.
 
 ## Step 7 — Merge + Cleanup
 
 Only proceed when:
 - Step 5's watcher returned `.watch.result` as `ready` — its exit-0 readiness conjunction (mergeable, CI `success`/`none`, both bots posted, no Copilot review still owed, the policy reviewer not `CHANGES_REQUESTED`); the field predicate is the watcher's, not restated here (`rules/script-as-black-box.md` — see `skills/release/watch-pr-reviews.sh` header). `ready` already requires each bot's `state` to have left `none`, so a reviewer that never ran cannot satisfy the gate vacuously, AND
-- Every non-empty `reviews.*.body` in the returned snapshot has been read in full — a `COMMENTED` state with zero inline comments is not a license to skip the body (see `rules/reviewer-feedback-reading.md`), AND
-- Every inline comment from Step 5's `inline_comments` count has a `Fixed in <sha>`, `Declining — <reason>`, or `Acknowledged — deferred to <follow-up ref>` reply per Step 6 (verify by listing the PR's review comments — the poll script tracks counts, not reply state, so the operator confirms thread closure). An advisory comment deferred with the `Acknowledged — deferred` reply closes its thread and never blocks the merge per `rules/review-severity.md`, AND
+- Every `review_bodies[].body` in the returned snapshot has been read in full, from every author, page and review state, and any blocking finding has been addressed per Step 6, AND
+- Every `inline_comment_bodies[].body` in Step 5's snapshot has been read in full and any blocking finding has been addressed per Step 6. Ordinary advisory acknowledgments and thread resolution are outside the merge predicate, AND
 - A ruled finding's reply cites its ruling, per Step 6.
 
-A `COMMENTED` review never gates the merge on its state alone — but its body must be read before merge, zero inline comments included. With inline comments, it is mergeable once every thread also has a reply. Advisory findings (the reviewer's `## Advisory findings` section, and every Copilot comment) do not block the merge — acknowledge them and defer per `rules/review-severity.md`; only a blocking finding gates.
+A `COMMENTED` review never gates the merge on its state alone — but its body must be read before merge, zero inline comments included. Every inline comment must also be read. Advisory findings (the reviewer's `## Advisory findings` section, and every Copilot comment) do not block the merge or require thread closure; use Step 6's standalone or team acknowledgment form during the existing review work. Only a blocking finding gates.
 
 Once these conditions hold, merge automatically per `rules/ship-on-green.md` — the green gates are the approval, stakes raise care not permission, and the only blocks are its three objective exits (Red / No undo / Murky). Do not pause to ask a human whether to merge.
 

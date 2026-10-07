@@ -15,7 +15,10 @@ the base, a changed path in the declared trust-boundary set, an added line
 carrying a declared CLI-surface marker, an added file in the declared
 user-facing docs set.
 
-The declaration is the repo's, never this module's. The architect trigger reads
+The declaration is the repo's, never this module's. One absent-base bootstrap
+may classify a reviewed external artifact whose exact digest and installation
+path the plan binds; the first pushed head must install identical bytes. Every
+existing and later declaration is read from the repository. The architect trigger reads
 "above the size the repo states", and a repo that states no size has a trigger
 that fires never or always depending on the reader (#415), so
 `package_change_lines` is required for every writing round. A validated
@@ -25,7 +28,8 @@ a declaration (#671); an existing malformed declaration is still refused.
 Contract:
 
 * `load_declaration(repo)` reads `<repo>/.herdr/triggers.json`; callers may
-  tolerate only its absence for an already validated read-only round.
+  tolerate only its absence for an already validated read-only round or use
+  `load_bootstrap_declaration` under the absent-base plan contract.
 * `detect(...)` is pure over the declaration and the diff facts.
 * `run_command(args, runner=...)` collects those facts through `runner`, a
   callable taking a git argument list and returning its stdout.
@@ -34,18 +38,22 @@ Contract:
 """
 
 import fnmatch
+import hashlib
 import json
+import os
 import subprocess
 from pathlib import Path
 from typing import Any
 
-from . import runnable
+from . import runnable, engagement
+from .recovery import receipt
+from .state import default_state_path, load_state_checked
 from .composition import REQUIREMENTS_SCHEMA_VERSION
 from .errors import UsageError
 
 
 DECLARATION_SCHEMA_VERSION = 1
-DETECTION_SCHEMA_VERSION = 1
+DETECTION_SCHEMA_VERSION = 2
 DECISIONS_SCHEMA_VERSION = 1
 
 #: Repo-relative location of the consuming repo's trigger declaration.
@@ -75,26 +83,8 @@ def _globs(value, label):
     return list(value)
 
 
-def load_declaration(repo, *, required=True):
-    """Read and validate the consuming repo's trigger declaration.
-
-    A missing or incomplete declaration is normally refused, never defaulted:
-    the architect trigger's size and the other three surfaces are the repo's to
-    state, and an invented default would fire on repos it was never measured
-    against. A caller that has already validated an explicit no-write plan may
-    set ``required=False``; only a genuinely absent file is tolerated, and the
-    returned path is sufficient for the all-quiet report.
-    """
-    root = Path(repo)
-    path = root / DECLARATION_FILE
-    try:
-        raw = path.read_text(encoding="utf-8")
-    except FileNotFoundError as exc:
-        if not required and not path.is_symlink():
-            return {"path": str(path)}
-        raise UsageError("No trigger declaration at {} ({}); state this repo's package roots and size, trust-boundary paths, CLI spec surface and user-facing docs paths there before composing a round.".format(path, exc.strerror), {}) from None
-    except OSError as exc:
-        raise UsageError("No trigger declaration at {} ({}); state this repo's package roots and size, trust-boundary paths, CLI spec surface and user-facing docs paths there before composing a round.".format(path, exc.strerror), {}) from None
+def _declaration(raw, path, *, authority):
+    """Validate declaration bytes and retain the authority that supplied them."""
     try:
         payload = json.loads(raw)
     except json.JSONDecodeError as exc:
@@ -119,7 +109,31 @@ def load_declaration(repo, *, required=True):
     for field in GLOB_FIELDS:
         declaration[field] = _globs(payload[field], field)
     declaration["path"] = str(path)
+    declaration["authority"] = authority
     return declaration
+
+
+def load_declaration(repo, *, required=True):
+    """Read and validate the consuming repo's trigger declaration.
+
+    A missing or incomplete declaration is normally refused, never defaulted:
+    the architect trigger's size and the other three surfaces are the repo's to
+    state, and an invented default would fire on repos it was never measured
+    against. A caller that has already validated an explicit no-write plan may
+    set ``required=False``; only a genuinely absent file is tolerated, and the
+    returned path is sufficient for the all-quiet report.
+    """
+    root = Path(repo)
+    path = root / DECLARATION_FILE
+    try:
+        raw = path.read_text(encoding="utf-8")
+    except FileNotFoundError as exc:
+        if not required and not path.is_symlink():
+            return {"path": str(path), "authority": {"kind": "repository", "revision": "worktree"}}
+        raise UsageError("No trigger declaration at {} ({}); state this repo's package roots and size, trust-boundary paths, CLI spec surface and user-facing docs paths there before composing a round.".format(path, exc.strerror), {}) from None
+    except OSError as exc:
+        raise UsageError("No trigger declaration at {} ({}); state this repo's package roots and size, trust-boundary paths, CLI spec surface and user-facing docs paths there before composing a round.".format(path, exc.strerror), {}) from None
+    return _declaration(raw, path, authority={"kind": "repository", "revision": "worktree"})
 
 
 def load_decisions(path):
@@ -152,7 +166,7 @@ PLAN_FIELDS = frozenset({"schema_version", "added", "changed", "package_lines", 
 #: A round that writes no repository content says so here. Omitting the field
 #: reads as True, so every plan written before it keeps its meaning and only an
 #: explicit `false` opens the no-surface path (#471).
-PLAN_OPTIONAL_FIELDS = frozenset({"writes_repository"})
+PLAN_OPTIONAL_FIELDS = frozenset({"writes_repository", "bootstrap_declaration_sha256"})
 #: The responsibilities `skills/herdr-foreman/references/team-operation.md` declares read-only on
 #: repository content. A round claiming to write nothing seats these alone.
 READ_ONLY_ROLES = frozenset({"advisor", "investigator", "architect"})
@@ -180,7 +194,7 @@ def load_plan(path):
         raise UsageError("Planned surfaces {} are invalid JSON ({}); repair the plan.".format(path, exc.msg), {}) from None
     if (not isinstance(payload, dict) or set(payload) - PLAN_OPTIONAL_FIELDS != PLAN_FIELDS
             or payload["schema_version"] != DECLARATION_SCHEMA_VERSION):
-        raise UsageError("Planned surfaces must be a schema_version {} object with added, changed, package_lines and cli_surface, and may carry writes_repository; state [] or {{}} for one this round has none of.".format(
+        raise UsageError("Planned surfaces must be a schema_version {} object with added, changed, package_lines and cli_surface, and may carry writes_repository and bootstrap_declaration_sha256; state [] or {{}} for one this round has none of.".format(
             DECLARATION_SCHEMA_VERSION), {})
     plan: dict[str, Any] = {"schema_version": DECLARATION_SCHEMA_VERSION}
     for field in ("added", "changed", "cli_surface"):
@@ -198,7 +212,124 @@ def load_plan(path):
     plan["writes_repository"] = writes
     if not writes and (plan["added"] or plan["changed"] or plan["cli_surface"] or plan["package_lines"]):
         raise UsageError("A plan declaring writes_repository false names no surface; empty added, changed, cli_surface and package_lines, or declare the surfaces the round will touch.", {})
+    digest = payload.get("bootstrap_declaration_sha256")
+    if digest is not None and (not isinstance(digest, str) or len(digest) != 64
+                               or any(char not in "0123456789abcdef" for char in digest)):
+        raise UsageError("Planned bootstrap_declaration_sha256 must be the reviewed trigger artifact's lowercase SHA-256 hex digest.", {})
+    if not writes and digest is not None:
+        raise UsageError("A no-write plan cannot install a trigger declaration; remove bootstrap_declaration_sha256.", {})
+    plan["bootstrap_declaration_sha256"] = digest
     return plan
+
+
+def load_revision_declaration(run, repo, revision, *, required=True):
+    """Read the declaration from a named commit, never adjacent checkout bytes."""
+    path = Path(repo) / DECLARATION_FILE
+    present = run(["ls-tree", "--name-only", revision, "--", DECLARATION_FILE]).strip()
+    if not present:
+        if not required:
+            return {"path": str(path), "authority": {"kind": "repository", "revision": revision}}
+        raise UsageError("No trigger declaration at {} in {}; install the reviewed bootstrap declaration before classifying this pushed head.".format(path, revision), {})
+    raw = run(["show", "{}:{}".format(revision, DECLARATION_FILE)])
+    digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()
+    return _declaration(raw, path, authority={"kind": "repository", "revision": revision,
+                                              "sha256": digest})
+
+
+def validate_bootstrap_binding(raw):
+    """Validate the specialist's structured evidence at ordinary assessment."""
+    try:
+        binding = json.loads(raw)
+    except json.JSONDecodeError:
+        raise UsageError("TRIGGER_DECLARATION evidence must be a JSON object naming repo, base_revision, path and sha256.", {}) from None
+    if (not isinstance(binding, dict) or set(binding) != {"repo", "base_revision", "path", "sha256"}
+            or any(not isinstance(value, str) for value in binding.values())
+            or not Path(binding["repo"]).is_absolute() or not Path(binding["path"]).is_absolute()
+            or len(binding["base_revision"]) not in (40, 64)
+            or any(char not in "0123456789abcdef" for char in binding["base_revision"])
+            or len(binding["sha256"]) != 64
+            or any(char not in "0123456789abcdef" for char in binding["sha256"])):
+        raise UsageError("TRIGGER_DECLARATION requires absolute repo/path, exact base commit and SHA-256 of reviewed bytes.", {})
+    artifact = Path(binding["path"])
+    if artifact.resolve().is_relative_to(Path(binding["repo"]).resolve()):
+        raise UsageError("Reviewed declaration artifact must be outside the target repository.", {})
+    evidence, body = receipt(str(artifact))
+    if evidence["sha256"] != binding["sha256"]:
+        raise UsageError("Reviewed declaration artifact changed before assessment; the consultation must review its actual bytes.", {})
+    _declaration(body, artifact, authority={"kind": "bootstrap"})
+    return binding
+
+
+def accepted_bootstrap(repo, base, artifact, digest, state_path):
+    """Read an existing accepted consultation's immutable artifact evidence.
+
+    The specialist report supplies the exact binding, not an operator approval
+    flag. Its ordinary assessment binds those report bytes and delivered role.
+    No state is written and no native call is made during classification.
+    """
+    state, usable = load_state_checked(state_path or default_state_path(), persist_migration=False)
+    if not usable:
+        raise UsageError("Bootstrap consultation history is unreadable; restore the existing owner ledger.", {})
+    expected = {"repo": str(Path(repo).resolve()), "base_revision": base,
+                "path": str(Path(artifact).resolve()), "sha256": digest}
+    for record in reversed(state["specialist_assessments"]):
+        if record["role"] not in engagement.CONSULTATION_ROLES or not engagement.investigated(record):
+            continue
+        try:
+            evidence, body = receipt(record["report"])
+        except UsageError:
+            # Missing historical reports establish no authority; they do not
+            # impose unrelated restoration work on a first integration.
+            continue
+        if evidence != record["report_evidence"]:
+            continue
+        bindings = [line.removeprefix("TRIGGER_DECLARATION: ") for line in body.splitlines()
+                    if line.startswith("TRIGGER_DECLARATION: ")]
+        if len(bindings) != 1:
+            continue
+        try:
+            binding = json.loads(bindings[0])
+        except json.JSONDecodeError:
+            continue
+        if binding == expected:
+            return record["id"]
+    raise UsageError("The first trigger declaration has no accepted consultation bound to these exact artifact bytes, repository and task base. Dispatch the read-only declaration consultation and assess its delivered report through the normal owner path.", {})
+
+
+def load_bootstrap_declaration(repo, base, artifact, plan, run, state_path=None):
+    """Load the one-time reviewed declaration bound to an absent base and plan."""
+    if plan is None or not plan["writes_repository"]:
+        raise UsageError("--bootstrap-declaration requires a writing --planned record that binds the reviewed artifact's installation.", {})
+    if DECLARATION_FILE not in plan["added"]:
+        raise UsageError("The bootstrap plan must add {}; include it in planned added paths.".format(DECLARATION_FILE), {})
+    expected = plan["bootstrap_declaration_sha256"]
+    if expected is None:
+        raise UsageError("The bootstrap plan must bind the reviewed artifact in bootstrap_declaration_sha256 before dispatch.", {})
+    base_entry = run(["ls-tree", "--name-only", base, "--", DECLARATION_FILE]).strip()
+    if base_entry:
+        raise UsageError("The recorded base {} already contains {}; the in-repo declaration is sole authority and the bootstrap is stale.".format(
+            base, DECLARATION_FILE), {})
+    artifact_path = Path(artifact)
+    try:
+        data = artifact_path.read_bytes()
+    except OSError as exc:
+        raise UsageError("Cannot read reviewed bootstrap declaration at {} ({}); restore the accepted artifact before classification.".format(
+            artifact_path, exc.strerror), {}) from None
+    if os.path.commonpath([str(Path(repo).resolve()), str(artifact_path.resolve())]) == str(Path(repo).resolve()):
+        raise UsageError("Reviewed bootstrap declaration {} must remain outside the target repository until the developer installs it.".format(
+            artifact_path), {})
+    actual = hashlib.sha256(data).hexdigest()
+    if actual != expected:
+        raise UsageError("Reviewed bootstrap declaration {} is {} but the plan binds {}; restore the reviewed bytes or return to classification with a new accepted plan.".format(
+            artifact_path, actual, expected), {})
+    try:
+        raw = data.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise UsageError("Reviewed bootstrap declaration {} is not UTF-8 ({}); restore the accepted JSON artifact.".format(
+            artifact_path, exc.reason), {}) from None
+    assessment = accepted_bootstrap(repo, run(["rev-parse", "--verify", base + "^{commit}"]).strip(), artifact, actual, state_path)
+    return _declaration(raw, artifact_path, authority={"kind": "bootstrap", "artifact": str(artifact_path),
+                                                      "sha256": actual, "assessment": assessment})
 
 
 def load_requirements(path):
@@ -333,6 +464,7 @@ def report(declaration, base, head, fired, roles, specialties, decisions):
         triggers.append({"trigger": name, "fired": bool(signals), "signals": signals,
                          "addressed": addressed, "decision": decisions.get(name)})
     payload = {"schema_version": DETECTION_SCHEMA_VERSION, "declaration": declaration["path"],
+               "declaration_authority": declaration["authority"],
                "base": base, "head": head, "triggers": triggers,
                "fired": [name for name in TRIGGERS if fired.get(name)],
                "unaddressed": unaddressed,
@@ -424,11 +556,17 @@ def git_runner(repo):
 
     def run(arguments):
         completed = subprocess.run(["git", "-C", str(repo), *arguments],
-                                   capture_output=True, text=True, check=False)
+                                   capture_output=True, check=False)
+        try:
+            stdout = completed.stdout.decode("utf-8")
+            stderr = completed.stderr.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise UsageError("git {} returned non-UTF-8 output in {} ({}); use UTF-8 repository metadata and trigger declarations.".format(
+                " ".join(arguments), repo, exc.reason), {}) from None
         if completed.returncode != 0:
             raise UsageError("git {} failed in {} ({}): {}".format(
-                " ".join(arguments), repo, completed.returncode, completed.stderr.strip() or "no diagnostic"), {})
-        return completed.stdout
+                " ".join(arguments), repo, completed.returncode, stderr.strip() or "no diagnostic"), {})
+        return stdout
     return run
 
 
@@ -436,12 +574,41 @@ def run_command(args, runner=None):
     """Detect the triggers for one task's diff and gate on the unaddressed set."""
     plan = load_plan(getattr(args, "planned", None))
     writes = plan is None or plan["writes_repository"]
-    declaration = load_declaration(args.repo, required=writes)
+    run = runner if runner is not None else git_runner(args.repo)
+    head = getattr(args, "head", None)
+    declaration_path = Path(args.repo) / DECLARATION_FILE
+    bootstrap = None
+    artifact = getattr(args, "bootstrap_declaration", None)
+    base_has_declaration = bool(run(["ls-tree", "--name-only", args.base, "--", DECLARATION_FILE]).strip()) if writes else False
+    if writes and not base_has_declaration:
+        if artifact is None:
+            raise UsageError("The recorded base lacks a trigger declaration; the first writing round requires --bootstrap-declaration and its accepted consultation, including when --head or the worktree already contains a declaration.", {})
+        bootstrap = load_bootstrap_declaration(
+            args.repo, args.base, artifact, plan, run, getattr(args, "state", None))
+    elif artifact is not None:
+        # A stale bootstrap cannot override a committed authority.
+        bootstrap = load_bootstrap_declaration(
+            args.repo, args.base, artifact, plan, run, getattr(args, "state", None))
+    if head:
+        declaration = load_revision_declaration(run, args.repo, head, required=writes)
+    elif declaration_path.exists() or declaration_path.is_symlink():
+        declaration = load_declaration(args.repo, required=writes)
+        if bootstrap is not None:
+            data = declaration_path.read_bytes()
+            declaration["authority"]["sha256"] = hashlib.sha256(data).hexdigest()
+    elif bootstrap is not None:
+        declaration = bootstrap
+    else:
+        declaration = load_declaration(args.repo, required=writes)
+    if bootstrap is not None and declaration is not bootstrap:
+        expected = bootstrap["authority"]["sha256"]
+        if declaration["authority"].get("sha256") != expected:
+            raise UsageError("The first installed declaration differs from the accepted bootstrap artifact; restore the byte-identical installation or return to classification.", {})
+        declaration["authority"]["bootstrap_sha256"] = expected
+        declaration["authority"]["bootstrap_assessment"] = bootstrap["authority"]["assessment"]
     decisions = load_decisions(getattr(args, "decisions", None))
     specialties = load_requirements(getattr(args, "requirements", None))
     roles = [role for role in (getattr(args, "roles", None) or "").split(",") if role]
-    run = runner if runner is not None else git_runner(args.repo)
-    head = getattr(args, "head", None)
     # `base...head` diffs from the merge base, so "absent from the base" is
     # read at that same commit rather than at the branch point's namesake.
     left = run(["merge-base", args.base, head]).strip() if head else args.base
@@ -532,3 +699,5 @@ def register_command(sub, common):
     parser.add_argument("--decisions", metavar="FILE", help="Recorded staffing decisions for fired triggers.")
     parser.add_argument("--planned", metavar="FILE",
                         help="Surfaces this round will touch, for a pre-implementation round with no diff yet.")
+    parser.add_argument("--bootstrap-declaration", metavar="FILE",
+                        help="Reviewed first trigger declaration; accepted only when the recorded base lacks one and --planned binds its exact installation.")

@@ -447,11 +447,11 @@ skills/herdr-foreman/references/retrospectives.md
 
 ```json
 {
-  "schema_version": 10,
+  "schema_version": 11,
   "snapshots": ["<measure output>, oldest first, ring capped at 20"],
   "assignments": [
     {
-      "schema_version": 10,
+      "schema_version": 11,
       "at": "2026-09-01T21:00:00+00:00",
       "role": "developer",
       "agent": "grok",
@@ -490,7 +490,7 @@ skills/herdr-foreman/references/retrospectives.md
 
 | Field | Type | Meaning |
 | ----- | ---- | ------- |
-| `schema_version` | integer | Currently `10`. Version 10 adds the non-counting assignment status `maintenance`; version 9 adds `judge_mode` to every row: the judge seat's declared mode, `unknown` for a judge row migrated from before it, null for other roles. Version 8 drops the retired qualification battery's summary from `tier`; migration removes it from older rows. Version 7 adds `pressure_headroom` and `de_escalated` to a row's `tier`; an older tier row migrates to null headroom and `de_escalated: false`, since nothing could de-escalate before it. Bumped on any shape change |
+| `schema_version` | integer | Currently `11`. Version 11 adds `reconciled_not_sent` context provenance with cleared true for an owner-proved closed immutable no-brief retry; older records migrate without inventing that proof. Version 10 adds the non-counting assignment status `maintenance`; version 9 adds `judge_mode` to every row: the judge seat's declared mode, `unknown` for a judge row migrated from before it, null for other roles. Version 8 drops the retired qualification battery's summary from `tier`; migration removes it from older rows. Version 7 adds `pressure_headroom` and `de_escalated` to a row's `tier`; an older tier row migrates to null headroom and `de_escalated: false`, since nothing could de-escalate before it. Bumped on any shape change |
 | `snapshots` | array | Whole `measure` documents, oldest first; the ring holds the last 20 |
 | `assignments` | array | Append-only ledger of who held which role |
 | `snapshots[].schema_version` | integer | Currently `4`. Version 2 added `window_group`; version 3 adds per-round `tier_billing`; version 4 adds `error.details` to failed agent records. Older snapshots migrate on read, preserving headroom and shared-window membership |
@@ -501,7 +501,7 @@ skills/herdr-foreman/references/retrospectives.md
 | `assignments[].agent` | string | The agent that received it |
 | `assignments[].status` | string | `applied`, `sent_but_not_started`, `maintenance`, or `unknown`. `maintenance` records a verified relaunch without a dispatch and does not count as role experience |
 | `assignments[].cleared` | boolean or null | Whether the dispatcher confirmed its automatic clear; null means historical evidence is unavailable |
-| `assignments[].clear_reason` | string | `automatic` with cleared true, `hand` or `retained` with cleared false, or `unknown` with cleared null |
+| `assignments[].clear_reason` | string | `automatic` or `reconciled_not_sent` with cleared true, `hand` or `retained` with cleared false, or `unknown` with cleared null |
 | `assignments[].task` | string or null | Non-empty stable task identifier; null for older or unlabelled assignments |
 | `assignments[].fix_round` | positive integer or null | Task's fix number; null for initial development or non-fix work |
 | `assignments[].context_session` | object or null | Verified native session reference scoped to a pane: `pane_id`, `source`, `agent`, `kind`, `value`, all non-empty strings; kind is `id` or `path`. Null means continuity was not established |
@@ -1098,3 +1098,44 @@ row's pane and `native_session` must equal the exact supervision binding, and
 its recorded process identity must still be live. A missing, wrong-stow,
 ambiguous-handoff, wrong-pane, wrong-session, dead, reused-process, failed, interrupted,
 delivered, or reconciled row supplies no Stop authorization.
+
+## Worktree provisioning provenance
+
+Owner: Herdr `skills/herdr-foreman/provision-worktree.sh` and `skills/herdr-foreman/foreman/provision.py`. Each worktree's
+private Git directory holds `foreman-provision.json`, schema 1. Writer fields:
+`schema_version`, absolute `path`, `branch`, `base_ref`, exact `base_revision`,
+`fetched_default_ref`, exact `fetched_default_revision`. The writer fetches and
+resolves commits before worktree creation. The common Git directory holds an
+owner intent named `foreman-provision-<sha256 of absolute path>.json`, with the
+same schema-1 fields, persisted before creating a branch or tree. It binds the
+original path, branch and base across failed receipt persistence and later
+default movement. The owner creates branches at that base and atomically
+persists the private worktree receipt before returning success, then removes
+only its matching pending intent. Normal retries
+recover a complete legacy `foreman-provision.tmp` receipt when no intent exists;
+unsupported or identity-mismatched evidence is preserved and refused. Unique
+scratch files do not strand retries; interrupted writes do not authorize
+composition before the authoritative private receipt exists. An existing worktree
+without an intent, receipt or supported legacy scratch refuses provisioning;
+its present HEAD does not establish original-base provenance. Reruns preserve the
+original base and update fetched-default evidence; they never reset task history.
+Existing task corrections supply their authorized base rather than changing it
+to a newer default. An attachment must descend from that base.
+
+The composition reader takes top-level `task` and optional `state` in values,
+reads the already registered task's exact original base, and validates each
+WORKTREE against its receipt and current Git path/branch/commit ancestry. The
+effective role/shared BRANCH must match the receipt's actual branch. It
+renders the exact task base in COMMON and the fetched-default evidence in the
+developer brief automatically. Missing or unsupported receipts refuse composing
+a worktree-bearing packaged brief; no caller-authored SHA substitutes. Read-only
+consultations need no worktree receipt. No older format exists to migrate; a
+future format refuses with an update diagnostic. Custom rendering templates
+without the provenance placeholder retain their rendering-only contract.
+
+A first trigger consultation's `TRIGGER_DECLARATION` line is report content,
+not a new owner-state schema or acceptance record. Ordinary schema-2 specialist
+assessment receipts bind its exact bytes; the assessment owner checks its
+absolute repository/artifact, exact task base and reviewed digest. Detection
+reads all-met, non-blocking consultation records and rechecks the report digest
+before relying on that binding. No operator-written approval or receipt is read.

@@ -470,6 +470,54 @@ check_cleanup_retry() {
   [[ -z "$INSTALL_FIXTURE" ]] || die "cleanup retry fixture remains; the exit trap will retry"
 }
 
+# Exercise the actual release entrypoints together: standalone has no simulated
+# team artifact, and ordinary advisory replies cannot become merge predicates.
+check_release_advisory_contract() {
+  local skills_root="$1"
+  if python3 - "$skills_root" <<'PYCONTRACT'
+import sys
+from pathlib import Path
+root = Path(sys.argv[1])
+release = (root / "release/SKILL.md").read_text()
+brief = (root / "herdr-foreman/templates/brief-release.md").read_text()
+mechanics = (root / "release/SCRIPTING.md").read_text()
+rules = root.parent / "rules"
+boy_scout = (rules / "boy-scout.md").read_text()
+severity = (rules / "review-severity.md").read_text()
+advisory_directive = next(line for line in boy_scout.splitlines() if line.startswith("- **Advisory**"))
+risk_directive = next(line for line in boy_scout.splitlines() if line.startswith("- **Unrelated blocking risk**"))
+assert "Herdr round" in risk_directive and "current conversation standalone" in risk_directive
+references = {
+    "herdr-foreman/SKILL.md": ["skills/herdr-foreman/templates/brief-release.md"],
+    "herdr-foreman/references/dispatch-recovery.md": ["skills/herdr-foreman/foreman/composer.py", "skills/herdr-foreman/foreman/assign.py"],
+    "herdr-foreman/references/judge-round.md": ["skills/herdr-foreman/templates/brief-judge.md", "skills/herdr-foreman/templates/brief-judge-diagnosis.md"],
+    "herdr-foreman/references/round-setup.md": ["skills/herdr-foreman/references/specialists.md"],
+    "herdr-foreman/state-schema.md": ["skills/herdr-foreman/provision-worktree.sh", "skills/herdr-foreman/foreman/provision.py"],
+}
+for source, paths in references.items():
+    content = (root / source).read_text()
+    for target in paths:
+        assert "`" + target + "`" in content and (root.parent / target).is_file(), (source, target)
+assert "reconcile --state <state-path> --dispatch <recorded-dispatch-id>" in (root / "herdr-foreman/references/dispatch-recovery.md").read_text()
+assert "rules/review-severity.md" in advisory_directive
+assert "task report" not in advisory_directive and "round log" not in advisory_directive
+assert "Advisory in a team round → acknowledge in the existing task report or round log" in severity
+assert "Advisory standalone → note it directly in the existing review conversation" in severity
+assert "Acknowledged — advisory noted" in release
+assert "never simulate a team report" in release
+assert "outside merge prerequisites" in release
+assert "outside the merge predicate" in release and "outside the merge predicate" in mechanics
+assert "Every inline comment must also be read" in release
+assert "no follow-up issue or reference is required" in brief
+assert "ruling obligations below" in brief
+for content in (release, mechanics, brief, boy_scout):
+    for contradiction in ("Reply on EVERY thread", "every thread has a reply",
+                          "no review thread is unresolved", "existing follow-up references"):
+        assert contradiction not in content, contradiction
+PYCONTRACT
+  then pass; else fail "release advisory routes contradict standalone/team merge contracts"; fi
+}
+
 # Progress and failures go to stderr; stdout carries one JSON result.
 run_suite() {
   local skills_root skill name
@@ -489,6 +537,7 @@ run_suite() {
     check_invocations "$ref" "$skills_root/$ref"
   done
   check_cleanup_retry
+  check_release_advisory_contract "$skills_root"
 
   skill="${skills_root}/${MODE_GATE_SKILL}/SKILL.md"
   check_mode_gate "$MODE_GATE_SKILL" "$skill"

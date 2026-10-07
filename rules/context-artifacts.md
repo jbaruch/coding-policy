@@ -113,4 +113,4 @@ After editing a rule, audit the repo itself against the new rule text and fix an
 
 - Grep for every instance of the pattern the rule governs (`.env.example` files, `SKILL.md` step headings, secret names, etc.) and update them to satisfy the new wording
 - A rule that doesn't describe what's already committed in the repo erodes trust in every rule
-- If drift can't be fixed in the same PR (e.g., it touches a frozen branch), file a follow-up issue that references the rule-edit commit
+- If drift can't be fixed in the same PR, record it with the rule-edit commit under `rules/boy-scout.md` How to Apply

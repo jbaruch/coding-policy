@@ -17,6 +17,7 @@ if _ROOT not in _sys.path:
     _sys.path.insert(0, _ROOT)
 
 import contextlib
+import copy
 import io
 import json
 import shutil
@@ -27,12 +28,14 @@ from pathlib import Path
 
 from types import SimpleNamespace
 
-from foreman import attention, cli, runnable, supervision
+from foreman import attention, cli, recovery, runnable, supervision
 from foreman.report_delivery import marker_columns
 from foreman.cli import build_parser, main
+from foreman.diagnostics import PREFIX as DIAGNOSTIC_PREFIX
 from foreman.errors import HerdrError, StateError, UsageError
 from foreman.herdr import HerdrClient
 from foreman.partition import slice_digest
+from foreman.tiers import launch_flags, verify_argv, worker_launch_args
 from foreman.state import STATE_SCHEMA_VERSION, add_assignment, empty_state, load_state_checked, save_state
 
 from tests.fakes import (
@@ -573,6 +576,79 @@ class PlanCommandTest(CliCase):
         return [item for role in ("developer", "reviewer")
                 for item in ("--report", "{}={}".format(role, self.tmp / (role + "-report.md")))]
 
+    def test_scoped_fix_success_counts_once_and_completed_replay_never_spawns_or_sends(self):
+        plan = self._interrupt_plan()
+        del plan["tiers"]
+        plan["assignments"] = {"developer": plan["assignments"]["developer"]}
+        plan["worker_kinds"] = {"developer": plan["worker_kinds"]["developer"]}
+        plan["task_context"]["fix_round"] = 1
+        saved, _usable = load_state_checked(self.state)
+        recovery.register_task(saved["recovery"], {"task": "t-interrupt", "base_revision": "a" * 40,
+            "scope": "Repair original parser", "allowed_paths": ["src/*"],
+            "authorization": {"source": "operator", "quote": "Repair parser"}}, AT)
+        add_assignment(saved, "2026-02-03T09:00:00+00:00", "developer", "original-worker", task="t-interrupt")
+        save_state(self.state, saved)
+        command = self.base() + ["apply", "--assignments", json.dumps(plan), "--task", "t-interrupt",
+                                 "--fix-round", "1", "--dispatch-id", "fresh-fix-1", "--now", AT,
+                                 "--common", str(self.common)] + self.brief_args("developer") + [
+                                     "--report", "developer=" + str(self.tmp / "fix-report.md")]
+        def sent(_client, _assignments, _agents, _paths, _at, **options):
+            owner, _usable = load_state_checked(self.state)
+            row = dict(owner["recovery"]["dispatches"][-1])
+            wanted = options["tiers"]["developer"]
+            worker = _agents[row["agent"]]
+            flags = worker_launch_args(worker.kind, worker.launch_args)
+            proof = verify_argv(worker.kind, wanted, [worker.kind] + flags + launch_flags(worker.kind, wanted), flags)
+            row.update(pane_id="new-root", cleared=True, clear_reason="automatic", context_session=None,
+                       tier={**wanted, "launch_args": flags, "verified": {**proof, "pane_id": "new-root"}, "prompt_hash": "a" * 64},
+                       status="applied", assignment_scoped=True)
+            options["on_before_send"]({"role": "developer", "agent": row["agent"], "pane_id": "new-root"}, row)
+            options["on_result"](row)
+            return {"applied": [row]}
+        client = Mock()
+        with patch("foreman.lifecycle.spawn", return_value="new-root") as spawn, \
+                patch("foreman.cli.apply_assignments", side_effect=sent) as send:
+            code, out, err = self.run_cli(command, client=client)
+            self.assertEqual(code, 0, err)
+            self.out, self.err = io.StringIO(), io.StringIO()
+            code, replay, err = self.run_cli(command, client=client)
+            self.assertEqual(code, 0, err)
+        self.assertEqual(spawn.call_count, 1)
+        self.assertEqual(send.call_count, 1)
+        self.assertTrue(json.loads(replay)["applied"][0]["replayed"])
+        final, _usable = load_state_checked(self.state)
+        self.assertEqual([row["fix_round"] for row in final["assignments"]], [None, 1])
+        self.assertEqual(final["assignments"][0], saved["assignments"][0])
+        self.assertEqual(final["recovery"]["tasks"], saved["recovery"]["tasks"])
+
+    def test_scoped_invalid_fix_counts_refuse_before_workspace_creation(self):
+        plan = self._interrupt_plan()
+        del plan["tiers"]
+        plan["assignments"] = {"developer": plan["assignments"]["developer"]}
+        plan["worker_kinds"] = {"developer": plan["worker_kinds"]["developer"]}
+        saved, _usable = load_state_checked(self.state)
+        recovery.register_task(saved["recovery"], {"task": "t-interrupt", "base_revision": "a" * 40,
+            "scope": "Repair original parser", "allowed_paths": ["src/*"],
+            "authorization": {"source": "operator", "quote": "Repair parser"}}, AT)
+        add_assignment(saved, AT, "developer", "original-worker", task="t-interrupt")
+        save_state(self.state, saved)
+        for number in (2, 6):
+            plan["task_context"]["fix_round"] = number
+            with self.subTest(number=number), patch("foreman.lifecycle.spawn") as spawn:
+                self.out, self.err = io.StringIO(), io.StringIO()
+                code, out, err = self.run_cli(
+                    self.base() + ["apply", "--assignments", json.dumps(plan), "--task", "t-interrupt",
+                                   "--fix-round", str(number), "--now", AT, "--common", str(self.common)]
+                    + self.brief_args("developer") + ["--report", "developer=" + str(self.tmp / "fix-report.md")],
+                    client=Mock())
+                self.assertEqual(code, 1)
+                self.assertEqual(out, "")
+                self.assertTrue("next fix number" in err or "allowance is exhausted" in err, err)
+                spawn.assert_not_called()
+        final, _usable = load_state_checked(self.state)
+        self.assertEqual(final["assignments"], saved["assignments"])
+        self.assertEqual(final["recovery"]["tasks"], saved["recovery"]["tasks"])
+
     def test_scoped_apply_closes_earlier_panes_when_a_later_spawn_is_interrupted(self):
         plan = self._interrupt_plan()
         client = Mock()
@@ -614,6 +690,8 @@ class PlanCommandTest(CliCase):
 
         with patch("foreman.lifecycle.spawn", side_effect=["pane-developer-2", "pane-reviewer"]), \
                 patch("foreman.cli.apply_assignments", return_value={"applied": []}):
+            client.agent_get.side_effect = HerdrError("absent", {"stderr": json.dumps({"error": {"code": "agent_not_found"}})})
+            client.pane_get.side_effect = HerdrError("absent", {"stderr": json.dumps({"error": {"code": "pane_not_found"}})})
             code, _, err = self.run_cli(command, client=client)
 
         self.assertEqual(code, 0, err)
@@ -628,6 +706,111 @@ class PlanCommandTest(CliCase):
             supervision.expected_assignment(developer[1])["pane_id"],
             "pane-developer-2",
         )
+
+    def test_closed_no_send_retry_requires_complete_immutable_negative_evidence(self):
+        plan = self._interrupt_plan()
+        command = (self.base() + ["apply", "--assignments", json.dumps(plan),
+                   "--task", "t-interrupt", "--now", AT, "--common", str(self.common)]
+                   + self.brief_args("developer", "reviewer") + self._interrupt_reports())
+        with patch("foreman.lifecycle.spawn", side_effect=["old-pane", KeyboardInterrupt]), \
+                patch("foreman.lifecycle.close"), self.assertRaises(KeyboardInterrupt):
+            self.run_cli(command, client=Mock())
+        state, _ = load_state_checked(self.state)
+        member = supervision.load(self.state)["members"][0]
+        row = state["recovery"]["dispatches"][0]
+        tier = row["context_before_send"]["tier"]
+        paths = {"developer": row["brief"], "common": row["common"]}
+        client = Mock()
+        client.agent_get.side_effect = HerdrError("absent", {"stderr": json.dumps({"error": {"code": "agent_not_found"}})})
+        client.pane_get.side_effect = HerdrError("absent", {"stderr": json.dumps({"error": {"code": "pane_not_found"}})})
+        proof = cli._closed_no_send_retry(self.state, state, client, row, tier, paths)
+        assert proof is not None
+        self.assertEqual(proof["classification"], "reconciled_not_sent")
+        self.assertNotIn(row["agent"], {agent["name"] for agent in CONFIG["agents"]})
+        original = copy.deepcopy(state)
+        cases = [("status", value) for value in ("sending", "applied", "unknown")]
+        cases += [("result", {"landed": True}), ("report", {"path": "report"}),
+                  ("task", "different"), ("role", "tester"), ("brief_identity", "changed"),
+                  ("judge_mode", "ModeB"), ("fingerprint", "changed"), ("fix_round", 3)]
+        for field, value in cases:
+            changed = copy.deepcopy(original)
+            changed["recovery"]["dispatches"][0][field] = value
+            with self.subTest(field=field, value=value), self.assertRaises(UsageError):
+                cli._closed_no_send_retry(self.state, changed, client, row, tier, paths)
+        changed = copy.deepcopy(original)
+        changed["recovery"]["events"] = []
+        with self.assertRaises(UsageError) as refused:
+            cli._closed_no_send_retry(self.state, changed, client, row, tier, paths)
+        self.assertEqual(refused.exception.details["failure_kind"], "retry_transport_unproved")
+        self.assertIn("reconcile", refused.exception.details["recovery"]["operation"])
+        with self.assertRaises(UsageError) as selected:
+            cli._recorded_no_send_cleanup(self.state, changed, row["id"])
+        self.assertEqual(selected.exception.details["recovery"]["outcome"], "blocked")
+        changed = copy.deepcopy(original)
+        changed["assignments"].append({"agent": row["agent"], "role": "developer"})
+        with self.assertRaises(UsageError):
+            cli._closed_no_send_retry(self.state, changed, client, row, tier, paths)
+        with patch.object(client, "pane_get", side_effect=HerdrError("unreadable", {})), self.assertRaises(HerdrError):
+            cli._closed_no_send_retry(self.state, original, client, row, tier, paths)
+        for changed_members in ([], [{**member, "active": True}]):
+            with patch("foreman.cli.supervision.load", return_value={"members": changed_members}), self.assertRaises(UsageError):
+                cli._closed_no_send_retry(self.state, original, client, row, tier, paths)
+        with self.assertRaises(UsageError):
+            cli._closed_no_send_retry(self.state, original, client, row, {**tier, "model": "changed"}, paths)
+        with patch("foreman.cli.supervision.expected_assignment", return_value={"pane_id": None, "report": str(self.tmp / "missing.md")}), self.assertRaises(UsageError):
+            cli._closed_no_send_retry(self.state, original, client, row, tier, paths)
+        evidence = self.tmp / "no-send-receipt.md"
+        evidence.write_text("Owner verified no assignment input and closed the old surface.\n")
+        receipt, _ = recovery.receipt(str(evidence))
+        reconciled = copy.deepcopy(original)
+        reconciled["recovery"]["dispatches"][0]["reconciliation"] = {
+            "input": {"outcome": "not_sent", "evidence": str(evidence)}, "evidence_receipt": receipt}
+        self.assertIsNotNone(cli._closed_no_send_retry(self.state, reconciled, client, row, tier, paths))
+        evidence.write_text("Changed receipt")
+        with self.assertRaises(UsageError):
+            cli._closed_no_send_retry(self.state, reconciled, client, row, tier, paths)
+        for method in ("agent_get", "pane_get"):
+            with patch.object(client, method, return_value={}, side_effect=None), self.assertRaises(UsageError):
+                cli._closed_no_send_retry(self.state, original, client, row, tier, paths)
+        report = Path(supervision.expected_assignment(member)["report"])
+        report.write_text("Possibly completed work")
+        with self.assertRaises(UsageError):
+            cli._closed_no_send_retry(self.state, original, client, row, tier, paths)
+        self.assertEqual(state, original)
+        client.agent_prompt.assert_not_called()
+        client.pane_send_keys.assert_not_called()
+
+    def test_fresh_composer_timeout_automatically_aborts_and_closes_only_owned_panes(self):
+        from foreman import composer
+        from foreman.config import load_config
+        plan = self._interrupt_plan()
+        client = Mock()
+        worker = next(agent for agent in load_config(self.config) if agent.kind == "codex")
+        worker = copy.copy(worker)
+        worker.name = plan["assignments"]["developer"]
+        animated = "\x1b[2m" + worker.composer_glyph + worker.composer_placeholders[0] + " ✦\x1b[0m"
+        def apply_without_native(*_args, **options):
+            composer.send_message(client, worker, "brief", "assignment", pane_id="developer-pane",
+                startup_observe=lambda: ("developer-pane", 123, "fixed-model", "high"),
+                before_prompt=lambda: options["on_before_send"](
+                    {"agent": worker.name, "role": "developer"}, {}), sleep=lambda _: None)
+        with patch("foreman.lifecycle.spawn", side_effect=["developer-pane", "reviewer-pane"]), \
+                patch("foreman.lifecycle.close") as close, \
+                patch("foreman.cli.apply_assignments", side_effect=apply_without_native), \
+                patch("foreman.composer.read_pane", return_value=(animated, True)):
+            code, out, err = self.run_cli(self.base() + ["apply", "--assignments", json.dumps(plan),
+                "--task", "t-interrupt", "--now", AT, "--common", str(self.common)]
+                + self.brief_args("developer", "reviewer") + self._interrupt_reports(), client=client)
+        self.assertEqual(code, 1, err)
+        self.assertIn("read-only startup bound", err)
+        self.assertEqual(out, "")
+        client.agent_prompt.assert_not_called()
+        client.pane_send_keys.assert_not_called()
+        self.assertEqual({call.args[2] for call in close.call_args_list}, {"developer-pane", "reviewer-pane"})
+        saved, _ = load_state_checked(self.state)
+        self.assertEqual([row["status"] for row in saved["recovery"]["dispatches"]], ["not_sent", "not_sent"])
+        self.assertEqual(saved["assignments"], [])
+        self.assertTrue(all(not member["active"] for member in supervision.load(self.state)["members"]))
 
     def test_scoped_not_sent_reconciliation_closes_and_resolves_before_retry(self):
         plan = self._interrupt_plan()
@@ -2867,6 +3050,214 @@ class ReportPathTests(unittest.TestCase):
         self.assertEqual(cli._parse_reports(["developer=/r/報告 1.md"], {"developer": {}}),
                          {"developer": "/r/報告 1.md"})
 
+
+class FreshOwnerNative(HerdrClient):
+    """In-memory transport for the actual public owner lifecycle and guards."""
+    EMPTY = "\x1b[2m› Ask Codex to do anything\x1b[0m"
+    ANIMATION = "\x1b[2m› Ask Codex to do anything ✧\x1b[0m"
+
+    def __init__(self):
+        super().__init__(runner=lambda *_: (_ for _ in ()).throw(AssertionError("Unexpected native command")))
+        self.panes = {}
+        self.agents = {}
+        self.events = []
+        self.frames = [self.ANIMATION]
+        self.ordinal = 0
+        self.sent_text = None
+
+    def workspace_create(self, *, cwd, label, focus=False):
+        self.ordinal += 1
+        pane = "fixture-pane-" + str(self.ordinal)
+        self.panes[pane] = 300 + self.ordinal
+        self.events.append(("create", pane, focus))
+        return pane
+
+    def pane_process_info(self, pane_id):
+        self.events.append(("process_info", pane_id))
+        worker = next((item for item in self.agents.values() if item["pane_id"] == pane_id), None)
+        foreground = ({"pid": worker["pid"], "argv": worker["argv"], "name": worker["agent"]}
+                      if worker else {"pid": self.panes[pane_id], "argv": ["zsh"], "name": "zsh"})
+        return {"pane_id": pane_id, "shell_pid": self.panes[pane_id], "foreground_processes": [foreground]}
+
+    def agent_start(self, name, kind, pane_id, flags):
+        worker = {"name": name, "agent": kind, "pane_id": pane_id, "agent_status": "idle",
+                  "pid": 500 + self.ordinal, "argv": [kind] + list(flags),
+                  "agent_session": {"source": "herdr:" + kind, "agent": kind, "kind": "id",
+                                    "value": "fixture-session-" + str(self.ordinal)}}
+        self.agents[name] = worker
+        self.events.append(("start", name, pane_id))
+        return {"agent": dict(worker), "argv": worker["argv"]}
+
+    def agent_get(self, name):
+        self.events.append(("agent_get", name))
+        if name not in self.agents:
+            raise HerdrError("absent", {"stderr": json.dumps({"error": {"code": "agent_not_found"}})})
+        return dict(self.agents[name])
+
+    def pane_get(self, pane_id):
+        self.events.append(("pane_get", pane_id))
+        if pane_id not in self.panes:
+            raise HerdrError("absent", {"stderr": json.dumps({"error": {"code": "pane_not_found"}})})
+        return {"pane_id": pane_id}
+
+    def pane_width(self, pane_id):
+        self.events.append(("width", pane_id))
+        return 400
+
+    def process_args(self, pid):
+        self.events.append(("process_args", pid))
+        return ["zsh"]
+
+    def pane_close(self, pane_id):
+        self.events.append(("close", pane_id))
+        self.panes.pop(pane_id, None)
+        self.agents = {name: worker for name, worker in self.agents.items() if worker["pane_id"] != pane_id}
+
+    def agent_read(self, name, source=None, lines=None, fmt=None):
+        self.events.append(("read", name, fmt))
+        if self.sent_text is not None:
+            return self.sent_text + "\n" + self.EMPTY
+        return self.frames.pop(0) if len(self.frames) > 1 else self.frames[0]
+
+    def agent_prompt(self, name, text, wait=False, until=(), timeout_ms=None):
+        self.events.append(("prompt", name, text))
+        self.sent_text = text
+        return {}
+
+    def agent_wait(self, name, until=(), timeout_ms=None):
+        self.events.append(("wait", name))
+        return {"agent_status": "working"}
+
+    def pane_rename(self, pane_id, label):
+        self.events.append(("rename", pane_id, label))
+
+    def pane_send_keys(self, pane_id, keys):
+        raise AssertionError("Startup/retry must send no keys")
+
+    def agent_send_keys(self, name, keys):
+        raise AssertionError("Startup/retry must send no keys")
+
+    def pane_send_text(self, pane_id, text):
+        raise AssertionError("Startup/retry must send no text")
+
+
+class PublicOwnerRetryTest(unittest.TestCase):
+    def test_closed_retry_persists_reloadable_history_and_completed_replay_uses_no_native_access(self):
+        for failure in ("timeout", "draft", "ansi", "identity"):
+            with self.subTest(failure=failure):
+                from foreman import assign, lifecycle, retrospective
+                with tempfile.TemporaryDirectory() as temporary:
+                    root = Path(temporary)
+                    config, state, snapshot = (root / name for name in ("config.json", "state.json", "snapshot.json"))
+                    common, brief, report = (root / name for name in ("common.md", "judge.md", "report.md"))
+                    payload = json.loads((Path(_ROOT) / "config.example.json").read_text())
+                    payload["judge"] = {"worker_kind": "codex", "model": "gpt-6-astra", "effort": "high"}
+                    config.write_text(json.dumps(payload))
+                    snapshot.write_text(json.dumps(SNAPSHOT))
+                    common.write_text("Common immutable instructions\n")
+                    brief.write_text("Judge immutable task\nREPORT: " + str(report) + "\n")
+                    base = ["--config", str(config), "--state", str(state)]
+                    def invoke(arguments, native=None):
+                        out, err = io.StringIO(), io.StringIO()
+                        code = main(base + arguments, stdout=out, stderr=err, client=native)
+                        return code, out.getvalue(), err.getvalue()
+                    with patch("foreman.lifecycle.identity", return_value="judge-b4f5e9e65a"):
+                        code, text, err = invoke(["plan", "--roles", "judge", "--judge-mode", "adjudication",
+                                                 "--task", "media-77", "--snapshot", str(snapshot)])
+                    self.assertEqual(code, 0, err)
+                    plan = json.loads(text)
+                    supervision.bind(state, {"kind": "id", "value": "fixture-foreman", "cwd": str(root),
+                        "herdr_env": "fixture", "pane_id": "foreman-pane"}, AT, root=root / "bindings")
+                    arguments = ["apply", "--assignments", json.dumps(plan), "--judge-mode", "adjudication",
+                        "--task", "media-77", "--now", AT, "--common", str(common), "--brief", "judge=" + str(brief),
+                        "--report", "judge=" + str(report), "--composer-settle", "0"]
+                    native = FreshOwnerNative()
+                    original_read = native.agent_read
+                    if failure == "draft":
+                        native.frames = ["\x1b[2m› recalled work\x1b[0m"]
+                    if failure == "ansi":
+                        def missing_ansi(name, source=None, lines=None, fmt=None):
+                            if fmt == "ansi":
+                                raise HerdrError("ANSI unavailable", {})
+                            return native.EMPTY
+                        native.agent_read = missing_ansi
+                    if failure == "identity":
+                        native.frames = [native.EMPTY]
+                        def changed_identity(name, source=None, lines=None, fmt=None):
+                            result = original_read(name, source=source, lines=lines, fmt=fmt)
+                            native.agents[name]["pid"] += 1
+                            return result
+                        native.agent_read = changed_identity
+                    real_spawn, real_apply = lifecycle.spawn, assign.apply
+                    with patch("foreman.cli.lifecycle.spawn", side_effect=lambda *a, **kw: real_spawn(*a, **kw, sleep=lambda _: None)), \
+                            patch("foreman.cli.apply_assignments", side_effect=lambda *a, **kw: real_apply(*a, **kw, sleep=lambda _: None)):
+                        code, text, err = invoke(arguments, native)
+                        self.assertEqual(code, 1, err)
+                        refused = json.loads("\n".join(line for line in err.splitlines()
+                            if not line.startswith(DIAGNOSTIC_PREFIX)))
+                        self.assertEqual(refused["details"]["recovery"]["outcome"], "retryable")
+                        self.assertIn("apply", refused["details"]["recovery"]["operation"])
+                        self.assertEqual(len([event for event in native.events if event[0] == "prompt"]), 0)
+                        self.assertEqual(native.panes, {})
+                        self.assertEqual(native.agents, {})
+                        saved, usable = load_state_checked(state)
+                        self.assertTrue(usable)
+                        self.assertEqual(saved["recovery"]["dispatches"][0]["status"], "not_sent")
+                        self.assertTrue(retrospective.load(state)["transitions"])
+                        self.assertFalse(supervision.load(state)["members"][0]["active"])
+                        dispatch = saved["recovery"]["dispatches"][0]
+                        native.agent_read = original_read
+                        if failure == "timeout":
+                            code, cleanup, err = invoke(["reconcile", "--dispatch", dispatch["id"], "--now", AT], native)
+                            self.assertEqual(code, 0, err)
+                            self.assertTrue(json.loads(cleanup)["cleanup_replayed"])
+                            self.assertEqual(json.loads(cleanup)["status"], "not_sent")
+                            self.assertEqual(len([event for event in native.events if event[0] == "prompt"]), 0)
+                        if failure == "draft":
+                            persisted = state.read_bytes()
+                            missing = copy.deepcopy(saved)
+                            missing["recovery"]["events"] = []
+                            save_state(state, missing)
+                            native_before = list(native.events)
+                            code, _, err = invoke(arguments, native)
+                            self.assertEqual(code, 1, err)
+                            self.assertEqual(json.loads(err)["details"]["failure_kind"], "retry_transport_unproved")
+                            self.assertEqual(native.events, native_before)
+                            code, _, err = invoke(["reconcile", "--dispatch", dispatch["id"], "--now", AT], native)
+                            self.assertEqual(code, 1, err)
+                            self.assertEqual(native.events, native_before)
+                            state.write_bytes(persisted)
+                        if failure == "identity":
+                            pane = "fixture-pane-1"
+                            native.panes[pane] = 301
+                            native.agents[dispatch["agent"]] = {"pane_id": pane, "agent_status": "working"}
+                            creates = len([event for event in native.events if event[0] == "create"])
+                            code, _, err = invoke(arguments, native)
+                            self.assertEqual(code, 1, err)
+                            self.assertEqual(json.loads(err)["details"]["failure_kind"], "retry_identity_live")
+                            code, _, err = invoke(["reconcile", "--dispatch", dispatch["id"], "--now", AT], native)
+                            self.assertEqual(code, 1, err)
+                            self.assertIn(dispatch["agent"], native.agents)
+                            self.assertEqual(len([event for event in native.events if event[0] == "create"]), creates)
+                            native.agents.pop(dispatch["agent"])
+                            native.panes.pop(pane)
+                        native.frames = [native.ANIMATION, native.EMPTY, native.EMPTY]
+                        code, text, err = invoke(arguments, native)
+                        self.assertEqual(code, 0, err)
+                        self.assertEqual(json.loads(text)["applied"][0]["clear_reason"], "reconciled_not_sent")
+                        saved, usable = load_state_checked(state)
+                        self.assertTrue(usable, "A successful retry must not make owner history unreadable")
+                        self.assertEqual(saved["assignments"][0]["clear_reason"], "reconciled_not_sent")
+                        self.assertEqual(saved["assignments"][0]["task"], "media-77")
+                        self.assertEqual([row["status"] for row in saved["recovery"]["dispatches"]], ["not_sent", "applied"])
+                        self.assertEqual([row["active"] for row in supervision.load(state)["members"]], [False, True])
+                        self.assertEqual(len([event for event in native.events if event[0] == "prompt"]), 1)
+                        events, persisted = list(native.events), state.read_bytes()
+                        code, text, err = invoke(arguments, native)
+                        self.assertEqual(code, 0, err)
+                        self.assertTrue(json.loads(text)["applied"][0]["replayed"])
+                        self.assertEqual(native.events, events, "Completed replay must make no new native access")
+                        self.assertEqual(state.read_bytes(), persisted)
 
 if __name__ == "__main__":
     unittest.main()

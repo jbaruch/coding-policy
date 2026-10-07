@@ -11,8 +11,10 @@ Complete `{{ISSUE}}` within the task authorization in COMMON.md.
 
 ## Setup
 
-Your worktree already exists at `{{WORKTREE}}`, on branch `{{BRANCH}}`, cut
-from the fresh remote default. The foreman created it. You do not.
+Your worktree already exists at `{{WORKTREE}}`, on branch `{{BRANCH}}`, provisioned
+from the exact recorded task base `{{BASE_REVISION}}` in COMMON.md. The foreman created it. You do not.
+
+{{BASE_PROVENANCE}}
 
 1. Confirm where you are before anything else:
 

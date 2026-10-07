@@ -79,6 +79,25 @@ and existing correction allowance; a specialist recommendation grants no new
 implementation authority. A completed consultation returns to the next needed
 assignment, or closes an investigation-only knowledge deliverable through Step 12.
 
+## Four Delivery Stages
+
+`skills/herdr-foreman/references/team-operation.md` Delivery Stages is the one
+gate matrix. This flow maps onto it:
+
+1. `authorized` ends after authority, accepted behavior, base, trigger and
+   selected-worktree/seat checks permit dispatch.
+2. `built` ends when the developer's task-scoped tip is pushed and its declared
+   deterministic gates pass.
+3. `verified` ends when independent reviewer and tester reports approve that
+   exact tip with contributor exclusions intact.
+4. `released` ends after hosted gates, merge and every declared publication are
+   confirmed.
+
+Maintenance cadence, unrelated checkout observations and advisories stay
+visible beside these decisions. They never advance a stage and never block one.
+Unknown effect in a stage's own authority, work, verification or publication
+evidence fails that stage closed.
+
 ## One Round, End to End
 
 1. **Roster** — `roster.sh` names the live workers. An unnamed pane has no

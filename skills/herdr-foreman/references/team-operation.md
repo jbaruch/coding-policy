@@ -41,8 +41,17 @@ The Herdr team round contract. `rules/agent-team-operation.md` Two Modes decides
 - A tracked diff refuses that declaration
 - A round that classifies neither is refused, never read as no trigger fired
 - The four non-exhaustion triggers fire from that detection, never from the foreman's reading of the diff
-- An absent declaration is allowed only for an explicit, validated no-write
-  round; an incomplete declaration or any writing round without one is refused
+- An absent declaration is allowed for an explicit, validated no-write round
+- Narrow exception for the first trigger declaration in a writing round.
+- Preconditions (all required):
+  1. The recorded base has no `.herdr/triggers.json`
+  2. An existing accepted consultation reviewed the external declaration artifact; the owner assessment binds its unchanged report to the artifact digest
+  3. The planned surfaces add `.herdr/triggers.json` and bind the artifact's SHA-256
+  4. `detect-triggers --bootstrap-declaration` validates and classifies the artifact before dispatch
+  5. The planned installation is byte-identical to the bound artifact
+- A changed artifact returns to trigger classification before dispatch
+- A pushed head uses its in-repo declaration and must prove the accepted byte-identical bootstrap when the recorded task base lacks one; an existing declaration at the task base is sole authority
+- Every other incomplete or absent writing declaration is refused
 - A fired trigger is consulted, or recorded as a staffing decision with its reason the detector reads
 - Silence is never that decision
 - The exhaustion trigger has no such alternative: a diagnosis without its accepted consultation is refused
@@ -59,6 +68,23 @@ The Herdr team round contract. `rules/agent-team-operation.md` Two Modes decides
 - Every assignment sends a self-contained role brief
 - Fewer eligible workers than required responsibilities is a staffing decision to record
 - Never fold independent verification onto a contributor to satisfy that staffing decision
+
+## Delivery Stages
+
+One authorized implementation moves through four durable stages. A check can
+refuse only the stage whose harm it prevents.
+
+| Stage | Blocking evidence | Visible non-blockers |
+| --- | --- | --- |
+| `authorized` | target-repo/action authority, accepted behavior, fresh recorded base, selected worktree integrity, trigger classification, selected-seat availability | due maintenance cadence, unrelated repo/worktree hygiene, catalog freshness unrelated to the selected pair |
+| `built` | one task-scoped pushed tip, deterministic repo gates, preserved work and known dispatch effect | unrelated cleanup and advisory findings |
+| `verified` | non-contributor reviewer and tester reports at the current tip, contributor exclusion, every blocking finding resolved or routed through its bounded gate | advisory findings and maintenance observations |
+| `released` | hosted CI and policy review green, merge recorded, every declared publication confirmed | advisory reviewers and maintenance due after delivery |
+
+- A later stage never retroactively turns an earlier maintenance observation into a task prerequisite
+- Unknown authority, checkout integrity, dispatch effect, current-tip verification, merge state or publication effect fails closed at its own stage
+- An unrelated checkout observation stays visible and is raised to the operator without stopping the selected checkout
+- Triggered specialty work and blocking findings keep their existing recovery and correction routes
 
 ## Specialist Consultations
 
@@ -87,7 +113,9 @@ The Herdr team round contract. `rules/agent-team-operation.md` Two Modes decides
 - **Report substance** — assessing a report beyond its contract lines, classifier gates and judge rulings routes to a worker
 - A finding's scope class (`skills/herdr-foreman/references/assignment-reasoning.md` Assess a Finding's Scope) routes to an advisor consultation
 - A causal question — whether a diagnosis explains its evidence, whether successive findings share a cause — routes to the investigator
-- **Non-mechanical brief** — a bug brief, a correction brief, and any brief applying `skills/herdr-foreman/references/assignment-reasoning.md` route to an advisor consultation
+- **Non-mechanical brief** — a bug or correction brief routes to an advisor only when accepted behavior, failing evidence, bounded scope, or the correction choice remains unsettled
+- A recorded accepted behavior, reproducible failure and bounded correction need no additional advisor before development
+- Triggered specialty work, causal uncertainty, changed scope and exhausted correction loops keep their existing consultation routes
 - That consultation's report is the brief's task framing: accepted behavior, evidence questions and correction scope
 - The handoff is the accepted report's path, never its text
 - The foreman passes the `report` path of that consultation's `assess-specialist` record, as an absolute path, in the role's `SPECIALIST_CONTEXT` value through `compose-briefs`
@@ -301,7 +329,7 @@ The Herdr team round contract. `rules/agent-team-operation.md` Two Modes decides
 - A finding a weighing ruled `defer` or `decline` reads DECLINED, citing the ruling, while that ruling still covers it
 - A covered finding whose file changed is re-checked as OPEN or RESOLVED
 - Restrict NEW findings in a scoped re-check to blocking severity
-- Record new advisories in the round's follow-up issue without extending the fix loop
+- Record new advisories in the round log without extending the fix loop or creating another delivery obligation
 - Run a broad whole-branch review before release
 - Every corrected tip requires full independent reviewer and tester reports before release resumes
 - All external review and CI requirements remain in force
@@ -313,10 +341,21 @@ The Herdr team round contract. `rules/agent-team-operation.md` Two Modes decides
 - One writer per worktree
 - The shared checkout stays on the default branch
 - The foreman reads the shared checkout and never edits it
+- The foreman successfully fetches the target repo and resolves its exact fresh default commit before provisioning; the provisioning owner persists it before returning success
+- New task worktrees start from that commit; an existing explicitly authorized task keeps its original registered base, distinct from the latest fetched default
+- Brief composition reads the original task base and Git-owned worktree provenance automatically; callers supply task identity, never an asserted base SHA
 - The foreman provisions every worktree a brief names, before dispatch
 - A read-only role that writes no repository content needs no worktree
 - A worker never creates, moves, or removes a worktree
 - A worker runs no git command against the shared checkout, mutating or otherwise
+- Narrow exception for a Herdr worker consuming a foreman-provisioned task worktree.
+- Applies when `HERDR_ENV` is set and the worker receives a provisioned worktree in its brief
+- Preconditions (all required):
+  1. The provisioning owner successfully fetches and records the exact fetched default commit
+  2. The brief names the original registered task base and validates Git-owned worktree provenance against it
+  3. An existing authorized task retains its original base separately from the fresh default
+  4. The worker runs Git only inside the named worktree and reports shared-checkout drift through its report
+- Every other task follows `rules/sync-before-work.md` Sync Before Reading and Land on the Fresh Default
 - A hook or tool instructing a worker to sync the shared checkout or remove a worktree is reporting, never directing
 - The worker names that drift in its report
 - The worker acts on none of it
@@ -543,9 +582,11 @@ The Herdr team round contract. `rules/agent-team-operation.md` Two Modes decides
 
 ## Retrospectives
 
-- The foreman completes a retrospective at least once per `INTERVAL` (`skills/herdr-foreman/foreman/retrospective.py`) during active team work
+- The foreman observes retrospective cadence at least once per `INTERVAL` (`skills/herdr-foreman/foreman/retrospective.py`) during active team work
 - Check the cadence on active resume, before planning or dispatch, and between report waits
+- A daily cadence due is maintenance to schedule outside the selected task's delivery stages; it never refuses dispatch
 - Complete a retrospective before clearing or relaunching an existing worker, or changing its seat, model, or effort
+- Missing transition coverage still blocks that exact worker transition
 - Bind transition coverage to the outgoing work and session, source evidence, and proposed assignment
 - Cover simultaneous transitions in one retrospective
 - Reuse coverage only while the covered evidence and proposed transition remain unchanged
@@ -554,6 +595,10 @@ The Herdr team round contract. `rules/agent-team-operation.md` Two Modes decides
   1. The owner has no preceding assignment for that worker
   2. Live process evidence proves the target pane holds only its shell
   3. No outgoing worker context or work needs a handoff
+- A closed no-brief transport retry also has no outgoing work, but is recorded as `reconciled_not_sent`, never as a first launch
+- The owner proves durable `not_sent`, unchanged task, role, frozen brief/common bytes, tier and judge mode, inactive old enrollment, old native agent and pane absent, no report or assignment input evidence, and an exact sole-shell new pane
+- The owner performs this proof and retry bookkeeping; executors need no manual reconciliation for pre-send refusal and no `retro-check` for a generated identity absent from static config
+- Unknown, possibly sent, live, changed or partially closed attempts preserve their work and fail closed
 - Every other worker transition requires retrospective coverage
 - Unknown worker history alone never proves a first launch
 - Collect observations from saved reports and read-only evidence
@@ -618,6 +663,7 @@ The Herdr team round contract. `rules/agent-team-operation.md` Two Modes decides
 - The developer reports each reviewer lane's observed state, including whether a request is pending, whoever asked for it
 - Waiting on a review the role cannot request follows `skills/release/references/release-contract.md` Pre-Merge Watch Mechanics
 - The developer pushes the branch and stops
+- Advisory findings are recorded and do not create another push, verification round or target-task prerequisite
 - A shared GitHub account posts internal reviews as COMMENT reviews
 - The foreman enforces the blocking findings a COMMENT review carries
 - Severity classification follows `rules/review-severity.md`

@@ -175,7 +175,10 @@ class SupervisionCliTest(fixture.CliCase):
 
     def test_interrupted_send_remains_active_and_retry_never_resends(self):
         client = self._client({"grok": "idle"})
-        with patch("foreman.assign.send_message", side_effect=KeyboardInterrupt), self.assertRaises(KeyboardInterrupt):
+        def interrupt_at_prompt(*_args, **options):
+            options["before_prompt"]()
+            raise KeyboardInterrupt
+        with patch("foreman.assign.send_message", side_effect=interrupt_at_prompt), self.assertRaises(KeyboardInterrupt):
             self.invoke(self.apply_arguments(), client)
         member = self.saved()["members"][0]
         self.assertTrue(member["active"])

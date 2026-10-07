@@ -64,3 +64,18 @@ class UsageError(ForemanError):
     """The invocation itself was wrong (bad --brief, unknown agent, ...)."""
 
     code = "usage_error"
+
+
+def owner_recovery(error, kind, operation, condition, *, outcome="blocked", **evidence):
+    """Attach a consumer-facing next operation without changing safety proof.
+
+    This is error output only, not durable state or authorization. Owners may
+    replace a lower-level outcome after actual cleanup/persistence succeeds.
+    """
+    message = error.details.get("failure_message", error.message)
+    error.details = {**error.details, "failure_kind": kind, "failure_message": message, "recovery": {
+        "outcome": outcome, "operation": operation, "condition": condition,
+        "evidence": evidence}}
+    error.message = "{} Next owner operation: `{}`. {}".format(message, operation, condition)
+    error.args = (error.message,)
+    return error

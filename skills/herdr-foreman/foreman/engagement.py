@@ -257,8 +257,8 @@ def _brief_criteria(dispatch):
 def record_assessment(state, state_path, data, at):
     """Append the contract lines of a delivered enrollment's report, bound to its bytes.
 
-    A report missing a required line, or carrying an extra, duplicate or
-    malformed one, records nothing.
+    A refused report retains only a declared excluding contribution;
+    neither a line gap nor an invalid trigger binding grants acceptance.
     """
     _input(data)
     supervision.timestamp(at)
@@ -313,6 +313,14 @@ def record_assessment(state, state_path, data, at):
     try:
         brief_evidence, criteria = _brief_criteria(dispatch) if role in CONSULTATION_ROLES else (None, None)
         lines = report_contract.report_lines(body, role, specialty(dispatch), criteria)
+        # Binding refusals preserve declared contributions just like line gaps.
+        bindings = [line.removeprefix("TRIGGER_DECLARATION: ") for line in body.splitlines()
+                    if line.startswith("TRIGGER_DECLARATION: ")]
+        if bindings:
+            from .triggers import validate_bootstrap_binding
+            if role not in CONSULTATION_ROLES or len(bindings) != 1:
+                raise UsageError("Trigger declaration evidence belongs to one consultation report binding.", {})
+            validate_bootstrap_binding(bindings[0])
     except UsageError as exc:
         declared = report_contract.declared_contributions(body) & EXCLUDING_CONTRIBUTIONS
         if not declared:

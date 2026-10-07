@@ -69,6 +69,13 @@ run() { # <templates> <values-file> <outdir>
       || die "could not add TEAM_OPERATION to the rendering fixture"
     values="$with_team"
   fi
+  if [[ "$1" == "$(dirname "$SCRIPT")/templates" ]]; then
+    local with_base="$TMP/values.$RUN_SEQ.base.json"
+    jq --arg state "$TMP/owner-state.json" --arg worktree "$TMP/worktrees/compose" \
+      '. + {task: "compose-fixture", state: $state} | .roles |= with_entries(if .value | has("WORKTREE") then .value += {WORKTREE: $worktree, BRANCH: "feat/compose"} else . end)' \
+      "$values" > "$with_base" || die "could not add owner task/worktree metadata"
+    values="$with_base"
+  fi
   OUT="$(bash "$SCRIPT" "$1" "$values" "$3" 2>"$TMP/err.$RUN_SEQ")"
   RC=$?
   ERRTEXT="$(cat "$TMP/err.$RUN_SEQ")"
@@ -83,6 +90,20 @@ run_suite() {
   trap cleanup EXIT
   printf 'Review fixture\n' > "$TMP/package.diff" || die "could not write package fixture"
   TPL="$TMP/templates"; mk_templates "$TPL"
+  # Packaged templates consume a real normal-owner provision and task record.
+  git init -q --bare -b main "$TMP/origin.git" || die "could not create origin fixture"
+  git clone -q "$TMP/origin.git" "$TMP/shared" 2>"$TMP/clone.err" || die "could not clone fixture"
+  printf 'fixture\n' > "$TMP/shared/README.md" || die "could not seed fixture"
+  git -C "$TMP/shared" add README.md || die "could not stage fixture"
+  git -C "$TMP/shared" -c user.name=Fixture -c user.email=fixture@example.invalid commit -qm 'Fixture base' || die "could not commit fixture"
+  git -C "$TMP/shared" push -q origin main || die "could not push fixture"
+  WORKTREE_ROOT="$TMP/worktrees" bash "$(dirname "$SCRIPT")/provision-worktree.sh" \
+    "$TMP/shared" feat/compose "$TMP/worktrees/compose" > "$TMP/provision.json" || die "could not provision fixture"
+  jq '{task:"compose-fixture", base_revision:.base_revision, scope:"Compose bounded fixture", allowed_paths:["*"],
+       authorization:{source:"fixture operator request",quote:"Compose this task"}}' \
+    "$TMP/provision.json" > "$TMP/task.json" || die "could not prepare task input"
+  bash "$(dirname "$SCRIPT")/foreman.sh" task --state "$TMP/owner-state.json" \
+    --record "$TMP/task.json" --now 2026-01-08T12:00:00Z > "$TMP/task-output.json" || die "could not register fixture task"
   FAIL=0; PASS=0; RUN_SEQ=0
 
   # 1 + 3. A complete round.
@@ -191,7 +212,7 @@ JSON
     "$v6b" > "$TMP/packaged-values.json" || die "could not add packaged review paths"
   v6b="$TMP/packaged-values.json"
   run "$PKG" "$v6b" "$o6b"
-  if [[ $RC -eq 0 ]] && grep -q 'cd /wt/dev && pwd' "$o6b/brief-release.md" \
+  if [[ $RC -eq 0 ]] && grep -Fq "cd $TMP/worktrees/compose && pwd" "$o6b/brief-release.md" \
      && grep -q 'Skill(skill: "release")' "$o6b/brief-release.md"; then
     pass; else fail "packaged templates: expected exit 0 and a filled release brief, got RC=$RC ERR=$ERRTEXT"; fi
 

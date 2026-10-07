@@ -1,6 +1,6 @@
 ---
 alwaysApply: true
-description: Sync the local checkout with the remote default branch before reading, planning, or editing
+description: Start from the fresh remote default; in Herdr rounds the foreman records it and workers consume their provisioned base
 ---
 
 # Sync Before Work
@@ -21,6 +21,13 @@ description: Sync the local checkout with the remote default branch before readi
 
 - Local default behind `origin/<default>` by more than a trivial amount: treat every "this file looks like X" conclusion as suspect until re-derived against the fresh tree
 - An issue naming files, skills, or steps absent from the local tree is a staleness tell — fetch and re-derive before mapping the work onto what you see
+
+## Herdr Team Rounds
+
+- Narrow exception for a Herdr worker consuming a foreman-provisioned task worktree.
+- Applies when `HERDR_ENV` is set and the worker receives a provisioned worktree in its brief
+- Preconditions are binding: read `skills/herdr-foreman/references/team-operation.md` Writers and Checkouts before relying on it
+- Every other task follows Sync Before Reading and Land on the Fresh Default
 
 ## Working Against a Pinned Ref
 

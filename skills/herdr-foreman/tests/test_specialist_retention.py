@@ -245,7 +245,7 @@ class SpecialistRetentionTest(unittest.TestCase):
         state["assignments"] = self.history
         return retrospective_runtime.Guard(self.path, state, self.client, BY_NAME, at, task="task-1", retain=True)
 
-    def test_warm_followup_preserves_daily_retrospective_gate(self):
+    def test_warm_followup_proceeds_when_daily_retrospective_maintenance_is_due(self):
         with notes.lock(self.path):
             notes.establish_baseline(self.path, notes.empty(self.path), OLD)
         result = self.dispatch(retrospective_guard=self.guard())
@@ -253,11 +253,11 @@ class SpecialistRetentionTest(unittest.TestCase):
         self.assertEqual(notes.load(self.path)["transitions"], [])
         self.reset_client()
         prepared = []
-        with self.assertRaises(UsageError):
-            self.dispatch(retrospective_guard=self.guard("2026-01-09T11:00:00Z"),
-                          on_prepare=lambda *_: prepared.append(True))
-        self.assertEqual(prepared, [])
-        self.assert_no_input()
+        result = self.dispatch(retrospective_guard=self.guard("2026-01-09T11:00:00Z"),
+                               on_prepare=lambda *_: prepared.append(True))
+        self.assertEqual(result["applied"][0]["clear_reason"], "retained")
+        self.assertEqual(prepared, [True])
+        self.assertEqual(len(self.runner.writes()), 1)
 
     def test_fresh_transition_still_requires_retrospective_coverage(self):
         with notes.lock(self.path):

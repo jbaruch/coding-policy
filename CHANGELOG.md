@@ -1,5 +1,77 @@
 # Changelog
 
+### Changed
+
+- **Herdr delivery gates are stage-local.** Authorized, built, independently
+  verified and released are the four durable decisions. Authority, selected
+  checkout/seat integrity, current-tip tests and independent reports, hosted
+  gates and publication still fail closed at the stage they protect. Due
+  capability or retrospective maintenance, unrelated checkout observations
+  and advisory findings stay visible without delaying the selected delivery.
+  Transition-specific retrospective coverage remains blocking. Team workers
+  consume the foreman's recorded fresh base instead of syncing the shared
+  checkout themselves, and a fully evidenced bounded bug correction no longer
+  requires an extra advisor round. Standalone acknowledgments use the existing
+  review conversation; team acknowledgments use the existing round record.
+  Unfixed rule-audit drift uses the same scoped observation contract rather than
+  automatically creating a follow-up issue. Ordinary advisory thread replies
+  remain outside merge prerequisites. Release
+  snapshots now carry all review bodies from every author and page, plus every
+  inline comment and reply for required reading. Large snapshot payloads stream
+  through stdin instead of exceeding process-argument limits.
+
+- **A repo can bootstrap its first trigger declaration without bypassing
+  classification.** `detect-triggers --bootstrap-declaration` accepts reviewed
+  external bytes only when the recorded base lacks `.herdr/triggers.json` and
+  the planned surfaces bind its path and SHA-256. An existing accepted
+  consultation must be bound to those reviewed bytes, including a first
+  declaration already installed at head. The first pushed declaration
+  must be byte-identical. Existing declarations and later pushed heads are read
+  from the repository as sole authority. Missing, changed and stale artifacts
+  fail closed. A refused trigger binding still preserves a declared contribution
+  as an independent-verification exclusion, without accepting the report.
+
+### Fixed
+
+- **Worktree provisioning preserves original-base evidence across retries.**
+  Fetch failures stop creation. The owner persists exact task and fetched-default
+  commits, recovers interrupted receipt writes from durable intent or supported
+  legacy scratch, and refuses to invent provenance for receiptless existing
+  worktrees. Packaged briefs consume the registered original task base and
+  validate the rendered branch against the actual worktree branch. Recorded
+  commit fetches preserve existing work, and Git error diagnostics withhold raw
+  stderr that can contain credential-bearing remote URLs. Refusals name the
+  owner recovery operation and the evidence needed before retrying.
+
+- **Fresh worker dispatch owns pre-brief recovery.** Startup may settle through
+  dim placeholder decoration with read-only checks, but sends only after stable
+  exact empty-composer evidence under unchanged pane, process and tier. The
+  durable sending marker now follows that gate, so earlier failures automatically
+  record `not_sent` and clean up owned panes/enrollments. Exact closed no-brief
+  retries preserve their task, frozen inputs, mode and correction count without
+  requiring a retrospective for outgoing work that never existed. Uncertain,
+  live, changed or partially closed attempts still refuse and preserve evidence.
+  `reconcile --dispatch` consumes existing owner proof for guarded cleanup;
+  startup refusals return structured recovery outcomes.
+  State schema 11 owns this retry provenance and preserves older valid history
+  on upgrade, so successful retries remain readable and completed replay sends
+  nothing again. Briefing, retained restoration and release instructions now
+  follow the same conditional consultation, advisory cadence and report-only
+  advisory obligations throughout the delivery path.
+
+- **Fresh workspace startup waits for available foreground evidence.** Herdr
+  omits an empty foreground-process list. The owner now waits for that field
+  within its existing startup bound, requiring consecutive explicit same-shell
+  observations before preflight. Explicit null, malformed evidence and a changed
+  shell still refuse, and the final proof before launch remains strict.
+
+- **Fresh assignment corrections use schema-7 context rules before launch.**
+  Early fixes keep their original task and cumulative count while receiving a
+  fresh identity; legacy retained-session requirements no longer reject them.
+  Pure correction checks run before workspace creation. A changed or malformed
+  pre-start shell refuses with PID evidence, without looking up the absent new
+  worker or weakening the final occupancy proof.
+
 ## 0.3.364 — 2026-10-06
 
 ### Fixed

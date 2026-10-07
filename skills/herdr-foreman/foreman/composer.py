@@ -25,7 +25,8 @@ keeps the legacy unchecked path.
 import re
 import time
 
-from .errors import HerdrError
+from .errors import HerdrError, owner_recovery
+from . import runnable
 from .parsers import BOX_FRAME
 from .probe import stderr_warn
 
@@ -42,6 +43,9 @@ COMPOSER_SETTLE_SEC = 1.0
 #: composer by then is drawing something else over it (#393).
 COMPOSER_VISIBLE_ATTEMPTS = 20
 COMPOSER_VISIBLE_INTERVAL = 0.5
+FRESH_COMPOSER_ATTEMPTS = 20
+FRESH_COMPOSER_INTERVAL = 0.5
+FRESH_COMPOSER_STABLE_READS = 2
 
 #: Re-reads allowed while waiting for the screen to change after a clear.
 SCREEN_CHANGE_ATTEMPTS = 3
@@ -550,7 +554,47 @@ def _wait_for_visible_composer(client, agent, pane_id, text, ansi, sleep, warn):
     )
 
 
-def ensure_ready(client, agent, pane_id=None, session=None, sleep=time.sleep, warn=None, settle_sec=COMPOSER_SETTLE_SEC, text=None, ansi=True, before_input=None, recovery_state=None):
+def _fresh_startup_error(kind, message, evidence):
+    return owner_recovery(HerdrError(message, evidence), kind,
+        runnable.command("apply"),
+        "The apply owner must prove owned pre-send cleanup and durable not_sent before retrying the unchanged assignment; unknown input remains blocked.")
+
+
+def _settle_fresh_composer(client, agent, pane_id, observe, sleep, warn):
+    """Read only; decorative startup evidence never authorizes input itself."""
+    original = observe()
+    stable = 0
+    composer = Composer(False, "", False, False, False, None)
+    for attempt in range(FRESH_COMPOSER_ATTEMPTS):
+        text, ansi = read_pane(client, agent, warn=warn)
+        composer = inspect_composer(text, agent, ansi=ansi)
+        if observe() != original:
+            raise _fresh_startup_error("startup_identity_changed", "Fresh worker changed pane, process or tier during startup; nothing was sent.", {"pane_id": pane_id})
+        if not ansi or not composer.visible:
+            raise _fresh_startup_error("startup_evidence_missing", "Fresh startup lacks ANSI composer evidence; nothing was sent.", {"pane_id": pane_id, "ansi_read": ansi})
+        exact = composer.placeholder or composer.literal == ""
+        # Only a single placeholder row with decorative non-word marks may
+        # settle. Recalled paragraphs and arbitrary dim input remain drafts.
+        decorated = (composer.dim and "\n" not in (composer.literal or "") and any(
+            (composer.literal or "").strip().startswith(hint.strip())
+            and (composer.literal or "").strip()[len(hint.strip()):].strip()
+            and all(char.isspace() or char in "✦✧✶✷✸✹✺✻✼✽✾✿⋆*" for char in
+                    (composer.literal or "").strip()[len(hint.strip()):])
+            for hint in agent.composer_placeholders))
+        if not exact and not decorated:
+            raise _fresh_startup_error("startup_input_occupied", "Fresh startup contains a draft or dialog; no input was sent.",
+                {"pane_id": pane_id, "composer_occupied": True, "dim": composer.dim, "placeholder": composer.placeholder, "ansi_read": composer.ansi})
+        stable = stable + 1 if exact else 0
+        if stable >= FRESH_COMPOSER_STABLE_READS:
+            return text
+        if attempt + 1 < FRESH_COMPOSER_ATTEMPTS:
+            sleep(FRESH_COMPOSER_INTERVAL)
+    raise _fresh_startup_error("startup_settle_timeout", "Fresh composer did not settle within its read-only startup bound; nothing was sent.",
+                    {"pane_id": pane_id, "attempts": FRESH_COMPOSER_ATTEMPTS,
+                     "dim": composer.dim, "placeholder": composer.placeholder, "ansi_read": composer.ansi})
+
+
+def ensure_ready(client, agent, pane_id=None, session=None, sleep=time.sleep, warn=None, settle_sec=COMPOSER_SETTLE_SEC, text=None, ansi=True, before_input=None, recovery_state=None, startup_observe=None):
     """Return pane text once the worker's own composer is on screen and empty.
 
     Recovery keys are sent only when every condition in `recovery_allowed`
@@ -567,6 +611,8 @@ def ensure_ready(client, agent, pane_id=None, session=None, sleep=time.sleep, wa
     waited out, bounded; one that never appears refuses before any input.
     """
     warn = warn or stderr_warn
+    if startup_observe is not None:
+        return _settle_fresh_composer(client, agent, pane_id, startup_observe, sleep, warn)
     session = session if session is not None else DispatchSession()
     if text is None:
         text, ansi = read_pane(client, agent, warn=warn)
@@ -607,7 +653,7 @@ def ensure_ready(client, agent, pane_id=None, session=None, sleep=time.sleep, wa
     return text
 
 
-def send_message(client, agent, text, landing_needle, pane_id=None, session=None, sleep=time.sleep, warn=None, settle_sec=COMPOSER_SETTLE_SEC, attempts=LANDING_ATTEMPTS, start_timeout_ms=DEFAULT_START_TIMEOUT_MS, before_input=None):
+def send_message(client, agent, text, landing_needle, pane_id=None, session=None, sleep=time.sleep, warn=None, settle_sec=COMPOSER_SETTLE_SEC, attempts=LANDING_ATTEMPTS, start_timeout_ms=DEFAULT_START_TIMEOUT_MS, before_input=None, before_prompt=None, startup_observe=None):
     """Paste a real message and confirm the agent actually took it.
 
     Sending is not starting. Live, an assignment pasted onto a leftover `/`
@@ -634,9 +680,12 @@ def send_message(client, agent, text, landing_needle, pane_id=None, session=None
         warn=warn,
         settle_sec=settle_sec,
         before_input=before_input,
+        startup_observe=startup_observe,
     )
     if before_input is not None:
         before_input()
+    if before_prompt is not None:
+        before_prompt()
     client.agent_prompt(agent.name, text)
 
     landed = False

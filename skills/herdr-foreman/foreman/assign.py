@@ -50,8 +50,9 @@ from .composer import (
     send_command,
     send_message,
 )
-from .errors import AgentBusyError, HerdrError, UsageError
+from .errors import AgentBusyError, HerdrError, UsageError, owner_recovery
 from .herdr import (
+    READY_STATES,
     BUSY_STATES,
     DEFAULT_SETTLE_TIMEOUT_MS,
     SLASH_DELIVERY_TYPE,
@@ -61,7 +62,7 @@ from .composer import COMPOSER_READ_LINES, COMPOSER_READ_SOURCE, checkable
 from .probe import PROBE_READ_LINES, PROBE_READ_SOURCE, resolve_status, stderr_warn
 from .chronology import latest_assignment
 from .recovery import JUDGE_MODES, briefing_bytes, empty_recovery, fresh_transition, task_record, validate_work
-from .launch import restart_worker, verify_running, verify_running_permissions
+from .launch import foreground_agent, restart_worker, verify_running, verify_running_permissions
 from .tiers import EFFORT_RANK, canonical_role, launch_flags, require_seatable, still_de_escalated, worker_launch_args
 from .report_delivery import marker_columns
 from .composition import normalize_requirement, parse_requirements, seat_holds
@@ -593,7 +594,7 @@ def refuse_reserved(assignments, task, reserved):
                 name, reserved[name], runnable.command("close-task")), {"agent": name, "task": reserved[name]})
 
 
-def validate_context_mode(assignments, no_clear, retain_context, task, fix_round, *, recovery=None, history=None, plan_id=None, work=None, retain_specialist=False, requirements=None):
+def validate_context_mode(assignments, no_clear, retain_context, task, fix_round, *, recovery=None, history=None, plan_id=None, work=None, retain_specialist=False, requirements=None, assignment_scoped=False, fresh=False):
     """Validate the explicit context choice before any herdr operation."""
     parse_requirements(
         {"schema_version": 1, "assignments": requirements} if requirements else None,
@@ -638,6 +639,8 @@ def validate_context_mode(assignments, no_clear, retain_context, task, fix_round
         raise UsageError("Pass --task with --fix-round to identify the task.", {})
     store = recovery if recovery is not None else empty_recovery()
     validate_work(store, history or [], task, fix_round, plan_id, work, implementation="developer" in assignments)
+    if assignment_scoped and fresh and "developer" in assignments and fix_round is not None:
+        task_record(store, task)
     transition = fresh_transition(store, history or [], task, fix_round)
     if retain_context and (
         set(assignments) != {"developer"} or fix_round not in RETAIN_CONTEXT_ROUNDS
@@ -645,7 +648,8 @@ def validate_context_mode(assignments, no_clear, retain_context, task, fix_round
         raise UsageError(
             "--retain-context requires one developer assignment and --fix-round 1, 2 or 3.", {}
         )
-    if "developer" in assignments and fix_round in RETAIN_CONTEXT_ROUNDS and not retain_context:
+    if ("developer" in assignments and fix_round in RETAIN_CONTEXT_ROUNDS and not retain_context
+            and not (assignment_scoped and fresh)):
         if transition is None:
             raise UsageError("Early developer fixes require --retain-context or a recorded fresh handoff. Use `{}` for a verified automatic role clear, or follow dispatch-recovery.md for other causes; never reset the task.".format(runnable.command("recover-role-clear")), {})
         task_record(store, task)
@@ -653,7 +657,7 @@ def validate_context_mode(assignments, no_clear, retain_context, task, fix_round
             raise UsageError("A replacement developer session requires an automatic clear; omit --no-clear.", {})
     if no_clear and fix_round is not None and fix_round not in RETAIN_CONTEXT_ROUNDS:
         raise UsageError("Fresh fix rounds require an automatic clear; omit --no-clear.", {})
-    return transition if not retain_context and "developer" in assignments else None
+    return transition if not retain_context and "developer" in assignments and not (assignment_scoped and fresh) else None
 
 
 def validate_fix_history(assignments, history, task, fix_round):
@@ -1052,7 +1056,8 @@ def apply(client, assignments, agents_by_name, paths, at, no_clear=False, settle
     validate_agents(assignments, agents_by_name)
     transition = validate_context_mode(assignments, no_clear, retain_context, task, fix_round,
                                        recovery=recovery, history=history, plan_id=plan_id, work=work,
-                                       retain_specialist=retain_specialist, requirements=requirements)
+                                       retain_specialist=retain_specialist, requirements=requirements,
+                                       assignment_scoped=assignment_scoped, fresh=fresh)
     # Every judge dispatch declares its mode, whichever caller reaches here; an
     # undeclared mode is refused, never defaulted (#478).
     if any(canonical_role(role) == "judge" for role in assignments) and judge_mode not in JUDGE_MODES:
@@ -1123,6 +1128,9 @@ def apply(client, assignments, agents_by_name, paths, at, no_clear=False, settle
         if on_prepare is not None:
             on_prepare(step, statuses[name])
         cleared = fresh
+        clear_reason = "retained" if retain_context or retain_specialist else "hand" if no_clear else "automatic"
+        if retrospective_guard is not None and isinstance(getattr(retrospective_guard, "retries", None), dict) and name in retrospective_guard.retries:
+            clear_reason = "reconciled_not_sent"
         tier = tiers.get(step["role"])
         tier_record = None
         def before_input():
@@ -1135,6 +1143,23 @@ def apply(client, assignments, agents_by_name, paths, at, no_clear=False, settle
             if specialist_prior is not None:
                 live = check_all_ready(client, {step["role"]: name}, agents_by_name, warn=warn)
                 verify_live_retention(specialist_prior, live[name]["context_session"], name)
+
+        startup_identity = None
+        def startup_observe():
+            nonlocal startup_identity
+            before_input()
+            live = client.agent_get(name)
+            proof = (verify_running(client, agent, step["pane_id"], tier) if tier
+                     else foreground_agent(client, step["pane_id"], agent.kind))
+            identity = (live.get("pane_id"), live.get("agent_session"), proof)
+            if (live.get("pane_id") != step["pane_id"] or live.get("agent_status") not in READY_STATES
+                    or type(proof.get("pid")) is not int or proof["pid"] <= 0
+                    or (startup_identity is not None and identity != startup_identity)):
+                raise owner_recovery(HerdrError("Fresh worker changed its startup identity; nothing was sent.", {"pane_id": step["pane_id"]}),
+                    "startup_identity_changed", runnable.command("apply"),
+                    "The apply owner must close only its proved pre-send surface and record not_sent before retrying the unchanged plan.")
+            startup_identity = identity
+            return identity
 
         if not tier:
             # Earlier roles and their callbacks may replace a later worker.
@@ -1212,15 +1237,20 @@ def apply(client, assignments, agents_by_name, paths, at, no_clear=False, settle
             context_session = None
         # send_message re-checks the composer, pastes, and confirms the
         # message actually landed as a user message rather than as a command.
-        if on_before_send is not None:
-            before = {"cleared": cleared, "clear_reason": clear_reason,
+        def before_prompt():
+            if fresh and assignment_scoped:
+                startup_observe()
+            if on_before_send is not None:
+                before = {"cleared": cleared, "clear_reason": clear_reason,
                       "context_session": context_session, "tier": tier_record,
                       "transition": transition if step["role"] == "developer" else None}
-            # Only a judge dispatch carries its mode, so every other dispatch keeps
-            # the shape it had before recovery store 12 (#478).
-            if canonical_role(step["role"]) == "judge":
-                before["judge_mode"] = judge_mode
-            on_before_send(step, before)
+                # Only a judge dispatch carries its mode (#478).
+                if canonical_role(step["role"]) == "judge":
+                    before["judge_mode"] = judge_mode
+                on_before_send(step, before)
+                before_input()
+                if fresh and assignment_scoped:
+                    startup_observe()
         landing = send_message(
             client,
             agent,
@@ -1234,6 +1264,8 @@ def apply(client, assignments, agents_by_name, paths, at, no_clear=False, settle
             attempts=landing_attempts,
             start_timeout_ms=start_timeout_ms,
             before_input=before_input,
+            before_prompt=before_prompt,
+            startup_observe=startup_observe if fresh and assignment_scoped else None,
         )
         if tracks_session and prior is None and specialist_prior is None:
             context_session = (correlate_dispatch_session(
@@ -1329,7 +1361,10 @@ def dry_run(client, assignments, agents_by_name, paths, no_clear=False, settle_t
     """
     transition = validate_context_mode(assignments, no_clear, retain_context, task, fix_round,
                                        recovery=recovery, history=history, plan_id=plan_id, work=work,
-                                       retain_specialist=retain_specialist, requirements=requirements)
+                                       retain_specialist=retain_specialist, requirements=requirements,
+                                       assignment_scoped=assignment_scoped, fresh=fresh)
+    if assignment_scoped and fresh:
+        validate_fix_history(assignments, history, task, fix_round)
     if retain_specialist:
         validate_specialist_history(assignments, history, task, requirements, tiers)
     refuse_reserved(assignments, task, reserved)

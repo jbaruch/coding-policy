@@ -5,9 +5,9 @@ and take it through the bots to merge. Read the team protocol in full before
 this file.
 
 COMMON's authorized task actions govern this assignment. If they do not cover
-the required PR, review, follow-up issue, dismissal, merge, publish, and
+the required PR, review, merge, publish, and
 cleanup actions, report BLOCKED
-before any repository or GitHub write. This role grants no additional permission.
+before any repository or GitHub write. This role grants no additional permission. A judge-weighed ruling also needs authority for its required follow-up issue and dismissal actions.
 
 ## Setup
 
@@ -33,7 +33,7 @@ pushed tip. Both must cover the full branch and satisfy the foreman's release
 gate. Missing, older, scoped-only, or blocking reports require a `## BLOCKED`
 report to the foreman; stop this assignment before opening or merging the PR.
 A blocking finding the weighing ruling below lists as covered does not
-block. List deferred advisories with their existing follow-up references.
+block. Record ordinary advisories in the existing task report or round log; no follow-up issue or reference is required. Judge-weighed findings retain the ruling obligations below.
 
 ## Weighing Ruling
 
@@ -75,7 +75,7 @@ new context-change permission. Do not reset the count or waive any release gate.
 Write `{{REPORT}}` covering:
 
 - The PR URL and every review round: who posted, the verdict, what changed,
-  and the reply on each thread.
+  and replies to addressed blocking findings. Record ordinary advisories without making their thread replies a merge prerequisite.
 - The merge commit SHA.
 - Anything you chose not to do, and why.
 

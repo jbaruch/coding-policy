@@ -5,17 +5,17 @@ looked like when it was measured; it never substitutes for reading the agent's
 live status before writing to it. `plan` may run off a stale snapshot on
 purpose (planning has no side effects); `apply` always re-checks live status.
 
-Schema (schema_version 10)::
+Schema (schema_version 11)::
 
     {
-      "schema_version": 10,
+      "schema_version": 11,
       "snapshots":  [ <measure output>, ... ],   # newest last, capped at 20
-      "assignments":[ {"schema_version": 10, "at": <ISO-8601>,
+      "assignments":[ {"schema_version": 11, "at": <ISO-8601>,
                        "role": <str>, "agent": <str>,
                        "status": "applied" | "sent_but_not_started" | "maintenance"
                                  | "unknown",
                        "cleared": <bool> | null,
-                       "clear_reason": "automatic" | "hand" | "retained" | "unknown",
+                       "clear_reason": "automatic" | "hand" | "retained" | "reconciled_not_sent" | "unknown",
                        "task": <str> | null, "fix_round": <int> | null,
                        "context_session": <object> | null,
                        "tier": <object> | null,
@@ -88,9 +88,9 @@ from .recovery import JUDGE_MODES, empty_recovery, migrate_store, validate_store
 
 #: The version this build writes for the document and assignment rows.
 #: Snapshots have their own version and migration chain below.
-STATE_SCHEMA_VERSION = 10
+STATE_SCHEMA_VERSION = 11
 
-CLEAR_REASONS = frozenset({"automatic", "hand", "retained", "unknown"})
+CLEAR_REASONS = frozenset({"automatic", "hand", "retained", "reconciled_not_sent", "unknown"})
 
 #: What a judge row may record. `unknown` is history alone: a row migrated from
 #: before the field, or a dispatch reconciled from a receipt written before it.
@@ -347,6 +347,19 @@ def _migrate_document_9_to_10(payload):
     return payload
 
 
+def _migrate_record_10_to_11(record):
+    """Version 11 owns no-send retry provenance; older evidence is unchanged."""
+    if record.get("clear_reason") == "reconciled_not_sent":
+        raise _NoUsableState("schema-10 assignment contains unowned no-send retry evidence")
+    record["schema_version"] = 11
+    return record
+
+
+def _migrate_document_10_to_11(payload):
+    payload["schema_version"] = 11
+    return payload
+
+
 def _migrate_snapshot_2_to_3(snapshot):
     """An older snapshot has no measured per-tier billing attribution."""
     snapshot["schema_version"] = 3
@@ -432,6 +445,7 @@ MIGRATIONS = {
     7: (8, _migrate_document_7_to_8),
     8: (9, _migrate_document_8_to_9),
     9: (10, _migrate_document_9_to_10),
+    10: (11, _migrate_document_10_to_11),
 }
 
 #: The same table for one assignment record, walked the same way.
@@ -446,6 +460,7 @@ RECORD_MIGRATIONS = {
     7: (8, _migrate_record_7_to_8),
     8: (9, _migrate_record_8_to_9),
     9: (10, _migrate_record_9_to_10),
+    10: (11, _migrate_record_10_to_11),
 }
 
 
@@ -544,7 +559,7 @@ def _validate(payload, path):
         cleared = record.get("cleared")
         reason = record.get("clear_reason")
         if not isinstance(reason, str) or reason not in CLEAR_REASONS or (
-            (reason == "automatic" and cleared is not True)
+            (reason in {"automatic", "reconciled_not_sent"} and cleared is not True)
             or (reason in {"hand", "retained"} and cleared is not False)
             or (reason == "unknown" and cleared is not None)
         ):
@@ -832,6 +847,8 @@ def add_assignment(state, at, role, agent, status=STATUS_APPLIED, *,
         # A tier that never met pressure (a judge start, an unmeasured round)
         # still carries both fields, so every current row reads one shape.
         tier = {"pressure_headroom": None, "de_escalated": False, **tier}
+    if clear_reason == "reconciled_not_sent" and cleared is not True:
+        raise UsageError("A reconciled no-send retry requires verified fresh-context evidence.", {})
     if status == STATUS_MAINTENANCE and (
         cleared is not True or clear_reason != "automatic" or not _maintenance_tier_is_valid(tier)
     ):

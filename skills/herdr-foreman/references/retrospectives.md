@@ -8,10 +8,13 @@ completed retrospective.
 ## When to run one
 
 Check on active resume, before planning and dispatch, and between report waits.
-The utility owns the elapsed-time calculation and daily interval. Complete a
-retrospective when the active cadence is due. Existing work with no usable
-retrospective history is due immediately. A new empty team's first active work
-establishes its baseline. Do not install a scheduler or wake an inactive team.
+The utility owns the elapsed-time calculation and daily interval. A due daily
+cadence is a maintenance observation, never a selected task's dispatch or
+delivery gate. Record it and complete the retrospective at the next maintenance
+checkpoint without interrupting the task. Existing work with no usable history
+is due immediately but remains non-blocking. A new empty team's first active
+work establishes its baseline. Do not install a scheduler or wake an inactive
+team.
 
 Independently, complete one before clearing or relaunching a worker with outgoing
 work, or changing its role, model, or effort. This includes release and judge
@@ -20,7 +23,7 @@ transition requirement; missing history or unknown session evidence does not
 prove that exemption. Ordinary readiness, recovery, and acceptance gates still
 apply after a retrospective.
 
-A retained specialist follow-up remains subject to the daily cadence. Use
+A retained specialist follow-up still reports the daily cadence. Use
 `context: "retain"` in its check request; the continuation owner verifies the
 unchanged engagement under `references/dispatch-recovery.md`. A changed specialty
 or engagement uses the normal fresh assignment and transition path.
@@ -141,10 +144,11 @@ the exact output envelope; the state schema documents persisted fields.
    `missing_coverage`, the source request, and coverage receipts. A successful
    command is a completed check, not a completed retrospective. Follow its
    diagnostic on non-zero; never replace missing proof with a hand-written result.
-3. If due, coverage is missing, or the operator explicitly requested a new
-   retrospective, gather evidence and write the substantive Markdown described
-   above. Otherwise proceed silently to the calling checkpoint. Read the previous
-   saved actions before writing the new note.
+3. Missing transition coverage requires the substantive retrospective before
+   that worker transition. An operator request performs it and finishes at that
+   checkpoint. Daily cadence alone is recorded for maintenance and the selected
+   delivery stage proceeds. Read the previous saved actions before writing a new
+   note.
 4. Prepare recording metadata with `id`, absolute draft `note`, timezone-qualified
    `period_start` and `period_end`, `triggers` (`daily`, `transition`, or both),
    covered `tasks`, `participants`, `unavailable` worker-to-reason map, absolute
@@ -158,11 +162,12 @@ the exact output envelope; the state schema documents persisted fields.
    source list is usable only when transition coverage supplies concrete evidence.
    Completion asserts the foreman has reviewed the substance; the boolean alone
    never establishes it.
-5. Run `retro-record --record <metadata.json>`. The utility revalidates evidence,
+5. Run `retro-record --record <metadata.json>` when completing the retrospective. The utility revalidates evidence,
    preserves the completed note, and records its digest and coverage. Inspect the
    returned saved path and identity, then reference them in the task ledger. A
-   failure leaves the cadence or transition unsatisfied; reconcile its diagnostic
-   before proceeding. An identical record retry is idempotent.
+   failure leaves the cadence or transition unsatisfied. Reconcile a transition
+   failure before that transition; retain a cadence failure as visible maintenance.
+   An identical record retry is idempotent.
 6. Resume the checkpoint that requested the retrospective. A changed plan or
    source requires a new check and coverage before the affected transition.
    Recording notes alone never launches, clears, or dispatches workers.

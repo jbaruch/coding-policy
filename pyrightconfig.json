@@ -49,6 +49,7 @@
     "skills/herdr-foreman/foreman/parsers.py",
     "skills/herdr-foreman/foreman/partition.py",
     "skills/herdr-foreman/foreman/planner.py",
+    "skills/herdr-foreman/foreman/provision.py",
     "skills/herdr-foreman/foreman/probe.py",
     "skills/herdr-foreman/foreman/prune_result.py",
     "skills/herdr-foreman/foreman/recovery.py",

@@ -9,19 +9,30 @@
 #
 # Contract:
 #   argv  : <shared-checkout> <branch> <worktree-path> [base-ref]
-#           base-ref defaults to origin's default branch. It is used only when
-#           the branch has to be created.
+#           base-ref defaults to origin's fetched default branch for a new
+#           provision. Reruns retain the original owner-recorded task base;
+#           an explicit base must match it.
 #   stdout: one JSON object —
 #           {"path":"<abs>","branch":"<name>","base_ref":"<ref>",
-#            "state":"created|attached|already-provisioned"}
+#            "base_revision":"<exact task base commit>",
+#            "fetched_default_ref":"origin/<default>",
+#            "fetched_default_revision":"<exact fetched commit>",
+#            "schema_version":1,"state":"created|attached|already-provisioned"}
+#           The provenance is persisted in the worktree private Git directory;
+#           reruns preserve its original base while recording the fresh fetch.
 #           `created` cut a new branch, `attached` checked out one that already
 #           existed, `already-provisioned` found the path already on that
 #           branch and did nothing (idempotent re-run).
-#   stderr: diagnostics only.
+#   stderr: diagnostics and structured provenance refusal objects. Their
+#           details.failure_kind and details.recovery name the normal owner
+#           operation and evidence condition; never repair private Git by hand.
 #   exit  : 0 the worktree exists at <worktree-path> on <branch>,
 #           1 precondition unmet (usage, git absent, not a repo, no origin,
 #             invalid branch name, path outside the worktree root),
-#           2 git refused the operation, or the path exists as something else.
+#           2 Git, provenance validation or persistence failed, or the path is
+#             occupied. No success object is emitted. A normal rerun recovers
+#             interrupted receipt writes using the durable original-base intent;
+#             existing branches, trees and work are preserved.
 #   env   : WORKTREE_ROOT overrides the required parent dir (default
 #           $HOME/.worktrees); the tests point it at a temp dir.
 set -euo pipefail
@@ -31,8 +42,21 @@ set -euo pipefail
 BRANCH_RE='^[a-z]+(/[a-z0-9]+(-[a-z0-9]+)*|-[0-9]+)$'
 
 ERRFILE=""
+SKILL_DIR="$(CDPATH='' cd -- "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+record_base() {
+  PYTHONPATH="${SKILL_DIR}${PYTHONPATH:+:${PYTHONPATH}}" python3 -m foreman.provision record "$@"
+}
 
 warn() { printf 'provision-worktree: %s\n' "$1" >&2; }
+
+provenance_failure() {
+  jq -n --arg kind "$1" --arg message "$2" --arg path "$path" --arg branch "$branch" \
+    --arg operation "bash ${SKILL_DIR}/provision-worktree.sh" \
+    '{error: "provision_refused", message: ($message + " Retry the same normal provisioning invocation when its owner can establish origin and the recorded base; existing work is preserved."),
+      details: {failure_kind: $kind, recovery: {outcome: "blocked", operation: $operation,
+        condition: "The owner must complete the authorized fetch/lookup without replacing the original worktree or base.", evidence: {path: $path, branch: $branch}}}}' >&2
+}
 
 # Echo the ABSOLUTE common git dir for the work tree at <dir>, or return 1.
 #
@@ -80,6 +104,10 @@ main() {
   fi
   ERRFILE="$(mktemp)"
   trap cleanup EXIT
+  if ! command -v python3 >/dev/null 2>&1; then
+    warn "python3 not found on PATH — install Python 3.11+ for base provenance"
+    return 1
+  fi
   if ! command -v jq >/dev/null 2>&1; then
     warn "jq not found on PATH — install it (\`brew install jq\`) to emit the result"
     return 1
@@ -91,6 +119,39 @@ main() {
   if ! [[ "$branch" =~ $BRANCH_RE ]]; then
     warn "branch '${branch}' does not follow <type>/<description> or <type>-<number>, lowercase with hyphens (rules/ci-safety.md Branch Naming)"
     return 1
+  fi
+
+  # Fail before creating any worker directory or branch on a failed fetch.
+  if ! git -C "$shared" remote get-url origin >/dev/null 2>&1; then
+    warn "${shared} has no origin remote — provisioning needs one to fetch from"
+    return 1
+  fi
+  if ! git -C "$shared" fetch --quiet origin 2>"$ERRFILE"; then
+    provenance_failure "provision_fetch_failed" "git fetch origin failed — verify origin connectivity and credentials before retrying; Git stderr is withheld to protect credentials"
+    return 2
+  fi
+  local default_ref default_revision base_revision db=""
+  if db="$(git -C "$shared" symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null)"; then
+    default_ref="$db"
+  else
+    local cand
+    for cand in main master; do
+      if git -C "$shared" show-ref --verify --quiet "refs/remotes/origin/$cand"; then db="$cand"; break; fi
+    done
+    if [[ -z "$db" ]]; then
+      warn "cannot resolve origin's default branch — set origin/HEAD before provisioning"
+      return 1
+    fi
+    default_ref="origin/$db"
+  fi
+  if ! default_revision="$(git -C "$shared" rev-parse --verify "${default_ref}^{commit}" 2>"$ERRFILE")"; then
+    warn "cannot resolve fetched default commit — restore origin's default ref with git remote set-head origin --auto and fetch origin, then rerun provisioning; Git stderr is withheld to protect credentials"
+    return 2
+  fi
+  base="${base:-$default_ref}"
+  if ! base_revision="$(git -C "$shared" rev-parse --verify "${base}^{commit}" 2>"$ERRFILE")"; then
+    warn "cannot resolve task base commit — fetch the recorded original commit or pass a resolvable authorized base-ref, then rerun provisioning; Git stderr is withheld to protect credentials"
+    return 2
   fi
 
   # A worktree lives under the worktree root and nowhere else: a path inside a
@@ -118,33 +179,6 @@ main() {
   local abs_path base_name
   base_name="$(basename "$path")"
   abs_path="${abs_parent}/${base_name}"
-
-  if ! git -C "$shared" remote get-url origin >/dev/null 2>&1; then
-    warn "${shared} has no origin remote — provisioning needs one to fetch from"
-    return 1
-  fi
-  if ! git -C "$shared" fetch --quiet origin 2>"$ERRFILE"; then
-    warn "\`git -C ${shared} fetch origin\` failed: $(tr '\n' ' ' < "$ERRFILE") — check connectivity; provisioning from possibly stale refs"
-  fi
-
-  # Resolve the default branch for the base ref, when the caller gave none.
-  if [[ -z "$base" ]]; then
-    local db=""
-    if db="$(git -C "$shared" symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null)"; then
-      db="${db#origin/}"
-    else
-      db=""
-      local cand
-      for cand in main master; do
-        if git -C "$shared" show-ref --verify --quiet "refs/remotes/origin/$cand"; then db="$cand"; break; fi
-      done
-    fi
-    if [[ -z "$db" ]]; then
-      warn "cannot resolve origin's default branch — pass a base-ref explicitly, or run \`git -C ${shared} remote set-head origin --auto\`"
-      return 1
-    fi
-    base="origin/${db}"
-  fi
 
   # An existing path is either this exact worktree (idempotent re-run) or
   # something this must not touch. "Same branch name" is not identity: two
@@ -183,8 +217,25 @@ main() {
       warn "'${abs_path}' is a work tree on '${on}', not '${branch}' — choose another path, or remove it with \`git worktree remove\`"
       return 2
     fi
-    jq -n --arg path "$abs_path" --arg branch "$branch" --arg base "$base" \
-      '{path: $path, branch: $branch, base_ref: $base, state: "already-provisioned"}'
+
+  fi
+
+  # Bind the base before creating any worker surface. A retry after a failed
+  # receipt write consumes this same intent even when origin has advanced.
+  local intent original_revision="$base_revision"
+  intent="$(PYTHONPATH="${SKILL_DIR}${PYTHONPATH:+:${PYTHONPATH}}" python3 -m foreman.provision prepare \
+    "$shared" "$abs_path" "$branch" "$base" "$base_revision" "$default_ref" "$default_revision")" || return 2
+  base_revision="$(printf '%s' "$intent" | jq -er '.base_revision')" || return 2
+  base="$(printf '%s' "$intent" | jq -er '.base_ref')" || return 2
+  if (( $# == 4 )) && [[ "$base_revision" != "$original_revision" ]]; then
+    warn "explicit base differs from the original provisioning intent — preserve the original task base"
+    return 2
+  fi
+
+  if [[ -e "$abs_path" ]]; then
+    local provenance
+    provenance="$(record_base "$abs_path" "$branch" "$base" "$base_revision" "$default_ref" "$default_revision")" || return 2
+    printf '%s' "$provenance" | jq '. + {state: "already-provisioned"}'
     return 0
   fi
 
@@ -197,15 +248,16 @@ main() {
     state="attached"
     git -C "$shared" worktree add --track -b "$branch" "$abs_path" "origin/${branch}" >/dev/null 2>"$ERRFILE" || rc=$?
   else
-    git -C "$shared" worktree add -b "$branch" "$abs_path" "$base" >/dev/null 2>"$ERRFILE" || rc=$?
+    git -C "$shared" worktree add -b "$branch" "$abs_path" "$base_revision" >/dev/null 2>"$ERRFILE" || rc=$?
   fi
   if (( rc != 0 )); then
     warn "\`git worktree add\` failed (exit ${rc}) for ${abs_path} on ${branch}: $(tr '\n' ' ' < "$ERRFILE")"
     return 2
   fi
 
-  jq -n --arg path "$abs_path" --arg branch "$branch" --arg base "$base" --arg state "$state" \
-    '{path: $path, branch: $branch, base_ref: $base, state: $state}'
+  local provenance
+  provenance="$(record_base "$abs_path" "$branch" "$base" "$base_revision" "$default_ref" "$default_revision")" || return 2
+  printf '%s' "$provenance" | jq --arg state "$state" '. + {state: $state}'
   return 0
 }
 

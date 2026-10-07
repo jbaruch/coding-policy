@@ -52,7 +52,7 @@ description: Review findings carry a severity — blocking gates the merge, advi
 
 - Read every finding in full first — severity never licenses skipping a body (see `rules/reviewer-feedback-reading.md`)
 - Blocking → fix before merge
-- Advisory → acknowledge
-- Fold an advisory in only when a blocking round is already happening
-- Otherwise defer the advisory to a follow-up PR or issue and reference it from the current PR
-- Never burn a dedicated re-review round on a lone advisory
+- Advisory in a team round → acknowledge in the existing task report or round log
+- Advisory standalone → note it directly in the existing review conversation without simulating team artifacts
+- Fold an advisory only when an already-required blocking correction touches the same surface and it adds no push or verification round
+- Never make an advisory a task prerequisite or spend a push, review round, issue, or pull request solely on it

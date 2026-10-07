@@ -78,8 +78,9 @@ When the foreman names a **scoped re-check**, verify each prior finding against
 the current tip and report `RESOLVED`, `OPEN`, or `DECLINED — <reason>`.
 A prior finding this brief lists as covered by a weighing ruling reads
 `DECLINED — ruling <report path>`; one it lists as no longer covered is
-checked like any other. Restrict `NEW` findings to blocking severity. Record new advisories in the
-brief's follow-up issue; they never extend the fix loop. Name missing scope
+checked like any other. Restrict `NEW` findings to blocking severity. Record
+new advisories in the report for the round log; they create no issue, push or
+fix-loop obligation. Name missing scope
 inputs in a `## BLOCKED` report instead of guessing which findings to check.
 
 A **full** verification covers the whole surface this brief assigns you,

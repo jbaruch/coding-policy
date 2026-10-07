@@ -110,19 +110,27 @@ def _dispatch_evidence(state, identifier, unavailable=None):
 def _observation(client, name, kind, pane=None, *, starting=False, agent=None):
     if starting:
         info = client.pane_process_info(pane)
-        processes = info.get("foreground_processes", [])
-        if not isinstance(processes, list):
-            raise HerdrError("Retrospective start needs readable foreground processes; inspect the shell pane before starting.", {})
-        shell = info.get("shell_pid")
-        if (isinstance(shell, int) and not isinstance(shell, bool) and shell > 0 and len(processes) == 1
-                and isinstance(processes[0], dict) and processes[0].get("pid") == shell):
-            argv = processes[0].get("argv")
-            if argv is None:
-                argv = client.process_args(shell)
-            result = {"pane_id": pane, "native": None, "process": {"pid": shell, "argv": argv},
-                      "readiness": "shell", "shell": True}
-            notes.validate_observation(result)
-            return result
+        processes = info.get("foreground_processes") if isinstance(info, dict) else None
+        shell = info.get("shell_pid") if isinstance(info, dict) else None
+        valid_pid = lambda pid: isinstance(pid, int) and not isinstance(pid, bool) and pid > 0
+        pids = ([row.get("pid") if isinstance(row, dict) else None for row in processes]
+                if isinstance(processes, list) else None)
+        if (not isinstance(info, dict) or not isinstance(processes, list) or pids is None
+                or not valid_pid(shell) or pids != [shell] or not all(valid_pid(pid) for pid in pids)
+                or info.get("pane_id", pane) != pane):
+            raise HerdrError(
+                "Retrospective start requires the target pane's sole shell; inspect its startup or occupant "
+                "and retry only after restoring that proof. No fresh worker was looked up or started.",
+                {"pane_id": pane, "shell_pid": shell if valid_pid(shell) else None,
+                 "foreground_pids": [pid if valid_pid(pid) else None for pid in pids] if pids is not None else None},
+            )
+        argv = processes[0].get("argv")
+        if argv is None:
+            argv = client.process_args(shell)
+        result = {"pane_id": pane, "native": None, "process": {"pid": shell, "argv": argv},
+                  "readiness": "shell", "shell": True}
+        notes.validate_observation(result)
+        return result
     live = client.agent_get(name)
     actual_pane = live.get("pane_id")
     if not isinstance(actual_pane, str) or not actual_pane or (pane and pane != actual_pane):
@@ -197,6 +205,12 @@ class Guard:
         self.task, self.retain, self.no_clear = task, retain, no_clear
         self.requests = {}
         self.original = {}
+        self.retries = {}
+
+    def _no_outgoing_work(self, name):
+        original = self.original.get(name)
+        return original is not None and (original.get("first_start") is True or
+                name in self.retries and original.get("transition_required") is False)
 
     def _item(self, step):
         tier = step.get("tier") or {}
@@ -239,12 +253,18 @@ class Guard:
         index = notes.load(self.path)
         item = self._known_report(item, index)
         current = describe(self.state, self.client, self.agents, item, index)
+        retry = self.retries.get(item["agent"])
+        if item["context"] == "start" and retry is not None:
+            if (current["source"]["assignment_index"] is not None or not current["source"]["observation"]["shell"]
+                    or not notes.same_history(current["target"], retry["target"])):
+                raise UsageError("No-send retry changed its exact target or has outgoing work; nothing was started.", {})
+            current = {**current, "first_start": False, "transition_required": False}
         daily = notes.cadence(index, self.at, existing_work=bool(self.state["assignments"]) or not current["first_start"])
         covered = not current["transition_required"] or _usable_coverage(index, current)
         if allow_bridge and self._bridge(index, current):
             covered = True
-        if daily["due"] or not covered:
-            raise UsageError("A retrospective is due before this worker transition. Run `{}` with the provided request, write the foreman's synthesis, and use `{}` before retrying the same dispatch.".format(
+        if not covered:
+            raise UsageError("Retrospective transition coverage is required before this worker transition. Run `{}` with the provided request, write the foreman's synthesis, and use `{}` before retrying the same dispatch.".format(
                 runnable.command("retro-check"), runnable.command("retro-record")),
                              {"daily": daily, "request": {"transitions": [item]}, "coverage": [current]})
         if current["source"]["observation"]["readiness"] not in READY_STATES | {"shell"}:
@@ -255,29 +275,27 @@ class Guard:
 
     def preflight(self, steps, _statuses=None):
         for step in steps:
-            if not (step["agent"] in self.original
-                    and self.original[step["agent"]].get("first_start") is True):
+            if not self._no_outgoing_work(step["agent"]):
                 self.requests[step["agent"]] = self._item(step)
         # Refuse the whole batch before its first reservation or input.
         notes.require_no_pending(self.path)
         index = notes.load(self.path)
         items = [self._known_report(item, index) for item in self.requests.values()]
         current = [self.original[item["agent"]]
-                   if (item["agent"] in self.original
-                       and self.original[item["agent"]].get("first_start") is True)
+                   if self._no_outgoing_work(item["agent"])
                    else describe(self.state, self.client, self.agents, item, index)
                    for item in items]
         daily = notes.cadence(index, self.at, existing_work=bool(self.state["assignments"]) or any(not row["first_start"] for row in current))
         missing = [row["agent"] for row in current if row["transition_required"] and not _usable_coverage(index, row) and not self._bridge(index, row)]
-        if daily["due"] or missing:
-            raise UsageError("A retrospective is due before dispatch. Save the provided request, run `{}`, record the foreman's completed synthesis with `{}`, then retry this dispatch.".format(
+        if missing:
+            raise UsageError("Retrospective transition coverage is required before dispatch. Save the provided request, run `{}`, record the foreman's completed synthesis with `{}`, then retry this dispatch.".format(
                 runnable.command("retro-check"), runnable.command("retro-record")),
                              {"daily": daily, "missing_coverage": missing, "request": {"transitions": items}, "coverage": current})
         self.original = {row["agent"]: (self._bridge(index, row) or {}).get("descriptor", row) for row in current}
 
     def before(self, step):
         original = self.original.get(step["agent"])
-        if original is not None and original.get("first_start") is True:
+        if self._no_outgoing_work(step["agent"]):
             notes.require_no_pending(self.path)
             return
         current = self._require(self.requests[step["agent"]])

@@ -56,8 +56,9 @@ This mode carries no developer correction parameters and cannot replace the
 developer's retained-fix path. A dry run checks recorded prerequisites but proves
 no live session or permission flags.
 
-Live apply still enforces the retrospective cadence, YOLO launch proof, readiness,
-and composer gates. Its successful result records retained context
+Live apply still enforces transition-specific retrospective coverage, YOLO
+launch proof, readiness and composer gates. Daily cadence remains visible
+maintenance and does not refuse dispatch. Its successful result records retained context
 and the original requirements; it proves dispatch only. Use normal report
 observation and a new assessment for the follow-up.
 
@@ -109,6 +110,16 @@ produce a report, so Step 11 waits on exactly the roles that landed here.
   `--task <label>` puts the round's task in the label. A hand-off that never
   started is left unlabelled.
 
+Fresh assignment-scoped startup waits read-only for proved readiness under an
+unchanged pane, process and tier; real input or uncertain identity refuses.
+Waiting sends no keys. The owner records `sending` at the guarded prompt
+boundary. Earlier failures automatically record `not_sent` and clean only owned
+surfaces. A proved closed immutable no-brief retry needs no retrospective for
+nonexistent outgoing work; unknown sends preserve the pane and reconciliation.
+The exact settling predicate and bounds are owned by
+`skills/herdr-foreman/foreman/composer.py` (`FRESH_COMPOSER_*`, `_settle_fresh_composer`), rather than
+restated here.
+
 The delivery mechanics behind those outcomes — composer confirmation, recovery
 keys, ghost text, the rejection strings, the settle knobs — are in:
 
@@ -117,7 +128,33 @@ skills/herdr-foreman/references/herdr.md
 ```
 
 The prompt text, the refusal predicate, and every constant are the utility's
-own contract; see `skills/herdr-foreman/foreman/assign.py`.
+own contract; see `skills/herdr-foreman/foreman/composer.py` (`send_message`,
+`_settle_fresh_composer`) and `skills/herdr-foreman/foreman/assign.py` (`apply`, `before_prompt`).
+
+Failure JSON carries `details.failure_kind` and `details.recovery`: its outcome,
+normal owner operation, evidence condition and recorded surfaces. A retryable
+closed `not_sent` outcome means repeat the identical normal apply. A blocked
+outcome preserves unknown/sent work and names the supported owner operation;
+no pane/config/receipt workaround substitutes for proof.
+
+For owner-recorded assignment-scoped `not_sent` cleanup, including a failed
+cleanup whose surface must still be proved empty, use the existing dispatch ID:
+
+```bash
+CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"; [ -d "$CP" ] || case "$(git config --get remote.origin.url)" in git@github.com:jbaruch/coding-policy|git@github.com:jbaruch/coding-policy.git|https://github.com/jbaruch/coding-policy|https://github.com/jbaruch/coding-policy.git|ssh://git@github.com/jbaruch/coding-policy|ssh://git@github.com/jbaruch/coding-policy.git) CP=. ;; *) echo "coding-policy plugin not found: run tessl install jbaruch/coding-policy" >&2; exit 1 ;; esac
+bash "$CP/skills/herdr-foreman/foreman.sh" reconcile --state <state-path> --dispatch <recorded-dispatch-id>
+```
+
+This selector reads the stored reconciliation or owner pre-send abort proof;
+it creates no transport receipt, authorization or native history. It performs
+only proved owned empty-surface cleanup and returns the unchanged transport row
+with `cleanup_replayed` and `pane_closure` on stdout, exit 0. Missing/changed
+proof, report/work evidence, an uncertain/live changed identity or cleanup
+failure emits structured refusal on stderr, exit 1. Once closure is proved,
+repeat unchanged normal apply. Unknown sends still require the existing
+actual-evidence `reconcile --record` route; the selector cannot infer no-send.
+The guard is owned by `skills/herdr-foreman/foreman/cli.py`
+(`_recorded_no_send_cleanup`, `_run_recovery`).
 
 Proceed to Step 11 with the roles that were dispatched.
 
@@ -259,8 +296,8 @@ non-tiered worker, its `pane`, and its outgoing `report` — and record the
 completed note with `triggers` including `transition` under
 `references/retrospectives.md`. That is the only retrospective the restoration
 carries: the later `apply --retain-context` targets the same role, task, and
-tier, so it demands no new transition coverage; only the daily cadence can
-refuse it.
+tier, so it demands no new transition coverage. A due daily cadence remains a
+visible maintenance observation and does not refuse the restoration.
 
 1. Inspect and archive under the task's evidence directory: `herdr agent get
    <name>` (state, `pane_id`, `agent_session`), `herdr pane process-info --pane
@@ -330,8 +367,9 @@ refuse it.
    hand, edit owner state, or prime a different task.
 4. Dispatch normally with `apply --retain-context --task <task> --fix-round
    <N>`. It verifies the resumed argv (`verify_worker_permissions`), the
-   ledger's preceding confirmed round, retrospective cadence, and live native
-   continuity before any input, then records `cleared: false, clear_reason:
+   ledger's preceding confirmed round, required transition coverage, and live
+   native continuity before any input. Due daily cadence remains visible without
+   refusing restoration. It then records `cleared: false, clear_reason:
    retained` with the unchanged session. Never edit state.json, an assignment
    row, or the session value by hand.
 
@@ -533,7 +571,7 @@ lock file can remain after exit; do not delete it to bypass an active lock.
     report recovery below. Otherwise record no report and continue to the next
     worker. Never re-dispatch on top of it. The
     marker may be wrapped, quoted, absent, or identify another attempt. Do
-    not join rows or use a matching filename as proof. Step 7 requires a fresh
+    not join rows or use a matching filename as proof. Brief composition requires a fresh
     report destination and bounds its length; narrow panes can still wrap it.
 - **Exit 3** — the worker is blocked at an approval or question dialog,
   confirmed across two reads and the pane. Read the dialog with

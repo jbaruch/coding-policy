@@ -345,16 +345,36 @@ class MigrationTest(unittest.TestCase):
 
     def test_context_modes_round_trip_without_conflating_their_evidence(self):
         state = empty_state()
-        for cleared, reason in ((True, "automatic"), (False, "hand"),
+        for cleared, reason in ((True, "automatic"), (True, "reconciled_not_sent"), (False, "hand"),
                                 (False, "retained"), (None, "unknown")):
             add_assignment(state, "2026-01-01T00:00:00+00:00", "developer", "grok",
                            cleared=cleared, clear_reason=reason, task="repo#322", fix_round=1)
         save_state(self.path, state)
         self.assertEqual(self.load(), state)
 
+    def test_schema_10_upgrade_preserves_history_without_inventing_retry_proof(self):
+        state = empty_state()
+        add_assignment(state, "2026-01-01T00:00:00+00:00", "developer", "grok", task="original")
+        state["schema_version"] = state["assignments"][0]["schema_version"] = 10
+        self.write(state)
+        saved, usable = load_state_checked(self.path)
+        self.assertTrue(usable)
+        self.assertEqual(saved["assignments"][0]["clear_reason"], "unknown")
+        self.assertEqual(saved["assignments"][0]["task"], "original")
+        self.assertEqual(saved["schema_version"], STATE_SCHEMA_VERSION)
+        self.assertEqual(saved, self.load())
+        state["assignments"][0].update(cleared=True, clear_reason="reconciled_not_sent")
+        self.write(state)
+        before = self.path.read_bytes()
+        _unusable, usable = load_state_checked(self.path, warn=self.warnings.append)
+        self.assertFalse(usable)
+        self.assertEqual(self.path.read_bytes(), before)
+
     def test_malformed_context_evidence_is_preserved_but_not_used(self):
         for fields in (
             {"cleared": False, "clear_reason": "automatic"},
+            {"cleared": False, "clear_reason": "reconciled_not_sent"},
+            {"cleared": None, "clear_reason": "reconciled_not_sent"},
             {"cleared": True, "clear_reason": "retained"},
             {"cleared": None, "clear_reason": "hand"},
             {"clear_reason": []}, {"task": " "}, {"fix_round": True},

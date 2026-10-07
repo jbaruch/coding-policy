@@ -14,7 +14,7 @@ Optional. Modes, triggers and both report contracts are in
 disagreement inside SKILL.md Step 14 returns here first). No trigger — proceed to
 SKILL.md Step 14.
 
-For a dispute, compose from `templates/brief-judge.md` through SKILL.md Step 7: the
+For a dispute, compose from `skills/herdr-foreman/templates/brief-judge.md` through SKILL.md Step 8: the
 dispute, both positions with report paths, the governing rule, the tree. Fill
 `POSITION_A_EVIDENCE` and `POSITION_B_EVIDENCE` with the citations each report
 makes (file and line, or command output, at a revision), copied, never supplied by the
@@ -26,8 +26,8 @@ evidence value with `supplied by the investigator report`, and fill
 `INVESTIGATION_REPORT` with the investigator's report after an `insufficient`
 ruling as well, otherwise "none".
 
-For an exhausted allowance, compose from `templates/brief-judge-diagnosis.md`
-through SKILL.md Step 7 under the role key `judge-diagnosis`, which writes
+For an exhausted allowance, compose from `skills/herdr-foreman/templates/brief-judge-diagnosis.md`
+through SKILL.md Step 8 under the role key `judge-diagnosis`, which writes
 `brief-judge-diagnosis.md`: the assessed investigator report, the task, rounds
 spent, remaining blocking work, the per-round history, the tree, and any prior
 remedy with what it changed.
@@ -58,7 +58,7 @@ and its evidence; policy findings come from the list-mode JSON in the release
 worker's report. `HEAD` is that head's full sha. Fill `INVESTIGATION_REPORT`
 after an `insufficient` weighing, otherwise "none".
 
-Skip SKILL.md Step 8 for the read-only judge. Proceed immediately to step 2.
+Skip SKILL.md Step 7 for the read-only judge. Proceed immediately to step 2.
 
 ## 2 — Re-measure the Shared Window
 

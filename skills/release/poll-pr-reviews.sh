@@ -1,12 +1,14 @@
 #!/usr/bin/env bash
-# Snapshot CI status, bot review states + bodies, and inline comment counts for a PR.
+# Snapshot CI status, bot verdicts, and every review and inline comment body for a PR.
 # Non-blocking — call repeatedly to observe transitions.
 #
 # Usage: poll-pr-reviews.sh <owner> <repo> <pr-number>
 # Out:   one JSON object on stdout with the schema below.
 # Exit:  0 on successful query; non-zero with stderr diagnostic on failure
 #
-# `reviews.*.body` carries the full review body text — a review's state classifies
+# `review_bodies` carries all non-empty review text, from every author and page,
+# including historical and dismissed reviews. `reviews` retains bot verdict routing.
+# A review's state classifies
 # whether it gates the merge, not whether its body must be read. A COMMENTED review
 # with zero inline comments still carries a body (see rules/reviewer-feedback-reading.md).
 #
@@ -25,7 +27,11 @@
 #                   "commit_id": "<SHA the review is bound to>|null",
 #                   "stale": bool, "requested": bool}
 #     },
+#     "review_bodies": [{"id", "state", "submitted_at", "commit_id",
+#                        "body", "html_url", "author"}],
 #     "inline_comments": {"codex": N, "copilot": N},
+#     "inline_comment_bodies": [{"id", "in_reply_to_id", "path", "line",
+#                                "body", "html_url", "author"}],
 #     "merge_state": {"status": "CLEAN|DIRTY|BLOCKED|BEHIND|UNSTABLE|...",
 #                     "mergeable": "MERGEABLE|CONFLICTING|UNKNOWN"}
 #   }
@@ -124,9 +130,8 @@ fi
 # PR can never mask an active block.
 #
 # Counting Copilot's comments against its REVIEW login matches nothing, so
-# `inline_comments.copilot` reads 0 on every PR — which vacuously satisfies the
-# release skill's Step 7 "every inline comment has a reply" merge gate and lets
-# a real Copilot finding merge unanswered. Comment counting therefore matches a
+# `inline_comments.copilot` reads 0 on every PR — which hides real comments from the
+# full reading required by the release skill. Comment counting therefore matches a
 # SET of logins per reviewer. A comment carries exactly one author, so listing
 # multiple logins cannot double-count.
 CODEX_REVIEW_LOGINS=("github-actions[bot]" "coding-policy-fleet-reviewer[bot]")
@@ -356,7 +361,7 @@ main() {
     copilot_started_at=$(printf '%s' "$flight" | jq -r '.started_at // empty')
   fi
 
-  local codex_review copilot_review codex_comments copilot_comments
+  local codex_review copilot_review codex_comments copilot_comments comment_bodies review_bodies
   codex_review=$(latest_review_by   "$owner" "$repo" "$pr_number" "${CODEX_REVIEW_LOGINS[@]}") \
     || { echo "error: failed to fetch Codex review state" >&2; exit 1; }
   copilot_review=$(latest_review_by "$owner" "$repo" "$pr_number" "$COPILOT_REVIEW_LOGIN") \
@@ -380,24 +385,32 @@ main() {
     || { echo "error: failed to count Codex inline comments" >&2; exit 1; }
   copilot_comments=$(toplevel_comments_by "$owner" "$repo" "$pr_number" "${COPILOT_COMMENT_LOGINS[@]}") \
     || { echo "error: failed to count Copilot inline comments" >&2; exit 1; }
+  comment_bodies=$(slurp_api_array "repos/${owner}/${repo}/pulls/${pr_number}/comments?per_page=100" "inline comment" \
+    | jq '[.[] | {id, in_reply_to_id, path, line, body, html_url, author: .user.login}]') \
+    || { echo "error: failed to read inline comment bodies — restore GitHub API access and rerun this snapshot before merging" >&2; exit 1; }
+  review_bodies=$(slurp_api_array "repos/${owner}/${repo}/pulls/${pr_number}/reviews?per_page=100" "review" \
+    | jq '[.[] | select(.body != null and .body != "")
+                   | {id, state, submitted_at, commit_id, body, html_url, author: .user.login}]') \
+    || { echo "error: failed to read all review bodies — restore GitHub API access and rerun this snapshot before merging" >&2; exit 1; }
 
-  jq -n \
+  # Review text can exceed a platform's per-argument limit. Stream every
+  # potentially large JSON payload instead of passing it through --argjson.
+  printf '%s\n' "$checks_json" "$codex_review" "$copilot_review" \
+    "$comment_bodies" "$review_bodies" "$merge_state" | jq -s \
     --argjson pr_number "$pr_number" \
     --arg head_sha "$head_sha" \
     --arg ci_status "$ci_status" \
-    --argjson checks "$checks_json" \
-    --argjson codex "$codex_review" \
-    --argjson copilot "$copilot_review" \
     --argjson codex_comments "$codex_comments" \
     --argjson copilot_comments "$copilot_comments" \
-    --argjson merge_state "$merge_state" \
     '{
       pr_number: $pr_number,
       head_sha: $head_sha,
-      ci: {status: $ci_status, checks: $checks},
-      reviews: {codex: $codex, copilot: $copilot},
+      ci: {status: $ci_status, checks: .[0]},
+      reviews: {codex: .[1], copilot: .[2]},
+      review_bodies: .[4],
       inline_comments: {codex: $codex_comments, copilot: $copilot_comments},
-      merge_state: ($merge_state | {status, mergeable})
+      inline_comment_bodies: .[3],
+      merge_state: (.[5] | {status, mergeable})
     }'
 }
 
