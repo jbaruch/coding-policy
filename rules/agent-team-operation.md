@@ -29,7 +29,8 @@ description: Standalone versus Herdr team round — the mode test, and where the
 - When Herdr or an eligible worker is unavailable, follow the existing recovery and escalation route
 - Outside a Herdr round the requesting agent retains ownership of an unavailable delegation route
 - An unavailable route never authorizes native fallback
-- Direct work remains permitted only within the current role's authority and standalone rules
+- Team-round direct work stays within the current role's authority
+- Standalone direct work follows every other applicable rule
 - Team-round staffing and worker requests follow `skills/herdr-foreman/references/team-operation.md` Delegation
 
 ## Foreman Role

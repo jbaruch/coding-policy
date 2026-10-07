@@ -589,6 +589,8 @@ assert "Herdr-managed agents" in rule
 for scope in ("nested", "read-only", "tools, skills or CLI wrappers"):
     assert scope in rule, scope
 assert "does the task directly" in rule
+assert "Team-round direct work stays within the current role's authority" in rule
+assert "Standalone direct work follows every other applicable rule" in rule
 assert 'Agent tool\'s `isolation: "worktree"`' not in isolation
 assert "foreman provisions" in isolation
 for surface in (team, skill, common):
