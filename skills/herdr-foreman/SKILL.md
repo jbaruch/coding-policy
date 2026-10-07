@@ -23,7 +23,8 @@ successor/reset continuation satisfies the Stop gate. A saved handoff hold
 prepares reset preflight; it does not permit Stop on its own. Keep user
 attention visible under `skills/herdr-foreman/references/attention.md`.
 
-Before any team-round action, read the team-round contract in full. It is the
+Before any team-round action outside Step 1's bounded factual lookup, read the
+team-round contract in full. It is the
 file `rules/agent-team-operation.md` points to, and it binds every step below.
 Every worker brief names it as a required read.
 
@@ -38,7 +39,7 @@ resolved through `select_tier` and checked against the capability table
 Each command resolves `CP` to the local or home plugin, or to `.` in a
 coding-policy clone; anywhere else it stops with an install instruction. Repeat its resolver in every call. Prose `skills/...` paths are relative to that root.
 
-Before each decision, load its records and read every listed file:
+Before each listed owner decision, load its records and read every listed file:
 
 ```bash
 CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"; [ -d "$CP" ] || case "$(git config --get remote.origin.url)" in git@github.com:jbaruch/coding-policy|git@github.com:jbaruch/coding-policy.git|https://github.com/jbaruch/coding-policy|https://github.com/jbaruch/coding-policy.git|ssh://git@github.com/jbaruch/coding-policy|ssh://git@github.com/jbaruch/coding-policy.git) CP=. ;; *) echo "coding-policy plugin not found: run tessl install jbaruch/coding-policy" >&2; exit 1 ;; esac
@@ -132,6 +133,11 @@ For every other request, read `HERDR_ENV` before running scripts.
 - **Unset or empty** — this skill does not apply. Say so and do the task
   directly, without roster calls, briefs, provisioning, reports, or simulated
   worker roles. Finish here.
+- **Set, with a bounded factual lookup** — read
+  `skills/herdr-foreman/references/team-operation.md` Bounded Factual Lookup.
+  Answer within that boundary and cite the source. Run no round preflight,
+  roster measurement, enrollment, report gate or context reset for the lookup.
+  Finish here.
 - **Set, with a team task or new retrospective** — Proceed to Step 2.
 - **Set, with a lookup, a file inspection, research, a bounded question, a
   review of existing code, a repository edit, or any other task deliverable** —

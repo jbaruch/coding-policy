@@ -30,6 +30,10 @@ description: Standalone versus Herdr team round — the mode test, and where the
 - A request whose answer is a task deliverable is dispatched, whatever its size, and whether or not the foreman already knows the answer
 - A task deliverable is a written artifact, a recommendation, an assessment, or a repository edit, other than a foreman-owned record
 - A request the foreman could answer only after a lookup, a file inspection, or research is dispatched
+- Narrow exception for a bounded factual lookup.
+- Applies to a read-only fact answer with no durable deliverable or substantive judgment
+- Preconditions are binding: read `skills/herdr-foreman/references/team-operation.md` Bounded Factual Lookup before relying on it
+- Every other lookup follows the dispatch requirement
 - A bounded question routes to a specialist consultation under Team Composition
 - A review of code already pushed for the task routes to the reviewer responsibility under Review Before PR
 - A review of any other existing code routes to a read-only consultation under Specialist Consultations
@@ -39,7 +43,7 @@ description: Standalone versus Herdr team round — the mode test, and where the
 ## Team Round Contract
 
 - A Herdr team round follows `skills/herdr-foreman/references/team-operation.md` in full
-- That file is a must-read before any team-round action
+- That file is a must-read before any team-round action outside Bounded Factual Lookup
 - Its sections bind a team round as rule content
 - The foreman loads it through `skills/herdr-foreman/SKILL.md`
 - Every worker brief names it as a required read

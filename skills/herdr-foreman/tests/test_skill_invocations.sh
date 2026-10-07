@@ -22,8 +22,8 @@
 # Mode-gate conventions, checked against MODE_GATE_SKILL only:
 # 4. The first step gates on HERDR_ENV before any script, and the gate turns a
 #    standalone agent away by reading rather than by running a script.
-# 5. Inside a Herdr round, round work reaches Step 2 and the foreman's own
-#    finish-here branch stays residual. Checks 4a/4b pass with the old
+# 5. Inside a Herdr round, round work reaches Step 2. Only the bounded factual
+#    lookup and already-in-context residual branches finish here. Checks 4a/4b pass with the old
 #    direct-execution hatch restored, so they do not cover the routing the
 #    foreman actually acts on: a foreman that answers a bounded question or writes a
 #    deliverable itself never dispatches the round (#470).
@@ -238,6 +238,7 @@ check_mode_gate() { # <skill-name> <skill-file>
   # The residual branch's condition IS the contract, so it is pinned whole.
   # A substring would accept "not already in the foreman's context".
   local residual_label="Set, none of the above applies, and the answer is already in the foreman's context"
+  local factual_label="Set, with a bounded factual lookup"
   local round_work=("lookup" "file inspection" "research" "bounded question" \
                     "review of existing code" "repository edit" "task deliverable")
 
@@ -261,7 +262,7 @@ check_mode_gate() { # <skill-name> <skill-file>
 
   # A branch ends in one disposition or the other. The literal must open its
   # own sentence, so "Do not Proceed to Step 2." is not routing.
-  local label text verdict routing_labels="" terminals=0 stray=""
+  local label text verdict routing_labels="" terminals=0 factual=0 residual=0 stray=""
   while IFS=$'\t' read -r label text; do
     [[ -n "$label" ]] || continue
     case "$text" in
@@ -273,18 +274,24 @@ check_mode_gate() { # <skill-name> <skill-file>
       proceed) routing_labels+="${label}"$'\n' ;;
       finish)
         terminals=$(( terminals + 1 ))
-        [[ "$label" == "$residual_label" ]] || stray="$label"
+        [[ "$label" == "$residual_label" || "$label" == "$factual_label" ]] || stray="$label"
+        [[ "$label" != "$residual_label" ]] || residual=$(( residual + 1 ))
+        [[ "$label" != "$factual_label" ]] || factual=$(( factual + 1 ))
         ;;
       *) stray="$label" ;;
     esac
   done <<< "$branches"
 
-  # 5a. Every branch disposes of its request, and only the residual one ends
+  # 5a. Every branch disposes of its request, and only the two bounded branches end
   # the round. The old hatch was a branch that did neither.
   if [[ -n "$stray" ]]; then
     fail "${name}: Step 1 branch '${stray}' neither ends in '${disp_proceed}' nor is the residual branch ending in '${disp_finish}'"
-  elif (( terminals == 1 )); then pass
-  else fail "${name}: Step 1 has ${terminals} Herdr-mode branches ending in '${disp_finish}'; exactly the residual one may"; fi
+  elif (( terminals == 2 && factual == 1 && residual == 1 )); then pass
+  else fail "${name}: Step 1 has ${terminals} Herdr-mode branches ending in '${disp_finish}'; only the factual and residual branches may"; fi
+
+  if [[ "$flat" == *"bounded factual lookup"* && "$flat" == *"bounded factual lookup. answer within that boundary and cite the source"* \
+        && "$flat" == *"run no round preflight, roster measurement, enrollment, report gate or context reset for the lookup"* ]]; then pass
+  else fail "${name}: bounded factual lookup must bind its contract, cite facts and skip round-only overhead"; fi
 
   # 5b. Each kind of round work is named by a branch that routes. Dropping one
   # returns it to the foreman.
