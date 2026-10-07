@@ -17,6 +17,21 @@ description: Standalone versus Herdr team round — the mode test, and where the
 - A standalone agent never simulates the roles, the briefs, or the reports
 - Standalone work is still governed by every other rule in this plugin
 
+## Delegation
+
+- Authorized delegated work uses Herdr-managed agents through the existing foreman owners
+- This section governs both modes and every role, including nested delegation and read-only research or review
+- Native subagent, spawn, task and team mechanisms are forbidden delegation routes
+- The prohibition covers invocation through tools, skills or CLI wrappers
+- Claude Code, Codex CLI and other supported runtimes remain valid workers inside Herdr
+- Role-specific delegation prohibitions and independence constraints remain binding
+- An unmanaged agent's output never substitutes for a required Herdr report
+- When Herdr or an eligible worker is unavailable, follow the existing recovery and escalation route
+- Outside a Herdr round the requesting agent retains ownership of an unavailable delegation route
+- An unavailable route never authorizes native fallback
+- Direct work remains permitted only within the current role's authority and standalone rules
+- Team-round staffing and worker requests follow `skills/herdr-foreman/references/team-operation.md` Delegation
+
 ## Foreman Role
 
 - This section governs a Herdr team round only

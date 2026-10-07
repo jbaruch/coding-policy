@@ -573,6 +573,35 @@ PYCONTRACT
   then pass; else fail "release advisory routes contradict standalone/team merge contracts"; fi
 }
 
+check_delegation_contract() {
+  local skills_root="$1"
+  if python3 - "$skills_root" <<'PYCONTRACT'
+import sys
+from pathlib import Path
+root = Path(sys.argv[1])
+rule = (root.parent / "rules/agent-team-operation.md").read_text()
+isolation = (root.parent / "rules/agent-worktree-isolation.md").read_text()
+team = (root / "herdr-foreman/references/team-operation.md").read_text()
+skill = (root / "herdr-foreman/SKILL.md").read_text()
+common = (root / "herdr-foreman/templates/COMMON.md").read_text()
+assert "## Delegation" in rule
+assert "Herdr-managed agents" in rule
+for scope in ("nested", "read-only", "tools, skills or CLI wrappers"):
+    assert scope in rule, scope
+assert "does the task directly" in rule
+assert 'Agent tool\'s `isolation: "worktree"`' not in isolation
+assert "foreman provisions" in isolation
+for surface in (team, skill, common):
+    assert "rules/agent-team-operation.md" in surface and "Delegation" in surface
+assert "staffing" in common and "foreman" in common
+assert "unavailable" in rule and "native" in rule
+for name in ("reviewer", "tester", "specialist", "judge", "judge-diagnosis", "judge-weighing"):
+    brief = (root / f"herdr-foreman/templates/brief-{name}.md").read_text()
+    assert "do not dispatch subagents" in brief or "never dispatch a subagent" in brief, name
+PYCONTRACT
+  then pass; else fail "delegation guidance must use Herdr owners and preserve direct work and role restrictions"; fi
+}
+
 # Progress and failures go to stderr; stdout carries one JSON result.
 run_suite() {
   local skills_root skill name
@@ -593,6 +622,7 @@ run_suite() {
   done
   check_cleanup_retry
   check_release_advisory_contract "$skills_root"
+  check_delegation_contract "$skills_root"
 
   skill="${skills_root}/${MODE_GATE_SKILL}/SKILL.md"
   check_mode_gate "$MODE_GATE_SKILL" "$skill"

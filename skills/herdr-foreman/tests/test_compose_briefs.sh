@@ -760,6 +760,11 @@ JSON
       "$oc/brief-advisor.md")" && [[ "$criteria_count" == "2" ]]; then
     pass; else fail "report contracts: the rendered brief must count 2 criteria, got ${criteria_count:-none}"; fi
   local contract_role
+  if [[ $RC -eq 0 ]] && grep -Fq 'rules/agent-team-operation.md' "$oc/COMMON.md" \
+     && grep -Fq 'Delegation. Use no native' "$oc/COMMON.md" \
+     && grep -Fq 'staffing need in your report' "$oc/COMMON.md" \
+     && grep -Fq 'Start no child agent' "$oc/COMMON.md"; then
+    pass; else fail "packaged worker common must carry the Herdr-only delegation and foreman staffing route"; fi
   for contract_role in reviewer tester; do
     if grep -Fq 'VERDICT: approved' "$o6b/brief-${contract_role}.md"; then
       pass; else fail "report contracts: shipped brief-${contract_role}.md must ask for its VERDICT line"; fi
