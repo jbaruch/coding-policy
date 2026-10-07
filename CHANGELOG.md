@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.372 — 2026-10-07
+
 ### Fixed
 
 - Worker brief values now preserve literal ampersands, backslashes, quotes and
