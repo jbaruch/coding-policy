@@ -83,7 +83,7 @@ def decide(agent, role, tier, needs, table, headroom, measured_at, at, capacity_
     override = "operator_pin" if mode == "pinned" else None
     if tier["round"] in JUDGMENT_ROUNDS or tier["tier_row"] in JUDGMENT_ROUNDS:
         override = "judgment_floor"
-    elif (tier["model"], tier.get("effort")) != (
+    elif tier["de_escalated"] or (tier["model"], tier.get("effort")) != (
             agent.tiers[tier["tier_row"]]["model"], agent.tiers[tier["tier_row"]].get("effort")):
         override = "risk_escalation"
     capacity_status = "unknown"
@@ -91,7 +91,7 @@ def decide(agent, role, tier, needs, table, headroom, measured_at, at, capacity_
         capacity_status = "available" if headroom > 0 else "exhausted"
         if not _fresh(measured_at, at, CAPACITY_MAX_AGE):
             capacity_status = "stale"
-        elif not agent.window_group or capacity_group != agent.window_group:
+        elif capacity_group != agent.window_group:
             capacity_status = "account_unknown"
     capacity = {"status": capacity_status, "remaining_pct": headroom,
                 "measured_at": measured_at, "window_group": capacity_group}

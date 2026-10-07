@@ -111,6 +111,40 @@ class MinimumAdequateTest(CliCase):
         self.assertEqual(plan["tiers"]["developer"]["model"], "opus-5")
         self.assertEqual(plan["selection"]["developer"]["routing"]["override"], "operator_pin")
 
+    def test_own_window_accepts_matching_empty_identity_but_not_missing_proof(self):
+        for omitted in (False, True):
+            with self.subTest(omitted=omitted):
+                if omitted:
+                    self.worker.pop("window_group", None)
+                else:
+                    self.worker["window_group"] = ""
+                for proof in self.worker["tier_routing"]["evidence"].values():
+                    proof["access"]["window_group"] = ""
+                snapshot = json.loads(self.snapshot.read_text())
+                snapshot["agents"]["claude"]["window_group"] = ""
+                self.snapshot.write_text(json.dumps(snapshot))
+                plan = self.plan()
+                self.assertEqual(plan["tiers"]["developer"]["tier_row"], "mechanical")
+                rc, _, err, native = self.apply(plan)
+                self.assertEqual(rc, 0, err)
+                self.assertEqual(native.events, [])
+                snapshot["agents"]["claude"].pop("window_group")
+                self.snapshot.write_text(json.dumps(snapshot))
+                rc, _, err, native = self.apply(plan)
+                self.assertEqual(rc, 1)
+                self.assertIn("capacity_account_unknown", err)
+                self.assertEqual(native.events, [])
+
+    def test_declined_risk_escalation_preserves_the_configured_floor(self):
+        snapshot = json.loads(self.snapshot.read_text())
+        snapshot["agents"]["claude"]["headroom_pct"] = 20
+        self.snapshot.write_text(json.dumps(snapshot))
+        plan = self.plan("--round-context", self.context({"prior_high_miss": True}))
+        tier = plan["tiers"]["developer"]
+        self.assertEqual((tier["model"], tier["effort"], tier["tier_row"]), ("opus-5", "high", "build"))
+        self.assertTrue(tier["de_escalated"])
+        self.assertEqual(plan["selection"]["developer"]["routing"]["override"], "risk_escalation")
+
     def test_repeated_failure_judgment_floor_is_preserved(self):
         plan = self.plan("--round-context", self.context({"failed_gates": 2}))
         self.assertEqual((plan["tiers"]["developer"]["model"], plan["tiers"]["developer"]["tier_row"]),
