@@ -776,6 +776,25 @@ JSON
       pass; else fail "$compose_shell literal specialist input must preserve ampersands, backslashes, quotes and newlines: RC=$RC ERR=$ERRTEXT"; fi
   done
 
+  # Literal values are not new template input. Preserve template EOF and a
+  # value's trailing newlines even when the placeholder ends the template.
+  local eof_tpl="$TMP/eof-templates" eof_values="$TMP/eof-values.json" eof_out="$TMP/eof-out"
+  mk_templates "$eof_tpl"
+  printf 'Checkout: {{SHARED_CHECKOUT}}\nAuthority: {{AUTHORITY_STATEMENT}}\nContract: {{TEAM_OPERATION}}\n\n' \
+    > "$eof_tpl/COMMON.md" || die "could not prepare common EOF fixture"
+  printf 'Issue: {{ISSUE}}\nWorktree: {{WORKTREE}}\nReport: {{REPORT}}\n{{BRANCH}}' \
+    > "$eof_tpl/brief-developer.md" || die "could not prepare role EOF fixture"
+  jq --arg text $'literal && {{ISSUE}} and {{UNKNOWN}}; \\path; $VARIABLE\n\n' \
+    '.roles = {developer: .roles.developer} | .roles.developer.BRANCH = $text' \
+    "$v1" > "$eof_values" || die "could not prepare EOF values"
+  for compose_shell in bash /bin/bash; do
+    COMPOSE_BASH="$compose_shell" run "$eof_tpl" "$eof_values" "$eof_out"
+    if [[ $RC -eq 0 ]] && python3 -c \
+      'import json, pathlib, sys; v=json.loads(pathlib.Path(sys.argv[1]).read_text()); s=v["shared"]; r=v["roles"]["developer"]; root=pathlib.Path(sys.argv[2]); expected="Issue: "+r["ISSUE"]+"\nWorktree: "+r["WORKTREE"]+"\nReport: "+r["REPORT"]+"\n"+r["BRANCH"]; common="Checkout: "+s["SHARED_CHECKOUT"]+"\nAuthority: "+s["AUTHORITY_STATEMENT"]+"\nContract: "+s["TEAM_OPERATION"]+"\n\n"; sys.exit(0 if (root/"brief-developer.md").read_text()==expected and (root/"COMMON.md").read_text()==common else 1)' \
+      "$eof_values" "$eof_out"; then
+      pass; else fail "$compose_shell must preserve literal placeholder-like values and complete template/value EOF: RC=$RC ERR=$ERRTEXT"; fi
+  done
+
   # Tool failures during rendering refuse atomically with an actionable error.
   local render_bin="$TMP/render-bin" render_failure
   mkdir -p "$render_bin" || die "could not create rendering-tool fixtures"

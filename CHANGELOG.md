@@ -5,7 +5,8 @@
 - Worker brief values now preserve literal ampersands, backslashes, quotes and
   trailing newlines. Packaged specialist briefs accept shell examples such as
   `cd /worktree && command` without reintroducing `{{INPUTS}}` placeholders
-  (#702).
+  (#702). Placeholder-like value text is never reinterpreted; template and
+  value trailing newlines remain intact through file output.
 
 ## 0.3.370 — 2026-10-07
 
