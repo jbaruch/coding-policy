@@ -21,7 +21,7 @@ from .tiers import JUDGMENT_ROUNDS, ROLE_ROUNDS, TOP_MODELS, canonical_role, esc
 
 #: Selection record version, stamped on every record so a reader can tell the
 #: shape it holds apart from the plan document's own version.
-SELECTION_SCHEMA_VERSION = 2
+SELECTION_SCHEMA_VERSION = 3
 
 
 def _verdict(table, model, effort, needs):

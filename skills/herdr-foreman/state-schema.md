@@ -253,6 +253,14 @@ launch; selected pair, row, cost and context drift still require replanning.
 Plan `tiers` adds optional `routing` only for opted-in workers; it is stripped
 before recording a dispatch, so assignment/recovery shapes stay unchanged.
 
+Plan schemas 17/18 add selection-record schema 3. Each routing candidate adds
+`placement`, null without an exact successor binding, otherwise the origin,
+provisional/confirmed/withdrawn status, provenance and maintenance timing/history
+documented in `skills/herdr-foreman/references/successor-placement.md`. Qualification stays separate
+and unchanged by inheritance. Older explanation records remain readable without
+placement; no history is backfilled. Apply independently rereads capability-table
+schema 1/2 and the current live fact owners, not the plan's claimed placement.
+
 Plan schema 14 adds assignment-scoped identities. `worker_kinds` maps every
 seat to the stable template selected from the snapshot; `assignments` maps the
 same seats to fresh Herdr-safe identities allocated by that plan. Apply
@@ -870,6 +878,7 @@ The independent continuity stores do not change this dispatch-state schema.
 | User attention and recorded progress | `<selected-state>.attention.json` | `skills/herdr-foreman/references/attention.md`, Commands and files |
 | Fleet observations and supervision | `<selected-state>.supervision.json` | `skills/herdr-foreman/references/supervision.md` |
 | Model capabilities, sourced and dated | `<selected-state>.capabilities.json` | `skills/herdr-foreman/references/model-tiers.md`, Capability table |
+| Provisional successor placements and recalibration history | Same capability-table schema 2; entries remain schema 1 | `skills/herdr-foreman/references/successor-placement.md`, Saved schema and readers |
 | Report gates from classifier labels and blocking verdicts | `<selected-state>.report-gates.json` | `skills/herdr-foreman/references/report-classifier.md`, Sidecar schema 2 |
 
 Resolve the selected state path before deriving these locations. Each store and

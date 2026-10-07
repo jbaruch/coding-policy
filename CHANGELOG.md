@@ -1,5 +1,20 @@
 # Changelog
 
+### Changed
+
+- **Verified model successors inherit their authorized operating spot provisionally.**
+  The capability owner binds a dated same-family successor to the exact
+  predecessor's worker, responsibility, round, effort, account and declared
+  weight, preserving original qualification and sources, including unknown.
+  Provider identity quotes are reread from trusted official hosts; they never
+  establish adequacy. Routing still requires fresh installed-CLI support,
+  account access and account-bound capacity, with apply-time revalidation.
+  Pins, judgment floors, risk escalation, authority and contributor exclusion
+  remain intact. The existing maintenance checkpoint visibly keeps, confirms
+  from substantive evidence, or withdraws placement; unrelated refreshes cannot
+  hide its due date. No automatic scheduler, per-role qualification campaign,
+  additional approval or invented savings is introduced (#700).
+
 ## 0.3.368 — 2026-10-07
 
 ### Changed

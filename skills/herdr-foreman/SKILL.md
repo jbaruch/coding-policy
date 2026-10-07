@@ -187,7 +187,11 @@ Before following any route below, report the worktree sweep to the operator:
   Refresh a due capability table at the next maintenance checkpoint under
   `skills/herdr-foreman/references/model-tiers.md`. A selection-time fact about
   a seat this task needs may block that seat; cadence alone never does. The
-  maintenance commands record the report and show the result:
+  maintenance consultation revisits `successors_due` under
+  `skills/herdr-foreman/references/successor-placement.md`. Record keep, revise
+  or withdraw outcomes through `capability-record`; unknown stays unknown.
+  This cadence creates no automatic recalibration job. The maintenance
+  commands record the report and show the result:
 
 ```bash
 CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"; [ -d "$CP" ] || case "$(git config --get remote.origin.url)" in git@github.com:jbaruch/coding-policy|git@github.com:jbaruch/coding-policy.git|https://github.com/jbaruch/coding-policy|https://github.com/jbaruch/coding-policy.git|ssh://git@github.com/jbaruch/coding-policy|ssh://git@github.com/jbaruch/coding-policy.git) CP=. ;; *) echo "coding-policy plugin not found: run tessl install jbaruch/coding-policy" >&2; exit 1 ;; esac
@@ -198,6 +202,23 @@ bash "$CP/skills/herdr-foreman/foreman.sh" capability-record --record <report.js
 CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"; [ -d "$CP" ] || case "$(git config --get remote.origin.url)" in git@github.com:jbaruch/coding-policy|git@github.com:jbaruch/coding-policy.git|https://github.com/jbaruch/coding-policy|https://github.com/jbaruch/coding-policy.git|ssh://git@github.com/jbaruch/coding-policy|ssh://git@github.com/jbaruch/coding-policy.git) CP=. ;; *) echo "coding-policy plugin not found: run tessl install jbaruch/coding-policy" >&2; exit 1 ;; esac
 bash "$CP/skills/herdr-foreman/foreman.sh" capability-show
 ```
+
+For an authorized verified successor, read
+this reference before editing config:
+
+```text
+skills/herdr-foreman/references/successor-placement.md
+```
+
+Record its existing spot through the owner:
+
+```bash
+CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"; [ -d "$CP" ] || case "$(git config --get remote.origin.url)" in git@github.com:jbaruch/coding-policy|git@github.com:jbaruch/coding-policy.git|https://github.com/jbaruch/coding-policy|https://github.com/jbaruch/coding-policy.git|ssh://git@github.com:jbaruch/coding-policy|ssh://git@github.com:jbaruch/coding-policy.git) CP=. ;; *) echo "coding-policy plugin not found: run tessl install jbaruch/coding-policy" >&2; exit 1 ;; esac
+bash "$CP/skills/herdr-foreman/foreman.sh" capability-successor --record <successor-report.json>
+```
+
+Exit 0 records dated provisional placement. Non-zero refuses the cited field
+or evidence; repair it without relabeling qualification or changing pins.
 
 - **Exit 1** — report the `blocking` reasons verbatim. Each names the command
   that produced it; re-run that one, not the preflight. A `foreman_tier` block
