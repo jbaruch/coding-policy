@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.366 — 2026-10-07
+
 ### Fixed
 
 - **Recorded no-send cleanup preserves replacement sessions.** The dispatch
