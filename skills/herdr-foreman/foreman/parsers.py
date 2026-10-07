@@ -39,6 +39,9 @@ _CLAUDE_HEADER_RE = re.compile(
 )
 # "████        8% used" -- the bar glyphs are decoration, only the number counts.
 _CLAUDE_USED_RE = re.compile(r"^[█░▒▓▏▎▍▌▋▊▉\s]*(-?\d+(?:\.\d+)?)\s*%\s+used$")
+# Captured old and narrow dialogs permit blank rows and wrapped bars between
+# the heading and percentage. Other prose ends that window's association.
+_CLAUDE_BAR_RE = re.compile(r"^[█░▒▓▏▎▍▌▋▊▉\s]+$")
 _CLAUDE_RESETS_RE = re.compile(r"^Resets\s+(.+)$")
 # Only the evidenced narrow-view reset continuations: a timezone, or a time
 # after an inline reset ending in " at". No date inference or prose joining.
@@ -191,6 +194,14 @@ def parse_claude_usage(text):
         resets = _CLAUDE_RESETS_RE.match(line)
         if resets and pending_used is not None and pending_resets is None:
             pending_resets = resets.group(1).strip()
+            continue
+        if not line or _CLAUDE_BAR_RE.fullmatch(line):
+            continue
+        # An unknown row is a section boundary, not a gap to search across.
+        # Keep any complete observation; never borrow a later percentage.
+        flush()
+        label = None
+        collecting_inline_reset = False
     flush()
 
     if not windows:
