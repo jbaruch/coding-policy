@@ -57,6 +57,13 @@ does not prove account access. Missing, stale, future or mismatched proof is
 recorded and skipped, not fabricated. Config is operator-owned; the utility
 validates and reads it, never writes or migrates it.
 
+For a verified same-family version replacement, use
+`skills/herdr-foreman/references/successor-placement.md` before changing config. Provisional
+placement preserves the predecessor's authorized spot and qualification,
+including unknown, without another per-role validation campaign. Fresh CLI,
+account access and account-bound capacity remain independent requirements.
+That reference also governs explicit null effort for a new no-effort successor.
+
 The existing capability table supplies dated qualification for the **requested
 round**, not the row's usual round. A build may borrow a mechanical row's pair
 only when it is qualified for implementation; the task never becomes
@@ -343,13 +350,18 @@ the project imports, not a measurement it takes: routing reads it to pick a
 model, and a capability nobody has evidence for is recorded `unknown` rather
 than assumed.
 
-Saved at `<selected-state>.capabilities.json`. Owner:
+Saved at `<selected-state>.capabilities.json`. Schema 2 adds provisional
+placements under `skills/herdr-foreman/references/successor-placement.md`; entry schema remains 1.
+Schema 1 below is the prior envelope. The owner upgrades it on read through
+`capability-migrate` or either record command; entries and refresh time remain
+untouched. Read-only readers refuse it until that
+upgrade and emit the owner-command diagnostic. Owner:
 `skills/herdr-foreman/foreman/capabilities.py`. Writer: `capability-record`,
-alone. Readers: `capability-check`, `capability-show`, the round preflight,
+and `capability-successor` for placements. Readers: `capability-check`, `capability-show`, the round preflight,
 `plan`, `apply` and `start-judge`, which refuses a pinned judge the table
 records inadequate before anything launches. `plan` and `apply` read it read-only through
 `capabilities.load`: a missing file is an empty table, a table written by a
-newer build is read as empty with a warning and left untouched, and an
+newer build refuses with an update diagnostic and is left untouched, and an
 unreadable or malformed one refuses the command naming the file. A symlink at
 the table's path, live or dangling, refuses the command and is left as found.
 
@@ -380,10 +392,13 @@ the table's path, live or dangling, refuses the command and is left as found.
 | `entries[].source` | required | `kind`, `ref` (where it was read) and `dated` (`YYYY-MM-DD`, when it was read) |
 | `entries[].recorded_at` | required, UTC | Stamped by the writer, never supplied by the report |
 
-An absent file reads as an empty table: `refreshed_at: null`, no entries. A
-file stamped with a newer schema than the reader owns reads as no prior state,
-with a diagnostic to update the plugin; `capability-record` refuses to write
-over it. An older or malformed file is refused with its repair, and so is a
+An absent file reads as an empty table: `refreshed_at: null`, no entries.
+This artifact uses the `rules/stateful-artifacts.md` gate-store exception:
+an inadequate entry is an open gate refusing a launch. Readers refuse any
+schema they do not accept, without discarding negative evidence. A newer
+record names the plugin update; schema 1 names the owner migration, which
+rewrites it before use without changing evidence. Writers never overwrite
+a newer record. An unsupported older or malformed file is refused with its repair, and so is a
 symlink in the file's place. No field has a
 default: an entry missing one is refused, never filled in.
 
@@ -392,7 +407,9 @@ shaped `{"entries": [...]}`: each entry carries `model`, `effort`,
 `capability`, `verdict` and `source`, and nothing else. The writer stamps
 `schema_version` and `recorded_at`, replaces the entries whose key the report
 covers, keeps every other entry, and sets `refreshed_at`. A report with no
-entries refreshes nothing and is refused. A result this project recorded is a
+entries or recalibrations refreshes nothing and is refused. Recalibrations use
+`skills/herdr-foreman/references/successor-placement.md`; a recalibration-only report leaves the
+table's `refreshed_at` unchanged. A result this project recorded is a
 `project` source and cites its issue.
 
 Which source kinds exist, and which of them can support an `adequate` verdict,
@@ -459,7 +476,7 @@ required capabilities, the selected pair, the capability-table evidence, each
 cheaper candidate with its verdict or an unknown cost, and the escalation
 conditions. Opted-in routing also records separate launch support, account
 access, qualification and capacity, candidate refusals and overrides. The
-record shape is plan schemas 15/16 in `state-schema.md`; it
+record shape is plan schemas 17/18 in `state-schema.md`; it
 explains a selection and never changes one.
 
 `cost-report` reports each task's resource use through acceptance from the
@@ -483,7 +500,9 @@ cover what one would catch:
    rows, refreshed on a cadence. Tier selection reads it for every candidate:
    an `inadequate` entry for the selected model and effort refuses that
    candidate, naming its source. Legacy configured routing keeps its row on
-   `unknown`; minimum-adequate routing skips an unknown or stale candidate.
+   `unknown`; minimum-adequate routing skips an unknown or stale candidate
+   unless its exact authorized spot has provisional successor placement under
+   `skills/herdr-foreman/references/successor-placement.md`. Qualification itself stays unchanged.
    Which capabilities each round needs, and the only names
    `capability-record` accepts, are `ROUND_CAPABILITIES` and `VOCABULARY` in
    `skills/herdr-foreman/foreman/capabilities.py`

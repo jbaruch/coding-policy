@@ -419,7 +419,7 @@ class PlanCommandTest(CliCase):
             )
         self.assertEqual(code, 0, err)
         document = json.loads(out)
-        self.assertEqual(document["schema_version"], 16)
+        self.assertEqual(document["schema_version"], 18)
         self.assertEqual(set(document["worker_kinds"]), {"developer", "reviewer"})
         self.assertTrue(set(document["worker_kinds"].values()) <= {"claude", "codex", "grok"})
         self.assertEqual(document["assignments"], {

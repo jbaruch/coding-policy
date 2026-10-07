@@ -252,7 +252,7 @@ class CommandTest(unittest.TestCase):
     def record(self, model, effort, verdict):
         path = capabilities.storage_path(self.state)
         document = json.loads(path.read_text()) if path.exists() else {
-            "schema_version": 1, "refreshed_at": AT, "entries": []}
+            "schema_version": 2, "refreshed_at": AT, "entries": [], "successors": []}
         document["entries"].append({
             "schema_version": 1, "model": model, "effort": effort, "capability": "mechanical-execution",
             "verdict": verdict, "source": {"kind": "project", "ref": "fixture", "dated": "2026-09-23"},

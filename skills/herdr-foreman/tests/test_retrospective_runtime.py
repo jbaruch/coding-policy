@@ -474,7 +474,7 @@ class RetrospectiveRuntimeTest(unittest.TestCase):
                                    "judge": {"agent": "codex", "model": "gpt-5.6-sol", "effort": "high",
                                              "mode": "adjudication"}}))
         capabilities.storage_path(self.path).write_text(json.dumps({
-            "schema_version": 1, "refreshed_at": AT, "entries": [{
+            "schema_version": 2, "refreshed_at": AT, "successors": [], "entries": [{
                 "schema_version": 1, "model": "gpt-5.6-sol", "effort": "high", "capability": "pinned-judge-launch",
                 "verdict": "inadequate", "source": {"kind": "project", "ref": "fixture", "dated": "2026-09-23"},
                 "recorded_at": AT}]}))

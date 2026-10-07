@@ -9,6 +9,26 @@
   direct standalone work remain intact. Worktree guidance no longer recommends
   the host runtime's native Agent mechanism (#701).
 
+## 0.3.371 — 2026-10-07
+
+### Changed
+
+- **Verified model successors inherit their authorized operating spot provisionally.**
+  The capability owner binds a dated same-family successor to the exact
+  predecessor's worker, responsibility, round, effort, account and declared
+  weight, preserving original qualification and sources, including unknown.
+  Provider-owned directed mappings and identity quotes are reread from trusted
+  official hosts; they never establish adequacy. The owner upgrades older
+  capability envelopes before use without restamping evidence; readers refuse
+  unknown schemas without discarding negative gates. Stable maintenance event IDs deduplicate
+  retries without postponing recalibration. Routing still requires fresh installed-CLI support,
+  account access and account-bound capacity, with apply-time revalidation.
+  Pins, judgment floors, risk escalation, authority and contributor exclusion
+  remain intact. The existing maintenance checkpoint visibly keeps, confirms
+  from substantive evidence, or withdraws placement; unrelated refreshes cannot
+  hide its due date. No automatic scheduler, per-role qualification campaign,
+  additional approval or invented savings is introduced (#700).
+
 ## 0.3.370 — 2026-10-07
 
 ### Fixed

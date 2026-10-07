@@ -68,16 +68,14 @@ class CapabilityTableTest(unittest.TestCase):
         with self.assertRaisesRegex(UsageError, "not valid JSON"):
             capabilities.load(self.state)
 
-    def test_a_newer_table_reads_as_no_prior_state_and_is_never_overwritten(self):
-        # rules/stateful-artifacts.md: a lagging reader treats a newer record as
-        # no usable prior state; a lagging writer must not clobber it.
+    def test_a_newer_gate_table_refuses_and_is_never_overwritten(self):
+        # The documented gate-store exception preserves unknown negative gates;
+        # neither a reader nor a lagging writer may discard or clobber them.
         target = capabilities.storage_path(self.state)
         original = json.dumps({"schema_version": 99, "refreshed_at": None, "entries": [], "future": 1})
         target.write_text(original, encoding="utf-8")
-        err = io.StringIO()
-        with redirect_stderr(err):
-            self.assertEqual(capabilities.load(self.state), capabilities.empty())
-        self.assertIn("newer than this build", err.getvalue())
+        with self.assertRaisesRegex(UsageError, "newer than this build"):
+            capabilities.load(self.state)
         with self.assertRaisesRegex(UsageError, "Update the coding-policy plugin before recording"):
             capabilities.record(self.state, {"entries": [entry()]}, AT)
         self.assertEqual(target.read_text(encoding="utf-8"), original)
