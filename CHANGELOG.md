@@ -8,8 +8,8 @@
   weight, preserving original qualification and sources, including unknown.
   Provider-owned directed mappings and identity quotes are reread from trusted
   official hosts; they never establish adequacy. The owner upgrades older
-  capability envelopes before use without restamping evidence; readers leave
-  them untouched until migration. Stable maintenance event IDs deduplicate
+  capability envelopes before use without restamping evidence; readers refuse
+  unknown schemas without discarding negative gates. Stable maintenance event IDs deduplicate
   retries without postponing recalibration. Routing still requires fresh installed-CLI support,
   account access and account-bound capacity, with apply-time revalidation.
   Pins, judgment floors, risk escalation, authority and contributor exclusion

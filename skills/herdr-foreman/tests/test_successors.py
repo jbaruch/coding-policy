@@ -6,7 +6,7 @@ import json
 import sys
 import unittest
 from datetime import timedelta
-from http.client import HTTPMessage
+from http.client import HTTPMessage, IncompleteRead
 from html import escape
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -176,7 +176,8 @@ class SuccessorTest(CliCase):
         legacy["schema_version"] = 1
         capabilities.storage_path(self.state).write_text(json.dumps(legacy))
         before = capabilities.storage_path(self.state).read_bytes()
-        self.assertEqual(capabilities.load(self.state), capabilities.empty())
+        with self.assertRaisesRegex(UsageError, "capability-migrate"):
+            capabilities.load(self.state)
         self.assertEqual(capabilities.storage_path(self.state).read_bytes(), before)
         self.out, self.err = io.StringIO(), io.StringIO()
         rc, out, err = self.run_cli(["capability-migrate", *self.base()])
@@ -418,6 +419,24 @@ class SuccessorTest(CliCase):
         self.assertIn("placement_withdrawn", err)
         self.assertEqual(native.events, [])
 
+    def test_withdrawal_requires_negative_or_unestablished_provider_evidence(self):
+        self.successor_record()
+        for verdict in ("adequate", "unknown"):
+            with self.assertRaisesRegex(UsageError, "withdraw needs"):
+                self.recalibrate("withdraw", verdict)
+        self.recalibrate("withdraw", "inadequate")
+
+    def test_schema_one_negative_gate_is_not_discarded_before_owner_migration(self):
+        self.record("sonnet-5", "low", "inadequate")
+        legacy = capabilities.load(self.state)
+        legacy.pop("successors")
+        legacy["schema_version"] = 1
+        capabilities.storage_path(self.state).write_text(json.dumps(legacy))
+        refusal = self.plan(expected=1)
+        self.assertIn("capability-migrate", json.dumps(refusal))
+        capabilities.migrate(self.state)
+        self.successor_record(expected=1)
+
     def test_explicit_pin_and_judgment_do_not_accept_provisional_reassignment(self):
         self.worker["tier_routing"]["mode"] = "pinned"
         self.successor_record(expected=1)
@@ -427,6 +446,18 @@ class SuccessorTest(CliCase):
             self.successor_record(report, expected=1)
 
     def test_public_dispatch_launches_successor_with_real_owner_path(self):
+        self.public_dispatch_and_reload()
+
+    def test_public_no_effort_dispatch_remains_readable_on_next_owner_command(self):
+        self.worker["tiers"]["build"]["effort"] = None
+        self.worker["tier_routing"]["evidence"]["build"] = {
+            "model": "sonnet-5", "effort": None,
+            "launch": {"status": "supported", "ref": "fixture: installed CLI omitted effort", "checked_at": AT},
+            "access": {"status": "accessible", "ref": "fixture: account", "checked_at": AT,
+                       "window_group": self.worker["window_group"]}}
+        self.public_dispatch_and_reload()
+
+    def public_dispatch_and_reload(self):
         self.successor_record()
         self.upgrade()
         plan = self.plan("--task", "successor-1")
@@ -450,6 +481,13 @@ class SuccessorTest(CliCase):
         self.assertEqual(rc, 0, err)
         self.assertEqual(json.loads(out)["applied"][0]["tier"]["model"], "sonnet-5.1")
         self.assertEqual(len([event for event in native.events if event[0] == "prompt"]), 1)
+        self.out, self.err = io.StringIO(), io.StringIO()
+        rc, out, err = self.run_cli(["capability-check", *self.base(), "--now", AT])
+        self.assertEqual(rc, 0, err)
+        self.out, self.err = io.StringIO(), io.StringIO()
+        rc, out, err = self.run_cli(["state", *self.base()])
+        self.assertEqual(rc, 0, err)
+        self.assertEqual(json.loads(out)["assignments"][-1]["tier"]["effort"], self.worker["tiers"]["build"]["effort"])
 
 
 class ProviderReadTest(unittest.TestCase):
@@ -495,6 +533,16 @@ class ProviderReadTest(unittest.TestCase):
         with patch("foreman.successors.build_opener") as opener:
             opener.return_value.open.return_value = response
             with self.assertRaisesRegex(UsageError, "smaller catalog page"):
+                successors.read_provider(response.geturl(), "anthropic")
+
+    def test_truncated_http_response_is_an_actionable_refusal(self):
+        response = MagicMock()
+        response.geturl.return_value = "https://www.anthropic.com/fixture"
+        response.__enter__.return_value = response
+        response.read.side_effect = IncompleteRead(b"fixture partial", 12)
+        with patch("foreman.successors.build_opener") as opener:
+            opener.return_value.open.return_value = response
+            with self.assertRaisesRegex(UsageError, "Restore access"):
                 successors.read_provider(response.geturl(), "anthropic")
 
 

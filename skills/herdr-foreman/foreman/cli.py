@@ -2788,9 +2788,8 @@ def cmd_capability(args, client=None, warn=None, trace=None):
     path = _state_path(args)
     if args.command == "capability-migrate":
         return capabilities.migrate(path), None
-    document = capabilities.load(path)
     if args.command == "capability-show":
-        return document, None
+        return capabilities.load(path), None
     at = args.now or now_iso()
     if args.command == "capability-successor":
         report = _read_record(args.record)
@@ -2799,6 +2798,7 @@ def cmd_capability(args, client=None, warn=None, trace=None):
         agent = select_agents(load_config(_config_path(args)), [report["worker"]])[0]
         return successors.record(path, report, at, agent), None
     if args.command == "capability-check":
+        document = capabilities.load(path)
         state, usable = load_state_checked(path, warn=warn, persist_migration=False)
         if not usable:
             # An unreadable ledger is not an empty one: whether work exists, and

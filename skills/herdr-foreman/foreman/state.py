@@ -143,7 +143,8 @@ def _maintenance_tier_is_valid(tier):
             or proof.get("effort") != tier.get("effort")):
         return False
     try:
-        parse_tiers({"build": {"model": tier.get("model"), "effort": tier.get("effort")}}, tier.get("kind"))
+        parse_tiers({"build": {"model": tier.get("model"), "effort": tier.get("effort")}}, tier.get("kind"),
+                    no_effort_rows=frozenset({"build"}))
         launch_args = parse_launch_args(tier.get("launch_args"), tier.get("kind"))
         verify_argv(tier.get("kind"), tier, proof.get("argv"), launch_args)
     except (ConfigError, HerdrError, UsageError):
@@ -594,7 +595,11 @@ def _validate(payload, path):
             if "qualification" in tier:
                 raise _NoUsableState("an assignment row's tier carries the retired qualification summary")
             try:
-                parse_tiers({"build": {"model": tier["model"], "effort": tier.get("effort")}}, tier["kind"])
+                # This is syntax validation of a saved launch, not config
+                # authorization. Exact process argv proves the omitted flag;
+                # apply still rechecks current config and live fact owners.
+                parse_tiers({"build": {"model": tier["model"], "effort": tier.get("effort")}}, tier["kind"],
+                            no_effort_rows=frozenset({"build"}))
                 launch_args = parse_launch_args(tier.get("launch_args", []), tier["kind"])
                 verify_argv(tier["kind"], tier, proof.get("argv"), launch_args)
             except (ConfigError, HerdrError, UsageError):

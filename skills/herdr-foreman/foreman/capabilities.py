@@ -27,7 +27,6 @@ from typing import NoReturn
 
 from . import runnable
 from .chronology import timestamp
-from .diagnostics import stderr_warn as _warn
 from .errors import UsageError
 from .state import save_state, state_lock
 
@@ -119,13 +118,12 @@ def load(path, *, for_write=False):
     A symlink at the table's path is refused, live or dangling, the way the
     reset record refuses one.
 
-    Schema 1 is no usable prior state for a read-only consumer. Owner callers
+    Schema 1 refuses a read-only consumer until migration. Owner callers
     hold the table lock and migrate/rewrite that envelope before using it.
 
-    A table stamped with a newer schema than this build owns was written by a
-    newer owner. A reader treats it as no usable prior state and says so; a
-    writer refuses, so an older build never overwrites what it cannot read
-    (rules/stateful-artifacts.md Migration Policy).
+    The table is a gate store: inadequate entries refuse launches. Unknown
+    schemas refuse instead of discarding a gate (stateful-artifacts exception,
+    documented in references/model-tiers.md). Only the owner upgrades schema 1.
     """
     target = storage_path(path)
     # A dangling link is not a missing table, and a live one is not the owner's
@@ -165,21 +163,15 @@ def load(path, *, for_write=False):
               "file rather than editing it by hand.".format(target, exc.msg))
     version = document.get("schema_version") if isinstance(document, dict) else None
     if isinstance(version, int) and not isinstance(version, bool) and version > SCHEMA_VERSION:
-        if for_write:
-            _fail("The capability table at {} is schema {}, newer than this build's {}. Update "
-                  "the coding-policy plugin before recording; the file is left untouched.".format(
-                      target, version, SCHEMA_VERSION))
-        _warn("capability table {} is schema {}, newer than this build's {}; reading it as no "
-              "prior state. Update the coding-policy plugin. The file is left untouched.".format(
+        _fail("The capability table at {} is schema {}, newer than this build's {}. Update "
+              "the coding-policy plugin before recording or reading its gates; the file is left untouched.".format(
                   target, version, SCHEMA_VERSION))
-        return empty()
     validate(document)
     if version == 1:
         if not for_write:
-            _warn("capability table {} is schema 1; reading it as no usable prior state. "
+            _fail("capability table {} is schema 1; its negative gates cannot be discarded. "
                   "Run `{}` to migrate with the owner; the file is left untouched.".format(
                       target, runnable.command("capability-migrate")))
-            return empty()
         # Owner callers hold the table lock. Persist the envelope upgrade on
         # read, before any report is applied; never restamp historical entries.
         document = {**document, "schema_version": SCHEMA_VERSION, "successors": []}

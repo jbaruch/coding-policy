@@ -155,7 +155,10 @@ cadence, and worktree hygiene.
 
 First run the capability owner's local schema upgrade. It preserves evidence
 and creates no missing table; no consultation or operator approval is needed.
-On non-zero, report the diagnostic and stop this round start.
+Exit 0 emits the schema-2 capability-table JSON documented in
+`skills/herdr-foreman/references/successor-placement.md`, including `entries`
+and `successors`. Non-zero emits an actionable refusal on stderr; report it
+and stop this round start.
 
 ```bash
 CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"; [ -d "$CP" ] || case "$(git config --get remote.origin.url)" in git@github.com:jbaruch/coding-policy|git@github.com:jbaruch/coding-policy.git|https://github.com/jbaruch/coding-policy|https://github.com/jbaruch/coding-policy.git|ssh://git@github.com/jbaruch/coding-policy|ssh://git@github.com/jbaruch/coding-policy.git) CP=. ;; *) echo "coding-policy plugin not found: run tessl install jbaruch/coding-policy" >&2; exit 1 ;; esac
@@ -197,9 +200,12 @@ Before following any route below, report the worktree sweep to the operator:
   `skills/herdr-foreman/references/model-tiers.md`. A selection-time fact about
   a seat this task needs may block that seat; cadence alone never does. The
   maintenance consultation revisits `successors_due` under
-  `skills/herdr-foreman/references/successor-placement.md`. Record keep, revise
-  or withdraw outcomes through `capability-record`; unknown stays unknown.
-  This cadence creates no automatic recalibration job. The maintenance
+  `skills/herdr-foreman/references/successor-placement.md`.
+  - Record keep, revise or withdraw outcomes through `capability-record`.
+  - Preserve unknown outcomes as unknown.
+  - Create no automatic recalibration job.
+
+  The maintenance
   commands record the report and show the result:
 
 ```bash
@@ -226,7 +232,8 @@ CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"; [ -d "$
 bash "$CP/skills/herdr-foreman/foreman.sh" capability-successor --record <successor-report.json>
 ```
 
-Exit 0 records dated provisional placement. Non-zero refuses the cited field
+Exit 0 emits the saved provisional-placement JSON described by the referenced
+schema, including its origin, provenance and empty history. Non-zero refuses the cited field
 or evidence; repair it without relabeling qualification or changing pins.
 
 - **Exit 1** — report the `blocking` reasons verbatim. Each names the command

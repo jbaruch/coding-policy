@@ -12,6 +12,7 @@ import hashlib
 import json
 from datetime import timedelta
 from html.parser import HTMLParser
+from http.client import HTTPException
 from typing import NoReturn
 from urllib.error import URLError
 from urllib.parse import urlsplit
@@ -133,7 +134,7 @@ def read_provider(ref, provider):
             if len(body) > BODY_LIMIT:
                 fail("provider evidence exceeds the bounded read; cite a smaller catalog page.")
             decoded = body.decode("utf-8")
-    except (OSError, URLError, UnicodeError) as exc:
+    except (OSError, URLError, UnicodeError, HTTPException) as exc:
         fail("cannot read provider evidence: {}. Restore access or cite a reachable official source; nothing was recorded.".format(exc))
     if decoded.lstrip().startswith("{"):
         try:
@@ -348,6 +349,8 @@ def validate_recalibration(event, saved=False):
         fail("contrary evidence, retirement or unknown provider status requires withdrawal, not inherited permission.")
     if event["action"] == "revise" and event["verdict"] != "adequate":
         fail("revise confirms measured placement only with adequate evidence; unknown stays provisional on keep.")
+    if event["action"] == "withdraw" and event["verdict"] != "inadequate" and event["provider_status"] == "active":
+        fail("withdraw needs negative capability evidence, retirement or unestablished provider status.")
     if saved and event["schema_version"] != RECALIBRATION_SCHEMA_VERSION:
         fail("unsupported recalibration schema.")
 

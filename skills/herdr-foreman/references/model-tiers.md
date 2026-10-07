@@ -354,14 +354,14 @@ Saved at `<selected-state>.capabilities.json`. Schema 2 adds provisional
 placements under `skills/herdr-foreman/references/successor-placement.md`; entry schema remains 1.
 Schema 1 below is the prior envelope. The owner upgrades it on read through
 `capability-migrate` or either record command; entries and refresh time remain
-untouched. Read-only readers treat it as no usable prior state until that
+untouched. Read-only readers refuse it until that
 upgrade and emit the owner-command diagnostic. Owner:
 `skills/herdr-foreman/foreman/capabilities.py`. Writer: `capability-record`,
 and `capability-successor` for placements. Readers: `capability-check`, `capability-show`, the round preflight,
 `plan`, `apply` and `start-judge`, which refuses a pinned judge the table
 records inadequate before anything launches. `plan` and `apply` read it read-only through
 `capabilities.load`: a missing file is an empty table, a table written by a
-newer build is read as empty with a warning and left untouched, and an
+newer build refuses with an update diagnostic and is left untouched, and an
 unreadable or malformed one refuses the command naming the file. A symlink at
 the table's path, live or dangling, refuses the command and is left as found.
 
@@ -392,10 +392,13 @@ the table's path, live or dangling, refuses the command and is left as found.
 | `entries[].source` | required | `kind`, `ref` (where it was read) and `dated` (`YYYY-MM-DD`, when it was read) |
 | `entries[].recorded_at` | required, UTC | Stamped by the writer, never supplied by the report |
 
-An absent file reads as an empty table: `refreshed_at: null`, no entries. A
-file stamped with a newer schema than the reader owns reads as no prior state,
-with a diagnostic to update the plugin; the writers refuse to write
-over it. An unsupported older or malformed file is refused with its repair, and so is a
+An absent file reads as an empty table: `refreshed_at: null`, no entries.
+This artifact uses the `rules/stateful-artifacts.md` gate-store exception:
+an inadequate entry is an open gate refusing a launch. Readers refuse any
+schema they do not accept, without discarding negative evidence. A newer
+record names the plugin update; schema 1 names the owner migration, which
+rewrites it before use without changing evidence. Writers never overwrite
+a newer record. An unsupported older or malformed file is refused with its repair, and so is a
 symlink in the file's place. No field has a
 default: an entry missing one is refused, never filled in.
 

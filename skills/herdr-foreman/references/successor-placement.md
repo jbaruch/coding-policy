@@ -129,8 +129,8 @@ Artifact: `<selected-state>.capabilities.json`. Owner: `herdr-foreman`, through
 `skills/herdr-foreman/foreman/capabilities.py` and
 `skills/herdr-foreman/foreman/successors.py`. Capability-table schema 2
 adds required `successors`, an array. Entry schema stays 1: upgrade does not
-rewrite or restamp model/effort/capability evidence. Read-only readers treat
-schema 1 as no usable prior state and leave it untouched, with an owner-upgrade
+rewrite or restamp model/effort/capability evidence. Read-only readers refuse
+schema 1 and leave it untouched, with an owner-upgrade
 diagnostic. SKILL.md Step 2 runs `capability-migrate` before preflight; the owner
 rewrites the older envelope on read, preserving all entries and refresh time.
 Both record commands perform that owner migration under their table lock too.
@@ -169,3 +169,7 @@ null when none applies, otherwise `id`, `status`, `origin`, `provenance`,
 its own `status` and `sources`. Older explanatory records remain readable
 without placement; no history is backfilled. Audit data is stripped from
 durable dispatch tiers and never supplies launch proof.
+
+Durable tier validation accepts the syntax of an omitted effort flag when
+the saved exact process argv proves that launch. It grants no routing authority;
+apply rereads config, launch support, account access and capacity normally.
