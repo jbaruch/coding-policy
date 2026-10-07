@@ -41,6 +41,9 @@ class SuccessorTest(CliCase):
         snapshot["agents"][self.worker["name"]]["window_group"] = self.worker["window_group"]
         self.snapshot.write_text(json.dumps(snapshot))
         self.record("sonnet-5", "low", "unknown")
+        document = capabilities.load(self.state)
+        document["refreshed_at"] = AT
+        capabilities.storage_path(self.state).write_text(json.dumps(document))
         self.quote = "Fixture only: sonnet-5 (Sonnet 5) is replaced by sonnet-5.1 (Sonnet 5.1)."
         self.report = {
             "id": "sonnet-upgrade", "worker": self.worker["name"], "role": "developer",
