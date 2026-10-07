@@ -164,6 +164,16 @@ def assignment_worker(template, name):
     )
 
 
+def _no_effort_rows(entry, routing):
+    """Explicit null effort needs observed launch support, never a name-prefix rule."""
+    if routing is None or routing["mode"] != "minimum_adequate" or not isinstance(entry.get("tiers"), dict):
+        return frozenset()
+    return frozenset(name for name, proof in routing["evidence"].items()
+                     if proof["effort"] is None and proof["launch"]["status"] == "supported"
+                     and isinstance(entry.get("tiers", {}).get(name), dict)
+                     and entry["tiers"][name].get("model") == proof["model"])
+
+
 def parse_capabilities(value, source="capabilities", error_type: type[ForemanError] = ConfigError):
     """Normalize explicit eligibility tags; a model name never supplies them."""
     if (not isinstance(value, list)
@@ -273,8 +283,9 @@ def parse_config(payload, source="<memory>"):
         name = entry["name"]
         if "tier_routing" in entry and version < 8:
             raise ConfigError("tier_routing requires config schema_version 8; preserve the operator-owned rows when opting in.", {"source": source})
-        tiers = parse_tiers(entry.get("tiers"), entry["kind"])
-        routing = parse_tier_routing(entry.get("tier_routing"), tiers)
+        raw_tiers = entry.get("tiers")
+        routing = parse_tier_routing(entry.get("tier_routing"), raw_tiers if isinstance(raw_tiers, dict) else {})
+        tiers = parse_tiers(entry.get("tiers"), entry["kind"], no_effort_rows=_no_effort_rows(entry, routing))
         if "tiers" in entry and version < 2:
             raise ConfigError("Tier tables need config schema_version 2; upgrade the operator-owned config.", {"source": source})
         if version >= 5 and not entry.get("tiers") and (version >= 7 or entry.get("name") != pinned_judge):
@@ -673,7 +684,9 @@ def parse_foreman(payload, source="<memory>"):
         tier_source = ""
         for entry in workers:
             if isinstance(entry, dict) and entry.get("kind") == kind and entry.get("tiers"):
-                tiers, tier_source = parse_tiers(entry["tiers"], kind), "{}.{}".format(worker_field, entry.get("name"))
+                routing = parse_tier_routing(entry.get("tier_routing"), entry["tiers"])
+                tiers = parse_tiers(entry["tiers"], kind, no_effort_rows=_no_effort_rows(entry, routing))
+                tier_source = "{}.{}".format(worker_field, entry.get("name"))
                 break
     launch_args = parse_launch_args(raw.get("launch_args", []), kind)
     window_group = raw.get("window_group", "")

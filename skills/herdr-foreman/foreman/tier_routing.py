@@ -9,7 +9,7 @@ ordering proxies, never a currency or separate-quota claim.
 import copy
 from datetime import timedelta
 
-from . import capabilities
+from . import capabilities, successors
 from .billing import billing_window, effective_multiplier
 from .chronology import timestamp
 from .errors import ConfigError, UsageError
@@ -74,7 +74,7 @@ def _fact(proof, kind, row, agent, at):
     return {"status": status, "evidence": copy.deepcopy(fact)}
 
 
-def decide(agent, role, tier, needs, table, headroom, measured_at, at, capacity_group=None):
+def decide(agent, role, tier, needs, table, headroom, measured_at, at, capacity_group=None, worker_kind=None):
     """Return the selected tier plus audit facts; judgment and explicit pins stay fixed."""
     policy = agent.tier_routing
     if policy is None:
@@ -109,18 +109,24 @@ def decide(agent, role, tier, needs, table, headroom, measured_at, at, capacity_
         if qualification == "adequate" and not all(
                 _fresh(source["dated"] + "T00:00:00Z", at, FACT_MAX_AGE) for source in sources):
             qualification = "stale"
+        placement = successors.placement(table, agent, role, tier["round"], name, row, needs, at, worker_kind) if at else None
+        inherited = placement is not None and placement["status"] == "provisional" and override is None
         rejected = []
         if name not in allowed or name in JUDGMENT_ROUNDS:
             rejected.append("role_ineligible")
         for kind, status, positive in (("launch", launch["status"], "supported"),
                                        ("access", access["status"], "accessible"),
-                                       ("qualification", qualification, "adequate"),
                                        ("capacity", capacity_status, "available")):
             if status != positive:
                 rejected.append(kind + "_" + status)
+        if qualification != "adequate" and not inherited:
+            rejected.append("qualification_" + qualification)
+        if placement and placement["status"] in {"withdrawn", "retired", "inadequate", "future"}:
+            rejected.append("placement_" + placement["status"])
         candidates.append({"tier_row": name, "model": row["model"], "effort": row.get("effort"),
                            "resource_weight": effective_multiplier(row), "launch": launch, "access": access,
                            "qualification": {"status": qualification, "sources": sources},
+                           "placement": placement,
                            "capacity": capacity, "rejected": rejected})
     chosen = tier
     if mode == "minimum_adequate" and override is None:

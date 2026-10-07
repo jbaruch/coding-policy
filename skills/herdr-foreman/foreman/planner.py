@@ -103,8 +103,10 @@ from .tiers import SEAT_SEPARATOR, canonical_role
 #: Versions 15/16 add selection-record schema 2: separate launch/account,
 #: qualification and capacity facts, routing mode and rejection reasons (#695).
 #: Version 15 is the pure planner; 16 adds assignment-scoped identities.
-PLAN_SCHEMA_VERSION = 15
-ASSIGNMENT_PLAN_SCHEMA_VERSION = 16
+#: Versions 17/18 add selection-record schema 3, preserving qualification
+#: beside a successor's provisional placement and its maintenance provenance.
+PLAN_SCHEMA_VERSION = 17
+ASSIGNMENT_PLAN_SCHEMA_VERSION = 18
 
 #: What one round in each seat is expected to burn, in points of the agent's
 #: remaining headroom percentage. The ORDER is what the planner acts on:

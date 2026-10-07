@@ -365,7 +365,7 @@ def verify_worker_permissions(kind, argv):
         raise HerdrError("Worker launch arguments do not prove YOLO mode. " + recovery, {})
 
 
-def parse_tiers(raw, kind):
+def parse_tiers(raw, kind, *, no_effort_rows=frozenset()):
     """Validate an optional per-agent {round: tier} table; never invent rows."""
     if raw is None:
         return {}
@@ -386,6 +386,10 @@ def parse_tiers(raw, kind):
         if model in NO_EFFORT_MODELS:
             if kind != "claude" or effort is not None:
                 _error("Haiku accepts no effort flag; omit effort for its Claude tier.")
+        elif round_type in no_effort_rows and "effort" in entry and effort is None:
+            # Exact-pair installed-launch evidence comes from opted-in config.
+            # Routing rechecks freshness; no judgment floor or model pin moves.
+            pass
         elif not isinstance(effort, str) or effort not in EFFORTS[kind]:
             _error("Tier {!r} needs an explicit effort from {}.".format(round_type, sorted(EFFORTS[kind])))
         if round_type in JUDGMENT_ROUNDS and (

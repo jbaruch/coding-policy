@@ -27,11 +27,11 @@ from typing import NoReturn
 
 from . import runnable
 from .chronology import timestamp
-from .diagnostics import stderr_warn as _warn
 from .errors import UsageError
 from .state import save_state, state_lock
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
+ENTRY_SCHEMA_VERSION = 1
 
 #: The table is read at dispatch time, so a week that dispatches nothing is a
 #: week where a stale table is never consulted. The interval is script-owned.
@@ -109,7 +109,7 @@ def _utc(value):
 
 
 def empty():
-    return {"schema_version": SCHEMA_VERSION, "refreshed_at": None, "entries": []}
+    return {"schema_version": SCHEMA_VERSION, "refreshed_at": None, "entries": [], "successors": []}
 
 
 def load(path, *, for_write=False):
@@ -118,10 +118,12 @@ def load(path, *, for_write=False):
     A symlink at the table's path is refused, live or dangling, the way the
     reset record refuses one.
 
-    A table stamped with a newer schema than this build owns was written by a
-    newer owner. A reader treats it as no usable prior state and says so; a
-    writer refuses, so an older build never overwrites what it cannot read
-    (rules/stateful-artifacts.md Migration Policy).
+    Schema 1 refuses a read-only consumer until migration. Owner callers
+    hold the table lock and migrate/rewrite that envelope before using it.
+
+    The table is a gate store: inadequate entries refuse launches. Unknown
+    schemas refuse instead of discarding a gate (stateful-artifacts exception,
+    documented in references/model-tiers.md). Only the owner upgrades schema 1.
     """
     target = storage_path(path)
     # A dangling link is not a missing table, and a live one is not the owner's
@@ -161,23 +163,35 @@ def load(path, *, for_write=False):
               "file rather than editing it by hand.".format(target, exc.msg))
     version = document.get("schema_version") if isinstance(document, dict) else None
     if isinstance(version, int) and not isinstance(version, bool) and version > SCHEMA_VERSION:
-        if for_write:
-            _fail("The capability table at {} is schema {}, newer than this build's {}. Update "
-                  "the coding-policy plugin before recording; the file is left untouched.".format(
-                      target, version, SCHEMA_VERSION))
-        _warn("capability table {} is schema {}, newer than this build's {}; reading it as no "
-              "prior state. Update the coding-policy plugin. The file is left untouched.".format(
+        _fail("The capability table at {} is schema {}, newer than this build's {}. Update "
+              "the coding-policy plugin before recording or reading its gates; the file is left untouched.".format(
                   target, version, SCHEMA_VERSION))
-        return empty()
     validate(document)
+    if version == 1:
+        if not for_write:
+            _fail("capability table {} is schema 1; its negative gates cannot be discarded. "
+                  "Run `{}` to migrate with the owner; the file is left untouched.".format(
+                      target, runnable.command("capability-migrate")))
+        # Owner callers hold the table lock. Persist the envelope upgrade on
+        # read, before any report is applied; never restamp historical entries.
+        document = {**document, "schema_version": SCHEMA_VERSION, "successors": []}
+        validate(document)
+        save_state(target, document)
     return document
 
 
+def migrate(path):
+    """Owner-only upgrade on read; absent and current tables are not rewritten."""
+    with state_lock(storage_path(path)):
+        return load(path, for_write=True)
+
+
 def validate(document):
-    if not isinstance(document, dict) or document.get("schema_version") != SCHEMA_VERSION:
+    if not isinstance(document, dict) or document.get("schema_version") not in (1, SCHEMA_VERSION):
         _fail("Unsupported capability-table schema; update the owner skill before using it.")
-    if set(document) != {"schema_version", "refreshed_at", "entries"}:
-        _fail("The capability table carries exactly schema_version, refreshed_at and entries.")
+    expected = {"schema_version", "refreshed_at", "entries"} | ({"successors"} if document["schema_version"] == 2 else set())
+    if set(document) != expected:
+        _fail("The capability table carries exactly {}.".format(", ".join(sorted(expected))))
     if document["refreshed_at"] is not None:
         _utc(document["refreshed_at"])
     if not isinstance(document["entries"], list):
@@ -189,6 +203,16 @@ def validate(document):
             _fail("The capability table records {} twice; one entry owns one model, effort and "
                   "capability.".format(" / ".join(key)))
         seen.add(key)
+    from . import successors
+    placements = document.get("successors", [])
+    if not isinstance(placements, list):
+        _fail("The capability table's successors must be an array.")
+    ids = set()
+    for row in placements:
+        successors.validate(row)
+        if row["id"] in ids:
+            _fail("The capability table records a successor placement id twice.")
+        ids.add(row["id"])
     return document
 
 
@@ -197,7 +221,7 @@ def validate_entry(entry):
     required = {"schema_version", "model", "effort", "capability", "verdict", "source", "recorded_at"}
     if not isinstance(entry, dict) or set(entry) != required:
         _fail("A capability entry carries exactly {}.".format(", ".join(sorted(required))))
-    if entry["schema_version"] != SCHEMA_VERSION:
+    if entry["schema_version"] != ENTRY_SCHEMA_VERSION:
         _fail("A capability entry carries an unsupported schema version.")
     key = (_name(entry["model"], "Capability model"),
            _name(entry["effort"], "Capability effort"),
@@ -228,7 +252,7 @@ def validate_entry(entry):
     return key
 
 
-def cadence(document, at, *, existing_work=False):
+def _table_cadence(document, at, *, existing_work=False):
     """Whether the table is due a refresh, and when the next one falls."""
     now = timestamp(_utc(at), "Capability checkpoint")
     last = document.get("refreshed_at")
@@ -243,6 +267,14 @@ def cadence(document, at, *, existing_work=False):
     return {"due": due, "last_refreshed_at": reference.isoformat(),
             "next_due_at": (reference + INTERVAL).isoformat(),
             "reason": "interval_elapsed" if due else "not_due"}
+
+
+def cadence(document, at, *, existing_work=False):
+    """Existing table cadence plus independently due provisional placements."""
+    from . import successors
+    result = _table_cadence(document, at, existing_work=existing_work)
+    placements = successors.due(document, at)
+    return {**result, "due": result["due"] or bool(placements), "successors_due": placements}
 
 
 def lookup(document, model, effort, capability):
@@ -317,18 +349,18 @@ def record(path, data, at):
     entries it carries and leaves every other row untouched, so one report about
     two models does not retire the rest of the table.
     """
-    if not isinstance(data, dict) or set(data) != {"entries"}:
-        _fail("A capability record carries `entries` alone: the rows this refresh covers.")
-    if not isinstance(data["entries"], list) or not data["entries"]:
+    if not isinstance(data, dict) or not set(data) <= {"entries", "recalibrations"} or not data:
+        _fail("A capability record carries `entries` alone or with `recalibrations`: the maintenance outcomes it covers.")
+    if not isinstance(data.get("entries", []), list) or not (data.get("entries") or data.get("recalibrations")):
         _fail("A capability refresh records at least one entry; an empty report refreshes nothing.")
     stamped = []
     covered = set()
     reported = {"model", "effort", "capability", "verdict", "source"}
-    for entry in data["entries"]:
+    for entry in data.get("entries", []):
         # The writer stamps the version and the time; a report never supplies them.
         if not isinstance(entry, dict) or set(entry) != reported:
             _fail("A reported capability entry carries exactly {}.".format(", ".join(sorted(reported))))
-        row = {**entry, "schema_version": SCHEMA_VERSION, "recorded_at": _utc(at)}
+        row = {**entry, "schema_version": ENTRY_SCHEMA_VERSION, "recorded_at": _utc(at)}
         key = validate_entry(row)
         # After validation, so the name is known to be a string.
         if key[2] not in VOCABULARY:
@@ -346,7 +378,13 @@ def record(path, data, at):
                 if (row["model"], row["effort"], row["capability"]) not in covered]
         document["entries"] = sorted(kept + stamped,
                                      key=lambda row: (row["model"], row["effort"], row["capability"]))
-        document["refreshed_at"] = _utc(at)
+        document["schema_version"] = SCHEMA_VERSION
+        document.setdefault("successors", [])
+        if "recalibrations" in data:
+            from . import successors
+            successors.recalibrate(document, data["recalibrations"], at)
+        if stamped:
+            document["refreshed_at"] = _utc(at)
         validate(document)
         save_state(target, document)
     return document

@@ -54,7 +54,7 @@ from .planner import plan as build_plan
 from .planner import ASSIGNMENT_PLAN_SCHEMA_VERSION, headroom_of
 from .tiers import (COORDINATION_ROUND, FOREMAN_ROLE, JUDGMENT_ROUNDS, MissingTierError,
                     parse_launch_args, parse_tiers, select_tier, worker_launch_args)
-from . import cost_report, selection, tier_routing
+from . import cost_report, selection, successors, tier_routing
 from .launch import configured_running_tier, restart_worker, start_foreman, start_worker, verify_foreman, verify_running, require_empty_shell
 from .state import (
     add_assignment,
@@ -165,8 +165,14 @@ def build_parser():
                                        help="Record a capability consultation's report into the table.")
     capability_record.add_argument("--record", required=True, metavar="FILE")
     capability_record.add_argument("--now", metavar="ISO")
+    successor_record = sub.add_parser("capability-successor", parents=[common],
+                                      help="Bind a verified successor to its predecessor's authorized operating spot.")
+    successor_record.add_argument("--record", required=True, metavar="FILE")
+    successor_record.add_argument("--now", metavar="ISO")
     capability_show = sub.add_parser("capability-show", parents=[common],
                                      help="Read the saved capability table without contacting Herdr.")
+    sub.add_parser("capability-migrate", parents=[common],
+                   help="Owner upgrade of an older capability table, preserving historical evidence.")
     sub.add_parser("supervision-gate", parents=[common],
                    help="Which pending supervision events need the foreman. Read-only.")
 
@@ -865,7 +871,7 @@ PLAN_ONLY_TIER_FIELDS = frozenset({"capability", "cheaper_adequate", "routing"})
 
 
 def _candidate_tiers(roles, agents, rounds, fix_round=None, judge=None, excludes=None, headroom=None, table=None, refusals=None,
-                     reusable_agents=False, measured_at=None, at=None, capacity_groups=None):
+                     reusable_agents=False, measured_at=None, at=None, capacity_groups=None, worker_kinds=None):
     """Each role's candidate tiers; `refusals` collects a capability refusal per skipped candidate."""
     table = table if table is not None else capabilities.empty()
     tiered = any(agent.tiers for agent in agents)
@@ -912,7 +918,8 @@ def _candidate_tiers(roles, agents, rounds, fix_round=None, judge=None, excludes
             try:
                 tier, routing = tier_routing.decide(agent, role, tier, needs, table,
                                                    (headroom or {}).get(agent.name), measured_at, at,
-                                                   (capacity_groups or {}).get(agent.name))
+                                                   (capacity_groups or {}).get(agent.name),
+                                                   (worker_kinds or {}).get(agent.name))
                 verdict = capabilities.assess(table, tier["model"], tier["effort"], needs)
             except UsageError as exc:
                 if refusals is not None:
@@ -1674,7 +1681,8 @@ def _apply(args, client, warn, trace, hold_gates):
                                   excludes=constraints["exclude"], headroom=planned_headroom,
                                   table=capabilities.load(state_path), refusals=capability_refusals,
                                   measured_at=(planned_snapshot or {}).get("measured_at"), at=at,
-                                  capacity_groups=capacity_groups)
+                                  capacity_groups=capacity_groups,
+                                  worker_kinds={name: document["worker_kinds"][role] for role, name in assignments.items()} if scoped else None)
     tiers = {}
     if candidates is not None:
         for role, name in assignments.items():
@@ -2778,11 +2786,19 @@ def cmd_capability(args, client=None, warn=None, trace=None):
     stays quiet on a fleet that has dispatched nothing (#481).
     """
     path = _state_path(args)
-    document = capabilities.load(path)
+    if args.command == "capability-migrate":
+        return capabilities.migrate(path), None
     if args.command == "capability-show":
-        return document, None
+        return capabilities.load(path), None
     at = args.now or now_iso()
+    if args.command == "capability-successor":
+        report = _read_record(args.record)
+        if not isinstance(report, dict) or not isinstance(report.get("worker"), str):
+            raise UsageError("Successor report needs the configured predecessor worker name.", {})
+        agent = select_agents(load_config(_config_path(args)), [report["worker"]])[0]
+        return successors.record(path, report, at, agent), None
     if args.command == "capability-check":
+        document = capabilities.load(path)
         state, usable = load_state_checked(path, warn=warn, persist_migration=False)
         if not usable:
             # An unreadable ledger is not an empty one: whether work exists, and
@@ -3106,7 +3122,7 @@ COMMANDS = {
     "probe-report": cmd_probe_report,
     "marker-fit": cmd_marker_fit,
     **{command: cmd_retrospective for command in ("retro-check", "retro-record", "retro-list", "retro-show")},
-    **{command: cmd_capability for command in ("capability-check", "capability-record", "capability-show")},
+    **{command: cmd_capability for command in ("capability-check", "capability-record", "capability-show", "capability-successor", "capability-migrate")},
     "supervision-gate": cmd_supervision_gate,
     **{command: cmd_memory for command in memory.COMMANDS},
     **{command: cmd_attention for command in attention.COMMANDS},

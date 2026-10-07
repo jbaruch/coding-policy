@@ -33,7 +33,7 @@ def entry(model, effort, capability, verdict, kind="project"):
 
 
 def table(*entries):
-    return {"schema_version": 1, "refreshed_at": "2026-09-23T00:00:00+00:00", "entries": list(entries)}
+    return {"schema_version": 2, "refreshed_at": "2026-09-23T00:00:00+00:00", "entries": list(entries), "successors": []}
 
 
 class VocabularyTest(unittest.TestCase):
