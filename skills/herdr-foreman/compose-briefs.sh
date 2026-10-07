@@ -21,7 +21,7 @@
 #   stdout: one JSON object —
 #           {"common":"<path>","briefs":{"<role>":"<path>", ...}}
 #   stderr: diagnostics only.
-#   exit  : 0 every file written with no placeholder left,
+#   exit  : 0 every file written with its template placeholders filled literally,
 #           1 precondition unmet (usage, missing dir/file/template, no jq,
 #             no python3),
 #           2 validation failed — an unfilled placeholder, a supplied key no
@@ -33,7 +33,8 @@
 #             with no {{TEAM_OPERATION}} placeholder.
 #             Nothing is written on a
 #             validation failure,
-#           3 a tool this depends on failed (the placeholder scan, or the
+#           3 a tool this depends on failed (template reading/value extraction,
+#             the placeholder scan, or the
 #             renderable-text check in foreman/renderable.py). The answer is
 #             unknown, which is never reported as "no placeholders".
 #           A REPORT, POLICY_INDEX, RELEASE_SKILL, TEAM_OPERATION or REVIEW_PACKAGE
@@ -137,34 +138,6 @@ placeholders_in() { # <file>
   fi
 }
 
-# Echo the placeholders still standing in <text>, space separated and sorted.
-#
-# Returns 0 when the scan RAN — empty output then means none are left — and 2
-# when the scan itself failed. `grep` exits 1 on no-match and 2 on a real error
-# (an unreadable input, a bad pattern), and collapsing those two into "nothing
-# found" is what would let an unrendered brief pass validation
-# (rules/error-handling.md Shell Error Handling).
-leftover_placeholders() { # <text>
-  local found rc=0 sorted
-  found="$(printf '%s' "$1" | grep -oE "$PLACEHOLDER_RE")" || rc=$?
-  if (( rc == 1 )); then
-    printf ''
-    return 0
-  fi
-  if (( rc != 0 )); then
-    warn "the placeholder scan failed (grep exit ${rc}) — the rendered text could not be checked; re-run, and check that grep is a working GNU/BSD grep"
-    return 2
-  fi
-  rc=0
-  sorted="$(printf '%s' "$found" | sort -u | tr '\n' ' ')" || rc=$?
-  if (( rc != 0 )); then
-    warn "the placeholder scan failed while sorting its matches (exit ${rc}) — the rendered text could not be checked; re-run"
-    return 2
-  fi
-  printf '%s' "$sorted"
-  return 0
-}
-
 # Refuse a value that is not text before it reaches a brief.
 #
 # `jq -r` prints a JSON null as the four characters `null`, which substitutes
@@ -219,14 +192,37 @@ validate_review_package() { # <merged-values-json> <role-or-seat>
 
 # Echo <template> with every KEY=VALUE pair in the given JSON object applied.
 substitute() { # <template-file> <values-json>
-  local content key value
-  content="$(cat "$1")"
-  while IFS= read -r key; do
-    [[ -n "$key" ]] || continue
-    value="$(printf '%s' "$2" | jq -r --arg k "$key" '.[$k]')"
-    content="${content//\{\{$key\}\}/$value}"
-  done < <(printf '%s' "$2" | jq -r 'keys[]')
-  printf '%s\n' "$content"
+  local content key value keys token prefix rendered=""
+  if ! content="$(cat "$1" && printf x)"; then
+    warn "cannot read template $1 — restore its read access before composing"
+    return 3
+  fi
+  content="${content%x}"
+  if ! keys="$(printf '%s' "$2" | jq -r 'keys[]')"; then
+    warn "cannot enumerate template values — repair the JSON values and jq installation before composing"
+    return 3
+  fi
+  # Consume only the original template. Inserted text is never scanned as
+  # another placeholder, including when it names a supplied or unknown key.
+  while [[ "$content" =~ $PLACEHOLDER_RE ]]; do
+    token="${BASH_REMATCH[0]}"
+    key="${token#\{\{}"
+    key="${key%\}\}}"
+    if [[ $'\n'"$keys"$'\n' != *$'\n'"$key"$'\n'* ]]; then
+      warn "${1##*/} still holds unfilled placeholders: $token — add it to the template's shared or role values"
+      return 2
+    fi
+    prefix="${content%%"$token"*}"
+    content="${content#*"$token"}"
+    # Sentinels preserve EOF across every command-substitution boundary.
+    if ! value="$(printf '%s' "$2" | jq -rj --arg k "$key" '.[$k]' && printf x)"; then
+      warn "cannot read template value $key — repair the JSON values and jq installation before composing"
+      return 3
+    fi
+    value="${value%x}"
+    rendered+="$prefix$value"
+  done
+  printf '%s' "$rendered$content"
 }
 
 main() {
@@ -365,8 +361,8 @@ main() {
   # round behind, and no output directory either (`rules/file-hygiene.md`
   # Idempotency); the directory is created only once every check has passed.
   local -a out_paths=() out_bodies=() report_paths=()
-  local merged rendered leftovers supplied known common_known unused key report rendered_scope slice_digest
-  local common_body scan_rc=0 check_rc=0
+  local merged rendered supplied known common_known unused key report rendered_scope slice_digest
+  local common_body check_rc=0
   validate_values "$shared" "the shared values" || return 2
   # Resolver-produced policy paths are explicit brief inputs. Custom templates
   # need not carry POLICY_INDEX or RELEASE_SKILL; any supplied artifact must
@@ -401,13 +397,8 @@ main() {
       fi
     fi
   done
-  common_body="$(substitute "$common_tpl" "$shared")"
-  leftovers="$(leftover_placeholders "$common_body")" || scan_rc=$?
-  if (( scan_rc != 0 )); then return 3; fi
-  if [[ -n "${leftovers// /}" ]]; then
-    warn "COMMON.md still holds unfilled placeholders: ${leftovers}— add them to .shared"
-    return 2
-  fi
+  common_body="$(substitute "$common_tpl" "$shared" && printf x)" || return $?
+  common_body="${common_body%x}"
   out_paths+=("${outdir}/COMMON.md")
   out_bodies+=("$common_body")
 
@@ -524,14 +515,8 @@ main() {
       warn "REPORT for role '${role}' is ${#report} characters; the limit is ${FOREMAN_REPORT_PATH_MAX_COLS}, a coarse bound on the worker's \`REPORT: <path>\` line (\`foreman apply\` checks the live pane width before dispatch) — use a shorter reports directory (e.g. one under \$HOME/.local/state) and re-run"
       return 2
     fi
-    rendered="$(substitute "$role_tpl" "$merged")"
-    scan_rc=0
-    leftovers="$(leftover_placeholders "$rendered")" || scan_rc=$?
-    if (( scan_rc != 0 )); then return 3; fi
-    if [[ -n "${leftovers// /}" ]]; then
-      warn "brief-${role}.md still holds unfilled placeholders: ${leftovers}— add them to .roles.${role} or .shared"
-      return 2
-    fi
+    rendered="$(substitute "$role_tpl" "$merged" && printf x)" || return $?
+    rendered="${rendered%x}"
     # A supplied key no template uses is a value the foreman believes it sent.
     # The known set is collected ONCE into a string and membership-tested with
     # a glob: piping into `grep -q` under `set -o pipefail` reports failure
@@ -574,7 +559,7 @@ main() {
   fi
   local i
   for i in "${!out_paths[@]}"; do
-    if ! printf '%s\n' "${out_bodies[$i]}" > "${out_paths[$i]}"; then
+    if ! printf '%s' "${out_bodies[$i]}" > "${out_paths[$i]}"; then
       warn "cannot write ${out_paths[$i]} — check permissions on ${outdir}"
       return 1
     fi

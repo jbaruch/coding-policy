@@ -329,9 +329,10 @@ a report overlapping a generated brief, or a `REPORT` longer than the
 script's limit (use a short reports directory). The limit is a coarse
 composition-time cap; `foreman apply` then measures each target pane and
 refuses, before any input, a `REPORT: <path>` row that pane would wrap — widen
-the pane or recompose with a shorter path. Exit 3 means the placeholder scan
-itself failed, so whether the briefs are clean is unknown: re-run, never
-dispatch on it. The placeholder set and both validation directions are the
+the pane or recompose with a shorter path. Exit 3 means template reading, value
+enumeration or extraction, the placeholder scan, or the renderable-text check
+failed. Repair the named read access, JSON or tool installation and re-run;
+never dispatch an unverified rendering. The placeholder set and both validation directions are the
 script's contract; see the header of
 `skills/herdr-foreman/compose-briefs.sh`.
 
