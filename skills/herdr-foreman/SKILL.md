@@ -133,13 +133,14 @@ For every other request, read `HERDR_ENV` before running scripts.
 - **Unset or empty** — this skill does not apply. Say so and do the task
   directly, without roster calls, briefs, provisioning, reports, or simulated
   worker roles. Finish here.
-- **Set, with a bounded factual lookup** — read
-  `skills/herdr-foreman/references/team-operation.md` Bounded Factual Lookup.
-  Answer within that boundary and cite the source. Run no round preflight,
-  roster measurement, enrollment, report gate or context reset for the lookup.
-  Finish here.
-- **Set, with a team task or new retrospective** — Proceed to Step 2.
-- **Set, with a lookup, a file inspection, research, a bounded question, a
+- **Set, with a bounded factual lookup**
+  - Read `skills/herdr-foreman/references/team-operation.md` Bounded Factual Lookup.
+  - Answer within that boundary.
+  - Cite the source.
+  - Run no round preflight, roster measurement, enrollment, report gate or context reset for the lookup.
+  - Finish here only with no enrollment requiring supervision or a valid Stop-gate condition; otherwise resume Fleet Supervision at Step 11.
+- **Set, outside Bounded Factual Lookup, with a team task or new retrospective** — Proceed to Step 2.
+- **Set, outside Bounded Factual Lookup, with a lookup, a file inspection, research, a bounded question, a
   review of existing code, a repository edit, or any other task deliverable** —
   a round, whatever its size. None of it is foreman work. Staff it in Step 5.
   Proceed to Step 2.

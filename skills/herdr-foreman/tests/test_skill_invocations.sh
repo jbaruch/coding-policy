@@ -230,11 +230,12 @@ check_mode_gate() { # <skill-name> <skill-file>
   else fail "${name}: Step 1 does not tell a non-Herdr agent the skill does not apply"; fi
 
   # 5. Read each Herdr-mode branch of Step 1 by its disposition, which is a
-  # closed set of two literal sentences. Inferring routing from prose is the
+  # closed set of three literal dispositions. Inferring routing from prose is the
   # regex trap (rules/script-delegation.md): "must not proceed to Step 2"
   # reads as routing to a pattern and as its opposite to a human. The branch
   # states its disposition verbatim instead, and this check compares literals.
   local disp_proceed="Proceed to Step 2." disp_finish="Finish here."
+  local disp_factual="Finish here only with no enrollment requiring supervision or a valid Stop-gate condition; otherwise resume Fleet Supervision at Step 11."
   # The residual branch's condition IS the contract, so it is pinned whole.
   # A substring would accept "not already in the foreman's context".
   local residual_label="Set, none of the above applies, and the answer is already in the foreman's context"
@@ -262,10 +263,11 @@ check_mode_gate() { # <skill-name> <skill-file>
 
   # A branch ends in one disposition or the other. The literal must open its
   # own sentence, so "Do not Proceed to Step 2." is not routing.
-  local label text verdict routing_labels="" terminals=0 factual=0 residual=0 stray=""
+  local label text verdict routing_labels="" factual_text="" terminals=0 factual=0 residual=0 stray=""
   while IFS=$'\t' read -r label text; do
     [[ -n "$label" ]] || continue
     case "$text" in
+      *"- ${disp_factual}") verdict=factual ;;
       *". ${disp_proceed}"|*"— ${disp_proceed}") verdict=proceed ;;
       *". ${disp_finish}"|*"— ${disp_finish}") verdict=finish ;;
       *) verdict=none ;;
@@ -274,9 +276,14 @@ check_mode_gate() { # <skill-name> <skill-file>
       proceed) routing_labels+="${label}"$'\n' ;;
       finish)
         terminals=$(( terminals + 1 ))
-        [[ "$label" == "$residual_label" || "$label" == "$factual_label" ]] || stray="$label"
+        [[ "$label" == "$residual_label" ]] || stray="$label"
         [[ "$label" != "$residual_label" ]] || residual=$(( residual + 1 ))
-        [[ "$label" != "$factual_label" ]] || factual=$(( factual + 1 ))
+        ;;
+      factual)
+        terminals=$(( terminals + 1 ))
+        [[ "$label" == "$factual_label" ]] || stray="$label"
+        factual=$(( factual + 1 ))
+        factual_text="$text"
         ;;
       *) stray="$label" ;;
     esac
@@ -289,9 +296,14 @@ check_mode_gate() { # <skill-name> <skill-file>
   elif (( terminals == 2 && factual == 1 && residual == 1 )); then pass
   else fail "${name}: Step 1 has ${terminals} Herdr-mode branches ending in '${disp_finish}'; only the factual and residual branches may"; fi
 
-  if [[ "$flat" == *"bounded factual lookup"* && "$flat" == *"bounded factual lookup. answer within that boundary and cite the source"* \
-        && "$flat" == *"run no round preflight, roster measurement, enrollment, report gate or context reset for the lookup"* ]]; then pass
+  # shellcheck disable=SC2016 # Backticks are Markdown code-span delimiters matched literally, not shell substitution.
+  if [[ "$factual_text" == *'Read `skills/herdr-foreman/references/team-operation.md` Bounded Factual Lookup.'* \
+        && "$factual_text" == *"Answer within that boundary."* && "$factual_text" == *"Cite the source."* \
+        && "$factual_text" == *"Run no round preflight, roster measurement, enrollment, report gate or context reset for the lookup."* ]]; then pass
   else fail "${name}: bounded factual lookup must bind its contract, cite facts and skip round-only overhead"; fi
+
+  if [[ "$routing_labels" == *"Set, outside Bounded Factual Lookup, with a lookup"* ]]; then pass
+  else fail "${name}: generic lookup routing must exclude the bounded factual route"; fi
 
   # 5b. Each kind of round work is named by a branch that routes. Dropping one
   # returns it to the foreman.
@@ -304,6 +316,36 @@ check_mode_gate() { # <skill-name> <skill-file>
   else pass; fi
 
   rm -f "$body_file" || warn_cleanup "$body_file"
+}
+
+# The owner must refuse the original Stop violation and overlapping routing.
+mode_gate_fixture_status() { # <skill-file>
+  # Bash dynamic scope isolates fixture counters from the aggregate suite.
+  local PASS=0 FAIL=0
+  check_mode_gate "$MODE_GATE_SKILL" "$1"
+  (( FAIL == 0 ))
+}
+
+check_mode_gate_regressions() { # <skill-file>
+  local fixture variant rc
+  fixture="$(mktemp -d)" || die "could not create mode-gate fixtures"
+  if ! sed 's/^  - Finish here only.*$/  - Finish here./' "$1" > "$fixture/unconditional.md"; then
+    die "could not create unconditional-finish regression"
+  fi
+  if ! sed 's/outside Bounded Factual Lookup, //g' "$1" > "$fixture/overlap.md"; then
+    die "could not create overlapping-lookup regression"
+  fi
+  for variant in unconditional overlap; do
+    rc=0
+    mode_gate_fixture_status "$fixture/$variant.md" \
+      > "$fixture/$variant.log" 2>&1 || rc=$?
+    case "$rc" in
+      1) pass ;;
+      0) fail "mode gate accepted the ${variant} regression" ;;
+      *) die "mode-gate ${variant} fixture failed unexpectedly (exit ${rc})" ;;
+    esac
+  done
+  if ! rm -rf "$fixture"; then warn_cleanup "$fixture"; fi
 }
 
 # Execute a documented block's resolver and invocation against packaged-mode
@@ -548,6 +590,7 @@ run_suite() {
 
   skill="${skills_root}/${MODE_GATE_SKILL}/SKILL.md"
   check_mode_gate "$MODE_GATE_SKILL" "$skill"
+  check_mode_gate_regressions "$skill"
 
   echo "results: ${PASS} pass, ${FAIL} fail" >&2
   printf '{"suite":"test_skill_invocations.sh","passed":%d,"failed":%d}\n' "$PASS" "$FAIL"
