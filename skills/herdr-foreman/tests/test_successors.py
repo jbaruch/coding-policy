@@ -191,6 +191,15 @@ class SuccessorTest(CliCase):
         self.record("sonnet-5", "low", "inadequate")
         self.successor_record(expected=1)
 
+    def test_future_maintenance_checkpoint_remains_visible_and_refuses_inheritance(self):
+        self.successor_record()
+        self.upgrade()
+        future = (timestamp(AT, "Fixture") + timedelta(days=1)).isoformat()
+        self.recalibrate("keep", at=future)
+        document = capabilities.load(self.state)
+        self.assertEqual(capabilities.cadence(document, AT)["successors_due"][0]["status"], "future")
+        self.assertIn("placement_future", json.dumps(self.plan(expected=1)))
+
     def test_unrelated_model_changed_round_effort_weight_or_account_cannot_borrow_spot(self):
         self.successor_record()
         self.upgrade()

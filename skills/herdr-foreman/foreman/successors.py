@@ -311,7 +311,7 @@ def inspect(row, at):
     due_at = timestamp(checked, "Placement checkpoint") + capabilities.INTERVAL
     return {"id": row["id"], "status": status, "origin": copy.deepcopy(row["origin"]),
             "provenance": copy.deepcopy(row["provenance"]), "assigned_at": row["assigned_at"],
-            "recalibration_due_at": due_at.isoformat(), "due": timestamp(at, "Placement read") >= due_at,
+            "recalibration_due_at": due_at.isoformat(), "due": status == "future" or timestamp(at, "Placement read") >= due_at,
             "history": copy.deepcopy(row["history"])}
 
 
