@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.365 — 2026-10-07
+
 ### Changed
 
 - **Herdr delivery gates are stage-local.** Authorized, built, independently
