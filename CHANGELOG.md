@@ -1,5 +1,17 @@
 # Changelog
 
+### Fixed
+
+- **Recorded no-send cleanup preserves replacement sessions.** The dispatch
+  selector now binds destructive cleanup to the original native session and
+  verified foreground process, including a final check at the close boundary.
+  Stable same-name/pane/tier replacements and missing original proof refuse
+  without input, closure or owner-record changes. Original-owned empty cleanup,
+  absent-pane and sole-shell recovery remain supported. Recovery instructions
+  distinguish mutually exclusive `reconcile --record FILE` transport evidence
+  from `reconcile --dispatch ID` stored-proof cleanup; the latter needs no
+  invented receipt (#692, #693).
+
 ## 0.3.365 — 2026-10-07
 
 ### Changed
