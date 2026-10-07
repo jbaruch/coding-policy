@@ -396,6 +396,11 @@ exclude contributors from verification, reserve the developer through early fixe
 preserve task identity and fix count, and reuse recorded correction bounds.
 Tier contracts:
 
+Operator-opted minimum-adequate worker routing follows Minimum Adequate Routing
+in the reference below. Refresh selected-candidate facts, not unrelated fleet
+maintenance; preserve task authority, independence, explicit pins and judgment
+floors.
+
 ```text
 skills/herdr-foreman/references/model-tiers.md
 skills/herdr-foreman/references/dispatch-recovery.md

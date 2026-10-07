@@ -54,7 +54,7 @@ from .planner import plan as build_plan
 from .planner import ASSIGNMENT_PLAN_SCHEMA_VERSION, headroom_of
 from .tiers import (COORDINATION_ROUND, FOREMAN_ROLE, JUDGMENT_ROUNDS, MissingTierError,
                     parse_launch_args, parse_tiers, select_tier, worker_launch_args)
-from . import cost_report, selection
+from . import cost_report, selection, tier_routing
 from .launch import configured_running_tier, restart_worker, start_foreman, start_worker, verify_foreman, verify_running, require_empty_shell
 from .state import (
     add_assignment,
@@ -814,8 +814,8 @@ def _snapshot_headroom(snapshot):
     return {name: headroom_of(name, record, lambda _message: None) for name, record in agents.items()}
 
 
-def _planned_snapshot_headroom(document, state, state_path):
-    """The headroom of the snapshot a plan names, or {} when it cannot be found.
+def _planned_snapshot(document, state, state_path):
+    """The snapshot a plan names, or None when it cannot be found.
 
     An unlocatable snapshot reads as unmeasured. A plan that de-escalated on
     it then recomputes without the de-escalation and is refused as stale,
@@ -823,19 +823,28 @@ def _planned_snapshot_headroom(document, state, state_path):
     """
     ref = document.get("snapshot_ref") if isinstance(document, dict) else None
     if not isinstance(ref, dict) or not isinstance(ref.get("source"), str):
-        return {}
+        return None
     measured_at = ref.get("measured_at")
     if ref["source"] == str(state_path):
         matches = [snap for snap in state.get("snapshots", [])
                    if isinstance(snap, dict) and snap.get("measured_at") == measured_at]
-        return _snapshot_headroom(matches[-1]) if matches else {}
+        return matches[-1] if matches else None
     try:
         snapshot = json.loads(Path(ref["source"]).read_text(encoding="utf-8"))
     except (OSError, UnicodeDecodeError, json.JSONDecodeError):
-        return {}
+        return None
     if not isinstance(snapshot, dict) or snapshot.get("measured_at") != measured_at:
+        return None
+    return snapshot
+
+
+def _snapshot_groups(snapshot):
+    """Account/window identity from measurement, never inferred from a percentage."""
+    agents = snapshot.get("agents") if isinstance(snapshot, dict) else None
+    if not isinstance(agents, dict):
         return {}
-    return _snapshot_headroom(snapshot)
+    return {name: record.get("window_group") for name, record in agents.items()
+            if isinstance(record, dict)}
 
 
 def _build_plan_with_refusals(build, refusals, *args, **kwargs):
@@ -851,12 +860,12 @@ def _build_plan_with_refusals(build, refusals, *args, **kwargs):
 
 
 #: Tier fields a plan carries to explain itself and a dispatch never records.
-PLAN_ONLY_TIER_FIELDS = frozenset({"capability", "cheaper_adequate"})
+PLAN_ONLY_TIER_FIELDS = frozenset({"capability", "cheaper_adequate", "routing"})
 
 
 
 def _candidate_tiers(roles, agents, rounds, fix_round=None, judge=None, excludes=None, headroom=None, table=None, refusals=None,
-                     reusable_agents=False):
+                     reusable_agents=False, measured_at=None, at=None, capacity_groups=None):
     """Each role's candidate tiers; `refusals` collects a capability refusal per skipped candidate."""
     table = table if table is not None else capabilities.empty()
     tiered = any(agent.tiers for agent in agents)
@@ -901,8 +910,11 @@ def _candidate_tiers(roles, agents, rounds, fix_round=None, judge=None, excludes
                 continue
             needs = capabilities.required(canonical_role(role), tier["round"], JUDGMENT_ROUNDS)
             try:
+                tier, routing = tier_routing.decide(agent, role, tier, needs, table,
+                                                   (headroom or {}).get(agent.name), measured_at, at,
+                                                   (capacity_groups or {}).get(agent.name))
                 verdict = capabilities.assess(table, tier["model"], tier["effort"], needs)
-            except capabilities.InadequateCapability as exc:
+            except UsageError as exc:
                 if refusals is not None:
                     refusals.append({"role": role, "agent": agent.name, "message": exc.message, **exc.details})
                 continue
@@ -913,6 +925,8 @@ def _candidate_tiers(roles, agents, rounds, fix_round=None, judge=None, excludes
             candidates[role][agent.name].update(
                 capability=verdict,
                 cheaper_adequate=selection.cheaper_adequate(agent, role, tier, needs, table))
+            if routing is not None:
+                candidates[role][agent.name]["routing"] = routing
     return candidates
 
 
@@ -1163,7 +1177,9 @@ def cmd_plan(args, client=None, warn=None, trace=None):
     tier_candidates = _candidate_tiers(canonical, agents, rounds, args.fix_round, judge,
                                       excludes={role: names for role, names in excludes.items() if role in set(canonical)},
                                       headroom=measured_headroom, table=table,
-                                      refusals=capability_refusals, reusable_agents=scoped)
+                                      refusals=capability_refusals, reusable_agents=scoped,
+                                      measured_at=snapshot.get("measured_at"), at=args.now or now_iso(),
+                                      capacity_groups=_snapshot_groups(snapshot))
     constraints = {**constraints, "rationale": constraints["rationale"] + [
         "{} was not considered for {}: {}".format(row["agent"], row["role"], row["message"]) for row in capability_refusals]}
     # Each seat inherits its role's bars, tiers, round type and requirements.
@@ -1646,14 +1662,19 @@ def _apply(args, client, warn, trace, hold_gates):
     # The headroom comes from the snapshot the plan names, never from the
     # plan's own `pressure_headroom`: a plan edited to claim scarcity would
     # otherwise recompute its own downgrade and pass the comparison below.
-    planned_headroom = _planned_snapshot_headroom(document, state, state_path)
+    planned_snapshot = _planned_snapshot(document, state, state_path)
+    planned_headroom = _snapshot_headroom(planned_snapshot)
+    capacity_groups = _snapshot_groups(planned_snapshot)
     if scoped:
         planned_headroom = _scoped_headroom(
             assignments, document["worker_kinds"], planned_headroom)
+        capacity_groups = _scoped_headroom(assignments, document["worker_kinds"], capacity_groups)
     capability_refusals = []
     candidates = _candidate_tiers(list(assignments), agents, rounds, args.fix_round, active_judge,
                                   excludes=constraints["exclude"], headroom=planned_headroom,
-                                  table=capabilities.load(state_path), refusals=capability_refusals)
+                                  table=capabilities.load(state_path), refusals=capability_refusals,
+                                  measured_at=(planned_snapshot or {}).get("measured_at"), at=at,
+                                  capacity_groups=capacity_groups)
     tiers = {}
     if candidates is not None:
         for role, name in assignments.items():
@@ -1665,7 +1686,16 @@ def _apply(args, client, warn, trace, hold_gates):
             if candidates[role][name] is not None:
                 tiers[role] = candidates[role][name]
         saved_tiers = {role: tier for role, tier in document.get("tiers", {}).items() if tier is not None and role in assignments} if isinstance(document.get("tiers", {}), dict) else None
-        if "tiers" in document and saved_tiers != tiers:
+        # An opted-in route revalidates each binding fact above. Changes to
+        # its explanatory rejected-candidate data do not change a launch or
+        # make unrelated maintenance a prerequisite. Legacy comparison stays
+        # unchanged; an actual selected pair/row/cost/context drift refuses.
+        def comparison(rows):
+            if rows is None:
+                return None
+            return {role: {key: value for key, value in tier.items() if key not in PLAN_ONLY_TIER_FIELDS}
+                    if isinstance(tier, dict) and "routing" in tiers.get(role, {}) else tier for role, tier in rows.items()}
+        if "tiers" in document and comparison(saved_tiers) != comparison(tiers):
             raise UsageError("Plan tiers differ from current config or fix context; re-run `{}` before dispatch.".format(runnable.command("plan")), {})
         # The capability verdict explains the plan; it is not part of the tier a
         # dispatch records, so the assignment row keeps its schema (#520).

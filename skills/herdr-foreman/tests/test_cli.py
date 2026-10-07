@@ -419,7 +419,7 @@ class PlanCommandTest(CliCase):
             )
         self.assertEqual(code, 0, err)
         document = json.loads(out)
-        self.assertEqual(document["schema_version"], 14)
+        self.assertEqual(document["schema_version"], 16)
         self.assertEqual(set(document["worker_kinds"]), {"developer", "reviewer"})
         self.assertTrue(set(document["worker_kinds"].values()) <= {"claude", "codex", "grok"})
         self.assertEqual(document["assignments"], {
@@ -3060,7 +3060,7 @@ class ReportPathTests(unittest.TestCase):
 
 class FreshOwnerNative(HerdrClient):
     """In-memory transport for the actual public owner lifecycle and guards."""
-    EMPTY = "\x1b[2m› Ask Codex to do anything\x1b[0m"
+    EMPTY: str = "\x1b[2m› Ask Codex to do anything\x1b[0m"
     ANIMATION = "\x1b[2m› Ask Codex to do anything ✧\x1b[0m"
 
     def __init__(self):

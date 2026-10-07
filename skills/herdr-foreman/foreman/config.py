@@ -14,9 +14,10 @@ from pathlib import Path
 from .errors import ConfigError, ForemanError
 from .herdr import SLASH_DELIVERIES, SLASH_DELIVERY_PASTE
 from .tiers import TOP_MODELS, parse_launch_args, parse_tiers
+from .tier_routing import parse as parse_tier_routing
 
-CONFIG_SCHEMA_VERSION = 7
-READABLE_CONFIG_VERSIONS = frozenset({1, 2, 3, 4, 5, 6, 7})
+CONFIG_SCHEMA_VERSION = 8
+READABLE_CONFIG_VERSIONS = frozenset({1, 2, 3, 4, 5, 6, 7, 8})
 #: The first config version that may declare the top-level `foreman` block.
 FOREMAN_CONFIG_VERSION = 6
 CAPABILITY_ID = re.compile(r"[a-z][a-z0-9_-]*\Z")
@@ -64,9 +65,10 @@ class Agent:
         "launch_args",
         "capabilities",
         "assignment_scoped",
+        "tier_routing",
     )
 
-    def __init__(self, name, kind, usage_prompt, usage_marker, usage_read_source, clear_prompt, close_keys=(), idle_markers=(), working_markers=(), dialog_next_tab_keys=(), recover_keys=(), composer_placeholders=(), slash_delivery=DEFAULT_SLASH_DELIVERY, composer_glyph="", composer_ignore_dim=DEFAULT_COMPOSER_IGNORE_DIM, slash_enter_count=DEFAULT_SLASH_ENTER_COUNT, model_label="", window_group="", tiers=None, launch_args=(), capabilities=(), assignment_scoped=False):
+    def __init__(self, name, kind, usage_prompt, usage_marker, usage_read_source, clear_prompt, close_keys=(), idle_markers=(), working_markers=(), dialog_next_tab_keys=(), recover_keys=(), composer_placeholders=(), slash_delivery=DEFAULT_SLASH_DELIVERY, composer_glyph="", composer_ignore_dim=DEFAULT_COMPOSER_IGNORE_DIM, slash_enter_count=DEFAULT_SLASH_ENTER_COUNT, model_label="", window_group="", tiers=None, launch_args=(), capabilities=(), assignment_scoped=False, tier_routing=None):
         self.name = name
         self.kind = kind
         self.usage_prompt = usage_prompt
@@ -98,6 +100,7 @@ class Agent:
         self.launch_args = tuple(launch_args)
         self.capabilities = tuple(capabilities)
         self.assignment_scoped = assignment_scoped
+        self.tier_routing = tier_routing
         # "paste" (agent prompt) or "type" (pane send-text plus Enter).
         self.slash_delivery = slash_delivery
         # The prompt glyph that marks the composer row, so foreman can see
@@ -137,6 +140,8 @@ class Agent:
             record["capabilities"] = list(self.capabilities)
         if self.assignment_scoped:
             record["assignment_scoped"] = True
+        if self.tier_routing is not None:
+            record["tier_routing"] = self.tier_routing
         return record
 
 
@@ -155,6 +160,7 @@ def assignment_worker(template, name):
         window_group=template.window_group, tiers=template.tiers,
         launch_args=template.launch_args, capabilities=template.capabilities,
         assignment_scoped=True,
+        tier_routing=template.tier_routing,
     )
 
 
@@ -265,6 +271,10 @@ def parse_config(payload, source="<memory>"):
                 {"source": source, "index": index, "usage_read_source": read_source},
             )
         name = entry["name"]
+        if "tier_routing" in entry and version < 8:
+            raise ConfigError("tier_routing requires config schema_version 8; preserve the operator-owned rows when opting in.", {"source": source})
+        tiers = parse_tiers(entry.get("tiers"), entry["kind"])
+        routing = parse_tier_routing(entry.get("tier_routing"), tiers)
         if "tiers" in entry and version < 2:
             raise ConfigError("Tier tables need config schema_version 2; upgrade the operator-owned config.", {"source": source})
         if version >= 5 and not entry.get("tiers") and (version >= 7 or entry.get("name") != pinned_judge):
@@ -387,10 +397,11 @@ def parse_config(payload, source="<memory>"):
                 composer_ignore_dim=ignore_dim,
                 model_label=model_label,
                 window_group=window_group,
-                tiers=parse_tiers(entry.get("tiers"), entry["kind"]),
+                tiers=tiers,
                 launch_args=parse_launch_args(entry.get("launch_args", []), entry["kind"]),
                 capabilities=capabilities,
                 assignment_scoped=version >= 7,
+                tier_routing=routing,
                 slash_enter_count=enters,
                 **lists
             )
@@ -490,13 +501,14 @@ def parse_judge(payload, source="<memory>"):
             {"source": source, "judge_type": type(raw).__name__},
         )
     version = payload.get("schema_version")
-    identity_field = "worker_kind" if version == 7 else "agent"
-    retired_field = "agent" if version == 7 else "worker_kind"
+    scoped = type(version) is int and version >= 7
+    identity_field = "worker_kind" if scoped else "agent"
+    retired_field = "agent" if scoped else "worker_kind"
     if retired_field in raw:
         raise ConfigError(
             "Config at {}: schema_version {} judge uses `{}`; use `{}` so the pinned seat names {}.".format(
                 source, version, retired_field, identity_field,
-                "a spawnable worker kind" if version == 7 else "the standing worker",
+                "a spawnable worker kind" if scoped else "the standing worker",
             ),
             {"source": source, "field": retired_field},
         )
@@ -641,15 +653,16 @@ def parse_foreman(payload, source="<memory>"):
                 source, kind, " or ".join(sorted(TOP_MODELS))),
             {"source": source, "kind": kind})
     judge = parse_judge(payload, source=source)
-    if version != 7 and judge is not None and agent == judge.agent:
+    scoped = isinstance(version, int) and version >= 7
+    if not scoped and judge is not None and agent == judge.agent:
         raise ConfigError(
             "Config at {}: `foreman.agent` is the pinned judge's worker {!r}; the judge holds no other seat. "
             "Give the foreman its own agent name.".format(source, agent),
             {"source": source, "agent": agent})
-    worker_field = "worker_kinds" if version == 7 else "agents"
+    worker_field = "worker_kinds" if scoped else "agents"
     raw_workers = payload.get(worker_field)
     workers = raw_workers if isinstance(raw_workers, list) else []
-    if version != 7 and any(isinstance(entry, dict) and entry.get("name") == agent for entry in workers):
+    if not scoped and any(isinstance(entry, dict) and entry.get("name") == agent for entry in workers):
         raise ConfigError(
             "Config at {}: `foreman.agent` {!r} is also a configured worker; the foreman seat is never planned as "
             "a worker. Give the foreman its own agent name.".format(source, agent),
