@@ -550,8 +550,9 @@ class WindowProbeTest(unittest.TestCase):
         workers = [template("claude", "claude", "anthropic"),
                    template("codex", "codex", "openai"), template("grok", "grok", "xai")]
         catalog = copy.deepcopy([(worker.name, worker.kind, worker.tiers) for worker in workers])
+        unavailable = {"claude"}
         def launched(_client, worker, _tier, **_options):
-            if worker.kind == "claude":
+            if worker.kind in unavailable:
                 raise failure("agent_pane_busy", "startup observation unavailable")
             return "pane-" + worker.kind
         def measured(_client, probes, _at, **_options):
@@ -568,6 +569,26 @@ class WindowProbeTest(unittest.TestCase):
         self.assertEqual(result["agents"]["grok"]["headroom_pct"], 89.0)
         self.assertEqual([(worker.name, worker.kind, worker.tiers) for worker in workers], catalog)
         self.assertEqual(closed.call_count, 2)
+        unavailable.clear()
+        with patch("foreman.lifecycle.spawn", side_effect=launched), \
+                patch("foreman.lifecycle.close"), patch("foreman.measure.measure", side_effect=measured):
+            recovered = measure_worker_kinds(Mock(), workers, "2026-10-01T00:01:00+00:00")
+        self.assertEqual(recovered["failed_agents"], [])
+        self.assertEqual(recovered["agents"]["claude"]["headroom_pct"], 89.0)
+        self.assertEqual([(worker.name, worker.kind, worker.tiers) for worker in workers], catalog)
+
+    def test_persistent_native_account_refusal_keeps_unknown_capacity_and_its_actual_cause(self):
+        worker = template()
+        native = failure("agent_not_ready", "account access denied")
+        with patch("foreman.lifecycle.spawn", side_effect=native) as launches, \
+                patch("foreman.measure.measure") as usage:
+            result = measure_worker_kinds(Mock(), [worker], "2026-10-01T00:00:00+00:00")
+        launches.assert_called_once()
+        usage.assert_not_called()
+        self.assertEqual(result["failed_agents"], [worker.name])
+        self.assertIsNone(result["agents"][worker.name]["headroom_pct"])
+        self.assertIn("account access denied", json.dumps(result["agents"][worker.name]["error"]))
+        self.assertEqual(worker.name, "claude")
 
     def test_settled_probe_keeps_a_measurement_failure_and_closes_its_pane(self):
         fixture = FreshShellStartupTest()
