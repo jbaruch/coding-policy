@@ -18,6 +18,8 @@
   hide its due date. No automatic scheduler, per-role qualification campaign,
   additional approval or invented savings is introduced (#700).
 
+## 0.3.370 — 2026-10-07
+
 ### Fixed
 
 - Claude usage parsing now ends a window at unrecognized wrapped prose rather
