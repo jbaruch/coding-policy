@@ -10,6 +10,18 @@
   launch identities, timestamps, frozen briefs and pinned tiers stay intact
   (#710).
 
+## 0.3.372 — 2026-10-07
+
+### Fixed
+
+- Worker brief values now preserve literal ampersands, backslashes, quotes and
+  trailing newlines. Packaged specialist briefs accept shell examples such as
+  `cd /worktree && command` without reintroducing `{{INPUTS}}` placeholders
+  (#702). Placeholder-like value text is never reinterpreted; template and
+  value trailing newlines remain intact through file output.
+
+## 0.3.371 — 2026-10-07
+
 ### Changed
 
 - **Verified model successors inherit their authorized operating spot provisionally.**
