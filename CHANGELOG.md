@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.368 — 2026-10-07
+
 ### Changed
 
 - **Operator-opted minimum-adequate worker routing selects the pair.** Config
