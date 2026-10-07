@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.367 — 2026-10-07
+
 ### Changed
 
 - **Bounded factual lookups need no Herdr round.** A foreman may answer from
