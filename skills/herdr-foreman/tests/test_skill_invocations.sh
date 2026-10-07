@@ -302,8 +302,9 @@ check_mode_gate() { # <skill-name> <skill-file>
         && "$factual_text" == *"Run no round preflight, roster measurement, enrollment, report gate or context reset for the lookup."* ]]; then pass
   else fail "${name}: bounded factual lookup must bind its contract, cite facts and skip round-only overhead"; fi
 
-  if [[ "$routing_labels" == *"Set, outside Bounded Factual Lookup, with a lookup"* ]]; then pass
-  else fail "${name}: generic lookup routing must exclude the bounded factual route"; fi
+  if [[ "$routing_labels" == *"Set, outside Bounded Factual Lookup, with a lookup"* \
+        && "$routing_labels" == *"Set, outside Bounded Factual Lookup, with a team task or new retrospective"* ]]; then pass
+  else fail "${name}: both dispatch routes must exclude the bounded factual route"; fi
 
   # 5b. Each kind of round work is named by a branch that routes. Dropping one
   # returns it to the foreman.
@@ -329,13 +330,17 @@ mode_gate_fixture_status() { # <skill-file>
 check_mode_gate_regressions() { # <skill-file>
   local fixture variant rc
   fixture="$(mktemp -d)" || die "could not create mode-gate fixtures"
+  INSTALL_FIXTURE="$fixture"
   if ! sed 's/^  - Finish here only.*$/  - Finish here./' "$1" > "$fixture/unconditional.md"; then
     die "could not create unconditional-finish regression"
   fi
   if ! sed 's/outside Bounded Factual Lookup, //g' "$1" > "$fixture/overlap.md"; then
     die "could not create overlapping-lookup regression"
   fi
-  for variant in unconditional overlap; do
+  if ! sed 's/outside Bounded Factual Lookup, with a team task/with a team task/' "$1" > "$fixture/team-overlap.md"; then
+    die "could not create overlapping-team-task regression"
+  fi
+  for variant in unconditional overlap team-overlap; do
     rc=0
     mode_gate_fixture_status "$fixture/$variant.md" \
       > "$fixture/$variant.log" 2>&1 || rc=$?
@@ -345,7 +350,8 @@ check_mode_gate_regressions() { # <skill-file>
       *) die "mode-gate ${variant} fixture failed unexpectedly (exit ${rc})" ;;
     esac
   done
-  if ! rm -rf "$fixture"; then warn_cleanup "$fixture"; fi
+  cleanup
+  [[ -z "$INSTALL_FIXTURE" ]] || die "mode-gate fixture cleanup failed; the exit trap will retry"
 }
 
 # Execute a documented block's resolver and invocation against packaged-mode
