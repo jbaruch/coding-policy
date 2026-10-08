@@ -8,7 +8,8 @@
   recovery reaps only unclaimed children under the record lock and retains
   each startup loss in the private log; claimed or uncertain deliveries never
   retry. Stow, native-session, PID-reuse and per-keystroke guards remain intact
-  (#707).
+  (#707). Codex's unpainted composer is separated from its styled shortcut
+  footer without treating recalled multiline drafts as empty input.
 
 ## 0.3.377 — 2026-10-08
 

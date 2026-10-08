@@ -83,6 +83,12 @@ _SGR_RE = re.compile(r"\x1b\[([0-9;]*)m")
 #: Colon-separated SGR is valid but not decoded by the existing ANSI parser.
 #: Such a read cannot safely establish the new painted-composer boundary.
 _UNSUPPORTED_SGR_RE = re.compile(r"\x1b\[[0-9;:]*:[0-9;:]*m")
+#: Codex's unpainted empty/draft footer styles the shortcut key alone, then
+#: resets before its label. Editor text does not style individual key hints.
+#: Plain wording, model names and ordinary bold/dim draft rows prove nothing.
+_CODEX_SHORTCUT_ROW_RE = re.compile(
+    r"^\s*(?:\x1b\[0m)?\x1b\[1m\?(?:\x1b\[0m | \x1b\[0m)for shortcuts(?:\s|$)"
+)
 #: Any other escape sequence, dropped before spanning: CSI (cursor moves,
 #: erases) and OSC strings (titles).
 _OTHER_ESC_RE = re.compile(r"\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b\[[0-9;?]*[A-Za-ln-z]|\x1b[()][B0]")
@@ -214,6 +220,28 @@ def _row_background(line, background=False):
     return painted or (background and position < len(line)), background
 
 
+def _unpainted_codex_footer_start(rows, found_index):
+    """Find the padded footer only with Codex's native shortcut-key styling.
+
+    Some terminals provide no composer background. Codex still separates the
+    editor from the status/shortcut footer with bottom padding. Only its final
+    nonblank, individually styled shortcut row establishes that footer; an
+    unstyled read, unknown SGR, missing padding or later text stays ambiguous.
+    Choose the LAST blank before that footer, retaining every draft paragraph.
+    """
+    if any(_UNSUPPORTED_SGR_RE.search(row) for row in rows):
+        return None
+    tail = len(rows) - 1
+    while tail > found_index and not strip_ansi(rows[tail]).strip():
+        tail -= 1
+    if tail <= found_index or not _CODEX_SHORTCUT_ROW_RE.match(rows[tail]):
+        return None
+    for index in range(tail - 1, found_index, -1):
+        if not strip_ansi(rows[index]).strip():
+            return index
+    return None
+
+
 def composer_text(pane_text, glyph, ignore_dim=False):
     """Return what sits in the composer, or None when it is not visible.
 
@@ -277,7 +305,13 @@ def composer_text(pane_text, glyph, ignore_dim=False):
         and painted_rows[found_index or 0]
         and not _UNSUPPORTED_SGR_RE.search(pane_text)
     )
+    footer_start = (
+        _unpainted_codex_footer_start(rows, found_index)
+        if prefix == "›" and not painted_composer else None
+    )
     for index in range((found_index or 0) + 1, len(rows)):
+        if footer_start is not None and index >= footer_start:
+            break
         raw = rows[index]
         # Unknown SGR still has zero display width. Keep its text as occupied
         # input, without letting an escape before spaces hide the indentation.
