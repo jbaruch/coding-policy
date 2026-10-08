@@ -1072,7 +1072,7 @@ records.
 
 `<canonical-state-path>.foreman-reset.json` is owned by
 the foreman owner through `skills/herdr-foreman/foreman/foreman_reset.py` and
-`foreman/reset_input_hook.py`. The native Stop evaluator also performs the bounded
+`skills/herdr-foreman/foreman/reset_input_hook.py`. The native Stop evaluator also performs the bounded
 read-only eligibility check documented below. The owner writes under the
 file's own state lock, never the main state lock.
 `foreman-reset` appends a row and starts the deliverer. The reader
@@ -1115,7 +1115,7 @@ could not take.
 | `scheduled_at` | ISO-8601 string with timezone | The `foreman-reset` time |
 | `options` | object with optional non-empty string `config` and `herdr_bin` | The non-default settings `foreman-reset` ran with; every resume prompt for this row carries them, including one finalized later by another process |
 | `process` | `{"pid": integer, "identity": string}`, or null | The deliverer's process: its pid and a digest of its start time and command line (`supervision_runtime.process_identity`). A reused pid carries another identity. Null only on a `scheduled` row before its deliverer is identified, or on a `failed` row whose deliverer never started or was gone before identification. Every `delivering`, `delivered` and `interrupted` row carries one |
-| `native_session` | `{"kind": "id" \| "path", "value": non-empty string}`, or null | Original native binding. Null is retained only from schema-1 migration and authorizes no input. The per-keystroke session/process contract is `foreman_reset.py` (`deliver`); hook transfer is `reset_input_hook.py` (`check`) |
+| `native_session` | `{"kind": "id" \| "path", "value": non-empty string}`, or null | Original native binding. Null is retained only from schema-1 migration and authorizes no input. The per-keystroke session/process contract is `skills/herdr-foreman/foreman/foreman_reset.py` (`deliver`); hook transfer is `skills/herdr-foreman/foreman/reset_input_hook.py` (`check`) |
 | `result` | null, the delivery object, or the failure object | `scheduled` and `delivering` hold null. `delivered` holds exactly `{"schema_version", "pane_id", "stow", "agent", "cleared": true, "resume": {"landed": true, "started": true}}`, whose `schema_version`, `pane_id` and `stow` equal the row's. `failed` and `interrupted` hold exactly `{"error": string, "message": string, "details": object, "resume_prompt": string}`; `resume_prompt` is what the operator pastes. `reconciled` holds exactly `{"outcome": "delivered", "reconciled_at": ISO-8601 string}` |
 
 One claimed delivery attempt per pane and stow, never retried automatically.
@@ -1123,7 +1123,7 @@ Production startup uses a private inherited pipe: the loaded child supplies
 its identity before waiting on the record lock, and acknowledges its durable
 claim after the scheduler saves that identity and unlocks. Scheduling returns
 success only with a live recorded claim or completed delivery. Bounded
-preclaim recovery follows `foreman_reset.py` (`schedule`, `DetachedReset`,
+preclaim recovery follows `skills/herdr-foreman/foreman/foreman_reset.py` (`schedule`, `DetachedReset`,
 `STARTUP_ATTEMPTS`): under the record lock the owner proves its row remains
 unclaimed, reaps only its own child and revokes that process identity before
 another start. The private reset log retains each lost startup's attempt,
@@ -1133,9 +1133,11 @@ A
 retry replays before every precondition the reset itself changes (stow
 readiness, supervision work); reading the stow and supervision, and checking
 the caller's pane, still come first. A `delivered` or `reconciled` row,
-or a `scheduled` or `delivering` row whose exact process identity is still
-alive, replays: each returns the recorded row with `replayed: true` and
-starts nothing. A dead `scheduled` row is finalized `failed` (nothing
+or a `delivering` row whose exact process identity is still alive, replays:
+each returns the recorded row with `replayed: true` and starts nothing.
+A live `scheduled` row refuses with `state_error` and reason
+`startup_claim_pending`; it never reports success before durable claim or
+starts another child. A dead `scheduled` row is finalized `failed` (nothing
 was typed), and a dead `delivering` row `interrupted` (typing may have
 begun), each with the failure object. Every other row, `failed` or
 `interrupted` whether recorded earlier or just finalized, is then refused

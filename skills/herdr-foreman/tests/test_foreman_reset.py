@@ -702,8 +702,20 @@ class RecordTest(unittest.TestCase):
                  "resume": {"landed": True, "started": True}}
     FAILURE = {"error": "herdr_error", "message": "boom", "details": {}, "resume_prompt": "resume"}
 
+    def test_live_unclaimed_rows_never_report_successful_replay(self):
+        self.schedule("2026-09-24T10:00:00+00:00", True)
+        path = foreman_reset.record_path(self.state)
+        before = path.read_bytes()
+        for retry in (lambda: foreman_reset.replay(self.state, self.plan, alive=lambda process: True),
+                      lambda: self.schedule("2026-09-24T10:05:00+00:00", True)):
+            with self.assertRaises(StateError) as caught:
+                retry()
+            self.assertEqual(caught.exception.details["reason"], "startup_claim_pending")
+            self.assertEqual((path.read_bytes(), self.starts), (before, 1))
+
     def test_a_retry_of_a_live_reset_replays_without_spawning(self):
         first = self.schedule("2026-09-24T10:00:00+00:00", True)
+        foreman_reset.claim(self.state, self.plan, self.me())
         again = self.schedule("2026-09-24T10:05:00+00:00", True)
         self.assertEqual((first["replayed"], again["replayed"], again["process"], self.starts), (False, True, self.me(), 1))
 
@@ -739,6 +751,7 @@ class RecordTest(unittest.TestCase):
         original = {"pid": 1001, "identity": "original"}
         foreman_reset.schedule(self.state, self.plan, "2026-09-24T10:00:00+00:00", lambda: 1001,
                                probe=lambda pid: original, native_session=SESSION)
+        foreman_reset.claim(self.state, self.plan, original)
         with patch("foreman.foreman_reset.process_identity", return_value=original):
             live = foreman_reset.replay(self.state, self.plan)
         self.assertIsNotNone(live)
@@ -1101,6 +1114,7 @@ class ResetCommandTest(CliCase):
     def test_a_retry_replays_before_preconditions_that_the_reset_itself_changed(self):
         # A live pid: this test process stands in for the running deliverer.
         foreman_reset.schedule(self.state, {"pane_id": PANE, "stow": "round-7"}, "2026-09-24T10:00:00+00:00", os.getpid, native_session=SESSION)
+        foreman_reset.claim(self.state, {"pane_id": PANE, "stow": "round-7"}, supervision_runtime.process_identity(os.getpid()))
         with patch("foreman.cli.memory.show", return_value={"record": {"id": "round-7", "kind": "stow", "reset_ready": False}}), \
              patch("foreman.cli.supervision.load", return_value=supervision_data(active=True)[0]), \
              patch.dict("os.environ", {"HERDR_PANE_ID": PANE, "HERDR_ENV": "1"}), \

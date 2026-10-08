@@ -1,6 +1,7 @@
 """All native adapters enforce the same reset input proof before model work."""
 
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -95,6 +96,47 @@ class ResetHookTest(unittest.TestCase):
 
     def test_normal_prompts_do_not_read_or_write_owner_state(self):
         self.assertIsNone(self.invoke(payload={"prompt": "Fix the test"}, env={}))
+
+    def test_a_forged_locator_cannot_create_directories_or_lock_files(self):
+        foreign = self.directory / "never-created" / "owner.json"
+        prompt = reset.guarded_resume("round-7", foreign, SESSION, FOREGROUND)
+        self.assertEqual(self.invoke(payload={**self.payload, "prompt": prompt})["decision"], "block")
+        self.assertFalse(foreign.parent.exists())
+
+    def test_the_read_only_candidate_is_reverified_after_locking(self):
+        probes = iter((CHILD, None))
+        self.assertEqual(self.invoke(probe=lambda pid: next(probes))["decision"], "block")
+        self.assertEqual(store.load(self.state)["binding"]["identity"], self.who)
+
+    def test_partial_binding_transfer_never_admits_or_retries_the_input(self):
+        with patch("foreman.reset_input_hook.save_state", side_effect=OSError("fixture storage failure")):
+            self.assertEqual(self.invoke()["decision"], "block")
+        self.assertEqual(store.load(self.state)["binding"]["identity"]["value"], CLEARED)
+        row = json.loads(reset.record_path(self.state).read_text())["resets"][0]
+        self.assertIsNone(row["accepted_session"])
+        self.assertIsNone(reset.accepted_resume(self.state, PANE, "round-7", SESSION))
+        self.assertEqual(self.invoke()["decision"], "block")
+
+    def test_checkout_and_inherited_pythonpath_cannot_shadow_the_installed_verifier(self):
+        shadow = self.directory / "foreman"
+        shadow.mkdir()
+        (shadow / "__init__.py").write_text("")
+        marker = self.directory / "checkout-executed"
+        (shadow / "reset_input_hook.py").write_text(
+            "from pathlib import Path\nPath(" + repr(str(marker)) + ").touch()\nprint('unverified allow')\n")
+        inherited = self.directory / "inherited"
+        inherited.mkdir()
+        inherited_marker = self.directory / "inherited-executed"
+        (inherited / "json.py").write_text(
+            "from pathlib import Path\nPath(" + repr(str(inherited_marker)) + ").touch()\nraise RuntimeError('shadow')\n")
+        script = ROOT.parents[1] / "hooks/herdr-reset-input.sh"
+        result = subprocess.run(["bash", str(script)], cwd=self.directory,
+                                env={**os.environ, "PYTHONPATH": str(inherited)},
+                                input=json.dumps({"prompt": "Ordinary prompt"}),
+                                capture_output=True, text=True, check=False)
+        self.assertEqual((result.returncode, result.stdout), (0, ""), result.stderr)
+        self.assertFalse(marker.exists())
+        self.assertFalse(inherited_marker.exists())
 
     def test_native_claude_long_paste_frame_preserves_exact_inner_input(self):
         wrapped = '<pasted_content id="f0fc">\n' + self.payload["prompt"] + '\n</pasted_content id="f0fc">'

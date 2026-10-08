@@ -20,8 +20,14 @@ main() {
     printf '%s\n' '{"decision":"block","reason":"Restore Python to verify Herdr reset input before submitting this prompt."}'
     return 0
   fi
-  PYTHONPATH="${root}/skills/herdr-foreman${PYTHONPATH:+:${PYTHONPATH}}" PYTHONDONTWRITEBYTECODE=1 \
-    python3 -m foreman.reset_input_hook || rc=$?
+  if ! cd -- "${root}/skills/herdr-foreman"; then
+    printf '%s\n' '{"decision":"block","reason":"Restore the installed Herdr skill directory before submitting this prompt."}'
+    return 0
+  fi
+  # Neither checkout modules nor an inherited PYTHONPATH may replace this
+  # installed verifier. Native cwd authority comes from the hook payload.
+  PYTHONPATH="${root}/skills/herdr-foreman" PYTHONDONTWRITEBYTECODE=1 \
+    python3 -s -m foreman.reset_input_hook || rc=$?
   if (( rc != 0 )); then
     printf '%s\n' '{"decision":"block","reason":"The Herdr reset hook failed; restore its installation and inspect the reset record before submitting this prompt."}'
   fi

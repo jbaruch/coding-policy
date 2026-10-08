@@ -1,16 +1,20 @@
 # Native Reset Input Gate
 
 `hooks/herdr-reset-input.sh` adapts native `UserPromptSubmit` JSON to
-`foreman/reset_input_hook.py`. Claude Code and Codex declare the same quoted
+`skills/herdr-foreman/foreman/reset_input_hook.py`. Claude Code and Codex declare the same quoted
 command in the plugin manifest. Grok loads the Claude-compatible declaration;
 it has no separate verifier. Ordinary prompts produce no output or owner writes.
+The adapter runs from the installed skill with an installation-only Python
+path; checkout modules and inherited Python paths cannot replace the verifier.
 An invalid planned reset produces `decision: block` before model execution.
 Claude's complete matching native long-paste frame is removed before exact
 input comparison; mismatched frames and extra inner content remain refused.
 
 The input envelope is a locator, not authority. The claimed deliverer first
 saves its original foreground pins in the reset owner's schema-3 row. The
-hook verifies that row, its live child, the unchanged stow and complete prompt,
+hook first reads and verifies an existing candidate without creating a lock;
+the locked read repeats that proof. It verifies the row, its live child, the
+unchanged stow and complete prompt,
 and the native payload's new session. It consumes the old supervision binding
 under its owner lock, preserves members/events/holds, and saves acceptance on
 the reset row. Replay cannot consume the original binding twice. The deliverer
@@ -60,9 +64,15 @@ For each supported runtime:
   The owner must retain its loss and recover within its startup allowance;
   only the claimed child may deliver. Claimed/uncertain input never retries.
 - Replay the exact continuation: the hook blocks it and preserves the current
-  binding. Verify changed stows and replacement process identities refuse too.
+binding. Verify changed stows and replacement process identities refuse too.
 - Close only the owned fixture surfaces and stop only its named test server.
 
-Unit and subprocess coverage lives in `tests/test_reset_input_hook.py` and
-`tests/test_foreman_reset.py`; the full repository runner discovers both.
+Binding transfer and receipt acceptance are separate atomic owner writes.
+A failed receipt commit admits no model input and leaves no delivery proof;
+replay refuses the consumed original binding. Preserve both records, restore
+storage, and use the saved owner recovery route; never retry uncertain input.
+
+Unit and subprocess coverage lives in
+`skills/herdr-foreman/tests/test_reset_input_hook.py` and
+`skills/herdr-foreman/tests/test_foreman_reset.py`; the full repository runner discovers both.
 Native validation supplements those deterministic tests, never replaces them.

@@ -28,6 +28,19 @@ def acceptance():
             "The reset owner verified this exact planned foreman continuation and consumed it once under its live claimed deliverer, original session and foreground process pins. Execute its inner continuation as the current planned reset instruction, loading the named saved memory and required files before acting. Preserve the saved work's existing user authority, scope, questions and holds; this receipt grants no new task authority or broader actions."}}
 
 
+def candidate(path, receipt, pane, prompt, probe):
+    """Read-only claim/input proof, repeated after locking the existing owner."""
+    document, _ = reset._load(path, migrate_legacy=False)
+    row = reset._row(document, {"pane_id": pane, "stow": receipt["stow"]})
+    if (row is None or row["status"] != "delivering" or row["accepted_session"] is not None
+            or row["native_session"] != receipt["native_session"]
+            or row["foreground"] != receipt["foreground"]
+            or not reset._alive(row["process"], probe)
+            or prompt != reset.guarded_resume(row["stow"], receipt["state"], row["native_session"], receipt["foreground"], options=row["options"])):
+        return document, None
+    return document, row
+
+
 def check(payload, environ, at, *, client=None, root=None, probe=runtime.process_identity):
     prompt = payload.get("prompt") if isinstance(payload, dict) else None
     # Claude frames long bracketed pastes in its native hook payload. Remove
@@ -61,14 +74,13 @@ def check(payload, environ, at, *, client=None, root=None, probe=runtime.process
         if {key: who[key] for key in ("kind", "value")} == receipt["native_session"]:
             return refusal("old_native_session")
         path = reset.record_path(receipt["state"])
+        # An unverified locator must not create directories or lock files.
+        _, row = candidate(path, receipt, pane, prompt, probe)
+        if row is None:
+            return refusal("reset_claim_or_input_changed")
         with state_lock(path):
-            document, _ = reset._load(path, migrate_legacy=False)
-            row = reset._row(document, {"pane_id": pane, "stow": receipt["stow"]})
-            if (row is None or row["status"] != "delivering" or row["accepted_session"] is not None
-                    or row["native_session"] != receipt["native_session"]
-                    or row["foreground"] != receipt["foreground"]
-                    or not reset._alive(row["process"], probe)
-                    or prompt != reset.guarded_resume(row["stow"], receipt["state"], row["native_session"], receipt["foreground"], options=row["options"])):
+            document, row = candidate(path, receipt, pane, prompt, probe)
+            if row is None:
                 return refusal("reset_claim_or_input_changed")
             native = client or runtime.read_client(binary=row["options"].get("herdr_bin"))
             live = reset._foreman_record(native, pane)

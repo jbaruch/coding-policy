@@ -32,7 +32,7 @@ startup allowance while the record lock prevents them from ever claiming;
 the private reset log retains their identity and failure reason.
 `<state>.foreman-reset.json` records each scheduled reset (`schedule`), and
 the deliverer claims it before sending anything (`claim`). A retry of a live,
-delivered or reconciled reset replays the record and spawns nothing. Any
+claimed reset, or a delivered or reconciled reset, replays the record and spawns nothing. Any
 other reset is finalized `failed` (nothing typed) or `interrupted` (typing began) with the
 resume prompt the operator pastes, under the Working Memory recovery
 carve-out; the next round resets from a new stow. Before every keystroke the
@@ -572,6 +572,13 @@ def _refuse(row, state_path, cause=None):
         {"record": str(record_path(state_path)), "resume_prompt": row["result"]["resume_prompt"]})
 
 
+def _claimed_replay(row, state_path):
+    if row["status"] == "scheduled":
+        raise StateError("The reset child has not recorded its durable claim. Continue foreground supervision and inspect {} for the original scheduler's claim or failure; do not send continuation input or start another child.".format(record_path(state_path)),
+                         {"record": str(record_path(state_path)), "reason": "startup_claim_pending"})
+    return row
+
+
 def replay(state_path, plan, *, alive=_alive):
     """The existing reset for (pane, stow), or None when this stow never reset.
 
@@ -579,6 +586,7 @@ def replay(state_path, plan, *, alive=_alive):
     ran, its stow's reads and the supervision state legitimately change, and a
     retry still replays. Reading the stow and supervision, and checking the
     caller's pane, still come first (`cli.cmd_foreman_reset`).
+    A live unclaimed row refuses without changes; it supplies no success proof.
     A reset that is neither live, delivered nor reconciled is finalized and refused.
     """
     path = record_path(state_path)
@@ -594,7 +602,7 @@ def replay(state_path, plan, *, alive=_alive):
             save_state(path, document)
     if live is None:
         _refuse(row, state_path)
-    return live
+    return _claimed_replay(live, state_path)
 
 
 def schedule(state_path, plan, at, start, *, native_session, alive=_alive, probe=None, options=None):
@@ -630,7 +638,7 @@ def schedule(state_path, plan, at, start, *, native_session, alive=_alive, probe
                     if changed:
                         save_state(path, document)
                     if live is not None:
-                        return live
+                        return _claimed_replay(live, state_path)
                     _refuse(row, state_path)
                 row = {"schema_version": RESET_SCHEMA_VERSION, **plan, "status": "scheduled", "scheduled_at": at,
                        "options": dict(options or {}), "process": None, "result": None, "native_session": dict(native_session),
