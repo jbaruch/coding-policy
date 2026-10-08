@@ -74,28 +74,10 @@ decision's records".
 - Record such a sequence as a follow-up
 - Never script such a sequence locally
 
-Reference routing:
-
-```text
-skills/herdr-foreman/references/herdr.md — native session, pane and agent control
-skills/herdr-foreman/references/team-operation.md — team roles, authority and fix loops
-skills/herdr-foreman/references/round-flow.md — round gates and dispatch outcomes
-skills/herdr-foreman/references/round-setup.md — setup and brief contracts
-skills/herdr-foreman/references/task-ledger.md — durable task events
-skills/herdr-foreman/references/retrospectives.md — cadence, notes and transition coverage
-skills/herdr-foreman/references/working-memory.md — lessons, handoffs and reset recovery
-skills/herdr-foreman/references/attention.md — user obligations and catch-up
-skills/herdr-foreman/references/supervision.md — fleet observation and Stop reconciliation
-skills/herdr-foreman/references/assignment-reasoning.md — intake and bounded corrections
-skills/herdr-foreman/references/specialists.md — on-demand team composition
-skills/herdr-foreman/references/judge-round.md — adjudication and diagnosis rounds
-skills/herdr-foreman/references/model-tiers.md — tier selection and maintenance relaunch
-skills/herdr-foreman/references/successor-placement.md — provisional model successors
-skills/herdr-foreman/references/dispatch-recovery.md — startup, retry and exhaustion recovery
-skills/herdr-foreman/references/report-classifier.md — labels and reversible report gates
-skills/herdr-foreman/references/review-partition.md — independent verification slices
-skills/herdr-foreman/state-schema.md — owner records and migration contracts
-```
+Load the reference named by the current step before acting. Read its contracts
+in full; execute only the current step and its stated continuation. Do not preload
+later stages or rerun earlier stages on resume. Step numbers in these references
+match this execution plan.
 
 ## Step 1 — Determine the Mode
 
@@ -156,813 +138,242 @@ For every other request, read `HERDR_ENV` before running scripts.
 
 ## Step 2 — Run the Round Preflight
 
-One call answers every deterministic check a round start owes: Herdr and the
-roster, authority for the repo, measured headroom, the capability table's
-cadence, and worktree hygiene.
+Run capability migration and the consolidated round preflight. Relay the worktree
+report and warnings verbatim. Exit 0 proceeds immediately to Step 5, or the stow's
+continuation step on resume. Cadence-only maintenance and unrelated worktrees
+never block the selected task. Exit 1 follows the named owner's recovery; exit 2
+reports the diagnostic and finishes here. Preserve enrolled supervision obligations.
 
-First run the capability owner's local schema upgrade. It preserves evidence
-and creates no missing table; no consultation or operator approval is needed.
-Exit 0 emits the schema-2 capability-table JSON documented in
-`skills/herdr-foreman/references/successor-placement.md`, including `entries`
-and `successors`. Non-zero emits an actionable refusal on stderr; report it
-and stop this round start.
-
-```bash
-CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"; [ -d "$CP" ] || case "$(git config --get remote.origin.url)" in git@github.com:jbaruch/coding-policy|git@github.com:jbaruch/coding-policy.git|https://github.com/jbaruch/coding-policy|https://github.com/jbaruch/coding-policy.git|ssh://git@github.com/jbaruch/coding-policy|ssh://git@github.com/jbaruch/coding-policy.git) CP=. ;; *) echo "coding-policy plugin not found: run tessl install jbaruch/coding-policy" >&2; exit 1 ;; esac
-bash "$CP/skills/herdr-foreman/foreman.sh" capability-migrate
-```
-
-```bash
-CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"; [ -d "$CP" ] || case "$(git config --get remote.origin.url)" in git@github.com:jbaruch/coding-policy|git@github.com:jbaruch/coding-policy.git|https://github.com/jbaruch/coding-policy|https://github.com/jbaruch/coding-policy.git|ssh://git@github.com/jbaruch/coding-policy|ssh://git@github.com/jbaruch/coding-policy.git) CP=. ;; *) echo "coding-policy plugin not found: run tessl install jbaruch/coding-policy" >&2; exit 1 ;; esac
-bash "$CP/skills/herdr-foreman/round-preflight.sh" \
-  --repo <owner/repo> --checkout <shared-checkout>
-```
-
-Emits one JSON object: `ready`, the `blocking` reasons, the cadences that are
-`due`, and each check's own payload under `checks`. Exit 1 is a verdict, not a
-failure — something blocks the round. Exit 2 means the preflight could not
-answer.
-
-Before following any route below, report the worktree sweep to the operator:
-
-- When `checks.worktrees.detail` is present, relay its `report` verbatim
-- The sweep builds that report (`skills/herdr-foreman/sweep-worktrees.sh`,
-  `report_text`); never reshape or summarize it
-- When `checks.worktrees` has no `detail`, report its `reason` verbatim; a
-  status `ok` with no `detail` means the worktree root does not exist, and
-  there is nothing to report for it
-- On exit 2 there is no JSON; report the stderr diagnostic instead
-- Raise each `dirty` or `unpushed` item the report lists per
-  `rules/hook-action-reporting.md` Act on What It Names; the operator carries
-  out the resolution chosen, and the foreman runs none of it
-- An item outside the selected checkout remains visible in attention but never
-  blocks this task
-- `ready` carries any hygiene failure that affects the selected checkout
-
-- **Exit 0** — record `due` as maintenance and proceed to Step 5 without waiting
-  on it.
-  A resumed foreman proceeds to the stow's continuation step instead (Step 17
-  Resume Route).
-  Refresh a due capability table at the next maintenance checkpoint under
-  `skills/herdr-foreman/references/model-tiers.md`. A selection-time fact about
-  a seat this task needs may block that seat; cadence alone never does. The
-  maintenance consultation revisits `successors_due` under
-  `skills/herdr-foreman/references/successor-placement.md`.
-  - Record keep, revise or withdraw outcomes through `capability-record`.
-  - Preserve unknown outcomes as unknown.
-  - Create no automatic recalibration job.
-
-  The maintenance
-  commands record the report and show the result:
-
-```bash
-CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"; [ -d "$CP" ] || case "$(git config --get remote.origin.url)" in git@github.com:jbaruch/coding-policy|git@github.com:jbaruch/coding-policy.git|https://github.com/jbaruch/coding-policy|https://github.com/jbaruch/coding-policy.git|ssh://git@github.com/jbaruch/coding-policy|ssh://git@github.com/jbaruch/coding-policy.git) CP=. ;; *) echo "coding-policy plugin not found: run tessl install jbaruch/coding-policy" >&2; exit 1 ;; esac
-bash "$CP/skills/herdr-foreman/foreman.sh" capability-record --record <report.json>
-```
-
-```bash
-CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"; [ -d "$CP" ] || case "$(git config --get remote.origin.url)" in git@github.com:jbaruch/coding-policy|git@github.com:jbaruch/coding-policy.git|https://github.com/jbaruch/coding-policy|https://github.com/jbaruch/coding-policy.git|ssh://git@github.com/jbaruch/coding-policy|ssh://git@github.com/jbaruch/coding-policy.git) CP=. ;; *) echo "coding-policy plugin not found: run tessl install jbaruch/coding-policy" >&2; exit 1 ;; esac
-bash "$CP/skills/herdr-foreman/foreman.sh" capability-show
-```
-
-For an authorized verified successor, read
-this reference before editing config:
+Read before acting:
 
 ```text
-skills/herdr-foreman/references/successor-placement.md
+skills/herdr-foreman/references/round-preflight.md
 ```
-
-Record its existing spot through the owner:
-
-```bash
-CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"; [ -d "$CP" ] || case "$(git config --get remote.origin.url)" in git@github.com:jbaruch/coding-policy|git@github.com:jbaruch/coding-policy.git|https://github.com/jbaruch/coding-policy|https://github.com/jbaruch/coding-policy.git|ssh://git@github.com/jbaruch/coding-policy|ssh://git@github.com/jbaruch/coding-policy.git) CP=. ;; *) echo "coding-policy plugin not found: run tessl install jbaruch/coding-policy" >&2; exit 1 ;; esac
-bash "$CP/skills/herdr-foreman/foreman.sh" capability-successor --record <successor-report.json>
-```
-
-Exit 0 emits the saved provisional-placement JSON described by the referenced
-schema, including its origin, provenance and empty history. Non-zero refuses the cited field
-or evidence; repair it without relabeling qualification or changing pins.
-
-- **Exit 1** — report the `blocking` reasons verbatim. Each names the command
-  that produced it; re-run that one, not the preflight. A `foreman_tier` block
-  beside a failed `headroom` check waits on that measurement; fix it first.
-  A named `foreman relaunch-worker <name>` recovery follows
-  `skills/herdr-foreman/references/model-tiers.md` Maintenance Relaunch.
-  After that recovery, re-run the preflight.
-  Otherwise it means this pane does not run the foreman's selected tier:
-  record a user-attention blocker naming `start-foreman`
-  (`skills/herdr-foreman/references/model-tiers.md` Foreman Seat) and finish here.
-- **Exit 2** — report the diagnostic and finish here.
-
-On exit 0 or 1, a `checks.foreman_tier` status `unconfigured` blocks nothing:
-relay its `detail.warning` verbatim before routing.
-
-The blocker quotes the restart the operator runs from another shell, naming an
-empty Herdr shell pane; never run it from the foreman's own pane:
-
-```bash
-CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"; [ -d "$CP" ] || case "$(git config --get remote.origin.url)" in git@github.com:jbaruch/coding-policy|git@github.com:jbaruch/coding-policy.git|https://github.com/jbaruch/coding-policy|https://github.com/jbaruch/coding-policy.git|ssh://git@github.com/jbaruch/coding-policy|ssh://git@github.com/jbaruch/coding-policy.git) CP=. ;; *) echo "coding-policy plugin not found: run tessl install jbaruch/coding-policy" >&2; exit 1 ;; esac
-bash "$CP/skills/herdr-foreman/foreman.sh" start-foreman --pane <pane-id>
-```
-
-Which checks run, and which exit codes they fold into `blocking`, are the
-script's decision contract — see `skills/herdr-foreman/round-preflight.sh`, not
-restated here (`rules/script-as-black-box.md`).
-
-Steps 3 and 4 remain the individual commands, for a caller that needs one on its
-own. A round start runs this instead of all of them. The roster has no step of
-its own; inspect it directly when only the live workers are wanted:
-
-```bash
-CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"; [ -d "$CP" ] || case "$(git config --get remote.origin.url)" in git@github.com:jbaruch/coding-policy|git@github.com:jbaruch/coding-policy.git|https://github.com/jbaruch/coding-policy|https://github.com/jbaruch/coding-policy.git|ssh://git@github.com/jbaruch/coding-policy|ssh://git@github.com/jbaruch/coding-policy.git) CP=. ;; *) echo "coding-policy plugin not found: run tessl install jbaruch/coding-policy" >&2; exit 1 ;; esac
-bash "$CP/skills/herdr-foreman/roster.sh"
-```
-
-Emits the caller and live workers with kind, pane, and state. Under schema 7 an
-empty worker roster is the expected idle state. Apply creates workers only for
-planned assignments. If `herdr agent list` shows other unnamed panes, report
-them separately; never turn them into a standing roster.
-
-Record staffing gaps under `skills/herdr-foreman/references/round-setup.md`. Leave unused specialist
-profiles unlaunched. Never duplicate targets or fold verification onto a
-contributor. Apply starts schema-7 workers in YOLO mode under
-`skills/herdr-foreman/references/model-tiers.md`;
-preserve it on relaunch. Verify live permission flags before dispatch, including
-existing workers. Record task authorization and permitted actions under the
-round-setup reference. Create or resume the stable ledger under
-`skills/herdr-foreman/references/task-ledger.md`; record its absolute path before dispatch. Apply the
-round-setup accepted-behavior, resume and supervision binding requirements.
-
-Check `skills/herdr-foreman/references/retrospectives.md` on resume, before
-planning, or for an explicit retrospective request. Daily cadence is visible
-maintenance and never blocks the selected task. Missing coverage still blocks
-the exact worker transition it protects. For an explicit request, complete a
-new retrospective and finish here.
-
-Proceed immediately to Step 5, or on a resume to the stow's continuation step.
 
 ## Step 3 — Verify Authority for the Repo
 
-Step 2 runs this. Use it alone when only the authority answer is wanted.
+Step 2 includes this check. For a standalone authority check, run the documented
+command and record namespace evidence. Non-owned repositories require explicit
+per-action permission; otherwise remain read-only or finish here. On non-zero,
+report the diagnostic and finish here. Proceed immediately to Step 4.
 
-```bash
-CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"; [ -d "$CP" ] || case "$(git config --get remote.origin.url)" in git@github.com:jbaruch/coding-policy|git@github.com:jbaruch/coding-policy.git|https://github.com/jbaruch/coding-policy|https://github.com/jbaruch/coding-policy.git|ssh://git@github.com/jbaruch/coding-policy|ssh://git@github.com/jbaruch/coding-policy.git) CP=. ;; *) echo "coding-policy plugin not found: run tessl install jbaruch/coding-policy" >&2; exit 1 ;; esac
-bash "$CP/skills/herdr-foreman/verify-authority.sh" <owner/repo>
+Read before acting:
+
+```text
+skills/herdr-foreman/references/round-preflight.md
 ```
-
-Record the emitted namespace ownership evidence using Step 3 of
-`skills/herdr-foreman/references/round-setup.md`. For a non-owned repo, reuse explicit per-action
-operator permission; absent permission, remain read-only or finish here.
-On non-zero, report the diagnostic and finish here.
-
-Proceed immediately to Step 4.
 
 ## Step 4 — Measure Headroom
 
-Step 2 runs this. Use it alone to re-measure, which the judge round does.
+Step 2 includes this measurement. For a re-measurement, run the documented owner
+command. Preserve failed measurements and unknown billing; recover required seats
+through their owner route. Proceed immediately to Step 5 when required readings
+are available.
 
-```bash
-CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"; [ -d "$CP" ] || case "$(git config --get remote.origin.url)" in git@github.com:jbaruch/coding-policy|git@github.com:jbaruch/coding-policy.git|https://github.com/jbaruch/coding-policy|https://github.com/jbaruch/coding-policy.git|ssh://git@github.com/jbaruch/coding-policy|ssh://git@github.com/jbaruch/coding-policy.git) CP=. ;; *) echo "coding-policy plugin not found: run tessl install jbaruch/coding-policy" >&2; exit 1 ;; esac
-bash "$CP/skills/herdr-foreman/foreman.sh" measure
-```
-
-Emits and saves headroom, windows, state, `tier_billing`, and `failed_agents`.
-With schema 7 it sends no usage keystrokes to assignment panes. Probe and
-window-group mechanics live in
-`skills/herdr-foreman/foreman/lifecycle.py` (`measure_worker_kinds`).
-Legacy busy standing workers are skipped.
-Unmeasured billing stays `unknown`. Report failed
-measurements and follow Step 4's Probe and startup recovery route in
-`skills/herdr-foreman/references/round-setup.md` before relying on those seats. A pending
-CLI update follows `skills/herdr-foreman/references/model-tiers.md`
-Maintenance Relaunch.
-
-Usage and `--trace` contracts:
+Read before acting:
 
 ```text
-skills/herdr-foreman/references/round-setup.md
+skills/herdr-foreman/references/round-preflight.md
 ```
-
-Proceed immediately to Step 5 once the required readings are available.
 
 ## Step 5 — Plan the Roles
 
-Read the open tasks waiting for a seat, oldest first:
-
-```bash
-CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"; [ -d "$CP" ] || case "$(git config --get remote.origin.url)" in git@github.com:jbaruch/coding-policy|git@github.com:jbaruch/coding-policy.git|https://github.com/jbaruch/coding-policy|https://github.com/jbaruch/coding-policy.git|ssh://git@github.com/jbaruch/coding-policy|ssh://git@github.com/jbaruch/coding-policy.git) CP=. ;; *) echo "coding-policy plugin not found: run tessl install jbaruch/coding-policy" >&2; exit 1 ;; esac
-bash "$CP/skills/herdr-foreman/foreman.sh" foreman-queue
-```
-
-It prints `{"schema_version": 1, "queue": [...]}`. Each entry names `task`,
-`waiting_for` (a list of `developer`, `reviewer` or `tester`),
-`dispatched_seats`, `since`, `developer` and `fix_round`. A non-zero exit names
-an unusable state file on stderr; restore it before planning. Tasks with an
-active worker are omitted. A partitioned verifier stays listed with its
-dispatched slices; check them against the validated partition. The order is a
-default; choose another when the round needs it.
-
-Choose the responsibilities needed next under `skills/herdr-foreman/references/specialists.md`.
-Supply its requirements file for specialized work. Schedule consultation and
-verification as the task needs them. `plan` bars a developer reserved to
-another task and a worker with an active enrollment, and names each bar in its
-`rationale`; do not pass `--exclude` for either. `apply` re-reads the
-reservations before sending. Reusing a reserved developer elsewhere requires
-closing its task first.
-
-The composition triggers decide part of that roster. Classify this round
-against the repo's declaration first. For a pre-implementation round, pass
-`--planned` naming the surfaces the work will touch. A round that writes no
-repository content — an investigation, an architecture or advisory consultation
-— declares `writes_repository: false` in that file instead
-(`skills/herdr-foreman/references/specialists.md`). That explicit read-only plan requires no repo
-trigger declaration. An existing declaration must still be valid. A round with
-work already written classifies that work:
-
-```bash
-CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"; [ -d "$CP" ] || case "$(git config --get remote.origin.url)" in git@github.com:jbaruch/coding-policy|git@github.com:jbaruch/coding-policy.git|https://github.com/jbaruch/coding-policy|https://github.com/jbaruch/coding-policy.git|ssh://git@github.com/jbaruch/coding-policy|ssh://git@github.com/jbaruch/coding-policy.git) CP=. ;; *) echo "coding-policy plugin not found: run tessl install jbaruch/coding-policy" >&2; exit 1 ;; esac
-bash "$CP/skills/herdr-foreman/foreman.sh" detect-triggers \
-  --repo <repo-path> --base <recorded-base> [--head <pushed-head>] \
-  --roles <role[,role...]> [--requirements <requirements.json>] \
-  [--planned <planned.json>] [--decisions <decisions.json>] \
-  [--bootstrap-declaration <reviewed-triggers.json>]
-```
-
-Exit 0 means every fired trigger is staffed or answered. On exit 1, read the
-stderr object. A writing repo with no declaration uses the one-time reviewed
-bootstrap contract in `skills/herdr-foreman/references/specialists.md`;
-and an `unaddressed_trigger` is staffed in the roles below or answered by a
-recorded decision with its reason. Re-run the command with the updated
-declaration, roles, requirements and decisions after every such change, and
-plan only once it exits 0.
-
-A round that will split its review surface validates the partition first, then
-plans it with `--partition`:
-
-```bash
-CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"; [ -d "$CP" ] || case "$(git config --get remote.origin.url)" in git@github.com:jbaruch/coding-policy|git@github.com:jbaruch/coding-policy.git|https://github.com/jbaruch/coding-policy|https://github.com/jbaruch/coding-policy.git|ssh://git@github.com/jbaruch/coding-policy|ssh://git@github.com/jbaruch/coding-policy.git) CP=. ;; *) echo "coding-policy plugin not found: run tessl install jbaruch/coding-policy" >&2; exit 1 ;; esac
-bash "$CP/skills/herdr-foreman/foreman.sh" validate-partition \
-  --repo <repo-path> --base <recorded-base> [--head <pushed-head>] \
-  --partition <partition.json>
-```
-
-Exit 1 names every unowned path, every overlap and every slice owning nothing,
-in one run. Fix the partition and re-run; plan only once it exits 0. Save its
-stdout — `plan --partition` takes that result, never the document
-`validate-partition` read. Validate at the pushed head: the result's `proof`
-records the repo, base and head it was proven against, and Step 12's gate
-cannot check a working-tree proof. Format, ownership
-payload and the seating it produces:
-
-```text
-skills/herdr-foreman/references/review-partition.md
-```
-
-```bash
-CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"; [ -d "$CP" ] || case "$(git config --get remote.origin.url)" in git@github.com:jbaruch/coding-policy|git@github.com:jbaruch/coding-policy.git|https://github.com/jbaruch/coding-policy|https://github.com/jbaruch/coding-policy.git|ssh://git@github.com/jbaruch/coding-policy|ssh://git@github.com/jbaruch/coding-policy.git) CP=. ;; *) echo "coding-policy plugin not found: run tessl install jbaruch/coding-policy" >&2; exit 1 ;; esac
-bash "$CP/skills/herdr-foreman/foreman.sh" plan \
-  --roles <role[,role...]> [--requirements <requirements.json>] \
-  [--exclude <role>=<agent>[,<agent>...]]... [--partition <validated.json>] \
-  [--judge-mode adjudication|diagnosis] \
-  [--round <role>=<round-type>] [--round-context <evidence.json>] \
-  --task <task-id> [--fix-round <N>] [--correction-plan <id> --work <work.json>]
-```
-
-Emits the role plan without worker contact. Under config schema 7,
-`worker_kinds` records the ranked template and `assignments` records one fresh,
-plan-bound live identity per seat; a later plan creates different identities.
-A partitioned role is seated once
-per slice as `<role>#<slice>`, and Step 10 dispatches each seat with its own
-brief. A judge seat declares its mode:
-`adjudication` rules on a contested verdict, `diagnosis` on the investigator's
-assessment at an exhausted allowance. Pass the same `--judge-mode` to `apply`.
-On exit 1, resolve the diagnostic before continuing. Apply the Step 5 constraints in `skills/herdr-foreman/references/round-setup.md`:
-exclude contributors from verification, reserve the developer through early fixes,
-preserve task identity and fix count, and reuse recorded correction bounds.
-Tier contracts:
-
-Operator-opted minimum-adequate worker routing follows Minimum Adequate Routing
-in the reference below. Refresh selected-candidate facts, not unrelated fleet
-maintenance; preserve task authority, independence, explicit pins and judgment
-floors.
-
-```text
-skills/herdr-foreman/references/model-tiers.md
-skills/herdr-foreman/references/dispatch-recovery.md
-```
-
-Save the plan and rationale.
+Load the plan decision's records. Read the waiting queue, choose the needed
+responsibilities, resolve composition triggers, validate any review partition,
+and save the owner's plan and rationale. Preserve developer reservations, task
+identity, cumulative fix count, correction bounds and independent verification.
+Plan only after trigger and partition validation pass. Staff specialists when
+the task's triggers or unresolved judgment require them, not every round.
 Proceed immediately to Step 6.
+
+Read before acting:
+
+```text
+skills/herdr-foreman/references/role-planning.md
+```
 
 ## Step 6 — Build the Review Package
 
-For reviewer/tester briefs, run from a checkout holding the recorded commits:
-
-```bash
-CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"; [ -d "$CP" ] || case "$(git config --get remote.origin.url)" in git@github.com:jbaruch/coding-policy|git@github.com:jbaruch/coding-policy.git|https://github.com/jbaruch/coding-policy|https://github.com/jbaruch/coding-policy.git|ssh://git@github.com/jbaruch/coding-policy|ssh://git@github.com/jbaruch/coding-policy.git) CP=. ;; *) echo "coding-policy plugin not found: run tessl install jbaruch/coding-policy" >&2; exit 1 ;; esac
-bash "$CP/skills/herdr-foreman/review-package.sh" \
-  <recorded-base-sha> <pushed-head-sha> <round-reports-dir>/review-<base7>..<head7>.diff
-```
-
-Apply the Step 6 base, range, and rebuild requirements in
-`skills/herdr-foreman/references/round-setup.md`. Success prints the absolute review-package path;
-set it as `REVIEW_PACKAGE`. On non-zero, fix the diagnostic and retry before
-composing verification briefs. Other roles need no package.
+Build the recorded-base-to-pushed-head review package for reviewer and tester
+briefs. Resolve any diagnostic before composition; other roles need no package.
 Proceed immediately to Step 7.
+
+Read before acting:
+
+```text
+skills/herdr-foreman/references/role-planning.md
+```
 
 ## Step 7 — Provision the Worktrees
 
-Step 2's preflight swept every repository with a worktree directory under
-the root, every round, and Step 2 reported its outcomes. Route on its
-`checks.worktrees.status`; the classification is
-`skills/herdr-foreman/round-preflight.sh`'s (the `checks.worktrees` comment
-at the top of the file):
+Route on Step 2's worktree check before provisioning. Provision every writing
+worker and every checkout named in a brief; consultations may be read-only.
+Preserve the task's original authorized base. Never dispatch a missing worktree
+or manually remove another task's checkout. Proceed immediately to Step 8.
 
-- `ok` or `degraded` — provision
-- any other status — do not provision; report its `reason` and detail,
-  repair what it names, then run Step 2's preflight again with
-  `--no-measure` and route on the new status
+Read before acting:
 
-Never remove a worktree by hand; Step 15's removal of the merged task's own
-worktree is the one exception. To re-sweep without provisioning (Step 15),
-run the sweep alone and relay its `report` verbatim, as Step 2 does:
-
-```bash
-CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"; [ -d "$CP" ] || case "$(git config --get remote.origin.url)" in git@github.com:jbaruch/coding-policy|git@github.com:jbaruch/coding-policy.git|https://github.com/jbaruch/coding-policy|https://github.com/jbaruch/coding-policy.git|ssh://git@github.com/jbaruch/coding-policy|ssh://git@github.com/jbaruch/coding-policy.git) CP=. ;; *) echo "coding-policy plugin not found: run tessl install jbaruch/coding-policy" >&2; exit 1 ;; esac
-bash "$CP/skills/herdr-foreman/sweep-worktrees.sh" "$HOME/.worktrees"
+```text
+skills/herdr-foreman/references/assignment-delivery.md
 ```
-
-Input is the worktree root. It removes the spent worktrees and local branches
-of every repository with a worktree under that root. Stdout is one JSON
-object whose `report` is the operator-facing summary; the full shape is the
-script's top-of-file contract.
-
-- **Exit 0** — every repository decided cleanly. Relay `report`, raise each
-  `dirty` or `unpushed` item it lists, and continue.
-- **Exit 2** — JSON is present; at least one repository's prune failed or a
-  path could not be read. Every other repository still ran, unless the
-  root changed mid-sweep: then the prune in flight stopped its removals,
-  and the error and failure lines name the repositories and steps left
-  undone.
-  - Relay `report`; its failure and error lines name each one.
-  - Repair what they name.
-  - Run the sweep again.
-- **Exit 1** — no JSON; a precondition is unmet. Report the stderr
-  diagnostic, repair what it names, then run the sweep again.
-
-The removal predicates live in `skills/herdr-foreman/prune-worktrees.sh`
-(top-of-file docstring).
-
-Then run once per writing worker and every worktree named in a brief:
-
-```bash
-CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"; [ -d "$CP" ] || case "$(git config --get remote.origin.url)" in git@github.com:jbaruch/coding-policy|git@github.com:jbaruch/coding-policy.git|https://github.com/jbaruch/coding-policy|https://github.com/jbaruch/coding-policy.git|ssh://git@github.com/jbaruch/coding-policy|ssh://git@github.com/jbaruch/coding-policy.git) CP=. ;; *) echo "coding-policy plugin not found: run tessl install jbaruch/coding-policy" >&2; exit 1 ;; esac
-bash "$CP/skills/herdr-foreman/provision-worktree.sh" \
-  <shared-checkout> <branch> <worktree-path> [base-ref]
-```
-
-Emits path, branch, exact base and fetched-default commits, and
-`created|attached|already-provisioned`; it persists their Git-owned provenance.
-Fetch failure stops before worktree creation. Pass an existing task's original
-authorized base as `base-ref`; never refresh that task base for a correction. On any
-non-zero exit, fix the diagnostic and retry. Never dispatch a missing
-worktree. Read-only consultations need none. Clean up after merge per
-`rules/agent-worktree-isolation.md`. Proceed immediately to Step 8.
 
 ## Step 8 — Compose the Briefs
 
-Resolve policy paths through the Step 8 reference first. Write its outputs in
-`shared` within `{"task":"<existing task id>", "state":"<owner state path when non-default>", "shared": {...}, "roles": {"<role>": {...}}}` and run:
+Load the brief decision's records. Resolve policy paths and compose complete,
+bounded briefs with fresh report paths and recorded authorization. Accepted
+behavior, reproducible failure and a bounded correction permit a direct developer
+brief. Unsettled behavior, evidence, scope, causal uncertainty or exhausted
+allowances take their named consultation route; return to Step 5 when required.
+The foreman never substitutes substantive judgment. Proceed immediately to Step 9.
 
-`GATES` is shared: Step 2's `checks.gates.detail.brief`, verbatim. On a
-non-empty `checks.gates.detail.missing`, name those paths in the round's report.
+Read before acting:
 
-```bash
-CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"; [ -d "$CP" ] || case "$(git config --get remote.origin.url)" in git@github.com:jbaruch/coding-policy|git@github.com:jbaruch/coding-policy.git|https://github.com/jbaruch/coding-policy|https://github.com/jbaruch/coding-policy.git|ssh://git@github.com/jbaruch/coding-policy|ssh://git@github.com/jbaruch/coding-policy.git) CP=. ;; *) echo "coding-policy plugin not found: run tessl install jbaruch/coding-policy" >&2; exit 1 ;; esac
-bash "$CP/skills/herdr-foreman/compose-briefs.sh" \
-  "$CP/skills/herdr-foreman/templates" \
-  <values.json> <round-reports-dir>
+```text
+skills/herdr-foreman/references/assignment-delivery.md
 ```
-
-Emits common and role-brief paths. On non-zero, fix the diagnostic before
-dispatch. Validates composition inputs and review evidence before writing.
-Use a fresh absolute report path per role and attempt.
-
-Follow `skills/herdr-foreman/references/round-setup.md` Step 8 for shared and role-specific values,
-authority, review evidence and brief completeness.
-
-- Follow `skills/herdr-foreman/references/team-operation.md` Judgment Routes
-- When accepted behavior, reproducible failure and a bounded correction are
-  already recorded, compose the development brief directly from that evidence;
-  no additional advisor report is required
-- Unsettled behavior, evidence, scope or correction choice requires the named
-  consultation
-- Substantive foreman judgment remains prohibited
-- When consultation is required, return to Step 5 until its framing is accepted,
-  then set `SPECIALIST_CONTEXT` to its assessed report's absolute path
-- Otherwise leave `SPECIALIST_CONTEXT` empty; do not invent a consultation report
-- Never copy, excerpt or paraphrase a consultation report into a value
-- Triggered specialty work, causal uncertainty, changed scope and exhaustion keep
-  their required consultation routes
-
-Proceed immediately to Step 9.
 
 ## Step 9 — Label the Layout
 
-Optional, once per team; skip an already named sidebar.
+Optionally label the team layout once; skip an already named sidebar. Report
+partial label failures and continue immediately to Step 10.
 
-```bash
-CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"; [ -d "$CP" ] || case "$(git config --get remote.origin.url)" in git@github.com:jbaruch/coding-policy|git@github.com:jbaruch/coding-policy.git|https://github.com/jbaruch/coding-policy|https://github.com/jbaruch/coding-policy.git|ssh://git@github.com/jbaruch/coding-policy|ssh://git@github.com/jbaruch/coding-policy.git) CP=. ;; *) echo "coding-policy plugin not found: run tessl install jbaruch/coding-policy" >&2; exit 1 ;; esac
-bash "$CP/skills/herdr-foreman/label-workspaces.sh" \
-  <lead-label> [<agent>=<workspace-id>]...
+Read before acting:
+
+```text
+skills/herdr-foreman/references/assignment-delivery.md
 ```
-
-Emits per-target `renamed|unchanged|failed`; exit 3 names partial failures.
-Report label failures and continue. Proceed immediately to Step 10.
 
 ## Step 10 — Dispatch the Briefs
 
-Complete the retrospective reference's cadence and transition checks before live
-dispatch. Apply rechecks coverage before worker input. Dry runs prove no coverage.
+Check retrospective cadence and transition coverage, then apply the saved plan
+with the composed briefs and fresh report paths. Preserve task authorization,
+identity and fix count. Apply enrolls before input; reconcile uncertain sends
+before retrying. An applied send is not task acceptance. Unanswered task decisions
+and blockers retain their dispatch gate. Proceed immediately to Step 11.
 
-```bash
-CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"; [ -d "$CP" ] || case "$(git config --get remote.origin.url)" in git@github.com:jbaruch/coding-policy|git@github.com:jbaruch/coding-policy.git|https://github.com/jbaruch/coding-policy|https://github.com/jbaruch/coding-policy.git|ssh://git@github.com/jbaruch/coding-policy|ssh://git@github.com/jbaruch/coding-policy.git) CP=. ;; *) echo "coding-policy plugin not found: run tessl install jbaruch/coding-policy" >&2; exit 1 ;; esac
-bash "$CP/skills/herdr-foreman/foreman.sh" apply \
-  --assignments <plan-file> \
-  --brief <role>=<path> [--brief <role>=<path>]... \
-  --report <role>=<report> [--report <role>=<report>]... \
-  --common <path-to-COMMON.md> --task <task-id> \
-  [--fix-round <N>] [--retain-context | --retain-specialist | --no-clear] \
-  [--correction-plan <id> --work <work.json>] [--dispatch-id <stable-id>]
-```
-
-Emits dispatch JSON under `state-schema.md`. Supply each role's fresh absolute
-report path from its brief. Apply enrolls before input; unknown sends remain
-observation obligations. Apply refuses while an open decision or blocker on the
-task is unanswered; see the attention reference's Dispatch gate.
-Classify every brief against Step 3's authorization before sending it.
-Apply refuses a consultation brief without a contiguous `CRITERION 1..N` block
-under `## Acceptance Criteria`. That block is the `N` its report answers.
-Append the dispatch outcome to the task ledger; `applied` proves dispatch only.
-
-Apply the recovery reference's Dispatch context requirements before sending.
-Preserve task identity and cumulative fix count. Retained fixes dispatch
-developer alone. Warm consultations use the recovery reference's
-`--retain-specialist` path. Reconcile unknown outcomes
-before retrying. Reuse existing correction authorization within its bounds.
-
-Follow the Dispatch Results contract in `skills/herdr-foreman/references/round-flow.md` for busy,
-uncertain, failed, and dry-run outcomes. Preserve all already enrolled work.
-
-Dispatch references:
+Read before acting:
 
 ```text
-skills/herdr-foreman/references/dispatch-recovery.md
-skills/herdr-foreman/references/model-tiers.md
+skills/herdr-foreman/references/assignment-delivery.md
 ```
-
-Proceed to Step 11.
 
 ## Step 11 — Observe the Fleet
 
-Run the bounded foreground watcher for all enrolled assignments:
+Retain and await the bounded fleet watch's real execution handle, then gate its
+events. A quiet deadline ends only the checkpoint. Acknowledge suppressed events
+with their recorded reason. For each wake event, load its enrollment's records and
+verify report delivery. Persist user attention and acknowledge only handled event
+IDs; do not assess outcomes or close enrollments here. Continue watching every
+observation obligation. Proceed to Step 12 when required reports are delivered or
+their unavailability and recovery are recorded.
 
-```bash
-CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"; [ -d "$CP" ] || case "$(git config --get remote.origin.url)" in git@github.com:jbaruch/coding-policy|git@github.com:jbaruch/coding-policy.git|https://github.com/jbaruch/coding-policy|https://github.com/jbaruch/coding-policy.git|ssh://git@github.com/jbaruch/coding-policy|ssh://git@github.com/jbaruch/coding-policy.git) CP=. ;; *) echo "coding-policy plugin not found: run tessl install jbaruch/coding-policy" >&2; exit 1 ;; esac
-bash "$CP/skills/herdr-foreman/foreman.sh" supervision-watch [--state <state-file>]
-```
-
-Retain and await its real execution handle. The JSON result gives `reason`,
-`through`, and durable `events`; a quiet deadline completes only that checkpoint.
-
-Then ask which of those events need you:
-
-```bash
-CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"; [ -d "$CP" ] || case "$(git config --get remote.origin.url)" in git@github.com:jbaruch/coding-policy|git@github.com:jbaruch/coding-policy.git|https://github.com/jbaruch/coding-policy|https://github.com/jbaruch/coding-policy.git|ssh://git@github.com/jbaruch/coding-policy|ssh://git@github.com/jbaruch/coding-policy.git) CP=. ;; *) echo "coding-policy plugin not found: run tessl install jbaruch/coding-policy" >&2; exit 1 ;; esac
-bash "$CP/skills/herdr-foreman/foreman.sh" supervision-gate [--state <state-file>]
-```
-
-It returns `wake` and `suppressed`, each event with its `reason`. Acknowledge
-every `suppressed` event with that reason as its outcome, without reading
-anything. Only named, information-poor cases are suppressed and every other
-event wakes you, including a kind the gate has never seen; which cases, and
-why, is the script's decision contract — see
-`skills/herdr-foreman/foreman/supervision_gate.py`, not restated here
-(`rules/script-as-black-box.md`).
-
-For each `wake` event, verify report delivery for its enrollment:
-
-```bash
-CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"; [ -d "$CP" ] || case "$(git config --get remote.origin.url)" in git@github.com:jbaruch/coding-policy|git@github.com:jbaruch/coding-policy.git|https://github.com/jbaruch/coding-policy|https://github.com/jbaruch/coding-policy.git|ssh://git@github.com/jbaruch/coding-policy|ssh://git@github.com/jbaruch/coding-policy.git) CP=. ;; *) echo "coding-policy plugin not found: run tessl install jbaruch/coding-policy" >&2; exit 1 ;; esac
-bash "$CP/skills/herdr-foreman/foreman.sh" check-member --enrollment <enrollment-id> \
-  [--worktree <worker-checkout>]
-```
-
-Before checking a member, read and follow the checkpoint contract:
+Read before acting:
 
 ```text
-skills/herdr-foreman/references/round-flow.md — Report Checkpoint Outcomes
+skills/herdr-foreman/references/fleet-checkpoint.md
 ```
-
-Record user-facing obligations in the attention queue. Acknowledge only handled
-event IDs through the saved snapshot; schedule pending rechecks. Record no
-assessed outcome and close no enrollment here.
-Step 12 records acceptance after the round's gates exist. Complete due
-retrospectives between checkpoints without interrupting workers. Resume the fleet
-watch while any observation obligation remains; one blocked worker never hides
-another worker's report. Proceed to Step 12 when the required reports are delivered
-or their unavailability and recovery are recorded.
 
 ## Step 12 — Gate the Round
 
-Classify every delivered report in one call, and save its stdout:
+Load the gate decision's records. Classify reports, read every report in full,
+and record classifier gates before assessment. Contract lines decide acceptance;
+labels and a clean worker exit never replace the verdict. Verify any mechanical
+oracle and partition against the dispatched plan and current tip. Record assessed
+assignment outcomes separately from the task's gate; close enrollments only after
+the owner verifies the ledger and report evidence. Resume Step 11 for remaining
+observation obligations.
 
-```bash
-CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"; [ -d "$CP" ] || case "$(git config --get remote.origin.url)" in git@github.com:jbaruch/coding-policy|git@github.com:jbaruch/coding-policy.git|https://github.com/jbaruch/coding-policy|https://github.com/jbaruch/coding-policy.git|ssh://git@github.com/jbaruch/coding-policy|ssh://git@github.com/jbaruch/coding-policy.git) CP=. ;; *) echo "coding-policy plugin not found: run tessl install jbaruch/coding-policy" >&2; exit 1 ;; esac
-bash "$CP/skills/herdr-foreman/classify/classify-reports.sh" <report>... > <labels.json>
-```
+Blocking verdicts take the bounded fix loop or a required Step 13 ruling. A
+contradicting classifier gate or weighing nomination goes to Step 13. Exhausted
+approach allowances go through the investigator's assessed report to judge
+diagnosis, without waiting for an operator decision. Advisory findings go in the
+round log; they do not become blocking verdicts. Never weigh findings yourself or
+use a judge report to clear a verdict gate.
 
-On exit 2 (usage error), fix the arguments stderr names and rerun before using
-`<labels.json>`. A report in the output's `unannotated` list gets no gate and is
-gated exactly as it would have been.
+Every return to Step 4 crosses Steps 16 and 17 first, with the named continuation
+saved in the stow. An accepted investigation presents findings without inferring
+implementation or release, then goes to Step 15 if cleanup is needed, otherwise
+Step 16. Release requires broad independent reviewer and tester passes at the
+current pushed tip. With release criteria met, proceed immediately to Step 13.
 
-Read every report file in full, including a report whose worker exited cleanly.
-A `## BLOCKED` section can sit under a report that otherwise reads as finished.
-A report's recorded `VERDICT:` and `ACCEPTANCE` lines decide it. Never accept,
-reject or rate a finding on your own reading.
-Then record the gates the labels earn, before gating any report:
-
-```bash
-CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"; [ -d "$CP" ] || case "$(git config --get remote.origin.url)" in git@github.com:jbaruch/coding-policy|git@github.com:jbaruch/coding-policy.git|https://github.com/jbaruch/coding-policy|https://github.com/jbaruch/coding-policy.git|ssh://git@github.com/jbaruch/coding-policy|ssh://git@github.com/jbaruch/coding-policy.git) CP=. ;; *) echo "coding-policy plugin not found: run tessl install jbaruch/coding-policy" >&2; exit 1 ;; esac
-bash "$CP/skills/herdr-foreman/foreman.sh" report-gate-record --labels <labels.json>
-```
-
-- Exit 0 prints one JSON object: `recorded`, `replayed` and `no_gate` lists
-- Exit 1: nothing is recorded; resolve the cause stderr names before gating any report
-- `close-member` and `record-report` refuse while a gate forbids the decision
-- `assess-specialist` and `record-report` record a verdict gate for every
-  `VERDICT: blocking` report
-- A verdict gate never refuses acceptance
-- `apply` refuses a fresh `release` dispatch while the task carries an open
-  verdict gate
-- A `block` gate clears only through `report-gate-clear`
-- A `reread` gate clears only through `report-gate-reread`
-- A label never approves, accepts or skips a check
-
-Output fields, gate levels and the evidence each resolution cites are the
-owners' contract:
+Read before acting:
 
 ```text
-skills/herdr-foreman/references/report-classifier.md
+skills/herdr-foreman/references/round-gate.md
 ```
-
-Gate the reports together in one turn, not one turn per report.
-Before accepting a mechanical round, compare its whole result against the
-oracle its plan declared. `<result-file>` is the pushed diff for a `patch`
-oracle and the produced output otherwise:
-
-```bash
-CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"; [ -d "$CP" ] || case "$(git config --get remote.origin.url)" in git@github.com:jbaruch/coding-policy|git@github.com:jbaruch/coding-policy.git|https://github.com/jbaruch/coding-policy|https://github.com/jbaruch/coding-policy.git|ssh://git@github.com/jbaruch/coding-policy|ssh://git@github.com/jbaruch/coding-policy.git) CP=. ;; *) echo "coding-policy plugin not found: run tessl install jbaruch/coding-policy" >&2; exit 1 ;; esac
-bash "$CP/skills/herdr-foreman/foreman.sh" verify-oracle \
-  --plan <plan-file> --role <role> --result <result-file> --task <task>
-```
-
-Exit 0 is a match. Exit 1 with `"match": false` is a blocking finding on the
-round; exit 1 with no verdict is a usage error to resolve before gating,
-including a plan whose oracle differs from the one the round's dispatch bound.
-Before accepting a partitioned responsibility's pass, confirm its plan, as
-dispatched, still covers exactly the task's diff at the tip under review:
-
-```bash
-CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"; [ -d "$CP" ] || case "$(git config --get remote.origin.url)" in git@github.com:jbaruch/coding-policy|git@github.com:jbaruch/coding-policy.git|https://github.com/jbaruch/coding-policy|https://github.com/jbaruch/coding-policy.git|ssh://git@github.com/jbaruch/coding-policy|ssh://git@github.com/jbaruch/coding-policy.git) CP=. ;; *) echo "coding-policy plugin not found: run tessl install jbaruch/coding-policy" >&2; exit 1 ;; esac
-bash "$CP/skills/herdr-foreman/foreman.sh" verify-partition \
-  --plan <plan.json> --repo <repo-path> --head <tip-under-review> --task <task>
-```
-
-- Exit 0 confirms it
-- Exit 1 names what failed: another repo or base, a stale head, an edited
-  boundary, a seat never dispatched or dispatched with another boundary, or
-  paths the slices leave unowned, no longer cover, or own twice
-- Exit 1 also names a seat whose latest dispatch is not this plan's applied
-  send to its assigned worker, or a plan made without `--task`
-- Exit 1 is a blocking finding on the round, gated below like any other
-- Run Step 16, then Step 17, with Step 4 as the stow's continuation step
-- The reset foreman resumes at Step 4 and re-validates the partition at the
-  tip in Step 5, replanning from that result
-- The new plan then takes Step 8 composition, Step 10 dispatch, Step 11
-  observation, and this step's gate
-
-Only now, with every report's gates recorded, record each assignment's outcome
-in the task ledger from its recorded contract lines, citing the report:
-
-- `accepted` for a reviewer or tester needs a recorded valid `VERDICT:` at the
-  current report bytes, whatever its value; for a consultation it needs every
-  `ACCEPTANCE` line `met`. The verdict gates the round below, never acceptance
-- A contract gap, or an `unmet` criterion, is `needs_work`
-- A developer's work rests on the reviewer's and tester's verdicts
-
-Record the task's gate decision separately; a worker finishing its brief never
-completes the whole task. Once the ledger records an assignment's assessed
-outcome, close its enrollment in one call:
-
-```bash
-CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"; [ -d "$CP" ] || case "$(git config --get remote.origin.url)" in git@github.com:jbaruch/coding-policy|git@github.com:jbaruch/coding-policy.git|https://github.com/jbaruch/coding-policy|https://github.com/jbaruch/coding-policy.git|ssh://git@github.com/jbaruch/coding-policy|ssh://git@github.com/jbaruch/coding-policy.git) CP=. ;; *) echo "coding-policy plugin not found: run tessl install jbaruch/coding-policy" >&2; exit 1 ;; esac
-bash "$CP/skills/herdr-foreman/foreman.sh" close-member --enrollment <enrollment-id> \
-  --ledger <absolute-TASK-LEDGER.md>
-```
-
-It refuses until the ledger's latest event for that worker and report carries
-an assessed decision, and refuses `accepted` without the report's recorded
-contract lines, checked before its classifier gates. It verifies a schema-7
-assignment pane remains bound to the recorded identity, then closes it with
-live absence proved before the enrollment resolves. Schema-7 workers never
-retain a pane across assignments; a follow-up round carries prior evidence in
-its self-contained brief and receives a fresh identity. A repeated close
-accepts an already-absent identity and replays. Resolution stays
-separate from assignment acceptance and task completion.
-Resume Step 11's fleet watch for any enrollment still observed.
-Route correction-scope and bug-evidence assessment to a worker under
-`skills/herdr-foreman/references/team-operation.md` Judgment Routes; never
-assess them yourself.
-Persist user-facing obligations under `skills/herdr-foreman/references/attention.md` before presenting
-them; record an actual answer or resolution separately from showing the item.
-
-Every return to Step 4 is a round boundary: run Step 16 to log the round and
-Step 17 to reset first. Record the step this gate decision named as the stow's
-continuation step. The reset foreman takes Step 17's Resume Route.
-
-After accepting a consultation, return to Step 4 for the next needed
-responsibility. For an investigation-only task, use the knowledge gate below.
-
-For an investigation-only task, gate every assigned report on its recorded
-`ACCEPTANCE` lines. Resolve a blocking verdict through the same bounded and
-judge paths below. Once every criterion is met, present the findings and
-preserve open user decisions; proceed to Step 15 if a task worktree needs cleanup, otherwise
-Step 16. No implementation or release is inferred from the diagnostic result.
-
-- **Any blocking verdict** — a recorded `VERDICT: blocking` from a reviewer,
-  tester, or `security`, `ux-product` or `documentation` consultation is a
-  blocking finding for the round. Apply the round-flow reference's Blocking
-  Gate contract and `skills/herdr-foreman/references/team-operation.md` Fix Loops. Return to
-  Step 4 for an authorized correction or Step 13 for a required judge ruling.
-- **A ruled blocking verdict** — a completed adjudication (`uphold` or `amend`)
-  decides it. A finding a weighing ruled `defer` or `decline` is settled only
-  by the next reviewer or tester report at the tip, marking it DECLINED with
-  the ruling and recording `VERDICT: approved`. Never match rulings to
-  findings yourself.
-- **Clearing a verdict gate by re-check** — once the same responsibility's
-  re-check records `VERDICT: approved`, run `report-gate-clear --report
-  <blocking report> --evidence <re-check> --reason <what it settled>` for each
-  blocking report.
-- **Clearing a verdict gate by decision** — an operator's resolved decision
-  clears it through `--decision`.
-- **No judge clear** — a judge's report is refused as evidence.
-- **A contradicting gate** — a classifier `block` gate on a `VERDICT: approved`
-  report goes to Step 13 for adjudication.
-- **A weighing nomination** — a finding a worker report marks `MARGINAL:`, or
-  one `foreman finding-churn` places on lines the previous fix round added,
-  goes to Step 13 for a weighing.
-- **Nominate, never weigh** — the foreman nominates a finding and never weighs
-  it.
-- **An exhausted approach allowance** — record the checkpoint through
-  `skills/herdr-foreman/references/dispatch-recovery.md`, consult the investigator under
-  `skills/herdr-foreman/references/specialists.md` with round context `{"investigator":
-  {"diagnosis_input": true}}`, and take its assessed report to Step 13 for the
-  diagnosis.
-- **No operator wait at exhaustion** — no operator decision is awaited.
-- **`VERDICT: approved` with advisory findings** — record them in the round
-  log under `rules/review-severity.md` Split Reading From Acting.
-
-Apply the release gate in this reference; obtain broad independent reviewer and
-tester passes against the current pushed tip before release:
-
-```text
-skills/herdr-foreman/references/round-flow.md
-```
-
-With its release criteria met, proceed immediately to Step 13.
 
 ## Step 13 — Run the Judge Round
 
-Optional. No trigger — proceed to Step 14. A bot disagreement inside Step 14
-returns here first. A weighing nomination from Step 12 is an adjudication
-trigger. The judge's report is the ruling once `foreman verify-ruling`
-binds it in the judge round's last step; until then no `defer` or `decline`
-applies.
+No judge trigger: proceed immediately to Step 14. Otherwise run the referenced
+judge round, preserving its pinned tier, independence and verified ruling.
+Diagnosis loads the diagnose decision's records. Skip writing-worktree provision
+for the read-only judge. After any ruling, log and reset through Steps 16 and 17
+before its named continuation.
 
-Run the round's seven steps in order — compose the brief, re-measure the shared
-window, plan the pinned seat, let apply spawn its fresh worker on the pinned tier, dispatch,
-wait, act on the ruling:
+Read before acting:
 
 ```text
-skills/herdr-foreman/references/judge-round.md
+skills/herdr-foreman/references/round-completion.md
 ```
-
-The judge is read-only, so Step 7 is skipped for it. Never substitute a judge,
-lower its tier, or hand-write an assignment to bypass a refusal. Its last step
-names where to continue.
-
-A judge round is a round: once its ruling is recorded, run Step 16 and Step
-17 before continuing, whatever the ruling (`insufficient` and `blocked`
-included). Record the step the ruling named as the stow's continuation step.
-The reset foreman takes Step 17's Resume Route.
 
 ## Step 14 — Release the Pull Request
 
-The release is one more assignment, never a prompt into the developer's
-existing context. Return to Step 7 (it reports `already-provisioned`), then
-Step 8 with the role `release` for the developer's agent (template
-`skills/herdr-foreman/templates/brief-release.md`, the same `WORKTREE` and `BRANCH`, a fresh
-`REPORT`), dispatch through Step 10 so the context is cleared and
-the brief is fresh, and wait on the report in Step 11. `apply` refuses the
-release dispatch, dry run included, while the task carries an open verdict
-gate: return to Step 12 and clear it first. A source-changing
-release finding returns to Step 12 for the next counted developer assignment.
-A blocking policy review returns there too, where its nominations go to a
-weighing. Fill `WEIGHING_RULING` with the judge's report and the follow-up
-issue once a weighing covers the findings, otherwise "none".
-The worker merges after all gates pass. Proceed immediately to Step 15 only
-after verifying its reported release against the live VCS and release gates.
-Record that evidence in the task ledger.
+Release is a fresh assignment, not a prompt into the developer's existing
+context. Follow the Step 7, 8, 10 and 11 release route with fresh report evidence.
+Open verdict gates and source-changing release findings return to Step 12; bot
+disagreements return to Step 13. Verify the reported release against live VCS
+and release gates, record the evidence, then proceed immediately to Step 15.
+
+Read before acting:
+
+```text
+skills/herdr-foreman/references/round-completion.md
+```
 
 ## Step 15 — Clean Up the Worktree
 
-Fast-forward the shared checkout, remove the merged task's own worktree with
-`git worktree remove`, and delete the branch, in the post-merge order of
-`rules/agent-worktree-isolation.md` Cleanup. This is the one removal the
-foreman makes itself (`skills/herdr-foreman/references/team-operation.md` Writers and Checkouts,
-the merged-task exception). Then run Step 7's sweep again for the round's other
-worktrees. Proceed immediately to Step 16.
+After merge, fast-forward the shared checkout, remove only the merged task's own
+worktree with `git worktree remove`, then delete its branch. Follow the mandatory
+post-merge order in `rules/agent-worktree-isolation.md`. Re-sweep the round's other
+worktrees through Step 7's referenced sweep contract. Proceed immediately to Step 16.
+
+Read before acting:
+
+```text
+skills/herdr-foreman/references/round-completion.md
+```
 
 ## Step 16 — Log the Round
 
-Finalize the task ledger with the round outcome and remaining obligations.
-Mark the task completed only after its acceptance criteria and required
-release and cleanup obligations are verified. When the task merged or was
-abandoned, close it. The record is
-`{"task", "outcome": "merged" | "abandoned", "evidence"}`:
+Finalize the ledger and remaining obligations. Complete the task only after its
+acceptance, release and cleanup requirements are verified. Close merged or
+abandoned tasks through the owner; resolve any refusal before continuing. Keep
+in-progress tasks open. Preserve lessons and retrospective notes; report outstanding
+attention first, then the outcome and saved paths. Proceed immediately to Step 17.
 
-```bash
-CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"; [ -d "$CP" ] || case "$(git config --get remote.origin.url)" in git@github.com:jbaruch/coding-policy|git@github.com:jbaruch/coding-policy.git|https://github.com/jbaruch/coding-policy|https://github.com/jbaruch/coding-policy.git|ssh://git@github.com/jbaruch/coding-policy|ssh://git@github.com/jbaruch/coding-policy.git) CP=. ;; *) echo "coding-policy plugin not found: run tessl install jbaruch/coding-policy" >&2; exit 1 ;; esac
-bash "$CP/skills/herdr-foreman/foreman.sh" close-task --record <close.json>
+Read before acting:
+
+```text
+skills/herdr-foreman/references/round-completion.md
 ```
-
-- **Exit 0** — stdout is the recorded `task_closed` event JSON. Repeating the
-  same closure prints the existing event. Proceed.
-- **Non-zero** — stderr names the refused field or the conflicting earlier
-  closure. Correct the record and re-run; do not finish Step 16 with a merged
-  or abandoned task unclosed.
-
-A task still in progress (a consultation or a fix round) is not closed; it
-continues to Step 17 open.
-
-Preserve the ledger for resume and standup. Preserve retrospective notes and link them from the ledger. Save
-current progress through the attention owner and curate the round's lessons.
-Report outstanding attention first, followed by the outcome and saved paths.
-Proceed immediately to Step 17.
 
 ## Step 17 — Reset the Foreman Context
 
-Stow the handoff under the working-memory reference, with a structured gap
-for anything the stow could not capture. The stow's `unresolved_work` names
-the continuation step, the step the round's outcome routes to:
+Stow the handoff, required reads, gaps and the outcome's continuation step. Handle
+pending supervision events and save handoff holds for active enrollments before
+scheduling reset. A stow or handoff hold alone never permits Stop. Follow the
+working-memory reset outcome contract; failed resets do not permit Stop with
+active work.
 
-- A gate decision, judge ruling or remedy — the step it named
-- A release-ready pull request — Step 14
-- A merged or abandoned task awaiting closure — Step 16
-- Only `foreman-queue` seats remaining — Step 5
+The next context reads the stow and its required files, reconciles supervision,
+reads the queue, runs Steps 1 and 2, then takes the stow's continuation step in
+place of Step 5. The queue lists seats only; gating, release and closure resume
+at their saved step. Finish here only when the Stop gate permits it.
 
-Handle every pending supervision event, and save `supervision-hold` kind
-`handoff` covering each active enrollment. Use the stow id as the hold id.
-This prepares reset preflight; it does not permit Stop on its own. Then
-schedule the reset:
-
-```bash
-CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"; [ -d "$CP" ] || case "$(git config --get remote.origin.url)" in git@github.com:jbaruch/coding-policy|git@github.com:jbaruch/coding-policy.git|https://github.com/jbaruch/coding-policy|https://github.com/jbaruch/coding-policy.git|ssh://git@github.com/jbaruch/coding-policy|ssh://git@github.com/jbaruch/coding-policy.git) CP=. ;; *) echo "coding-policy plugin not found: run tessl install jbaruch/coding-policy" >&2; exit 1 ;; esac
-bash "$CP/skills/herdr-foreman/foreman.sh" foreman-reset --stow <stow-id> \
-  [--state <state-file>] [--config <config-file>] [--herdr-bin <path>]
-```
-
-Before running the reset, read:
+Read before acting:
 
 ```text
-skills/herdr-foreman/references/working-memory.md — Reset Outcome Routing
+skills/herdr-foreman/references/round-completion.md
 ```
 
-Follow its exit and asynchronous-failure routes. A
-failed reset never permits Stop with active work.
-
-**Resume Route** — the next context follows one route:
-
-1. The resume prompt's reads: the stow and its required files, supervision,
-   `foreman-queue`
-2. Step 1, then Step 2
-3. The stow's continuation step, in place of Step 5
-
-`foreman-queue` lists seats only. Gating, release and closure return through
-the continuation step, never through the queue.
-
-Finish here.
-
-For the daily standup, use
-`Skill(skill: "herdr-standup")`.
+For the daily standup, use `Skill(skill: "herdr-standup")`.

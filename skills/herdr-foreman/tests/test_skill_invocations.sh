@@ -47,6 +47,10 @@ SKILLS=(herdr-foreman herdr-standup release adopt-fork-pr onboard-repo migrate-t
 
 # Reference files whose command blocks the bootstrap carve-out also covers.
 REFERENCES=(herdr-foreman/references/round-setup.md herdr-foreman/references/judge-round.md
+            herdr-foreman/references/dispatch-recovery.md
+            herdr-foreman/references/round-preflight.md herdr-foreman/references/role-planning.md
+            herdr-foreman/references/assignment-delivery.md herdr-foreman/references/fleet-checkpoint.md
+            herdr-foreman/references/round-gate.md herdr-foreman/references/round-completion.md
             release/PUBLICATION.md)
 
 # herdr-foreman alone carries the standalone/Herdr mode gate. herdr-standup
@@ -543,7 +547,7 @@ advisory_directive = next(line for line in boy_scout.splitlines() if line.starts
 risk_directive = next(line for line in boy_scout.splitlines() if line.startswith("- **Unrelated blocking risk**"))
 assert "Herdr round" in risk_directive and "current conversation standalone" in risk_directive
 references = {
-    "herdr-foreman/SKILL.md": ["skills/herdr-foreman/templates/brief-release.md"],
+    "herdr-foreman/references/round-completion.md": ["skills/herdr-foreman/templates/brief-release.md"],
     "herdr-foreman/references/dispatch-recovery.md": ["skills/herdr-foreman/foreman/composer.py", "skills/herdr-foreman/foreman/assign.py"],
     "herdr-foreman/references/judge-round.md": ["skills/herdr-foreman/templates/brief-judge.md", "skills/herdr-foreman/templates/brief-judge-diagnosis.md"],
     "herdr-foreman/references/round-setup.md": ["skills/herdr-foreman/references/specialists.md"],
@@ -623,6 +627,42 @@ PYCONTRACT
   then pass; else fail "delegation guidance must use Herdr owners and preserve direct work and role restrictions"; fi
 }
 
+# Resume instructions name stable step numbers. Each routed step must reach a
+# shipped, matching contract without preloading every stage of the round.
+check_foreman_reference_routes() {
+  local skills_root="$1"
+  if python3 - "$skills_root" <<'PYCONTRACT'
+import re
+import sys
+from pathlib import Path
+root = Path(sys.argv[1]).parent
+skill = (root / "skills/herdr-foreman/SKILL.md").read_text()
+sections = re.split(r"(?=^## Step \d+ — )", skill, flags=re.M)
+assert len(sections) == 18, "the resume contract needs all 17 steps"
+for number, section in enumerate(sections[1:], 1):
+    heading = section.splitlines()[0]
+    assert heading.startswith(f"## Step {number} — "), heading
+    if number == 1:
+        continue
+    routes = re.findall(r"```text\n(skills/herdr-foreman/references/[^\n]+\.md)\n```", section)
+    assert len(routes) == 1, (number, "needs one stage contract", routes)
+    target = (root / routes[0]).resolve()
+    assert target.is_relative_to(root.resolve()), routes[0]
+    assert target.is_file(), (number, routes[0])
+    detail = target.read_text()
+    assert heading in detail.splitlines(), (number, "contract lost its step", routes[0])
+    assert "only the current step" in detail, routes[0]
+assert len(skill.encode("utf-8")) <= 20000, "entry point exceeds the 5000-token approximation"
+rule = (root / "rules/script-delegation.md").read_text()
+scope = next(line for line in rule.splitlines() if line.startswith("- Applies only to command blocks in "))
+allowed = set(re.findall(r"`(skills/[^`]+\.md)`", scope))
+for file in (root / "skills").rglob("*.md"):
+    if re.search(r"^[ \t]*CP=\.tessl/plugins/jbaruch/coding-policy;", file.read_text(), re.M):
+        assert file.relative_to(root).as_posix() in allowed, (file, "bootstrap is outside its exact policy scope")
+PYCONTRACT
+  then pass; else fail "foreman step routes must preserve compact, shipped resume contracts"; fi
+}
+
 # Progress and failures go to stderr; stdout carries one JSON result.
 run_suite() {
   local skills_root skill name
@@ -640,11 +680,13 @@ run_suite() {
   for ref in "${REFERENCES[@]}"; do
     [[ -r "$skills_root/$ref" ]] || die "reference not found at $skills_root/$ref"
     check_invocations "$ref" "$skills_root/$ref"
+    check_install_shapes "$skills_root/$ref"
   done
   check_cleanup_retry
   check_release_advisory_contract "$skills_root"
   check_probe_recovery_contract "$skills_root"
   check_delegation_contract "$skills_root"
+  check_foreman_reference_routes "$skills_root"
 
   skill="${skills_root}/${MODE_GATE_SKILL}/SKILL.md"
   check_mode_gate "$MODE_GATE_SKILL" "$skill"
