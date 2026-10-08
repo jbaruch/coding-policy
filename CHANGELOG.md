@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.374 — 2026-10-08
+
 ### Fixed
 
 - Native Claude-settings hooks use quoted shell command strings, preserving
