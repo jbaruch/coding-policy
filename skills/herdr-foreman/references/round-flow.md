@@ -204,8 +204,8 @@ a `## BLOCKED` section can sit under a report that otherwise reads as finished.
 - **`wait-report.sh` exit 3** — the worker is at an approval or question
   dialog. Read the pane and follow
   `skills/herdr-foreman/references/herdr.md` Runtime Dialogs. Resolve an
-  already-authorized action without another operator approval; escalate only
-  the authority or choice that remains missing. Re-read the target and resume
+  already-authorized action without another operator approval, or follow that
+  contract's escalation path. Re-read the target and resume
   the report wait after the dialog clears; never resend its assignment.
 - **`wait-report.sh --once` exit 1 with `reason: checkpoint_pending`** —
   delivery remains pending. Record the checkpoint, acknowledge its event with a

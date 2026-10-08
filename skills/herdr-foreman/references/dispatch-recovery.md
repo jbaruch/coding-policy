@@ -604,8 +604,8 @@ lock file can remain after exit; do not delete it to bypass an active lock.
   confirmed across two reads and the pane. Read the dialog with
   `herdr pane read <pane-id> --source visible` and follow
   `skills/herdr-foreman/references/herdr.md` Runtime Dialogs. Resolve an
-  already-authorized action; surface only a missing authority or operator
-  choice. After confirming the dialog cleared and the same target remains,
+  already-authorized action or follow that contract's escalation path.
+  After confirming the dialog cleared and the same target remains,
   re-run this report wait for that worker. Never resend its assignment.
 - **Exit 5** — `reason: terminal_provider_refusal` identifies an unavailable
   attempt, with `found: false`. Save the JSON and record it with
