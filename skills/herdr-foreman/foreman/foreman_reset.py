@@ -101,6 +101,11 @@ RESET_STABLE_READS = 3
 #: native session the clear started, and how often it looks.
 CLEAR_SESSION_BUDGET_SEC = 30
 CLEAR_SESSION_POLL_SEC = 1
+#: Native prompt hooks can outlive transcript repaint and the working signal.
+#: Keep the claimed owner alive while observing their durable receipt. No input
+#: is sent during this bounded wait and no uncertain delivery is retried.
+HOOK_ACCEPTANCE_BUDGET_SEC = 60
+HOOK_ACCEPTANCE_POLL_SEC = 1
 #: The detail keys a failure record keeps. Herdr and composer errors can carry
 #: raw subprocess output or pane text; the record keeps identifiers only.
 FAILURE_DETAIL_KEYS = frozenset({"pane_id", "stow", "record", "status", "pid", "lock", "kind", "reconciled",
@@ -1195,6 +1200,33 @@ class SessionInterrupted(DeliveryInterrupted):
     code = SessionChanged.code
 
 
+def wait_hook_acceptance(client, agent, pane_id, state, stow, before, processes, *, sleep, clock,
+                         budget_sec=HOOK_ACCEPTANCE_BUDGET_SEC, poll_sec=HOOK_ACCEPTANCE_POLL_SEC):
+    """Observe the original input's receipt without ending its live claim early.
+
+    A working signal can mean native hooks are still running. An absent receipt
+    at that instant is pending, not a failure. Keep the exact named runtime and
+    process pins; replacement, a blocked runtime or budget exhaustion refuses.
+    """
+    deadline = clock() + budget_sec
+    while True:
+        live = _foreman_record(client, pane_id)
+        if (live.get("name") != agent.name or live.get("agent") != agent.kind
+                or foreground_processes(client, pane_id) != processes):
+            raise SessionChanged("The foreman runtime changed while its reset input hook was pending; do not repeat the input.",
+                                 {"pane_id": pane_id, "reason": "native_session_changed"})
+        if live.get("agent_status") == "blocked":
+            raise HerdrError("The reset input is blocked at its native runtime; inspect the pane without repeating it.",
+                             {"pane_id": pane_id, "reason": "reset_input_blocked"})
+        accepted = accepted_resume(state, pane_id, stow, before)
+        if accepted is not None:
+            return accepted
+        remaining = deadline - clock()
+        if remaining <= 0:
+            return None
+        sleep(min(poll_sec, remaining))
+
+
 def deliver(client, agents, pane_id, stow, state, *, native_session, still_ready=lambda: True, sleep=time.sleep,
             clock=time.monotonic, warn=None, budget_sec=IDLE_BUDGET_SEC, poll_sec=IDLE_POLL_SEC,
             settle_sec=COMPOSER_SETTLE_SEC, options=None):
@@ -1294,7 +1326,8 @@ def deliver(client, agents, pane_id, stow, state, *, native_session, still_ready
         landing = send_message(client, agent, prompt, RESUME_OPENING, pane_id=pane_id, sleep=sleep, warn=warn,
                                settle_sec=settle_sec, before_input=guard)
         phase = "hook_acceptance"
-        accepted = accepted_resume(state, pane_id, stow, native_session)
+        accepted = wait_hook_acceptance(client, agent, pane_id, state, stow, native_session, processes[0],
+                                        sleep=sleep, clock=clock)
         # Native acceptance proves the exact input landed even when a runtime
         # collapses or clips its transcript. A visible prompt is only a hint.
         if (not landing["landed"] and accepted is None) or not landing["started"]:

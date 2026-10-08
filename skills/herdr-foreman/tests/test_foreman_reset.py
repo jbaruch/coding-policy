@@ -306,9 +306,17 @@ class HandoffHoldTest(unittest.TestCase):
 
 class DeliverTest(unittest.TestCase):
     def run_deliver(self, client, *, screen_changed=True, landed=True, started=None, budget=30, still_ready=lambda: True,
-                    native_session=SESSION, claude_delivery="type", extra_enters=0, hook_accepted=True, extra_workers=()):
+                    native_session=SESSION, claude_delivery="type", extra_enters=0, hook_accepted=True, extra_workers=(),
+                    hook_pending_reads=0):
         calls = []
         ticks = iter(range(0, 10000, 5))
+        pending = [hook_pending_reads]
+
+        def acceptance(*args):
+            if pending[0]:
+                pending[0] -= 1
+                return None
+            return foreman_reset.pane_session(client, PANE) if hook_accepted else None
 
         def command(c, agent, pane, text, **kw):
             # The real delivery: its text and each configured Enter run the guard.
@@ -334,7 +342,7 @@ class DeliverTest(unittest.TestCase):
         with patch("foreman.foreman_reset.send_command", side_effect=command), \
              patch("foreman.foreman_reset.send_message", side_effect=message), \
              patch("foreman.foreman_reset.arm_resume"), \
-             patch("foreman.foreman_reset.accepted_resume", side_effect=lambda *args: foreman_reset.pane_session(client, PANE) if hook_accepted else None), \
+             patch("foreman.foreman_reset.accepted_resume", side_effect=acceptance), \
              patch("foreman.foreman_reset.process_identity", side_effect=client.identify):
             # Shipped Codex config takes two Enters; the first can only accept autocomplete.
             result = foreman_reset.deliver(client, [worker("codex-a", "codex", enters=2),
@@ -383,6 +391,39 @@ class DeliverTest(unittest.TestCase):
                     self.run_deliver(client, hook_accepted=False, extra_workers=[worker("grok-a", "grok")])
                 self.assertEqual(caught.exception.details["reason"], "reset_input_unverified")
                 self.assertTrue(client.prompt_started)
+
+    def test_every_runtime_waits_for_delayed_native_acceptance_without_resending(self):
+        for kind in ("claude", "codex", "grok"):
+            with self.subTest(kind=kind):
+                result, calls = self.run_deliver(FakeClient(["idle"], kind=kind), landed=False, started=True,
+                                                hook_pending_reads=3, extra_workers=[worker("grok-a", "grok")])
+                self.assertEqual(result["resume"], {"landed": True, "started": True})
+                self.assertEqual([call[0] for call in calls], ["command", "message"])
+
+    def test_native_acceptance_wait_is_read_only_bounded_and_refuses_replacement(self):
+        agent = worker("foreman", "codex")
+        for kind in ("claude", "codex", "grok"):
+            client = FakeClient(["working"], kind=kind)
+            agent.kind = kind
+            sleeps = []
+            ticks = iter([0, 0, 1, 2])
+            with self.subTest(kind=kind), patch("foreman.foreman_reset.accepted_resume", return_value=None), \
+                 patch("foreman.foreman_reset.process_identity", side_effect=client.identify):
+                self.assertIsNone(foreman_reset.wait_hook_acceptance(
+                    client, agent, PANE, "/state/s.json", "round-7", SESSION,
+                    [{"pid": 4242, "identity": "started-once"}], sleep=sleeps.append, clock=lambda: next(ticks),
+                    budget_sec=2, poll_sec=1))
+                self.assertEqual(sleeps, [1, 1])
+                self.assertEqual(client.keystrokes, [])
+        for client, reason in ((FakeClient(["blocked"]), "reset_input_blocked"),
+                               (FakeClient(["working"], pids=[9876]), "native_session_changed")):
+            with self.subTest(reason=reason), patch("foreman.foreman_reset.process_identity", side_effect=client.identify):
+                with self.assertRaises(HerdrError) as caught:
+                    foreman_reset.wait_hook_acceptance(
+                        client, worker("foreman", "claude"), PANE, "/state/s.json", "round-7", SESSION,
+                        [{"pid": 4242, "identity": "started-once"}], sleep=lambda seconds: self.fail("must refuse"), clock=lambda: 0)
+                self.assertEqual(caught.exception.details["reason"], reason)
+                self.assertEqual(client.keystrokes, [])
 
     def test_a_pane_that_never_idles_sends_nothing(self):
         with self.assertRaisesRegex(HerdrError, "(?s)stayed working.*" + DO_NOT_RERUN):
