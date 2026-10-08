@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.379 — 2026-10-08
+
 ### Fixed
 
 - Runtime trust and permission dialogs no longer impose a blanket operator
