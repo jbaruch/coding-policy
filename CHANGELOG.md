@@ -10,6 +10,13 @@
   retry. Stow, native-session, PID-reuse and per-keystroke guards remain intact
   (#707). Codex's unpainted composer is separated from its styled shortcut
   footer without treating recalled multiline drafts as empty input.
+- Planned reset input now uses a shared native pre-prompt gate for Claude,
+  Codex and Grok's Claude-compatible hooks. The claimed owner saves foreground
+  process pins; the hook validates the exact continuation and new native
+  session before rebinding supervision. Codex's delayed SessionStart receipt
+  no longer prevents submitting that continuation. Duplicate, old-session,
+  replacement, changed-stow and unclaimed inputs refuse; delivery still
+  requires the hook's durable acceptance (#707).
 
 ## 0.3.377 — 2026-10-08
 

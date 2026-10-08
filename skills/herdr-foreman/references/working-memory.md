@@ -69,7 +69,8 @@ claiming that recalled context proves present competence or independence.
 
 The foreman resets its context at every round boundary (SKILL.md Step 17), so
 this stow runs every round. `foreman foreman-reset` refuses unless the stow is
-`reset_ready`; the reset command's contract is in
+`reset_ready`; native input verification and its validation procedure are in
+`skills/herdr-foreman/references/reset-hooks.md`. The reset command's contract is in
 `skills/herdr-foreman/foreman/foreman_reset.py` (module docstring).
 
 Before planned foreman context compaction, restart, model change or replacement, sweep the conversation for knowledge that is still only in context. Persist accepted decisions, unanswered questions, promised updates, unresolved work, assumptions and useful lessons in their appropriate owner artifacts. Put user-facing obligations in the attention queue; reference their durable ids in the stow. Do not treat displayed questions as answered.
