@@ -47,6 +47,7 @@ SKILLS=(herdr-foreman herdr-standup release adopt-fork-pr onboard-repo migrate-t
 
 # Reference files whose command blocks the bootstrap carve-out also covers.
 REFERENCES=(herdr-foreman/references/round-setup.md herdr-foreman/references/judge-round.md
+            herdr-foreman/references/dispatch-recovery.md
             herdr-foreman/references/round-preflight.md herdr-foreman/references/role-planning.md
             herdr-foreman/references/assignment-delivery.md herdr-foreman/references/fleet-checkpoint.md
             herdr-foreman/references/round-gate.md herdr-foreman/references/round-completion.md
@@ -652,6 +653,12 @@ for number, section in enumerate(sections[1:], 1):
     assert heading in detail.splitlines(), (number, "contract lost its step", routes[0])
     assert "only the current step" in detail, routes[0]
 assert len(skill.encode("utf-8")) <= 20000, "entry point exceeds the 5000-token approximation"
+rule = (root / "rules/script-delegation.md").read_text()
+scope = next(line for line in rule.splitlines() if line.startswith("- Applies only to command blocks in "))
+allowed = set(re.findall(r"`(skills/[^`]+\.md)`", scope))
+for file in (root / "skills").rglob("*.md"):
+    if re.search(r"^[ \t]*CP=\.tessl/plugins/jbaruch/coding-policy;", file.read_text(), re.M):
+        assert file.relative_to(root).as_posix() in allowed, (file, "bootstrap is outside its exact policy scope")
 PYCONTRACT
   then pass; else fail "foreman step routes must preserve compact, shipped resume contracts"; fi
 }
@@ -673,6 +680,7 @@ run_suite() {
   for ref in "${REFERENCES[@]}"; do
     [[ -r "$skills_root/$ref" ]] || die "reference not found at $skills_root/$ref"
     check_invocations "$ref" "$skills_root/$ref"
+    check_install_shapes "$skills_root/$ref"
   done
   check_cleanup_retry
   check_release_advisory_contract "$skills_root"

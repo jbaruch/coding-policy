@@ -185,8 +185,8 @@ Proceed to Step 11 with the roles that were dispatched.
 ## Owner-managed recovery
 
 Resolve the plugin root for each call as in the skill's command blocks, then
-use `bash "$CP/skills/herdr-foreman/foreman.sh"` for the commands below,
-with the same `--state FILE` throughout. Record-submitting owner mutations
+use the resolved owner launcher from the command block above for the commands
+below, with the same `--state FILE` throughout. Record-submitting owner mutations
 take `--record FILE` containing a JSON object and optional `--now`.
 `reconcile` requires exactly one mutually exclusive input: `--record FILE`
 for actual transport evidence, or `--dispatch ID` for the stored-proof cleanup
