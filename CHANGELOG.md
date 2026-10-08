@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.380 — 2026-10-08
+
 ### Fixed
 
 - Foreman reset delivery waits read-only for the original native input hook's
