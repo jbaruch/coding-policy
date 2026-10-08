@@ -12,6 +12,15 @@
   entry's own dispatch and enrollment, without granting a retry or touching
   live panes, reports, unknown sends or changed frozen inputs.
 
+## 0.3.374 — 2026-10-08
+
+### Fixed
+
+- Native Claude-settings hooks use quoted shell command strings, preserving
+  installed paths with spaces and Grok's imported Stop/SessionStart execution.
+  Both handoff hygiene and exact-bound foreman supervision remain enabled;
+  the portable hook contract is unchanged (#704).
+
 ## 0.3.373 — 2026-10-08
 
 ### Changed

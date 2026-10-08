@@ -16,12 +16,11 @@
 # wraps the script in `tessl hook run`, which translates `additionalContext`
 # (informational), not a stop-block. nativeHooks writes the entry raw to each
 # agent's native config, so the agent reads the script's `{"decision":"block"}`
-# directly. Claude Code and Codex share the same Stop contract (decision/reason/
-# stop_hook_active), so the SAME script is dual-wired. The two entries differ in
-# shape by necessity: Claude Code's config takes command + args[], Codex's takes
-# a single command string (its config has no args field), so nativeHooks.codex
-# uses `bash "<path>"` as one string. Verified by installing into scratch
-# consumers and inspecting .claude/settings.json and .codex/config.toml.
+# directly. Claude Code, Codex and Grok's Claude-settings import share the same
+# Stop contract (decision/reason/stop_hook_active). Both native entries use
+# `bash "<path>"` as one string: Grok ignores args[] and treats a bare command
+# as a file relative to the settings directory. The portable hooks tier keeps
+# its command/args contract. Scratch installs check both native configurations.
 #
 # Blocking findings (gate the stop, once):
 #   - Spent worktrees and local branches, as the owner script decides them:
