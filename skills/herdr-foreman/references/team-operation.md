@@ -505,14 +505,15 @@ refuse only the stage whose harm it prevents.
 ## Dispatch Safety
 
 - Classify each assignment against the operator's task authorization and permitted actions before dispatch
-- Never send input to a `working` or `blocked` agent
+- Never send input to a `working` agent
+- Never send an assignment or slash command to a `blocked` agent
 - Never clear a working agent's context
 - Wait on the report marker plus the report file, never on a single idle or done observation
 - Every report wait runs through `skills/herdr-foreman/wait-report.sh`, never a hand-rolled loop
 - Each interval a wait reads the report file, the worker's status and the remaining budget, and ends on whichever settles first
 - The poll interval and the give-up budget are script-owned constants, never numbers the foreman picks per round
 - Confirm a `blocked` verdict through `skills/herdr-foreman/wait-report.sh`'s blocked confirmation (`FOREMAN_BLOCKED_CONFIRM_SEC`) and the pane before acting on it
-- A blocked worker is surfaced to the operator, never answered on the operator's behalf beyond its brief
+- Resolve blocked runtime dialogs under `skills/herdr-foreman/references/herdr.md` Runtime Dialogs
 - Record a terminal provider refusal against its dispatch before any replacement
 - Never resend a refused brief to the same provider
 - Never reword a refused brief for any provider

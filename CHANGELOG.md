@@ -1,5 +1,16 @@
 # Changelog
 
+### Fixed
+
+- Runtime trust and permission dialogs no longer impose a blanket operator
+  approval gate on already-authorized work. Standalone and team agents inspect
+  the actual dialog, resolve actions within the existing task authority, and
+  escalate only missing authority, choices or access. The foreman wait and
+  recovery instructions use that same contract across Claude Code, Codex and
+  Grok. Dispatch, report verification and uncertain-input safeguards remain
+  unchanged; the installed CLI supplies mechanics, not redundant approval
+  requirements.
+
 ## 0.3.378 — 2026-10-08
 
 ### Fixed
