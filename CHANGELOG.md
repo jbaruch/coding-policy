@@ -1,5 +1,14 @@
 # Changelog
 
+### Changed
+
+- Herdr is the sole route for authorized delegation across roles, nested work,
+  read-only consultations and tool/skill/CLI wrappers. Workers return staffing
+  needs to the foreman; unavailable seats retain an owner and the existing
+  recovery route. Runtime choice inside Herdr, independent verification and
+  direct standalone work remain intact. Worktree guidance no longer recommends
+  the host runtime's native Agent mechanism (#701).
+
 ## 0.3.372 — 2026-10-07
 
 ### Fixed

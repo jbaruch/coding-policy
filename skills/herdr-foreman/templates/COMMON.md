@@ -13,6 +13,12 @@ to know goes in the report.
 
 ## Authority
 
+- Delegation follows `rules/agent-team-operation.md` Delegation. Use no native
+  subagent mechanism, including through tools, skills or CLI wrappers.
+- Record a need for delegated help as a staffing need in your report for the
+  foreman. Start no child agent and assume no dispatch authority; continue only
+  work your brief already authorizes. Role-specific prohibitions remain binding.
+
 - Verified repo ownership: **{{AUTHORITY_STATEMENT}}**
 - The foreman verified ownership with `gh`. Ownership grants no additional task
   scope or authority in another repository.
