@@ -242,6 +242,7 @@ class ForegroundIdentityTest(unittest.TestCase):
     def test_missing_group_identity_preserves_the_strict_legacy_check(self):
         before = self.pins(None, [{"pid": 77}, {"pid": 90}], missing=True)
         after = self.pins(None, [{"pid": 77}, {"pid": 91}], missing=True)
+        assert before is not None, "valid legacy processes must supply strict pins"
         self.assertEqual(len(before), 2)
         self.assertNotEqual(before, after)
 
