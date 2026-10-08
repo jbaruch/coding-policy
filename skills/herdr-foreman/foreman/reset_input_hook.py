@@ -113,11 +113,11 @@ def main():
     except (ValueError, UnicodeDecodeError):
         print(json.dumps(refusal()))
         return 0
+    try:
+        result = check(payload, os.environ, now_iso())
     # outer-boundary-process-contract: native prompt hooks ignore nonzero or
     # invalid stdout; emit structured blocking JSON for unexpected errors so
     # propagation cannot silently admit an unverified continuation prompt.
-    try:
-        result = check(payload, os.environ, now_iso())
     except Exception:
         print("herdr-reset-input: verification failed; restore the hook installation and inspect the reset owner record.", file=sys.stderr)
         result = refusal()
