@@ -1088,16 +1088,26 @@ def mechanics(agents, kind, name):
 
 
 def foreground_processes(client, pane_id):
-    """The pane's foreground processes as identities, or None when Herdr reports none usable.
+    """Pin the foreground runtime leader, or the strict legacy process set.
 
     Each is `supervision_runtime.process_identity`: the pid with a digest of
     its start time and command line, so a reused pid or a process that
-    exec'd in place reads as another process.
+    exec'd in place reads as another process. MCP and hook children may come
+    and go without replacing the runtime. A reported process-group leader
+    must appear exactly once in the foreground set; never guess its PID.
+    Older transports without a group ID retain the strict whole-set check.
     """
     info = client.pane_process_info(pane_id)
     processes = info.get("foreground_processes") if isinstance(info, dict) else None
     if not isinstance(processes, list) or not processes:
         return None
+    group = info.get("foreground_process_group_id")
+    if group is not None:
+        if type(group) is not int or group <= 0:
+            return None
+        processes = [process for process in processes if isinstance(process, dict) and process.get("pid") == group]
+        if len(processes) != 1:
+            return None
     identities = []
     for process in processes:
         pid = process.get("pid") if isinstance(process, dict) else None

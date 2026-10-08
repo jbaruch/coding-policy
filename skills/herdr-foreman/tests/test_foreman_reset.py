@@ -213,6 +213,45 @@ def worker(name, kind, delivery="type", enters=1):
     return SimpleNamespace(name=name, kind=kind, clear_prompt="/clear", slash_delivery=delivery, slash_enter_count=enters)
 
 
+class ForegroundIdentityTest(unittest.TestCase):
+    def pins(self, group, processes, *, missing=False):
+        info = {"foreground_processes": processes}
+        if not missing:
+            info["foreground_process_group_id"] = group
+        client = SimpleNamespace(pane_process_info=lambda pane: info)
+        with patch("foreman.foreman_reset.process_identity", side_effect=lambda pid: {"pid": pid, "identity": "fixed-start"}):
+            return foreman_reset.foreground_processes(client, PANE)
+
+    def test_group_leader_stays_pinned_when_hook_or_mcp_children_restart(self):
+        before = self.pins(77, [{"pid": 20}, {"pid": 77}, {"pid": 90}])
+        after = self.pins(77, [{"pid": 77}, {"pid": 91}])
+        self.assertEqual(before, [{"pid": 77, "identity": "fixed-start"}])
+        self.assertEqual(after, before)
+
+    def test_runtime_replacement_changes_the_pins(self):
+        before = self.pins(77, [{"pid": 77}, {"pid": 90}])
+        after = self.pins(78, [{"pid": 78}, {"pid": 90}])
+        self.assertNotEqual(before, after)
+
+    def test_a_reported_leader_must_be_unique_present_and_valid(self):
+        for group, processes in ((77, [{"pid": 90}]), (77, [{"pid": 77}, {"pid": 77}]),
+                                 (True, [{"pid": 1}]), (0, [{"pid": 0}]), ("77", [{"pid": 77}])):
+            with self.subTest(group=group, processes=processes):
+                self.assertIsNone(self.pins(group, processes))
+
+    def test_missing_group_identity_preserves_the_strict_legacy_check(self):
+        before = self.pins(None, [{"pid": 77}, {"pid": 90}], missing=True)
+        after = self.pins(None, [{"pid": 77}, {"pid": 91}], missing=True)
+        self.assertEqual(len(before), 2)
+        self.assertNotEqual(before, after)
+
+    def test_an_unverifiable_leader_never_supplies_pins(self):
+        client = SimpleNamespace(pane_process_info=lambda pane: {
+            "foreground_process_group_id": 77, "foreground_processes": [{"pid": 77}]})
+        with patch("foreman.foreman_reset.process_identity", return_value=None):
+            self.assertIsNone(foreman_reset.foreground_processes(client, PANE))
+
+
 class SettledClearTest(unittest.TestCase):
     def observe(self, client, budget=30):
         now, waits = [0.0], []
@@ -322,6 +361,17 @@ class DeliverTest(unittest.TestCase):
         result, calls = self.run_deliver(Deferred(["idle"], kind="codex"))
         self.assertEqual([call[0] for call in calls], ["command", "message"])
         self.assertTrue(result["cleared"])
+
+    def test_helper_churn_across_clear_keeps_the_same_runtime_and_one_continuation(self):
+        class Helpers(FakeClient):
+            def pane_process_info(self, pane_id):
+                return {"foreground_process_group_id": 4242,
+                        "foreground_processes": [{"pid": 4242}, {"pid": 5001 if self.cleared else 5000}]}
+        for kind in ("claude", "codex", "grok"):
+            with self.subTest(kind=kind):
+                result, calls = self.run_deliver(Helpers(["idle"], kind=kind), extra_workers=[worker("grok-a", "grok")])
+                self.assertEqual([call[0] for call in calls], ["command", "message"])
+                self.assertEqual(result["resume"], {"landed": True, "started": True})
 
     def test_every_runtime_requires_hook_acceptance_and_never_repeats_uncertain_input(self):
         for kind in ("claude", "codex", "grok"):

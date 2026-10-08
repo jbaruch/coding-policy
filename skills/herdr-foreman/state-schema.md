@@ -1107,7 +1107,7 @@ could not take.
 | Field | Type | Meaning |
 | --- | --- | --- |
 | `schema_version` | integer, always `3` | Row version |
-| `foreground` | null or nonempty list of unique process identities | The claimed deliverer's pre-clear foreground pins, saved by `arm_resume` before continuation input. Migrated rows have null and supply no hook input authority |
+| `foreground` | null or nonempty list of unique process identities | The claimed deliverer's pre-clear foreground runtime pins, saved by `arm_resume` before continuation input. A reported process-group leader supplies its PID/start/command identity; a transport without a group ID pins the strict whole set. Migrated rows have null and supply no hook input authority |
 | `accepted_session` | null or native kind/value | Written only by the reset input gate after verifying and rebinding the new session. A new supervision binding alone never proves continuation input accepted |
 | `pane_id` | string | The foreman's Herdr pane; with `stow`, the reset's identity |
 | `stow` | string | The stow id the resume prompt names |

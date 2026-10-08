@@ -33,6 +33,10 @@ same final hook gate. Unknown sends remain interrupted and are never repeated.
 After clearing, all runtimes must establish stable idle under the original
 process pins. That bounded read-only wait handles startup hooks after a stale
 done observation; it never waits for an identity event that requires a prompt.
+When Herdr reports a foreground process-group leader, pins bind that leader's
+PID/start/command digest, not its changing hook/MCP children. Missing or duplicate
+leaders refuse; transports without a group ID retain the strict full-set check.
+Runtime replacement and same-PID exec still change the required identity.
 
 ## Native validation
 
