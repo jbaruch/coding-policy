@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.381 — 2026-10-08
+
 ### Fixed
 
 - Fresh assignment and usage-probe startup preserves native hook/trust dialogs
