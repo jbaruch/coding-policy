@@ -8,7 +8,10 @@
   shells and uncertain sends still refuse. Failed observations preserve the
   provider roster and unknown capacity with foreman-owned recovery, rather
   than removing healthy providers. The lifecycle description now names the
-  unfocused workspace and returned root pane (#705, #706, #687).
+  unfocused workspace and returned root pane (#705, #706, #687). Busy-start
+  retries check the running Herdr server's declared compatibility floor;
+  unknown or older versions never authorize a repeated launch. Exhaustion
+  preserves the native refusal code through later shell observations.
 
 ## 0.3.375 — 2026-10-08
 

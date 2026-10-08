@@ -48,6 +48,13 @@ from .errors import HerdrError
 #: --timeout governs how long *it* waits; this guards against a wedged binary.
 SUBPROCESS_TIMEOUT_SEC = 300
 
+#: Runtime dependency floor for retrying the server's atomic pre-input
+#: agent_pane_busy refusal. Renew quarterly and before changing this floor:
+#: inspect src/app/agents.rs start_managed_agent in the supported Herdr release
+#: and run the refusal regressions. The running server, not --version's local
+#: client binary, supplies this compatibility evidence (client/server may differ).
+MIN_START_REFUSAL_VERSION = (0, 9, 2)
+
 #: How long to wait for a usage report's marker to appear after sending the
 #: slash command. Bounded on purpose: a missing marker fails loudly.
 DEFAULT_MARKER_TIMEOUT_MS = 20000
@@ -354,6 +361,32 @@ class HerdrClient:
         return argv
 
     # -- execution -----------------------------------------------------------
+
+    def require_start_retry_compatibility(self):
+        """Require a compatible running server before repeating a busy start.
+
+        `status server` owns the running version and endpoint compatibility.
+        Unknown, duplicate, prerelease or missing facts authorize no retry.
+        A failed read propagates as a transport failure, never compatibility.
+        """
+        facts = {}
+        for line in self._run([self.binary, "status", "server"]).splitlines():
+            key, separator, value = line.partition(":")
+            if separator and key in {"status", "version", "endpoint_compatible"}:
+                if key in facts:
+                    facts[key] = None
+                else:
+                    facts[key] = value.strip()
+        match = re.fullmatch(r"(\d+)\.(\d+)\.(\d+)(?:\+[A-Za-z0-9.-]+)?", facts.get("version") or "")
+        compatible = (match is not None and tuple(map(int, match.groups())) >= MIN_START_REFUSAL_VERSION
+                      and facts.get("status") == "running" and facts.get("endpoint_compatible") == "yes")
+        if not compatible:
+            minimum = ".".join(map(str, MIN_START_REFUSAL_VERSION))
+            raise HerdrError("Native start retry compatibility is unproved. Inspect `{}` and restore a running, "
+                             "endpoint-compatible Herdr server at version {} or newer before retrying the owner "
+                             "spawn; this busy launch is not automatically repeated.".format(
+                                 format_argv([self.binary, "status", "server"]), minimum),
+                             {"minimum_server_version": minimum, "reason": "startup_retry_compatibility_unproved"})
 
     def _emit_trace(self, argv, completed=None, outcome=None):
         """Record one invocation on the trace sink, if there is one.

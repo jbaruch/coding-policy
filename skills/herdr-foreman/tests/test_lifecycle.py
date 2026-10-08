@@ -225,9 +225,22 @@ class FreshShellStartupTest(unittest.TestCase):
               before_start=callback, sleep=lambda _: None)
         self.assertEqual(client.agent_start.call_count, 2)
         self.assertEqual(callback.call_count, 2)
+        client.require_start_retry_compatibility.assert_called_once_with()
         client.pane_send_text.assert_not_called()
         client.pane_send_keys.assert_not_called()
         client.pane_close.assert_not_called()
+
+    def test_unproved_native_refusal_compatibility_never_repeats_start(self):
+        client = self.client([self.SHELL] * 3)
+        client.agent_start.side_effect = failure("agent_pane_busy", "not an available shell")
+        client.require_start_retry_compatibility.side_effect = HerdrError("retry compatibility unavailable", {})
+        worker = template()
+        with self.assertRaisesRegex(HerdrError, "retry compatibility"):
+            spawn(client, worker, worker.tiers["coordination"], history=[], sleep=lambda _: None)
+        client.agent_start.assert_called_once()
+        client.pane_close.assert_called_once_with("pane-new")
+        client.pane_send_text.assert_not_called()
+        client.pane_send_keys.assert_not_called()
 
     def test_retrospective_initialization_read_recovers_without_bypassing_its_gate(self):
         from foreman.retrospective_runtime import _observation
@@ -268,12 +281,25 @@ class FreshShellStartupTest(unittest.TestCase):
         client.pane_process_info.return_value = self.SHELL
         client.agent_start.side_effect = failure("agent_pane_busy", "not an available shell")
         worker = template()
-        with self.assertRaisesRegex(HerdrError, "did not settle"):
+        with self.assertRaisesRegex(HerdrError, "did not settle") as caught:
             spawn(client, worker, worker.tiers["coordination"], history=[], sleep=lambda _: None)
+        self.assertEqual(caught.exception.details["error_code"], "agent_pane_busy")
         self.assertLessEqual(client.agent_start.call_count, FRESH_SHELL_POLL_ATTEMPTS)
         client.pane_send_text.assert_not_called()
         client.pane_send_keys.assert_not_called()
         client.pane_close.assert_called_once_with("pane-new")
+
+    def test_native_busy_evidence_survives_later_shell_initialization_reads(self):
+        client = self.client([self.SHELL] * 3 + [self.INITIALIZING] * FRESH_SHELL_POLL_ATTEMPTS)
+        client.agent_start.side_effect = failure("agent_pane_busy", "not an available shell")
+        worker = template()
+        with self.assertRaisesRegex(HerdrError, "did not settle") as caught:
+            spawn(client, worker, worker.tiers["coordination"], history=[], sleep=lambda _: None)
+        self.assertEqual(caught.exception.details["error_code"], "agent_pane_busy")
+        client.agent_start.assert_called_once()
+        client.require_start_retry_compatibility.assert_called_once_with()
+        client.pane_send_text.assert_not_called()
+        client.pane_send_keys.assert_not_called()
 
     def test_absent_foreground_waits_for_explicit_stable_shell_before_start(self):
         client = self.client([self.SPARSE, self.SHELL, self.SHELL, self.SHELL, self.running()])

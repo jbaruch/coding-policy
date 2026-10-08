@@ -97,12 +97,13 @@ def _await_fresh_shell(client, pane, sleep):
 def _start_fresh_worker(client, worker, pane, tier, shell, before_start, sleep):
     """Bound late login-shell forks and Herdr's atomic pre-input busy refusal.
 
-    Herdr 0.9.2 checks agent_pane_busy before registering an agent or writing
-    bytes (src/app/agents.rs start_managed_agent). No other native failure is
+    HerdrClient requires its running-server dependency floor before trusting
+    agent_pane_busy as a pre-registration, pre-input refusal. No other failure is
     retried: startup timeout, transport failure and unknown readiness may
     already have sent input. Every retry rechecks the same root and authority.
     """
     evidence = {"pane": pane, "shell_pid": shell}
+    native_error = None
     for attempt in range(1, FRESH_SHELL_POLL_ATTEMPTS + 1):
         if attempt > 1:
             info, evidence = _fresh_shell_info(client, pane, shell, allow_absent_foreground=True)
@@ -131,6 +132,8 @@ def _start_fresh_worker(client, worker, pane, tier, shell, before_start, sleep):
                 except HerdrError as exc:
                     if error_code(exc) != "agent_pane_busy":
                         raise
+                    native_error = error_code(exc)
+                    client.require_start_retry_compatibility()
                 else:
                     return
         if attempt < FRESH_SHELL_POLL_ATTEMPTS:
@@ -139,7 +142,7 @@ def _start_fresh_worker(client, worker, pane, tier, shell, before_start, sleep):
         "Fresh pane {} did not settle through preflight and native start after {} attempts; inspect "
         "its shell startup or Herdr's available-shell check, then retry the owner spawn. No worker input "
         "was sent.".format(pane, FRESH_SHELL_POLL_ATTEMPTS),
-        {**evidence, "attempts": FRESH_SHELL_POLL_ATTEMPTS},
+        {**evidence, "attempts": FRESH_SHELL_POLL_ATTEMPTS, "error_code": native_error},
     )
 
 
