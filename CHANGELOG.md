@@ -1,5 +1,15 @@
 # Changelog
 
+### Changed
+
+- Foreman invocation now loads a compact 17-step execution plan instead of the
+  14.9k-token operational manual. Preflight, planning, assignment delivery,
+  fleet checkpoints, report gates and round completion retain their command
+  and recovery contracts in stage-specific references, loaded when needed.
+  Saved continuation step numbers, ownership, consultation and release gates
+  are unchanged. The entry point remains below the 5000-token recommendation;
+  shipped reference and command checks cover the extracted contracts.
+
 ## 0.3.376 — 2026-10-08
 
 ### Fixed
