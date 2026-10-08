@@ -1,14 +1,14 @@
 ---
 alwaysApply: true
-description: Standalone versus Herdr team round — the mode test, and where the team-round contract lives
+description: Standalone/team modes, delegation, foreman authority and runtime dialogs
 ---
 
 # Agent Team Operation
 
 ## Two Modes
 
-- **Standalone** — one agent working a task on its own, with no Herdr session around it. `HERDR_ENV` is unset
-- **Herdr team round** — a nonworking foreman dispatching work across separate Herdr worker panes. `HERDR_ENV` is set
+- **Standalone** — one agent working alone outside Herdr. `HERDR_ENV` is unset
+- **Herdr team round** — a nonworking foreman dispatching separate worker panes. `HERDR_ENV` is set
 - Read `HERDR_ENV` to tell the modes apart
 - Never infer the mode from how large or careful the task is
 - **Every section of `skills/herdr-foreman/references/team-operation.md` governs a Herdr team round only**
@@ -16,6 +16,10 @@ description: Standalone versus Herdr team round — the mode test, and where the
 - A standalone agent does the task directly
 - A standalone agent never simulates the roles, the briefs, or the reports
 - Standalone work is still governed by every other rule in this plugin
+
+## Runtime Dialogs
+
+- Both modes follow `skills/herdr-foreman/references/herdr.md` Runtime Dialogs
 
 ## Delegation
 

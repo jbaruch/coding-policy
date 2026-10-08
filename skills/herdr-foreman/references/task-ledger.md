@@ -51,7 +51,9 @@ Verify release claims against the live PR, merge, and any required publication
 checks under `rules/ci-safety.md`. An accepted release report is not a substitute
 for those checks. Record remaining obligations explicitly before claiming the
 task complete. The ledger never bypasses dispatch readiness or permits input
-into a working or blocked worker.
+into a working worker, or assignments/slash commands into a blocked worker.
+Runtime-dialog resolution follows
+`skills/herdr-foreman/references/herdr.md` Runtime Dialogs.
 
 ## Blank Document and Event
 

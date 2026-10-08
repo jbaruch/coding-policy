@@ -602,10 +602,11 @@ lock file can remain after exit; do not delete it to bypass an active lock.
     report destination and bounds its length; narrow panes can still wrap it.
 - **Exit 3** — the worker is blocked at an approval or question dialog,
   confirmed across two reads and the pane. Read the dialog with
-  `herdr pane read <pane-id> --source visible`, relay its text to the operator
-  verbatim, and stop the round for that worker. You never answer it: the
-  operator does. Resume only once `herdr agent get <name>` reports a state
-  other than `blocked`, then re-run this step for that worker.
+  `herdr pane read <pane-id> --source visible` and follow
+  `skills/herdr-foreman/references/herdr.md` Runtime Dialogs. Resolve an
+  already-authorized action or follow that contract's escalation path.
+  After confirming the dialog cleared and the same target remains,
+  re-run this report wait for that worker. Never resend its assignment.
 - **Exit 5** — `reason: terminal_provider_refusal` identifies an unavailable
   attempt, with `found: false`. Save the JSON and record it with
   `record-refusal` against that dispatch; every review/release gate remains

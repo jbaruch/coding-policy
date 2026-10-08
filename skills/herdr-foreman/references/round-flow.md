@@ -202,11 +202,11 @@ a `## BLOCKED` section can sit under a report that otherwise reads as finished.
   decide. Resolve it in the NEXT brief, which reaches it through a fresh
   dispatch. Never type the answer into the worker that is waiting.
 - **`wait-report.sh` exit 3** — the worker is at an approval or question
-  dialog. Read the pane, relay the dialog text to the operator verbatim, and
-  stop the round for that worker. The foreman never answers it — an approval
-  dialog is input, and input to a blocked agent is exactly what Dispatch
-  Safety forbids. The operator answers; the wait resumes once
-  `herdr agent get <name>` reports a state other than `blocked`.
+  dialog. Read the pane and follow
+  `skills/herdr-foreman/references/herdr.md` Runtime Dialogs. Resolve an
+  already-authorized action without another operator approval, or follow that
+  contract's escalation path. Re-read the target and resume
+  the report wait after the dialog clears; never resend its assignment.
 - **`wait-report.sh --once` exit 1 with `reason: checkpoint_pending`** —
   delivery remains pending. Record the checkpoint, acknowledge its event with a
   scheduled pending recheck, and resume the fleet watcher. Never send a second
@@ -540,7 +540,7 @@ and no degraded ruling.
 
 - Edit the shared checkout. The foreman reads it and dispatches; workers write.
 - Answer a question by typing into a working worker. Wait for the report.
-- Answer a blocked worker's approval dialog. Relay it to the operator and stop.
+- Grant authority beyond the task when resolving a runtime dialog.
 - Create a worktree for a worker after dispatch. Provision before briefing.
 - Write an authority line by hand. It comes from `verify-authority.sh`.
 - Brief a write action on a repo the operator does not own without their

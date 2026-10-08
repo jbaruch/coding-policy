@@ -85,7 +85,13 @@ Same argv, stdout, and exit codes as `wait-report.sh`. The
 budget is the script's constant, never a number chosen here; see the header of
 `skills/herdr-standup/standup-wait.sh`. Exit 1 means the worker did not answer
 inside it. It is not chased twice. Move it to Step 4's list with what you know.
-Exit 3 means a dialog is up — relay it and leave that worker to the operator.
+Exit 3 means a dialog is up:
+
+- Read the pane and follow `skills/herdr-foreman/references/herdr.md` Runtime Dialogs.
+- After resolving an authorized action, re-read the same target and resume its wait after the dialog clears.
+- Never resend the standup question.
+- If that contract requires escalation, continue Step 4 with the worker's recorded state while it remains blocked.
+
 Exit 5 means the report is unavailable after a confirmed provider refusal.
 Record it as missing in Step 4 and notify the operator; never automatically
 retry, rephrase, switch models/providers, or synthesize an answer.

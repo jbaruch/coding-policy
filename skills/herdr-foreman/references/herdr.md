@@ -9,7 +9,9 @@ Code), `codex` (OpenAI Codex CLI), and `grok` (Grok CLI).
 `herdr --skill` prints the authoritative control skill shipped with the
 installed binary. `herdr agent`, `herdr pane`, `herdr workspace` (each group
 with no subcommand) print the current command surface. When this file and the
-binary disagree, the binary wins.
+binary disagree on command mechanics, the binary wins. Task authorization and
+the Runtime Dialogs contract below govern approval decisions; the binary's
+blanket instruction to ask before answering every blocked dialog does not.
 
 ## Am I Inside Herdr
 
@@ -57,6 +59,31 @@ herdr agent read <name> --source visible|recent|recent-unwrapped --lines <n>
 or question dialog, before sending any input. A prompt sent from a non-working
 state must produce an observed lifecycle change within 5 seconds, otherwise
 Herdr returns `agent_prompt_stalled` rather than waiting forever.
+
+## Runtime Dialogs
+
+A runtime dialog does not create a new approval requirement. Read the actual
+pane before sending input, even when Herdr reports `idle`. Confirm the named
+target, live runtime and requested action against the existing task authority.
+
+- Resolve trust and permission prompts for already-authorized actions without
+  asking the operator again. This includes trusting a task-owned isolated test
+  directory whose files and native settings have been inspected.
+- Approval remains limited to the named directory, command or resource. Never
+  select a broader permanent grant when the task authorizes only one action.
+- Resolve a question from the recorded task decision or explicit default;
+  never invent an operator choice or treat silence as consent.
+- Escalate only missing authority, an unresolved operator choice, or information
+  or account access the task cannot supply. Preserve the dialog and continue
+  independent authorized work.
+- Use the dialog's logical keys, not an assignment prompt. Re-read the target
+  after the choice before resuming its existing owner workflow.
+- Do not type into a working runtime, bypass dispatch checks, clear saved work,
+  replay uncertain input or treat a dismissed dialog as task completion.
+
+The installed CLI remains authoritative for commands, state and receipts, not
+for expanding authority or requiring redundant approval. Apply this contract
+to Claude Code, Codex and Grok alike; native dialog layout is runtime-specific.
 
 ## Why Reports Are Files
 
