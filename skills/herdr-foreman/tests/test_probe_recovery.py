@@ -72,7 +72,7 @@ class ProbeRecoveryTest(unittest.TestCase):
                 result = self.measure(worker, client)
                 self.assertEqual(result["failed_agents"], [kind])
                 row = copy.deepcopy(probe_recovery.pending(self.state, worker))
-                self.assertIsNotNone(row)
+                assert row is not None
                 self.assertIn("resolve-probe", result["agents"][kind]["error"]["message"])
                 before = list(client.events)
                 result = self.measure(worker, client)
@@ -98,6 +98,7 @@ class ProbeRecoveryTest(unittest.TestCase):
                 worker, client = self.worker("codex"), self.native("codex", dialog=True)
                 self.measure(worker, client)
                 row = probe_recovery.pending(self.state, worker)
+                assert row is not None
                 live = client.agents[row["agent"]]
                 client.frames = [client.EMPTY]
                 if change == "pid":
@@ -148,14 +149,15 @@ class ProbeRecoveryTest(unittest.TestCase):
     def test_original_null_session_cannot_be_replaced_by_later_session(self):
         worker, client = self.worker("codex"), self.native("codex", dialog=True)
         start = client.agent_start
-        def start_without_session(*args):
-            result = start(*args)
-            client.agents[args[0]]["agent_session"] = None
+        def start_without_session(name, kind, pane_id, flags):
+            result = start(name, kind, pane_id, flags)
+            client.agents[name]["agent_session"] = None
             result["agent"]["agent_session"] = None
             return result
         client.agent_start = start_without_session
         self.measure(worker, client)
         row = probe_recovery.pending(self.state, worker)
+        assert row is not None
         self.assertIsNone(row["native"])
         client.frames = [client.EMPTY]
         client.agents[row["agent"]]["agent_session"] = {"source": "herdr:codex", "agent": "codex", "kind": "id", "value": "later-session"}
@@ -171,13 +173,16 @@ class ProbeRecoveryTest(unittest.TestCase):
         self.measure(worker, client)
         peer = self.worker("claude")
         peer.window_group = worker.window_group
-        self.assertEqual(probe_recovery.pending(self.state, peer)["worker_kind"], "codex")
+        row = probe_recovery.pending(self.state, peer)
+        assert row is not None
+        self.assertEqual(row["worker_kind"], "codex")
         self.assertIsNone(probe_recovery.pending(self.state, self.worker("grok")))
 
     def test_malformed_gate_and_changed_config_preserve_original_pending_evidence(self):
         worker, client = self.worker("codex"), self.native("codex", dialog=True)
         self.measure(worker, client)
         row = probe_recovery.pending(self.state, worker)
+        assert row is not None
         before = probe_recovery.store_path(self.state).read_bytes()
         with self.assertRaisesRegex(UsageError, "original --config"):
             probe_recovery.resolve(self.state, row["agent"], [worker], client, config_path=self.root / "different.json")
@@ -207,6 +212,7 @@ class ProbeRecoveryTest(unittest.TestCase):
                 code = main(base + ["measure", "--agent", "codex", "--now", AT], stdout=io.StringIO(), stderr=io.StringIO(), client=client)
         self.assertEqual(code, 1)
         row = probe_recovery.pending(self.state, self.worker("codex"))
+        assert row is not None
         client.frames = [client.EMPTY]
         out, err = io.StringIO(), io.StringIO()
         code = main(base + ["resolve-probe", "--agent", row["agent"]], stdout=out, stderr=err, client=client)
