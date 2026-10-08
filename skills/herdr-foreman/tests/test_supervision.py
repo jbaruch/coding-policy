@@ -621,14 +621,21 @@ class SupervisionTest(unittest.TestCase):
         script.chmod(0o644)
         manifest = json.loads((repo / ".tessl-plugin/plugin.json").read_text())
         environment = {**os.environ, **self.environ, "XDG_STATE_HOME": str(self.root / "xdg")}
-        for agent in ("claude-code", "codex"):
+        for agent in ("claude-code", "codex", "grok"):
             with self.subTest(agent=agent):
-                entries = [item for group in manifest["nativeHooks"][agent]["Stop"]
+                configuration = "claude-code" if agent == "grok" else agent
+                entries = [item for group in manifest["nativeHooks"][configuration]["Stop"]
                            for item in group["hooks"] if "herdr-supervision-stop.sh" in json.dumps(item)]
                 self.assertEqual(len(entries), 1)
                 entry = entries[0]
                 expand = lambda value: value.replace("${TESSL_PLUGIN_DIR}", str(plugin))
-                argv = shlex.split(expand(entry["command"])) + [expand(arg) for arg in entry.get("args", [])]
+                if agent == "grok":
+                    # Grok imports Claude settings but ignores args. A bare
+                    # command is relative to the settings directory, not PATH.
+                    command = expand(entry["command"])
+                    argv = ["sh", "-c", command] if " " in command else [str(plugin / ".claude" / command)]
+                else:
+                    argv = shlex.split(expand(entry["command"])) + [expand(arg) for arg in entry.get("args", [])]
                 result = subprocess.run(argv, input=json.dumps(self.payload), env=environment,
                                         capture_output=True, text=True, check=False)
                 self.assertEqual(result.returncode, 0, result.stderr)

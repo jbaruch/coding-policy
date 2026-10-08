@@ -1,5 +1,12 @@
 # Changelog
 
+### Fixed
+
+- Native Claude-settings hooks use quoted shell command strings, preserving
+  installed paths with spaces and Grok's imported Stop/SessionStart execution.
+  Both handoff hygiene and exact-bound foreman supervision remain enabled;
+  the portable hook contract is unchanged (#704).
+
 ## 0.3.372 — 2026-10-07
 
 ### Fixed

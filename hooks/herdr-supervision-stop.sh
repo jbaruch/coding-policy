@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Native Claude/Codex Stop gate; only an exact persisted Herdr foreman binding
+# Native Claude/Codex/Grok Stop gate; only an exact persisted Herdr foreman binding
 # activates it. stdin/stdout/exit contract: foreman/supervision_hook.py.
 set -euo pipefail
 

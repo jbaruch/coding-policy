@@ -99,7 +99,7 @@ portable = [h for g in d["hooks"]["SessionStart"] for h in g["hooks"]]
 claude = [h for g in d["nativeHooks"]["claude-code"]["SessionStart"] for h in g["hooks"]]
 codex = [h for g in d["nativeHooks"]["codex"]["SessionStart"] for h in g["hooks"]]
 ok = (len(portable) == 1 and portable[0]["args"] == ["${TESSL_PLUGIN_DIR}/hooks/session-start.sh"]
-      and len(claude) == 1 and claude[0]["args"] == ["${TESSL_PLUGIN_DIR}/hooks/session-start.sh"]
+      and len(claude) == 1 and claude[0]["command"] == 'bash "${TESSL_PLUGIN_DIR}/hooks/session-start.sh"'
       and len(codex) == 1 and codex[0]["command"] == 'bash "${TESSL_PLUGIN_DIR}/hooks/session-start.sh"')
 sys.exit(0 if ok else 1)
 PY
