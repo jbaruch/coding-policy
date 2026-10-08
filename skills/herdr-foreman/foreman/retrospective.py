@@ -324,7 +324,7 @@ def load(path, *, allow_pending=False):
     return _validate_index(path, _json(index))
 
 
-def _validate_index(path, result, *, retry_proofs=None, repaired=None):
+def _validate_index(path, result, *, retry_proofs=None, repaired=None, proof_for=None):
     """Validate a complete envelope before either reading or owner repair."""
     root = directory(path)
     if (not isinstance(result, dict) or set(result) != {"schema_version", "state_path", "baseline_at", "records", "transitions"}
@@ -359,8 +359,10 @@ def _validate_index(path, result, *, retry_proofs=None, repaired=None):
                 and not any(same_history(descriptor, saved) for record in result["records"]
                             for saved in record["coverage"])):
             proof = (retry_proofs or {}).get(row["agent"])
-            if not _recover_retry_origin(row, result["transitions"][:offset], proof):
-                _malformed("transition coverage provenance")
+            earlier = result["transitions"][:offset]
+            if not _recover_retry_origin(row, earlier, proof):
+                if proof_for is None or not _recover_retry_origin(row, earlier, proof_for(row)):
+                    _malformed("transition coverage provenance")
             if repaired is not None:
                 repaired.append(row["agent"])
         if row["id"] in transition_ids:
@@ -394,16 +396,18 @@ def _recover_retry_origin(row, earlier, proof):
     return True
 
 
-def recover_no_send_transitions(path, retries):
+def recover_no_send_transitions(path, retries, *, proof_for=None):
     """Repair only the old owner's synthetic descriptor for a proved closed retry.
 
     The apply owner holds both state and retrospective locks. Its retry proof
     already binds immutable target receipts, not_sent transport and absence of
-    the exact closed pane. Restore the earlier first-start descriptor verbatim;
+    the exact closed pane. For a different task, proof_for obtains that same
+    proof from the malformed transition's own historical dispatch, not the new
+    assignment. Restore the earlier first-start descriptor verbatim;
     retain the failed attempt's incoming identity and timestamp. Readers never
     repair, and any unrelated malformed field prevents every write.
     """
-    if not retries:
+    if not retries and proof_for is None:
         return []
     require_no_pending(path)
     index = directory(path) / "index.json"
@@ -411,7 +415,7 @@ def recover_no_send_transitions(path, retries):
         return []
     result = _json(index)
     repaired = []
-    _validate_index(path, result, retry_proofs=retries, repaired=repaired)
+    _validate_index(path, result, retry_proofs=retries, repaired=repaired, proof_for=proof_for)
     if repaired:
         save_state(index, result)
     return repaired

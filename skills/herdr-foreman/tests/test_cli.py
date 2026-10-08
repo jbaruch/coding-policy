@@ -3265,13 +3265,16 @@ class PublicOwnerRetryTest(unittest.TestCase):
                     self.assertEqual({path: path.read_bytes() for path in before}, before)
 
     def test_consecutive_closed_retries_preserve_history_and_send_the_same_plan_once(self):
-        for failure in ("timeout", "draft", "ansi", "identity", "legacy", "legacy_wrong_target",
+        for failure in ("timeout", "draft", "ansi", "identity", "legacy", "legacy_distinct_task",
+                        "legacy_distinct_live", "legacy_distinct_report", "legacy_distinct_unknown",
+                        "legacy_distinct_changed_bytes", "legacy_wrong_target",
                         "legacy_missing_origin", "legacy_malformed_sibling"):
             with self.subTest(failure=failure):
                 from foreman import assign, lifecycle, retrospective
                 with tempfile.TemporaryDirectory() as temporary:
                     root = Path(temporary)
                     config, state, snapshot = (root / name for name in ("config.json", "state.json", "snapshot.json"))
+                    index_path = retrospective.directory(state) / "index.json"
                     common, brief, report = (root / name for name in ("common.md", "judge.md", "report.md"))
                     payload = json.loads((Path(_ROOT) / "config.example.json").read_text())
                     payload["judge"] = {"worker_kind": "codex", "model": "gpt-6-astra", "effort": "high"}
@@ -3389,13 +3392,12 @@ class PublicOwnerRetryTest(unittest.TestCase):
                                 index["transitions"].pop(0)
                             if failure == "legacy_malformed_sibling":
                                 index["transitions"].append({"schema_version": 1})
-                            index_path = retrospective.directory(state) / "index.json"
                             save_state(index_path, index)
                             damaged = index_path.read_bytes()
                             with self.assertRaises(StateError):
                                 retrospective.load(state)
                             self.assertEqual(index_path.read_bytes(), damaged, "Readers never repair")
-                            if failure != "legacy":
+                            if failure != "legacy" and not failure.startswith("legacy_distinct"):
                                 events = list(native.events)
                                 code, _, err = invoke(arguments, native)
                                 self.assertEqual(code, 1, err)
@@ -3403,20 +3405,66 @@ class PublicOwnerRetryTest(unittest.TestCase):
                                 self.assertEqual([event for event in native.events if event[0] in {"create", "start", "prompt"}],
                                                  [event for event in events if event[0] in {"create", "start", "prompt"}])
                                 continue
+                        distinct = failure.startswith("legacy_distinct")
+                        if distinct:
+                            # An unrelated fresh task must recover the old
+                            # owner's closed no-input history before starting.
+                            common, brief, report = (root / name for name in
+                                ("next-common.md", "next-judge.md", "next-report.md"))
+                            common.write_text("New task's immutable common instructions\n")
+                            brief.write_text("New judge task\nREPORT: " + str(report) + "\n")
+                            with patch("foreman.lifecycle.identity", return_value="judge-0000000078"):
+                                code, text, err = invoke(["plan", "--roles", "judge", "--judge-mode", "adjudication",
+                                    "--task", "next-task", "--snapshot", str(snapshot)])
+                            self.assertEqual(code, 0, err)
+                            arguments = ["apply", "--assignments", text, "--judge-mode", "adjudication",
+                                "--task", "next-task", "--now", AT, "--common", str(common),
+                                "--brief", "judge=" + str(brief), "--report", "judge=" + str(report),
+                                "--composer-settle", "0"]
+                            frozen.update({path: path.read_bytes() for path in (common, brief)})
+                            if failure != "legacy_distinct_task":
+                                old, _ = load_state_checked(state)
+                                dispatch = old["recovery"]["dispatches"][-1]
+                                member = supervision.expected_assignment(supervision.load(state)["members"][-1])
+                                if failure == "legacy_distinct_live":
+                                    native.panes[member["pane_id"]] = 302
+                                    native.agents[dispatch["agent"]] = {"pane_id": member["pane_id"], "agent_status": "working"}
+                                elif failure == "legacy_distinct_report":
+                                    Path(member["report"]).write_text("Possible completed work; preserve it.\n")
+                                elif failure == "legacy_distinct_unknown":
+                                    dispatch["status"] = "sending"
+                                    save_state(state, old)
+                                elif failure == "legacy_distinct_changed_bytes":
+                                    Path(dispatch["brief"]).write_text("Changed frozen input\n")
+                                persisted = {path: path.read_bytes() for path in (state, index_path)}
+                                events = list(native.events)
+                                surfaces = copy.deepcopy((native.agents, native.panes))
+                                code, _, err = invoke(arguments, native)
+                                self.assertEqual(code, 1, err)
+                                self.assertEqual({path: path.read_bytes() for path in persisted}, persisted)
+                                self.assertEqual((native.agents, native.panes), surfaces)
+                                writes = {"create", "start", "prompt", "close"}
+                                self.assertEqual([event for event in native.events if event[0] in writes],
+                                                 [event for event in events if event[0] in writes])
+                                continue
                         native.frames = [native.ANIMATION, native.EMPTY, native.EMPTY]
                         code, text, err = invoke(arguments, native)
                         self.assertEqual(code, 0, err)
-                        self.assertEqual(json.loads(text)["applied"][0]["clear_reason"], "reconciled_not_sent")
+                        expected_reason = "automatic" if distinct else "reconciled_not_sent"
+                        self.assertEqual(json.loads(text)["applied"][0]["clear_reason"], expected_reason)
                         saved, usable = load_state_checked(state)
                         self.assertTrue(usable, "A successful retry must not make owner history unreadable")
-                        self.assertEqual(saved["assignments"][0]["clear_reason"], "reconciled_not_sent")
-                        self.assertEqual(saved["assignments"][0]["task"], "media-77")
+                        self.assertEqual(saved["assignments"][0]["clear_reason"], expected_reason)
+                        self.assertEqual(saved["assignments"][0]["task"], "next-task" if distinct else "media-77")
                         self.assertEqual([row["status"] for row in saved["recovery"]["dispatches"]], ["not_sent", "not_sent", "applied"])
                         self.assertEqual([row["active"] for row in supervision.load(state)["members"]], [False, False, True])
                         self.assertEqual(len([event for event in native.events if event[0] == "prompt"]), 1)
                         index = retrospective.load(state)
+                        matching = index["transitions"][:2] if distinct else index["transitions"]
                         self.assertTrue(all(row["descriptor"] == index["transitions"][0]["descriptor"]
-                                            for row in index["transitions"]))
+                                            for row in matching))
+                        if distinct:
+                            self.assertEqual(index["transitions"][-1]["descriptor"]["target"]["task"], "next-task")
                         self.assertEqual([row["incoming"]["pane_id"] for row in index["transitions"]],
                                          ["fixture-pane-1", "fixture-pane-2", "fixture-pane-3"])
                         self.assertEqual({path: path.read_bytes() for path in frozen}, frozen)

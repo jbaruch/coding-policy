@@ -450,7 +450,9 @@ and timestamp. Normal `apply` also repairs the older writer's unbacked retry
 descriptor from its original first-start receipt, after proving unchanged
 target bytes, recorded `not_sent` transport and closure. It preserves notes,
 incoming observations and timestamps; only that descriptor and its derived ID
-are restored. The repair contract belongs to
+are restored. A subsequent distinct task uses the damaged entry's own dispatch
+and enrollment for this proof; it grants no retry authority to the new task.
+The repair contract belongs to
 `skills/herdr-foreman/foreman/retrospective.py` (`recover_no_send_transitions`).
 Unproved or unrelated corruption refuses without a rewrite. Read-only readers
 still refuse malformed provenance and never repair it.
