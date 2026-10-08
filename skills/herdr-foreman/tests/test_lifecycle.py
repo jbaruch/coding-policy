@@ -609,6 +609,7 @@ class WindowProbeTest(unittest.TestCase):
             for state in ("idle", "blocked"):
                 with self.subTest(kind=kind, state=state), tempfile.TemporaryDirectory() as temporary:
                     worker, client = template(kind, kind, kind), Mock()
+                    worker.tiers["coordination"] = {"model": kind + "-fixture", "effort": "low", "multiplier": 1.0}
                     client.agent_get.return_value = {"pane_id": "owned-probe", "agent_status": state, "name": "probe-fixed", "agent": kind}
                     client.agent_read.return_value = "Native startup dialog"
                     client.argv_pane_close.return_value = ["herdr", "pane", "close", "owned-probe"]

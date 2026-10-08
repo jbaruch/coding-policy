@@ -6,19 +6,28 @@ no keys, rechecks original native/process/tier evidence, and records closure
 after the actual pane closes. Unknown/corrupt gate documents refuse work.
 """
 
+import hashlib
+import json
+import re
 import shlex
 from pathlib import Path
 
 from . import runnable
 from .composer import ensure_ready
 from .config import assignment_worker, default_config_path
-from .errors import HerdrError, StateError, UsageError, owner_recovery
+from .errors import ConfigError, HerdrError, StateError, UsageError, owner_recovery
 from .herdr import READY_STATES, error_code
 from .launch import require_empty_shell, verify_running
 from .state import save_state
 from .supervision import read_json, timestamp
+from .tiers import parse_tiers
 
 SCHEMA_VERSION = 1
+
+
+def config_digest(template):
+    value = {**template.as_dict(), "window_group": template.window_group}
+    return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
 
 
 def store_path(state_path):
@@ -46,6 +55,8 @@ def _validate(data, path):
                        ("agent", "pane_id", "worker_kind", "kind", "at", "config_path"))
                 or not isinstance(row.get("window_group"), str)
                 or not isinstance(row.get("tier"), dict)
+                or not isinstance(row.get("config_sha256"), str)
+                or not re.fullmatch(r"[0-9a-f]{64}", row["config_sha256"])
                 or "native" not in row or row["native"] is not None and not isinstance(row["native"], dict)
                 or not isinstance(row.get("process"), dict)
                 or row["process"].get("source") != "process_argv"
@@ -57,6 +68,10 @@ def _validate(data, path):
                 or row["agent"] in names):
             raise StateError("Malformed probe gate {}. Preserve it and restore the original owner record; do not discard its retained surfaces.".format(path), {})
         timestamp(row["at"])
+        try:
+            parse_tiers({"coordination": row["tier"]}, row["kind"], no_effort_rows=frozenset({"coordination"}))
+        except ConfigError as exc:
+            raise StateError("Malformed original tier in probe gate {}. Preserve the retained pane and restore the original owner evidence before measuring or resolving.".format(path), {}) from exc
         native = row["native"]
         if native is not None and (native.get("source") != "herdr:" + row["kind"] or native.get("agent") != row["kind"]
                 or native.get("kind") not in {"id", "path"} or not isinstance(native.get("value"), str) or not native["value"].strip()):
@@ -85,6 +100,7 @@ def retain(state_path, template, probe, pane, tier, observation, at, *, config_p
     row = {"schema_version": SCHEMA_VERSION, "at": at, "status": "pending",
         "agent": probe.name, "pane_id": pane, "worker_kind": template.name, "kind": probe.kind,
         "config_path": str(Path(config_path or default_config_path()).expanduser().resolve()),
+        "config_sha256": config_digest(template),
         "window_group": template.window_group or "", "tier": tier,
         "native": observation[1], "process": observation[2], "closure": None}
     data["records"].append(row)
@@ -106,6 +122,8 @@ def resolve(state_path, name, templates, client, *, config_path=None):
     template = next((worker for worker in templates if worker.name == row["worker_kind"] and worker.kind == row["kind"] and worker.assignment_scoped), None)
     if template is None:
         raise UsageError("Restore the retained probe's original worker-kind config before resolving it; the pane is preserved.", {})
+    if config_digest(template) != row["config_sha256"]:
+        raise UsageError("Retained probe's worker config changed. Restore its original launch/composer configuration before resolving; no native input or closure occurred.", {})
     worker = assignment_worker(template, name)
     def observe():
         try:

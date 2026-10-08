@@ -20,9 +20,12 @@ It rechecks before closing only that no-input probe. No usage command,
 assignment, trust choice or recovery key is sent.
 
 Exit 0 emits the owner record with `status: closed` and actual `closure`;
-replaying a closed record returns `replayed: true` without native calls. Exit 1
-emits structured recovery, preserves pending ownership, and names the same
-command. Drafts, working/blocked targets, changed/missing identity or tier,
+replaying a closed record returns `replayed: true` without native calls. Cleanup
+refusals exit 1 with structured recovery naming the same command and preserve
+pending ownership. Missing records, mismatched config paths or worker config,
+and unsupported/unreadable gate data exit 1 with an actionable usage/state
+diagnostic, without a recovery object or native cleanup. Drafts,
+working/blocked targets, changed/missing identity or tier,
 unsupported config, unreadable evidence and cleanup failures do not authorize
 closure. An absent agent permits cleanup only when its recorded pane is absent
 or holds only its shell. The recorded absence of a first-start native session
@@ -45,10 +48,13 @@ Document schema 1 is `{schema_version: 1, records: [...]}`. Each schema-1 row
 contains `at` (timezone-qualified original observation), `agent`, `pane_id`,
 `worker_kind`, native `kind`, original canonical `config_path`, `window_group`
 (empty when unshared), selected
-`tier`, original raw native-session observation `native` (object or explicit
+`tier`, `config_sha256` (immutable SHA-256 of the original worker's exported
+configuration including its billing window), original raw native-session observation `native` (object or explicit
 null), original verified `process`, `status` (`pending` or `closed`), and
 `closure` (null until actual closure). Original identity/tier fields remain
 unchanged on resolution. Closed rows preserve the recovery history.
+Resolution requires the current worker config to match that digest before any
+native call; editing its launch/composer settings cannot authorize cleanup.
 
 Writer creates a row only after a proved owner-created first start and
 pre-input startup-dialog refusal. Persistence precedes retaining the surface.

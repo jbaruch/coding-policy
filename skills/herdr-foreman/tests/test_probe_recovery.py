@@ -187,7 +187,7 @@ class ProbeRecoveryTest(unittest.TestCase):
         with self.assertRaisesRegex(UsageError, "original --config"):
             probe_recovery.resolve(self.state, row["agent"], [worker], client, config_path=self.root / "different.json")
         self.assertEqual(probe_recovery.store_path(self.state).read_bytes(), before)
-        for change in ("process", "native", "closure"):
+        for change in ("process", "native", "closure", "tier", "config_sha256"):
             malformed = probe_recovery.load(self.state)
             malformed["records"][0][change] = {} if change != "closure" else {"closed": True}
             save_state(probe_recovery.store_path(self.state), malformed)
@@ -196,6 +196,41 @@ class ProbeRecoveryTest(unittest.TestCase):
                 self.measure(worker, client)
             self.assertEqual(probe_recovery.store_path(self.state).read_bytes(), original)
             save_state(probe_recovery.store_path(self.state), {"schema_version": 1, "records": [row]})
+
+    def test_changed_cleanup_config_refuses_before_native_calls(self):
+        for change in ("composer_glyph", "composer_placeholders", "composer_ignore_dim", "launch_args"):
+            with self.subTest(change=change):
+                self.state = self.root / (change + ".json")
+                worker, client = self.worker("codex"), self.native("codex", dialog=True)
+                self.measure(worker, client)
+                row = probe_recovery.pending(self.state, worker)
+                assert row is not None
+                original = probe_recovery.store_path(self.state).read_bytes()
+                setattr(worker, change, {"composer_glyph": "replacement", "composer_placeholders": ("authored draft",),
+                    "composer_ignore_dim": not worker.composer_ignore_dim, "launch_args": ("--no-alt-screen",)}[change])
+                before = list(client.events)
+                with self.assertRaisesRegex(UsageError, "worker config changed"):
+                    self.resolve(row, worker, client)
+                self.assertEqual(client.events, before)
+                self.assertEqual(probe_recovery.store_path(self.state).read_bytes(), original)
+
+    def test_nonretained_startup_failures_emit_measure_recovery_after_actual_cleanup(self):
+        for failure in (HerdrError("Fresh probe identity changed", {}), HerdrError("Fresh probe is not idle/done", {}),
+                composer._fresh_startup_error("startup_evidence_missing", "Missing ANSI evidence", {}),
+                composer._fresh_startup_error("startup_input_occupied", "Draft occupied", {})):
+            with self.subTest(failure=failure.message):
+                worker, client = self.worker("codex"), self.native("codex")
+                with patch("foreman.lifecycle._prepare_fresh_probe", side_effect=failure):
+                    result = self.measure(worker, client)
+                error = result["agents"]["codex"]["error"]
+                self.assertIn("measure --agent codex", error["message"])
+                self.assertIn("closed its unused probe", error["message"])
+                self.assertNotIn(" apply", error["message"])
+                self.assertNotIn("not_sent", error["message"])
+                self.assertIsNone(result["agents"]["codex"]["headroom_pct"])
+                self.assertEqual(client.panes, {})
+                self.assertEqual(client.agents, {})
+                self.assertFalse(any(event[0] == "prompt" for event in client.events))
 
     def test_public_owner_resolve_command_consumes_its_real_measure_gate(self):
         config = self.root / "config.json"

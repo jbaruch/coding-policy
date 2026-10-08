@@ -9,12 +9,13 @@ assessed outcome is accepted by the owner records.
 import os
 import re
 import secrets
+import shlex
 import sys
 import time
 
 from .config import assignment_worker
 from .composer import ensure_ready, startup_pending_error
-from .errors import ForemanError, HerdrError, StartShellNotReadyError, UsageError
+from .errors import ForemanError, HerdrError, StartShellNotReadyError, UsageError, owner_recovery
 from .herdr import READY_STATES, error_code, format_argv
 from .launch import holds_initializing_shell, holds_only_shell, require_empty_shell, start_worker, verify_running
 from . import probe_recovery, runnable
@@ -335,6 +336,11 @@ def measure_worker_kinds(client, templates, measured_at, *, state_path=None, con
         pane = None
         record = None
         pending = False
+        prior = None
+        startup = True
+        startup_error = None
+        closure = None
+        cleanup_error = None
         try:
             prior = probe_recovery.pending(state_path, template) if state_path is not None else None
             if prior is not None:
@@ -343,10 +349,13 @@ def measure_worker_kinds(client, templates, measured_at, *, state_path=None, con
                 raise UsageError("Worker kind {!r} has no coordination tier for its disposable usage probe.".format(template.name), {})
             pane = spawn(client, probe, tier, history=(), sleep=options.get("sleep", time.sleep))
             _prepare_fresh_probe(client, probe, pane, tier, sleep=options.get("sleep", time.sleep), warn=options.get("warn"))
+            startup = False
             snapshot = measure(client, [probe], measured_at, **options)
             record = dict(snapshot["agents"][probe.name])
             record.pop("tier_billing", None)
         except (HerdrError, UsageError) as exc:
+            if startup and prior is None:
+                startup_error = exc
             needs_retention = (pane is not None and exc.details.get("failure_kind") == "startup_dialog_pending"
                        and exc.details.get("agent") == probe.name and exc.details.get("pane_id") == pane)
             if needs_retention:
@@ -364,8 +373,9 @@ def measure_worker_kinds(client, templates, measured_at, *, state_path=None, con
             if pane is not None and not pending:
                 primary = sys.exc_info()[1]
                 try:
-                    close(client, probe.name, pane)
+                    closure = close(client, probe.name, pane)
                 except HerdrError as exc:
+                    cleanup_error = exc
                     if primary is not None:
                         action = "Probe cleanup also failed for pane {}: {}. Close it with `{}` before measuring again.".format(
                             pane, exc, format_argv(client.argv_pane_close(pane)))
@@ -378,6 +388,19 @@ def measure_worker_kinds(client, templates, measured_at, *, state_path=None, con
                             "plan": None, "headroom_pct": None, "window_group": group,
                             "skipped": False, "error": snapshot_error(exc),
                         }
+        if startup_error is not None and not pending:
+            operation = "measure --agent " + shlex.quote(template.name)
+            if state_path is not None:
+                operation += " --state " + shlex.quote(str(state_path))
+            if config_path is not None:
+                operation += " --config " + shlex.quote(str(config_path))
+            closed = isinstance(closure, dict) and closure.get("closed") is True
+            condition = ("The owner closed its unused probe; no usage command was sent. Restore the worker-kind configuration/native startup evidence, then repeat normal measure."
+                if closed else "No usage command was sent. Preserve and inspect the actual startup/cleanup evidence; restore the worker-kind configuration and finish owned cleanup before repeating normal measure.")
+            failure = cleanup_error or startup_error
+            record["error"] = snapshot_error(owner_recovery(failure,
+                "probe_cleanup_unproved" if cleanup_error else "probe_startup_unproved",
+                runnable.command(operation), condition, outcome="retryable" if closed else "blocked"))
         for member in members:
             copied = {**record, "kind": member.kind, "window_group": member.window_group,
                       "pane_id": None, "tier_billing": tier_billing(member.tiers)}
