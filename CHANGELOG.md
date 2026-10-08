@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.378 — 2026-10-08
+
 ### Fixed
 
 - Reset scheduling now verifies the loaded Python runtime's identity and
