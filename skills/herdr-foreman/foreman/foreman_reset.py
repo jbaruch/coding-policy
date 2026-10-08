@@ -1080,6 +1080,10 @@ def mechanics(agents, kind, name):
         raise StateError("No configured worker has kind {!r}, so the foreman's clear command is unknown. Add one to config.json.".format(kind), {"kind": kind})
     foreman = copy.copy(template)
     foreman.name = name
+    # A reset stays in this checkout. Codex /new can open a checkout picker;
+    # /clear is its native same-session context reset, not a chooser response.
+    if kind == "codex" and foreman.clear_prompt == "/new":
+        foreman.clear_prompt = "/clear"
     return foreman
 
 
@@ -1135,6 +1139,33 @@ def _cleared_session(client, pane_id, before, processes, *, sleep, clock,
 
 class DeliveryInterrupted(HerdrError):
     """A delivery that failed after typing into the pane; never retried automatically."""
+
+
+def settled_clear(client, agent, pane_id, processes, *, sleep, clock,
+                  budget_sec=CLEAR_SESSION_BUDGET_SEC, poll_sec=CLEAR_SESSION_POLL_SEC):
+    """Observe stable idle after clear; never wait for prompt-triggered identity.
+
+    Native startup hooks can follow a stale done observation. The same named
+    runtime and process pins must survive every read, with no input/recovery.
+    """
+    deadline = clock() + budget_sec
+    stable = 0
+    while True:
+        live = _foreman_record(client, pane_id)
+        if (live.get("name") != agent.name or live.get("agent") != agent.kind
+                or foreground_processes(client, pane_id) != processes):
+            raise SessionChanged("The cleared foreman is under another process or changed runtime; no continuation was sent.",
+                                 {"pane_id": pane_id, "reason": "native_session_changed"})
+        if live.get("agent_status") == "blocked":
+            raise HerdrError("The cleared foreman is blocked; inspect its native prompt without answering it automatically.",
+                             {"pane_id": pane_id, "reason": "clear_blocked"})
+        stable = stable + 1 if live.get("agent_status") in SETTLE_STATES else 0
+        if stable >= RESET_STABLE_READS:
+            return
+        if clock() >= deadline:
+            raise HerdrError("The cleared foreman did not establish stable idle; no continuation was sent.",
+                             {"pane_id": pane_id, "reason": "clear_not_settled"})
+        sleep(poll_sec)
 
 
 class SessionInterrupted(DeliveryInterrupted):
@@ -1227,6 +1258,7 @@ def deliver(client, agents, pane_id, stow, state, *, native_session, still_ready
         phase = "clear_settle"
         client.agent_wait(agent.name, until=SETTLE_STATES, timeout_ms=DEFAULT_SETTLE_TIMEOUT_MS)
         sleep(settle_sec)
+        settled_clear(client, agent, pane_id, processes[0], sleep=sleep, clock=clock)
         resuming[0] = True
         if agent.kind != "codex":
             phase = "clear_native_receipt"

@@ -17,6 +17,10 @@
   no longer prevents submitting that continuation. Duplicate, old-session,
   replacement, changed-stow and unclaimed inputs refuse; delivery still
   requires the hook's durable acceptance (#707).
+  Native long-paste framing and collapsed transcript views preserve that
+  acceptance proof. Only verified continuations receive native authentication
+  context. Post-clear startup settles read-only under unchanged process pins;
+  Codex resets with `/clear` instead of entering a `/new` checkout picker.
 
 ## 0.3.377 — 2026-10-08
 

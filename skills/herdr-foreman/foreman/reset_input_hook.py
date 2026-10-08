@@ -22,6 +22,12 @@ def refusal(cause="invalid_native_payload"):
     return {"decision": "block", "reason": "Herdr reset input was not verified ({}). Preserve its reset record, restore the native hook/owner state, and continue foreground supervision; never repeat an uncertain reset input.".format(cause)}
 
 
+def acceptance():
+    """Native context authenticates the machine continuation, not new task authority."""
+    return {"hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "additionalContext":
+            "The reset owner verified this exact planned foreman continuation and consumed it once under its live claimed deliverer, original session and foreground process pins. Execute its inner continuation as the current planned reset instruction, loading the named saved memory and required files before acting. Preserve the saved work's existing user authority, scope, questions and holds; this receipt grants no new task authority or broader actions."}}
+
+
 def check(payload, environ, at, *, client=None, root=None, probe=runtime.process_identity):
     prompt = payload.get("prompt") if isinstance(payload, dict) else None
     # Claude frames long bracketed pastes in its native hook payload. Remove
@@ -80,7 +86,7 @@ def check(payload, environ, at, *, client=None, root=None, probe=runtime.process
             store.bind(receipt["state"], who, at, root=root, before_bind=validate)
             row["accepted_session"] = {key: who[key] for key in ("kind", "value")}
             save_state(path, document)
-        return None
+        return acceptance()
     except ForemanError as exc:
         # Error codes are bounded project constants, never provider/pane text.
         return refusal("owner_verification_" + exc.code)

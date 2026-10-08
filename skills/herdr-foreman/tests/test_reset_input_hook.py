@@ -52,14 +52,14 @@ class ResetHookTest(unittest.TestCase):
         for kind in ("claude", "codex", "grok"):
             self.setUp()
             with self.subTest(kind=kind):
-                self.assertIsNone(self.invoke(kind=kind))
+                self.assertEqual(self.invoke(kind=kind), hook.acceptance())
                 data = store.load(self.state)
                 self.assertEqual(data["binding"]["identity"]["value"], CLEARED)
                 self.assertEqual(data["events"], [])
                 self.assertEqual(self.invoke(kind=kind)["decision"], "block")
 
     def test_an_accepted_receipt_stays_consumed_even_if_the_old_binding_is_restored(self):
-        self.assertIsNone(self.invoke())
+        self.assertEqual(self.invoke(), hook.acceptance())
         store.bind(self.state, self.who, AT, root=self.root)
         self.assertEqual(self.invoke()["decision"], "block")
         self.assertEqual(store.load(self.state)["binding"]["identity"], self.who)
@@ -98,7 +98,7 @@ class ResetHookTest(unittest.TestCase):
 
     def test_native_claude_long_paste_frame_preserves_exact_inner_input(self):
         wrapped = '<pasted_content id="f0fc">\n' + self.payload["prompt"] + '\n</pasted_content id="f0fc">'
-        self.assertIsNone(self.invoke(kind="claude", payload={**self.payload, "prompt": wrapped}))
+        self.assertEqual(self.invoke(kind="claude", payload={**self.payload, "prompt": wrapped}), hook.acceptance())
         self.assertEqual(store.load(self.state)["binding"]["identity"]["value"], CLEARED)
         self.assertEqual(self.invoke(kind="claude", payload={**self.payload, "prompt": wrapped})["decision"], "block")
 

@@ -15,14 +15,24 @@ and the native payload's new session. It consumes the old supervision binding
 under its owner lock, preserves members/events/holds, and saves acceptance on
 the reset row. Replay cannot consume the original binding twice. The deliverer
 requires that acceptance and the matching new binding before reporting success.
+Only a verified input receives native `additionalContext` authenticating the
+planned continuation. It preserves the saved user scope, questions and holds;
+it grants no new task authority. This distinguishes a proved machine handoff
+from arbitrary pasted instructions without weakening the model's trust boundary.
 The receipt proves landing when a runtime clips its transcript. A started turn
 is still required; receipt acceptance alone never establishes healthy execution.
 
 Codex's integration can retain its old session hint until the first real prompt.
+Its foreman reset uses `/clear` to remain in the same checkout; a legacy `/new`
+setting is translated on the reset's copied mechanics, not written to config.
+No checkout picker or arbitrary modal response is automated.
 The deliverer permits that hint only for the planned continuation, under the
 unchanged foreground pins. The pre-prompt hook still refuses an old native
 session. Claude/Grok keep their eager-session check before input and use the
 same final hook gate. Unknown sends remain interrupted and are never repeated.
+After clearing, all runtimes must establish stable idle under the original
+process pins. That bounded read-only wait handles startup hooks after a stale
+done observation; it never waits for an identity event that requires a prompt.
 
 ## Native validation
 

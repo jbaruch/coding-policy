@@ -213,6 +213,43 @@ def worker(name, kind, delivery="type", enters=1):
     return SimpleNamespace(name=name, kind=kind, clear_prompt="/clear", slash_delivery=delivery, slash_enter_count=enters)
 
 
+class SettledClearTest(unittest.TestCase):
+    def observe(self, client, budget=30):
+        now, waits = [0.0], []
+
+        def tick(seconds):
+            waits.append(seconds)
+            now[0] += seconds
+
+        with patch("foreman.foreman_reset.process_identity", side_effect=client.identify), \
+             patch.object(client, "pane_get", side_effect=AssertionError("never wait for prompt-triggered session identity")):
+            foreman_reset.settled_clear(client, worker("foreman", client.kind), PANE,
+                                       [{"pid": 4242, "identity": "started-once"}],
+                                       sleep=tick, clock=lambda: now[0], budget_sec=budget, poll_sec=1)
+        return waits
+
+    def test_all_runtimes_wait_out_stale_done_before_startup_hooks_without_input(self):
+        for kind in ("claude", "codex", "grok"):
+            client = FakeClient(["done", "done", "working", "idle", "idle", "idle"], kind=kind)
+            with self.subTest(kind=kind):
+                self.assertEqual(self.observe(client), [1] * 5)
+                self.assertEqual(client.keystrokes, [])
+
+    def test_unsettled_or_blocked_clear_refuses_without_a_recovery_key(self):
+        for status, reason in (("working", "clear_not_settled"), ("blocked", "clear_blocked")):
+            client = FakeClient([status])
+            with self.subTest(status=status), self.assertRaises(HerdrError) as caught:
+                self.observe(client, budget=2)
+            self.assertEqual(caught.exception.details["reason"], reason)
+            self.assertEqual(client.keystrokes, [])
+
+    def test_replacement_during_startup_refuses_without_input(self):
+        client = FakeClient(["idle"], pids=[5151])
+        with self.assertRaises(foreman_reset.SessionChanged):
+            self.observe(client)
+        self.assertEqual(client.keystrokes, [])
+
+
 class HandoffHoldTest(unittest.TestCase):
     def test_only_a_handoff_hold_lets_the_foreman_reset(self):
         self.assertEqual(check(active=True, held=True, hold_kind="handoff")["pane_id"], PANE)
@@ -553,6 +590,13 @@ class DeliverTest(unittest.TestCase):
         template = worker("claude-a", "claude")
         foreman = foreman_reset.mechanics([template], "claude", "foreman")
         self.assertEqual((template.name, foreman.name), ("claude-a", "foreman"))
+
+    def test_codex_legacy_new_reset_uses_clear_without_rewriting_worker_configuration(self):
+        template = worker("codex-a", "codex")
+        template.clear_prompt = "/new"
+        reset = foreman_reset.mechanics([template], "codex", "foreman")
+        self.assertEqual(reset.clear_prompt, "/clear")
+        self.assertEqual(template.clear_prompt, "/new")
 
 
 class RecordTest(unittest.TestCase):
