@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.377 — 2026-10-08
+
 ### Changed
 
 - Foreman invocation now loads a compact 17-step execution plan instead of the
