@@ -6,6 +6,7 @@ import re
 import shlex
 import shutil
 import subprocess
+import socket
 import tempfile
 import fcntl
 import json
@@ -1433,7 +1434,7 @@ class ResetCommandTest(CliCase):
 # claim. Only native pane input is replaced with a controlled journal. No
 # default Herdr session or production owner state is reachable.
 STARTUP_CHILD = r'''
-import json, os, sys, time
+import json, os, signal, socket, sys
 from pathlib import Path
 from foreman import foreman_reset, supervision_runtime
 from foreman.state import state_lock
@@ -1452,6 +1453,9 @@ if mode == "before_claim":
         raise SystemExit(7)
 if mode == "false_claim":
     foreman_reset.startup_notify(fd, "claimed", process)
+    # The scheduler must reject this unrecorded claim and reap the child.
+    signal.pause()
+    raise SystemExit(9)
 else:
     claimed = foreman_reset.claim(state, plan, process)
     if not claimed:
@@ -1464,16 +1468,17 @@ else:
     foreman_reset.startup_notify(fd, "claimed", process)
     if mode == "claimed_failure":
         raise SystemExit(7)
-for _ in range(300):
-    if Path(release).exists():
-        with Path(journal).open("a") as handle:
-            handle.write("clear\nresume\n")
-        foreman_reset.finish(state, plan, "delivered", {
-            "schema_version": foreman_reset.RESET_SCHEMA_VERSION, **plan, "agent": "fixture-foreman", "cleared": True,
-            "resume": {"landed": True, "started": True}})
-        raise SystemExit(0)
-    time.sleep(0.02)
-raise SystemExit(8)
+with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as wire:
+    wire.connect(release)
+    if wire.recv(1) != b"r":
+        raise SystemExit(8)
+    with Path(journal).open("a") as handle:
+        handle.write("clear\nresume\n")
+    foreman_reset.finish(state, plan, "delivered", {
+        "schema_version": foreman_reset.RESET_SCHEMA_VERSION, **plan, "agent": "fixture-foreman", "cleared": True,
+        "resume": {"landed": True, "started": True}})
+    wire.sendall(b"d")
+raise SystemExit(0)
 '''
 
 
@@ -1484,6 +1489,13 @@ class DetachedStartupTest(unittest.TestCase):
         self.root = Path(self.temp.name)
         self.state = self.root / "owner state.json"
         self.release = self.root / "release"
+        self.channel = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        self.addCleanup(self.channel.close)
+        self.channel.bind(str(self.release))
+        self.channel.listen(1)
+        # Failure-only deadlock guard; success depends on explicit IPC, not
+        # elapsed time, polling iterations or a filesystem marker's arrival.
+        self.channel.settimeout(20)
         self.journal = self.root / "input"
         self.log = self.root / "reset.log"
         self.child_script = self.root / "child.py"
@@ -1515,8 +1527,15 @@ class DetachedStartupTest(unittest.TestCase):
             return foreman_reset.schedule(self.state, self.plan, RESET_AT, lambda: self.start(next(choices)),
                                           native_session=SESSION)
 
+    def release_and_confirm(self):
+        wire, _ = self.channel.accept()
+        with wire:
+            wire.settimeout(20)
+            wire.sendall(b"r")
+            self.assertEqual(wire.recv(1), b"d")
+
     def finish_once(self):
-        self.release.write_text("release", encoding="utf-8")
+        self.release_and_confirm()
         for child in self.children:
             child.child.wait(timeout=5)
         self.assertEqual(self.journal.read_text(), "clear\nresume\n")
@@ -1537,7 +1556,6 @@ class DetachedStartupTest(unittest.TestCase):
             with self.subTest(mode=mode):
                 # Each subcase gets independent owner records and fixture control.
                 foreman_reset.record_path(self.state).unlink(missing_ok=True)
-                self.release.unlink(missing_ok=True)
                 self.journal.unlink(missing_ok=True)
                 self.log.unlink(missing_ok=True)
                 before = len(self.children)
@@ -1594,14 +1612,8 @@ class DetachedStartupTest(unittest.TestCase):
         self.assertEqual(supervision_runtime.process_identity(row["process"]["pid"]), row["process"])
         self.assertFalse(self.journal.exists())
         # The scheduling tool/process is gone; release the same detached child.
-        self.release.write_text("release", encoding="utf-8")
+        self.release_and_confirm()
         final = json.loads(foreman_reset.record_path(self.state).read_text())["resets"][0]
-        for _ in range(100):
-            final = json.loads(foreman_reset.record_path(self.state).read_text())["resets"][0]
-            if final["status"] == "delivered":
-                break
-            import time
-            time.sleep(0.02)
         self.assertEqual(final["status"], "delivered")
         self.assertEqual(self.journal.read_text(), "clear\nresume\n")
 
