@@ -99,6 +99,10 @@ skills/herdr-foreman/state-schema.md — owner records and migration contracts
 
 ## Step 1 — Determine the Mode
 
+Delegation in either mode follows `rules/agent-team-operation.md` Delegation.
+In a team round, use the existing Herdr owner route under
+`skills/herdr-foreman/references/team-operation.md` Delegation.
+
 A refusal naming the legacy `teamlead` default home is a one-time operator
 step, not a mode: record it as a
 user-attention blocker naming `foreman migrate-home` (`skills/herdr-foreman/state-schema.md` Home

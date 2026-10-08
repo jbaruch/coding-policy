@@ -760,6 +760,11 @@ JSON
       "$oc/brief-advisor.md")" && [[ "$criteria_count" == "2" ]]; then
     pass; else fail "report contracts: the rendered brief must count 2 criteria, got ${criteria_count:-none}"; fi
   local contract_role
+  if [[ $RC -eq 0 ]] && grep -Fq 'rules/agent-team-operation.md' "$oc/COMMON.md" \
+     && grep -Fq 'Delegation. Use no native' "$oc/COMMON.md" \
+     && grep -Fq 'staffing need in your report' "$oc/COMMON.md" \
+     && grep -Fq 'Start no child agent' "$oc/COMMON.md"; then
+    pass; else fail "packaged worker common must carry the Herdr-only delegation and foreman staffing route"; fi
   # #702: a packaged specialist must receive shell examples literally, not
   # replacement-pattern syntax. Include an internal/trailing newline too.
   local literal_input literal_values="$TMP/literal-values.json" literal_out="$TMP/literal-out"
