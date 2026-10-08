@@ -69,7 +69,8 @@ claiming that recalled context proves present competence or independence.
 
 The foreman resets its context at every round boundary (SKILL.md Step 17), so
 this stow runs every round. `foreman foreman-reset` refuses unless the stow is
-`reset_ready`; the reset command's contract is in
+`reset_ready`; native input verification and its validation procedure are in
+`skills/herdr-foreman/references/reset-hooks.md`. The reset command's contract is in
 `skills/herdr-foreman/foreman/foreman_reset.py` (module docstring).
 
 Before planned foreman context compaction, restart, model change or replacement, sweep the conversation for knowledge that is still only in context. Persist accepted decisions, unanswered questions, promised updates, unresolved work, assumptions and useful lessons in their appropriate owner artifacts. Put user-facing obligations in the attention queue; reference their durable ids in the stow. Do not treat displayed questions as answered.
@@ -111,14 +112,17 @@ under when running Step 17's `foreman-reset` command.
 
 - **Exit 0** — stdout names the scheduled `pane_id`, `stow`, deliverer `pid`
   and `log`
+  - A fresh schedule confirms the loaded child's identity and saved claim
+  - Preclaim loss is recovered within the owner's startup allowance;
+    failed starts remain in the private log
   - `replayed: true` means this exact reset was already scheduled, and
     nothing new started
   - End the turn now
   - Once the pane is idle, the deliverer clears it and sends the resume
     prompt naming that stow; the next context takes Step 17's Resume Route
 - **Exit 1** — stderr is one JSON object; route on its `error` field:
-  - `reset_ended` — this stow's one reset attempt failed or was
-    interrupted, including a deliverer that could not start
+  - `reset_ended` — this stow's delivery failed or was interrupted,
+    including exhausted preclaim startup recovery
     - Never re-run `foreman-reset` for this stow
     - Record a user-attention blocker quoting `details.resume_prompt` and
       `details.record`

@@ -441,6 +441,7 @@ def build_parser():
     deliver_parser = sub.add_parser("foreman-reset-deliver", parents=[common], help="Internal: wait for the foreman pane to idle, then clear it and send the resume prompt.")
     deliver_parser.add_argument("--pane", required=True)
     deliver_parser.add_argument("--stow", required=True)
+    deliver_parser.add_argument("--startup-fd", type=int, help=argparse.SUPPRESS)
     reconcile_parser = sub.add_parser("foreman-reset-reconcile", parents=[common], help="Close a reset whose deliverer stopped without an outcome, as delivered or failed.")
     reconcile_parser.add_argument("--pane", required=True)
     reconcile_parser.add_argument("--stow", required=True)
@@ -2103,10 +2104,8 @@ def _herdr_bin_setting(args):
 
 
 def _spawn_detached(argv, sink):
-    """Start `argv` in its own session so it outlives the foreman's turn."""
-    process = subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=sink, stderr=sink,
-                               start_new_session=True, cwd=str(Path(__file__).resolve().parents[1]))
-    return process.pid
+    """Start an owned child that proves its loaded identity and durable claim."""
+    return foreman_reset.DetachedReset(argv, sink, str(Path(__file__).resolve().parents[1]))
 
 
 def _resume_options(args):
@@ -2151,8 +2150,11 @@ def cmd_foreman_reset_deliver(args, client=None, warn=None, trace=None):
     state_path = Path(_state_path(args)).expanduser().resolve()
     plan = {"pane_id": args.pane, "stow": args.stow}
     options = _resume_options(args)
+    startup_fd = getattr(args, "startup_fd", None)
     try:
-        claimed = foreman_reset.claim(state_path, plan, supervision_runtime.process_identity(os.getpid()))
+        identity = supervision_runtime.process_identity(os.getpid())
+        foreman_reset.startup_notify(startup_fd, "ready", identity)
+        claimed = foreman_reset.claim(state_path, plan, identity)
     except ForemanError as exc:
         # Nothing was typed. The row must show a terminal failure before the
         # operator's recovery is authorized.
@@ -2160,8 +2162,10 @@ def cmd_foreman_reset_deliver(args, client=None, warn=None, trace=None):
         _raise_reset_failure(state_path, args.stow, outcome,
                              lambda: foreman_reset.fail_unclaimed(state_path, plan, outcome))
     if not claimed:
+        foreman_reset.startup_notify(startup_fd, "unclaimed", identity)
         return {"schema_version": foreman_reset.RESET_SCHEMA_VERSION, **plan, "skipped": "not the scheduled owner of this reset"}, None
     try:
+        foreman_reset.startup_notify(startup_fd, "claimed", identity)
         # Setup runs after the claim, so its failure must finish the row too.
         client = client if client is not None else _client(args, trace=trace)
         result = foreman_reset.deliver(

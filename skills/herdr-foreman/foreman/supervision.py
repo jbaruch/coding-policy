@@ -475,7 +475,7 @@ def _refuse_lost_owner(state_path, directory):
             raise StateError("A saved foreman discovery record already names the missing supervision owner {}. Restore its owner document before rebinding; do not discard unresolved assignments.".format(store_path(state_path)), {})
 
 
-def bind(state_path, who, at, *, root=None):
+def bind(state_path, who, at, *, root=None, before_bind=None):
     if not isinstance(who, dict) or set(who) != {"kind", "value", "cwd", "herdr_env", "pane_id"}:
         raise UsageError("Binding requires the foreman's exact native kind/value, cwd, HERDR_ENV, and pane_id.", {})
     who = identity(who["value"], who["cwd"], who["herdr_env"], kind=who["kind"], pane_id=who["pane_id"])
@@ -488,6 +488,8 @@ def bind(state_path, who, at, *, root=None):
     # sessions can stop once the owner has committed a newer binding.
     with state_lock(store_path(state_path)):
         data = load(state_path)
+        if before_bind is not None:
+            before_bind(data)
         old = data["binding"]
         first_use = old is None and not store_path(state_path).exists()
         if first_use:

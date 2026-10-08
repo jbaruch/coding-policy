@@ -25,10 +25,14 @@ The foreman's runtime mechanics (clear command, slash delivery, composer
 glyphs) come from a configured worker of the same kind; Herdr names the kind
 and the foreman's agent name from its own pane.
 
-One delivery attempt per pane and stow, never retried automatically.
+One claimed delivery attempt per pane and stow, never retried automatically.
+The scheduler verifies the loaded child's identity and durable claim before
+returning success. Lost preclaim children are reaped and replaced within the
+startup allowance while the record lock prevents them from ever claiming;
+the private reset log retains their identity and failure reason.
 `<state>.foreman-reset.json` records each scheduled reset (`schedule`), and
 the deliverer claims it before sending anything (`claim`). A retry of a live,
-delivered or reconciled reset replays the record and spawns nothing. Any
+claimed reset, or a delivered or reconciled reset, replays the record and spawns nothing. Any
 other reset is finalized `failed` (nothing typed) or `interrupted` (typing began) with the
 resume prompt the operator pastes, under the Working Memory recovery
 carve-out; the next round resets from a new stow. Before every keystroke the
@@ -41,19 +45,24 @@ kind while the deliverer waits (#523). `foreman-reset` records the native
 session bound at `supervision-bind` on the row, and every keystroke of the
 clear command, extra Enters included, refuses unless the pane still holds that
 session.
-The clear itself starts a new native session by design. The deliverer waits
-for Herdr to report that new session, pins it, and every keystroke of the
-resume prompt refuses unless the pane still holds the pinned session. A new
-session alone cannot tell the clear's from a replacement's, so the pin also
-requires the pane's foreground processes to be the ones the first keystroke
-found, by pid, start time and command line: the clear keeps its process, and a
-replacement is a new one.
+The clear itself starts a new native session by design. Claude/Grok report it
+before the continuation; Codex can report it only after a prompt is submitted.
+All routes use the same UserPromptSubmit gate before model execution. The
+claimed child saves the foreground process pins it found before clearing;
+the hook verifies the exact input, unchanged stow, live claim and new native
+session, then atomically rebinds supervision and records input acceptance.
+Every keystroke checks the same foreground identities. Codex alone permits
+the old integration hint until its real continuation triggers the native hook.
+No delivered outcome is recorded without that hook's durable acceptance.
 """
 
 import copy
 import fcntl
+import json
 import os
+import select
 import shlex
+import subprocess
 import time
 from contextlib import contextmanager
 from pathlib import Path
@@ -68,7 +77,13 @@ from .runnable import command, launcher
 from .supervision_runtime import process_identity
 from .state import save_state, state_lock
 
-RESET_SCHEMA_VERSION = 2
+RESET_SCHEMA_VERSION = 3
+#: Startup is acknowledged by the loaded child, not guessed from its launcher
+#: PID. A macOS Python launcher execs the framework runtime in the same PID.
+STARTUP_BUDGET_SEC = 10
+STARTUP_ATTEMPTS = 2
+STARTUP_MESSAGE_BYTES = 1024
+STARTUP_REAP_SEC = 5
 #: How long the deliverer waits for the foreman's turn to end, and how often
 #: it looks. Script-owned constants (rules/ci-safety.md Always Watch CI).
 IDLE_BUDGET_SEC = 1800
@@ -89,8 +104,9 @@ CLEAR_SESSION_POLL_SEC = 1
 #: The detail keys a failure record keeps. Herdr and composer errors can carry
 #: raw subprocess output or pane text; the record keeps identifiers only.
 FAILURE_DETAIL_KEYS = frozenset({"pane_id", "stow", "record", "status", "pid", "lock", "kind", "reconciled",
-                                 "reconciled_at", "schema_version", "reason"})
+                                 "reconciled_at", "schema_version", "reason", "phase", "name_matches", "kind_matches"})
 RESUME_OPENING = "Foreman resume after a planned round-boundary reset."
+RESET_RECEIPT_PREFIX = "Herdr reset input receipt: "
 RESUME_TEMPLATE = (
     RESUME_OPENING + " Your earlier conversation is gone by design. Run the "
     "herdr-foreman skill; every command below is complete and runnable as written, "
@@ -115,6 +131,30 @@ def resume_prompt(stow, state, *, config=None, herdr_bin=None):
     if herdr_bin:
         flags += " --herdr-bin " + shlex.quote(herdr_bin)
     return RESUME_TEMPLATE.format(tl="bash " + shlex.quote(launcher()), stow=shlex.quote(stow), flags=flags)
+
+
+def guarded_resume(stow, state, native_session, processes, *, options=None):
+    """Native wire input; the pre-prompt hook consumes the handoff once.
+
+    The envelope identifies existing owner records, never authorizes itself.
+    It contains no pane text, provider output or credentials.
+    """
+    receipt = {"schema_version": 1, "state": str(supervision.canonical(state)), "stow": stow,
+               "native_session": native_session, "foreground": processes}
+    return resume_prompt(stow, str(supervision.canonical(state)), **(options or {})) + "\n" + RESET_RECEIPT_PREFIX + json.dumps(receipt, sort_keys=True)
+
+
+def accepted_resume(state, pane_id, stow, before):
+    """The hook's new owner binding, not a screen or stale integration hint."""
+    binding = supervision.load(state)["binding"]
+    document, _ = _load(record_path(state), migrate_legacy=False)
+    row = _row(document, {"pane_id": pane_id, "stow": stow})
+    who = binding["identity"] if binding is not None else {}
+    current = {key: who.get(key) for key in ("kind", "value")}
+    if (row is not None and row["status"] == "delivering" and row["accepted_session"] == current
+            and who.get("pane_id") == pane_id and _valid_session(current) and current != before):
+        return current
+    return None
 
 
 OPERATOR_RECOVERY = ("Do not run `{}` again for this stow. The operator recovers the foreman under "
@@ -153,6 +193,141 @@ class SessionChanged(HerdrError):
     code = "reset_session_changed"
 
 
+class StartupFailed(StateError):
+    """The detached child supplied no verified startup/claim acknowledgment."""
+
+    code = "reset_startup_failed"
+
+
+def startup_notify(fd, phase, process):
+    """Send the child's post-import identity and, later, its durable claim proof.
+
+    The inherited pipe is private to this launch. No argv, pane text or
+    provider output crosses it. The child closes it after the second message.
+    """
+    if fd is None:
+        return
+    try:
+        payload = json.dumps({"phase": phase, "process": process}).encode("ascii") + b"\n"
+        if os.write(fd, payload) != len(payload):
+            raise StartupFailed("The reset startup acknowledgment was incomplete; continue foreground supervision and inspect the reset log.", {})
+    except OSError:
+        raise StartupFailed("The reset startup pipe is unavailable; continue foreground supervision and inspect the reset log.", {}) from None
+    finally:
+        if phase != "ready":
+            os.close(fd)
+
+
+class DetachedReset:
+    """One owned detached child, with readiness and post-lock claim handshakes.
+
+    `ready` validates the child's final runtime identity against a live probe.
+    `claimed` waits for the owner-record claim after the scheduler unlocks.
+    `abort` is called only while that record is locked and still unclaimed;
+    an unreaped Popen child cannot have its PID reused during termination.
+    Failed pre-claim attempts are appended to the existing private reset log.
+    """
+
+    def __init__(self, argv, sink, cwd):
+        self.sink = os.fdopen(os.dup(sink.fileno()), "ab")
+        self.buffer = b""
+        self.identity = None
+        self.fd, writer = os.pipe()
+        try:
+            self.child = subprocess.Popen([*argv, "--startup-fd", str(writer)],
+                                          stdin=subprocess.DEVNULL, stdout=sink, stderr=sink,
+                                          start_new_session=True, cwd=cwd, pass_fds=(writer,))
+        except OSError:
+            os.close(self.fd)
+            self.sink.close()
+            raise
+        finally:
+            os.close(writer)
+
+    def _failed(self, reason):
+        return StartupFailed("Reset child {} did not establish continuation ({}); continue foreground supervision and inspect the reset log.".format(
+            self.child.pid, reason), {"pid": self.child.pid, "reason": reason})
+
+    def _receive(self):
+        if self.fd is None:
+            raise self._failed("startup_pipe_closed")
+        deadline = time.monotonic() + STARTUP_BUDGET_SEC
+        while b"\n" not in self.buffer:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise self._failed("startup_timeout")
+            try:
+                readable, _, _ = select.select([self.fd], [], [], remaining)
+                if not readable:
+                    raise self._failed("startup_timeout")
+                chunk = os.read(self.fd, STARTUP_MESSAGE_BYTES)
+            except OSError:
+                raise self._failed("startup_pipe_unavailable") from None
+            if not chunk:
+                raise self._failed("startup_child_exited")
+            self.buffer += chunk
+            if len(self.buffer) > STARTUP_MESSAGE_BYTES:
+                raise self._failed("startup_message_oversized")
+        line, self.buffer = self.buffer.split(b"\n", 1)
+        try:
+            return json.loads(line)
+        except (ValueError, UnicodeDecodeError):
+            raise self._failed("startup_message_invalid") from None
+
+    def ready(self, probe):
+        message = self._receive()
+        identity = message.get("process") if isinstance(message, dict) else None
+        if (not isinstance(message, dict) or set(message) != {"phase", "process"} or message["phase"] != "ready"
+                or not isinstance(identity, dict) or set(identity) != {"pid", "identity"}
+                or type(identity["pid"]) is not int or identity["pid"] != self.child.pid
+                or not isinstance(identity["identity"], str) or len(identity["identity"]) != 64
+                or any(ch not in "0123456789abcdef" for ch in identity["identity"])
+                or probe(self.child.pid) != identity):
+            raise self._failed("startup_identity_unverified")
+        self.identity = identity
+        return identity
+
+    def claimed(self):
+        if self._receive() != {"phase": "claimed", "process": self.identity}:
+            raise self._failed("startup_claim_unverified")
+
+    def abort(self):
+        if self.child.poll() is None:
+            try:
+                self.child.terminate()
+            except ProcessLookupError:
+                pass  # The owned child exited between poll and terminate; wait reaps it.
+            try:
+                self.child.wait(timeout=STARTUP_REAP_SEC)
+            except subprocess.TimeoutExpired:
+                self.child.kill()
+                self.child.wait(timeout=STARTUP_REAP_SEC)
+        self.close()
+
+    def close(self):
+        if self.fd is not None:
+            os.close(self.fd)
+            self.fd = None
+        self.sink.close()
+
+    def record_loss(self, attempt, exc):
+        try:
+            self.sink.write(json.dumps({"startup_attempt": attempt, "phase": "preclaim", "process": self.identity,
+                                       "pid": self.child.pid, "reason": exc.details.get("reason", exc.code)}).encode("ascii") + b"\n")
+            self.sink.flush()
+            os.fsync(self.sink.fileno())
+        except OSError:
+            raise StateError("Could not retain reset startup evidence; restore access to the reset log before another scheduling call. Continue foreground supervision.",
+                             {"pid": self.child.pid, "reason": "startup_log_unavailable"}) from None
+
+    def abandon(self, attempt, exc):
+        """Retain preclaim loss evidence and reap even when logging fails."""
+        try:
+            self.record_loss(attempt, exc)
+        finally:
+            self.abort()
+
+
 def record_path(state_path):
     return Path(str(Path(state_path).expanduser().resolve()) + ".foreman-reset.json")
 
@@ -165,11 +340,12 @@ def record_path(state_path):
 STATUSES = frozenset({"scheduled", "delivering", "delivered", "failed", "interrupted", "reconciled"})
 #: Schema 1 rows lack `native_session`; schema 2 adds it (#523).
 ROW_FIELDS_V1 = frozenset({"schema_version", "pane_id", "stow", "status", "scheduled_at", "options", "process", "result"})
-ROW_FIELDS = ROW_FIELDS_V1 | {"native_session"}
+ROW_FIELDS_V2 = ROW_FIELDS_V1 | {"native_session"}
+ROW_FIELDS = ROW_FIELDS_V2 | {"foreground", "accepted_session"}
 OPTION_FIELDS = frozenset({"config", "herdr_bin"})
 SESSION_KINDS = ("id", "path")
 #: The agents whose native session supervision-bind accepts (supervision_runtime.bind_current).
-SESSION_AGENTS = ("claude", "codex")
+SESSION_AGENTS = ("claude", "codex", "grok")
 
 
 def _version(value, expected=RESET_SCHEMA_VERSION):
@@ -183,19 +359,45 @@ def _valid_session(value):
             and isinstance(value["value"], str) and bool(value["value"]))
 
 
+def _valid_foreground(value):
+    return (isinstance(value, list) and bool(value)
+            and all(isinstance(item, dict) and set(item) == {"pid", "identity"}
+                    and type(item["pid"]) is int and item["pid"] > 0
+                    and isinstance(item["identity"], str) and bool(item["identity"]) for item in value)
+            and len({item["pid"] for item in value}) == len(value))
+
+
+def arm_resume(state, pane, stow, before, processes):
+    """Only the claimed child saves the pre-clear process pins for its input hook."""
+    path = record_path(state)
+    with state_lock(path):
+        document = _records(path)
+        row = _row(document, {"pane_id": pane, "stow": stow})
+        me = process_identity(os.getpid())
+        if (row is None or row["status"] != "delivering" or row["process"] != me
+                or row["native_session"] != before or not _valid_foreground(processes)
+                or row["foreground"] is not None):
+            raise UsageError("The reset input cannot be armed by this process. Preserve its owner record and continue foreground supervision.", {})
+        row["foreground"] = copy.deepcopy(processes)
+        save_state(path, document)
+
+
 def _migrate(document):
-    """Upgrade a schema-1 record in memory; `_open` persists it.
+    """Upgrade schema 1/2 in memory; `_open` persists schema 3.
 
     A schema-1 row never recorded the bound native session, so it migrates
     with `native_session: null`, and a deliverer that claims such a row
-    refuses before any keystroke. Every schema-1 row is validated against
+    refuses before any keystroke. Every legacy row is validated against
     its own shape first; one that fails leaves the record unusable.
     """
     rows = document.get("resets")
-    if not isinstance(rows, list) or not all(_valid_row(row, 1) for row in rows):
+    version = document.get("schema_version")
+    if version not in (1, 2) or not isinstance(rows, list) or not all(_valid_row(row, version) for row in rows):
         return False
     for row in rows:
-        row.update(schema_version=RESET_SCHEMA_VERSION, native_session=None)
+        row.update(schema_version=RESET_SCHEMA_VERSION, foreground=None, accepted_session=None)
+        if version == 1:
+            row["native_session"] = None
         if row["status"] == "delivered":
             row["result"]["schema_version"] = RESET_SCHEMA_VERSION
     document["schema_version"] = RESET_SCHEMA_VERSION
@@ -208,7 +410,7 @@ def _alive(process, probe=None):
 
 
 def _load(path, *, migrate_legacy=True):
-    """The reset record in this build's shape, and whether it was migrated from schema 1.
+    """The reset record in this build's shape, and whether it needs owner migration.
 
     A newer `schema_version` is data this build lags, not corruption
     (rules/stateful-artifacts.md Migration Policy). A write refuses it;
@@ -234,14 +436,15 @@ def _load(path, *, migrate_legacy=True):
                                "coding-policy plugin, then run `{}`.".format(path, version, RESET_SCHEMA_VERSION,
                                                                           command("foreman-reset")),
                                {"record": str(path), "schema_version": version})
-    migrated = _version(version, 1)
+    migrated = _version(version, 1) or _version(version, 2)
     if migrated and not migrate_legacy:
+        assert type(version) is int  # migration detection above narrows the legacy version
         rows = document.get("resets")
-        if (not isinstance(rows, list) or not all(_valid_row(row, 1) for row in rows)
+        if (not isinstance(rows, list) or not all(_valid_row(row, version) for row in rows)
                 or len({(row["pane_id"], row["stow"]) for row in rows}) != len(rows)):
             raise ResetRecordUnusable("Reset record {} is malformed. It is left untouched; the operator restores a valid file "
                                       "from its own backup before any reset.".format(path), {"record": str(path)})
-        raise ResetRecordOlder("Reset record {} is schema 1 and supplies no usable Stop proof. It is left untouched; "
+        raise ResetRecordOlder("Reset record {} is an older schema and supplies no usable Stop proof. It is left untouched; "
                                "run `{}` for the same owner state to migrate and rewrite it before resetting.".format(
                                    path, command("catch-up")),
                                {"record": str(path), "schema_version": version})
@@ -258,10 +461,10 @@ def _load(path, *, migrate_legacy=True):
 
 
 def _open(path):
-    """The reset record, a schema-1 one upgraded and rewritten; the caller holds the record lock.
+    """The reset record, a legacy one upgraded and rewritten; the caller holds the record lock.
 
     The owner rewrites a migrated record at once (rules/stateful-artifacts.md
-    Migration Policy). A deliverer of the schema-1 build still running then
+    Migration Policy). A deliverer of a legacy build still running then
     reads a newer record and cannot record its outcome; its row stays
     `scheduled` or `delivering`, and once that process is gone `outstanding`
     names the `foreman-reset-reconcile` command, the recovery for any outcome
@@ -288,11 +491,15 @@ def _readable(path):
 
 def _valid_row(row, version=RESET_SCHEMA_VERSION):
     """Every documented field of that schema version, typed, with the result shape its status requires."""
-    fields = ROW_FIELDS_V1 if version == 1 else ROW_FIELDS
+    fields = ROW_FIELDS_V1 if version == 1 else ROW_FIELDS_V2 if version == 2 else ROW_FIELDS
     if not isinstance(row, dict) or set(row) != fields or not _version(row["schema_version"], version):
         return False
     # Null only on a row migrated from schema 1, which never recorded it.
     if version != 1 and row["native_session"] is not None and not _valid_session(row["native_session"]):
+        return False
+    if version == 3 and row["foreground"] is not None and not _valid_foreground(row["foreground"]):
+        return False
+    if version == 3 and row["accepted_session"] is not None and not _valid_session(row["accepted_session"]):
         return False
     options = row["options"]
     if not (isinstance(options, dict) and set(options) <= OPTION_FIELDS
@@ -365,6 +572,13 @@ def _refuse(row, state_path, cause=None):
         {"record": str(record_path(state_path)), "resume_prompt": row["result"]["resume_prompt"]})
 
 
+def _claimed_replay(row, state_path):
+    if row["status"] == "scheduled":
+        raise StateError("The reset child has not recorded its durable claim. Continue foreground supervision and inspect {} for the original scheduler's claim or failure; do not send continuation input or start another child.".format(record_path(state_path)),
+                         {"record": str(record_path(state_path)), "reason": "startup_claim_pending"})
+    return row
+
+
 def replay(state_path, plan, *, alive=_alive):
     """The existing reset for (pane, stow), or None when this stow never reset.
 
@@ -372,6 +586,7 @@ def replay(state_path, plan, *, alive=_alive):
     ran, its stow's reads and the supervision state legitimately change, and a
     retry still replays. Reading the stow and supervision, and checking the
     caller's pane, still come first (`cli.cmd_foreman_reset`).
+    A live unclaimed row refuses without changes; it supplies no success proof.
     A reset that is neither live, delivered nor reconciled is finalized and refused.
     """
     path = record_path(state_path)
@@ -387,19 +602,20 @@ def replay(state_path, plan, *, alive=_alive):
             save_state(path, document)
     if live is None:
         _refuse(row, state_path)
-    return live
+    return _claimed_replay(live, state_path)
 
 
 def schedule(state_path, plan, at, start, *, native_session, alive=_alive, probe=None, options=None):
-    """Record one reset for (pane, stow) and start its deliverer exactly once.
+    """Record one reset for (pane, stow), with bounded proved-preclaim recovery.
 
     `native_session` is the foreman's session bound at supervision-bind
     (`bound_session`); the deliverer types only while the pane still holds it.
-    `start()` launches the deliverer and returns its pid. The record lock is
-    held until the deliverer's process identity is saved, and a deliverer
-    claims only the row carrying its own identity. A launch failure, or a
-    deliverer that is already gone when probed, finishes the row `failed`
-    with the resume prompt before re-raising.
+    Production `start()` returns a DetachedReset. Its loaded runtime sends
+    its identity before waiting for this lock, then acknowledges the durable
+    claim after unlock. Preclaim loss revokes the identity under the lock,
+    reaps only that owned child, and retries within STARTUP_ATTEMPTS. The log
+    retains each lost attempt. Once claimed, no automatic retry is possible.
+    Injected PID-only launchers retain the existing test/embedder contract.
     """
     try:
         timestamp(at, "Reset scheduled_at")
@@ -411,56 +627,106 @@ def schedule(state_path, plan, at, start, *, native_session, alive=_alive, probe
                          "Nothing was scheduled.".format(plan.get("stow"), command("supervision-bind"), command("foreman-reset")),
                          {"stow": plan.get("stow")})
     path = record_path(state_path)
-    with state_lock(path):
-        document = _records(path)
-        prior = _row(document, plan)
-        if prior is not None:
-            live, changed = _settle(document, prior, state_path, alive)
-            if changed:
+    managed = None
+    for attempt in range(1, STARTUP_ATTEMPTS + 1):
+        with state_lock(path):
+            document = _records(path)
+            row = _row(document, plan)
+            if attempt == 1:
+                if row is not None:
+                    live, changed = _settle(document, row, state_path, alive)
+                    if changed:
+                        save_state(path, document)
+                    if live is not None:
+                        return _claimed_replay(live, state_path)
+                    _refuse(row, state_path)
+                row = {"schema_version": RESET_SCHEMA_VERSION, **plan, "status": "scheduled", "scheduled_at": at,
+                       "options": dict(options or {}), "process": None, "result": None, "native_session": dict(native_session),
+                       "foreground": None, "accepted_session": None}
+                if not _valid_row(row):
+                    raise UsageError("The reset for stow {} would not validate as a reset row; nothing was scheduled.".format(
+                        plan.get("stow")), {"row": row})
+                document["resets"].append(row)
                 save_state(path, document)
-            if live is not None:
-                return live
-            _refuse(prior, state_path)
-        row = {"schema_version": RESET_SCHEMA_VERSION, **plan, "status": "scheduled", "scheduled_at": at,
-               "options": dict(options or {}), "process": None, "result": None, "native_session": dict(native_session)}
-        if not _valid_row(row):
-            raise UsageError("The reset for stow {} would not validate as a reset row; nothing was scheduled.".format(
-                plan.get("stow")), {"row": row})
-        document["resets"].append(row)
-        save_state(path, document)
-        try:
-            pid = start()
-            # The deliverer waits on this lock to claim, so it is alive to be identified.
-            identity = (probe or process_identity)(pid)
-            if identity is None:
-                raise StateError("The reset deliverer (pid {}) exited before it could be identified; nothing was sent.".format(pid), {"pid": pid})
-            row["process"] = identity
-        except ForemanError as exc:
-            row.update(status="failed", result=failure(exc, plan["stow"], str(Path(state_path).expanduser().resolve()), **(options or {})))
+            if row is None or row["status"] != "scheduled" or row["process"] is not None:
+                raise StateError("Reset startup ownership changed; continue foreground supervision and inspect {} before any retry.".format(path),
+                                 {"record": str(path)})
+            managed = None
+            try:
+                started = start()
+                managed = started if isinstance(started, DetachedReset) else None
+                if managed is not None:
+                    identity = managed.ready(probe or process_identity)
+                else:
+                    identity = (probe or process_identity)(started)
+                    if identity is None:
+                        raise StateError("The reset deliverer (pid {}) exited before it could be identified; nothing was sent.".format(started), {"pid": started})
+                row["process"] = identity
+            except ForemanError as exc:
+                if managed is not None:
+                    managed.abandon(attempt, exc)
+                if isinstance(exc, StartupFailed) and managed is not None and attempt < STARTUP_ATTEMPTS:
+                    continue
+                row.update(status="failed", result=failure(exc, plan["stow"], str(Path(state_path).expanduser().resolve()), **(options or {})))
+                save_state(path, document)
+                _refuse(row, state_path, exc.message)
             save_state(path, document)
-            _refuse(row, state_path, exc.message)
-        save_state(path, document)
-        return {**row, "replayed": False}
+            scheduled = copy.deepcopy(row)
+        if managed is None:
+            return {**scheduled, "replayed": False}
+        claim_error = None
+        try:
+            managed.claimed()
+        except StartupFailed as exc:
+            claim_error = exc
+        with state_lock(path):
+            document = _records(path)
+            row = _row(document, plan)
+            if row is None or row["process"] != scheduled["process"]:
+                managed.close()
+                raise StateError("Reset startup ownership changed; continue foreground supervision and inspect {} before any retry.".format(path),
+                                 {"record": str(path)})
+            if row["status"] == "delivered" or (row["status"] == "delivering" and alive(row["process"])):
+                managed.close()
+                return {**copy.deepcopy(row), "replayed": False}
+            if row["status"] != "scheduled":
+                managed.close()
+                _live, changed = _settle(document, row, state_path, alive)
+                if changed:
+                    save_state(path, document)
+                _refuse(row, state_path)
+            # No claim occurred. Holding the same lock bars the old child
+            # from ever claiming while it is reaped and its identity revoked.
+            exc = claim_error or managed._failed("startup_claim_not_recorded")
+            managed.abandon(attempt, exc)
+            row["process"] = None
+            if attempt == STARTUP_ATTEMPTS:
+                row.update(status="failed", result=failure(exc, plan["stow"], str(Path(state_path).expanduser().resolve()), **(options or {})))
+            save_state(path, document)
+            if row["status"] == "failed":
+                _refuse(row, state_path, exc.message)
+    raise StateError("Reset startup exhausted its owner recovery; continue foreground supervision and inspect {}.".format(path),
+                     {"record": str(path)})
 
 
 #: Error codes whose messages this owner writes itself. Any other error, a
 #: Herdr or composer failure above all, can carry raw subprocess output or pane
-#: text in its message; the record keeps a generic line and the log keeps it.
+#: text in its message; the record and log keep a generic line and safe fields.
 OWN_MESSAGE_CODES = frozenset({"usage_error", "state_error", "reset_ended", "reset_record_newer", "reset_record_unusable",
-                               "reset_session_changed"})
+                               "reset_session_changed", "reset_startup_failed"})
 
 
 def failure(exc, stow, state, **options):
     """The durable result of a failed or interrupted reset: the error and the prompt the operator pastes.
 
     Details are filtered to identifier keys with scalar values, and a message
-    this owner did not write is replaced by a generic one; the full error
-    stays in the deliverer's log.
+    this owner did not write is replaced by a generic one. The deliverer's
+    log holds the same safe diagnostic, never the raw provider error.
     """
     details = {key: value for key, value in exc.details.items()
                if key in FAILURE_DETAIL_KEYS and (value is None or isinstance(value, (str, int, float, bool)))}
     message = exc.message if exc.code in OWN_MESSAGE_CODES else (
-        "A Herdr call failed ({}); the reset's log holds its output.".format(exc.code))
+        "A Herdr call failed ({}); inspect the saved diagnostic fields and native pane before owner recovery.".format(exc.code))
     return {"error": exc.code, "message": message, "details": details, "resume_prompt": resume_prompt(stow, state, **options)}
 
 
@@ -482,7 +748,7 @@ def outstanding(state_path, *, alive=_alive):
     `interrupted`, or when it never reached an outcome and its deliverer is
     gone. A later `delivered` or `reconciled` reset for the pane supersedes an older failure.
     An unreadable record is itself outstanding. Nothing is written except the
-    owner's rewrite of a schema-1 record (`_open`).
+    owner's rewrite of a legacy record (`_open`).
     """
     path = record_path(state_path)
     try:
@@ -491,7 +757,7 @@ def outstanding(state_path, *, alive=_alive):
         except ResetRecordNewer:
             document, migrated = None, False
         if migrated:
-            # Only a schema-1 record takes the owner lock, to be rewritten; any
+            # Only a legacy record takes the owner lock, to be rewritten; any
             # other read writes nothing, not even a lock file.
             with state_lock(path):
                 document = _readable(path)
@@ -700,7 +966,7 @@ def stop_coverage(state_path, supervision_data, *, probe=process_identity):
 
     A handoff hold prepares reset preflight. It authorizes Stop only after the
     reset record binds the same hold/stow id, pane, native session, and exact
-    live deliverer process. Legacy records supply no usable prior state;
+    live claimed deliverer process. Legacy records supply no usable prior state;
     this Stop-path reader never migrates or rewrites the record.
     """
     holds = supervision.current_holds(supervision_data, "handoff")
@@ -730,6 +996,9 @@ def stop_coverage(state_path, supervision_data, *, probe=process_identity):
                 "stow": row["stow"]}
     if not _alive(row["process"], probe):
         return {"eligible": False, "state": "reset_deliverer_not_live", "record": str(path),
+                "stow": row["stow"]}
+    if row["status"] == "scheduled":
+        return {"eligible": False, "state": "reset_claim_pending", "record": str(path),
                 "stow": row["stow"]}
     return {"eligible": True, "state": "scheduled_continuation", "record": str(path),
             "stow": row["stow"], "process": row["process"]}
@@ -822,20 +1091,34 @@ def mechanics(agents, kind, name):
         raise StateError("No configured worker has kind {!r}, so the foreman's clear command is unknown. Add one to config.json.".format(kind), {"kind": kind})
     foreman = copy.copy(template)
     foreman.name = name
+    # A reset stays in this checkout. Codex /new can open a checkout picker;
+    # /clear is its native same-session context reset, not a chooser response.
+    if kind == "codex" and foreman.clear_prompt == "/new":
+        foreman.clear_prompt = "/clear"
     return foreman
 
 
 def foreground_processes(client, pane_id):
-    """The pane's foreground processes as identities, or None when Herdr reports none usable.
+    """Pin the foreground runtime leader, or the strict legacy process set.
 
     Each is `supervision_runtime.process_identity`: the pid with a digest of
     its start time and command line, so a reused pid or a process that
-    exec'd in place reads as another process.
+    exec'd in place reads as another process. MCP and hook children may come
+    and go without replacing the runtime. A reported process-group leader
+    must appear exactly once in the foreground set; never guess its PID.
+    Older transports without a group ID retain the strict whole-set check.
     """
     info = client.pane_process_info(pane_id)
     processes = info.get("foreground_processes") if isinstance(info, dict) else None
     if not isinstance(processes, list) or not processes:
         return None
+    group = info.get("foreground_process_group_id")
+    if group is not None:
+        if type(group) is not int or group <= 0:
+            return None
+        processes = [process for process in processes if isinstance(process, dict) and process.get("pid") == group]
+        if len(processes) != 1:
+            return None
     identities = []
     for process in processes:
         pid = process.get("pid") if isinstance(process, dict) else None
@@ -879,6 +1162,33 @@ class DeliveryInterrupted(HerdrError):
     """A delivery that failed after typing into the pane; never retried automatically."""
 
 
+def settled_clear(client, agent, pane_id, processes, *, sleep, clock,
+                  budget_sec=CLEAR_SESSION_BUDGET_SEC, poll_sec=CLEAR_SESSION_POLL_SEC):
+    """Observe stable idle after clear; never wait for prompt-triggered identity.
+
+    Native startup hooks can follow a stale done observation. The same named
+    runtime and process pins must survive every read, with no input/recovery.
+    """
+    deadline = clock() + budget_sec
+    stable = 0
+    while True:
+        live = _foreman_record(client, pane_id)
+        if (live.get("name") != agent.name or live.get("agent") != agent.kind
+                or foreground_processes(client, pane_id) != processes):
+            raise SessionChanged("The cleared foreman is under another process or changed runtime; no continuation was sent.",
+                                 {"pane_id": pane_id, "reason": "native_session_changed"})
+        if live.get("agent_status") == "blocked":
+            raise HerdrError("The cleared foreman is blocked; inspect its native prompt without answering it automatically.",
+                             {"pane_id": pane_id, "reason": "clear_blocked"})
+        stable = stable + 1 if live.get("agent_status") in SETTLE_STATES else 0
+        if stable >= RESET_STABLE_READS:
+            return
+        if clock() >= deadline:
+            raise HerdrError("The cleared foreman did not establish stable idle; no continuation was sent.",
+                             {"pane_id": pane_id, "reason": "clear_not_settled"})
+        sleep(poll_sec)
+
+
 class SessionInterrupted(DeliveryInterrupted):
     """The pane's native session changed after typing began; the record keeps `reset_session_changed`."""
 
@@ -895,9 +1205,10 @@ def deliver(client, agents, pane_id, stow, state, *, native_session, still_ready
     `native_session` is the row's bound session: every keystroke of the clear
     command, extra Enters included, refuses unless the pane still holds it. A
     null one, from a row migrated off schema 1, refuses before any keystroke.
-    Once the clear is consumed, the new session Herdr reports for the pane is
-    pinned, and every keystroke of the resume prompt refuses unless the pane
-    still holds that one.
+    Once the clear is consumed, eager native sessions are pinned before input.
+    Codex permits its old integration hint under unchanged process pins until
+    the real continuation triggers its pre-prompt gate. All routes require the
+    new binding and acceptance recorded by that gate before delivery succeeds.
     """
     deadline = clock() + budget_sec
     settled = 0
@@ -923,6 +1234,7 @@ def deliver(client, agents, pane_id, stow, state, *, native_session, still_ready
     # submitted; Codex's first only accepts autocomplete), then the new one
     # the clear started, once Herdr reports it.
     expected = [native_session]
+    resuming = [False]
     # The foreground processes the first keystroke found; the clear keeps them.
     processes = []
 
@@ -935,9 +1247,16 @@ def deliver(client, agents, pane_id, stow, state, *, native_session, still_ready
         if (live.get("name") != agent.name or live.get("agent") != agent.kind
                 or live.get("agent_status") not in SETTLE_STATES):
             raise HerdrError("The foreman's pane {} changed ({} {}, {}) before typing, so the reset stopped. {}".format(
-                pane_id, live.get("agent"), live.get("name"), live.get("agent_status"), OPERATOR_RECOVERY), {"pane_id": pane_id})
+                pane_id, live.get("agent"), live.get("name"), live.get("agent_status"), OPERATOR_RECOVERY),
+                {"pane_id": pane_id, "reason": "foreman_before_input_changed",
+                 "status": live.get("agent_status") if live.get("agent_status") in ("idle", "done", "working", "blocked", "unknown") else "unknown",
+                 "name_matches": live.get("name") == agent.name, "kind_matches": live.get("agent") == agent.kind})
         # A same-name, same-kind replacement is another session (#523).
-        if expected[0] is None or pane_session(client, pane_id) != expected[0]:
+        current = pane_session(client, pane_id)
+        deferred = resuming[0] and agent.kind == "codex" and expected[0] == native_session
+        if deferred and current is not None and current != native_session:
+            expected[0] = current
+        if expected[0] is None or current != expected[0]:
             raise SessionChanged("The foreman's pane {} no longer holds the native session {}{}, so the reset stopped. {}".format(
                 pane_id, "its supervision binding recorded" if expected[0] is native_session else "the clear started",
                 "" if expected[0] is not None else " (this reset recorded none)", OPERATOR_RECOVERY),
@@ -948,27 +1267,54 @@ def deliver(client, agents, pane_id, stow, state, *, native_session, still_ready
                 raise HerdrError("Herdr reports no foreground process for the foreman's pane {}, so the clear could not be "
                                  "tied to it; nothing was sent. {}".format(pane_id, OPERATOR_RECOVERY), {"pane_id": pane_id})
             processes.append(found)
+        elif foreground_processes(client, pane_id) != processes[0]:
+            raise SessionChanged("The foreman's pane {} is under another process before typing; nothing more was sent. {}".format(
+                pane_id, OPERATOR_RECOVERY), {"pane_id": pane_id, "reason": "native_session_changed"})
         typed.append(True)
 
+    phase = "clear_command"
     try:
         outcome = send_command(client, agent, pane_id, agent.clear_prompt, sleep=sleep, warn=warn, settle_sec=settle_sec,
                                before_input=guard)
         if not outcome["screen_changed"]:
             raise HerdrError("The foreman consumed {} but its screen did not change, so its context was not cleared and nothing further was sent. Check the clear command configured for kind {} in pane {}. {}".format(
                 agent.clear_prompt, agent.kind, pane_id, OPERATOR_RECOVERY), {"pane_id": pane_id})
+        phase = "clear_settle"
         client.agent_wait(agent.name, until=SETTLE_STATES, timeout_ms=DEFAULT_SETTLE_TIMEOUT_MS)
         sleep(settle_sec)
-        expected[0] = _cleared_session(client, pane_id, native_session, processes[0], sleep=sleep, clock=clock)
-        landing = send_message(client, agent, resume_prompt(stow, state, **(options or {})), RESUME_OPENING, pane_id=pane_id, sleep=sleep, warn=warn,
+        settled_clear(client, agent, pane_id, processes[0], sleep=sleep, clock=clock)
+        resuming[0] = True
+        if agent.kind != "codex":
+            phase = "clear_native_receipt"
+            expected[0] = _cleared_session(client, pane_id, native_session, processes[0], sleep=sleep, clock=clock)
+        phase = "arm_resume"
+        arm_resume(state, pane_id, stow, native_session, processes[0])
+        prompt = guarded_resume(stow, state, native_session, processes[0], options=options)
+        phase = "resume_input"
+        landing = send_message(client, agent, prompt, RESUME_OPENING, pane_id=pane_id, sleep=sleep, warn=warn,
                                settle_sec=settle_sec, before_input=guard)
-        if not (landing["landed"] and landing["started"]):
+        phase = "hook_acceptance"
+        accepted = accepted_resume(state, pane_id, stow, native_session)
+        # Native acceptance proves the exact input landed even when a runtime
+        # collapses or clips its transcript. A visible prompt is only a hint.
+        if (not landing["landed"] and accepted is None) or not landing["started"]:
             raise HerdrError("The foreman was cleared but the resume prompt did not {} in pane {}. {}".format(
-                "land" if not landing["landed"] else "start a turn", pane_id, OPERATOR_RECOVERY), {"pane_id": pane_id})
+                "land" if not landing["landed"] and accepted is None else "start a turn", pane_id, OPERATOR_RECOVERY),
+                             {"pane_id": pane_id, "reason": "resume_not_landed" if not landing["landed"] and accepted is None else "resume_not_started"})
+        # The real prompt triggers native hook/session events. No dummy
+        # prompt, journal scrape or fabricated Herdr receipt substitutes.
+        if (accepted is None or foreground_processes(client, pane_id) != processes[0]
+                or expected[0] != native_session and accepted != expected[0]):
+            raise SessionChanged("The reset input hook did not verify the new foreman session; do not repeat this input. Restore the native hook and inspect the saved reset. {}".format(
+                OPERATOR_RECOVERY), {"pane_id": pane_id, "reason": "reset_input_unverified"})
+        landing = {"landed": True, "started": True}
     except ForemanError as exc:
+        # Persist a bounded owner phase, not raw pane/provider diagnostics.
+        details = {"reason": phase, **exc.details, "phase": phase}
         if typed and not isinstance(exc, DeliveryInterrupted):
             wrapper = SessionInterrupted if isinstance(exc, SessionChanged) else DeliveryInterrupted
             raise wrapper("{} The pane was already typed into, so this reset is not retried. {}".format(
-                exc.message, OPERATOR_RECOVERY), exc.details) from None
+                exc.message, OPERATOR_RECOVERY), details) from None
         raise
     return {"schema_version": RESET_SCHEMA_VERSION, "pane_id": pane_id, "stow": stow, "agent": agent.name,
             "cleared": True, "resume": landing}

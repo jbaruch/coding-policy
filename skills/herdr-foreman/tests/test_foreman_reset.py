@@ -6,6 +6,7 @@ import re
 import shlex
 import shutil
 import subprocess
+import socket
 import tempfile
 import fcntl
 import json
@@ -165,6 +166,7 @@ class FakeClient:
         # clear is consumed, then the new one the clear started.
         self.sessions = list(sessions) if sessions is not None else None
         self.cleared = False
+        self.prompt_started = False
         self.keystrokes = []
 
     def identify(self, pid):
@@ -212,6 +214,83 @@ def worker(name, kind, delivery="type", enters=1):
     return SimpleNamespace(name=name, kind=kind, clear_prompt="/clear", slash_delivery=delivery, slash_enter_count=enters)
 
 
+class ForegroundIdentityTest(unittest.TestCase):
+    def pins(self, group, processes, *, missing=False):
+        info = {"foreground_processes": processes}
+        if not missing:
+            info["foreground_process_group_id"] = group
+        client = SimpleNamespace(pane_process_info=lambda pane: info)
+        with patch("foreman.foreman_reset.process_identity", side_effect=lambda pid: {"pid": pid, "identity": "fixed-start"}):
+            return foreman_reset.foreground_processes(client, PANE)
+
+    def test_group_leader_stays_pinned_when_hook_or_mcp_children_restart(self):
+        before = self.pins(77, [{"pid": 20}, {"pid": 77}, {"pid": 90}])
+        after = self.pins(77, [{"pid": 77}, {"pid": 91}])
+        self.assertEqual(before, [{"pid": 77, "identity": "fixed-start"}])
+        self.assertEqual(after, before)
+
+    def test_runtime_replacement_changes_the_pins(self):
+        before = self.pins(77, [{"pid": 77}, {"pid": 90}])
+        after = self.pins(78, [{"pid": 78}, {"pid": 90}])
+        self.assertNotEqual(before, after)
+
+    def test_a_reported_leader_must_be_unique_present_and_valid(self):
+        for group, processes in ((77, [{"pid": 90}]), (77, [{"pid": 77}, {"pid": 77}]),
+                                 (True, [{"pid": 1}]), (0, [{"pid": 0}]), ("77", [{"pid": 77}])):
+            with self.subTest(group=group, processes=processes):
+                self.assertIsNone(self.pins(group, processes))
+
+    def test_missing_group_identity_preserves_the_strict_legacy_check(self):
+        before = self.pins(None, [{"pid": 77}, {"pid": 90}], missing=True)
+        after = self.pins(None, [{"pid": 77}, {"pid": 91}], missing=True)
+        assert before is not None, "valid legacy processes must supply strict pins"
+        self.assertEqual(len(before), 2)
+        self.assertNotEqual(before, after)
+
+    def test_an_unverifiable_leader_never_supplies_pins(self):
+        client = SimpleNamespace(pane_process_info=lambda pane: {
+            "foreground_process_group_id": 77, "foreground_processes": [{"pid": 77}]})
+        with patch("foreman.foreman_reset.process_identity", return_value=None):
+            self.assertIsNone(foreman_reset.foreground_processes(client, PANE))
+
+
+class SettledClearTest(unittest.TestCase):
+    def observe(self, client, budget=30):
+        now, waits = [0.0], []
+
+        def tick(seconds):
+            waits.append(seconds)
+            now[0] += seconds
+
+        with patch("foreman.foreman_reset.process_identity", side_effect=client.identify), \
+             patch.object(client, "pane_get", side_effect=AssertionError("never wait for prompt-triggered session identity")):
+            foreman_reset.settled_clear(client, worker("foreman", client.kind), PANE,
+                                       [{"pid": 4242, "identity": "started-once"}],
+                                       sleep=tick, clock=lambda: now[0], budget_sec=budget, poll_sec=1)
+        return waits
+
+    def test_all_runtimes_wait_out_stale_done_before_startup_hooks_without_input(self):
+        for kind in ("claude", "codex", "grok"):
+            client = FakeClient(["done", "done", "working", "idle", "idle", "idle"], kind=kind)
+            with self.subTest(kind=kind):
+                self.assertEqual(self.observe(client), [1] * 5)
+                self.assertEqual(client.keystrokes, [])
+
+    def test_unsettled_or_blocked_clear_refuses_without_a_recovery_key(self):
+        for status, reason in (("working", "clear_not_settled"), ("blocked", "clear_blocked")):
+            client = FakeClient([status])
+            with self.subTest(status=status), self.assertRaises(HerdrError) as caught:
+                self.observe(client, budget=2)
+            self.assertEqual(caught.exception.details["reason"], reason)
+            self.assertEqual(client.keystrokes, [])
+
+    def test_replacement_during_startup_refuses_without_input(self):
+        client = FakeClient(["idle"], pids=[5151])
+        with self.assertRaises(foreman_reset.SessionChanged):
+            self.observe(client)
+        self.assertEqual(client.keystrokes, [])
+
+
 class HandoffHoldTest(unittest.TestCase):
     def test_only_a_handoff_hold_lets_the_foreman_reset(self):
         self.assertEqual(check(active=True, held=True, hold_kind="handoff")["pane_id"], PANE)
@@ -227,7 +306,7 @@ class HandoffHoldTest(unittest.TestCase):
 
 class DeliverTest(unittest.TestCase):
     def run_deliver(self, client, *, screen_changed=True, landed=True, started=None, budget=30, still_ready=lambda: True,
-                    native_session=SESSION, claude_delivery="type", extra_enters=0):
+                    native_session=SESSION, claude_delivery="type", extra_enters=0, hook_accepted=True, extra_workers=()):
         calls = []
         ticks = iter(range(0, 10000, 5))
 
@@ -249,14 +328,17 @@ class DeliverTest(unittest.TestCase):
         def message(c, agent, text, needle, **kw):
             kw["before_input"]()
             calls.append(("message", agent.name, kw["pane_id"], text))
+            c.prompt_started = True
             return {"landed": landed, "started": landed if started is None else started}
 
         with patch("foreman.foreman_reset.send_command", side_effect=command), \
              patch("foreman.foreman_reset.send_message", side_effect=message), \
+             patch("foreman.foreman_reset.arm_resume"), \
+             patch("foreman.foreman_reset.accepted_resume", side_effect=lambda *args: foreman_reset.pane_session(client, PANE) if hook_accepted else None), \
              patch("foreman.foreman_reset.process_identity", side_effect=client.identify):
             # Shipped Codex config takes two Enters; the first can only accept autocomplete.
             result = foreman_reset.deliver(client, [worker("codex-a", "codex", enters=2),
-                                                    worker("claude-a", "claude", delivery=claude_delivery)], PANE, "round-7",
+                                                    worker("claude-a", "claude", delivery=claude_delivery), *extra_workers], PANE, "round-7",
                                            "/state/s.json",
                                            still_ready=still_ready, sleep=lambda seconds: None, clock=lambda: next(ticks),
                                            budget_sec=budget, poll_sec=5, native_session=native_session)
@@ -266,11 +348,41 @@ class DeliverTest(unittest.TestCase):
         client = FakeClient(["working", "working", "idle"])
         result, calls = self.run_deliver(client)
         self.assertEqual(calls, [("command", "foreman", PANE, "/clear"),
-                                 ("message", "foreman", PANE, foreman_reset.resume_prompt("round-7", "/state/s.json"))])
+                                 ("message", "foreman", PANE, foreman_reset.guarded_resume("round-7", "/state/s.json", SESSION,
+                                     [{"pid": 4242, "identity": "started-once"}]))])
         self.assertIn("memory-show --state /state/s.json --id round-7", calls[1][3])
         self.assertIn("foreman-queue --state /state/s.json", calls[1][3])
         self.assertEqual(client.waits, ["foreman"])
         self.assertTrue(result["cleared"])
+
+    def test_codex_continuation_triggers_the_receipt_instead_of_waiting_for_it_first(self):
+        class Deferred(FakeClient):
+            def pane_get(self, pane_id):
+                value = CLEARED if getattr(self, "prompt_started", False) else SESSION["value"]
+                return {"pane_id": pane_id, "agent_session": {"source": "herdr:codex", "agent": "codex", "kind": "id", "value": value}}
+        result, calls = self.run_deliver(Deferred(["idle"], kind="codex"))
+        self.assertEqual([call[0] for call in calls], ["command", "message"])
+        self.assertTrue(result["cleared"])
+
+    def test_helper_churn_across_clear_keeps_the_same_runtime_and_one_continuation(self):
+        class Helpers(FakeClient):
+            def pane_process_info(self, pane_id):
+                return {"foreground_process_group_id": 4242,
+                        "foreground_processes": [{"pid": 4242}, {"pid": 5001 if self.cleared else 5000}]}
+        for kind in ("claude", "codex", "grok"):
+            with self.subTest(kind=kind):
+                result, calls = self.run_deliver(Helpers(["idle"], kind=kind), extra_workers=[worker("grok-a", "grok")])
+                self.assertEqual([call[0] for call in calls], ["command", "message"])
+                self.assertEqual(result["resume"], {"landed": True, "started": True})
+
+    def test_every_runtime_requires_hook_acceptance_and_never_repeats_uncertain_input(self):
+        for kind in ("claude", "codex", "grok"):
+            with self.subTest(kind=kind):
+                client = FakeClient(["idle"], kind=kind)
+                with self.assertRaises(foreman_reset.SessionInterrupted) as caught:
+                    self.run_deliver(client, hook_accepted=False, extra_workers=[worker("grok-a", "grok")])
+                self.assertEqual(caught.exception.details["reason"], "reset_input_unverified")
+                self.assertTrue(client.prompt_started)
 
     def test_a_pane_that_never_idles_sends_nothing(self):
         with self.assertRaisesRegex(HerdrError, "(?s)stayed working.*" + DO_NOT_RERUN):
@@ -282,7 +394,14 @@ class DeliverTest(unittest.TestCase):
 
     def test_a_resume_prompt_that_did_not_land_is_an_interrupted_delivery(self):
         with self.assertRaisesRegex(foreman_reset.DeliveryInterrupted, "did not land"):
-            self.run_deliver(FakeClient(["idle"]), landed=False)
+            self.run_deliver(FakeClient(["idle"]), landed=False, hook_accepted=False)
+
+    def test_exact_native_acceptance_proves_landing_when_each_runtime_collapses_the_prompt(self):
+        for kind in ("claude", "codex", "grok"):
+            with self.subTest(kind=kind):
+                result, _ = self.run_deliver(FakeClient(["idle"], kind=kind), landed=False, started=True,
+                                             extra_workers=[worker("grok-a", "grok")])
+                self.assertEqual(result["resume"], {"landed": True, "started": True})
 
     def test_a_prompt_that_landed_but_started_no_turn_is_interrupted(self):
         with self.assertRaisesRegex(foreman_reset.DeliveryInterrupted, "start a turn"):
@@ -340,6 +459,34 @@ class DeliverTest(unittest.TestCase):
         client.agent_list = swapped
         with self.assertRaisesRegex(HerdrError, "changed \\(codex foreman"):
             self.run_deliver(client)
+
+    def test_post_clear_guard_records_bounded_identity_and_status_without_resume_input(self):
+        for field, value, status, name_matches, kind_matches in (
+                ("agent_status", "working", "working", True, True),
+                ("agent_status", "token=secret", "unknown", True, True),
+                ("name", "token=secret", "idle", False, True),
+                ("agent", "token=secret", "idle", True, False)):
+            with self.subTest(field=field):
+                class Changed(FakeClient):
+                    after_clear = 0
+
+                    def agent_list(self):
+                        rows = super().agent_list()
+                        if self.cleared:
+                            self.after_clear += 1
+                            if self.after_clear > foreman_reset.RESET_STABLE_READS:
+                                rows[1][field] = value
+                        return rows
+
+                client = Changed(["idle"])
+                with self.assertRaises(foreman_reset.DeliveryInterrupted) as caught:
+                    self.run_deliver(client)
+                record = foreman_reset.failure(caught.exception, "round-7", "/state/s.json")
+                self.assertEqual(record["details"], {"pane_id": PANE, "reason": "foreman_before_input_changed",
+                    "phase": "resume_input", "status": status, "name_matches": name_matches, "kind_matches": kind_matches})
+                self.assertFalse(client.prompt_started)
+                self.assertEqual(client.keystrokes, ["/clear", "enter"])
+                self.assertNotIn("secret", json.dumps(record))
 
     def test_a_stow_that_changed_while_waiting_stops_the_reset(self):
         with self.assertRaisesRegex(UsageError, "(?s)no longer reset-ready.*" + DO_NOT_RERUN):
@@ -459,7 +606,7 @@ class DeliverTest(unittest.TestCase):
 
     def test_a_replacement_before_the_clear_session_is_pinned_gets_no_resume_prompt(self):
         # The new session appears under another process: a replacement, not the clear.
-        client = FakeClient(["idle"], pids=[4242, 5151])
+        client = FakeClient(["idle"], pids=[4242, 4242, 5151])
         with self.assertRaisesRegex(foreman_reset.SessionInterrupted, "under another process") as caught:
             self.run_deliver(client)
         self.assertEqual(client.keystrokes, ["/clear", "enter"])
@@ -468,13 +615,13 @@ class DeliverTest(unittest.TestCase):
 
     def test_a_replacement_that_reuses_the_pid_gets_no_resume_prompt(self):
         # Same pid, another start and command line: a process that exec'd in place.
-        client = FakeClient(["idle"], starts=["started-once", "exec-in-place"])
+        client = FakeClient(["idle"], starts=["started-once", "started-once", "exec-in-place"])
         with self.assertRaisesRegex(foreman_reset.SessionInterrupted, "under another process"):
             self.run_deliver(client)
         self.assertEqual(client.keystrokes, ["/clear", "enter"])
 
     def test_a_session_another_integration_reports_is_no_match(self):
-        for ref in ({"source": "other:claude", "agent": "claude"}, {"source": "herdr:grok", "agent": "grok"},
+        for ref in ({"source": "other:claude", "agent": "claude"}, {"source": "herdr:foreign", "agent": "foreign"},
                     {"agent": "claude"}, {"source": "herdr:claude"}):
             with self.subTest(ref=ref):
                 class Foreign(FakeClient):
@@ -524,6 +671,13 @@ class DeliverTest(unittest.TestCase):
         foreman = foreman_reset.mechanics([template], "claude", "foreman")
         self.assertEqual((template.name, foreman.name), ("claude-a", "foreman"))
 
+    def test_codex_legacy_new_reset_uses_clear_without_rewriting_worker_configuration(self):
+        template = worker("codex-a", "codex")
+        template.clear_prompt = "/new"
+        reset = foreman_reset.mechanics([template], "codex", "foreman")
+        self.assertEqual(reset.clear_prompt, "/clear")
+        self.assertEqual(template.clear_prompt, "/new")
+
 
 class RecordTest(unittest.TestCase):
     def setUp(self):
@@ -549,8 +703,20 @@ class RecordTest(unittest.TestCase):
                  "resume": {"landed": True, "started": True}}
     FAILURE = {"error": "herdr_error", "message": "boom", "details": {}, "resume_prompt": "resume"}
 
+    def test_live_unclaimed_rows_never_report_successful_replay(self):
+        self.schedule("2026-09-24T10:00:00+00:00", True)
+        path = foreman_reset.record_path(self.state)
+        before = path.read_bytes()
+        for retry in (lambda: foreman_reset.replay(self.state, self.plan, alive=lambda process: True),
+                      lambda: self.schedule("2026-09-24T10:05:00+00:00", True)):
+            with self.assertRaises(StateError) as caught:
+                retry()
+            self.assertEqual(caught.exception.details["reason"], "startup_claim_pending")
+            self.assertEqual((path.read_bytes(), self.starts), (before, 1))
+
     def test_a_retry_of_a_live_reset_replays_without_spawning(self):
         first = self.schedule("2026-09-24T10:00:00+00:00", True)
+        foreman_reset.claim(self.state, self.plan, self.me())
         again = self.schedule("2026-09-24T10:05:00+00:00", True)
         self.assertEqual((first["replayed"], again["replayed"], again["process"], self.starts), (False, True, self.me(), 1))
 
@@ -586,6 +752,7 @@ class RecordTest(unittest.TestCase):
         original = {"pid": 1001, "identity": "original"}
         foreman_reset.schedule(self.state, self.plan, "2026-09-24T10:00:00+00:00", lambda: 1001,
                                probe=lambda pid: original, native_session=SESSION)
+        foreman_reset.claim(self.state, self.plan, original)
         with patch("foreman.foreman_reset.process_identity", return_value=original):
             live = foreman_reset.replay(self.state, self.plan)
         self.assertIsNotNone(live)
@@ -738,12 +905,12 @@ class RecordTest(unittest.TestCase):
         # The owner's read rewrites the record; a delivered reset still replays.
         replayed = foreman_reset.replay(self.state, self.plan, alive=lambda process: False)
         assert replayed is not None, "a migrated delivered reset replays"
-        self.assertEqual((replayed["schema_version"], replayed["native_session"]), (2, None))
+        self.assertEqual((replayed["schema_version"], replayed["native_session"]), (3, None))
         document = json.loads(path.read_text())
-        self.assertEqual(document["schema_version"], 2)
+        self.assertEqual(document["schema_version"], 3)
         self.assertEqual([(row["stow"], row["schema_version"], row["native_session"]) for row in document["resets"]],
-                         [("round-7", 2, None), ("round-6", 2, None)])
-        self.assertEqual(document["resets"][0]["result"]["schema_version"], 2)
+                         [("round-7", 3, None), ("round-6", 3, None)])
+        self.assertEqual(document["resets"][0]["result"]["schema_version"], 3)
         self.assertEqual([item["stow"] for item in foreman_reset.outstanding(self.state)], ["round-6"])
 
     def test_catch_up_alone_rewrites_a_schema_1_record(self):
@@ -752,7 +919,37 @@ class RecordTest(unittest.TestCase):
                "scheduled_at": "2026-09-24T10:00:00+00:00", "options": {}, "process": None, "result": self.FAILURE}
         path.write_text(json.dumps({"schema_version": 1, "resets": [row]}))
         self.assertEqual([item["stow"] for item in foreman_reset.outstanding(self.state)], ["round-6"])
-        self.assertEqual(json.loads(path.read_text())["resets"][0], {**row, "schema_version": 2, "native_session": None})
+        self.assertEqual(json.loads(path.read_text())["resets"][0], {**row, "schema_version": 3, "native_session": None, "foreground": None, "accepted_session": None})
+
+    def test_schema_2_migration_preserves_session_without_inventing_hook_acceptance(self):
+        path = foreman_reset.record_path(self.state)
+        row = {"schema_version": 2, "pane_id": PANE, "stow": "round-7", "status": "delivering",
+               "scheduled_at": "2026-09-24T10:00:00+00:00", "options": {}, "process": self.me(),
+               "result": None, "native_session": SESSION}
+        original = json.dumps({"schema_version": 2, "resets": [row]})
+        path.write_text(original)
+        with self.assertRaises(foreman_reset.ResetRecordOlder):
+            foreman_reset._load(path, migrate_legacy=False)
+        self.assertEqual(path.read_text(), original)
+        self.assertEqual(foreman_reset.outstanding(self.state, alive=lambda process: True), [])
+        self.assertEqual(json.loads(path.read_text())["resets"][0],
+                         {**row, "schema_version": 3, "foreground": None, "accepted_session": None})
+
+    def test_malformed_hook_pins_or_acceptance_refuse_without_rewriting(self):
+        self.schedule("2026-09-24T10:00:00+00:00", True)
+        path = foreman_reset.record_path(self.state)
+        document = json.loads(path.read_text())
+        for field, value in (("foreground", []), ("foreground", [{"pid": True, "identity": "fixed"}]),
+                             ("foreground", [{"pid": 77, "identity": "fixed"}] * 2),
+                             ("accepted_session", {"kind": "id"})):
+            with self.subTest(field=field, value=value):
+                document["resets"][0][field] = value
+                original = json.dumps(document)
+                path.write_text(original)
+                with self.assertRaises(foreman_reset.ResetRecordUnusable):
+                    foreman_reset._load(path, migrate_legacy=False)
+                self.assertEqual(path.read_text(), original)
+                document["resets"][0][field] = None
 
     def test_a_schema_1_delivery_still_running_is_rewritten_and_surfaces_once_gone(self):
         path = foreman_reset.record_path(self.state)
@@ -760,7 +957,7 @@ class RecordTest(unittest.TestCase):
                "scheduled_at": "2026-09-24T10:00:00+00:00", "options": {}, "process": self.me(), "result": None}
         path.write_text(json.dumps({"schema_version": 1, "resets": [row]}))
         self.assertEqual(foreman_reset.outstanding(self.state, alive=lambda process: True), [])
-        self.assertEqual(json.loads(path.read_text())["resets"][0], {**row, "schema_version": 2, "native_session": None})
+        self.assertEqual(json.loads(path.read_text())["resets"][0], {**row, "schema_version": 3, "native_session": None, "foreground": None, "accepted_session": None})
         # That build cannot record its outcome now; once it is gone, catch-up names the repair.
         items = foreman_reset.outstanding(self.state, alive=lambda process: False)
         self.assertEqual([(item["stow"], item["status"]) for item in items], [("round-7", "delivering")])
@@ -918,6 +1115,7 @@ class ResetCommandTest(CliCase):
     def test_a_retry_replays_before_preconditions_that_the_reset_itself_changed(self):
         # A live pid: this test process stands in for the running deliverer.
         foreman_reset.schedule(self.state, {"pane_id": PANE, "stow": "round-7"}, "2026-09-24T10:00:00+00:00", os.getpid, native_session=SESSION)
+        foreman_reset.claim(self.state, {"pane_id": PANE, "stow": "round-7"}, supervision_runtime.process_identity(os.getpid()))
         with patch("foreman.cli.memory.show", return_value={"record": {"id": "round-7", "kind": "stow", "reset_ready": False}}), \
              patch("foreman.cli.supervision.load", return_value=supervision_data(active=True)[0]), \
              patch.dict("os.environ", {"HERDR_PANE_ID": PANE, "HERDR_ENV": "1"}), \
@@ -1230,6 +1428,194 @@ class ResetCommandTest(CliCase):
             code, _, err = self.run_cli(self.base() + ["foreman-reset", "--now", RESET_AT])
         self.assertEqual(code, 1)
         self.assertIn("not reset-ready", err)
+
+
+# The fixture uses the real detached process, identity probe, record lock and
+# claim. Only native pane input is replaced with a controlled journal. No
+# default Herdr session or production owner state is reachable.
+STARTUP_CHILD = r'''
+import json, os, signal, socket, sys
+from pathlib import Path
+from foreman import foreman_reset, supervision_runtime
+from foreman.state import state_lock
+state, mode, release, journal = sys.argv[1:5]
+fd = int(sys.argv[-1])
+plan = {"pane_id": "w9:p1", "stow": "round-7"}
+process = supervision_runtime.process_identity(os.getpid())
+if mode == "before_ready":
+    raise SystemExit(7)
+if mode == "wrong_identity":
+    foreman_reset.startup_notify(fd, "ready", {**process, "identity": "0" * 64})
+else:
+    foreman_reset.startup_notify(fd, "ready", process)
+if mode == "before_claim":
+    with foreman_reset._waiting_lock(foreman_reset.record_path(state)):
+        raise SystemExit(7)
+if mode == "false_claim":
+    foreman_reset.startup_notify(fd, "claimed", process)
+    # The scheduler must reject this unrecorded claim and reap the child.
+    signal.pause()
+    raise SystemExit(9)
+else:
+    claimed = foreman_reset.claim(state, plan, process)
+    if not claimed:
+        foreman_reset.startup_notify(fd, "unclaimed", process)
+        raise SystemExit(9)
+    if mode == "claimed_failure":
+        foreman_reset.finish(state, plan, "failed", {
+            "error": "state_error", "message": "fixture failure after claim", "details": {},
+            "resume_prompt": foreman_reset.resume_prompt("round-7", state)})
+    foreman_reset.startup_notify(fd, "claimed", process)
+    if mode == "claimed_failure":
+        raise SystemExit(7)
+with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as wire:
+    wire.connect(release)
+    if wire.recv(1) != b"r":
+        raise SystemExit(8)
+    with Path(journal).open("a") as handle:
+        handle.write("clear\nresume\n")
+    foreman_reset.finish(state, plan, "delivered", {
+        "schema_version": foreman_reset.RESET_SCHEMA_VERSION, **plan, "agent": "fixture-foreman", "cleared": True,
+        "resume": {"landed": True, "started": True}})
+    wire.sendall(b"d")
+raise SystemExit(0)
+'''
+
+
+class DetachedStartupTest(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory(prefix="reset-startup-")
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+        self.state = self.root / "owner state.json"
+        self.release = self.root / "release"
+        self.channel = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        self.addCleanup(self.channel.close)
+        self.channel.bind(str(self.release))
+        self.channel.listen(1)
+        # Failure-only deadlock guard; success depends on explicit IPC, not
+        # elapsed time, polling iterations or a filesystem marker's arrival.
+        self.channel.settimeout(20)
+        self.journal = self.root / "input"
+        self.log = self.root / "reset.log"
+        self.child_script = self.root / "child.py"
+        self.child_script.write_text(STARTUP_CHILD, encoding="utf-8")
+        self.children = []
+        self.addCleanup(self.reap)
+        self.package = str(Path(__file__).resolve().parents[1])
+        self.plan = {"pane_id": PANE, "stow": "round-7"}
+
+    def reap(self):
+        # These are Popen-owned fixture children, never native pane processes.
+        for child in self.children:
+            if child.child.poll() is None:
+                child.child.terminate()
+            child.child.wait(timeout=5)
+            child.close()
+
+    def start(self, mode):
+        with self.log.open("ab") as sink:
+            child = foreman_reset.DetachedReset(
+                [sys.executable, str(self.child_script), str(self.state), mode, str(self.release), str(self.journal)],
+                sink, self.package)
+        self.children.append(child)
+        return child
+
+    def schedule(self, modes):
+        choices = iter(modes)
+        with patch.dict(os.environ, {"PYTHONPATH": self.package}):
+            return foreman_reset.schedule(self.state, self.plan, RESET_AT, lambda: self.start(next(choices)),
+                                          native_session=SESSION)
+
+    def release_and_confirm(self):
+        wire, _ = self.channel.accept()
+        with wire:
+            wire.settimeout(20)
+            wire.sendall(b"r")
+            self.assertEqual(wire.recv(1), b"d")
+
+    def finish_once(self):
+        self.release_and_confirm()
+        for child in self.children:
+            child.child.wait(timeout=5)
+        self.assertEqual(self.journal.read_text(), "clear\nresume\n")
+        document = json.loads(foreman_reset.record_path(self.state).read_text())
+        self.assertEqual(len(document["resets"]), 1)
+        row = document["resets"][0]
+        self.assertEqual((row["status"], row["native_session"], row["scheduled_at"]), ("delivered", SESSION, RESET_AT))
+
+    def test_loaded_identity_and_durable_claim_precede_success(self):
+        row = self.schedule(["healthy"])
+        self.assertEqual(row["status"], "delivering")
+        self.assertEqual(row["process"], supervision_runtime.process_identity(self.children[0].child.pid))
+        self.assertFalse(self.journal.exists())
+        self.finish_once()
+
+    def test_preclaim_loss_recovers_once_without_duplicate_input(self):
+        for mode in ("before_ready", "before_claim", "wrong_identity", "false_claim"):
+            with self.subTest(mode=mode):
+                # Each subcase gets independent owner records and fixture control.
+                foreman_reset.record_path(self.state).unlink(missing_ok=True)
+                self.journal.unlink(missing_ok=True)
+                self.log.unlink(missing_ok=True)
+                before = len(self.children)
+                row = self.schedule([mode, "healthy"])
+                launched = self.children[before:]
+                self.assertEqual(len(launched), 2)
+                self.assertIsNotNone(launched[0].child.poll())
+                self.assertEqual(row["process"]["pid"], launched[1].child.pid)
+                self.assertFalse(self.journal.exists())
+                losses = [json.loads(line) for line in self.log.read_text().splitlines()]
+                self.assertEqual(len(losses), 1)
+                self.assertEqual((losses[0]["startup_attempt"], losses[0]["pid"], losses[0]["phase"]),
+                                 (1, launched[0].child.pid, "preclaim"))
+                self.finish_once()
+
+    def test_exhausted_preclaim_recovery_preserves_a_terminal_no_input_receipt(self):
+        with self.assertRaises(foreman_reset.ResetEnded):
+            self.schedule(["before_claim", "before_claim"])
+        self.assertEqual(len(self.children), foreman_reset.STARTUP_ATTEMPTS)
+        self.assertFalse(self.journal.exists())
+        row = json.loads(foreman_reset.record_path(self.state).read_text())["resets"][0]
+        self.assertEqual((row["status"], row["process"], row["result"]["error"]), ("failed", None, "reset_startup_failed"))
+        self.assertIn("memory-show", row["result"]["resume_prompt"])
+        self.assertEqual(len(self.log.read_text().splitlines()), 2)
+        with self.assertRaises(foreman_reset.ResetEnded):
+            self.schedule(["healthy"])
+        self.assertEqual(len(self.children), foreman_reset.STARTUP_ATTEMPTS)
+
+    def test_a_claimed_failure_never_starts_another_child(self):
+        with self.assertRaises(foreman_reset.ResetEnded):
+            self.schedule(["claimed_failure", "healthy"])
+        self.assertEqual(len(self.children), 1)
+        self.assertFalse(self.journal.exists())
+        row = json.loads(foreman_reset.record_path(self.state).read_text())["resets"][0]
+        self.assertEqual((row["status"], row["result"]["message"]), ("failed", "fixture failure after claim"))
+
+    def test_continuation_survives_the_scheduling_parent_process(self):
+        parent_script = self.root / "parent.py"
+        parent_script.write_text(
+            "import json, sys\nfrom pathlib import Path\nfrom foreman import foreman_reset\n"
+            "state, child, release, journal, log, package = sys.argv[1:]\n"
+            "with Path(log).open('ab') as sink:\n"
+            "    row = foreman_reset.schedule(state, {'pane_id':'w9:p1','stow':'round-7'}, " + repr(RESET_AT) + ",\n"
+            "        lambda: foreman_reset.DetachedReset([sys.executable, child, state, 'healthy', release, journal], sink, package),\n"
+            "        native_session=" + repr(SESSION) + ")\n"
+            "print(json.dumps(row))\n", encoding="utf-8")
+        env = {**os.environ, "PYTHONPATH": self.package}
+        result = subprocess.run([sys.executable, str(parent_script), str(self.state), str(self.child_script),
+                                 str(self.release), str(self.journal), str(self.log), self.package],
+                                env=env, capture_output=True, text=True, check=False, timeout=20)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        row = json.loads(result.stdout)
+        self.assertEqual(row["status"], "delivering")
+        self.assertEqual(supervision_runtime.process_identity(row["process"]["pid"]), row["process"])
+        self.assertFalse(self.journal.exists())
+        # The scheduling tool/process is gone; release the same detached child.
+        self.release_and_confirm()
+        final = json.loads(foreman_reset.record_path(self.state).read_text())["resets"][0]
+        self.assertEqual(final["status"], "delivered")
+        self.assertEqual(self.journal.read_text(), "clear\nresume\n")
 
 
 if __name__ == "__main__":

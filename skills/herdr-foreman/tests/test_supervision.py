@@ -117,10 +117,14 @@ class SupervisionTest(unittest.TestCase):
                 {"member": member, "outcome": "The assignment remains covered by the saved boundary.", "evidence": [str(self.evidence)]}
                 for member in members]}, AT)
 
-    def schedule_reset(self, *, stow="hold-1", pane="lead-pane", native=None):
-        return foreman_reset.schedule(
-            self.path, {"pane_id": pane, "stow": stow}, AT, lambda: PROCESS["pid"],
+    def schedule_reset(self, *, stow="hold-1", pane="lead-pane", native=None, claimed=True):
+        plan = {"pane_id": pane, "stow": stow}
+        result = foreman_reset.schedule(
+            self.path, plan, AT, lambda: PROCESS["pid"],
             native_session=native or {"kind": "id", "value": "lead-session"}, probe=self.probe)
+        if claimed:
+            foreman_reset.claim(self.path, plan, PROCESS)
+        return result
 
     def test_worker_b_event_is_returned_while_a_is_still_working(self):
         self.member("a")
@@ -348,7 +352,18 @@ class SupervisionTest(unittest.TestCase):
         self.assertIn("quiet watch deadline", blocked["reason"])
         self.assertIn("Schedule its exact live continuation", blocked["reason"])
 
-    def test_matching_live_scheduled_reset_releases_the_handoff_boundary(self):
+    def test_live_unclaimed_reset_never_releases_stop_or_changes_its_record(self):
+        self.member()
+        self.hold(["dispatch-a"], kind="handoff")
+        self.schedule_reset(claimed=False)
+        path = foreman_reset.record_path(self.path)
+        before = path.read_bytes()
+        blocked = self.stop()
+        self.assertEqual(blocked["decision"], "block")
+        self.assertIn("reset_claim_pending", blocked["reason"])
+        self.assertEqual(path.read_bytes(), before)
+
+    def test_matching_live_claimed_reset_releases_the_handoff_boundary(self):
         self.member()
         self.hold(["dispatch-a"], kind="handoff")
         self.schedule_reset()

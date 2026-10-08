@@ -1,5 +1,34 @@
 # Changelog
 
+### Fixed
+
+- Reset scheduling now verifies the loaded Python runtime's identity and
+  durable claim before reporting a live continuation. A private handshake
+  avoids macOS launcher's same-PID executable change. Owner-managed bounded
+  recovery reaps only unclaimed children under the record lock and retains
+  each startup loss in the private log; claimed or uncertain deliveries never
+  retry. Stow, native-session, PID-reuse and per-keystroke guards remain intact
+  (#707). Codex's unpainted composer is separated from its styled shortcut
+  footer without treating recalled multiline drafts as empty input.
+- Planned reset input now uses a shared native pre-prompt gate for Claude,
+  Codex and Grok's Claude-compatible hooks. The claimed owner saves foreground
+  process pins; the hook validates the exact continuation and new native
+  session before rebinding supervision. Codex's delayed SessionStart receipt
+  no longer prevents submitting that continuation. Duplicate, old-session,
+  replacement, changed-stow and unclaimed inputs refuse; delivery still
+  requires the hook's durable acceptance (#707).
+  Native long-paste framing and collapsed transcript views preserve that
+  acceptance proof. Only verified continuations receive native authentication
+  context. Post-clear startup settles read-only under unchanged process pins;
+  Codex resets with `/clear` instead of entering a `/new` checkout picker.
+  Foreground pins bind the reported runtime group leader rather than changing
+  hook/MCP children; unverifiable leaders and runtime replacements still
+  refuse. Interrupted guards retain bounded phase, status and identity-match
+  diagnostics without storing raw provider or pane output.
+  Replay success and Stop authorization require a durable claim, and forged receipt locators create
+  no directories or locks. The native adapter loads only the installed verifier,
+  excluding checkout and inherited Python-path shadow modules.
+
 ## 0.3.377 — 2026-10-08
 
 ### Changed

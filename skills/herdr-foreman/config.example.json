@@ -140,7 +140,7 @@
         "Ask Codex to do anything"
       ],
       "recover_keys": [],
-      "clear_prompt": "/new",
+      "clear_prompt": "/clear",
       "idle_markers": [
         "\u203a Ask Codex to do anything"
       ],

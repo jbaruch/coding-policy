@@ -260,9 +260,9 @@ def bind_current(state_path, client, at, *, environ=None, cwd=None, root=None):
     pane = client.pane_get(pane_id)
     native = pane.get("agent_session")
     if (pane.get("pane_id") != pane_id or not isinstance(native, dict)
-            or native.get("kind") not in ("id", "path") or native.get("agent") not in ("claude", "codex")
+            or native.get("kind") not in ("id", "path") or native.get("agent") not in ("claude", "codex", "grok")
             or native.get("source") != "herdr:" + native["agent"]):
-        raise UsageError("This foreman pane lacks supported Claude/Codex native session proof. Restore Herdr's session identity before binding the native Stop backstop.", {})
+        raise UsageError("This foreman pane lacks supported Claude/Codex/Grok native session proof. Restore Herdr's session identity before binding the native Stop backstop.", {})
     who = store.identity(native["value"], cwd or str(Path.cwd()), environ.get("HERDR_ENV"),
                          kind=native["kind"], pane_id=pane_id)
     return store.bind(state_path, who, at, root=root)

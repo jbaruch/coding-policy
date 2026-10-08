@@ -137,6 +137,12 @@ BY_NAME = {agent.name: agent for agent in parse_config(CONFIG)}
 
 # The live rows, as Codex draws them.
 CODEX_EMPTY = "  Codex v1.2  ~/Projects/x\n  ─────────────\n  › \n"
+CODEX_UNPAINTED_EMPTY = (
+    "\x1b[0m\x1b[1m› \x1b[0m\x1b[2mAsk Codex to do anything\x1b[0m\n"
+    "\n"
+    "  GPT-6.1-Sol high · /private/tmp/fixture · Execute issue #707 reset\n"
+    "  \x1b[0m\x1b[1m?\x1b[0m for shortcuts     ⚠ 2 warnings · \x1b[0m\x1b[1mf2 \x1b[0mto view"
+)
 CODEX_HELD = "  Codex v1.2  ~/Projects/x\n  ─────────────\n  › /new\n"
 CODEX_FRESH = "  ╭─ Codex ─╮\n  │ new session │\n  ╰─────────╯\n  › \n"
 
@@ -334,6 +340,20 @@ class SendCommandTest(unittest.TestCase):
         self.assertEqual(result["extra_enters"], 0)
         self.assertFalse(result["recovered"])
         self.assertTrue(result["screen_changed"])
+
+    def test_post_clear_startup_paint_settles_by_reading_without_any_extra_key(self):
+        runner = self._runner([CODEX_EMPTY, "  › starting session\n", CODEX_FRESH])
+        result = self._send(runner)
+        self.assertTrue(result["consumed"])
+        self.assertEqual(result["extra_enters"], 0)
+        self.assertEqual(runner.writes(), ["pane send-text w3:p1 /new", "pane send-keys w3:p1 enter"])
+
+    def test_post_clear_foreign_draft_remains_refused_after_bounded_reads(self):
+        runner = self._runner([CODEX_EMPTY, "  › another person's draft\n"])
+        with self.assertRaises(HerdrError) as caught:
+            self._send(runner)
+        self.assertTrue(caught.exception.details["composer_occupied"])
+        self.assertEqual(runner.writes(), ["pane send-text w3:p1 /new", "pane send-keys w3:p1 enter"])
 
     def test_the_autocomplete_popup_costs_a_second_enter(self):
         # First Enter accepts the completion; the second submits.
@@ -790,6 +810,39 @@ CODEX_BLANK_THEN_CONTINUATION = (
 
 
 class PlaceholderTest(unittest.TestCase):
+    def test_native_unpainted_placeholder_excludes_the_styled_footer(self):
+        for screen in (CODEX_UNPAINTED_EMPTY, CODEX_UNPAINTED_EMPTY.replace(
+                "\x1b[1m?\x1b[0m for", "\x1b[1m? \x1b[0mfor")):
+            with self.subTest(screen=screen):
+                composer = inspect_composer(screen, BY_NAME["codex"])
+                self.assertFalse(composer.occupied)
+                self.assertTrue(composer.placeholder)
+
+    def test_unpainted_recalled_draft_keeps_all_paragraphs_before_the_footer(self):
+        for draft in (
+            "\n  \x1b[2mkeep this recalled continuation\x1b[0m",
+            "\n\n  \x1b[2mkeep this second paragraph\x1b[0m",
+            "\n  \x1b[2mGPT-6.1-Sol high · /private/tmp/fixture\x1b[0m\n"
+            "  \x1b[2m? for shortcuts\x1b[0m",
+        ):
+            with self.subTest(draft=draft):
+                screen = CODEX_UNPAINTED_EMPTY.replace("\x1b[0m\n\n", "\x1b[0m" + draft + "\n\n", 1)
+                composer = inspect_composer(screen, BY_NAME["codex"])
+                self.assertTrue(composer.occupied)
+                self.assertIn("\n", composer.content)
+                self.assertNotIn("Execute issue #707 reset", composer.content)
+
+    def test_unpainted_footer_without_ansi_or_separator_is_not_a_boundary(self):
+        for screen in (
+            strip_ansi(CODEX_UNPAINTED_EMPTY),
+            CODEX_UNPAINTED_EMPTY.replace("\n\n", "\n"),
+            CODEX_UNPAINTED_EMPTY + "\n  further draft text",
+            CODEX_UNPAINTED_EMPTY.replace("\x1b[1m?\x1b[0m", "?"),
+            CODEX_UNPAINTED_EMPTY.replace("\x1b[1m?\x1b[0m", "\x1b[1:0m?\x1b[0m"),
+        ):
+            with self.subTest(screen=screen):
+                self.assertTrue(inspect_composer(screen, BY_NAME["codex"]).occupied)
+
     def test_painted_placeholder_excludes_indented_status_and_shortcuts(self):
         for background in ("48;2;62;64;81", "48;5;235", "44", "104"):
             with self.subTest(background=background):
@@ -950,6 +1003,11 @@ class LiveKillSequenceTest(unittest.TestCase):
 
     def test_painted_placeholder_with_footer_sends_no_recovery_keys(self):
         runner = self._runner(painted_codex_composer())
+        ensure_ready(HerdrClient(runner=runner), BY_NAME["codex"], sleep=NO_SLEEP)
+        self.assertEqual(runner.writes(), [])
+
+    def test_unpainted_native_placeholder_sends_no_recovery_keys(self):
+        runner = self._runner(CODEX_UNPAINTED_EMPTY)
         ensure_ready(HerdrClient(runner=runner), BY_NAME["codex"], sleep=NO_SLEEP)
         self.assertEqual(runner.writes(), [])
 
