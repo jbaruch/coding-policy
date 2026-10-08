@@ -1192,7 +1192,7 @@ class FreshStartupDeliveryTest(unittest.TestCase):
     EMPTY = "\x1b[2m› Ask Codex to do anything\x1b[0m"
     ANIMATED = "\x1b[2m› Ask Codex to do anything ✦\x1b[0m"
 
-    def run_send(self, frames, *, observe=None):
+    def run_send(self, frames, *, observe=None, agent=None):
         from unittest.mock import Mock, patch
         client = Mock()
         writes = []
@@ -1201,10 +1201,51 @@ class FreshStartupDeliveryTest(unittest.TestCase):
         reads = iter(frames)
         with patch("foreman.composer.read_pane", side_effect=lambda *_a, **_k: next(reads)), \
                 patch("foreman.composer._left_idle", return_value=True):
-            result = send_message(client, BY_NAME["codex"], "immutable brief", "immutable brief", pane_id="p1",
+            result = send_message(client, agent or BY_NAME["codex"], "immutable brief", "immutable brief", pane_id="p1",
                                   startup_observe=observe or (lambda: ("p1", 42, "model", "high")),
                                   before_prompt=boundary, sleep=NO_SLEEP, attempts=1)
         return client, boundary, writes, result
+
+    def test_native_claude_dynamic_hint_permits_one_prompt_without_recovery(self):
+        # #723: captured Claude 2.1.294 ANSI composer and decorated footer.
+        frame = (
+            '\x1b[0m\x1b[38;2;153;153;153m○ low · /effort\x1b[0m\n'
+            '\x1b[0m\x1b[38;2;136;136;136m────────────────────\x1b[0m\n'
+            '❯\xa0\x1b[0m\x1b[2mTry "how does promote-skill.sh work?"\x1b[0m\n'
+            '\x1b[0m\x1b[38;2;136;136;136m────────────────────\x1b[0m\n'
+            '  \x1b[0m\x1b[38;5;111m~/Projects/nanoclaw\x1b[0m'
+            '\x1b[38;2;153;153;153m \ue0a0 main\x1b[0m'
+            '\x1b[38;5;215m Haiku 5.5\x1b[0m\n'
+            '  \x1b[0m\x1b[38;2;255;107;128m⏵⏵ bypass permissions on\x1b[0m'
+        )
+        client, boundary, writes, result = self.run_send(
+            [(frame, True), (frame, True), ("immutable brief", True)], agent=BY_NAME["claude"])
+        self.assertEqual(writes, [("claude", "immutable brief")])
+        self.assertTrue(result["landed"])
+        boundary.assert_called_once()
+        client.pane_send_keys.assert_not_called()
+        client.pane_send_text.assert_not_called()
+
+    def test_claude_hint_does_not_admit_plain_typed_or_mixed_input(self):
+        from unittest.mock import Mock, patch
+        hint = '❯\xa0\x1b[2mTry "how does promote-skill.sh work?"\x1b[0m'
+        for agent, frame, ansi in [
+            (BY_NAME["claude"], hint, False),
+            (BY_NAME["claude"], strip_ansi(hint), True),
+            (BY_NAME["claude"], hint + " authored text", True),
+            (BY_NAME["strict"], hint, True),
+            (BY_NAME["claude"], "Trust this directory?", True),
+            (BY_NAME["codex"], "\x1b[2m› recalled draft\x1b[0m", True),
+        ]:
+            with self.subTest(agent=agent.name, frame=frame, ansi=ansi):
+                client, boundary = Mock(), Mock()
+                with patch("foreman.composer.read_pane", return_value=(frame, ansi)), self.assertRaises(HerdrError):
+                    send_message(client, agent, "brief", "brief", before_prompt=boundary,
+                                 startup_observe=lambda: ("p1", 42), sleep=NO_SLEEP)
+                boundary.assert_not_called()
+                client.agent_prompt.assert_not_called()
+                client.pane_send_keys.assert_not_called()
+                client.pane_send_text.assert_not_called()
 
     def test_animation_settles_before_exactly_one_prompt_without_keys(self):
         client, boundary, writes, result = self.run_send([

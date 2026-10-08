@@ -627,7 +627,10 @@ def _settle_fresh_composer(client, agent, pane_id, observe, sleep, warn):
                 sleep(FRESH_COMPOSER_INTERVAL)
                 continue
             raise startup_pending_error(agent, pane_id)
-        exact = composer.placeholder or composer.literal == ""
+        # Keep the runtime's existing empty-input classification. Claude's
+        # dynamic dim hints have no static allowlist; Codex recalled input
+        # remains occupied under its explicit placeholder policy.
+        exact = not composer.occupied
         # Only a single placeholder row with decorative non-word marks may
         # settle. Recalled paragraphs and arbitrary dim input remain drafts.
         decorated = (composer.dim and "\n" not in (composer.literal or "") and any(
