@@ -21,6 +21,10 @@
   acceptance proof. Only verified continuations receive native authentication
   context. Post-clear startup settles read-only under unchanged process pins;
   Codex resets with `/clear` instead of entering a `/new` checkout picker.
+  Foreground pins bind the reported runtime group leader rather than changing
+  hook/MCP children; unverifiable leaders and runtime replacements still
+  refuse. Interrupted guards retain bounded phase, status and identity-match
+  diagnostics without storing raw provider or pane output.
 
 ## 0.3.377 — 2026-10-08
 
