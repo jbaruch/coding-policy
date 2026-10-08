@@ -14,8 +14,8 @@
 #   2. No hook reports       -> no output, exit 0.
 #   3. A hook exits non-zero -> its own status line; the others still arrive.
 #   4. A hook prints non-JSON -> its own status line; the others still arrive.
-#   5. The manifest declares session-start.sh as the only SessionStart hook:
-#      portable, plus native for claude-code and codex.
+#   5. Every manifest route delivers SessionStart statuses from a plugin path
+#      with spaces, including Grok's args-ignoring Claude-settings import.
 #   8. Portable run under a native agent (TESSL_AGENT=claude-code/codex) -> silent.
 #   9. Portable run under another agent -> the consensus {"additionalContext"} form.
 #  10. python3 and jq both fail to parse -> a status naming the parsers, not the hook.
@@ -91,19 +91,45 @@ main() {
   if [[ $RC -eq 0 ]] && context | grep -q "hook noisy printed something other than" && context | grep -q "— one"; then
     pass; else fail "bad output: expected a status naming it, got RC=$RC OUT=$OUT"; fi
 
-  # 5. the manifest routes SessionStart through this script alone.
-  if python3 - "$here/../.tessl-plugin/plugin.json" <<'PY'
-import json, sys
-d = json.load(open(sys.argv[1]))
-portable = [h for g in d["hooks"]["SessionStart"] for h in g["hooks"]]
-claude = [h for g in d["nativeHooks"]["claude-code"]["SessionStart"] for h in g["hooks"]]
-codex = [h for g in d["nativeHooks"]["codex"]["SessionStart"] for h in g["hooks"]]
-ok = (len(portable) == 1 and portable[0]["args"] == ["${TESSL_PLUGIN_DIR}/hooks/session-start.sh"]
-      and len(claude) == 1 and claude[0]["command"] == 'bash "${TESSL_PLUGIN_DIR}/hooks/session-start.sh"'
-      and len(codex) == 1 and codex[0]["command"] == 'bash "${TESSL_PLUGIN_DIR}/hooks/session-start.sh"')
-sys.exit(0 if ok else 1)
+  # 5. execute the manifest routes; quoting is proved by the delivered payload.
+  if python3 - "$here/../.tessl-plugin/plugin.json" "$DIR" "$TMP" <<'PY'
+import json, os, shlex, shutil, subprocess, sys
+from pathlib import Path
+
+d = json.loads(Path(sys.argv[1]).read_text())
+plugin = Path(sys.argv[3]) / "installed plugin with spaces"
+shutil.copytree(sys.argv[2], plugin / "hooks")
+settings = plugin / ".claude"
+settings.mkdir()
+environment = {**os.environ, "SESSION_START_HOOKS": "one two quiet"}
+environment.pop("TESSL_AGENT", None)
+expected = "Session-start status — one\n\nSession-start status — two"
+for agent in ("portable", "claude-code", "codex", "grok"):
+    groups = d["hooks"]["SessionStart"] if agent == "portable" else d["nativeHooks"][
+        "claude-code" if agent == "grok" else agent]["SessionStart"]
+    entries = [entry for group in groups for entry in group["hooks"]]
+    outputs = []
+    for entry in entries:
+        expand = lambda value: value.replace("${TESSL_PLUGIN_DIR}", str(plugin))
+        command = expand(entry["command"])
+        if agent == "grok":
+            # Grok executes a compound string in sh, ignores args, and
+            # resolves a bare command against the settings directory.
+            argv = ["sh", "-c", command] if " " in command else [str(settings / command)]
+        else:
+            argv = shlex.split(command) + [expand(arg) for arg in entry.get("args", [])]
+        current = {**environment, **({"TESSL_AGENT": "cursor"} if agent == "portable" else {})}
+        result = subprocess.run(argv, env=current, input="", capture_output=True, text=True, check=False)
+        assert result.returncode == 0, (agent, result.stderr)
+        if result.stdout.strip():
+            payload = json.loads(result.stdout)
+            if agent != "portable":
+                payload = payload["hookSpecificOutput"]
+                assert payload["hookEventName"] == "SessionStart", agent
+            outputs.append(payload["additionalContext"])
+    assert outputs == [expected], (agent, outputs)
 PY
-  then pass; else fail "manifest: SessionStart must be session-start.sh alone: portable, plus native for claude-code and codex"; fi
+  then pass; else fail "manifest: every SessionStart route must deliver both statuses once from installed paths with spaces"; fi
 
   # 6. jq alone merges the same way.
   command -v jq >/dev/null || die "jq required for these tests"
