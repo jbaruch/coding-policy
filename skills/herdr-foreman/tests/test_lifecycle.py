@@ -584,7 +584,8 @@ class WindowProbeTest(unittest.TestCase):
         def measured(_client, probes, _at, **_options):
             return {"agents": {probes[0].name: {"kind": probes[0].kind,
                      "headroom_pct": 89.0, "windows": []}}}
-        with patch("foreman.lifecycle.spawn", side_effect=launched), \
+        with patch("foreman.lifecycle.identity", side_effect=lambda role: role + "-fixed"), \
+                patch("foreman.lifecycle.spawn", side_effect=launched), \
                 patch("foreman.lifecycle.close") as closed, patch("foreman.measure.measure", side_effect=measured):
             result = measure_worker_kinds(Mock(), workers, "2026-10-01T00:00:00+00:00")
         self.assertEqual(set(result["agents"]), {"claude", "codex", "grok"})
@@ -596,7 +597,8 @@ class WindowProbeTest(unittest.TestCase):
         self.assertEqual([(worker.name, worker.kind, worker.tiers) for worker in workers], catalog)
         self.assertEqual(closed.call_count, 2)
         unavailable.clear()
-        with patch("foreman.lifecycle.spawn", side_effect=launched), \
+        with patch("foreman.lifecycle.identity", side_effect=lambda role: role + "-fixed"), \
+                patch("foreman.lifecycle.spawn", side_effect=launched), \
                 patch("foreman.lifecycle.close"), patch("foreman.measure.measure", side_effect=measured):
             recovered = measure_worker_kinds(Mock(), workers, "2026-10-01T00:01:00+00:00")
         self.assertEqual(recovered["failed_agents"], [])
@@ -606,7 +608,8 @@ class WindowProbeTest(unittest.TestCase):
     def test_persistent_native_account_refusal_keeps_unknown_capacity_and_its_actual_cause(self):
         worker = template()
         native = failure("agent_not_ready", "account access denied")
-        with patch("foreman.lifecycle.spawn", side_effect=native) as launches, \
+        with patch("foreman.lifecycle.identity", return_value="probe-claude-fixed"), \
+                patch("foreman.lifecycle.spawn", side_effect=native) as launches, \
                 patch("foreman.measure.measure") as usage:
             result = measure_worker_kinds(Mock(), [worker], "2026-10-01T00:00:00+00:00")
         launches.assert_called_once()
