@@ -104,7 +104,7 @@ CLEAR_SESSION_POLL_SEC = 1
 #: The detail keys a failure record keeps. Herdr and composer errors can carry
 #: raw subprocess output or pane text; the record keeps identifiers only.
 FAILURE_DETAIL_KEYS = frozenset({"pane_id", "stow", "record", "status", "pid", "lock", "kind", "reconciled",
-                                 "reconciled_at", "schema_version", "reason"})
+                                 "reconciled_at", "schema_version", "reason", "phase", "name_matches", "kind_matches"})
 RESUME_OPENING = "Foreman resume after a planned round-boundary reset."
 RESET_RECEIPT_PREFIX = "Herdr reset input receipt: "
 RESUME_TEMPLATE = (
@@ -703,7 +703,7 @@ def schedule(state_path, plan, at, start, *, native_session, alive=_alive, probe
 
 #: Error codes whose messages this owner writes itself. Any other error, a
 #: Herdr or composer failure above all, can carry raw subprocess output or pane
-#: text in its message; the record keeps a generic line and the log keeps it.
+#: text in its message; the record and log keep a generic line and safe fields.
 OWN_MESSAGE_CODES = frozenset({"usage_error", "state_error", "reset_ended", "reset_record_newer", "reset_record_unusable",
                                "reset_session_changed", "reset_startup_failed"})
 
@@ -712,13 +712,13 @@ def failure(exc, stow, state, **options):
     """The durable result of a failed or interrupted reset: the error and the prompt the operator pastes.
 
     Details are filtered to identifier keys with scalar values, and a message
-    this owner did not write is replaced by a generic one; the full error
-    stays in the deliverer's log.
+    this owner did not write is replaced by a generic one. The deliverer's
+    log holds the same safe diagnostic, never the raw provider error.
     """
     details = {key: value for key, value in exc.details.items()
                if key in FAILURE_DETAIL_KEYS and (value is None or isinstance(value, (str, int, float, bool)))}
     message = exc.message if exc.code in OWN_MESSAGE_CODES else (
-        "A Herdr call failed ({}); the reset's log holds its output.".format(exc.code))
+        "A Herdr call failed ({}); inspect the saved diagnostic fields and native pane before owner recovery.".format(exc.code))
     return {"error": exc.code, "message": message, "details": details, "resume_prompt": resume_prompt(stow, state, **options)}
 
 
@@ -1226,7 +1226,10 @@ def deliver(client, agents, pane_id, stow, state, *, native_session, still_ready
         if (live.get("name") != agent.name or live.get("agent") != agent.kind
                 or live.get("agent_status") not in SETTLE_STATES):
             raise HerdrError("The foreman's pane {} changed ({} {}, {}) before typing, so the reset stopped. {}".format(
-                pane_id, live.get("agent"), live.get("name"), live.get("agent_status"), OPERATOR_RECOVERY), {"pane_id": pane_id})
+                pane_id, live.get("agent"), live.get("name"), live.get("agent_status"), OPERATOR_RECOVERY),
+                {"pane_id": pane_id, "reason": "foreman_before_input_changed",
+                 "status": live.get("agent_status") if live.get("agent_status") in ("idle", "done", "working", "blocked", "unknown") else "unknown",
+                 "name_matches": live.get("name") == agent.name, "kind_matches": live.get("agent") == agent.kind})
         # A same-name, same-kind replacement is another session (#523).
         current = pane_session(client, pane_id)
         deferred = resuming[0] and agent.kind == "codex" and expected[0] == native_session
@@ -1286,7 +1289,7 @@ def deliver(client, agents, pane_id, stow, state, *, native_session, still_ready
         landing = {"landed": True, "started": True}
     except ForemanError as exc:
         # Persist a bounded owner phase, not raw pane/provider diagnostics.
-        details = {"reason": phase, **exc.details}
+        details = {"reason": phase, **exc.details, "phase": phase}
         if typed and not isinstance(exc, DeliveryInterrupted):
             wrapper = SessionInterrupted if isinstance(exc, SessionChanged) else DeliveryInterrupted
             raise wrapper("{} The pane was already typed into, so this reset is not retried. {}".format(

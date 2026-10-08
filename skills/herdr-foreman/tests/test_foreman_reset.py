@@ -408,6 +408,34 @@ class DeliverTest(unittest.TestCase):
         with self.assertRaisesRegex(HerdrError, "changed \\(codex foreman"):
             self.run_deliver(client)
 
+    def test_post_clear_guard_records_bounded_identity_and_status_without_resume_input(self):
+        for field, value, status, name_matches, kind_matches in (
+                ("agent_status", "working", "working", True, True),
+                ("agent_status", "token=secret", "unknown", True, True),
+                ("name", "token=secret", "idle", False, True),
+                ("agent", "token=secret", "idle", True, False)):
+            with self.subTest(field=field):
+                class Changed(FakeClient):
+                    after_clear = 0
+
+                    def agent_list(self):
+                        rows = super().agent_list()
+                        if self.cleared:
+                            self.after_clear += 1
+                            if self.after_clear > foreman_reset.RESET_STABLE_READS:
+                                rows[1][field] = value
+                        return rows
+
+                client = Changed(["idle"])
+                with self.assertRaises(foreman_reset.DeliveryInterrupted) as caught:
+                    self.run_deliver(client)
+                record = foreman_reset.failure(caught.exception, "round-7", "/state/s.json")
+                self.assertEqual(record["details"], {"pane_id": PANE, "reason": "foreman_before_input_changed",
+                    "phase": "resume_input", "status": status, "name_matches": name_matches, "kind_matches": kind_matches})
+                self.assertFalse(client.prompt_started)
+                self.assertEqual(client.keystrokes, ["/clear", "enter"])
+                self.assertNotIn("secret", json.dumps(record))
+
     def test_a_stow_that_changed_while_waiting_stops_the_reset(self):
         with self.assertRaisesRegex(UsageError, "(?s)no longer reset-ready.*" + DO_NOT_RERUN):
             self.run_deliver(FakeClient(["idle"]), still_ready=lambda: False)
