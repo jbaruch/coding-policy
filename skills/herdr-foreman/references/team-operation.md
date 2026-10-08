@@ -37,6 +37,19 @@ is consultation, not an expanded lookup exception. Report action counts or
 token/cost reductions only from measured executions. Unmeasured token use and
 monetary savings remain unknown.
 
+## Delegation
+
+- Follow `rules/agent-team-operation.md` Delegation for every delegated task.
+- The foreman uses the existing planning, assignment, dispatch, supervision and report owners.
+- Preserve responsibility, model/effort selection, account/capacity checks, contribution exclusion, checkout ownership and lifecycle evidence.
+- A worker needing delegated help records the staffing need and its evidence in its report for the foreman.
+- A worker gains no dispatch authority from that need and starts no child agent, managed or native.
+- Reviewer, tester, specialist and judge delegation prohibitions remain intact.
+- If Herdr or an eligible worker is unavailable, the foreman owns the staffing gap and uses the existing readiness, dispatch-recovery and escalation routes.
+- Preserve recoverable work and continue independent authorized work that the unavailable seat does not gate.
+- Escalate only a decision, authority, information or usable account the operator must supply.
+- An unavailable delegation route never authorizes native fallback or an unowned halt.
+
 ## Foreman Seat
 
 - The operator's `config.json` `foreman` block declares the seat like a worker: its agent, kind, launch options and an optional tier table
