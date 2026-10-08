@@ -30,6 +30,29 @@ from foreman.herdr import (
 from tests.fakes import FakeRunner, agent_json, ok_json, pane_layout
 
 
+class StartRetryCompatibilityTest(unittest.TestCase):
+    def test_running_server_not_the_client_binary_establishes_retry_compatibility(self):
+        runner = FakeRunner()
+        runner.set("status server", "status: running\nversion: 0.9.2\nendpoint_compatible: yes\n")
+        client = HerdrClient(binary="custom-herdr", runner=runner)
+        client.require_start_retry_compatibility()
+        self.assertEqual(runner.calls, [["custom-herdr", "status", "server"]])
+
+    def test_old_unknown_or_incompatible_server_never_authorizes_a_retry(self):
+        for output in ("status: running\nversion: 0.9.1\nendpoint_compatible: yes\n",
+                       "status: stopped\nversion: 0.9.2\nendpoint_compatible: yes\n",
+                       "status: running\nversion: 0.9.2\nendpoint_compatible: no\n",
+                       "status: running\nversion: unknown\nendpoint_compatible: yes\n",
+                       "status: running\nversion: 0.9.2-preview\nendpoint_compatible: yes\n",
+                       "status: running\nversion: 0.9.1\nversion: 0.9.2\nendpoint_compatible: yes\n", ""):
+            with self.subTest(output=output):
+                runner = FakeRunner()
+                runner.set("status server", output)
+                with self.assertRaisesRegex(HerdrError, "retry compatibility"):
+                    HerdrClient(runner=runner).require_start_retry_compatibility()
+                self.assertEqual(len(runner.calls), 1)
+
+
 class ArgvBuilderTest(unittest.TestCase):
     def setUp(self):
         self.client = HerdrClient(binary="herdr", runner=FakeRunner())

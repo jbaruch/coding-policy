@@ -573,6 +573,25 @@ PYCONTRACT
   then pass; else fail "release advisory routes contradict standalone/team merge contracts"; fi
 }
 
+check_probe_recovery_contract() {
+  local skills_root="$1"
+  if python3 - "$skills_root" <<'PYCONTRACT'
+import sys
+from pathlib import Path
+root = Path(sys.argv[1]) / "herdr-foreman"
+setup = (root / "references/round-setup.md").read_text()
+recovery = (root / "references/dispatch-recovery.md").read_text()
+section = setup.split("## Step 4 — Measure Headroom", 1)[1].split("## Step 5", 1)[0]
+assert "Probe and startup recovery" in section
+assert "measure that worker by hand" not in section
+probe = recovery.split("## Probe and startup recovery", 1)[1].split("## ", 1)[0]
+for obligation in ("declared provider roster", "unknown", "unavailability", "independent", "operator"):
+    assert obligation in probe, obligation
+assert "lifecycle.py" in probe
+PYCONTRACT
+  then pass; else fail "probe failures need an owner recovery route without removing providers or inventing capacity"; fi
+}
+
 check_delegation_contract() {
   local skills_root="$1"
   if python3 - "$skills_root" <<'PYCONTRACT'
@@ -624,6 +643,7 @@ run_suite() {
   done
   check_cleanup_retry
   check_release_advisory_contract "$skills_root"
+  check_probe_recovery_contract "$skills_root"
   check_delegation_contract "$skills_root"
 
   skill="${skills_root}/${MODE_GATE_SKILL}/SKILL.md"

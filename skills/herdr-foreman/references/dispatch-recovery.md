@@ -1,5 +1,20 @@
 # Dispatch and Wait Recovery
 
+## Probe and startup recovery
+
+- The foreman owns recovery of failed probe and startup observations.
+- Preserve the declared provider roster, tiers, accounts and capability evidence.
+- A transient shell, transport or measurement failure proves neither provider unavailability nor zero capacity.
+- Missing capacity stays `unknown`.
+- Require fresh facts for the affected seat; preserve independent authorized work whose own gates hold.
+- Follow the emitted owner diagnostic and repair its cause before re-measuring through SKILL.md Step 4.
+- Never remove a provider or rewrite its capabilities to make a failed measurement disappear.
+- Fresh-workspace readiness and pre-input recovery belong to `skills/herdr-foreman/foreman/lifecycle.py` (`_await_fresh_shell`, `_start_fresh_worker`); existing panes keep their strict refusal.
+- Herdr is an external CLI runtime dependency. Native busy-start retry requires the running-server compatibility check in `skills/herdr-foreman/foreman/herdr.py` (`require_start_retry_compatibility`); its `MIN_START_REFUSAL_VERSION` comment owns the minimum and renewal cadence. Unknown, older or incompatible servers authorize no repeat launch.
+- Unsettled causes and correction choices follow `skills/herdr-foreman/references/team-operation.md` Judgment Routes.
+- Exhausted approaches follow that contract's Fix Loops, with the investigator and pinned judge.
+- Escalate to the operator only for missing information, authority or a usable account that the team cannot supply.
+
 ## Dispatch context
 
 Keep the same `--task` identifier from initial development through all its

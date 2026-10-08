@@ -54,6 +54,14 @@ class AgentBusyError(ForemanError):
     code = "agent_busy"
 
 
+class StartShellNotReadyError(HerdrError):
+    """Pre-input start evidence is absent or shows captured login-shell children.
+
+    Only the fresh-workspace owner may wait and repeat this observation.
+    Existing-pane callers retain the ordinary immediate refusal.
+    """
+
+
 class PlanError(ForemanError):
     """The requested roles cannot be assigned from the given snapshot."""
 
