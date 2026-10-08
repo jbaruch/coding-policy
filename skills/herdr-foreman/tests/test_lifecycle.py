@@ -198,6 +198,37 @@ class FreshShellStartupTest(unittest.TestCase):
         client.agent_start.assert_called_once_with("claude", "claude", "pane-new", self.ARGV[1:])
         client.pane_close.assert_not_called()
 
+    def test_native_not_ready_retains_only_the_exact_blocked_first_start(self):
+        original = {"pane_id": "pane-new", "name": "claude", "agent": "claude", "agent_status": "blocked"}
+        for change in ({}, {"pane_id": "foreign"}, {"name": "foreign"}, {"agent": "codex"},
+                       {"agent_status": "working"}, {"agent_status": "unknown"}):
+            with self.subTest(change=change):
+                client, worker = self.client([self.SHELL] * 3 + [self.running()] * 2), template()
+                client.agent_start.side_effect = failure("agent_not_ready", "native startup dialog")
+                client.agent_get.return_value = {**original, **change}
+                if change:
+                    with self.assertRaises(HerdrError):
+                        spawn(client, worker, worker.tiers["coordination"], history=[], sleep=lambda _: None)
+                    client.pane_close.assert_called_once_with("pane-new")
+                else:
+                    self.assertEqual(spawn(client, worker, worker.tiers["coordination"], history=[], sleep=lambda _: None), "pane-new")
+                    client.pane_close.assert_not_called()
+                client.agent_start.assert_called_once()
+                client.agent_prompt.assert_not_called()
+                client.pane_send_keys.assert_not_called()
+
+    def test_blocked_start_with_a_changed_tier_is_not_accepted_or_restarted(self):
+        running = self.running()
+        running["foreground_processes"][0]["argv"] = ["claude", "--dangerously-skip-permissions", "--model", "opus-5", "--effort", "high"]
+        client, worker = self.client([self.SHELL] * 3 + [running]), template()
+        client.agent_start.side_effect = failure("agent_not_ready", "native startup dialog")
+        client.agent_get.return_value = {"pane_id": "pane-new", "name": "claude", "agent": "claude", "agent_status": "blocked"}
+        with self.assertRaises(HerdrError):
+            spawn(client, worker, worker.tiers["coordination"], history=[], sleep=lambda _: None)
+        client.agent_start.assert_called_once()
+        client.pane_close.assert_called_once_with("pane-new")
+        client.agent_prompt.assert_not_called()
+
     def test_ready_shell_needs_spaced_confirmation_before_start(self):
         client = self.client([self.SHELL, self.SHELL, self.SHELL, self.running()])
         sleeps = Mock()
@@ -571,6 +602,28 @@ class FreshShellStartupTest(unittest.TestCase):
 
 
 class WindowProbeTest(unittest.TestCase):
+    def test_startup_dialog_is_retained_without_usage_input_or_capacity_inference(self):
+        for kind in ("codex", "claude", "grok"):
+            for state in ("idle", "blocked"):
+                with self.subTest(kind=kind, state=state):
+                    worker, client = template(kind, kind, kind), Mock()
+                    client.agent_get.return_value = {"pane_id": "owned-probe", "agent_status": state}
+                    client.agent_read.return_value = "Native startup dialog"
+                    client.argv_pane_close.return_value = ["herdr", "pane", "close", "owned-probe"]
+                    with patch("foreman.lifecycle.spawn", return_value="owned-probe"), \
+                            patch("foreman.lifecycle.verify_running", return_value={"pid": 71, "source": "process_argv"}), \
+                            patch("foreman.lifecycle.close") as closed, patch("foreman.measure.measure") as usage:
+                        result = measure_worker_kinds(client, [worker], "2026-10-08T00:00:00+00:00", sleep=lambda _: None)
+                    closed.assert_not_called()
+                    usage.assert_not_called()
+                    client.agent_prompt.assert_not_called()
+                    client.agent_send_keys.assert_not_called()
+                    client.pane_send_keys.assert_not_called()
+                    self.assertEqual(result["failed_agents"], [kind])
+                    self.assertIsNone(result["agents"][kind]["headroom_pct"])
+                    self.assertIn("owned-probe", result["agents"][kind]["error"]["message"])
+                    self.assertIn("Runtime Dialogs", result["agents"][kind]["error"]["message"])
+
     def test_failed_probe_preserves_catalog_and_unknown_capacity_beside_healthy_providers(self):
         import copy
         workers = [template("claude", "claude", "anthropic"),
@@ -586,6 +639,7 @@ class WindowProbeTest(unittest.TestCase):
                      "headroom_pct": 89.0, "windows": []}}}
         with patch("foreman.lifecycle.identity", side_effect=lambda role: role + "-fixed"), \
                 patch("foreman.lifecycle.spawn", side_effect=launched), \
+                patch("foreman.lifecycle._prepare_fresh_probe"), \
                 patch("foreman.lifecycle.close") as closed, patch("foreman.measure.measure", side_effect=measured):
             result = measure_worker_kinds(Mock(), workers, "2026-10-01T00:00:00+00:00")
         self.assertEqual(set(result["agents"]), {"claude", "codex", "grok"})
@@ -599,6 +653,7 @@ class WindowProbeTest(unittest.TestCase):
         unavailable.clear()
         with patch("foreman.lifecycle.identity", side_effect=lambda role: role + "-fixed"), \
                 patch("foreman.lifecycle.spawn", side_effect=launched), \
+                patch("foreman.lifecycle._prepare_fresh_probe"), \
                 patch("foreman.lifecycle.close"), patch("foreman.measure.measure", side_effect=measured):
             recovered = measure_worker_kinds(Mock(), workers, "2026-10-01T00:01:00+00:00")
         self.assertEqual(recovered["failed_agents"], [])
@@ -629,6 +684,7 @@ class WindowProbeTest(unittest.TestCase):
             return {"agents": {probes[0].name: {"windows": None, "headroom_pct": None,
                 "error": {"code": "parse_error", "message": "usage unavailable"}}}}
         with patch("foreman.lifecycle.identity", return_value="probe-fixed"), \
+                patch("foreman.lifecycle._prepare_fresh_probe"), \
                 patch("foreman.measure.measure", side_effect=measured) as usage:
             result = measure_worker_kinds(client, [template()], "2026-10-01T00:00:00+00:00", sleep=sleeps)
         self.assertEqual(sleeps.call_count, 2)
@@ -665,6 +721,7 @@ class WindowProbeTest(unittest.TestCase):
                     "failed_agents": []}
 
         with patch("foreman.lifecycle.spawn", return_value="probe-pane") as started, \
+                patch("foreman.lifecycle._prepare_fresh_probe"), \
                 patch("foreman.lifecycle.identity", return_value="probe-claude-fixed"), \
                 patch("foreman.measure.measure", side_effect=measured) as usage, \
                 patch("foreman.lifecycle.close") as stopped:
@@ -689,6 +746,7 @@ class WindowProbeTest(unittest.TestCase):
                     "failed_agents": []}
 
         with patch("foreman.lifecycle.spawn", side_effect=["pane-foo", "pane-bar"]) as started, \
+                patch("foreman.lifecycle._prepare_fresh_probe"), \
                 patch("foreman.lifecycle.identity", side_effect=["probe-foo-fixed", "probe-bar-fixed"]), \
                 patch("foreman.measure.measure", side_effect=measured) as usage, \
                 patch("foreman.lifecycle.close"):
@@ -700,6 +758,7 @@ class WindowProbeTest(unittest.TestCase):
         client = Mock()
         client.argv_pane_close.return_value = ["herdr", "pane", "close", "--pane", "probe-pane"]
         with patch("foreman.lifecycle.spawn", return_value="probe-pane"), \
+                patch("foreman.lifecycle._prepare_fresh_probe"), \
                 patch("foreman.lifecycle.identity", return_value="probe-fixed"), \
                 patch("foreman.measure.measure", side_effect=KeyboardInterrupt), \
                 patch("foreman.lifecycle.close", side_effect=failure("pane_busy", "cannot close")), \
@@ -788,6 +847,7 @@ class WorkspacePlacementTest(unittest.TestCase):
             self.assertEqual(focus(), "w1")
             return {"agents": {probes[0].name: {"headroom_pct": 90, "pane_id": "w9:p7"}}}
         with patch("foreman.lifecycle.identity", return_value="probe-claude-fixed"), \
+                patch("foreman.lifecycle._prepare_fresh_probe"), \
                 patch("foreman.measure.measure", side_effect=measured):
             result = measure_worker_kinds(client, [template()], "2026-10-01T00:00:00+00:00", sleep=lambda _: None)
         self.assertEqual(result["failed_agents"], [])

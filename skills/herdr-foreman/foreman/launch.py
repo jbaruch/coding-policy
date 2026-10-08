@@ -22,7 +22,7 @@ from pathlib import PurePath
 
 from . import runnable
 from .composer import ensure_ready
-from .errors import AgentBusyError, HerdrError
+from .errors import AgentBusyError, HerdrError, owner_recovery
 from .herdr import READY_STATES, error_code
 from .restoration import NAME_RELEASED, NAME_TAKEN, name_state
 from .tiers import launch_flags, verify_argv, verify_worker_permissions, worker_launch_args
@@ -151,6 +151,12 @@ def _start_seat(client, name, kind, pane, tier, launch_args):
     """Start one named seat on `tier` and prove its launch argv."""
     result = client.agent_start(name, kind, pane, list(launch_args) + launch_flags(kind, tier))
     info = result.get("agent") if isinstance(result, dict) else None
+    if (isinstance(info, dict) and info.get("pane_id") == pane and info.get("name") == name
+            and info.get("agent") == kind and info.get("agent_status") == "blocked"):
+        verify_argv(kind, tier, result.get("argv"), launch_args)
+        raise owner_recovery(HerdrError("Started worker is blocked at native startup; no brief was sent.",
+            {"agent": name, "pane_id": pane}), "startup_dialog_pending", runnable.command("apply"),
+            "The fresh owner must preserve this pre-send dialog for Runtime Dialogs recovery; existing workers remain blocked.")
     if not isinstance(info, dict) or (
         info.get("pane_id") != pane or info.get("name") != name
         or info.get("agent") != kind or info.get("agent_status") not in READY_STATES

@@ -1215,6 +1215,26 @@ class FreshStartupDeliveryTest(unittest.TestCase):
         client.pane_send_keys.assert_not_called()
         client.pane_send_text.assert_not_called()
 
+    def test_initial_paint_without_composer_settles_before_one_prompt(self):
+        client, boundary, writes, result = self.run_send([
+            ("Starting Codex", True), (self.EMPTY, True), (self.EMPTY, True), ("immutable brief", True)])
+        self.assertEqual(writes, [("codex", "immutable brief")])
+        boundary.assert_called_once()
+        self.assertTrue(result["landed"])
+        client.pane_send_keys.assert_not_called()
+
+    def test_hook_review_glyph_is_not_an_assignment_composer(self):
+        from unittest.mock import Mock, patch
+        client, boundary = Mock(), Mock()
+        frame = "Hooks need review\n1 hook is new or changed.\n› 1. Review hooks\n2. Trust all and continue"
+        with patch("foreman.composer.read_pane", return_value=(frame, True)), self.assertRaises(HerdrError) as caught:
+            send_message(client, BY_NAME["codex"], "brief", "brief", before_prompt=boundary,
+                         startup_observe=lambda: ("p1", 42), sleep=NO_SLEEP)
+        self.assertEqual(caught.exception.details["failure_kind"], "startup_dialog_pending")
+        boundary.assert_not_called()
+        client.agent_prompt.assert_not_called()
+        client.pane_send_keys.assert_not_called()
+
     def test_unsafe_startup_frames_never_reach_prompt_or_sending_boundary(self):
         from unittest.mock import Mock, patch
         for frame in [("\x1b[2m› recalled draft\x1b[0m", True),

@@ -41,7 +41,7 @@ from .herdr import (
     format_argv,
     trace_enabled_in_env,
 )
-from .composer import COMPOSER_SETTLE_SEC, DEFAULT_START_TIMEOUT_MS, ensure_ready
+from .composer import COMPOSER_SETTLE_SEC, DEFAULT_START_TIMEOUT_MS, ensure_ready, startup_pending_error
 from .tiers import SEAT_SEPARATOR, canonical_role, require_seatable
 from .diagnostics import PREFIX as DIAGNOSTIC_PREFIX, stderr_warn
 from .measure import (
@@ -1865,7 +1865,14 @@ def _apply(args, client, warn, trace, hold_gates):
         """Best-effort cleanup that never replaces the active failure."""
         failures = []
         closed = []
+        retained = []
+        if isinstance(primary, ForemanError) and primary.details.get("failure_kind") == "startup_dialog_pending":
+            name = primary.details.get("agent")
+            if name in names and spawned[name] == primary.details.get("pane_id") and name not in sending:
+                retained.append(name)
         for name in names:
+            if name in retained:
+                continue
             pane = spawned[name]
             try:
                 lifecycle.close(client, name, pane)
@@ -1911,16 +1918,18 @@ def _apply(args, client, warn, trace, hold_gates):
                         "error": cleanup.to_dict(),
                     })
         if isinstance(primary, ForemanError):
-            known_closed = (bool(names) and bool(prepared) and not failures and not sending
+            known_closed = (bool(names) and bool(prepared) and not retained and not failures and not sending
                 and state_saved and all(next(row for row in store["dispatches"] if row["id"] == identifier)["status"] == "not_sent" for identifier in prepared))
-            cleanup_id = next((identifier for identifier in prepared if any(row["id"] == identifier and row["status"] == "not_sent" for row in store["dispatches"])), None)
-            operation = "apply" if known_closed else ("reconcile --dispatch " + shlex.quote(cleanup_id) if cleanup_id and not sending else "supervision-status")
+            cleanup_id = next((row["id"] for row in store["dispatches"] if row["id"] in prepared
+                and row["status"] == "not_sent" and (not retained or row["agent"] in retained)), None)
+            operation = "apply" if known_closed else ("reconcile --dispatch " + shlex.quote(cleanup_id) if cleanup_id and state_saved and (not sending or retained) else "supervision-status")
             owner_recovery(primary, primary.details.get("failure_kind", primary.code),
                 runnable.command(operation + " --state " + shlex.quote(str(state_path))),
                 ("Owned pre-send surfaces are closed and not_sent is durable. Repeat the identical normal apply; no retrospective, configuration or receipt repair is required."
-                 if known_closed else "The owner must complete recorded transport/cleanup reconciliation before the unchanged apply may retry; unknown or sent work is preserved."),
+                 if known_closed else "Read the retained native pane and follow Runtime Dialogs under existing task authority, without a redundant operator approval. After the same target returns to its empty composer, run the named reconciliation, then repeat unchanged apply. Do not repeat apply while its dialog remains."
+                 if retained and state_saved and cleanup_id else "The owner must complete recorded transport/cleanup reconciliation before the unchanged apply may retry; unknown or sent work is preserved."),
                 outcome="retryable" if known_closed else "blocked",
-                closed_agents=closed, dispatches=list(prepared), cleanup_failures=failures,
+                closed_agents=closed, retained_agents=retained, dispatches=list(prepared), cleanup_failures=failures,
                 state_saved=state_saved, sending_agents=sorted(sending))
             if failures:
                 primary.details["cleanup_failures"] = failures
@@ -1972,6 +1981,14 @@ def _apply(args, client, warn, trace, hold_gates):
                 }, at)
                 prepared.append(identifier)
                 save_state(state_path, state)
+                live = client.agent_get(name)
+                if live.get("pane_id") == pane and live.get("agent_status") == "blocked":
+                    recovery.observe_reserved(store, identifier, {
+                        "state": "blocked", "herdr_state": "blocked", "state_source": "herdr", "pane_id": pane,
+                        "context_session": native_context_session(live, agents_by_name[name].kind),
+                    })
+                    save_state(state_path, state)
+                    raise startup_pending_error(agents_by_name[name], pane)
             spawn_complete = True
         finally:
             if not spawn_complete:
@@ -2499,10 +2516,12 @@ def _run_recovery(args, state_path, warn, client, trace):
                     else:
                         require_empty_shell(client, pane)
                     return None
-                if (not isinstance(original_session, dict) or not isinstance(original_process, dict)
+                observation = dispatch.get("observed_before")
+                if (not isinstance(observation, dict) or "context_session" not in observation
+                        or not isinstance(original_process, dict)
                         or original_process.get("source") != "process_argv"
                         or type(original_process.get("pid")) is not int or original_process["pid"] <= 0):
-                    raise UsageError("No original native-session/process proof is available for cleanup; preserve the worker and inspect its recorded evidence.", {})
+                    raise UsageError("No original native-session observation/process proof is available for cleanup; preserve the worker and inspect its recorded evidence.", {})
                 running = verify_running(client, agents[name], pane, tier)
                 identity = (native_context_session(current, agents[name].kind), running)
                 if (current.get("pane_id") != pane or current.get("agent_status") not in READY_STATES

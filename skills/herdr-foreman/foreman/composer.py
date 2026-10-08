@@ -594,6 +594,13 @@ def _fresh_startup_error(kind, message, evidence):
         "The apply owner must prove owned pre-send cleanup and durable not_sent before retrying the unchanged assignment; unknown input remains blocked.")
 
 
+def startup_pending_error(agent, pane_id):
+    """No authority decision: leave this named pre-input UI for its owner."""
+    return _fresh_startup_error("startup_dialog_pending",
+        "Fresh startup for {} in {} has no proved empty composer; inspect its retained native pane. Nothing was sent.".format(agent.name, pane_id),
+        {"agent": agent.name, "pane_id": pane_id})
+
+
 def _settle_fresh_composer(client, agent, pane_id, observe, sleep, warn):
     """Read only; decorative startup evidence never authorizes input itself."""
     original = observe()
@@ -604,8 +611,22 @@ def _settle_fresh_composer(client, agent, pane_id, observe, sleep, warn):
         composer = inspect_composer(text, agent, ansi=ansi)
         if observe() != original:
             raise _fresh_startup_error("startup_identity_changed", "Fresh worker changed pane, process or tier during startup; nothing was sent.", {"pane_id": pane_id})
+        # The native hook-review menu uses the same glyph as Codex's composer.
+        # Recognizing its UI preserves the target, not permission to trust it.
+        rows = [row.strip() for row in strip_ansi(text).splitlines()]
+        if agent.kind == "codex" and "Hooks need review" in rows and any("1. Review hooks" in row for row in rows):
+            raise startup_pending_error(agent, pane_id)
         if not ansi or not composer.visible:
-            raise _fresh_startup_error("startup_evidence_missing", "Fresh startup lacks ANSI composer evidence; nothing was sent.", {"pane_id": pane_id, "ansi_read": ansi})
+            if not ansi:
+                raise _fresh_startup_error("startup_evidence_missing", "Fresh startup lacks ANSI composer evidence; nothing was sent.", {"pane_id": pane_id, "ansi_read": ansi})
+            # Startup paint can precede the composer. Wait without keys, but
+            # leave a persistent overlay available for the owner's contextual
+            # Runtime Dialogs decision instead of closing it on the first read.
+            stable = 0
+            if attempt + 1 < FRESH_COMPOSER_ATTEMPTS:
+                sleep(FRESH_COMPOSER_INTERVAL)
+                continue
+            raise startup_pending_error(agent, pane_id)
         exact = composer.placeholder or composer.literal == ""
         # Only a single placeholder row with decorative non-word marks may
         # settle. Recalled paragraphs and arbitrary dim input remain drafts.
