@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.376 — 2026-10-08
+
 ### Fixed
 
 - Fresh worker startup now bounds late shell initialization and pre-input
