@@ -15,6 +15,17 @@
 - Exhausted approaches follow that contract's Fix Loops, with the investigator and pinned judge.
 - Escalate to the operator only for missing information, authority or a usable account that the team cannot supply.
 
+A fresh usage probe with `startup_dialog_pending` remains at the named agent
+and pane in its error message, with unknown capacity and no usage input. Read
+that native pane and follow `skills/herdr-foreman/references/herdr.md` Runtime
+Dialogs. The foreman resolves already-authorized hook or directory trust
+without asking again, then runs the emitted `resolve-probe --agent` owner
+command. It proves the original target and empty composer before cleanup;
+normal measure refuses another probe for that unresolved worker kind or
+billing window. Re-read after the choice, resolve, then repeat normal measure.
+The guarded command and durable probe schema are documented in
+`skills/herdr-foreman/references/probe-recovery.md`.
+
 ## Dispatch context
 
 Keep the same `--task` identifier from initial development through all its
@@ -129,7 +140,9 @@ Fresh assignment-scoped startup waits read-only for proved readiness under an
 unchanged pane, process and tier; real input or uncertain identity refuses.
 Waiting sends no keys. The owner records `sending` at the guarded prompt
 boundary. Earlier failures automatically record `not_sent` and clean only owned
-surfaces. A proved closed immutable no-brief retry needs no retrospective for
+surfaces, except `startup_dialog_pending`, which retains the named pre-send
+surface and its active supervision enrollment for Runtime Dialogs recovery.
+A proved closed immutable no-brief retry needs no retrospective for
 nonexistent outgoing work; unknown sends preserve the pane and reconciliation.
 The exact settling predicate and bounds are owned by
 `skills/herdr-foreman/foreman/composer.py` (`FRESH_COMPOSER_*`, `_settle_fresh_composer`), rather than
@@ -151,6 +164,20 @@ normal owner operation, evidence condition and recorded surfaces. A retryable
 closed `not_sent` outcome means repeat the identical normal apply. A blocked
 outcome preserves unknown/sent work and names the supported owner operation;
 no pane/config/receipt workaround substitutes for proof.
+
+For `startup_dialog_pending`, the foreman reads the retained native pane and
+follows `skills/herdr-foreman/references/herdr.md` Runtime Dialogs. Review the
+specific hook source and command against the authorized installation; resolve
+that scoped trust through native UI, not trust-all, hash edits or another
+operator approval. Other native dialogs use that same authority contract.
+Re-read the same target after the choice. Once its composer is empty, run the
+diagnostic's existing `reconcile --dispatch` operation below, then repeat the
+unchanged normal apply. Reconciliation retires the owned no-input surface;
+the transport retry dispatches the original brief once at its original tier.
+Do not repeat apply while the dialog remains, send a brief through a menu,
+change the plan or downgrade a model to avoid startup. Missing authority
+preserves the dialog and follows Runtime Dialogs' escalation path; independent
+authorized work continues.
 
 Normal apply owns retrospective provenance recovery for those closed retries;
 see `skills/herdr-foreman/state-schema.md` Retrospective Records. Do not repair
@@ -175,9 +202,12 @@ actual-evidence `reconcile --record` route; the selector cannot infer no-send.
 The guard is owned by `skills/herdr-foreman/foreman/cli.py`
 (`_recorded_no_send_cleanup`, `_run_recovery`).
 
-A live surface must match the original recorded native session and verified
+A live surface must match the original recorded native-session observation and verified
 foreground process, not merely remain stable across current reads. Missing
-original identity proof preserves the live surface. An absent agent permits
+original identity proof preserves the live surface. An explicitly recorded
+absence of a first-start session is not a fabricated identity: only that same
+absence and original process can pass the owned `not_sent` cleanup guard; a
+later or changed session refuses. An absent agent permits
 cleanup only when the recorded pane is absent or holds only its shell.
 
 Proceed to Step 11 with the roles that were dispatched.

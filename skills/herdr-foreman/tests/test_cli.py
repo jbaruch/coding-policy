@@ -697,7 +697,9 @@ class PlanCommandTest(CliCase):
 
         with patch("foreman.lifecycle.spawn", side_effect=["pane-developer-2", "pane-reviewer"]), \
                 patch("foreman.cli.apply_assignments", return_value={"applied": []}):
-            client.agent_get.side_effect = HerdrError("absent", {"stderr": json.dumps({"error": {"code": "agent_not_found"}})})
+            absent = HerdrError("absent", {"stderr": json.dumps({"error": {"code": "agent_not_found"}})})
+            client.agent_get.side_effect = [absent, {"pane_id": "pane-developer-2", "agent_status": "idle"},
+                                           {"pane_id": "pane-reviewer", "agent_status": "idle"}]
             client.pane_get.side_effect = HerdrError("absent", {"stderr": json.dumps({"error": {"code": "pane_not_found"}})})
             code, _, err = self.run_cli(command, client=client)
 
@@ -3149,6 +3151,102 @@ class FreshOwnerNative(HerdrClient):
 
 
 class PublicOwnerRetryTest(unittest.TestCase):
+    def test_startup_dialog_survives_until_scoped_resolution_then_same_plan_sends_once(self):
+        from foreman import assign, composer, lifecycle
+        cases = [(kind, mode) for kind in ("codex", "claude", "grok") for mode in ("overlay", "blocked")]
+        cases += [("codex", "hook_menu"), ("codex", "no_session")]
+        for kind, mode in cases:
+            with self.subTest(kind=kind, mode=mode), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                config, state, snapshot = (root / name for name in ("config.json", "state.json", "snapshot.json"))
+                common, brief, report = (root / name for name in ("common.md", "judge.md", "report.md"))
+                payload = json.loads((Path(_ROOT) / "config.example.json").read_text())
+                payload["judge"] = {"worker_kind": kind, "model": {"codex": "gpt-6-astra", "claude": "opus-5", "grok": "grok-4.6"}[kind], "effort": "high"}
+                config.write_text(json.dumps(payload))
+                snapshot.write_text(json.dumps(SNAPSHOT))
+                common.write_text("Common immutable instructions\n")
+                brief.write_text("Judge immutable task\nREPORT: " + str(report) + "\n")
+                base = ["--config", str(config), "--state", str(state)]
+                def invoke(arguments, native=None):
+                    out, err = io.StringIO(), io.StringIO()
+                    code = main(base + arguments, stdout=out, stderr=err, client=native)
+                    return code, out.getvalue(), err.getvalue()
+                with patch("foreman.lifecycle.identity", return_value="judge-719"):
+                    code, text, err = invoke(["plan", "--roles", "judge", "--judge-mode", "adjudication",
+                        "--task", "native-719", "--snapshot", str(snapshot)])
+                self.assertEqual(code, 0, err)
+                plan = json.loads(text)
+                supervision.bind(state, {"kind": "id", "value": "fixture-foreman", "cwd": str(root),
+                    "herdr_env": "fixture", "pane_id": "foreman-pane"}, AT, root=root / "bindings")
+                native = FreshOwnerNative()
+                native.EMPTY = {"codex": native.EMPTY, "claude": "❯ ", "grok": "│ ❯"}[kind]
+                native.frames = ["Hooks need review\n› 1. Review hooks\n2. Trust all and continue"
+                                 if mode == "hook_menu" else "Native startup dialog"]
+                start = native.agent_start
+                def start_dialog(*args, **kwargs):
+                    result = start(*args, **kwargs)
+                    if mode == "no_session":
+                        native.agents[args[0]]["agent_session"] = None
+                        result["agent"]["agent_session"] = None
+                    if mode == "blocked":
+                        native.agents[args[0]]["agent_status"] = "blocked"
+                        result["agent"]["agent_status"] = "blocked"
+                    return result
+                native.agent_start = start_dialog
+                arguments = ["apply", "--assignments", json.dumps(plan), "--judge-mode", "adjudication",
+                    "--task", "native-719", "--now", AT, "--common", str(common), "--brief", "judge=" + str(brief),
+                    "--report", "judge=" + str(report), "--composer-settle", "0"]
+                frozen = {path: path.read_bytes() for path in (config, common, brief)}
+                real_spawn, real_apply, real_ready = lifecycle.spawn, assign.apply, composer.ensure_ready
+                with patch("foreman.cli.lifecycle.spawn", side_effect=lambda *a, **kw: real_spawn(*a, **kw, sleep=lambda _: None)), \
+                        patch("foreman.cli.apply_assignments", side_effect=lambda *a, **kw: real_apply(*a, **kw, sleep=lambda _: None)), \
+                        patch("foreman.cli.ensure_ready", side_effect=lambda *a, **kw: real_ready(*a, **kw, sleep=lambda _: None)):
+                    code, _, err = invoke(arguments, native)
+                    self.assertEqual(code, 1, err)
+                    refused = json.loads("\n".join(line for line in err.splitlines() if not line.startswith(DIAGNOSTIC_PREFIX)))
+                    self.assertEqual(refused["details"]["failure_kind"], "startup_dialog_pending")
+                    evidence = refused["details"]["recovery"]["evidence"]
+                    self.assertEqual(evidence["retained_agents"], ["judge-719"])
+                    self.assertEqual(evidence["closed_agents"], [])
+                    self.assertEqual(evidence["sending_agents"], [])
+                    saved, usable = load_state_checked(state)
+                    self.assertTrue(usable)
+                    dispatch = copy.deepcopy(saved["recovery"]["dispatches"][0])
+                    self.assertEqual(dispatch["status"], "not_sent")
+                    self.assertEqual(saved["assignments"], [])
+                    self.assertTrue(supervision.load(state)["members"][0]["active"])
+                    self.assertEqual(len(native.panes), 1)
+                    before = list(native.events)
+                    code, _, err = invoke(arguments, native)
+                    self.assertEqual(code, 1, err)
+                    self.assertFalse(any(event[0] in {"create", "start", "prompt", "close"} for event in native.events[len(before):]))
+                    code, _, err = invoke(["reconcile", "--dispatch", dispatch["id"], "--now", AT], native)
+                    self.assertEqual(code, 1, err)
+                    self.assertEqual(len(native.panes), 1)
+                    self.assertFalse(any(event[0] == "prompt" for event in native.events))
+                    # The contextual owner resolves the dialog separately;
+                    # this fixture proves transport/recovery, not native trust.
+                    native.agents["judge-719"]["agent_status"] = "idle"
+                    native.frames = [native.EMPTY]
+                    code, text, err = invoke(["reconcile", "--dispatch", dispatch["id"], "--now", AT], native)
+                    self.assertEqual(code, 0, err)
+                    self.assertTrue(json.loads(text)["cleanup_replayed"])
+                    self.assertEqual(native.panes, {})
+                    self.assertEqual(load_state_checked(state)[0]["recovery"]["dispatches"][0], dispatch)
+                    self.assertFalse(supervision.load(state)["members"][0]["active"])
+                    native.agent_start = start
+                    code, text, err = invoke(arguments, native)
+                    self.assertEqual(code, 0, err)
+                    self.assertEqual(len([event for event in native.events if event[0] == "prompt"]), 1)
+                    code, text, err = invoke(arguments, native)
+                    self.assertEqual(code, 0, err)
+                    self.assertTrue(json.loads(text)["applied"][0]["replayed"])
+                    self.assertEqual(len([event for event in native.events if event[0] == "prompt"]), 1)
+                    final = load_state_checked(state)[0]
+                    self.assertEqual(final["recovery"]["dispatches"][0], dispatch)
+                    self.assertEqual(len(final["assignments"]), 1)
+                    self.assertEqual({path: path.read_bytes() for path in frozen}, frozen)
+
     def test_reconcile_help_and_parser_expose_exclusive_record_or_dispatch_inputs(self):
         parser = build_parser()
         help_text = io.StringIO()

@@ -1,5 +1,14 @@
 # Changelog
 
+### Fixed
+
+- Fresh assignment and usage-probe startup preserves native hook/trust dialogs
+  instead of closing their panes before the foreman can acknowledge an already
+  authorized action. Read-only startup settling, original process/tier checks,
+  durable no-send recovery and unchanged-plan exact-once dispatch apply across
+  Codex, Claude Code and Grok. No blanket trust or redundant human approval is
+  introduced.
+
 ## 0.3.380 — 2026-10-08
 
 ### Fixed

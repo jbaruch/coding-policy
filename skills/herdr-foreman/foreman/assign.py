@@ -1152,13 +1152,17 @@ def apply(client, assignments, agents_by_name, paths, at, no_clear=False, settle
             proof = (verify_running(client, agent, step["pane_id"], tier) if tier
                      else foreground_agent(client, step["pane_id"], agent.kind))
             identity = (live.get("pane_id"), live.get("agent_session"), proof)
-            if (live.get("pane_id") != step["pane_id"] or live.get("agent_status") not in READY_STATES
+            if (live.get("pane_id") != step["pane_id"] or live.get("agent_status") not in READY_STATES | {"blocked"}
                     or type(proof.get("pid")) is not int or proof["pid"] <= 0
                     or (startup_identity is not None and identity != startup_identity)):
                 raise owner_recovery(HerdrError("Fresh worker changed its startup identity; nothing was sent.", {"pane_id": step["pane_id"]}),
                     "startup_identity_changed", runnable.command("apply"),
                     "The apply owner must close only its proved pre-send surface and record not_sent before retrying the unchanged plan.")
             startup_identity = identity
+            if live.get("agent_status") == "blocked":
+                raise owner_recovery(HerdrError("Fresh worker is blocked at native startup; nothing was sent.",
+                    {"agent": name, "pane_id": step["pane_id"]}), "startup_dialog_pending", runnable.command("apply"),
+                    "The owner must inspect and resolve this retained native dialog under Runtime Dialogs before retrying.")
             return identity
 
         if not tier:

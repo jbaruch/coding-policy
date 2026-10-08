@@ -9,14 +9,16 @@ assessed outcome is accepted by the owner records.
 import os
 import re
 import secrets
+import shlex
 import sys
 import time
 
 from .config import assignment_worker
-from .errors import ForemanError, HerdrError, StartShellNotReadyError, UsageError
-from .herdr import error_code, format_argv
+from .composer import ensure_ready, startup_pending_error
+from .errors import ForemanError, HerdrError, StartShellNotReadyError, UsageError, owner_recovery
+from .herdr import READY_STATES, error_code, format_argv
 from .launch import holds_initializing_shell, holds_only_shell, require_empty_shell, start_worker, verify_running
-from . import runnable
+from . import probe_recovery, runnable
 from .tiers import launch_flags, worker_launch_args
 
 MAX_AGENT_NAME = 32
@@ -128,8 +130,17 @@ def _start_fresh_worker(client, worker, pane, tier, shell, before_start, sleep):
                     require_empty_shell(client, pane, info)
             else:
                 try:
-                    start_worker(client, worker, pane, tier)
+                    start_worker(client, worker, pane, tier, owned_fresh=True)
                 except HerdrError as exc:
+                    if error_code(exc) == "agent_not_ready":
+                        live = client.agent_get(worker.name)
+                        if (live.get("pane_id") == pane and live.get("name") == worker.name
+                                and live.get("agent") == worker.kind and live.get("agent_status") == "blocked"):
+                            # A known first-start refusal can leave its native
+                            # dialog alive. Prove that exact seat, never launch
+                            # again or grant it readiness for assignment input.
+                            verify_running(client, worker, pane, tier)
+                            return
                     if error_code(exc) != "agent_pane_busy":
                         raise
                     native_error = error_code(exc)
@@ -278,8 +289,36 @@ def rendered_commands(client, worker, tier, *, cwd=None):
     return [{"argv": argv, "shell": format_argv(argv)} for argv in spawn_commands(client, worker, tier, cwd=cwd)]
 
 
-def measure_worker_kinds(client, templates, measured_at, **options):
-    """Measure one disposable probe per billing window, then close every probe."""
+def _prepare_fresh_probe(client, worker, pane, tier, *, sleep=time.sleep, warn=None):
+    """Prove the owned first-start composer before any usage-command input."""
+    from .probe import resolve_status
+    original = None
+    def observe():
+        nonlocal original
+        live = client.agent_get(worker.name)
+        proof = verify_running(client, worker, pane, tier)
+        identity = (live.get("pane_id"), live.get("agent_session"), proof)
+        if (live.get("pane_id") != pane or live.get("name") != worker.name or live.get("agent") != worker.kind
+                or type(proof.get("pid")) is not int or proof["pid"] <= 0
+                or (original is not None and original != identity)):
+            raise HerdrError("Fresh probe identity changed; no usage command was sent.", {"agent": worker.name, "pane_id": pane})
+        original = identity
+        status, _source = resolve_status(client, worker, live.get("agent_status"), warn=warn)
+        if status == "blocked":
+            raise startup_pending_error(worker, pane)
+        if status not in READY_STATES:
+            raise HerdrError("Fresh probe is not idle/done; no usage command was sent.", {"agent": worker.name, "pane_id": pane})
+        return identity
+    try:
+        ensure_ready(client, worker, pane, startup_observe=observe, sleep=sleep, warn=warn)
+    except HerdrError as exc:
+        if exc.details.get("failure_kind") == "startup_dialog_pending":
+            exc.details["startup_observation"] = original
+        raise
+
+
+def measure_worker_kinds(client, templates, measured_at, *, state_path=None, config_path=None, **options):
+    """Measure one probe per billing window; retain pre-input startup dialogs."""
     from .billing import tier_billing
     from .measure import MEASURE_SCHEMA_VERSION, measure, snapshot_error
 
@@ -296,14 +335,34 @@ def measure_worker_kinds(client, templates, measured_at, **options):
         tier = template.tiers.get("coordination")
         pane = None
         record = None
+        pending = False
+        prior = None
+        startup = True
+        startup_error = None
+        closure = None
+        cleanup_error = None
         try:
+            prior = probe_recovery.pending(state_path, template) if state_path is not None else None
+            if prior is not None:
+                raise probe_recovery.diagnostic(state_path, prior)
             if not isinstance(tier, dict):
                 raise UsageError("Worker kind {!r} has no coordination tier for its disposable usage probe.".format(template.name), {})
             pane = spawn(client, probe, tier, history=(), sleep=options.get("sleep", time.sleep))
+            _prepare_fresh_probe(client, probe, pane, tier, sleep=options.get("sleep", time.sleep), warn=options.get("warn"))
+            startup = False
             snapshot = measure(client, [probe], measured_at, **options)
             record = dict(snapshot["agents"][probe.name])
             record.pop("tier_billing", None)
         except (HerdrError, UsageError) as exc:
+            if startup and prior is None:
+                startup_error = exc
+            needs_retention = (pane is not None and exc.details.get("failure_kind") == "startup_dialog_pending"
+                       and exc.details.get("agent") == probe.name and exc.details.get("pane_id") == pane)
+            if needs_retention:
+                row = probe_recovery.retain(state_path, template, probe, pane, tier,
+                    exc.details.get("startup_observation"), measured_at, config_path=config_path)
+                pending = True
+                exc = probe_recovery.diagnostic(state_path, row)
             record = {
                 "kind": template.kind, "state": None, "herdr_state": None,
                 "state_source": None, "windows": None, "credits": None,
@@ -311,11 +370,12 @@ def measure_worker_kinds(client, templates, measured_at, **options):
                 "skipped": False, "error": snapshot_error(exc),
             }
         finally:
-            if pane is not None:
+            if pane is not None and not pending:
                 primary = sys.exc_info()[1]
                 try:
-                    close(client, probe.name, pane)
+                    closure = close(client, probe.name, pane)
                 except HerdrError as exc:
+                    cleanup_error = exc
                     if primary is not None:
                         action = "Probe cleanup also failed for pane {}: {}. Close it with `{}` before measuring again.".format(
                             pane, exc, format_argv(client.argv_pane_close(pane)))
@@ -328,6 +388,19 @@ def measure_worker_kinds(client, templates, measured_at, **options):
                             "plan": None, "headroom_pct": None, "window_group": group,
                             "skipped": False, "error": snapshot_error(exc),
                         }
+        if startup_error is not None and not pending:
+            operation = "measure --agent " + shlex.quote(template.name)
+            if state_path is not None:
+                operation += " --state " + shlex.quote(str(state_path))
+            if config_path is not None:
+                operation += " --config " + shlex.quote(str(config_path))
+            closed = isinstance(closure, dict) and closure.get("closed") is True
+            condition = ("The owner closed its unused probe; no usage command was sent. Restore the worker-kind configuration/native startup evidence, then repeat normal measure."
+                if closed else "No usage command was sent. Preserve and inspect the actual startup/cleanup evidence; restore the worker-kind configuration and finish owned cleanup before repeating normal measure.")
+            failure = cleanup_error or startup_error
+            record["error"] = snapshot_error(owner_recovery(failure,
+                "probe_cleanup_unproved" if cleanup_error else "probe_startup_unproved",
+                runnable.command(operation), condition, outcome="retryable" if closed else "blocked"))
         for member in members:
             copied = {**record, "kind": member.kind, "window_group": member.window_group,
                       "pane_id": None, "tier_billing": tier_billing(member.tiers)}
