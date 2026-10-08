@@ -341,6 +341,20 @@ class SendCommandTest(unittest.TestCase):
         self.assertFalse(result["recovered"])
         self.assertTrue(result["screen_changed"])
 
+    def test_post_clear_startup_paint_settles_by_reading_without_any_extra_key(self):
+        runner = self._runner([CODEX_EMPTY, "  › starting session\n", CODEX_FRESH])
+        result = self._send(runner)
+        self.assertTrue(result["consumed"])
+        self.assertEqual(result["extra_enters"], 0)
+        self.assertEqual(runner.writes(), ["pane send-text w3:p1 /new", "pane send-keys w3:p1 enter"])
+
+    def test_post_clear_foreign_draft_remains_refused_after_bounded_reads(self):
+        runner = self._runner([CODEX_EMPTY, "  › another person's draft\n"])
+        with self.assertRaises(HerdrError) as caught:
+            self._send(runner)
+        self.assertTrue(caught.exception.details["composer_occupied"])
+        self.assertEqual(runner.writes(), ["pane send-text w3:p1 /new", "pane send-keys w3:p1 enter"])
+
     def test_the_autocomplete_popup_costs_a_second_enter(self):
         # First Enter accepts the completion; the second submits.
         runner = self._runner([CODEX_EMPTY, CODEX_HELD, CODEX_FRESH])

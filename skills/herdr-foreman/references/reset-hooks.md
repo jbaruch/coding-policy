@@ -5,6 +5,8 @@
 command in the plugin manifest. Grok loads the Claude-compatible declaration;
 it has no separate verifier. Ordinary prompts produce no output or owner writes.
 An invalid planned reset produces `decision: block` before model execution.
+Claude's complete matching native long-paste frame is removed before exact
+input comparison; mismatched frames and extra inner content remain refused.
 
 The input envelope is a locator, not authority. The claimed deliverer first
 saves its original foreground pins in the reset owner's schema-3 row. The
@@ -13,6 +15,8 @@ and the native payload's new session. It consumes the old supervision binding
 under its owner lock, preserves members/events/holds, and saves acceptance on
 the reset row. Replay cannot consume the original binding twice. The deliverer
 requires that acceptance and the matching new binding before reporting success.
+The receipt proves landing when a runtime clips its transcript. A started turn
+is still required; receipt acceptance alone never establishes healthy execution.
 
 Codex's integration can retain its old session hint until the first real prompt.
 The deliverer permits that hint only for the planned continuation, under the

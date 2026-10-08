@@ -1217,36 +1217,48 @@ def deliver(client, agents, pane_id, stow, state, *, native_session, still_ready
                 pane_id, OPERATOR_RECOVERY), {"pane_id": pane_id, "reason": "native_session_changed"})
         typed.append(True)
 
+    phase = "clear_command"
     try:
         outcome = send_command(client, agent, pane_id, agent.clear_prompt, sleep=sleep, warn=warn, settle_sec=settle_sec,
                                before_input=guard)
         if not outcome["screen_changed"]:
             raise HerdrError("The foreman consumed {} but its screen did not change, so its context was not cleared and nothing further was sent. Check the clear command configured for kind {} in pane {}. {}".format(
                 agent.clear_prompt, agent.kind, pane_id, OPERATOR_RECOVERY), {"pane_id": pane_id})
+        phase = "clear_settle"
         client.agent_wait(agent.name, until=SETTLE_STATES, timeout_ms=DEFAULT_SETTLE_TIMEOUT_MS)
         sleep(settle_sec)
         resuming[0] = True
         if agent.kind != "codex":
+            phase = "clear_native_receipt"
             expected[0] = _cleared_session(client, pane_id, native_session, processes[0], sleep=sleep, clock=clock)
+        phase = "arm_resume"
         arm_resume(state, pane_id, stow, native_session, processes[0])
         prompt = guarded_resume(stow, state, native_session, processes[0], options=options)
+        phase = "resume_input"
         landing = send_message(client, agent, prompt, RESUME_OPENING, pane_id=pane_id, sleep=sleep, warn=warn,
                                settle_sec=settle_sec, before_input=guard)
-        if not (landing["landed"] and landing["started"]):
+        phase = "hook_acceptance"
+        accepted = accepted_resume(state, pane_id, stow, native_session)
+        # Native acceptance proves the exact input landed even when a runtime
+        # collapses or clips its transcript. A visible prompt is only a hint.
+        if (not landing["landed"] and accepted is None) or not landing["started"]:
             raise HerdrError("The foreman was cleared but the resume prompt did not {} in pane {}. {}".format(
-                "land" if not landing["landed"] else "start a turn", pane_id, OPERATOR_RECOVERY), {"pane_id": pane_id})
+                "land" if not landing["landed"] and accepted is None else "start a turn", pane_id, OPERATOR_RECOVERY),
+                             {"pane_id": pane_id, "reason": "resume_not_landed" if not landing["landed"] and accepted is None else "resume_not_started"})
         # The real prompt triggers native hook/session events. No dummy
         # prompt, journal scrape or fabricated Herdr receipt substitutes.
-        accepted = accepted_resume(state, pane_id, stow, native_session)
         if (accepted is None or foreground_processes(client, pane_id) != processes[0]
                 or expected[0] != native_session and accepted != expected[0]):
             raise SessionChanged("The reset input hook did not verify the new foreman session; do not repeat this input. Restore the native hook and inspect the saved reset. {}".format(
                 OPERATOR_RECOVERY), {"pane_id": pane_id, "reason": "reset_input_unverified"})
+        landing = {"landed": True, "started": True}
     except ForemanError as exc:
+        # Persist a bounded owner phase, not raw pane/provider diagnostics.
+        details = {"reason": phase, **exc.details}
         if typed and not isinstance(exc, DeliveryInterrupted):
             wrapper = SessionInterrupted if isinstance(exc, SessionChanged) else DeliveryInterrupted
             raise wrapper("{} The pane was already typed into, so this reset is not retried. {}".format(
-                exc.message, OPERATOR_RECOVERY), exc.details) from None
+                exc.message, OPERATOR_RECOVERY), details) from None
         raise
     return {"schema_version": RESET_SCHEMA_VERSION, "pane_id": pane_id, "stow": stow, "agent": agent.name,
             "cleared": True, "resume": landing}

@@ -870,6 +870,14 @@ def send_command(client, agent, pane_id, command, session=None, sleep=time.sleep
     # Phase 2 -- the command is gone; NOW placeholder and dim rules decide
     # whether anything else is sitting there.
     held = inspect_composer(text, agent, ansi=ansi)
+    # A consumed clear can leave a transient startup frame painted as editor
+    # content. Observe only: no key may clear an occupied post-command draft.
+    for _ in range(max(0, screen_attempts)):
+        if not held.occupied:
+            break
+        sleep(settle_sec)
+        text, ansi = read_pane(client, agent, warn=warn)
+        held = inspect_composer(text, agent, ansi=ansi)
     if held.occupied:
         raise HerdrError(
             "{} consumed {!r}, but its composer now holds input. Nothing "

@@ -165,6 +165,7 @@ class FakeClient:
         # clear is consumed, then the new one the clear started.
         self.sessions = list(sessions) if sessions is not None else None
         self.cleared = False
+        self.prompt_started = False
         self.keystrokes = []
 
     def identify(self, pid):
@@ -304,7 +305,14 @@ class DeliverTest(unittest.TestCase):
 
     def test_a_resume_prompt_that_did_not_land_is_an_interrupted_delivery(self):
         with self.assertRaisesRegex(foreman_reset.DeliveryInterrupted, "did not land"):
-            self.run_deliver(FakeClient(["idle"]), landed=False)
+            self.run_deliver(FakeClient(["idle"]), landed=False, hook_accepted=False)
+
+    def test_exact_native_acceptance_proves_landing_when_each_runtime_collapses_the_prompt(self):
+        for kind in ("claude", "codex", "grok"):
+            with self.subTest(kind=kind):
+                result, _ = self.run_deliver(FakeClient(["idle"], kind=kind), landed=False, started=True,
+                                             extra_workers=[worker("grok-a", "grok")])
+                self.assertEqual(result["resume"], {"landed": True, "started": True})
 
     def test_a_prompt_that_landed_but_started_no_turn_is_interrupted(self):
         with self.assertRaisesRegex(foreman_reset.DeliveryInterrupted, "start a turn"):

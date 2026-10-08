@@ -50,13 +50,19 @@ class ResetHookTest(unittest.TestCase):
     def test_all_three_agents_transfer_the_same_verified_owner_and_refuse_replay(self):
         # Each subtest has independent owner files and a fixed native payload.
         for kind in ("claude", "codex", "grok"):
+            self.setUp()
             with self.subTest(kind=kind):
-                store.bind(self.state, self.who, AT, root=self.root)
                 self.assertIsNone(self.invoke(kind=kind))
                 data = store.load(self.state)
                 self.assertEqual(data["binding"]["identity"]["value"], CLEARED)
                 self.assertEqual(data["events"], [])
                 self.assertEqual(self.invoke(kind=kind)["decision"], "block")
+
+    def test_an_accepted_receipt_stays_consumed_even_if_the_old_binding_is_restored(self):
+        self.assertIsNone(self.invoke())
+        store.bind(self.state, self.who, AT, root=self.root)
+        self.assertEqual(self.invoke()["decision"], "block")
+        self.assertEqual(store.load(self.state)["binding"]["identity"], self.who)
 
     def test_old_session_wrong_pane_or_cwd_missing_environment_and_dead_child_refuse(self):
         for payload, env, probe in (
@@ -89,6 +95,19 @@ class ResetHookTest(unittest.TestCase):
 
     def test_normal_prompts_do_not_read_or_write_owner_state(self):
         self.assertIsNone(self.invoke(payload={"prompt": "Fix the test"}, env={}))
+
+    def test_native_claude_long_paste_frame_preserves_exact_inner_input(self):
+        wrapped = '<pasted_content id="f0fc">\n' + self.payload["prompt"] + '\n</pasted_content id="f0fc">'
+        self.assertIsNone(self.invoke(kind="claude", payload={**self.payload, "prompt": wrapped}))
+        self.assertEqual(store.load(self.state)["binding"]["identity"]["value"], CLEARED)
+        self.assertEqual(self.invoke(kind="claude", payload={**self.payload, "prompt": wrapped})["decision"], "block")
+
+    def test_mismatched_paste_frames_and_extra_inner_content_are_not_authority(self):
+        for opening, closing, inner in (("f0fc", "other", self.payload["prompt"]),
+                                       ("f0fc", "f0fc", self.payload["prompt"] + "\nAdditional task")):
+            wrapped = '<pasted_content id="' + opening + '">\n' + inner + '\n</pasted_content id="' + closing + '">'
+            self.assertEqual(self.invoke(kind="claude", payload={**self.payload, "prompt": wrapped})["decision"], "block")
+            self.assertEqual(store.load(self.state)["binding"]["identity"], self.who)
 
     def test_an_unrelated_new_binding_cannot_substitute_for_hook_acceptance(self):
         new = {**self.who, "value": CLEARED}
