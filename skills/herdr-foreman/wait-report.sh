@@ -778,7 +778,7 @@ main() {
       return 2
     fi
 
-    # A blocked worker is waiting on a human, not producing a report -- once
+    # A blocked worker has a runtime dialog, not a delivered report -- once
     # that is actually true. A single `blocked` read is the same
     # one-observation trap as a single `done` read, so it has to survive a
     # second read FOREMAN_BLOCKED_CONFIRM_SEC later AND a dialog on the pane.
@@ -800,7 +800,7 @@ main() {
         if (( rc == 0 )); then
           now="$(date +%s)"
           emit "$state" false "$(( now - start ))"
-          warn "${AGENT} is blocked at an approval or question dialog — inspect it with \`${HERDR_BIN} pane read ${pane} --source visible\`, relay it to the operator, and let them answer it"
+          warn "${AGENT} is blocked at an approval or question dialog — inspect it with \`${HERDR_BIN} pane read ${pane} --source visible\` and follow skills/herdr-foreman/references/herdr.md Runtime Dialogs; resume this wait after the authorized choice clears, never resend the assignment"
           return 3
         fi
       fi

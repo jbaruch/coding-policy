@@ -430,9 +430,11 @@ ${base}"
   if [[ $RC -eq 3 ]] && printf '%s' "$OUT" | jq -e '.state == "blocked" and .found == false' >/dev/null 2>&1; then
     pass; else fail "blocked confirmed: expected exit 3, got RC=$RC OUT=$OUT"; fi
 
-  # 18b. The refusal points at the operator, never at the foreman answering it.
-  if grep -q "let them answer it" "$TMP/e18"; then
-    pass; else fail "blocked confirmed: expected the operator-answers message, got $(cat "$TMP/e18")"; fi
+  # 18b. The diagnostic routes authorization decisions to the shared contract.
+  if grep -q "skills/herdr-foreman/references/herdr.md Runtime Dialogs" "$TMP/e18" \
+     && grep -q "never resend the assignment" "$TMP/e18" \
+     && ! grep -q "let them answer it" "$TMP/e18"; then
+    pass; else fail "blocked confirmed: expected shared dialog recovery without an assignment replay, got $(cat "$TMP/e18")"; fi
 
   # 19. Two `blocked` reads with nothing on screen is still not a dialog: a
   #     pane with no marker keeps the wait alive rather than ending the round.
