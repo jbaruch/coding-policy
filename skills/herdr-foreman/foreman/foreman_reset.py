@@ -966,7 +966,7 @@ def stop_coverage(state_path, supervision_data, *, probe=process_identity):
 
     A handoff hold prepares reset preflight. It authorizes Stop only after the
     reset record binds the same hold/stow id, pane, native session, and exact
-    live deliverer process. Legacy records supply no usable prior state;
+    live claimed deliverer process. Legacy records supply no usable prior state;
     this Stop-path reader never migrates or rewrites the record.
     """
     holds = supervision.current_holds(supervision_data, "handoff")
@@ -996,6 +996,9 @@ def stop_coverage(state_path, supervision_data, *, probe=process_identity):
                 "stow": row["stow"]}
     if not _alive(row["process"], probe):
         return {"eligible": False, "state": "reset_deliverer_not_live", "record": str(path),
+                "stow": row["stow"]}
+    if row["status"] == "scheduled":
+        return {"eligible": False, "state": "reset_claim_pending", "record": str(path),
                 "stow": row["stow"]}
     return {"eligible": True, "state": "scheduled_continuation", "record": str(path),
             "stow": row["stow"], "process": row["process"]}

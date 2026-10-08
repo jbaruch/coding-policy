@@ -25,7 +25,7 @@
   hook/MCP children; unverifiable leaders and runtime replacements still
   refuse. Interrupted guards retain bounded phase, status and identity-match
   diagnostics without storing raw provider or pane output.
-  Replay success requires a durable claim, and forged receipt locators create
+  Replay success and Stop authorization require a durable claim, and forged receipt locators create
   no directories or locks. The native adapter loads only the installed verifier,
   excluding checkout and inherited Python-path shadow modules.
 
