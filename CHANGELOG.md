@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.373 — 2026-10-08
+
 ### Changed
 
 - Herdr is the sole route for authorized delegation across roles, nested work,
