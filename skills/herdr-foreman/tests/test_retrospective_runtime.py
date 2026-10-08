@@ -160,7 +160,8 @@ class RetrospectiveRuntimeTest(unittest.TestCase):
         retry.retries[name] = {"classification": "reconciled_not_sent", "target": runtime.target(item)}
         with patch("foreman.retrospective_runtime._observation", return_value={**shell, "pane_id": "new-pane"}):
             retry.before_start(item)
-        self.assertFalse(retry.original[name]["first_start"])
+        self.assertEqual(retry.original[name], guard.original[name])
+        self.assertTrue(retry.original[name]["first_start"])
         self.assertFalse(retry.original[name]["transition_required"])
         with patch("foreman.retrospective_runtime.describe", side_effect=AssertionError("generated TUI cannot require retro-check")):
             retry.preflight([step])

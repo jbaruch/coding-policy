@@ -444,6 +444,19 @@ saved coverage under the migration rule above. The transition receipt bridges
 only the utility's own recorded boundary to that incoming worker; it does not
 cover later outgoing work.
 
+Consecutive owner-proved closed no-input retries preserve the original start
+descriptor verbatim. Each verified launch records its own incoming identity
+and timestamp. Normal `apply` also repairs the older writer's unbacked retry
+descriptor from its original first-start receipt, after proving unchanged
+target bytes, recorded `not_sent` transport and closure. It preserves notes,
+incoming observations and timestamps; only that descriptor and its derived ID
+are restored. A subsequent distinct task uses the damaged entry's own dispatch
+and enrollment for this proof; it grants no retry authority to the new task.
+The repair contract belongs to
+`skills/herdr-foreman/foreman/retrospective.py` (`recover_no_send_transitions`).
+Unproved or unrelated corruption refuses without a rewrite. Read-only readers
+still refuse malformed provenance and never repair it.
+
 The cadence uses the latest completed retrospective, or the established first-work
 baseline when no retrospective exists. Failed checks and incomplete notes never
 advance it. Existing work with no usable history is due immediately. Coverage for

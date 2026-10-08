@@ -1,5 +1,17 @@
 # Changelog
 
+### Fixed
+
+- Consecutive proved-no-input startups preserve their original retrospective
+  provenance instead of saving a synthetic descriptor the reader rejects.
+  Normal apply restores the older writer's damaged retry receipt only after
+  owner proof of unchanged inputs, not-sent transport and closed surfaces;
+  unrelated corruption and unknown sends still refuse. Original notes,
+  launch identities, timestamps, frozen briefs and pinned tiers stay intact
+  (#710). A later distinct task can repair the blocking old entry using that
+  entry's own dispatch and enrollment, without granting a retry or touching
+  live panes, reports, unknown sends or changed frozen inputs.
+
 ## 0.3.374 — 2026-10-08
 
 ### Fixed

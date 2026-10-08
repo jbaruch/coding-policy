@@ -6,6 +6,7 @@ record to finish without treating an orphan note as completed coverage.
 Readers never create files or migrate dispatch state. All times are injected.
 """
 
+import copy
 import hashlib
 import json
 import os
@@ -320,7 +321,12 @@ def load(path, *, allow_pending=False):
             if leftovers and not (allow_pending and (root / "pending.json").is_file()):
                 raise StateError("Retrospective index is missing beside saved artifacts; preserve them and resume its pending transaction or restore the index backup.", {})
         return empty(path)
-    result = _json(index)
+    return _validate_index(path, _json(index))
+
+
+def _validate_index(path, result, *, retry_proofs=None, repaired=None, proof_for=None):
+    """Validate a complete envelope before either reading or owner repair."""
+    root = directory(path)
     if (not isinstance(result, dict) or set(result) != {"schema_version", "state_path", "baseline_at", "records", "transitions"}
             or not _version(result.get("schema_version"))
             or result.get("state_path") != str(canonical_state(path))
@@ -339,7 +345,7 @@ def load(path, *, allow_pending=False):
             _malformed("note location")
         _read_note(record)
     transition_ids = set()
-    for row in result["transitions"]:
+    for offset, row in enumerate(result["transitions"]):
         if (not isinstance(row, dict) or set(row) != {"schema_version", "id", "at", "agent", "descriptor", "incoming"}
                 or not _version(row["schema_version"])):
             _malformed("transition schema")
@@ -349,14 +355,70 @@ def load(path, *, allow_pending=False):
         descriptor = row["descriptor"]
         if row["agent"] != descriptor["agent"] or row["id"] != digest({key: value for key, value in row.items() if key not in {"at", "id"}}):
             _malformed("transition identity")
-        if row["id"] in transition_ids:
-            _malformed("duplicate transition")
-        transition_ids.add(row["id"])
         if (not descriptor["first_start"]
                 and not any(same_history(descriptor, saved) for record in result["records"]
                             for saved in record["coverage"])):
-            _malformed("transition coverage provenance")
+            proof = (retry_proofs or {}).get(row["agent"])
+            earlier = result["transitions"][:offset]
+            if not _recover_retry_origin(row, earlier, proof):
+                if proof_for is None or not _recover_retry_origin(row, earlier, proof_for(row)):
+                    _malformed("transition coverage provenance")
+            if repaired is not None:
+                repaired.append(row["agent"])
+        if row["id"] in transition_ids:
+            _malformed("duplicate transition")
+        transition_ids.add(row["id"])
     return result
+
+
+def _recover_retry_origin(row, earlier, proof):
+    """Match only the old writer's unbacked no-work retry to a validated origin."""
+    descriptor = row["descriptor"]
+    source, incoming = descriptor["source"], row["incoming"]
+    if (not isinstance(proof, dict) or proof.get("classification") != "reconciled_not_sent"
+            or not isinstance(proof.get("pane_id"), str)
+            or descriptor["first_start"] or descriptor["transition_required"]
+            or source["assignment_index"] is not None
+            or not same_history(descriptor["target"], proof.get("target"))
+            or incoming["pane_id"] != proof["pane_id"] or incoming["shell"]
+            or source["observation"]["pane_id"] != proof["pane_id"]
+            or not source["observation"]["shell"]):
+        return False
+    origin = next((prior["descriptor"] for prior in reversed(earlier)
+                   if prior["agent"] == row["agent"] and prior["descriptor"]["first_start"]
+                   and same_history(prior["descriptor"]["target"], descriptor["target"])
+                   and {key: value for key, value in prior["descriptor"]["source"].items() if key != "observation"}
+                       == {key: value for key, value in source.items() if key != "observation"}), None)
+    if origin is None:
+        return False
+    row["descriptor"] = copy.deepcopy(origin)
+    row["id"] = digest({key: value for key, value in row.items() if key not in {"at", "id"}})
+    return True
+
+
+def recover_no_send_transitions(path, retries, *, proof_for=None):
+    """Repair only the old owner's synthetic descriptor for a proved closed retry.
+
+    The apply owner holds both state and retrospective locks. Its retry proof
+    already binds immutable target receipts, not_sent transport and absence of
+    the exact closed pane. For a different task, proof_for obtains that same
+    proof from the malformed transition's own historical dispatch, not the new
+    assignment. Restore the earlier first-start descriptor verbatim;
+    retain the failed attempt's incoming identity and timestamp. Readers never
+    repair, and any unrelated malformed field prevents every write.
+    """
+    if not retries and proof_for is None:
+        return []
+    require_no_pending(path)
+    index = directory(path) / "index.json"
+    if not index.exists():
+        return []
+    result = _json(index)
+    repaired = []
+    _validate_index(path, result, retry_proofs=retries, repaired=repaired, proof_for=proof_for)
+    if repaired:
+        save_state(index, result)
+    return repaired
 
 
 def require_no_pending(path):

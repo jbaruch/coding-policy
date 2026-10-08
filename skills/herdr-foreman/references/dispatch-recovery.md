@@ -137,6 +137,10 @@ closed `not_sent` outcome means repeat the identical normal apply. A blocked
 outcome preserves unknown/sent work and names the supported owner operation;
 no pane/config/receipt workaround substitutes for proof.
 
+Normal apply owns retrospective provenance recovery for those closed retries;
+see `skills/herdr-foreman/state-schema.md` Retrospective Records. Do not repair
+the sidecar by hand or manufacture a retrospective for work never sent.
+
 For owner-recorded assignment-scoped `not_sent` cleanup, including a failed
 cleanup whose surface must still be proved empty, use the existing dispatch ID:
 

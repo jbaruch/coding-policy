@@ -577,7 +577,7 @@ def _retryable_enrollment_identity(state_path, store, identifier, fingerprint):
         identifier = "{}:transport-retry-{}".format(base, attempt)
 
 
-def _closed_no_send_retry(state_path, state, client, dispatch, tier, paths):
+def _closed_no_send_retry(state_path, state, client, dispatch, tier, paths, *, recorded=None):
     """Prove an immutable, closed no-brief attempt without changing history."""
     name = dispatch["agent"]
     def refuse(kind, message, operation="reconcile", **evidence):
@@ -589,7 +589,10 @@ def _closed_no_send_retry(state_path, state, client, dispatch, tier, paths):
     previous = [row for row in state["recovery"]["dispatches"] if row.get("agent") == name]
     if not previous:
         return None
-    row = previous[-1]
+    row = previous[-1] if recorded is None else recorded
+    if recorded is not None and row not in previous:
+        raise StateError("Closed no-input history is not in the owner ledger; preserve it and inspect `{}`.".format(
+            runnable.command("supervision-status")), {})
     members = supervision.load(state_path)["members"]
     member = next((entry for entry in members if entry["id"] == row["id"]), None)
     saved_tier = (row.get("context_before_send") or {}).get("tier") or (row.get("observed_before") or {}).get("tier")
@@ -632,7 +635,35 @@ def _closed_no_send_retry(state_path, state, client, dispatch, tier, paths):
     item = {"role": dispatch["role"], "task": dispatch["task"], "model": tier.get("model"),
             "effort": tier.get("effort"), "context": "start", "brief": paths[dispatch["role"]], "common": paths["common"]}
     return {"classification": "reconciled_not_sent", "dispatch": row["id"],
-            "target": retrospective_runtime.target(item)}
+            "pane_id": pane, "target": retrospective_runtime.target(item)}
+
+
+def _historical_no_send_proof(state_path, state, client, transition):
+    """Prove the exact old attempt blocking a different task's index read.
+
+    The caller holds both owner locks. A validated transition supplies only
+    the lookup key, never transport authority. Its original enrollment and
+    dispatch must independently prove unchanged frozen bytes, no work and
+    actual absence of that old pane before retrospective repair can use it.
+    """
+    members = [member for member in supervision.load(state_path)["members"]
+               if member["assignment"]["agent"] == transition["agent"]
+               and supervision.expected_assignment(member).get("pane_id") == transition["incoming"]["pane_id"]]
+    if len(members) != 1:
+        return None
+    assignment = supervision.expected_assignment(members[0])
+    row = next((entry for entry in state["recovery"]["dispatches"]
+                if entry["id"] == members[0]["id"] and entry["agent"] == transition["agent"]), None)
+    if row is None or assignment["task"] != row["task"]:
+        return None
+    saved_tier = (row.get("context_before_send") or {}).get("tier") or (row.get("observed_before") or {}).get("tier")
+    if not isinstance(saved_tier, dict) or not row.get("brief") or not row.get("common"):
+        return None
+    paths = {row["role"]: row["brief"], "common": row["common"]}
+    if recovery.brief_identity(paths, row["role"], assignment.get("report")) != row.get("brief_identity"):
+        return None
+    tier = {key: saved_tier.get(key) for key in ("model", "effort")}
+    return _closed_no_send_retry(state_path, state, client, row, tier, paths, recorded=row)
 
 
 def _recorded_no_send_cleanup(state_path, state, identifier):
@@ -1822,6 +1853,11 @@ def _apply(args, client, warn, trace, hold_gates):
     if fresh_workers:
         guard.retries = {name: proof for role, name in assignments.items()
                          if (proof := _closed_no_send_retry(state_path, state, client, dispatches[role], tiers[role], paths)) is not None}
+        repaired = retrospective.recover_no_send_transitions(state_path, guard.retries,
+            proof_for=lambda transition: _historical_no_send_proof(state_path, state, client, transition))
+        if repaired:
+            warn("Restored original retrospective start provenance for proved closed no-input retries: {}. "
+                 "Incoming identities, timestamps and immutable targets are preserved.".format(", ".join(repaired)))
     cleanup_evidence = str(Path(state_path).expanduser().resolve())
 
     def clean_pre_send(primary, names, reason):
