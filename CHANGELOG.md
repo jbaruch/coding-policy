@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.375 — 2026-10-08
+
 ### Fixed
 
 - Consecutive proved-no-input startups preserve their original retrospective
