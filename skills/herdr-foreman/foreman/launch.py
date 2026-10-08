@@ -22,7 +22,7 @@ from pathlib import PurePath
 
 from . import runnable
 from .composer import ensure_ready
-from .errors import AgentBusyError, HerdrError, owner_recovery
+from .errors import AgentBusyError, HerdrError
 from .herdr import READY_STATES, error_code
 from .restoration import NAME_RELEASED, NAME_TAKEN, name_state
 from .tiers import launch_flags, verify_argv, verify_worker_permissions, worker_launch_args
@@ -147,32 +147,27 @@ def verify_running_permissions(client, agent, pane):
     verify_worker_permissions(agent.kind, process["argv"])
 
 
-def _start_seat(client, name, kind, pane, tier, launch_args):
+def _start_seat(client, name, kind, pane, tier, launch_args, *, owned_fresh=False):
     """Start one named seat on `tier` and prove its launch argv."""
     result = client.agent_start(name, kind, pane, list(launch_args) + launch_flags(kind, tier))
     info = result.get("agent") if isinstance(result, dict) else None
-    if (isinstance(info, dict) and info.get("pane_id") == pane and info.get("name") == name
-            and info.get("agent") == kind and info.get("agent_status") == "blocked"):
-        verify_argv(kind, tier, result.get("argv"), launch_args)
-        raise owner_recovery(HerdrError("Started worker is blocked at native startup; no brief was sent.",
-            {"agent": name, "pane_id": pane}), "startup_dialog_pending", runnable.command("apply"),
-            "The fresh owner must preserve this pre-send dialog for Runtime Dialogs recovery; existing workers remain blocked.")
+    observed_states = READY_STATES | {"blocked"} if owned_fresh else READY_STATES
     if not isinstance(info, dict) or (
         info.get("pane_id") != pane or info.get("name") != name
-        or info.get("agent") != kind or info.get("agent_status") not in READY_STATES
+        or info.get("agent") != kind or info.get("agent_status") not in observed_states
     ):
         raise HerdrError("Started worker identity or readiness differs from the requested pane and kind; no brief was sent.", {})
     proof = verify_argv(kind, tier, result.get("argv"), launch_args)
     return {**proof, "pane_id": pane}
 
 
-def start_worker(client, agent, pane, tier, before_start=None, sleep=time.sleep):
+def start_worker(client, agent, pane, tier, before_start=None, sleep=time.sleep, *, owned_fresh=False):
     launch_args = worker_launch_args(agent.kind, agent.launch_args)
     # An unsupported kind refuses here, before the retrospective hook runs.
     launch_flags(agent.kind, tier)
     if before_start is not None:
         before_start()
-    return _start_seat(client, agent.name, agent.kind, pane, tier, launch_args)
+    return _start_seat(client, agent.name, agent.kind, pane, tier, launch_args, owned_fresh=owned_fresh)
 
 
 def start_foreman(client, seat, pane, tier):

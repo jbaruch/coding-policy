@@ -28,7 +28,7 @@ from . import runnable
 from . import __version__
 from .assign import apply as apply_assignments
 from .assign import APPLY_SCHEMA_VERSION, dry_run, freeze_decision, freeze_paths, read_frozen, native_context_session, normalize_assignments, resolve_paths, validate_context_mode, validate_fix_history
-from . import renderable
+from . import probe_recovery, renderable
 from . import attention, capabilities, chronology, churn, composition, engagement, foreman_queue, foreman_reset, historical, home, lifecycle, load_set, members, memory, oracle, partition, recovery, report_delivery, report_gates, restoration, role_clear, retrospective, retrospective_runtime, supervision, supervision_gate, supervision_runtime, triggers
 from .config import FOREMAN_CONFIG_VERSION, default_config_path, load_config, load_foreman, load_judge, load_role_costs, select_agents
 from .errors import AgentBusyError, PlanError, StateError, ForemanError, HerdrError, UsageError, owner_recovery
@@ -424,6 +424,8 @@ def build_parser():
     fit_parser = sub.add_parser("marker-fit", parents=[common], help="Measure a worker's live pane against its `REPORT: <path>` row, for a sender outside apply.")
     fit_parser.add_argument("--agent", required=True)
     fit_parser.add_argument("--report", required=True)
+    resolve_probe_parser = sub.add_parser("resolve-probe", parents=[common], help="Prove and close an owner-recorded no-input startup probe after its native dialog resolves.")
+    resolve_probe_parser.add_argument("--agent", required=True, help="Exact retained probe name from the normal measure receipt.")
 
     for command in ("task", "checkpoint", "authorize-corrections", "authorize-approach", "recover-context", "recover-role-clear", "record-report", "record-refusal", "authorize-refused-dispatch", "diagnose", "reconcile", "record-release-clear", "import-correction", "record-historical-review", "recover-report", "assess-specialist", "close-task"):
         record_parser = sub.add_parser(command, parents=[common], help=RECOVERY_HELP.get(command, "Record owner-managed {} evidence.".format(command)))
@@ -1008,7 +1010,8 @@ def cmd_measure(args, client=None, warn=None, trace=None):
         client, agents, args.now or now_iso(), marker_timeout_ms=args.marker_timeout,
         read_lines=args.lines, warn=warn, poll_attempts=args.marker_poll_attempts,
         poll_interval_sec=args.marker_poll_interval, settle_sec=args.composer_settle,
-        allow_recovery=args.allow_recovery)
+        allow_recovery=args.allow_recovery,
+        **({"state_path": _state_path(args), "config_path": _config_path(args)} if measure_fn is lifecycle.measure_worker_kinds else {}))
     state_path = _state_path(args)
     state = _load_state_for_write(state_path, warn)
     add_snapshot(state, snapshot)
@@ -1021,6 +1024,12 @@ def cmd_measure(args, client=None, warn=None, trace=None):
         "in the snapshot on stdout.".format(", ".join(snapshot["failed_agents"])),
         "details": {"failed_agents": snapshot["failed_agents"]},
     }
+
+
+def cmd_resolve_probe(args, client=None, warn=None, trace=None):
+    templates = load_config(_config_path(args))
+    client = client if client is not None else _client(args, trace=trace)
+    return probe_recovery.resolve(_state_path(args), args.agent, templates, client, config_path=_config_path(args)), None
 
 
 def _judge_mode_for(args, document):
@@ -3155,6 +3164,7 @@ def cmd_migrate_home(args, client=None, warn=None, trace=None):
 COMMANDS = {
     "migrate-home": cmd_migrate_home,
     "measure": cmd_measure,
+    "resolve-probe": cmd_resolve_probe,
     "plan": cmd_plan,
     "apply": cmd_apply,
     "state": cmd_state,

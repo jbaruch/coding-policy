@@ -3190,7 +3190,7 @@ class PublicOwnerRetryTest(unittest.TestCase):
                         result["agent"]["agent_session"] = None
                     if mode == "blocked":
                         native.agents[args[0]]["agent_status"] = "blocked"
-                        raise HerdrError("native startup blocked", {"stderr": json.dumps({"error": {"code": "agent_not_ready"}})})
+                        result["agent"]["agent_status"] = "blocked"
                     return result
                 native.agent_start = start_dialog
                 arguments = ["apply", "--assignments", json.dumps(plan), "--judge-mode", "adjudication",

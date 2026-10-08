@@ -70,7 +70,7 @@ class SpawnCloseTest(unittest.TestCase):
         client.workspace_create.assert_called_once_with(cwd="/work", label=worker.name, focus=False)
         client.pane_split.assert_not_called()
         self.assertEqual(client.pane_process_info.call_args_list, [call("pane-new")] * 3)
-        start.assert_called_once_with(client, worker, "pane-new", tier)
+        start.assert_called_once_with(client, worker, "pane-new", tier, owned_fresh=True)
         verify.assert_called_once_with(client, worker, "pane-new", tier)
 
     def test_spawn_runs_first_start_preflight_while_the_pane_is_still_a_shell(self):
@@ -81,7 +81,7 @@ class SpawnCloseTest(unittest.TestCase):
         }
         worker = template()
         order = []
-        with patch("foreman.lifecycle.start_worker", side_effect=lambda *_args: order.append("start")), \
+        with patch("foreman.lifecycle.start_worker", side_effect=lambda *_args, **_kwargs: order.append("start")), \
                 patch("foreman.lifecycle.verify_running", return_value={"pid": 1}):
             spawn(
                 client, worker, worker.tiers["coordination"], history=[],
@@ -603,17 +603,20 @@ class FreshShellStartupTest(unittest.TestCase):
 
 class WindowProbeTest(unittest.TestCase):
     def test_startup_dialog_is_retained_without_usage_input_or_capacity_inference(self):
+        import tempfile
+        from pathlib import Path
         for kind in ("codex", "claude", "grok"):
             for state in ("idle", "blocked"):
-                with self.subTest(kind=kind, state=state):
+                with self.subTest(kind=kind, state=state), tempfile.TemporaryDirectory() as temporary:
                     worker, client = template(kind, kind, kind), Mock()
-                    client.agent_get.return_value = {"pane_id": "owned-probe", "agent_status": state}
+                    client.agent_get.return_value = {"pane_id": "owned-probe", "agent_status": state, "name": "probe-fixed", "agent": kind}
                     client.agent_read.return_value = "Native startup dialog"
                     client.argv_pane_close.return_value = ["herdr", "pane", "close", "owned-probe"]
                     with patch("foreman.lifecycle.spawn", return_value="owned-probe"), \
-                            patch("foreman.lifecycle.verify_running", return_value={"pid": 71, "source": "process_argv"}), \
+                            patch("foreman.lifecycle.identity", return_value="probe-fixed"), \
+                            patch("foreman.lifecycle.verify_running", return_value={"pid": 71, "source": "process_argv", "pane_id": "owned-probe"}), \
                             patch("foreman.lifecycle.close") as closed, patch("foreman.measure.measure") as usage:
-                        result = measure_worker_kinds(client, [worker], "2026-10-08T00:00:00+00:00", sleep=lambda _: None)
+                        result = measure_worker_kinds(client, [worker], "2026-10-08T00:00:00+00:00", state_path=Path(temporary) / "state.json", sleep=lambda _: None)
                     closed.assert_not_called()
                     usage.assert_not_called()
                     client.agent_prompt.assert_not_called()

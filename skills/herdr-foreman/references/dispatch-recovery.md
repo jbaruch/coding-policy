@@ -19,11 +19,12 @@ A fresh usage probe with `startup_dialog_pending` remains at the named agent
 and pane in its error message, with unknown capacity and no usage input. Read
 that native pane and follow `skills/herdr-foreman/references/herdr.md` Runtime
 Dialogs. The foreman resolves already-authorized hook or directory trust
-without asking again. Re-read the same native target, prove its empty composer,
-then close only that owned no-input probe using the emitted command and repeat
-normal measure. Do not accumulate probes by repeating measure before resolving
-the retained one. The startup guard lives in
-`skills/herdr-foreman/foreman/lifecycle.py` (`_prepare_fresh_probe`).
+without asking again, then runs the emitted `resolve-probe --agent` owner
+command. It proves the original target and empty composer before cleanup;
+normal measure refuses another probe for that unresolved worker kind or
+billing window. Re-read after the choice, resolve, then repeat normal measure.
+The guarded command and durable probe schema are documented in
+`skills/herdr-foreman/references/probe-recovery.md`.
 
 ## Dispatch context
 
