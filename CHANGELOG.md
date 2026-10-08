@@ -1,5 +1,13 @@
 # Changelog
 
+### Fixed
+
+- Foreman reset delivery waits read-only for the original native input hook's
+  durable acceptance before ending its live claim. A working signal or clipped
+  transcript no longer ends the owner while startup hooks are still processing
+  the continuation. The bounded wait preserves runtime/process identity,
+  blocks replacement and never resends input across Claude Code, Codex and Grok.
+
 ## 0.3.379 — 2026-10-08
 
 ### Fixed
