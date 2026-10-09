@@ -1330,6 +1330,44 @@ class FreshStartupDeliveryTest(unittest.TestCase):
         self.assertTrue(result["landed"])
         client.pane_send_keys.assert_not_called()
 
+    def test_claude_model_unavailable_notice_refuses_before_any_input_with_a_repair_path(self):
+        # coding-policy#733: the saved native model_not_found text, verbatim.
+        from unittest.mock import Mock, patch
+        notice = ("There's an issue with the selected model (opus-6). It may not exist or you may not have "
+                  "access to it. Run /model to pick a different model.")
+        for frame in (notice + "\n❯ ", "\u23fa " + notice + "\n\x1b[2m❯ \x1b[0m"):
+            with self.subTest(frame=frame):
+                client, boundary = Mock(), Mock()
+                with patch("foreman.composer.read_pane", return_value=(frame, True)), self.assertRaises(HerdrError) as caught:
+                    send_message(client, BY_NAME["claude"], "brief", "brief", before_prompt=boundary,
+                                 startup_observe=lambda: ("p1", 42), sleep=NO_SLEEP)
+                details = caught.exception.details
+                self.assertEqual((details["failure_kind"], details["model"]), ("model_identifier_unavailable", "opus-6"))
+                self.assertIn(" plan", details["recovery"]["operation"])
+                self.assertIn("same-family successor", details["recovery"]["condition"])
+                boundary.assert_not_called()
+                client.agent_prompt.assert_not_called()
+                client.pane_send_keys.assert_not_called()
+                client.pane_send_text.assert_not_called()
+
+    def test_model_unavailable_notice_needs_a_bare_claude_row_with_a_plain_model_token(self):
+        from foreman.composer import identifier_unavailable_model
+        notice = "There's an issue with the selected model ({}). It may not exist or you may not have access to it."
+        self.assertEqual(identifier_unavailable_model(notice.format("claude-opus-6") + "\n❯"), "claude-opus-6")
+        for text in ("> " + notice.format("opus-6"), "see: " + notice.format("opus-6"), notice.format("opus-6; rm -rf"),
+                     notice.format("") , "This content can't be shown\n❯"):
+            with self.subTest(text=text):
+                self.assertIsNone(identifier_unavailable_model(text))
+
+    def test_other_adapters_ignore_the_claude_model_notice_and_keep_their_startup_path(self):
+        from unittest.mock import Mock, patch
+        notice = ("There's an issue with the selected model (opus-6). It may not exist or you may not have "
+                  "access to it.")
+        client = Mock()
+        with patch("foreman.composer.read_pane", return_value=(notice + "\n› authored draft", True)), self.assertRaises(HerdrError) as caught:
+            send_message(client, BY_NAME["codex"], "brief", "brief", startup_observe=lambda: ("p1", 42), sleep=NO_SLEEP)
+        self.assertEqual(caught.exception.details["failure_kind"], "startup_input_occupied")
+
     def test_hook_review_glyph_is_not_an_assignment_composer(self):
         from unittest.mock import Mock, patch
         client, boundary = Mock(), Mock()

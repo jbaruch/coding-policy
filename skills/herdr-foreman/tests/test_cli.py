@@ -3294,6 +3294,91 @@ class PublicOwnerRetryTest(unittest.TestCase):
                     self.assertEqual(len(final["assignments"]), 1)
                     self.assertEqual({path: path.read_bytes() for path in frozen}, frozen)
 
+    def test_unavailable_model_identifier_closes_not_sent_then_repaired_row_relaunches_same_provider(self):
+        # coding-policy#733: a stale launched identifier is seat-local model
+        # maintenance. The failed attempt records not_sent, sends nothing and
+        # names repair (never an identical retry); the repaired row relaunches
+        # the same task on the same provider.
+        from foreman import assign, composer, lifecycle
+        notice = ("There's an issue with the selected model (opus-6). It may not exist or you may not have "
+                  "access to it. Run /model to pick a different model.")
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            config, state, snapshot = (root / name for name in ("config.json", "state.json", "snapshot.json"))
+            common, brief, report = (root / name for name in ("common.md", "judge.md", "report.md"))
+            payload = json.loads((Path(_ROOT) / "config.example.json").read_text())
+            payload["judge"] = {"worker_kind": "claude", "model": "opus-6", "effort": "high"}
+            config.write_text(json.dumps(payload))
+            snapshot.write_text(json.dumps(SNAPSHOT))
+            common.write_text("Common immutable instructions\n")
+            brief.write_text("Judge immutable task\nREPORT: " + str(report) + "\n")
+            base = ["--config", str(config), "--state", str(state)]
+
+            def invoke(arguments, native=None):
+                out, err = io.StringIO(), io.StringIO()
+                code = main(base + arguments, stdout=out, stderr=err, client=native)
+                return code, out.getvalue(), err.getvalue()
+
+            def plan(seat):
+                with patch("foreman.lifecycle.identity", return_value=seat):
+                    code, text, err = invoke(["plan", "--roles", "judge", "--judge-mode", "adjudication",
+                        "--task", "native-733", "--snapshot", str(snapshot)])
+                self.assertEqual(code, 0, err)
+                return json.loads(text)
+
+            first = plan("judge-733")
+            supervision.bind(state, {"kind": "id", "value": "fixture-foreman", "cwd": str(root),
+                "herdr_env": "fixture", "pane_id": "foreman-pane"}, AT, root=root / "bindings")
+            native = FreshOwnerNative()
+            native.EMPTY = "❯ "
+            native.frames = [notice + "\n❯ "]
+
+            def arguments(assignments):
+                return ["apply", "--assignments", json.dumps(assignments), "--judge-mode", "adjudication",
+                    "--task", "native-733", "--now", AT, "--common", str(common), "--brief", "judge=" + str(brief),
+                    "--report", "judge=" + str(report), "--composer-settle", "0"]
+
+            real_spawn, real_apply, real_ready = lifecycle.spawn, assign.apply, composer.ensure_ready
+            with patch("foreman.cli.lifecycle.spawn", side_effect=lambda *a, **kw: real_spawn(*a, **kw, sleep=lambda _: None)), \
+                    patch("foreman.cli.apply_assignments", side_effect=lambda *a, **kw: real_apply(*a, **kw, sleep=lambda _: None)), \
+                    patch("foreman.cli.ensure_ready", side_effect=lambda *a, **kw: real_ready(*a, **kw, sleep=lambda _: None)):
+                code, _, err = invoke(arguments(first), native)
+                self.assertEqual(code, 1, err)
+                refused = json.loads("\n".join(line for line in err.splitlines() if not line.startswith(DIAGNOSTIC_PREFIX)))
+                self.assertEqual(refused["details"]["failure_kind"], "model_identifier_unavailable")
+                recovery_hint = refused["details"]["recovery"]
+                self.assertEqual(recovery_hint["outcome"], "repair_required")
+                self.assertIn(" plan ", " " + recovery_hint["operation"] + " ")
+                self.assertNotIn(" apply ", " " + recovery_hint["operation"] + " ")
+                self.assertIn("provider's current catalog", recovery_hint["condition"])
+                self.assertEqual(refused["details"]["model"], "opus-6")
+                # Nothing was sent, the owned pane is closed, and the failed attempt is durable.
+                self.assertEqual(native.panes, {})
+                self.assertFalse(any(event[0] == "prompt" for event in native.events))
+                saved, usable = load_state_checked(state)
+                self.assertTrue(usable)
+                failed = copy.deepcopy(saved["recovery"]["dispatches"][0])
+                self.assertEqual((failed["status"], failed["task"], failed["agent"].startswith("judge")), ("not_sent", "native-733", True))
+                self.assertEqual(saved["assignments"], [])
+                # Repair the exact row, validate by planning, relaunch: same task, same provider.
+                payload["judge"]["model"] = "claude-opus-5-5"
+                config.write_text(json.dumps(payload))
+                native.frames = ["❯ "]
+                second = plan("judge-734")
+                code, text, err = invoke(arguments(second), native)
+                self.assertEqual(code, 0, err)
+                self.assertEqual(len([event for event in native.events if event[0] == "prompt"]), 1)
+                final = load_state_checked(state)[0]
+                self.assertEqual(final["recovery"]["dispatches"][0], failed)
+                relaunch = final["recovery"]["dispatches"][1]
+                self.assertEqual((relaunch["status"], relaunch["task"], relaunch["role"], relaunch["fix_round"]),
+                                 ("applied", failed["task"], failed["role"], failed["fix_round"]))
+                self.assertEqual([row["agent"] for row in final["assignments"]], ["judge-734"])
+                started = [event for event in native.events if event[0] == "start"][-1]
+                self.assertEqual(started[1], "judge-734")
+                self.assertEqual(native.agents[started[1]]["argv"][0], "claude")
+                self.assertIn("claude-opus-5-5", native.agents[started[1]]["argv"])
+
     def test_reconcile_help_and_parser_expose_exclusive_record_or_dispatch_inputs(self):
         parser = build_parser()
         help_text = io.StringIO()

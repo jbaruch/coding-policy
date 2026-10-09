@@ -25,7 +25,7 @@ keeps the legacy unchecked path.
 import re
 import time
 
-from .errors import HerdrError, owner_recovery
+from .errors import HerdrError, IDENTIFIER_UNAVAILABLE_KIND, IDENTIFIER_UNAVAILABLE_RECOVERY, owner_recovery
 from . import runnable
 from .parsers import BOX_FRAME
 from .probe import stderr_warn
@@ -594,6 +594,32 @@ def _fresh_startup_error(kind, message, evidence):
         "The apply owner must prove owned pre-send cleanup and durable not_sent before retrying the unchanged assignment; unknown input remains blocked.")
 
 
+#: The provider's notice for a launched model identifier the account cannot
+#: call (Claude Code's `model_not_found`), as one bare row. `wait-report.sh`
+#: owns the same predicate for the post-send wait
+#: (`IDENTIFIER_NOTICE_PATTERN`); keep the two spellings aligned.
+IDENTIFIER_UNAVAILABLE_ROW = re.compile(
+    r"^(?:(?:\u23fa|\u23bf)\s+)?There.s an issue with the selected model \(([A-Za-z0-9._:/-]+)\)\. "
+    r"It may not exist or you may not have access to it\.(?: Run /model to pick a different model\.)?$")
+
+
+def identifier_unavailable_model(pane_text):
+    """The model id a bare provider identifier-unavailable row names, or None."""
+    for row in strip_ansi(pane_text).splitlines():
+        match = IDENTIFIER_UNAVAILABLE_ROW.match(row.strip())
+        if match:
+            return match.group(1)
+    return None
+
+
+def identifier_unavailable_error(agent, pane_id, model):
+    """Pre-input startup refusal: the launched model id is the stale part."""
+    return owner_recovery(
+        HerdrError("Fresh startup for {} in {} shows the provider's model-unavailable notice for {}; nothing was sent.".format(
+            agent.name, pane_id, model), {"agent": agent.name, "pane_id": pane_id, "model": model}),
+        IDENTIFIER_UNAVAILABLE_KIND, runnable.command("plan"), IDENTIFIER_UNAVAILABLE_RECOVERY)
+
+
 def startup_pending_error(agent, pane_id):
     """No authority decision: leave this named pre-input UI for its owner."""
     return _fresh_startup_error("startup_dialog_pending",
@@ -611,6 +637,10 @@ def _settle_fresh_composer(client, agent, pane_id, observe, sleep, warn):
         composer = inspect_composer(text, agent, ansi=ansi)
         if observe() != original:
             raise _fresh_startup_error("startup_identity_changed", "Fresh worker changed pane, process or tier during startup; nothing was sent.", {"pane_id": pane_id})
+        if agent.kind == "claude":
+            model = identifier_unavailable_model(text)
+            if model is not None:
+                raise identifier_unavailable_error(agent, pane_id, model)
         # The native hook-review menu uses the same glyph as Codex's composer.
         # Recognizing its UI preserves the target, not permission to trust it.
         rows = [row.strip() for row in strip_ansi(text).splitlines()]
