@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.389 — 2026-10-09
+
 ### Fixed
 
 - Disposable usage failures retain bounded, allowlisted native observations before
