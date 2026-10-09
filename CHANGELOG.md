@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.386 — 2026-10-09
+
 ### Fixed
 
 - Confirmed Herdr dispatch pane labels show the verified launch model and
