@@ -57,6 +57,11 @@ Untriggered work keeps the old judgement, whatever its size: skip Phase 1 when
 a design note would say less than the diff. Nothing in Phase 1 is a pass; it
 is preparation.
 
+An unchanged historical PR may use the separate "Classify an unchanged legacy
+PR" contract in `skills/herdr-foreman/references/specialists.md`. Its external
+classification requires staffing every fired trigger and leaves source intact;
+it never substitutes for Phase 2 or authorizes release.
+
 **Phase 2 — post-push verification (mandatory).** The reviewer reviews the
 pushed branch and posts a COMMENT review (Mode B). The tester runs the gates
 and the acceptance tests against that same branch (Mode C). Both report against

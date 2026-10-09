@@ -145,10 +145,15 @@ plan only once it exits 0. The declaration's fields, the
 decisions file and the answers each trigger accepts are in
 `skills/herdr-foreman/references/specialists.md`.
 
-For a repo whose recorded base lacks its first declaration, use the reviewed
+For a writing round whose recorded base lacks its first declaration, use the reviewed
 artifact, digest-bound plan and `--bootstrap-declaration` contract in
 `skills/herdr-foreman/references/specialists.md`. The first pushed head must install those bytes
 unchanged. Existing and later declarations remain in-repo authority.
+
+Read-only classification of an unchanged historical PR uses "Classify an
+unchanged legacy PR" in `skills/herdr-foreman/references/specialists.md` instead.
+Its fired triggers require staffing, not decisions. It supplies no writing or
+release authority and does not install a declaration into that PR.
 
 ```bash
 CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"; [ -d "$CP" ] || case "$(git config --get remote.origin.url)" in git@github.com:jbaruch/coding-policy|git@github.com:jbaruch/coding-policy.git|https://github.com/jbaruch/coding-policy|https://github.com/jbaruch/coding-policy.git|ssh://git@github.com/jbaruch/coding-policy|ssh://git@github.com/jbaruch/coding-policy.git) CP=. ;; *) echo "coding-policy plugin not found: run tessl install jbaruch/coding-policy" >&2; exit 1 ;; esac

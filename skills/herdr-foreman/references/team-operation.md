@@ -86,8 +86,8 @@ monetary savings remain unknown.
 - A round before implementation declares the surfaces the work will touch, and classifies those
 - A round that writes no repository content declares that explicitly
 - Such a round seats read-only responsibilities alone
-- Such a round fires no trigger
-- A tracked diff refuses that declaration
+- An ordinary no-write round fires no trigger
+- A tracked diff refuses the ordinary no-write declaration
 - A round that classifies neither is refused, never read as no trigger fired
 - The four non-exhaustion triggers fire from that detection, never from the foreman's reading of the diff
 - An absent declaration is allowed for an explicit, validated no-write round
@@ -99,9 +99,11 @@ monetary savings remain unknown.
   4. `detect-triggers --bootstrap-declaration` validates and classifies the artifact before dispatch
   5. The planned installation is byte-identical to the bound artifact
 - A changed artifact returns to trigger classification before dispatch
-- A pushed head uses its in-repo declaration and must prove the accepted byte-identical bootstrap when the recorded task base lacks one; an existing declaration at the task base is sole authority
+- A writing round's pushed head uses its in-repo declaration and must prove the accepted byte-identical bootstrap when the recorded task base lacks one; an existing declaration at the task base is sole authority
 - Every other incomplete or absent writing declaration is refused
-- A fired trigger is consulted, or recorded as a staffing decision with its reason the detector reads
+- Read-only classification of an unchanged historical PR follows "Classify an unchanged legacy PR" in `skills/herdr-foreman/references/specialists.md`
+- That classification supplies no writing, merge, release or future-task authority
+- A fired trigger is consulted, or recorded as a staffing decision with its reason the detector reads, except legacy review which requires staffing
 - Silence is never that decision
 - The exhaustion trigger has no such alternative: a diagnosis without its accepted consultation is refused
 - A diagnosis is not dispatched at an exhausted allowance before that assessment exists

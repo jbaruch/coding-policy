@@ -1270,6 +1270,23 @@ not a new owner-state schema or acceptance record. Only a standalone line counts
 fenced, quoted, indented and inline-code copies are examples
 (`skills/herdr-foreman/foreman/report_contract.py` `trigger_bindings`). Ordinary schema-2 specialist
 assessment receipts bind its exact bytes; the assessment owner checks its
-absolute repository/artifact, exact task base and reviewed digest. Detection
+absolute repository/artifact, exact task base and reviewed digest. The existing
+four-key writing shape is unchanged. Legacy review uses the separate five-key
+report-line input, adding `head_revision`, under "Classify an unchanged legacy
+PR" in `skills/herdr-foreman/references/specialists.md`; it adds no assessment
+record fields or separate approval artifact. Detection
 reads all-met, non-blocking consultation records and rechecks the report digest
 before relying on that binding. No operator-written approval or receipt is read.
+
+## Trigger classification output
+
+`detect-triggers` emits schema 3 on stdout. Existing fields remain `declaration`,
+`declaration_authority`, `base`, `head`, `triggers`, `fired`, `unaddressed` and
+`unused_decisions`. Schema 2 introduced declaration authority; schema 3 adds the
+legacy-review variant. Legacy output also carries top-level `task`.
+Its authority contains `kind: legacy_review`, canonical absolute `repo` and
+`path`, full `base_revision` and `head_revision`, artifact `sha256`, exact `task`,
+accepted `assessment` id and `report_evidence: {path, sha256}`.
+This is read-only command output, not a stored authorization or migration.
+Ordinary specialist assessments remain schema 2; older owner state takes its
+existing migration refusal before classification and is left unchanged.
