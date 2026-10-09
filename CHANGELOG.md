@@ -1,5 +1,28 @@
 # Changelog
 
+### Added
+
+- Add an owner-attested, single-controller remote Herdr context (#748).
+  Immutable argv routing applies the saved-machine selector to every client
+  invocation, including server compatibility probes. The coding-policy owner
+  pins the controller, service principal, remote session, workspace, thin
+  foreman anchor, lease epoch and loaded policy bytes; it checks those pins
+  before remote effects. A durable pre-effect intent fences timeout, disconnect
+  and malformed control replies across owner restarts until same-identity
+  reconciliation. Prior supervision or discovery history prevents a missing
+  owner record from being recreated as an empty gate. Task ingress rejects
+  command, model, provider and routing overrides. The canonical store identity
+  is pinned in both lease and supervision records, rejecting copied leases.
+  Binding owners refuse implicit native/remote mode conversion. Distinct remote
+  supervision bindings require no fabricated native environment, competing
+  foreman brain or local signals to remote PIDs. The binding team-round scope
+  recognizes the remote controller and preserves its tier and continuation gates.
+  An independent current-lease reader fences revoked controllers, exact private
+  modes and reason-specific remedies enforce the owner contract, and durable
+  task handoff markers prevent lost registration history from requeuing work.
+  Native operation is unchanged; consuming service deployment stays gated on
+  its authenticated controller, shared lease and evidence transport.
+
 ## 0.3.397 — 2026-10-09
 
 ### Fixed

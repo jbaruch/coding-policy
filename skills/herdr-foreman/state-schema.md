@@ -15,6 +15,7 @@ the utility alone records the saved notes and their separate index.
 | `<task-reports-dir>/TASK-LEDGER.md` | `herdr-foreman`, written by the foreman | Evidence-backed assignment acceptance and task completion across rounds |
 | `<canonical-state-path>.retrospectives/` | `herdr-foreman`, through its retrospective utility | Immutable retrospective notes, versioned index, and transition coverage |
 | `<canonical-state-path>.foreman-reset.json` | `skills/herdr-foreman/foreman/foreman_reset.py` | One record per foreman round-boundary reset; see Foreman Reset Record below |
+| Controller-configured private remote owner JSON | `skills/herdr-foreman/foreman/remote_owner.py` | Attested command context, current single-controller lease, indeterminate intent and task ingress; schema and writer/reader contract in `skills/herdr-foreman/references/remote-context.md` |
 
 ## Home Migration
 
@@ -961,7 +962,7 @@ retry and unsupported-schema behavior; only their owner commands mutate them.
 `skills/herdr-foreman/foreman/supervision.py` owns `<canonical selected state>.supervision.json`.
 The document has `schema_version: 1`, canonical `state_path`, nullable `binding`,
 and arrays `members`, `events`, `acknowledgements`, `holds`, and `watchers`.
-Each array entry, binding, refinement, resolution, disposition, and evidence
+Each array entry, native binding, refinement, resolution, disposition, and evidence
 receipt carries `schema_version: 1`. Timestamps are timezone-aware ISO strings.
 Readers reject unsupported versions or corrupt records without migrating or
 replacing them. A missing never-bound store is empty; loss of a bound owner's
@@ -977,6 +978,14 @@ store requires recovery of its history before rebinding or writing.
   binding; an ahead
   generation blocks an incomplete handoff. An older native session stops being
   the foreman once the owner's newer generation commits.
+- An attested remote binding is a distinct schema-2 record type, not a migrated
+  native binding. It keeps `at`, `generation`, `state_path` and `identity`;
+  the identity is `{kind: "attested-remote", cwd, pane_id, attestation, owner_store_path}` with no
+  `herdr_env` or fabricated native session. Its receipt, owner validation and
+  unsupported-reader behavior are in `skills/herdr-foreman/references/remote-context.md`. Native
+  binding schema 1 and every other supervision row stay unchanged.
+  The canonical owner-store path must match the private remote lease record.
+  A cross-mode binding refuses instead of converting its history.
 - `members`: `{schema_version, id, at, assignment, active, observed, resolution,
   refinements}`. `assignment` contains `{id, agent, task, report, pane_id,
   native_session}`; `id` equals the stable dispatch ID, `report` is absolute,

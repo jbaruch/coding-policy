@@ -495,6 +495,8 @@ def _client(args, trace=None):
     return HerdrClient(
         binary=getattr(args, "herdr_bin", None),
         trace=trace if tracing else None,
+        context=getattr(args, "herdr_context", None),
+        remote_authority=getattr(args, "herdr_authority", None),
     )
 
 
@@ -2885,6 +2887,9 @@ def cmd_start_foreman(args, client=None, warn=None, trace=None):
 
 
 def cmd_verify_foreman(args, client=None, warn=None, trace=None):
+    if client is not None and getattr(getattr(client, "context", None), "mode", None) == "attested-remote":
+        from .command_context import refuse
+        raise refuse("native_foreman_tier_verifier_in_remote_context")
     if getattr(args, "config_only", False):
         # The preflight's view when headroom did not pass: whether the seat is
         # configured is independent of any measurement.
@@ -3297,6 +3302,11 @@ def main(argv=None, stdout=None, stderr=None, client=None):
         stderr.write(DIAGNOSTIC_PREFIX + message + "\n")
 
     try:
+        if client is not None and getattr(getattr(client, "context", None), "mode", None) == "attested-remote":
+            client.remote_preflight(_state_path(args), allow_indeterminate=True)
+            if args.command in {"start-foreman", "foreman-reset", "foreman-reset-deliver", "foreman-reset-reconcile", "migrate-home"}:
+                from .command_context import refuse
+                raise refuse("native_controller_operation_in_remote_context")
         # A default home still at the legacy path is refused before anything is
         # read or created at the new one. `migrate-home` moves the default homes
         # alone, under the home guard held exclusively; every other command holds

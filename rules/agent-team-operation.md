@@ -7,15 +7,16 @@ description: Standalone/team modes, delegation, foreman authority and runtime di
 
 ## Two Modes
 
-- **Standalone** — one agent working alone outside Herdr. `HERDR_ENV` is unset
-- **Herdr team round** — a nonworking foreman dispatching separate worker panes. `HERDR_ENV` is set
-- Read `HERDR_ENV` to tell the modes apart
+- **Standalone** — `HERDR_ENV` unset and no verified remote context
+- **Herdr team round** — a nonworking foreman dispatches native or remote workers
+- Read real `HERDR_ENV` or the verified owner context
+- Remote preconditions are binding: read `skills/herdr-foreman/references/remote-context.md` before relying on them
 - Never infer the mode from how large or careful the task is
 - **Every section of `skills/herdr-foreman/references/team-operation.md` governs a Herdr team round only**
 - In standalone mode none of it applies — no roles, no rotation, no briefs, no report files, no worktree-per-writer, no judge seat
 - A standalone agent does the task directly
-- A standalone agent never simulates the roles, the briefs, or the reports
-- Standalone work is still governed by every other rule in this plugin
+- Never simulate team roles, briefs or reports in standalone mode
+- Every other plugin rule governs standalone work
 
 ## Runtime Dialogs
 
@@ -24,9 +25,9 @@ description: Standalone/team modes, delegation, foreman authority and runtime di
 ## Delegation
 
 - Authorized delegated work uses Herdr-managed agents through the existing foreman owners
-- This section governs both modes and every role, including nested delegation and read-only research or review
+- Applies to both modes, every role, nested delegation, research and review
 - Native subagent, spawn, task and team mechanisms are forbidden delegation routes
-- The prohibition covers invocation through tools, skills or CLI wrappers
+- Includes tools, skills or CLI wrappers
 - Claude Code, Codex CLI and other supported runtimes remain valid workers inside Herdr
 - Role-specific delegation prohibitions and independence constraints remain binding
 - An unmanaged agent's output never substitutes for a required Herdr report
@@ -65,6 +66,6 @@ description: Standalone/team modes, delegation, foreman authority and runtime di
 - A Herdr team round follows `skills/herdr-foreman/references/team-operation.md` in full
 - That file is a must-read before any team-round action outside Bounded Factual Lookup
 - Its sections bind a team round as rule content
-- The foreman loads it through `skills/herdr-foreman/SKILL.md`
+- The foreman loads `skills/herdr-foreman/SKILL.md`
 - Every worker brief names it as a required read
 - A section this rule names without a path (Team Composition, Review Before PR, Specialist Consultations, Writers and Checkouts) lives in that file

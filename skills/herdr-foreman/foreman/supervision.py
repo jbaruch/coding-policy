@@ -1,6 +1,7 @@
 """Durable foreman-owned fleet observations, acknowledgements, and stop bindings.
 
-Every document/row is schema 1. The canonical selected state owns an adjacent
+Documents and native bindings are schema 1; attested remote bindings are a
+distinct schema-2 record type. The canonical selected state owns an adjacent
 `.supervision.json`; exact native foreman identities discover it through one
 hashed binding under the default state directory. Reads never migrate or write.
 Unknown/corrupt files are preserved and mutations refuse them. Transactions use
@@ -19,6 +20,7 @@ from pathlib import Path
 from . import runnable
 from .errors import StateError, UsageError
 from .state import default_state_path, save_state, state_lock
+from .command_context import RemoteForemanAttestation
 
 SCHEMA_VERSION = 1
 DEFAULT_RECHECK_SECONDS = 30
@@ -110,15 +112,14 @@ def load(state_path):
         for key in ("members", "events", "acknowledgements", "holds", "watchers"):
             if not isinstance(data.get(key), list) or any(not isinstance(row, dict) or row.get("schema_version") != 1 for row in data[key]):
                 raise ValueError("invalid {} rows".format(key))
-        if data.get("binding") is not None and (not isinstance(data["binding"], dict) or data["binding"].get("schema_version") != 1):
+        if data.get("binding") is not None and (not isinstance(data["binding"], dict) or data["binding"].get("schema_version") not in (1, 2)):
             raise ValueError("invalid binding")
         if data["binding"] is None and any(data[key] for key in ("members", "events", "acknowledgements", "holds", "watchers")):
             raise ValueError("unbound owner contains active history")
         if data["binding"] is not None:
             saved_binding = data["binding"]
             who = saved_binding["identity"]
-            if (not isinstance(who, dict) or set(who) != {"kind", "value", "cwd", "herdr_env", "pane_id"}
-                    or identity(who["value"], who["cwd"], who["herdr_env"], kind=who["kind"], pane_id=who["pane_id"]) != who
+            if (normalize_identity(who, saved_binding["schema_version"]) != who
                     or saved_binding["state_path"] != str(canonical(state_path))
                     or type(saved_binding["generation"]) is not int or saved_binding["generation"] < 1):
                 raise ValueError("invalid bound foreman identity")
@@ -437,6 +438,32 @@ def identity(value, cwd, environment, *, kind="id", pane_id):
             "herdr_env": text(environment, "HERDR_ENV"), "pane_id": text(pane_id, "HERDR_PANE_ID")}
 
 
+def remote_identity(attestation, cwd, *, owner_store_path):
+    """Distinct remote binding; no invented HERDR_ENV or native session value."""
+    from dataclasses import asdict
+    if not isinstance(attestation, RemoteForemanAttestation):
+        raise UsageError("Remote binding needs the verified owner attestation; attach the configured remote owner first.", {})
+    if not isinstance(owner_store_path, (str, Path)) or not Path(owner_store_path).is_absolute():
+        raise UsageError("Remote binding needs its canonical absolute owner-store path; restore the configured shared lease path.", {})
+    return {"kind": "attested-remote", "cwd": str(canonical(cwd)),
+            "pane_id": attestation.foreman_pane_id, "attestation": asdict(attestation),
+            "owner_store_path": str(canonical(owner_store_path))}
+
+
+def normalize_identity(who, version):
+    if not isinstance(who, dict):
+        raise UsageError("Restore the original foreman identity record before dispatching.", {})
+    if version == 1 and set(who) == {"kind", "value", "cwd", "herdr_env", "pane_id"}:
+        return identity(who["value"], who["cwd"], who["herdr_env"], kind=who["kind"], pane_id=who["pane_id"])
+    if version == 2 and set(who) == {"kind", "cwd", "pane_id", "attestation", "owner_store_path"} and who["kind"] == "attested-remote":
+        try:
+            attestation = RemoteForemanAttestation(**who["attestation"])
+        except (TypeError, ValueError):
+            raise UsageError("Remote binding receipt is malformed; restore the verified controller receipt.", {}) from None
+        return remote_identity(attestation, who["cwd"], owner_store_path=who["owner_store_path"])
+    raise UsageError("Foreman identity schema is unsupported; restore its matching coding-policy owner before dispatch.", {})
+
+
 def binding_path(who, root=None):
     directory = canonical(root) if root is not None else default_state_path().parent / "supervision-bindings"
     return directory / (digest(who) + ".json")
@@ -479,6 +506,16 @@ def bind(state_path, who, at, *, root=None, before_bind=None):
     if not isinstance(who, dict) or set(who) != {"kind", "value", "cwd", "herdr_env", "pane_id"}:
         raise UsageError("Binding requires the foreman's exact native kind/value, cwd, HERDR_ENV, and pane_id.", {})
     who = identity(who["value"], who["cwd"], who["herdr_env"], kind=who["kind"], pane_id=who["pane_id"])
+    return _bind(state_path, who, at, root=root, before_bind=before_bind, binding_schema=1)
+
+
+def bind_attested_remote(state_path, attestation, cwd, at, *, owner_store_path, root=None):
+    """Privileged remote owner entry; caller ingress never invokes this function."""
+    who = remote_identity(attestation, cwd, owner_store_path=owner_store_path)
+    return _bind(state_path, who, at, root=root, binding_schema=2)
+
+
+def _bind(state_path, who, at, *, root=None, before_bind=None, binding_schema):
     timestamp(at)
     path = binding_path(who, root)
     # An empty unbound first-use owner exists before discovery. No transaction
@@ -494,12 +531,14 @@ def bind(state_path, who, at, *, root=None, before_bind=None):
         first_use = old is None and not store_path(state_path).exists()
         if first_use:
             _refuse_lost_owner(state_path, path.parent)
+        if old is not None and old["schema_version"] != binding_schema:
+            raise StateError("Foreman binding mode differs from this owner. Preserve its history and explicitly reconcile the native/remote transition before rebinding.", {})
         row = old if old is not None and old["identity"] == who else {
-            "schema_version": 1, "at": at, "identity": who, "state_path": str(canonical(state_path)),
+            "schema_version": binding_schema, "at": at, "identity": who, "state_path": str(canonical(state_path)),
             "generation": 1 if old is None else old["generation"] + 1}
         with state_lock(path):
             previous = read_json(path)
-            if previous is not None and (not isinstance(previous, dict) or previous.get("schema_version") != 1
+            if previous is not None and (not isinstance(previous, dict) or previous.get("schema_version") != binding_schema
                     or previous.get("identity") != who or previous.get("state_path") != row["state_path"]):
                 raise StateError("Foreman identity already has a conflicting or unreadable state binding. Preserve it and explicitly reconcile the original state path.", {})
             if first_use:

@@ -43,6 +43,7 @@ import shlex
 import subprocess
 
 from .errors import HerdrError
+from .command_context import HerdrCommandContext, remote_command, refuse
 
 #: Default per-call wall-clock ceiling for the subprocess itself. Herdr's own
 #: --timeout governs how long *it* waits; this guards against a wedged binary.
@@ -238,23 +239,50 @@ def error_code(exc):
 class HerdrClient:
     """A thin, injectable wrapper over the `herdr` CLI."""
 
-    def __init__(self, binary=None, runner=None, trace=None):
-        self.binary = binary or default_binary()
+    def __init__(self, binary=None, runner=None, trace=None, *, context=None, remote_authority=None):
+        if context is not None and binary is not None:
+            raise refuse("executable_override_of_bound_context")
+        self.context = context if context is not None else HerdrCommandContext(binary or default_binary())
+        if not isinstance(self.context, HerdrCommandContext):
+            raise refuse("untyped_command_context")
+        if self.context.mode == "attested-remote" and remote_authority is None:
+            raise refuse("remote_authority_missing")
+        if self.context.mode == "attested-remote":
+            from .remote_owner import RemoteForemanOwner
+            if not isinstance(remote_authority, RemoteForemanOwner) or remote_authority.context != self.context:
+                raise refuse("unverified_remote_owner")
+        if self.context.mode == "native" and remote_authority is not None:
+            raise refuse("remote_authority_on_native_context")
+        self.binary = self.context.executable
+        self._remote_authority = remote_authority
         self._runner = runner if runner is not None else subprocess_runner
         # A callable taking one string, or None for no tracing. Diagnostics go
         # to stderr so stdout stays machine-readable JSON.
         self._trace = trace
 
+    def _argv(self, *command):
+        return self.context.argv(*command)
+
+    def remote_preflight(self, state_path=None, *, allow_indeterminate=False):
+        """Check this remote owner without fabricating a native runtime identity."""
+        if self.context.mode != "attested-remote" or self._remote_authority is None:
+            raise refuse("remote_owner_not_attached")
+        if state_path is not None:
+            from pathlib import Path
+            if Path(state_path).resolve() != self._remote_authority.state_path:
+                raise refuse("remote_owner_state_path_changed")
+        return self._remote_authority.preflight(self._runner, allow_indeterminate=allow_indeterminate)
+
     # -- argv builders (pure) ------------------------------------------------
 
     def argv_agent_get(self, name):
-        return [self.binary, "agent", "get", name]
+        return self._argv("agent", "get", name)
 
     def argv_agent_list(self):
-        return [self.binary, "agent", "list"]
+        return self._argv("agent", "list")
 
     def argv_agent_read(self, name, source=None, lines=None, fmt=None):
-        argv = [self.binary, "agent", "read", name]
+        argv = self._argv("agent", "read", name)
         if source:
             argv += ["--source", source]
         if lines is not None:
@@ -266,7 +294,7 @@ class HerdrClient:
         return argv
 
     def argv_agent_prompt(self, name, text, wait=False, until=(), timeout_ms=None):
-        argv = [self.binary, "agent", "prompt", name, text]
+        argv = self._argv("agent", "prompt", name, text)
         if wait:
             argv.append("--wait")
         for state in until:
@@ -276,10 +304,10 @@ class HerdrClient:
         return argv
 
     def argv_agent_send_keys(self, name, keys):
-        return [self.binary, "agent", "send-keys", name] + list(keys)
+        return self._argv("agent", "send-keys", name, *keys)
 
     def argv_agent_wait(self, name, until=(), timeout_ms=None):
-        argv = [self.binary, "agent", "wait", name]
+        argv = self._argv("agent", "wait", name)
         for state in until:
             argv += ["--until", state]
         if timeout_ms is not None:
@@ -287,15 +315,15 @@ class HerdrClient:
         return argv
 
     def argv_pane_send_text(self, pane_id, text):
-        return [self.binary, "pane", "send-text", pane_id, text]
+        return self._argv("pane", "send-text", pane_id, text)
 
     def argv_pane_send_keys(self, pane_id, keys):
-        return [self.binary, "pane", "send-keys", pane_id] + list(keys)
+        return self._argv("pane", "send-keys", pane_id, *keys)
 
     def argv_pane_split(self, pane_id=None, *, current=False, direction="right", ratio=0.5, cwd=None, focus=False):
         if (pane_id is None) == (not current):
             raise HerdrError("pane split needs exactly one parent pane or --current.", {})
-        argv = [self.binary, "pane", "split"]
+        argv = self._argv("pane", "split")
         if pane_id is not None:
             argv.append(pane_id)
         else:
@@ -307,14 +335,14 @@ class HerdrClient:
         return argv
 
     def argv_workspace_create(self, *, cwd, label, focus=False, env=()):
-        argv = [self.binary, "workspace", "create", "--cwd", cwd, "--label", label,
-                "--focus" if focus else "--no-focus"]
+        argv = self._argv("workspace", "create", "--cwd", cwd, "--label", label,
+                          "--focus" if focus else "--no-focus")
         for value in env:
             argv += ["--env", value]
         return argv
 
     def argv_pane_close(self, pane_id):
-        return [self.binary, "pane", "close", pane_id]
+        return self._argv("pane", "close", pane_id)
 
     def argv_send_slash_command(self, pane_id, text, enter_count=1):
         """The argv lists `send_slash_command` runs, in order.
@@ -349,7 +377,7 @@ class HerdrClient:
                 "pass a marker pattern for the agent's usage report.",
                 {"pane_id": pane_id},
             )
-        argv = [self.binary, "pane", "wait-output"]
+        argv = self._argv("pane", "wait-output")
         if regex is not None:
             argv += ["--regex", regex]
         else:
@@ -373,7 +401,7 @@ class HerdrClient:
         A failed read propagates as a transport failure, never compatibility.
         """
         facts = {}
-        for line in self._run([self.binary, "status", "server"]).splitlines():
+        for line in self._run(self._argv("status", "server")).splitlines():
             key, separator, value = line.partition(":")
             if separator and key in {"status", "version", "endpoint_compatible"}:
                 if key in facts:
@@ -388,7 +416,7 @@ class HerdrClient:
             raise HerdrError("Native start retry compatibility is unproved. Inspect `{}` and restore a running, "
                              "endpoint-compatible Herdr server at version {} or newer before retrying the owner "
                              "spawn; this busy launch is not automatically repeated.".format(
-                                 format_argv([self.binary, "status", "server"]), minimum),
+                                 format_argv(self._argv("status", "server")), minimum),
                              {"minimum_server_version": minimum, "reason": "startup_retry_compatibility_unproved"})
 
     def _emit_trace(self, argv, completed=None, outcome=None):
@@ -417,7 +445,13 @@ class HerdrClient:
     def _run(self, argv):
         """Execute `argv`, raising HerdrError on anything but a clean exit."""
         try:
-            completed = self._runner(argv)
+            if self.context.mode == "attested-remote":
+                if self._remote_authority is None:
+                    raise refuse("remote_authority_missing")
+                command, mutating = remote_command(self.context, argv)
+                completed = self._remote_authority.invoke(self.context, command, mutating, self._runner)
+            else:
+                completed = self._runner(argv)
         except FileNotFoundError:
             self._emit_trace(argv, outcome="\nherdr< executable not found")
             raise HerdrError(
@@ -529,7 +563,7 @@ class HerdrClient:
     # -- operations ----------------------------------------------------------
 
     def argv_agent_start(self, name, kind, pane_id, flags):
-        return [self.binary, "agent", "start", name, "--kind", kind, "--pane", pane_id, "--", *flags]
+        return self._argv("agent", "start", name, "--kind", kind, "--pane", pane_id, "--", *flags)
 
     def agent_start(self, name, kind, pane_id, flags):
         return self._run_json(self.argv_agent_start(name, kind, pane_id, flags))
@@ -556,7 +590,7 @@ class HerdrClient:
         return self._run_optional_json(self.argv_pane_close(pane_id))
 
     def argv_pane_process_info(self, pane_id):
-        return [self.binary, "pane", "process-info", "--pane", pane_id]
+        return self._argv("pane", "process-info", "--pane", pane_id)
 
     def pane_process_info(self, pane_id):
         result = self._run_json_object(self.argv_pane_process_info(pane_id))
@@ -592,14 +626,14 @@ class HerdrClient:
 
     def pane_get(self, pane_id):
         """Return native terminal identity and viewport metadata for a pane."""
-        result = self._run_json([self.binary, "pane", "get", pane_id])
+        result = self._run_json(self._argv("pane", "get", pane_id))
         pane = result.get("pane")
         if not isinstance(pane, dict):
             raise HerdrError("herdr pane get returned no pane record; restore the pane connection.", {"pane": pane_id})
         return pane
 
     def argv_pane_layout(self, pane_id):
-        return [self.binary, "pane", "layout", "--pane", pane_id]
+        return self._argv("pane", "layout", "--pane", pane_id)
 
     def pane_width(self, pane_id):
         """Return the pane's live column count from its tab layout."""
@@ -622,7 +656,7 @@ class HerdrClient:
 
     def pane_read(self, pane_id, lines):
         """Read visible rows even while the agent status changes."""
-        return self._run([self.binary, "pane", "read", pane_id, "--source", "visible", "--lines", str(lines)])
+        return self._run(self._argv("pane", "read", pane_id, "--source", "visible", "--lines", str(lines)))
 
     def agent_list(self):
         """Return every live agent record."""
@@ -664,7 +698,7 @@ class HerdrClient:
 
     def argv_pane_rename(self, pane_id, label):
         """`pane rename` sets the pane's title in the sidebar."""
-        return [self.binary, "pane", "rename", pane_id, label]
+        return self._argv("pane", "rename", pane_id, label)
 
     def pane_rename(self, pane_id, label):
         """Retitle a pane. Returns the control response.

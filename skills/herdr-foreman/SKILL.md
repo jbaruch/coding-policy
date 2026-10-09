@@ -9,7 +9,7 @@ description: >
   idle workers, collect reports, run or retrieve retrospectives,
   catch up on outstanding user attention, curate team lessons, save and resume
   foreman handoffs, or report a task's cost or resource use through acceptance.
-  Live rounds require HERDR_ENV; saved memory, attention and cost reports work
+  Live rounds require native HERDR_ENV or a verified owner-attested remote context; saved memory, attention and cost reports work
   offline. Other standalone tasks skip this skill.
 ---
 
@@ -117,9 +117,26 @@ authority.
   for an unusable state file or an unknown task; report it and stop. The output
   contract is `skills/herdr-foreman/state-schema.md` (Writer / Reader Contract).
 
-For every other request, read `HERDR_ENV` before running scripts.
+For every other request, read `HERDR_ENV` and the controller's attached context before running scripts.
 
-- **Unset or empty** — this skill does not apply. Say so and do the task
+- **Owner-attested remote context**
+  - Read the remote contract in full:
+
+    ```text
+    skills/herdr-foreman/references/remote-context.md
+    ```
+
+  - Verify its owner preflight and supervision binding.
+  - Load the team-round contract.
+  - Use the bound Python owners.
+  - Do not manufacture `HERDR_ENV`.
+  - Do not start another foreman brain.
+  - Native-only shell preflights and reset hooks do not authorize remote operation.
+  - Preserve every remaining stage-local gate.
+  - Run Step 2's remaining gates through the controller's configured owners.
+  - Proceed immediately to Step 5 only when those gates pass.
+
+- **Unset or empty, without a verified remote context** — this skill does not apply. Say so and do the task
   directly, without roster calls, briefs, provisioning, reports, or simulated
   worker roles. Finish here.
 - **Set, with a bounded factual lookup**
