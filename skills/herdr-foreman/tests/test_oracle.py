@@ -8,6 +8,7 @@ import sys
 import tempfile
 import tracemalloc
 import unittest
+from contextlib import chdir
 from pathlib import Path
 from unittest.mock import patch
 
@@ -113,6 +114,24 @@ class OracleTest(unittest.TestCase):
         self.assertEqual(verdict["observed"], hashlib.sha256(self.result.read_bytes()).hexdigest())
         self.assertEqual(verdict["comparison"]["expected"], verdict["comparison"]["observed"])
         self.assertEqual(verdict["comparison"]["mode"], "unified_hunk_heading_ignored")
+
+    def test_relative_result_path_is_read_and_reported_as_supplied(self):
+        expected = self.root / "expected"
+        expected.write_bytes(self.result.read_bytes())
+        for kind in ("digest", "patch", "fixture"):
+            with self.subTest(kind=kind):
+                oracle = ({"kind": kind, "value": hashlib.sha256(expected.read_bytes()).hexdigest()}
+                          if kind == "digest" else {"kind": kind, "path": str(expected)})
+                plan = self.plan(oracle)
+                out, err = io.StringIO(), io.StringIO()
+                with chdir(self.root):
+                    code = main(["verify-oracle", "--state", str(self.state), "--plan", str(plan),
+                                 "--role", "developer", "--result", "result.diff", "--task", TASK],
+                                stdout=out, stderr=err)
+                self.assertEqual(code, 0, err.getvalue())
+                verdict = json.loads(out.getvalue())
+                self.assertTrue(verdict["match"])
+                self.assertEqual(verdict["result"], "result.diff")
 
     def test_patch_heading_comparison_preserves_every_other_byte(self):
         expected = self.root / "expected.patch"

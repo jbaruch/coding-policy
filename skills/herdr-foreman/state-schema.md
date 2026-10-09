@@ -311,8 +311,8 @@ number is refused, naming the file and the role. `plan` is the only reader.
 `verify-oracle` (`skills/herdr-foreman/foreman/oracle.py`, `verify`) emits schema 2.
 The `herdr-foreman` owner writes the verdict; the foreman reads its `match` and
 comparison evidence before accepting the round. Fields are `schema_version`,
-`kind`, boolean `match`, raw SHA-256 `expected` and `observed`, absolute
-`result`, `oracle` for file-backed kinds, and `comparison` with `mode`,
+`kind`, boolean `match`, raw SHA-256 `expected` and `observed`, caller-supplied
+`result` path, absolute `oracle` for file-backed kinds, and `comparison` with `mode`,
 `expected` and `observed`. The comparison digests decide `match`; the raw
 digests retain the original bytes' identities. The module docstring owns
 comparison modes and normalization. Plan pins, dispatched oracles and their
