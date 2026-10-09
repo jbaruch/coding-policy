@@ -316,6 +316,21 @@ class RemoteOwnerTest(unittest.TestCase):
         with self.assertRaises(RemoteIndeterminateError):
             self.client.remote_preflight()
 
+    def test_remote_read_transport_errors_never_recommend_native_server_recovery(self):
+        for failure in (subprocess.TimeoutExpired(["herdr"], 1), OSError("disconnected")):
+            original = self.runner
+            def disconnected_read(argv):
+                result = original(argv)
+                if argv[3:5] == ["agent", "read"]:
+                    raise failure
+                return result
+            client = HerdrClient(context=self.context, remote_authority=self.owner, runner=disconnected_read)
+            with self.subTest(failure=type(failure).__name__), self.assertRaises(RemoteContextError) as caught:
+                client.agent_read("worker", source="visible")
+            self.assertIn("SAME saved machine profile", str(caught.exception))
+            self.assertNotIn("`herdr agent list`", str(caught.exception))
+            self.assertIsNone(json.loads(self.store.read_text(encoding="utf-8"))["pending"])
+
     def test_remote_context_ready_never_substitutes_for_controller_model_tier_proof(self):
         self.assertTrue(self.client.remote_preflight()["ready"])
         stderr = io.StringIO()

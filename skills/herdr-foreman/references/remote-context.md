@@ -40,6 +40,12 @@ It does not replace an existing controller, principal, lease or pending intent.
 Every competing controller of this deployment uses the same owner store and
 OS lock. The canonical `owner_store_path` is pinned in the owner record and
 supervision binding. A copied store is refused, not another controller lease.
+This interface supplies no receipt-rotation transaction. A lease handoff or
+policy upgrade therefore keeps the existing deployment disabled; never erase
+its store to start fresh. A consuming runtime requiring that lifecycle must
+first provide an owner-controlled, history-preserving reattachment transaction
+for the lease and supervision binding. This bounded surface does not claim
+production handoff or rolling-upgrade support.
 
 The workstation foreman seat is a **thin terminal anchor without an LLM**.
 The controller running the loaded coding-policy foreman is the sole brain.

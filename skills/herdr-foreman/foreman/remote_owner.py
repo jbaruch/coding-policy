@@ -296,7 +296,10 @@ class RemoteForemanOwner:
             live_identity(context, runner)
             self._current_lease()
             if not mutating:
-                return runner(context.argv(*command))
+                try:
+                    return runner(context.argv(*command))
+                except (OSError, subprocess.TimeoutExpired):
+                    raise refuse("remote_identity_transport_unavailable") from None
             pending = {"schema_version": 1, "id": uuid.uuid4().hex,
                        "operation": " ".join(command[:2]), "status": "indeterminate",
                        "argv_digest": hashlib.sha256(json.dumps(command).encode("utf-8")).hexdigest()}
