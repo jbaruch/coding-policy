@@ -36,10 +36,11 @@ class ProbeRecoveryTest(unittest.TestCase):
                 original_read = client.agent_read
                 def prepared(*args, **options):
                     proof = original_prepare(*args, **options)
+                    assert proof is not None
                     ready.append(proof[2]["pid"])
                     return proof
-                def replaced_read(name, **options):
-                    text = original_read(name, **options)
+                def replaced_read(name, source=None, lines=None, fmt=None):
+                    text = original_read(name, source=source, lines=lines, fmt=fmt)
                     if ready:
                         client.agents[name]["pid"] = ready[0] + 1
                     return text
@@ -53,6 +54,26 @@ class ProbeRecoveryTest(unittest.TestCase):
                 assert row is not None
                 self.assertEqual(row["process"]["pid"], ready[0])
                 self.assertEqual(row["phase"], "cleanup")
+                self.assertFalse(any(event[0] in {"prompt", "close"} for event in client.events))
+
+    def test_missing_startup_proof_never_closes_a_same_name_replacement(self):
+        for kind in ("claude", "codex", "grok"):
+            with self.subTest(kind=kind):
+                self.state = self.root / (kind + "-missing-startup.json")
+                worker, client = self.worker(kind), self.native(kind)
+                def replaced_before_proof(_client, probe, _pane, _tier, **_options):
+                    client.agents[probe.name]["pid"] += 1
+                    raise HerdrError("startup proof unavailable", {})
+                with patch("foreman.lifecycle._prepare_fresh_probe", side_effect=replaced_before_proof):
+                    result = self.measure(worker, client)
+                self.assertEqual(result["failed_agents"], [kind])
+                message = result["agents"][kind]["error"]["message"]
+                self.assertIn("startup proof unavailable", message)
+                self.assertIn("original startup binding is missing", message)
+                self.assertIn("process-info", message)
+                self.assertNotIn("measure --agent", message)
+                self.assertIsNone(probe_recovery.pending(self.state, worker))
+                self.assertTrue(client.panes)
                 self.assertFalse(any(event[0] in {"prompt", "close"} for event in client.events))
 
     def test_failed_usage_cleanup_is_retained_and_gates_until_owned_resolution(self):
@@ -336,7 +357,13 @@ class ProbeRecoveryTest(unittest.TestCase):
                 composer._fresh_startup_error("startup_input_occupied", "Draft occupied", {})):
             with self.subTest(failure=failure.message):
                 worker, client = self.worker("codex"), self.native("codex")
-                with patch("foreman.lifecycle._prepare_fresh_probe", side_effect=failure):
+                original_prepare = lifecycle._prepare_fresh_probe
+                def proved_then_refused(*args, **options):
+                    proof = original_prepare(*args, **options)
+                    setattr(failure, "_probe_startup_observation", proof)
+                    raise failure
+                with patch("foreman.lifecycle._prepare_fresh_probe", side_effect=proved_then_refused), \
+                        patch.object(client, "pane_read", return_value=client.EMPTY):
                     result = self.measure(worker, client)
                 error = result["agents"]["codex"]["error"]
                 self.assertIn("measure --agent codex", error["message"])

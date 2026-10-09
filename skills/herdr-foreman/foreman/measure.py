@@ -112,6 +112,10 @@ def _capture_failure(exc, capture, observed_text=None):
     if view is not None and PENDING_CLI_UPDATE in view:
         exc.details["pending_cli_update"] = True
     cause = exc.details.get("failure_message", exc.message)
+    if isinstance(exc, ParseError):
+        # Parser messages may embed arbitrary native labels. Preserve the
+        # typed failure without treating pane-derived prose as safe evidence.
+        cause = "usage_report_invalid: native usage parser rejected the report; reopen the usage dialog and read a complete supported report."
     exc.message = "Visible evidence (diagnostic only): {}. Original measurement error: {}".format(
         json.dumps(_visible_diagnostic(view), ensure_ascii=False),
         json.dumps(scrub_for_trace(cause, cap=FAILURE_CAUSE_BYTES), ensure_ascii=False))

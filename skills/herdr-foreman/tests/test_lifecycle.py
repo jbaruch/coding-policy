@@ -682,13 +682,15 @@ class WindowProbeTest(unittest.TestCase):
         fixture = FreshShellStartupTest()
         client = fixture.client([fixture.INITIALIZING, fixture.SHELL, fixture.SHELL, fixture.SHELL, fixture.running()])
         client.agent_start.return_value["agent"]["name"] = "probe-fixed"
-        client.agent_get.side_effect = [{"pane_id": "pane-new"}, missing("probe-fixed")]
+        live = {"pane_id": "pane-new", "name": "probe-fixed", "agent": "claude", "agent_session": None}
+        client.agent_get.side_effect = [live, live, missing("probe-fixed")]
         sleeps = Mock()
         def measured(_client, probes, measured_at, **_options):
             return {"agents": {probes[0].name: {"windows": None, "headroom_pct": None,
                 "error": {"code": "parse_error", "message": "usage unavailable"}}}}
         with patch("foreman.lifecycle.identity", return_value="probe-fixed"), \
-                patch("foreman.lifecycle._prepare_fresh_probe", return_value=None), \
+                patch("foreman.lifecycle._prepare_fresh_probe", return_value=("pane-new", None, {"pid": 42})), \
+                patch("foreman.lifecycle.verify_running", return_value={"pid": 42}), \
                 patch("foreman.measure.measure", side_effect=measured) as usage:
             result = measure_worker_kinds(client, [template()], "2026-10-01T00:00:00+00:00", sleep=sleeps)
         self.assertEqual(sleeps.call_count, 2)
@@ -971,7 +973,11 @@ class WorkspacePlacementTest(unittest.TestCase):
                 del created[argv[-1]]
                 result = {"closed": True}
             elif op == ["agent", "get"]:
-                return FakeCompleted(1, "", json.dumps({"error": {"code": "agent_not_found"}}))
+                if created:
+                    result = {"agent": {"name": "probe-claude-fixed", "agent": "claude",
+                        "pane_id": "w9:p7", "agent_status": "idle", "agent_session": None}}
+                else:
+                    return FakeCompleted(1, "", json.dumps({"error": {"code": "agent_not_found"}}))
             else:
                 raise AssertionError("unexpected command: " + str(argv))
             return FakeCompleted(stdout=json.dumps({"result": result}))
@@ -1008,8 +1014,11 @@ class WorkspacePlacementTest(unittest.TestCase):
             self.assertEqual(set(created), {"w9:p7"})
             self.assertEqual(focus(), "w1")
             return {"agents": {probes[0].name: {"headroom_pct": 90, "pane_id": "w9:p7"}}}
+        def prepared(_client, worker, pane, tier, **_options):
+            from foreman.launch import verify_running
+            return (pane, None, verify_running(_client, worker, pane, tier))
         with patch("foreman.lifecycle.identity", return_value="probe-claude-fixed"), \
-                patch("foreman.lifecycle._prepare_fresh_probe", return_value=None), \
+                patch("foreman.lifecycle._prepare_fresh_probe", side_effect=prepared), \
                 patch("foreman.measure.measure", side_effect=measured):
             result = measure_worker_kinds(client, [template()], "2026-10-01T00:00:00+00:00", sleep=lambda _: None)
         self.assertEqual(result["failed_agents"], [])

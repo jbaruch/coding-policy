@@ -261,6 +261,17 @@ class FailureEvidenceTest(unittest.TestCase):
         self.assertIn("hooks_review", serialized)
         self.assertIn("composer occupied", serialized)
 
+    def test_pane_derived_parse_reason_never_enters_durable_failure_evidence(self):
+        text = "Current week (DUMMYprosecredential)\n101% used"
+        runner = runner_with({"claude": "idle"}, {"claude": text})
+        with patch("foreman.measure.send_command"):
+            snapshot = measure(HerdrClient(runner=runner), [BY_NAME["claude"]], AT,
+                               failure_capture=Mock(return_value=text))
+        error = snapshot["agents"]["claude"]["error"]
+        self.assertEqual(error["code"], "parse_error")
+        self.assertNotIn("DUMMYprosecredential", json.dumps(snapshot))
+        self.assertIn("usage_report_invalid", error["message"])
+
     def test_usage_failure_preserves_visible_text_before_dialog_dismissal(self):
         for kind, text in (("claude", CLAUDE_UNPARSEABLE_PANE),
                            ("codex", "Weekly limit has no reading"),
@@ -311,7 +322,7 @@ class FailureEvidenceTest(unittest.TestCase):
         capture.assert_called_once_with(CLAUDE_UPDATE_PANE)
         error = snapshot["agents"]["claude"]["error"]
         self.assertIn("dialog dismissal failed", error["message"])
-        self.assertIn("No usage windows found", error["message"])
+        self.assertIn("usage_report_invalid", error["message"])
         self.assertIn("pending_cli_update", error["message"])
         self.assertTrue(error["details"]["pending_cli_update"])
 

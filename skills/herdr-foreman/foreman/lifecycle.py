@@ -469,8 +469,7 @@ def measure_worker_kinds(client, templates, measured_at, *, state_path=None, con
                 primary = sys.exc_info()[1]
                 try:
                     closure = close(client, probe.name, pane,
-                        before_close=(lambda: _probe_binding(client, probe, pane, tier, original))
-                            if original is not None else None)
+                        before_close=lambda: _probe_binding(client, probe, pane, tier, original))
                 except HerdrError as exc:
                     cleanup_error = exc
                     if primary is not None:

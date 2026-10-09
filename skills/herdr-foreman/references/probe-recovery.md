@@ -65,6 +65,8 @@ owner command records closure. Cleanup rows preserve the original binding,
 not a replacement observed during failure. Reprove that full binding before
 each usage/recovery/Enter or dialog-tab input, usage-dialog dismissal and pane
 cleanup. Changed bindings authorize none of them.
+Missing startup bindings also refuse cleanup; preserve that surface for
+read-only owner inspection rather than closing a same-name/pane replacement.
 No assignment input occurs under either phase; a cleanup row may have usage
 input. A failed startup-dialog retention write leaves
 ordinary owned pre-input cleanup in force; it cannot advertise a durable gate.
