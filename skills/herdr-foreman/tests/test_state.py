@@ -282,6 +282,38 @@ class MigrationTest(unittest.TestCase):
                          {"code": "parse_error", "message": "old failure", "details": {}})
         self.assertEqual(self.on_disk(), migrated)
 
+    def test_snapshot_v4_failure_migrates_without_inventing_evidence(self):
+        details = {"pending_cli_update": True}
+        state = empty_state()
+        state["snapshots"] = [
+            {"schema_version": 4,
+             "agents": {"claude": {"error": {"code": "parse_error", "message": "old failure",
+                                              "details": dict(details)}}},
+             "failed_agents": ["claude"]},
+            {"schema_version": 4,
+             "agents": {"grok": {"error": {"code": "parse_error", "message": "bare", "details": {}}}},
+             "failed_agents": ["grok"]},
+        ]
+        self.write(state)
+        migrated = self.load()
+        first, second = migrated["snapshots"]
+        self.assertEqual(first["schema_version"], 5)
+        self.assertEqual(first["agents"]["claude"]["error"],
+                         {"code": "parse_error", "message": "old failure", "details": details})
+        self.assertEqual(second["schema_version"], 5)
+        self.assertEqual(second["agents"]["grok"]["error"]["details"], {})
+        self.assertEqual(self.on_disk(), migrated)
+
+    def test_a_snapshot_newer_than_five_is_refused_unchanged(self):
+        state = empty_state()
+        state["snapshots"] = [{"schema_version": SNAPSHOT_SCHEMA_VERSION + 1, "agents": {},
+                               "failed_agents": []}]
+        self.write(state)
+        before = self.path.read_text(encoding="utf-8")
+        _loaded, usable = load_state_checked(self.path, warn=self.warnings.append)
+        self.assertFalse(usable)
+        self.assertEqual(self.path.read_text(encoding="utf-8"), before)
+
     def test_snapshot_v3_malformed_failed_error_is_refused_unchanged(self):
         for error in (None, [], {"code": "parse_error"},
                       {"code": "parse_error", "message": "old", "details": []},
