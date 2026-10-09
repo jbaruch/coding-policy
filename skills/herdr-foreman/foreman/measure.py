@@ -32,7 +32,7 @@ import time
 
 from .composer import COMPOSER_SETTLE_SEC, DispatchSession, send_command
 from .errors import HerdrError, ParseError
-from .herdr import BUSY_STATES, DEFAULT_MARKER_TIMEOUT_MS, READY_STATES, format_argv, scrub_for_trace
+from .herdr import BUSY_STATES, DEFAULT_MARKER_TIMEOUT_MS, READY_STATES, error_code, format_argv, scrub_for_trace
 from .parsers import headroom_pct, parse_usage
 from .probe import resolve_status, stderr_warn
 from .state import SNAPSHOT_SCHEMA_VERSION
@@ -108,7 +108,7 @@ def snapshot_error(exc):
     }
 
 
-def wait_for_usage_report(client, agent, pane_id, marker_timeout_ms=DEFAULT_MARKER_TIMEOUT_MS, read_lines=DEFAULT_READ_LINES, poll_attempts=DEFAULT_MARKER_POLL_ATTEMPTS, poll_interval_sec=DEFAULT_MARKER_POLL_INTERVAL_SEC, sleep=time.sleep, warn=None, max_tabs=MAX_DIALOG_TABS):
+def wait_for_usage_report(client, agent, pane_id, marker_timeout_ms=DEFAULT_MARKER_TIMEOUT_MS, read_lines=DEFAULT_READ_LINES, poll_attempts=DEFAULT_MARKER_POLL_ATTEMPTS, poll_interval_sec=DEFAULT_MARKER_POLL_INTERVAL_SEC, sleep=time.sleep, warn=None, max_tabs=MAX_DIALOG_TABS, owned_visible_read=None):
     """Return pane text containing `agent.usage_marker`.
 
     The marker is a literal substring, never a pattern, so the wait uses
@@ -154,9 +154,15 @@ def wait_for_usage_report(client, agent, pane_id, marker_timeout_ms=DEFAULT_MARK
         )
 
     def read():
-        return client.agent_read(
-            agent.name, source=agent.usage_read_source, lines=read_lines
-        )
+        try:
+            return client.agent_read(
+                agent.name, source=agent.usage_read_source, lines=read_lines
+            )
+        except HerdrError as exc:
+            if owned_visible_read is None or error_code(exc) != "agent_not_idle":
+                raise
+            warn("{}'s history read refused while working; checking only the identity-bound owned probe's visible pane.".format(agent.name))
+            return owned_visible_read()
 
     text = read()
     attempts = 0
@@ -225,7 +231,7 @@ def skipped_record(agent, status, herdr_status, state_source):
     }
 
 
-def measure_agent(client, agent, marker_timeout_ms=DEFAULT_MARKER_TIMEOUT_MS, read_lines=DEFAULT_READ_LINES, warn=None, poll_attempts=DEFAULT_MARKER_POLL_ATTEMPTS, poll_interval_sec=DEFAULT_MARKER_POLL_INTERVAL_SEC, sleep=time.sleep, max_tabs=MAX_DIALOG_TABS, settle_sec=COMPOSER_SETTLE_SEC, session=None, failure_capture=None):
+def measure_agent(client, agent, marker_timeout_ms=DEFAULT_MARKER_TIMEOUT_MS, read_lines=DEFAULT_READ_LINES, warn=None, poll_attempts=DEFAULT_MARKER_POLL_ATTEMPTS, poll_interval_sec=DEFAULT_MARKER_POLL_INTERVAL_SEC, sleep=time.sleep, max_tabs=MAX_DIALOG_TABS, settle_sec=COMPOSER_SETTLE_SEC, session=None, failure_capture=None, owned_visible_read=None):
     """Measure one agent and return its record.
 
     Raises HerdrError or ParseError; the caller decides whether one bad agent
@@ -280,6 +286,7 @@ def measure_agent(client, agent, marker_timeout_ms=DEFAULT_MARKER_TIMEOUT_MS, re
             sleep=sleep,
             warn=warn,
             max_tabs=max_tabs,
+            owned_visible_read=owned_visible_read,
         )
         try:
             parsed = parse_usage(agent.kind, text)
@@ -327,7 +334,7 @@ def measure_agent(client, agent, marker_timeout_ms=DEFAULT_MARKER_TIMEOUT_MS, re
     }
 
 
-def measure(client, agents, measured_at, marker_timeout_ms=DEFAULT_MARKER_TIMEOUT_MS, read_lines=DEFAULT_READ_LINES, warn=None, poll_attempts=DEFAULT_MARKER_POLL_ATTEMPTS, poll_interval_sec=DEFAULT_MARKER_POLL_INTERVAL_SEC, sleep=time.sleep, settle_sec=COMPOSER_SETTLE_SEC, allow_recovery=False, failure_capture=None):
+def measure(client, agents, measured_at, marker_timeout_ms=DEFAULT_MARKER_TIMEOUT_MS, read_lines=DEFAULT_READ_LINES, warn=None, poll_attempts=DEFAULT_MARKER_POLL_ATTEMPTS, poll_interval_sec=DEFAULT_MARKER_POLL_INTERVAL_SEC, sleep=time.sleep, settle_sec=COMPOSER_SETTLE_SEC, allow_recovery=False, failure_capture=None, owned_visible_read=None):
     """Measure every agent in `agents` and return the snapshot document.
 
     A failure on one agent is recorded on that agent's record and does not
@@ -354,6 +361,7 @@ def measure(client, agents, measured_at, marker_timeout_ms=DEFAULT_MARKER_TIMEOU
                 settle_sec=settle_sec,
                 session=session,
                 failure_capture=failure_capture,
+                owned_visible_read=owned_visible_read,
             )
         except (HerdrError, ParseError) as exc:
             if not getattr(exc, "_failure_captured", False):

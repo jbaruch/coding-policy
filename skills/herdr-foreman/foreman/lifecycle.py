@@ -325,30 +325,31 @@ def _prepare_fresh_probe(client, worker, pane, tier, *, sleep=time.sleep, warn=N
     return original
 
 
-def _probe_failure_view(client, worker, pane, tier, original, observed_text=None):
-    """Read only a still-bound disposable probe, before its cleanup.
-
-    This evidence cannot authorize input or cleanup. A failed observation
-    remains explicit and must not replace the original usage failure.
-    """
+def _probe_visible_read(client, worker, pane, tier, original, observed_text=None, *, lines=PROBE_FAILURE_READ_LINES):
+    """Read only a still-bound disposable probe; authorize no input/cleanup."""
     if (not isinstance(original, tuple) or len(original) != 3 or original[0] != pane
             or not isinstance(original[2], dict) or type(original[2].get("pid")) is not int
             or original[2]["pid"] <= 0):
-        return "Visible evidence unavailable: original startup binding is missing."
+        raise HerdrError("original startup binding is missing", {})
 
     def same_identity():
         live = client.agent_get(worker.name)
         return (live.get("name") == worker.name and live.get("agent") == worker.kind
                 and (live.get("pane_id"), live.get("agent_session"),
                      verify_running(client, worker, pane, tier)) == original)
+    if not same_identity():
+        raise HerdrError("original probe identity changed", {})
+    text = (observed_text if observed_text is not None and worker.usage_read_source == "visible"
+            else client.pane_read(pane, lines=lines))
+    if not same_identity():
+        raise HerdrError("original probe identity changed during the read", {})
+    return text
+
+
+def _probe_failure_view(client, worker, pane, tier, original, observed_text=None):
+    """Keep failed read evidence explicit without replacing the usage cause."""
     try:
-        if not same_identity():
-            return "Visible evidence unavailable: original probe identity changed."
-        text = (observed_text if observed_text is not None and worker.usage_read_source == "visible"
-                else client.pane_read(pane, lines=PROBE_FAILURE_READ_LINES))
-        if not same_identity():
-            return "Visible evidence unavailable: original probe identity changed during the read."
-        return text
+        return _probe_visible_read(client, worker, pane, tier, original, observed_text)
     except (HerdrError, UsageError) as exc:
         return "Visible evidence unavailable: bound probe observation failed: {}".format(exc.message)
 
@@ -382,7 +383,7 @@ def _probe_usage_recovery(record, cleanup_error, closure, client, pane, operatio
 def measure_worker_kinds(client, templates, measured_at, *, state_path=None, config_path=None, **options):
     """Measure one probe per billing window; retain pre-input startup dialogs."""
     from .billing import tier_billing
-    from .measure import MEASURE_SCHEMA_VERSION, _capture_failure, measure, snapshot_error
+    from .measure import DEFAULT_READ_LINES, MEASURE_SCHEMA_VERSION, _capture_failure, measure, snapshot_error
 
     groups = {}
     for template in templates:
@@ -422,7 +423,9 @@ def measure_worker_kinds(client, templates, measured_at, *, state_path=None, con
             original = _prepare_fresh_probe(client, probe, pane, tier, sleep=options.get("sleep", time.sleep), warn=options.get("warn"))
             startup = False
             snapshot = measure(client, [probe], measured_at,
-                failure_capture=lambda text: _probe_failure_view(client, probe, pane, tier, original, text), **options)
+                failure_capture=lambda text: _probe_failure_view(client, probe, pane, tier, original, text),
+                owned_visible_read=lambda: _probe_visible_read(client, probe, pane, tier, original,
+                    lines=options.get("read_lines", DEFAULT_READ_LINES)), **options)
             record = dict(snapshot["agents"][probe.name])
             record.pop("tier_billing", None)
             if "error" in record:

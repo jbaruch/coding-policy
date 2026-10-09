@@ -4,7 +4,9 @@
 
 - Disposable usage failures retain bounded, redacted native observations before
   dialog and pane cleanup (#721). Recovery targets the configured worker kind,
-  not a retired probe; unproved cleanup permits read-only inspection only.
+  not a retired probe and preserves its transport; unproved cleanup permits
+  read-only inspection only. Owned probes use verified visible data when Herdr
+  refuses history reads during a working status; standing workers do not.
   Capacity stays unknown, provider/tier choices remain intact, and a cleanup
   error retains the original usage diagnostic.
 

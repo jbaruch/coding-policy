@@ -171,6 +171,41 @@ def runner_with(statuses, panes, footers=None):
     return runner
 
 
+class OwnedVisibleUsageTest(unittest.TestCase):
+    def runner(self, code="agent_not_idle"):
+        runner = runner_with({"codex": "idle"}, {})
+        runner.set("agent read codex --source recent-unwrapped --lines 80", returncode=1,
+                   stderr=json.dumps({"error": {"code": code, "message": "history unavailable"}}))
+        return runner
+
+    def test_owned_probe_reads_actual_visible_usage_when_history_refuses(self):
+        runner = self.runner()
+        visible = Mock(return_value=CODEX_PANE)
+        snapshot = measure(HerdrClient(runner=runner), [BY_NAME["codex"]], AT,
+                           owned_visible_read=visible, warn=Mock())
+        self.assertEqual(snapshot["failed_agents"], [])
+        self.assertEqual(snapshot["agents"]["codex"]["headroom_pct"], 87.0)
+        visible.assert_called_once_with()
+        self.assertEqual(runner.commands().count("pane send-text w3:p1 /status"), 1)
+
+    def test_no_fallback_authority_or_unrelated_transport_failure_stays_unknown(self):
+        runner = self.runner()
+        snapshot = measure(HerdrClient(runner=runner), [BY_NAME["codex"]], AT)
+        self.assertIsNone(snapshot["agents"]["codex"]["headroom_pct"])
+        visible = Mock(return_value=CODEX_PANE)
+        snapshot = measure(HerdrClient(runner=self.runner("agent_not_found")), [BY_NAME["codex"]], AT,
+                           owned_visible_read=visible)
+        self.assertIsNone(snapshot["agents"]["codex"]["headroom_pct"])
+        visible.assert_not_called()
+
+    def test_changed_probe_binding_never_substitutes_a_quota_reading(self):
+        visible = Mock(side_effect=HerdrError("original probe identity changed", {}))
+        snapshot = measure(HerdrClient(runner=self.runner()), [BY_NAME["codex"]], AT,
+                           owned_visible_read=visible, warn=Mock())
+        self.assertIsNone(snapshot["agents"]["codex"]["headroom_pct"])
+        self.assertIn("identity changed", snapshot["agents"]["codex"]["error"]["message"])
+
+
 class FailureEvidenceTest(unittest.TestCase):
     def test_usage_failure_preserves_visible_text_before_dialog_dismissal(self):
         for kind, text in (("claude", CLAUDE_UNPARSEABLE_PANE),
