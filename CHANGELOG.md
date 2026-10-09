@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.392 — 2026-10-09
+
 ### Fixed
 
 - Disposable probe occupancy failures retain only pane, foreground PID and
