@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.397 — 2026-10-09
+
 ### Fixed
 
 - Refuse unnamed foreman context-reset targets before scheduling (#747).
