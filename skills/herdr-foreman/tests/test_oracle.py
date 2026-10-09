@@ -8,7 +8,9 @@ import sys
 import tempfile
 import tracemalloc
 import unittest
+from contextlib import chdir
 from pathlib import Path
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -93,6 +95,126 @@ class OracleTest(unittest.TestCase):
             with self.subTest(kind=kind):
                 self.assertEqual(self.run_cli(self.plan({"kind": kind, "path": str(same)}))[0], 0)
                 self.assertEqual(self.run_cli(self.plan({"kind": kind, "path": str(other)}))[0], 1)
+
+    def test_patch_hunk_heading_is_presentation_not_result_content(self):
+        expected = self.root / "expected.patch"
+        original = (b"diff --git a/SKILL.md b/SKILL.md\nindex 123..456 100644\n"
+                    b"--- a/SKILL.md\n+++ b/SKILL.md\n@@ -3,7 +3,7 @@\n"
+                    b" name: check-watchlist\n-agentModel: old\n+agentModel: new\n")
+        expected.write_bytes(original)
+        self.result.write_bytes(original.replace(b"@@ -3,7 +3,7 @@\n",
+                                                b"@@ -3,7 +3,7 @@ name: check-watchlist\n"))
+        code, output, error = self.run_cli(self.plan({"kind": "patch", "path": str(expected)}))
+        self.assertEqual(code, 0, error)
+        verdict = json.loads(output)
+        self.assertTrue(verdict["match"])
+        self.assertEqual(verdict["schema_version"], 2)
+        self.assertNotEqual(verdict["expected"], verdict["observed"])
+        self.assertEqual(verdict["expected"], hashlib.sha256(original).hexdigest())
+        self.assertEqual(verdict["observed"], hashlib.sha256(self.result.read_bytes()).hexdigest())
+        self.assertEqual(verdict["comparison"]["expected"], verdict["comparison"]["observed"])
+        self.assertEqual(verdict["comparison"]["mode"], "unified_hunk_heading_ignored")
+
+    def test_relative_result_path_is_read_and_reported_as_supplied(self):
+        expected = self.root / "expected"
+        expected.write_bytes(self.result.read_bytes())
+        for kind in ("digest", "patch", "fixture"):
+            with self.subTest(kind=kind):
+                oracle = ({"kind": kind, "value": hashlib.sha256(expected.read_bytes()).hexdigest()}
+                          if kind == "digest" else {"kind": kind, "path": str(expected)})
+                plan = self.plan(oracle)
+                out, err = io.StringIO(), io.StringIO()
+                with chdir(self.root):
+                    code = main(["verify-oracle", "--state", str(self.state), "--plan", str(plan),
+                                 "--role", "developer", "--result", "result.diff", "--task", TASK],
+                                stdout=out, stderr=err)
+                self.assertEqual(code, 0, err.getvalue())
+                verdict = json.loads(out.getvalue())
+                self.assertTrue(verdict["match"])
+                self.assertEqual(verdict["result"], "result.diff")
+
+    def test_patch_heading_comparison_preserves_every_other_byte(self):
+        expected = self.root / "expected.patch"
+        original = b"--- a/x\n+++ b/x\n@@ -1 +1 @@\n-old\n+new\n"
+        expected.write_bytes(original)
+        for label, changed in (
+                ("path", original.replace(b"a/x", b"a/y")),
+                ("range", original.replace(b"-1 +1", b"-2 +1")),
+                ("body", original.replace(b"+new", b"+other")),
+                ("body resembling header", original + b"+@@ -1 +1 @@ section\n"),
+                ("line ending", original.replace(b" @@\n", b" @@\r\n")),
+                ("missing newline", original[:-1])):
+            with self.subTest(label=label):
+                self.result.write_bytes(changed)
+                code, output, error = self.run_cli(self.plan({"kind": "patch", "path": str(expected)}))
+                self.assertEqual(code, 1, error)
+                self.assertFalse(json.loads(output)["match"])
+
+    def test_heading_normalization_never_weakens_an_oracle_pin(self):
+        expected = self.root / "expected.patch"
+        expected.write_bytes(b"@@ -1 +1 @@ original\n-old\n+new\n")
+        self.result.write_bytes(b"@@ -1 +1 @@ other\n-old\n+new\n")
+        plan = self.plan({"kind": "patch", "path": str(expected)})
+        expected.write_bytes(self.result.read_bytes())
+        code, output, error = self.run_cli(plan)
+        self.assertEqual((code, output), (1, ""))
+        self.assertIn("changed since the plan was written", error)
+
+    def test_heading_comparison_is_patch_only_and_survives_chunk_boundaries(self):
+        expected = self.root / "expected.patch"
+        original = b"@@ -0,0 +1 @@\r\n+one\n@@ -2 +3,2 @@\n-old\n+new\n@@ -4 +5 @@"
+        decorated = original.replace(b"@@\r\n", b"@@ section\r\n").replace(
+            b"@@\n", b"@@ another section\n") + b" final section"
+        expected.write_bytes(original)
+        self.result.write_bytes(decorated)
+        with patch("foreman.oracle.CHUNK_BYTES", 7):
+            code, output, error = self.run_cli(self.plan({"kind": "patch", "path": str(expected)}))
+        self.assertEqual(code, 0, error)
+        self.assertTrue(json.loads(output)["match"])
+        for kind in ("fixture", "digest"):
+            oracle = ({"kind": kind, "path": str(expected)} if kind == "fixture" else
+                      {"kind": kind, "value": hashlib.sha256(original).hexdigest()})
+            self.assertEqual(self.run_cli(self.plan(oracle))[0], 1)
+
+    def test_malformed_headers_and_header_like_body_text_stay_byte_exact(self):
+        expected = self.root / "expected.patch"
+        for header in (b"@@ -1, +1 @@", b"@@ -1 +1, @@", b"@@ -x +1 @@",
+                       b"@@ -1 +1 @", b"@@@ -1 +1 @@@", b" @@ -1 +1 @@",
+                       b"+@@ -1 +1 @@", b"-@@ -1 +1 @@", b"@@ -1 +1 @@nospace"):
+            with self.subTest(header=header):
+                expected.write_bytes(header + b"\n")
+                self.result.write_bytes(header + b" changed\n")
+                self.assertEqual(self.run_cli(self.plan({"kind": "patch", "path": str(expected)}))[0], 1)
+
+    def test_patch_hashes_raw_and_comparison_in_one_read_per_file(self):
+        expected = self.root / "expected.patch"
+        expected.write_bytes(b"@@ -1 +1 @@\n-old\n+new\n")
+        self.result.write_bytes(b"@@ -1 +1 @@ heading\n-old\n+new\n")
+        licensed = {"kind": "patch", "path": str(expected),
+                    "sha256": hashlib.sha256(expected.read_bytes()).hexdigest()}
+        with patch("foreman.oracle.os.open", wraps=os.open) as opened:
+            self.assertTrue(verify(licensed, self.result)["match"])
+        self.assertEqual([call.args[0] for call in opened.call_args_list], [self.result, str(expected)])
+
+    def test_memory_stays_bounded_for_a_patch_with_an_oversized_heading(self):
+        expected = self.root / "expected.patch"
+        expected.write_bytes(b"@@ -1 +1 @@\n-old\n+new\n")
+        size = 16 * 1024 * 1024
+        with self.result.open("wb") as handle:
+            handle.write(b"@@ -1 +1 @@ ")
+            for _ in range(16):
+                handle.write(b"x" * (size // 16))
+            handle.write(b"\n-old\n+new\n")
+        plan = self.plan({"kind": "patch", "path": str(expected)})
+        tracemalloc.start()
+        try:
+            code, output, error = self.run_cli(plan)
+            _current, peak = tracemalloc.get_traced_memory()
+        finally:
+            tracemalloc.stop()
+        self.assertEqual(code, 0, error)
+        self.assertTrue(json.loads(output)["match"])
+        self.assertLess(peak, size // 4)
 
     def test_the_oracle_comes_from_the_plan_not_the_caller(self):
         # A role the plan licensed on no oracle has nothing to be checked

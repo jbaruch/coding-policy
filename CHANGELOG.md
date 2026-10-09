@@ -1,5 +1,13 @@
 # Changelog
 
+### Fixed
+
+- Mechanical patch oracles ignore optional unified-diff hunk section headings
+  during comparison (#727). Original oracle pins and raw result digests stay
+  byte-exact; paths, ranges, patch bodies and line endings remain significant.
+  Schema-2 verdicts expose separate comparison digests, computed alongside raw
+  hashes in one bounded read per file, without buffering oversized lines.
+
 ## 0.3.384 — 2026-10-09
 
 ### Fixed
