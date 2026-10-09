@@ -307,7 +307,7 @@ class ProbeRecoveryTest(unittest.TestCase):
         self.assertFalse(any(event[0] in {"prompt", "close"} for event in client.events[len(before):]))
 
     def test_newer_gate_refuses_measurement_without_native_activity_or_rewriting(self):
-        save_state(probe_recovery.store_path(self.state), {"schema_version": 3, "records": []})
+        save_state(probe_recovery.store_path(self.state), {"schema_version": 4, "records": []})
         before = probe_recovery.store_path(self.state).read_bytes()
         client = self.native("codex")
         with self.assertRaises(StateError):
@@ -325,8 +325,8 @@ class ProbeRecoveryTest(unittest.TestCase):
         self.assertFalse(probe_recovery.store_path(self.state).exists())
         self.assertFalse(any(event[0] == "prompt" for event in client.events))
 
-    def test_original_null_session_cannot_be_replaced_by_later_session(self):
-        worker, client = self.worker("codex"), self.native("codex", dialog=True)
+    def retained_without_session(self, kind):
+        worker, client = self.worker(kind), self.native(kind, dialog=True)
         start = client.agent_start
         def start_without_session(name, kind, pane_id, flags):
             result = start(name, kind, pane_id, flags)
@@ -338,13 +338,137 @@ class ProbeRecoveryTest(unittest.TestCase):
         row = probe_recovery.pending(self.state, worker)
         assert row is not None
         self.assertIsNone(row["native"])
+        return worker, client, row
+
+    def test_first_session_after_startup_dialog_resolves_for_every_runtime(self):
+        for kind in ("claude", "codex", "grok"):
+            with self.subTest(kind=kind):
+                self.state = self.root / (kind + "-first-session.json")
+                worker, client, row = self.retained_without_session(kind)
+                client.frames = [client.EMPTY]
+                native = {"source": "herdr:" + kind, "agent": kind, "kind": "id", "value": "first-session"}
+                client.agents[row["agent"]]["agent_session"] = native
+                resolved = self.resolve(row, worker, client)
+                self.assertEqual(resolved["status"], "closed")
+                self.assertIsNone(resolved["native"])
+                self.assertEqual(resolved["startup_native"], native)
+                self.assertEqual(resolved["process"], row["process"])
+                self.assertEqual(client.panes, {})
+                before = list(client.events)
+                self.assertTrue(self.resolve(row, worker, client)["replayed"])
+                self.assertEqual(client.events, before)
+                self.assertFalse(any(event[0] == "prompt" for event in client.events))
+
+    def test_first_session_stays_bound_after_draft_refusal_and_rejects_later_changes(self):
+        for kind in ("claude", "codex", "grok"):
+            for changed in (None, {"source": "herdr:" + kind, "agent": kind, "kind": "id", "value": "replacement"}):
+                with self.subTest(kind=kind, changed=changed):
+                    self.state = self.root / (kind + "-bound-" + str(changed is None) + ".json")
+                    worker, client, row = self.retained_without_session(kind)
+                    native = {"source": "herdr:" + kind, "agent": kind, "kind": "id", "value": "first-session"}
+                    client.agents[row["agent"]]["agent_session"] = native
+                    client.frames = [client.EMPTY + " actual draft"]
+                    with self.assertRaises(HerdrError):
+                        self.resolve(row, worker, client)
+                    pending = probe_recovery.pending(self.state, worker)
+                    assert pending is not None
+                    self.assertEqual(pending["startup_native"], native)
+                    self.assertIsNone(pending["native"])
+                    self.assertIsNone(pending["closure"])
+                    original = probe_recovery.store_path(self.state).read_bytes()
+                    client.frames = [client.EMPTY]
+                    client.agents[row["agent"]]["agent_session"] = changed
+                    before = list(client.events)
+                    with self.assertRaises(HerdrError):
+                        self.resolve(row, worker, client)
+                    self.assertEqual(probe_recovery.store_path(self.state).read_bytes(), original)
+                    self.assertFalse(any(event[0] in {"close", "prompt"} for event in client.events[len(before):]))
+
+    def test_first_session_cannot_bind_replaced_or_busy_startup_or_cleanup_phase(self):
+        for change in ("pid", "pane", "name", "kind", "tier", "working", "blocked", "cleanup", "malformed", "wrong_source"):
+            with self.subTest(change=change):
+                self.state = self.root / (change + "-first-session.json")
+                worker, client, row = self.retained_without_session("grok")
+                live = client.agents[row["agent"]]
+                live["agent_session"] = {"source": "herdr:grok", "agent": "grok", "kind": "id", "value": "first-session"}
+                client.frames = [client.EMPTY]
+                if change == "pid":
+                    live["pid"] += 1
+                elif change in {"pane", "name", "kind"}:
+                    live[{"pane": "pane_id", "name": "name", "kind": "agent"}[change]] = "replacement"
+                elif change == "tier":
+                    live["argv"] = ["grok", "--always-approve", "--model", "replacement", "--reasoning-effort", "low"]
+                elif change in {"working", "blocked"}:
+                    live["agent_status"] = change
+                elif change == "cleanup":
+                    data = probe_recovery.load(self.state)
+                    data["records"][0]["phase"] = "cleanup"
+                    save_state(probe_recovery.store_path(self.state), data)
+                elif change == "malformed":
+                    live["agent_session"] = {}
+                else:
+                    live["agent_session"]["source"] = "herdr:codex"
+                original = probe_recovery.store_path(self.state).read_bytes()
+                before = list(client.events)
+                with self.assertRaises(HerdrError):
+                    self.resolve(row, worker, client)
+                self.assertEqual(probe_recovery.store_path(self.state).read_bytes(), original)
+                self.assertFalse(any(event[0] in {"close", "prompt"} for event in client.events[len(before):]))
+
+    def test_failed_first_session_binding_write_preserves_pending_gate_and_pane(self):
+        worker, client, row = self.retained_without_session("grok")
         client.frames = [client.EMPTY]
-        client.agents[row["agent"]]["agent_session"] = {"source": "herdr:codex", "agent": "codex", "kind": "id", "value": "later-session"}
+        client.agents[row["agent"]]["agent_session"] = {"source": "herdr:grok", "agent": "grok", "kind": "id", "value": "first-session"}
         before = probe_recovery.store_path(self.state).read_bytes()
-        with self.assertRaises(HerdrError):
+        with patch("foreman.probe_recovery.save_state", side_effect=OSError("disk full")), self.assertRaises(OSError):
             self.resolve(row, worker, client)
         self.assertEqual(probe_recovery.store_path(self.state).read_bytes(), before)
         self.assertFalse(any(event[0] in {"close", "prompt"} for event in client.events))
+
+    def test_session_swap_during_composer_reads_preserves_first_binding(self):
+        worker, client, row = self.retained_without_session("grok")
+        client.frames = [client.EMPTY]
+        native = {"source": "herdr:grok", "agent": "grok", "kind": "path", "value": "/owned/first-session"}
+        live = client.agents[row["agent"]]
+        live["agent_session"] = native
+        read = client.agent_read
+        def swapped(*args, **kwargs):
+            text = read(*args, **kwargs)
+            live["agent_session"] = {**native, "value": "/owned/replacement"}
+            return text
+        client.agent_read = swapped
+        with self.assertRaises(HerdrError):
+            self.resolve(row, worker, client)
+        pending = probe_recovery.pending(self.state, worker)
+        assert pending is not None
+        self.assertEqual(pending["startup_native"], native)
+        self.assertEqual(pending["status"], "pending")
+        self.assertFalse(any(event[0] in {"close", "prompt"} for event in client.events))
+
+    def test_corrupt_first_binding_refuses_without_native_calls_or_rewriting(self):
+        worker, client, row = self.retained_without_session("grok")
+        for binding in ({}, {"source": "herdr:codex", "agent": "grok", "kind": "id", "value": "first"},
+                {"source": "herdr:grok", "agent": "grok", "kind": [], "value": "first"}):
+            with self.subTest(binding=binding):
+                save_state(probe_recovery.store_path(self.state), {"schema_version": 3,
+                    "records": [{**row, "startup_native": binding}]})
+                original = probe_recovery.store_path(self.state).read_bytes()
+                before = list(client.events)
+                with self.assertRaises(StateError):
+                    self.resolve(row, worker, client)
+                self.assertEqual(probe_recovery.store_path(self.state).read_bytes(), original)
+                self.assertEqual(client.events, before)
+
+    def test_schema_two_cleanup_migration_preserves_binding_and_phase(self):
+        worker, client = self.worker("grok"), self.native("grok", dialog=True)
+        self.measure(worker, client)
+        row = probe_recovery.pending(self.state, worker)
+        assert row is not None
+        legacy = {key: value for key, value in row.items() if key != "startup_native"}
+        legacy.update(schema_version=2, phase="cleanup")
+        save_state(probe_recovery.store_path(self.state), {"schema_version": 2, "records": [legacy]})
+        migrated = probe_recovery.load(self.state)["records"][0]
+        self.assertEqual(migrated, {**legacy, "schema_version": 3, "startup_native": None})
 
     def test_pending_guard_matches_shared_window_but_not_independent_worker(self):
         worker, client = self.worker("codex"), self.native("codex", dialog=True)
@@ -381,15 +505,18 @@ class ProbeRecoveryTest(unittest.TestCase):
         self.measure(worker, client)
         row = probe_recovery.pending(self.state, worker)
         assert row is not None
-        legacy = {key: value for key, value in row.items() if key != "phase"}
-        legacy["schema_version"] = 1
-        save_state(probe_recovery.store_path(self.state), {"schema_version": 1, "records": [legacy]})
-        before = list(client.events)
-        migrated = probe_recovery.load(self.state)
-        self.assertEqual(client.events, before)
-        self.assertEqual(migrated["schema_version"], 2)
-        self.assertEqual(migrated["records"][0], row)
-        self.assertEqual(json.loads(probe_recovery.store_path(self.state).read_text()), migrated)
+        for version in (1, 2):
+            with self.subTest(version=version):
+                legacy = {key: value for key, value in row.items()
+                    if key != "startup_native" and (version != 1 or key != "phase")}
+                legacy["schema_version"] = version
+                save_state(probe_recovery.store_path(self.state), {"schema_version": version, "records": [legacy]})
+                before = list(client.events)
+                migrated = probe_recovery.load(self.state)
+                self.assertEqual(client.events, before)
+                self.assertEqual(migrated["schema_version"], 3)
+                self.assertEqual(migrated["records"][0], row)
+                self.assertEqual(json.loads(probe_recovery.store_path(self.state).read_text()), migrated)
 
     def test_missing_cleanup_phase_refuses_without_discarding_the_gate(self):
         worker, client = self.worker("codex"), self.native("codex", dialog=True)
@@ -446,7 +573,14 @@ class ProbeRecoveryTest(unittest.TestCase):
     def test_public_owner_resolve_command_consumes_its_real_measure_gate(self):
         config = self.root / "config.json"
         config.write_text(json.dumps(self.payload))
-        client = self.native("codex", dialog=True)
+        client = self.native("grok", dialog=True)
+        start = client.agent_start
+        def start_without_session(name, kind, pane_id, flags):
+            result = start(name, kind, pane_id, flags)
+            client.agents[name]["agent_session"] = None
+            result["agent"]["agent_session"] = None
+            return result
+        client.agent_start = start_without_session
         base = ["--config", str(config), "--state", str(self.state)]
         with patch("foreman.measure.measure", side_effect=self.measured), \
                 patch("foreman.lifecycle._prepare_fresh_probe", wraps=lifecycle._prepare_fresh_probe), \
@@ -455,11 +589,12 @@ class ProbeRecoveryTest(unittest.TestCase):
             # boundary; normal command selection, persistence and guards run.
             actual = lifecycle.measure_worker_kinds
             with patch("foreman.cli.lifecycle.measure_worker_kinds", side_effect=lambda *a, **kw: actual(*a, **kw, sleep=lambda _: None)):
-                code = main(base + ["measure", "--agent", "codex", "--now", AT], stdout=io.StringIO(), stderr=io.StringIO(), client=client)
+                code = main(base + ["measure", "--agent", "grok", "--now", AT], stdout=io.StringIO(), stderr=io.StringIO(), client=client)
         self.assertEqual(code, 1)
-        row = probe_recovery.pending(self.state, self.worker("codex"))
+        row = probe_recovery.pending(self.state, self.worker("grok"))
         assert row is not None
         client.frames = [client.EMPTY]
+        client.agents[row["agent"]]["agent_session"] = {"source": "herdr:grok", "agent": "grok", "kind": "id", "value": "first-session"}
         out, err = io.StringIO(), io.StringIO()
         code = main(base + ["resolve-probe", "--agent", row["agent"]], stdout=out, stderr=err, client=client)
         self.assertEqual(code, 0, err.getvalue())

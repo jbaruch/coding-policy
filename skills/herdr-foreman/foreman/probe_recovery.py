@@ -22,7 +22,7 @@ from .state import save_state
 from .supervision import read_json, timestamp
 from .tiers import parse_tiers
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 
 def config_digest(template):
@@ -39,14 +39,24 @@ def load(state_path):
     data = read_json(path)
     if data is None:
         return {"schema_version": SCHEMA_VERSION, "records": []}
-    if isinstance(data, dict) and type(data.get("schema_version")) is int and data["schema_version"] == 1:
-        _validate(data, path, version=1)
+    if isinstance(data, dict) and type(data.get("schema_version")) is int and data["schema_version"] in {1, 2}:
+        version = data["schema_version"]
+        _validate(data, path, version=version)
         data = {**data, "schema_version": SCHEMA_VERSION, "records": [
-            {**row, "schema_version": SCHEMA_VERSION, "phase": "startup"} for row in data["records"]]}
+            {**row, "schema_version": SCHEMA_VERSION,
+             "phase": "startup" if version == 1 else row["phase"],
+             "startup_native": None} for row in data["records"]]}
         _validate(data, path)
         save_state(path, data)
     _validate(data, path)
     return data
+
+
+def _valid_native(native, kind):
+    return native is None or (isinstance(native, dict)
+        and native.get("source") == "herdr:" + kind and native.get("agent") == kind
+        and native.get("kind") in ("id", "path")
+        and isinstance(native.get("value"), str) and bool(native["value"].strip()))
 
 
 def _validate(data, path, *, version=SCHEMA_VERSION):
@@ -56,7 +66,7 @@ def _validate(data, path, *, version=SCHEMA_VERSION):
     names = set()
     for row in data["records"]:
         if (not isinstance(row, dict) or type(row.get("schema_version")) is not int or row["schema_version"] != version
-                or version == SCHEMA_VERSION and row.get("phase") not in {"startup", "cleanup"}
+                or version >= 2 and row.get("phase") not in {"startup", "cleanup"}
                 or row.get("status") not in {"pending", "closed"}
                 or any(not isinstance(row.get(key), str) or not row[key].strip() for key in
                        ("agent", "pane_id", "worker_kind", "kind", "at", "config_path"))
@@ -80,9 +90,11 @@ def _validate(data, path, *, version=SCHEMA_VERSION):
         except ConfigError as exc:
             raise StateError("Malformed original tier in probe gate {}. Preserve the retained pane and restore the original owner evidence before measuring or resolving.".format(path), {}) from exc
         native = row["native"]
-        if native is not None and (native.get("source") != "herdr:" + row["kind"] or native.get("agent") != row["kind"]
-                or native.get("kind") not in {"id", "path"} or not isinstance(native.get("value"), str) or not native["value"].strip()):
+        if not _valid_native(native, row["kind"]):
             raise StateError("Malformed original native-session observation in probe gate {}. Preserve it and restore actual owner evidence.".format(path), {})
+        if version >= 3 and ("startup_native" not in row or not _valid_native(row["startup_native"], row["kind"])
+                or row["startup_native"] is not None and (native is not None or row["phase"] != "startup")):
+            raise StateError("Malformed first-start native binding in probe gate {}. Preserve it and restore supported owner evidence.".format(path), {})
         names.add(row["agent"])
 
 
@@ -118,7 +130,7 @@ def retain(state_path, template, probe, pane, tier, observation, at, *, config_p
         "config_path": str(Path(config_path or default_config_path()).expanduser().resolve()),
         "config_sha256": config_digest(template),
         "window_group": template.window_group or "", "tier": tier,
-        "native": observation[1], "process": observation[2], "closure": None}
+        "native": observation[1], "startup_native": None, "process": observation[2], "closure": None}
     data["records"].append(row)
     _validate(data, store_path(state_path))
     save_state(store_path(state_path), data)
@@ -157,10 +169,24 @@ def resolve(state_path, name, templates, client, *, config_path=None):
             return None
         process = verify_running(client, worker, row["pane_id"], row["tier"])
         if (live.get("pane_id") != row["pane_id"] or live.get("agent") != row["kind"]
-                or live.get("name") != name or live.get("agent_session") != row["native"]
+                or live.get("name") != name
                 or process != row["process"] or live.get("agent_status") not in READY_STATES):
             raise HerdrError("Retained probe's original native/process/tier/readiness proof differs; preserve it and resolve only its actual startup dialog.", {})
-        return (row["pane_id"], row["native"], process)
+        native = live.get("agent_session")
+        if not _valid_native(native, row["kind"]):
+            raise HerdrError("Retained probe has malformed native-session evidence; preserve its pane and restore runtime evidence before resolving.", {})
+        expected = row["native"] if row["native"] is not None else row["startup_native"]
+        if expected is None and native is not None and row["phase"] == "startup":
+            # First-start dialogs can precede session creation. Bind the first
+            # ID only under the unchanged owner process/name/pane/tier proof.
+            # Persist while pending, before composer checks: a draft, failed
+            # cleanup or interruption must never permit a later ID swap.
+            row["startup_native"] = native.copy()
+            save_state(store_path(state_path), data)
+            expected = row["startup_native"]
+        if native != expected:
+            raise HerdrError("Retained probe's bound native session changed or disappeared; preserve its pane and original evidence before resolving.", {})
+        return (row["pane_id"], expected, process)
     try:
         if observe() is not None:
             ensure_ready(client, worker, row["pane_id"], startup_observe=observe)
