@@ -459,7 +459,7 @@ class FreshShellStartupTest(unittest.TestCase):
         worker, callback, sleeps = template(), Mock(), Mock()
         with self.assertRaisesRegex(HerdrError, "did not settle") as caught:
             spawn(client, worker, worker.tiers["coordination"], history=[], before_start=callback, sleep=sleeps)
-        self.assertEqual(client.pane_process_info.call_count, FRESH_SHELL_POLL_ATTEMPTS + 1)
+        self.assertEqual(client.pane_process_info.call_count, FRESH_SHELL_POLL_ATTEMPTS + 2)
         self.assertEqual(sleeps.call_count, FRESH_SHELL_POLL_ATTEMPTS - 1)
         self.assertIsNone(caught.exception.details["foreground_pids"])
         self.assertEqual(caught.exception.details["ready_reads"], 0)
@@ -479,7 +479,7 @@ class FreshShellStartupTest(unittest.TestCase):
                 worker, callback, sleeps = template(), Mock(), Mock()
                 with self.assertRaisesRegex(HerdrError, "malformed"):
                     spawn(client, worker, worker.tiers["coordination"], history=[], before_start=callback, sleep=sleeps)
-                self.assertEqual(client.pane_process_info.call_count, 3)
+                self.assertEqual(client.pane_process_info.call_count, 4)
                 self.assertEqual(sleeps.call_count, 1)
                 callback.assert_not_called()
                 client.agent_start.assert_not_called()
@@ -496,14 +496,14 @@ class FreshShellStartupTest(unittest.TestCase):
                     spawn(client, worker, worker.tiers["coordination"], history=[], before_start=callback, sleep=lambda _: None)
                 callback.assert_not_called()
                 client.agent_start.assert_not_called()
-                client.pane_close.assert_called_once_with("pane-new")
+                client.pane_close.assert_not_called()
 
     def test_api_failure_after_sparse_observation_is_not_retried(self):
         client = self.client([self.SPARSE, failure("read_failed", "unavailable"), self.SHELL])
         worker, callback = template(), Mock()
         with self.assertRaisesRegex(HerdrError, "Cannot read fresh pane"):
             spawn(client, worker, worker.tiers["coordination"], history=[], before_start=callback, sleep=lambda _: None)
-        self.assertEqual(client.pane_process_info.call_count, 3)
+        self.assertEqual(client.pane_process_info.call_count, 4)
         callback.assert_not_called()
         client.agent_start.assert_not_called()
         client.pane_close.assert_called_once_with("pane-new")
@@ -535,7 +535,7 @@ class FreshShellStartupTest(unittest.TestCase):
         worker = template()
         with self.assertRaisesRegex(HerdrError, "inspect the shell startup") as caught:
             spawn(client, worker, worker.tiers["coordination"], history=[], before_start=callback, sleep=sleeps)
-        self.assertEqual(client.pane_process_info.call_count, FRESH_SHELL_POLL_ATTEMPTS + 1)
+        self.assertEqual(client.pane_process_info.call_count, FRESH_SHELL_POLL_ATTEMPTS + 2)
         self.assertEqual(sleeps.call_count, FRESH_SHELL_POLL_ATTEMPTS - 1)
         self.assertEqual(caught.exception.details["foreground_pids"], [52707, 52704])
         self.assertEqual(caught.exception.details["pane"], "pane-new")
@@ -556,12 +556,15 @@ class FreshShellStartupTest(unittest.TestCase):
         for info in invalid:
             with self.subTest(info=info):
                 client = self.client([info])
+                # A None record cannot be scripted as a repeating observation.
+                client.pane_process_info.side_effect = None
+                client.pane_process_info.return_value = info
                 sleeps = Mock()
                 with self.assertRaisesRegex(HerdrError, "malformed"):
                     spawn(client, worker, worker.tiers["coordination"], history=[], sleep=sleeps)
                 sleeps.assert_not_called()
                 client.agent_start.assert_not_called()
-                client.pane_close.assert_called_once_with("pane-new")
+                client.pane_close.assert_not_called()
 
     def test_process_info_failure_is_not_retried_as_shell_readiness(self):
         client = self.client([failure("read_failed", "unavailable")])
@@ -570,7 +573,36 @@ class FreshShellStartupTest(unittest.TestCase):
             spawn(client, worker, worker.tiers["coordination"], history=[], sleep=sleeps)
         sleeps.assert_not_called()
         client.agent_start.assert_not_called()
-        client.pane_close.assert_called_once_with("pane-new")
+        client.pane_close.assert_not_called()
+
+    def test_unproved_present_pane_is_preserved_when_the_first_read_fails_then_a_shell_appears(self):
+        replacement = {"shell_pid": 52708, "foreground_processes": [{"pid": 52708}]}
+        client = self.client([failure("read_failed", "unavailable"), replacement])
+        worker = template()
+        with self.assertRaisesRegex(HerdrError, "Cannot read fresh pane") as caught:
+            spawn(client, worker, worker.tiers["coordination"], history=[], sleep=Mock())
+        client.agent_start.assert_not_called()
+        client.pane_close.assert_not_called()
+        self.assertNotIn("pane_closure", caught.exception.details)
+
+    def test_unproved_pane_that_is_already_gone_is_accepted_as_absent(self):
+        client = self.client([failure("read_failed", "unavailable")])
+        client.pane_process_info.side_effect = RepeatingReads(
+            [failure("read_failed", "unavailable"), failure("pane_not_found", "gone")])
+        client.agent_get.side_effect = missing("claude")
+        worker = template()
+        with self.assertRaisesRegex(HerdrError, "Cannot read fresh pane") as caught:
+            spawn(client, worker, worker.tiers["coordination"], history=[], sleep=Mock())
+        client.pane_close.assert_not_called()
+        self.assertTrue(caught.exception.details["pane_closure"]["closed"])
+
+    def test_cleanup_failure_tells_the_operator_to_inspect_before_closing(self):
+        client = self.client([failure("read_failed", "unavailable")])
+        worker = template()
+        with self.assertRaises(HerdrError) as caught:
+            spawn(client, worker, worker.tiers["coordination"], history=[], sleep=Mock())
+        self.assertIn("only after confirming it is this spawn's own surface", str(caught.exception))
+        self.assertNotIn("before retrying.", str(caught.exception).split("Cleanup also failed")[-1].split("`")[0])
 
     def test_replaced_shell_is_refused_even_when_the_replacement_is_alone(self):
         replacement = {"shell_pid": 52708, "foreground_processes": [{"pid": 52708}]}
@@ -580,7 +612,7 @@ class FreshShellStartupTest(unittest.TestCase):
                 with self.assertRaisesRegex(HerdrError, "shell changed"):
                     spawn(client, worker, worker.tiers["coordination"], history=[], sleep=lambda _: None)
                 client.agent_start.assert_not_called()
-                client.pane_close.assert_called_once_with("pane-new")
+                client.pane_close.assert_not_called()
 
     def test_wait_interrupt_preserves_interrupt_and_cleanup_failure_note(self):
         for cleanup_fails in (False, True):
