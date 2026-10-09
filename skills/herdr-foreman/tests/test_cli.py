@@ -3379,6 +3379,74 @@ class PublicOwnerRetryTest(unittest.TestCase):
                 self.assertEqual(native.agents[started[1]]["argv"][0], "claude")
                 self.assertIn("claude-opus-5-5", native.agents[started[1]]["argv"])
 
+    def test_direct_native_start_errors_take_the_identifier_or_transient_path_without_a_send(self):
+        # coding-policy#733: Herdr may report the launch failure from agent_start
+        # itself instead of rendering it in a pane. Trusted error codes classify
+        # it; the pane is already closed, nothing was sent, and no refusal,
+        # capability or provider state moves.
+        from foreman import lifecycle
+        cases = [("model_not_found", "model_identifier_unavailable", "repair_required", "plan"),
+                 ("unsupported_model", "model_identifier_unavailable", "repair_required", "plan"),
+                 ("service_unavailable", "launch_transient", "retryable", "apply"),
+                 ("bad_gateway", "launch_transient", "retryable", "apply"),
+                 ("timeout", "herdr_error", "blocked", "supervision-status"),
+                 ("something_else", "herdr_error", "blocked", "supervision-status")]
+        for code, kind, outcome, operation in cases:
+            with self.subTest(code=code), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                config, state, snapshot = (root / name for name in ("config.json", "state.json", "snapshot.json"))
+                common, brief, report = (root / name for name in ("common.md", "judge.md", "report.md"))
+                payload = json.loads((Path(_ROOT) / "config.example.json").read_text())
+                payload["judge"] = {"worker_kind": "claude", "model": "claude-opus-5-5", "effort": "high"}
+                config.write_text(json.dumps(payload))
+                snapshot.write_text(json.dumps(SNAPSHOT))
+                common.write_text("Common immutable instructions\n")
+                brief.write_text("Judge immutable task\nREPORT: " + str(report) + "\n")
+                base = ["--config", str(config), "--state", str(state)]
+
+                def invoke(arguments, native=None):
+                    out, err = io.StringIO(), io.StringIO()
+                    exit_code = main(base + arguments, stdout=out, stderr=err, client=native)
+                    return exit_code, out.getvalue(), err.getvalue()
+
+                with patch("foreman.lifecycle.identity", return_value="judge-733"):
+                    exit_code, text, err = invoke(["plan", "--roles", "judge", "--judge-mode", "adjudication",
+                        "--task", "native-733", "--snapshot", str(snapshot)])
+                self.assertEqual(exit_code, 0, err)
+                planned = json.loads(text)
+                supervision.bind(state, {"kind": "id", "value": "fixture-foreman", "cwd": str(root),
+                    "herdr_env": "fixture", "pane_id": "foreman-pane"}, AT, root=root / "bindings")
+
+                class RejectingStart(FreshOwnerNative):
+                    def agent_start(self, name, kind, pane_id, flags):
+                        self.events.append(("start_refused", name, pane_id))
+                        raise HerdrError("start refused", {"stderr": json.dumps({"error": {"code": code, "message": "provider prose"}})})
+
+                native = RejectingStart()
+                arguments = ["apply", "--assignments", json.dumps(planned), "--judge-mode", "adjudication",
+                    "--task", "native-733", "--now", AT, "--common", str(common), "--brief", "judge=" + str(brief),
+                    "--report", "judge=" + str(report), "--composer-settle", "0"]
+                before = (root / "config.json").read_bytes()
+                real_spawn = lifecycle.spawn
+                with patch("foreman.cli.lifecycle.spawn", side_effect=lambda *a, **kw: real_spawn(*a, **kw, sleep=lambda _: None)):
+                    exit_code, _, err = invoke(arguments, native)
+                self.assertEqual(exit_code, 1, err)
+                refused = json.loads("\n".join(line for line in err.splitlines() if not line.startswith(DIAGNOSTIC_PREFIX)))
+                details = refused["details"]
+                self.assertEqual(details["failure_kind"], kind)
+                self.assertEqual(details["recovery"]["outcome"], outcome)
+                self.assertIn(" " + operation + " ", " " + details["recovery"]["operation"] + " ")
+                if kind == "model_identifier_unavailable":
+                    self.assertEqual(details["model"], "claude-opus-5-5")
+                    self.assertIn("provider's current catalog", details["recovery"]["condition"])
+                self.assertEqual(native.panes, {})
+                self.assertFalse(any(event[0] == "prompt" for event in native.events))
+                self.assertEqual((root / "config.json").read_bytes(), before)
+                saved, usable = load_state_checked(state)
+                self.assertTrue(usable)
+                self.assertEqual(saved["assignments"], [])
+                self.assertFalse(saved["recovery"].get("refusals"))
+
     def test_reconcile_help_and_parser_expose_exclusive_record_or_dispatch_inputs(self):
         parser = build_parser()
         help_text = io.StringIO()

@@ -171,9 +171,13 @@ Catalog identity, account access and capability adequacy are separate facts.
 A smoke call proves access; it never writes an `adequate` capability entry.
 The independently pinned judge keeps its own pin and launch proof.
 
-Detection: `wait-report.sh` exit 6 after a send, and
+Detection: `wait-report.sh` exit 6 after a send,
 `identifier_unavailable_model` in `skills/herdr-foreman/foreman/composer.py`
-at fresh startup.
+at fresh startup, and the structured `agent_start` error codes
+`IDENTIFIER_ERROR_CODES` / `TRANSIENT_LAUNCH_ERROR_CODES` in
+`skills/herdr-foreman/foreman/errors.py`, classified at the spawn boundary in
+`skills/herdr-foreman/foreman/lifecycle.py`. Only Herdr's own error code
+classifies; provider prose never does.
 
 ## Foreman Seat
 

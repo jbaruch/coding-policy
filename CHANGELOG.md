@@ -26,7 +26,14 @@
   repair procedure is `references/model-tiers.md` Launch Failure Maintenance.
   The live TUI rendering of the notice is unverified: the parser accepts the
   bare row, optionally behind a `⏺`/`⎿` marker, and any other shape keeps the
-  ordinary wait.
+  ordinary wait. The fresh-startup parser holds the same positional rule as
+  the wait watcher: fenced, indented or quoted rows and a notice followed by
+  later content never classify a launch. A structured `agent_start` error is
+  classified at the spawn boundary by Herdr's own code: `model_not_found` or
+  `unsupported_model` yields `model_identifier_unavailable` with the row's
+  model and `repair_required` / `plan`; an enumerated transient code yields
+  `launch_transient` and the identical bounded retry. Both leave the closed
+  pane, refusal record, capabilities and provider roster untouched.
 
 ## 0.3.387 — 2026-10-09
 

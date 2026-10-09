@@ -187,7 +187,14 @@ names the id and `details.recovery` names `plan` instead of a retry. Repeating
 the identical apply launches the same unavailable id, so follow
 `skills/herdr-foreman/references/model-tiers.md` Launch Failure Maintenance
 first. The predicate is `identifier_unavailable_model` in
-`skills/herdr-foreman/foreman/composer.py`.
+`skills/herdr-foreman/foreman/composer.py`; it accepts only a bare notice row
+that is the last content on screen, never a fenced, indented or stale one.
+
+A native `agent_start` that fails with a trusted identifier code takes the
+same `plan` recovery, and one that fails with an enumerated transient code
+(`failure_kind: launch_transient`) takes the identical retry. Both close the
+owned pane with nothing sent, and write no refusal, capability or provider
+change.
 
 For `startup_dialog_pending`, the foreman reads the retained native pane and
 follows `skills/herdr-foreman/references/herdr.md` Runtime Dialogs. Review the

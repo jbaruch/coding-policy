@@ -31,7 +31,7 @@ from .assign import APPLY_SCHEMA_VERSION, dry_run, freeze_decision, freeze_paths
 from . import probe_recovery, renderable
 from . import attention, capabilities, chronology, churn, composition, engagement, foreman_queue, foreman_reset, historical, home, lifecycle, load_set, members, memory, oracle, partition, recovery, report_delivery, report_gates, restoration, role_clear, retrospective, retrospective_runtime, supervision, supervision_gate, supervision_runtime, triggers
 from .config import FOREMAN_CONFIG_VERSION, default_config_path, load_config, load_foreman, load_judge, load_role_costs, select_agents
-from .errors import AgentBusyError, IDENTIFIER_UNAVAILABLE_KIND, IDENTIFIER_UNAVAILABLE_RECOVERY, PlanError, StateError, ForemanError, HerdrError, UsageError, owner_recovery
+from .errors import AgentBusyError, IDENTIFIER_UNAVAILABLE_KIND, IDENTIFIER_UNAVAILABLE_RECOVERY, TRANSIENT_LAUNCH_KIND, PlanError, StateError, ForemanError, HerdrError, UsageError, owner_recovery
 from .herdr import (
     error_code,
     DEFAULT_MARKER_TIMEOUT_MS,
@@ -1927,7 +1927,11 @@ def _apply(args, client, warn, trace, hold_gates):
                         "error": cleanup.to_dict(),
                     })
         if isinstance(primary, ForemanError):
-            known_closed = (bool(names) and bool(prepared) and not retained and not failures and not sending
+            # A native start refusal closes its own pane before any reservation, so the
+            # failed seat is in neither `names` nor `prepared`; that proof stands in.
+            spawn_closed = (primary.details.get("failure_kind") in (IDENTIFIER_UNAVAILABLE_KIND, TRANSIENT_LAUNCH_KIND)
+                and bool(primary.details.get("spawn_pane_closed")) and len(prepared) == len(names))
+            known_closed = (((bool(names) and bool(prepared)) or spawn_closed) and not retained and not failures and not sending
                 and state_saved and all(next(row for row in store["dispatches"] if row["id"] == identifier)["status"] == "not_sent" for identifier in prepared))
             cleanup_id = next((row["id"] for row in store["dispatches"] if row["id"] in prepared
                 and row["status"] == "not_sent" and (not retained or row["agent"] in retained)), None)
@@ -1937,10 +1941,12 @@ def _apply(args, client, warn, trace, hold_gates):
             repair = known_closed and primary.details.get("failure_kind") == IDENTIFIER_UNAVAILABLE_KIND
             if repair:
                 operation = "plan"
+            closed_note = ("Owned pre-send surfaces are closed and not_sent is durable. " if prepared
+                           else "The owned pane is closed and nothing was sent. ")
             owner_recovery(primary, primary.details.get("failure_kind", primary.code),
                 runnable.command(operation + " --state " + shlex.quote(str(state_path))),
-                ("Owned pre-send surfaces are closed and not_sent is durable. " + IDENTIFIER_UNAVAILABLE_RECOVERY if repair else
-                 "Owned pre-send surfaces are closed and not_sent is durable. Repeat the identical normal apply; no retrospective, configuration or receipt repair is required."
+                (closed_note + IDENTIFIER_UNAVAILABLE_RECOVERY if repair else
+                 closed_note + "Repeat the identical normal apply; no retrospective, configuration or receipt repair is required."
                  if known_closed else "Read the retained native pane and follow Runtime Dialogs under existing task authority, without a redundant operator approval. After the same target returns to its empty composer, run the named reconciliation, then repeat unchanged apply. Do not repeat apply while its dialog remains."
                  if retained and state_saved and cleanup_id else "The owner must complete recorded transport/cleanup reconciliation before the unchanged apply may retry; unknown or sent work is preserved."),
                 outcome="repair_required" if repair else "retryable" if known_closed else "blocked",
