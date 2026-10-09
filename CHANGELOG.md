@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.395 — 2026-10-09
+
 ### Fixed
 
 - Classify unchanged legacy PRs through `detect-triggers
