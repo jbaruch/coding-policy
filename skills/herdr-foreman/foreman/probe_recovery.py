@@ -84,10 +84,17 @@ def pending(state_path, template):
         and (row["worker_kind"] == template.name or template.window_group and row["window_group"] == template.window_group)), None)
 
 
-def diagnostic(state_path, row):
+def _operation(state_path, row, herdr_bin=None):
+    operation = "resolve-probe --state " + shlex.quote(str(state_path)) + " --config " + shlex.quote(row["config_path"]) + " --agent " + shlex.quote(row["agent"])
+    if isinstance(herdr_bin, str) and herdr_bin:
+        operation += " --herdr-bin " + shlex.quote(herdr_bin)
+    return runnable.command(operation)
+
+
+def diagnostic(state_path, row, *, herdr_bin=None):
     error = HerdrError("Fresh startup probe {} in {} remains retained; no usage command was sent.".format(row["agent"], row["pane_id"]), {})
     return owner_recovery(error, "startup_dialog_pending",
-        runnable.command("resolve-probe --state " + shlex.quote(str(state_path)) + " --config " + shlex.quote(row["config_path"]) + " --agent " + shlex.quote(row["agent"])),
+        _operation(state_path, row, herdr_bin),
         "Read the retained native pane and follow Runtime Dialogs under existing task authority. After the dialog clears, the named owner command proves the original target and empty composer before cleanup. Repeat normal measure only after that resolution.")
 
 
@@ -151,7 +158,7 @@ def resolve(state_path, name, templates, client, *, config_path=None):
         closure = lifecycle.close(client, name, row["pane_id"], before_close=observe)
     except (HerdrError, UsageError) as exc:
         raise owner_recovery(exc, "probe_cleanup_unproved",
-            runnable.command("resolve-probe --state " + shlex.quote(str(state_path)) + " --config " + shlex.quote(row["config_path"]) + " --agent " + shlex.quote(name)),
+            _operation(state_path, row, getattr(client, "binary", None)),
             "Read the actual retained native pane. Preserve any draft, changed identity/tier, working or unresolved dialog; repeat this guarded owner operation only after the original empty target is proved.") from exc
     row.update(status="closed", closure=closure)
     save_state(store_path(state_path), data)

@@ -1,5 +1,13 @@
 # Changelog
 
+### Fixed
+
+- Disposable usage failures retain bounded, redacted native observations before
+  dialog and pane cleanup (#721). Recovery targets the configured worker kind,
+  not a retired probe; unproved cleanup permits read-only inspection only.
+  Capacity stays unknown, provider/tier choices remain intact, and a cleanup
+  error retains the original usage diagnostic.
+
 ## 0.3.388 — 2026-10-09
 
 ### Fixed

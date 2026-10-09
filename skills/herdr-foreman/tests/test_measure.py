@@ -171,6 +171,61 @@ def runner_with(statuses, panes, footers=None):
     return runner
 
 
+class FailureEvidenceTest(unittest.TestCase):
+    def test_usage_failure_preserves_visible_text_before_dialog_dismissal(self):
+        for kind, text in (("claude", CLAUDE_UNPARSEABLE_PANE),
+                           ("codex", "Weekly limit has no reading"),
+                           ("grok", "A different tab has no marker")):
+            with self.subTest(kind=kind):
+                runner = runner_with({kind: "idle"}, {kind: text})
+                seen = []
+                def capture(observed):
+                    self.assertFalse(any(command.startswith("agent send-keys " + kind + " esc")
+                                         for command in runner.commands()))
+                    seen.append(observed)
+                    return observed
+                snapshot = measure(HerdrClient(runner=runner), [BY_NAME[kind]], AT,
+                                   failure_capture=capture, poll_attempts=0)
+                self.assertEqual(seen, [text])
+                self.assertIsNone(snapshot["agents"][kind]["headroom_pct"])
+                self.assertIn(json.dumps(text, ensure_ascii=False), snapshot["agents"][kind]["error"]["message"])
+
+    def test_send_failure_capture_does_not_dismiss_unproved_dialog_or_leak_secrets(self):
+        runner = runner_with({"claude": "idle"}, {})
+        capture = Mock(return_value="Bearer DUMMYcredentialvalue\n" + "x" * 5000)
+        with patch("foreman.measure.send_command", side_effect=HerdrError("composer occupied", {})):
+            snapshot = measure(HerdrClient(runner=runner), [BY_NAME["claude"]], AT,
+                               failure_capture=capture)
+        capture.assert_called_once_with(None)
+        message = snapshot["agents"]["claude"]["error"]["message"]
+        self.assertIn("[redacted]", message)
+        self.assertIn("truncated", message)
+        self.assertNotIn("DUMMYcredentialvalue", message)
+        self.assertIn("composer occupied", message)
+        self.assertFalse(any(command.startswith("agent send-keys") for command in runner.commands()))
+
+    def test_success_never_captures_failure_evidence(self):
+        runner = runner_with({"claude": "idle"}, {"claude": CLAUDE_PANE})
+        capture = Mock()
+        snapshot = measure(HerdrClient(runner=runner), [BY_NAME["claude"]], AT,
+                           failure_capture=capture)
+        self.assertEqual(snapshot["failed_agents"], [])
+        capture.assert_not_called()
+
+    def test_dialog_dismissal_failure_keeps_the_pre_dismissal_usage_evidence(self):
+        runner = runner_with({"claude": "idle"}, {"claude": CLAUDE_UPDATE_PANE})
+        capture = Mock(side_effect=lambda text: text)
+        client = HerdrClient(runner=runner)
+        with patch.object(client, "agent_send_keys", side_effect=HerdrError("dialog dismissal failed", {})):
+            snapshot = measure(client, [BY_NAME["claude"]], AT, failure_capture=capture)
+        capture.assert_called_once_with(CLAUDE_UPDATE_PANE)
+        error = snapshot["agents"]["claude"]["error"]
+        self.assertIn("dialog dismissal failed", error["message"])
+        self.assertIn("No usage windows found", error["message"])
+        self.assertIn("Update installed", error["message"])
+        self.assertTrue(error["details"]["pending_cli_update"])
+
+
 class MeasureAgentTest(unittest.TestCase):
     def test_current_claude_inline_usage_is_measured_and_dialog_closed(self):
         runner = runner_with({"claude": "idle"}, {"claude": CLAUDE_INLINE_RESET_PANE})

@@ -27,6 +27,7 @@ standing.
 CLI-layer concern, which is what lets the tests assert on an exact timestamp.
 """
 
+import json
 import time
 
 from .composer import COMPOSER_SETTLE_SEC, DispatchSession, send_command
@@ -61,6 +62,35 @@ DEFAULT_MARKER_POLL_INTERVAL_SEC = 1.0
 #: info). Bounded so a dialog whose tabs do not cycle cannot spin forever.
 MAX_DIALOG_TABS = 3
 PENDING_CLI_UPDATE = "Update installed · Restart"
+
+#: Failure observations are historical diagnostics, never input authority.
+#: Leave room inside the shared trace cap for the executable owner recovery.
+FAILURE_VIEW_BYTES = 512
+FAILURE_CAUSE_BYTES = 512
+
+
+class _UsageReportError(HerdrError):
+    """Carry the last read only until the disposable owner captures it.
+
+    Kept outside error.details so raw terminal text cannot escape through the
+    process error serializer. Standing-worker callers retain their old output.
+    """
+
+    def __init__(self, message, details, observed_text):
+        super().__init__(message, details)
+        self.observed_text = observed_text
+
+
+def _capture_failure(exc, capture, observed_text=None):
+    """Preserve an owner's read-only diagnostic before dialog/pane cleanup."""
+    if capture is None:
+        return
+    view = capture(observed_text)
+    exc.message = "Visible evidence (diagnostic only): {}. Original measurement error: {}".format(
+        json.dumps(scrub_for_trace(view, cap=FAILURE_VIEW_BYTES), ensure_ascii=False),
+        json.dumps(scrub_for_trace(exc.message, cap=FAILURE_CAUSE_BYTES), ensure_ascii=False))
+    exc.args = (exc.message,)
+    setattr(exc, "_failure_captured", True)
 
 
 def snapshot_error(exc):
@@ -155,7 +185,7 @@ def wait_for_usage_report(client, agent, pane_id, marker_timeout_ms=DEFAULT_MARK
         }
         if PENDING_CLI_UPDATE in text:
             details["pending_cli_update"] = True
-        raise HerdrError(
+        raise _UsageReportError(
             "{!r} never appeared in {}'s pane. Tried `herdr pane wait-output "
             "--match` for {}ms, then {} reads of `herdr agent read {} --source "
             "{} --lines {}` {}s apart.{} Check the marker against what the agent "
@@ -171,7 +201,7 @@ def wait_for_usage_report(client, agent, pane_id, marker_timeout_ms=DEFAULT_MARK
                 poll_interval_sec,
                 " Tabbed through the dialog {} times too.".format(tabs) if tabs else "",
             ),
-            details,
+            details, text,
         )
     return text
 
@@ -192,7 +222,7 @@ def skipped_record(agent, status, herdr_status, state_source):
     }
 
 
-def measure_agent(client, agent, marker_timeout_ms=DEFAULT_MARKER_TIMEOUT_MS, read_lines=DEFAULT_READ_LINES, warn=None, poll_attempts=DEFAULT_MARKER_POLL_ATTEMPTS, poll_interval_sec=DEFAULT_MARKER_POLL_INTERVAL_SEC, sleep=time.sleep, max_tabs=MAX_DIALOG_TABS, settle_sec=COMPOSER_SETTLE_SEC, session=None):
+def measure_agent(client, agent, marker_timeout_ms=DEFAULT_MARKER_TIMEOUT_MS, read_lines=DEFAULT_READ_LINES, warn=None, poll_attempts=DEFAULT_MARKER_POLL_ATTEMPTS, poll_interval_sec=DEFAULT_MARKER_POLL_INTERVAL_SEC, sleep=time.sleep, max_tabs=MAX_DIALOG_TABS, settle_sec=COMPOSER_SETTLE_SEC, session=None, failure_capture=None):
     """Measure one agent and return its record.
 
     Raises HerdrError or ParseError; the caller decides whether one bad agent
@@ -215,19 +245,26 @@ def measure_agent(client, agent, marker_timeout_ms=DEFAULT_MARKER_TIMEOUT_MS, re
             {"agent": agent.name},
         )
 
-    send_command(
-        client,
-        agent,
-        pane_id,
-        agent.usage_prompt,
-        session=session,
-        sleep=sleep,
-        warn=warn,
-        settle_sec=settle_sec,
-        # A usage command opens a dialog; whether the screen "changed" is not
-        # a question this flow asks, and waiting on it would cost reads.
-        screen_attempts=0,
-    )
+    try:
+        send_command(
+            client,
+            agent,
+            pane_id,
+            agent.usage_prompt,
+            session=session,
+            sleep=sleep,
+            warn=warn,
+            settle_sec=settle_sec,
+            # A usage command opens a dialog; whether the screen "changed" is not
+            # a question this flow asks, and waiting on it would cost reads.
+            screen_attempts=0,
+        )
+    except HerdrError as exc:
+        _capture_failure(exc, failure_capture)
+        # Do not send close_keys when command delivery itself was unproved.
+        raise
+    text = None
+    usage_error = None
     try:
         text = wait_for_usage_report(
             client,
@@ -247,12 +284,27 @@ def measure_agent(client, agent, marker_timeout_ms=DEFAULT_MARKER_TIMEOUT_MS, re
             if PENDING_CLI_UPDATE in text:
                 exc.details["pending_cli_update"] = True
             raise
+    except (HerdrError, ParseError) as exc:
+        observed = exc.observed_text if isinstance(exc, _UsageReportError) else text
+        _capture_failure(exc, failure_capture, observed)
+        usage_error = exc
+        raise
     finally:
         # Always dismiss the report, including when the wait timed out, the
         # read failed, or the parse failed. A usage dialog left open flips the
         # agent to `working` and swallows the next prompt foreman sends.
         if agent.close_keys:
-            client.agent_send_keys(agent.name, agent.close_keys)
+            try:
+                client.agent_send_keys(agent.name, agent.close_keys)
+            except HerdrError as exc:
+                if failure_capture is not None and usage_error is not None:
+                    exc.message = "Usage dialog dismissal failed: {}. Preserved usage diagnostic: {}".format(
+                        scrub_for_trace(exc.message, cap=256), usage_error.message)
+                    exc.args = (exc.message,)
+                    setattr(exc, "_failure_captured", True)
+                    if usage_error.details.get("pending_cli_update") is True:
+                        exc.details["pending_cli_update"] = True
+                raise
 
     windows = parsed["windows"]
     return {
@@ -272,7 +324,7 @@ def measure_agent(client, agent, marker_timeout_ms=DEFAULT_MARKER_TIMEOUT_MS, re
     }
 
 
-def measure(client, agents, measured_at, marker_timeout_ms=DEFAULT_MARKER_TIMEOUT_MS, read_lines=DEFAULT_READ_LINES, warn=None, poll_attempts=DEFAULT_MARKER_POLL_ATTEMPTS, poll_interval_sec=DEFAULT_MARKER_POLL_INTERVAL_SEC, sleep=time.sleep, settle_sec=COMPOSER_SETTLE_SEC, allow_recovery=False):
+def measure(client, agents, measured_at, marker_timeout_ms=DEFAULT_MARKER_TIMEOUT_MS, read_lines=DEFAULT_READ_LINES, warn=None, poll_attempts=DEFAULT_MARKER_POLL_ATTEMPTS, poll_interval_sec=DEFAULT_MARKER_POLL_INTERVAL_SEC, sleep=time.sleep, settle_sec=COMPOSER_SETTLE_SEC, allow_recovery=False, failure_capture=None):
     """Measure every agent in `agents` and return the snapshot document.
 
     A failure on one agent is recorded on that agent's record and does not
@@ -298,8 +350,11 @@ def measure(client, agents, measured_at, marker_timeout_ms=DEFAULT_MARKER_TIMEOU
                 sleep=sleep,
                 settle_sec=settle_sec,
                 session=session,
+                failure_capture=failure_capture,
             )
         except (HerdrError, ParseError) as exc:
+            if not getattr(exc, "_failure_captured", False):
+                _capture_failure(exc, failure_capture)
             failures.append(agent.name)
             records[agent.name] = {
                 "kind": agent.kind,

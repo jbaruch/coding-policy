@@ -773,6 +773,132 @@ class WindowProbeTest(unittest.TestCase):
         self.assertIn("herdr pane close --pane probe-pane", notes)
 
 
+class ProbeUsageRecoveryTest(unittest.TestCase):
+    def test_startup_refusal_preserves_its_bound_visible_evidence_without_input(self):
+        for kind in ("claude", "codex", "grok"):
+            with self.subTest(kind=kind):
+                client = Mock()
+                client.agent_get.return_value = {"name": "probe-fixed", "agent": kind,
+                    "pane_id": "probe-pane", "agent_status": "idle", "agent_session": None}
+                client.pane_read.return_value = 'Try "a visible native suggestion"'
+                def refuse(_client, _worker, _pane, **options):
+                    options["startup_observe"]()
+                    raise HerdrError("startup composer is unproved", {})
+                with patch("foreman.lifecycle.spawn", return_value="probe-pane"), \
+                        patch("foreman.lifecycle.identity", return_value="probe-fixed"), \
+                        patch("foreman.lifecycle.verify_running", return_value={"pid": 42}), \
+                        patch("foreman.lifecycle.ensure_ready", side_effect=refuse), \
+                        patch("foreman.lifecycle.close", return_value={"closed": True}), \
+                        patch("foreman.measure.measure") as usage:
+                    result = measure_worker_kinds(client, [template(kind, kind)], "2026-10-01T00:00:00+00:00")
+                usage.assert_not_called()
+                message = result["agents"][kind]["error"]["message"]
+                self.assertIn("visible native suggestion", message)
+                self.assertIn("startup composer is unproved", message)
+                self.assertIsNone(result["agents"][kind]["headroom_pct"])
+                client.agent_prompt.assert_not_called()
+                client.agent_send_keys.assert_not_called()
+
+    def run_failure(self, kind="claude", *, cleanup=None, changed=False, read_error=None, replace_during_read=False, binding=True):
+        worker = template(kind, kind, kind + "-window")
+        client = Mock()
+        client.binary = "/tmp/owned herdr wrapper"
+        live = {"name": "probe-fixed", "agent": kind, "pane_id": "probe-pane",
+                "agent_status": "idle", "agent_session": None}
+        client.agent_get.return_value = {**live, "pane_id": "other-pane"} if changed else live
+        if replace_during_read:
+            client.agent_get.side_effect = [live, live, {**live, "agent_session": {"id": "replacement"}}]
+        client.argv_pane_process_info.return_value = ["herdr", "pane", "process-info", "--pane", "probe-pane"]
+        client.pane_read.return_value = "owned visible evidence Bearer DUMMYcredentialvalue"
+        events = []
+        def visible(*_args, **_kwargs):
+            events.append("read")
+            if read_error is not None:
+                raise read_error
+            return client.pane_read.return_value
+        client.pane_read.side_effect = visible
+        def close_probe(*_args, **_kwargs):
+            events.append("close")
+            if cleanup is not None:
+                raise cleanup
+            return {"closed": True, "pane_id": "probe-pane"}
+        with patch("foreman.lifecycle.spawn", return_value="probe-pane"), \
+                patch("foreman.lifecycle._prepare_fresh_probe", return_value=("probe-pane", None, {"pid": 42}) if binding else None), \
+                patch("foreman.lifecycle.verify_running", return_value={"pid": 42}), \
+                patch("foreman.lifecycle.identity", return_value="probe-fixed"), \
+                patch("foreman.lifecycle.close", side_effect=close_probe), \
+                patch("foreman.measure.send_command", side_effect=HerdrError(
+                    "inspect or clear retired probe-fixed; original composer failure", {"pending_cli_update": True})):
+            result = measure_worker_kinds(client, [worker], "2026-10-01T00:00:00+00:00",
+                state_path=None, config_path="/tmp/config with spaces.json")
+        return result, client, events, worker
+
+    def test_post_cleanup_recovery_targets_worker_kind_for_all_providers(self):
+        for kind in ("claude", "codex", "grok"):
+            with self.subTest(kind=kind):
+                result, client, events, worker = self.run_failure(kind)
+                record = result["agents"][kind]
+                message = record["error"]["message"]
+                self.assertEqual(events, ["read", "close"])
+                self.assertIn("Next owner operation:", message)
+                self.assertIn("measure --agent " + kind, message)
+                self.assertIn("--config '/tmp/config with spaces.json'", message)
+                self.assertIn("--herdr-bin '/tmp/owned herdr wrapper'", message)
+                self.assertIn("retired", message)
+                self.assertIn("Historical diagnostic", message)
+                self.assertIn("owned visible evidence", message)
+                self.assertNotIn("DUMMYcredentialvalue", message)
+                self.assertIsNone(record["headroom_pct"])
+                self.assertIsNone(record["pane_id"])
+                self.assertEqual(record["window_group"], kind + "-window")
+                self.assertTrue(record["error"]["details"]["pending_cli_update"])
+                self.assertEqual(worker.name, kind)
+                client.agent_prompt.assert_not_called()
+                client.agent_send_keys.assert_not_called()
+                client.pane_send_keys.assert_not_called()
+
+    def test_unproved_cleanup_keeps_usage_cause_and_names_read_only_inspection(self):
+        result, client, events, _worker = self.run_failure(cleanup=HerdrError("cleanup occupancy changed", {}))
+        message = result["agents"]["claude"]["error"]["message"]
+        self.assertEqual(events, ["read", "close"])
+        self.assertIn("cleanup occupancy changed", message)
+        self.assertIn("original composer failure", message)
+        self.assertIn("Next owner operation: `herdr pane process-info --pane probe-pane`", message)
+        self.assertNotIn("measure --agent", message)
+        self.assertNotIn("pane close", message)
+        self.assertTrue(result["agents"]["claude"]["error"]["details"]["pending_cli_update"])
+        client.pane_close.assert_not_called()
+
+    def test_changed_original_binding_does_not_read_replacement_pane(self):
+        result, client, events, _worker = self.run_failure(changed=True)
+        self.assertEqual(events, ["close"])
+        client.pane_read.assert_not_called()
+        message = result["agents"]["claude"]["error"]["message"]
+        self.assertIn("evidence unavailable", message)
+        self.assertIn("identity changed", message)
+
+    def test_native_identity_change_during_read_discards_unbound_text(self):
+        result, client, events, _worker = self.run_failure(replace_during_read=True)
+        self.assertEqual(events, ["read", "close"])
+        message = result["agents"]["claude"]["error"]["message"]
+        self.assertIn("identity changed during the read", message)
+        self.assertNotIn("owned visible evidence", message)
+        client.agent_prompt.assert_not_called()
+
+    def test_read_failure_is_explicit_without_losing_original_cause(self):
+        result, _client, events, _worker = self.run_failure(read_error=HerdrError("visible read unavailable", {}))
+        self.assertEqual(events, ["read", "close"])
+        message = result["agents"]["claude"]["error"]["message"]
+        self.assertIn("visible read unavailable", message)
+        self.assertIn("original composer failure", message)
+
+    def test_missing_startup_binding_never_adds_a_native_read(self):
+        result, client, events, _worker = self.run_failure(binding=False)
+        self.assertEqual(events, ["close"])
+        client.pane_read.assert_not_called()
+        self.assertIn("startup binding is missing", result["agents"]["claude"]["error"]["message"])
+
+
 class WorkspacePlacementTest(unittest.TestCase):
     """Stateful transport replay preserves the focused foreman workspace."""
 

@@ -127,6 +127,22 @@ class ProbeRecoveryTest(unittest.TestCase):
                 self.assertEqual(probe_recovery.store_path(self.state).read_bytes(), original)
                 self.assertFalse(any(event[0] in {"prompt", "close"} for event in client.events[len(events):]))
 
+    def test_retained_and_refused_recovery_preserve_the_current_transport_override(self):
+        worker, client = self.worker("codex"), self.native("codex", dialog=True)
+        client.binary = "/tmp/owned transport with spaces"
+        result = self.measure(worker, client)
+        row = probe_recovery.pending(self.state, worker)
+        assert row is not None
+        expected = "--herdr-bin '/tmp/owned transport with spaces'"
+        self.assertIn(expected, result["agents"]["codex"]["error"]["message"])
+        before = list(client.events)
+        self.assertIn(expected, self.measure(worker, client)["agents"]["codex"]["error"]["message"])
+        self.assertEqual(client.events, before)
+        with self.assertRaises(HerdrError) as caught:
+            self.resolve(row, worker, client)
+        self.assertIn(expected, caught.exception.details["recovery"]["operation"])
+        self.assertFalse(any(event[0] in {"prompt", "close"} for event in client.events[len(before):]))
+
     def test_newer_gate_refuses_measurement_without_native_activity_or_rewriting(self):
         save_state(probe_recovery.store_path(self.state), {"schema_version": 2, "records": []})
         before = probe_recovery.store_path(self.state).read_bytes()
