@@ -980,10 +980,12 @@ store requires recovery of its history before rebinding or writing.
   the foreman once the owner's newer generation commits.
 - An attested remote binding is a distinct schema-2 record type, not a migrated
   native binding. It keeps `at`, `generation`, `state_path` and `identity`;
-  the identity is `{kind: "attested-remote", cwd, pane_id, attestation}` with no
+  the identity is `{kind: "attested-remote", cwd, pane_id, attestation, owner_store_path}` with no
   `herdr_env` or fabricated native session. Its receipt, owner validation and
   unsupported-reader behavior are in `references/remote-context.md`. Native
   binding schema 1 and every other supervision row stay unchanged.
+  The canonical owner-store path must match the private remote lease record.
+  A cross-mode binding refuses instead of converting its history.
 - `members`: `{schema_version, id, at, assignment, active, observed, resolution,
   refinements}`. `assignment` contains `{id, agent, task, report, pane_id,
   native_session}`; `id` equals the stable dispatch ID, `report` is absolute,

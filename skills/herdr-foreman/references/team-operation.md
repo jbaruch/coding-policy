@@ -1,6 +1,6 @@
 # Team Operation
 
-The Herdr team round contract. `rules/agent-team-operation.md` Two Modes decides when it applies: a Herdr team round (`HERDR_ENV` set) follows every section below, and a standalone session follows none of it. The foreman reads this file through `skills/herdr-foreman/SKILL.md`, and every worker brief names it as a required read.
+The Herdr team round contract. `rules/agent-team-operation.md` Two Modes decides when it applies: a native Herdr session with real `HERDR_ENV`, or a verified owner-attested remote foreman context, follows every section below. A standalone session follows none of it. Native workers retain their genuine `HERDR_ENV`. The foreman reads this file through `skills/herdr-foreman/SKILL.md`, and every worker brief names it as a required read.
 
 ## Bounded Factual Lookup
 
@@ -62,8 +62,9 @@ monetary savings remain unknown.
 - The foreman's headroom is the measured headroom of the `window_group` its block declares, recorded with the selection
 - A foreman declaring no `window_group` reads as unmeasured
 - The foreman's agent is never a configured worker or the pinned judge's
-- `foreman start-foreman` launches the selected tier and proves it from the launch argv
-- The round preflight proves the running foreman's argv carries the selected tier, after it measures headroom
+- Native `foreman start-foreman` launches the selected tier and proves it from the launch argv
+- The native round preflight proves the running foreman's argv carries the selected tier, after it measures headroom
+- A remote controller supplies authenticated live proof of its selected coordination tier under `skills/herdr-foreman/references/remote-context.md`; the thin anchor and context-ready receipt never supply that proof
 - A running tier other than the selected one blocks the round
 - An absent `foreman` block is a visible preflight warning naming the config file and the block to add, never a round block
 - The seat's config, selection and launch contracts are in `skills/herdr-foreman/references/model-tiers.md` Foreman Seat
@@ -581,6 +582,12 @@ refuse only the stage whose harm it prevents.
 - The ledger's path, schema, ownership, and recovery contract are in `skills/herdr-foreman/state-schema.md`
 
 ## Working Memory
+
+Native foreman-reset commands and pane recovery below govern native foremen.
+A remote controller performs its round-boundary continuation through the
+authenticated host runtime under `skills/herdr-foreman/references/remote-context.md`.
+Its saved outcomes, lessons, reset-ready stow, handoff and supervision gates
+remain required. It never clears the workstation's thin anchor.
 
 - Curate applicable lessons with their scope and evidence through the foreman-owned memory commands
 - Consult relevant lessons before composing assignments

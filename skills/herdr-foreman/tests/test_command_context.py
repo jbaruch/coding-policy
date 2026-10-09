@@ -362,6 +362,49 @@ class RemoteOwnerTest(unittest.TestCase):
         self.assertFalse(self.store.exists())
         self.assertEqual(self.effects(), [])
 
+    def test_copied_owner_store_cannot_bypass_the_current_pending_fence(self):
+        before_loss = json.loads(self.store.read_text(encoding="utf-8"))
+        self.lost = True
+        with self.assertRaises(RemoteIndeterminateError):
+            self.client.pane_close("w1:p2")
+        self.lost = False
+        copy_dir = self.root / "copied-owner"
+        copy_dir.mkdir(mode=0o700)
+        copied_path = copy_dir / "owner.json"
+        save_state(copied_path, before_loss)
+        copied = RemoteForemanOwner(context=self.context, store_path=copied_path,
+                                    plugin_root=self.root, state_path=self.owner.state_path)
+        client = HerdrClient(context=self.context, remote_authority=copied, runner=self.runner)
+        self.calls.clear()
+        with self.assertRaises(RemoteContextError):
+            client.pane_close("w1:p2")
+        self.assertEqual(self.calls, [])
+        before_loss["owner_store_path"] = str(copied_path.resolve())
+        save_state(copied_path, before_loss)
+        with self.assertRaises(RemoteContextError):
+            client.pane_close("w1:p2")
+        self.assertEqual(self.calls, [])
+        self.assertIsNotNone(json.loads(self.store.read_text(encoding="utf-8"))["pending"])
+
+    def test_native_binding_cannot_silently_replace_remote_mode(self):
+        original = supervision.load(self.owner.state_path)["binding"]
+        native = supervision.identity("native-session", self.root, "native-herdr", pane_id="w1:p1")
+        with self.assertRaises(StateError):
+            supervision.bind(self.owner.state_path, native, "2026-09-01T12:00:01+00:00",
+                             root=self.root / "native-bindings")
+        self.assertEqual(supervision.load(self.owner.state_path)["binding"], original)
+
+    def test_remote_binding_cannot_silently_replace_native_mode(self):
+        state_path = self.root / "native-state.json"
+        native = supervision.identity("native-session", self.root, "native-herdr", pane_id="w1:p1")
+        original = supervision.bind(state_path, native, "2026-09-01T12:00:01+00:00",
+                                    root=self.root / "native-bindings")
+        with self.assertRaises(StateError):
+            supervision.bind_attested_remote(state_path, self.receipt, self.root,
+                "2026-09-01T12:00:02+00:00", owner_store_path=self.store,
+                root=self.root / "bindings")
+        self.assertEqual(supervision.load(state_path)["binding"], original)
+
 
 if __name__ == "__main__":
     unittest.main()

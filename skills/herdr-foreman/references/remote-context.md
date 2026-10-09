@@ -30,7 +30,8 @@ symlink. `initialize(runner, at=ISO)` verifies the live session and terminal
 anchor before writing the receipt and a distinct remote supervision binding.
 It does not replace an existing controller, principal, lease or pending intent.
 Every competing controller of this deployment uses the same owner store and
-OS lock. A separately copied store is not a lease and must not be enabled.
+OS lock. The canonical `owner_store_path` is pinned in the owner record and
+supervision binding. A copied store is refused, not another controller lease.
 
 The workstation foreman seat is a **thin terminal anchor without an LLM**.
 The controller running the loaded coding-policy foreman is the sole brain.
@@ -102,6 +103,11 @@ Missing remote argv/process evidence refuses the affected operation. Native
 context-reset hooks act on native foreground sessions only; they do not clear
 the thin remote anchor. A controller requiring a reset must preserve its own
 supervision obligations through its host runtime's planned continuation.
+At every round boundary the controller records outcomes, curates lessons and
+saves a reset-ready stow through the existing memory owners. Its host runtime
+must reset the controller context and prove the loaded-policy, model-tier and
+live supervision continuation before dispatch resumes. Missing host proof
+keeps remote round enablement disabled; the thin anchor is never reset.
 
 ## Schema and Writer / Reader Contract
 
@@ -113,6 +119,8 @@ Document schema 1 has exactly:
 - `schema_version`: integer 1.
 - `attestation`: all receipt fields above.
 - `state_path`: canonical absolute path of the existing foreman task state.
+- `owner_store_path`: canonical absolute path of this owner record, also pinned
+  in its remote supervision identity. A record copied to another path refuses.
 - `pending`: null or one schema-1 intent with `id`, `operation`,
   `status: "indeterminate"` and `argv_digest`. No raw prompt, argv or secret is
   saved in this intent.
@@ -131,12 +139,14 @@ it; restore its original intents, reconciliation and request history first.
 
 Remote supervision uses a distinct schema-2 **binding record** with `at`,
 `state_path`, `generation` and identity `{kind: "attested-remote", cwd, pane_id,
-attestation}`. Native binding records stay schema 1 with their unchanged
+attestation, owner_store_path}`. Native binding records stay schema 1 with their unchanged
 native identity. The containing supervision document and its other row types
 remain schema 1. These are two current record types, not a native-to-remote
 migration. Older native-only owners refuse schema-2 bindings; they must not
 resume a remote deployment. Changing mode requires explicit reconciliation,
 not automatic conversion of a native session or its obligations.
+Binding a different schema type refuses before writing; neither native nor
+remote binding silently converts the other's owner history.
 
 ## Bounded Compatibility Test
 

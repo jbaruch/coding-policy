@@ -11,8 +11,12 @@
   and malformed control replies across owner restarts until same-identity
   reconciliation. Prior supervision or discovery history prevents a missing
   owner record from being recreated as an empty gate. Task ingress rejects
-  command, model, provider and routing overrides. Distinct remote supervision bindings require no fabricated
-  native environment, competing foreman brain or local signals to remote PIDs.
+  command, model, provider and routing overrides. The canonical store identity
+  is pinned in both lease and supervision records, rejecting copied leases.
+  Binding owners refuse implicit native/remote mode conversion. Distinct remote
+  supervision bindings require no fabricated native environment, competing
+  foreman brain or local signals to remote PIDs. The binding team-round scope
+  recognizes the remote controller and preserves its tier and continuation gates.
   Native operation is unchanged; consuming service deployment stays gated on
   its authenticated controller, shared lease and evidence transport.
 

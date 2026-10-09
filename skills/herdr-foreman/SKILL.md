@@ -119,14 +119,22 @@ authority.
 
 For every other request, read `HERDR_ENV` and the controller's attached context before running scripts.
 
-- **Owner-attested remote context** — read `skills/herdr-foreman/references/remote-context.md` in full.
-  Verify its owner preflight and supervision binding.
-  Load the team-round contract and use the bound Python owners.
-  Do not manufacture `HERDR_ENV` or start another foreman brain.
-  Native-only shell preflights and reset hooks do not authorize remote operation.
-  Preserve every remaining stage-local gate.
-  Run Step 2's remaining gates through the controller's configured owners.
-  Proceed immediately to Step 5 only when those gates pass.
+- **Owner-attested remote context**
+  - Read the remote contract in full:
+
+    ```text
+    skills/herdr-foreman/references/remote-context.md
+    ```
+
+  - Verify its owner preflight and supervision binding.
+  - Load the team-round contract.
+  - Use the bound Python owners.
+  - Do not manufacture `HERDR_ENV`.
+  - Do not start another foreman brain.
+  - Native-only shell preflights and reset hooks do not authorize remote operation.
+  - Preserve every remaining stage-local gate.
+  - Run Step 2's remaining gates through the controller's configured owners.
+  - Proceed immediately to Step 5 only when those gates pass.
 
 - **Unset or empty, without a verified remote context** — this skill does not apply. Say so and do the task
   directly, without roster calls, briefs, provisioning, reports, or simulated

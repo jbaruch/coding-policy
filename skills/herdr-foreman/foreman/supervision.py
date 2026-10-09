@@ -438,13 +438,16 @@ def identity(value, cwd, environment, *, kind="id", pane_id):
             "herdr_env": text(environment, "HERDR_ENV"), "pane_id": text(pane_id, "HERDR_PANE_ID")}
 
 
-def remote_identity(attestation, cwd):
+def remote_identity(attestation, cwd, *, owner_store_path):
     """Distinct remote binding; no invented HERDR_ENV or native session value."""
     from dataclasses import asdict
     if not isinstance(attestation, RemoteForemanAttestation):
         raise UsageError("Remote binding needs the verified owner attestation; attach the configured remote owner first.", {})
+    if not isinstance(owner_store_path, (str, Path)) or not Path(owner_store_path).is_absolute():
+        raise UsageError("Remote binding needs its canonical absolute owner-store path; restore the configured shared lease path.", {})
     return {"kind": "attested-remote", "cwd": str(canonical(cwd)),
-            "pane_id": attestation.foreman_pane_id, "attestation": asdict(attestation)}
+            "pane_id": attestation.foreman_pane_id, "attestation": asdict(attestation),
+            "owner_store_path": str(canonical(owner_store_path))}
 
 
 def normalize_identity(who, version):
@@ -452,12 +455,12 @@ def normalize_identity(who, version):
         raise UsageError("Restore the original foreman identity record before dispatching.", {})
     if version == 1 and set(who) == {"kind", "value", "cwd", "herdr_env", "pane_id"}:
         return identity(who["value"], who["cwd"], who["herdr_env"], kind=who["kind"], pane_id=who["pane_id"])
-    if version == 2 and set(who) == {"kind", "cwd", "pane_id", "attestation"} and who["kind"] == "attested-remote":
+    if version == 2 and set(who) == {"kind", "cwd", "pane_id", "attestation", "owner_store_path"} and who["kind"] == "attested-remote":
         try:
             attestation = RemoteForemanAttestation(**who["attestation"])
         except (TypeError, ValueError):
             raise UsageError("Remote binding receipt is malformed; restore the verified controller receipt.", {}) from None
-        return remote_identity(attestation, who["cwd"])
+        return remote_identity(attestation, who["cwd"], owner_store_path=who["owner_store_path"])
     raise UsageError("Foreman identity schema is unsupported; restore its matching coding-policy owner before dispatch.", {})
 
 
@@ -506,9 +509,9 @@ def bind(state_path, who, at, *, root=None, before_bind=None):
     return _bind(state_path, who, at, root=root, before_bind=before_bind, binding_schema=1)
 
 
-def bind_attested_remote(state_path, attestation, cwd, at, *, root=None):
+def bind_attested_remote(state_path, attestation, cwd, at, *, owner_store_path, root=None):
     """Privileged remote owner entry; caller ingress never invokes this function."""
-    who = remote_identity(attestation, cwd)
+    who = remote_identity(attestation, cwd, owner_store_path=owner_store_path)
     return _bind(state_path, who, at, root=root, binding_schema=2)
 
 
@@ -528,6 +531,8 @@ def _bind(state_path, who, at, *, root=None, before_bind=None, binding_schema):
         first_use = old is None and not store_path(state_path).exists()
         if first_use:
             _refuse_lost_owner(state_path, path.parent)
+        if old is not None and old["schema_version"] != binding_schema:
+            raise StateError("Foreman binding mode differs from this owner. Preserve its history and explicitly reconcile the native/remote transition before rebinding.", {})
         row = old if old is not None and old["identity"] == who else {
             "schema_version": binding_schema, "at": at, "identity": who, "state_path": str(canonical(state_path)),
             "generation": 1 if old is None else old["generation"] + 1}

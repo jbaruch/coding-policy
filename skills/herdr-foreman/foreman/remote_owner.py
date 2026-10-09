@@ -152,9 +152,10 @@ class RemoteForemanOwner:
             raise refuse("remote_owner_record_missing_or_unreadable") from None
         if (not isinstance(document, dict) or type(document.get("schema_version")) is not int
                 or document.get("schema_version") != 1
-                or set(document) != {"schema_version", "attestation", "state_path", "pending", "reconciliations", "requests"}
+                or set(document) != {"schema_version", "attestation", "state_path", "owner_store_path", "pending", "reconciliations", "requests"}
                 or document.get("attestation") != asdict(remote_receipt(self.context))
                 or document.get("state_path") != str(self.state_path)
+                or document.get("owner_store_path") != str(self.path.resolve())
                 or not isinstance(document.get("reconciliations"), list)
                 or not isinstance(document.get("requests"), list)
                 or (document.get("pending") is not None and not isinstance(document["pending"], dict))):
@@ -205,12 +206,15 @@ class RemoteForemanOwner:
                     raise refuse("remote_owner_record_lost_restore_original_intents_and_requests")
                 save_state(self.path, {"schema_version": 1, "attestation": asdict(remote_receipt(self.context)),
                                       "state_path": str(self.state_path),
+                                      "owner_store_path": str(self.path.resolve()),
                                       "pending": None, "reconciliations": [], "requests": []})
             existing = supervision.load(self.state_path)["binding"]
-            expected = supervision.remote_identity(self.context.attestation, self.plugin_root)
+            expected = supervision.remote_identity(self.context.attestation, self.plugin_root,
+                                                   owner_store_path=self.path)
             if existing is not None and existing["identity"] != expected:
                 raise refuse("remote_supervision_binding_changed")
             supervision.bind_attested_remote(self.state_path, self.context.attestation, self.plugin_root, at,
+                                               owner_store_path=self.path,
                                                root=self.path.parent / "bindings")
 
     def preflight(self, runner, *, allow_indeterminate=False):
@@ -229,7 +233,8 @@ class RemoteForemanOwner:
     def _binding(self):
         binding = supervision.load(self.state_path)["binding"]
         if (binding is None or binding["schema_version"] != 2
-                or binding["identity"] != supervision.remote_identity(self.context.attestation, self.plugin_root)):
+                or binding["identity"] != supervision.remote_identity(self.context.attestation, self.plugin_root,
+                                                                      owner_store_path=self.path)):
             raise refuse("remote_supervision_binding_changed")
 
     def _indeterminate(self, pending):
