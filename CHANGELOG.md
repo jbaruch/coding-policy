@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.384 — 2026-10-09
+
 ### Fixed
 
 - Fresh startup observes transient painted composer frames read-only within
