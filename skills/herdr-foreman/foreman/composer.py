@@ -605,9 +605,10 @@ IDENTIFIER_UNAVAILABLE_ROW = re.compile(
 
 _NOTICE_FENCE = re.compile(r"^(`{3,}|~{3,})")
 _NOTICE_BORDER = re.compile(r"^[─━╭╮╰╯┌┐└┘│\s]+$")
-#: Rows that may follow the notice: Claude's composer row (any content, occupancy
-#: is judged separately) and its shortcut footer. Anything else is later content.
-_NOTICE_TRAILER = re.compile(r"^(?:│\s*)?[❯›](?:\s.*)?$|^\? for shortcuts$")
+#: Rows that may follow the notice: Claude's plain composer row (any content;
+#: `_settle_fresh_composer` refuses an occupied one before it classifies), its
+#: boxed composer row only when empty, and the shortcut footer. Anything else is later content.
+_NOTICE_TRAILER = re.compile(r"^[❯›](?:\s.*)?$|^│\s*[❯›]\s*│?$|^\? for shortcuts$")
 
 
 def identifier_unavailable_model(pane_text):
@@ -670,7 +671,9 @@ def _settle_fresh_composer(client, agent, pane_id, observe, sleep, warn):
         composer = inspect_composer(text, agent, ansi=ansi)
         if observe() != original:
             raise _fresh_startup_error("startup_identity_changed", "Fresh worker changed pane, process or tier during startup; nothing was sent.", {"pane_id": pane_id})
-        if agent.kind == "claude":
+        # An occupied composer is the stronger evidence: a draft or dialog is
+        # never provider evidence, so it takes the occupied path below.
+        if agent.kind == "claude" and not (composer.visible and composer.occupied):
             model = identifier_unavailable_model(text)
             if model is not None:
                 raise identifier_unavailable_error(agent, pane_id, model)

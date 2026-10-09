@@ -1359,12 +1359,33 @@ class FreshStartupDeliveryTest(unittest.TestCase):
             with self.subTest(text=text):
                 self.assertIsNone(identifier_unavailable_model(text))
 
+    def test_occupied_composer_after_the_notice_takes_the_occupied_path_not_identifier_maintenance(self):
+        from unittest.mock import Mock, patch
+        notice = ("There's an issue with the selected model (opus-6). It may not exist or you may not have "
+                  "access to it. Run /model to pick a different model.")
+        # Plain: the occupied classification. Boxed: the same fail-closed path an
+        # ordinary boxed occupied startup takes, never identifier maintenance.
+        for frame, kind in ((notice + "\n\u276f pending input", "startup_input_occupied"),
+                            (notice + "\n\u2502 \u276f pending input \u2502", "startup_dialog_pending")):
+            with self.subTest(frame=frame):
+                client, boundary = Mock(), Mock()
+                with patch("foreman.composer.read_pane", return_value=(frame, True)), self.assertRaises(HerdrError) as caught:
+                    send_message(client, BY_NAME["claude"], "brief", "brief", before_prompt=boundary,
+                                 startup_observe=lambda: ("p1", 42), sleep=NO_SLEEP)
+                details = caught.exception.details
+                self.assertEqual(details["failure_kind"], kind)
+                boundary.assert_not_called()
+                client.agent_prompt.assert_not_called()
+                client.pane_send_keys.assert_not_called()
+                client.pane_send_text.assert_not_called()
+
     def test_model_unavailable_notice_ignores_fenced_indented_and_stale_rows(self):
         # Parity with wait-report.sh: examples and history are not a live notice.
         from foreman.composer import identifier_unavailable_model
         row = "There's an issue with the selected model (opus-6). It may not exist or you may not have access to it."
         for text in ("```\n" + row + "\n```\n❯", "~~~\n" + row + "\n❯", "    " + row + "\n❯", "\t" + row + "\n❯",
-                     row + "\nStartup completed normally\n❯", row + "\nNew assignment from the team lead\n❯"):
+                     row + "\nStartup completed normally\n❯", row + "\nNew assignment from the team lead\n❯",
+                     row + "\n│ ❯ pending input │"):
             with self.subTest(text=text):
                 self.assertIsNone(identifier_unavailable_model(text))
         for text in (row, "\u23fa " + row + "\n╭────╮\n│ ❯  │\n╰────╯\n? for shortcuts",
