@@ -1,5 +1,22 @@
 # Changelog
 
+### Fixed
+
+- Disposable probe occupancy failures now retain only pane, foreground PID
+  and process-name evidence in durable measure receipts. Owned pane cleanup
+  proves the pane is absent or still holds its original shell before reporting
+  success, so a late process or reused pane cannot be mistaken for a clean
+  retry surface (#730). Cleanup binds the recorded shell PID before its first
+  pane close: a failed spawn whose pane already changed shells, whose first
+  shell PID was never proved, or an absent assignment whose pane survives
+  without a recorded original shell, is refused without closing, so a reused
+  pane id is never closed as the old probe. The first valid shell PID is kept
+  even when readiness later fails, and the cleanup failure message now says to
+  inspect the pane before closing it.
+  Durable measurements now stamp snapshot schema 5 for the added `error.details`
+  evidence; stored schema-4 snapshots migrate on load with the version stamped
+  and no evidence fabricated.
+
 ## 0.3.388 — 2026-10-09
 
 ### Fixed
@@ -55,17 +72,6 @@
 
 ### Fixed
 
-- Disposable probe occupancy failures now retain only pane, foreground PID
-  and process-name evidence in durable measure receipts. Owned pane cleanup
-  proves the pane is absent or still holds its original shell before reporting
-  success, so a late process or reused pane cannot be mistaken for a clean
-  retry surface (#730). Cleanup binds the recorded shell PID before its first
-  pane close: a failed spawn whose pane already changed shells, whose first
-  shell PID was never proved, or an absent assignment whose pane survives
-  without a recorded original shell, is refused without closing, so a reused
-  pane id is never closed as the old probe. The first valid shell PID is kept
-  even when readiness later fails, and the cleanup failure message now says to
-  inspect the pane before closing it.
 - Fresh Claude Code startup honors its existing dim-hint classification,
   allowing dynamic native launch suggestions to settle before one exact
   assignment. Plain/typed input, dialogs and recalled Codex drafts retain
