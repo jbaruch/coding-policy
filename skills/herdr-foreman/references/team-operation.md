@@ -101,8 +101,19 @@ monetary savings remain unknown.
 - A changed artifact returns to trigger classification before dispatch
 - A pushed head uses its in-repo declaration and must prove the accepted byte-identical bootstrap when the recorded task base lacks one; an existing declaration at the task base is sole authority
 - Every other incomplete or absent writing declaration is refused
+- Narrow exception for classifying an unchanged pushed pair with no declaration at either revision.
+- Preconditions (all required):
+  1. `detect-triggers --legacy-review-declaration` names the exact consumer task and full base and head commit ids
+  2. Both revisions lack `.herdr/triggers.json` and the plan is the no-write plan
+  3. An accepted consultation's `TRIGGER_DECLARATION` binds repository, base, head, external artifact path and digest, and its assessment task matches
+  4. The roles are `reviewer`, `tester`, `advisor`, `investigator` or `architect`
+  5. No `--decisions` file is passed
+- A changed head or evidence returns to a new bounded consultation assessment
+- Classification grants no source, hosted-CI, merge or release authority
+- Every other pushed pair follows the in-repository or bootstrap routes
 - A fired trigger is consulted, or recorded as a staffing decision with its reason the detector reads
 - Silence is never that decision
+- A legacy-review classification has no staffing decision; its fired triggers are staffed by role or requirements specialty
 - The exhaustion trigger has no such alternative: a diagnosis without its accepted consultation is refused
 - A diagnosis is not dispatched at an exhausted allowance before that assessment exists
 - An adjudication at that same allowance is unaffected; it rules on a contested verdict and needs no assessment

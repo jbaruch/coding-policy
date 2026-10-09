@@ -150,6 +150,13 @@ artifact, digest-bound plan and `--bootstrap-declaration` contract in
 `skills/herdr-foreman/references/specialists.md`. The first pushed head must install those bytes
 unchanged. Existing and later declarations remain in-repo authority.
 
+An already-pushed pull request with no declaration at its base or head is
+classified, without source churn, by `--legacy-review-declaration` under the
+legacy-review contract in `skills/herdr-foreman/references/specialists.md`. Its
+exit 0 stays composition evidence: independent reviewer and tester reports and
+hosted CI at the exact head still gate the round, and a changed head needs a
+newly assessed consultation.
+
 ```bash
 CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"; [ -d "$CP" ] || case "$(git config --get remote.origin.url)" in git@github.com:jbaruch/coding-policy|git@github.com:jbaruch/coding-policy.git|https://github.com/jbaruch/coding-policy|https://github.com/jbaruch/coding-policy.git|ssh://git@github.com/jbaruch/coding-policy|ssh://git@github.com/jbaruch/coding-policy.git) CP=. ;; *) echo "coding-policy plugin not found: run tessl install jbaruch/coding-policy" >&2; exit 1 ;; esac
 bash "$CP/skills/herdr-foreman/foreman.sh" plan \

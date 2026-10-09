@@ -53,6 +53,12 @@ reason. Step 5's `detect-triggers` run decides which of the four fired, and
 reads that recorded decision; the foreman's own reading of the diff does not. The cheap gate is the one worth making mandatory; a reviewer catching
 the same thing one finding per round is the expensive one.
 
+Narrow exception to the recorded staffing decision: a legacy-review
+classification (`--legacy-review-declaration`, `skills/herdr-foreman/references/specialists.md`)
+refuses `--decisions`. Its fired triggers are staffed by role or requirements
+specialty, never answered by a decision. Every ordinary and no-write round keeps
+the recorded decision.
+
 Untriggered work keeps the old judgement, whatever its size: skip Phase 1 when
 a design note would say less than the diff. Nothing in Phase 1 is a pass; it
 is preparation.

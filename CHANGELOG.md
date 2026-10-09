@@ -1,5 +1,43 @@
 # Changelog
 
+### Fixed
+
+- `foreman detect-triggers --legacy-review-declaration` classifies an unchanged
+  pushed pull request whose base and head both lack `.herdr/triggers.json`
+  (#729). Before, the ordinary no-write plan refused any tracked diff and the
+  bootstrap flag demanded a writing plan that installs the declaration, so a
+  dependency-only pull request opened before the repo declared its triggers
+  could not reach independent review without declaration-only source churn
+  (jbaruch/nanoclaw-admin#555 and jbaruch/nanoclaw-travel#322 reproduced it
+  with the identical two refusals). The mode is a third door, mutually
+  exclusive with `--bootstrap-declaration`: it requires `--task`, full 40- or
+  64-hex `--base` and `--head`, the existing no-write plan and an external
+  artifact outside the repo, and writes nothing. Authority is an accepted
+  consultation whose single standalone `TRIGGER_DECLARATION` line carries
+  exactly `repo`, `base_revision`, `head_revision`, `path` and `sha256`, whose
+  assessment task equals `--task`, whose report still matches its assessed
+  receipt and whose artifact still hashes to the bound digest. The four-key
+  writing-bootstrap binding is unchanged and neither shape authorizes the other
+  door. A changed head, task, repository, base, artifact or report has no
+  authority; the diagnostic names the differing dimension, and a head change
+  directs a new bounded consultation for the new full head, never an empty
+  commit, rebase or pull-request rewrite. Only `reviewer`, `tester`, `advisor`,
+  `investigator` and `architect` seat after `canonical_role`; `developer`,
+  `release`, `judge` and unknown roles refuse, and `--decisions` refuses, so a
+  fired trigger is staffed by role or `--requirements` specialty and never by a
+  recorded decision. A declaration at the base selects the committed
+  declaration, and one only at the head selects the writing bootstrap. The
+  detection document is schema version 3 and a legacy-review document adds
+  `mode`, `task` and a `legacy_review` authority carrying the repository, base,
+  head, artifact digest, assessment id and report evidence; no field claims
+  approval or release. Exit 0 stays composition evidence: reviewer and tester
+  reports and hosted CI at the exact head still gate, and the owner persists no
+  detection receipt (the downstream gates bind their own heads). The ordinary
+  no-write tracked-diff refusal and every writing-bootstrap case are unchanged.
+  `specialists.md` carries the contract; `role-planning.md`, `round-setup.md`,
+  `round-flow.md`, `team-operation.md` and `state-schema.md` carry the pointer
+  and the narrow staffing-decision exception.
+
 ## 0.3.394 — 2026-10-09
 
 ### Fixed

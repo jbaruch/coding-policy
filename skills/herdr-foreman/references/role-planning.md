@@ -50,8 +50,12 @@ bash "$CP/skills/herdr-foreman/foreman.sh" detect-triggers \
 Exit 0 means every fired trigger is staffed or answered. On exit 1, read the
 stderr object. A writing repo with no declaration uses the one-time reviewed
 bootstrap contract in `skills/herdr-foreman/references/specialists.md`;
-and an `unaddressed_trigger` is staffed in the roles below or answered by a
-recorded decision with its reason. Re-run the command with the updated
+an unchanged pushed pair with no declaration at either revision uses that file's
+legacy-review contract, `--legacy-review-declaration` with `--task`, full commit
+ids, the no-write plan and reviewer, tester or read-only roles, and no
+`--decisions`; and an `unaddressed_trigger` is staffed in the roles below or
+answered by a recorded decision with its reason, except in legacy review, where
+only a role or requirements specialty answers it. Re-run the command with the updated
 declaration, roles, requirements and decisions after every such change, and
 plan only once it exits 0.
 

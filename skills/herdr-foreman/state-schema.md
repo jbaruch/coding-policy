@@ -1273,3 +1273,13 @@ assessment receipts bind its exact bytes; the assessment owner checks its
 absolute repository/artifact, exact task base and reviewed digest. Detection
 reads all-met, non-blocking consultation records and rechecks the report digest
 before relying on that binding. No operator-written approval or receipt is read.
+
+A legacy-review binding (#729) carries the same four keys plus `head_revision`,
+exact and full commit ids, in the same standalone report line. No new owner-state
+record exists: `detect-triggers --legacy-review-declaration` matches the
+assessment's `task` and `report_evidence` and the five binding values. A four-key
+line authorizes only the writing bootstrap and a five-key line only legacy
+review; neither shape accepts extra keys. The detection document is schema
+version 3, and a legacy-review document adds top-level `mode` and `task` and a
+`legacy_review` `declaration_authority`. The owner persists no detection receipt:
+each downstream review package, report and release gate binds its own exact head.

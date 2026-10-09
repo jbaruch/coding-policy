@@ -96,7 +96,13 @@ root, is `skills/herdr-foreman/SKILL.md` Step 5:
 foreman detect-triggers --repo <dir> --base <ref> [--head <ref>] \
   --roles <role[,role...]> [--requirements <file>] [--planned <file>] \
   [--decisions <file>] [--bootstrap-declaration <reviewed-file>]
+foreman detect-triggers --repo <dir> --task <task> --base <full-oid> --head <full-oid> \
+  --roles <role[,role...]> --planned <no-write-plan> --legacy-review-declaration <accepted-file> \
+  [--requirements <file>] [--state <owner-state>]
 ```
+
+The second form is the legacy-review mode, described under Classify an unchanged
+legacy pull request below.
 
 ## Declare a pre-implementation round's surfaces
 
@@ -173,6 +179,48 @@ When the recorded task base already contains `.herdr/triggers.json`, its own
 committed declaration is the sole authority. A first declaration at the head or
 in the worktree still requires the bootstrap proof; omitting the flag refuses. Omit `--bootstrap-declaration` on
 later rounds. A bootstrap artifact never overrides existing repo content.
+
+### Classify an unchanged legacy pull request
+
+A pull request whose base and head both lack `.herdr/triggers.json` is not a
+writing round: its source stays unchanged, and installing a declaration would
+add policy bytes to a focused change. `--legacy-review-declaration` classifies
+that one pair from an externally reviewed declaration and writes nothing. It is
+a third door beside the ordinary no-write plan and the writing bootstrap, and
+it is mutually exclusive with `--bootstrap-declaration`.
+
+A consultation assesses a report carrying one five-key line:
+
+```text
+TRIGGER_DECLARATION: {"repo":"/absolute/canonical/repo","base_revision":"<full base>","head_revision":"<full head>","path":"/absolute/external/triggers.json","sha256":"<SHA-256 of reviewed bytes>"}
+```
+
+The line carries exactly those keys. The four-key bootstrap line authorizes no
+legacy classification and the five-key line authorizes no writing bootstrap.
+Detection matches `--task` to the assessment's task and the other five values to
+the invocation, rereads the report against its assessed receipt and rehashes the
+artifact. The command shape, its refusals and the payload fields are in
+`skills/herdr-foreman/foreman/triggers.py` (`legacy_review_roles`,
+`load_legacy_review_declaration`, `run_legacy_review`).
+
+- Pass the same no-write plan as an investigation; the diff is the subject
+  classified, never the plan's surface.
+- Pass full commit ids for `--base` and `--head`; a branch, tag, abbreviation or
+  the working tree refuses.
+- Seat only `reviewer`, `tester`, `advisor`, `investigator` and `architect`. A
+  seat such as `reviewer#api` counts as `reviewer`. `developer`, `release`,
+  `judge` and unknown roles refuse.
+- Omit `--decisions`; the mode refuses it. A fired trigger is staffed by its
+  role or a `--requirements` specialty, then the command is rerun.
+- A declaration at the base selects the committed declaration. A declaration
+  only at the head selects the writing bootstrap. Both refuse here.
+
+Exit 0 is composition evidence. It is not verification, hosted CI, approval or
+release authority: the reviewer and tester reports, hosted CI and the release
+contract still bind the exact head. A changed head returns to consultation: the
+foreman dispatches a bounded consultation whose report binds the new full head,
+assesses it, and reruns detection. It never updates or rewrites the pull request
+to preserve the old classification.
 
 A round that writes no repository content at all — an investigation, an
 architecture consultation, an advisory question — has no surface to declare and
