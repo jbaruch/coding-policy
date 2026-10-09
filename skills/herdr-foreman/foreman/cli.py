@@ -429,7 +429,7 @@ def build_parser():
     fit_parser = sub.add_parser("marker-fit", parents=[common], help="Measure a worker's live pane against its `REPORT: <path>` row, for a sender outside apply.")
     fit_parser.add_argument("--agent", required=True)
     fit_parser.add_argument("--report", required=True)
-    resolve_probe_parser = sub.add_parser("resolve-probe", parents=[common], help="Prove and close an owner-recorded no-input startup probe after its native dialog resolves.")
+    resolve_probe_parser = sub.add_parser("resolve-probe", parents=[common], help="Prove and close an owner-retained disposable startup or cleanup probe after its native surface resolves.")
     resolve_probe_parser.add_argument("--agent", required=True, help="Exact retained probe name from the normal measure receipt.")
 
     for command in ("task", "checkpoint", "authorize-corrections", "authorize-approach", "recover-context", "recover-role-clear", "record-report", "record-refusal", "authorize-refused-dispatch", "diagnose", "reconcile", "record-release-clear", "import-correction", "record-historical-review", "recover-report", "assess-specialist", "close-task"):

@@ -207,6 +207,21 @@ class OwnedVisibleUsageTest(unittest.TestCase):
 
 
 class FailureEvidenceTest(unittest.TestCase):
+    def test_captured_update_banner_sets_the_existing_maintenance_flag(self):
+        runner = runner_with({"claude": "idle"}, {})
+        with patch("foreman.measure.send_command", side_effect=HerdrError("composer occupied", {})):
+            snapshot = measure(HerdrClient(runner=runner), [BY_NAME["claude"]], AT,
+                               failure_capture=Mock(return_value=CLAUDE_UPDATE_PANE))
+        self.assertTrue(snapshot["agents"]["claude"]["error"]["details"]["pending_cli_update"])
+
+    def test_changed_binding_prevents_dialog_dismissal(self):
+        runner = runner_with({"claude": "idle"}, {"claude": CLAUDE_UNPARSEABLE_PANE})
+        guard = Mock(side_effect=HerdrError("original binding changed; preserve the pane", {}))
+        snapshot = measure(HerdrClient(runner=runner), [BY_NAME["claude"]], AT,
+                           before_dismiss=guard)
+        self.assertIsNone(snapshot["agents"]["claude"]["headroom_pct"])
+        self.assertFalse(any(command.startswith("agent send-keys claude esc") for command in runner.commands()))
+
     def test_arbitrary_visible_content_never_enters_the_snapshot(self):
         runner = runner_with({"claude": "idle"}, {})
         capture = Mock(return_value='DATABASE_URL=postgres://alice:DUMMYpassword@db/internal\n'

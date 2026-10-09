@@ -325,24 +325,26 @@ def _prepare_fresh_probe(client, worker, pane, tier, *, sleep=time.sleep, warn=N
     return original
 
 
-def _probe_visible_read(client, worker, pane, tier, original, observed_text=None, *, lines=PROBE_FAILURE_READ_LINES):
-    """Read only a still-bound disposable probe; authorize no input/cleanup."""
+def _probe_binding(client, worker, pane, tier, original):
+    """Reprove the complete original owner binding before one scoped effect."""
     if (not isinstance(original, tuple) or len(original) != 3 or original[0] != pane
             or not isinstance(original[2], dict) or type(original[2].get("pid")) is not int
             or original[2]["pid"] <= 0):
         raise HerdrError("original startup binding is missing", {})
 
-    def same_identity():
-        live = client.agent_get(worker.name)
-        return (live.get("name") == worker.name and live.get("agent") == worker.kind
-                and (live.get("pane_id"), live.get("agent_session"),
-                     verify_running(client, worker, pane, tier)) == original)
-    if not same_identity():
+    live = client.agent_get(worker.name)
+    if not (live.get("name") == worker.name and live.get("agent") == worker.kind
+            and (live.get("pane_id"), live.get("agent_session"),
+                 verify_running(client, worker, pane, tier)) == original):
         raise HerdrError("original probe identity changed", {})
+
+
+def _probe_visible_read(client, worker, pane, tier, original, observed_text=None, *, lines=PROBE_FAILURE_READ_LINES):
+    """Read only a still-bound disposable probe; authorize no input/cleanup."""
+    _probe_binding(client, worker, pane, tier, original)
     text = (observed_text if observed_text is not None and worker.usage_read_source == "visible"
             else client.pane_read(pane, lines=lines))
-    if not same_identity():
-        raise HerdrError("original probe identity changed during the read", {})
+    _probe_binding(client, worker, pane, tier, original)
     return text
 
 
@@ -356,7 +358,7 @@ def _probe_failure_view(client, worker, pane, tier, original, observed_text=None
         return None
 
 
-def _probe_usage_recovery(record, cleanup_error, closure, client, pane, operation):
+def _probe_usage_recovery(record, cleanup_error, closure, client, pane, operation, *, state_path=None, retained=None):
     """Replace retired-target instructions with one currently executable route."""
     from .measure import snapshot_error
     historical = record["error"]
@@ -365,6 +367,10 @@ def _probe_usage_recovery(record, cleanup_error, closure, client, pane, operatio
         action = runnable.command(operation)
         condition = ("The disposable probe is retired; do not inspect, clear or submit input to its old identity. "
                      "Repair the observed native/configuration cause, then use normal measure to create a fresh owned probe.")
+    elif retained is not None:
+        recovery = probe_recovery.diagnostic(state_path, retained, herdr_bin=getattr(client, "binary", None))
+        action = recovery.details["recovery"]["operation"]
+        condition = recovery.details["recovery"]["condition"]
     else:
         action = format_argv(client.argv_pane_process_info(pane))
         condition = ("Probe cleanup is unproved. Preserve the surface and finish identity-bound owner cleanup "
@@ -407,6 +413,8 @@ def measure_worker_kinds(client, templates, measured_at, *, state_path=None, con
         closure = None
         cleanup_error = None
         usage_failure = None
+        original = None
+        cleanup_row = None
         operation = "measure --agent " + shlex.quote(template.name)
         if state_path is not None:
             operation += " --state " + shlex.quote(str(state_path))
@@ -427,7 +435,8 @@ def measure_worker_kinds(client, templates, measured_at, *, state_path=None, con
             snapshot = measure(client, [probe], measured_at,
                 failure_capture=lambda text: _probe_failure_view(client, probe, pane, tier, original, text),
                 owned_visible_read=lambda: _probe_visible_read(client, probe, pane, tier, original,
-                    lines=options.get("read_lines", DEFAULT_READ_LINES)), **options)
+                    lines=options.get("read_lines", DEFAULT_READ_LINES)),
+                before_dismiss=lambda: _probe_binding(client, probe, pane, tier, original), **options)
             record = dict(snapshot["agents"][probe.name])
             record.pop("tier_billing", None)
             if "error" in record:
@@ -435,6 +444,7 @@ def measure_worker_kinds(client, templates, measured_at, *, state_path=None, con
         except (HerdrError, UsageError) as exc:
             if startup and prior is None:
                 startup_error = exc
+                original = getattr(exc, "_probe_startup_observation", None)
             needs_retention = (pane is not None and exc.details.get("failure_kind") == "startup_dialog_pending"
                        and exc.details.get("agent") == probe.name and exc.details.get("pane_id") == pane)
             if needs_retention:
@@ -457,7 +467,9 @@ def measure_worker_kinds(client, templates, measured_at, *, state_path=None, con
             if pane is not None and not pending:
                 primary = sys.exc_info()[1]
                 try:
-                    closure = close(client, probe.name, pane)
+                    closure = close(client, probe.name, pane,
+                        before_close=(lambda: _probe_binding(client, probe, pane, tier, original))
+                            if original is not None else None)
                 except HerdrError as exc:
                     cleanup_error = exc
                     if primary is not None:
@@ -472,8 +484,13 @@ def measure_worker_kinds(client, templates, measured_at, *, state_path=None, con
                             "plan": None, "headroom_pct": None, "window_group": group,
                             "skipped": False, "error": snapshot_error(exc),
                         }
-        if usage_failure is not None:
-            _probe_usage_recovery(usage_failure, cleanup_error, closure, client, pane, operation)
+        if cleanup_error is not None and original is not None and state_path is not None:
+            cleanup_row = probe_recovery.retain(state_path, template, probe, pane, tier,
+                original, measured_at, config_path=config_path, phase="cleanup")
+        if usage_failure is not None or cleanup_error is not None and startup_error is None:
+            usage_failure = usage_failure or dict(record)
+            _probe_usage_recovery(usage_failure, cleanup_error, closure, client, pane, operation,
+                state_path=state_path, retained=cleanup_row)
             record = usage_failure
         if startup_error is not None and not pending:
             closed = isinstance(closure, dict) and closure.get("closed") is True
@@ -481,11 +498,20 @@ def measure_worker_kinds(client, templates, measured_at, *, state_path=None, con
                 if closed else "No usage command was sent. Preserve and inspect the actual startup/cleanup evidence; restore the worker-kind configuration and finish owned cleanup before repeating normal measure.")
             historical = startup_error.details.get("failure_message", startup_error.message)
             failure = cleanup_error or startup_error
+            action = runnable.command(operation)
+            if cleanup_row is not None:
+                recovery = probe_recovery.diagnostic(state_path, cleanup_row, herdr_bin=binary)
+                action = recovery.details["recovery"]["operation"]
+                condition = recovery.details["recovery"]["condition"]
+            elif cleanup_error is not None and pane is not None:
+                action = format_argv(client.argv_pane_process_info(pane))
+            if startup_error.details.get("pending_cli_update") is True:
+                failure.details["pending_cli_update"] = True
             recovered = owner_recovery(failure,
                 "probe_cleanup_unproved" if cleanup_error else "probe_startup_unproved",
-                runnable.command(operation), condition, outcome="retryable" if closed else "blocked")
+                action, condition, outcome="retryable" if closed else "blocked")
             recovered.message = "Next owner operation: `{}`. {}{} Historical diagnostic: {}".format(
-                runnable.command(operation), condition,
+                action, condition,
                 " Cleanup diagnostic: " + json.dumps(scrub_for_trace(cleanup_error.message, cap=256), ensure_ascii=False)
                     if cleanup_error is not None else "",
                 json.dumps(scrub_for_trace(historical, cap=PROBE_HISTORY_BYTES), ensure_ascii=False))

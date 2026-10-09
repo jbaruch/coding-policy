@@ -109,6 +109,8 @@ def _capture_failure(exc, capture, observed_text=None):
     if capture is None:
         return
     view = capture(observed_text)
+    if view is not None and PENDING_CLI_UPDATE in view:
+        exc.details["pending_cli_update"] = True
     cause = exc.details.get("failure_message", exc.message)
     exc.message = "Visible evidence (diagnostic only): {}. Original measurement error: {}".format(
         json.dumps(_visible_diagnostic(view), ensure_ascii=False),
@@ -254,7 +256,7 @@ def skipped_record(agent, status, herdr_status, state_source):
     }
 
 
-def measure_agent(client, agent, marker_timeout_ms=DEFAULT_MARKER_TIMEOUT_MS, read_lines=DEFAULT_READ_LINES, warn=None, poll_attempts=DEFAULT_MARKER_POLL_ATTEMPTS, poll_interval_sec=DEFAULT_MARKER_POLL_INTERVAL_SEC, sleep=time.sleep, max_tabs=MAX_DIALOG_TABS, settle_sec=COMPOSER_SETTLE_SEC, session=None, failure_capture=None, owned_visible_read=None):
+def measure_agent(client, agent, marker_timeout_ms=DEFAULT_MARKER_TIMEOUT_MS, read_lines=DEFAULT_READ_LINES, warn=None, poll_attempts=DEFAULT_MARKER_POLL_ATTEMPTS, poll_interval_sec=DEFAULT_MARKER_POLL_INTERVAL_SEC, sleep=time.sleep, max_tabs=MAX_DIALOG_TABS, settle_sec=COMPOSER_SETTLE_SEC, session=None, failure_capture=None, owned_visible_read=None, before_dismiss=None):
     """Measure one agent and return its record.
 
     Raises HerdrError or ParseError; the caller decides whether one bad agent
@@ -328,6 +330,8 @@ def measure_agent(client, agent, marker_timeout_ms=DEFAULT_MARKER_TIMEOUT_MS, re
         # agent to `working` and swallows the next prompt foreman sends.
         if agent.close_keys:
             try:
+                if before_dismiss is not None:
+                    before_dismiss()
                 client.agent_send_keys(agent.name, agent.close_keys)
             except HerdrError as exc:
                 if failure_capture is not None and usage_error is not None:
@@ -357,7 +361,7 @@ def measure_agent(client, agent, marker_timeout_ms=DEFAULT_MARKER_TIMEOUT_MS, re
     }
 
 
-def measure(client, agents, measured_at, marker_timeout_ms=DEFAULT_MARKER_TIMEOUT_MS, read_lines=DEFAULT_READ_LINES, warn=None, poll_attempts=DEFAULT_MARKER_POLL_ATTEMPTS, poll_interval_sec=DEFAULT_MARKER_POLL_INTERVAL_SEC, sleep=time.sleep, settle_sec=COMPOSER_SETTLE_SEC, allow_recovery=False, failure_capture=None, owned_visible_read=None):
+def measure(client, agents, measured_at, marker_timeout_ms=DEFAULT_MARKER_TIMEOUT_MS, read_lines=DEFAULT_READ_LINES, warn=None, poll_attempts=DEFAULT_MARKER_POLL_ATTEMPTS, poll_interval_sec=DEFAULT_MARKER_POLL_INTERVAL_SEC, sleep=time.sleep, settle_sec=COMPOSER_SETTLE_SEC, allow_recovery=False, failure_capture=None, owned_visible_read=None, before_dismiss=None):
     """Measure every agent in `agents` and return the snapshot document.
 
     A failure on one agent is recorded on that agent's record and does not
@@ -385,6 +389,7 @@ def measure(client, agents, measured_at, marker_timeout_ms=DEFAULT_MARKER_TIMEOU
                 session=session,
                 failure_capture=failure_capture,
                 owned_visible_read=owned_visible_read,
+                before_dismiss=before_dismiss,
             )
         except (HerdrError, ParseError) as exc:
             if not getattr(exc, "_failure_captured", False):

@@ -688,7 +688,7 @@ class WindowProbeTest(unittest.TestCase):
             return {"agents": {probes[0].name: {"windows": None, "headroom_pct": None,
                 "error": {"code": "parse_error", "message": "usage unavailable"}}}}
         with patch("foreman.lifecycle.identity", return_value="probe-fixed"), \
-                patch("foreman.lifecycle._prepare_fresh_probe"), \
+                patch("foreman.lifecycle._prepare_fresh_probe", return_value=None), \
                 patch("foreman.measure.measure", side_effect=measured) as usage:
             result = measure_worker_kinds(client, [template()], "2026-10-01T00:00:00+00:00", sleep=sleeps)
         self.assertEqual(sleeps.call_count, 2)
@@ -781,6 +781,7 @@ class ProbeUsageRecoveryTest(unittest.TestCase):
                 client.agent_get.return_value = {"name": "probe-fixed", "agent": kind,
                     "pane_id": "probe-pane", "agent_status": "idle", "agent_session": None}
                 client.pane_read.return_value = "original startup observation"
+                client.argv_pane_process_info.return_value = ["herdr", "pane", "process-info", "--pane", "probe-pane"]
                 def refuse(_client, _worker, _pane, **options):
                     options["startup_observe"]()
                     raise HerdrError("original startup cause", {"failure_message": "original startup cause"})
@@ -1008,7 +1009,7 @@ class WorkspacePlacementTest(unittest.TestCase):
             self.assertEqual(focus(), "w1")
             return {"agents": {probes[0].name: {"headroom_pct": 90, "pane_id": "w9:p7"}}}
         with patch("foreman.lifecycle.identity", return_value="probe-claude-fixed"), \
-                patch("foreman.lifecycle._prepare_fresh_probe"), \
+                patch("foreman.lifecycle._prepare_fresh_probe", return_value=None), \
                 patch("foreman.measure.measure", side_effect=measured):
             result = measure_worker_kinds(client, [template()], "2026-10-01T00:00:00+00:00", sleep=lambda _: None)
         self.assertEqual(result["failed_agents"], [])

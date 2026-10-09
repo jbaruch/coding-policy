@@ -26,6 +26,51 @@ AT = "2026-10-08T19:00:00+00:00"
 
 
 class ProbeRecoveryTest(unittest.TestCase):
+    def test_failed_usage_cleanup_is_retained_and_gates_until_owned_resolution(self):
+        for kind in ("claude", "codex", "grok"):
+            with self.subTest(kind=kind):
+                self.state = self.root / (kind + "-cleanup.json")
+                worker, client = self.worker(kind), self.native(kind)
+                failure = {"agents": {"unused": {"kind": kind, "headroom_pct": None,
+                    "error": {"code": "herdr_error", "message": "original usage failure", "details": {}}}}}
+                def failed_measure(_client, workers, _at, **_options):
+                    return {**failure, "agents": {workers[0].name: failure["agents"]["unused"]}}
+                with patch.object(self, "measured", side_effect=failed_measure), \
+                        patch.object(client, "pane_close", side_effect=HerdrError("cleanup failed", {})):
+                    result = self.measure(worker, client)
+                row = probe_recovery.pending(self.state, worker)
+                self.assertIsNotNone(row)
+                assert row is not None
+                self.assertEqual(row["phase"], "cleanup")
+                self.assertIn("resolve-probe", result["agents"][kind]["error"]["message"])
+                self.assertIn("original usage failure", result["agents"][kind]["error"]["message"])
+                before = list(client.events)
+                self.assertEqual(self.measure(worker, client)["failed_agents"], [kind])
+                self.assertEqual(client.events, before)
+                self.assertEqual(self.resolve(row, worker, client)["status"], "closed")
+                self.assertEqual(client.panes, {})
+
+    def test_replaced_process_is_preserved_and_the_original_probe_remains_gated(self):
+        worker, client = self.worker("codex"), self.native("codex")
+        original_pid = []
+        def replaced(_client, workers, at, **_options):
+            live = client.agents[workers[0].name]
+            original_pid.append(live["pid"])
+            live["pid"] += 1
+            return self.measured(_client, workers, at, **_options)
+        with patch("foreman.measure.measure", side_effect=replaced):
+            result = lifecycle.measure_worker_kinds(client, [worker], AT,
+                state_path=self.state, sleep=lambda _: None)
+        row = probe_recovery.pending(self.state, worker)
+        self.assertIsNotNone(row)
+        assert row is not None
+        self.assertEqual(row["process"]["pid"], original_pid[0])
+        self.assertEqual(result["failed_agents"], ["codex"])
+        self.assertFalse(any(event[0] in {"close", "prompt"} for event in client.events))
+        with self.assertRaises(HerdrError):
+            self.resolve(row, worker, client)
+        self.assertFalse(any(event[0] in {"close", "prompt"} for event in client.events))
+
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
@@ -144,7 +189,7 @@ class ProbeRecoveryTest(unittest.TestCase):
         self.assertFalse(any(event[0] in {"prompt", "close"} for event in client.events[len(before):]))
 
     def test_newer_gate_refuses_measurement_without_native_activity_or_rewriting(self):
-        save_state(probe_recovery.store_path(self.state), {"schema_version": 2, "records": []})
+        save_state(probe_recovery.store_path(self.state), {"schema_version": 3, "records": []})
         before = probe_recovery.store_path(self.state).read_bytes()
         client = self.native("codex")
         with self.assertRaises(StateError):
@@ -211,7 +256,33 @@ class ProbeRecoveryTest(unittest.TestCase):
             with self.assertRaises(StateError):
                 self.measure(worker, client)
             self.assertEqual(probe_recovery.store_path(self.state).read_bytes(), original)
-            save_state(probe_recovery.store_path(self.state), {"schema_version": 1, "records": [row]})
+            save_state(probe_recovery.store_path(self.state), {"schema_version": probe_recovery.SCHEMA_VERSION, "records": [row]})
+
+    def test_owner_migrates_startup_gates_without_changing_original_proof(self):
+        worker, client = self.worker("codex"), self.native("codex", dialog=True)
+        self.measure(worker, client)
+        row = probe_recovery.pending(self.state, worker)
+        assert row is not None
+        legacy = {key: value for key, value in row.items() if key != "phase"}
+        legacy["schema_version"] = 1
+        save_state(probe_recovery.store_path(self.state), {"schema_version": 1, "records": [legacy]})
+        before = list(client.events)
+        migrated = probe_recovery.load(self.state)
+        self.assertEqual(client.events, before)
+        self.assertEqual(migrated["schema_version"], 2)
+        self.assertEqual(migrated["records"][0], row)
+        self.assertEqual(json.loads(probe_recovery.store_path(self.state).read_text()), migrated)
+
+    def test_missing_cleanup_phase_refuses_without_discarding_the_gate(self):
+        worker, client = self.worker("codex"), self.native("codex", dialog=True)
+        self.measure(worker, client)
+        data = probe_recovery.load(self.state)
+        del data["records"][0]["phase"]
+        save_state(probe_recovery.store_path(self.state), data)
+        before = probe_recovery.store_path(self.state).read_bytes()
+        with self.assertRaises(StateError):
+            probe_recovery.load(self.state)
+        self.assertEqual(probe_recovery.store_path(self.state).read_bytes(), before)
 
     def test_changed_cleanup_config_refuses_before_native_calls(self):
         for change in ("composer_glyph", "composer_placeholders", "composer_ignore_dim", "launch_args"):

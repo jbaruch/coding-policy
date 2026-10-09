@@ -823,12 +823,16 @@ Each snapshot is one `measure` document: `schema_version`, `measured_at`, an
 `agents` object keyed by agent name (`kind`, `state`, `herdr_state`,
 `state_source`, `pane_id`, `windows`, `credits`, `plan`, `headroom_pct`,
 `skipped`), and `failed_agents`. A failed agent carries `error.code`,
-`error.message`, and `error.details`; a usage failure whose pane shows the
+`error.message`, and `error.details`; a disposable startup or usage failure whose bound pane shows the
 pending-update banner sets `error.details.pending_cli_update` to true so the
 round preflight can name its maintenance relaunch command. `headroom_pct` is the minimum `remaining_pct`
 across that agent's windows. `state_source` is `herdr` or `probe`, naming which
 signal decided `state`; `herdr_state` carries what herdr claimed. `plan` is an
 informational plan name and never feeds headroom.
+
+Retained disposable probe gates are a separate owner artifact. Their schema,
+migration, writer/reader contract and guarded recovery command are documented
+in `skills/herdr-foreman/references/probe-recovery.md`.
 
 ## Writer / Reader Contract
 

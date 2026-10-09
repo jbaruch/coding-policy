@@ -10,6 +10,10 @@
   Capacity stays unknown, provider/tier choices remain intact, and a cleanup
   error retains the original usage diagnostic. Persisted observations contain
   counts and fixed UI cues, never arbitrary pane text or draft contents.
+  Failed owned cleanup retains a versioned probe gate and a guarded owner
+  recovery command; replacement probes wait for recorded closure. Full
+  original bindings guard dialog dismissal and cleanup. Captured update
+  banners keep the existing typed maintenance flag.
 
 ## 0.3.388 — 2026-10-09
 
