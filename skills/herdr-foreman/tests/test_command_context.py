@@ -11,7 +11,6 @@ from dataclasses import asdict, FrozenInstanceError, replace
 from concurrent.futures import ThreadPoolExecutor
 import json
 import io
-import ast
 import subprocess
 import tempfile
 import unittest
@@ -20,7 +19,6 @@ from typing import Any, cast
 
 from foreman.command_context import (
     HerdrCommandContext, RemoteForemanAttestation, RemoteContextError, RemoteIndeterminateError,
-    REFUSAL_REMEDIES, refuse,
 )
 from foreman.herdr import HerdrClient
 from foreman.remote_owner import RemoteForemanOwner, loaded_policy
@@ -31,17 +29,14 @@ from foreman.state import empty_state
 
 
 class ContextTest(unittest.TestCase):
-    def test_each_internal_refusal_has_a_reason_specific_remedy(self):
-        for module in ("command_context.py", "remote_owner.py", "herdr.py", "cli.py"):
-            tree = ast.parse((ROOT / "foreman" / module).read_text(encoding="utf-8"))
-            for node in ast.walk(tree):
-                if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
-                        and node.func.id == "refuse" and node.args
-                        and isinstance(node.args[0], ast.Constant) and len(node.args) == 1):
-                    self.assertIn(node.args[0].value, REFUSAL_REMEDIES)
-        self.assertIn("0700", str(refuse("remote_owner_store_not_private")))
-        self.assertIn("request_id", str(refuse("task_request_fields_invalid")))
-        self.assertIn("task ID", str(refuse("task_not_found")))
+    def test_invalid_contexts_explain_the_specific_configuration_recovery(self):
+        with self.assertRaises(RemoteContextError) as invalid_profile:
+            replace(self.receipt(), machine_profile_id="ssh://secret@host")
+        self.assertIn("valid receipt", str(invalid_profile.exception))
+        self.assertNotIn("ssh://secret", str(invalid_profile.exception))
+        with self.assertRaises(RemoteContextError) as mixed_mode:
+            HerdrCommandContext("herdr", ("--machine", "machine_id"))
+        self.assertIn("typed native or attested-remote context", str(mixed_mode.exception))
 
     def receipt(self):
         return RemoteForemanAttestation("controller", "principal", "machine_id", "session", "w1",
@@ -247,6 +242,20 @@ class RemoteOwnerTest(unittest.TestCase):
         first = self.owner.task_request({"request_id": "request", "task": "Implement the task"})
         self.assertEqual(first, self.owner.task_request({"request_id": "request", "task": "Implement the task"}))
         self.assertEqual(first, self.owner.task_query({"task_id": first["task_id"]}))
+        self.assertEqual(self.calls, [])
+
+    def test_task_errors_explain_request_and_lookup_recovery_without_reattachment(self):
+        with self.assertRaises(RemoteContextError) as invalid_request:
+            self.owner.task_request({"request_id": "request", "task": "task", "model": "override"})
+        self.assertIn("remove all execution and routing fields", str(invalid_request.exception))
+        with self.assertRaises(RemoteContextError) as missing_task:
+            self.owner.task_query({"task_id": "not-returned-by-this-owner"})
+        self.assertIn("task ID returned by this same owner", str(missing_task.exception))
+        self.store.chmod(0o400)
+        with self.assertRaises(RemoteContextError) as private_mode:
+            self.client.pane_close("w1:p2")
+        self.store.chmod(0o600)
+        self.assertIn("exact mode 0600", str(private_mode.exception))
         self.assertEqual(self.calls, [])
 
     def test_no_raw_process_command_or_competing_foreman_is_allowed(self):

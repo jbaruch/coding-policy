@@ -15,7 +15,7 @@ the utility alone records the saved notes and their separate index.
 | `<task-reports-dir>/TASK-LEDGER.md` | `herdr-foreman`, written by the foreman | Evidence-backed assignment acceptance and task completion across rounds |
 | `<canonical-state-path>.retrospectives/` | `herdr-foreman`, through its retrospective utility | Immutable retrospective notes, versioned index, and transition coverage |
 | `<canonical-state-path>.foreman-reset.json` | `skills/herdr-foreman/foreman/foreman_reset.py` | One record per foreman round-boundary reset; see Foreman Reset Record below |
-| Controller-configured private remote owner JSON | `skills/herdr-foreman/foreman/remote_owner.py` | Attested command context, current single-controller lease, indeterminate intent and task ingress; schema and writer/reader contract in `references/remote-context.md` |
+| Controller-configured private remote owner JSON | `skills/herdr-foreman/foreman/remote_owner.py` | Attested command context, current single-controller lease, indeterminate intent and task ingress; schema and writer/reader contract in `skills/herdr-foreman/references/remote-context.md` |
 
 ## Home Migration
 
@@ -982,7 +982,7 @@ store requires recovery of its history before rebinding or writing.
   native binding. It keeps `at`, `generation`, `state_path` and `identity`;
   the identity is `{kind: "attested-remote", cwd, pane_id, attestation, owner_store_path}` with no
   `herdr_env` or fabricated native session. Its receipt, owner validation and
-  unsupported-reader behavior are in `references/remote-context.md`. Native
+  unsupported-reader behavior are in `skills/herdr-foreman/references/remote-context.md`. Native
   binding schema 1 and every other supervision row stay unchanged.
   The canonical owner-store path must match the private remote lease record.
   A cross-mode binding refuses instead of converting its history.
