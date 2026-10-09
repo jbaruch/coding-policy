@@ -15,7 +15,7 @@ Each `tiers` entry maps a round type to:
 
 ```json
 {
-  "model": "opus-5",
+  "model": "claude-opus-5-5",
   "effort": "high",
   "multiplier": 1.0,
   "billing_evidence": null
