@@ -144,6 +144,15 @@ CODEX_UNPAINTED_EMPTY = (
     "  GPT-6.1-Sol high · /private/tmp/fixture · Execute issue #707 reset\n"
     "  \x1b[0m\x1b[1m?\x1b[0m for shortcuts     ⚠ 2 warnings · \x1b[0m\x1b[1mf2 \x1b[0mto view"
 )
+# Codex 0.162.0 startup, observed in an owned PTY without task input. These
+# visible rows retain its SGR 22 intensity resets, not a Herdr ANSI export.
+CODEX_INTENSITY_RESET_EMPTY = (
+    "\x1b[22m\x1b[1m› \x1b[22m\x1b[2m\x1b[2mAsk Codex to do anything\n"
+    "\n"
+    "  GPT-6-Astra high · /private/tmp/fixture\n"
+    "  \x1b[22m\x1b[1m? \x1b[22mfor shortcuts     ⚠ 3 warnings · "
+    "\x1b[1mf2 \x1b[22mto view\x1b[0m"
+)
 CODEX_HELD = "  Codex v1.2  ~/Projects/x\n  ─────────────\n  › /new\n"
 CODEX_FRESH = "  ╭─ Codex ─╮\n  │ new session │\n  ╰─────────╯\n  › \n"
 
@@ -811,6 +820,48 @@ CODEX_BLANK_THEN_CONTINUATION = (
 
 
 class PlaceholderTest(unittest.TestCase):
+    def test_native_intensity_reset_placeholder_excludes_the_footer(self):
+        for leading_reset in ("0", "22"):
+            for label_reset in ("0", "22"):
+                for reset_after_space in (False, True):
+                    with self.subTest(leading_reset=leading_reset,
+                                     label_reset=label_reset,
+                                     reset_after_space=reset_after_space):
+                        shortcut = "\x1b[{}m\x1b[1m?{}for shortcuts".format(
+                            leading_reset,
+                            " \x1b[{}m".format(label_reset) if reset_after_space
+                            else "\x1b[{}m ".format(label_reset),
+                        )
+                        screen = CODEX_INTENSITY_RESET_EMPTY.replace(
+                            "\x1b[22m\x1b[1m? \x1b[22mfor shortcuts", shortcut,
+                        )
+                        composer = inspect_composer(screen, BY_NAME["codex"])
+                        self.assertFalse(composer.occupied)
+                        self.assertTrue(composer.placeholder)
+                        self.assertEqual(composer.content, "")
+
+    def test_intensity_reset_footer_does_not_hide_recalled_input(self):
+        for draft in ("\n  keep this continuation", "\n\n  keep this paragraph"):
+            with self.subTest(draft=draft):
+                screen = CODEX_INTENSITY_RESET_EMPTY.replace("\n\n", draft + "\n\n", 1)
+                composer = inspect_composer(screen, BY_NAME["codex"])
+                self.assertTrue(composer.occupied)
+                self.assertIn("keep this", composer.content)
+                self.assertNotIn("for shortcuts", composer.content)
+
+    def test_intensity_reset_footer_requires_native_key_style_and_separator(self):
+        for screen in (
+            strip_ansi(CODEX_INTENSITY_RESET_EMPTY),
+            CODEX_INTENSITY_RESET_EMPTY.replace("\n\n", "\n"),
+            CODEX_INTENSITY_RESET_EMPTY.replace("\x1b[1m? \x1b[22m", "\x1b[1m? "),
+            CODEX_INTENSITY_RESET_EMPTY.replace("\x1b[1m?", "\x1b[2m?"),
+            CODEX_INTENSITY_RESET_EMPTY.replace("\x1b[1m?", "\x1b[1:0m?"),
+            CODEX_INTENSITY_RESET_EMPTY.replace("? \x1b[22m", "?\x1b[22m"),
+            CODEX_INTENSITY_RESET_EMPTY + "\n  further draft text",
+        ):
+            with self.subTest(screen=screen):
+                self.assertTrue(inspect_composer(screen, BY_NAME["codex"]).occupied)
+
     def test_native_unpainted_placeholder_excludes_the_styled_footer(self):
         for screen in (CODEX_UNPAINTED_EMPTY, CODEX_UNPAINTED_EMPTY.replace(
                 "\x1b[1m?\x1b[0m for", "\x1b[1m? \x1b[0mfor")):
@@ -1012,6 +1063,11 @@ class LiveKillSequenceTest(unittest.TestCase):
         ensure_ready(HerdrClient(runner=runner), BY_NAME["codex"], sleep=NO_SLEEP)
         self.assertEqual(runner.writes(), [])
 
+    def test_native_intensity_reset_placeholder_sends_no_recovery_keys(self):
+        runner = self._runner(CODEX_INTENSITY_RESET_EMPTY)
+        ensure_ready(HerdrClient(runner=runner), BY_NAME["codex"], sleep=NO_SLEEP)
+        self.assertEqual(runner.writes(), [])
+
     def test_no_ctrl_c_reaches_codex_on_the_live_pane(self):
         runner = self._runner(CODEX_PLACEHOLDER_DIM)
         ensure_ready(HerdrClient(runner=runner), BY_NAME["codex"], sleep=NO_SLEEP)
@@ -1207,6 +1263,17 @@ class FreshStartupDeliveryTest(unittest.TestCase):
                                   before_prompt=boundary, sleep=NO_SLEEP, attempts=1)
         return client, boundary, writes, result
 
+    def test_native_intensity_reset_startup_sends_once_after_two_empty_reads(self):
+        client, boundary, writes, result = self.run_send([
+            (CODEX_INTENSITY_RESET_EMPTY, True),
+            (CODEX_INTENSITY_RESET_EMPTY, True), ("immutable brief", True),
+        ])
+        self.assertEqual(writes, [("codex", "immutable brief")])
+        self.assertTrue(result["landed"])
+        boundary.assert_called_once()
+        client.pane_send_keys.assert_not_called()
+        client.pane_send_text.assert_not_called()
+
     def test_native_claude_dynamic_hint_permits_one_prompt_without_recovery(self):
         # #723: captured Claude 2.1.294 ANSI composer and decorated footer.
         frame = (
@@ -1309,7 +1376,9 @@ class FreshStartupDeliveryTest(unittest.TestCase):
     def test_persistent_drafts_refuse_at_the_readonly_bound_without_keys(self):
         from unittest.mock import Mock, patch
         for frame in ["› authored draft", "\x1b[2m› recalled draft\x1b[0m",
-                      self.EMPTY + "\n  authored continuation", self.ANIMATED]:
+                      self.EMPTY + "\n  authored continuation", self.ANIMATED,
+                      CODEX_INTENSITY_RESET_EMPTY.replace("\n\n", "\n  recalled draft\n\n", 1),
+                      strip_ansi(CODEX_INTENSITY_RESET_EMPTY)]:
             with self.subTest(frame=frame):
                 client, boundary = Mock(), Mock()
                 with patch("foreman.composer.read_pane", return_value=(frame, True)) as reads, self.assertRaises(HerdrError) as caught:
