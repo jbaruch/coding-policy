@@ -1,5 +1,14 @@
 # Changelog
 
+### Fixed
+
+- Retained disposable startup probes can recover after their native runtime
+  creates its first session (#721). The owner preserves the original null
+  observation and records the first session separately under unchanged process,
+  pane, name and tier proof. A draft, failed cleanup or interruption keeps that
+  session bound; later identity changes still refuse cleanup. Gate schema 3
+  migrates existing startup/cleanup rows without changing original evidence.
+
 ## 0.3.390 — 2026-10-09
 
 ### Fixed

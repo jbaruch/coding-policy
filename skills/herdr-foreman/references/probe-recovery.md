@@ -16,6 +16,9 @@ The agent name comes from the measure receipt, not a current assignment. After
 the foreman resolves the actual native dialog within existing task authority,
 the command checks the original name, kind, pane, native-session observation,
 foreground process and tier, then proves idle/done and an empty composer.
+First-session creation after a startup dialog uses the separate durable binding
+owned by `skills/herdr-foreman/foreman/probe_recovery.py` (`resolve`). The original
+observation remains unchanged; binding a first session does not clear the gate.
 It rechecks before closing only that owner-created probe. No usage command,
 assignment, trust choice or recovery key is sent.
 
@@ -28,8 +31,8 @@ diagnostic, without a recovery object or native cleanup. Drafts,
 working/blocked targets, changed/missing identity or tier,
 unsupported config, unreadable evidence and cleanup failures do not authorize
 closure. An absent agent permits cleanup only when its recorded pane is absent
-or holds only its shell. The recorded absence of a first-start native session
-must still match; a later session is not original proof.
+or holds only its shell. A changed or missing bound session refuses cleanup;
+a first-start binding never authorizes replacement of a recorded session.
 
 Repeat normal measure after successful resolution. Until then it reports
 unknown capacity for the affected worker kind/billing window without launching
@@ -52,17 +55,19 @@ owns an adjacent `<state-path>.probes.json`; `measure` and `resolve-probe` hold
 the canonical state's existing transaction lock through observation and writes.
 Writes use the existing atomic state writer.
 
-Document schema 2 is `{schema_version: 2, records: [...]}`. Each schema-2 row
+Document schema 3 is `{schema_version: 3, records: [...]}`. Each schema-3 row
 contains `at` (timezone-qualified original observation), `agent`, `pane_id`,
 `worker_kind`, native `kind`, original canonical `config_path`, `window_group`
 (empty when unshared), selected
 `tier`, `config_sha256` (immutable SHA-256 of the original worker's exported
 configuration including its billing window), original raw native-session observation `native` (object or explicit
-null), original verified `process`, `status` (`pending` or `closed`), and
+null), `startup_native` (null until the owner observes and durably binds the first
+session after a null startup observation), original verified `process`, `status` (`pending` or `closed`), and
 `closure` (null until actual closure), and `phase` (`startup` or `cleanup`).
 Startup rows retain pre-input native dialogs; cleanup rows retain failed
 disposable cleanup after startup or usage. Original identity/tier fields remain
-unchanged on resolution. Closed rows preserve the recovery history.
+unchanged on resolution. `startup_native` is separate from that original proof
+and remains bound across failed resolution attempts. Closed rows preserve the recovery history.
 Resolution requires the current worker config to match that digest before any
 native call; editing its launch/composer settings cannot authorize cleanup.
 
@@ -85,8 +90,9 @@ Failed cleanup retention writes fail visibly and preserve the surface, never
 claiming persistence or permitting an automatic retry.
 
 Readers are those two owner commands. Missing documents mean first use;
-The owner validates and migrates schema 1 to schema 2 on read, stamps original
-rows `phase: startup`, and atomically rewrites the gate. Original proof, status,
+The owner validates and migrates schemas 1 and 2 to schema 3 on read, initializes
+`startup_native: null`, stamps schema-1 rows `phase: startup`, and atomically
+rewrites the gate. Schema-2 phases, original proof, status,
 config digest and closure history stay unchanged. Corrupt or unsupported documents/rows remain unchanged and refuse
 measurement and cleanup with a restore-evidence diagnostic.
 
@@ -94,4 +100,4 @@ This is a gate-store exception to the newer-record no-prior-state fallback in
 `rules/stateful-artifacts.md`: an unresolved row prevents another probe, so
 discarding unsupported evidence would lose that guard. A lagging reader
 refuses rather than initializing an empty store. The owner migrates every
-older version it accepts; schema 1 is the only older supported shape.
+older version it accepts; schemas 1 and 2 are the older supported shapes.
