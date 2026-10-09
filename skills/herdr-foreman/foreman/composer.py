@@ -84,10 +84,12 @@ _SGR_RE = re.compile(r"\x1b\[([0-9;]*)m")
 #: Such a read cannot safely establish the new painted-composer boundary.
 _UNSUPPORTED_SGR_RE = re.compile(r"\x1b\[[0-9;:]*:[0-9;:]*m")
 #: Codex's unpainted empty/draft footer styles the shortcut key alone, then
-#: resets before its label. Editor text does not style individual key hints.
+#: resets intensity (SGR 22 or full reset 0) before its label. Editor text
+#: does not style individual key hints.
 #: Plain wording, model names and ordinary bold/dim draft rows prove nothing.
 _CODEX_SHORTCUT_ROW_RE = re.compile(
-    r"^\s*(?:\x1b\[0m)?\x1b\[1m\?(?:\x1b\[0m | \x1b\[0m)for shortcuts(?:\s|$)"
+    r"^\s*(?:\x1b\[(?:0|22)m)?\x1b\[1m\?"
+    r"(?:\x1b\[(?:0|22)m | \x1b\[(?:0|22)m)for shortcuts(?:\s|$)"
 )
 #: Any other escape sequence, dropped before spanning: CSI (cursor moves,
 #: erases) and OSC strings (titles).

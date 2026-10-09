@@ -1,5 +1,16 @@
 # Changelog
 
+### Fixed
+
+- Recognize Codex's SGR 22 intensity reset around its individually styled
+  shortcut key when locating an unpainted composer footer (#720, follow-up to
+  #719). Codex 0.162.0's empty startup placeholder no longer absorbs the model
+  and shortcut rows as occupied input. Exact shortcut styling and the blank
+  separator remain required; recalled drafts, plain or ambiguous reads, and
+  Claude/Grok composer behavior retain their existing protections. This
+  corrects the observed native style, not the still-pending original judge
+  dispatch and ruling.
+
 ## 0.3.395 — 2026-10-09
 
 ### Fixed
