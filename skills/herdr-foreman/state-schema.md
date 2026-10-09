@@ -1257,7 +1257,9 @@ future format refuses with an update diagnostic. Custom rendering templates
 without the provenance placeholder retain their rendering-only contract.
 
 A first trigger consultation's `TRIGGER_DECLARATION` line is report content,
-not a new owner-state schema or acceptance record. Ordinary schema-2 specialist
+not a new owner-state schema or acceptance record. Only a standalone line counts;
+fenced, quoted, indented and inline-code copies are examples
+(`skills/herdr-foreman/foreman/report_contract.py` `trigger_bindings`). Ordinary schema-2 specialist
 assessment receipts bind its exact bytes; the assessment owner checks its
 absolute repository/artifact, exact task base and reviewed digest. Detection
 reads all-met, non-blocking consultation records and rechecks the report digest

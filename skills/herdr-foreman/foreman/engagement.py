@@ -314,8 +314,7 @@ def record_assessment(state, state_path, data, at):
         brief_evidence, criteria = _brief_criteria(dispatch) if role in CONSULTATION_ROLES else (None, None)
         lines = report_contract.report_lines(body, role, specialty(dispatch), criteria)
         # Binding refusals preserve declared contributions just like line gaps.
-        bindings = [line.removeprefix("TRIGGER_DECLARATION: ") for line in body.splitlines()
-                    if line.startswith("TRIGGER_DECLARATION: ")]
+        bindings = report_contract.trigger_bindings(body)
         if bindings:
             from .triggers import validate_bootstrap_binding
             if role not in CONSULTATION_ROLES or len(bindings) != 1:
