@@ -95,16 +95,34 @@ def holds_initializing_shell(info):
                for row in processes)
 
 
+def foreground_identity_evidence(info, pane):
+    """Return receipt-safe pane/process identity without argv or environment."""
+    processes = info.get("foreground_processes") if isinstance(info, dict) else None
+    rows = processes if isinstance(processes, list) else ()
+    return {
+        "pane": pane,
+        "foreground_pids": [
+            row["pid"] for row in rows
+            if isinstance(row, dict) and type(row.get("pid")) is int and row["pid"] > 0
+        ],
+        "occupant_names": [
+            row["name"] for row in rows
+            if isinstance(row, dict) and isinstance(row.get("name"), str) and row["name"]
+        ],
+    }
+
+
 def require_empty_shell(client, pane, info=None):
     """Refuse a pane whose foreground holds anything but its shell.
 
     `info` is an earlier `pane_process_info` read to judge; without one the
     pane is read now.
     """
-    if not holds_only_shell(client.pane_process_info(pane) if info is None else info):
+    observed = client.pane_process_info(pane) if info is None else info
+    if not holds_only_shell(observed):
         raise HerdrError(
             "Pane {} is occupied: its foreground holds something other than its shell. Name an empty Herdr shell "
-            "pane; nothing was started.".format(pane), {"pane": pane})
+            "pane; nothing was started.".format(pane), foreground_identity_evidence(observed, pane))
 
 
 def verify_running(client, agent, pane, tier):

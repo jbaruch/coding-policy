@@ -39,6 +39,59 @@
   or transport failure stays fail-closed with no retry until the send effect is
   reconciled; `model-tiers.md` now says so.
 
+## 0.3.392 — 2026-10-09
+
+### Fixed
+
+- Disposable probe occupancy failures retain only pane, foreground PID and
+  process-name evidence in durable measure receipts (#730). Owned cleanup binds
+  the original shell before its first close and rechecks live agent ownership
+  after cleanup callbacks; replaced, unproved or occupied surviving panes remain
+  untouched. Snapshot schema 5 migrates existing measurements without inventing
+  cleanup proof. Integration retains the disposable startup recovery, first-session
+  binding and Claude probe-only environment from 0.3.391.
+
+## 0.3.391 — 2026-10-09
+
+### Fixed
+
+- Retained disposable startup probes can recover after their native runtime
+  creates its first session (#721). The owner preserves the original null
+  observation and records the first session separately under unchanged process,
+  pane, name and tier proof. A draft, failed cleanup or interruption keeps that
+  session bound; later identity changes still refuse cleanup. Gate schema 3
+  migrates existing startup/cleanup rows without changing original evidence.
+
+## 0.3.390 — 2026-10-09
+
+### Fixed
+
+- Suppress Claude's predicted-input decoration only in disposable usage-probe
+  workspaces (#721). Native Claude 2.1.295 renders its startup `Try` hint
+  without ANSI styling in the observed terminal; disabling suggestions through
+  the documented session override produces an actually empty composer instead
+  of teaching the guard to mistake arbitrary `Try` text for empty input.
+  Assignment workers, provider roster, tiers, and global/project settings stay
+  unchanged; remaining hints, drafts, dialogs, and replaced identities still
+  refuse input through the existing guards.
+
+## 0.3.389 — 2026-10-09
+
+### Fixed
+
+- Disposable usage failures retain bounded, allowlisted native observations before
+  dialog and pane cleanup (#721). Recovery targets the configured worker kind,
+  not a retired probe and preserves its transport; unproved cleanup permits
+  read-only inspection only. Owned probes use verified visible data when Herdr
+  refuses history reads during a working status; standing workers do not.
+  Capacity stays unknown, provider/tier choices remain intact, and a cleanup
+  error retains the original usage diagnostic. Persisted observations contain
+  counts and fixed UI cues, never arbitrary pane text or draft contents.
+  Failed owned cleanup retains a versioned probe gate and a guarded owner
+  recovery command; replacement probes wait for recorded closure. Full
+  original bindings guard usage input, dialog tabs/dismissal and cleanup. Captured update
+  banners keep the existing typed maintenance flag.
+
 ## 0.3.388 — 2026-10-09
 
 ### Fixed

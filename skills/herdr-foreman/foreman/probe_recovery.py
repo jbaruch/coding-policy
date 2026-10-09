@@ -1,7 +1,7 @@
-"""Owned no-input startup probes; schema/commands: references/probe-recovery.md.
+"""Owned retained disposable probes; schema/commands: references/probe-recovery.md.
 
 The CLI holds the selected state's transaction lock through measure/resolve.
-Only an observed first-start pre-input dialog creates a row. Resolution sends
+First-start pre-input dialogs and failed owned cleanup create gated rows. Resolution sends
 no keys, rechecks original native/process/tier evidence, and records closure
 after the actual pane closes. Unknown/corrupt gate documents refuse work.
 """
@@ -22,7 +22,7 @@ from .state import save_state
 from .supervision import read_json, timestamp
 from .tiers import parse_tiers
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 3
 
 
 def config_digest(template):
@@ -39,17 +39,34 @@ def load(state_path):
     data = read_json(path)
     if data is None:
         return {"schema_version": SCHEMA_VERSION, "records": []}
+    if isinstance(data, dict) and type(data.get("schema_version")) is int and data["schema_version"] in {1, 2}:
+        version = data["schema_version"]
+        _validate(data, path, version=version)
+        data = {**data, "schema_version": SCHEMA_VERSION, "records": [
+            {**row, "schema_version": SCHEMA_VERSION,
+             "phase": "startup" if version == 1 else row["phase"],
+             "startup_native": None} for row in data["records"]]}
+        _validate(data, path)
+        save_state(path, data)
     _validate(data, path)
     return data
 
 
-def _validate(data, path):
-    if (not isinstance(data, dict) or type(data.get("schema_version")) is not int or data["schema_version"] != SCHEMA_VERSION
+def _valid_native(native, kind):
+    return native is None or (isinstance(native, dict)
+        and native.get("source") == "herdr:" + kind and native.get("agent") == kind
+        and native.get("kind") in ("id", "path")
+        and isinstance(native.get("value"), str) and bool(native["value"].strip()))
+
+
+def _validate(data, path, *, version=SCHEMA_VERSION):
+    if (not isinstance(data, dict) or type(data.get("schema_version")) is not int or data["schema_version"] != version
             or not isinstance(data.get("records"), list)):
         raise StateError("Unsupported probe gate {}. Preserve it and restore supported owner evidence before measuring or resolving probes.".format(path), {})
     names = set()
     for row in data["records"]:
-        if (not isinstance(row, dict) or type(row.get("schema_version")) is not int or row["schema_version"] != SCHEMA_VERSION
+        if (not isinstance(row, dict) or type(row.get("schema_version")) is not int or row["schema_version"] != version
+                or version >= 2 and row.get("phase") not in {"startup", "cleanup"}
                 or row.get("status") not in {"pending", "closed"}
                 or any(not isinstance(row.get(key), str) or not row[key].strip() for key in
                        ("agent", "pane_id", "worker_kind", "kind", "at", "config_path"))
@@ -73,9 +90,11 @@ def _validate(data, path):
         except ConfigError as exc:
             raise StateError("Malformed original tier in probe gate {}. Preserve the retained pane and restore the original owner evidence before measuring or resolving.".format(path), {}) from exc
         native = row["native"]
-        if native is not None and (native.get("source") != "herdr:" + row["kind"] or native.get("agent") != row["kind"]
-                or native.get("kind") not in {"id", "path"} or not isinstance(native.get("value"), str) or not native["value"].strip()):
+        if not _valid_native(native, row["kind"]):
             raise StateError("Malformed original native-session observation in probe gate {}. Preserve it and restore actual owner evidence.".format(path), {})
+        if version >= 3 and ("startup_native" not in row or not _valid_native(row["startup_native"], row["kind"])
+                or row["startup_native"] is not None and (native is not None or row["phase"] != "startup")):
+            raise StateError("Malformed first-start native binding in probe gate {}. Preserve it and restore supported owner evidence.".format(path), {})
         names.add(row["agent"])
 
 
@@ -84,25 +103,34 @@ def pending(state_path, template):
         and (row["worker_kind"] == template.name or template.window_group and row["window_group"] == template.window_group)), None)
 
 
-def diagnostic(state_path, row):
-    error = HerdrError("Fresh startup probe {} in {} remains retained; no usage command was sent.".format(row["agent"], row["pane_id"]), {})
-    return owner_recovery(error, "startup_dialog_pending",
-        runnable.command("resolve-probe --state " + shlex.quote(str(state_path)) + " --config " + shlex.quote(row["config_path"]) + " --agent " + shlex.quote(row["agent"])),
-        "Read the retained native pane and follow Runtime Dialogs under existing task authority. After the dialog clears, the named owner command proves the original target and empty composer before cleanup. Repeat normal measure only after that resolution.")
+def _operation(state_path, row, herdr_bin=None):
+    operation = "resolve-probe --state " + shlex.quote(str(state_path)) + " --config " + shlex.quote(row["config_path"]) + " --agent " + shlex.quote(row["agent"])
+    if isinstance(herdr_bin, str) and herdr_bin:
+        operation += " --herdr-bin " + shlex.quote(herdr_bin)
+    return runnable.command(operation)
 
 
-def retain(state_path, template, probe, pane, tier, observation, at, *, config_path=None):
+def diagnostic(state_path, row, *, herdr_bin=None):
+    cleanup = row["phase"] == "cleanup"
+    error = HerdrError(("Disposable probe {} in {} remains retained after unproved cleanup."
+        if cleanup else "Fresh startup probe {} in {} remains retained; no usage command was sent.").format(row["agent"], row["pane_id"]), {})
+    return owner_recovery(error, "probe_cleanup_unproved" if cleanup else "startup_dialog_pending",
+        _operation(state_path, row, herdr_bin),
+        "Read the retained native pane and follow Runtime Dialogs under existing task authority. After the native surface clears, the named owner command proves the original target and empty composer before cleanup. Repeat normal measure only after that resolution.")
+
+
+def retain(state_path, template, probe, pane, tier, observation, at, *, config_path=None, phase="startup"):
     if state_path is None or not isinstance(observation, tuple) or len(observation) != 3:
         raise UsageError("Retaining a startup probe requires the normal measure owner's state and original native/process evidence. Repeat through the public measure command.", {})
     if observation[0] != pane:
         raise HerdrError("Probe moved before reservation; preserve its actual identity and inspect the native pane.", {})
     data = load(state_path)
-    row = {"schema_version": SCHEMA_VERSION, "at": at, "status": "pending",
+    row = {"schema_version": SCHEMA_VERSION, "at": at, "status": "pending", "phase": phase,
         "agent": probe.name, "pane_id": pane, "worker_kind": template.name, "kind": probe.kind,
         "config_path": str(Path(config_path or default_config_path()).expanduser().resolve()),
         "config_sha256": config_digest(template),
         "window_group": template.window_group or "", "tier": tier,
-        "native": observation[1], "process": observation[2], "closure": None}
+        "native": observation[1], "startup_native": None, "process": observation[2], "closure": None}
     data["records"].append(row)
     _validate(data, store_path(state_path))
     save_state(store_path(state_path), data)
@@ -141,17 +169,31 @@ def resolve(state_path, name, templates, client, *, config_path=None):
             return None
         process = verify_running(client, worker, row["pane_id"], row["tier"])
         if (live.get("pane_id") != row["pane_id"] or live.get("agent") != row["kind"]
-                or live.get("name") != name or live.get("agent_session") != row["native"]
+                or live.get("name") != name
                 or process != row["process"] or live.get("agent_status") not in READY_STATES):
             raise HerdrError("Retained probe's original native/process/tier/readiness proof differs; preserve it and resolve only its actual startup dialog.", {})
-        return (row["pane_id"], row["native"], process)
+        native = live.get("agent_session")
+        if not _valid_native(native, row["kind"]):
+            raise HerdrError("Retained probe has malformed native-session evidence; preserve its pane and restore runtime evidence before resolving.", {})
+        expected = row["native"] if row["native"] is not None else row["startup_native"]
+        if expected is None and native is not None and row["phase"] == "startup":
+            # First-start dialogs can precede session creation. Bind the first
+            # ID only under the unchanged owner process/name/pane/tier proof.
+            # Persist while pending, before composer checks: a draft, failed
+            # cleanup or interruption must never permit a later ID swap.
+            row["startup_native"] = native.copy()
+            save_state(store_path(state_path), data)
+            expected = row["startup_native"]
+        if native != expected:
+            raise HerdrError("Retained probe's bound native session changed or disappeared; preserve its pane and original evidence before resolving.", {})
+        return (row["pane_id"], expected, process)
     try:
         if observe() is not None:
             ensure_ready(client, worker, row["pane_id"], startup_observe=observe)
         closure = lifecycle.close(client, name, row["pane_id"], before_close=observe)
     except (HerdrError, UsageError) as exc:
         raise owner_recovery(exc, "probe_cleanup_unproved",
-            runnable.command("resolve-probe --state " + shlex.quote(str(state_path)) + " --config " + shlex.quote(row["config_path"]) + " --agent " + shlex.quote(name)),
+            _operation(state_path, row, getattr(client, "binary", None)),
             "Read the actual retained native pane. Preserve any draft, changed identity/tier, working or unresolved dialog; repeat this guarded owner operation only after the original empty target is proved.") from exc
     row.update(status="closed", closure=closure)
     save_state(store_path(state_path), data)

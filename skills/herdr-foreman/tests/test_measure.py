@@ -171,6 +171,162 @@ def runner_with(statuses, panes, footers=None):
     return runner
 
 
+class OwnedVisibleUsageTest(unittest.TestCase):
+    def runner(self, code="agent_not_idle"):
+        runner = runner_with({"codex": "idle"}, {})
+        runner.set("agent read codex --source recent-unwrapped --lines 80", returncode=1,
+                   stderr=json.dumps({"error": {"code": code, "message": "history unavailable"}}))
+        return runner
+
+    def test_owned_probe_reads_actual_visible_usage_when_history_refuses(self):
+        runner = self.runner()
+        visible = Mock(return_value=CODEX_PANE)
+        snapshot = measure(HerdrClient(runner=runner), [BY_NAME["codex"]], AT,
+                           owned_visible_read=visible, warn=Mock())
+        self.assertEqual(snapshot["failed_agents"], [])
+        self.assertEqual(snapshot["agents"]["codex"]["headroom_pct"], 87.0)
+        visible.assert_called_once_with()
+        self.assertEqual(runner.commands().count("pane send-text w3:p1 /status"), 1)
+
+    def test_no_fallback_authority_or_unrelated_transport_failure_stays_unknown(self):
+        runner = self.runner()
+        snapshot = measure(HerdrClient(runner=runner), [BY_NAME["codex"]], AT)
+        self.assertIsNone(snapshot["agents"]["codex"]["headroom_pct"])
+        visible = Mock(return_value=CODEX_PANE)
+        snapshot = measure(HerdrClient(runner=self.runner("agent_not_found")), [BY_NAME["codex"]], AT,
+                           owned_visible_read=visible)
+        self.assertIsNone(snapshot["agents"]["codex"]["headroom_pct"])
+        visible.assert_not_called()
+
+    def test_changed_probe_binding_never_substitutes_a_quota_reading(self):
+        visible = Mock(side_effect=HerdrError("original probe identity changed", {}))
+        snapshot = measure(HerdrClient(runner=self.runner()), [BY_NAME["codex"]], AT,
+                           owned_visible_read=visible, warn=Mock())
+        self.assertIsNone(snapshot["agents"]["codex"]["headroom_pct"])
+        self.assertIn("identity changed", snapshot["agents"]["codex"]["error"]["message"])
+
+
+class FailureEvidenceTest(unittest.TestCase):
+    def test_replacement_before_usage_send_receives_no_input(self):
+        runner = runner_with({"claude": "idle"}, {})
+        guard = Mock(side_effect=HerdrError("original binding changed; preserve the pane", {}))
+        snapshot = measure(HerdrClient(runner=runner), [BY_NAME["claude"]], AT,
+                           before_input=guard)
+        self.assertIsNone(snapshot["agents"]["claude"]["headroom_pct"])
+        self.assertFalse(any(command.startswith(("pane send-text", "pane send-keys", "agent send-keys"))
+                             for command in runner.commands()))
+
+    def test_replacement_before_dialog_tab_send_receives_no_keys(self):
+        runner = runner_with({"grok": "idle"}, {"grok": "A dialog without the usage marker"})
+        guard = Mock(side_effect=HerdrError("original binding changed; preserve the pane", {}))
+        with self.assertRaises(HerdrError):
+            wait_for_usage_report(HerdrClient(runner=runner), BY_NAME["grok"], "w4:p1",
+                                  poll_attempts=0, before_input=guard)
+        self.assertFalse(any(command.startswith("agent send-keys") for command in runner.commands()))
+
+    def test_each_dialog_tab_send_rechecks_the_binding(self):
+        runner = runner_with({"grok": "idle"}, {"grok": "A dialog without the usage marker"})
+        guard = Mock(side_effect=[None, HerdrError("binding replaced after first tab", {})])
+        with self.assertRaises(HerdrError):
+            wait_for_usage_report(HerdrClient(runner=runner), BY_NAME["grok"], "w4:p1",
+                                  poll_attempts=0, before_input=guard)
+        self.assertEqual(len([command for command in runner.commands()
+                              if command.startswith("agent send-keys")]), 1)
+
+    def test_captured_update_banner_sets_the_existing_maintenance_flag(self):
+        runner = runner_with({"claude": "idle"}, {})
+        with patch("foreman.measure.send_command", side_effect=HerdrError("composer occupied", {})):
+            snapshot = measure(HerdrClient(runner=runner), [BY_NAME["claude"]], AT,
+                               failure_capture=Mock(return_value=CLAUDE_UPDATE_PANE))
+        self.assertTrue(snapshot["agents"]["claude"]["error"]["details"]["pending_cli_update"])
+
+    def test_changed_binding_prevents_dialog_dismissal(self):
+        runner = runner_with({"claude": "idle"}, {"claude": CLAUDE_UNPARSEABLE_PANE})
+        guard = Mock(side_effect=HerdrError("original binding changed; preserve the pane", {}))
+        snapshot = measure(HerdrClient(runner=runner), [BY_NAME["claude"]], AT,
+                           before_dismiss=guard)
+        self.assertIsNone(snapshot["agents"]["claude"]["headroom_pct"])
+        self.assertFalse(any(command.startswith("agent send-keys claude esc") for command in runner.commands()))
+
+    def test_arbitrary_visible_content_never_enters_the_snapshot(self):
+        runner = runner_with({"claude": "idle"}, {})
+        capture = Mock(return_value='DATABASE_URL=postgres://alice:DUMMYpassword@db/internal\n'
+            'a password in prose: DUMMYprosecredential\nTry "DUMMYsuggestioncredential"\nHooks need review')
+        with patch("foreman.measure.send_command", side_effect=HerdrError("composer occupied", {})):
+            snapshot = measure(HerdrClient(runner=runner), [BY_NAME["claude"]], AT, failure_capture=capture)
+        serialized = json.dumps(snapshot)
+        self.assertNotIn("DUMMY", serialized)
+        self.assertNotIn("postgres://", serialized)
+        self.assertIn("native_suggestion", serialized)
+        self.assertIn("hooks_review", serialized)
+        self.assertIn("composer occupied", serialized)
+
+    def test_pane_derived_parse_reason_never_enters_durable_failure_evidence(self):
+        text = "Current week (DUMMYprosecredential)\n101% used"
+        runner = runner_with({"claude": "idle"}, {"claude": text})
+        with patch("foreman.measure.send_command"):
+            snapshot = measure(HerdrClient(runner=runner), [BY_NAME["claude"]], AT,
+                               failure_capture=Mock(return_value=text))
+        error = snapshot["agents"]["claude"]["error"]
+        self.assertEqual(error["code"], "parse_error")
+        self.assertNotIn("DUMMYprosecredential", json.dumps(snapshot))
+        self.assertIn("usage_report_invalid", error["message"])
+
+    def test_usage_failure_preserves_visible_text_before_dialog_dismissal(self):
+        for kind, text in (("claude", CLAUDE_UNPARSEABLE_PANE),
+                           ("codex", "Weekly limit has no reading"),
+                           ("grok", "A different tab has no marker")):
+            with self.subTest(kind=kind):
+                runner = runner_with({kind: "idle"}, {kind: text})
+                seen = []
+                def capture(observed):
+                    self.assertFalse(any(command.startswith("agent send-keys " + kind + " esc")
+                                         for command in runner.commands()))
+                    seen.append(observed)
+                    return observed
+                snapshot = measure(HerdrClient(runner=runner), [BY_NAME[kind]], AT,
+                                   failure_capture=capture, poll_attempts=0)
+                self.assertEqual(seen, [text])
+                self.assertIsNone(snapshot["agents"][kind]["headroom_pct"])
+                message = snapshot["agents"][kind]["error"]["message"]
+                self.assertIn('"observation": "visible"', message)
+                self.assertIn('"line_count": ' + str(len(text.splitlines())), message)
+
+    def test_send_failure_capture_does_not_dismiss_unproved_dialog_or_leak_secrets(self):
+        runner = runner_with({"claude": "idle"}, {})
+        capture = Mock(return_value="Bearer DUMMYcredentialvalue\n" + "x" * 5000)
+        with patch("foreman.measure.send_command", side_effect=HerdrError("composer occupied", {})):
+            snapshot = measure(HerdrClient(runner=runner), [BY_NAME["claude"]], AT,
+                               failure_capture=capture)
+        capture.assert_called_once_with(None)
+        message = snapshot["agents"]["claude"]["error"]["message"]
+        self.assertIn('"character_count": 5028', message)
+        self.assertNotIn("DUMMYcredentialvalue", message)
+        self.assertIn("composer occupied", message)
+        self.assertFalse(any(command.startswith("agent send-keys") for command in runner.commands()))
+
+    def test_success_never_captures_failure_evidence(self):
+        runner = runner_with({"claude": "idle"}, {"claude": CLAUDE_PANE})
+        capture = Mock()
+        snapshot = measure(HerdrClient(runner=runner), [BY_NAME["claude"]], AT,
+                           failure_capture=capture)
+        self.assertEqual(snapshot["failed_agents"], [])
+        capture.assert_not_called()
+
+    def test_dialog_dismissal_failure_keeps_the_pre_dismissal_usage_evidence(self):
+        runner = runner_with({"claude": "idle"}, {"claude": CLAUDE_UPDATE_PANE})
+        capture = Mock(side_effect=lambda text: text)
+        client = HerdrClient(runner=runner)
+        with patch.object(client, "agent_send_keys", side_effect=HerdrError("dialog dismissal failed", {})):
+            snapshot = measure(client, [BY_NAME["claude"]], AT, failure_capture=capture)
+        capture.assert_called_once_with(CLAUDE_UPDATE_PANE)
+        error = snapshot["agents"]["claude"]["error"]
+        self.assertIn("dialog dismissal failed", error["message"])
+        self.assertIn("usage_report_invalid", error["message"])
+        self.assertIn("pending_cli_update", error["message"])
+        self.assertTrue(error["details"]["pending_cli_update"])
+
+
 class MeasureAgentTest(unittest.TestCase):
     def test_current_claude_inline_usage_is_measured_and_dialog_closed(self):
         runner = runner_with({"claude": "idle"}, {"claude": CLAUDE_INLINE_RESET_PANE})
@@ -828,14 +984,26 @@ class FailureTest(unittest.TestCase):
         failure = HerdrError(
             "herdr failed with token={}".format(secret),
             {"command": "herdr --token {}".format(secret), "stderr": secret,
-             "pending_cli_update": True},
+             "pending_cli_update": True, "failure_kind": "probe_startup_unproved",
+             "pane": "w8D:p1", "pane_id": "w8D:p1",
+             "foreground_pids": [101, True, -1, "102"],
+             "occupant_names": ["claude", "vim"],
+             "argv": ["claude", "--token", secret], "composer_literal": secret,
+             "primary_error": {"stderr": secret}},
         )
         with patch("foreman.measure.measure_agent", side_effect=failure):
             snapshot = measure(Mock(), [BY_NAME["claude"]], AT)
         error = snapshot["agents"]["claude"]["error"]
         self.assertNotIn(secret, json.dumps(error))
         self.assertIn("[redacted]", error["message"])
-        self.assertEqual(error["details"], {"pending_cli_update": True})
+        self.assertEqual(error["details"], {
+            "pending_cli_update": True,
+            "failure_kind": "probe_startup_unproved",
+            "pane": "w8D:p1",
+            "pane_id": "w8D:p1",
+            "foreground_pids": [101],
+            "occupant_names": ["claude", "vim"],
+        })
 
     def test_pending_cli_update_is_machine_readable_on_parse_failure(self):
         runner = runner_with({"claude": "idle"}, {"claude": CLAUDE_UPDATE_PANE})
@@ -887,7 +1055,7 @@ class SnapshotTest(unittest.TestCase):
             {"claude": CLAUDE_PANE, "grok": GROK_PANE},
         )
         snapshot = measure(HerdrClient(runner=runner), AGENTS, AT)
-        self.assertEqual(snapshot["schema_version"], 4)
+        self.assertEqual(snapshot["schema_version"], 5)
         self.assertEqual(snapshot["measured_at"], AT)
         self.assertEqual(sorted(snapshot["agents"]), ["claude", "codex", "grok"])
         self.assertEqual(snapshot["failed_agents"], [])

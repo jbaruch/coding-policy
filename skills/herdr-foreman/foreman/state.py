@@ -399,6 +399,19 @@ def _migrate_snapshot_3_to_4(snapshot):
     return snapshot
 
 
+def _migrate_snapshot_4_to_5(snapshot):
+    """Snapshot version 4 -> 5: stamp only the version.
+
+    Version 5 lets `error.details` carry optional cleanup evidence
+    (`failure_kind`, `pane`, `pane_id`, `foreground_pids`, `occupant_names`).
+    A version-4 record did not record any of it, so the migration adds none:
+    an absent key means "not recorded", never an observed empty pane or an
+    empty occupant set. Existing `error.details` stay byte-for-value.
+    """
+    snapshot["schema_version"] = 5
+    return snapshot
+
+
 #: Document migrations, keyed by the version being upgraded FROM. Each value is
 #: (version_produced, upgrade_callable). `_apply_migrations` walks the chain
 #: until it reaches STATE_SCHEMA_VERSION, so a future 1->2 is one entry.
@@ -428,11 +441,12 @@ SNAPSHOT_MIGRATIONS = {
     1: (2, _migrate_snapshot_1_to_2),
     2: (3, _migrate_snapshot_2_to_3),
     3: (4, _migrate_snapshot_3_to_4),
+    4: (5, _migrate_snapshot_4_to_5),
 }
 
 #: The snapshot version this build owns. Kept beside the migration table so
 #: the two move together; `measure.MEASURE_SCHEMA_VERSION` writes it.
-SNAPSHOT_SCHEMA_VERSION = 4
+SNAPSHOT_SCHEMA_VERSION = 5
 
 
 MIGRATIONS = {
