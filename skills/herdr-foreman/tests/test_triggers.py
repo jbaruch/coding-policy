@@ -1280,7 +1280,14 @@ class LegacyReviewCommandTest(TempCase):
     def test_allowed_responsibilities_and_partition_seats_classify(self):
         for roles in ("reviewer", "tester", "advisor", "investigator", "architect", "reviewer#api,tester"):
             with self.subTest(roles=roles):
-                code, out, err = self.run_cli(roles=roles)
+                fields = {}
+                if roles in ("advisor", "investigator", "architect"):
+                    requirements = self.external / "requirements.json"
+                    requirements.write_text(json.dumps({"schema_version": 1, "assignments": {roles: {
+                        "specialty": "architecture", "required_capabilities": ["architecture"],
+                        "independent": False, "engagement": "legacy-architecture"}}}))
+                    fields["requirements"] = str(requirements)
+                code, out, err = self.run_cli(roles=roles, **fields)
                 self.assertEqual(code, 0, err)
                 self.assertEqual(json.loads(out)["fired"], [])
 
@@ -1374,6 +1381,16 @@ class LegacyReviewCommandTest(TempCase):
                        {"base": "HEAD"}, {"head": "main"}, {"base": self.base[:12]}, {"head": self.head[:12]}):
             with self.subTest(change=change):
                 self.refused(**change)
+
+    def test_malformed_seats_and_unqualified_consultations_refuse(self):
+        for role in ("reviewer#", "reviewer#api/bad", "architect#api", "advisor#api",
+                     "reviewer#api=bad", "tester#api#bad"):
+            with self.subTest(role=role), patch("foreman.triggers.git_runner") as git:
+                self.refused(roles=role)
+                git.return_value.assert_not_called()
+        for role in ("advisor", "investigator", "architect"):
+            with self.subTest(role=role):
+                self.assertIn("explicit specialist requirements", self.refused(roles=role))
 
     def test_writing_or_nonempty_plan_refuses(self):
         original = json.loads(self.plan.read_text())
@@ -1519,6 +1536,7 @@ class LegacyReviewCommandTest(TempCase):
         self.assertEqual(code, 1)
         self.assertEqual(json.loads(out)["unaddressed"], ["architect", "documentation", "security", "ux-product"])
         self.assertIn("--decisions cannot", err)
+        self.assertIn("explicit specialist requirements", self.refused(roles="architect"))
         requirements = self.external / "requirements.json"
         requirements.write_text(json.dumps({"schema_version": 1, "assignments": {
             role: {"specialty": specialty, "required_capabilities": [specialty], "independent": independent,

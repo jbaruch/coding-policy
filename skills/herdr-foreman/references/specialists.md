@@ -226,7 +226,10 @@ consultation and ordinary assessment; re-running detection alone supplies none.
 Quoted examples remain inert under the report-line contract above.
 
 Pass the ordinary empty no-write plan, the intended read-only responsibilities
-and their requirements, and the same owner state that holds that assessment:
+and their requirements, and the same owner state that holds that assessment.
+
+Consultation responsibilities retain the normal explicit engagement, specialty
+and capability requirements. Seat syntax must be valid for the normal planner.
 
 ```text
 foreman detect-triggers --repo <dir> --base <full-base-OID> --head <full-head-OID> \

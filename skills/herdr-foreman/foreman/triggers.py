@@ -50,7 +50,7 @@ from .recovery import receipt
 from .state import default_state_path, load_state_checked
 from .composition import REQUIREMENTS_SCHEMA_VERSION, parse_requirements
 from .errors import UsageError
-from .tiers import canonical_role
+from .tiers import canonical_role, require_seatable
 
 
 DECLARATION_SCHEMA_VERSION = 1
@@ -404,7 +404,10 @@ def load_legacy_review_declaration(args, plan, run):
         raise UsageError("--legacy-review-declaration requires --task, literal full --base and --head OIDs, an empty no-write --planned record and read-only --roles. Preserve the unchanged PR and assess its exact full head.", {})
     if getattr(args, "bootstrap_declaration", None) is not None or getattr(args, "decisions", None) is not None:
         raise UsageError("Legacy review accepts neither --bootstrap-declaration nor --decisions; use its accepted external binding and staff every fired trigger.", {})
-    roles = [canonical_role(role) for role in (getattr(args, "roles", None) or "").split(",")]
+    raw_roles = (getattr(args, "roles", None) or "").split(",")
+    for role in raw_roles:
+        require_seatable(role)
+    roles = [canonical_role(role) for role in raw_roles]
     if not set(roles) <= LEGACY_REVIEW_ROLES:
         raise UsageError("Legacy review requires read-only verification/consultation --roles; remove writing, release, judge, empty or unknown responsibilities before classification.", {})
     for revision in (args.base, head):
@@ -466,6 +469,8 @@ def load_bootstrap_declaration(repo, base, artifact, plan, run, state_path=None)
 def load_requirements(path, *, roles=None, task=None):
     """Collect the specialties a requirements file staffs, for trigger cover."""
     if path is None:
+        if roles is not None:
+            parse_requirements(None, roles, task)
         return set()
     try:
         raw = Path(path).read_text(encoding="utf-8")
