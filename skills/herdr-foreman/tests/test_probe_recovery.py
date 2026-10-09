@@ -162,6 +162,10 @@ class ProbeRecoveryTest(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
+        identities = patch("foreman.lifecycle.identity", side_effect=[
+            "probe-fixture-{:03d}".format(index) for index in range(1, 129)])
+        identities.start()
+        self.addCleanup(identities.stop)
         self.root = Path(self.temporary.name)
         self.state = self.root / "state.json"
         self.payload = json.loads((Path(_ROOT) / "config.example.json").read_text())
