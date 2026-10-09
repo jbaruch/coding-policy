@@ -202,8 +202,12 @@ def spawn_commands(client, worker, tier, *, cwd=None):
     return [create, client.argv_agent_start(worker.name, worker.kind, pane, flags)]
 
 
-def spawn(client, worker, tier, *, cwd=None, history=None, before_start=None, sleep=time.sleep):
-    """Create an unfocused workspace, prove a first-launch shell, start one worker, and prove its tier."""
+def spawn(client, worker, tier, *, cwd=None, history=None, before_start=None, owned=None, sleep=time.sleep):
+    """Create an unfocused workspace, prove a first-launch shell, start one worker, and prove its tier.
+
+    A caller passing `owned` receives the pane's proven root `shell_pid` there,
+    so later cleanup can bind the pane to this spawn.
+    """
     if not isinstance(history, (list, tuple)):
         raise UsageError(
             "Assignment spawn needs the owner's assignment history to prove this fresh identity has never held an earlier assignment.",
@@ -224,6 +228,8 @@ def spawn(client, worker, tier, *, cwd=None, history=None, before_start=None, sl
         # history proof above establishes that no prior assignment can carry
         # context under this identity.
         shell = _await_fresh_shell(client, pane, sleep)
+        if owned is not None:
+            owned["shell_pid"] = shell
         _start_fresh_worker(client, worker, pane, tier, shell, before_start, sleep)
         verify_running(client, worker, pane, tier)
         completed = True
@@ -320,6 +326,14 @@ def _await_owned_pane_closed(client, agent, pane, shell, replayed, sleep):
 
 def _close_spawn_pane(client, agent, pane, shell, *, sleep=time.sleep):
     """Close the root returned by workspace_create and prove its result."""
+    if shell is not None:
+        info = _close_process_info(client, pane)
+        if info is not None and info["shell_pid"] != shell:
+            raise HerdrError(
+                "Pane {} changed from shell PID {} to {} before cleanup; refusing to close a reused pane. "
+                "Do not close it; inspect the new surface.".format(pane, shell, info["shell_pid"]),
+                foreground_identity_evidence(info, pane),
+            )
     try:
         client.pane_close(pane)
     except HerdrError as exc:
@@ -334,8 +348,14 @@ def _close_spawn_pane(client, agent, pane, shell, *, sleep=time.sleep):
     return _await_owned_pane_closed(client, agent, pane, shell, False, sleep)
 
 
-def _close_owned_pane(client, agent, pane, expected_shell=None, *, before_close=None, sleep=time.sleep):
-    """Close one recorded pane and prove absence or the same surviving shell."""
+def _close_owned_pane(client, agent, pane, expected_shell=None, *, agent_bound=True,
+                      before_close=None, sleep=time.sleep):
+    """Close one recorded pane and prove absence or the same surviving shell.
+
+    `agent_bound` means a live agent is bound to the recorded pane, which is
+    what ties the surface to this assignment. Without it, only a persisted
+    `expected_shell` can prove a still-present pane is the original surface.
+    """
     if before_close is not None:
         before_close()
     info = _close_process_info(client, pane)
@@ -348,6 +368,13 @@ def _close_owned_pane(client, agent, pane, expected_shell=None, *, before_close=
             )
         return {"pane_id": pane, "agent": agent, "closed": True, "replayed": True}
     shell = info["shell_pid"]
+    if not agent_bound and expected_shell is None:
+        raise HerdrError(
+            "Pane {} still exists but assignment {} is absent and no original shell identity is recorded; "
+            "refusing to close a pane that may have been reused. Inspect the pane before retrying.".format(
+                pane, agent),
+            foreground_identity_evidence(info, pane),
+        )
     if expected_shell is not None and shell != expected_shell:
         raise HerdrError(
             "Pane {} changed from shell PID {} to {} before cleanup; refusing to close a reused pane.".format(
@@ -368,13 +395,14 @@ def _close_owned_pane(client, agent, pane, expected_shell=None, *, before_close=
     return _await_owned_pane_closed(client, agent, pane, shell, False, sleep)
 
 
-def close(client, agent, pane, before_close=None, sleep=time.sleep):
-    """Close one assignment pane, accepting a replay only when its agent is absent."""
+def close(client, agent, pane, before_close=None, sleep=time.sleep, expected_shell=None):
+    """Close one assignment pane, accepting a replay only when its agent and pane are absent."""
     try:
         live = client.agent_get(agent)
     except HerdrError as exc:
         if error_code(exc) == "agent_not_found":
-            return _close_owned_pane(client, agent, pane, before_close=before_close, sleep=sleep)
+            return _close_owned_pane(client, agent, pane, expected_shell, agent_bound=False,
+                                     before_close=before_close, sleep=sleep)
         raise
     if live.get("pane_id") != pane:
         raise HerdrError(
@@ -441,13 +469,16 @@ def measure_worker_kinds(client, templates, measured_at, *, state_path=None, con
         startup_error = None
         closure = None
         cleanup_error = None
+        owned = {}
         try:
             prior = probe_recovery.pending(state_path, template) if state_path is not None else None
             if prior is not None:
                 raise probe_recovery.diagnostic(state_path, prior)
             if not isinstance(tier, dict):
                 raise UsageError("Worker kind {!r} has no coordination tier for its disposable usage probe.".format(template.name), {})
-            pane = spawn(client, probe, tier, history=(), sleep=options.get("sleep", time.sleep))
+            # The root shell PID is the owned surface's identity; cleanup must
+            # match it when the agent has already gone and only the pane remains.
+            pane = spawn(client, probe, tier, history=(), owned=owned, sleep=options.get("sleep", time.sleep))
             _prepare_fresh_probe(client, probe, pane, tier, sleep=options.get("sleep", time.sleep), warn=options.get("warn"))
             startup = False
             snapshot = measure(client, [probe], measured_at, **options)
@@ -475,7 +506,8 @@ def measure_worker_kinds(client, templates, measured_at, *, state_path=None, con
             if pane is not None and not pending:
                 primary = sys.exc_info()[1]
                 try:
-                    closure = close(client, probe.name, pane, sleep=options.get("sleep", time.sleep))
+                    closure = close(client, probe.name, pane, sleep=options.get("sleep", time.sleep),
+                                    expected_shell=owned.get("shell_pid"))
                 except HerdrError as exc:
                     cleanup_error = exc
                     if primary is not None:

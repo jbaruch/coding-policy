@@ -59,7 +59,10 @@
   and process-name evidence in durable measure receipts. Owned pane cleanup
   proves the pane is absent or still holds its original shell before reporting
   success, so a late process or reused pane cannot be mistaken for a clean
-  retry surface (#730).
+  retry surface (#730). Cleanup binds the recorded shell PID before its first
+  pane close: a failed spawn whose pane already changed shells, or an absent
+  assignment whose pane survives without a recorded original shell, is refused
+  without closing, so a reused pane id is never closed as the old probe.
 - Fresh Claude Code startup honors its existing dim-hint classification,
   allowing dynamic native launch suggestions to settle before one exact
   assignment. Plain/typed input, dialogs and recalled Codex drafts retain

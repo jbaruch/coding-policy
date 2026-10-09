@@ -180,15 +180,33 @@ class SpawnCloseTest(unittest.TestCase):
         self.assertTrue(result["closed"])
         self.assertFalse(result["replayed"])
 
-    def test_close_still_closes_a_recorded_pane_when_agent_is_absent(self):
+    def test_close_refuses_unbound_present_pane_when_agent_is_absent(self):
+        # A reused pane id holding a newer shell must never be closed as the old assignment.
+        client = Mock()
+        client.agent_get.side_effect = missing("reviewer-a1")
+        client.pane_process_info.return_value = {
+            "pane_id": "pane-new", "shell_pid": 99, "foreground_processes": [{"pid": 99, "name": "zsh"}]}
+        with self.assertRaisesRegex(HerdrError, "no original shell identity"):
+            close(client, "reviewer-a1", "pane-new")
+        client.pane_close.assert_not_called()
+
+    def test_close_refuses_absent_agent_pane_with_a_different_shell(self):
+        client = Mock()
+        client.agent_get.side_effect = missing("reviewer-a1")
+        client.pane_process_info.return_value = {
+            "pane_id": "pane-new", "shell_pid": 99, "foreground_processes": [{"pid": 99, "name": "zsh"}]}
+        with self.assertRaisesRegex(HerdrError, "reused pane"):
+            close(client, "reviewer-a1", "pane-new", expected_shell=10)
+        client.pane_close.assert_not_called()
+
+    def test_close_closes_absent_agent_pane_that_keeps_its_recorded_shell(self):
         client = Mock()
         client.agent_get.side_effect = missing("reviewer-a1")
         client.pane_process_info.side_effect = [
-            {"pane_id": "pane-new", "shell_pid": 10,
-             "foreground_processes": [{"pid": 10, "name": "zsh"}]},
+            {"pane_id": "pane-new", "shell_pid": 10, "foreground_processes": [{"pid": 10, "name": "zsh"}]},
             failure("pane_not_found", "gone"),
         ]
-        result = close(client, "reviewer-a1", "pane-new")
+        result = close(client, "reviewer-a1", "pane-new", expected_shell=10)
         client.pane_close.assert_called_once_with("pane-new")
         self.assertFalse(result["replayed"])
 
@@ -626,7 +644,12 @@ class FreshShellStartupTest(unittest.TestCase):
         with self.assertRaisesRegex(HerdrError, "shell changed"):
             spawn(client, worker, worker.tiers["coordination"], history=[], sleep=lambda _: None)
         client.agent_start.assert_called_once()
-        client.pane_close.assert_called_once_with("pane-new")
+        client.pane_close.assert_not_called()
+
+    def test_spawn_reports_the_proven_root_shell_for_later_cleanup(self):
+        client, worker, owned = self.client([self.SHELL, self.SHELL, self.SHELL, self.running()]), template(), {}
+        spawn(client, worker, worker.tiers["coordination"], history=[], owned=owned, sleep=lambda _: None)
+        self.assertEqual(owned, {"shell_pid": self.SHELL["shell_pid"]})
 
     def test_new_startup_child_after_initial_readiness_settles_before_launch(self):
         # Live startup briefly reports the root alone, then a later init child.
@@ -654,7 +677,7 @@ class FreshShellStartupTest(unittest.TestCase):
         with self.assertRaisesRegex(HerdrError, "shell changed"):
             spawn(client, worker, worker.tiers["coordination"], history=[], sleep=lambda _: None)
         client.agent_start.assert_not_called()
-        client.pane_close.assert_called_once_with("pane-new")
+        client.pane_close.assert_not_called()
 
     def test_interrupt_during_confirmation_keeps_cleanup_and_primary_interrupt(self):
         client = self.client([self.SHELL])
