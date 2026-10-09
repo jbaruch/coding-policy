@@ -1,5 +1,12 @@
 # Changelog
 
+### Fixed
+
+- Fresh Claude Code startup honors its existing dim-hint classification,
+  allowing dynamic native launch suggestions to settle before one exact
+  assignment. Plain/typed input, dialogs and recalled Codex drafts retain
+  their refusal; no recovery keys or placeholder configuration changes.
+
 ## 0.3.381 — 2026-10-08
 
 ### Fixed
