@@ -774,6 +774,32 @@ class WindowProbeTest(unittest.TestCase):
 
 
 class ProbeUsageRecoveryTest(unittest.TestCase):
+    def test_startup_and_cleanup_failure_preserve_both_causes_and_visible_evidence(self):
+        for kind in ("claude", "codex", "grok"):
+            with self.subTest(kind=kind):
+                client = Mock()
+                client.agent_get.return_value = {"name": "probe-fixed", "agent": kind,
+                    "pane_id": "probe-pane", "agent_status": "idle", "agent_session": None}
+                client.pane_read.return_value = "original startup observation"
+                def refuse(_client, _worker, _pane, **options):
+                    options["startup_observe"]()
+                    raise HerdrError("original startup cause", {"failure_message": "original startup cause"})
+                with patch("foreman.lifecycle.spawn", return_value="probe-pane"), \
+                        patch("foreman.lifecycle.identity", return_value="probe-fixed"), \
+                        patch("foreman.lifecycle.verify_running", return_value={"pid": 42}), \
+                        patch("foreman.lifecycle.ensure_ready", side_effect=refuse), \
+                        patch("foreman.lifecycle.close", side_effect=HerdrError("separate cleanup cause", {})), \
+                        patch("foreman.measure.measure") as usage:
+                    result = measure_worker_kinds(client, [template(kind, kind)], "2026-10-01T00:00:00+00:00")
+                message = result["agents"][kind]["error"]["message"]
+                self.assertIn("original startup observation", message)
+                self.assertIn("original startup cause", message)
+                self.assertIn("separate cleanup cause", message)
+                self.assertIsNone(result["agents"][kind]["headroom_pct"])
+                usage.assert_not_called()
+                client.agent_prompt.assert_not_called()
+                client.agent_send_keys.assert_not_called()
+
     def test_startup_refusal_preserves_its_bound_visible_evidence_without_input(self):
         for kind in ("claude", "codex", "grok"):
             with self.subTest(kind=kind):

@@ -477,13 +477,16 @@ def measure_worker_kinds(client, templates, measured_at, *, state_path=None, con
             closed = isinstance(closure, dict) and closure.get("closed") is True
             condition = ("The owner closed its unused probe; no usage command was sent. Restore the worker-kind configuration/native startup evidence, then repeat normal measure."
                 if closed else "No usage command was sent. Preserve and inspect the actual startup/cleanup evidence; restore the worker-kind configuration and finish owned cleanup before repeating normal measure.")
+            historical = startup_error.details.get("failure_message", startup_error.message)
             failure = cleanup_error or startup_error
             recovered = owner_recovery(failure,
                 "probe_cleanup_unproved" if cleanup_error else "probe_startup_unproved",
                 runnable.command(operation), condition, outcome="retryable" if closed else "blocked")
-            recovered.message = "Next owner operation: `{}`. {} Historical diagnostic: {}".format(
+            recovered.message = "Next owner operation: `{}`. {}{} Historical diagnostic: {}".format(
                 runnable.command(operation), condition,
-                json.dumps(scrub_for_trace(recovered.details["failure_message"], cap=PROBE_HISTORY_BYTES), ensure_ascii=False))
+                " Cleanup diagnostic: " + json.dumps(scrub_for_trace(cleanup_error.message, cap=256), ensure_ascii=False)
+                    if cleanup_error is not None else "",
+                json.dumps(scrub_for_trace(historical, cap=PROBE_HISTORY_BYTES), ensure_ascii=False))
             recovered.args = (recovered.message,)
             record["error"] = snapshot_error(recovered)
         for member in members:
