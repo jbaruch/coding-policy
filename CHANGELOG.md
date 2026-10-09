@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.394 — 2026-10-09
+
 ### Fixed
 
 - A failed model launch prompts availability recovery for that model and seat,
