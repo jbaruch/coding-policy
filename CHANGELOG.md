@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.385 — 2026-10-09
+
 ### Fixed
 
 - Mechanical patch oracles ignore optional unified-diff hunk section headings
