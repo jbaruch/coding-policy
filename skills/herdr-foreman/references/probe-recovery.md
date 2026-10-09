@@ -63,7 +63,8 @@ pre-input startup-dialog refusal or unproved later cleanup. A pending row
 refuses another probe for its worker kind/shared window until the guarded
 owner command records closure. Cleanup rows preserve the original binding,
 not a replacement observed during failure. Reprove that full binding before
-usage-dialog dismissal and pane cleanup. Changed bindings authorize neither.
+each usage/recovery/Enter or dialog-tab input, usage-dialog dismissal and pane
+cleanup. Changed bindings authorize none of them.
 No assignment input occurs under either phase; a cleanup row may have usage
 input. A failed startup-dialog retention write leaves
 ordinary owned pre-input cleanup in force; it cannot advertise a durable gate.

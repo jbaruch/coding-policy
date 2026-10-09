@@ -26,6 +26,35 @@ AT = "2026-10-08T19:00:00+00:00"
 
 
 class ProbeRecoveryTest(unittest.TestCase):
+    def test_actual_measure_path_refuses_replacement_before_usage_input_for_every_runtime(self):
+        for kind in ("claude", "codex", "grok"):
+            with self.subTest(kind=kind):
+                self.state = self.root / (kind + "-before-input.json")
+                worker, client = self.worker(kind), self.native(kind)
+                ready = []
+                original_prepare = lifecycle._prepare_fresh_probe
+                original_read = client.agent_read
+                def prepared(*args, **options):
+                    proof = original_prepare(*args, **options)
+                    ready.append(proof[2]["pid"])
+                    return proof
+                def replaced_read(name, **options):
+                    text = original_read(name, **options)
+                    if ready:
+                        client.agents[name]["pid"] = ready[0] + 1
+                    return text
+                client.agent_read = replaced_read
+                with patch("foreman.lifecycle._prepare_fresh_probe", side_effect=prepared):
+                    result = lifecycle.measure_worker_kinds(client, [worker], AT,
+                        state_path=self.state, sleep=lambda _: None)
+                self.assertEqual(result["failed_agents"], [kind])
+                self.assertIsNone(result["agents"][kind]["headroom_pct"])
+                row = probe_recovery.pending(self.state, worker)
+                assert row is not None
+                self.assertEqual(row["process"]["pid"], ready[0])
+                self.assertEqual(row["phase"], "cleanup")
+                self.assertFalse(any(event[0] in {"prompt", "close"} for event in client.events))
+
     def test_failed_usage_cleanup_is_retained_and_gates_until_owned_resolution(self):
         for kind in ("claude", "codex", "grok"):
             with self.subTest(kind=kind):

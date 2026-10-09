@@ -436,7 +436,8 @@ def measure_worker_kinds(client, templates, measured_at, *, state_path=None, con
                 failure_capture=lambda text: _probe_failure_view(client, probe, pane, tier, original, text),
                 owned_visible_read=lambda: _probe_visible_read(client, probe, pane, tier, original,
                     lines=options.get("read_lines", DEFAULT_READ_LINES)),
-                before_dismiss=lambda: _probe_binding(client, probe, pane, tier, original), **options)
+                before_dismiss=lambda: _probe_binding(client, probe, pane, tier, original),
+                before_input=lambda: _probe_binding(client, probe, pane, tier, original), **options)
             record = dict(snapshot["agents"][probe.name])
             record.pop("tier_billing", None)
             if "error" in record:

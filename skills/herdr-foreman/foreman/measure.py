@@ -133,7 +133,7 @@ def snapshot_error(exc):
     }
 
 
-def wait_for_usage_report(client, agent, pane_id, marker_timeout_ms=DEFAULT_MARKER_TIMEOUT_MS, read_lines=DEFAULT_READ_LINES, poll_attempts=DEFAULT_MARKER_POLL_ATTEMPTS, poll_interval_sec=DEFAULT_MARKER_POLL_INTERVAL_SEC, sleep=time.sleep, warn=None, max_tabs=MAX_DIALOG_TABS, owned_visible_read=None):
+def wait_for_usage_report(client, agent, pane_id, marker_timeout_ms=DEFAULT_MARKER_TIMEOUT_MS, read_lines=DEFAULT_READ_LINES, poll_attempts=DEFAULT_MARKER_POLL_ATTEMPTS, poll_interval_sec=DEFAULT_MARKER_POLL_INTERVAL_SEC, sleep=time.sleep, warn=None, max_tabs=MAX_DIALOG_TABS, owned_visible_read=None, before_input=None):
     """Return pane text containing `agent.usage_marker`.
 
     The marker is a literal substring, never a pattern, so the wait uses
@@ -205,6 +205,8 @@ def wait_for_usage_report(client, agent, pane_id, marker_timeout_ms=DEFAULT_MARK
         and tabs < max_tabs
     ):
         tabs += 1
+        if before_input is not None:
+            before_input()
         client.agent_send_keys(agent.name, agent.dialog_next_tab_keys)
         sleep(poll_interval_sec)
         text = read()
@@ -256,7 +258,7 @@ def skipped_record(agent, status, herdr_status, state_source):
     }
 
 
-def measure_agent(client, agent, marker_timeout_ms=DEFAULT_MARKER_TIMEOUT_MS, read_lines=DEFAULT_READ_LINES, warn=None, poll_attempts=DEFAULT_MARKER_POLL_ATTEMPTS, poll_interval_sec=DEFAULT_MARKER_POLL_INTERVAL_SEC, sleep=time.sleep, max_tabs=MAX_DIALOG_TABS, settle_sec=COMPOSER_SETTLE_SEC, session=None, failure_capture=None, owned_visible_read=None, before_dismiss=None):
+def measure_agent(client, agent, marker_timeout_ms=DEFAULT_MARKER_TIMEOUT_MS, read_lines=DEFAULT_READ_LINES, warn=None, poll_attempts=DEFAULT_MARKER_POLL_ATTEMPTS, poll_interval_sec=DEFAULT_MARKER_POLL_INTERVAL_SEC, sleep=time.sleep, max_tabs=MAX_DIALOG_TABS, settle_sec=COMPOSER_SETTLE_SEC, session=None, failure_capture=None, owned_visible_read=None, before_dismiss=None, before_input=None):
     """Measure one agent and return its record.
 
     Raises HerdrError or ParseError; the caller decides whether one bad agent
@@ -292,6 +294,7 @@ def measure_agent(client, agent, marker_timeout_ms=DEFAULT_MARKER_TIMEOUT_MS, re
             # A usage command opens a dialog; whether the screen "changed" is not
             # a question this flow asks, and waiting on it would cost reads.
             screen_attempts=0,
+            before_input=before_input,
         )
     except HerdrError as exc:
         _capture_failure(exc, failure_capture)
@@ -312,6 +315,7 @@ def measure_agent(client, agent, marker_timeout_ms=DEFAULT_MARKER_TIMEOUT_MS, re
             warn=warn,
             max_tabs=max_tabs,
             owned_visible_read=owned_visible_read,
+            before_input=before_input,
         )
         try:
             parsed = parse_usage(agent.kind, text)
@@ -361,7 +365,7 @@ def measure_agent(client, agent, marker_timeout_ms=DEFAULT_MARKER_TIMEOUT_MS, re
     }
 
 
-def measure(client, agents, measured_at, marker_timeout_ms=DEFAULT_MARKER_TIMEOUT_MS, read_lines=DEFAULT_READ_LINES, warn=None, poll_attempts=DEFAULT_MARKER_POLL_ATTEMPTS, poll_interval_sec=DEFAULT_MARKER_POLL_INTERVAL_SEC, sleep=time.sleep, settle_sec=COMPOSER_SETTLE_SEC, allow_recovery=False, failure_capture=None, owned_visible_read=None, before_dismiss=None):
+def measure(client, agents, measured_at, marker_timeout_ms=DEFAULT_MARKER_TIMEOUT_MS, read_lines=DEFAULT_READ_LINES, warn=None, poll_attempts=DEFAULT_MARKER_POLL_ATTEMPTS, poll_interval_sec=DEFAULT_MARKER_POLL_INTERVAL_SEC, sleep=time.sleep, settle_sec=COMPOSER_SETTLE_SEC, allow_recovery=False, failure_capture=None, owned_visible_read=None, before_dismiss=None, before_input=None):
     """Measure every agent in `agents` and return the snapshot document.
 
     A failure on one agent is recorded on that agent's record and does not
@@ -390,6 +394,7 @@ def measure(client, agents, measured_at, marker_timeout_ms=DEFAULT_MARKER_TIMEOU
                 failure_capture=failure_capture,
                 owned_visible_read=owned_visible_read,
                 before_dismiss=before_dismiss,
+                before_input=before_input,
             )
         except (HerdrError, ParseError) as exc:
             if not getattr(exc, "_failure_captured", False):

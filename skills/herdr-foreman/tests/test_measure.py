@@ -207,6 +207,32 @@ class OwnedVisibleUsageTest(unittest.TestCase):
 
 
 class FailureEvidenceTest(unittest.TestCase):
+    def test_replacement_before_usage_send_receives_no_input(self):
+        runner = runner_with({"claude": "idle"}, {})
+        guard = Mock(side_effect=HerdrError("original binding changed; preserve the pane", {}))
+        snapshot = measure(HerdrClient(runner=runner), [BY_NAME["claude"]], AT,
+                           before_input=guard)
+        self.assertIsNone(snapshot["agents"]["claude"]["headroom_pct"])
+        self.assertFalse(any(command.startswith(("pane send-text", "pane send-keys", "agent send-keys"))
+                             for command in runner.commands()))
+
+    def test_replacement_before_dialog_tab_send_receives_no_keys(self):
+        runner = runner_with({"grok": "idle"}, {"grok": "A dialog without the usage marker"})
+        guard = Mock(side_effect=HerdrError("original binding changed; preserve the pane", {}))
+        with self.assertRaises(HerdrError):
+            wait_for_usage_report(HerdrClient(runner=runner), BY_NAME["grok"], "w4:p1",
+                                  poll_attempts=0, before_input=guard)
+        self.assertFalse(any(command.startswith("agent send-keys") for command in runner.commands()))
+
+    def test_each_dialog_tab_send_rechecks_the_binding(self):
+        runner = runner_with({"grok": "idle"}, {"grok": "A dialog without the usage marker"})
+        guard = Mock(side_effect=[None, HerdrError("binding replaced after first tab", {})])
+        with self.assertRaises(HerdrError):
+            wait_for_usage_report(HerdrClient(runner=runner), BY_NAME["grok"], "w4:p1",
+                                  poll_attempts=0, before_input=guard)
+        self.assertEqual(len([command for command in runner.commands()
+                              if command.startswith("agent send-keys")]), 1)
+
     def test_captured_update_banner_sets_the_existing_maintenance_flag(self):
         runner = runner_with({"claude": "idle"}, {})
         with patch("foreman.measure.send_command", side_effect=HerdrError("composer occupied", {})):
