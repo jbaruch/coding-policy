@@ -1,6 +1,7 @@
 """Delivered report-contract evidence survives replay, migrates from schema 1, and gates warm follow-ups."""
 
 import copy
+import hashlib
 import io
 import json
 import os
@@ -492,6 +493,49 @@ class EngagementTest(unittest.TestCase):
                     record = self.state["specialist_assessments"][-1]
                     self.assertEqual((record["source"], record["contribution"]), ("contribution_only", "design"))
                     self.assertEqual(recovery.accepted(self.state["specialist_assessments"]), [])
+
+    def declaration_artifact(self):
+        artifact = self.root / "reviewed-triggers.json"
+        artifact.write_text(json.dumps({
+            "schema_version": 1, "package_roots": [], "package_change_lines": 50, "trust_boundary_paths": [],
+            "cli_spec_paths": [], "cli_surface_markers": [], "user_doc_paths": []}), encoding="utf-8")
+        return artifact
+
+    def binding_line(self, artifact, **changes):
+        binding = {"repo": "/absolute/target/repo", "base_revision": "a" * 40, "head_revision": "c" * 40,
+                   "path": str(artifact), "sha256": hashlib.sha256(artifact.read_bytes()).hexdigest(), **changes}
+        return "TRIGGER_DECLARATION: " + json.dumps(binding) + "\n"
+
+    def test_a_four_key_or_five_key_binding_is_each_accepted_exactly(self):
+        artifact = self.declaration_artifact()
+        five = json.loads(self.binding_line(artifact)[len("TRIGGER_DECLARATION: "):])
+        four = {key: value for key, value in five.items() if key != "head_revision"}
+        for name, binding in (("five keys", five), ("four keys", four)):
+            with self.subTest(name):
+                self.report.write_text(CONSULT_REPORT + "CONTRIBUTION: design\nTRIGGER_DECLARATION: " + json.dumps(binding) + "\n")
+                result = self.assess({**self.data, "id": "binding-" + name.replace(" ", "-")})
+                self.assertEqual((result["source"], result["contribution"]), ("report", "design"))
+
+    def test_a_binding_outside_the_two_exact_shapes_preserves_the_contribution_and_accepts_nothing(self):
+        artifact = self.declaration_artifact()
+        good = json.loads(self.binding_line(artifact)[len("TRIGGER_DECLARATION: "):])
+        cases = (("abbreviated head", {**good, "head_revision": "c" * 12}),
+                 ("non-hex head", {**good, "head_revision": "z" * 40}),
+                 ("empty head", {**good, "head_revision": ""}),
+                 ("uppercase head", {**good, "head_revision": "C" * 40}),
+                 ("numeric head", {**good, "head_revision": 12}),
+                 ("extra key", {**good, "task": "task-1"}),
+                 ("head without digest", {key: value for key, value in good.items() if key != "sha256"}),
+                 ("changed artifact", {**good, "sha256": "d" * 64}))
+        for name, binding in cases:
+            with self.subTest(name):
+                self.report.write_text(CONSULT_REPORT + "CONTRIBUTION: design\nTRIGGER_DECLARATION: " + json.dumps(binding) + "\n")
+                with self.assertRaises(UsageError) as caught:
+                    self.assess({**self.data, "id": "bad-" + name.replace(" ", "-")})
+                self.assertIsInstance(caught.exception, engagement.ContractGap)
+                record = self.state["specialist_assessments"][-1]
+                self.assertEqual((record["source"], record["contribution"]), ("contribution_only", "design"))
+                self.assertEqual(recovery.accepted(self.state["specialist_assessments"]), [])
 
     def test_two_actual_trigger_declarations_are_refused_whatever_is_quoted(self):
         actual = "TRIGGER_DECLARATION: not-json"
