@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.398 — 2026-10-09
+
 ### Added
 
 - Add an owner-attested, single-controller remote Herdr context (#748).
