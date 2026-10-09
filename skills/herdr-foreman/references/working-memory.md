@@ -109,6 +109,9 @@ The output supplies `memory_path`, the stow record and receipts for each require
 
 Pass the same `--state`, `--config` and `--herdr-bin` the stow was recorded
 under when running Step 17's `foreman-reset` command.
+The live foreman must have a Herdr agent name. An unnamed target refuses before
+the child or reset record is created; the diagnostic names the metadata rename
+and native-session verification to perform before scheduling.
 
 - **Exit 0** — stdout names the scheduled `pane_id`, `stow`, deliverer `pid`
   and `log`
@@ -124,11 +127,13 @@ under when running Step 17's `foreman-reset` command.
   - `reset_ended` — this stow's delivery failed or was interrupted,
     including exhausted preclaim startup recovery
     - Never re-run `foreman-reset` for this stow
-    - Record a user-attention blocker quoting `details.resume_prompt` and
-      `details.record`
     - Keep the current turn and foreground supervision active
     - The failed reset supplies no Stop-authorizing continuation
-    - The operator recovers under the Working Memory carve-out, first
+    - Follow the recorded recovery instruction: a never-typed failure keeps
+      its existing context, fixes the cause, and schedules a new stow without
+      clearing or pasting
+    - An interrupted or indeterminate delivery requires operator recovery
+      under the Working Memory carve-out, first
       confirming the pane is not already running a resumed foreman
     - The next round resets from a new stow
   - `reset_record_newer` — a newer build wrote the reset record
@@ -139,6 +144,9 @@ under when running Step 17's `foreman-reset` command.
     - Record a user-attention blocker naming `details.record`
     - Never edit or delete the file
     - The operator restores it
+  - `reset_foreman_unnamed` — the live foreman has no usable agent name
+    - Perform the named metadata rename and verify the same native session
+    - Re-run `foreman-reset`; no child, reset row or input was created
   - any other `error` — a refused precondition: an unready stow, the wrong
     pane, supervision work still unheld, or an unreadable stow or state
     - Fix the cause stderr names
@@ -152,6 +160,7 @@ under when running Step 17's `foreman-reset` command.
   - Any other error means the record could not be updated
     - The operator closes the reset with the complete
       `foreman-reset-reconcile` command catch-up prints for that row before recovery
+- A lost unclaimed child is reconciled as failed without clearing or pasting
 - Never end the turn with active work unless a genuine user pause or verified
   successor/reset continuation satisfies the Stop gate
 

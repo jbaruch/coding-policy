@@ -591,13 +591,15 @@ refuse only the stage whose harm it prevents.
 - Before the reset, curate the round's lessons
 - Before the reset, save a reset-ready stow
 - The reset runs through `foreman foreman-reset`, never by typing into the foreman's pane
+- A reset that typed nothing preserves its current context; inspect the live binding, fix its cause, and schedule a new stow without clearing or pasting
 - Narrow exception for recovering a reset that failed or was interrupted.
 - Preconditions (all required):
   1. The reset record shows the reset `failed` or `interrupted`
-  2. The operator, never the foreman, clears the foreman's pane
-  3. The operator pastes the resume prompt the reset record saved for that reset
-  4. Before clearing, the operator confirms the pane is not already running a foreman resumed from that reset
-  5. A pane already running that resumed foreman is reconciled as delivered, never cleared
+  2. Its saved owner recovery instruction records typing began or delivery is indeterminate
+  3. The operator, never the foreman, clears the foreman's pane
+  4. The operator pastes the resume prompt the reset record saved for that reset
+  5. Before clearing, the operator confirms the pane is not already running a foreman resumed from that reset
+  6. A pane already running that resumed foreman is reconciled as delivered, never cleared
 - Every other reset runs through `foreman foreman-reset`
 - A reset foreman resumes from the stow, the supervision resume sequence, and the foreman queue
 - Save conversation-only knowledge and open work before a planned foreman reset, compaction, or replacement
