@@ -1152,10 +1152,29 @@ def apply(client, assignments, agents_by_name, paths, at, no_clear=False, settle
             proof = (verify_running(client, agent, step["pane_id"], tier) if tier
                      else foreground_agent(client, step["pane_id"], agent.kind))
             identity = (live.get("pane_id"), live.get("agent_session"), proof)
-            if (live.get("pane_id") != step["pane_id"] or live.get("agent_status") not in READY_STATES | {"blocked"}
-                    or type(proof.get("pid")) is not int or proof["pid"] <= 0
-                    or (startup_identity is not None and identity != startup_identity)):
-                raise owner_recovery(HerdrError("Fresh worker changed its startup identity; nothing was sent.", {"pane_id": step["pane_id"]}),
+            failed_checks = []
+            if live.get("pane_id") != step["pane_id"]:
+                failed_checks.append("pane_id")
+            if live.get("agent_status") not in READY_STATES | {"blocked"}:
+                failed_checks.append("agent_status")
+            if type(proof.get("pid")) is not int or proof["pid"] <= 0:
+                failed_checks.append("process_pid")
+            if startup_identity is not None:
+                for index, component in enumerate(("pane_id", "native_session", "process_proof")):
+                    if identity[index] != startup_identity[index] and component not in failed_checks:
+                        failed_checks.append(component)
+            if failed_checks:
+                # Error-output evidence only (#720), never new dispatch authority.
+                # Compare the complete identities as before, but do not emit
+                # native session values, arbitrary process fields or argv.
+                before = None if startup_identity is None else {
+                    "pane_id": startup_identity[0], "process_pid": startup_identity[2].get("pid"),
+                    "native_session_present": startup_identity[1] is not None}
+                current = {"pane_id": identity[0], "process_pid": proof.get("pid") if type(proof.get("pid")) is int else None,
+                    "native_session_present": identity[1] is not None, "agent_status": live.get("agent_status")}
+                raise owner_recovery(HerdrError("Fresh startup refused checks {}; nothing was sent.".format(
+                    ", ".join(failed_checks)), {"pane_id": step["pane_id"], "startup_evidence": {
+                        "failed_checks": failed_checks, "before": before, "current": current}}),
                     "startup_identity_changed", runnable.command("apply"),
                     "The apply owner must close only its proved pre-send surface and record not_sent before retrying the unchanged plan.")
             startup_identity = identity
