@@ -43,6 +43,36 @@ OVERRIDE = {"source": "operator message 2026-02-03", "quote": "Try the visitor r
 
 
 class RecoveryTests(unittest.TestCase):
+    def test_launch_retry_gate_is_durable_scoped_and_validated(self):
+        from foreman.recovery import record_transient_launch_failure, transient_launch_attempts
+        scope, other_scope = "a" * 64, "b" * 64
+        for attempt in (1, 2, 3):
+            self.assertEqual(record_transient_launch_failure(self.store, TASK, scope, AT), attempt)
+        validate_store(self.store, self.history)
+        self.assertEqual(transient_launch_attempts(self.store, TASK, scope), 3)
+        self.assertEqual(transient_launch_attempts(self.store, TASK, other_scope), 0)
+        self.assertEqual(transient_launch_attempts(self.store, "another-task", scope), 0)
+        saved = copy.deepcopy(self.store)
+        self.store["events"][-1]["details"]["attempt"] = 1
+        with self.assertRaisesRegex(UsageError, "Inconsistent launch retry count"):
+            validate_store(self.store, self.history)
+        legacy = copy.deepcopy(saved)
+        legacy["schema_version"] = 16
+        before = copy.deepcopy(legacy)
+        with self.assertRaisesRegex(UsageError, "unowned launch retry gate"):
+            migrate_store(legacy)
+        self.assertEqual(legacy, before)
+
+    def test_older_launch_history_migrates_without_inventing_failures(self):
+        from foreman.recovery import transient_launch_attempts
+        self.store["schema_version"] = 16
+        previous_events = copy.deepcopy(self.store["events"])
+        self.assertTrue(migrate_store(self.store))
+        validate_store(self.store, self.history)
+        self.assertEqual(self.store["schema_version"], RECOVERY_STORE_VERSION)
+        self.assertEqual(self.store["events"], previous_events)
+        self.assertEqual(transient_launch_attempts(self.store, TASK, "a" * 64), 0)
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
@@ -1352,6 +1382,26 @@ class RecoveryTests(unittest.TestCase):
             record_refusal(self.store, {"dispatch": first, "receipt": self.refusal_receipt("codex-a", "extra.json", extra=True)}, AT, "codex", self.REPORT)
         result = record_refusal(self.store, {"dispatch": first, "receipt": self.refusal_receipt("codex-a")}, AT, "codex", self.REPORT)
         self.assertEqual(result["report_path"], self.REPORT)
+        validate_store(self.store, self.history)
+
+    def test_unavailable_model_identifier_is_not_a_provider_refusal(self):
+        # coding-policy#733: wait-report exit 6 is seat-local model maintenance
+        # on the same provider. It records nothing, burns no refusal slot and
+        # leaves the provider eligible for the unchanged brief.
+        first = self.dispatch_tester(1, "claude-a")
+        before = copy.deepcopy(self.store)
+        receipt = self.refusal_receipt("claude-a", "identifier.json", reason="model_identifier_unavailable")
+        with self.assertRaisesRegex(UsageError, "seat-local model maintenance, not a provider refusal") as caught:
+            record_refusal(self.store, {"dispatch": first, "receipt": receipt}, AT, "claude", self.REPORT)
+        self.assertIn("provider's current catalog", str(caught.exception))
+        self.assertEqual(self.store, before)
+        self.assertIsNone(self.store["dispatches"][0].get("refusal"))
+        # No refusal exists, so the same provider takes the unchanged brief on a fresh report path.
+        self.assertIsNone(refusal_move(self.store, TASK, "tester", None, "claude", self.BRIEF, "/reports/tester-2.md"))
+        # A genuine refusal afterwards is still the FIRST one: the identifier failure did not count.
+        genuine = record_refusal(self.store, {"dispatch": first, "receipt": self.refusal_receipt("claude-a", "genuine.json")}, AT, "claude", self.REPORT)
+        self.assertEqual(genuine["reason"], "terminal_provider_refusal")
+        self.assertIsNotNone(refusal_move(self.store, TASK, "tester", None, "codex", self.BRIEF, "/reports/tester-3.md"))
         validate_store(self.store, self.history)
 
     def test_a_malformed_receipt_is_a_usage_error_not_a_crash(self):

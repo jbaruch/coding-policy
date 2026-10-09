@@ -93,6 +93,45 @@ def seed_contract(case):
 
 
 class CloseMemberTest(MembersCase):
+    def test_post_send_exit_six_needs_unavailable_ledger_then_closes_old_member(self):
+        # Controlled native boundary, real wait-input/ledger/supervision owners.
+        # The failed applied transport remains history; it is not a refusal
+        # or an accepted report, and check-member never writes an assessment.
+        import copy
+        dispatch = self.state["recovery"]["dispatches"][0]
+        dispatch.update(schema_version=4, worker_kind="codex")
+        dispatch["result"].update(schema_version=4, worker_kind="codex", assignment_scoped=True,
+                                  pane_id="pane-a", at=AT)
+        save_state(self.path, self.state)
+        Path(self.report).unlink()
+        before = copy.deepcopy(dispatch)
+        wait_receipt = json.dumps({"found": False, "reason": "model_identifier_unavailable",
+                                   "agent": "codex-a", "report_path": self.report})
+        outcome, code = members.check(self.path, "dispatch-a", run=lambda argv, **kwargs:
+            subprocess.CompletedProcess(argv, 6, stdout=wait_receipt, stderr="seat-local maintenance"))
+        self.assertEqual((code, outcome["exit"]), (6, 6))
+        self.assertFalse(json.loads(outcome["wait"])["found"])
+        self.assertTrue(store.load(self.path)["members"][0]["active"])
+        self.write_ledger("pending")
+        client = Mock()
+        with patch("foreman.members.lifecycle.close") as close:
+            with self.assertRaisesRegex(UsageError, "no assessed outcome"):
+                members.close(self.path, "dispatch-a", self.ledger, LATER, client)
+            close.assert_not_called()
+        evidence = self.root / "unavailable.json"
+        evidence.write_text(wait_receipt)
+        self.write_ledger("unavailable", fields={"observed": "wait exit 6; no report",
+            "evidence": str(evidence), "assessment": "Same-provider model maintenance; old member must close before replanning"})
+        self.emit()
+        with patch("foreman.members.lifecycle.close", return_value={"closed": True}) as close:
+            result = members.close(self.path, "dispatch-a", self.ledger, LATER, client)
+        close.assert_called_once_with(client, "codex-a", "pane-a")
+        self.assertEqual(result["decision"], "unavailable")
+        self.assertFalse(store.load(self.path)["members"][0]["active"])
+        self.assertEqual(store.pending(store.load(self.path)), [])
+        self.assertEqual(json.loads(self.path.read_text())["recovery"]["dispatches"][0], before)
+        self.assertFalse(Path(self.report).exists())
+
     def setUp(self):
         super().setUp()
         Path(self.report).write_text("Reviewed the tip.\nVERDICT: approved\n")
@@ -460,7 +499,7 @@ class CheckMemberCliTest(MembersCase):
         return rc, _json.loads(out.getvalue()), err.getvalue()
 
     def test_a_verdict_exits_zero_with_it_in_the_payload(self):
-        for code in (0, 1, 3, 4, 5):
+        for code in (0, 1, 3, 4, 5, 6):
             with self.subTest(code=code):
                 rc, payload, _ = self.run_cli(code)
                 self.assertEqual((rc, payload["exit"]), (0, code))

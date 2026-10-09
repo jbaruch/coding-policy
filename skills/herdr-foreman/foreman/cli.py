@@ -31,7 +31,7 @@ from .assign import APPLY_SCHEMA_VERSION, dry_run, freeze_decision, freeze_paths
 from . import model_unavailability, probe_recovery, renderable
 from . import attention, capabilities, chronology, churn, composition, engagement, foreman_queue, foreman_reset, historical, home, lifecycle, load_set, members, memory, oracle, partition, recovery, report_delivery, report_gates, restoration, role_clear, retrospective, retrospective_runtime, supervision, supervision_gate, supervision_runtime, triggers
 from .config import FOREMAN_CONFIG_VERSION, default_config_path, load_config, load_foreman, load_judge, load_role_costs, select_agents
-from .errors import AgentBusyError, PlanError, StateError, ForemanError, HerdrError, UsageError, owner_recovery
+from .errors import AgentBusyError, IDENTIFIER_UNAVAILABLE_KIND, IDENTIFIER_UNAVAILABLE_RECOVERY, TRANSIENT_LAUNCH_KIND, PlanError, StateError, ForemanError, HerdrError, UsageError, owner_recovery
 from .herdr import (
     error_code,
     DEFAULT_MARKER_TIMEOUT_MS,
@@ -1783,6 +1783,21 @@ def _apply(args, client, warn, trace, hold_gates):
         )
         validate_fix_history(assignments, state["assignments"], args.task, args.fix_round, recovery=store)
 
+    launch_scopes = {}
+    if fresh_workers:
+        for role, name in assignments.items():
+            launch_scopes[role] = recovery.canonical_digest({
+                "task": args.task, "role": role, "fix_round": args.fix_round, "judge_mode": judge_mode,
+                "launch_scope": model_unavailability.launch_scope(agents_by_name[name], document["worker_kinds"][role]),
+                "tier": {key: tiers[role].get(key) for key in ("model", "effort")},
+                "brief_identity": recovery.brief_identity(paths, role, reports.get(role), contents),
+            })
+            if recovery.transient_launch_attempts(store, args.task, launch_scopes[role]) >= recovery.TRANSIENT_LAUNCH_LIMIT:
+                raise owner_recovery(UsageError("This seat exhausted its transient launch retry budget; no native call was made.", {}),
+                    TRANSIENT_LAUNCH_KIND, runnable.command("load-set --decision diagnose --task " + shlex.quote(args.task)),
+                    "Preserve the task, pins, artifacts and failure history. The foreman routes causal investigation and recovery under Judgment Routes; no provider retirement or redundant operator approval.",
+                    outcome="exhausted", attempts=recovery.TRANSIENT_LAUNCH_LIMIT)
+
     if args.dry_run:
         rehearsal = dry_run(
                 client,
@@ -1946,17 +1961,33 @@ def _apply(args, client, warn, trace, hold_gates):
                         "error": cleanup.to_dict(),
                     })
         if isinstance(primary, ForemanError):
-            known_closed = (bool(names) and bool(prepared) and not retained and not failures and not sending
+            # A native start refusal closes its own pane before any reservation, so the
+            # failed seat is in neither `names` nor `prepared`; that proof stands in.
+            spawn_closed = (primary.details.get("failure_kind") in (IDENTIFIER_UNAVAILABLE_KIND, TRANSIENT_LAUNCH_KIND)
+                and bool(primary.details.get("spawn_pane_closed")) and len(prepared) == len(names))
+            known_closed = (((bool(names) and bool(prepared)) or spawn_closed) and not retained and not failures and not sending
                 and state_saved and all(next(row for row in store["dispatches"] if row["id"] == identifier)["status"] == "not_sent" for identifier in prepared))
             cleanup_id = next((row["id"] for row in store["dispatches"] if row["id"] in prepared
                 and row["status"] == "not_sent" and (not retained or row["agent"] in retained)), None)
             operation = "apply" if known_closed else ("reconcile --dispatch " + shlex.quote(cleanup_id) if cleanup_id and state_saved and (not sending or retained) else "supervision-status")
+            # A stale model id is repaired, not retried: repeating the identical
+            # apply would launch the same unavailable identifier (#733).
+            repair = known_closed and primary.details.get("failure_kind") == IDENTIFIER_UNAVAILABLE_KIND
+            exhausted = known_closed and primary.details.get("launch_attempt", 0) >= recovery.TRANSIENT_LAUNCH_LIMIT
+            if repair:
+                operation = "plan"
+            if exhausted:
+                operation = "load-set --decision diagnose --task " + shlex.quote(args.task)
+            closed_note = ("Owned pre-send surfaces are closed and not_sent is durable. " if prepared
+                           else "The owned pane is closed and nothing was sent. ")
             owner_recovery(primary, primary.details.get("failure_kind", primary.code),
                 runnable.command(operation + " --state " + shlex.quote(str(state_path))),
-                ("Owned pre-send surfaces are closed and not_sent is durable. Repeat the identical normal apply; no retrospective, configuration or receipt repair is required."
+                (closed_note + "The transient launch retry budget is exhausted. Preserve the task and pins; the foreman routes causal investigation and recovery under Judgment Routes, not another identical apply or provider retirement." if exhausted else
+                 closed_note + IDENTIFIER_UNAVAILABLE_RECOVERY if repair else
+                 closed_note + "Repeat the identical normal apply; no retrospective, configuration or receipt repair is required."
                  if known_closed else "Read the retained native pane and follow Runtime Dialogs under existing task authority, without a redundant operator approval. After the same target returns to its empty composer, run the named reconciliation, then repeat unchanged apply. Do not repeat apply while its dialog remains."
                  if retained and state_saved and cleanup_id else "The owner must complete recorded transport/cleanup reconciliation before the unchanged apply may retry; unknown or sent work is preserved."),
-                outcome="retryable" if known_closed else "blocked",
+                outcome="exhausted" if exhausted else "repair_required" if repair else "retryable" if known_closed else "blocked",
                 closed_agents=closed, retained_agents=retained, dispatches=list(prepared), cleanup_failures=failures,
                 state_saved=state_saved, sending_agents=sorted(sending))
             if failures:
@@ -1991,10 +2022,21 @@ def _apply(args, client, warn, trace, hold_gates):
                         "brief": paths[role], "common": paths["common"],
                         "report": None, "unavailable": None, "pane": pane,
                     })
-                pane = lifecycle.spawn(
-                    client, agents_by_name[name], tier,
-                    history=state["assignments"], before_start=preflight_start,
-                )
+                try:
+                    pane = lifecycle.spawn(
+                        client, agents_by_name[name], tier,
+                        history=state["assignments"], before_start=preflight_start,
+                    )
+                except HerdrError as exc:
+                    if exc.details.get("failure_kind") == TRANSIENT_LAUNCH_KIND:
+                        attempt = recovery.record_transient_launch_failure(store, args.task, launch_scopes[role], at)
+                        try:
+                            save_state(state_path, state)
+                        except ForemanError as persistence:
+                            raise owner_recovery(persistence, "launch_retry_persistence_failed", runnable.command("supervision-status"),
+                                "The launch failure could not be persisted. Preserve its actual cleanup evidence and restore owner storage before retrying; no retry is authorized.") from exc
+                        exc.details["launch_attempt"] = attempt
+                    raise
                 spawned[name] = pane
                 identifier = dispatches[role]["id"]
                 _supervision_enrollment(

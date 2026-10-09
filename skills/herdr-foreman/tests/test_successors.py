@@ -462,6 +462,28 @@ class SuccessorTest(CliCase):
             report = {**self.report, "role": role, "round": round_type}
             self.successor_record(report, expected=1)
 
+    def test_opus_successor_is_a_pin_edit_never_a_judgment_placement(self):
+        # coding-policy#733: `claude-opus-5-5` joins the judgment pin in
+        # `tiers.TOP_MODELS`; the placement owner still refuses to hand a
+        # judgment or judge seat a provisional successor.
+        self.worker["tier_routing"]["mode"] = "minimum_adequate"
+        quote = "Fixture only: opus-5 (Opus 5) is replaced by claude-opus-5-5 (Opus 5.5)."
+        for role, round_type in (("reviewer", "review"), ("tester", "hostile_verify"), ("judge", "judge")):
+            report = {
+                **self.report, "role": role, "round": round_type, "tier_row": round_type,
+                "successor": "claude-opus-5-5",
+                "provenance": {
+                    **self.report["provenance"],
+                    "citations": [{"ref": "https://platform.claude.com/docs/en/models/opus-5-5/migration-guide", "quote": quote}],
+                    "predecessor": {"model": "opus-5", "family": "Opus", "version": "5", "status": "active"},
+                    "successor": {"model": "claude-opus-5-5", "family": "Opus", "version": "5.5", "status": "active"},
+                },
+            }
+            with self.subTest(role=role):
+                result = self.successor_record(report, expected=1)
+                if role != "judge":
+                    self.assertIn("judge and judgment floors stay pinned", result["message"])
+
     def test_public_dispatch_launches_successor_with_real_owner_path(self):
         self.public_dispatch_and_reload()
 

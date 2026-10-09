@@ -624,6 +624,57 @@ STUB
       pass; else fail "empty native composer refusal: RC=$RC OUT=$OUT"; fi
   done
 
+  # 22c. A launched model identifier the account cannot call is a distinct
+  # unavailable attempt (coding-policy#733): seat-local model maintenance on
+  # the same provider, exit 6, never the provider refusal of exit 5. The
+  # notice is the saved native model_not_found text verbatim.
+  local ident=$'There\'s an issue with the selected model (opus-6). It may not exist or you may not have access to it. Run /model to pick a different model.'
+  local ident_composer=$'❯\n  ? for shortcuts'
+  local ident_calls="$TMP/identifier-calls" ident_gets="$TMP/identifier-gets" ident_reads="$TMP/identifier-reads"
+  run "$missing" FAKE_MARKER=timeout FAKE_STATUS=idle FAKE_PANE_TEXT="${ident}"$'\n'"${ident_composer}" \
+    FAKE_CALLS="$ident_calls" FAKE_GET_COUNTER="$ident_gets" FAKE_READ_COUNTER="$ident_reads"
+  if [[ $RC -eq 6 ]] && printf '%s' "$OUT" | jq -e '.found == false and .state == "idle" and .reason == "model_identifier_unavailable"' >/dev/null; then
+    pass; else fail "identifier-unavailable notice: expected exit 6, got RC=$RC OUT=$OUT ERR=$ERRTEXT"; fi
+  if [[ "$ERRTEXT" == *"not a provider refusal"* && "$ERRTEXT" == *"do not run record-refusal"* && "$ERRTEXT" != *"record-refusal\`"* ]]; then
+    pass; else fail "identifier-unavailable must not direct record-refusal: ERR=$ERRTEXT"; fi
+  if [[ "$(cat "$ident_gets")" == 2 && "$(cat "$ident_reads")" == 2 ]]; then
+    pass; else fail "identifier-unavailable needs the same independent confirmation reads"; fi
+  write_rc=0
+  grep -Eq 'agent (prompt|start|send)|pane (send|run)' "$ident_calls" || write_rc=$?
+  if (( write_rc == 1 )); then pass; else fail "identifier diagnosis must never send input or switch a worker"; fi
+  local ident_variant
+  for ident_variant in \
+    $'⏺ There\'s an issue with the selected model (claude-opus-6). It may not exist or you may not have access to it.' \
+    $'⎿  There\'s an issue with the selected model (opus-6). It may not exist or you may not have access to it. Run /model to pick a different model.'; do
+    run "$missing" FAKE_MARKER=timeout FAKE_STATUS=done FAKE_PANE_TEXT="${ident_variant}"$'\n'"${ident_composer}"
+    if [[ $RC -eq 6 ]] && printf '%s' "$OUT" | jq -e '.found == false and .state == "done" and .reason == "model_identifier_unavailable"' >/dev/null; then
+      pass; else fail "identifier notice variant: RC=$RC OUT=$OUT pane=$ident_variant"; fi
+  done
+  # The refusal and identifier notices never stand in for each other.
+  run "$missing" FAKE_MARKER=timeout FAKE_STATUS=idle FAKE_PANE_TEXT="$refusal"
+  if [[ $RC -eq 5 ]] && printf '%s' "$OUT" | jq -e '.reason == "terminal_provider_refusal"' >/dev/null; then
+    pass; else fail "withheld content must keep exit 5 after the identifier class exists: RC=$RC OUT=$OUT"; fi
+  # Quoted, fenced, indented, stale, occupied or working-footer shapes, and an
+  # id that is not a plain model token, keep the ordinary wait.
+  local ident_decoy
+  for ident_decoy in \
+    "> ${ident}"$'\n'"${ident_composer}" \
+    $'```\n'"${ident}"$'\n```\n'"${ident_composer}" \
+    "    ${ident}"$'\n'"${ident_composer}" \
+    "${ident}"$'\nNew assignment from the team lead\n'"${ident_composer}" \
+    "${ident}"$'\n❯ pending input\n  ? for shortcuts' \
+    $'There\'s an issue with the selected model (opus-6; rm -rf). It may not exist or you may not have access to it.\n'"${ident_composer}" \
+    "${ident}"; do
+    run "$missing" FAKE_MARKER=timeout FAKE_STATUS=idle FAKE_PANE_TEXT="$ident_decoy"
+    if [[ $RC -eq 1 ]] && printf '%s' "$OUT" | jq -e '.found == false and (has("reason") | not)' >/dev/null; then
+      pass; else fail "non-terminal identifier notice shape: RC=$RC OUT=$OUT pane=$ident_decoy"; fi
+  done
+  run "$missing" FAKE_MARKER=timeout FAKE_STATUS=working FAKE_PANE_TEXT="${ident}"$'\n'"${ident_composer}"
+  if [[ $RC -eq 1 ]]; then pass; else fail "working worker with an identifier notice must keep waiting: RC=$RC OUT=$OUT"; fi
+  run "$report" FAKE_MARKER=found FAKE_STATUS=done FAKE_PANE_TEXT="REPORT: ${report}"$'\n'"${ident}"
+  if [[ $RC -eq 0 ]] && printf '%s' "$OUT" | jq -e '.found == true' >/dev/null; then
+    pass; else fail "a delivered report outranks a stale identifier notice: RC=$RC OUT=$OUT"; fi
+
   # Quoted/code examples, stale notices, occupied input and working footers
   # do not diagnose the current attempt as a terminal provider refusal.
   local notice_decoy

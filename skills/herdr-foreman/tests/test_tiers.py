@@ -62,6 +62,37 @@ class TierConfigTest(unittest.TestCase):
                 with self.subTest(round_type=round_type, entry=entry), self.assertRaises(ConfigError):
                     parse_tiers({round_type: entry}, "claude")
 
+    def test_claude_judgment_pin_accepts_the_catalog_successor_and_the_stale_ids(self):
+        # coding-policy#733: the provider catalog's same-family successor is
+        # callable on the account, and a config still naming the retired ids
+        # must parse until launch-failure recovery rewrites the row.
+        for model in ("claude-opus-5-5", "claude-opus-5", "opus-5"):
+            for effort in ("high", "xhigh", "max"):
+                with self.subTest(model=model, effort=effort):
+                    tier = parse_tiers({"architect": {"model": model, "effort": effort}}, "claude")["architect"]
+                    self.assertEqual((tier["model"], tier["effort"]), (model, effort))
+
+    def test_claude_judgment_pin_refuses_unlisted_opus_and_other_families(self):
+        for model in ("opus-6", "claude-opus-6", "claude-sonnet-5-5", "sonnet-5", "claude-fable-5-1", "claude-haiku-5-5"):
+            with self.subTest(model=model), self.assertRaisesRegex(ConfigError, "pinned top model"):
+                parse_tiers({"architect": {"model": model, "effort": "high"}}, "claude")
+
+    def test_successor_keeps_the_judgment_effort_floor(self):
+        for effort in ("low", "medium"):
+            with self.subTest(effort=effort), self.assertRaisesRegex(ConfigError, "pinned top model"):
+                parse_tiers({"architect": {"model": "claude-opus-5-5", "effort": effort}}, "claude")
+
+    def test_cheaper_family_rows_stay_valid_for_non_judgment_rounds(self):
+        tiers = parse_tiers({"consultation": {"model": "claude-sonnet-5-5", "effort": "high"},
+                             "test_plan": {"model": "sonnet-5", "effort": "high"}}, "claude")
+        self.assertEqual(tiers["consultation"]["model"], "claude-sonnet-5-5")
+
+    def test_other_adapters_pins_are_unchanged(self):
+        self.assertEqual(TOP_MODELS["codex"], frozenset({"gpt-5.6-sol"}))
+        self.assertEqual(TOP_MODELS["grok"], frozenset({"grok-4.6"}))
+        with self.assertRaises(ConfigError):
+            parse_tiers({"architect": {"model": "claude-opus-5-5", "effort": "high"}}, "codex")
+
     def test_dead_rounds_kinds_and_bad_costs_are_refused(self):
         with self.assertRaises(ConfigError):
             parse_tiers({"review": {"model": "gemini-3.1-pro", "effort": "high"}}, "agy")

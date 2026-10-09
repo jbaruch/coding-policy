@@ -15,7 +15,7 @@ Each `tiers` entry maps a round type to:
 
 ```json
 {
-  "model": "opus-5",
+  "model": "claude-opus-5-5",
   "effort": "high",
   "multiplier": 1.0,
   "billing_evidence": null
@@ -135,6 +135,49 @@ operator expressly requires YOLO for that retained developer.
 
 Recheck model availability and CLI flag spellings when upgrading a worker's
 CLI or changing a model pin.
+
+## Launch Failure Maintenance
+
+A classified owner output routes recovery without discarding the agent or
+its provider. Read the emitted receipt; never classify provider prose yourself.
+
+| Owner output | Class | Next step |
+| --- | --- | --- |
+| Wait exit 6 or `failure_kind: model_identifier_unavailable` | identifier maintenance | The repair below, after the dispatch lifecycle in Wait outcomes (Exit 6) |
+| `failure_kind: launch_transient` | pre-input service failure | Follow the emitted retry or exhaustion outcome under dispatch recovery; no model retirement |
+| `failure_kind: startup_dialog_pending` | retained native dialog | Runtime Dialogs and the named owner reconciliation |
+| Recovery `outcome: blocked`, or dispatch `sending` / `sent_but_not_started` | unproved transport or cleanup | Preserve evidence and complete the named owner reconciliation before retrying |
+| Wait exit 5 with `reason: terminal_provider_refusal` | provider refusal | `record-refusal` and its bounded provider-move contract |
+
+Repair for `model_identifier_unavailable`:
+
+1. Preserve the task, original base, correction count, artifacts and the
+   actual dispatch effect. Reconcile an uncertain send before anything else.
+2. Check three sources: the provider's current catalog, the installed CLI's
+   model and flag spellings, and this account's actual access. Another
+   account's success and a catalog listing each establish nothing about this
+   account.
+3. Repair the exact stale row in the operator's config with the identifier the
+   sources support, or a verified same-family successor
+   (`skills/herdr-foreman/references/successor-placement.md`). The utility never rewrites the
+   config.
+4. Validate with `plan`. A judgment row stays on the pinned top model at the
+   effort floor; `TOP_MODELS` in `skills/herdr-foreman/foreman/tiers.py` names
+   the accepted ids.
+5. Dispatch the affected seat again. The provider, every other callable row
+   and every `capabilities` entry stay as they were.
+
+Catalog identity, account access and capability adequacy are separate facts.
+A smoke call proves access; it never writes an `adequate` capability entry.
+The independently pinned judge keeps its own pin and launch proof.
+
+Detection: `skills/herdr-foreman/wait-report.sh` exit 6 after a send,
+`identifier_unavailable_model` in `skills/herdr-foreman/foreman/composer.py`
+at fresh startup, and the structured `agent_start` error codes
+`IDENTIFIER_ERROR_CODES` / `TRANSIENT_LAUNCH_ERROR_CODES` in
+`skills/herdr-foreman/foreman/errors.py`, classified at the spawn boundary in
+`skills/herdr-foreman/foreman/lifecycle.py`. Only Herdr's own error code
+classifies native-start errors; arbitrary provider prose never does.
 
 ## Foreman Seat
 

@@ -139,6 +139,23 @@ class ParseConfigTest(unittest.TestCase):
             parse_config(broken)
         self.assertIn("working_markers", str(caught.exception))
 
+    def test_shipped_example_pins_judgment_rows_to_the_callable_successor(self):
+        # coding-policy#733: a fresh copy of the example must not ship a model
+        # id the account answers with `model_not_found`.
+        payload = json.loads((REPO_ROOT / "config.example.json").read_text(encoding="utf-8"))
+        claude = next(kind for kind in payload["worker_kinds"] if kind["kind"] == "claude")
+        judgment = ("architect", "reconciliation", "critic", "review", "hostile_verify", "recheck", "release_adjudication", "lead")
+        self.assertEqual({(role, claude["tiers"][role]["model"], claude["tiers"][role]["effort"]) for role in judgment},
+                         {(role, "claude-opus-5-5", "high") for role in judgment})
+        for role in ("test_plan", "build", "fix"):
+            self.assertNotEqual(claude["tiers"][role]["model"], "claude-opus-5-5")
+        # The independently pinned judge is untouched by the worker-kind pin.
+        judge = parse_judge(payload)
+        codex = parse_judge({"schema_version": 7, "judge": {"worker_kind": "codex", "model": "gpt-6-astra", "effort": "high"}})
+        assert judge is not None and codex is not None, "both fixtures declare a judge block"
+        self.assertEqual((judge.agent, judge.model, judge.effort), ("claude", "claude-fable-5-1", "max"))
+        self.assertEqual((codex.agent, codex.model, codex.effort), ("codex", "gpt-6-astra", "high"))
+
     def test_shipped_example_config_is_valid(self):
         payload = json.loads((REPO_ROOT / "config.example.json").read_text(encoding="utf-8"))
         self.assertEqual(payload["schema_version"], 7)

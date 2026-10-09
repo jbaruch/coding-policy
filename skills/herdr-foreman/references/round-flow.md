@@ -152,8 +152,10 @@ from the owner records and runs `wait-report.sh --once` with them
 checkpoint's `exit` and delivery JSON as `wait`:
 
 - `exit` 0 confirms delivery, 1 remains pending, 3 confirms blocked, 4 lacks
-  confirmed delivery, and 5 proves terminal refusal; record it with
-  `record-refusal`
+  confirmed delivery, 5 proves terminal refusal (record it with
+  `record-refusal`), and 6 proves an unavailable model identifier (repair the
+  row per `skills/herdr-foreman/references/dispatch-recovery.md` Wait outcomes;
+  never `record-refusal`)
 - The command itself exits non-zero when the dispatch has no recorded send
   time, or when the wait ran without a verdict (`wait_failed`, carrying the
   wait's own exit, 2 included); resolve the diagnostic stderr names, then run

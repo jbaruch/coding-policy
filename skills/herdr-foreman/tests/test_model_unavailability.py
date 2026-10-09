@@ -404,14 +404,15 @@ class PublicWaitErrorTests(unittest.TestCase):
                                          ["agent", "start"], ["agent", "close"]) for call in calls))
         return result, source
 
-    def test_codex_and_claude_errors_exit_five_without_waiting_for_round_budget(self):
+    def test_native_errors_keep_identifier_maintenance_separate_from_account_refusal(self):
         for kind, rows in (("codex", codex_rows()), ("claude", claude_rows())):
             with self.subTest(kind=kind):
                 result, source = self.wait(kind, rows)
-                self.assertEqual(result.returncode, 5, result.stderr)
+                expected_exit = 6 if kind == "claude" else 5
+                self.assertEqual(result.returncode, expected_exit, result.stderr)
                 receipt = json.loads(result.stdout)
                 self.assertFalse(receipt["found"])
-                self.assertEqual(receipt["reason"], "terminal_provider_refusal")
+                self.assertEqual(receipt["reason"], "model_identifier_unavailable" if kind == "claude" else "terminal_provider_refusal")
                 self.assertEqual(receipt["unavailability"]["source"]["path"], str(source))
                 self.assertEqual(receipt["unavailability"]["native_session"]["value"], SESSION)
                 self.assertFalse(self.report.exists())

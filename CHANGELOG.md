@@ -1,5 +1,52 @@
 # Changelog
 
+### Fixed
+
+- A failed model launch prompts availability recovery for that model and seat,
+  and the Claude judgment pin accepts the callable same-family successor
+  (#733). `tiers.TOP_MODELS["claude"]` adds the provider catalog's
+  `claude-opus-5-5` beside the retired `opus-5` / `claude-opus-5` ids, so a
+  config still naming them parses until its row is repaired; `opus-6`,
+  `claude-opus-6`, other families and efforts below `high` stay refused, and
+  `successors.validate`, `parse_judge` and the independently pinned judge are
+  unchanged. The shipped example names `claude-opus-5-5` on its judgment rows.
+  A provider notice naming an unavailable model id ("There's an issue with the
+  selected model (...). It may not exist or you may not have access to it.")
+  is a distinct class from a withheld-content refusal: `wait-report.sh` exits
+  6 with `reason: model_identifier_unavailable` under the same two-read,
+  empty-composer, no-report conditions as exit 5, `record-refusal` refuses
+  that receipt without recording anything, and fresh Claude startup refuses
+  before any input with `failure_kind: model_identifier_unavailable`. `apply`
+  closes the pane, records `not_sent` and names `plan` with outcome
+  `repair_required` instead of an identical retry. Task, original base,
+  correction count, artifacts, the provider, other callable rows and every
+  `capabilities` entry stay as recorded; transient errors keep their bounded
+  retry. Recovery store 17 records trusted transient start failures durably;
+  the owner enforces its seat/brief/account/model/effort budget across fresh
+  identities and process restarts, then refuses another identical native
+  start and routes causal diagnosis. No developer correction is spent.
+  Post-send exit 6 requires the unavailable ledger outcome and guarded
+  old-member closure before replanning. Native source-backed Claude
+  `model_not_found` follows exit 6 too, retaining its proof; Codex's
+  account-unsupported proof keeps its separate exit-5 contract.
+  Catalog identity, account access and capability adequacy remain
+  separate facts, and the new class never writes the capability table. The
+  repair procedure is `references/model-tiers.md` Launch Failure Maintenance.
+  The live TUI rendering of the notice is unverified: the parser accepts the
+  bare row, optionally behind a `⏺`/`⎿` marker, and any other shape keeps the
+  ordinary wait. The fresh-startup parser holds the same positional rule as
+  the wait watcher: fenced, indented or quoted rows and a notice followed by
+  later content never classify a launch. A structured `agent_start` error is
+  classified at the spawn boundary by Herdr's own code: `model_not_found` or
+  `unsupported_model` yields `model_identifier_unavailable` with the row's
+  model and `repair_required` / `plan`; an enumerated transient code yields
+  `launch_transient` and the identical bounded retry. Both leave the closed
+  pane, refusal record, capabilities and provider roster untouched.
+  A notice followed by an occupied composer takes the existing
+  `startup_input_occupied` refusal, not model maintenance, and a start timeout
+  or transport failure stays fail-closed with no retry until the send effect is
+  reconciled; `model-tiers.md` now says so.
+
 ## 0.3.393 — 2026-10-09
 
 ### Fixed

@@ -180,6 +180,26 @@ arbitrary process fields and argv. Preserve it with the original error receipt;
 it grants no input, retry or replacement authority. Older receipts without this
 field supply no causal observations; do not backfill or infer their cause.
 
+For `model_identifier_unavailable` at fresh startup, the owner closes
+the pane and records `not_sent` as for any pre-send failure; `details.model`
+names the id and `details.recovery` names `plan` instead of a retry. Repeating
+the identical apply launches the same unavailable id, so follow
+`skills/herdr-foreman/references/model-tiers.md` Launch Failure Maintenance
+first. Detection belongs to that reference's named owners.
+
+A native-start `model_identifier_unavailable` takes the same `plan` recovery.
+For `launch_transient`, follow `details.recovery.outcome`: `retryable` permits
+the unchanged normal apply after proved closure; `exhausted` forbids another
+identical start and routes causal investigation through Judgment Routes.
+`blocked` requires the named cleanup/storage recovery first. Neither class
+writes a refusal, capability or provider change. The durable retry owner is
+`skills/herdr-foreman/foreman/recovery.py` (`TRANSIENT_LAUNCH_LIMIT`,
+`record_transient_launch_failure`); apply enforces it across fresh identities
+and process restarts. Keep the original task and correction count.
+Never rename the task, reword its brief or change a configured row solely to
+refill the budget. A materially changed recovery follows Judgment Routes and
+carries the original failure evidence into its self-contained brief.
+
 For `startup_dialog_pending`, the foreman reads the retained native pane and
 follows `skills/herdr-foreman/references/herdr.md` Runtime Dialogs. Review the
 specific hook source and command against the authorized installation; resolve
@@ -679,9 +699,30 @@ lock file can remain after exit; do not delete it to bypass an active lock.
   Recording, the same-provider refusal, the single move and the stop are the
   owner's contract; see `skills/herdr-foreman/foreman/recovery.py`,
   `record_refusal` and `refusal_move`.
+- **Exit 6** — `reason: model_identifier_unavailable` with `found: false`: the
+  launched model identifier is unavailable to this account and no model turn
+  ran. This is seat-local model maintenance on the same provider, never a
+  provider refusal:
+  - Do not run `record-refusal`; it refuses this receipt, records nothing and
+    spends no refusal slot.
+  - Keep every review/release gate unsatisfied. Preserve the task, original
+    base, correction count, artifacts and the dispatch as recorded.
+  - Save the wait receipt and append this assignment's `unavailable` outcome
+    to its original task ledger, citing the actual failure and recovery.
+    `check-member` is read-only; its verdict is not a ledger event.
+  - Run `close-member --enrollment <failed-dispatch-id> --ledger <original-ledger>`
+    through the installed launcher. It verifies the assessed outcome and
+    closes the old owned pane and enrollment. Resolve any refusal before
+    replanning; preserve the original dispatch and evidence.
+  - Follow `skills/herdr-foreman/references/model-tiers.md` Launch Failure
+    Maintenance, then dispatch the affected seat again on the repaired row
+    with a fresh report path. Plan mints a fresh seat identity, so the new
+    dispatch is distinct from the failed one.
+  - Other callable rows, the provider and every `capabilities` entry stay
+    unchanged.
 
-`wait-report.sh` owns refusal confirmation; see its header and
-`confirmed_provider_refusal`. Missing terminal evidence keeps the ordinary
+`skills/herdr-foreman/wait-report.sh` owns refusal confirmation, for exit 5 and exit 6 alike; see its
+header and `confirmed_provider_refusal`. Missing terminal evidence keeps the ordinary
 wait. The read-only `foreman probe-unavailable` command takes `--agent`, `--pane`,
 absolute `--report`, positive `--lines` and the observed visible text on stdin.
 It needs no config/state home. It emits `{confirmed: false, reason}` for unknown
@@ -694,7 +735,7 @@ formats (`SUPPORTED_VERSIONS`, `source_error`) and the read-only confirmation
 contract (`probe`). An unconfirmed result grants no recovery authority. Grok
 retains the legacy refusal path.
 
-For these native failures exit 5 adds `unavailability`. `record-refusal` binds
+For native account failures exit 5 adds `unavailability`. `record-refusal` binds
 that proof to the original dispatch under the adapter's `verify_refusal`
 contract; invalid evidence refuses without changing the dispatch.
 An identical recorded receipt replays without new input; different evidence

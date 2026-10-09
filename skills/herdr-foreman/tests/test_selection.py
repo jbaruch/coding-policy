@@ -103,6 +103,25 @@ class PlanSelectionTest(CliCase):
                          [("fix", "sonnet-5", "inadequate")])
         self.assertIn("conditions", record["escalation"])
 
+    def test_the_successor_is_a_top_model_so_only_cheaper_families_are_barred_from_a_judgment_seat(self):
+        # coding-policy#733: the floor audit reads the same TOP_MODELS the
+        # parser does, so the successor row is held to the judgment floor and
+        # the cheaper family row stays barred.
+        tiers = self.settings["agents"][0]["tiers"]
+        tiers["hostile_verify"] = {"model": "claude-opus-5-5", "effort": "high", "multiplier": 3.0}
+        tiers["recheck"] = {"model": "claude-opus-5-5", "effort": "xhigh", "multiplier": 1.0}
+        tiers["test_plan"] = {"model": "claude-sonnet-5-5", "effort": "high", "multiplier": 1.0}
+        self.config.write_text(json.dumps(self.settings), encoding="utf-8")
+        self.out, self.err = io.StringIO(), io.StringIO()
+        rc, output, error = self.run_cli(["plan", *self.base(), "--roles", "tester",
+                                          "--snapshot", str(self.snapshot), "--now", AT])
+        self.assertEqual(rc, 0, error)
+        record: Any = json.loads(output)["selection"]["tester"]
+        self.assertEqual((record["model"], record["effort"]), ("claude-opus-5-5", "high"))
+        self.assertEqual(record["cheaper"]["floor"], "judgment_round")
+        self.assertEqual({row["tier_row"]: row["barred_by_floor"] for row in record["cheaper"]["candidates"]},
+                         {"recheck": False, "test_plan": True})
+
     def test_a_cheaper_row_without_evidence_reads_unknown_with_no_source(self):
         record = self.plan()["selection"]["developer"]
         self.assertEqual(record["evidence"], [{"capability": "implementation", "verdict": "unknown", "source": None}])
