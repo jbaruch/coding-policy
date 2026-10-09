@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.390 — 2026-10-09
+
 ### Fixed
 
 - Suppress Claude's predicted-input decoration only in disposable usage-probe
