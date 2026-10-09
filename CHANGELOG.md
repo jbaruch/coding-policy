@@ -9,8 +9,9 @@
   foreman anchor, lease epoch and loaded policy bytes; it checks those pins
   before remote effects. A durable pre-effect intent fences timeout, disconnect
   and malformed control replies across owner restarts until same-identity
-  reconciliation. Task ingress rejects command, model, provider and routing
-  overrides. Distinct remote supervision bindings require no fabricated
+  reconciliation. Prior supervision or discovery history prevents a missing
+  owner record from being recreated as an empty gate. Task ingress rejects
+  command, model, provider and routing overrides. Distinct remote supervision bindings require no fabricated
   native environment, competing foreman brain or local signals to remote PIDs.
   Native operation is unchanged; consuming service deployment stays gated on
   its authenticated controller, shared lease and evidence transport.

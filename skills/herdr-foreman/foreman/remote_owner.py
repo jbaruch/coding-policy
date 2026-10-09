@@ -199,6 +199,10 @@ class RemoteForemanOwner:
             if self.path.exists():
                 self._load()
             else:
+                # Reuse the supervision owner's cross-identity discovery guard
+                # before writing anything that could erase an uncertain effect.
+                if supervision.dispatch_binding(self.state_path, root=self.path.parent / "bindings") is not None:
+                    raise refuse("remote_owner_record_lost_restore_original_intents_and_requests")
                 save_state(self.path, {"schema_version": 1, "attestation": asdict(remote_receipt(self.context)),
                                       "state_path": str(self.state_path),
                                       "pending": None, "reconciliations": [], "requests": []})

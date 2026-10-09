@@ -343,6 +343,25 @@ class RemoteOwnerTest(unittest.TestCase):
         self.assertEqual(len(self.effects()), 8)
         self.assertIsNone(json.loads(self.store.read_text(encoding="utf-8"))["pending"])
 
+    def test_lost_owner_record_cannot_be_reinitialized_over_prior_binding(self):
+        self.lost = True
+        with self.assertRaises(RemoteIndeterminateError):
+            self.client.pane_close("w1:p2")
+        self.lost = False
+        self.store.unlink()
+        with self.assertRaises(RemoteContextError):
+            self.owner.initialize(self.runner, at="2026-09-01T12:00:01+00:00")
+        self.assertFalse(self.store.exists())
+        self.assertEqual(len(self.effects()), 1)
+
+    def test_discovery_prevents_empty_owner_recreation_when_both_records_are_lost(self):
+        self.store.unlink()
+        supervision.store_path(self.owner.state_path).unlink()
+        with self.assertRaises(StateError):
+            self.owner.initialize(self.runner, at="2026-09-01T12:00:01+00:00")
+        self.assertFalse(self.store.exists())
+        self.assertEqual(self.effects(), [])
+
 
 if __name__ == "__main__":
     unittest.main()

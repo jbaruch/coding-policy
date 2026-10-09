@@ -125,6 +125,9 @@ This is a gate store under `rules/stateful-artifacts.md`: missing owner records
 require explicit first-use initialization. Corrupt, older and newer unknown
 versions refuse and remain untouched; this first schema has no older supported
 version to migrate. Never discard a pending record to unblock a deployment.
+An existing supervision binding or discovery record proves prior ownership.
+If the remote owner record is missing, initialization refuses before recreating
+it; restore its original intents, reconciliation and request history first.
 
 Remote supervision uses a distinct schema-2 **binding record** with `at`,
 `state_path`, `generation` and identity `{kind: "attested-remote", cwd, pane_id,
