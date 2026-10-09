@@ -645,7 +645,7 @@ evidence. Version-5 rows may carry the existing composition, judge and scoped
 lifecycle fields. Version-2 refusals add the original `launch_scope` or null and
 `unavailability` schema 1 (source-bound model/error/account-class/CLI-version,
 prompt digest, native identity and viewport proof). Its exact fields and first
-recording checks belong to `foreman/model_unavailability.py` `validate_proof`
+recording checks belong to `skills/herdr-foreman/foreman/model_unavailability.py` `validate_proof`
 and `verify_refusal`. Historical dispatches and schema-1 refusals acquire no
 scope or native proof from current config. Store versions below 16 carrying
 either new shape refuse as unowned evidence. Version 1, 2, 3 and 4 rows

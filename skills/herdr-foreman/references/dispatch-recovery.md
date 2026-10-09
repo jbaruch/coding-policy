@@ -689,7 +689,7 @@ evidence, or `{confirmed: true, unavailability}` with schema-1 native proof;
 usage/tool/source faults exit non-zero, never a pending verdict. The wait's
 validated `FOREMAN_REFUSAL_CONFIRM_SEC` supplies its confirmation interval.
 
-The source adapter in `foreman/model_unavailability.py` owns supported native
+The source adapter in `skills/herdr-foreman/foreman/model_unavailability.py` owns supported native
 formats (`SUPPORTED_VERSIONS`, `source_error`) and the read-only confirmation
 contract (`probe`). An unconfirmed result grants no recovery authority. Grok
 retains the legacy refusal path.
