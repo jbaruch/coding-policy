@@ -138,11 +138,15 @@ metadata. The operator's tier table, supported flags, and billing evidence are d
 `task`, cumulative `fix_round`, correction `plan` identity or null, and `work`
 bounds or null. Apply refuses different task context. Earlier plan shapes and
 plain role mappings remain accepted; live apply still checks current history,
-allowance, tiers, and readiness. Apply output schema 8 includes
+allowance, tiers, and readiness. Apply output schema 9 includes
 `context_transition`, persistent `dispatch_id` for labelled assignments, and
 `replayed: true` when returning an existing completed result; a fresh
 schema-7-config dispatch also carries `assignment_scoped: true` and its
-`worker_kind`.
+`worker_kind`. Version 9 adds `launch_scope` to newly reserved labelled
+dispatch results and the `native_model_unavailability` fresh-context transition
+(`previous_developer`, `grants_future_attempts: false`). It retains the failed
+developer's cumulative attempt number, never grants the next attempt. Older
+completed replays retain their original result shape.
 Version 7 adds optional per-assignment specialist `requirements` and retained
 consultation handling for legacy standing-worker configs. Assignment-scoped
 configs reject retention and give every follow-up a fresh identity and pane.
@@ -607,7 +611,7 @@ document and arrives already stamped.
 
 ## Recovery records
 
-The recovery document uses `schema_version: 15`; individual records retain their
+The recovery document uses `schema_version: 16`; individual records retain their
 independent versions. Version 6 adds the dispatch fields `brief_identity`, `refusal` and
 `refusal_move` and the `refusal_authorizations` collection; version 7 adds the
 dispatch's send-time `provider`; version 8 adds the `diagnoses` collection;
@@ -632,7 +636,19 @@ owner stamps an older store on load, adds the empty collections, and refuses one
 already carrying a field — or a seat-named dispatch — its version did not own. Generic records remain version 1; stale-Grok delivery and
 composition-bearing dispatch/result records use version 2; a judge
 dispatch/result carrying its `judge_mode` uses version 3; assignment-scoped
-dispatch/result records use version 4. Version 1, 2 and 3 rows
+dispatch/result records use version 4. Version 16 adds dispatch/result version 5's
+`launch_scope` and native refusal record version 2. The configured scope is
+`{schema_version: 1, kind, window_group, worker_kind}` frozen before input:
+`window_group` is the operator-declared shared account/window; a blank value
+binds only the original worker template. It is not authenticated account-ID
+evidence. Version-5 rows may carry the existing composition, judge and scoped
+lifecycle fields. Version-2 refusals add the original `launch_scope` or null and
+`unavailability` schema 1 (source-bound model/error/account-class/CLI-version,
+prompt digest, native identity and viewport proof). Its exact fields and first
+recording checks belong to `skills/herdr-foreman/foreman/model_unavailability.py` `validate_proof`
+and `verify_refusal`. Historical dispatches and schema-1 refusals acquire no
+scope or native proof from current config. Store versions below 16 carrying
+either new shape refuse as unowned evidence. Version 1, 2, 3 and 4 rows
 are never restamped: a judge dispatch recorded before version 3 keeps no mode,
 and its ledger row reads `unknown`. A new judge reservation without a mode is
 refused, and so is a mode-less retry of a stored row; only stored rows keep
