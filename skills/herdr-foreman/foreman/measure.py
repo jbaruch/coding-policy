@@ -65,8 +65,31 @@ PENDING_CLI_UPDATE = "Update installed · Restart"
 
 #: Failure observations are historical diagnostics, never input authority.
 #: Leave room inside the shared trace cap for the executable owner recovery.
-FAILURE_VIEW_BYTES = 512
 FAILURE_CAUSE_BYTES = 512
+FAILURE_VISIBLE_CUES = (
+    ("native_suggestion", 'Try "'),
+    ("hooks_review", "Hooks need review"),
+    ("folder_trust", "Do you trust"),
+    ("pending_cli_update", PENDING_CLI_UPDATE),
+    ("weekly_usage", "Weekly limit"),
+    ("weekly_usage", "Current week"),
+    ("session_usage", "Current session"),
+    ("composer_glyph", "❯"),
+    ("composer_glyph", "›"),
+)
+
+
+def _visible_diagnostic(text):
+    """Retain only counts and fixed cues, never arbitrary terminal content.
+
+    These observations cannot grant input, trust, cleanup or quota authority.
+    Signatures cannot redact unknown secrets in URLs, drafts or native prose.
+    """
+    if text is None:
+        return {"observation": "unavailable", "reason": "bound_probe_read_unproved"}
+    return {"observation": "visible", "line_count": len(text.splitlines()),
+            "character_count": len(text), "native_cues": sorted({
+                cue for cue, literal in FAILURE_VISIBLE_CUES if literal in text})}
 
 
 class _UsageReportError(HerdrError):
@@ -88,7 +111,7 @@ def _capture_failure(exc, capture, observed_text=None):
     view = capture(observed_text)
     cause = exc.details.get("failure_message", exc.message)
     exc.message = "Visible evidence (diagnostic only): {}. Original measurement error: {}".format(
-        json.dumps(scrub_for_trace(view, cap=FAILURE_VIEW_BYTES), ensure_ascii=False),
+        json.dumps(_visible_diagnostic(view), ensure_ascii=False),
         json.dumps(scrub_for_trace(cause, cap=FAILURE_CAUSE_BYTES), ensure_ascii=False))
     if "failure_message" in exc.details:
         exc.details["failure_message"] = exc.message

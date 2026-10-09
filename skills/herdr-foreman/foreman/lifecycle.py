@@ -350,8 +350,10 @@ def _probe_failure_view(client, worker, pane, tier, original, observed_text=None
     """Keep failed read evidence explicit without replacing the usage cause."""
     try:
         return _probe_visible_read(client, worker, pane, tier, original, observed_text)
-    except (HerdrError, UsageError) as exc:
-        return "Visible evidence unavailable: bound probe observation failed: {}".format(exc.message)
+    except (HerdrError, UsageError):
+        # An observation failure is explicit, without retaining native/tool
+        # error text as a purported visible pane or an arbitrary secret.
+        return None
 
 
 def _probe_usage_recovery(record, cleanup_error, closure, client, pane, operation):

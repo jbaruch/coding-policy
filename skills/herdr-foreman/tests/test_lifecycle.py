@@ -792,7 +792,8 @@ class ProbeUsageRecoveryTest(unittest.TestCase):
                         patch("foreman.measure.measure") as usage:
                     result = measure_worker_kinds(client, [template(kind, kind)], "2026-10-01T00:00:00+00:00")
                 message = result["agents"][kind]["error"]["message"]
-                self.assertIn("original startup observation", message)
+                self.assertIn('\\"observation\\": \\"visible\\"', message)
+                self.assertNotIn("original startup observation", message)
                 self.assertIn("original startup cause", message)
                 self.assertIn("separate cleanup cause", message)
                 self.assertIsNone(result["agents"][kind]["headroom_pct"])
@@ -821,7 +822,8 @@ class ProbeUsageRecoveryTest(unittest.TestCase):
                     result = measure_worker_kinds(client, [template(kind, kind)], "2026-10-01T00:00:00+00:00")
                 usage.assert_not_called()
                 message = result["agents"][kind]["error"]["message"]
-                self.assertIn("visible native suggestion", message)
+                self.assertIn("native_suggestion", message)
+                self.assertNotIn("visible native suggestion", message)
                 self.assertIn("startup composer is unproved", message)
                 self.assertIsNone(result["agents"][kind]["headroom_pct"])
                 client.agent_prompt.assert_not_called()
@@ -874,7 +876,8 @@ class ProbeUsageRecoveryTest(unittest.TestCase):
                 self.assertIn("--herdr-bin '/tmp/owned herdr wrapper'", message)
                 self.assertIn("retired", message)
                 self.assertIn("Historical diagnostic", message)
-                self.assertIn("owned visible evidence", message)
+                self.assertIn("character_count", message)
+                self.assertNotIn("owned visible evidence", message)
                 self.assertNotIn("DUMMYcredentialvalue", message)
                 self.assertIsNone(record["headroom_pct"])
                 self.assertIsNone(record["pane_id"])
@@ -902,14 +905,14 @@ class ProbeUsageRecoveryTest(unittest.TestCase):
         self.assertEqual(events, ["close"])
         client.pane_read.assert_not_called()
         message = result["agents"]["claude"]["error"]["message"]
-        self.assertIn("evidence unavailable", message)
-        self.assertIn("identity changed", message)
+        self.assertIn("unavailable", message)
+        self.assertIn("bound_probe_read_unproved", message)
 
     def test_native_identity_change_during_read_discards_unbound_text(self):
         result, client, events, _worker = self.run_failure(replace_during_read=True)
         self.assertEqual(events, ["read", "close"])
         message = result["agents"]["claude"]["error"]["message"]
-        self.assertIn("identity changed during the read", message)
+        self.assertIn("bound_probe_read_unproved", message)
         self.assertNotIn("owned visible evidence", message)
         client.agent_prompt.assert_not_called()
 
@@ -917,14 +920,14 @@ class ProbeUsageRecoveryTest(unittest.TestCase):
         result, _client, events, _worker = self.run_failure(read_error=HerdrError("visible read unavailable", {}))
         self.assertEqual(events, ["read", "close"])
         message = result["agents"]["claude"]["error"]["message"]
-        self.assertIn("visible read unavailable", message)
+        self.assertIn("bound_probe_read_unproved", message)
         self.assertIn("original composer failure", message)
 
     def test_missing_startup_binding_never_adds_a_native_read(self):
         result, client, events, _worker = self.run_failure(binding=False)
         self.assertEqual(events, ["close"])
         client.pane_read.assert_not_called()
-        self.assertIn("startup binding is missing", result["agents"]["claude"]["error"]["message"])
+        self.assertIn("bound_probe_read_unproved", result["agents"]["claude"]["error"]["message"])
 
 
 class WorkspacePlacementTest(unittest.TestCase):

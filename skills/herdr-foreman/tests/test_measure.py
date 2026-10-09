@@ -207,6 +207,19 @@ class OwnedVisibleUsageTest(unittest.TestCase):
 
 
 class FailureEvidenceTest(unittest.TestCase):
+    def test_arbitrary_visible_content_never_enters_the_snapshot(self):
+        runner = runner_with({"claude": "idle"}, {})
+        capture = Mock(return_value='DATABASE_URL=postgres://alice:DUMMYpassword@db/internal\n'
+            'a password in prose: DUMMYprosecredential\nTry "DUMMYsuggestioncredential"\nHooks need review')
+        with patch("foreman.measure.send_command", side_effect=HerdrError("composer occupied", {})):
+            snapshot = measure(HerdrClient(runner=runner), [BY_NAME["claude"]], AT, failure_capture=capture)
+        serialized = json.dumps(snapshot)
+        self.assertNotIn("DUMMY", serialized)
+        self.assertNotIn("postgres://", serialized)
+        self.assertIn("native_suggestion", serialized)
+        self.assertIn("hooks_review", serialized)
+        self.assertIn("composer occupied", serialized)
+
     def test_usage_failure_preserves_visible_text_before_dialog_dismissal(self):
         for kind, text in (("claude", CLAUDE_UNPARSEABLE_PANE),
                            ("codex", "Weekly limit has no reading"),
@@ -223,7 +236,9 @@ class FailureEvidenceTest(unittest.TestCase):
                                    failure_capture=capture, poll_attempts=0)
                 self.assertEqual(seen, [text])
                 self.assertIsNone(snapshot["agents"][kind]["headroom_pct"])
-                self.assertIn(json.dumps(text, ensure_ascii=False), snapshot["agents"][kind]["error"]["message"])
+                message = snapshot["agents"][kind]["error"]["message"]
+                self.assertIn('"observation": "visible"', message)
+                self.assertIn('"line_count": ' + str(len(text.splitlines())), message)
 
     def test_send_failure_capture_does_not_dismiss_unproved_dialog_or_leak_secrets(self):
         runner = runner_with({"claude": "idle"}, {})
@@ -233,8 +248,7 @@ class FailureEvidenceTest(unittest.TestCase):
                                failure_capture=capture)
         capture.assert_called_once_with(None)
         message = snapshot["agents"]["claude"]["error"]["message"]
-        self.assertIn("[redacted]", message)
-        self.assertIn("truncated", message)
+        self.assertIn('"character_count": 5028', message)
         self.assertNotIn("DUMMYcredentialvalue", message)
         self.assertIn("composer occupied", message)
         self.assertFalse(any(command.startswith("agent send-keys") for command in runner.commands()))
@@ -257,7 +271,7 @@ class FailureEvidenceTest(unittest.TestCase):
         error = snapshot["agents"]["claude"]["error"]
         self.assertIn("dialog dismissal failed", error["message"])
         self.assertIn("No usage windows found", error["message"])
-        self.assertIn("Update installed", error["message"])
+        self.assertIn("pending_cli_update", error["message"])
         self.assertTrue(error["details"]["pending_cli_update"])
 
 
