@@ -25,12 +25,75 @@ class RemoteIndeterminateError(HerdrError):
     code = "remote_effect_indeterminate"
 
 
+_REMEDY_GROUPS = (
+    (("invalid_attestation_identity", "invalid_saved_profile_id", "invalid_controller_lease",
+      "invalid_loaded_policy_receipt", "remote_attestation_missing", "remote_prefix_or_attestation_missing"),
+     "Have the trusted controller issue a valid receipt for the configured saved profile, exact identities, current lease and loaded policy."),
+    (("invalid_command_context", "untyped_command_context", "unknown_context_mode",
+      "native_context_has_remote_authority", "remote_authority_on_native_context",
+      "executable_override_of_bound_context", "command_not_in_bound_context", "owner_command_context_changed"),
+     "Construct one typed native or attested-remote context in trusted configuration; do not override its executable or routing."),
+    (("remote_authority_missing", "unverified_remote_owner", "remote_owner_not_attached", "remote_owner_needs_attested_context"),
+     "Attach the verified RemoteForemanOwner for this exact attested context before using the client."),
+    (("remote_current_lease_reader_missing", "remote_current_lease_unavailable"),
+     "Configure and restore the trusted runtime's independent live lease reader; keep dispatch disabled while it is unavailable."),
+    (("remote_current_lease_revoked",),
+     "Stop this stale controller and reconcile the original intents under the current authorized controller; do not reuse its expired or superseded receipt."),
+    (("unsupported_remote_operation", "remote_effect_classification_changed"),
+     "Use a supported bound Herdr operation; correct the owner integration rather than forwarding arbitrary commands or local process signals."),
+    (("loaded_policy_missing", "loaded_policy_unreadable"),
+     "Restore readable installed rules, foreman skill and plugin manifest, then load them before issuing the receipt."),
+    (("loaded_policy_receipt_changed", "loaded_policy_changed_after_attachment"),
+     "Reload the installed policy and reconcile the existing owner history before attaching a receipt for the new policy bytes."),
+    (("remote_identity_read_failed", "remote_identity_transport_unavailable", "remote_server_not_ready"),
+     "Check connectivity and server readiness through the SAME saved machine profile; restore that endpoint before retrying an observation."),
+    (("remote_identity_read_invalid", "duplicate_remote_status_fact", "remote_snapshot_missing", "remote_snapshot_invalid"),
+     "Inspect the selected Herdr server's status/snapshot response and repair its command-surface compatibility before dispatch."),
+    (("remote_session_changed", "remote_workspace_or_foreman_changed"),
+     "Restore or explicitly reconcile the original session, workspace and thin-anchor terminal; do not retarget the receipt."),
+    (("remote_foreman_seat_has_another_brain", "another_foreman_brain_forbidden", "remote_thin_foreman_seat_is_not_a_worker"),
+     "Keep the thin anchor non-LLM and untouched; launch or address a separate worker pane instead."),
+    (("remote_owner_store_not_absolute",),
+     "Configure an absolute canonical owner-store path in trusted controller configuration."),
+    (("remote_owner_store_not_private",),
+     "Restore the controller-owned regular owner directory to exact mode 0700 before accessing it."),
+    (("remote_owner_record_not_private",),
+     "Restore the original controller-owned regular owner file to exact mode 0600; do not replace it with a symlink."),
+    (("remote_owner_store_unavailable",),
+     "Restore access to the original private owner directory without discarding its intents or request history."),
+    (("remote_owner_record_missing_or_unreadable", "remote_owner_record_lost_restore_original_intents_and_requests",
+      "remote_owner_receipt_or_schema_changed", "remote_pending_intent_invalid",
+      "remote_reconciliation_record_invalid", "remote_task_request_record_invalid"),
+     "Restore the original canonical owner record, current receipt and supported schema with all intents and request history; never recreate an empty record over prior ownership."),
+    (("remote_owner_state_path_changed", "remote_supervision_binding_changed"),
+     "Use the original state path and matching remote supervision binding; reconcile ownership history before changing mode or store identity."),
+    (("remote_reconciliation_needs_observed_evidence",),
+     "Observe the SAME remote identities and provide actual evidence plus an applied/not_applied outcome to the trusted owner reconciliation API."),
+    (("remote_reconciliation_intent_changed",),
+     "Query the current pending intent and reconcile that exact operation ID; do not replay a different or already reconciled operation."),
+    (("task_request_fields_invalid",),
+     "Submit only nonempty string request_id (at most 128 characters) and task (at most 65536 characters); remove all execution and routing fields."),
+    (("task_request_identity_conflict",),
+     "Reuse the request ID only with identical task bytes, or submit a genuinely new authorized task with a new request ID."),
+    (("task_query_fields_invalid",),
+     "Submit exactly one string task_id returned by this owner's task request API."),
+    (("task_not_found",),
+     "Query a task ID returned by this same owner's request API; verify the selected owner rather than inventing a task ID."),
+    (("remote_policy_task_state_unreadable", "remote_policy_task_state_lost"),
+     "Restore the original readable task ledger and registration history before resuming; do not requeue or redispatch accepted work."),
+    (("remote_legacy_task_registration_unproved",),
+     "Recover the original task ledger proving this legacy request's registration before migration; its queued field alone cannot prove that it was never dispatched."),
+    (("native_foreman_tier_verifier_in_remote_context",),
+     "Supply authenticated controller-runtime model-tier proof before enabling the remote round; the native pane verifier cannot prove it."),
+    (("native_controller_operation_in_remote_context",),
+     "Use the controller host runtime's policy-preserving continuation or home management; do not reset or launch a foreman in the thin anchor."),
+)
+REFUSAL_REMEDIES = {reason: remedy for reasons, remedy in _REMEDY_GROUPS for reason in reasons}
+
+
 def refuse(reason):
-    return RemoteContextError(
-        "Remote foreman context is unproved ({}). Restore the configured owner receipt, "
-        "same remote identities and current controller lease before dispatch; do not "
-        "retarget, invent HERDR_ENV or repeat uncertain input.".format(reason),
-        {"reason": reason})
+    remedy = REFUSAL_REMEDIES.get(reason, "Correct the internal refusal-reason mapping before enabling this operation.")
+    return RemoteContextError("Remote operation refused ({}). {}".format(reason, remedy), {"reason": reason})
 
 
 @dataclass(frozen=True)

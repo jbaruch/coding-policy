@@ -26,7 +26,7 @@ import re
 import threading
 
 from .command_context import (
-    HerdrCommandContext, RemoteIndeterminateError, remote_command, remote_receipt, refuse,
+    HerdrCommandContext, RemoteForemanAttestation, RemoteIndeterminateError, remote_command, remote_receipt, refuse,
 )
 from .state import save_state, state_lock, load_state_checked
 from . import supervision, recovery
@@ -107,10 +107,13 @@ def live_identity(context, runner):
 class RemoteForemanOwner:
     """Privileged owner; service transports expose only `task_request`/`task_query`."""
 
-    def __init__(self, *, context, store_path, plugin_root, state_path=None):
+    def __init__(self, *, context, store_path, plugin_root, lease_reader, state_path=None):
         if not isinstance(context, HerdrCommandContext) or context.mode != "attested-remote":
             raise refuse("remote_owner_needs_attested_context")
         self.context = context
+        if not callable(lease_reader):
+            raise refuse("remote_current_lease_reader_missing")
+        self._lease_reader = lease_reader
         self.path = Path(store_path)
         self.plugin_root = Path(plugin_root)
         self._thread_lock = threading.RLock()
@@ -126,12 +129,12 @@ class RemoteForemanOwner:
         try:
             directory = self.path.parent.lstat()
             if (not stat.S_ISDIR(directory.st_mode) or directory.st_uid != os.getuid()
-                    or stat.S_IMODE(directory.st_mode) & 0o077):
+                    or stat.S_IMODE(directory.st_mode) != 0o700):
                 raise refuse("remote_owner_store_not_private")
             if self.path.exists() or self.path.is_symlink():
                 info = self.path.lstat()
                 if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid()
-                        or stat.S_IMODE(info.st_mode) & 0o077):
+                        or stat.S_IMODE(info.st_mode) != 0o600):
                     raise refuse("remote_owner_record_not_private")
         except OSError:
             raise refuse("remote_owner_store_unavailable") from None
@@ -144,8 +147,19 @@ class RemoteForemanOwner:
             with state_lock(self.path):
                 yield
 
+    def _current_lease(self):
+        # The trusted runtime's live lease is independent of this immutable
+        # context and persisted receipt; a copied epoch is not revocation proof.
+        try:
+            current = self._lease_reader()
+        except (OSError, ValueError):
+            raise refuse("remote_current_lease_unavailable") from None
+        if not isinstance(current, RemoteForemanAttestation) or current != remote_receipt(self.context):
+            raise refuse("remote_current_lease_revoked")
+
     def _load(self):
         self._private_store()
+        self._current_lease()
         try:
             document = json.loads(self.path.read_text(encoding="utf-8"))
         except (OSError, ValueError):
@@ -174,18 +188,29 @@ class RemoteForemanOwner:
                     or not self._hex(row.get("operation_id"), 32) or not self._hex(row.get("evidence_digest"), 64)):
                 raise refuse("remote_reconciliation_record_invalid")
         requests, tasks = set(), set()
+        migrated = False
         for row in document["requests"]:
             if (not isinstance(row, dict) or set(row) != {"schema_version", "request_id", "task", "task_id", "status"}
-                    or type(row.get("schema_version")) is not int or row["schema_version"] != 1
-                    or row.get("status") != "queued" or not self._hex(row.get("task_id"), 32)
+                    or type(row.get("schema_version")) is not int or row["schema_version"] not in {1, 2}
+                    or row.get("status") not in ({"queued"} if row["schema_version"] == 1 else {"queued", "registered"})
+                    or not self._hex(row.get("task_id"), 32)
                     or not isinstance(row.get("request_id"), str) or not row["request_id"].strip()
                     or not isinstance(row.get("task"), str) or not row["task"].strip()
                     or row["request_id"] in requests or row["task_id"] in tasks):
                 raise refuse("remote_task_request_record_invalid")
             requests.add(row["request_id"])
             tasks.add(row["task_id"])
+            if row["schema_version"] == 1:
+                state = self._task_state()
+                if state is None or row["task_id"] not in state["recovery"]["tasks"]:
+                    raise refuse("remote_legacy_task_registration_unproved")
+                row["schema_version"] = 2
+                row["status"] = "registered"
+                migrated = True
         if loaded_policy(self.plugin_root) != self._loaded_policy:
             raise refuse("loaded_policy_changed_after_attachment")
+        if migrated:
+            save_state(self.path, document)
         return document
 
     @staticmethod
@@ -196,7 +221,9 @@ class RemoteForemanOwner:
         """Explicit trusted-controller bootstrap; never automatically replaces a lease."""
         self._private_store()
         with self._lease():
+            self._current_lease()
             live_identity(self.context, runner)
+            self._current_lease()
             if self.path.exists():
                 self._load()
             else:
@@ -267,6 +294,7 @@ class RemoteForemanOwner:
             if mutating and document["pending"] is not None:
                 raise self._indeterminate(document["pending"])
             live_identity(context, runner)
+            self._current_lease()
             if not mutating:
                 return runner(context.argv(*command))
             pending = {"schema_version": 1, "id": uuid.uuid4().hex,
@@ -290,9 +318,31 @@ class RemoteForemanOwner:
                     raise self._indeterminate(pending) from None
                 if not isinstance(response, dict) or not isinstance(response.get("result"), dict):
                     raise self._indeterminate(pending)
+                if not self._mutation_response_valid(command, response["result"]):
+                    raise self._indeterminate(pending)
             document["pending"] = None
             save_state(self.path, document)
             return result
+
+    @staticmethod
+    def _mutation_response_valid(command, result):
+        """Check identities consumed by launch/create owners before dropping the fence."""
+        operation = tuple(command[:2])
+        if operation in {("pane", "split"), ("workspace", "create")}:
+            pane = result.get("pane" if operation == ("pane", "split") else "root_pane")
+            return isinstance(pane, dict) and isinstance(pane.get("pane_id"), str) and bool(pane["pane_id"].strip())
+        if operation == ("agent", "start"):
+            agent, argv = result.get("agent"), result.get("argv")
+            if "--pane" not in command or "--kind" not in command:
+                return False
+            pane_index, kind_index = command.index("--pane") + 1, command.index("--kind") + 1
+            return (pane_index < len(command) and kind_index < len(command)
+                    and isinstance(agent, dict) and agent.get("name") == command[2]
+                    and agent.get("pane_id") == command[pane_index] and agent.get("agent") == command[kind_index]
+                    and agent.get("agent_status") in {"idle", "done", "blocked"}
+                    and isinstance(argv, list) and bool(argv)
+                    and all(isinstance(arg, str) and bool(arg) for arg in argv))
+        return True
 
     def reconcile(self, operation_id, *, outcome, evidence, runner):
         """Trusted foreman decision after SAME-identity observation; no automatic replay."""
@@ -306,6 +356,7 @@ class RemoteForemanOwner:
             if pending is None or pending.get("id") != operation_id:
                 raise refuse("remote_reconciliation_intent_changed")
             live_identity(self.context, runner)
+            self._current_lease()
             document["reconciliations"].append({"schema_version": 1, "operation_id": operation_id,
                                                "outcome": outcome,
                                                "evidence_digest": hashlib.sha256(evidence.encode("utf-8")).hexdigest()})
@@ -328,7 +379,7 @@ class RemoteForemanOwner:
                     if row["task"] != payload["task"]:
                         raise refuse("task_request_identity_conflict")
                     return {"task_id": row["task_id"], "status": row["status"]}
-            row = {"schema_version": 1, **payload, "task_id": uuid.uuid4().hex, "status": "queued"}
+            row = {"schema_version": 2, **payload, "task_id": uuid.uuid4().hex, "status": "queued"}
             document["requests"].append(row)
             save_state(self.path, document)
             return {"task_id": row["task_id"], "status": row["status"]}
@@ -336,22 +387,62 @@ class RemoteForemanOwner:
     def task_query(self, payload):
         if not isinstance(payload, dict) or set(payload) != {"task_id"} or not isinstance(payload["task_id"], str):
             raise refuse("task_query_fields_invalid")
-        document = self._load()
-        rows = [row for row in document["requests"] if row["task_id"] == payload["task_id"]]
-        if len(rows) != 1:
-            raise refuse("task_not_found")
-        task_id = rows[0]["task_id"]
-        status = rows[0]["status"]
+        with self._lease():
+            document = self._load()
+            self._binding()
+            rows = [row for row in document["requests"] if row["task_id"] == payload["task_id"]]
+            if len(rows) != 1:
+                raise refuse("task_not_found")
+            state = self._task_state()
+            status, changed = self._task_status(rows[0], state)
+            if changed:
+                save_state(self.path, document)
+            return {"task_id": rows[0]["task_id"], "status": status}
+
+    def _task_state(self):
         if self.state_path.exists():
             state, usable = load_state_checked(self.state_path, persist_migration=False)
             if not usable:
                 raise refuse("remote_policy_task_state_unreadable")
-            if task_id in state["recovery"]["tasks"]:
-                status = ("closed" if recovery.task_closure(state["recovery"], state["assignments"], task_id)
-                          else recovery.task_statuses(state["recovery"], state["assignments"])[task_id]["status"])
-        return {"task_id": task_id, "status": status}
+            return state
+        return None
+
+    @staticmethod
+    def _task_status(row, state):
+        task_id = row["task_id"]
+        if state is not None and task_id in state["recovery"]["tasks"]:
+            changed = row["status"] != "registered"
+            row["status"] = "registered"
+            status = ("closed" if recovery.task_closure(state["recovery"], state["assignments"], task_id)
+                      else recovery.task_statuses(state["recovery"], state["assignments"])[task_id]["status"])
+            return status, changed
+        if row["status"] == "registered":
+            raise refuse("remote_policy_task_state_lost")
+        return "queued", False
+
+    def claim_task(self, task_id):
+        """Trusted foreman marks handoff BEFORE registration; never caller ingress."""
+        with self._lease():
+            document = self._load()
+            self._binding()
+            rows = [row for row in document["requests"] if row["task_id"] == task_id]
+            if len(rows) != 1:
+                raise refuse("task_not_found")
+            rows[0]["status"] = "registered"
+            save_state(self.path, document)
 
     def queued_tasks(self):
         """Privileged policy foreman reads task DATA; callers cannot replace its instructions."""
-        return [{"task_id": row["task_id"], "task": row["task"]} for row in self._load()["requests"]
-                if self.task_query({"task_id": row["task_id"]})["status"] == "queued"]
+        with self._lease():
+            document = self._load()
+            self._binding()
+            state = self._task_state()
+            queued, changed = [], False
+            for row in document["requests"]:
+                status, updated = self._task_status(row, state)
+                changed = changed or updated
+                if status == "queued":
+                    queued.append({"task_id": row["task_id"], "task": row["task"]})
+            if changed:
+                save_state(self.path, document)
+            return queued

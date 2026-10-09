@@ -8,7 +8,15 @@ their real `HERDR_ENV`, session and foreground-process checks.
 ## Controller Bootstrap
 
 Only trusted service configuration constructs `HerdrCommandContext` and
-`RemoteForemanOwner`. The service first loads the installed in-tree rules and
+`RemoteForemanOwner`. Its required `lease_reader` reads the authenticated host
+runtime's current lease, independently of the context and stored receipt.
+It returns the current typed attestation, or no receipt for a revoked/expired
+lease. Never supply a constant copy of the attachment receipt as a live reader.
+The lease authority serializes revocation/handoff with this same owner lock;
+the reader does not acquire it recursively. Remote observations are followed
+by a fresh lease check immediately before effect invocation or reconciliation.
+The owner checks it under the shared lock before initialization, effects,
+queries and reconciliation. The service first loads the installed in-tree rules and
 Herdr foreman skill/references in full. `loaded_policy(plugin_root)` computes
 the version and digest of those bytes; the hash alone does not prove that a
 model loaded or followed the policy. The controller attests that load.
@@ -67,11 +75,17 @@ task data, not replacement policy or permission to choose any of those. The
 service authenticates the source and its existing task authority before ingress.
 An idempotent request with changed task bytes is a conflict, not an update.
 
-The policy foreman reads the queued requests, registers their returned
+The policy foreman reads the queued requests, calls trusted `claim_task(task_id)`
+to persist the handoff **before** registration, then registers their returned
 `task_id` in the existing task owner, and coordinates them under the loaded
-policy. Queue acceptance is not a dispatch or a completed task. Transport code
+policy. A crash between claim and registration requires recovery of that same
+handoff; a claimed task never becomes a fresh queued task. Queries also persist
+observed registration. Missing registered tasks or a lost ledger refuse queries
+and queue scans until the original history is restored.
+Queue acceptance is not a dispatch or a completed task. Transport code
 does not plan, dispatch, adjudicate, correct or publish. Do not expose the
 owner object, client, initialization, reconciliation or internal CLI to callers.
+`claim_task` is likewise trusted coordination, not caller ingress.
 
 ## Effect and Reconciliation Contract
 
@@ -81,11 +95,15 @@ observes `status server` plus `api snapshot` through the same typed prefix.
 The session selector, workspace, pane and terminal must still match. The
 controller/principal/lease and policy load must still match the current record.
 A stale epoch or changed identity refuses before the effect invocation.
+The independent live lease reader must still authenticate that same receipt;
+an unchanged owner file cannot keep a revoked controller authorized.
 
 The owner writes an indeterminate intent **before** invoking Herdr once. An
 exit-0 response resolves transport delivery only, not semantic completion.
 Timeout, disconnect, nonzero exit or an unexpected interruption preserves the
-intent. No second start, prompt, text, key or close follows, including cleanup
+intent. A syntactically valid but incomplete start/split/create response also
+keeps the intent: its consumed agent/pane identities must be valid before the
+fence clears. No second start, prompt, text, key or close follows, including cleanup
 and after controller restart. A provider failure inside an uncertain transport
 result is not a provider-retirement signal. Native retry classification remains
 unchanged outside this remote boundary.
@@ -126,13 +144,20 @@ Document schema 1 has exactly:
   saved in this intent.
 - `reconciliations`: schema-1 rows with `operation_id`, `outcome` and
   `evidence_digest`.
-- `requests`: schema-1 rows with `request_id`, untrusted `task`, `task_id` and
-  `status: "queued"`. Task progress remains owned by the existing task ledger.
+- `requests`: schema-2 rows with `request_id`, untrusted `task`, `task_id` and
+  `status: "queued" | "registered"`. The latter is a durable handoff marker,
+  not task completion. Progress remains owned by the existing task ledger.
+  The owner migrates schema-1 request rows to schema 2 only when the original
+  ledger proves registration, marking them registered and rewriting the store.
+  Otherwise it refuses without writing: the old queued field cannot distinguish
+  never-dispatched work from lost registration history. Non-owner readers must
+  update to schema 2; unknown request versions refuse under the gate-store rule.
 
 This is a gate store under `rules/stateful-artifacts.md`: missing owner records
-require explicit first-use initialization. Corrupt, older and newer unknown
-versions refuse and remain untouched; this first schema has no older supported
-version to migrate. Never discard a pending record to unblock a deployment.
+require explicit first-use initialization. Corrupt or unsupported document
+versions refuse and remain untouched; document schema 1 has no older supported
+document version. Request-row migration is specified above. Never discard a
+pending record to unblock a deployment.
 An existing supervision binding or discovery record proves prior ownership.
 If the remote owner record is missing, initialization refuses before recreating
 it; restore its original intents, reconciliation and request history first.

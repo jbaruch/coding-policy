@@ -11,6 +11,7 @@ from dataclasses import asdict, FrozenInstanceError, replace
 from concurrent.futures import ThreadPoolExecutor
 import json
 import io
+import ast
 import subprocess
 import tempfile
 import unittest
@@ -19,6 +20,7 @@ from typing import Any, cast
 
 from foreman.command_context import (
     HerdrCommandContext, RemoteForemanAttestation, RemoteContextError, RemoteIndeterminateError,
+    REFUSAL_REMEDIES, refuse,
 )
 from foreman.herdr import HerdrClient
 from foreman.remote_owner import RemoteForemanOwner, loaded_policy
@@ -29,6 +31,18 @@ from foreman.state import empty_state
 
 
 class ContextTest(unittest.TestCase):
+    def test_each_internal_refusal_has_a_reason_specific_remedy(self):
+        for module in ("command_context.py", "remote_owner.py", "herdr.py", "cli.py"):
+            tree = ast.parse((ROOT / "foreman" / module).read_text(encoding="utf-8"))
+            for node in ast.walk(tree):
+                if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                        and node.func.id == "refuse" and node.args
+                        and isinstance(node.args[0], ast.Constant) and len(node.args) == 1):
+                    self.assertIn(node.args[0].value, REFUSAL_REMEDIES)
+        self.assertIn("0700", str(refuse("remote_owner_store_not_private")))
+        self.assertIn("request_id", str(refuse("task_request_fields_invalid")))
+        self.assertIn("task ID", str(refuse("task_not_found")))
+
     def receipt(self):
         return RemoteForemanAttestation("controller", "principal", "machine_id", "session", "w1",
                                         "w1:p1", "terminal-foreman", 1, "0.3.1", "a" * 64)
@@ -84,7 +98,9 @@ class RemoteOwnerTest(unittest.TestCase):
         self.receipt = RemoteForemanAttestation("controller", "principal", "machine_id", "session", "w1",
                                                "w1:p1", "terminal-foreman", 1, version, digest)
         self.context = HerdrCommandContext("herdr", ("--machine", "machine_id"), "attested-remote", self.receipt)
-        self.owner = RemoteForemanOwner(context=self.context, store_path=self.store, plugin_root=self.root)
+        self.current_receipt = self.receipt
+        self.owner = RemoteForemanOwner(context=self.context, store_path=self.store, plugin_root=self.root,
+                                        lease_reader=lambda: self.current_receipt)
         self.calls = []
         self.snapshot = {"workspaces": [{"workspace_id": "w1"}], "agents": [],
                          "panes": [{"workspace_id": "w1", "pane_id": "w1:p1", "terminal_id": "terminal-foreman"}]}
@@ -175,7 +191,8 @@ class RemoteOwnerTest(unittest.TestCase):
             self.client.agent_start("worker", "codex", "w1:p2", ["--model", "policy-chosen"])
         operation_id = caught.exception.details["operation_id"]
         self.lost = False
-        restarted = RemoteForemanOwner(context=self.context, store_path=self.store, plugin_root=self.root)
+        restarted = RemoteForemanOwner(context=self.context, store_path=self.store, plugin_root=self.root,
+                                       lease_reader=lambda: self.current_receipt)
         client = HerdrClient(context=self.context, remote_authority=restarted, runner=self.runner)
         for effect in (lambda: client.agent_start("worker", "codex", "w1:p2", []),
                        lambda: client.agent_prompt("worker", "task"),
@@ -313,6 +330,92 @@ class RemoteOwnerTest(unittest.TestCase):
             client.pane_close("w1:p2")
         self.assertEqual(len(self.effects()), 1)
 
+    def test_incomplete_mutation_objects_keep_fence_before_client_parsing(self):
+        for operation in (lambda client: client.agent_start("worker", "codex", "w1:p2", []),
+                          lambda client: client.pane_split("w1:p1"),
+                          lambda client: client.workspace_create(cwd="/project", label="task")):
+            original = json.loads(self.store.read_text(encoding="utf-8"))
+            self.calls.clear()
+            with self.assertRaises(RemoteIndeterminateError):
+                operation(self.client)  # runner returns valid JSON, but an empty result
+            with self.assertRaises(RemoteIndeterminateError):
+                self.client.pane_close("w1:p2")
+            self.assertEqual(len(self.effects()), 1)
+            save_state(self.store, original)
+
+    def test_complete_mutation_identities_clear_delivery_fence(self):
+        original = self.runner
+        def complete(argv):
+            response = original(argv)
+            results = {("agent", "start"): {"agent": {"name": "worker", "agent": "codex",
+                "pane_id": "w1:p2", "agent_status": "idle"}, "argv": ["codex"]},
+                ("pane", "split"): {"pane": {"pane_id": "w1:p2"}},
+                ("workspace", "create"): {"root_pane": {"pane_id": "w2:p1"}}}
+            if tuple(argv[3:5]) in results:
+                response.stdout = json.dumps({"result": results[tuple(argv[3:5])]})
+            return response
+        client = HerdrClient(context=self.context, remote_authority=self.owner, runner=complete)
+        client.agent_start("worker", "codex", "w1:p2", [])
+        self.assertEqual(client.pane_split("w1:p1"), "w1:p2")
+        self.assertEqual(client.workspace_create(cwd="/project", label="task"), "w2:p1")
+        self.assertIsNone(json.loads(self.store.read_text(encoding="utf-8"))["pending"])
+
+    def test_exact_private_modes_reject_other_owner_bits_before_transport(self):
+        for mode in (0o400, 0o500, 0o700, 0o640, 0o1600):
+            with self.subTest(file_mode=mode):
+                self.store.chmod(mode)
+                with self.assertRaises(RemoteContextError):
+                    self.client.pane_close("w1:p2")
+                self.store.chmod(0o600)
+        for mode in (0o500, 0o600, 0o750, 0o1700):
+            with self.subTest(directory_mode=mode):
+                self.root.chmod(mode)
+                with self.assertRaises(RemoteContextError):
+                    self.client.pane_close("w1:p2")
+                self.root.chmod(0o700)
+        self.assertEqual(self.calls, [])
+
+    def test_live_lease_revocation_blocks_effect_and_reconciliation_with_unchanged_store(self):
+        self.lost = True
+        with self.assertRaises(RemoteIndeterminateError) as caught:
+            self.client.pane_close("w1:p2")
+        self.lost = False
+        original = self.store.read_bytes()
+        self.calls.clear()
+        self.current_receipt = replace(self.receipt, lease_epoch=2)
+        with self.assertRaises(RemoteContextError):
+            self.client.pane_send_text("w1:p2", "task")
+        with self.assertRaises(RemoteContextError):
+            self.owner.reconcile(caught.exception.details["operation_id"], outcome="applied",
+                                 evidence="same-identity observation", runner=self.runner)
+        self.assertEqual(self.calls, [])
+        self.assertEqual(self.store.read_bytes(), original)
+
+    def test_lease_revocation_during_live_observation_refuses_before_effect(self):
+        original = self.runner
+        def revoked_during_snapshot(argv):
+            result = original(argv)
+            if argv[3:5] == ["api", "snapshot"]:
+                self.current_receipt = replace(self.receipt, lease_epoch=2)
+            return result
+        client = HerdrClient(context=self.context, remote_authority=self.owner, runner=revoked_during_snapshot)
+        with self.assertRaises(RemoteContextError):
+            client.pane_close("w1:p2")
+        self.assertEqual(self.effects(), [])
+        self.assertIsNone(json.loads(self.store.read_text(encoding="utf-8"))["pending"])
+
+    def test_claim_survives_lost_registration_without_requeue(self):
+        request = self.owner.task_request({"request_id": "request", "task": "bounded task"})
+        self.owner.claim_task(request["task_id"])
+        for state in (None, empty_state()):
+            if state is not None:
+                save_state(self.owner.state_path, state)
+            with self.assertRaises(RemoteContextError):
+                self.owner.task_query({"task_id": request["task_id"]})
+            with self.assertRaises(RemoteContextError):
+                self.owner.queued_tasks()
+        self.assertEqual(json.loads(self.store.read_text(encoding="utf-8"))["requests"][0]["status"], "registered")
+
     def test_task_query_uses_existing_policy_task_state_not_transport_acceptance(self):
         request = self.owner.task_request({"request_id": "request", "task": "bounded task"})
         self.assertEqual(self.owner.queued_tasks(), [{"task_id": request["task_id"], "task": "bounded task"}])
@@ -323,7 +426,24 @@ class RemoteOwnerTest(unittest.TestCase):
             "2026-09-01T12:00:00+00:00")
         save_state(self.owner.state_path, state)
         self.assertEqual(self.owner.task_query({"task_id": request["task_id"]})["status"], "within_authorized_budget")
+        document = json.loads(self.store.read_text(encoding="utf-8"))
+        document["requests"][0].update(schema_version=1, status="queued")
+        save_state(self.store, document)
         self.assertEqual(self.owner.queued_tasks(), [])
+        migrated = json.loads(self.store.read_text(encoding="utf-8"))["requests"][0]
+        self.assertEqual((migrated["schema_version"], migrated["status"]), (2, "registered"))
+        self.owner.state_path.unlink()
+        with self.assertRaises(RemoteContextError):
+            self.owner.queued_tasks()
+
+    def test_legacy_request_without_registration_history_refuses_unchanged(self):
+        self.owner.task_request({"request_id": "request", "task": "bounded task"})
+        document = json.loads(self.store.read_text(encoding="utf-8"))
+        document["requests"][0]["schema_version"] = 1
+        save_state(self.store, document)
+        with self.assertRaises(RemoteContextError):
+            self.owner.queued_tasks()
+        self.assertEqual(json.loads(self.store.read_text(encoding="utf-8")), document)
 
     def test_corrupt_pending_or_request_rows_cannot_disappear_into_no_prior_state(self):
         original = json.loads(self.store.read_text(encoding="utf-8"))
@@ -373,7 +493,8 @@ class RemoteOwnerTest(unittest.TestCase):
         copied_path = copy_dir / "owner.json"
         save_state(copied_path, before_loss)
         copied = RemoteForemanOwner(context=self.context, store_path=copied_path,
-                                    plugin_root=self.root, state_path=self.owner.state_path)
+                                    plugin_root=self.root, state_path=self.owner.state_path,
+                                    lease_reader=lambda: self.current_receipt)
         client = HerdrClient(context=self.context, remote_authority=copied, runner=self.runner)
         self.calls.clear()
         with self.assertRaises(RemoteContextError):

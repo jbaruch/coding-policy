@@ -17,6 +17,9 @@
   supervision bindings require no fabricated native environment, competing
   foreman brain or local signals to remote PIDs. The binding team-round scope
   recognizes the remote controller and preserves its tier and continuation gates.
+  An independent current-lease reader fences revoked controllers, exact private
+  modes and reason-specific remedies enforce the owner contract, and durable
+  task handoff markers prevent lost registration history from requeuing work.
   Native operation is unchanged; consuming service deployment stays gated on
   its authenticated controller, shared lease and evidence transport.
 
