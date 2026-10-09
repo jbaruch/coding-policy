@@ -1,5 +1,16 @@
 # Changelog
 
+### Fixed
+
+- Suppress Claude's predicted-input decoration only in disposable usage-probe
+  workspaces (#721). Native Claude 2.1.295 renders its startup `Try` hint
+  without ANSI styling in the observed terminal; disabling suggestions through
+  the documented session override produces an actually empty composer instead
+  of teaching the guard to mistake arbitrary `Try` text for empty input.
+  Assignment workers, provider roster, tiers, and global/project settings stay
+  unchanged; remaining hints, drafts, dialogs, and replaced identities still
+  refuse input through the existing guards.
+
 ## 0.3.389 — 2026-10-09
 
 ### Fixed

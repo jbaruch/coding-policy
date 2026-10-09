@@ -202,6 +202,32 @@ class ProbeRecoveryTest(unittest.TestCase):
                 self.assertEqual(client.agents, {})
                 self.assertFalse(any(event[0] == "prompt" for event in client.events))
 
+    def test_suggestion_override_is_only_on_disposable_claude_workspaces(self):
+        for kind in ("claude", "codex", "grok"):
+            with self.subTest(kind=kind):
+                worker, client = self.worker(kind), self.native(kind)
+                original_config = copy.deepcopy(worker.as_dict())
+                self.assertEqual(self.measure(worker, client)["failed_agents"], [])
+                environment = [event[2] for event in client.events if event[0] == "workspace_env"]
+                self.assertEqual(environment,
+                    [("CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION=false",)] if kind == "claude" else [])
+                self.assertEqual(worker.as_dict(), original_config)
+                self.assertEqual(client.panes, {})
+
+    def test_unstyled_try_text_still_refuses_input_with_suggestions_disabled(self):
+        worker, client = self.worker("claude"), self.native("claude")
+        client.frames = ['❯ Try "write a test for <filepath>"']
+        with patch("foreman.measure.measure") as measured, \
+                patch.object(client, "pane_read", return_value=client.frames[0]):
+            result = lifecycle.measure_worker_kinds(client, [worker], AT,
+                state_path=self.state, sleep=lambda _: None)
+        self.assertEqual(result["failed_agents"], ["claude"])
+        self.assertIsNone(result["agents"]["claude"]["headroom_pct"])
+        measured.assert_not_called()
+        self.assertFalse(any(event[0] == "prompt" for event in client.events))
+        self.assertEqual(client.panes, {})
+        self.assertTrue(any(event[0] == "workspace_env" for event in client.events))
+
     def test_retained_probe_gates_remeasurement_and_resolves_without_receipt_edits(self):
         for kind in ("codex", "claude", "grok"):
             with self.subTest(kind=kind):

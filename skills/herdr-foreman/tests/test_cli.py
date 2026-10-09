@@ -3121,11 +3121,13 @@ class FreshOwnerNative(HerdrClient):
         self.ordinal = 0
         self.sent_text = None
 
-    def workspace_create(self, *, cwd, label, focus=False):
+    def workspace_create(self, *, cwd, label, focus=False, env=()):
         self.ordinal += 1
         pane = "fixture-pane-" + str(self.ordinal)
         self.panes[pane] = 300 + self.ordinal
         self.events.append(("create", pane, focus))
+        if env:
+            self.events.append(("workspace_env", pane, tuple(env)))
         return pane
 
     def pane_process_info(self, pane_id):
