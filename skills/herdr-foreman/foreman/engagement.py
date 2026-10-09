@@ -316,10 +316,10 @@ def record_assessment(state, state_path, data, at):
         # Binding refusals preserve declared contributions just like line gaps.
         bindings = report_contract.trigger_bindings(body)
         if bindings:
-            from .triggers import validate_bootstrap_binding
+            from .triggers import validate_trigger_binding
             if role not in CONSULTATION_ROLES or len(bindings) != 1:
                 raise UsageError("Trigger declaration evidence belongs to one consultation report binding.", {})
-            validate_bootstrap_binding(bindings[0])
+            validate_trigger_binding(bindings[0])
     except UsageError as exc:
         declared = report_contract.declared_contributions(body) & EXCLUDING_CONTRIBUTIONS
         if not declared:

@@ -48,12 +48,13 @@ from typing import Any
 from . import runnable, engagement, report_contract
 from .recovery import receipt
 from .state import default_state_path, load_state_checked
-from .composition import REQUIREMENTS_SCHEMA_VERSION
+from .composition import REQUIREMENTS_SCHEMA_VERSION, parse_requirements
 from .errors import UsageError
+from .tiers import canonical_role, require_seatable
 
 
 DECLARATION_SCHEMA_VERSION = 1
-DETECTION_SCHEMA_VERSION = 2
+DETECTION_SCHEMA_VERSION = 3
 DECISIONS_SCHEMA_VERSION = 1
 
 #: Repo-relative location of the consuming repo's trigger declaration.
@@ -170,6 +171,28 @@ PLAN_OPTIONAL_FIELDS = frozenset({"writes_repository", "bootstrap_declaration_sh
 #: The responsibilities `skills/herdr-foreman/references/team-operation.md` declares read-only on
 #: repository content. A round claiming to write nothing seats these alone.
 READ_ONLY_ROLES = frozenset({"advisor", "investigator", "architect"})
+#: Only verification and consultation responsibilities may classify an unchanged
+#: legacy PR. This door grants no writing or release authority, and takes no
+#: staffing-decision overrides. Seats are compared by canonical responsibility.
+LEGACY_REVIEW_ROLES = READ_ONLY_ROLES | frozenset({"reviewer", "tester"})
+LEGACY_BINDING_FIELDS = frozenset({"repo", "base_revision", "head_revision", "path", "sha256"})
+
+
+def _full_oid(value):
+    return (isinstance(value, str) and len(value) in (40, 64)
+            and all(char in "0123456789abcdef" for char in value))
+
+
+def _legacy_binding(raw):
+    """Reject ambiguous duplicate JSON keys in the new closed legacy shape."""
+    def unique_object(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise UsageError("Legacy TRIGGER_DECLARATION repeats {}; supply one unambiguous five-key binding and reassess the report.".format(key), {})
+            result[key] = value
+        return result
+    return json.loads(raw, object_pairs_hook=unique_object)
 
 
 def load_plan(path):
@@ -295,6 +318,118 @@ def accepted_bootstrap(repo, base, artifact, digest, state_path):
     raise UsageError("The first trigger declaration has no accepted consultation bound to these exact artifact bytes, repository and task base. Dispatch the read-only declaration consultation and assess its delivered report through the normal owner path.", {})
 
 
+def validate_trigger_binding(raw):
+    """Read the two closed report-line shapes without widening writing bootstrap.
+
+    Four keys retain the original writing contract. Five keys bind one legacy
+    head; both reuse the same artifact validation during normal assessment.
+    The line is report content, not a new stored record or owner approval.
+    """
+    try:
+        binding = json.loads(raw)
+    except json.JSONDecodeError:
+        return validate_bootstrap_binding(raw)
+    if not isinstance(binding, dict) or set(binding) != LEGACY_BINDING_FIELDS:
+        return validate_bootstrap_binding(raw)
+    binding = _legacy_binding(raw)
+    if not _full_oid(binding["head_revision"]):
+        raise UsageError("Legacy TRIGGER_DECLARATION requires a full head_revision commit OID; assess the exact pushed head, not a branch or abbreviation.", {})
+    base_binding = {key: value for key, value in binding.items() if key != "head_revision"}
+    validate_bootstrap_binding(json.dumps(base_binding))
+    if any(binding[key] != str(Path(binding[key]).resolve()) for key in ("repo", "path")):
+        raise UsageError("Legacy TRIGGER_DECLARATION requires canonical absolute repo/path; consult and assess those exact paths.", {})
+    return binding
+
+
+def accepted_legacy_review(expected, task, state_path):
+    """Find unchanged, report-sourced authority for one exact task/head tuple.
+
+    This reader writes no state and preserves the existing older-state
+    migration refusal. Unrelated historical gaps create no authority and no
+    restoration obligation. Diagnostics name the missing binding dimensions.
+    """
+    state, usable = load_state_checked(state_path or default_state_path(), persist_migration=False)
+    if not usable:
+        raise UsageError("Legacy consultation history is unreadable; restore the existing owner ledger before classification.", {})
+    mismatched = set()
+    for record in reversed(state["specialist_assessments"]):
+        if record["role"] not in engagement.CONSULTATION_ROLES:
+            continue
+        if record["task"] != task:
+            mismatched.add("task")
+            continue
+        if not engagement.investigated(record):
+            mismatched.add("assessment acceptance")
+            continue
+        try:
+            evidence, body = receipt(record["report"])
+        except UsageError:
+            mismatched.add("report")
+            continue
+        if evidence != record["report_evidence"]:
+            mismatched.add("report")
+            continue
+        bindings = report_contract.trigger_bindings(body)
+        if len(bindings) != 1:
+            mismatched.add("report binding")
+            continue
+        try:
+            binding = _legacy_binding(bindings[0])
+        except (json.JSONDecodeError, UsageError):
+            mismatched.add("report binding")
+            continue
+        if not isinstance(binding, dict) or set(binding) != LEGACY_BINDING_FIELDS:
+            mismatched.add("five-key binding")
+            continue
+        differences = {key for key in LEGACY_BINDING_FIELDS if binding[key] != expected[key]}
+        if differences:
+            mismatched.update(differences)
+            continue
+        return record["id"], evidence
+    dimensions = sorted(mismatched or {"assessment"})
+    raise UsageError("Legacy review has no accepted consultation for this exact task, repository, base, head and artifact/report bytes (mismatch: {}). Obtain a new bounded five-key consultation assessment for the exact full head and rerun detection; do not change the PR to install a declaration.".format(
+        ", ".join(dimensions)), {"mismatched": dimensions})
+
+
+def load_legacy_review_declaration(args, plan, run):
+    """Load the read-only, task/head-bound external declaration (#729).
+
+    Require immutable subjects and an empty no-write plan before reading any
+    authority. Both commits must predate the declaration. Every mismatch fails
+    before diff classification; success returns canonical roles and commits.
+    """
+    task, head = getattr(args, "task", None), getattr(args, "head", None)
+    if (not isinstance(task, str) or not task.strip() or not isinstance(head, str) or not _full_oid(args.base)
+            or not _full_oid(head) or plan is None or plan["writes_repository"]):
+        raise UsageError("--legacy-review-declaration requires --task, literal full --base and --head OIDs, an empty no-write --planned record and read-only --roles. Preserve the unchanged PR and assess its exact full head.", {})
+    if getattr(args, "bootstrap_declaration", None) is not None or getattr(args, "decisions", None) is not None:
+        raise UsageError("Legacy review accepts neither --bootstrap-declaration nor --decisions; use its accepted external binding and staff every fired trigger.", {})
+    raw_roles = (getattr(args, "roles", None) or "").split(",")
+    for role in raw_roles:
+        require_seatable(role)
+    roles = [canonical_role(role) for role in raw_roles]
+    if not set(roles) <= LEGACY_REVIEW_ROLES:
+        raise UsageError("Legacy review requires read-only verification/consultation --roles; remove writing, release, judge, empty or unknown responsibilities before classification.", {})
+    for revision in (args.base, head):
+        if run(["rev-parse", "--verify", revision + "^{commit}"]).strip() != revision:
+            raise UsageError("Legacy revision {} did not resolve to its exact commit; use its full commit OID and obtain a matching assessment.".format(revision), {})
+        if run(["ls-tree", "--name-only", revision, "--", DECLARATION_FILE]).strip():
+            route = "committed in-repository authority" if revision == args.base else "the byte-identical writing bootstrap"
+            raise UsageError("Legacy review requires both revisions to lack {}; {} contains it. Use {} instead.".format(
+                DECLARATION_FILE, revision, route), {})
+    artifact = Path(args.legacy_review_declaration)
+    repo = Path(args.repo).resolve()
+    if artifact.resolve().is_relative_to(repo):
+        raise UsageError("Legacy review declaration must remain outside the target repository; restore the assessed external artifact.", {})
+    evidence, body = receipt(str(artifact.resolve()))
+    expected = {"repo": str(repo), "base_revision": args.base, "head_revision": head,
+                "path": evidence["path"], "sha256": evidence["sha256"]}
+    declaration = _declaration(body, artifact.resolve(), authority={"kind": "legacy_review"})
+    assessment, report_evidence = accepted_legacy_review(expected, task, getattr(args, "state", None))
+    declaration["authority"].update(expected, task=task, assessment=assessment, report_evidence=report_evidence)
+    return declaration, roles
+
+
 def load_bootstrap_declaration(repo, base, artifact, plan, run, state_path=None):
     """Load the one-time reviewed declaration bound to an absent base and plan."""
     if plan is None or not plan["writes_repository"]:
@@ -331,9 +466,11 @@ def load_bootstrap_declaration(repo, base, artifact, plan, run, state_path=None)
                                                       "sha256": actual, "assessment": assessment})
 
 
-def load_requirements(path):
+def load_requirements(path, *, roles=None, task=None):
     """Collect the specialties a requirements file staffs, for trigger cover."""
     if path is None:
+        if roles is not None:
+            parse_requirements(None, roles, task)
         return set()
     try:
         raw = Path(path).read_text(encoding="utf-8")
@@ -348,6 +485,11 @@ def load_requirements(path):
             or payload["schema_version"] != REQUIREMENTS_SCHEMA_VERSION
             or not isinstance(payload["assignments"], dict)):
         raise UsageError("Requirements must be a schema_version {} object with an assignments map; use the documented requirements file.".format(REQUIREMENTS_SCHEMA_VERSION), {})
+    if roles is not None:
+        # Legacy triggers must be staffed by actual read-only seats, not an
+        # unseated or writing requirement that the normal planner would refuse.
+        resolved = parse_requirements(payload, roles, task)
+        return {record["specialty"] for record in resolved.values()}
     found = set()
     for record in payload["assignments"].values():
         if isinstance(record, dict) and isinstance(record.get("specialty"), str):
@@ -578,6 +720,11 @@ def run_command(args, runner=None):
     declaration_path = Path(args.repo) / DECLARATION_FILE
     bootstrap = None
     artifact = getattr(args, "bootstrap_declaration", None)
+    legacy = getattr(args, "legacy_review_declaration", None)
+    legacy_roles = None
+    legacy_declaration = None
+    if legacy is not None:
+        legacy_declaration, legacy_roles = load_legacy_review_declaration(args, plan, run)
     base_has_declaration = bool(run(["ls-tree", "--name-only", args.base, "--", DECLARATION_FILE]).strip()) if writes else False
     if writes and not base_has_declaration:
         if artifact is None:
@@ -588,7 +735,9 @@ def run_command(args, runner=None):
         # A stale bootstrap cannot override a committed authority.
         bootstrap = load_bootstrap_declaration(
             args.repo, args.base, artifact, plan, run, getattr(args, "state", None))
-    if head:
+    if legacy_declaration is not None:
+        declaration = legacy_declaration
+    elif head:
         declaration = load_revision_declaration(run, args.repo, head, required=writes)
     elif declaration_path.exists() or declaration_path.is_symlink():
         declaration = load_declaration(args.repo, required=writes)
@@ -606,8 +755,10 @@ def run_command(args, runner=None):
         declaration["authority"]["bootstrap_sha256"] = expected
         declaration["authority"]["bootstrap_assessment"] = bootstrap["authority"]["assessment"]
     decisions = load_decisions(getattr(args, "decisions", None))
-    specialties = load_requirements(getattr(args, "requirements", None))
-    roles = [role for role in (getattr(args, "roles", None) or "").split(",") if role]
+    specialties = load_requirements(getattr(args, "requirements", None),
+        roles=args.roles.split(",") if legacy is not None else None,
+        task=getattr(args, "task", None))
+    roles = legacy_roles if legacy_roles is not None else [role for role in (getattr(args, "roles", None) or "").split(",") if role]
     # `base...head` diffs from the merge base, so "absent from the base" is
     # read at that same commit rather than at the branch point's namesake.
     left = run(["merge-base", args.base, head]).strip() if head else args.base
@@ -640,7 +791,7 @@ def run_command(args, runner=None):
             # path that is also a trust boundary fires security too; validating
             # it and classifying nothing let UX and product answer for both.
             changes.setdefault(path, "M")
-    if not writes:
+    if not writes and legacy is None:
         # An investigation touches no repository surface, so it has nothing to
         # declare and every trigger is quiet by construction. The claim is
         # checkable rather than asserted: the seats are the read-only ones, and
@@ -659,7 +810,7 @@ def run_command(args, runner=None):
     # An empty plan classifies exactly as much as an absent one, so the guard
     # reads the combined inputs rather than the plan's presence: a vacuous
     # success here is the silence the triggers exist to end (#415).
-    elif not changes and not planned_lines and not (plan is not None and plan["cli_surface"]):
+    elif writes and not changes and not planned_lines and not (plan is not None and plan["cli_surface"]):
         raise UsageError("This round classifies nothing: its diff is empty and no planned surface is declared. Name the paths, package sizes or CLI surfaces the work will touch in --planned before the developer is dispatched. A round that writes no repository content declares writes_repository false instead.", {})
     # A package declared only by its planned size has no path in `changes`, and
     # a candidate missing here reads as one the base already held -- so a
@@ -682,7 +833,13 @@ def run_command(args, runner=None):
     if plan is not None and plan["cli_surface"]:
         fired.setdefault("ux-product", []).extend(
             {"signal": "planned_cli_surface", "evidence": path} for path in plan["cli_surface"])
-    return report(declaration, args.base, head or "worktree", fired, roles, specialties, decisions)
+    payload, failure = report(declaration, args.base, head or "worktree", fired, roles, specialties, decisions)
+    if legacy is not None:
+        payload["task"] = args.task
+        if failure is not None:
+            failure["message"] = "Legacy review triggers {} are unstaffed; add the required role or requirements specialty and rerun detection. --decisions cannot answer a legacy trigger.".format(
+                ", ".join(payload["unaddressed"]))
+    return payload, failure
 
 
 def register_command(sub, common):
@@ -693,6 +850,7 @@ def register_command(sub, common):
                         help="Repository holding " + DECLARATION_FILE + " and the commits to compare.")
     parser.add_argument("--base", required=True, metavar="REF", help="The task's recorded base revision.")
     parser.add_argument("--head", metavar="REF", help="Pushed head; omit to read the working tree.")
+    parser.add_argument("--task", help="Exact consultation task identity; required for legacy review.")
     parser.add_argument("--roles", metavar="ROLE[,ROLE...]", help="Roles this round plans, as given to `plan`.")
     parser.add_argument("--requirements", metavar="FILE", help="The requirements file this round gives `plan`.")
     parser.add_argument("--decisions", metavar="FILE", help="Recorded staffing decisions for fired triggers.")
@@ -700,3 +858,5 @@ def register_command(sub, common):
                         help="Surfaces this round will touch, for a pre-implementation round with no diff yet.")
     parser.add_argument("--bootstrap-declaration", metavar="FILE",
                         help="Reviewed first trigger declaration; accepted only when the recorded base lacks one and --planned binds its exact installation.")
+    parser.add_argument("--legacy-review-declaration", metavar="FILE",
+                        help="Accepted external declaration for one unchanged legacy PR; requires exact task/full base/head, no-write plan and read-only seats. No bootstrap, decisions or release authority.")

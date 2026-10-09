@@ -452,6 +452,32 @@ class EngagementTest(unittest.TestCase):
                 with self.assertRaises(UsageError):
                     engagement.require_accepted(persisted, "consult-1", str(self.report))
 
+    def test_legacy_head_binding_uses_the_existing_report_assessment_schema(self):
+        artifact = self.root / "triggers.json"
+        artifact.write_text(json.dumps({"schema_version": 1, "package_roots": [], "package_change_lines": 1,
+            "trust_boundary_paths": [], "cli_spec_paths": [], "cli_surface_markers": [], "user_doc_paths": []}))
+        binding = {"repo": str(self.root / "consumer"), "base_revision": "a" * 40,
+                   "head_revision": "c" * 40, "path": str(artifact),
+                   "sha256": recovery.receipt(str(artifact))[0]["sha256"]}
+        for head in ("c" * 40, "c" * 64):
+            self.report.write_text(CONSULT_REPORT + "CONTRIBUTION: design\nTRIGGER_DECLARATION: " +
+                                   json.dumps({**binding, "head_revision": head}) + "\n")
+            record = self.assess({**self.data, "id": "legacy-" + head})
+            self.assertEqual((record["schema_version"], record["source"], record["task"], record["contribution"]),
+                             (2, "report", "task-1", "design"))
+            self.assertEqual(record["report_evidence"], recovery.receipt(str(self.report))[0])
+            engagement.validate_assessments(self.state)
+        for change in ({"head_revision": "HEAD"}, {"head_revision": "c" * 12}, {"head_revision": None},
+                       {"head_revision": "C" * 40}, {"extra": "forbidden"}, {"repo": "relative"},
+                       {"path": str(artifact.parent / "." / artifact.name) + "/../triggers.json"}):
+            with self.subTest(change=change):
+                self.report.write_text(CONSULT_REPORT + "CONTRIBUTION: design\nTRIGGER_DECLARATION: " +
+                                       json.dumps({**binding, **change}) + "\n")
+                with self.assertRaises(engagement.ContractGap):
+                    self.assess({**self.data, "id": "gap-" + str(len(self.state["specialist_assessments"]))})
+                record = self.state["specialist_assessments"][-1]
+                self.assertEqual((record["source"], record["contribution"]), ("contribution_only", "design"))
+
     def test_quoted_trigger_declarations_are_not_bindings_and_leave_the_contract_exact(self):
         # #737: the 729 report quoted its proposed five-key schema in a fence; a well-formed
         # four-key copy naming a missing artifact is just as inert, so no artifact is read.

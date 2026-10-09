@@ -44,7 +44,8 @@ bash "$CP/skills/herdr-foreman/foreman.sh" detect-triggers \
   --repo <repo-path> --base <recorded-base> [--head <pushed-head>] \
   --roles <role[,role...]> [--requirements <requirements.json>] \
   [--planned <planned.json>] [--decisions <decisions.json>] \
-  [--bootstrap-declaration <reviewed-triggers.json>]
+  [--bootstrap-declaration <reviewed-triggers.json>] \
+  [--legacy-review-declaration <reviewed-triggers.json> --task <exact-task>]
 ```
 
 Exit 0 means every fired trigger is staffed or answered. On exit 1, read the
@@ -54,6 +55,11 @@ and an `unaddressed_trigger` is staffed in the roles below or answered by a
 recorded decision with its reason. Re-run the command with the updated
 declaration, roles, requirements and decisions after every such change, and
 plan only once it exits 0.
+
+For an unchanged historical PR, use "Classify an unchanged legacy PR" in
+`skills/herdr-foreman/references/specialists.md`. Supply its immutable subject,
+empty no-write plan and accepted task-bound consultation; staff every fired
+trigger instead of passing decisions. Classification never authorizes release.
 
 A round that will split its review surface validates the partition first, then
 plans it with `--partition`:

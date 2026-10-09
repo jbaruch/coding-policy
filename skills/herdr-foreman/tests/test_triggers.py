@@ -12,6 +12,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -1182,6 +1183,369 @@ class BootstrapDeclarationCommandTest(TempCase):
                 code, out, err = self.run_cli()
                 self.assertEqual((code, out), (1, ""))
                 self.assertIn("no accepted consultation", err)
+
+
+class LegacyReviewCommandTest(TempCase):
+    """Public assessment -> unchanged legacy subject -> read-only detection."""
+
+    def setUp(self):
+        self.tmp = self.temp_dir().resolve()
+        self.external = self.temp_dir().resolve()
+        self.environment = {**os.environ, "GIT_AUTHOR_DATE": "2026-01-08T10:00:00Z",
+                            "GIT_COMMITTER_DATE": "2026-01-08T10:00:00Z"}
+        self.git("init", "-q", "-b", "main")
+        self.git("config", "user.email", "tests@example.invalid")
+        self.git("config", "user.name", "Tests")
+        (self.tmp / "requirements-dev.txt").write_text("ruff==0.16.9\n")
+        self.git("add", "-A")
+        self.git("commit", "-qm", "base")
+        self.base = self.git("rev-parse", "HEAD").strip()
+        (self.tmp / "requirements-dev.txt").write_text("ruff==0.16.10\n")
+        self.git("commit", "-qam", "dependency update")
+        self.head = self.git("rev-parse", "HEAD").strip()
+        self.task = "task-1"
+        self.artifact = self.external / "triggers.json"
+        self.artifact.write_text(json.dumps(DECLARATION))
+        self.plan = self.external / "no-write.json"
+        self.plan.write_text(json.dumps({"schema_version": 1, "added": [], "changed": [],
+                                       "package_lines": {}, "cli_surface": [], "writes_repository": False}))
+        self.owner = consultation_fixture.SpecialistCliTest("test_assess_command_retrieves_real_receipts_without_worker_calls")
+        self.owner.setUp()
+        self.addCleanup(self.owner.doCleanups)
+        self.owner.seed_warm_consultation(assess=False, retire=False)
+        self.report_path = self.owner.tmp / "prior-report.md"
+        self.assess()
+
+    def git(self, *arguments):
+        return subprocess.run(["git", "-C", str(self.tmp), *arguments], env=self.environment,
+                              capture_output=True, text=True, check=True).stdout
+
+    def binding(self, **changes):
+        return {"repo": str(self.tmp), "base_revision": self.base, "head_revision": self.head,
+                "path": str(self.artifact), "sha256": hashlib.sha256(self.artifact.read_bytes()).hexdigest(), **changes}
+
+    def assess(self, *, binding=None, acceptance="met", layout="{line}", code=0, verdict=None):
+        line = "TRIGGER_DECLARATION: " + json.dumps(self.binding() if binding is None else binding)
+        self.report_path.write_text("ACCEPTANCE 1/1: " + acceptance + " — inspected exact legacy subject\n"
+                                    "CONTRIBUTION: design\n" + layout.replace("{line}", line) + "\n" +
+                                    ("VERDICT: " + verdict + "\n" if verdict is not None else ""))
+        record = self.external / "assessment.json"
+        record.write_text(json.dumps({"id": "legacy-" + str(len(self.owner.saved()["specialist_assessments"])),
+            "dispatch": "prior:advisor", "report": str(self.report_path),
+            "delivery": str(self.owner.tmp / "prior-delivery.json")}))
+        actual, _, err = self.owner.invoke(["assess-specialist", "--record", str(record),
+                                            "--now", "2026-01-08T12:00:00Z"], self.owner._client({}))
+        self.assertEqual(actual, code, err)
+
+    def args(self, **changes):
+        return namespace(**{"repo": str(self.tmp), "base": self.base, "head": self.head, "task": self.task,
+            "roles": "reviewer,tester", "planned": str(self.plan), "state": str(self.owner.state),
+            "legacy_review_declaration": str(self.artifact), **changes})
+
+    def run_cli(self, **changes):
+        fields = {"repo": str(self.tmp), "base": self.base, "head": self.head, "task": self.task,
+                  "roles": "reviewer,tester", "planned": str(self.plan), "state": str(self.owner.state),
+                  "legacy-review-declaration": str(self.artifact), **changes}
+        argv = ["detect-triggers"]
+        for flag, value in fields.items():
+            if value is not None:
+                argv += ["--" + flag, value]
+        out, err = io.StringIO(), io.StringIO()
+        code = cli.main(argv, stdout=out, stderr=err)
+        return code, out.getvalue(), err.getvalue()
+
+    def refused(self, **changes):
+        code, out, err = self.run_cli(**changes)
+        self.assertEqual((code, out), (1, ""), err)
+        return err
+
+    def test_exact_subject_emits_evidence_without_writing_or_worker_calls(self):
+        before = {path: path.read_bytes() for path in (self.owner.state,
+                  Path(str(self.owner.state) + ".supervision.json"), self.artifact, self.report_path)}
+        with patch("foreman.triggers.subprocess.run", wraps=subprocess.run) as calls:
+            code, out, err = self.run_cli()
+        self.assertEqual(code, 0, err)
+        result = json.loads(out)
+        self.assertEqual((result["schema_version"], result["task"], result["base"], result["head"], result["fired"]),
+                         (3, self.task, self.base, self.head, []))
+        self.assertEqual(result["declaration_authority"], {"kind": "legacy_review", **self.binding(),
+            "task": self.task, "assessment": "legacy-0", "report_evidence": {
+                "path": str(self.report_path), "sha256": hashlib.sha256(self.report_path.read_bytes()).hexdigest()}})
+        self.assertEqual({path: path.read_bytes() for path in before}, before)
+        self.assertEqual(self.git("status", "--porcelain"), "")
+        self.assertEqual(self.git("rev-parse", "HEAD").strip(), self.head)
+        self.assertTrue(all(call.args[0][0] == "git" for call in calls.call_args_list))
+        self.assertEqual(self.owner.runner.calls, [])
+
+    def test_allowed_responsibilities_and_partition_seats_classify(self):
+        for roles in ("reviewer", "tester", "advisor", "investigator", "architect", "reviewer#api,tester"):
+            with self.subTest(roles=roles):
+                fields = {}
+                if roles in ("advisor", "investigator", "architect"):
+                    requirements = self.external / "requirements.json"
+                    requirements.write_text(json.dumps({"schema_version": 1, "assignments": {roles: {
+                        "specialty": "architecture", "required_capabilities": ["architecture"],
+                        "independent": False, "engagement": "legacy-architecture"}}}))
+                    fields["requirements"] = str(requirements)
+                code, out, err = self.run_cli(roles=roles, **fields)
+                self.assertEqual(code, 0, err)
+                self.assertEqual(json.loads(out)["fired"], [])
+
+    def test_pinned_admin_and_travel_ruff_prs_use_reviewed_bytes_without_head_changes(self):
+        # Prospective five-key owner assessments, never the live four-key reports.
+        # Git is replayed at the captured immutable subjects; all files are owned fixtures.
+        admin_boundaries = [
+            ".github/workflows/*", ".github/fleet-review-enabled", ".github/pre-publish.sh",
+            "scripts/lint-rule-citation-implementations.py", "scripts/lint-skill-script-packaging.py",
+            "rules/container-mounts.md", "rules/nuke-payload.md", "rules/google-access.md",
+            "rules/event-filter-rules.md", "rules/no-inplace-overrides.md", "rules/follow-me-two-phase-lock.md",
+            "rules/subagent-spawning.md", "rules/tile-propagation.md", "rules/skill-tile-placement.md",
+            "skills/brief-cleanup/*", "skills/check-email/*", "skills/email-surface/*", "skills/google-fetch/*",
+            "skills/heartbeat/*", "skills/manage-groups/*", "skills/memory-enrich-apply/*",
+            "skills/nightly-backup/*", "skills/promote-tiles/*", "skills/schedule-task/*",
+            "skills/broadcast-to-chat/*", "skills/soul-searching/*", "skills/soul-searching-apply/*",
+            "skills/state-purge/*", "skills/troubleshoot-chat/*", "rules/cross-group-scheduling.md",
+            "skills/verify-tiles/*", "skills/daily-spend-rollup/scripts/post-anomaly-comments.py",
+            "skills/memory-enrich/scripts/apply-links.py", "skills/morning-brief/scripts/fetch-task-emails.py",
+            "skills/morning-brief/scripts/reminder-precheck.py",
+        ]
+        common = {"schema_version": 1, "package_roots": ["skills/*"], "package_change_lines": 400}
+        admin = {**common, "package_roots": ["skills/*", "rules", "scripts"],
+            "trust_boundary_paths": admin_boundaries, "cli_spec_paths": ["scripts/*.py", "skills/*/scripts/*.py"],
+            "cli_surface_markers": ["add_parser(", "add_argument(", "ArgumentParser(", "sys.argv", '\": (\"'],
+            "user_doc_paths": ["README.md", "skills/*/SKILL.md"]}
+        travel = {**common, "trust_boundary_paths": [".github/workflows/*", "skills/*.py", "skills/*.sh"],
+            "cli_spec_paths": ["skills/check-travel-bookings/scripts/update-travel-booking-state.py",
+                "skills/expertflyer/scripts/expertflyer.py", "skills/expertflyer/scripts/upcoming-flights.py"],
+            "cli_surface_markers": ["add_parser(", "add_argument("],
+            "user_doc_paths": ["README.md", "docs/*", "rules/*", "skills/*/SKILL.md",
+                "skills/*/references/*", "skills/*/state-schema.md"]}
+        cases = [
+            ("nanoclaw-admin555-native-20261008", "2f1c79e3b5ca023e49ba93a59f75bd634be20b55",
+             "dabd4cd1255a8cd0de042fd858af8cc405dbe86c", admin,
+             "2ffba47c308d556cc5c7c8009a0df156c18182a18111b76cdad681daf2a10a3c"),
+            ("nanoclaw-travel322-native-20261008", "ca88a50754579688ef0ccee1bea01a7b3a663c92",
+             "8420539ef229001b593d933703d63a0738cf40d0", travel,
+             "c5dd7421889b364bb0142014c61ab3c3e2d5edd2e77a426041c67c757479d7b9"),
+        ]
+        checkout_head, checkout_status = self.git("rev-parse", "HEAD"), self.git("status", "--porcelain")
+        for self.task, self.base, self.head, artifact, digest in cases:
+            with self.subTest(task=self.task):
+                self.artifact.write_text(json.dumps(artifact, indent=2) + "\n")
+                self.assertEqual(hashlib.sha256(self.artifact.read_bytes()).hexdigest(), digest)
+                state = self.owner.saved()
+                state["specialist_assessments"] = []
+                for row in (state["assignments"][0], state["recovery"]["dispatches"][0],
+                            state["recovery"]["dispatches"][0]["result"]):
+                    row["task"] = self.task
+                save_state(self.owner.state, state)
+                fleet_path = Path(str(self.owner.state) + ".supervision.json")
+                fleet = json.loads(fleet_path.read_text())
+                fleet["members"][0]["assignment"]["task"] = self.task
+                fleet_path.write_text(json.dumps(fleet))
+                self.assess()
+                before = {path: path.read_bytes() for path in (self.owner.state, fleet_path,
+                          self.artifact, self.report_path)}
+                commands = []
+                def replay(arguments):
+                    commands.append(arguments)
+                    if arguments[0] == "rev-parse":
+                        return arguments[2].removesuffix("^{commit}") + "\n"
+                    if arguments[0] == "ls-tree":
+                        return ""
+                    if arguments[0] == "merge-base":
+                        return self.base + "\n"
+                    if "--name-status" in arguments:
+                        return "M\0requirements-dev.txt\0"
+                    if "--numstat" in arguments:
+                        return "1\t1\trequirements-dev.txt\0"
+                    self.fail("unexpected Git read: " + str(arguments))
+                result, failure = triggers.run_command(self.args(), runner=replay)
+                self.assertIsNone(failure)
+                self.assertEqual((result["base"], result["head"], result["task"], result["fired"]),
+                                 (self.base, self.head, self.task, []))
+                self.assertEqual(result["declaration_authority"]["sha256"], digest)
+                self.assertIn(["diff", "--no-renames", self.base + "..." + self.head, "--name-status", "-z"], commands)
+                self.assertEqual({path: path.read_bytes() for path in before}, before)
+                self.assertEqual(self.git("rev-parse", "HEAD"), checkout_head)
+                self.assertEqual(self.git("status", "--porcelain"), checkout_status)
+
+    def test_writing_release_judge_unknown_and_empty_seats_refuse_before_diff(self):
+        for roles in ("", "developer", "release", "judge", "unknown", "reviewer,release", "reviewer,,tester"):
+            with self.subTest(roles=roles), patch("foreman.triggers.git_runner") as git:
+                self.assertIn("read-only", self.refused(roles=roles))
+                git.return_value.assert_not_called()
+
+    def test_missing_inputs_and_mutable_or_abbreviated_subjects_refuse(self):
+        for change in ({"task": None}, {"head": None}, {"planned": None}, {"roles": None},
+                       {"base": "HEAD"}, {"head": "main"}, {"base": self.base[:12]}, {"head": self.head[:12]}):
+            with self.subTest(change=change):
+                self.refused(**change)
+
+    def test_malformed_seats_and_unqualified_consultations_refuse(self):
+        for role in ("reviewer#", "reviewer#api/bad", "architect#api", "advisor#api",
+                     "reviewer#api=bad", "tester#api#bad"):
+            with self.subTest(role=role), patch("foreman.triggers.git_runner") as git:
+                self.refused(roles=role)
+                git.return_value.assert_not_called()
+        for role in ("advisor", "investigator", "architect"):
+            with self.subTest(role=role):
+                self.assertIn("explicit specialist requirements", self.refused(roles=role))
+
+    def test_writing_or_nonempty_plan_refuses(self):
+        original = json.loads(self.plan.read_text())
+        for change in ({"writes_repository": True}, {"added": [".herdr/triggers.json"]},
+                       {"changed": ["README.md"]}, {"package_lines": {"tools": 1}}, {"cli_surface": ["src/cli/main.py"]}):
+            with self.subTest(change=change):
+                self.plan.write_text(json.dumps({**original, **change}))
+                self.refused()
+
+    def test_bootstrap_and_even_unused_decisions_refuse(self):
+        for change in ({"bootstrap-declaration": str(self.artifact)}, {"decisions": str(self.external / "missing.json")}):
+            with self.subTest(change=change):
+                self.assertIn("neither", self.refused(**change))
+
+    def test_writing_unseated_or_nonindependent_requirements_cannot_staff_legacy_roles(self):
+        requirements = self.external / "requirements.json"
+        for role, independent in (("developer", False), ("advisor", False), ("tester", False)):
+            with self.subTest(role=role):
+                requirements.write_text(json.dumps({"schema_version": 1, "assignments": {role: {
+                    "specialty": "security", "required_capabilities": ["security"],
+                    "independent": independent, "engagement": "legacy-security"}}}))
+                self.refused(requirements=str(requirements))
+
+    def test_present_declaration_at_either_revision_uses_its_original_route(self):
+        (self.tmp / ".herdr").mkdir()
+        (self.tmp / triggers.DECLARATION_FILE).write_bytes(self.artifact.read_bytes())
+        self.git("add", "-A")
+        self.git("commit", "-qm", "install declaration")
+        declared = self.git("rev-parse", "HEAD").strip()
+        self.assertIn("writing bootstrap", self.refused(head=declared))
+        self.assertIn("in-repository", self.refused(base=declared, head=declared))
+
+    def test_changed_head_requires_new_assessment_not_a_detector_rerun(self):
+        (self.tmp / "requirements-dev.txt").write_text("ruff==0.16.11\n")
+        self.git("commit", "-qam", "new subject")
+        new_head = self.git("rev-parse", "HEAD").strip()
+        self.assertIn("head_revision", self.refused(head=new_head))
+        self.assertEqual(self.run_cli()[0], 0)  # The original immutable head still has its own authority.
+        self.head = new_head
+        self.assess()
+        self.assertEqual(self.run_cli()[0], 0)
+
+    def test_four_key_bootstrap_binding_cannot_authorize_legacy_review(self):
+        binding = self.binding()
+        del binding["head_revision"]
+        self.assess(binding=binding)
+        self.assertIn("five-key", self.refused())
+
+    def test_duplicate_json_subject_keys_cannot_establish_authority(self):
+        line = "TRIGGER_DECLARATION: " + json.dumps(self.binding())
+        ambiguous = line[:-1] + ', "head_revision": "' + self.head + '"}'
+        self.assess(layout=ambiguous, code=1)
+        self.assertEqual(self.owner.saved()["specialist_assessments"][-1]["source"], "contribution_only")
+        self.assertIn("acceptance", self.refused())
+
+    def test_repository_base_and_head_binding_mismatches_name_the_dimension(self):
+        for change in ({"repo": str(self.owner.tmp.resolve())}, {"base_revision": "a" * 40},
+                       {"head_revision": "c" * 40}):
+            with self.subTest(change=change):
+                self.assess(binding=self.binding(**change))
+                self.assertIn(next(iter(change)), self.refused())
+
+    def test_blocking_consultation_establishes_no_classification_authority(self):
+        state = self.owner.saved()
+        state["specialist_assessments"] = []
+        state["assignments"][0]["requirements"]["specialty"] = "security"
+        state["recovery"]["dispatches"][0]["requirements"]["specialty"] = "security"
+        state["recovery"]["dispatches"][0]["result"]["requirements"]["specialty"] = "security"
+        save_state(self.owner.state, state)
+        self.assess(verdict="blocking")
+        self.assertIn("acceptance", self.refused())
+
+    def test_unresolved_literal_oid_and_unusable_owner_history_refuse(self):
+        with self.assertRaisesRegex(UsageError, "exact commit"):
+            triggers.run_command(self.args(), runner=lambda _arguments: "f" * 40)
+        self.owner.state.write_text('{"schema_version": 999}')
+        self.assertIn("history is unreadable", self.refused())
+
+    def test_old_owner_history_refuses_without_persisting_a_migration(self):
+        state = self.owner.saved()
+        state["recovery"]["schema_version"] = 16
+        self.owner.state.write_text(json.dumps(state))
+        before = self.owner.state.read_bytes()
+        self.assertIn("owner migration", self.refused())
+        self.assertEqual(self.owner.state.read_bytes(), before)
+
+    def test_report_artifact_path_bytes_and_task_mismatch_refuse(self):
+        self.assertIn("task", self.refused(task="another-task"))
+        self.report_path.write_text(self.report_path.read_text() + "changed\n")
+        self.assertIn("report", self.refused())
+        self.assess()
+        replacement = self.external / "same-bytes-another-path.json"
+        replacement.write_bytes(self.artifact.read_bytes())
+        self.assertIn("path", self.refused(**{"legacy-review-declaration": str(replacement)}))
+        self.artifact.write_text(json.dumps({**DECLARATION, "package_change_lines": 51}))
+        self.assertIn("sha256", self.refused())
+
+    def test_unaccepted_unmet_and_contribution_only_records_grant_nothing(self):
+        state = self.owner.saved()
+        state["specialist_assessments"] = []
+        save_state(self.owner.state, state)
+        self.assertIn("assessment", self.refused())
+        self.assess(acceptance="unmet")
+        self.assertIn("acceptance", self.refused())
+        self.assess(binding={**self.binding(), "extra": "forbidden"}, code=1)
+        self.assertEqual(self.owner.saved()["specialist_assessments"][-1]["source"], "contribution_only")
+        self.refused()
+
+    def test_fenced_examples_are_inert_but_multiple_live_bindings_refuse(self):
+        self.assess(layout="```text\nTRIGGER_DECLARATION: not-json\n```\n{line}")
+        self.assertEqual(self.run_cli()[0], 0)
+        self.assess(layout="```text\n{line}\n```")
+        self.assertIn("report binding", self.refused())
+        self.assess(layout="{line}\n{line}", code=1)
+        self.refused()
+
+    def test_missing_non_utf8_inside_repo_or_invalid_artifact_refuses(self):
+        inside = self.tmp / "inside.json"
+        inside.write_bytes(self.artifact.read_bytes())
+        self.assertIn("outside", self.refused(**{"legacy-review-declaration": str(inside)}))
+        self.artifact.write_bytes(b"\xff")
+        self.assertIn("UTF-8", self.refused())
+        self.artifact.write_text("{}")
+        self.assertIn("requires exactly", self.refused())
+        self.artifact.unlink()
+        self.assertIn("Cannot read", self.refused())
+
+    def test_an_ordinary_no_write_round_still_refuses_the_same_tracked_diff(self):
+        self.assertIn("tracked diff", self.refused(**{"legacy-review-declaration": None}))
+
+    def test_unstaffed_triggers_are_classified_but_never_answered_by_a_decision(self):
+        (self.tmp / "src/auth").mkdir(parents=True)
+        (self.tmp / "src/auth/token.py").write_text("token = 1\n")
+        (self.tmp / "src/cli").mkdir()
+        (self.tmp / "src/cli/main.py").write_text('sub.add_parser("ship")\n')
+        (self.tmp / "docs").mkdir()
+        (self.tmp / "docs/guide.md").write_text("Guide\n")
+        self.git("add", "-A")
+        self.git("commit", "-qm", "trigger all consultations")
+        self.head = self.git("rev-parse", "HEAD").strip()
+        self.assess()
+        code, out, err = self.run_cli()
+        self.assertEqual(code, 1)
+        self.assertEqual(json.loads(out)["unaddressed"], ["architect", "documentation", "security", "ux-product"])
+        self.assertIn("--decisions cannot", err)
+        self.assertIn("explicit specialist requirements", self.refused(roles="architect"))
+        requirements = self.external / "requirements.json"
+        requirements.write_text(json.dumps({"schema_version": 1, "assignments": {
+            role: {"specialty": specialty, "required_capabilities": [specialty], "independent": independent,
+                   "engagement": "legacy-" + specialty}
+            for role, specialty, independent in (("reviewer", "security", True), ("tester", "documentation", True),
+                ("advisor", "ux-product", False), ("architect", "architecture", False))}}))
+        code, out, err = self.run_cli(roles="reviewer#api,tester,advisor,architect", requirements=str(requirements))
+        self.assertEqual(code, 0, err)
+        self.assertEqual(json.loads(out)["unaddressed"], [])
 
 
 class WorktreeBaseCommandTest(TempCase):

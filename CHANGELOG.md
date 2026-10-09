@@ -1,5 +1,17 @@
 # Changelog
 
+### Fixed
+
+- Classify unchanged legacy PRs through `detect-triggers
+  --legacy-review-declaration`, using an accepted consultation bound to the exact
+  task, repository, full base/head commits and external artifact path/digest
+  (#729). The admin/travel Ruff-only reproduction no longer needs an unrelated
+  declaration commit or a replaced PR head. The separate read-only mode staffs
+  every fired trigger, refuses decisions and writing/release responsibilities,
+  and emits schema-3 subject, assessment and report evidence without state or
+  repository writes. Changed subjects or evidence require reassessment; normal
+  no-write guards and byte-identical writing bootstrap remain intact.
+
 ## 0.3.394 — 2026-10-09
 
 ### Fixed

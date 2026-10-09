@@ -42,7 +42,8 @@ deliverable lands before implementation proceeds. Four of them allow a
 recorded staffing decision instead, with its reason, the way a shortfall of
 eligible workers already does. The exhaustion trigger does not: the judge's
 diagnosis rules on that assessment, and `foreman diagnose` refuses without
-it.
+it. Legacy review below requires staffing every fired trigger; decisions cannot
+answer its triggers.
 
 | Trigger | Profile | Deliverable before implementation |
 | --- | --- | --- |
@@ -97,6 +98,8 @@ foreman detect-triggers --repo <dir> --base <ref> [--head <ref>] \
   --roles <role[,role...]> [--requirements <file>] [--planned <file>] \
   [--decisions <file>] [--bootstrap-declaration <reviewed-file>]
 ```
+
+An unchanged historical PR uses the separate legacy-review synopsis below.
 
 ## Declare a pre-implementation round's surfaces
 
@@ -174,7 +177,9 @@ committed declaration is the sole authority. A first declaration at the head or
 in the worktree still requires the bootstrap proof; omitting the flag refuses. Omit `--bootstrap-declaration` on
 later rounds. A bootstrap artifact never overrides existing repo content.
 
-A round that writes no repository content at all — an investigation, an
+### Ordinary no-write rounds
+
+An ordinary round that writes no repository content at all — an investigation, an
 architecture consultation, an advisory question — has no surface to declare and
 would otherwise be refused as classifying nothing. It says so explicitly:
 
@@ -200,6 +205,56 @@ still be valid; writing rounds still require the complete declaration.
 Omitting `writes_repository` reads as `true`, so a plan written before the
 field keeps its meaning.
 
+### Classify an unchanged legacy PR
+
+Use this mode only for read-only verification of an existing immutable PR head
+whose base and head both predate `.herdr/triggers.json`. Keep its source and
+head unchanged. A declaration at the base uses committed repository authority;
+a first declaration at the head uses the writing bootstrap above instead.
+
+Obtain a bounded consultation for the exact task and subject. Its report carries
+one operative five-key line, assessed through the normal owner path above:
+
+```text
+TRIGGER_DECLARATION: {"repo":"/absolute/target/repo","base_revision":"<full base commit OID>","head_revision":"<full head commit OID>","path":"/absolute/external/triggers.json","sha256":"<SHA-256 of reviewed bytes>"}
+```
+
+Repository and artifact paths are canonical absolute paths. The existing
+four-key writing-bootstrap line does not authorize legacy review. Changing the
+task, subject, artifact path/bytes or assessed report requires a new bounded
+consultation and ordinary assessment; re-running detection alone supplies none.
+Quoted examples remain inert under the report-line contract above.
+
+Pass the ordinary empty no-write plan, the intended read-only responsibilities
+and their requirements, and the same owner state that holds that assessment.
+
+Consultation responsibilities retain the normal explicit engagement, specialty
+and capability requirements. Seat syntax must be valid for the normal planner.
+
+```text
+foreman detect-triggers --repo <dir> --base <full-base-OID> --head <full-head-OID> \
+  --task <exact-task> --legacy-review-declaration <external-file> \
+  --planned <empty-no-write-plan> --roles <role[,role...]> \
+  [--requirements <file>] [--state <owner-state>]
+```
+
+The mode's input validation and subject binding are owned by
+`skills/herdr-foreman/foreman/triggers.py` `load_legacy_review_declaration`;
+its permitted responsibilities are `LEGACY_REVIEW_ROLES` there. Do not pass
+`--bootstrap-declaration` or `--decisions`. Staff every fired trigger through its
+required role or requirements specialty. Ordinary no-write tracked-diff refusal
+and byte-identical writing bootstrap remain unchanged outside this mode.
+
+Success emits schema-3 classification with `task` and
+`declaration_authority.kind: legacy_review`, the exact subject/artifact tuple,
+assessment id and unchanged report receipt. An authority failure emits no
+classification. Unstaffed triggers emit classification on stdout and an
+`unaddressed_trigger` error on stderr, exit 1; update staffing and rerun.
+Detection writes no repository or state and contacts no worker. Exit 0 proves
+composition only: it grants no writing, merge, release or future-task authority.
+Independent current-head review/test reports, contribution exclusions and
+normal external CI/review gates still apply.
+
 Exit 0 means every fired trigger is staffed or answered. Exit 1 with an
 `unaddressed_trigger` error names the triggers that are neither; re-run it
 after each change, since the failed invocation read none of them. A trigger is
@@ -211,7 +266,8 @@ the one it accepted. An advisor staffed for a fired `security` trigger is
 planned with round context `{"advisor": {"security_trigger": true}}`, which
 selects its judgment round (`references/model-tiers.md`).
 
-A staffing decision answers a fired trigger instead, and the detector reads it:
+Outside legacy review, a staffing decision answers a fired trigger instead, and
+the detector reads it:
 
 ```json
 {
