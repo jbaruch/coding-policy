@@ -832,7 +832,8 @@ class NativeDeliveryTests(unittest.TestCase):
         original = case.saved()
         self.assertIsNone(original["assignments"][-1]["context_session"])
         self.assertNotIn("schema_version", applied)
-        self.assertEqual(original["recovery"]["dispatches"][-1]["result"]["schema_version"], 2)
+        from foreman.recovery import LAUNCH_DISPATCH_VERSION
+        self.assertEqual(original["recovery"]["dispatches"][-1]["result"]["schema_version"], LAUNCH_DISPATCH_VERSION)
         prompt = next(call[4] for call in case.runner.calls if call[1:3] == ["agent", "prompt"])
         rows = grok_rows(self.marker)
         rows[0]["params"]["update"]["content"]["text"] = prompt

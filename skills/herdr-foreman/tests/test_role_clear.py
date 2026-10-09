@@ -301,6 +301,11 @@ class RoleClearTests(fixture.fixture.CliCase):
         for row in state["recovery"]["dispatches"]:
             row.pop("provider", None)
             row.pop("brief_identity", None)
+            row.pop("launch_scope", None)
+            row["schema_version"] = 1
+            if row.get("result") is not None:
+                row["result"].pop("launch_scope", None)
+                row["result"]["schema_version"] = 1
         for row in state["recovery"]["dispatches"]:
             row.pop("brief_identity", None)
         self.state.write_text(json.dumps(state))

@@ -74,7 +74,7 @@ def _fact(proof, kind, row, agent, at):
     return {"status": status, "evidence": copy.deepcopy(fact)}
 
 
-def decide(agent, role, tier, needs, table, headroom, measured_at, at, capacity_group=None, worker_kind=None):
+def decide(agent, role, tier, needs, table, headroom, measured_at, at, capacity_group=None, worker_kind=None, *, unavailable=None):
     """Return the selected tier plus audit facts; judgment and explicit pins stay fixed."""
     policy = agent.tier_routing
     if policy is None:
@@ -123,12 +123,27 @@ def decide(agent, role, tier, needs, table, headroom, measured_at, at, capacity_
             rejected.append("qualification_" + qualification)
         if placement and placement["status"] in {"withdrawn", "retired", "inadequate", "future"}:
             rejected.append("placement_" + placement["status"])
+        native_negative = unavailable(row["model"]) if unavailable else None
+        if native_negative is not None:
+            rejected.append("model_unavailable")
         candidates.append({"tier_row": name, "model": row["model"], "effort": row.get("effort"),
                            "resource_weight": effective_multiplier(row), "launch": launch, "access": access,
                            "qualification": {"status": qualification, "sources": sources},
                            "placement": placement,
                            "capacity": capacity, "rejected": rejected})
+        if native_negative is not None:
+            candidates[-1]["model_unavailability"] = native_negative
     chosen = tier
+    # An explicit pin preserves the pair; it cannot make a known unavailable
+    # launch/account combination callable. Unknown/stale facts retain legacy
+    # pin behavior and never fabricate a positive account observation.
+    if override is not None:
+        proof = policy["evidence"].get(tier["tier_row"])
+        launch = _fact(proof, "launch", tier, agent, at)
+        access = _fact(proof, "access", tier, agent, at)
+        if launch["status"] == "unsupported" or access["status"] == "unavailable":
+            raise UsageError("Pinned model {} is unavailable under current launch/account evidence; preserve its pin and replan another eligible provider or resolve the cited access fact.".format(tier["model"]),
+                             {"routing_candidates": candidates, "override": override})
     if mode == "minimum_adequate" and override is None:
         eligible = [row for row in candidates if not row["rejected"]]
         if not eligible:

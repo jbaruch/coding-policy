@@ -28,7 +28,7 @@ from . import runnable
 from . import __version__
 from .assign import apply as apply_assignments
 from .assign import APPLY_SCHEMA_VERSION, dry_run, freeze_decision, freeze_paths, read_frozen, native_context_session, normalize_assignments, resolve_paths, validate_context_mode, validate_fix_history
-from . import probe_recovery, renderable
+from . import model_unavailability, probe_recovery, renderable
 from . import attention, capabilities, chronology, churn, composition, engagement, foreman_queue, foreman_reset, historical, home, lifecycle, load_set, members, memory, oracle, partition, recovery, report_delivery, report_gates, restoration, role_clear, retrospective, retrospective_runtime, supervision, supervision_gate, supervision_runtime, triggers
 from .config import FOREMAN_CONFIG_VERSION, default_config_path, load_config, load_foreman, load_judge, load_role_costs, select_agents
 from .errors import AgentBusyError, PlanError, StateError, ForemanError, HerdrError, UsageError, owner_recovery
@@ -421,6 +421,11 @@ def build_parser():
     report_parser.add_argument("--pane", required=True)
     report_parser.add_argument("--report", required=True)
     report_parser.add_argument("--lines", type=int, required=True)
+    unavailable_parser = sub.add_parser("probe-unavailable", parents=[common], help="Read-only confirmation of a terminal native model/account error, with visible rows on stdin.")
+    unavailable_parser.add_argument("--agent", required=True)
+    unavailable_parser.add_argument("--pane", required=True)
+    unavailable_parser.add_argument("--report", required=True)
+    unavailable_parser.add_argument("--lines", type=int, required=True)
     fit_parser = sub.add_parser("marker-fit", parents=[common], help="Measure a worker's live pane against its `REPORT: <path>` row, for a sender outside apply.")
     fit_parser.add_argument("--agent", required=True)
     fit_parser.add_argument("--report", required=True)
@@ -905,7 +910,8 @@ PLAN_ONLY_TIER_FIELDS = frozenset({"capability", "cheaper_adequate", "routing"})
 
 
 def _candidate_tiers(roles, agents, rounds, fix_round=None, judge=None, excludes=None, headroom=None, table=None, refusals=None,
-                     reusable_agents=False, measured_at=None, at=None, capacity_groups=None, worker_kinds=None):
+                     reusable_agents=False, measured_at=None, at=None, capacity_groups=None, worker_kinds=None,
+                     unavailable_store=None):
     """Each role's candidate tiers; `refusals` collects a capability refusal per skipped candidate."""
     table = table if table is not None else capabilities.empty()
     tiered = any(agent.tiers for agent in agents)
@@ -922,6 +928,8 @@ def _candidate_tiers(roles, agents, rounds, fix_round=None, judge=None, excludes
             if judge and agent.name == judge.agent:
                 if role == "judge":
                     # The pinned judge has no substitute, so an inadequate pin refuses the plan.
+                    model_unavailability.require_available(unavailable_store, agent, judge.model, at,
+                                                           (worker_kinds or {}).get(agent.name))
                     verdict = capabilities.assess(table, judge.model, judge.effort or None,
                                                   capabilities.required("judge", "judge", JUDGMENT_ROUNDS))
                     candidates[role][agent.name] = {"round": "judge", "tier_row": "judge", "kind": agent.kind,
@@ -953,7 +961,11 @@ def _candidate_tiers(roles, agents, rounds, fix_round=None, judge=None, excludes
                 tier, routing = tier_routing.decide(agent, role, tier, needs, table,
                                                    (headroom or {}).get(agent.name), measured_at, at,
                                                    (capacity_groups or {}).get(agent.name),
-                                                   (worker_kinds or {}).get(agent.name))
+                                                   (worker_kinds or {}).get(agent.name),
+                                                   unavailable=lambda model: model_unavailability.exclusion(
+                                                       unavailable_store, agent, model, at, (worker_kinds or {}).get(agent.name)))
+                model_unavailability.require_available(unavailable_store, agent, tier["model"], at,
+                                                       (worker_kinds or {}).get(agent.name))
                 verdict = capabilities.assess(table, tier["model"], tier["effort"], needs)
             except UsageError as exc:
                 if refusals is not None:
@@ -1161,7 +1173,8 @@ def cmd_plan(args, client=None, warn=None, trace=None):
     recovery.validate_work(state["recovery"], state["assignments"], args.task, args.fix_round,
                            args.correction_plan, work, implementation="developer" in canonical)
     if args.task:
-        validate_fix_history({role: None for role in canonical}, state["assignments"], args.task, args.fix_round)
+        validate_fix_history({role: None for role in canonical}, state["assignments"], args.task, args.fix_round,
+                             recovery=state["recovery"])
     if args.snapshot:
         snapshot_path = Path(args.snapshot)
         try:
@@ -1227,7 +1240,7 @@ def cmd_plan(args, client=None, warn=None, trace=None):
                                       headroom=measured_headroom, table=table,
                                       refusals=capability_refusals, reusable_agents=scoped,
                                       measured_at=snapshot.get("measured_at"), at=args.now or now_iso(),
-                                      capacity_groups=_snapshot_groups(snapshot))
+                                      capacity_groups=_snapshot_groups(snapshot), unavailable_store=state["recovery"])
     constraints = {**constraints, "rationale": constraints["rationale"] + [
         "{} was not considered for {}: {}".format(row["agent"], row["role"], row["message"]) for row in capability_refusals]}
     # Each seat inherits its role's bars, tiers, round type and requirements.
@@ -1656,6 +1669,9 @@ def _apply(args, client, warn, trace, hold_gates):
                                     "plan": args.correction_plan, "work": work,
                                     "brief_identity": recovery.brief_identity(paths, role, reports.get(role), contents),
                                     "provider": agents_by_name[name].kind}
+                if prior is None or "launch_scope" in prior:
+                    dispatches[role]["launch_scope"] = model_unavailability.launch_scope(
+                        agents_by_name[name], document["worker_kinds"][role] if scoped else None)
                 if scoped:
                     dispatches[role]["worker_kind"] = document["worker_kinds"][role]
                 if role in moves:
@@ -1723,7 +1739,8 @@ def _apply(args, client, warn, trace, hold_gates):
                                   table=capabilities.load(state_path), refusals=capability_refusals,
                                   measured_at=(planned_snapshot or {}).get("measured_at"), at=at,
                                   capacity_groups=capacity_groups,
-                                  worker_kinds={name: document["worker_kinds"][role] for role, name in assignments.items()} if scoped else None)
+                                  worker_kinds={name: document["worker_kinds"][role] for role, name in assignments.items()} if scoped else None,
+                                  unavailable_store=store)
     tiers = {}
     if candidates is not None:
         for role, name in assignments.items():
@@ -1764,7 +1781,7 @@ def _apply(args, client, warn, trace, hold_gates):
             retain_specialist=args.retain_specialist, requirements=requirements,
             assignment_scoped=scoped, fresh=fresh_workers,
         )
-        validate_fix_history(assignments, state["assignments"], args.task, args.fix_round)
+        validate_fix_history(assignments, state["assignments"], args.task, args.fix_round, recovery=store)
 
     if args.dry_run:
         rehearsal = dry_run(
@@ -1846,6 +1863,8 @@ def _apply(args, client, warn, trace, hold_gates):
         add_assignment(state, at, seat, result["agent"], status=result["status"], **context)
         if args.task:
             result["dispatch_id"] = dispatches[result["role"]]["id"]
+            if "launch_scope" in dispatches[result["role"]]:
+                result["launch_scope"] = dispatches[result["role"]]["launch_scope"]
             recovery.finish_dispatch(store, result["dispatch_id"], dict(result), len(state["assignments"]) - 1, at)
         save_state(state_path, state)
         # Commit the real transport outcome before optional identity refinement;
@@ -2457,13 +2476,13 @@ def _run_recovery(args, state_path, warn, client, trace):
         # The refined assignment, not the original: supervision fills in a
         # pane id the enrollment did not know, and wait-report may have been
         # given that one (#403).
-        report, aliases = None, ()
+        report, aliases, expected = None, (), None
         if member is not None:
             expected = supervision.expected_assignment(member)
             report = expected["report"]
             aliases = (expected["pane_id"], member["assignment"]["pane_id"])
         result = recovery.record_refusal(store, data, at, agents_by_name[configured].kind if dispatch else None,
-                                         report, aliases=aliases)
+                                         report, aliases=aliases, binding=expected)
     elif args.command == "recover-report":
         result = report_delivery.recover(store, history, data, at)
     elif args.command == "assess-specialist":
@@ -2601,6 +2620,8 @@ def _run_recovery(args, state_path, warn, client, trace):
                 if result.get("worker_kind") is not None:
                     recovered["worker_kind"] = result["worker_kind"]
                     recovered["assignment_scoped"] = True
+                if "launch_scope" in result:
+                    recovered["launch_scope"] = result["launch_scope"]
                 if canonical_role(recovered["role"]) == "judge":
                     # The mode travels in the pre-send context and on the dispatch
                     # itself; `unknown` is only for a receipt older than both.
@@ -3121,6 +3142,18 @@ def cmd_marker_fit(args, client=None, warn=None, trace=None):
     return report_delivery.marker_fit(client, args.agent, args.report), None
 
 
+def cmd_probe_unavailable(args, client=None, warn=None, trace=None):
+    if not Path(args.report).is_absolute() or not renderable.renderable(args.report) or args.lines < 1:
+        raise UsageError("Native error probing needs an absolute one-row report path and positive --lines.", {})
+    confirmation = os.environ.get("FOREMAN_REFUSAL_CONFIRM_SEC", str(model_unavailability.CONFIRM_SECONDS))
+    if not confirmation.isascii() or not confirmation.isdigit():
+        raise UsageError("FOREMAN_REFUSAL_CONFIRM_SEC must be a non-negative integer; unset it for the script-owned default.", {})
+    client = client if client is not None else _client(args, trace=trace)
+    return model_unavailability.probe(client, args.agent, args.pane, args.report,
+                                     sys.stdin.read().rstrip("\n"), args.lines,
+                                     confirm_seconds=int(confirmation)), None
+
+
 def cmd_memory(args, client=None, warn=None, trace=None):
     return memory.run_command(args, _state_path(args), args.now or now_iso()), None
 
@@ -3189,6 +3222,7 @@ COMMANDS = {
     "start-foreman": cmd_start_foreman,
     "verify-foreman": cmd_verify_foreman,
     "probe-report": cmd_probe_report,
+    "probe-unavailable": cmd_probe_unavailable,
     "marker-fit": cmd_marker_fit,
     **{command: cmd_retrospective for command in ("retro-check", "retro-record", "retro-list", "retro-show")},
     **{command: cmd_capability for command in ("capability-check", "capability-record", "capability-show", "capability-successor", "capability-migrate")},
@@ -3202,7 +3236,7 @@ COMMANDS = {
 
 
 #: Commands that read neither the state nor the config home.
-HOME_FREE_COMMANDS = frozenset({"marker-fit", "finding-churn"})
+HOME_FREE_COMMANDS = frozenset({"marker-fit", "finding-churn", "probe-unavailable"})
 
 
 def main(argv=None, stdout=None, stderr=None, client=None):
@@ -3245,7 +3279,7 @@ def main(argv=None, stdout=None, stderr=None, client=None):
             home.require_current(defaults)
             # Commands that may migrate or write state share its canonical lock.
             # Dry runs, probes, and retrospective reads remain read-only.
-            readonly = args.command in {"probe-report", "marker-fit", "detect-triggers", "finding-churn", "validate-partition", "verify-oracle", "verify-ruling", "retro-check", "retro-list", "retro-show", "capability-check", "capability-show", "supervision-gate", "load-set", "foreman-queue", "cost-report", "check-member", "verify-foreman", "report-gate-status"} or getattr(args, "dry_run", False)
+            readonly = args.command in {"probe-report", "probe-unavailable", "marker-fit", "detect-triggers", "finding-churn", "validate-partition", "verify-oracle", "verify-ruling", "retro-check", "retro-list", "retro-show", "capability-check", "capability-show", "supervision-gate", "load-set", "foreman-queue", "cost-report", "check-member", "verify-foreman", "report-gate-status"} or getattr(args, "dry_run", False)
             # The deliverer starts while `foreman-reset` still holds the state lock;
             # it serializes on the reset record's own lock instead. close-member
             # writes only through the supervision owner's own lock.

@@ -75,6 +75,9 @@
 #             unchanged terminal notice directly above an empty composer at
 #             the live bottom of the same terminal session, and
 #             no report file (`found` false, `reason` terminal_provider_refusal).
+#             A supported native model/account error instead requires the
+#             source/session proof in foreman/model_unavailability.py and adds
+#             `unavailability` schema 1. Unknown formats remain unconfirmed.
 #             Save this JSON and record it with the launcher's `record-refusal`;
 #             never rephrase or synthesize the missing report. The bounded
 #             move to another provider is dispatch-recovery.md's Wait
@@ -194,6 +197,7 @@ SINCE=""
 BASE=""
 REFUSAL_STATE=""
 REFUSAL_PANE=""
+REFUSAL_UNAVAILABILITY=null
 
 warn() { printf 'wait-report: %s\n' "$1" >&2; }
 
@@ -223,15 +227,14 @@ cleanup() {
   return 0
 }
 
-emit() { # <state> <found-bool> <elapsed-seconds> [reason] [stall-json]
-  # `reason` and `stall` appear only when set: the object stays the documented
-  # shape on every outcome, with one extra field for an unavailable delivery
-  # and one for a stall's classification.
+emit() { # <state> <found-bool> <elapsed-seconds> [reason] [stall-json] [unavailability-json]
+  # Optional reason/stall/native unavailability appear only on their outcomes.
   jq -n --arg a "$AGENT" --arg s "$1" --arg p "$REPORT_PATH" \
-        --argjson f "$2" --argjson e "$3" --arg r "${4:-}" --argjson st "${5:-null}" \
+        --argjson f "$2" --argjson e "$3" --arg r "${4:-}" --argjson st "${5:-null}" --argjson u "${6:-null}" \
     '{agent: $a, state: $s, report_path: $p, found: $f, elapsed_seconds: $e}
      + (if $r == "" then {} else {reason: $r} end)
-     + (if $st == null then {} else {stall: $st} end)'
+     + (if $st == null then {} else {stall: $st} end)
+     + (if $u == null then {} else {unavailability: $u} end)'
 }
 
 # Echo "<state> <pane_id>" for the agent, or return 2 on a herdr failure.
@@ -471,10 +474,28 @@ refusal_context() { # <pane-id>
 # Compare complete visible snapshots so new prompt/output activity invalidates
 # an old notice even when its literal text remains somewhere on screen.
 confirmed_provider_refusal() { # <pane-id>
-  local before after context_before context_after info state pane rc=0
-  REFUSAL_STATE=""; REFUSAL_PANE=""
+  local before after context_before context_after info state pane result rc=0
+  REFUSAL_STATE=""; REFUSAL_PANE=""; REFUSAL_UNAVAILABILITY=null
   before="$(read_refusal_view "$1")" || return 2
-  terminal_refusal_on_screen "$before" || return 1
+  if ! terminal_refusal_on_screen "$before"; then
+    # A model/account error needs native source authority, never a matching
+    # rendered sentence. The read-only helper owns its versioned contracts.
+    if ! resolve_skill_dir; then return 2; fi
+    result="$(printf '%s' "$before" | FOREMAN_REFUSAL_CONFIRM_SEC="$FOREMAN_REFUSAL_CONFIRM_SEC" \
+      bash "$SKILL_DIR/foreman.sh" probe-unavailable --herdr-bin "$HERDR_BIN" \
+      --agent "$AGENT" --pane "$1" --report "$REPORT_PATH" --lines "$FOREMAN_PROBE_LINES")" || rc=$?
+    if (( rc != 0 )); then
+      warn "native model-error verification failed — restore the named evidence/tool before deciding this attempt's outcome"
+      return 2
+    fi
+    if [[ "$(printf '%s' "$result" | jq -r '.confirmed')" != true ]]; then return 1; fi
+    REFUSAL_UNAVAILABILITY="$(printf '%s' "$result" | jq -c '.unavailability')" || return 2
+    info="$(agent_info "$AGENT")" || return 2
+    REFUSAL_STATE="${info%% *}"; REFUSAL_PANE="${info##* }"
+    if [[ "$REFUSAL_PANE" != "$1" || ( "$REFUSAL_STATE" != idle && "$REFUSAL_STATE" != "done" ) \
+          || -e "$REPORT_PATH" ]]; then return 1; fi
+    return 0
+  fi
   context_before="$(refusal_context "$1")" || return $?
   if ! sleep "$FOREMAN_REFUSAL_CONFIRM_SEC"; then
     warn "terminal-refusal confirmation wait failed — restore the sleep utility before deciding this attempt's outcome"
@@ -825,7 +846,7 @@ main() {
       state="${REFUSAL_STATE:-$state}"; pane="${REFUSAL_PANE:-$pane}"
       if (( rc == 0 )); then
         now="$(date +%s)"
-        emit "$REFUSAL_STATE" false "$(( now - start ))" "terminal_provider_refusal"
+        emit "$REFUSAL_STATE" false "$(( now - start ))" "terminal_provider_refusal" null "$REFUSAL_UNAVAILABILITY"
         if ! resolve_skill_dir; then return 2; fi
         local launcher="${SKILL_DIR}/foreman.sh"
         warn "${AGENT}: report unavailable after a confirmed terminal provider refusal — save this JSON and record it with \`bash $(printf '%q' "$launcher") record-refusal\`; keep review/release gates unsatisfied, with no rephrasing, no resend to the same provider, and no synthesized report; one move of the unchanged brief to another provider goes through plan and apply (dispatch-recovery.md Wait outcomes)"

@@ -855,13 +855,14 @@ STUB
   OUT="$(env HERDR_ENV=1 HERDR_BIN="$FAKE" FOREMAN_WAIT_INTERVAL_SEC=0 FOREMAN_WAIT_BUDGET_SEC=600 \
     FOREMAN_BLOCKED_CONFIRM_SEC=0 FOREMAN_REFUSAL_CONFIRM_SEC=0 FAKE_PANE_TEXT="nothing here" \
     FAKE_MARKER=timeout FAKE_STATUS=idle FOREMAN_NOW_EPOCH=1767229200 \
-    FAKE_GET_COUNTER="$TMP/expired-since-count" \
+    FAKE_GET_COUNTER="$TMP/expired-since-count" FAKE_CALLS="$TMP/expired-since-calls" \
     bash "$SCRIPT" --worktree "$stall_wt" --base "$stall_base" \
     --since "2026-01-01T00:00:00+00:00" worker "$missing" </dev/null 2>"$TMP/expired-since")"; RC=$?
-  # One status read = one interval. `elapsed_seconds` comes from the real
-  # clock, so it cannot carry this assertion (rules/testing-standards.md).
+  # One marker probe = one interval; native-source verification may collect
+  # another status read. Never use the real elapsed clock for this assertion.
   expired_reads=0; [[ -r "$TMP/expired-since-count" ]] && read -r expired_reads < "$TMP/expired-since-count"
-  if [[ $RC -eq 1 ]] && printf '%s' "$OUT" | jq -e '(.stall | type) == "object"' >/dev/null && [[ "$expired_reads" == "1" ]]; then
+  expired_probes="$(grep -c '^pane wait-output ' "$TMP/expired-since-calls")" || die "expired dispatch never probed the marker"
+  if [[ $RC -eq 1 ]] && printf '%s' "$OUT" | jq -e '(.stall | type) == "object"' >/dev/null && [[ "$expired_probes" == "1" ]]; then
     pass; else fail "an expired dispatch stalls on the first interval: RC=$RC reads=$expired_reads OUT=$OUT"; fi
 
   # Finding: a timezone offset is CONVERTED, never rewritten as Z. This stamp

@@ -1275,6 +1275,23 @@ class RecoveryTests(unittest.TestCase):
         with self.assertRaisesRegex(UsageError, "assignment-scoped"):
             migrate_store(scoped)
 
+    def test_store_fifteen_migrates_without_inventing_launch_account_scope(self):
+        self.dispatch_tester(1, "codex-a")
+        clean = copy.deepcopy(self.store)
+        clean["schema_version"] = 15
+        self.assertTrue(migrate_store(clean))
+        self.assertNotIn("launch_scope", clean["dispatches"][0])
+        self.assertEqual(clean["dispatches"][0]["schema_version"], 1)
+        for field in ("launch_scope", "native_refusal"):
+            corrupt = copy.deepcopy(self.store)
+            corrupt["schema_version"] = 15
+            if field == "launch_scope":
+                corrupt["dispatches"][0][field] = {"schema_version": 1}
+            else:
+                corrupt["dispatches"][0]["refusal"] = {"schema_version": 2}
+            with self.assertRaisesRegex(UsageError, "unowned native model"):
+                migrate_store(corrupt)
+
     REPORT = "/reports/tester.md"
     BRIEF = "brief-identity-tester"
 
