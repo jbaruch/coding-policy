@@ -783,7 +783,9 @@ class ProbeUsageRecoveryTest(unittest.TestCase):
                 client.pane_read.return_value = 'Try "a visible native suggestion"'
                 def refuse(_client, _worker, _pane, **options):
                     options["startup_observe"]()
-                    raise HerdrError("startup composer is unproved", {})
+                    raise HerdrError("startup composer is unproved", {
+                        "failure_message": "startup composer is unproved",
+                        "failure_kind": "startup_input_occupied"})
                 with patch("foreman.lifecycle.spawn", return_value="probe-pane"), \
                         patch("foreman.lifecycle.identity", return_value="probe-fixed"), \
                         patch("foreman.lifecycle.verify_running", return_value={"pid": 42}), \

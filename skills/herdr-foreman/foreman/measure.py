@@ -86,9 +86,12 @@ def _capture_failure(exc, capture, observed_text=None):
     if capture is None:
         return
     view = capture(observed_text)
+    cause = exc.details.get("failure_message", exc.message)
     exc.message = "Visible evidence (diagnostic only): {}. Original measurement error: {}".format(
         json.dumps(scrub_for_trace(view, cap=FAILURE_VIEW_BYTES), ensure_ascii=False),
-        json.dumps(scrub_for_trace(exc.message, cap=FAILURE_CAUSE_BYTES), ensure_ascii=False))
+        json.dumps(scrub_for_trace(cause, cap=FAILURE_CAUSE_BYTES), ensure_ascii=False))
+    if "failure_message" in exc.details:
+        exc.details["failure_message"] = exc.message
     exc.args = (exc.message,)
     setattr(exc, "_failure_captured", True)
 

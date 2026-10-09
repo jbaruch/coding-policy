@@ -475,9 +475,14 @@ def measure_worker_kinds(client, templates, measured_at, *, state_path=None, con
             condition = ("The owner closed its unused probe; no usage command was sent. Restore the worker-kind configuration/native startup evidence, then repeat normal measure."
                 if closed else "No usage command was sent. Preserve and inspect the actual startup/cleanup evidence; restore the worker-kind configuration and finish owned cleanup before repeating normal measure.")
             failure = cleanup_error or startup_error
-            record["error"] = snapshot_error(owner_recovery(failure,
+            recovered = owner_recovery(failure,
                 "probe_cleanup_unproved" if cleanup_error else "probe_startup_unproved",
-                runnable.command(operation), condition, outcome="retryable" if closed else "blocked"))
+                runnable.command(operation), condition, outcome="retryable" if closed else "blocked")
+            recovered.message = "Next owner operation: `{}`. {} Historical diagnostic: {}".format(
+                runnable.command(operation), condition,
+                json.dumps(scrub_for_trace(recovered.details["failure_message"], cap=PROBE_HISTORY_BYTES), ensure_ascii=False))
+            recovered.args = (recovered.message,)
+            record["error"] = snapshot_error(recovered)
         for member in members:
             copied = {**record, "kind": member.kind, "window_group": member.window_group,
                       "pane_id": None, "tier_billing": tier_billing(member.tiers)}
