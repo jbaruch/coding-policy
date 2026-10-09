@@ -61,14 +61,15 @@ from .herdr import (
 from .composer import COMPOSER_READ_LINES, COMPOSER_READ_SOURCE, checkable
 from .probe import PROBE_READ_LINES, PROBE_READ_SOURCE, resolve_status, stderr_warn
 from .chronology import latest_assignment
-from .recovery import JUDGE_MODES, briefing_bytes, empty_recovery, fresh_transition, task_record, validate_work
+from .recovery import JUDGE_MODES, briefing_bytes, empty_recovery, fresh_transition, native_refusal_retry, task_record, validate_work
 from .launch import foreground_agent, restart_worker, verify_running, verify_running_permissions
 from .tiers import EFFORT_RANK, canonical_role, launch_flags, require_seatable, still_de_escalated, worker_launch_args
 from .report_delivery import marker_columns
 from .composition import normalize_requirement, parse_requirements, seat_holds
 
 # Version 3 adds verified model-tier metadata to context and task/fix evidence.
-APPLY_SCHEMA_VERSION = 8
+# Version 9 permits labelled owner results to carry frozen launch/account scope.
+APPLY_SCHEMA_VERSION = 9
 
 RETAIN_CONTEXT_ROUNDS = frozenset({1, 2, 3})
 CONSULTATION_ROLES = frozenset({"advisor", "investigator", "architect"})
@@ -660,9 +661,11 @@ def validate_context_mode(assignments, no_clear, retain_context, task, fix_round
     return transition if not retain_context and "developer" in assignments and not (assignment_scoped and fresh) else None
 
 
-def validate_fix_history(assignments, history, task, fix_round):
+def validate_fix_history(assignments, history, task, fix_round, *, recovery=None):
     """A worker change cannot reset or skip the task's confirmed fix count."""
     if "developer" not in assignments or task is None:
+        return
+    if native_refusal_retry(recovery, history, task, fix_round):
         return
     prior = [row for row in (history or []) if row.get("task") == task
              and row.get("role") == "developer" and row.get("status") == "applied"]
@@ -1063,7 +1066,7 @@ def apply(client, assignments, agents_by_name, paths, at, no_clear=False, settle
     if any(canonical_role(role) == "judge" for role in assignments) and judge_mode not in JUDGE_MODES:
         raise UsageError("A judge dispatch declares its mode, one of {}; pass judge_mode.".format(
             " | ".join(JUDGE_MODES)), {"judge_mode": judge_mode})
-    validate_fix_history(assignments, history, task, fix_round)
+    validate_fix_history(assignments, history, task, fix_round, recovery=recovery)
     prior = validate_retained_history(assignments, history, task, fix_round) if retain_context else None
     tiers = dict(tiers or {})
     specialist_prior = validate_specialist_history(assignments, history, task, requirements, tiers) if retain_specialist else None
@@ -1389,7 +1392,7 @@ def dry_run(client, assignments, agents_by_name, paths, no_clear=False, settle_t
                                        retain_specialist=retain_specialist, requirements=requirements,
                                        assignment_scoped=assignment_scoped, fresh=fresh)
     if assignment_scoped and fresh:
-        validate_fix_history(assignments, history, task, fix_round)
+        validate_fix_history(assignments, history, task, fix_round, recovery=recovery)
     if retain_specialist:
         validate_specialist_history(assignments, history, task, requirements, tiers)
     refuse_reserved(assignments, task, reserved)

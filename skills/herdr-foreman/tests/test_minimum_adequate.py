@@ -111,6 +111,34 @@ class MinimumAdequateTest(CliCase):
         self.assertEqual(plan["tiers"]["developer"]["model"], "opus-5")
         self.assertEqual(plan["selection"]["developer"]["routing"]["override"], "operator_pin")
 
+    def test_pin_does_not_override_known_model_account_unavailability(self):
+        self.worker["tier_routing"]["mode"] = "pinned"
+        for kind, status in (("access", "unavailable"), ("launch", "unsupported")):
+            with self.subTest(kind=kind):
+                fact = self.worker["tier_routing"]["evidence"]["build"][kind]
+                previous = fact["status"]
+                fact["status"] = status
+                result = self.plan(expected=1)
+                self.assertIn("unavailable", result["message"])
+                fact["status"] = previous
+
+    def test_cached_model_negative_keeps_other_models_on_same_provider_eligible(self):
+        with patch("foreman.model_unavailability.exclusion", side_effect=lambda _store, _agent, model, *_args:
+                   {"dispatch": "native-failure"} if model == "sonnet-5" else None):
+            plan = self.plan()
+        self.assertEqual(plan["tiers"]["developer"]["model"], "opus-5")
+        rejected = [row for row in plan["selection"]["developer"]["routing"]["candidates"]
+                    if row["model"] == "sonnet-5"]
+        self.assertTrue(rejected)
+        self.assertTrue(all("model_unavailable" in row["rejected"] for row in rejected))
+
+    def test_cached_model_negative_refuses_judge_pin_without_substitution(self):
+        self.settings["judge"] = {"worker_kind": "claude", "model": "opus-5", "effort": "high"}
+        with patch("foreman.model_unavailability.exclusion", return_value={"dispatch": "native-failure"}):
+            result = self.plan("--roles", "judge", "--judge-mode", "adjudication", expected=1)
+        self.assertIn("never substitute a judge pin", result["message"])
+        self.assertEqual(self.settings["judge"]["model"], "opus-5")
+
     def test_own_window_accepts_matching_empty_identity_but_not_missing_proof(self):
         for omitted in (False, True):
             with self.subTest(omitted=omitted):

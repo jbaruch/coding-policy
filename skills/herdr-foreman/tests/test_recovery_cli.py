@@ -352,7 +352,8 @@ class RecoveryCommandTests(fixture.CliCase):
             self.invoke(args, client)
         dispatch = self.saved()["recovery"]["dispatches"][-1]
         self.assertEqual((dispatch["status"], dispatch["judge_mode"]), ("sending", "diagnosis"))
-        self.assertEqual(dispatch["schema_version"], 3)
+        from foreman.recovery import LAUNCH_DISPATCH_VERSION
+        self.assertEqual(dispatch["schema_version"], LAUNCH_DISPATCH_VERSION)
         self.assertEqual(dispatch["context_before_send"]["judge_mode"], "diagnosis")
         data = {"dispatch": "interrupted-judge:judge", "outcome": "applied",
                 "reason": "Original report proves delivery and completion",
@@ -362,7 +363,7 @@ class RecoveryCommandTests(fixture.CliCase):
         row = self.saved()["assignments"][-1]
         self.assertEqual((row["role"], row["judge_mode"]), ("judge", "diagnosis"))
         dispatch = self.saved()["recovery"]["dispatches"][-1]
-        self.assertEqual((dispatch["result"]["schema_version"], dispatch["result"]["judge_mode"]), (3, "diagnosis"))
+        self.assertEqual((dispatch["result"]["schema_version"], dispatch["result"]["judge_mode"]), (LAUNCH_DISPATCH_VERSION, "diagnosis"))
         # A saved result naming the other mode is an inconsistent record, not
         # a second truth: the ledger refuses to read it.
         document = self.saved()
@@ -446,6 +447,8 @@ class RecoveryCommandTests(fixture.CliCase):
         row["fingerprint"] = legacy
         row["brief"], row["common"] = str(self.briefs["judge"]), str(self.common)
         row["schema_version"] = 1
+        row.pop("launch_scope")
+        row["result"].pop("launch_scope")
         del row["judge_mode"]
         del row["result"]["judge_mode"]
         row["result"]["schema_version"] = 1

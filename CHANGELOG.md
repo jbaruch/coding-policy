@@ -39,6 +39,18 @@
   or transport failure stays fail-closed with no retry until the send effect is
   reconciled; `model-tiers.md` now says so.
 
+## 0.3.388 — 2026-10-09
+
+### Fixed
+
+- Native Codex model/account rejection and Claude model-not-found errors now
+  reach Herdr's unavailable-attempt handoff without spending the round wait
+  budget (#724). Original native source, dispatched prompt/model and stable
+  empty session prove the error; quoted notices and unknown formats do not.
+  Fresh model negatives stay scoped to the dispatch's recorded configured
+  account/worker context. Other models/providers remain eligible, pins stay
+  fixed, and recovery preserves legacy receipts without inventing account data.
+
 ## 0.3.387 — 2026-10-09
 
 ### Fixed

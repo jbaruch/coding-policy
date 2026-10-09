@@ -712,7 +712,46 @@ lock file can remain after exit; do not delete it to bypass an active lock.
 
 `wait-report.sh` owns refusal confirmation, for exit 5 and exit 6 alike; see its
 header and `confirmed_provider_refusal`. Missing terminal evidence keeps the ordinary
-wait. Herdr 0.8.2's bundled API schema has no dedicated provider-refusal
+wait. The read-only `foreman probe-unavailable` command takes `--agent`, `--pane`,
+absolute `--report`, positive `--lines` and the observed visible text on stdin.
+It needs no config/state home. It emits `{confirmed: false, reason}` for unknown
+evidence, or `{confirmed: true, unavailability}` with schema-1 native proof;
+usage/tool/source faults exit non-zero, never a pending verdict. The wait's
+validated `FOREMAN_REFUSAL_CONFIRM_SEC` supplies its confirmation interval.
+
+The source adapter in `skills/herdr-foreman/foreman/model_unavailability.py` owns supported native
+formats (`SUPPORTED_VERSIONS`, `source_error`) and the read-only confirmation
+contract (`probe`). An unconfirmed result grants no recovery authority. Grok
+retains the legacy refusal path.
+
+For these native failures exit 5 adds `unavailability`. `record-refusal` binds
+that proof to the original dispatch under the adapter's `verify_refusal`
+contract; invalid evidence refuses without changing the dispatch.
+An identical recorded receipt replays without new input; different evidence
+refuses. The record owns no delivered report, capability change or judge ruling.
+For a developer's latest native-unavailable attempt, the unchanged bounded move
+keeps its cumulative fix number (initial development keeps null). Both applied
+transport rows remain in history; the move resets no counter or allowance.
+It still requires the normal fresh-context route, unchanged brief, alternate
+provider and fresh report. A moved attempt without its own recorded refusal
+permits no further move. The existing refusal decision gate remains in force;
+an authorization buys only the dispatch it names.
+
+New dispatches freeze the configured launch scope before input. A fresh native
+model negative excludes only that model in that provider's recorded account
+group; an ungrouped worker excludes only its own template. Other models,
+providers and configured account groups remain candidates. Original dispatches
+without scope retain null scope and only the existing per-task bounded-move
+gate, never a guessed historical account binding. Plan and apply both recheck
+the negative for `capabilities.INTERVAL`; expiry is unknown, not access proof.
+Minimum-adequate routing skips a failed pair before comparing candidates.
+Explicit/risk/judgment pins cannot override a fresh negative: refuse the
+unavailable pin, never replace or lower it. Current operator-owned launch/access
+facts also refuse known unsupported/unavailable pinned rows. Update a changed
+account's configured grouping under the existing config-owner contract; never
+write config or read secret credential caches to manufacture access evidence.
+
+Herdr 0.8.2's bundled API schema has no dedicated provider-refusal
 outcome; the watcher uses its documented pane/state surfaces. Synthetic
 fixtures verify decisions, not live provider behavior or production elapsed
 time.

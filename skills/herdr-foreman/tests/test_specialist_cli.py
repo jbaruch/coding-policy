@@ -164,8 +164,9 @@ class SpecialistCliTest(fixture.CliCase):
         self.assertEqual(row["context_session"]["value"], "incoming")
         state = self.saved()
         self.assertEqual(state["assignments"][0]["requirements"], REQUIREMENT)
-        self.assertEqual(state["recovery"]["dispatches"][0]["schema_version"], 2)
-        self.assertEqual(state["recovery"]["dispatches"][0]["result"]["schema_version"], 2)
+        from foreman.recovery import LAUNCH_DISPATCH_VERSION
+        self.assertEqual(state["recovery"]["dispatches"][0]["schema_version"], LAUNCH_DISPATCH_VERSION)
+        self.assertEqual(state["recovery"]["dispatches"][0]["result"]["schema_version"], LAUNCH_DISPATCH_VERSION)
 
     def test_completed_retry_returns_saved_result_without_live_calls_or_second_assignment(self):
         self.bind()

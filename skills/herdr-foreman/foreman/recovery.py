@@ -54,7 +54,10 @@ RECOVERY_SCHEMA_VERSION = 1
 #: the dispatch's `agent` remains the fresh live identity; an applied result
 #: also carries `assignment_scoped: true`. Older stores carrying either field
 #: are unowned newer data and are refused.
-RECOVERY_STORE_VERSION = 15
+#: Version 16 owns dispatch v5's frozen configured launch/account scope and
+#: refusal v2's verified native model error. Historical scopes stay absent.
+RECOVERY_STORE_VERSION = 16
+LAUNCH_DISPATCH_VERSION = 5
 REFUSAL_FIELDS = frozenset({"brief_identity", "refusal", "refusal_move", "provider"})
 SPECIALIST_DISPATCH_VERSION = 2
 #: Dispatch record version 3: a judge dispatch carrying the mode it was sent
@@ -240,6 +243,10 @@ def _refuse_unowned_legacy(store, version):
         if version < 15 and any(
                 "worker_kind" in part or "assignment_scoped" in part for part in carriers):
             raise UsageError("Older recovery contains assignment-scoped dispatch fields this version never wrote; preserve it for owner recovery.", {})
+        if version < 16 and isinstance(row, dict) and (any("launch_scope" in part for part in carriers)
+                or isinstance(row.get("refusal"), dict) and (row["refusal"].get("schema_version") == 2
+                    or {"launch_scope", "unavailability"}.intersection(row["refusal"]))):
+            raise UsageError("Older recovery contains unowned native model/launch-scope evidence; preserve it for owner recovery.", {})
         allowed = ALLOWED_AT_6 if version == 6 else REFUSAL_FIELDS if version >= 7 else frozenset()
         if not isinstance(row, dict) or REFUSAL_FIELDS.intersection(row) - allowed:
             raise UsageError("Older recovery contains unowned newer refusal records; preserve it for owner recovery.", {})
@@ -1225,13 +1232,23 @@ def validate_work(store, assignments, task, fix_round, plan_id=None, work=None, 
         raise UsageError("Name the concrete blocking findings this correction addresses.", {})
     if any(not any(fnmatchcase(path, allowed) for allowed in plan["allowed_paths"]) for path in work["paths"]):
         raise UsageError("Correction paths exceed the approved scope; pause implementation for the changed decision.", {})
+    if implementation and native_refusal_retry(store, assignments, task, fix_round):
+        return plan
     count = confirmed_fix(assignments, task)
     if implementation and fix_round != count + 1:
         raise UsageError("Use this task's actual next fix number; approval never resets, skips, or reuses a completed attempt.", {})
-    # Count identities are unique; receipt append time cannot select an attempt.
-    previous = next((row for row in store["dispatches"] if row["task"] == task
+    # A native-unavailable transport and its bounded replacement share a
+    # cumulative attempt. Only original assignment time selects the replacement.
+    previous_candidates = [row for row in store["dispatches"] if row["task"] == task
                      and row["role"] == "developer" and row["status"] == "applied"
-                     and (row.get("fix_round") or 0) == count), None)
+                     and (row.get("fix_round") or 0) == count]
+    previous = previous_candidates[0] if previous_candidates else None
+    if len(previous_candidates) > 1:
+        latest = latest_assignment(assignments, task=task, role="developer", status="applied")
+        previous = next((row for row in previous_candidates if latest is not None
+                         and row["assignment_index"] == latest[0]), None)
+        if previous is None:
+            raise UsageError("Shared correction transports lack the latest original assignment binding; preserve and reconcile their chronology before another fix.", {})
     historical = next((row for row in store["historical_attempts"] if row["task"] == task
                        and row["fix_round"] == count), None)
     if implementation and historical and historical["fix_round"] >= plan["first_fix"]:
@@ -1323,6 +1340,14 @@ def _dispatch_version(record):
     if "reviewer_scope" in record and (canonical_role(record.get("role")) != "reviewer"
             or not isinstance(record["reviewer_scope"], str) or record["reviewer_scope"] not in {"verification", "design"}):
         raise UsageError("New reviewer_scope must name verification or design on a reviewer dispatch; preserve unknown scope only in legacy assignment history.", {})
+    if "launch_scope" in record:
+        from .model_unavailability import validate_scope
+        validate_scope(record["launch_scope"])
+        if record.get("provider", record["launch_scope"]["kind"]) != record["launch_scope"]["kind"]:
+            raise UsageError("Original launch scope differs from the dispatch's provider; restore its original evidence.", {})
+        if record["launch_scope"]["worker_kind"] != record.get("worker_kind", record.get("agent")):
+            raise UsageError("Original launch scope differs from the dispatch's worker template; restore its original evidence.", {})
+        return LAUNCH_DISPATCH_VERSION
     if scoped:
         return ASSIGNMENT_DISPATCH_VERSION
     if DISPATCH_METADATA_FIELDS.intersection(record):
@@ -1331,7 +1356,7 @@ def _dispatch_version(record):
 
 
 def _dispatch_metadata(record):
-    fields = DISPATCH_METADATA_FIELDS | SCOPED_DISPATCH_FIELDS
+    fields = DISPATCH_METADATA_FIELDS | SCOPED_DISPATCH_FIELDS | {"launch_scope"}
     return {key: deepcopy(record[key]) for key in fields if key in record}
 
 
@@ -1376,14 +1401,16 @@ def reserve(store, record, at):
     if prior:
         if prior["status"] != "not_sent" or prior["fingerprint"] != record["fingerprint"]:
             raise UsageError("Dispatch already exists; inspect its recorded result instead of sending again.", {})
-        if prior["schema_version"] != version or _dispatch_metadata(prior) != _dispatch_metadata(record):
+        before_metadata = {key: value for key, value in _dispatch_metadata(prior).items() if key != "launch_scope"}
+        after_metadata = {key: value for key, value in _dispatch_metadata(record).items() if key != "launch_scope"}
+        if prior["schema_version"] != version or before_metadata != after_metadata:
             raise UsageError("Retry changes the original composition metadata; restore the recorded dispatch inputs instead of reusing its identity.", {})
         _event(store, at, "dispatch_transport_retry", record["task"], {"dispatch": prior["id"], "previous": dict(prior)})
         prior.update(status="reserved", report=None, result=None)
         # The fingerprint does not cover these, so a retry after a config
         # change would otherwise keep the original row's provider, and a move
         # naming the old one fails validation on the next refusal (#403).
-        for key in ("provider", "brief_identity", "refusal_move"):
+        for key in ("provider", "brief_identity", "refusal_move", "launch_scope"):
             if key in record:
                 prior[key] = record[key]
             else:
@@ -1524,7 +1551,7 @@ def brief_identity(paths_by_role, role, report, contents=None):
     return digest.hexdigest()
 
 
-def record_refusal(store, data, at, provider, report, aliases=()):
+def record_refusal(store, data, at, provider, report, aliases=(), *, binding=None):
     """Bind a wait-report exit-5 receipt to the applied dispatch it stopped.
 
     `provider` is the refused agent's config `kind` and `report` the absolute
@@ -1561,7 +1588,7 @@ def record_refusal(store, data, at, provider, report, aliases=()):
     # Every field is typed before any membership test: a receipt holding a
     # list or object would raise TypeError on an unhashable value, and saved
     # evidence must fail as a usage error (#403).
-    if (not isinstance(payload, dict) or set(payload) != REFUSAL_RECEIPT_FIELDS
+    if (not isinstance(payload, dict) or set(payload) not in (REFUSAL_RECEIPT_FIELDS, REFUSAL_RECEIPT_FIELDS | {"unavailability"})
             or any(not isinstance(payload[key], str) for key in ("agent", "state", "reason", "report_path"))
             or payload["reason"] != REFUSAL_REASON or payload["found"] is not False
             or payload["agent"] not in {record["agent"], *[alias for alias in aliases if isinstance(alias, str) and alias]}
@@ -1577,6 +1604,14 @@ def record_refusal(store, data, at, provider, report, aliases=()):
         if prior["evidence"] != evidence:
             raise UsageError("Dispatch already records a different refusal receipt; preserve it and inspect both before recording again.", {})
         return prior
+    if "unavailability" in payload:
+        from .model_unavailability import verify_refusal
+        if store["schema_version"] != RECOVERY_STORE_VERSION:
+            raise UsageError("Native model refusal needs the owner-migrated recovery store; load it before recording.", {})
+        timestamp(at, "Native refusal")
+        verify_refusal(payload["unavailability"], record, binding, provider, report)
+        result.update(schema_version=2, unavailability=deepcopy(payload["unavailability"]),
+                      launch_scope=deepcopy(record.get("launch_scope")))
     record["refusal"] = result
     _event(store, at, "provider_refusal_recorded", record["task"], {"dispatch": record["id"], "provider": provider, "evidence": evidence})
     return result
@@ -1640,6 +1675,31 @@ def _unused_authorization(store, task, role, fix_round):
 def refusals(store, task, role, fix_round):
     return [row for row in store["dispatches"] if row.get("refusal") is not None
             and row["task"] == task and row["role"] == role and row["fix_round"] == fix_round]
+
+
+def native_refusal_retry(store, assignments, task, fix_round):
+    """Permit the same cumulative attempt only after its latest native failure.
+
+    This clears no send, rewrites no assignment and grants no next fix. The
+    actual dispatch still must satisfy refusal_move's unchanged-brief,
+    alternate-provider, fresh-report and one-move/authorization gates.
+    """
+    if not any(row.get("task") == task and row.get("role") == "developer"
+               and row.get("fix_round") == fix_round and (row.get("refusal") or {}).get("schema_version") == 2
+               for row in (store or {}).get("dispatches", [])):
+        return False
+    latest = latest_assignment(assignments or [], task=task, role="developer", status="applied")
+    if latest is None or latest[1].get("fix_round") != fix_round:
+        return False
+    source = next((row for row in (store or {}).get("dispatches", [])
+                   if row.get("assignment_index") == latest[0] and row.get("status") == "applied"
+                   and row.get("task") == task and row.get("role") == "developer"
+                   and row.get("fix_round") == fix_round and (row.get("refusal") or {}).get("schema_version") == 2), None)
+    if source is None:
+        return False
+    if len(_refusal_providers(store, task, "developer", fix_round)) >= REFUSAL_LIMIT and _unused_authorization(store, task, "developer", fix_round) is None:
+        raise UsageError("This native-unavailable developer attempt reached its independent-refusal limit; record the operator's bounded account/provider decision before another move.", {})
+    return True
 
 
 def refusal_move(store, task, role, fix_round, provider, identity, report=None):
@@ -1707,8 +1767,12 @@ def _validate_refusals(store):
             text(row["provider"], "dispatch provider")
         refusal = row.get("refusal")
         if refusal is not None:
-            if (not isinstance(refusal, dict) or set(refusal) != {"schema_version", "at", "provider", "reason", "receipt", "report_path", "evidence"}
-                    or type(refusal["schema_version"]) is not int or refusal["schema_version"] != RECOVERY_SCHEMA_VERSION
+            fields = {"schema_version", "at", "provider", "reason", "receipt", "report_path", "evidence"}
+            native = isinstance(refusal, dict) and refusal.get("schema_version") == 2
+            if native:
+                fields |= {"unavailability", "launch_scope"}
+            if (not isinstance(refusal, dict) or set(refusal) != fields
+                    or type(refusal["schema_version"]) is not int or refusal["schema_version"] not in {1, 2}
                     or refusal["reason"] != REFUSAL_REASON or row["status"] != "applied"):
                 raise UsageError("Refusal record has an unsupported schema or sits on an unconfirmed dispatch; preserve it for owner recovery.", {})
             text(refusal["at"], "refusal timestamp")
@@ -1716,6 +1780,16 @@ def _validate_refusals(store):
             validate_receipt(refusal["evidence"])
             if text(refusal["receipt"], "refusal receipt") != refusal["evidence"]["path"] or not Path(text(refusal["report_path"], "refusal report")).is_absolute():
                 raise UsageError("Refusal record's receipt path disagrees with its bound evidence; preserve it for owner recovery.", {})
+            if native:
+                from .model_unavailability import validate_proof, validate_scope
+                timestamp(refusal["at"], "Native refusal")
+                validate_proof(refusal["unavailability"])
+                if refusal["launch_scope"] is not None:
+                    validate_scope(refusal["launch_scope"])
+                if (refusal["launch_scope"] != row.get("launch_scope")
+                        or refusal["unavailability"]["kind"] != refusal["provider"]
+                        or refusal["unavailability"]["model"] != (row.get("result", {}).get("tier") or {}).get("model")):
+                    raise UsageError("Native refusal changed its original model or launch/account scope; preserve the ledger for owner recovery.", {})
         move = row.get("refusal_move")
         if move is not None:
             if (not isinstance(move, dict) or set(move) - {"authorization"} != {"schema_version", "from", "from_provider", "provider"}
@@ -1852,6 +1926,9 @@ def fresh_transition(store, assignments, task, fix_round):
     if task is None or fix_round is None:
         return None
     latest = latest_assignment(assignments, task=task, role="developer", status="applied")
+    if latest is not None and native_refusal_retry(store, assignments, task, fix_round):
+        return {"reason": "native_model_unavailability", "previous_developer": latest[0],
+                "grants_future_attempts": False}
     if latest is None or (latest[1].get("fix_round") or 0) + 1 != fix_round:
         return None
     index, developer = latest
@@ -1951,7 +2028,7 @@ def validate_store(store, assignments):
                 raise UsageError("Recovery {} must be an array; restore the owner-written ledger.".format(name), {})
             identifiers = []
             for row in store[name]:
-                versions = ({1, 2, JUDGE_DISPATCH_VERSION, ASSIGNMENT_DISPATCH_VERSION} if name == "dispatches"
+                versions = ({1, 2, JUDGE_DISPATCH_VERSION, ASSIGNMENT_DISPATCH_VERSION, LAUNCH_DISPATCH_VERSION} if name == "dispatches"
                             else {1, 2} if name == "delivery_recoveries"
                             else CHECKPOINT_VERSIONS if name == "checkpoints"
                             else DIAGNOSIS_VERSIONS if name == "diagnoses"
@@ -2067,7 +2144,7 @@ def validate_store(store, assignments):
                 previous = _item(store["plans"][:store["plans"].index(row)], row["supersedes"], "superseded plan")
                 if previous["task"] != row["task"] or previous["base_revision"] != row["base_revision"]:
                     raise UsageError("A changed decision cannot supersede another task or original base.", {})
-        applied_slots = set()
+        applied_slots = {}
         pending_workers = set()
         pending_tasks = set()
         for row in store["dispatches"]:
@@ -2137,8 +2214,14 @@ def validate_store(store, assignments):
                 if row["role"] == "developer":
                     slot = (row["task"], fix)
                     if slot in applied_slots:
-                        raise UsageError("A correction number was consumed twice; preserve the ledger and reconcile the duplicate.", {})
-                    applied_slots.add(slot)
+                        previous = applied_slots[slot]
+                        move = row.get("refusal_move") or {}
+                        if ((previous.get("refusal") or {}).get("schema_version") != 2
+                                or move.get("from") != previous["id"]):
+                            raise UsageError("A correction number was consumed twice; preserve the ledger and reconcile the duplicate.", {})
+                        if not assignment_after(assignments, index, previous["assignment_index"]):
+                            raise UsageError("A native-unavailability handoff must follow its failed attempt; preserve the original event chronology.", {})
+                    applied_slots[slot] = row
             report = row.get("report")
             if report is not None:
                 if not isinstance(report, dict) or type(report.get("schema_version")) is not int or report["schema_version"] != RECOVERY_SCHEMA_VERSION or report["dispatch"] != row["id"]:
