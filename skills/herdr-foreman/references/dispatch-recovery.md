@@ -710,7 +710,7 @@ lock file can remain after exit; do not delete it to bypass an active lock.
   - Other callable rows, the provider and every `capabilities` entry stay
     unchanged.
 
-`wait-report.sh` owns refusal confirmation, for exit 5 and exit 6 alike; see its
+`skills/herdr-foreman/wait-report.sh` owns refusal confirmation, for exit 5 and exit 6 alike; see its
 header and `confirmed_provider_refusal`. Missing terminal evidence keeps the ordinary
 wait. The read-only `foreman probe-unavailable` command takes `--agent`, `--pane`,
 absolute `--report`, positive `--lines` and the observed visible text on stdin.

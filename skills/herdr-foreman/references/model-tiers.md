@@ -145,7 +145,7 @@ its provider. The classes, each with its own owner:
 | Evidence | Class | Next step |
 | --- | --- | --- |
 | Provider notice naming a model the account cannot call: `model_not_found`, unsupported model, "may not exist" | `model_identifier_unavailable` | The repair below |
-| Enumerated trusted pre-input 5xx native-start code (`launch_transient`), measurement, `startup_dialog_pending` | transient | Existing bounded retry in `references/dispatch-recovery.md` after owned closure is proved; no model retirement |
+| Enumerated trusted pre-input 5xx native-start code (`launch_transient`), measurement, `startup_dialog_pending` | transient | Existing bounded retry in `skills/herdr-foreman/references/dispatch-recovery.md` after owned closure is proved; no model retirement |
 | Start timeout or transport failure | unknown send effect | Fail closed: retain evidence, `reconcile` from actual evidence; no retry until the send effect is known |
 | Withheld-content notice | `terminal_provider_refusal` | `record-refusal` and one move to another provider |
 | `sending` or `sent_but_not_started` | uncertain send | `reconcile` from actual evidence, first |
@@ -160,7 +160,7 @@ Repair for `model_identifier_unavailable`:
    account.
 3. Repair the exact stale row in the operator's config with the identifier the
    sources support, or a verified same-family successor
-   (`references/successor-placement.md`). The utility never rewrites the
+   (`skills/herdr-foreman/references/successor-placement.md`). The utility never rewrites the
    config.
 4. Validate with `plan`. A judgment row stays on the pinned top model at the
    effort floor; `TOP_MODELS` in `skills/herdr-foreman/foreman/tiers.py` names
@@ -172,7 +172,7 @@ Catalog identity, account access and capability adequacy are separate facts.
 A smoke call proves access; it never writes an `adequate` capability entry.
 The independently pinned judge keeps its own pin and launch proof.
 
-Detection: `wait-report.sh` exit 6 after a send,
+Detection: `skills/herdr-foreman/wait-report.sh` exit 6 after a send,
 `identifier_unavailable_model` in `skills/herdr-foreman/foreman/composer.py`
 at fresh startup, and the structured `agent_start` error codes
 `IDENTIFIER_ERROR_CODES` / `TRANSIENT_LAUNCH_ERROR_CODES` in
