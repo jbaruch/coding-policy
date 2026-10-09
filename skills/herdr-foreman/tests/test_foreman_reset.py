@@ -548,9 +548,16 @@ class DeliverTest(unittest.TestCase):
     def test_an_unnamed_foreman_pane_sends_nothing(self):
         class Unnamed(FakeClient):
             def agent_list(self):
-                return [{"pane_id": PANE, "agent_status": "idle", "agent": "claude"}]
-        with self.assertRaisesRegex(HerdrError, "(?s)no agent name.*" + DO_NOT_RERUN):
-            self.run_deliver(Unnamed(["idle"]))
+                return [{"pane_id": PANE, "agent_status": "working", "agent": self.kind}]
+        for kind in ("claude", "codex", "grok"):
+            client = Unnamed(["working"], kind=kind)
+            with self.subTest(kind=kind), self.assertRaises(foreman_reset.ForemanUnnamed) as caught:
+                self.run_deliver(client)
+            result = foreman_reset.failure(caught.exception, "round-7", "/s.json")
+            self.assertEqual(result["details"], {"pane_id": PANE, "reason": "foreman_name_missing", "phase": "idle_wait"})
+            self.assertIn("herdr agent rename {} <unique-name>".format(PANE), result["message"])
+            self.assertEqual(client.keystrokes, [])
+            self.assertEqual(client.waits, [])
 
     def test_a_same_name_same_kind_replacement_session_gets_no_keystroke(self):
         # #523: the operator replaced the foreman while the deliverer waited.
@@ -564,6 +571,7 @@ class DeliverTest(unittest.TestCase):
         record = foreman_reset.failure(caught.exception, "round-7", "/s.json")
         self.assertEqual((record["error"], record["details"]["reason"]), ("reset_session_changed", "native_session_changed"))
         self.assertIn("no longer holds the native session", record["message"])
+        self.assertNotIn(foreman_reset.OPERATOR_RECOVERY, record["message"])
 
     def test_a_replacement_between_the_clear_keystrokes_is_interrupted_and_says_why(self):
         # The text guard sees the bound session; the Enter guard sees another.
@@ -782,7 +790,8 @@ class RecordTest(unittest.TestCase):
                 with self.assertRaises(foreman_reset.ResetEnded) as caught:
                     self.schedule("2026-09-24T10:05:00+00:00", False)
                 self.assertEqual(caught.exception.code, "reset_ended")
-                self.assertIn(foreman_reset.OPERATOR_RECOVERY, caught.exception.message)
+                instruction = foreman_reset.UNTOUCHED_RECOVERY if status in ("failed", "scheduled") else foreman_reset.OPERATOR_RECOVERY
+                self.assertIn(instruction, caught.exception.message)
                 expected = "resume" if status in ("failed", "interrupted") else "memory-show --state"
                 self.assertIn(expected, caught.exception.details["resume_prompt"])
                 row = json.loads(foreman_reset.record_path(self.state).read_text())["resets"][-1]
@@ -1052,6 +1061,111 @@ RESET_AT = "2026-09-24T10:00:00+00:00"
 
 
 class ResetCommandTest(CliCase):
+    def run_cli(self, argv, client=None):
+        # Scheduling now observes a live name and bound native session. Keep
+        # those reads isolated even when a test exercises non-default binaries.
+        return super().run_cli(argv, client=FakeClient(["working"]) if client is None else client)
+
+    def test_unnamed_schedule_refuses_before_any_spawn_log_or_reset_record(self):
+        for kind in ("claude", "codex", "grok"):
+            for name in (None, "", " ", "token=secret"):
+                client = FakeClient(["working"], kind=kind)
+                client.agent_list = lambda: [{"pane_id": PANE, "agent": kind, "agent_status": "working", "name": name}]
+                with self.subTest(kind=kind, name=name), \
+                     patch("foreman.cli.memory.show", return_value={"record": READY}), \
+                     patch("foreman.cli.supervision.load", return_value=supervision_data()[0]), \
+                     patch.dict("os.environ", {"HERDR_PANE_ID": PANE, "HERDR_ENV": "1"}), \
+                     patch("foreman.cli._spawn_detached", side_effect=AssertionError("must not spawn")):
+                    self.out, self.err = io.StringIO(), io.StringIO()
+                    code, out, err = self.run_cli(self.base() + ["foreman-reset", "--now", RESET_AT], client=client)
+                self.assertEqual((code, out), (1, ""))
+                result = json.loads(err)
+                self.assertEqual(result["error"], "reset_foreman_unnamed")
+                self.assertEqual(result["details"], {"pane_id": PANE, "reason": "foreman_name_missing", "phase": "schedule_preflight"})
+                self.assertIn("herdr agent rename", result["message"])
+                self.assertNotIn("secret", err)
+                self.assertFalse(foreman_reset.record_path(self.state).exists())
+                self.assertFalse(Path(str(self.state.resolve()) + ".foreman-reset.log").exists())
+                self.assertEqual(client.keystrokes, [])
+
+    def test_named_replacement_session_cannot_schedule(self):
+        client = FakeClient(["working"], sessions=["22222222-2222-4222-8222-222222222222"])
+        with patch("foreman.cli.memory.show", return_value={"record": READY}), \
+             patch("foreman.cli.supervision.load", return_value=supervision_data()[0]), \
+             patch.dict("os.environ", {"HERDR_PANE_ID": PANE, "HERDR_ENV": "1"}), \
+             patch("foreman.cli._spawn_detached", side_effect=AssertionError("must not spawn")):
+            code, _, err = self.run_cli(self.base() + ["foreman-reset", "--now", RESET_AT], client=client)
+        self.assertEqual(code, 1)
+        self.assertEqual(json.loads(err)["details"]["phase"], "schedule_preflight")
+        self.assertFalse(foreman_reset.record_path(self.state).exists())
+        self.assertEqual(client.keystrokes, [])
+
+    def test_missing_live_foreman_cannot_schedule_or_request_clear_paste(self):
+        client = FakeClient(["working"])
+        client.agent_list = lambda: []
+        with patch("foreman.cli.memory.show", return_value={"record": READY}), \
+             patch("foreman.cli.supervision.load", return_value=supervision_data()[0]), \
+             patch.dict("os.environ", {"HERDR_PANE_ID": PANE, "HERDR_ENV": "1"}), \
+             patch("foreman.cli._spawn_detached", side_effect=AssertionError("must not spawn")):
+            code, _, err = self.run_cli(self.base() + ["foreman-reset", "--now", RESET_AT], client=client)
+        self.assertEqual(code, 1)
+        self.assertEqual(json.loads(err)["details"]["reason"], "foreman_not_found")
+        self.assertNotIn(foreman_reset.OPERATOR_RECOVERY, err)
+        self.assertFalse(foreman_reset.record_path(self.state).exists())
+
+    def test_metadata_naming_allows_fresh_schedule_without_resetting_context(self):
+        for kind in ("claude", "codex", "grok"):
+            client = FakeClient(["working"], kind=kind)
+            spawned = []
+            with self.subTest(kind=kind), \
+                 patch("foreman.cli.memory.show", return_value={"record": READY}), \
+                 patch("foreman.cli.supervision.load", return_value=supervision_data()[0]), \
+                 patch.dict("os.environ", {"HERDR_PANE_ID": PANE, "HERDR_ENV": "1"}), \
+                 patch("foreman.cli._spawn_detached", side_effect=lambda argv, sink: spawned.append(argv) or 4242), \
+                 patch("foreman.foreman_reset.process_identity", side_effect=lambda pid: {"pid": pid, "identity": "child"}):
+                foreman_reset.record_path(self.state).unlink(missing_ok=True)
+                self.out, self.err = io.StringIO(), io.StringIO()
+                code, out, err = self.run_cli(self.base() + ["foreman-reset", "--now", RESET_AT], client=client)
+            self.assertEqual(code, 0, err)
+            self.assertEqual(json.loads(out)["native_session"], SESSION)
+            self.assertEqual(len(spawned), 1)
+            self.assertEqual(client.keystrokes, [])
+
+    def test_reconciled_unknown_delivery_does_not_claim_nothing_was_typed(self):
+        plan = {"pane_id": PANE, "stow": "round-7"}
+        foreman_reset.schedule(self.state, plan, RESET_AT, os.getpid, native_session=SESSION)
+        foreman_reset.claim(self.state, plan, supervision_runtime.process_identity(os.getpid()))
+        foreman_reset.reconcile(self.state, plan, "failed", RESET_AT, alive=lambda process: False)
+        needed = foreman_reset.outstanding(self.state)[0]["needed"]
+        self.assertIn(foreman_reset.OPERATOR_RECOVERY, needed)
+        self.assertNotIn(foreman_reset.UNTOUCHED_RECOVERY, needed)
+
+    def test_reconciled_unclaimed_child_preserves_context(self):
+        plan = {"pane_id": PANE, "stow": "round-7"}
+        foreman_reset.schedule(self.state, plan, RESET_AT, os.getpid, native_session=SESSION)
+        foreman_reset.reconcile(self.state, plan, "failed", RESET_AT, alive=lambda process: False)
+        needed = foreman_reset.outstanding(self.state)[0]["needed"]
+        self.assertIn(foreman_reset.UNTOUCHED_RECOVERY, needed)
+        self.assertNotIn(foreman_reset.OPERATOR_RECOVERY, needed)
+
+    def test_deliverer_name_loss_keeps_actionable_cause_and_untouched_recovery(self):
+        from foreman import attention_view
+        plan = {"pane_id": PANE, "stow": "round-7"}
+        foreman_reset.schedule(self.state, plan, RESET_AT, os.getpid, native_session=SESSION)
+        client = FakeClient(["working"])
+        client.agent_list = lambda: [{"pane_id": PANE, "agent": "claude", "agent_status": "working"}]
+        code, _, err = self.run_cli(self.base() + ["foreman-reset-deliver", "--pane", PANE, "--stow", "round-7"], client=client)
+        self.assertEqual(code, 1)
+        emitted = json.loads(err)
+        self.assertEqual(emitted["details"]["status"], "failed")
+        self.assertEqual(emitted["details"]["cause"]["details"]["phase"], "idle_wait")
+        result = attention_view.catch_up(self.state, RESET_AT)
+        needed = result["foreman_resets"][0]["needed"]
+        self.assertIn("herdr agent rename", needed)
+        self.assertIn(foreman_reset.UNTOUCHED_RECOVERY, needed)
+        self.assertNotIn(foreman_reset.OPERATOR_RECOVERY, needed)
+        self.assertEqual(client.keystrokes, [])
+
     def test_a_reset_with_an_invalid_time_writes_nothing(self):
         with patch("foreman.cli.memory.show", return_value={"record": READY}), \
              patch("foreman.cli.supervision.load", return_value=supervision_data()[0]), \

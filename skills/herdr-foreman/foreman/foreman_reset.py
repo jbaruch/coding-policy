@@ -17,6 +17,7 @@ Preconditions, all checked before anything is scheduled:
 - the named stow is `reset_ready` (memory.py)
 - its id is not `latest`, the memory-show selector the resume prompt cannot name exactly
 - the caller runs in the bound foreman's own Herdr pane
+- the live foreman has a valid Herdr agent name and still holds the bound native session
 - the foreman could stop now: no unhandled supervision event, and either no
   active enrollment or a handoff hold whose id matches the stow. The scheduled
   live deliverer becomes the Stop proof after this preflight succeeds
@@ -33,9 +34,10 @@ the private reset log retains their identity and failure reason.
 `<state>.foreman-reset.json` records each scheduled reset (`schedule`), and
 the deliverer claims it before sending anything (`claim`). A retry of a live,
 claimed reset, or a delivered or reconciled reset, replays the record and spawns nothing. Any
-other reset is finalized `failed` (nothing typed) or `interrupted` (typing began) with the
-resume prompt the operator pastes, under the Working Memory recovery
-carve-out; the next round resets from a new stow. Before every keystroke the
+other reset is finalized `failed` (nothing typed) or `interrupted` (typing may have begun).
+Untouched failures keep the current context and schedule from a new stow;
+interrupted or indeterminate deliveries keep the operator's Working Memory
+recovery route. Before every keystroke the
 deliverer re-reads the stow and the pane, and refuses unless the stow is
 still reset-ready and the same agent is still idle.
 
@@ -60,6 +62,7 @@ import copy
 import fcntl
 import json
 import os
+import re
 import select
 import shlex
 import subprocess
@@ -167,9 +170,28 @@ OPERATOR_RECOVERY = ("Do not run `{}` again for this stow. The operator recovers
                      "resume prompt saved in this reset's record. The next round resets from a new stow.").format(
                          command("foreman-reset"))
 
+UNTOUCHED_RECOVERY = ("Do not run `{}` again for this stow. Nothing was typed by this reset; do not clear the pane or "
+                      "paste its resume prompt. Inspect the named pane and its current binding, fix the saved cause, "
+                      "continue foreground supervision, then save a new reset-ready stow and schedule its reset.").format(
+                          command("foreman-reset"))
+
+
+def recovery_instruction(status, result):
+    """Failed delivery typed nothing; operator-reconciled uncertainty is not that proof."""
+    if status == "failed" and (result["details"].get("reconciled") != "failed"
+                               or result["details"].get("phase") == "unclaimed"):
+        return UNTOUCHED_RECOVERY
+    return OPERATOR_RECOVERY
+
+
+class ForemanUnnamed(HerdrError):
+    """An owner-written naming prerequisite, safe to persist without pane text."""
+
+    code = "reset_foreman_unnamed"
+
 
 class ResetEnded(UsageError):
-    """This stow's one reset attempt failed or was interrupted; only the operator recovers it."""
+    """This stow's attempt ended; follow its no-input or interrupted recovery route."""
 
     code = "reset_ended"
 
@@ -572,9 +594,10 @@ def _settle(document, row, state_path, alive):
 
 
 def _refuse(row, state_path, cause=None):
-    raise ResetEnded("The reset from stow {} ended {}{}; the pane may already be cleared. {}".format(
-        row["stow"], row["status"], " ({})".format(cause) if cause else "", OPERATOR_RECOVERY),
-        {"record": str(record_path(state_path)), "resume_prompt": row["result"]["resume_prompt"]})
+    raise ResetEnded("The reset from stow {} ended {}{}. {}".format(
+        row["stow"], row["status"], " ({})".format(cause) if cause else "",
+        recovery_instruction(row["status"], row["result"])),
+        {"record": str(record_path(state_path)), "status": row["status"], "resume_prompt": row["result"]["resume_prompt"]})
 
 
 def _claimed_replay(row, state_path):
@@ -718,7 +741,7 @@ def schedule(state_path, plan, at, start, *, native_session, alive=_alive, probe
 #: Herdr or composer failure above all, can carry raw subprocess output or pane
 #: text in its message; the record and log keep a generic line and safe fields.
 OWN_MESSAGE_CODES = frozenset({"usage_error", "state_error", "reset_ended", "reset_record_newer", "reset_record_unusable",
-                               "reset_session_changed", "reset_startup_failed"})
+                               "reset_session_changed", "reset_startup_failed", "reset_foreman_unnamed"})
 
 
 def failure(exc, stow, state, **options):
@@ -732,6 +755,9 @@ def failure(exc, stow, state, **options):
                if key in FAILURE_DETAIL_KEYS and (value is None or isinstance(value, (str, int, float, bool)))}
     message = exc.message if exc.code in OWN_MESSAGE_CODES else (
         "A Herdr call failed ({}); inspect the saved diagnostic fields and native pane before owner recovery.".format(exc.code))
+    # Recovery depends on the persisted outcome, not on a pre-input error's
+    # old generic operator suffix. Keep the cause; readers add the correct route.
+    message = message.replace(OPERATOR_RECOVERY, "").strip()
     return {"error": exc.code, "message": message, "details": details, "resume_prompt": resume_prompt(stow, state, **options)}
 
 
@@ -778,7 +804,7 @@ def outstanding(state_path, *, alive=_alive):
     for row in latest.values():
         if row["status"] in TERMINAL_FAILURES:
             prompt = row["result"]["resume_prompt"]
-            needed = OPERATOR_RECOVERY
+            needed = row["result"]["message"].replace(OPERATOR_RECOVERY, "").strip() + " " + recovery_instruction(row["status"], row["result"])
             if row["status"] == "interrupted":
                 # Typing began, so the pane may already hold a resumed foreman:
                 # the record alone cannot say, and clearing it would erase that context.
@@ -792,8 +818,9 @@ def outstanding(state_path, *, alive=_alive):
             delivered = reconcile_command(state_path, row["pane_id"], row["stow"], "delivered")
             if row["status"] == "scheduled":
                 needed = ("The deliverer stopped before claiming the reset, so nothing was typed and the foreman in pane {} "
-                          "still holds its old context. Run `{}`; `{}` then shows the saved resume "
-                          "prompt for recovery.".format(row["pane_id"], failed, command("catch-up")))
+                          "still holds its old context. Run `{}`; `{}` then shows the saved cause. "
+                          "Do not clear or paste; inspect the current binding and schedule a new reset-ready stow.".format(
+                              row["pane_id"], failed, command("catch-up")))
             else:
                 needed = ("The deliverer stopped mid-delivery and its outcome is unknown. Look at pane {}: if a resumed "
                           "foreman is running there, run `{}`; otherwise run `{}` "
@@ -850,7 +877,8 @@ def reconcile(state_path, plan, outcome, at, *, alive=_alive):
             row.update(status="reconciled", result={"outcome": "delivered", "reconciled_at": at})
         else:
             lost = StateError("The operator reconciled this reset as failed: its deliverer stopped without an outcome.",
-                              {"reconciled": "failed", "reconciled_at": at})
+                              {"reconciled": "failed", "reconciled_at": at,
+                               "phase": "unclaimed" if row["status"] == "scheduled" else "unknown"})
             row.update(status="failed", result=failure(lost, row["stow"], str(Path(state_path).expanduser().resolve()),
                                                        **row["options"]))
         if not _valid_row(row):
@@ -868,12 +896,13 @@ def _reconciled_outcome(row):
     return None
 
 
-def delivery_failed(state_path, stow, result):
+def delivery_failed(state_path, stow, result, status):
     """The error a deliverer exits with once its failure is recorded: where the record and the prompt are."""
     record = record_path(state_path)
     return ResetEnded("The reset from stow {} did not complete ({}); {} holds the cause and the resume prompt. {}".format(
-        stow, result["error"], record, OPERATOR_RECOVERY),
-        {"record": str(record), "resume_prompt": result["resume_prompt"], "cause": {"error": result["error"], "message": result["message"]}})
+        stow, result["error"], record, recovery_instruction(status, result)),
+        {"record": str(record), "status": status, "resume_prompt": result["resume_prompt"],
+         "cause": {"error": result["error"], "message": result["message"], "details": result["details"]}})
 
 
 @contextmanager
@@ -1081,12 +1110,39 @@ def pane_session(client, pane_id):
     return {"kind": ref["kind"], "value": value}
 
 
-def _foreman_record(client, pane_id):
+def _foreman_record(client, pane_id, *, scheduling=False):
     record = next((row for row in client.agent_list() if row.get("pane_id") == pane_id), None)
     if record is None:
+        if scheduling:
+            raise UsageError("No Herdr agent runs in the bound foreman's pane {}. Restore and verify the foreman and "
+                             "its native binding before scheduling; no child or input was created. Do not clear or paste.".format(pane_id),
+                             {"pane_id": pane_id, "reason": "foreman_not_found", "phase": "schedule_preflight"})
         raise HerdrError("No Herdr agent runs in the foreman's pane {}, so nothing further was sent. {}".format(
             pane_id, OPERATOR_RECOVERY), {"pane_id": pane_id})
     return record
+
+
+def require_name(record, pane_id, phase):
+    """Name is metadata, never a replacement for native session/process guards."""
+    name = record.get("name")
+    if not isinstance(name, str) or re.fullmatch(r"[a-z][a-z0-9_-]{0,31}", name) is None:
+        raise ForemanUnnamed("Herdr lists the foreman's pane {} with no agent name usable for reset. Run "
+                             "`herdr agent rename {} <unique-name>` using the configured Herdr command context, "
+                             "verify the same native session remains bound, then schedule from a reset-ready stow. "
+                             "Nothing was typed; do not clear the pane or paste a resume prompt.".format(pane_id, pane_id),
+                             {"pane_id": pane_id, "reason": "foreman_name_missing", "phase": phase})
+    return name
+
+
+def live_preflight(client, agents, pane_id, native_session):
+    """Read-only scheduling prerequisites; no child, record or runtime input yet."""
+    record = _foreman_record(client, pane_id, scheduling=True)
+    name = require_name(record, pane_id, "schedule_preflight")
+    mechanics(agents, record.get("agent"), name)
+    if pane_session(client, pane_id) != native_session:
+        raise SessionChanged("The foreman's pane {} no longer holds its bound native session; revalidate the current "
+                             "foreman and supervision binding before scheduling. Nothing was scheduled or typed.".format(pane_id),
+                             {"pane_id": pane_id, "reason": "native_session_changed", "phase": "schedule_preflight"})
 
 
 def mechanics(agents, kind, name):
@@ -1246,6 +1302,7 @@ def deliver(client, agents, pane_id, stow, state, *, native_session, still_ready
     settled = 0
     while True:
         record = _foreman_record(client, pane_id)
+        require_name(record, pane_id, "idle_wait")
         settled = settled + 1 if record.get("agent_status") in SETTLE_STATES else 0
         if settled >= RESET_STABLE_READS:
             break
@@ -1253,9 +1310,6 @@ def deliver(client, agents, pane_id, stow, state, *, native_session, still_ready
             raise HerdrError("The foreman's pane {} stayed {} for {}s; nothing was sent. {}".format(
                 pane_id, record.get("agent_status"), budget_sec, OPERATOR_RECOVERY), {"pane_id": pane_id})
         sleep(poll_sec)
-    if not isinstance(record.get("name"), str) or not record["name"]:
-        raise HerdrError("Herdr lists the foreman's pane {} with no agent name, so its runtime cannot be matched; nothing was "
-                         "sent. {}".format(pane_id, OPERATOR_RECOVERY), {"pane_id": pane_id})
     agent = mechanics(agents, record.get("agent"), record["name"])
     if not still_ready():
         raise UsageError("Stow {} is no longer reset-ready; nothing was sent. {}".format(stow, OPERATOR_RECOVERY), {"stow": stow})
@@ -1348,6 +1402,7 @@ def deliver(client, agents, pane_id, stow, state, *, native_session, still_ready
             wrapper = SessionInterrupted if isinstance(exc, SessionChanged) else DeliveryInterrupted
             raise wrapper("{} The pane was already typed into, so this reset is not retried. {}".format(
                 exc.message, OPERATOR_RECOVERY), details) from None
+        exc.details = details
         raise
     return {"schema_version": RESET_SCHEMA_VERSION, "pane_id": pane_id, "stow": stow, "agent": agent.name,
             "cleared": True, "resume": landing}

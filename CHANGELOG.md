@@ -1,5 +1,14 @@
 # Changelog
 
+### Fixed
+
+- Refuse unnamed foreman context-reset targets before scheduling (#747).
+  Read-only preflight checks the live name and bound native session without
+  starting a child or writing a reset receipt. Name loss during the idle wait
+  preserves its owner-written reason and phase instead of a generic Herdr error.
+  Never-typed failures keep the existing context and recover through a new stow;
+  interrupted or indeterminate delivery still requires guarded operator recovery.
+
 ## 0.3.396 — 2026-10-09
 
 ### Fixed

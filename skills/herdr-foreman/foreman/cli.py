@@ -2150,6 +2150,8 @@ def cmd_foreman_reset(args, client=None, warn=None, trace=None, spawn=None):
                 "log": str(Path(str(state_path) + ".foreman-reset.log"))}, None
     plan = foreman_reset.preflight(stow, data, caller)
     native_session = foreman_reset.bound_session(data)
+    client = client if client is not None else _client(args, trace=trace)
+    foreman_reset.live_preflight(client, load_config(_config_path(args)), plan["pane_id"], native_session)
     log = Path(str(state_path) + ".foreman-reset.log")
     # The deliverer runs from the package directory, so every path it gets is absolute.
     argv = [sys.executable, "-m", "foreman", "foreman-reset-deliver", "--pane", plan["pane_id"], "--stow", plan["stow"],
@@ -2217,7 +2219,7 @@ def _raise_reset_failure(state_path, stow, outcome, record) -> NoReturn:
         raise StateError("The reset for stow {} failed here, but its record shows {!r}, which another process set; this "
                          "deliverer authorizes no recovery. Inspect {}.".format(stow, status, foreman_reset.record_path(state_path)),
                          {"record": str(foreman_reset.record_path(state_path)), "status": status})
-    raise foreman_reset.delivery_failed(state_path, stow, outcome)
+    raise foreman_reset.delivery_failed(state_path, stow, outcome, status)
 
 
 def _log_safe(warn):

@@ -1170,7 +1170,7 @@ could not take.
 | `options` | object with optional non-empty string `config` and `herdr_bin` | The non-default settings `foreman-reset` ran with; every resume prompt for this row carries them, including one finalized later by another process |
 | `process` | `{"pid": integer, "identity": string}`, or null | The deliverer's process: its pid and a digest of its start time and command line (`supervision_runtime.process_identity`). A reused pid carries another identity. Null only on a `scheduled` row before its deliverer is identified, or on a `failed` row whose deliverer never started or was gone before identification. Every `delivering`, `delivered` and `interrupted` row carries one |
 | `native_session` | `{"kind": "id" \| "path", "value": non-empty string}`, or null | Original native binding. Null is retained only from schema-1 migration and authorizes no input. The per-keystroke session/process contract is `skills/herdr-foreman/foreman/foreman_reset.py` (`deliver`); hook transfer is `skills/herdr-foreman/foreman/reset_input_hook.py` (`check`) |
-| `result` | null, the delivery object, or the failure object | `scheduled` and `delivering` hold null. `delivered` holds exactly `{"schema_version", "pane_id", "stow", "agent", "cleared": true, "resume": {"landed": true, "started": true}}`, whose `schema_version`, `pane_id` and `stow` equal the row's. `failed` and `interrupted` hold exactly `{"error": string, "message": string, "details": object, "resume_prompt": string}`; `resume_prompt` is what the operator pastes. `reconciled` holds exactly `{"outcome": "delivered", "reconciled_at": ISO-8601 string}` |
+| `result` | null, the delivery object, or the failure object | `scheduled` and `delivering` hold null. `delivered` holds exactly `{"schema_version", "pane_id", "stow", "agent", "cleared": true, "resume": {"landed": true, "started": true}}`, whose `schema_version`, `pane_id` and `stow` equal the row's. `failed` and `interrupted` hold exactly `{"error": string, "message": string, "details": object, "resume_prompt": string}`; the saved prompt is used only when the recovery instruction requires operator input. `reconciled` holds exactly `{"outcome": "delivered", "reconciled_at": ISO-8601 string}` |
 
 One claimed delivery attempt per pane and stow, never retried automatically.
 Production startup uses a private inherited pipe: the loaded child supplies
@@ -1195,7 +1195,9 @@ starts another child. A dead `scheduled` row is finalized `failed` (nothing
 was typed), and a dead `delivering` row `interrupted` (typing may have
 begun), each with the failure object. Every other row, `failed` or
 `interrupted` whether recorded earlier or just finalized, is then refused
-with `reset_ended` and its resume prompt, for operator recovery under
+with `reset_ended`, its status and saved resume prompt. Never-typed failures
+preserve the existing context and recover through a new stow without clear/paste.
+Interrupted or indeterminate delivery uses operator recovery under
 the Working Memory carve-out. The next
 round resets from a new stow. A deliverer claims only the row carrying its
 own process identity. A launch failure, or a deliverer already gone when
@@ -1220,6 +1222,13 @@ and an `interrupted` row the operator saw resume (`delivered` only): `failed` re
 own `options`, `delivered` records `reconciled`. An identical retry returns
 the recorded row with `replayed: true`; a row that already ended any other
 way, or whose deliverer is still running, is refused.
+The existing free-form failure `details` preserves bounded owner phases and
+reasons. An unnamed target uses `reset_foreman_unnamed`, reason
+`foreman_name_missing`, and its scheduling or idle-wait phase. New reconciliations
+record `phase: unclaimed` for a never-claimed child and `phase: unknown` for a
+claimed delivery whose outcome is unknown. Older reconciled failures without
+that phase retain the indeterminate operator route. Row/envelope shapes remain
+schema 3; no new stored field or legacy authority is introduced.
 
 The Stop evaluator reads this record without migrating or rewriting it. A schema-1/2
 record supplies no usable prior state and refuses Stop with `reset_record_older`;
