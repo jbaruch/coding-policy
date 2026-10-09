@@ -8,6 +8,7 @@ import shutil
 import sys
 import tempfile
 import unittest
+from datetime import datetime, timedelta
 from pathlib import Path
 from unittest.mock import patch
 
@@ -71,7 +72,7 @@ class TierIntegrationTest(CliCase):
         self.assertEqual(rc, 0, error)
         self.assertNotIn("Plan tiers differ", error)
 
-    def fresh_dispatch_runner(self):
+    def fresh_dispatch_runner(self, model: str = "sonnet-5", effort: str | None = "high"):
         """A fake Herdr through which a cleared, tier-verified claude dispatch succeeds."""
         runner = FakeRunner()
         info = json.loads(agent_json("claude", "idle", "w1:p2"))["result"]["agent"]
@@ -80,7 +81,9 @@ class TierIntegrationTest(CliCase):
         process = {"pane_id": "w1:p2", "shell_pid": 100,
                    "foreground_processes": [{"name": "claude", "pid": 200, "argv": ["claude"]}]}
         shell = {**process, "foreground_processes": [{"name": "bash", "pid": 100}]}
-        argv = ["claude", "--dangerously-skip-permissions", "--model", "sonnet-5", "--effort", "high"]
+        argv = ["claude", "--dangerously-skip-permissions", "--model", model]
+        if effort is not None:
+            argv += ["--effort", effort]
         started = {**process, "foreground_processes": [{"name": "claude", "pid": 300, "argv": argv}]}
         runner.responses["pane process-info"] = ScriptedReads([
             json.dumps({"result": {"process_info": item}}) for item in (process, process, shell, started)])
@@ -91,6 +94,32 @@ class TierIntegrationTest(CliCase):
         runner.set("agent wait", ok_json())
         runner.set("pane rename", ok_json())
         return runner
+
+    def test_confirmed_pane_labels_follow_verified_round_models_not_static_labels(self):
+        for index, (role, round_type, model, effort) in enumerate((
+                ("developer", "build", "sonnet-5", "high"),
+                ("tester", "hostile_verify", "opus-5", "high"),
+                ("developer", "build", "claude-haiku-4-5", None))):
+            with self.subTest(role=role, model=model, effort=effort):
+                self.reset_streams()
+                self.settings["agents"][0]["model_label"] = "stale-conflicting-model"
+                self.settings["agents"][0]["tiers"][round_type] = {"model": model, "effort": effort}
+                self.write_config()
+                runner = self.fresh_dispatch_runner(model, effort)
+                argv = ["apply", *self.base(), "--assignments", json.dumps({role: "claude"}),
+                        "--common", str(self.common), *self.brief_args(role), "--now",
+                        (datetime.fromisoformat(AT) + timedelta(seconds=index)).isoformat(),
+                        "--composer-settle", "0"]
+                code, output, error = self.run_cli(argv, client=HerdrClient("herdr", runner))
+                self.assertEqual(code, 0, error)
+                applied = json.loads(output)["applied"][0]
+                proof = applied["tier"]["verified"]
+                self.assertEqual((proof["model"], proof["effort"]), (model, effort))
+                label = "{} · {}{}".format(role, model, " " + effort if effort else "")
+                self.assertEqual(applied["pane_label"], label)
+                self.assertIn("pane rename w1:p2 '{}'".format(label), runner.commands())
+                self.assertEqual(len([c for c in runner.commands() if c.startswith("agent start")]), 1)
+                self.assertEqual(len(runner.pasted_prompts()), 1)
 
     def reset_streams(self):
         self.out.seek(0)
@@ -504,6 +533,7 @@ class TierIntegrationTest(CliCase):
         self.assertEqual(record["tier"]["effort"], "high")
         self.assertEqual(record["tier"]["effective_multiplier"], 2)
         self.assertEqual(record["tier"]["verified"]["source"], "process_argv")
+        self.assertEqual(record["pane_label"], "developer · sonnet-5 high #owner/repo#324")
         self.assertFalse(any(command.startswith(("agent start", "-TERM")) for command in runner.commands()))
 
     def test_measure_records_unknown_tier_billing_even_when_worker_is_skipped(self):
