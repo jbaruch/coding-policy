@@ -77,7 +77,7 @@ class ReportLinesTest(unittest.TestCase):
                     self.assertEqual(lines, {"verdict": verdict, "acceptance": None, "contribution": None})
 
     def test_tolerated_markup(self):
-        for line in ("- VERDICT: approved", "* VERDICT: approved", "`VERDICT: approved`", "  - `VERDICT: approved`  ",
+        for line in ("- VERDICT: approved", "* VERDICT: approved",
                      "   VERDICT: approved", "VERDICT: approved`"):
             with self.subTest(line=line):
                 self.assertEqual(report_contract.report_lines(line + "\n", "reviewer")["verdict"], "approved")
@@ -177,6 +177,12 @@ QUOTED = {
     "indented four": lambda line: "    " + line,
     "indented tab": lambda line: "\t" + line,
     "inline code then prose": lambda line: "`" + line + "` is the form.",
+    "inline code whole line": lambda line: "`" + line + "`",
+    "listed inline code whole line": lambda line: "  - `" + line + "`  ",
+    "bullet list fence": lambda line: "- {0}text\n  {1}\n  {0}".format(FENCE, line),
+    "ordered list fence": lambda line: "1. {0}text\n   {1}\n   {0}".format(FENCE, line),
+    "wide ordered list fence": lambda line: "10. {0}\n    {1}\n    {0}".format(FENCE, line),
+    "nested list tildes": lambda line: "- a\n  - ~~~\n    {}\n    ~~~".format(line),
 }
 EXAMPLES = ("VERDICT: approved", "VERDICT: blocking", "ACCEPTANCE 1/2: met — x", "ACCEPTANCE 9/9: met — x",
             "CONTRIBUTION: design", "CRITERION 1: restated", "CONTRIBUTION: lots", "VERDICT: looks good")
@@ -231,6 +237,16 @@ class QuotedExampleTest(unittest.TestCase):
         self.assertIn("malformed", self.gaps(*MET, "VERDICT approved", quoted))
         self.assertIn("duplicate VERDICT", self.gaps(*MET, "VERDICT: approved", "VERDICT: blocking", quoted,
                                                      role="advisor", specialty="security"))
+
+    def test_an_unclosed_list_fence_hides_what_follows(self):
+        text = "- {}text\n  VERDICT: blocking\nVERDICT: approved\n".format(FENCE)
+        with self.assertRaises(UsageError) as caught:
+            report_contract.report_lines(text, "reviewer")
+        self.assertIn("missing VERDICT line", caught.exception.details["gaps"])
+
+    def test_a_list_fence_example_does_not_hide_the_real_line_after_it(self):
+        text = "- {0}text\n  VERDICT: blocking\n  {0}\nVERDICT: approved\n".format(FENCE)
+        self.assertEqual(report_contract.report_lines(text, "reviewer")["verdict"], "approved")
 
     def test_operative_lines_after_a_closed_fence_count(self):
         text = "Body.\n{0}\nVERDICT: blocking\n{0}\nVERDICT: approved\n".format(FENCE)

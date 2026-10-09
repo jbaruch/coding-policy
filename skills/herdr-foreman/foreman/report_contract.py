@@ -7,8 +7,7 @@ nothing about the round; callers pass the role and specialty from the owner
 dispatch, never from the caller's own reading.
 
 Line forms (one per line; in a report a leading `-`, `*` or up to three spaces
-of indent, a line wrapped whole in one backtick span, and trailing backticks,
-are tolerated):
+of indent and trailing backticks are tolerated):
 
   VERDICT: blocking | approved
       Exactly one on a reviewer or tester report, and on a consultation whose
@@ -34,8 +33,9 @@ unmarked text starts with one of the upper-case keywords above.
 A report may quote the contract. These lines are illustrative, never contract
 lines and never `TRIGGER_DECLARATION` evidence (#737): lines inside a fenced code
 block (`` ``` `` or `~~~`, any info string), blockquote lines, lines indented four
-spaces or a tab, and lines opening with an inline code span that does not wrap
-the whole line. A fence left open runs to the end of the report. The same
+spaces or a tab, and lines opening with an inline code span, whether it wraps the
+whole line or not, and fences opened as list-item content (`- ``` `, `1. ``` `).
+A fence left open runs to the end of the report. The same
 classification serves every report-body scanner: `report_lines`,
 `trigger_bindings` and, through them, the owners in `engagement.py` and
 `triggers.py`. Briefs are foreman-composed, not quoted, and keep their own
@@ -69,10 +69,12 @@ CRITERIA_HEADING = "## Acceptance Criteria"
 _MARKUP = re.compile(r"^[\s>*`-]*")
 #: A fenced code block delimiter: up to three spaces, then three or more backticks or tildes.
 FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})(.*)$")
+#: A fence opened as list-item content: list markers, then the delimiter run. Its closer sits at the item's content indent.
+_LIST_FENCE = re.compile(r"^ {0,3}(?:(?:[-*+]|[0-9]{1,9}[.)])[ \t]+)+(`{3,}|~{3,})(.*)$")
+_ANY_INDENT_FENCE = re.compile(r"^\s*(`{3,}|~{3,})(.*)$")
 #: Report-side leading markup: indent, list markers and quote marks; backticks are judged separately.
 _REPORT_MARKUP = re.compile(r"^[\s>*-]*")
 _INDENTED_CODE = re.compile(r"^(?: {4}|\t)")
-_CODE_SPAN = re.compile(r"^`([^`]+)`$")
 #: The prefix of the one structured evidence line a first trigger consultation reports.
 TRIGGER_PREFIX = "TRIGGER_DECLARATION: "
 _KEYWORD = re.compile(r"^(VERDICT|ACCEPTANCE|CONTRIBUTION|CRITERION)\b")
@@ -106,17 +108,18 @@ def _unfenced(text):
     text after it. A backtick fence's info string holds no backtick, so
     ```` ```a``` ```` is an inline span rather than an opener.
     """
-    rows, fence, length, opened = [], "", 0, 0
+    rows, fence, length, opened, nested = [], "", 0, 0, False
     for number, line in enumerate(text.splitlines(), 1):
-        match = FENCE.match(line)
+        listed = None if fence else _LIST_FENCE.match(line)
+        match = listed or (_ANY_INDENT_FENCE if nested else FENCE).match(line)
         if match:
             run, tail = match.groups()
             if fence:
                 if run[0] == fence and len(run) >= length and not tail.strip():
-                    fence = ""
+                    fence, nested = "", False
                 continue
             if run[0] != "`" or "`" not in tail:
-                fence, length, opened = run[0], len(run), number
+                fence, length, opened, nested = run[0], len(run), number, listed is not None
                 continue
         if not fence:
             rows.append((number, line))
@@ -132,8 +135,7 @@ def _operative_text(line):
         return None
     rest = unmarked.rstrip()
     if rest.startswith("`"):
-        span = _CODE_SPAN.match(rest)
-        return span.group(1) if span else None
+        return None
     return rest.rstrip("`").rstrip()
 
 

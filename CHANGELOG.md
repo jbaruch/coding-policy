@@ -1,13 +1,13 @@
 # Changelog
 
-## 0.3.391 — 2026-10-09
-
 ### Fixed
 
 - Report-body scanners no longer read illustrative text as operative metadata
   (#737). A report may quote the contract in a fenced block (any info string,
   backtick or tilde), a blockquote, a four-space or tab indented block, or
-  prose that opens with an inline code span, without that quote becoming a
+  any line that opens with an inline code span (a line wrapped whole in one span
+  included), or a fence opened as list-item content (`- ` or `1. ` then the
+  delimiter), without that quote becoming a
   `VERDICT`, `ACCEPTANCE`, `CONTRIBUTION`, `CRITERION` or `TRIGGER_DECLARATION`
   line. One classification in `report_contract.py` serves `report_lines` and the
   new `trigger_bindings`, which replaces the two private `startswith` scans in
@@ -20,13 +20,18 @@
   well-formed four-key binding is still validated against its artifact bytes,
   and one live line beside quoted examples counts once. A leading `>` no longer
   makes a line operative, and a fence left open hides what follows it, which the
-  refusal now names. `declared_contributions` keeps reading quoted text, so a
+  refusal now names. Review of the first tip found two residual forms: a
+  whole-line `` `VERDICT: blocking` `` still recorded `blocking`, and a list-item
+  fence let its indented example count while its closer hid the real line after
+  it. Both are inert now. `declared_contributions` keeps reading quoted text, so a
   contribution declared anywhere still adds its independence exclusion on a
   refused report; briefs keep their tolerant `CRITERION` scan. `REPORT:` marker
   matching is a different surface and is unchanged, except that it now shares
   the fence delimiter pattern. Existing assessments and receipts are not
   reinterpreted: a refused report is re-assessed under a new assessment id after
   this ships.
+
+## 0.3.391 — 2026-10-09
 
 ### Fixed
 
