@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.396 — 2026-10-09
+
 ### Fixed
 
 - Recognize Codex's SGR 22 intensity reset around its individually styled
