@@ -1,5 +1,15 @@
 # Changelog
 
+### Fixed
+
+- Disposable probe occupancy failures retain only pane, foreground PID and
+  process-name evidence in durable measure receipts (#730). Owned cleanup binds
+  the original shell before its first close and rechecks live agent ownership
+  after cleanup callbacks; replaced, unproved or occupied surviving panes remain
+  untouched. Snapshot schema 5 migrates existing measurements without inventing
+  cleanup proof. Integration retains the disposable startup recovery, first-session
+  binding and Claude probe-only environment from 0.3.391.
+
 ## 0.3.391 — 2026-10-09
 
 ### Fixed

@@ -30,8 +30,9 @@ and unsupported/unreadable gate data exit 1 with an actionable usage/state
 diagnostic, without a recovery object or native cleanup. Drafts,
 working/blocked targets, changed/missing identity or tier,
 unsupported config, unreadable evidence and cleanup failures do not authorize
-closure. An absent agent permits cleanup only when its recorded pane is absent
-or holds only its shell. A changed or missing bound session refuses cleanup;
+closure. An absent agent permits cleanup only when its recorded pane is absent;
+gate rows record no original root shell PID to authorize closing a surviving
+pane. A changed or missing bound session refuses cleanup;
 a first-start binding never authorizes replacement of a recorded session.
 
 Repeat normal measure after successful resolution. Until then it reports

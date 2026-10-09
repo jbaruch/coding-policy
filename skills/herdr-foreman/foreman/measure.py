@@ -130,6 +130,16 @@ def snapshot_error(exc):
     details = {}
     if isinstance(exc.details, dict) and exc.details.get("pending_cli_update") is True:
         details["pending_cli_update"] = True
+    if isinstance(exc.details, dict):
+        for key in ("failure_kind", "pane", "pane_id"):
+            if isinstance(exc.details.get(key), str) and exc.details[key]:
+                details[key] = scrub_for_trace(exc.details[key])
+        for key in ("foreground_pids", "occupant_names"):
+            value = exc.details.get(key)
+            if key == "foreground_pids" and isinstance(value, list):
+                details[key] = [pid for pid in value if type(pid) is int and pid > 0]
+            elif key == "occupant_names" and isinstance(value, list):
+                details[key] = [scrub_for_trace(name) for name in value if isinstance(name, str) and name]
     return {
         "code": exc.code,
         "message": scrub_for_trace(exc.message),
