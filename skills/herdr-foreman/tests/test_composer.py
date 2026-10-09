@@ -22,6 +22,7 @@ import unittest
 
 from foreman.composer import (
     DispatchSession,
+    FRESH_COMPOSER_ATTEMPTS,
     checkable,
     command_still_present,
     composer_text,
@@ -1255,6 +1256,71 @@ class FreshStartupDeliveryTest(unittest.TestCase):
         self.assertTrue(result["landed"])
         client.pane_send_keys.assert_not_called()
         client.pane_send_text.assert_not_called()
+
+    def test_native_braille_paint_waits_for_two_real_empty_reads_before_prompt(self):
+        # #725: first two complete rows of the captured Codex 0.160.1 frame.
+        # The trace's truncated final row is not treated as native evidence.
+        frame = (
+            "\u001b[0m\u001b[38;2;134;139;165m\u001b[48;2;62;64;81m⠁\u001b[0m\u001b[48;2;62;64;81m   \u001b[0m\u001b[3"
+            "8;2;138;144;171m\u001b[48;2;62;64;81m⠈\u001b[0m\u001b[48;2;62;64;81m         \u001b[0m\u001b[38"
+            ";2;136;142;168m\u001b[48;2;62;64;81m⠄\u001b[0m\u001b[48;2;62;64;81m          \u001b[0m\u001b[38"
+            ";2;138;144;171m\u001b[48;2;62;64;81m⢀\u001b[0m\u001b[48;2;62;64;81m                  "
+            "     \u001b[0m\u001b[38;2;138;144;171m\u001b[48;2;62;64;81m⠐\u001b[0m\u001b[48;2;62;64;81m     "
+            " \u001b[0m\u001b[38;2;71;74;92m\u001b[48;2;62;64;81m⡀\u001b[0m\u001b[38;2;120;125;149m\u001b[48;2;62"
+            ";64;81m⠐\u001b[0m\u001b[48;2;62;64;81m  \u001b[0m\u001b[38;2;80;83;103m\u001b[48;2;62;64;81m⠄\u001b["
+            "0m\u001b[48;2;62;64;81m             \u001b[0m\u001b[38;2;137;143;169m\u001b[48;2;62;64;81m"
+            "⢀\u001b[0m\u001b[48;2;62;64;81m \u001b[0m\u001b[38;2;78;81;100m\u001b[48;2;62;64;81m⠄\u001b[0m\u001b[48;2"
+            ";62;64;81m  \u001b[0m\u001b[38;2;129;134;159m\u001b[48;2;62;64;81m⠈\u001b[0m\u001b[48;2;62;64;8"
+            "1m      \u001b[0m\u001b[38;2;95;98;119m\u001b[48;2;62;64;81m⠄\u001b[0m\u001b[48;2;62;64;81m    "
+            "\u001b[0m\u001b[38;2;104;108;130m\u001b[48;2;62;64;81m⠠\u001b[0m\u001b[48;2;62;64;81m \u001b[0m\u001b[38;"
+            "2;75;77;96m\u001b[48;2;62;64;81m⠠\u001b[0m\u001b[48;2;62;64;81m      \u001b[0m\u001b[38;2;90;94"
+            ";114m\u001b[48;2;62;64;81m⡀\u001b[0m\u001b[48;2;62;64;81m    \u001b[0m\n\u001b[0m\u001b[1m\u001b[48;2;62;6"
+            "4;81m›\u001b[0m\u001b[38;2;68;70;88m\u001b[48;2;62;64;81m⠁\u001b[0m\u001b[2m\u001b[48;2;62;64;81mAsk"
+            " Codex to do anything\u001b[0m\u001b[48;2;62;64;81m   \u001b[0m\u001b[38;2;134;140;166m\u001b[4"
+            "8;2;62;64;81m⠈\u001b[0m\u001b[48;2;62;64;81m       \u001b[0m\u001b[38;2;107;111;134m\u001b[48;2"
+            ";62;64;81m⠂\u001b[0m\u001b[48;2;62;64;81m  \u001b[0m\u001b[38;2;98;102;123m\u001b[48;2;62;64;81"
+            "m⠁\u001b[0m\u001b[48;2;62;64;81m                             \u001b[0m\u001b[38;2;135;140;"
+            "166m\u001b[48;2;62;64;81m⠄\u001b[0m\u001b[48;2;62;64;81m    \u001b[0m\u001b[38;2;133;138;164m\u001b["
+            "48;2;62;64;81m⠂\u001b[0m\u001b[48;2;62;64;81m         \u001b[0m\u001b[38;2;118;122;146m\u001b[4"
+            "8;2;62;64;81m⠐\u001b[0m\u001b[48;2;62;64;81m \u001b[0m\u001b[38;2;114;119;143m\u001b[48;2;62;64"
+            ";81m⠁\u001b[0m\u001b[48;2;62;64;81m   \u001b[0m\u001b[38;2;71;74;92m\u001b[48;2;62;64;81m⢀\u001b[0m\u001b"
+            "[48;2;62;64;81m            \u001b[0m\u001b[38;2;70;72;90m\u001b[48;2;62;64;81m⠄\u001b[0m"
+        )
+        held = inspect_composer(frame, BY_NAME["codex"])
+        self.assertTrue(held.visible)
+        self.assertTrue(held.occupied)
+        client, boundary, writes, result = self.run_send([
+            (frame, True), (self.EMPTY, True), (self.EMPTY, True), ("immutable brief", True)])
+        self.assertEqual(writes, [("codex", "immutable brief")])
+        self.assertTrue(result["landed"])
+        boundary.assert_called_once()
+        client.pane_send_keys.assert_not_called()
+        client.pane_send_text.assert_not_called()
+
+    def test_empty_reads_must_be_consecutive_after_occupied_paint(self):
+        client, boundary, writes, result = self.run_send([
+            (self.EMPTY, True), (self.ANIMATED, True), (self.EMPTY, True),
+            (self.EMPTY, True), ("immutable brief", True)])
+        self.assertTrue(result["landed"])
+        self.assertEqual(writes, [("codex", "immutable brief")])
+        boundary.assert_called_once()
+        client.pane_send_keys.assert_not_called()
+
+    def test_persistent_drafts_refuse_at_the_readonly_bound_without_keys(self):
+        from unittest.mock import Mock, patch
+        for frame in ["› authored draft", "\x1b[2m› recalled draft\x1b[0m",
+                      self.EMPTY + "\n  authored continuation", self.ANIMATED]:
+            with self.subTest(frame=frame):
+                client, boundary = Mock(), Mock()
+                with patch("foreman.composer.read_pane", return_value=(frame, True)) as reads, self.assertRaises(HerdrError) as caught:
+                    send_message(client, BY_NAME["codex"], "brief", "brief", before_prompt=boundary,
+                                 startup_observe=lambda: ("p1", 42), sleep=NO_SLEEP)
+                self.assertEqual(reads.call_count, FRESH_COMPOSER_ATTEMPTS)
+                self.assertEqual(caught.exception.details["failure_kind"], "startup_input_occupied")
+                boundary.assert_not_called()
+                client.agent_prompt.assert_not_called()
+                client.pane_send_keys.assert_not_called()
+                client.pane_send_text.assert_not_called()
 
     def test_initial_paint_without_composer_settles_before_one_prompt(self):
         client, boundary, writes, result = self.run_send([

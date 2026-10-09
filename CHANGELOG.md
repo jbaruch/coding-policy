@@ -1,5 +1,12 @@
 # Changelog
 
+### Fixed
+
+- Fresh startup observes transient painted composer frames read-only within
+  its existing bound. Codex's colored Braille animation can settle into two
+  genuinely empty reads before one exact dispatch. Persistent drafts,
+  dialogs and changed process/pane/tier evidence still refuse without input.
+
 ## 0.3.383 — 2026-10-09
 
 ### Fixed
