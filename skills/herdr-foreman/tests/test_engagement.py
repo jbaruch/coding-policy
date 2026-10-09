@@ -452,6 +452,64 @@ class EngagementTest(unittest.TestCase):
                 with self.assertRaises(UsageError):
                     engagement.require_accepted(persisted, "consult-1", str(self.report))
 
+    def test_quoted_trigger_declarations_are_not_bindings_and_leave_the_contract_exact(self):
+        # #737: the 729 report quoted its proposed five-key schema in a fence; a well-formed
+        # four-key copy naming a missing artifact is just as inert, so no artifact is read.
+        placeholder = ('TRIGGER_DECLARATION: {"repo":"/absolute/canonical/repo","base_revision":"<full base>",'
+                       '"head_revision":"<full head>","path":"/absolute/external/triggers.json","sha256":"<artifact SHA-256>"}')
+        well_formed = ('TRIGGER_DECLARATION: {"repo":"/absolute/target/repo","base_revision":"' + "a" * 40 +
+                       '","path":"/absolute/external/triggers.json","sha256":"' + "b" * 64 + '"}')
+        prose = ("`ACCEPTANCE` lines `met`, `contribution: design`, `verdict: null`. The only\n"
+                 "`CRITERION`, and `TRIGGER_DECLARATION`:\n`VERDICT`.\n")
+        for name, quoted in (("fenced placeholder", "```text\n" + placeholder + "\n```\n"),
+                             ("fenced well-formed", "```json\n" + well_formed + "\n```\n"),
+                             ("blockquote", "> " + well_formed + "\n"),
+                             ("indented", "    " + well_formed + "\n"),
+                             ("inline prose", prose)):
+            with self.subTest(name):
+                self.report.write_text(CONSULT_REPORT + quoted + "CONTRIBUTION: design\n")
+                bytes_before = self.report.read_bytes()
+                state_before = copy.deepcopy(self.state["specialist_assessments"])
+                result = self.assess({**self.data, "id": "assessment-" + name.replace(" ", "-")})
+                self.assertEqual((result["source"], result["contribution"], result["verdict"]), ("report", "design", None))
+                self.assertEqual([row["state"] for row in result["acceptance"]], ["met", "met"])
+                self.assertEqual(len(self.state["specialist_assessments"]), len(state_before) + 1)
+                self.assertEqual(self.report.read_bytes(), bytes_before)
+
+    def test_an_actual_trigger_declaration_beside_a_quoted_one_is_still_validated_alone(self):
+        placeholder = 'TRIGGER_DECLARATION: {"repo":"/absolute/canonical/repo","head_revision":"<full head>"}'
+        cases = (("malformed", "TRIGGER_DECLARATION: not-json", "must be a JSON object"),
+                 ("five keys", placeholder.replace("<full head>", "c" * 40), "requires absolute repo/path"),
+                 ("relative path", 'TRIGGER_DECLARATION: {"repo":"r","base_revision":"' + "a" * 40 + '","path":"p","sha256":"' + "b" * 64 + '"}',
+                  "requires absolute repo/path"))
+        for name, actual, message in cases:
+            for layout in ("```text\n{q}\n```\n{a}\n", "{a}\n> {q}\n"):
+                with self.subTest(name, layout=layout):
+                    self.report.write_text(CONSULT_REPORT + "CONTRIBUTION: design\n" + layout.format(q=placeholder, a=actual))
+                    with self.assertRaisesRegex(UsageError, message) as caught:
+                        self.assess({**self.data, "id": "bad-" + str(len(self.state["specialist_assessments"]))})
+                    self.assertIsInstance(caught.exception, engagement.ContractGap)
+                    record = self.state["specialist_assessments"][-1]
+                    self.assertEqual((record["source"], record["contribution"]), ("contribution_only", "design"))
+                    self.assertEqual(recovery.accepted(self.state["specialist_assessments"]), [])
+
+    def test_two_actual_trigger_declarations_are_refused_whatever_is_quoted(self):
+        actual = "TRIGGER_DECLARATION: not-json"
+        self.report.write_text(CONSULT_REPORT + "CONTRIBUTION: design\n```text\n" + actual + "\n```\n" + actual + "\n" + actual + "\n")
+        with self.assertRaisesRegex(UsageError, "one consultation report binding"):
+            self.assess()
+        self.assertEqual(self.state["specialist_assessments"][-1]["source"], "contribution_only")
+
+    def test_a_quoted_contract_line_never_satisfies_or_spoils_the_contract(self):
+        self.report.write_text("```text\nACCEPTANCE 1/2: met — x\nACCEPTANCE 2/2: met — y\n```\n")
+        with self.assertRaises(UsageError) as caught:
+            self.assess()
+        self.assertIn("missing ACCEPTANCE 1, 2", caught.exception.details["gaps"])
+        self.assertEqual(self.state["specialist_assessments"], [])
+        self.report.write_text(CONSULT_REPORT + "> VERDICT: approved\n```text\nVERDICT: approved\nACCEPTANCE 1/2: unmet — x\n```\n")
+        result = self.assess({**self.data, "id": "assessment-2"})
+        self.assertEqual((result["verdict"], [row["state"] for row in result["acceptance"]]), (None, ["met", "met"]))
+
     def test_wrong_role_trigger_binding_keeps_reviewer_contribution_exclusion(self):
         data = self.seed_reviewer("VERDICT: approved\nCONTRIBUTION: design\nTRIGGER_DECLARATION: {}\n")
         with self.assertRaises(engagement.ContractGap):

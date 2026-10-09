@@ -39,6 +39,39 @@
   or transport failure stays fail-closed with no retry until the send effect is
   reconciled; `model-tiers.md` now says so.
 
+## 0.3.393 — 2026-10-09
+
+### Fixed
+
+- Report-body scanners no longer read illustrative text as operative metadata
+  (#737). A report may quote the contract in a fenced block (any info string,
+  backtick or tilde), a blockquote, a four-space or tab indented block, or
+  any line that opens with an inline code span (a line wrapped whole in one span
+  included), or a fence opened as list-item content (`- ` or `1. ` then the
+  delimiter), without that quote becoming a
+  `VERDICT`, `ACCEPTANCE`, `CONTRIBUTION`, `CRITERION` or `TRIGGER_DECLARATION`
+  line. One classification in `report_contract.py` serves `report_lines` and the
+  new `trigger_bindings`, which replaces the two private `startswith` scans in
+  `engagement.record_assessment` and `triggers.accepted_bootstrap`. The
+  motivating case was an architecture report that quoted a proposed five-key
+  `TRIGGER_DECLARATION` schema in a fence: the owner read it as the live binding
+  and refused the assessment, and a later advisor report that named the keywords
+  in inline code was refused as malformed lines. Standalone lines keep every
+  check: a malformed, duplicated or mismatched operative line is refused, a
+  well-formed four-key binding is still validated against its artifact bytes,
+  and one live line beside quoted examples counts once. A leading `>` no longer
+  makes a line operative, and a fence left open hides what follows it, which the
+  refusal now names. Review of the first tip found two residual forms: a
+  whole-line `` `VERDICT: blocking` `` still recorded `blocking`, and a list-item
+  fence let its indented example count while its closer hid the real line after
+  it. Both are inert now. `declared_contributions` keeps reading quoted text, so a
+  contribution declared anywhere still adds its independence exclusion on a
+  refused report; briefs keep their tolerant `CRITERION` scan. `REPORT:` marker
+  matching is a different surface and is unchanged, except that it now shares
+  the fence delimiter pattern. Existing assessments and receipts are not
+  reinterpreted: a refused report is re-assessed under a new assessment id after
+  this ships.
+
 ## 0.3.392 — 2026-10-09
 
 ### Fixed

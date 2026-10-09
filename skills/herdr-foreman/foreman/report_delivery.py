@@ -24,6 +24,7 @@ from pathlib import Path
 
 from . import claude_native
 from . import recovery as ledger
+from . import report_contract
 from . import supervision
 from .composition import parse_requirements
 from .errors import HerdrError, UsageError
@@ -36,7 +37,7 @@ DISPLAY_PREFIXES = {"codex": ("• ",), "grok": ("     ",), "claude": ("\u23fa "
 # 0.153.2 under Herdr 0.8.2. An unknown kind takes the widest prefix and reserve.
 MARKER_RIGHT_RESERVE = {"codex": 2, "grok": 15, "claude": 2}
 SESSION_ID = re.compile(r"[A-Za-z0-9_-]+\Z")
-FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})(.*)$")
+FENCE = report_contract.FENCE
 CONTAINER = re.compile(r"^ {0,3}(?:>|[-+*•][ \t]|[0-9]{1,9}[.)][ \t])")
 RECOVERY_INPUTS = {"id", "dispatch", "report", "wait_receipt", "pane", "visible", "source"}
 STALE_RECOVERY_INPUTS = RECOVERY_INPUTS | {"plan"}

@@ -962,13 +962,14 @@ class BootstrapDeclarationCommandTest(TempCase):
         self.owner.seed_warm_consultation(assess=False, retire=False)
         self.assess_artifact()
 
-    def assess_artifact(self, *, binding_changes=None, acceptance="met"):
+    def assess_artifact(self, *, binding_changes=None, acceptance="met", layout="{line}"):
         report = self.owner.tmp / "prior-report.md"
         binding = {"repo": str(self.tmp.resolve()), "base_revision": self.base,
                    "path": str(self.artifact.resolve()),
                    "sha256": hashlib.sha256(self.artifact.read_bytes()).hexdigest()}
         binding.update(binding_changes or {})
-        report.write_text("ACCEPTANCE 1/1: " + acceptance + " — declaration review evidence\nTRIGGER_DECLARATION: " + json.dumps(binding) + "\n")
+        line = "TRIGGER_DECLARATION: " + json.dumps(binding)
+        report.write_text("ACCEPTANCE 1/1: " + acceptance + " — declaration review evidence\n" + layout.replace("{line}", line) + "\n")
         record = self.owner.tmp / "assessment.json"
         state = self.owner.saved()
         record.write_text(json.dumps({"id": "declaration-" + str(len(state["specialist_assessments"])),
@@ -1151,6 +1152,24 @@ class BootstrapDeclarationCommandTest(TempCase):
     def test_unmet_consultation_establishes_no_bootstrap_authority(self):
         self.write_plan()
         self.assess_artifact(acceptance="unmet")
+        code, out, err = self.run_cli()
+        self.assertEqual((code, out), (1, ""))
+        self.assertIn("no accepted consultation", err)
+
+    def test_a_fenced_example_beside_the_declaration_is_not_a_second_binding(self):
+        # #737: a report may quote the five-key schema it proposes and still carry its one live line.
+        quoted = ('```text\nTRIGGER_DECLARATION: {"repo":"/absolute/canonical/repo","base_revision":"<full base>",'
+                  '"head_revision":"<full head>","path":"/absolute/external/triggers.json","sha256":"<artifact SHA-256>"}\n```\n')
+        self.assess_artifact(layout=quoted + "{line}")
+        self.write_plan()
+        code, out, err = self.run_cli()
+        self.assertEqual(code, 0, err)
+        self.assertEqual(json.loads(out)["declaration_authority"]["kind"], "bootstrap")
+
+    def test_a_fenced_copy_alone_establishes_no_bootstrap_authority(self):
+        # The copy is well-formed and names the real artifact; only a standalone line binds.
+        self.assess_artifact(layout="```text\n{line}\n```")
+        self.write_plan()
         code, out, err = self.run_cli()
         self.assertEqual((code, out), (1, ""))
         self.assertIn("no accepted consultation", err)
