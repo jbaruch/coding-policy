@@ -116,7 +116,7 @@ remain readable without rewriting; they may not carry the new field.
 `window_group` names the usage window a worker kind shares with other kinds.
 Schema-7 `measure` starts one short-lived probe per group, reads usage once,
 closes it, and copies the result onto every kind in that group (snapshot schema
-2 introduced the field; current schema 4). `plan` charges a seat's cost
+2 introduced the field; current schema 5). `plan` charges a seat's cost
 against every kind in that window. A kind declaring none has a window to itself.
 
 The optional top-level `judge` key pins the judge worker kind, model, and effort.
@@ -568,7 +568,8 @@ skills/herdr-foreman/references/retrospectives.md
 | `schema_version` | integer | Currently `11`. Version 11 adds `reconciled_not_sent` context provenance with cleared true for an owner-proved closed immutable no-brief retry; older records migrate without inventing that proof. Version 10 adds the non-counting assignment status `maintenance`; version 9 adds `judge_mode` to every row: the judge seat's declared mode, `unknown` for a judge row migrated from before it, null for other roles. Version 8 drops the retired qualification battery's summary from `tier`; migration removes it from older rows. Version 7 adds `pressure_headroom` and `de_escalated` to a row's `tier`; an older tier row migrates to null headroom and `de_escalated: false`, since nothing could de-escalate before it. Bumped on any shape change |
 | `snapshots` | array | Whole `measure` documents, oldest first; the ring holds the last 20 |
 | `assignments` | array | Append-only ledger of who held which role |
-| `snapshots[].schema_version` | integer | Currently `4`. Version 2 added `window_group`; version 3 adds per-round `tier_billing`; version 4 adds `error.details` to failed agent records. Older snapshots migrate on read, preserving headroom and shared-window membership |
+| `snapshots[].schema_version` | integer | Currently `5`. Version 2 added `window_group`; version 3 adds per-round `tier_billing`; version 4 adds `error.details` to failed agent records; version 5 lets `error.details` carry the optional cleanup evidence keys below. Older snapshots migrate on read, preserving headroom and shared-window membership |
+| `snapshots[].agents[].error.details` | object | Bounded, redacted failure evidence. Optional keys, each present only when recorded: `pending_cli_update` (boolean `true`), `failure_kind` (non-empty string), `pane` and `pane_id` (non-empty strings), `foreground_pids` (array of positive integers), `occupant_names` (array of non-empty strings). A missing key means not recorded, never an observed empty pane or occupant set. Argv, environment, composer text and nested errors are never stored. Hints, not authority: cleanup still proves live ownership |
 | `snapshots[].agents[].window_group` | string | The usage window this agent shares with others; empty means a window of its own. Present on every agent record, including skipped and failed ones — pool membership is config, not a measurement result |
 | `assignments[].schema_version` | integer | The row's own version, stamped on write |
 | `assignments[].at` | string | ISO-8601 timestamp, from `--now` or the CLI's clock |
@@ -659,8 +660,10 @@ Assignment-scoped spawn reservations can record the existing
 Stored-dispatch cleanup binds that proof and `observed_before.context_session`
 to the live surface before closing. Older rows lacking either proof remain
 readable but cannot authorize closing a live agent. No historical proof is
-backfilled from a later observation; absent-agent cleanup still requires an
-absent recorded pane or its sole shell.
+backfilled from a later observation. Stored dispatches record no original root
+shell PID; absent-agent cleanup requires the recorded pane to be absent and
+preserves a surviving pane for inspection. Disposable spawn cleanup can use
+its original in-memory shell proof, never a later shell observation as history.
 
 `context_before_send`, wherever present, is an object. On a mode-bearing dispatch it carries
 `judge_mode` equal to the dispatch's own; on any other dispatch it carries no
@@ -674,7 +677,8 @@ gains empty `hand_clearances` and `historical_attempts` arrays. Existing
 record shapes, contents and evidence remain unchanged. Recovery 4 → 5 changes
 only the enclosing version. Older stores containing future dispatch fields or
 versions are refused without rewriting. State and assignment versions migrate
-independently; snapshot schema 4 carries failed-record details through its own 3 → 4 migration.
+independently; snapshot schemas 4 and 5 carry failed-record details and cleanup
+evidence through their own 3 → 4 and 4 → 5 migrations.
 Every record carries `at` and `task`. Authorizations contain the actual operator
 message `source` and `quote`; evidence receipts contain absolute `path` and
 `sha256` of the bytes read by the owner. Receipts are audit evidence, not a
@@ -1041,7 +1045,8 @@ Only the owner migrates, and it reads a version in one of three directions.
   writes may use `maintenance`. Snapshot `2 → 3` independently adds
   empty `tier_billing` maps, preserving window groups and readings. Snapshot
   `3 → 4` adds an empty `error.details` object to failed records, preserving
-  their code and message. Each row is migrated even in
+  their code and message. Snapshot `4 → 5` stamps the version only: it keeps every
+  `error.details` as stored and adds none of the cleanup evidence keys. Each row is migrated even in
   a document already at the current version.
 - **Newer** — this build is the lagging reader, not the migrator. The caller
   gets an empty document in memory, the file on disk is left exactly as found,

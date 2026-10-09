@@ -223,7 +223,7 @@ original identity proof preserves the live surface. An explicitly recorded
 absence of a first-start session is not a fabricated identity: only that same
 absence and original process can pass the owned `not_sent` cleanup guard; a
 later or changed session refuses. An absent agent permits
-cleanup only when the recorded pane is absent or holds only its shell.
+cleanup only when the recorded pane is absent; a surviving pane with no recorded original shell is preserved for inspection.
 
 Proceed to Step 11 with the roles that were dispatched.
 
