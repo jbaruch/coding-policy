@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.387 — 2026-10-09
+
 ### Fixed
 
 - Fresh startup identity refusals identify failed checks and safe before/after
