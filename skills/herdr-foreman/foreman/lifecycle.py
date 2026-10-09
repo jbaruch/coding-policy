@@ -472,9 +472,21 @@ def measure_worker_kinds(client, templates, measured_at, *, state_path=None, con
                         before_close=lambda: _probe_binding(client, probe, pane, tier, original))
                 except HerdrError as exc:
                     cleanup_error = exc
+                    if original is not None and state_path is not None:
+                        try:
+                            cleanup_row = probe_recovery.retain(state_path, template, probe, pane, tier,
+                                original, measured_at, config_path=config_path, phase="cleanup")
+                        except (ForemanError, OSError) as retention_error:
+                            if primary is None:
+                                raise
+                            if hasattr(primary, "add_note"):
+                                primary.add_note("Probe cleanup gate was not persisted: {}. Preserve the surface and restore owner-state storage before another measurement.".format(
+                                    scrub_for_trace(str(retention_error), cap=256)))
                     if primary is not None:
-                        action = "Probe cleanup also failed for pane {}: {}. Close it with `{}` before measuring again.".format(
-                            pane, exc, format_argv(client.argv_pane_close(pane)))
+                        cleanup_operation = (probe_recovery.diagnostic(state_path, cleanup_row, herdr_bin=binary).message
+                            if cleanup_row is not None else "Preserve the surface and inspect `{}`; restore original owner proof before cleanup or another measurement.".format(
+                                format_argv(client.argv_pane_process_info(pane))))
+                        action = "Probe cleanup also failed for pane {}: {}. {}".format(pane, exc, cleanup_operation)
                         if hasattr(primary, "add_note"):
                             primary.add_note(action)
                     else:
@@ -484,9 +496,6 @@ def measure_worker_kinds(client, templates, measured_at, *, state_path=None, con
                             "plan": None, "headroom_pct": None, "window_group": group,
                             "skipped": False, "error": snapshot_error(exc),
                         }
-        if cleanup_error is not None and original is not None and state_path is not None:
-            cleanup_row = probe_recovery.retain(state_path, template, probe, pane, tier,
-                original, measured_at, config_path=config_path, phase="cleanup")
         if usage_failure is not None or cleanup_error is not None and startup_error is None:
             usage_failure = usage_failure or dict(record)
             _probe_usage_recovery(usage_failure, cleanup_error, closure, client, pane, operation,

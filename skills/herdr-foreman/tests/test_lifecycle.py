@@ -762,7 +762,7 @@ class WindowProbeTest(unittest.TestCase):
 
     def test_probe_cleanup_failure_is_attached_to_an_interrupt(self):
         client = Mock()
-        client.argv_pane_close.return_value = ["herdr", "pane", "close", "--pane", "probe-pane"]
+        client.argv_pane_process_info.return_value = ["herdr", "pane", "process-info", "--pane", "probe-pane"]
         with patch("foreman.lifecycle.spawn", return_value="probe-pane"), \
                 patch("foreman.lifecycle._prepare_fresh_probe"), \
                 patch("foreman.lifecycle.identity", return_value="probe-fixed"), \
@@ -772,7 +772,7 @@ class WindowProbeTest(unittest.TestCase):
             measure_worker_kinds(client, [template()], "2026-10-01T00:00:00+00:00")
         notes = " ".join(caught.exception.__notes__)
         self.assertIn("Probe cleanup also failed", notes)
-        self.assertIn("herdr pane close --pane probe-pane", notes)
+        self.assertIn("herdr pane process-info --pane probe-pane", notes)
 
 
 class ProbeUsageRecoveryTest(unittest.TestCase):

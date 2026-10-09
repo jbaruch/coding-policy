@@ -76,6 +76,44 @@ class ProbeRecoveryTest(unittest.TestCase):
                 self.assertTrue(client.panes)
                 self.assertFalse(any(event[0] in {"prompt", "close"} for event in client.events))
 
+    def test_interrupted_measurement_retains_failed_cleanup_before_propagating(self):
+        for kind in ("claude", "codex", "grok"):
+            for interruption in (KeyboardInterrupt(), SystemExit(17), RuntimeError("unexpected measurement bug")):
+                with self.subTest(kind=kind, interruption=type(interruption).__name__):
+                    self.state = self.root / (kind + "-" + type(interruption).__name__ + ".json")
+                    worker, client = self.worker(kind), self.native(kind)
+                    with patch("foreman.measure.measure", side_effect=interruption), \
+                            patch.object(client, "pane_close", side_effect=HerdrError("cleanup refused", {})), \
+                            self.assertRaises(type(interruption)) as caught:
+                        lifecycle.measure_worker_kinds(client, [worker], AT,
+                            state_path=self.state, sleep=lambda _: None)
+                    self.assertIs(caught.exception, interruption)
+                    row = probe_recovery.pending(self.state, worker)
+                    self.assertIsNotNone(row)
+                    assert row is not None
+                    self.assertEqual(row["phase"], "cleanup")
+                    self.assertEqual(row["status"], "pending")
+                    self.assertIn("resolve-probe", " ".join(caught.exception.__notes__))
+                    before = list(client.events)
+                    self.assertEqual(self.measure(worker, client)["failed_agents"], [kind])
+                    self.assertEqual(client.events, before)
+                    self.assertEqual(self.resolve(row, worker, client)["status"], "closed")
+
+    def test_failed_interrupt_cleanup_retention_preserves_interrupt_and_reports_no_gate(self):
+        worker, client = self.worker("codex"), self.native("codex")
+        interruption = KeyboardInterrupt()
+        with patch("foreman.measure.measure", side_effect=interruption), \
+                patch.object(client, "pane_close", side_effect=HerdrError("cleanup refused", {})), \
+                patch("foreman.probe_recovery.save_state", side_effect=OSError("disk full")), \
+                self.assertRaises(KeyboardInterrupt) as caught:
+            lifecycle.measure_worker_kinds(client, [worker], AT,
+                state_path=self.state, sleep=lambda _: None)
+        self.assertIs(caught.exception, interruption)
+        self.assertIn("disk full", " ".join(caught.exception.__notes__))
+        self.assertIn("not persisted", " ".join(caught.exception.__notes__))
+        self.assertFalse(probe_recovery.store_path(self.state).exists())
+        self.assertTrue(client.panes)
+
     def test_failed_usage_cleanup_is_retained_and_gates_until_owned_resolution(self):
         for kind in ("claude", "codex", "grok"):
             with self.subTest(kind=kind):
