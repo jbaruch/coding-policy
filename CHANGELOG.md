@@ -1,5 +1,20 @@
 # Changelog
 
+### Fixed
+
+- Disposable usage failures retain bounded, allowlisted native observations before
+  dialog and pane cleanup (#721). Recovery targets the configured worker kind,
+  not a retired probe and preserves its transport; unproved cleanup permits
+  read-only inspection only. Owned probes use verified visible data when Herdr
+  refuses history reads during a working status; standing workers do not.
+  Capacity stays unknown, provider/tier choices remain intact, and a cleanup
+  error retains the original usage diagnostic. Persisted observations contain
+  counts and fixed UI cues, never arbitrary pane text or draft contents.
+  Failed owned cleanup retains a versioned probe gate and a guarded owner
+  recovery command; replacement probes wait for recorded closure. Full
+  original bindings guard usage input, dialog tabs/dismissal and cleanup. Captured update
+  banners keep the existing typed maintenance flag.
+
 ## 0.3.388 — 2026-10-09
 
 ### Fixed

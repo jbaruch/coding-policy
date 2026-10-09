@@ -26,9 +26,146 @@ AT = "2026-10-08T19:00:00+00:00"
 
 
 class ProbeRecoveryTest(unittest.TestCase):
+    def test_actual_measure_path_refuses_replacement_before_usage_input_for_every_runtime(self):
+        for kind in ("claude", "codex", "grok"):
+            with self.subTest(kind=kind):
+                self.state = self.root / (kind + "-before-input.json")
+                worker, client = self.worker(kind), self.native(kind)
+                ready = []
+                original_prepare = lifecycle._prepare_fresh_probe
+                original_read = client.agent_read
+                def prepared(*args, **options):
+                    proof = original_prepare(*args, **options)
+                    assert proof is not None
+                    ready.append(proof[2]["pid"])
+                    return proof
+                def replaced_read(name, source=None, lines=None, fmt=None):
+                    text = original_read(name, source=source, lines=lines, fmt=fmt)
+                    if ready:
+                        client.agents[name]["pid"] = ready[0] + 1
+                    return text
+                client.agent_read = replaced_read
+                with patch("foreman.lifecycle._prepare_fresh_probe", side_effect=prepared):
+                    result = lifecycle.measure_worker_kinds(client, [worker], AT,
+                        state_path=self.state, sleep=lambda _: None)
+                self.assertEqual(result["failed_agents"], [kind])
+                self.assertIsNone(result["agents"][kind]["headroom_pct"])
+                row = probe_recovery.pending(self.state, worker)
+                assert row is not None
+                self.assertEqual(row["process"]["pid"], ready[0])
+                self.assertEqual(row["phase"], "cleanup")
+                self.assertFalse(any(event[0] in {"prompt", "close"} for event in client.events))
+
+    def test_missing_startup_proof_never_closes_a_same_name_replacement(self):
+        for kind in ("claude", "codex", "grok"):
+            with self.subTest(kind=kind):
+                self.state = self.root / (kind + "-missing-startup.json")
+                worker, client = self.worker(kind), self.native(kind)
+                def replaced_before_proof(_client, probe, _pane, _tier, **_options):
+                    client.agents[probe.name]["pid"] += 1
+                    raise HerdrError("startup proof unavailable", {})
+                with patch("foreman.lifecycle._prepare_fresh_probe", side_effect=replaced_before_proof):
+                    result = self.measure(worker, client)
+                self.assertEqual(result["failed_agents"], [kind])
+                message = result["agents"][kind]["error"]["message"]
+                self.assertIn("startup proof unavailable", message)
+                self.assertIn("original startup binding is missing", message)
+                self.assertIn("process-info", message)
+                self.assertNotIn("measure --agent", message)
+                self.assertIsNone(probe_recovery.pending(self.state, worker))
+                self.assertTrue(client.panes)
+                self.assertFalse(any(event[0] in {"prompt", "close"} for event in client.events))
+
+    def test_interrupted_measurement_retains_failed_cleanup_before_propagating(self):
+        for kind in ("claude", "codex", "grok"):
+            for interruption in (KeyboardInterrupt(), SystemExit(17), RuntimeError("unexpected measurement bug")):
+                with self.subTest(kind=kind, interruption=type(interruption).__name__):
+                    self.state = self.root / (kind + "-" + type(interruption).__name__ + ".json")
+                    worker, client = self.worker(kind), self.native(kind)
+                    with patch("foreman.measure.measure", side_effect=interruption), \
+                            patch.object(client, "pane_close", side_effect=HerdrError("cleanup refused", {})), \
+                            self.assertRaises(type(interruption)) as caught:
+                        lifecycle.measure_worker_kinds(client, [worker], AT,
+                            state_path=self.state, sleep=lambda _: None)
+                    self.assertIs(caught.exception, interruption)
+                    row = probe_recovery.pending(self.state, worker)
+                    self.assertIsNotNone(row)
+                    assert row is not None
+                    self.assertEqual(row["phase"], "cleanup")
+                    self.assertEqual(row["status"], "pending")
+                    self.assertIn("resolve-probe", " ".join(caught.exception.__notes__))
+                    before = list(client.events)
+                    self.assertEqual(self.measure(worker, client)["failed_agents"], [kind])
+                    self.assertEqual(client.events, before)
+                    self.assertEqual(self.resolve(row, worker, client)["status"], "closed")
+
+    def test_failed_interrupt_cleanup_retention_preserves_interrupt_and_reports_no_gate(self):
+        worker, client = self.worker("codex"), self.native("codex")
+        interruption = KeyboardInterrupt()
+        with patch("foreman.measure.measure", side_effect=interruption), \
+                patch.object(client, "pane_close", side_effect=HerdrError("cleanup refused", {})), \
+                patch("foreman.probe_recovery.save_state", side_effect=OSError("disk full")), \
+                self.assertRaises(KeyboardInterrupt) as caught:
+            lifecycle.measure_worker_kinds(client, [worker], AT,
+                state_path=self.state, sleep=lambda _: None)
+        self.assertIs(caught.exception, interruption)
+        self.assertIn("disk full", " ".join(caught.exception.__notes__))
+        self.assertIn("not persisted", " ".join(caught.exception.__notes__))
+        self.assertFalse(probe_recovery.store_path(self.state).exists())
+        self.assertTrue(client.panes)
+
+    def test_failed_usage_cleanup_is_retained_and_gates_until_owned_resolution(self):
+        for kind in ("claude", "codex", "grok"):
+            with self.subTest(kind=kind):
+                self.state = self.root / (kind + "-cleanup.json")
+                worker, client = self.worker(kind), self.native(kind)
+                failure = {"agents": {"unused": {"kind": kind, "headroom_pct": None,
+                    "error": {"code": "herdr_error", "message": "original usage failure", "details": {}}}}}
+                def failed_measure(_client, workers, _at, **_options):
+                    return {**failure, "agents": {workers[0].name: failure["agents"]["unused"]}}
+                with patch.object(self, "measured", side_effect=failed_measure), \
+                        patch.object(client, "pane_close", side_effect=HerdrError("cleanup failed", {})):
+                    result = self.measure(worker, client)
+                row = probe_recovery.pending(self.state, worker)
+                self.assertIsNotNone(row)
+                assert row is not None
+                self.assertEqual(row["phase"], "cleanup")
+                self.assertIn("resolve-probe", result["agents"][kind]["error"]["message"])
+                self.assertIn("original usage failure", result["agents"][kind]["error"]["message"])
+                before = list(client.events)
+                self.assertEqual(self.measure(worker, client)["failed_agents"], [kind])
+                self.assertEqual(client.events, before)
+                self.assertEqual(self.resolve(row, worker, client)["status"], "closed")
+                self.assertEqual(client.panes, {})
+
+    def test_replaced_process_is_preserved_and_the_original_probe_remains_gated(self):
+        worker, client = self.worker("codex"), self.native("codex")
+        original_pid = []
+        def replaced(_client, workers, at, **_options):
+            live = client.agents[workers[0].name]
+            original_pid.append(live["pid"])
+            live["pid"] += 1
+            return self.measured(_client, workers, at, **_options)
+        with patch("foreman.measure.measure", side_effect=replaced):
+            result = lifecycle.measure_worker_kinds(client, [worker], AT,
+                state_path=self.state, sleep=lambda _: None)
+        row = probe_recovery.pending(self.state, worker)
+        self.assertIsNotNone(row)
+        assert row is not None
+        self.assertEqual(row["process"]["pid"], original_pid[0])
+        self.assertEqual(result["failed_agents"], ["codex"])
+        self.assertFalse(any(event[0] in {"close", "prompt"} for event in client.events))
+        with self.assertRaises(HerdrError):
+            self.resolve(row, worker, client)
+        self.assertFalse(any(event[0] in {"close", "prompt"} for event in client.events))
+
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
+        identities = patch("foreman.lifecycle.identity", side_effect=[
+            "probe-fixture-{:03d}".format(index) for index in range(1, 129)])
+        identities.start()
+        self.addCleanup(identities.stop)
         self.root = Path(self.temporary.name)
         self.state = self.root / "state.json"
         self.payload = json.loads((Path(_ROOT) / "config.example.json").read_text())
@@ -127,8 +264,24 @@ class ProbeRecoveryTest(unittest.TestCase):
                 self.assertEqual(probe_recovery.store_path(self.state).read_bytes(), original)
                 self.assertFalse(any(event[0] in {"prompt", "close"} for event in client.events[len(events):]))
 
+    def test_retained_and_refused_recovery_preserve_the_current_transport_override(self):
+        worker, client = self.worker("codex"), self.native("codex", dialog=True)
+        client.binary = "/tmp/owned transport with spaces"
+        result = self.measure(worker, client)
+        row = probe_recovery.pending(self.state, worker)
+        assert row is not None
+        expected = "--herdr-bin '/tmp/owned transport with spaces'"
+        self.assertIn(expected, result["agents"]["codex"]["error"]["message"])
+        before = list(client.events)
+        self.assertIn(expected, self.measure(worker, client)["agents"]["codex"]["error"]["message"])
+        self.assertEqual(client.events, before)
+        with self.assertRaises(HerdrError) as caught:
+            self.resolve(row, worker, client)
+        self.assertIn(expected, caught.exception.details["recovery"]["operation"])
+        self.assertFalse(any(event[0] in {"prompt", "close"} for event in client.events[len(before):]))
+
     def test_newer_gate_refuses_measurement_without_native_activity_or_rewriting(self):
-        save_state(probe_recovery.store_path(self.state), {"schema_version": 2, "records": []})
+        save_state(probe_recovery.store_path(self.state), {"schema_version": 3, "records": []})
         before = probe_recovery.store_path(self.state).read_bytes()
         client = self.native("codex")
         with self.assertRaises(StateError):
@@ -195,7 +348,33 @@ class ProbeRecoveryTest(unittest.TestCase):
             with self.assertRaises(StateError):
                 self.measure(worker, client)
             self.assertEqual(probe_recovery.store_path(self.state).read_bytes(), original)
-            save_state(probe_recovery.store_path(self.state), {"schema_version": 1, "records": [row]})
+            save_state(probe_recovery.store_path(self.state), {"schema_version": probe_recovery.SCHEMA_VERSION, "records": [row]})
+
+    def test_owner_migrates_startup_gates_without_changing_original_proof(self):
+        worker, client = self.worker("codex"), self.native("codex", dialog=True)
+        self.measure(worker, client)
+        row = probe_recovery.pending(self.state, worker)
+        assert row is not None
+        legacy = {key: value for key, value in row.items() if key != "phase"}
+        legacy["schema_version"] = 1
+        save_state(probe_recovery.store_path(self.state), {"schema_version": 1, "records": [legacy]})
+        before = list(client.events)
+        migrated = probe_recovery.load(self.state)
+        self.assertEqual(client.events, before)
+        self.assertEqual(migrated["schema_version"], 2)
+        self.assertEqual(migrated["records"][0], row)
+        self.assertEqual(json.loads(probe_recovery.store_path(self.state).read_text()), migrated)
+
+    def test_missing_cleanup_phase_refuses_without_discarding_the_gate(self):
+        worker, client = self.worker("codex"), self.native("codex", dialog=True)
+        self.measure(worker, client)
+        data = probe_recovery.load(self.state)
+        del data["records"][0]["phase"]
+        save_state(probe_recovery.store_path(self.state), data)
+        before = probe_recovery.store_path(self.state).read_bytes()
+        with self.assertRaises(StateError):
+            probe_recovery.load(self.state)
+        self.assertEqual(probe_recovery.store_path(self.state).read_bytes(), before)
 
     def test_changed_cleanup_config_refuses_before_native_calls(self):
         for change in ("composer_glyph", "composer_placeholders", "composer_ignore_dim", "launch_args"):
@@ -220,7 +399,13 @@ class ProbeRecoveryTest(unittest.TestCase):
                 composer._fresh_startup_error("startup_input_occupied", "Draft occupied", {})):
             with self.subTest(failure=failure.message):
                 worker, client = self.worker("codex"), self.native("codex")
-                with patch("foreman.lifecycle._prepare_fresh_probe", side_effect=failure):
+                original_prepare = lifecycle._prepare_fresh_probe
+                def proved_then_refused(*args, **options):
+                    proof = original_prepare(*args, **options)
+                    setattr(failure, "_probe_startup_observation", proof)
+                    raise failure
+                with patch("foreman.lifecycle._prepare_fresh_probe", side_effect=proved_then_refused), \
+                        patch.object(client, "pane_read", return_value=client.EMPTY):
                     result = self.measure(worker, client)
                 error = result["agents"]["codex"]["error"]
                 self.assertIn("measure --agent codex", error["message"])
