@@ -45,7 +45,7 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
-from . import runnable, engagement
+from . import runnable, engagement, report_contract
 from .recovery import receipt
 from .state import default_state_path, load_state_checked
 from .composition import REQUIREMENTS_SCHEMA_VERSION
@@ -283,8 +283,7 @@ def accepted_bootstrap(repo, base, artifact, digest, state_path):
             continue
         if evidence != record["report_evidence"]:
             continue
-        bindings = [line.removeprefix("TRIGGER_DECLARATION: ") for line in body.splitlines()
-                    if line.startswith("TRIGGER_DECLARATION: ")]
+        bindings = report_contract.trigger_bindings(body)
         if len(bindings) != 1:
             continue
         try:

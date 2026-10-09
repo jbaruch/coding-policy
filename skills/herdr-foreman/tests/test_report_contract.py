@@ -77,8 +77,8 @@ class ReportLinesTest(unittest.TestCase):
                     self.assertEqual(lines, {"verdict": verdict, "acceptance": None, "contribution": None})
 
     def test_tolerated_markup(self):
-        for line in ("- VERDICT: approved", "* VERDICT: approved", "> VERDICT: approved", "`VERDICT: approved`",
-                     "  - `VERDICT: approved`  "):
+        for line in ("- VERDICT: approved", "* VERDICT: approved",
+                     "   VERDICT: approved", "VERDICT: approved`"):
             with self.subTest(line=line):
                 self.assertEqual(report_contract.report_lines(line + "\n", "reviewer")["verdict"], "approved")
 
@@ -152,6 +152,181 @@ class ReportLinesTest(unittest.TestCase):
         for role, criteria in (("developer", None), ("advisor", None), ("advisor", 0), ("reviewer", 2)):
             with self.subTest(role=role, criteria=criteria), self.assertRaises(UsageError):
                 report_contract.report_lines("VERDICT: approved\n", role, None, criteria)
+
+
+FENCE = "```"
+#: The shape of the 729 architecture report's fenced example (#737), placeholders included.
+PLACEHOLDER = ('TRIGGER_DECLARATION: {"repo":"/absolute/canonical/repo","base_revision":"<full base>",'
+               '"head_revision":"<full head>","path":"/absolute/external/triggers.json","sha256":"<artifact SHA-256>"}')
+#: A well-formed four-key line: recognised as a binding when standalone, never when quoted.
+FOUR_KEY = ('TRIGGER_DECLARATION: {"repo":"/absolute/target/repo","base_revision":"' + "a" * 40 +
+            '","path":"/absolute/external/triggers.json","sha256":"' + "b" * 64 + '"}')
+#: The prose lines of the 737 advisor report that the gate refused (#737).
+PROSE = ("`VERDICT`.", "`CRITERION`, and `TRIGGER_DECLARATION`:",
+         "`ACCEPTANCE` lines `met`, `contribution: design`, `verdict: null`. The only")
+#: Every way an example stays out of the contract: fenced, quoted, indented, inline code.
+QUOTED = {
+    "fenced text": lambda line: "{0}text\n{1}\n{0}".format(FENCE, line),
+    "fenced json": lambda line: "{0}json\n{1}\n{0}".format(FENCE, line),
+    "fenced no info": lambda line: "{0}\n{1}\n{0}".format(FENCE, line),
+    "fenced tildes": lambda line: "~~~\n{}\n~~~".format(line),
+    "fenced longer closer": lambda line: "{0}\n{1}\n{0}`".format(FENCE, line),
+    "fenced indented opener": lambda line: "   {0}\n{1}\n   {0}".format(FENCE, line),
+    "blockquote": lambda line: "> " + line,
+    "nested blockquote": lambda line: "- > " + line,
+    "indented four": lambda line: "    " + line,
+    "indented tab": lambda line: "\t" + line,
+    "inline code then prose": lambda line: "`" + line + "` is the form.",
+    "inline code whole line": lambda line: "`" + line + "`",
+    "listed inline code whole line": lambda line: "  - `" + line + "`  ",
+    "bullet list fence": lambda line: "- {0}text\n  {1}\n  {0}".format(FENCE, line),
+    "ordered list fence": lambda line: "1. {0}text\n   {1}\n   {0}".format(FENCE, line),
+    "wide ordered list fence": lambda line: "10. {0}\n    {1}\n    {0}".format(FENCE, line),
+    "nested list tildes": lambda line: "- a\n  - ~~~\n    {}\n    ~~~".format(line),
+}
+EXAMPLES = ("VERDICT: approved", "VERDICT: blocking", "ACCEPTANCE 1/2: met — x", "ACCEPTANCE 9/9: met — x",
+            "CONTRIBUTION: design", "CRITERION 1: restated", "CONTRIBUTION: lots", "VERDICT: looks good")
+
+
+class QuotedExampleTest(unittest.TestCase):
+    """A report explains the contract without the explanation becoming the contract (#737)."""
+
+    def parse(self, *lines, role="architect", specialty=None):
+        return report_contract.report_lines("\n".join(("Findings.",) + lines) + "\n", role, specialty, 2)
+
+    def gaps(self, *lines, role="architect", specialty=None):
+        with self.assertRaises(UsageError) as caught:
+            self.parse(*lines, role=role, specialty=specialty)
+        return " | ".join(caught.exception.details["gaps"])
+
+    def test_every_quoted_example_of_every_keyword_is_inert(self):
+        for form, quote in QUOTED.items():
+            for example in EXAMPLES:
+                with self.subTest(form=form, example=example):
+                    lines = self.parse(*MET, quote(example))
+                    self.assertEqual((lines["verdict"], lines["contribution"]), (None, None))
+                    self.assertEqual([row["k"] for row in lines["acceptance"]], [1, 2])
+
+    def test_quoted_examples_beside_one_operative_line_leave_that_line_the_only_one(self):
+        for form, quote in QUOTED.items():
+            with self.subTest(form=form):
+                lines = self.parse(*MET, "CONTRIBUTION: none", quote("CONTRIBUTION: design"), quote("ACCEPTANCE 1/2: unmet — x"))
+                self.assertEqual(lines["contribution"], "none")
+                self.assertEqual([row["state"] for row in lines["acceptance"]], ["met", "met"])
+            with self.subTest(form=form, role="reviewer"):
+                text = "Notes.\n" + quote("VERDICT: blocking") + "\nVERDICT: approved\n"
+                self.assertEqual(report_contract.report_lines(text, "reviewer")["verdict"], "approved")
+
+    def test_prose_opening_with_an_inline_keyword_is_not_a_candidate(self):
+        # The 737 advisor report: three lines the gate refused as malformed VERDICT / extra CRITERION / malformed ACCEPTANCE.
+        lines = self.parse(*MET, *PROSE, "VERDICT: approved", role="advisor", specialty="security")
+        self.assertEqual((lines["verdict"], len(lines["acceptance"])), ("approved", 2))
+        for line in PROSE:
+            with self.subTest(line=line):
+                self.assertEqual(self.parse(*MET, line)["acceptance"][0]["state"], "met")
+
+    def test_the_strictness_of_operative_lines_is_unchanged_beside_quoted_ones(self):
+        quoted = QUOTED["fenced text"]("VERDICT: approved\nCONTRIBUTION: none")
+        self.assertIn("duplicate ACCEPTANCE 1", self.gaps(*MET, MET[0], quoted))
+        self.assertIn("extra VERDICT", self.gaps(*MET, "VERDICT: approved", quoted))
+        self.assertIn("malformed CONTRIBUTION", self.gaps(*MET, "CONTRIBUTION: lots", quoted))
+        self.assertIn("duplicate CONTRIBUTION", self.gaps(*MET, "CONTRIBUTION: none", "CONTRIBUTION: none", quoted))
+        self.assertIn("extra CRITERION", self.gaps(*MET, "CRITERION 1: x", quoted))
+        self.assertIn("recorded 2", self.gaps("ACCEPTANCE 1/1: met — x", quoted))
+        self.assertIn("missing ACCEPTANCE 2", self.gaps(MET[0], quoted))
+        self.assertIn("malformed", self.gaps(*MET, "VERDICT approved", quoted))
+        self.assertIn("duplicate VERDICT", self.gaps(*MET, "VERDICT: approved", "VERDICT: blocking", quoted,
+                                                     role="advisor", specialty="security"))
+
+    def test_an_unclosed_list_fence_hides_what_follows(self):
+        text = "- {}text\n  VERDICT: blocking\nVERDICT: approved\n".format(FENCE)
+        with self.assertRaises(UsageError) as caught:
+            report_contract.report_lines(text, "reviewer")
+        self.assertIn("missing VERDICT line", caught.exception.details["gaps"])
+
+    def test_a_list_fence_example_does_not_hide_the_real_line_after_it(self):
+        text = "- {0}text\n  VERDICT: blocking\n  {0}\nVERDICT: approved\n".format(FENCE)
+        self.assertEqual(report_contract.report_lines(text, "reviewer")["verdict"], "approved")
+
+    def test_operative_lines_after_a_closed_fence_count(self):
+        text = "Body.\n{0}\nVERDICT: blocking\n{0}\nVERDICT: approved\n".format(FENCE)
+        self.assertEqual(report_contract.report_lines(text, "tester")["verdict"], "approved")
+
+    def test_a_fence_is_closed_only_by_a_matching_unquoted_delimiter(self):
+        for closer in ("~~~", "> " + FENCE, FENCE + " text", "``"):
+            with self.subTest(closer=closer):
+                text = "{0}\nVERDICT: blocking\n{1}\nVERDICT: blocking\n{0}\nVERDICT: approved\n".format(FENCE, closer)
+                self.assertEqual(report_contract.report_lines(text, "tester")["verdict"], "approved")
+
+    def test_a_quoted_delimiter_does_not_open_a_fence(self):
+        text = "> {0}\nVERDICT: approved\n".format(FENCE)
+        self.assertEqual(report_contract.report_lines(text, "tester")["verdict"], "approved")
+
+    def test_inline_triple_backticks_do_not_open_a_fence(self):
+        text = "```not a fence``` here\nVERDICT: approved\n"
+        self.assertEqual(report_contract.report_lines(text, "tester")["verdict"], "approved")
+
+    def test_an_unclosed_fence_hides_what_follows_and_the_refusal_says_so(self):
+        text = "Body.\n{}text\nVERDICT: approved\n".format(FENCE)
+        with self.assertRaises(UsageError) as caught:
+            report_contract.report_lines(text, "reviewer")
+        gaps = caught.exception.details["gaps"]
+        self.assertIn("missing VERDICT line", gaps)
+        self.assertIn("the code fence opened on line 2 is never closed, so every line after it is illustrative", gaps)
+
+    def test_contract_lines_before_an_unclosed_fence_still_count(self):
+        text = "VERDICT: approved\n{}text\nillustration\n".format(FENCE)
+        self.assertEqual(report_contract.report_lines(text, "reviewer")["verdict"], "approved")
+
+    def test_a_contribution_declared_only_in_an_example_still_excludes_on_the_refusal_path(self):
+        # Over-reading adds an exclusion and never clears one, so this scan stays tolerant of quoting.
+        for form, quote in QUOTED.items():
+            if form == "inline code then prose":
+                continue  # a sentence about the line, not the line
+            with self.subTest(form=form):
+                self.assertEqual(report_contract.declared_contributions("No lines.\n" + quote("CONTRIBUTION: design") + "\n"),
+                                 {"design"})
+
+    def test_brief_criteria_keep_their_tolerant_scan(self):
+        text = brief().replace("CRITERION 1:", "```CRITERION 1:")
+        self.assertEqual(report_contract.brief_criteria(text), 2)
+
+
+class TriggerBindingTest(unittest.TestCase):
+    """Only a standalone TRIGGER_DECLARATION line is operative evidence (#737)."""
+
+    def test_a_standalone_line_is_the_one_binding(self):
+        text = "\n".join(("Findings.",) + MET + (FOUR_KEY,)) + "\n"
+        self.assertEqual(report_contract.trigger_bindings(text), [FOUR_KEY[len("TRIGGER_DECLARATION: "):]])
+
+    def test_quoted_copies_are_no_binding_whatever_they_contain(self):
+        for form, quote in QUOTED.items():
+            for line in (PLACEHOLDER, FOUR_KEY, "TRIGGER_DECLARATION: not-json", "TRIGGER_DECLARATION: {}"):
+                with self.subTest(form=form, line=line[:40]):
+                    self.assertEqual(report_contract.trigger_bindings("\n".join(MET) + "\n" + quote(line) + "\n"), [])
+
+    def test_list_prefixed_indented_and_inline_lines_are_no_binding(self):
+        for line in ("- " + FOUR_KEY, "* " + FOUR_KEY, " " + FOUR_KEY, "`" + FOUR_KEY + "`"):
+            with self.subTest(line=line[:20]):
+                self.assertEqual(report_contract.trigger_bindings(line + "\n"), [])
+
+    def test_an_example_beside_an_actual_line_leaves_one_binding(self):
+        for form, quote in QUOTED.items():
+            with self.subTest(form=form):
+                text = "{}\n{}\n".format(quote(PLACEHOLDER), FOUR_KEY)
+                self.assertEqual(report_contract.trigger_bindings(text), [FOUR_KEY[len("TRIGGER_DECLARATION: "):]])
+
+    def test_two_actual_lines_stay_two_bindings_for_the_owner_to_refuse(self):
+        text = "{0}\n{1}\n{0}\n".format(FOUR_KEY, QUOTED["fenced text"](PLACEHOLDER))
+        self.assertEqual(len(report_contract.trigger_bindings(text)), 2)
+
+    def test_a_malformed_actual_line_is_still_recognised_for_the_owner_to_refuse(self):
+        self.assertEqual(report_contract.trigger_bindings("TRIGGER_DECLARATION: not-json\n"), ["not-json"])
+
+    def test_the_prefix_must_be_exact(self):
+        for line in ("TRIGGER_DECLARATION:{}", "TRIGGER_DECLARATION {}", "trigger_declaration: {}"):
+            with self.subTest(line=line):
+                self.assertEqual(report_contract.trigger_bindings(line + "\n"), [])
 
 
 if __name__ == "__main__":
