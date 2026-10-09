@@ -39,6 +39,10 @@
   or transport failure stays fail-closed with no retry until the send effect is
   reconciled; `model-tiers.md` now says so.
 
+## 0.3.393 — 2026-10-09
+
+### Fixed
+
 - Report-body scanners no longer read illustrative text as operative metadata
   (#737). A report may quote the contract in a fenced block (any info string,
   backtick or tilde), a blockquote, a four-space or tab indented block, or
