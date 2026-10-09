@@ -26,7 +26,7 @@ import re
 import threading
 
 from .command_context import (
-    HerdrCommandContext, RemoteIndeterminateError, remote_command, refuse,
+    HerdrCommandContext, RemoteIndeterminateError, remote_command, remote_receipt, refuse,
 )
 from .state import save_state, state_lock, load_state_checked
 from . import supervision, recovery
@@ -66,7 +66,7 @@ def _result(completed):
 
 def live_identity(context, runner):
     """Authenticate the selected session and exact thin seat over saved-profile SSH."""
-    receipt = context.attestation
+    receipt = remote_receipt(context)
     try:
         status = runner(context.argv("status", "server"))
         if status.returncode != 0:
@@ -88,8 +88,9 @@ def live_identity(context, runner):
     if not isinstance(snapshot, dict):
         raise refuse("remote_snapshot_missing")
     workspaces, panes, agents = (snapshot.get(key) for key in ("workspaces", "panes", "agents"))
-    if not all(isinstance(rows, list) and all(isinstance(row, dict) for row in rows)
-               for rows in (workspaces, panes, agents)):
+    if not isinstance(workspaces, list) or not isinstance(panes, list) or not isinstance(agents, list):
+        raise refuse("remote_snapshot_invalid")
+    if not all(all(isinstance(row, dict) for row in rows) for rows in (workspaces, panes, agents)):
         raise refuse("remote_snapshot_invalid")
     workspaces = [row for row in workspaces if row.get("workspace_id") == receipt.workspace_id]
     panes = [row for row in panes if row.get("pane_id") == receipt.foreman_pane_id]
@@ -117,7 +118,8 @@ class RemoteForemanOwner:
         if not self.path.is_absolute():
             raise refuse("remote_owner_store_not_absolute")
         self._loaded_policy = loaded_policy(self.plugin_root)
-        if self._loaded_policy != (context.attestation.policy_version, context.attestation.policy_digest):
+        receipt = remote_receipt(context)
+        if self._loaded_policy != (receipt.policy_version, receipt.policy_digest):
             raise refuse("loaded_policy_receipt_changed")
 
     def _private_store(self):
@@ -151,7 +153,7 @@ class RemoteForemanOwner:
         if (not isinstance(document, dict) or type(document.get("schema_version")) is not int
                 or document.get("schema_version") != 1
                 or set(document) != {"schema_version", "attestation", "state_path", "pending", "reconciliations", "requests"}
-                or document.get("attestation") != asdict(self.context.attestation)
+                or document.get("attestation") != asdict(remote_receipt(self.context))
                 or document.get("state_path") != str(self.state_path)
                 or not isinstance(document.get("reconciliations"), list)
                 or not isinstance(document.get("requests"), list)
@@ -197,7 +199,7 @@ class RemoteForemanOwner:
             if self.path.exists():
                 self._load()
             else:
-                save_state(self.path, {"schema_version": 1, "attestation": asdict(self.context.attestation),
+                save_state(self.path, {"schema_version": 1, "attestation": asdict(remote_receipt(self.context)),
                                       "state_path": str(self.state_path),
                                       "pending": None, "reconciliations": [], "requests": []})
             existing = supervision.load(self.state_path)["binding"]
@@ -217,7 +219,7 @@ class RemoteForemanOwner:
             if document["pending"] is not None and not allow_indeterminate:
                 raise self._indeterminate(document["pending"])
             return {"ready": document["pending"] is None, "mode": "attested-remote",
-                    "attestation": asdict(self.context.attestation), "state_path": str(self.state_path),
+                    "attestation": asdict(remote_receipt(self.context)), "state_path": str(self.state_path),
                     "pending_operation": document["pending"]["id"] if document["pending"] else None}
 
     def _binding(self):
@@ -240,7 +242,7 @@ class RemoteForemanOwner:
         if effect != mutating:
             raise refuse("remote_effect_classification_changed")
         operation = tuple(command[:2])
-        foreman = context.attestation.foreman_pane_id
+        foreman = remote_receipt(context).foreman_pane_id
         target = command[2] if len(command) > 2 else None
         if (operation in {("pane", "close"), ("pane", "send-text"), ("pane", "send-keys")}
                 and target == foreman):

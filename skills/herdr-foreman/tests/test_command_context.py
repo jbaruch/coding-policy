@@ -15,6 +15,7 @@ import subprocess
 import tempfile
 import unittest
 from unittest.mock import patch
+from typing import Any, cast
 
 from foreman.command_context import (
     HerdrCommandContext, RemoteForemanAttestation, RemoteContextError, RemoteIndeterminateError,
@@ -41,9 +42,9 @@ class ContextTest(unittest.TestCase):
         receipt = self.receipt()
         context = HerdrCommandContext("herdr", ("--machine", "machine_id"), "attested-remote", receipt)
         with self.assertRaises(FrozenInstanceError):
-            context.mode = "native"
+            setattr(context, "mode", "native")
         with self.assertRaises(FrozenInstanceError):
-            receipt.lease_epoch = 2
+            setattr(receipt, "lease_epoch", 2)
 
     def test_malformed_prefixes_and_absent_attestation_are_refused(self):
         for prefix in (("machine_id", "--machine"), ("--machine",), (),
@@ -51,7 +52,8 @@ class ContextTest(unittest.TestCase):
                        ("--remote", "host"), ("--machine", "machine_id", "--remote", "host"),
                        ["--machine", "machine_id"], "--machine machine_id"):
             with self.subTest(prefix=prefix), self.assertRaises(RemoteContextError):
-                HerdrCommandContext("herdr", prefix, "attested-remote", self.receipt())
+                # Deliberately malformed runtime input exercises the constructor guard.
+                HerdrCommandContext("herdr", cast(Any, prefix), "attested-remote", self.receipt())
         with self.assertRaises(RemoteContextError):
             HerdrCommandContext("herdr", ("--machine", "machine_id"), "attested-remote")
         with self.assertRaises(RemoteContextError):

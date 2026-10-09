@@ -92,6 +92,13 @@ class HerdrCommandContext:
         return [self.executable, *self.argv_prefix, *command]
 
 
+def remote_receipt(context: HerdrCommandContext) -> RemoteForemanAttestation:
+    """Prove the remote receipt's type at each privileged integration boundary."""
+    if context.mode != "attested-remote" or context.attestation is None:
+        raise refuse("remote_attestation_missing")
+    return context.attestation
+
+
 # Unknown commands are refused, never optimistically treated as reads.
 REMOTE_READS = frozenset({
     ("status", "server"), ("api", "snapshot"),
