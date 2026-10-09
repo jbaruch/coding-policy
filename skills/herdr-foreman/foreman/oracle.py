@@ -5,10 +5,14 @@ is only honest if the comparison runs: a digest nobody checks catches nothing.
 This is that check. It reads the oracle from the saved plan, never from the
 caller, so the round is judged against the oracle it was licensed on.
 
-`digest` compares the sha256 of the result file. `patch` and `fixture` compare
-the result file's sha256 against the sha256 of the file the oracle names. Every
-file is hashed in bounded chunks, so an oversized result or oracle never loads
-whole into memory.
+`digest` and `fixture` compare raw sha256. `patch` compares sha256 after
+removing only the optional section heading after a unified hunk header:
+`@@ -start[,count] +start[,count] @@ heading`. All other bytes, including
+line endings and a missing final newline, remain significant. This is not
+general patch equivalence or proof of application to a tree. Raw oracle pins
+and raw expected/observed digests remain unchanged. Schema-2 verdicts add
+`comparison: {mode, expected, observed}` with the digests that decide `match`.
+Every file is read once in bounded chunks, including arbitrarily long lines.
 
 A `patch` or `fixture` oracle is a path, and a path says nothing about the
 bytes behind it. `plan` pins each such file's sha256 in the plan's
@@ -47,10 +51,65 @@ CHUNK_BYTES = 1 << 20
 RESULT_REMEDY = "Pass the file the round produced."
 ORACLE_REMEDY = "Restore the oracle file the round was licensed on, or declare a readable one and replan."
 
+_HUNK_DIGITS = {4: 5, 5: 5, 6: 7, 7: 7, 9: 10, 10: 10, 11: 12, 12: 12}
+_HUNK_TOKENS = {(5, 44): 6, (5, 32): 8, (7, 32): 8, (8, 43): 9,
+                (10, 44): 11, (10, 32): 13, (12, 32): 13,
+                (13, 64): 14, (14, 64): 15, (15, 32): 16}
 
-def _sha256(path, what, remedy):
-    """The hex sha256 of a file, read in CHUNK_BYTES pieces; `remedy` tells the caller what to do on failure."""
+
+def _hunk_state(state, byte):
+    """Streaming unified-header grammar; -1 copies the line, 16 drops its heading."""
+    if state < 4:
+        return state + 1 if byte == b"@@ -"[state] else -1
+    if 48 <= byte <= 57:
+        return _HUNK_DIGITS.get(state, -1)
+    return _HUNK_TOKENS.get((state, byte), -1)
+
+
+class _PatchHash:
+    """Hash header-normalized bytes without buffering a line or its section text."""
+
+    def __init__(self):
+        self.digest = hashlib.sha256()
+        self.state = 0
+        self.trailing_cr = False
+
+    def update(self, chunk):
+        start = 0
+        while start < len(chunk):
+            newline = chunk.find(b"\n", start)
+            end = len(chunk) if newline < 0 else newline
+            fragment = chunk[start:end]
+            offset = 0
+            while self.state not in {-1, 16} and offset < len(fragment):
+                self.state = _hunk_state(self.state, fragment[offset])
+                if self.state == 16:
+                    break
+                offset += 1
+            if self.state == 16:
+                self.digest.update(fragment[:offset])
+                if fragment:
+                    self.trailing_cr = fragment[-1] == 13
+            else:
+                self.digest.update(fragment)
+            if newline >= 0:
+                if self.state == 16 and self.trailing_cr:
+                    self.digest.update(b"\r")
+                self.digest.update(b"\n")
+                self.state, self.trailing_cr = 0, False
+            start = end + 1
+
+    def hexdigest(self):
+        digest = self.digest.copy()
+        if self.state == 16 and self.trailing_cr:
+            digest.update(b"\r")
+        return digest.hexdigest()
+
+
+def _file_digests(path, what, remedy, *, patch=False):
+    """Raw and comparison digests from the same bounded regular-file read."""
     digest = hashlib.sha256()
+    comparison = _PatchHash() if patch else None
     try:
         # Opened non-blocking and checked before any read: a FIFO or a device
         # swapped in for the file would block the gate, or never reach EOF.
@@ -61,6 +120,8 @@ def _sha256(path, what, remedy):
                     what, str(path), remedy), {"path": str(path)})
             for chunk in iter(lambda: handle.read(CHUNK_BYTES), b""):
                 digest.update(chunk)
+                if comparison is not None:
+                    comparison.update(chunk)
     except OSError as exc:
         raise UsageError("Cannot read the {} at {!r}: {}. {}".format(
             what, str(path), exc.strerror or exc, remedy), {"path": str(path)}) from None
@@ -70,7 +131,13 @@ def _sha256(path, what, remedy):
         # ValueError), never names a file.
         raise UsageError("The {} path {!r} is not a usable file name: {}. {}".format(
             what, str(path), exc, remedy), {"path": repr(str(path))}) from None
-    return digest.hexdigest()
+    raw = digest.hexdigest()
+    return raw, comparison.hexdigest() if comparison is not None else raw
+
+
+def _sha256(path, what, remedy):
+    """Raw file sha256 for immutable plan and dispatch pins."""
+    return _file_digests(path, what, remedy)[0]
 
 
 def plan_oracle(plan, role):
@@ -235,19 +302,22 @@ def verify(oracle, result_path):
     kind = oracle.get("kind")
     if kind not in ORACLE_KINDS:
         raise UsageError("Oracle kind {!r} is not one of {}.".format(kind, ", ".join(ORACLE_KINDS)), {})
-    observed = _sha256(result_path, "round result", RESULT_REMEDY)
+    observed, compared_result = _file_digests(result_path, "round result", RESULT_REMEDY, patch=kind == "patch")
     if kind == "digest":
         expected = oracle.get("value")
-        return {"schema_version": 1, "kind": kind, "match": observed == expected,
-                "expected": expected, "observed": observed, "result": str(result_path)}
+        return {"schema_version": 2, "kind": kind, "match": observed == expected,
+                "expected": expected, "observed": observed, "result": str(result_path),
+                "comparison": {"mode": "raw_sha256", "expected": expected, "observed": observed}}
     path = oracle.get("path")
-    expected = _sha256(path, "{} oracle".format(kind), ORACLE_REMEDY)
+    expected, compared_oracle = _file_digests(path, "{} oracle".format(kind), ORACLE_REMEDY, patch=kind == "patch")
     if expected != oracle.get("sha256"):
         raise UsageError("The {} oracle at {} changed since the plan was written (pinned sha256 {}, now {}); "
                          "restore the planned file or replan.".format(kind, path, oracle.get("sha256"), expected),
                          {"path": str(path), "pinned": oracle.get("sha256"), "observed": expected})
-    return {"schema_version": 1, "kind": kind, "match": observed == expected,
-            "expected": expected, "observed": observed, "oracle": path, "result": str(result_path)}
+    return {"schema_version": 2, "kind": kind, "match": compared_result == compared_oracle,
+            "expected": expected, "observed": observed, "oracle": path, "result": str(result_path),
+            "comparison": {"mode": "unified_hunk_heading_ignored" if kind == "patch" else "raw_sha256",
+                           "expected": compared_oracle, "observed": compared_result}}
 
 
 def register_commands(sub, common):

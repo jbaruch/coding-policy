@@ -306,6 +306,25 @@ default (see `skills/herdr-foreman/references/round-setup.md`, Step 5).
 A missing map means no overrides; a value that is not a non-negative finite
 number is refused, naming the file and the role. `plan` is the only reader.
 
+## Oracle Verdicts
+
+`verify-oracle` (`skills/herdr-foreman/foreman/oracle.py`, `verify`) emits schema 2.
+The `herdr-foreman` owner writes the verdict; the foreman reads its `match` and
+comparison evidence before accepting the round. Fields are `schema_version`,
+`kind`, boolean `match`, raw SHA-256 `expected` and `observed`, absolute
+`result`, `oracle` for file-backed kinds, and `comparison` with `mode`,
+`expected` and `observed`. The comparison digests decide `match`; the raw
+digests retain the original bytes' identities. The module docstring owns
+comparison modes and normalization. Plan pins, dispatched oracles and their
+existing versions stay unchanged.
+
+Schema-1 receipts retain their byte-exact meaning and have no comparison
+object. The owner does not read or migrate saved verdict receipts. Preserve
+them and run the current verifier against the unchanged dispatched plan and
+current result for new evidence. Never infer normalized equality from an old
+mismatch. Missing, corrupt or unsupported receipts supply no acceptance;
+rerun the owner rather than inventing a verdict.
+
 ## Task Ledger
 
 Choose one absolute task reports directory outside the shared checkout and

@@ -253,10 +253,10 @@ mechanical context has this shape:
 }
 ```
 
-A developer's `mechanical` round is licensed by one thing: a whole-result oracle, the
-expected result written down where a later check compares against it byte for
-byte. `kind` is `digest`, `patch` or `fixture` — an expected sha256 in `value`,
-or a file in `path` holding the exact patch or the complete expected output.
+A developer's `mechanical` round is licensed by one thing: a whole-result oracle,
+the expected result written down for a later comparison. `kind` is `digest`,
+`patch` or `fixture` — an expected sha256 in `value`, or a file in `path`
+holding the patch or the complete expected output.
 The declaration is checked, not taken: a digest of the wrong shape and a file
 nobody wrote both refuse the round.
 
