@@ -3130,6 +3130,8 @@ class FreshOwnerNative(HerdrClient):
 
     def pane_process_info(self, pane_id):
         self.events.append(("process_info", pane_id))
+        if pane_id not in self.panes:
+            raise HerdrError("absent", {"stderr": json.dumps({"error": {"code": "pane_not_found"}})})
         worker = next((item for item in self.agents.values() if item["pane_id"] == pane_id), None)
         foreground = ({"pid": worker["pid"], "argv": worker["argv"], "name": worker["agent"]}
                       if worker else {"pid": self.panes[pane_id], "argv": ["zsh"], "name": "zsh"})

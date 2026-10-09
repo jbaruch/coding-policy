@@ -55,6 +55,11 @@
 
 ### Fixed
 
+- Disposable probe occupancy failures now retain only pane, foreground PID
+  and process-name evidence in durable measure receipts. Owned pane cleanup
+  proves the pane is absent or still holds its original shell before reporting
+  success, so a late process or reused pane cannot be mistaken for a clean
+  retry surface (#730).
 - Fresh Claude Code startup honors its existing dim-hint classification,
   allowing dynamic native launch suggestions to settle before one exact
   assignment. Plain/typed input, dialogs and recalled Codex drafts retain

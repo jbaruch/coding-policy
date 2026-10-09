@@ -40,6 +40,27 @@ def failure(code, message):
         {"error": {"code": code, "message": message}})})
 
 
+class RepeatingReads:
+    """Script observations in order, then keep returning the final one."""
+
+    def __init__(self, observations):
+        self.observations = iter(observations)
+        self.last = None
+
+    def __next__(self):
+        try:
+            self.last = next(self.observations)
+        except StopIteration:
+            if self.last is None:
+                raise
+        if isinstance(self.last, BaseException):
+            raise self.last
+        return self.last
+
+    def __call__(self, *_args, **_kwargs):
+        return next(self)
+
+
 class IdentityTest(unittest.TestCase):
     def test_identity_is_safe_bounded_and_fresh(self):
         first = identity("reviewer#API", token="a" * 10)
@@ -127,6 +148,7 @@ class SpawnCloseTest(unittest.TestCase):
         client.pane_process_info.return_value = {
             "shell_pid": 10, "foreground_processes": [{"pid": 10}]}
         worker = template()
+        client.agent_get.side_effect = missing(worker.name)
         with patch("foreman.lifecycle.start_worker", side_effect=KeyboardInterrupt), \
                 self.assertRaises(KeyboardInterrupt):
             spawn(client, worker, worker.tiers["coordination"], history=[], sleep=lambda _: None)
@@ -148,6 +170,11 @@ class SpawnCloseTest(unittest.TestCase):
     def test_close_proves_the_assignment_disappeared(self):
         client = Mock()
         client.agent_get.side_effect = [{"pane_id": "pane-new"}, missing("reviewer-a1")]
+        client.pane_process_info.side_effect = [
+            {"pane_id": "pane-new", "shell_pid": 10,
+             "foreground_processes": [{"pid": 20, "name": "claude"}]},
+            failure("pane_not_found", "gone"),
+        ]
         result = close(client, "reviewer-a1", "pane-new")
         client.pane_close.assert_called_once_with("pane-new")
         self.assertTrue(result["closed"])
@@ -156,6 +183,11 @@ class SpawnCloseTest(unittest.TestCase):
     def test_close_still_closes_a_recorded_pane_when_agent_is_absent(self):
         client = Mock()
         client.agent_get.side_effect = missing("reviewer-a1")
+        client.pane_process_info.side_effect = [
+            {"pane_id": "pane-new", "shell_pid": 10,
+             "foreground_processes": [{"pid": 10, "name": "zsh"}]},
+            failure("pane_not_found", "gone"),
+        ]
         result = close(client, "reviewer-a1", "pane-new")
         client.pane_close.assert_called_once_with("pane-new")
         self.assertFalse(result["replayed"])
@@ -163,9 +195,50 @@ class SpawnCloseTest(unittest.TestCase):
     def test_close_replays_only_when_agent_and_pane_are_both_absent(self):
         client = Mock()
         client.agent_get.side_effect = missing("reviewer-a1")
-        client.pane_close.side_effect = failure("pane_not_found", "gone")
+        client.pane_process_info.side_effect = failure("pane_not_found", "gone")
         result = close(client, "reviewer-a1", "pane-new")
         self.assertTrue(result["replayed"])
+        client.pane_close.assert_not_called()
+
+    def test_close_refuses_success_while_non_shell_occupant_remains(self):
+        client = Mock()
+        occupied = {"pane_id": "pane-new", "shell_pid": 10,
+                    "foreground_processes": [{"pid": 20, "name": "claude",
+                                              "argv": ["claude", "--token", "secret"]}]}
+        client.agent_get.side_effect = [{"pane_id": "pane-new"}, missing("reviewer-a1")]
+        client.pane_process_info.return_value = occupied
+        with self.assertRaisesRegex(HerdrError, "non-shell occupant") as caught:
+            close(client, "reviewer-a1", "pane-new", sleep=lambda _: None)
+        self.assertEqual(caught.exception.details["foreground_pids"], [20])
+        self.assertEqual(caught.exception.details["occupant_names"], ["claude"])
+        self.assertNotIn("secret", json.dumps(caught.exception.details))
+        client.pane_close.assert_called_once_with("pane-new")
+
+    def test_close_refuses_reused_pane_with_a_different_shell(self):
+        client = Mock()
+        client.agent_get.side_effect = [{"pane_id": "pane-new"}, missing("reviewer-a1")]
+        client.pane_process_info.side_effect = [
+            {"pane_id": "pane-new", "shell_pid": 10,
+             "foreground_processes": [{"pid": 20, "name": "claude"}]},
+            {"pane_id": "pane-new", "shell_pid": 11,
+             "foreground_processes": [{"pid": 11, "name": "zsh"}]},
+        ]
+        with self.assertRaisesRegex(HerdrError, "reused pane"):
+            close(client, "reviewer-a1", "pane-new", sleep=lambda _: None)
+        client.pane_close.assert_called_once_with("pane-new")
+
+    def test_close_accepts_the_original_shell_remaining(self):
+        client = Mock()
+        client.agent_get.side_effect = [{"pane_id": "pane-new"}, missing("reviewer-a1")]
+        client.pane_process_info.side_effect = [
+            {"pane_id": "pane-new", "shell_pid": 10,
+             "foreground_processes": [{"pid": 20, "name": "claude"}]},
+            {"pane_id": "pane-new", "shell_pid": 10,
+             "foreground_processes": [{"pid": 10, "name": "zsh"}]},
+        ]
+        result = close(client, "reviewer-a1", "pane-new", sleep=lambda _: None)
+        self.assertTrue(result["closed"])
+        self.assertFalse(result["replayed"])
 
 
 class FreshShellStartupTest(unittest.TestCase):
@@ -180,10 +253,14 @@ class FreshShellStartupTest(unittest.TestCase):
     def client(self, observations):
         client = Mock()
         client.workspace_create.return_value = "pane-new"
-        client.pane_process_info.side_effect = observations
+        client.pane_process_info.side_effect = RepeatingReads(observations)
         client.agent_start.return_value = {"agent": {"pane_id": "pane-new", "name": "claude",
             "agent": "claude", "agent_status": "idle"}, "argv": self.ARGV}
         client.argv_pane_close.return_value = ["herdr", "pane", "close", "--pane", "pane-new"]
+        def close_pane(_pane):
+            client.pane_process_info.side_effect = failure("pane_not_found", "gone")
+            client.agent_get.side_effect = missing("claude")
+        client.pane_close.side_effect = close_pane
         return client
 
     def running(self):
@@ -287,11 +364,22 @@ class FreshShellStartupTest(unittest.TestCase):
         client.pane_close.assert_not_called()
 
     def test_native_busy_followed_by_real_occupant_refuses_before_second_input(self):
-        client = self.client([self.SHELL] * 3 + [self.running()])
+        occupied = self.running()
+        occupied["foreground_processes"][0].update(
+            cmdline="claude --token sensitive-token-must-stay-private",
+            environment={"TOKEN": "sensitive-token-must-stay-private"},
+        )
+        client = self.client([self.SHELL] * 3 + [occupied, occupied,
+                              failure("pane_not_found", "gone")])
+        client.agent_get.side_effect = missing("claude")
         client.agent_start.side_effect = failure("agent_pane_busy", "not an available shell")
         worker = template()
-        with self.assertRaisesRegex(HerdrError, "occupied"):
+        with self.assertRaisesRegex(HerdrError, "occupied") as caught:
             spawn(client, worker, worker.tiers["coordination"], history=[], sleep=lambda _: None)
+        self.assertEqual(caught.exception.details["foreground_pids"], [53000])
+        self.assertEqual(caught.exception.details["occupant_names"], ["claude"])
+        self.assertTrue(caught.exception.details["pane_closure"]["closed"])
+        self.assertNotIn("sensitive-token", json.dumps(caught.exception.details))
         client.agent_start.assert_called_once()
         client.pane_close.assert_called_once_with("pane-new")
 
@@ -353,7 +441,7 @@ class FreshShellStartupTest(unittest.TestCase):
         worker, callback, sleeps = template(), Mock(), Mock()
         with self.assertRaisesRegex(HerdrError, "did not settle") as caught:
             spawn(client, worker, worker.tiers["coordination"], history=[], before_start=callback, sleep=sleeps)
-        self.assertEqual(client.pane_process_info.call_count, FRESH_SHELL_POLL_ATTEMPTS)
+        self.assertEqual(client.pane_process_info.call_count, FRESH_SHELL_POLL_ATTEMPTS + 1)
         self.assertEqual(sleeps.call_count, FRESH_SHELL_POLL_ATTEMPTS - 1)
         self.assertIsNone(caught.exception.details["foreground_pids"])
         self.assertEqual(caught.exception.details["ready_reads"], 0)
@@ -373,7 +461,7 @@ class FreshShellStartupTest(unittest.TestCase):
                 worker, callback, sleeps = template(), Mock(), Mock()
                 with self.assertRaisesRegex(HerdrError, "malformed"):
                     spawn(client, worker, worker.tiers["coordination"], history=[], before_start=callback, sleep=sleeps)
-                self.assertEqual(client.pane_process_info.call_count, 2)
+                self.assertEqual(client.pane_process_info.call_count, 3)
                 self.assertEqual(sleeps.call_count, 1)
                 callback.assert_not_called()
                 client.agent_start.assert_not_called()
@@ -397,7 +485,7 @@ class FreshShellStartupTest(unittest.TestCase):
         worker, callback = template(), Mock()
         with self.assertRaisesRegex(HerdrError, "Cannot read fresh pane"):
             spawn(client, worker, worker.tiers["coordination"], history=[], before_start=callback, sleep=lambda _: None)
-        self.assertEqual(client.pane_process_info.call_count, 2)
+        self.assertEqual(client.pane_process_info.call_count, 3)
         callback.assert_not_called()
         client.agent_start.assert_not_called()
         client.pane_close.assert_called_once_with("pane-new")
@@ -429,7 +517,7 @@ class FreshShellStartupTest(unittest.TestCase):
         worker = template()
         with self.assertRaisesRegex(HerdrError, "inspect the shell startup") as caught:
             spawn(client, worker, worker.tiers["coordination"], history=[], before_start=callback, sleep=sleeps)
-        self.assertEqual(client.pane_process_info.call_count, FRESH_SHELL_POLL_ATTEMPTS)
+        self.assertEqual(client.pane_process_info.call_count, FRESH_SHELL_POLL_ATTEMPTS + 1)
         self.assertEqual(sleeps.call_count, FRESH_SHELL_POLL_ATTEMPTS - 1)
         self.assertEqual(caught.exception.details["foreground_pids"], [52707, 52704])
         self.assertEqual(caught.exception.details["pane"], "pane-new")
@@ -500,7 +588,7 @@ class FreshShellStartupTest(unittest.TestCase):
         client.agent_start.assert_not_called()
         client.pane_close.assert_called_once_with("pane-new")
 
-    def test_retrospective_start_refusal_cleans_only_created_pane_without_fresh_lookup(self):
+    def test_retrospective_start_refusal_cleans_only_created_pane_and_proves_closure(self):
         from foreman.retrospective_runtime import _observation
         client = self.client([self.SHELL, self.SHELL, self.running()])
         worker = template()
@@ -509,7 +597,7 @@ class FreshShellStartupTest(unittest.TestCase):
         with self.assertRaisesRegex(HerdrError, "sole shell"):
             spawn(client, worker, worker.tiers["coordination"], history=(),
                   before_start=callback, sleep=lambda _: None)
-        client.agent_get.assert_not_called()
+        client.agent_get.assert_called_once_with("claude")
         client.agent_start.assert_not_called()
         client.pane_close.assert_called_once_with("pane-new")
 
@@ -795,7 +883,8 @@ class WorkspacePlacementTest(unittest.TestCase):
             elif op == ["pane", "process-info"]:
                 pane = argv[-1]
                 if pane not in created:
-                    raise AssertionError("read outside created surface")
+                    return FakeCompleted(1, "", json.dumps(
+                        {"error": {"code": "pane_not_found", "message": "pane not found"}}))
                 result = {"process_info": {"pane_id": pane, "shell_pid": 10,
                     "foreground_processes": [{"pid": 20, "name": "claude", "argv": flags}]
                     if created[pane] else [{"pid": 10, "name": "zsh"}]}}
@@ -842,7 +931,9 @@ class WorkspacePlacementTest(unittest.TestCase):
         self.assertEqual(focus(), "w1")
         self.assertEqual(created, {})
         self.assertEqual(sum(argv[1:3] == ["agent", "start"] for argv in calls), 1)
-        self.assertEqual(calls[-1], ["herdr", "pane", "close", "w9:p7"])
+        self.assertEqual(calls[-3], ["herdr", "pane", "close", "w9:p7"])
+        self.assertEqual(calls[-2], ["herdr", "agent", "get", "claude"])
+        self.assertEqual(calls[-1], ["herdr", "pane", "process-info", "--pane", "w9:p7"])
 
     def test_probe_measurement_uses_separate_root_without_changing_focus_and_closes_it(self):
         client, calls, created, focus = self.client()

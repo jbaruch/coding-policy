@@ -828,14 +828,26 @@ class FailureTest(unittest.TestCase):
         failure = HerdrError(
             "herdr failed with token={}".format(secret),
             {"command": "herdr --token {}".format(secret), "stderr": secret,
-             "pending_cli_update": True},
+             "pending_cli_update": True, "failure_kind": "probe_startup_unproved",
+             "pane": "w8D:p1", "pane_id": "w8D:p1",
+             "foreground_pids": [101, True, -1, "102"],
+             "occupant_names": ["claude", "vim"],
+             "argv": ["claude", "--token", secret], "composer_literal": secret,
+             "primary_error": {"stderr": secret}},
         )
         with patch("foreman.measure.measure_agent", side_effect=failure):
             snapshot = measure(Mock(), [BY_NAME["claude"]], AT)
         error = snapshot["agents"]["claude"]["error"]
         self.assertNotIn(secret, json.dumps(error))
         self.assertIn("[redacted]", error["message"])
-        self.assertEqual(error["details"], {"pending_cli_update": True})
+        self.assertEqual(error["details"], {
+            "pending_cli_update": True,
+            "failure_kind": "probe_startup_unproved",
+            "pane": "w8D:p1",
+            "pane_id": "w8D:p1",
+            "foreground_pids": [101],
+            "occupant_names": ["claude", "vim"],
+        })
 
     def test_pending_cli_update_is_machine_readable_on_parse_failure(self):
         runner = runner_with({"claude": "idle"}, {"claude": CLAUDE_UPDATE_PANE})

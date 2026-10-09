@@ -232,6 +232,45 @@ class ProbeRecoveryTest(unittest.TestCase):
                 self.assertEqual(client.agents, {})
                 self.assertFalse(any(event[0] == "prompt" for event in client.events))
 
+    def test_occupied_spawn_receipt_proves_cleanup_before_retry(self):
+        worker, client = self.worker("claude"), self.native("claude")
+        start = client.agent_start
+        first = True
+
+        def busy_once(name, kind, pane_id, flags):
+            nonlocal first
+            if first:
+                first = False
+                client.agents["late-occupant"] = {
+                    "name": "late-occupant", "agent": kind, "pane_id": pane_id,
+                    "agent_status": "idle", "pid": 777,
+                    "argv": [kind, "--token", "sensitive-token-must-stay-private"],
+                    "agent_session": None,
+                }
+                raise HerdrError("not an available shell", {"stderr": json.dumps(
+                    {"error": {"code": "agent_pane_busy", "message": "busy"}})})
+            return start(name, kind, pane_id, flags)
+
+        client.agent_start = busy_once
+        client.require_start_retry_compatibility = lambda: None
+        failed = self.measure(worker, client)
+        error = failed["agents"]["claude"]["error"]
+        self.assertEqual(failed["failed_agents"], ["claude"])
+        self.assertEqual(error["details"]["pane"], "fixture-pane-1")
+        self.assertEqual(error["details"]["foreground_pids"], [777])
+        self.assertEqual(error["details"]["occupant_names"], ["claude"])
+        self.assertEqual(error["details"]["failure_kind"], "probe_startup_unproved")
+        self.assertNotIn("sensitive-token", json.dumps(error))
+        self.assertIn("closed its unused probe", error["message"])
+        self.assertEqual(client.panes, {})
+        self.assertEqual(client.agents, {})
+
+        recovered = self.measure(worker, client)
+        self.assertEqual(recovered["failed_agents"], [])
+        self.assertEqual(recovered["agents"]["claude"]["headroom_pct"], 86.0)
+        self.assertEqual(client.panes, {})
+        self.assertEqual(client.agents, {})
+
     def test_public_owner_resolve_command_consumes_its_real_measure_gate(self):
         config = self.root / "config.json"
         config.write_text(json.dumps(self.payload))
