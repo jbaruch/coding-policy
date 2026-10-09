@@ -1,5 +1,13 @@
 # Changelog
 
+### Fixed
+
+- Fresh startup identity refusals identify failed checks and safe before/after
+  observations (#720), instead of conflating readiness and identity changes.
+  Complete identity comparison, no-input refusal and owned cleanup remain
+  unchanged. Error evidence omits argv and native-session values; historical
+  receipts are not reinterpreted as proof of their original failure cause.
+
 ## 0.3.386 — 2026-10-09
 
 ### Fixed

@@ -1588,5 +1588,110 @@ class FreshScopedCorrectionTest(unittest.TestCase):
         self.assertEqual(runner.writes(), [])
 
 
+class FreshStartupEvidenceTest(unittest.TestCase):
+    def dispatch(self, observations, processes, kind="claude"):
+        runner = runner_with({kind: "idle"})
+        initial = json.loads(agent_json(kind, "idle", PANES[kind]))["result"]["agent"]
+        runner.responses["agent get " + kind] = ScriptedReads([
+            json.dumps({"result": {"agent": row}}) for row in [initial, *observations]])
+        with patch("foreman.assign.verify_running_permissions"), \
+                patch("foreman.assign.foreground_agent", side_effect=processes):
+            try:
+                result = apply(HerdrClient(runner=runner), {"developer": kind}, BY_NAME,
+                               {"common": "/w/COMMON.md", "developer": "/w/dev.md"}, AT,
+                               fresh=True, assignment_scoped=True)
+            except HerdrError as error:
+                return runner, error
+        return runner, result
+
+    def test_refused_startup_names_cause_without_exposing_native_values_or_argv(self):
+        live = {"pane_id": PANES["claude"], "agent_status": "idle", "agent_session": None}
+        process = {"pid": 42, "argv": ["claude", "credential-sentinel"]}
+        native = {"source": "herdr:claude", "agent": "claude", "kind": "id", "value": "native-value-sentinel"}
+        for field, value, components in (
+                ("pane_id", "replacement-pane", ["pane_id"]),
+                ("agent_status", "working", ["agent_status"]),
+                ("agent_status", "unknown", ["agent_status"]),
+                ("agent_session", native, ["native_session"]),
+                ("pid", 43, ["process_proof"]),
+                ("pid", None, ["process_pid", "process_proof"]),
+                ("argv", ["claude", "replacement-credential-sentinel"], ["process_proof"])):
+            with self.subTest(field=field, value=value):
+                current = {**live, field: value} if field in live else live
+                proof = {**process, field: value} if field in process else process
+                runner, error = self.dispatch([live, current], [process, proof])
+                self.assertIsInstance(error, HerdrError)
+                self.assertEqual(error.details["failure_kind"], "startup_identity_changed")
+                self.assertEqual(error.details["startup_evidence"]["failed_checks"], components)
+                before = error.details["startup_evidence"]["before"]
+                after = error.details["startup_evidence"]["current"]
+                self.assertEqual(before, {"pane_id": PANES["claude"], "process_pid": 42,
+                                          "native_session_present": False})
+                self.assertEqual(after["agent_status"], current["agent_status"])
+                self.assertEqual(after["process_pid"], proof["pid"])
+                self.assertEqual(after["native_session_present"], current["agent_session"] is not None)
+                self.assertNotIn("sentinel", json.dumps(error.to_dict()))
+                self.assertEqual(runner.writes(), [])
+
+    def test_initial_invalid_observation_has_no_invented_before_identity(self):
+        for pid in (None, False, 0, -1, "credential-sentinel"):
+            with self.subTest(pid=pid):
+                runner, error = self.dispatch(
+                    [{"pane_id": PANES["claude"], "agent_status": "idle"}], [{"pid": pid}])
+                self.assertIsInstance(error, HerdrError)
+                evidence = error.details["startup_evidence"]
+                self.assertEqual(evidence["failed_checks"], ["process_pid"])
+                self.assertIsNone(evidence["before"])
+                self.assertNotIn("sentinel", json.dumps(error.to_dict()))
+                self.assertEqual(runner.writes(), [])
+
+    def test_simultaneous_failures_are_preserved(self):
+        live = {"pane_id": PANES["claude"], "agent_status": "idle"}
+        current = {"pane_id": "replacement-pane", "agent_status": "working", "agent_session": {"value": "private"}}
+        runner, error = self.dispatch([live, current], [{"pid": 42}, {"pid": 0}])
+        self.assertIsInstance(error, HerdrError)
+        self.assertEqual(error.details["startup_evidence"]["failed_checks"],
+                         ["pane_id", "agent_status", "process_pid", "native_session", "process_proof"])
+        self.assertEqual(runner.writes(), [])
+
+    def test_stable_identity_still_delivers_once(self):
+        for kind in ("claude", "codex", "grok"):
+            with self.subTest(kind=kind):
+                live = {"pane_id": PANES[kind], "agent_status": "idle"}
+                runner, result = self.dispatch([live] * 4, [{"pid": 42}] * 4, kind)
+                assert isinstance(result, dict), result
+                self.assertEqual(result["applied"][0]["status"], "applied")
+                self.assertEqual(len(runner.pasted_prompts()), 1)
+
+    def test_changed_native_session_refuses_across_providers_even_when_both_are_present(self):
+        for kind in ("claude", "codex", "grok"):
+            with self.subTest(kind=kind):
+                live = {"pane_id": PANES[kind], "agent_status": "idle",
+                        "agent_session": {"source": "herdr:" + kind, "agent": kind,
+                                          "kind": "id", "value": "first-native-value"}}
+                current = {**live, "agent_session": {**live["agent_session"], "value": "replacement-native-value"}}
+                runner, error = self.dispatch([live, current], [{"pid": 42}] * 2, kind)
+                self.assertIsInstance(error, HerdrError)
+                evidence = error.details["startup_evidence"]
+                self.assertEqual(evidence["failed_checks"], ["native_session"])
+                self.assertTrue(evidence["before"]["native_session_present"])
+                self.assertTrue(evidence["current"]["native_session_present"])
+                self.assertNotIn("native-value", json.dumps(error.to_dict()))
+                self.assertEqual(runner.writes(), [])
+
+    def test_ready_state_transition_is_not_reinterpreted_as_identity_change(self):
+        live = {"pane_id": PANES["claude"], "agent_status": "idle"}
+        runner, result = self.dispatch([live, {**live, "agent_status": "done"}, live, live], [{"pid": 42}] * 4)
+        self.assertIsInstance(result, dict)
+        self.assertEqual(len(runner.pasted_prompts()), 1)
+
+    def test_blocked_native_dialog_retains_its_specific_recovery(self):
+        runner, error = self.dispatch(
+            [{"pane_id": PANES["claude"], "agent_status": "blocked"}], [{"pid": 42}])
+        self.assertIsInstance(error, HerdrError)
+        self.assertEqual(error.details["failure_kind"], "startup_dialog_pending")
+        self.assertEqual(runner.writes(), [])
+
+
 if __name__ == "__main__":
     unittest.main()

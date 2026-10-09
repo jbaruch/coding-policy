@@ -165,6 +165,21 @@ closed `not_sent` outcome means repeat the identical normal apply. A blocked
 outcome preserves unknown/sent work and names the supported owner operation;
 no pane/config/receipt workaround substitutes for proof.
 
+For fresh `startup_identity_changed`, `details.startup_evidence` also carries:
+
+- `failed_checks`: output check names drawn from `pane_id`, `agent_status`,
+  `process_pid`, `native_session` and `process_proof`.
+- `before`: null when no initial identity was established; otherwise an object
+  with `pane_id`, integer `process_pid` and boolean `native_session_present`.
+- `current`: an object with observed `pane_id`, `agent_status`, integer or null
+  `process_pid`, and boolean `native_session_present`.
+
+This error-output contract is owned by `startup_observe` in
+`skills/herdr-foreman/foreman/assign.py`. Evidence omits native-session values,
+arbitrary process fields and argv. Preserve it with the original error receipt;
+it grants no input, retry or replacement authority. Older receipts without this
+field supply no causal observations; do not backfill or infer their cause.
+
 For `startup_dialog_pending`, the foreman reads the retained native pane and
 follows `skills/herdr-foreman/references/herdr.md` Runtime Dialogs. Review the
 specific hook source and command against the authorized installation; resolve

@@ -789,6 +789,52 @@ class PlanCommandTest(CliCase):
         client.agent_prompt.assert_not_called()
         client.pane_send_keys.assert_not_called()
 
+    def test_startup_causal_evidence_survives_public_owner_cleanup(self):
+        plan = self._interrupt_plan()
+        for role in ("developer", "reviewer"):
+            self.assign_report(self.briefs[role], self.tmp / (role + "-report.md"))
+        client = Mock(wraps=HerdrClient("herdr", FakeRunner()))
+        current_status = "idle"
+        def live(name):
+            role = next(role for role, worker in plan["assignments"].items() if worker == name)
+            return {"name": name, "agent": plan["worker_kinds"][role], "pane_id": role + "-pane",
+                    "agent_status": current_status, "agent_session": None}
+        def repaint(*_args, **_options):
+            nonlocal current_status
+            current_status = "working"
+            return "\x1b[2m› Ask Codex to do anything\x1b[0m", True
+        def process(_client, _agent, pane, tier):
+            return {"model": tier["model"], "effort": tier["effort"], "source": "process_argv",
+                    "pid": 501, "pane_id": pane}
+        client.agent_get.side_effect = live
+        client.pane_width.return_value = 300
+        with patch("foreman.lifecycle.spawn", side_effect=["developer-pane", "reviewer-pane"]), \
+                patch("foreman.lifecycle.close") as close, \
+                patch("foreman.assign.verify_running", side_effect=process), \
+                patch("foreman.composer.read_pane", side_effect=repaint):
+            code, out, err = self.run_cli(self.base() + ["apply", "--assignments", json.dumps(plan),
+                "--task", "t-interrupt", "--now", AT, "--common", str(self.common)]
+                + self.brief_args("developer", "reviewer") + self._interrupt_reports(), client=client)
+        self.assertEqual(code, 1, err)
+        self.assertEqual(out, "")
+        details = json.loads(err)["details"]
+        self.assertEqual(details["failure_kind"], "startup_identity_changed", err)
+        self.assertEqual(details["startup_evidence"], {
+            "failed_checks": ["agent_status"],
+            "before": {"pane_id": "developer-pane", "process_pid": 501, "native_session_present": False},
+            "current": {"pane_id": "developer-pane", "process_pid": 501, "native_session_present": False,
+                        "agent_status": "working"}})
+        self.assertEqual(details["recovery"]["outcome"], "retryable")
+        self.assertTrue(details["recovery"]["evidence"]["state_saved"])
+        self.assertEqual(details["recovery"]["evidence"]["sending_agents"], [])
+        self.assertEqual({call.args[2] for call in close.call_args_list}, {"developer-pane", "reviewer-pane"})
+        saved, _ = load_state_checked(self.state)
+        self.assertEqual([row["status"] for row in saved["recovery"]["dispatches"]], ["not_sent", "not_sent"])
+        self.assertEqual(saved["assignments"], [])
+        self.assertTrue(all(not member["active"] for member in supervision.load(self.state)["members"]))
+        client.agent_prompt.assert_not_called()
+        client.pane_send_keys.assert_not_called()
+
     def test_fresh_composer_timeout_automatically_aborts_and_closes_only_owned_panes(self):
         from foreman import composer
         from foreman.config import load_config
