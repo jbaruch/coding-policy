@@ -1329,9 +1329,11 @@ def apply(client, assignments, agents_by_name, paths, at, no_clear=False, settle
         # claiming a role nobody started is worse than no label. Cosmetic, so a
         # failure warns and the dispatch stands.
         if record["status"] == "applied" and record.get("pane_id"):
-            label = pane_label(
-                step["role"], task, getattr(agents_by_name[name], "model_label", "")
-            )
+            verified = (record["tier"] or {}).get("verified", {})
+            model = verified.get("model", "")
+            effort = verified.get("effort")
+            display = "{} {}".format(model, effort) if model and effort else model
+            label = pane_label(step["role"], task, display)
             try:
                 client.pane_rename(record["pane_id"], label)
                 record["pane_label"] = label

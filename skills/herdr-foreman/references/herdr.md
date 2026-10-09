@@ -313,7 +313,7 @@ Three per-agent config keys drive it:
 | `composer_ignore_dim` | `true` (the default) reads dim/grey composer text as empty only when the worker has no exact `composer_placeholders`; with that allowlist, every other dim value remains occupied |
 | `composer_placeholders` | Hint text a runtime draws in an empty composer, matched exactly after trimming (`["Ask Codex to do anything"]`). Always counts as empty |
 | `recover_keys` | Keys that clear a stuck composer, sent at most once and only under the five conditions above. **Empty for Codex**: its clear key is `ctrl+c`, which exits an idle Codex |
-| `model_label` | Model name shown on the worker's pane after a dispatch (`"gpt-5.6"`). Optional; empty leaves the label carrying the role alone |
+| `model_label` | Legacy configuration field, still readable but unused for dispatch labels. The confirmed assignment's verified model/effort supplies the display; without tier proof the label carries only role/task |
 | `slash_delivery` | `paste` or `type`, per the table above |
 
 The placeholder list is per runtime and hand-maintained. A Codex release that

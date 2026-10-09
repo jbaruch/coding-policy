@@ -44,7 +44,6 @@
       "working_markers": [
         "Churned for"
       ],
-      "model_label": "claude-opus-5",
       "window_group": "claude-max-weekly",
       "tiers": {
         "architect": {
@@ -145,7 +144,6 @@
         "\u203a Ask Codex to do anything"
       ],
       "working_markers": [],
-      "model_label": "gpt-5.6",
       "tiers": {
         "architect": {
           "model": "gpt-5.6-sol",
@@ -254,7 +252,6 @@
       "working_markers": [
         "Esc:cancel"
       ],
-      "model_label": "grok-4",
       "tiers": {
         "architect": {
           "model": "grok-4.6",

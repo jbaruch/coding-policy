@@ -99,8 +99,9 @@ signatures the stale-state probe reads; an agent with neither is never probed.
 `composer_glyph`, `composer_ignore_dim`, `composer_placeholders`, and
 `recover_keys` drive the consumed-command check, the ghost-text and placeholder
 exemptions, and the guarded one-shot recovery of a stuck composer.
-`model_label` is cosmetic: it names the model on the worker's pane after a
-dispatch. All are documented in
+`model_label` remains accepted for legacy configuration compatibility; dispatch
+labels use the confirmed assignment's verified model and effort, or omit the
+model when no tier proof exists. All are documented in
 `skills/herdr-foreman/references/herdr.md`.
 
 Config schema 8 adds optional per-worker `tier_routing`: `{mode, evidence}`.

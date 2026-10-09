@@ -1,5 +1,13 @@
 # Changelog
 
+### Fixed
+
+- Confirmed Herdr dispatch pane labels show the verified launch model and
+  effort, not a stale worker-kind model_label (#732). Untiered legacy workers
+  retain role/task labels without asserting an unproved model. Cosmetic
+  relabel failures still preserve the confirmed dispatch and send nothing.
+  Legacy config fields remain readable; the example omits obsolete labels.
+
 ## 0.3.385 — 2026-10-09
 
 ### Fixed

@@ -1441,6 +1441,15 @@ class PaneLabelTest(unittest.TestCase):
         )
         self.assertIn("pane rename w4:p1 'developer #12'", runner.commands())
 
+    def test_an_unproven_legacy_model_label_is_not_presented_as_launch_evidence(self):
+        agents = {agent.name: agent for agent in parse_config(CONFIG)}
+        agents["grok"].model_label = "stale-conflicting-model"
+        runner = runner_with({"grok": "idle"})
+        result = apply(HerdrClient(runner=runner), {"developer": "grok"}, agents,
+                       self.paths, AT, task="12")
+        self.assertEqual(result["applied"][0]["pane_label"], "developer #12")
+        self.assertIn("pane rename w4:p1 'developer #12'", runner.commands())
+
     QUIET_SCREEN = "  nothing happened\n  │ ❯                                        │\n"
 
     def test_a_hand_off_that_never_started_is_not_labelled(self):
