@@ -6,8 +6,9 @@ text and returns what the lines say, or refuses naming every gap. It decides
 nothing about the round; callers pass the role and specialty from the owner
 dispatch, never from the caller's own reading.
 
-Line forms (one per line; leading `-`, `*`, `>`, whitespace or backtick markup,
-and trailing backticks, are tolerated):
+Line forms (one per line; in a report a leading `-`, `*` or up to three spaces
+of indent, a line wrapped whole in one backtick span, and trailing backticks,
+are tolerated):
 
   VERDICT: blocking | approved
       Exactly one on a reviewer or tester report, and on a consultation whose
@@ -30,8 +31,20 @@ Refusal classes, each naming the gap: missing, duplicate (an identical repeat
 included), extra, N mismatch, malformed candidate. A candidate is any line whose
 unmarked text starts with one of the upper-case keywords above.
 
-`declared_contributions` reads the well-formed CONTRIBUTION values alone, gap or
-no gap, so a declared contribution is never lost to a refusal elsewhere.
+A report may quote the contract. These lines are illustrative, never contract
+lines and never `TRIGGER_DECLARATION` evidence (#737): lines inside a fenced code
+block (`` ``` `` or `~~~`, any info string), blockquote lines, lines indented four
+spaces or a tab, and lines opening with an inline code span that does not wrap
+the whole line. A fence left open runs to the end of the report. The same
+classification serves every report-body scanner: `report_lines`,
+`trigger_bindings` and, through them, the owners in `engagement.py` and
+`triggers.py`. Briefs are foreman-composed, not quoted, and keep their own
+tolerant scan (`brief_criteria`).
+
+`declared_contributions` reads the well-formed CONTRIBUTION values anywhere in
+the text, quoted or not, gap or no gap. It only ever adds an independence
+exclusion, so over-reading fails safe and a declared contribution is never lost
+to a refusal elsewhere.
 """
 
 import re
@@ -54,6 +67,14 @@ VERDICT_SPECIALTIES = frozenset({"security", "ux-product", "documentation"})
 CRITERIA_HEADING = "## Acceptance Criteria"
 
 _MARKUP = re.compile(r"^[\s>*`-]*")
+#: A fenced code block delimiter: up to three spaces, then three or more backticks or tildes.
+FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})(.*)$")
+#: Report-side leading markup: indent, list markers and quote marks; backticks are judged separately.
+_REPORT_MARKUP = re.compile(r"^[\s>*-]*")
+_INDENTED_CODE = re.compile(r"^(?: {4}|\t)")
+_CODE_SPAN = re.compile(r"^`([^`]+)`$")
+#: The prefix of the one structured evidence line a first trigger consultation reports.
+TRIGGER_PREFIX = "TRIGGER_DECLARATION: "
 _KEYWORD = re.compile(r"^(VERDICT|ACCEPTANCE|CONTRIBUTION|CRITERION)\b")
 _VERDICT = re.compile(r"^VERDICT: (\S+)$")
 _CONTRIBUTION = re.compile(r"^CONTRIBUTION: (\S+)$")
@@ -75,6 +96,66 @@ def _candidates(lines, keywords):
         if match and match.group(1) in keywords:
             found.append((number, match.group(1), text))
     return found
+
+
+def _unfenced(text):
+    """((line number, line) outside fenced code, opening line number of a fence left open or 0).
+
+    CommonMark fence grammar, the one `report_delivery.bare_final` also uses: a
+    closing delimiter repeats the opener's character at least as long with no
+    text after it. A backtick fence's info string holds no backtick, so
+    ```` ```a``` ```` is an inline span rather than an opener.
+    """
+    rows, fence, length, opened = [], "", 0, 0
+    for number, line in enumerate(text.splitlines(), 1):
+        match = FENCE.match(line)
+        if match:
+            run, tail = match.groups()
+            if fence:
+                if run[0] == fence and len(run) >= length and not tail.strip():
+                    fence = ""
+                continue
+            if run[0] != "`" or "`" not in tail:
+                fence, length, opened = run[0], len(run), number
+                continue
+        if not fence:
+            rows.append((number, line))
+    return rows, opened if fence else 0
+
+
+def _operative_text(line):
+    """A report line's contract text, or None when the line is quoted, indented code or inline-code prose."""
+    if _INDENTED_CODE.match(line):
+        return None
+    unmarked = _REPORT_MARKUP.sub("", line, count=1)
+    if ">" in line[:len(line) - len(unmarked)]:
+        return None
+    rest = unmarked.rstrip()
+    if rest.startswith("`"):
+        span = _CODE_SPAN.match(rest)
+        return span.group(1) if span else None
+    return rest.rstrip("`").rstrip()
+
+
+def _report_candidates(text, keywords):
+    """([(line number, keyword, unmarked text)], open fence line) for every operative report line starting with `keywords`."""
+    rows, opened = _unfenced(text)
+    found = []
+    for number, line in rows:
+        candidate = _operative_text(line)
+        match = _KEYWORD.match(candidate) if candidate is not None else None
+        if match and match.group(1) in keywords:
+            found.append((number, match.group(1), candidate))
+    return found, opened
+
+
+def trigger_bindings(text):
+    """Every operative `TRIGGER_DECLARATION: ` value in a report: an unfenced line starting at column 0.
+
+    Quoted, indented, list-prefixed, inline-code and fenced copies are examples.
+    This recognises lines only; `triggers.validate_bootstrap_binding` judges them.
+    """
+    return [line[len(TRIGGER_PREFIX):] for _number, line in _unfenced(text)[0] if line.startswith(TRIGGER_PREFIX)]
 
 
 def declared_contributions(text):
@@ -155,8 +236,8 @@ def report_lines(text, role, specialty=None, criteria=None):
     wants_verdict = verdict_required(role, specialty)
     limit = criteria if consultation and type(criteria) is int else 0
     gaps, verdicts, contributions, accepted = [], [], [], {}
-    for _number, keyword, candidate in _candidates(text.splitlines(),
-                                                   {"VERDICT", "ACCEPTANCE", "CONTRIBUTION", "CRITERION"}):
+    found, opened = _report_candidates(text, {"VERDICT", "ACCEPTANCE", "CONTRIBUTION", "CRITERION"})
+    for _number, keyword, candidate in found:
         if keyword == "CRITERION":
             gaps.append("extra CRITERION line {!r}: criteria belong to the brief, never the report".format(candidate))
         elif keyword == "VERDICT":
@@ -201,6 +282,8 @@ def report_lines(text, role, specialty=None, criteria=None):
         missing = [k for k in range(1, limit + 1) if k not in accepted]
         if missing:
             gaps.append("missing ACCEPTANCE {}".format(", ".join(str(k) for k in missing)))
+    if gaps and opened:
+        gaps.append("the code fence opened on line {} is never closed, so every line after it is illustrative".format(opened))
     if gaps:
         raise UsageError("The {} report does not meet its contract: {}. Record `needs_work` and send it back to "
                          "its responsibility with these gaps named; no assessment was recorded.".format(

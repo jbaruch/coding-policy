@@ -134,6 +134,11 @@ read-only round. Its report supplies one structured evidence line:
 TRIGGER_DECLARATION: {"repo":"/absolute/target/repo","base_revision":"<exact recorded task commit>","path":"/absolute/external/triggers.json","sha256":"<SHA-256 of reviewed bytes>"}
 ```
 
+Only a standalone line at column 0 is evidence. A copy in a fenced block, a
+blockquote, an indented block or inline code is documentation, not assessment
+authority (`foreman/report_contract.py` docstring), so a report may quote the
+schema above and still carry its one live line.
+
 The consultation worker records the artifact it actually reviewed; the foreman
 never writes approval evidence on its behalf. Normal `assess-specialist`
 validates the artifact and digest while recording the delivered report's

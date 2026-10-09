@@ -4,6 +4,32 @@
 
 ### Fixed
 
+- Report-body scanners no longer read illustrative text as operative metadata
+  (#737). A report may quote the contract in a fenced block (any info string,
+  backtick or tilde), a blockquote, a four-space or tab indented block, or
+  prose that opens with an inline code span, without that quote becoming a
+  `VERDICT`, `ACCEPTANCE`, `CONTRIBUTION`, `CRITERION` or `TRIGGER_DECLARATION`
+  line. One classification in `report_contract.py` serves `report_lines` and the
+  new `trigger_bindings`, which replaces the two private `startswith` scans in
+  `engagement.record_assessment` and `triggers.accepted_bootstrap`. The
+  motivating case was an architecture report that quoted a proposed five-key
+  `TRIGGER_DECLARATION` schema in a fence: the owner read it as the live binding
+  and refused the assessment, and a later advisor report that named the keywords
+  in inline code was refused as malformed lines. Standalone lines keep every
+  check: a malformed, duplicated or mismatched operative line is refused, a
+  well-formed four-key binding is still validated against its artifact bytes,
+  and one live line beside quoted examples counts once. A leading `>` no longer
+  makes a line operative, and a fence left open hides what follows it, which the
+  refusal now names. `declared_contributions` keeps reading quoted text, so a
+  contribution declared anywhere still adds its independence exclusion on a
+  refused report; briefs keep their tolerant `CRITERION` scan. `REPORT:` marker
+  matching is a different surface and is unchanged, except that it now shares
+  the fence delimiter pattern. Existing assessments and receipts are not
+  reinterpreted: a refused report is re-assessed under a new assessment id after
+  this ships.
+
+### Fixed
+
 - Retained disposable startup probes can recover after their native runtime
   creates its first session (#721). The owner preserves the original null
   observation and records the first session separately under unchanged process,
