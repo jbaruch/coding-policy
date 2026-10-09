@@ -76,7 +76,7 @@
 #             the live bottom of the same terminal session, and
 #             no report file (`found` false, `reason` terminal_provider_refusal).
 #             A supported native model/account error instead requires the
-#             source/session proof in foreman/model_unavailability.py and adds
+#             source/session proof in skills/herdr-foreman/foreman/model_unavailability.py and adds
 #             `unavailability` schema 1. Unknown formats remain unconfirmed.
 #             Save this JSON and record it with the launcher's `record-refusal`;
 #             never rephrase or synthesize the missing report. The bounded
@@ -488,8 +488,23 @@ confirmed_provider_refusal() { # <pane-id>
       warn "native model-error verification failed — restore the named evidence/tool before deciding this attempt's outcome"
       return 2
     fi
-    if [[ "$(printf '%s' "$result" | jq -r '.confirmed')" != true ]]; then return 1; fi
-    REFUSAL_UNAVAILABILITY="$(printf '%s' "$result" | jq -c '.unavailability')" || return 2
+    if ! result="$(printf '%s' "$result" | jq -rs '
+      if length != 1 then error("expected one native probe result") else .[0] end
+      | if type != "object" then error("expected a native probe object")
+        elif (.confirmed | type) != "boolean" then error("expected boolean confirmed")
+        elif .confirmed then
+          if keys != ["confirmed", "unavailability"] or (.unavailability | type) != "object"
+          then error("confirmed native probe needs an unavailability object")
+          else "true\n" + (.unavailability | tojson) end
+        elif keys != ["confirmed", "reason"] or (.reason | type) != "string" or .reason == ""
+        then error("unconfirmed native probe needs its reason")
+        else "false" end
+    ')"; then
+      warn "invalid probe output — reinstall the matching foreman helper and rerun the read-only wait before deciding this attempt's outcome"
+      return 2
+    fi
+    if [[ "$result" == false ]]; then return 1; fi
+    REFUSAL_UNAVAILABILITY="${result#*$'\n'}"
     info="$(agent_info "$AGENT")" || return 2
     REFUSAL_STATE="${info%% *}"; REFUSAL_PANE="${info##* }"
     if [[ "$REFUSAL_PANE" != "$1" || ( "$REFUSAL_STATE" != idle && "$REFUSAL_STATE" != "done" ) \

@@ -366,7 +366,7 @@ class PublicWaitErrorTests(unittest.TestCase):
         self.fixture = self.root / "pane.json"
         self.calls = self.root / "calls.jsonl"
 
-    def wait(self, kind, rows, *, occupied=False, error_on=None):
+    def wait(self, kind, rows, *, occupied=False, error_on=None, helper_output=None):
         native = {"source": "herdr:" + kind, "agent": kind, "kind": "id", "value": SESSION}
         pane = {"pane_id": "w1:p1", "agent_status": "done", "agent": kind, "name": "worker",
                 "agent_session": native, "terminal_id": "terminal-724", "revision": 8,
@@ -385,7 +385,19 @@ class PublicWaitErrorTests(unittest.TestCase):
             "CODEX_HOME": str(self.root / "codex"), "CLAUDE_CONFIG_DIR": str(self.root / "claude"),
             "XDG_STATE_HOME": str(self.root / "empty-state"), "XDG_CONFIG_HOME": str(self.root / "empty-config"),
             "FOREMAN_REFUSAL_CONFIRM_SEC": "0", "FOREMAN_WAIT_BUDGET_SEC": "5400"}
-        result = subprocess.run(["bash", str(ROOT / "wait-report.sh"), "--once", "worker", str(self.report)],
+        script = ROOT / "wait-report.sh"
+        if helper_output is not None:
+            isolated_skill = self.root / "helper-fault-skill"
+            isolated_skill.mkdir(exist_ok=True)
+            script = isolated_skill / "wait-report.sh"
+            script.write_bytes((ROOT / "wait-report.sh").read_bytes())
+            (isolated_skill / "foreman.sh").write_text(
+                '#!/usr/bin/env bash\nset -euo pipefail\n'
+                'if [[ "$1" == probe-unavailable ]]; then\n'
+                '  printf "%s\\n" "$CP724_HELPER_OUTPUT"\n'
+                'else\n  bash "$CP724_REAL_FOREMAN" "$@"\nfi\n')
+            env.update(CP724_HELPER_OUTPUT=helper_output, CP724_REAL_FOREMAN=str(ROOT / "foreman.sh"))
+        result = subprocess.run(["bash", str(script), "--once", "worker", str(self.report)],
                                 capture_output=True, text=True, env=env, timeout=20)
         calls = [json.loads(line) for line in self.calls.read_text().splitlines()]
         self.assertFalse(any(call[:2] in (["agent", "prompt"], ["pane", "send-keys"], ["pane", "send-text"],
@@ -419,6 +431,17 @@ class PublicWaitErrorTests(unittest.TestCase):
         self.assertEqual(result.returncode, 2)
         self.assertEqual(result.stdout, "")
         self.assertIn("verification failed", result.stderr)
+
+    def test_malformed_probe_stdout_is_tool_fault_never_pending_or_legacy_refusal(self):
+        for output in ("", "not-json", "{}", "[]", '{"confirmed":"true","unavailability":{}}',
+                       '{"confirmed":true}', '{"confirmed":true,"unavailability":null}',
+                       '{"confirmed":true,"unavailability":[]}', '{"confirmed":false}',
+                       '{"confirmed":false,"reason":"unknown"}\n{"confirmed":false,"reason":"unknown"}'):
+            with self.subTest(output=output):
+                result, _ = self.wait("codex", codex_rows(), helper_output=output)
+                self.assertEqual(result.returncode, 2, result.stderr)
+                self.assertEqual(result.stdout, "")
+                self.assertIn("invalid probe output", result.stderr)
 
 
 class PublicOwnerModelErrorTests(CliCase):
