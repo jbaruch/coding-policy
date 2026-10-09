@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.388 — 2026-10-09
+
 ### Fixed
 
 - Native Codex model/account rejection and Claude model-not-found errors now
