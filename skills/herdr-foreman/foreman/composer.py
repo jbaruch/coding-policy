@@ -631,17 +631,13 @@ def _settle_fresh_composer(client, agent, pane_id, observe, sleep, warn):
         # dynamic dim hints have no static allowlist; Codex recalled input
         # remains occupied under its explicit placeholder policy.
         exact = not composer.occupied
-        # Only a single placeholder row with decorative non-word marks may
-        # settle. Recalled paragraphs and arbitrary dim input remain drafts.
-        decorated = (composer.dim and "\n" not in (composer.literal or "") and any(
-            (composer.literal or "").strip().startswith(hint.strip())
-            and (composer.literal or "").strip()[len(hint.strip()):].strip()
-            and all(char.isspace() or char in "✦✧✶✷✸✹✺✻✼✽✾✿⋆*" for char in
-                    (composer.literal or "").strip()[len(hint.strip()):])
-            for hint in agent.composer_placeholders))
-        if not exact and not decorated:
+        # Native startup paint can overlap the hint with colored particles.
+        # Observe without trusting those characters or clearing any input.
+        # Only the runtime's actual empty classification advances readiness.
+        if not exact and attempt + 1 == FRESH_COMPOSER_ATTEMPTS:
             raise _fresh_startup_error("startup_input_occupied", "Fresh startup contains a draft or dialog; no input was sent.",
-                {"pane_id": pane_id, "composer_occupied": True, "dim": composer.dim, "placeholder": composer.placeholder, "ansi_read": composer.ansi})
+                {"pane_id": pane_id, "composer_occupied": True, "dim": composer.dim,
+                 "placeholder": composer.placeholder, "ansi_read": composer.ansi, "attempts": FRESH_COMPOSER_ATTEMPTS})
         stable = stable + 1 if exact else 0
         if stable >= FRESH_COMPOSER_STABLE_READS:
             return text

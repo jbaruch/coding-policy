@@ -811,7 +811,8 @@ class PlanCommandTest(CliCase):
                 "--task", "t-interrupt", "--now", AT, "--common", str(self.common)]
                 + self.brief_args("developer", "reviewer") + self._interrupt_reports(), client=client)
         self.assertEqual(code, 1, err)
-        self.assertIn("read-only startup bound", err)
+        self.assertIn('"failure_kind": "startup_input_occupied"', err)
+        self.assertIn(f'"attempts": {composer.FRESH_COMPOSER_ATTEMPTS}', err)
         self.assertEqual(out, "")
         client.agent_prompt.assert_not_called()
         client.pane_send_keys.assert_not_called()
