@@ -25,7 +25,7 @@ keeps the legacy unchecked path.
 import re
 import time
 
-from .errors import HerdrError, owner_recovery
+from .errors import HerdrError, IDENTIFIER_UNAVAILABLE_KIND, IDENTIFIER_UNAVAILABLE_RECOVERY, owner_recovery
 from . import runnable
 from .parsers import BOX_FRAME
 from .probe import stderr_warn
@@ -594,6 +594,66 @@ def _fresh_startup_error(kind, message, evidence):
         "The apply owner must prove owned pre-send cleanup and durable not_sent before retrying the unchanged assignment; unknown input remains blocked.")
 
 
+#: The provider's notice for a launched model identifier the account cannot
+#: call (Claude Code's `model_not_found`), as one bare row. `wait-report.sh`
+#: owns the same predicate for the post-send wait
+#: (`IDENTIFIER_NOTICE_PATTERN`); keep the two spellings aligned.
+IDENTIFIER_UNAVAILABLE_ROW = re.compile(
+    r"^(?:(?:\u23fa|\u23bf)\s+)?There.s an issue with the selected model \(([A-Za-z0-9._:/-]+)\)\. "
+    r"It may not exist or you may not have access to it\.(?: Run /model to pick a different model\.)?$")
+
+
+_NOTICE_FENCE = re.compile(r"^(`{3,}|~{3,})")
+_NOTICE_BORDER = re.compile(r"^[─━╭╮╰╯┌┐└┘│\s]+$")
+#: Rows that may follow the notice: Claude's plain composer row (any content;
+#: `_settle_fresh_composer` refuses an occupied one before it classifies), its
+#: boxed composer row only when empty, and the shortcut footer. Anything else is later content.
+_NOTICE_TRAILER = re.compile(r"^[❯›](?:\s.*)?$|^│\s*[❯›]\s*│?$|^\? for shortcuts$")
+
+
+def identifier_unavailable_model(pane_text):
+    """The model id of the provider's identifier-unavailable notice, or None.
+
+    Parity with `wait-report.sh` `terminal_refusal_on_screen`: the notice must
+    be one bare row that is the last content on screen. Quoted, fenced and
+    indented rows, and a notice followed by later content, are examples or
+    stale history and never classify a launch.
+    """
+    model, fence, fence_length = None, "", 0
+    for row in strip_ansi(pane_text).splitlines():
+        trimmed = row.strip()
+        if not trimmed:
+            continue
+        if row.startswith("    ") or "\t" in row:
+            model = None
+            continue
+        opener = _NOTICE_FENCE.match(trimmed)
+        if opener:
+            run = opener.group(1)
+            if not fence:
+                fence, fence_length = run[0], len(run)
+            elif run[0] == fence and not trimmed[len(run):].strip() and len(run) >= fence_length:
+                fence = ""
+            model = None
+            continue
+        if fence:
+            continue
+        match = IDENTIFIER_UNAVAILABLE_ROW.match(trimmed)
+        if match:
+            model = match.group(1)
+        elif model is not None and not (_NOTICE_BORDER.match(trimmed) or _NOTICE_TRAILER.match(trimmed)):
+            model = None
+    return model
+
+
+def identifier_unavailable_error(agent, pane_id, model):
+    """Pre-input startup refusal: the launched model id is the stale part."""
+    return owner_recovery(
+        HerdrError("Fresh startup for {} in {} shows the provider's model-unavailable notice for {}; nothing was sent.".format(
+            agent.name, pane_id, model), {"agent": agent.name, "pane_id": pane_id, "model": model}),
+        IDENTIFIER_UNAVAILABLE_KIND, runnable.command("plan"), IDENTIFIER_UNAVAILABLE_RECOVERY)
+
+
 def startup_pending_error(agent, pane_id):
     """No authority decision: leave this named pre-input UI for its owner."""
     return _fresh_startup_error("startup_dialog_pending",
@@ -611,6 +671,12 @@ def _settle_fresh_composer(client, agent, pane_id, observe, sleep, warn):
         composer = inspect_composer(text, agent, ansi=ansi)
         if observe() != original:
             raise _fresh_startup_error("startup_identity_changed", "Fresh worker changed pane, process or tier during startup; nothing was sent.", {"pane_id": pane_id})
+        # An occupied composer is the stronger evidence: a draft or dialog is
+        # never provider evidence, so it takes the occupied path below.
+        if agent.kind == "claude" and not (composer.visible and composer.occupied):
+            model = identifier_unavailable_model(text)
+            if model is not None:
+                raise identifier_unavailable_error(agent, pane_id, model)
         # The native hook-review menu uses the same glyph as Codex's composer.
         # Recognizing its UI preserves the target, not permission to trust it.
         rows = [row.strip() for row in strip_ansi(text).splitlines()]

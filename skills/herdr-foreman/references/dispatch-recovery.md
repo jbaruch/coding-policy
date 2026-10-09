@@ -180,6 +180,22 @@ arbitrary process fields and argv. Preserve it with the original error receipt;
 it grants no input, retry or replacement authority. Older receipts without this
 field supply no causal observations; do not backfill or infer their cause.
 
+For `model_identifier_unavailable` at fresh startup, the provider's notice
+named a model id the account cannot call before any input. The owner closes
+the pane and records `not_sent` as for any pre-send failure; `details.model`
+names the id and `details.recovery` names `plan` instead of a retry. Repeating
+the identical apply launches the same unavailable id, so follow
+`skills/herdr-foreman/references/model-tiers.md` Launch Failure Maintenance
+first. The predicate is `identifier_unavailable_model` in
+`skills/herdr-foreman/foreman/composer.py`; it accepts only a bare notice row
+that is the last content on screen, never a fenced, indented or stale one.
+
+A native `agent_start` that fails with a trusted identifier code takes the
+same `plan` recovery, and one that fails with an enumerated transient code
+(`failure_kind: launch_transient`) takes the identical retry. Both close the
+owned pane with nothing sent, and write no refusal, capability or provider
+change.
+
 For `startup_dialog_pending`, the foreman reads the retained native pane and
 follows `skills/herdr-foreman/references/herdr.md` Runtime Dialogs. Review the
 specific hook source and command against the authorized installation; resolve
@@ -679,9 +695,23 @@ lock file can remain after exit; do not delete it to bypass an active lock.
   Recording, the same-provider refusal, the single move and the stop are the
   owner's contract; see `skills/herdr-foreman/foreman/recovery.py`,
   `record_refusal` and `refusal_move`.
+- **Exit 6** — `reason: model_identifier_unavailable` with `found: false`: the
+  launched model identifier is unavailable to this account and no model turn
+  ran. This is seat-local model maintenance on the same provider, never a
+  provider refusal:
+  - Do not run `record-refusal`; it refuses this receipt, records nothing and
+    spends no refusal slot.
+  - Keep every review/release gate unsatisfied. Preserve the task, original
+    base, correction count, artifacts and the dispatch as recorded.
+  - Follow `skills/herdr-foreman/references/model-tiers.md` Launch Failure
+    Maintenance, then dispatch the affected seat again on the repaired row
+    with a fresh report path. Plan mints a fresh seat identity, so the new
+    dispatch is distinct from the failed one.
+  - Other callable rows, the provider and every `capabilities` entry stay
+    unchanged.
 
-`wait-report.sh` owns refusal confirmation; see its header and
-`confirmed_provider_refusal`. Missing terminal evidence keeps the ordinary
+`wait-report.sh` owns refusal confirmation, for exit 5 and exit 6 alike; see its
+header and `confirmed_provider_refusal`. Missing terminal evidence keeps the ordinary
 wait. The read-only `foreman probe-unavailable` command takes `--agent`, `--pane`,
 absolute `--report`, positive `--lines` and the observed visible text on stdin.
 It needs no config/state home. It emits `{confirmed: false, reason}` for unknown

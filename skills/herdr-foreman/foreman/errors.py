@@ -87,3 +87,27 @@ def owner_recovery(error, kind, operation, condition, *, outcome="blocked", **ev
     error.message = "{} Next owner operation: `{}`. {}".format(message, operation, condition)
     error.args = (error.message,)
     return error
+
+
+#: `failure_kind` and `wait-report.sh` exit-6 reason for a launched model
+#: identifier the account cannot call. Seat-local model maintenance on the SAME
+#: provider: the identifier is the suspect, not the provider, so no
+#: whole-provider exclusion, capability-list edit or refusal record follows (#733).
+IDENTIFIER_UNAVAILABLE_KIND = "model_identifier_unavailable"
+IDENTIFIER_UNAVAILABLE_RECOVERY = (
+    "The launched model identifier is unavailable to this account. Check the provider's current catalog, the "
+    "installed CLI's model and flag spellings, and this account's actual access; repair that exact configured "
+    "row (or a verified same-family successor) in the operator's config; validate the repaired row by planning the "
+    "seat again; then dispatch the affected seat. The provider, the other callable rows, the task, its original base, its correction "
+    "count and its artifacts stay as recorded.")
+
+
+#: Trusted structured `agent_start` error codes. Only Herdr's own code field
+#: counts; provider prose in the same payload never classifies a failure.
+IDENTIFIER_ERROR_CODES = frozenset({"model_not_found", "unsupported_model"})
+#: `failure_kind` for a native start that failed on a 5xx class server error
+#: before any input. A start timeout or transport error may already have sent
+#: input, so it stays unclassified. The class takes the bounded retry, never a model retirement.
+TRANSIENT_LAUNCH_KIND = "launch_transient"
+TRANSIENT_LAUNCH_ERROR_CODES = frozenset({
+    "service_unavailable", "bad_gateway", "gateway_timeout", "internal_error", "overloaded"})

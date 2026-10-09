@@ -17,7 +17,9 @@ import time
 
 from .config import assignment_worker
 from .composer import ensure_ready, startup_pending_error
-from .errors import ForemanError, HerdrError, StartShellNotReadyError, UsageError, owner_recovery
+from .errors import (IDENTIFIER_ERROR_CODES, IDENTIFIER_UNAVAILABLE_KIND, IDENTIFIER_UNAVAILABLE_RECOVERY,
+                     TRANSIENT_LAUNCH_ERROR_CODES, TRANSIENT_LAUNCH_KIND, ForemanError, HerdrError,
+                     StartShellNotReadyError, UsageError, owner_recovery)
 from .herdr import READY_STATES, error_code, format_argv, scrub_for_trace
 from .launch import (foreground_identity_evidence, holds_initializing_shell, holds_only_shell,
                      require_empty_shell, start_worker, verify_running)
@@ -117,6 +119,31 @@ def _await_fresh_shell(client, pane, sleep, provisional=None):
     )
 
 
+def _classified_start_error(exc, worker, pane, tier):
+    """Name a trusted structured native-start failure, else return it unchanged.
+
+    Herdr's own error code is the only authority. The row's model rides along
+    as evidence; provider prose never classifies and never reaches the model
+    field. No refusal, capability change or provider exclusion follows either
+    class: the identifier is seat-local maintenance, an enumerated 5xx code
+    retries, and a timeout or transport error stays blocked (input may be sent).
+    """
+    code = error_code(exc)
+    evidence = {"agent": worker.name, "pane_id": pane, "error_code": code, "model": tier.get("model")}
+    if code in IDENTIFIER_ERROR_CODES:
+        return owner_recovery(
+            HerdrError("Native start for {} in {} reported {} for model {}; nothing was sent.".format(
+                worker.name, pane, code, tier.get("model")), {**evidence, "primary_error": exc.to_dict()}),
+            IDENTIFIER_UNAVAILABLE_KIND, runnable.command("plan"), IDENTIFIER_UNAVAILABLE_RECOVERY)
+    if code in TRANSIENT_LAUNCH_ERROR_CODES:
+        return owner_recovery(
+            HerdrError("Native start for {} in {} failed with transient error {}; nothing was sent.".format(
+                worker.name, pane, code), {**evidence, "primary_error": exc.to_dict()}),
+            TRANSIENT_LAUNCH_KIND, runnable.command("apply"),
+            "The owned pane is closed and nothing was sent. Repeat the identical apply; the model, provider and capability record are unchanged.")
+    return exc
+
+
 def _start_fresh_worker(client, worker, pane, tier, shell, before_start, sleep):
     """Bound late login-shell forks and Herdr's atomic pre-input busy refusal.
 
@@ -163,7 +190,10 @@ def _start_fresh_worker(client, worker, pane, tier, shell, before_start, sleep):
                             verify_running(client, worker, pane, tier)
                             return
                     if error_code(exc) != "agent_pane_busy":
-                        raise
+                        classified = _classified_start_error(exc, worker, pane, tier)
+                        if classified is exc:
+                            raise
+                        raise classified from exc
                     native_error = error_code(exc)
                     client.require_start_retry_compatibility()
                 else:
@@ -284,6 +314,8 @@ def spawn(client, worker, tier, *, cwd=None, history=None, before_start=None, ow
             else:
                 if isinstance(primary, ForemanError):
                     primary.details["pane_closure"] = closure
+                    # Proof for the apply owner: the failed spawn's own pane is closed.
+                    primary.details["spawn_pane_closed"] = pane
     return pane
 
 

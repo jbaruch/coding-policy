@@ -14,7 +14,7 @@ from fnmatch import fnmatchcase
 from pathlib import Path, PurePosixPath
 
 from . import runnable
-from .errors import UsageError
+from .errors import IDENTIFIER_UNAVAILABLE_KIND, IDENTIFIER_UNAVAILABLE_RECOVERY, UsageError
 from .chronology import assignment_after, latest_assignment, timestamp
 from .oracle import bound_oracle_problem
 from .report_contract import report_lines
@@ -1580,6 +1580,11 @@ def record_refusal(store, data, at, provider, report, aliases=(), *, binding=Non
         payload = json.loads(body)
     except ValueError as exc:
         raise UsageError("Refusal receipt {} is not wait-report JSON: {}. Save the exact exit-5 output.".format(data["receipt"], exc), {}) from None
+    if isinstance(payload, dict) and payload.get("reason") == IDENTIFIER_UNAVAILABLE_KIND:
+        raise UsageError(
+            "Receipt reason {} is seat-local model maintenance, not a provider refusal; nothing was recorded and the provider stays "
+            "eligible. {}".format(IDENTIFIER_UNAVAILABLE_KIND, IDENTIFIER_UNAVAILABLE_RECOVERY),
+            {"reason": IDENTIFIER_UNAVAILABLE_KIND})
     # Every field is typed before any membership test: a receipt holding a
     # list or object would raise TypeError on an unhashable value, and saved
     # evidence must fail as a usage error (#403).

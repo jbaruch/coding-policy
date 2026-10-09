@@ -22,8 +22,13 @@ from .errors import ConfigError, HerdrError, UsageError
 #: `capability-check` reports the capability table due (`capabilities.INTERVAL`),
 #: and bump one only with a CHANGELOG note citing the table entry that moved it;
 #: never rewrite this set from a model's own report (#520).
+#: Claude carries the provider catalog's same-family successor
+#: `claude-opus-5-5` beside the stale ids so a config still naming them parses
+#: until launch-failure recovery rewrites the row (#733). `opus-6` and
+#: `claude-opus-6` stay out: the catalog lists neither and the native launch
+#: answers `model_not_found`.
 TOP_MODELS = {
-    "claude": frozenset({"opus-5", "claude-opus-5"}),
+    "claude": frozenset({"opus-5", "claude-opus-5", "claude-opus-5-5"}),
     "codex": frozenset({"gpt-5.6-sol"}),
     "grok": frozenset({"grok-4.6"}),
 }

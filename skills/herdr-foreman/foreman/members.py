@@ -319,7 +319,7 @@ def wait_inputs(state_path, enrollment, warn=None):
 
 #: wait-report.sh's checkpoint verdicts. Any other exit, 2 above all, is a
 #: usage, precondition or tool failure of the wait itself.
-VERDICT_EXITS = frozenset({0, 1, 3, 4, 5})
+VERDICT_EXITS = frozenset({0, 1, 3, 4, 5, 6})
 
 
 def check(state_path, enrollment, worktree=None, *, run=subprocess.run, warn=None):

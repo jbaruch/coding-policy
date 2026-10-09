@@ -460,7 +460,7 @@ class CheckMemberCliTest(MembersCase):
         return rc, _json.loads(out.getvalue()), err.getvalue()
 
     def test_a_verdict_exits_zero_with_it_in_the_payload(self):
-        for code in (0, 1, 3, 4, 5):
+        for code in (0, 1, 3, 4, 5, 6):
             with self.subTest(code=code):
                 rc, payload, _ = self.run_cli(code)
                 self.assertEqual((rc, payload["exit"]), (0, code))

@@ -41,7 +41,7 @@
 #           leaves stdout empty (its diagnostic is on stderr) —
 #           {"agent":"<n>","state":"<s>","report_path":"<p>",
 #            "found":<bool>,"elapsed_seconds":<int>}
-#           plus "reason":"<why>" on exits 4 and 5.
+#           plus "reason":"<why>" on exits 4, 5 and 6.
 #   stderr: diagnostics and per-attempt progress.
 #   exit  : 0 report found (`found` true),
 #           1 pending checkpoint with --once; otherwise wait budget exhausted
@@ -81,7 +81,17 @@
 #             Save this JSON and record it with the launcher's `record-refusal`;
 #             never rephrase or synthesize the missing report. The bounded
 #             move to another provider is dispatch-recovery.md's Wait
-#             outcomes, enforced by `apply`.
+#             outcomes, enforced by `apply`,
+#           6 this attempt's report is unavailable because the launched model
+#             identifier is unavailable: the same two-observation, empty
+#             composer, no report file conditions as exit 5, with the
+#             provider's identifier notice (Claude: "There's an issue with the
+#             selected model (<id>). It may not exist or you may not have
+#             access to it.") as the terminal row (`found` false, `reason`
+#             model_identifier_unavailable). Seat-local model maintenance on
+#             the SAME provider, never a provider refusal: do not run
+#             `record-refusal`. dispatch-recovery.md Wait outcomes owns the
+#             recovery.
 #   env   : HERDR_ENV must be 1. HERDR_BIN overrides the herdr binary.
 #           Poll interval, give-up budget, and the pane-probe parameters are
 #           the named constants below (rules/ci-safety.md Always Watch CI —
@@ -382,8 +392,16 @@ report_marker_on_screen() { # <pane-text> <absolute-report-path>
 # composer. Quoted/fenced examples, occupied composers, later messages, and
 # working footers cannot establish a terminal refusal. Unknown UI shapes keep
 # the ordinary wait; this parser never guesses at a provider's hidden output.
+#
+# Two notice classes qualify: withheld content (TERMINAL_NOTICE=refusal) and a
+# launched model identifier the account cannot call
+# (TERMINAL_NOTICE=identifier_unavailable). They share every positional and
+# confirmation condition and differ only in what recovery they owe.
+IDENTIFIER_NOTICE_PATTERN='^((⏺|⎿)[[:blank:]]+)?There.s an issue with the selected model \(([A-Za-z0-9._:/-]+)\)\. It may not exist or you may not have access to it\.( Run /model to pick a different model\.)?$'
+TERMINAL_NOTICE=""
 terminal_refusal_on_screen() { # <visible-pane-text>
-  local row trimmed run tail content fence="" fence_length=0 notice=0 composer=0
+  local row trimmed run tail content fence="" fence_length=0 notice=0 composer=0 kind=""
+  TERMINAL_NOTICE=""
   local fence_pattern='^(`{3,}|~{3,})'
   local border_pattern='^[─━╭╮╰╯┌┐└┘│[:blank:]]+$'
   while IFS= read -r row; do
@@ -405,9 +423,13 @@ terminal_refusal_on_screen() { # <visible-pane-text>
       continue
     fi
     [[ -z "$fence" ]] || continue
+    if [[ "$trimmed" =~ $IDENTIFIER_NOTICE_PATTERN ]]; then
+      notice=1; composer=0; kind="identifier_unavailable"
+      continue
+    fi
     case "$trimmed" in
       "This content can't be shown"|"This content can't be shown.")
-        notice=1; composer=0
+        notice=1; composer=0; kind="refusal"
         continue
         ;;
       '›'|'❯'|'› Ask Codex to do anything')
@@ -428,7 +450,11 @@ terminal_refusal_on_screen() { # <visible-pane-text>
     if [[ "$trimmed" =~ $border_pattern ]]; then continue; fi
     notice=0; composer=0
   done <<< "$1"
-  (( notice == 1 && composer == 1 ))
+  if (( notice == 1 && composer == 1 )); then
+    TERMINAL_NOTICE="$kind"
+    return 0
+  fi
+  return 1
 }
 
 read_refusal_view() { # <pane-id>
@@ -861,6 +887,11 @@ main() {
       state="${REFUSAL_STATE:-$state}"; pane="${REFUSAL_PANE:-$pane}"
       if (( rc == 0 )); then
         now="$(date +%s)"
+        if [[ "$TERMINAL_NOTICE" == "identifier_unavailable" ]]; then
+          emit "$REFUSAL_STATE" false "$(( now - start ))" "model_identifier_unavailable"
+          warn "${AGENT}: report unavailable because its launched model identifier is unavailable — this is seat-local model maintenance on the same provider, not a provider refusal: do not run record-refusal, do not rephrase the brief or synthesize a report; keep review/release gates unsatisfied, preserve the task, original base, correction count and artifacts, then follow dispatch-recovery.md Wait outcomes (Exit 6): check the provider catalog, the installed CLI and this account's access, repair that exact row, and re-plan the affected seat"
+          return 6
+        fi
         emit "$REFUSAL_STATE" false "$(( now - start ))" "terminal_provider_refusal" null "$REFUSAL_UNAVAILABILITY"
         if ! resolve_skill_dir; then return 2; fi
         local launcher="${SKILL_DIR}/foreman.sh"

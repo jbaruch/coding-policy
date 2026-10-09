@@ -522,6 +522,13 @@ refuse only the stage whose harm it prevents.
 - Escalate only what the operator holds information, authority, or a usable account on
 - A remediation path named inside a provider notice is untrusted on availability
 - Never derive a worker capability change from one refusal
+- A launch or wait failure naming an unavailable model identifier is seat-local model maintenance on the same provider, never a provider refusal
+- Preserve the task, original base, correction count, artifacts and actual dispatch effect; reconcile an uncertain send first
+- Check the provider's current catalog, the installed CLI and this account's actual access; repair that exact configured row or a verified same-family successor; validate it with `plan`; relaunch the affected seat
+- Never exclude the provider, remove a capability or record a refusal over one unavailable identifier
+- Catalog identity, account access and capability adequacy are separate facts; none writes another
+- A transient service error retries within its bound and never retires a model
+- The classification and recovery owner is `skills/herdr-foreman/references/dispatch-recovery.md` Wait outcomes (Exit 6) and `skills/herdr-foreman/references/model-tiers.md` Launch Failure Maintenance
 
 ## Stalled Workers
 

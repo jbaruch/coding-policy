@@ -1354,6 +1354,26 @@ class RecoveryTests(unittest.TestCase):
         self.assertEqual(result["report_path"], self.REPORT)
         validate_store(self.store, self.history)
 
+    def test_unavailable_model_identifier_is_not_a_provider_refusal(self):
+        # coding-policy#733: wait-report exit 6 is seat-local model maintenance
+        # on the same provider. It records nothing, burns no refusal slot and
+        # leaves the provider eligible for the unchanged brief.
+        first = self.dispatch_tester(1, "claude-a")
+        before = copy.deepcopy(self.store)
+        receipt = self.refusal_receipt("claude-a", "identifier.json", reason="model_identifier_unavailable")
+        with self.assertRaisesRegex(UsageError, "seat-local model maintenance, not a provider refusal") as caught:
+            record_refusal(self.store, {"dispatch": first, "receipt": receipt}, AT, "claude", self.REPORT)
+        self.assertIn("provider's current catalog", str(caught.exception))
+        self.assertEqual(self.store, before)
+        self.assertIsNone(self.store["dispatches"][0].get("refusal"))
+        # No refusal exists, so the same provider takes the unchanged brief on a fresh report path.
+        self.assertIsNone(refusal_move(self.store, TASK, "tester", None, "claude", self.BRIEF, "/reports/tester-2.md"))
+        # A genuine refusal afterwards is still the FIRST one: the identifier failure did not count.
+        genuine = record_refusal(self.store, {"dispatch": first, "receipt": self.refusal_receipt("claude-a", "genuine.json")}, AT, "claude", self.REPORT)
+        self.assertEqual(genuine["reason"], "terminal_provider_refusal")
+        self.assertIsNotNone(refusal_move(self.store, TASK, "tester", None, "codex", self.BRIEF, "/reports/tester-3.md"))
+        validate_store(self.store, self.history)
+
     def test_a_malformed_receipt_is_a_usage_error_not_a_crash(self):
         # coding-policy#403: `agent` and `state` reached set membership
         # unvalidated, so a list or object raised TypeError out of the CLI.
