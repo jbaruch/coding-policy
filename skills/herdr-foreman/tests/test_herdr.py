@@ -130,6 +130,15 @@ class ArgvBuilderTest(unittest.TestCase):
                 self.assertEqual(len(runner.calls), 1)
                 self.assertEqual(runner.calls[0][1:3], ["workspace", "create"])
 
+    def test_workspace_environment_is_scoped_to_the_new_root(self):
+        runner = FakeRunner()
+        runner.set("workspace create", json.dumps({"result": {"root_pane": {"pane_id": "w7:p9"}}}))
+        client = HerdrClient(binary="herdr", runner=runner)
+        self.assertEqual(client.workspace_create(cwd="/work tree", label="probe-fixed",
+            env=("CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION=false",)), "w7:p9")
+        self.assertEqual(runner.calls, [["herdr", "workspace", "create", "--cwd", "/work tree",
+            "--label", "probe-fixed", "--no-focus", "--env", "CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION=false"]])
+
     def test_pane_wait_output_with_regex(self):
         self.assertEqual(
             self.client.argv_pane_wait_output(

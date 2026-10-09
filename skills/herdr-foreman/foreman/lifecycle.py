@@ -39,6 +39,13 @@ FRESH_SHELL_READY_READS = 2
 PROBE_FAILURE_READ_LINES = 16
 PROBE_HISTORY_BYTES = 1200
 
+#: Disable native predicted-input decoration only in disposable Claude probes.
+#: Unstyled native Try hints otherwise cannot be distinguished from drafts.
+#: No composer classification or assignment-worker settings are weakened.
+#: Claude Code >=2.1.238 documents this session override:
+#: https://code.claude.com/docs/en/env-vars#variables
+CLAUDE_PROBE_ENV = ("CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION=false",)
+
 
 def _fresh_shell_info(client, pane, expected_shell=None, *, allow_absent_foreground=False):
     """Read a fresh pane's process evidence, rejecting malformed/replaced shells.
@@ -207,7 +214,7 @@ def spawn_commands(client, worker, tier, *, cwd=None):
     return [create, client.argv_agent_start(worker.name, worker.kind, pane, flags)]
 
 
-def spawn(client, worker, tier, *, cwd=None, history=None, before_start=None, sleep=time.sleep):
+def spawn(client, worker, tier, *, cwd=None, history=None, before_start=None, sleep=time.sleep, workspace_env=()):
     """Create an unfocused workspace, prove a first-launch shell, start one worker, and prove its tier."""
     if not isinstance(history, (list, tuple)):
         raise UsageError(
@@ -220,7 +227,8 @@ def spawn(client, worker, tier, *, cwd=None, history=None, before_start=None, sl
                 worker.name),
             {"agent": worker.name},
         )
-    pane = client.workspace_create(cwd=cwd or os.getcwd(), label=worker.name, focus=False)
+    workspace_options = {"env": workspace_env} if workspace_env else {}
+    pane = client.workspace_create(cwd=cwd or os.getcwd(), label=worker.name, focus=False, **workspace_options)
     completed = False
     try:
         # This is the lifecycle's first-launch carve-out: live process evidence
@@ -429,7 +437,8 @@ def measure_worker_kinds(client, templates, measured_at, *, state_path=None, con
                 raise probe_recovery.diagnostic(state_path, prior, herdr_bin=binary)
             if not isinstance(tier, dict):
                 raise UsageError("Worker kind {!r} has no coordination tier for its disposable usage probe.".format(template.name), {})
-            pane = spawn(client, probe, tier, history=(), sleep=options.get("sleep", time.sleep))
+            pane = spawn(client, probe, tier, history=(), sleep=options.get("sleep", time.sleep),
+                workspace_env=CLAUDE_PROBE_ENV if probe.kind == "claude" else ())
             original = _prepare_fresh_probe(client, probe, pane, tier, sleep=options.get("sleep", time.sleep), warn=options.get("warn"))
             startup = False
             snapshot = measure(client, [probe], measured_at,

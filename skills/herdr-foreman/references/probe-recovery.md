@@ -36,6 +36,14 @@ unknown capacity for the affected worker kind/billing window without launching
 another probe; independent windows can still be measured. This recovery creates
 no dispatch, task acceptance, quota estimate or correction attempt.
 
+Normal measure suppresses predicted-input decoration in its disposable Claude
+workspace through the session environment owned by
+`skills/herdr-foreman/foreman/lifecycle.py` (`CLAUDE_PROBE_ENV`). It does not
+change global/project settings or assignment workers. A remaining hint or
+draft still takes the ordinary occupied-composer refusal; the override never
+establishes empty input on its own. Other runtime probes retain their launch
+environment and the same input/identity guards.
+
 ## Durable Schema
 
 Owner and sole writer: `herdr-foreman`, through
