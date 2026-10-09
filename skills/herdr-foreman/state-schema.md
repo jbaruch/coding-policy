@@ -612,7 +612,7 @@ document and arrives already stamped.
 
 ## Recovery records
 
-The recovery document uses `schema_version: 16`; individual records retain their
+The recovery document uses `schema_version: 17`; individual records retain their
 independent versions. Version 6 adds the dispatch fields `brief_identity`, `refusal` and
 `refusal_move` and the `refusal_authorizations` collection; version 7 adds the
 dispatch's send-time `provider`; version 8 adds the `diagnoses` collection;
@@ -642,7 +642,16 @@ dispatch/result records use version 4. Version 16 adds dispatch/result version 5
 `{schema_version: 1, kind, window_group, worker_kind}` frozen before input:
 `window_group` is the operator-declared shared account/window; a blank value
 binds only the original worker template. It is not authenticated account-ID
-evidence. Version-5 rows may carry the existing composition, judge and scoped
+evidence. Version 17 adds `launch_transient_failure` audit events with a
+digest-bound seat scope and consecutive `attempt`. The scope binds task,
+responsibility, fix round, judge mode, configured account/template, exact
+model/effort and report-masked brief identity. New live names and report paths
+do not reset the gate. The owner preserves older history without inventing
+failures; older stores already carrying these events refuse as unowned data.
+The event writer and validator are in
+`skills/herdr-foreman/foreman/recovery.py`; CLI apply owns
+the serialized write before advertising another retry.
+Version-5 rows may carry the existing composition, judge and scoped
 lifecycle fields. Version-2 refusals add the original `launch_scope` or null and
 `unavailability` schema 1 (source-bound model/error/account-class/CLI-version,
 prompt digest, native identity and viewport proof). Its exact fields and first

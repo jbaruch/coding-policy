@@ -138,17 +138,16 @@ CLI or changing a model pin.
 
 ## Launch Failure Maintenance
 
-A launch or wait failure that names an unavailable model identifier is a
-signal to check that identifier's availability. It never discards the agent or
-its provider. The classes, each with its own owner:
+A classified owner output routes recovery without discarding the agent or
+its provider. Read the emitted receipt; never classify provider prose yourself.
 
-| Evidence | Class | Next step |
+| Owner output | Class | Next step |
 | --- | --- | --- |
-| Provider notice naming a model the account cannot call: `model_not_found`, unsupported model, "may not exist" | `model_identifier_unavailable` | The repair below |
-| Enumerated trusted pre-input 5xx native-start code (`launch_transient`), measurement, `startup_dialog_pending` | transient | Existing bounded retry in `skills/herdr-foreman/references/dispatch-recovery.md` after owned closure is proved; no model retirement |
-| Start timeout or transport failure | unknown send effect | Fail closed: retain evidence, `reconcile` from actual evidence; no retry until the send effect is known |
-| Withheld-content notice | `terminal_provider_refusal` | `record-refusal` and one move to another provider |
-| `sending` or `sent_but_not_started` | uncertain send | `reconcile` from actual evidence, first |
+| Wait exit 6 or `failure_kind: model_identifier_unavailable` | identifier maintenance | The repair below, after the dispatch lifecycle in Wait outcomes (Exit 6) |
+| `failure_kind: launch_transient` | pre-input service failure | Follow the emitted retry or exhaustion outcome under dispatch recovery; no model retirement |
+| `failure_kind: startup_dialog_pending` | retained native dialog | Runtime Dialogs and the named owner reconciliation |
+| Recovery `outcome: blocked`, or dispatch `sending` / `sent_but_not_started` | unproved transport or cleanup | Preserve evidence and complete the named owner reconciliation before retrying |
+| Wait exit 5 with `reason: terminal_provider_refusal` | provider refusal | `record-refusal` and its bounded provider-move contract |
 
 Repair for `model_identifier_unavailable`:
 
@@ -178,7 +177,7 @@ at fresh startup, and the structured `agent_start` error codes
 `IDENTIFIER_ERROR_CODES` / `TRANSIENT_LAUNCH_ERROR_CODES` in
 `skills/herdr-foreman/foreman/errors.py`, classified at the spawn boundary in
 `skills/herdr-foreman/foreman/lifecycle.py`. Only Herdr's own error code
-classifies; provider prose never does.
+classifies native-start errors; arbitrary provider prose never does.
 
 ## Foreman Seat
 

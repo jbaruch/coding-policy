@@ -56,7 +56,14 @@ RECOVERY_SCHEMA_VERSION = 1
 #: are unowned newer data and are refused.
 #: Version 16 owns dispatch v5's frozen configured launch/account scope and
 #: refusal v2's verified native model error. Historical scopes stay absent.
-RECOVERY_STORE_VERSION = 16
+#: Version 17 adds durable seat-local transient launch failures. An older
+#: store cannot silently ignore these retry gates.
+RECOVERY_STORE_VERSION = 17
+#: Three confirmed pre-input service failures buy no further identical start.
+#: Scope binds task/role/brief/account/template/model/effort, not pane, fresh
+#: identity or report destination. Exhaustion routes to causal diagnosis,
+#: never a provider retirement or developer correction count.
+TRANSIENT_LAUNCH_LIMIT = 3
 LAUNCH_DISPATCH_VERSION = 5
 REFUSAL_FIELDS = frozenset({"brief_identity", "refusal", "refusal_move", "provider"})
 SPECIALIST_DISPATCH_VERSION = 2
@@ -265,6 +272,8 @@ def _refuse_unowned_legacy(store, version):
         raise UsageError("Older recovery requires an events array; restore the original owner-written store.", {})
     if version < 13 and any(isinstance(row, dict) and row.get("kind") == "task_closed" for row in events):
         raise UsageError("Older recovery contains a task closure this version never wrote; preserve it for owner recovery.", {})
+    if version < 17 and any(isinstance(row, dict) and row.get("kind") == "launch_transient_failure" for row in events):
+        raise UsageError("Older recovery contains an unowned launch retry gate; preserve it for owner recovery.", {})
     if version == 3:
         deliveries = store.get("delivery_recoveries")
         if not isinstance(deliveries, list):
@@ -410,6 +419,19 @@ def validate_legacy_ruling_recoveries(store):
 def _event(store, at, kind, task, details):
     store["events"].append({"schema_version": RECOVERY_SCHEMA_VERSION, "sequence": len(store["events"]) + 1,
                             "at": at, "kind": kind, "task": task, "details": details})
+
+
+def transient_launch_attempts(store, task, scope):
+    """Read the durable failure count; fresh seat names cannot reset it."""
+    return sum(row["kind"] == "launch_transient_failure" and row["task"] == task
+               and row["details"].get("scope") == scope for row in store["events"])
+
+
+def record_transient_launch_failure(store, task, scope, at):
+    """Record an actual structured pre-input service failure, never a guess."""
+    attempt = transient_launch_attempts(store, task, scope) + 1
+    _event(store, at, "launch_transient_failure", task, {"scope": scope, "attempt": attempt})
+    return attempt
 
 
 def _item(items, identifier, label):
@@ -2257,6 +2279,7 @@ def validate_store(store, assignments):
                 raise UsageError("Context recovery does not refer to the preserved null-session assignment.", {})
             if row["next_fix"] != (assignments[index].get("fix_round") or 0) + 1:
                 raise UsageError("Context recovery changed the cumulative fix count.", {})
+        launch_counts = {}
         for sequence, row in enumerate(store["events"], 1):
             if row["sequence"] != sequence or not isinstance(row["details"], dict):
                 raise UsageError("Recovery event history is malformed; preserve it for owner recovery.", {})
@@ -2267,6 +2290,19 @@ def validate_store(store, assignments):
                         or not isinstance(row.get("task"), str) or not row["task"].strip()):
                     raise UsageError("Task-closed event {} is malformed; restore the owner-written closure before planning.".format(sequence), {})
                 timestamp(row.get("at"), "Close-task event {} time".format(sequence))
+            if row["kind"] == "launch_transient_failure":
+                details = row["details"]
+                scope = details.get("scope")
+                if (set(details) != {"scope", "attempt"} or not isinstance(scope, str)
+                        or re.fullmatch(r"[0-9a-f]{64}", scope) is None
+                        or type(details["attempt"]) is not int
+                        or not isinstance(row.get("task"), str) or not row["task"].strip()):
+                    raise UsageError("Malformed launch retry gate; restore the owner history before dispatch.", {})
+                key = (row["task"], scope)
+                launch_counts[key] = launch_counts.get(key, 0) + 1
+                if details["attempt"] != launch_counts[key] or details["attempt"] > TRANSIENT_LAUNCH_LIMIT:
+                    raise UsageError("Inconsistent launch retry count; preserve the owner history before dispatch.", {})
+                timestamp(row.get("at"), "Launch retry event time")
         # Imported records use these shared validators without a module-level cycle.
         from .historical import validate_history
         validate_history(store, assignments)

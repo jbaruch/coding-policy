@@ -43,6 +43,36 @@ OVERRIDE = {"source": "operator message 2026-02-03", "quote": "Try the visitor r
 
 
 class RecoveryTests(unittest.TestCase):
+    def test_launch_retry_gate_is_durable_scoped_and_validated(self):
+        from foreman.recovery import record_transient_launch_failure, transient_launch_attempts
+        scope, other_scope = "a" * 64, "b" * 64
+        for attempt in (1, 2, 3):
+            self.assertEqual(record_transient_launch_failure(self.store, TASK, scope, AT), attempt)
+        validate_store(self.store, self.history)
+        self.assertEqual(transient_launch_attempts(self.store, TASK, scope), 3)
+        self.assertEqual(transient_launch_attempts(self.store, TASK, other_scope), 0)
+        self.assertEqual(transient_launch_attempts(self.store, "another-task", scope), 0)
+        saved = copy.deepcopy(self.store)
+        self.store["events"][-1]["details"]["attempt"] = 1
+        with self.assertRaisesRegex(UsageError, "Inconsistent launch retry count"):
+            validate_store(self.store, self.history)
+        legacy = copy.deepcopy(saved)
+        legacy["schema_version"] = 16
+        before = copy.deepcopy(legacy)
+        with self.assertRaisesRegex(UsageError, "unowned launch retry gate"):
+            migrate_store(legacy)
+        self.assertEqual(legacy, before)
+
+    def test_older_launch_history_migrates_without_inventing_failures(self):
+        from foreman.recovery import transient_launch_attempts
+        self.store["schema_version"] = 16
+        previous_events = copy.deepcopy(self.store["events"])
+        self.assertTrue(migrate_store(self.store))
+        validate_store(self.store, self.history)
+        self.assertEqual(self.store["schema_version"], RECOVERY_STORE_VERSION)
+        self.assertEqual(self.store["events"], previous_events)
+        self.assertEqual(transient_launch_attempts(self.store, TASK, "a" * 64), 0)
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)

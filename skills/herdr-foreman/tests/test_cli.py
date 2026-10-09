@@ -3451,6 +3451,34 @@ class PublicOwnerRetryTest(unittest.TestCase):
                 self.assertEqual(saved["assignments"], [])
                 self.assertFalse(saved["recovery"].get("refusals"))
 
+                if kind == "launch_transient":
+                    # Each invocation reloads durable state. Replanning a fresh
+                    # identity buys no new budget for the same seat and brief.
+                    for attempt in range(2, recovery.TRANSIENT_LAUNCH_LIMIT + 1):
+                        with patch("foreman.cli.lifecycle.spawn", side_effect=lambda *a, **kw: real_spawn(*a, **kw, sleep=lambda _: None)):
+                            exit_code, _, err = invoke(arguments, native)
+                        self.assertEqual(exit_code, 1, err)
+                        details = json.loads("\n".join(line for line in err.splitlines() if not line.startswith(DIAGNOSTIC_PREFIX)))["details"]
+                        self.assertEqual(details["launch_attempt"], attempt)
+                        self.assertEqual(details["recovery"]["outcome"], "exhausted" if attempt == recovery.TRANSIENT_LAUNCH_LIMIT else "retryable")
+                    with patch("foreman.lifecycle.identity", return_value="judge-new-733"):
+                        exit_code, text, err = invoke(["plan", "--roles", "judge", "--judge-mode", "adjudication",
+                            "--task", "native-733", "--snapshot", str(snapshot)])
+                    self.assertEqual(exit_code, 0, err)
+                    replacement = list(arguments)
+                    replacement[replacement.index("--assignments") + 1] = text
+                    before_retry = list(native.events)
+                    exit_code, _, err = invoke(replacement, native)
+                    self.assertEqual(exit_code, 1, err)
+                    self.assertIn('"outcome": "exhausted"', err)
+                    self.assertEqual(native.events, before_retry)
+                    saved = load_state_checked(state)[0]
+                    failures = [event for event in saved["recovery"]["events"] if event["kind"] == "launch_transient_failure"]
+                    self.assertEqual(len(failures), recovery.TRANSIENT_LAUNCH_LIMIT)
+                    self.assertEqual(saved["assignments"], [])
+                    self.assertFalse(any(event[0] == "prompt" for event in native.events))
+                    self.assertEqual(config.read_bytes(), before)
+
     def test_reconcile_help_and_parser_expose_exclusive_record_or_dispatch_inputs(self):
         parser = build_parser()
         help_text = io.StringIO()

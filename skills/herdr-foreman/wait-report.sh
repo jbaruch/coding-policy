@@ -531,6 +531,9 @@ confirmed_provider_refusal() { # <pane-id>
     fi
     if [[ "$result" == false ]]; then return 1; fi
     REFUSAL_UNAVAILABILITY="${result#*$'\n'}"
+    if jq -e '.kind == "claude" and .code == "model_not_found"' <<< "$REFUSAL_UNAVAILABILITY" >/dev/null; then
+      TERMINAL_NOTICE=identifier_unavailable
+    fi
     info="$(agent_info "$AGENT")" || return 2
     REFUSAL_STATE="${info%% *}"; REFUSAL_PANE="${info##* }"
     if [[ "$REFUSAL_PANE" != "$1" || ( "$REFUSAL_STATE" != idle && "$REFUSAL_STATE" != "done" ) \
@@ -888,7 +891,7 @@ main() {
       if (( rc == 0 )); then
         now="$(date +%s)"
         if [[ "$TERMINAL_NOTICE" == "identifier_unavailable" ]]; then
-          emit "$REFUSAL_STATE" false "$(( now - start ))" "model_identifier_unavailable"
+          emit "$REFUSAL_STATE" false "$(( now - start ))" "model_identifier_unavailable" null "$REFUSAL_UNAVAILABILITY"
           warn "${AGENT}: report unavailable because its launched model identifier is unavailable — this is seat-local model maintenance on the same provider, not a provider refusal: do not run record-refusal, do not rephrase the brief or synthesize a report; keep review/release gates unsatisfied, preserve the task, original base, correction count and artifacts, then follow dispatch-recovery.md Wait outcomes (Exit 6): check the provider catalog, the installed CLI and this account's access, repair that exact row, and re-plan the affected seat"
           return 6
         fi

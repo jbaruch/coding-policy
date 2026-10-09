@@ -21,7 +21,15 @@
   `repair_required` instead of an identical retry. Task, original base,
   correction count, artifacts, the provider, other callable rows and every
   `capabilities` entry stay as recorded; transient errors keep their bounded
-  retry. Catalog identity, account access and capability adequacy remain
+  retry. Recovery store 17 records trusted transient start failures durably;
+  the owner enforces its seat/brief/account/model/effort budget across fresh
+  identities and process restarts, then refuses another identical native
+  start and routes causal diagnosis. No developer correction is spent.
+  Post-send exit 6 requires the unavailable ledger outcome and guarded
+  old-member closure before replanning. Native source-backed Claude
+  `model_not_found` follows exit 6 too, retaining its proof; Codex's
+  account-unsupported proof keeps its separate exit-5 contract.
+  Catalog identity, account access and capability adequacy remain
   separate facts, and the new class never writes the capability table. The
   repair procedure is `references/model-tiers.md` Launch Failure Maintenance.
   The live TUI rendering of the notice is unverified: the parser accepts the
