@@ -1359,6 +1359,19 @@ class FreshStartupDeliveryTest(unittest.TestCase):
             with self.subTest(text=text):
                 self.assertIsNone(identifier_unavailable_model(text))
 
+    def test_model_unavailable_notice_ignores_fenced_indented_and_stale_rows(self):
+        # Parity with wait-report.sh: examples and history are not a live notice.
+        from foreman.composer import identifier_unavailable_model
+        row = "There's an issue with the selected model (opus-6). It may not exist or you may not have access to it."
+        for text in ("```\n" + row + "\n```\n❯", "~~~\n" + row + "\n❯", "    " + row + "\n❯", "\t" + row + "\n❯",
+                     row + "\nStartup completed normally\n❯", row + "\nNew assignment from the team lead\n❯"):
+            with self.subTest(text=text):
+                self.assertIsNone(identifier_unavailable_model(text))
+        for text in (row, "\u23fa " + row + "\n╭────╮\n│ ❯  │\n╰────╯\n? for shortcuts",
+                     "```\nexample\n```\n" + row + "\n❯ "):
+            with self.subTest(text=text):
+                self.assertEqual(identifier_unavailable_model(text), "opus-6")
+
     def test_other_adapters_ignore_the_claude_model_notice_and_keep_their_startup_path(self):
         from unittest.mock import Mock, patch
         notice = ("There's an issue with the selected model (opus-6). It may not exist or you may not have "

@@ -603,13 +603,46 @@ IDENTIFIER_UNAVAILABLE_ROW = re.compile(
     r"It may not exist or you may not have access to it\.(?: Run /model to pick a different model\.)?$")
 
 
+_NOTICE_FENCE = re.compile(r"^(`{3,}|~{3,})")
+_NOTICE_BORDER = re.compile(r"^[─━╭╮╰╯┌┐└┘│\s]+$")
+#: Rows that may follow the notice: Claude's composer row (any content, occupancy
+#: is judged separately) and its shortcut footer. Anything else is later content.
+_NOTICE_TRAILER = re.compile(r"^(?:│\s*)?[❯›](?:\s.*)?$|^\? for shortcuts$")
+
+
 def identifier_unavailable_model(pane_text):
-    """The model id a bare provider identifier-unavailable row names, or None."""
+    """The model id of the provider's identifier-unavailable notice, or None.
+
+    Parity with `wait-report.sh` `terminal_refusal_on_screen`: the notice must
+    be one bare row that is the last content on screen. Quoted, fenced and
+    indented rows, and a notice followed by later content, are examples or
+    stale history and never classify a launch.
+    """
+    model, fence, fence_length = None, "", 0
     for row in strip_ansi(pane_text).splitlines():
-        match = IDENTIFIER_UNAVAILABLE_ROW.match(row.strip())
+        trimmed = row.strip()
+        if not trimmed:
+            continue
+        if row.startswith("    ") or "\t" in row:
+            model = None
+            continue
+        opener = _NOTICE_FENCE.match(trimmed)
+        if opener:
+            run = opener.group(1)
+            if not fence:
+                fence, fence_length = run[0], len(run)
+            elif run[0] == fence and not trimmed[len(run):].strip() and len(run) >= fence_length:
+                fence = ""
+            model = None
+            continue
+        if fence:
+            continue
+        match = IDENTIFIER_UNAVAILABLE_ROW.match(trimmed)
         if match:
-            return match.group(1)
-    return None
+            model = match.group(1)
+        elif model is not None and not (_NOTICE_BORDER.match(trimmed) or _NOTICE_TRAILER.match(trimmed)):
+            model = None
+    return model
 
 
 def identifier_unavailable_error(agent, pane_id, model):
