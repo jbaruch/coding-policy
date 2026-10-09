@@ -34,6 +34,10 @@
   model and `repair_required` / `plan`; an enumerated transient code yields
   `launch_transient` and the identical bounded retry. Both leave the closed
   pane, refusal record, capabilities and provider roster untouched.
+  A notice followed by an occupied composer takes the existing
+  `startup_input_occupied` refusal, not model maintenance, and a start timeout
+  or transport failure stays fail-closed with no retry until the send effect is
+  reconciled; `model-tiers.md` now says so.
 
 ## 0.3.387 — 2026-10-09
 

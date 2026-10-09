@@ -104,7 +104,8 @@ def _classified_start_error(exc, worker, pane, tier):
     Herdr's own error code is the only authority. The row's model rides along
     as evidence; provider prose never classifies and never reaches the model
     field. No refusal, capability change or provider exclusion follows either
-    class: the identifier is seat-local maintenance, the transport error retries.
+    class: the identifier is seat-local maintenance, an enumerated 5xx code
+    retries, and a timeout or transport error stays blocked (input may be sent).
     """
     code = error_code(exc)
     evidence = {"agent": worker.name, "pane_id": pane, "error_code": code, "model": tier.get("model")}
