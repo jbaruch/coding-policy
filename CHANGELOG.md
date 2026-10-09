@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.391 — 2026-10-09
+
 ### Fixed
 
 - Retained disposable startup probes can recover after their native runtime
