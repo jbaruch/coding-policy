@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.393 — 2026-10-09
+
 ### Fixed
 
 - Report-body scanners no longer read illustrative text as operative metadata
