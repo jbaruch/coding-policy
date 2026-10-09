@@ -136,6 +136,45 @@ operator expressly requires YOLO for that retained developer.
 Recheck model availability and CLI flag spellings when upgrading a worker's
 CLI or changing a model pin.
 
+## Launch Failure Maintenance
+
+A launch or wait failure that names an unavailable model identifier is a
+signal to check that identifier's availability. It never discards the agent or
+its provider. The classes, each with its own owner:
+
+| Evidence | Class | Next step |
+| --- | --- | --- |
+| Provider notice naming a model the account cannot call: `model_not_found`, unsupported model, "may not exist" | `model_identifier_unavailable` | The repair below |
+| Timeout, 5xx, transport, measurement, `startup_dialog_pending` | transient | Existing bounded retry in `references/dispatch-recovery.md`; no model retirement |
+| Withheld-content notice | `terminal_provider_refusal` | `record-refusal` and one move to another provider |
+| `sending` or `sent_but_not_started` | uncertain send | `reconcile` from actual evidence, first |
+
+Repair for `model_identifier_unavailable`:
+
+1. Preserve the task, original base, correction count, artifacts and the
+   actual dispatch effect. Reconcile an uncertain send before anything else.
+2. Check three sources: the provider's current catalog, the installed CLI's
+   model and flag spellings, and this account's actual access. Another
+   account's success and a catalog listing each establish nothing about this
+   account.
+3. Repair the exact stale row in the operator's config with the identifier the
+   sources support, or a verified same-family successor
+   (`references/successor-placement.md`). The utility never rewrites the
+   config.
+4. Validate with `plan`. A judgment row stays on the pinned top model at the
+   effort floor; `TOP_MODELS` in `skills/herdr-foreman/foreman/tiers.py` names
+   the accepted ids.
+5. Dispatch the affected seat again. The provider, every other callable row
+   and every `capabilities` entry stay as they were.
+
+Catalog identity, account access and capability adequacy are separate facts.
+A smoke call proves access; it never writes an `adequate` capability entry.
+The independently pinned judge keeps its own pin and launch proof.
+
+Detection: `wait-report.sh` exit 6 after a send, and
+`identifier_unavailable_model` in `skills/herdr-foreman/foreman/composer.py`
+at fresh startup.
+
 ## Foreman Seat
 
 The foreman is a seat like every other. The operator's tier table supplies
