@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.383 — 2026-10-09
+
 ### Fixed
 
 - Fresh Claude Code startup honors its existing dim-hint classification,
