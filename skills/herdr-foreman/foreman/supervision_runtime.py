@@ -53,8 +53,9 @@ class ObservationClient(HerdrClient):
         return result
 
 
-def read_client(binary=None):
-    return ObservationClient(binary=binary, runner=observation_runner)
+def read_client(binary=None, *, context=None, remote_authority=None):
+    return ObservationClient(binary=binary, runner=observation_runner,
+                             context=context, remote_authority=remote_authority)
 
 
 def process_identity(pid):
@@ -255,6 +256,11 @@ def watch(state_path, client, at, *, clock, sleeper, probe=process_identity,
 
 
 def bind_current(state_path, client, at, *, environ=None, cwd=None, root=None):
+    if getattr(getattr(client, "context", None), "mode", None) == "attested-remote":
+        if str(store.canonical(state_path)) != str(client._remote_authority.state_path):
+            raise UsageError("Remote supervision must use its configured owner state path; restore that path before binding.", {})
+        client._remote_authority.initialize(client._runner, at=at)
+        return store.load(state_path)["binding"]
     environ = os.environ if environ is None else environ
     pane_id = store.text(environ.get("HERDR_PANE_ID"), "HERDR_PANE_ID")
     pane = client.pane_get(pane_id)
@@ -290,7 +296,9 @@ def run_command(args, state_path, now, *, client=None, clock=None, sleeper=None,
     if getattr(args, "record", None) and record is None:
         raise UsageError("The requested supervision record file is missing; save the JSON input before retrying.", {})
     if action == "bind":
-        return store.bind(state_path, record, at) if record is not None else bind_current(state_path, client or read_client(binary=getattr(args, "herdr_bin", None)), at)
+        return store.bind(state_path, record, at) if record is not None else bind_current(state_path, client or read_client(
+            binary=getattr(args, "herdr_bin", None), context=getattr(args, "herdr_context", None),
+            remote_authority=getattr(args, "herdr_authority", None)), at)
     functions = {"enroll": store.enroll, "ack": store.acknowledge, "resolve": store.resolve, "hold": store.hold}
     if action in functions:
         return functions[action](state_path, record, at)
@@ -303,6 +311,7 @@ def run_command(args, state_path, now, *, client=None, clock=None, sleeper=None,
     if action == "watch":
         if clock is None or sleeper is None:
             raise UsageError("CLI must supply a clock and sleeper for bounded fleet watching.", {})
-        return watch(state_path, client or read_client(binary=getattr(args, "herdr_bin", None)), at,
+        return watch(state_path, client or read_client(binary=getattr(args, "herdr_bin", None),
+                     context=getattr(args, "herdr_context", None), remote_authority=getattr(args, "herdr_authority", None)), at,
                      clock=clock, sleeper=sleeper, probe=process_probe, duration=args.duration, interval=args.interval)
     raise UsageError("Unknown supervision command; run `{}`.".format(runnable.command("--help")), {})
