@@ -613,7 +613,7 @@ workstation's thin anchor.
 - A reset foreman resumes from the stow, the supervision resume sequence, and the foreman queue
 - Save conversation-only knowledge and open work before a planned foreman reset, compaction, or replacement
 - Give the next foreman an ordered list of durable files to read
-- Require the next foreman to explicitly set `/goal <saved objective>` and verify it is active under Working Memory's Successor Goal contract before dispatch or retirement of the outgoing foreman
+- Require the next foreman to explicitly set `/goal <saved objective>` and verify it is active under `skills/herdr-foreman/references/working-memory.md` Successor Goal before dispatch or retirement of the outgoing foreman
 - Record uncaptured or unavailable context as an explicit handoff gap
 - A handoff gap names what is missing, the task it affects, and how to recover it
 - Narrow exception for a gap migrated from a version-1 stow.

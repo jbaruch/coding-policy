@@ -465,6 +465,15 @@ class DeliverTest(unittest.TestCase):
         self.assertIn("continuation step the stow's unresolved work names", prompt)
         self.assertLess(prompt.index("foreman-queue"), prompt.index("Resume Route"))
 
+    def test_resume_requires_explicit_goal_activation_before_supervision_resumes(self):
+        prompt = foreman_reset.resume_prompt("round-7", "/s.json")
+        self.assertIn("/goal <saved objective>", prompt)
+        self.assertIn("verify the goal is active", prompt)
+        self.assertIn("preserving any remaining budget", prompt)
+        self.assertLess(prompt.index("memory-show"), prompt.index("/goal"))
+        self.assertLess(prompt.index("/goal"), prompt.index("supervision-resume"))
+        self.assertIn("without dispatch or claiming healthy takeover", prompt)
+
     def test_a_refusal_before_any_keystroke_is_an_ordinary_failure(self):
         with self.assertRaises(HerdrError) as caught:
             self.run_deliver(FakeClient(["idle", "working"]))

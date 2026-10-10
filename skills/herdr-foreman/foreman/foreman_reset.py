@@ -113,17 +113,22 @@ HOOK_ACCEPTANCE_POLL_SEC = 1
 #: raw subprocess output or pane text; the record keeps identifiers only.
 FAILURE_DETAIL_KEYS = frozenset({"pane_id", "stow", "record", "status", "pid", "lock", "kind", "reconciled",
                                  "reconciled_at", "schema_version", "reason", "phase", "name_matches", "kind_matches"})
+# Keep the persisted wire marker; it does not authorize automatic scheduling.
 RESUME_OPENING = "Foreman resume after a planned round-boundary reset."
 RESET_RECEIPT_PREFIX = "Herdr reset input receipt: "
 RESUME_TEMPLATE = (
     RESUME_OPENING + " Your earlier conversation is gone by design. Run the "
-    "herdr-foreman skill; every command below is complete and runnable as written, "
-    "and every other launcher command takes the same `{flags}`. Before "
+    "herdr-foreman skill; every owner launcher command takes the same `{flags}`. Before "
     "anything else: run `{tl} memory-show {flags} --id {stow}` and read its "
-    "required files in order; run `{tl} supervision-bind {flags}`, "
+    "required files in order. Explicitly set `/goal <saved objective>` in this "
+    "foreman's host runtime and verify the goal is active under the working-memory "
+    "Successor Goal contract, preserving any remaining budget. Naming a goal in "
+    "a prompt is not goal activation. If the goal or runtime facility is unavailable, "
+    "recover that gap without dispatch or claiming healthy takeover. Then run "
+    "`{tl} supervision-bind {flags}`, "
     "`{tl} supervision-resume {flags}`, `{tl} supervision-status {flags}` "
     "and `{tl} supervision-drain {flags}`; then "
-    "`{tl} foreman-queue {flags}`. Then take SKILL.md Step 17's Resume Route: Step 1, Step 2, "
+    "`{tl} foreman-queue {flags}`. Then complete SKILL.md Step 17's Resume Route: Step 1, Step 2, "
     "then the continuation step the stow's unresolved work names, in place of Step 5. "
     "Load each decision's records before making it, with "
     "`{tl} load-set {flags} --decision <plan|brief|gate|diagnose> --task <task>` or "

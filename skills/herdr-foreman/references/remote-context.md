@@ -132,7 +132,7 @@ saves a stow with its active goal and continuation through the existing memory
 owners, then continues in the same context. It never automatically resets the
 controller at a round boundary. An explicitly requested restart or replacement
 requires its host runtime to explicitly set `/goal <saved objective>`, verify
-it is active under the working-memory Successor Goal contract, and prove loaded-policy,
+it is active under `skills/herdr-foreman/references/working-memory.md` Successor Goal, and prove loaded-policy,
 model-tier and live supervision continuation before dispatch resumes. Missing
 host proof keeps that replacement disabled; the thin anchor is never reset.
 
