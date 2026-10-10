@@ -78,7 +78,7 @@ bash "$CP/skills/herdr-foreman/foreman.sh" verify-partition \
   send to its assigned worker, or a plan made without `--task`
 - Exit 1 is a blocking finding on the round, gated below like any other
 - Run Step 16, then Step 17, with Step 4 as the stow's continuation step
-- The reset foreman resumes at Step 4 and re-validates the partition at the
+- The current foreman continues at Step 4 and re-validates the partition at the
   tip in Step 5, replanning from that result
 - The new plan then takes Step 8 composition, Step 10 dispatch, Step 11
   observation, and this step's gate
@@ -119,8 +119,9 @@ Persist user-facing obligations under `skills/herdr-foreman/references/attention
 them; record an actual answer or resolution separately from showing the item.
 
 Every return to Step 4 is a round boundary: run Step 16 to log the round and
-Step 17 to reset first. Record the step this gate decision named as the stow's
-continuation step. The reset foreman takes Step 17's Resume Route.
+Step 17 to checkpoint first. Record the step this gate decision named as the stow's
+continuation step. The current foreman takes Step 17's Continue Route without
+clearing context or ending supervision.
 
 After accepting a consultation, return to Step 4 for the next needed
 responsibility. For an investigation-only task, use the knowledge gate below.

@@ -67,8 +67,10 @@ claiming that recalled context proves present competence or independence.
 
 ## Stow before replacing the foreman
 
-The foreman resets its context at every round boundary (SKILL.md Step 17), so
-this stow runs every round. `foreman foreman-reset` refuses unless the stow is
+Stow at every round boundary (SKILL.md Step 17), then continue in the same
+context with the active goal intact. A checkpoint never schedules a reset or
+permits stopping supervision. Only an explicit operator-requested maintenance
+reset uses `foreman foreman-reset --explicit-reset`; it refuses unless the stow is
 `reset_ready`; native input verification and its validation procedure are in
 `skills/herdr-foreman/references/reset-hooks.md`. The reset command's contract is in
 `skills/herdr-foreman/foreman/foreman_reset.py` (module docstring).
@@ -79,6 +81,7 @@ Record a stow containing:
 
 - A substantive capture of the remaining context the next foreman needs.
 - Unresolved work, including where each item is now recorded or what the replacement must recover.
+- The active goal's objective, status, remaining work and remaining budget, if any, in the capture and unresolved work. Saving a stow never pauses or completes the goal.
 - The continuation step, in the unresolved work: the SKILL.md step the replacement continues at under Step 17's Resume Route.
 - Explicit gaps, including missing evidence and work the foreman could not persist. Use an empty list only after checking for gaps. Each gap is `{"missing", "task", "recovery"}`: what is missing, the task it affects, and exactly one recovery — `{"reread": "/absolute/path"}`, `{"ask": "<question for the operator>"}` or `{"accept": "<why the loss is safe>"}`. A gap without a recovery is refused, and so is a new gap naming the task `unrecorded`, which is reserved for migrated version-1 gaps.
 - Ordered, absolute paths to the durable files the replacement must read, such as the task ledger, attention queue, active assignment state, relevant retrospective notes and task context. Use actual files, not directories or a vague instruction to inspect the workspace.
@@ -105,10 +108,29 @@ The output supplies `memory_path`, the stow record and receipts for each require
 
 `reset_ready` is false if any required file has changed or become unavailable, or if a gap names the task `unrecorded`. Any other gap names its own recovery and does not block a reset. A true value covers only the saved local capture and its unchanged required files. It does not prove that the foreman captured every conversation fact, reconcile a fleet, satisfy the supervision gate, authorize interruption, or accept tasks. The foreman must still apply the separate handoff and supervision rules. New unresolved knowledge after the stow requires a new stow id.
 
+## Successor Goal
+
+For a new foreman taking over outstanding work, explicitly set
+`/goal <saved objective>` in that foreman's host runtime after reading the
+handoff and before resuming dispatch or retiring the outgoing foreman.
+Restore the saved remaining budget when the runtime supports a budget; never
+grant a fresh full budget for the same goal. Verify the runtime reports the
+goal active and that its objective and remaining work match the saved authority.
+A prompt saying "continue the goal" or naming the objective is not this action.
+If the saved goal or the runtime's `/goal` facility is unavailable, keep the
+outgoing foreman responsible and recover that gap; never silently skip goal
+activation or claim a healthy successor. A requested in-place reset uses the
+same goal restoration after resume; it does not implement successor takeover.
+
 ## Reset Outcome Routing
 
-Pass the same `--state`, `--config` and `--herdr-bin` the stow was recorded
-under when running Step 17's `foreman-reset` command.
+This route is only for an explicit operator-requested maintenance reset, not
+Step 17's ordinary checkpoint. Do not ask for reset permission at each boundary.
+Run `foreman-reset --explicit-reset --stow <stow-id>` with the same `--state`,
+`--config` and `--herdr-bin` the stow was recorded under.
+Without `--explicit-reset`, the command refuses before owner reads, writes,
+child startup or pane input. The flag declares an existing explicit request;
+it is not a new permission prompt or automatic round-boundary option.
 The live foreman must have a Herdr agent name. An unnamed target refuses before
 the child or reset record is created; the diagnostic names the metadata rename
 and native-session verification to perform before scheduling.
@@ -130,12 +152,13 @@ and native-session verification to perform before scheduling.
     - Keep the current turn and foreground supervision active
     - The failed reset supplies no Stop-authorizing continuation
     - Follow the recorded recovery instruction: a never-typed failure keeps
-      its existing context, fixes the cause, and schedules a new stow without
-      clearing or pasting
+      its existing context, fixes the cause, and continues supervision without
+      clearing or pasting. Schedule a new stow only if the explicit maintenance
+      reset request still applies
     - An interrupted or indeterminate delivery requires operator recovery
       under the Working Memory carve-out, first
       confirming the pane is not already running a resumed foreman
-    - The next round resets from a new stow
+    - The next round checkpoints and continues without another reset
   - `reset_record_newer` — a newer build wrote the reset record
     - Record a user-attention blocker to update the plugin
     - Leave the file untouched

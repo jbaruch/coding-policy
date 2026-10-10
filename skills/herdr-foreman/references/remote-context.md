@@ -128,10 +128,13 @@ context-reset hooks act on native foreground sessions only; they do not clear
 the thin remote anchor. A controller requiring a reset must preserve its own
 supervision obligations through its host runtime's planned continuation.
 At every round boundary the controller records outcomes, curates lessons and
-saves a reset-ready stow through the existing memory owners. Its host runtime
-must reset the controller context and prove the loaded-policy, model-tier and
-live supervision continuation before dispatch resumes. Missing host proof
-keeps remote round enablement disabled; the thin anchor is never reset.
+saves a stow with its active goal and continuation through the existing memory
+owners, then continues in the same context. It never automatically resets the
+controller at a round boundary. An explicitly requested restart or replacement
+requires its host runtime to explicitly set `/goal <saved objective>`, verify
+it is active under the working-memory Successor Goal contract, and prove loaded-policy,
+model-tier and live supervision continuation before dispatch resumes. Missing
+host proof keeps that replacement disabled; the thin anchor is never reset.
 
 ## Schema and Writer / Reader Contract
 

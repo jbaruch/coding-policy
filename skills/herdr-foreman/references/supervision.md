@@ -157,7 +157,9 @@ events. Persist the user's decision or recipient/continuation handoff, then run
 }
 ```
 
-Use `kind: handoff` to prepare a planned `foreman-reset`. Set the hold `id` to
+Use `kind: handoff` only for an explicit transfer or requested maintenance reset,
+never for an ordinary round checkpoint. A checkpoint keeps foreground supervision
+and the active goal running. For `foreman-reset --explicit-reset`, set the hold `id` to
 the exact stow id the reset resumes. Every active enrollment needs its own
 named disposition and evidence; a global pause cannot hide unrelated work.
 The hold alone does not transfer supervision and does not permit Stop. Stop

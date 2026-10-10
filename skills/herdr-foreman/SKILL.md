@@ -21,7 +21,7 @@ Before any finish with enrolled work, reconcile the whole fleet under
 `skills/herdr-foreman/references/supervision.md`. Continue observation while
 authorized work remains. Finish only after a genuine user pause or a verified
 successor/reset continuation satisfies the Stop gate. A saved handoff hold
-prepares reset preflight; it does not permit Stop on its own. Keep user
+does not permit Stop on its own. Keep user
 attention visible under `skills/herdr-foreman/references/attention.md`.
 
 Before any team-round action outside Step 1's bounded factual lookup, read the
@@ -157,7 +157,7 @@ For every other request, read `HERDR_ENV` and the controller's attached context 
 
 Run capability migration and the consolidated round preflight. Relay the worktree
 report and warnings verbatim. Exit 0 proceeds immediately to Step 5, or the stow's
-continuation step on resume. Cadence-only maintenance and unrelated worktrees
+continuation step after a checkpoint or resume. Cadence-only maintenance and unrelated worktrees
 never block the selected task. Exit 1 follows the named owner's recovery; exit 2
 reports the diagnostic and finishes here. Preserve enrolled supervision obligations.
 
@@ -324,7 +324,7 @@ skills/herdr-foreman/references/round-gate.md
 No judge trigger: proceed immediately to Step 14. Otherwise run the referenced
 judge round, preserving its pinned tier, independence and verified ruling.
 Diagnosis loads the diagnose decision's records. Skip writing-worktree provision
-for the read-only judge. After any ruling, log and reset through Steps 16 and 17
+for the read-only judge. After any ruling, log and checkpoint through Steps 16 and 17
 before its named continuation.
 
 Read before acting:
@@ -374,18 +374,21 @@ Read before acting:
 skills/herdr-foreman/references/round-completion.md
 ```
 
-## Step 17 — Reset the Foreman Context
+## Step 17 — Checkpoint the Foreman Context
 
-Stow the handoff, required reads, gaps and the outcome's continuation step. Handle
-pending supervision events and save handoff holds for active enrollments before
-scheduling reset. A stow or handoff hold alone never permits Stop. Follow the
-working-memory reset outcome contract; failed resets do not permit Stop with
-active work.
+Stow the handoff, active goal, required reads, gaps and the outcome's continuation
+step. Keep the current foreman context and goal active. Never schedule a reset,
+clear the pane or create a handoff hold merely for a round boundary.
+Run Steps 1 and 2 in this context, then continue at the saved step; resume Step 11 for enrolled observation
+obligations. A checkpoint is not a pause, completed goal or transfer of supervision.
 
-The next context reads the stow and its required files, reconciles supervision,
+After an explicitly requested restart or replacement, the next context reads
+the stow and its required files, explicitly sets `/goal <saved objective>`
+and verifies the goal is active, then reconciles supervision,
 reads the queue, runs Steps 1 and 2, then takes the stow's continuation step in
 place of Step 5. The queue lists seats only; gating, release and closure resume
-at their saved step. Finish here only when the Stop gate permits it.
+at their saved step. Finish here only with no authorized work remaining or a
+genuine pause or verified continuation satisfying the Stop gate.
 
 Read before acting:
 

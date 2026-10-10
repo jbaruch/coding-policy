@@ -14,7 +14,7 @@ the utility alone records the saved notes and their separate index.
 | `$XDG_CONFIG_HOME/foreman/config.json` (default `~/.config/foreman/config.json`, override `--config FILE`) | the operator | Per-agent usage / clear commands; foreman reads it and never writes it |
 | `<task-reports-dir>/TASK-LEDGER.md` | `herdr-foreman`, written by the foreman | Evidence-backed assignment acceptance and task completion across rounds |
 | `<canonical-state-path>.retrospectives/` | `herdr-foreman`, through its retrospective utility | Immutable retrospective notes, versioned index, and transition coverage |
-| `<canonical-state-path>.foreman-reset.json` | `skills/herdr-foreman/foreman/foreman_reset.py` | One record per foreman round-boundary reset; see Foreman Reset Record below |
+| `<canonical-state-path>.foreman-reset.json` | `skills/herdr-foreman/foreman/foreman_reset.py` | One record per explicitly requested foreman maintenance reset; see Foreman Reset Record below |
 | Controller-configured private remote owner JSON | `skills/herdr-foreman/foreman/remote_owner.py` | Attested command context, current single-controller lease, indeterminate intent and task ingress; schema and writer/reader contract in `skills/herdr-foreman/references/remote-context.md` |
 
 ## Home Migration
@@ -1138,7 +1138,12 @@ the foreman owner through `skills/herdr-foreman/foreman/foreman_reset.py` and
 `skills/herdr-foreman/foreman/reset_input_hook.py`. The native Stop evaluator also performs the bounded
 read-only eligibility check documented below. The owner writes under the
 file's own state lock, never the main state lock.
-`foreman-reset` appends a row and starts the deliverer. The reader
+`foreman-reset --explicit-reset` appends a row and starts the deliverer only
+for an existing explicit operator-requested maintenance reset. Without the flag,
+the CLI refuses before owner reads/writes, child startup or input. Ordinary
+round checkpoints schedule nothing and preserve the current goal and context.
+Existing reset rows and recovery commands remain readable; no schema changes.
+The reader
 checks every field, and the `result` shape each `status` requires.
 `foreman-reset-deliver` claims that row and finishes it.
 
@@ -1208,7 +1213,7 @@ with `reset_ended`, its status and saved resume prompt. Never-typed failures
 preserve the existing context and recover through a new stow without clear/paste.
 Interrupted or indeterminate delivery uses operator recovery under
 the Working Memory carve-out. The next
-round resets from a new stow. A deliverer claims only the row carrying its
+round checkpoints without resetting. A deliverer claims only the row carrying its
 own process identity. A launch failure, or a deliverer already gone when
 probed, finishes the row `failed`. A `foreman-reset` that dies between the
 row's first save and the identity save leaves it `scheduled` with a null

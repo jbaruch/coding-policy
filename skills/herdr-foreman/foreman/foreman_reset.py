@@ -1,9 +1,9 @@
-"""Clear the foreman's own context at a round boundary (#483).
+"""Deliver an explicitly requested foreman maintenance reset.
 
-The foreman's conversation grew for the whole session until it failed with
-`Prompt is too long`. The fix is a reset at every round boundary: the foreman
-saves a handoff (a reset-ready stow), ends its turn, and a fresh context
-resumes from durable records.
+Ordinary round boundaries save a checkpoint and continue in the same context.
+The CLI refuses scheduling without --explicit-reset before any owner access.
+This legacy in-place maintenance route is not fresh-foreman succession and
+does not prove that a host runtime's active goal survives clearing.
 
 A foreman cannot type into its own composer mid-turn, so the reset is two
 commands. `foreman-reset` runs inside the turn: it checks the preconditions
@@ -167,12 +167,13 @@ def accepted_resume(state, pane_id, stow, before):
 
 OPERATOR_RECOVERY = ("Do not run `{}` again for this stow. The operator recovers the foreman under "
                      "skills/herdr-foreman/references/team-operation.md Working Memory: clear the foreman's pane, then paste the "
-                     "resume prompt saved in this reset's record. The next round resets from a new stow.").format(
+                     "resume prompt saved in this reset's record. The next round checkpoints and continues without another reset.").format(
                          command("foreman-reset"))
 
 UNTOUCHED_RECOVERY = ("Do not run `{}` again for this stow. Nothing was typed by this reset; do not clear the pane or "
                       "paste its resume prompt. Inspect the named pane and its current binding, fix the saved cause, "
-                      "continue foreground supervision, then save a new reset-ready stow and schedule its reset.").format(
+                      "continue foreground supervision. Only if the explicit maintenance reset request still applies, "
+                      "save a new reset-ready stow and schedule its reset with --explicit-reset.").format(
                           command("foreman-reset"))
 
 

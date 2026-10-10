@@ -7,7 +7,8 @@ Workers, other native sessions, and never-bound sessions produce no output.
 No writes, worker contact, process termination, or acknowledgement occurs.
 
 stop_hook_active does not waive supervision. A genuine user pause remains a
-supported boundary. A handoff also needs a matching live reset continuation.
+supported boundary. A handoff needs a verified successor or explicitly requested
+live reset continuation, never a saved checkpoint alone.
 """
 
 import json
@@ -28,11 +29,10 @@ def block(reason):
 def _ineligible_handoff_clause(continuation):
     """Next action for an ineligible current handoff, keyed by continuation state."""
     state = continuation["state"]
-    prefix = (" The saved handoff prepares a reset but does not transfer supervision "
+    prefix = (" The saved handoff does not transfer supervision "
               "({}).".format(state))
     if state == "reset_missing":
-        return prefix + " Schedule its exact live continuation with `{}`.".format(
-            runnable.command("foreman-reset"))
+        return prefix + " Keep the current context, active goal and foreground watch; an ordinary checkpoint never schedules a reset."
     if state == "reset_deliverer_not_live":
         return prefix + " Run `{}` for this owner state to inspect the reset and obtain its reconciliation command; do not schedule another attempt for this stow.".format(
             runnable.command("catch-up"))
@@ -83,7 +83,7 @@ def check(payload, environ, at, *, root=None, probe=runtime.process_identity):
             handoff = ""
             if continuation is not None:
                 handoff = _ineligible_handoff_clause(continuation)
-            return block("{} active assignment(s), {} unhandled event(s); watcher is {}.{} Run `{}`, reconcile report/ledger evidence, acknowledge handled outcomes, and keep awaiting the foreground `{}` handle. A quiet watch deadline is a checkpoint: start the next foreground watch while authorized work remains. A genuine user-requested pause may use `{}`; a handoff permits Stop only after its matching reset continuation is live. State: {}".format(
+            return block("{} active assignment(s), {} unhandled event(s); watcher is {}.{} Run `{}`, reconcile report/ledger evidence, acknowledge handled outcomes, and keep awaiting the foreground `{}` handle. A quiet watch deadline is a checkpoint: start the next foreground watch while authorized work remains. A genuine user-requested pause may use `{}`; a handoff permits Stop only after verified successor takeover or its explicitly requested reset continuation is live. State: {}".format(
                 len(active), len(events), health["state"], handoff, runnable.command("supervision-drain"), runnable.command("supervision-watch"),
                 runnable.command("supervision-hold"),
                 binding["state_path"]))

@@ -1061,10 +1061,38 @@ RESET_AT = "2026-09-24T10:00:00+00:00"
 
 
 class ResetCommandTest(CliCase):
-    def run_cli(self, argv, client=None):
+    def run_cli(self, argv, client=None, *, explicit_reset=True):
+        # These fixtures exercise the opt-in maintenance owner, not the default
+        # round checkpoint. The default-refusal test disables this fixture opt-in.
+        if explicit_reset and "foreman-reset" in argv:
+            argv = argv + ["--explicit-reset"]
         # Scheduling now observes a live name and bound native session. Keep
         # those reads isolated even when a test exercises non-default binaries.
         return super().run_cli(argv, client=FakeClient(["working"]) if client is None else client)
+
+    def test_default_reset_refuses_before_owner_access_or_runtime_effects(self):
+        for kind in ("claude", "codex", "grok"):
+            with self.subTest(kind=kind), \
+                 patch("foreman.cli.memory.show", side_effect=AssertionError("must not read memory")), \
+                 patch("foreman.cli.supervision.load", side_effect=AssertionError("must not read supervision")), \
+                 patch("foreman.cli.home.guard", side_effect=AssertionError("must not access homes")), \
+                 patch("foreman.cli.state_lock", side_effect=AssertionError("must not write lock")), \
+                 patch("foreman.cli._spawn_detached", side_effect=AssertionError("must not spawn")):
+                self.out, self.err = io.StringIO(), io.StringIO()
+                before = self.config.read_bytes()
+                client = FakeClient(["working"], kind=kind)
+                code, out, err = self.run_cli(
+                    self.base() + ["foreman-reset", "--stow", "round-7", "--now", RESET_AT],
+                    client=client, explicit_reset=False)
+                self.assertEqual((code, out), (1, ""))
+                error = json.loads(err)
+                self.assertEqual(error["details"]["reason"], "automatic_foreman_reset_disabled")
+                self.assertIn("checkpoint and continue", error["message"])
+                self.assertEqual(self.config.read_bytes(), before)
+                self.assertFalse(self.state.exists())
+                self.assertFalse(foreman_reset.record_path(self.state).exists())
+                self.assertFalse(Path(str(self.state.resolve()) + ".foreman-reset.log").exists())
+                self.assertEqual(client.keystrokes, [])
 
     def test_unnamed_schedule_refuses_before_any_spawn_log_or_reset_record(self):
         for kind in ("claude", "codex", "grok"):

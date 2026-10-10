@@ -51,8 +51,8 @@ Before following any route below, report the worktree sweep to the operator:
 
 - **Exit 0** — record `due` as maintenance and proceed to Step 5 without waiting
   on it.
-  A resumed foreman proceeds to the stow's continuation step instead (Step 17
-  Resume Route).
+  A checkpointed or resumed foreman proceeds to the stow's continuation step
+  instead (Step 17 Continue Route or Resume Route).
   Refresh a due capability table at the next maintenance checkpoint under
   `skills/herdr-foreman/references/model-tiers.md`. A selection-time fact about
   a seat this task needs may block that seat; cadence alone never does. The
@@ -149,7 +149,7 @@ maintenance and never blocks the selected task. Missing coverage still blocks
 the exact worker transition it protects. For an explicit request, complete a
 new retrospective and finish here.
 
-Proceed immediately to Step 5, or on a resume to the stow's continuation step.
+Proceed immediately to Step 5, or after a checkpoint or resume to the stow's continuation step.
 
 ## Step 3 — Verify Authority for the Repo
 

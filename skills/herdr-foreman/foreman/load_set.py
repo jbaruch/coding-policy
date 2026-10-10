@@ -1,7 +1,6 @@
 """The durable records one foreman decision must load.
 
-A foreman reset at every round boundary loses whatever it knew from carrying
-the session (#483). What a decision needs is not a judgment call: the owner
+Conversation memory can be lost on restart or replacement. The owner
 records already link each task to its dispatches, briefs, report paths, review
 receipts and recovery decisions. This joins those links per decision, so the
 foreman loads what the decision depends on and nothing else.

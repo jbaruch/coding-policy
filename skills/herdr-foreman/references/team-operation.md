@@ -584,21 +584,23 @@ refuse only the stage whose harm it prevents.
 ## Working Memory
 
 Native foreman-reset commands and pane recovery below govern native foremen.
-A remote controller performs its round-boundary continuation through the
-authenticated host runtime under `skills/herdr-foreman/references/remote-context.md`.
-Its saved outcomes, lessons, reset-ready stow, handoff and supervision gates
-remain required. It never clears the workstation's thin anchor.
+A remote controller preserves its context through round boundaries under
+`skills/herdr-foreman/references/remote-context.md`. Its saved outcomes,
+lessons, stow and supervision gates remain required. It never clears the
+workstation's thin anchor.
 
 - Curate applicable lessons with their scope and evidence through the foreman-owned memory commands
 - Consult relevant lessons before composing assignments
 - Revalidate a lesson before relying on recalled operational facts
 - Preserve superseded lessons and immutable retrospective notes
-- The foreman resets its context at every round boundary
-- Before the reset, record the round's outcomes
-- Before the reset, curate the round's lessons
-- Before the reset, save a reset-ready stow
-- The reset runs through `foreman foreman-reset`, never by typing into the foreman's pane
-- A reset that typed nothing preserves its current context; inspect the live binding, fix its cause, and schedule a new stow without clearing or pasting
+- Keep the foreman's context and active goal across round boundaries
+- Record the round's outcomes and continuation step
+- Curate the round's lessons
+- Save a stow with the active goal and outstanding work
+- Continue the saved step and enrolled supervision without stopping for the checkpoint
+- Never automatically reset the foreman or ask for reset permission at each boundary
+- Only an explicit operator-requested maintenance reset uses `foreman foreman-reset --explicit-reset`, never input into the foreman's pane
+- A reset that typed nothing preserves its current context; inspect the live binding, fix its cause, and continue supervision
 - Narrow exception for recovering a reset that failed or was interrupted.
 - Preconditions (all required):
   1. The reset record shows the reset `failed` or `interrupted`
@@ -607,10 +609,11 @@ remain required. It never clears the workstation's thin anchor.
   4. The operator pastes the resume prompt the reset record saved for that reset
   5. Before clearing, the operator confirms the pane is not already running a foreman resumed from that reset
   6. A pane already running that resumed foreman is reconciled as delivered, never cleared
-- Every other reset runs through `foreman foreman-reset`
+- Every other explicitly requested reset runs through `foreman foreman-reset --explicit-reset`
 - A reset foreman resumes from the stow, the supervision resume sequence, and the foreman queue
 - Save conversation-only knowledge and open work before a planned foreman reset, compaction, or replacement
 - Give the next foreman an ordered list of durable files to read
+- Require the next foreman to explicitly set `/goal <saved objective>` and verify it is active under Working Memory's Successor Goal contract before dispatch or retirement of the outgoing foreman
 - Record uncaptured or unavailable context as an explicit handoff gap
 - A handoff gap names what is missing, the task it affects, and how to recover it
 - Narrow exception for a gap migrated from a version-1 stow.
@@ -646,7 +649,7 @@ remain required. It never clears the workstation's thin anchor.
 - Acknowledging an observation never accepts the assignment or completes the task
 - Reconcile interrupted supervision against its saved events and live process evidence
 - Continue the foreground watch after a quiet deadline while authorized work remains
-- A saved handoff prepares reset preflight and never proves a transferred continuation
+- A saved handoff never proves a transferred continuation
 - Never finish a foreman turn with active work unless a genuine user pause, a successor binding, or a matching live reset deliverer satisfies the Stop gate
 - Follow `skills/herdr-foreman/references/supervision.md`
 
