@@ -939,6 +939,7 @@ class RecordTest(unittest.TestCase):
             self.schedule("2026-09-24T10:00:00+00:00", True)
         self.assertEqual(caught.exception.code, "reset_record_newer")
         self.assertIn("update the coding-policy plugin", caught.exception.message)
+        self.assertIn(runnable.command("foreman-reset --explicit-reset"), caught.exception.message)
         with self.assertRaises(foreman_reset.ResetRecordNewer):
             foreman_reset.claim(self.state, self.plan, self.me())
         self.assertEqual((path.read_text(), self.starts), (newer, 0))
@@ -1036,9 +1037,10 @@ class RecordTest(unittest.TestCase):
     def test_a_reset_without_a_bound_session_is_not_scheduled(self):
         for session in (None, {"kind": "id"}, {"kind": "tty", "value": "x"}, {"kind": "id", "value": ""}):
             with self.subTest(session=session):
-                with self.assertRaisesRegex(UsageError, "no bound native session"):
+                with self.assertRaisesRegex(UsageError, "no bound native session") as caught:
                     foreman_reset.schedule(self.state, self.plan, "2026-09-24T10:00:00+00:00", self.start,
                                            native_session=session)
+                self.assertIn(runnable.command("foreman-reset --explicit-reset"), caught.exception.message)
                 self.assertFalse(foreman_reset.record_path(self.state).exists())
                 self.assertEqual(self.starts, 0)
 

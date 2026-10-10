@@ -169,11 +169,11 @@ and native-session verification to perform before scheduling.
     - The operator restores it
   - `reset_foreman_unnamed` — the live foreman has no usable agent name
     - Perform the named metadata rename and verify the same native session
-    - Re-run `foreman-reset`; no child, reset row or input was created
+    - Re-run the same `foreman-reset --explicit-reset` invocation; no child, reset row or input was created
   - any other `error` — a refused precondition: an unready stow, the wrong
     pane, supervision work still unheld, or an unreadable stow or state
     - Fix the cause stderr names
-    - Re-run `foreman-reset`
+    - Re-run the same `foreman-reset --explicit-reset` invocation
 - A deliverer that fails after scheduling leaves its outcome on the reset
   record
 - `catch-up` surfaces that outcome ahead of the attention queue

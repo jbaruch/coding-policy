@@ -467,7 +467,7 @@ def _load(path, *, migrate_legacy=True):
     if type(version) is int and version > RESET_SCHEMA_VERSION:
         raise ResetRecordNewer("Reset record {} is schema {}, newer than this build's {}. It is left untouched; update the "
                                "coding-policy plugin, then run `{}`.".format(path, version, RESET_SCHEMA_VERSION,
-                                                                          command("foreman-reset")),
+                                                                          command("foreman-reset --explicit-reset")),
                                {"record": str(path), "schema_version": version})
     migrated = _version(version, 1) or _version(version, 2)
     if migrated and not migrate_legacy:
@@ -658,7 +658,7 @@ def schedule(state_path, plan, at, start, *, native_session, alive=_alive, probe
                          {"at": at}) from None
     if not _valid_session(native_session):
         raise UsageError("The reset for stow {} carries no bound native session; run `{}` from the foreman's pane, then `{}`. "
-                         "Nothing was scheduled.".format(plan.get("stow"), command("supervision-bind"), command("foreman-reset")),
+                         "Nothing was scheduled.".format(plan.get("stow"), command("supervision-bind"), command("foreman-reset --explicit-reset")),
                          {"stow": plan.get("stow")})
     path = record_path(state_path)
     managed = None
