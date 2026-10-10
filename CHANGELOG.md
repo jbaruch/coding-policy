@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.399 — 2026-10-10
+
 ### Fixed
 
 - Stop automatically clearing the foreman's context at round boundaries.
