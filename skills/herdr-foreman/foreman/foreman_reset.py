@@ -1,9 +1,9 @@
-"""Clear the foreman's own context at a round boundary (#483).
+"""Deliver an explicitly requested foreman maintenance reset.
 
-The foreman's conversation grew for the whole session until it failed with
-`Prompt is too long`. The fix is a reset at every round boundary: the foreman
-saves a handoff (a reset-ready stow), ends its turn, and a fresh context
-resumes from durable records.
+Ordinary round boundaries save a checkpoint and continue in the same context.
+The CLI refuses scheduling without --explicit-reset before any owner access.
+This legacy in-place maintenance route is not fresh-foreman succession and
+does not prove that a host runtime's active goal survives clearing.
 
 A foreman cannot type into its own composer mid-turn, so the reset is two
 commands. `foreman-reset` runs inside the turn: it checks the preconditions
@@ -113,17 +113,22 @@ HOOK_ACCEPTANCE_POLL_SEC = 1
 #: raw subprocess output or pane text; the record keeps identifiers only.
 FAILURE_DETAIL_KEYS = frozenset({"pane_id", "stow", "record", "status", "pid", "lock", "kind", "reconciled",
                                  "reconciled_at", "schema_version", "reason", "phase", "name_matches", "kind_matches"})
+# Keep the persisted wire marker; it does not authorize automatic scheduling.
 RESUME_OPENING = "Foreman resume after a planned round-boundary reset."
 RESET_RECEIPT_PREFIX = "Herdr reset input receipt: "
 RESUME_TEMPLATE = (
     RESUME_OPENING + " Your earlier conversation is gone by design. Run the "
-    "herdr-foreman skill; every command below is complete and runnable as written, "
-    "and every other launcher command takes the same `{flags}`. Before "
+    "herdr-foreman skill; every owner launcher command takes the same `{flags}`. Before "
     "anything else: run `{tl} memory-show {flags} --id {stow}` and read its "
-    "required files in order; run `{tl} supervision-bind {flags}`, "
+    "required files in order. Explicitly set `/goal <saved objective>` in this "
+    "foreman's host runtime and verify the goal is active under the working-memory "
+    "Successor Goal contract, preserving any remaining budget. Naming a goal in "
+    "a prompt is not goal activation. If the goal or runtime facility is unavailable, "
+    "recover that gap without dispatch or claiming healthy takeover. Then run "
+    "`{tl} supervision-bind {flags}`, "
     "`{tl} supervision-resume {flags}`, `{tl} supervision-status {flags}` "
     "and `{tl} supervision-drain {flags}`; then "
-    "`{tl} foreman-queue {flags}`. Then take SKILL.md Step 17's Resume Route: Step 1, Step 2, "
+    "`{tl} foreman-queue {flags}`. Then complete SKILL.md Step 17's Resume Route: Step 1, Step 2, "
     "then the continuation step the stow's unresolved work names, in place of Step 5. "
     "Load each decision's records before making it, with "
     "`{tl} load-set {flags} --decision <plan|brief|gate|diagnose> --task <task>` or "
@@ -167,12 +172,13 @@ def accepted_resume(state, pane_id, stow, before):
 
 OPERATOR_RECOVERY = ("Do not run `{}` again for this stow. The operator recovers the foreman under "
                      "skills/herdr-foreman/references/team-operation.md Working Memory: clear the foreman's pane, then paste the "
-                     "resume prompt saved in this reset's record. The next round resets from a new stow.").format(
+                     "resume prompt saved in this reset's record. The next round checkpoints and continues without another reset.").format(
                          command("foreman-reset"))
 
 UNTOUCHED_RECOVERY = ("Do not run `{}` again for this stow. Nothing was typed by this reset; do not clear the pane or "
                       "paste its resume prompt. Inspect the named pane and its current binding, fix the saved cause, "
-                      "continue foreground supervision, then save a new reset-ready stow and schedule its reset.").format(
+                      "continue foreground supervision. Only if the explicit maintenance reset request still applies, "
+                      "save a new reset-ready stow and schedule its reset with --explicit-reset.").format(
                           command("foreman-reset"))
 
 
@@ -461,7 +467,7 @@ def _load(path, *, migrate_legacy=True):
     if type(version) is int and version > RESET_SCHEMA_VERSION:
         raise ResetRecordNewer("Reset record {} is schema {}, newer than this build's {}. It is left untouched; update the "
                                "coding-policy plugin, then run `{}`.".format(path, version, RESET_SCHEMA_VERSION,
-                                                                          command("foreman-reset")),
+                                                                          command("foreman-reset --explicit-reset")),
                                {"record": str(path), "schema_version": version})
     migrated = _version(version, 1) or _version(version, 2)
     if migrated and not migrate_legacy:
@@ -652,7 +658,7 @@ def schedule(state_path, plan, at, start, *, native_session, alive=_alive, probe
                          {"at": at}) from None
     if not _valid_session(native_session):
         raise UsageError("The reset for stow {} carries no bound native session; run `{}` from the foreman's pane, then `{}`. "
-                         "Nothing was scheduled.".format(plan.get("stow"), command("supervision-bind"), command("foreman-reset")),
+                         "Nothing was scheduled.".format(plan.get("stow"), command("supervision-bind"), command("foreman-reset --explicit-reset")),
                          {"stow": plan.get("stow")})
     path = record_path(state_path)
     managed = None

@@ -27,7 +27,7 @@ names where to continue.
 A judge round is a round: once its ruling is recorded, run Step 16 and Step
 17 before continuing, whatever the ruling (`insufficient` and `blocked`
 included). Record the step the ruling named as the stow's continuation step.
-The reset foreman takes Step 17's Resume Route.
+The current foreman takes Step 17's Continue Route without clearing context.
 
 ## Step 14 — Release the Pull Request
 
@@ -83,7 +83,7 @@ current progress through the attention owner and curate the round's lessons.
 Report outstanding attention first, followed by the outcome and saved paths.
 Proceed immediately to Step 17.
 
-## Step 17 — Reset the Foreman Context
+## Step 17 — Checkpoint the Foreman Context
 
 Stow the handoff under the working-memory reference, with a structured gap
 for anything the stow could not capture. The stow's `unresolved_work` names
@@ -94,37 +94,42 @@ the continuation step, the step the round's outcome routes to:
 - A merged or abandoned task awaiting closure — Step 16
 - Only `foreman-queue` seats remaining — Step 5
 
-Handle every pending supervision event, and save `supervision-hold` kind
-`handoff` covering each active enrollment. Use the stow id as the hold id.
-This prepares reset preflight; it does not permit Stop on its own. Then
-schedule the reset:
+Capture the active goal's objective, remaining work, status and any remaining
+budget in the stow; saving it does not complete, pause or recreate the goal.
+Handle pending supervision events and keep the foreground watch active for
+every enrollment. Do not save a handoff hold, schedule `foreman-reset`, type
+`/clear` or end the turn merely for a round boundary. Preserve the current
+context and active goal.
 
-```bash
-CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"; [ -d "$CP" ] || case "$(git config --get remote.origin.url)" in git@github.com:jbaruch/coding-policy|git@github.com:jbaruch/coding-policy.git|https://github.com/jbaruch/coding-policy|https://github.com/jbaruch/coding-policy.git|ssh://git@github.com/jbaruch/coding-policy|ssh://git@github.com/jbaruch/coding-policy.git) CP=. ;; *) echo "coding-policy plugin not found: run tessl install jbaruch/coding-policy" >&2; exit 1 ;; esac
-bash "$CP/skills/herdr-foreman/foreman.sh" foreman-reset --stow <stow-id> \
-  [--state <state-file>] [--config <config-file>] [--herdr-bin <path>]
-```
+**Continue Route** — run Steps 1 and 2 in this context, retaining their existing
+round-start gates, then take the saved continuation step in place of Step 5.
+When enrollments still need observation, continue Step 11's fleet
+loop while routing the next work. With only queued work, return to Step 5.
+Read `foreman-queue` from the owner rather than inferring an empty queue from
+a completed round. Finish only after the authorized work is complete, a genuine
+user pause, or a verified continuation satisfying the Stop gate.
 
-Before running the reset, read:
-
-```text
-skills/herdr-foreman/references/working-memory.md — Reset Outcome Routing
-```
-
-Follow its exit and asynchronous-failure routes. A
-failed reset never permits Stop with active work.
+An explicitly requested maintenance reset follows
+`skills/herdr-foreman/references/working-memory.md` Reset Outcome Routing.
+Do not ask for one at each boundary. A failed reset never permits Stop with
+active work. Fresh-foreman succession is not implemented by this checkpoint;
+a saved handoff alone is not a live successor.
 
 **Resume Route** — the next context follows one route:
 
 1. The resume prompt's reads: the stow and its required files, supervision,
    `foreman-queue`
-2. Step 1, then Step 2
-3. The stow's continuation step, in place of Step 5
+2. Explicitly set `/goal <saved objective>` in the incoming foreman's host runtime
+   under the working-memory reference's Successor Goal contract
+3. Step 1, then Step 2
+4. The stow's continuation step, in place of Step 5
 
 `foreman-queue` lists seats only. Gating, release and closure return through
 the continuation step, never through the queue.
 
-Finish here.
+On replacement, verify the incoming foreman's `/goal` is active and verify
+live supervision before retiring the outgoing foreman. A pasted goal objective
+alone is not proof that the runtime's goal is active.
 
 For the daily standup, use
 `Skill(skill: "herdr-standup")`.

@@ -348,9 +348,11 @@ class SupervisionTest(unittest.TestCase):
         self.hold(["dispatch-a"], kind="handoff")
         blocked = self.stop()
         self.assertEqual(blocked["decision"], "block")
-        self.assertIn("prepares a reset but does not transfer supervision", blocked["reason"])
+        self.assertIn("saved handoff does not transfer supervision", blocked["reason"])
         self.assertIn("quiet watch deadline", blocked["reason"])
-        self.assertIn("Schedule its exact live continuation", blocked["reason"])
+        self.assertIn("Keep the current context, active goal and foreground watch", blocked["reason"])
+        self.assertNotIn("foreman-reset", blocked["reason"])
+        self.assertFalse(foreman_reset.record_path(self.path).exists())
 
     def test_live_unclaimed_reset_never_releases_stop_or_changes_its_record(self):
         self.member()

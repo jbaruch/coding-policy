@@ -1,5 +1,20 @@
 # Changelog
 
+### Fixed
+
+- Stop automatically clearing the foreman's context at round boundaries.
+  Round completion, correction and judge continuations now checkpoint the
+  active goal and exact next step, then continue supervision in the same
+  context. Native Stop recovery no longer prescribes a reset for a saved
+  handoff without a successor. Remote controllers follow the same retention
+  contract. The reset CLI rejects ordinary calls before owner access or pane
+  input; an existing explicit maintenance request uses `--explicit-reset`.
+  Historical reset receipts and uncertain-delivery recovery stay intact.
+  Fresh-foreman succession remains a separate mechanism: load the handoff,
+  explicitly set `/goal <saved objective>` and verify it is active, prove
+  supervision takeover, then retire the old
+  foreman rather than killing it before the successor is ready.
+
 ## 0.3.398 — 2026-10-09
 
 ### Added

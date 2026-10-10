@@ -55,8 +55,8 @@ For each supported runtime:
 - Submit a prompt ending with `Herdr reset input receipt: {}` on its own line.
   The native UI must show the reset verifier's blocking reason and perform no
   model/tool work. A lifecycle wait alone does not prove this; read the pane.
-- For a healthy round boundary, bind the fixture's native session, save a stow
-  with unchanged required files, and run the normal reset owner command from
+- For an explicitly requested maintenance reset, bind the fixture's native session, save a stow
+  with unchanged required files, and run `foreman-reset --explicit-reset` from
   that fixture's actual tool turn. Observe the loaded child's durable claim,
   the clear, one real continuation, a new native binding, the row's acceptance
   and delivered result, and the resumed foreman's saved-memory read.

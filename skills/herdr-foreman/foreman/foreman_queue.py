@@ -1,9 +1,8 @@
 """Which open tasks are waiting for a seat.
 
 The ledger records that a task is "queued" and nothing about which seat it
-waits for. The foreman used to carry that in its conversation, and a foreman
-reset at every round boundary loses it (#483). The owner records already hold
-it, so this joins them rather than asking the foreman to keep a second copy.
+waits for. The owner records hold that evidence; this joins them instead of
+depending on conversation memory, including after a restart or replacement.
 
 A task is open while it has no `task_closed` event in force. An open task
 waits for:

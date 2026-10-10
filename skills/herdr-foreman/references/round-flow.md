@@ -319,9 +319,9 @@ At Step 12, apply `skills/herdr-foreman/references/assignment-reasoning.md` to
 the findings and their proposed corrections. Preserve required judge rulings
 and operator decisions; scope classification never waives a blocking finding.
 Read this task's confirmed fix history, name the next fix number,
-and treat the return to Step 4 as a round boundary: log the round and reset
+and treat the return to Step 4 as a round boundary: log the round and checkpoint
 (SKILL.md Steps 16–17), recording the fix number, findings and prior reports in
-the stow, so the reset context returns to Step 4 with self-contained briefs
+the stow, then take Step 17's Continue Route in the current context to Step 4 with self-contained briefs
 carrying them. Preserve the developer for retained fixes; use a fresh context for the
 fresh-worker stage. Never reset the counter during re-planning. At a contested
 verdict, a report `VERDICT:` the classifier gate contradicts, or a weighing

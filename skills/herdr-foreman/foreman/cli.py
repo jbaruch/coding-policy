@@ -442,7 +442,8 @@ def build_parser():
             record_parser.add_argument("--record", required=True, metavar="FILE", help="Structured evidence JSON; see dispatch-recovery.md.")
         record_parser.add_argument("--now", metavar="ISO8601")
     sub.add_parser("status", parents=[common], help="Show implementation budgets and paused work separately from active audit workers.")
-    reset_parser = sub.add_parser("foreman-reset", parents=[common], help="Schedule the foreman's round-boundary context reset from a reset-ready stow.")
+    reset_parser = sub.add_parser("foreman-reset", parents=[common], help="Schedule an explicitly requested maintenance reset, never an automatic round-boundary reset.")
+    reset_parser.add_argument("--explicit-reset", action="store_true", help="Declare an existing explicit operator request for this maintenance reset; ordinary checkpoints do not use it.")
     reset_parser.add_argument("--stow", default="latest", help="Stow id the reset resumes from (default: the latest).")
     reset_parser.add_argument("--now", metavar="ISO8601")
     deliver_parser = sub.add_parser("foreman-reset-deliver", parents=[common], help="Internal: wait for the foreman pane to idle, then clear it and send the resume prompt.")
@@ -3302,6 +3303,9 @@ def main(argv=None, stdout=None, stderr=None, client=None):
         stderr.write(DIAGNOSTIC_PREFIX + message + "\n")
 
     try:
+        if args.command == "foreman-reset" and not args.explicit_reset:
+            raise UsageError("Automatic foreman context resets are disabled. Keep the current context, active goal and foreground supervision; checkpoint and continue at the saved step. Use --explicit-reset only for an existing explicit operator-requested maintenance reset.",
+                             {"reason": "automatic_foreman_reset_disabled"})
         if client is not None and getattr(getattr(client, "context", None), "mode", None) == "attested-remote":
             client.remote_preflight(_state_path(args), allow_indeterminate=True)
             if args.command in {"start-foreman", "foreman-reset", "foreman-reset-deliver", "foreman-reset-reconcile", "migrate-home"}:
