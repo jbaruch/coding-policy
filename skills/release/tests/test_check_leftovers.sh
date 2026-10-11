@@ -447,7 +447,7 @@ sys.exit(0 if doc["self"]["path"].endswith("\n") else 1)
   # The reported reproduction: committed selected work plus an old dirty
   # checkout on a tip already in main. Repeated release checks preserve both
   # bytes and mtime, leave the branch intact, and keep attention visible.
-  before="$(git -C "$TMP/aband-wt" rev-parse HEAD)"
+  before="$(git -C "$TMP/aband-wt" rev-parse HEAD)" || die "read abandoned worktree tip"
   cp -p "$TMP/aband-wt/file.txt" "$TMP/preserved.txt" || die "preserve fixture"
   for attempt in 1 2; do
     run_check "$TMP/aband" "$AGED_FLOOR" --release
@@ -461,8 +461,9 @@ assert d["others"][0]["verdict"] == "abandoned"
 assert d["others"][0]["age_hours"] == 3600
 '; then pass; else fail "release preserves attention on attempt $attempt: RC=$RC OUT=$OUT"; fi
   done
+  after="$(git -C "$TMP/aband-wt" rev-parse HEAD)" || die "re-read abandoned worktree tip"
   if cmp "$TMP/preserved.txt" "$TMP/aband-wt/file.txt" \
-     && [[ "$(git -C "$TMP/aband-wt" rev-parse HEAD)" == "$before" ]] \
+     && [[ "$after" == "$before" ]] \
      && python3 -c 'import os,sys; assert os.stat(sys.argv[1]).st_mtime_ns == os.stat(sys.argv[2]).st_mtime_ns' \
         "$TMP/preserved.txt" "$TMP/aband-wt/file.txt"; then
     pass; else fail "release changed unrelated bytes, tip or mtime"; fi
