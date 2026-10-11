@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.400 — 2026-10-11
+
 ### Fixed
 
 - Scope release readiness to the selected checkout (#754). The release gate
