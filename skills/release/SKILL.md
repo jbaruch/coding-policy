@@ -27,10 +27,17 @@ Nothing below runs until this exits 0:
 
 ```bash
 CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"; [ -d "$CP" ] || case "$(git config --get remote.origin.url)" in git@github.com:jbaruch/coding-policy|git@github.com:jbaruch/coding-policy.git|https://github.com/jbaruch/coding-policy|https://github.com/jbaruch/coding-policy.git|ssh://git@github.com/jbaruch/coding-policy|ssh://git@github.com/jbaruch/coding-policy.git) CP=. ;; *) echo "coding-policy plugin not found: run tessl install jbaruch/coding-policy" >&2; exit 1 ;; esac
-bash "$CP/skills/release/check-leftovers.sh"
+bash "$CP/skills/release/check-leftovers.sh" --release
 ```
 
-Exit 0 clears the release. Exit 1 blocks it, with `blocking` naming each leftover and the stderr diagnostic naming its worktree — commit, stash, or gitignore the work, then re-run. Exit 2 is a usage or tool-state error, never a verdict. Which worktree states it refuses, and why another worktree's work in progress does not trip it, are the script's decision contract — see `skills/release/check-leftovers.sh` header, not restated here (`rules/script-as-black-box.md`).
+Exit 0 clears this readiness gate. Read `others` and `attention` even on exit 0.
+Preserve unrelated work and record its path, evidence, consequence and required
+owner decision in the existing task report or standalone conversation. Continue
+this release without committing, stashing, ignoring or deleting that work.
+Exit 1 blocks on `blocking`; resolve only the selected checkout's authorized work
+and re-run. Exit 2 is a usage or tool-state error, never a verdict.
+The scope and observation contract live in `skills/release/check-leftovers.sh`
+(header). The repository-wide inspection mode is not a release prerequisite.
 
 - Confirm you're on a feature branch (not `main`/`master`)
 - Run the test suite — all tests must pass

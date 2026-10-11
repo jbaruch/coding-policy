@@ -1,5 +1,13 @@
 # Changelog
 
+### Fixed
+
+- Scope release readiness to the selected checkout (#754). The release gate
+  preserves unrelated dirty worktrees and reports abandoned work or inspection
+  failures as nonblocking operator attention, without changing files, branches
+  or activity timestamps. Selected-checkout dirt and shared inventory failures
+  still refuse release. Repository-wide hygiene inspection remains available.
+
 ## 0.3.399 — 2026-10-10
 
 ### Fixed
