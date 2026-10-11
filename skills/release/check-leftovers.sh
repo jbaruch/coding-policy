@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Refuse to start a release while work sits uncommitted in a worktree.
+# Inspect leftovers; release mode gates only the selected checkout.
 #
 # The release flow's later steps are all scripted; Step 1 was prose, so the
 # decision to OPEN a PR rested on the agent remembering to look. It did not:
@@ -26,14 +26,24 @@
 #   and no network. An age floor keeps a worktree created minutes ago from
 #   tripping it.
 #
-# Every read here fails closed. A gate that answers "clean" when it could not
+# In --release mode, OTHER leftovers and inspection errors are observations,
+# never release prerequisites. Keep them in `others` and `attention` and report
+# them without modifying those worktrees. SELF and shared inventory errors
+# still fail closed. Without --release the historical repository-wide gate
+# remains available for explicit hygiene inspection.
+#
+# Every read in the repository-wide mode fails closed. A gate that answers "clean" when it could not
 # look is worse than one that refuses to answer, so a git command that fails,
 # a clock that cannot be read and a path whose status cannot be parsed all exit
 # 2 rather than producing a verdict.
 #
-# Usage: check-leftovers.sh [--repo <path>]
+# Usage: check-leftovers.sh [--repo <path>] [--release]
 # Out:   one JSON object on stdout, on every exit code below:
-#          {"ok":bool,"self":{...},"others":[{...}],"blocking":["<reason>",...]}
+#          {"ok":bool,"self":{...},"others":[{...}],"blocking":["<reason>",...],
+#           "attention":["<observation>",...]}
+#        An unreadable OTHER in release mode has path, verdict "unknown" and
+#        error, never a fabricated branch, age or clean verdict. No files, refs
+#        or mtimes in inspected worktrees are changed.
 #        `self` carries path, branch, staged/unstaged/untracked counts, and the
 #        same tip_in_main/age_hours/verdict the other entries carry. The release
 #        gate blocks on any `self` dirt whatever its verdict; the verdict is
@@ -97,7 +107,7 @@ json_str() {
   printf '"%s"' "$out"
 }
 
-die() { echo "check-leftovers: $*" >&2; printf '{"ok":false,"self":null,"others":[],"blocking":[]}\n'; exit 2; }
+die() { echo "check-leftovers: $*" >&2; printf '{"ok":false,"self":null,"others":[],"blocking":[],"attention":[]}\n'; exit 2; }
 
 # The removal is checked explicitly, not suppressed, and `return 0` is last:
 # under `set -e` a failing `rm` would abort the handler before it got there and
@@ -185,7 +195,7 @@ read_status() { # <worktree>
   local wt="$1" file="${SCRATCH}/status" record x y path origin
   WT_PATHS=(); WT_STAGED=0; WT_UNSTAGED=0; WT_UNTRACKED=0
 
-  if ! git -C "$wt" status --porcelain -z --untracked-files=all >"$file" 2>"$ERR_SINK"; then
+  if ! GIT_OPTIONAL_LOCKS=0 git -C "$wt" status --porcelain -z --untracked-files=all >"$file" 2>"$ERR_SINK"; then
     echo "check-leftovers: cannot read git status in ${wt}: $(cat "$ERR_SINK")" >&2
     return 1
   fi
@@ -274,13 +284,38 @@ tip_is_in() { # <worktree> <rev> <base>
   esac
 }
 
+# Emit a dirty OTHER row or nothing for clean/missing; refuse unreadable data.
+# Runs in a subshell so status counters never overwrite the selected checkout.
+inspect_other() { # <path> <base>
+  local wt="$1" base="$2" branch tip_in_main age verdict
+  if [ ! -d "$wt" ]; then
+    if [ -e "$wt" ] || [ -L "$wt" ]; then
+      echo "check-leftovers: ${wt} is registered as a worktree but is not a readable directory -- inspect its permissions and registration" >&2
+      return 1
+    fi
+    return 0
+  fi
+  read_status "$wt" || return 1
+  [ "${#WT_PATHS[@]}" -gt 0 ] || return 0
+  branch="$(branch_of "$wt")" || return 1
+  tip_in_main="$(tip_is_in "$wt" HEAD "$base")" || return 1
+  age="$(dirt_age_hours "$wt")" || return 1
+  verdict="in_progress"
+  if [ "$tip_in_main" = true ] && [ "$age" -ge "$LEFTOVERS_MIN_AGE_HOURS" ]; then
+    verdict="abandoned"
+  fi
+  printf '{"path":%s,"branch":%s,"tip_in_main":%s,"age_hours":%d,"verdict":%s}' \
+    "$(json_str "$wt")" "$(json_str "$branch")" "$tip_in_main" "$age" "$(json_str "$verdict")"
+}
+
 main() {
-  local repo="."
+  local repo="." release=false
   while [ "$#" -gt 0 ]; do
     case "$1" in
+      --release) release=true; shift ;;
       --repo) [ "$#" -ge 2 ] || die "--repo needs a path"; repo="$2"; shift 2 ;;
-      *) echo "usage: check-leftovers.sh [--repo <path>]" >&2
-         printf '{"ok":false,"self":null,"others":[],"blocking":[]}\n'; exit 2 ;;
+      *) echo "usage: check-leftovers.sh [--repo <path>] [--release]" >&2
+         printf '{"ok":false,"self":null,"others":[],"blocking":[],"attention":[]}\n'; exit 2 ;;
     esac
   done
 
@@ -339,7 +374,7 @@ main() {
     fi
   fi
 
-  local blocking=() others_json=() ok=true
+  local blocking=() others_json=() attention=() ok=true
 
   local self_branch staged unstaged untracked self_tip_in_main self_age self_verdict
   self_branch="$(branch_of "$self_path")" \
@@ -369,7 +404,7 @@ main() {
   git -C "$repo" worktree list --porcelain -z >"$inventory" 2>"$ERR_SINK" \
     || die "cannot read the worktree list for ${repo}: $(cat "$ERR_SINK")"
 
-  local field wt branch tip_in_main age verdict
+  local field wt
   while IFS= read -r -d '' field; do
     case "$field" in
       'worktree '*) wt="${field#worktree }" ;;
@@ -377,39 +412,32 @@ main() {
     esac
     [ -n "$wt" ] || continue
     [ "$wt" = "$self_path" ] && continue
-    if [ ! -d "$wt" ]; then
-      # A registered worktree whose directory is gone took its files with it and
-      # holds nothing to lose. One that exists and is not a searchable directory
-      # may hold the only copy of the work, and skipping it silently is the
-      # fail-open this gate exists to close.
-      if [ -e "$wt" ] || [ -L "$wt" ]; then
-        die "${wt} is registered as a worktree but is not a readable directory -- fix its permissions, or run 'git -C ${repo} worktree prune', then re-run"
+    local row diagnostic
+    if row="$(inspect_other "$wt" "$base" 2>"${SCRATCH}/other-error")"; then
+      if [ -s "${SCRATCH}/other-error" ]; then cat "${SCRATCH}/other-error" >&2; fi
+      [ -n "$row" ] || continue
+      others_json+=("$row")
+      # The classifier emits this exact terminal field; no path/branch content
+      # can forge a suffix after JSON escaping.
+      if [[ "$row" == *'"verdict":"abandoned"}' ]]; then
+        diagnostic="${wt} holds uncommitted work on a branch carrying no commits of its own; nothing in git preserves it"
+        if [ "$release" = true ]; then
+          attention+=("$diagnostic")
+        else
+          ok=false
+          blocking+=("$diagnostic")
+        fi
       fi
-      continue
+    else
+      diagnostic="$(cat "${SCRATCH}/other-error")"
+      if [ "$release" != true ]; then die "$diagnostic"; fi
+      attention+=("$diagnostic")
+      others_json+=("$(printf '{"path":%s,"verdict":"unknown","error":%s}' \
+        "$(json_str "$wt")" "$(json_str "$diagnostic")")")
     fi
-    read_status "$wt" \
-      || die "cannot read the working tree at ${wt} -- see the diagnostic above"
-    [ "${#WT_PATHS[@]}" -gt 0 ] || continue
-
-    branch="$(branch_of "$wt")" \
-      || die "cannot read the checked-out branch in ${wt} -- see the diagnostic above"
-    tip_in_main="$(tip_is_in "$wt" HEAD "$base")" \
-      || die "cannot classify ${wt} against ${base} -- see the diagnostic above"
-    age="$(dirt_age_hours "$wt")" \
-      || die "cannot age the changes in ${wt} -- see the diagnostic above"
-
-    verdict="in_progress"
-    if [ "$tip_in_main" = true ] && [ "$age" -ge "$LEFTOVERS_MIN_AGE_HOURS" ]; then
-      verdict="abandoned"
-      ok=false
-      blocking+=("$(printf '%s holds uncommitted work on %s, a branch carrying no commits of its own, last written %dh ago; nothing in git preserves it' \
-        "$wt" "$branch" "$age")")
-    fi
-    others_json+=("$(printf '{"path":%s,"branch":%s,"tip_in_main":%s,"age_hours":%d,"verdict":%s}' \
-      "$(json_str "$wt")" "$(json_str "$branch")" "$tip_in_main" "$age" "$(json_str "$verdict")")")
   done < "$inventory"
 
-  local others_out="" blocking_out="" item
+  local others_out="" blocking_out="" attention_out="" item
   for item in ${others_json+"${others_json[@]}"}; do
     others_out="${others_out:+${others_out},}${item}"
   done
@@ -417,15 +445,23 @@ main() {
     blocking_out="${blocking_out:+${blocking_out},}$(json_str "$item")"
   done
 
-  printf '{"ok":%s,"self":{"path":%s,"branch":%s,"staged":%d,"unstaged":%d,"untracked":%d,"tip_in_main":%s,"age_hours":%d,"verdict":%s},"others":[%s],"blocking":[%s]}\n' \
+  for item in ${attention+"${attention[@]}"}; do
+    attention_out="${attention_out:+${attention_out},}$(json_str "$item")"
+    echo "check-leftovers: attention (nonblocking): ${item}" >&2
+  done
+  if [ "${#attention[@]}" -gt 0 ]; then
+    echo "Preserve unrelated work; report these observations to its owner without changing it. Continue the selected release if its gate is clear." >&2
+  fi
+
+  printf '{"ok":%s,"self":{"path":%s,"branch":%s,"staged":%d,"unstaged":%d,"untracked":%d,"tip_in_main":%s,"age_hours":%d,"verdict":%s},"others":[%s],"blocking":[%s],"attention":[%s]}\n' \
     "$ok" "$(json_str "$self_path")" "$(json_str "$self_branch")" \
     "$staged" "$unstaged" "$untracked" "$self_tip_in_main" "$self_age" \
-    "$(json_str "$self_verdict")" "$others_out" "$blocking_out"
+    "$(json_str "$self_verdict")" "$others_out" "$blocking_out" "$attention_out"
 
   if [ "$ok" = false ]; then
     echo "check-leftovers: the release cannot start -- uncommitted work would be left behind:" >&2
     for item in ${blocking+"${blocking[@]}"}; do echo "  - ${item}" >&2; done
-    echo "Commit it, stash it, or add it to .gitignore, then re-run. Inspect a named worktree with 'git -C <path> status'." >&2
+    echo "Resolve only authorized work in blocking; preserve unrelated attention items. Inspect with 'git -C <path> status', then re-run." >&2
     exit 1
   fi
 }

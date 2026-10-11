@@ -86,9 +86,11 @@ freeze_clock() { # <bin-dir>
   chmod +x "$1/date" || die "chmod clock shim"
 }
 
-run_check() { # <repo-dir> <min-age-hours>
-  OUT="$(cd "$1" && PATH="$CLOCKBIN:$PATH" LEFTOVERS_MIN_AGE_HOURS="$2" \
-    bash "$SCRIPT_UNDER_TEST" --repo . 2>"$ERRFILE")"
+run_check() { # <repo-dir> <min-age-hours> [flags...]
+  local repo="$1" floor="$2"
+  shift 2
+  OUT="$(cd "$repo" && PATH="$CLOCKBIN:$PATH" LEFTOVERS_MIN_AGE_HOURS="$floor" \
+    bash "$SCRIPT_UNDER_TEST" --repo . "$@" 2>"$ERRFILE")"
   RC=$?
   ERRTEXT="$(cat "$ERRFILE")"
 }
@@ -439,6 +441,62 @@ sys.exit(0 if doc["self"]["path"].endswith("\n") else 1)
   run_check "$TMP/unreadable" "$AGED_FLOOR"
   if [[ $RC -eq 2 ]] && printf '%s' "$ERRTEXT" | grep -qF 'unreadable-wt'; then
     pass; else fail "a worktree git cannot read exits 2, got RC=$RC ERR=$ERRTEXT"; fi
+
+  echo "▶ selected release scope (#754)" >&2
+
+  # The reported reproduction: committed selected work plus an old dirty
+  # checkout on a tip already in main. Repeated release checks preserve both
+  # bytes and mtime, leave the branch intact, and keep attention visible.
+  before="$(git -C "$TMP/aband-wt" rev-parse HEAD)"
+  cp -p "$TMP/aband-wt/file.txt" "$TMP/preserved.txt" || die "preserve fixture"
+  for attempt in 1 2; do
+    run_check "$TMP/aband" "$AGED_FLOOR" --release
+    if [[ $RC -eq 0 ]] && printf '%s' "$OUT" | python3 -c '
+import json, sys
+d = json.load(sys.stdin)
+assert d["ok"] and not d["blocking"]
+assert d["self"]["verdict"] == "clean"
+assert len(d["attention"]) == 1
+assert d["others"][0]["verdict"] == "abandoned"
+assert d["others"][0]["age_hours"] == 3600
+'; then pass; else fail "release preserves attention on attempt $attempt: RC=$RC OUT=$OUT"; fi
+  done
+  if cmp "$TMP/preserved.txt" "$TMP/aband-wt/file.txt" \
+     && [[ "$(git -C "$TMP/aband-wt" rev-parse HEAD)" == "$before" ]] \
+     && python3 -c 'import os,sys; assert os.stat(sys.argv[1]).st_mtime_ns == os.stat(sys.argv[2]).st_mtime_ns' \
+        "$TMP/preserved.txt" "$TMP/aband-wt/file.txt"; then
+    pass; else fail "release changed unrelated bytes, tip or mtime"; fi
+
+  # Selecting the dirty checkout must not turn its own work into an advisory.
+  for fixture in unstaged staged untracked unmerged aband-wt; do
+    run_check "$TMP/$fixture" "$AGED_FLOOR" --release
+    if [[ $RC -eq 1 ]] && printf '%s' "$OUT" | python3 -c '
+import json, sys
+d = json.load(sys.stdin)
+assert not d["ok"] and d["blocking"]
+'; then pass; else fail "selected $fixture must block release: RC=$RC OUT=$OUT"; fi
+  done
+
+  for fixture in unreadable notadir; do
+    run_check "$TMP/$fixture" "$AGED_FLOOR" --release
+    if [[ $RC -eq 0 ]] && printf '%s' "$OUT" | python3 -c '
+import json, sys
+d = json.load(sys.stdin)
+assert d["ok"] and not d["blocking"] and d["attention"]
+assert d["others"][0]["verdict"] == "unknown"
+assert d["others"][0]["error"]
+assert "age_hours" not in d["others"][0]
+'; then pass; else fail "unreadable unrelated $fixture stays visible: RC=$RC OUT=$OUT"; fi
+  done
+
+  run_check "$TMP/unreadable-wt" "$AGED_FLOOR" --release
+  if [[ $RC -eq 2 ]]; then pass; else fail "unreadable selected checkout must refuse release"; fi
+  run_check "$TMP/badref" "$AGED_FLOOR" --release
+  if [[ $RC -eq 2 ]]; then pass; else fail "damaged shared ref must refuse release"; fi
+
+  run_check "$TMP/ahead" "$AGED_FLOOR" --release
+  if [[ $RC -eq 0 ]] && [[ "$(verdict_for "$OUT" ahead-wt)" == "in_progress" ]]; then
+    pass; else fail "concurrent committed work remains in progress"; fi
 
   echo "─────────────────────────────────────────────" >&2
   if [[ $FAIL -gt 0 ]]; then echo "FAILED: ${FAIL} failed, ${PASS} passed" >&2; exit 1; fi
