@@ -15,7 +15,34 @@ the utility alone records the saved notes and their separate index.
 | `<task-reports-dir>/TASK-LEDGER.md` | `herdr-foreman`, written by the foreman | Evidence-backed assignment acceptance and task completion across rounds |
 | `<canonical-state-path>.retrospectives/` | `herdr-foreman`, through its retrospective utility | Immutable retrospective notes, versioned index, and transition coverage |
 | `<canonical-state-path>.foreman-reset.json` | `skills/herdr-foreman/foreman/foreman_reset.py` | One record per explicitly requested foreman maintenance reset; see Foreman Reset Record below |
+| `<canonical-state-path>.bootstrap.json` | `skills/herdr-foreman/foreman/bootstrap_recovery.py` | Original Codex launch provenance and durable bootstrap transport/cleanup receipts |
 | Controller-configured private remote owner JSON | `skills/herdr-foreman/foreman/remote_owner.py` | Attested command context, current single-controller lease, indeterminate intent and task ingress; schema and writer/reader contract in `skills/herdr-foreman/references/remote-context.md` |
+
+## Bootstrap Transport Evidence
+
+`skills/herdr-foreman/foreman/bootstrap_recovery.py` is the sole writer/reader of
+`<canonical-state-path>.bootstrap.json`, under the selected state's owner lock.
+The sidecar, every origin and every outcome carry `schema_version: 1`.
+The top-level `origins` and `outcomes` arrays append evidence across invocations.
+Missing files mean no usable provenance; corrupt or unsupported versions refuse
+recovery and capture with an actionable diagnostic. No older schema exists.
+
+An origin stores `dispatch`, `at`, `pane_id`, positive `shell_pid`, and the original
+verified `process` (source, PID, pane, argv and tier). Normal Codex apply records
+it before sending input. Legacy import additionally stores an `evidence` file
+receipt from the original pre-exit process archive. No current shell is imported
+as original provenance.
+
+An outcome stores `dispatch`, `at`, exact `input`, saved pane `evidence` receipt,
+original `origin`, `historical_status`, and nullable `closure`. `closure` becomes
+the lifecycle's successful owned-close result after supervision resolves.
+Interrupted cleanup leaves null and is replayable only with unchanged inputs and
+receipts. Completed outcomes replay without another terminal effect.
+Assignments and applied dispatch history are never migrated or rewritten by this
+sidecar. Pending transport uses the existing reconciliation shape with
+`observed_state: absent`, `observed_session: null`; no native continuity is inferred.
+The input and output contracts live in
+`skills/herdr-foreman/references/bootstrap-recovery.md`.
 
 ## Home Migration
 
