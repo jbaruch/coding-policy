@@ -827,6 +827,47 @@ class FreshShellStartupTest(unittest.TestCase):
 
 
 class WindowProbeTest(unittest.TestCase):
+    def test_idle_codex_with_empty_composer_and_startup_footer_retains_unknown_capacity(self):
+        import copy
+        import tempfile
+        from pathlib import Path
+        from foreman.composer import FRESH_COMPOSER_ATTEMPTS, inspect_composer
+        from foreman import probe_recovery
+        from tests.fakes import painted_codex_composer
+        with tempfile.TemporaryDirectory() as temporary:
+            worker, client = template("codex", "codex", "openai-weekly"), Mock()
+            worker.composer_glyph = "› "
+            worker.composer_placeholders = ("Ask Codex to do anything",)
+            worker.tiers["coordination"] = {"model": "codex-fixture", "effort": "low", "multiplier": 1.0}
+            original = copy.deepcopy(worker)
+            frame = painted_codex_composer() + "\n  \x1b[1mWaiting for startup\x1b[0m  · esc cancel"
+            self.assertTrue(inspect_composer(frame, worker).visible)
+            self.assertFalse(inspect_composer(frame, worker).occupied)
+            client.agent_get.return_value = {"pane_id": "owned-probe", "agent_status": "idle",
+                                             "interactive_ready": True, "name": "probe-fixed", "agent": "codex"}
+            client.agent_read.return_value = frame
+            state = Path(temporary) / "state.json"
+            with patch("foreman.lifecycle.spawn", return_value="owned-probe"), \
+                    patch("foreman.lifecycle.identity", return_value="probe-fixed"), \
+                    patch("foreman.lifecycle.verify_running", return_value={"pid": 71, "source": "process_argv", "pane_id": "owned-probe"}), \
+                    patch("foreman.lifecycle.close") as closed, patch("foreman.measure.measure") as usage:
+                result = measure_worker_kinds(client, [worker], "2026-10-12T00:00:00+00:00", state_path=state, sleep=lambda _: None)
+            self.assertEqual(client.agent_read.call_count, FRESH_COMPOSER_ATTEMPTS)
+            closed.assert_not_called()
+            usage.assert_not_called()
+            client.agent_prompt.assert_not_called()
+            client.deliver_slash_command.assert_not_called()
+            client.agent_send_keys.assert_not_called()
+            client.pane_send_keys.assert_not_called()
+            self.assertEqual(worker, original)
+            self.assertEqual(result["failed_agents"], ["codex"])
+            record = result["agents"]["codex"]
+            self.assertIsNone(record["headroom_pct"])
+            self.assertIsNone(record["windows"])
+            self.assertEqual(record["window_group"], "openai-weekly")
+            self.assertIn("resolve-probe", record["error"]["message"])
+            self.assertIsNotNone(probe_recovery.pending(state, worker))
+
     def test_startup_dialog_is_retained_without_usage_input_or_capacity_inference(self):
         import tempfile
         from pathlib import Path

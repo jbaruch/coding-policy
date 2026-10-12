@@ -1,5 +1,9 @@
 # Changelog
 
+### Fixed
+
+- Wait for Codex's native startup footer to clear before treating an empty composer as ready for probe usage or assignment input. Persistent startup retains the owned probe with unknown capacity, and slash commands do not receive extra Enter keys while startup is pending (#758).
+
 ## 0.3.401 — 2026-10-12
 
 ### Fixed

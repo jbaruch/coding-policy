@@ -328,6 +328,23 @@ class FailureEvidenceTest(unittest.TestCase):
 
 
 class MeasureAgentTest(unittest.TestCase):
+    def test_codex_startup_clears_before_usage_and_capacity_requires_its_marker(self):
+        for report, expected_headroom in ((CODEX_PANE, 87.0), ("No usage report", None)):
+            with self.subTest(report=report):
+                runner = runner_with({"codex": "idle"}, {"codex": report})
+                empty = painted_codex_composer()
+                pending = empty + "\n  \x1b[1mWaiting for startup\x1b[0m  · esc cancel"
+                runner.responses["agent read codex --source visible --lines 20"] = ScriptedReads([
+                    pending, pending, empty, empty])
+                snapshot = measure(HerdrClient(runner=runner), [BY_NAME["codex"]], AT, poll_attempts=1)
+                self.assertEqual(snapshot["agents"]["codex"]["headroom_pct"], expected_headroom)
+                self.assertEqual(snapshot["failed_agents"], [] if expected_headroom is not None else ["codex"])
+                commands = runner.commands()
+                delivery = commands.index("pane send-text w3:p1 /status")
+                self.assertEqual(commands[:delivery].count("agent read codex --source visible --lines 20 --format ansi"), 3)
+                self.assertEqual(commands.count("pane send-text w3:p1 /status"), 1)
+                self.assertEqual(commands.count("pane send-keys w3:p1 enter"), BY_NAME["codex"].slash_enter_count)
+
     def test_current_claude_inline_usage_is_measured_and_dialog_closed(self):
         runner = runner_with({"claude": "idle"}, {"claude": CLAUDE_INLINE_RESET_PANE})
         record = measure_agent(HerdrClient(runner=runner), BY_NAME["claude"])

@@ -4,6 +4,14 @@ Read this reference when normal measure reports a retained disposable probe.
 Runtime Dialogs in `skills/herdr-foreman/references/herdr.md` owns trust and
 permission decisions; the probe owner never decides them from UI text.
 
+Codex's native `Waiting for startup` footer blocks usage input even when
+Herdr reports idle/interactive readiness and the composer looks empty. The
+existing read-only startup bound must observe the footer clear and consecutive
+empty composer reads on the same owned target. A persistent footer retains
+the probe through this recovery path with capacity unknown; extra Enter keys
+do not establish readiness. Slash-command delivery also checks startup before
+input, and still requires consumption and the configured usage marker.
+
 ## Owner Command
 
 Use the installed launcher resolved in SKILL.md with the same config and state:
