@@ -45,7 +45,7 @@ _REMEDY_GROUPS = (
     (("task_control_not_found",),
      "Use the host operation ID returned by this owner's cancel/resume API; do not substitute an internal Herdr effect ID."),
     (("task_cancel_cleanup_unproved",),
-     "Have the policy foreman reconcile uncertain dispatches, finish owned worker cleanup and supervision, then record the original task as abandoned before resolving cancellation."),
+     "Have the policy foreman settle uncertain dispatch outcomes, finish owned worker cleanup and supervision, then record the original task as abandoned before resolving cancellation."),
     (("task_resume_policy_unresolved",),
      "Have the policy foreman resolve the existing diagnosis and authorization gates for this same task before completing resume; preserve its correction history."),
     (("task_report_not_found",),
