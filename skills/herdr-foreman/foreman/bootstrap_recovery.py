@@ -6,6 +6,7 @@ No terminal input, launch, native continuity or correction authority is issued.
 """
 
 from copy import deepcopy
+import hashlib
 import json
 from pathlib import Path
 
@@ -35,7 +36,7 @@ def load(state_path):
             or not isinstance(data.get("origins"), list) or not isinstance(data.get("outcomes"), list)):
         raise StateError("Unsupported bootstrap evidence in {}; preserve it and update the owner before recovery.".format(path), {})
     for rows, fields in ((data["origins"], ("dispatch", "at", "pane_id", "process", "shell_pid")),
-                         (data["outcomes"], ("dispatch", "at", "input", "evidence", "origin", "historical_status", "closure"))):
+                         (data["outcomes"], ("dispatch", "at", "input", "evidence", "origin", "historical_status", "pane_sha256", "closure"))):
         for row in rows:
             if (not isinstance(row, dict) or type(row.get("schema_version")) is not int
                     or row["schema_version"] != SCHEMA_VERSION or any(key not in row for key in fields)
@@ -48,7 +49,9 @@ def load(state_path):
             elif (not isinstance(row["input"], dict) or not isinstance(row["evidence"], dict)
                     or not isinstance(row["origin"], dict)
                     or row["historical_status"] not in ("sending", "sent_but_not_started", "applied", "reserved")
-                    or row["closure"] is not None and (not isinstance(row["closure"], dict) or row["closure"].get("closed") is not True)):
+                    or not isinstance(row["pane_sha256"], str) or len(row["pane_sha256"]) != 64
+                    or any(char not in "0123456789abcdef" for char in row["pane_sha256"])
+                    or row["closure"] is not None and not _valid_closure(row["closure"], row["origin"].get("pane_id"))):
                 raise StateError("Malformed bootstrap outcome in {}; restore the original owner record before recovery.".format(path), {})
             else:
                 recovery.validate_receipt(row["evidence"])
@@ -58,6 +61,12 @@ def load(state_path):
     if len(set(origins)) != len(origins) or len(set(outcomes)) != len(outcomes):
         raise StateError("Duplicate bootstrap launch/outcome identities in {}; restore the unambiguous original owner evidence.".format(path), {})
     return data
+
+
+def _valid_closure(closure, pane):
+    return (isinstance(closure, dict) and set(closure) == {"pane_id", "agent", "closed", "replayed"}
+            and closure["pane_id"] == pane and isinstance(closure["agent"], str) and bool(closure["agent"])
+            and closure["closed"] is True and type(closure["replayed"]) is bool)
 
 
 def _validate_origin(row):
@@ -216,6 +225,8 @@ def reconcile(state_path, state, data, at, client):
         raise UsageError("Original bootstrap launch evidence changed; preserve the surface and restore its owner record.", {})
 
     if prior is not None and prior["closure"] is not None:
+        if prior["closure"]["agent"] != row["agent"]:
+            raise StateError("Completed bootstrap receipt names another agent; restore the original closure evidence before accepting retirement.", {})
         return {**prior, "outcome": "not_sent", "retry_authorized": False, "history_preserved": True}
 
     def observe():
@@ -247,13 +258,18 @@ def reconcile(state_path, state, data, at, client):
         # The name can disappear while another runtime owns the same pane.
         if any(item.get("pane_id") == binding["pane_id"] for item in client.agent_list()):
             raise UsageError("Another agent owns the original pane; preserve it and resolve that work before cleanup.", {})
-        _draft(client.pane_read(binding["pane_id"], 2000), prompt)
+        visible = client.pane_read(binding["pane_id"], 2000)
+        _draft(visible, prompt)
+        digest = hashlib.sha256(strip_ansi(visible).encode("utf-8")).hexdigest()
+        if prior is not None and digest != prior["pane_sha256"]:
+            raise UsageError("The pane changed after bootstrap reconciliation; preserve the surface and inspect any intervening work before cleanup.", {})
+        return digest
 
-    observe()
+    pane_digest = observe()
     if prior is None:
         prior = {"schema_version": SCHEMA_VERSION, "dispatch": row["id"], "at": at,
                  "input": deepcopy(data), "evidence": evidence, "origin": deepcopy(origin),
-                 "historical_status": row["status"], "closure": None}
+                 "historical_status": row["status"], "pane_sha256": pane_digest, "closure": None}
         saved["outcomes"].append(prior)
         save_state(store_path(state_path), saved)
     if row["status"] in recovery.PENDING_STATUSES:

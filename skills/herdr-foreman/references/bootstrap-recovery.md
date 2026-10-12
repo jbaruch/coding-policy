@@ -24,7 +24,9 @@ root shell, a sole-shell foreground, no registration on the pane, absent origina
 agent, explicit null native-session observations before send, no started result,
 no other worker history, and no enrolled report. Recorded supervision observations
 of native work or a report also refuse recovery, even if later reads fail. An API failure is not absence.
-All these checks run again before cleanup. A changed pane, native session, report,
+All these checks run again before cleanup. The first live pane observation's
+digest is persisted and must remain unchanged before every close; an appended
+shell command or output preserves the surface even when the old draft remains. A changed pane, native session, report,
 foreign process or unknown transport preserves the surface.
 
 For older dispatches, optional `origin_evidence` names an absolute path to an

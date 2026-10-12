@@ -27,12 +27,12 @@ class Client:
         self.visible = visible
         self.shell = 100
         self.foreground = [{"pid": 100, "name": "zsh"}]
-        self.live = None
+        self.live: dict | None = None
         self.occupants = []
         self.closed = []
         self.absent = False
         self.fail_close = False
-        self.error = None
+        self.error: str | None = None
 
     def agent_get(self, name):
         if self.error:
@@ -297,6 +297,32 @@ class BootstrapRecoveryTests(unittest.TestCase):
         with self.assertRaisesRegex(UsageError, "complete frozen prompt"):
             self.run_recovery()
         self.assertEqual(self.client.closed, [])
+
+    def test_appended_shell_work_after_failed_close_is_preserved(self):
+        self.client.fail_close = True
+        with self.assertRaises(HerdrError):
+            self.run_recovery()
+        self.client.fail_close = False
+        self.client.visible += "\n$ run-other-task\ncompleted other task\n$ "
+        with self.assertRaisesRegex(UsageError, "pane changed"):
+            self.run_recovery()
+        self.assertEqual(self.client.closed, [])
+
+    def test_incomplete_or_foreign_closure_receipts_cannot_clear_the_gate(self):
+        self.client.fail_close = True
+        with self.assertRaises(HerdrError):
+            self.run_recovery()
+        original = bootstrap.load(self.path)
+        for closure in ({"closed": True},
+                        {"pane_id": "other", "agent": "worker", "closed": True, "replayed": False},
+                        {"pane_id": "pane", "agent": "other", "closed": True, "replayed": False}):
+            with self.subTest(closure=closure):
+                changed = copy.deepcopy(original)
+                changed["outcomes"][0]["closure"] = closure
+                bootstrap.store_path(self.path).write_text(json.dumps(changed))
+                with self.assertRaises(StateError):
+                    self.run_recovery()
+                self.assertEqual(self.client.closed, [])
 
     def test_changed_evidence_cannot_replay_durable_outcome(self):
         self.client.fail_close = True

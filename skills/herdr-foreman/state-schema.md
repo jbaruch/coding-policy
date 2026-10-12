@@ -24,8 +24,14 @@ the utility alone records the saved notes and their separate index.
 `<canonical-state-path>.bootstrap.json`, under the selected state's owner lock.
 The sidecar, every origin and every outcome carry `schema_version: 1`.
 The top-level `origins` and `outcomes` arrays append evidence across invocations.
-Missing files mean no usable provenance; corrupt or unsupported versions refuse
-recovery and capture with an actionable diagnostic. No older schema exists.
+This artifact uses the `rules/stateful-artifacts.md` gate-store exception.
+An open outcome (`closure: null`) withholds completed retirement and completed
+replay until the owner proves closure and resolves supervision. Missing files
+mean no usable provenance. Corrupt or unsupported versions refuse recovery and
+capture with an actionable update-owner diagnostic; they never clear that gate.
+Version 1 is the first schema, so no older version is accepted today. Only this
+owner may introduce migrations; every older version it accepts must be migrated
+and rewritten on read while preserving its provenance and outcomes.
 
 An origin stores `dispatch`, `at`, `pane_id`, positive `shell_pid`, and the original
 verified `process` (source, PID, pane, argv and tier). Normal Codex apply records
@@ -34,8 +40,11 @@ receipt from the original pre-exit process archive. No current shell is imported
 as original provenance.
 
 An outcome stores `dispatch`, `at`, exact `input`, saved pane `evidence` receipt,
-original `origin`, `historical_status`, and nullable `closure`. `closure` becomes
-the lifecycle's successful owned-close result after supervision resolves.
+original `origin`, `historical_status`, `pane_sha256` of the first live visible
+observation after ANSI removal, and nullable `closure`. Every close compares the
+current pane digest to that original observation. `closure` becomes the complete
+lifecycle result (`pane_id`, `agent`, `closed: true`, boolean `replayed`) after
+supervision resolves. Its pane and agent must match the original dispatch.
 Interrupted cleanup leaves null and is replayable only with unchanged inputs and
 receipts. Completed outcomes replay without another terminal effect.
 Assignments and applied dispatch history are never migrated or rewritten by this
