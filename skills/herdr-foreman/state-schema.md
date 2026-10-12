@@ -41,8 +41,10 @@ as original provenance.
 
 An outcome stores `dispatch`, `at`, exact `input`, saved pane `evidence` receipt,
 original `origin`, `historical_status`, `pane_sha256` of the first live visible
-observation after ANSI removal, and nullable `closure`. Every close compares the
-current pane digest to that original observation. `closure` becomes the complete
+observation after ANSI removal, and nullable `closure`. Before writing an
+outcome, the first live observation must match the foreman's saved failure-only
+evidence. Every close compares the current pane digest to that original
+observation. Capture and reconciliation validate timestamps before any write. `closure` becomes the complete
 lifecycle result (`pane_id`, `agent`, `closed: true`, boolean `replayed`) after
 supervision resolves. Its pane and agent must match the original dispatch.
 Interrupted cleanup leaves null and is replayable only with unchanged inputs and

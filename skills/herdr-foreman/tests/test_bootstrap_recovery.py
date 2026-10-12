@@ -298,6 +298,26 @@ class BootstrapRecoveryTests(unittest.TestCase):
             self.run_recovery()
         self.assertEqual(self.client.closed, [])
 
+    def test_appended_shell_activity_before_first_reconciliation_is_preserved(self):
+        self.client.visible += "\n$ run-other-task\ncompleted other task\n$ "
+        with self.assertRaisesRegex(UsageError, "pane changed"):
+            self.run_recovery()
+        self.assertEqual(self.client.closed, [])
+        self.assertEqual(self.row["status"], "sending")
+        self.assertEqual(bootstrap.load(self.path)["outcomes"], [])
+
+    def test_invalid_timestamp_never_corrupts_origin_or_outcome_storage(self):
+        before = bootstrap.store_path(self.path).read_bytes()
+        with self.assertRaises(UsageError):
+            bootstrap.remember(self.path, "other", "pane", 100, self.process, "not-a-timestamp")
+        self.assertEqual(bootstrap.store_path(self.path).read_bytes(), before)
+        with self.assertRaises(UsageError):
+            bootstrap.reconcile(self.path, self.state, self.data, "not-a-timestamp", self.client)
+        self.assertEqual(bootstrap.store_path(self.path).read_bytes(), before)
+        self.assertEqual(self.client.closed, [])
+        self.assertEqual(self.row["status"], "sending")
+        self.assertEqual(self.run_recovery()["outcome"], "not_sent")
+
     def test_appended_shell_work_after_failed_close_is_preserved(self):
         self.client.fail_close = True
         with self.assertRaises(HerdrError):

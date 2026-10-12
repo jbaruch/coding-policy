@@ -85,6 +85,7 @@ def _validate_origin(row):
 
 def remember(state_path, dispatch, pane, shell, process, at):
     """Persist the launch root before prompt input; append across transport retries."""
+    supervision.timestamp(at)
     row = {"schema_version": SCHEMA_VERSION, "dispatch": dispatch, "at": at,
            "pane_id": pane, "shell_pid": shell, "process": deepcopy(process)}
     _validate_origin(row)
@@ -192,6 +193,7 @@ def reconcile(state_path, state, data, at, client):
     Pending sends become not_sent through the ordinary owner reconciliation.
     Repeating identical input retries cleanup after a crash, never dispatch.
     """
+    supervision.timestamp(at)
     required = {"dispatch", "reason", "authorization", "evidence"}
     if (not isinstance(data, dict) or set(data) not in (required, required | {"origin_evidence"})):
         raise UsageError("Bootstrap recovery requires dispatch, reason, authorization and saved pane evidence; see references/bootstrap-recovery.md.", {})
@@ -261,8 +263,9 @@ def reconcile(state_path, state, data, at, client):
         visible = client.pane_read(binding["pane_id"], 2000)
         _draft(visible, prompt)
         digest = hashlib.sha256(strip_ansi(visible).encode("utf-8")).hexdigest()
-        if prior is not None and digest != prior["pane_sha256"]:
-            raise UsageError("The pane changed after bootstrap reconciliation; preserve the surface and inspect any intervening work before cleanup.", {})
+        expected = prior["pane_sha256"] if prior is not None else hashlib.sha256(strip_ansi(body).encode("utf-8")).hexdigest()
+        if digest != expected:
+            raise UsageError("The pane changed from the saved bootstrap failure evidence; preserve the surface and inspect any intervening work before cleanup.", {})
         return digest
 
     pane_digest = observe()

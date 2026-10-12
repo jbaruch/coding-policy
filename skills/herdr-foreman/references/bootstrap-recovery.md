@@ -8,8 +8,10 @@ or retry allowance. Run through the normal `foreman` entrypoint with the origina
 
 The record requires `dispatch`, `reason`, `authorization: {source, quote}`, and
 `evidence` (absolute path to the saved visible pane text). Authorization cites the
-existing task decision. The foreman checks the actual evidence before recording
-it; a missing name or report alone is not evidence that no turn began.
+existing task decision. The foreman checks that the saved evidence is the original
+failure-only snapshot, taken before any shell interaction. Never replace it with
+a later snapshot containing other work. A missing name or report alone is not
+evidence that no turn began.
 
 The saved text and first live pane observation must contain the complete frozen
 assignment beneath the literal `Unsent draft:` heading, immediately followed by
@@ -24,9 +26,12 @@ root shell, a sole-shell foreground, no registration on the pane, absent origina
 agent, explicit null native-session observations before send, no started result,
 no other worker history, and no enrolled report. Recorded supervision observations
 of native work or a report also refuse recovery, even if later reads fail. An API failure is not absence.
-All these checks run again before cleanup. The first live pane observation's
-digest is persisted and must remain unchanged before every close; an appended
-shell command or output preserves the surface even when the old draft remains. A changed pane, native session, report,
+All these checks run again before cleanup. The first live pane must match the
+saved failure-only snapshot after ANSI removal. Its digest is persisted and must
+remain unchanged before every close; an appended shell command or output
+preserves the surface even when the old draft remains. If the original snapshot
+is unavailable or its provenance is uncertain, preserve the pane and reconcile
+the unknown work; a newly captured snapshot cannot establish the missing history. A changed pane, native session, report,
 foreign process or unknown transport preserves the surface.
 
 For older dispatches, optional `origin_evidence` names an absolute path to an
