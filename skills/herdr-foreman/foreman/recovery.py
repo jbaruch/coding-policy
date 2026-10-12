@@ -2013,7 +2013,7 @@ def scoped_not_sent_replay(store, data):
     return None
 
 
-def reconcile(store, assignments, data, at, live_info):
+def reconcile(store, assignments, data, at, live_info, *, missing_bootstrap=False):
     required = {"dispatch", "outcome", "reason", "authorization", "evidence"}
     if not isinstance(data, dict) or set(data) != required or not isinstance(data.get("outcome"), str) or data["outcome"] not in {"applied", "not_sent"}:
         raise UsageError("Reconciliation requires dispatch, applied/not_sent outcome, reason, authorization and actual evidence. Idle alone proves neither outcome.", {})
@@ -2024,11 +2024,15 @@ def reconcile(store, assignments, data, at, live_info):
         if record.get("reconciliation", {}).get("input") == data:
             return record
         raise UsageError("This dispatch already has a terminal outcome; do not change its attempt history.", {})
-    require_recovery_ready(live_info)
+    if missing_bootstrap:
+        if live_info is not None or data["outcome"] != "not_sent":
+            raise UsageError("Missing-bootstrap reconciliation only records proved not_sent; preserve unknown or accepted work.", {})
+    else:
+        require_recovery_ready(live_info)
     evidence, _body = receipt(data["evidence"])
     record["reconciliation"] = {"schema_version": RECOVERY_SCHEMA_VERSION, "at": at, "input": data,
-                                "evidence_receipt": evidence, "observed_state": live_info.get("agent_status"),
-                                "observed_session": live_info.get("agent_session")}
+                                "evidence_receipt": evidence, "observed_state": "absent" if missing_bootstrap else (live_info or {}).get("agent_status"),
+                                "observed_session": None if missing_bootstrap else (live_info or {}).get("agent_session")}
     record["status"] = data["outcome"]
     _event(store, at, "dispatch_reconciled", record["task"], {"dispatch": record["id"], "reconciliation": record["reconciliation"]})
     return record

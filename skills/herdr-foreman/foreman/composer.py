@@ -360,6 +360,10 @@ def transcript_holds(pane_text, needle):
     opening words of an assignment are ever looked for.
     """
     flat = " ".join(strip_ansi(pane_text).split())
+    # Codex prints a failed-bootstrap prompt back to the shell under this
+    # literal heading. Echoed input is not a native user turn (#756).
+    if "Unsent draft:" in flat:
+        return False
     return " ".join(needle.split()) in flat
 
 

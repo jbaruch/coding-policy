@@ -3296,6 +3296,14 @@ class PublicOwnerRetryTest(unittest.TestCase):
                     final = load_state_checked(state)[0]
                     self.assertEqual(final["recovery"]["dispatches"][0], dispatch)
                     self.assertEqual(len(final["assignments"]), 1)
+                    if kind == "codex":
+                        from foreman import bootstrap_recovery
+                        origins = bootstrap_recovery.load(state)["origins"]
+                        self.assertEqual(len(origins), 1)
+                        sent = next(row for row in final["recovery"]["dispatches"] if row["status"] == "applied")
+                        self.assertEqual(origins[0]["dispatch"], sent["id"])
+                        self.assertEqual(origins[0]["process"], sent["context_before_send"]["tier"]["verified"])
+                        self.assertGreater(origins[0]["shell_pid"], 0)
                     self.assertEqual({path: path.read_bytes() for path in frozen}, frozen)
 
     def test_unavailable_model_identifier_closes_not_sent_then_repaired_row_relaunches_same_provider(self):

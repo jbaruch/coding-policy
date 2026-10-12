@@ -904,3 +904,11 @@ null continuity and no review approval. A fresh process whose first identity
 already matches its transcript does not exercise this regression. Keep config,
 caches and transcripts report-local (`GROK_HOME` selects native source storage).
 Never input to, clear or restart an active team worker for this validation.
+
+## Disappeared Codex Bootstrap Runtime
+
+If `reconcile --record` encounters `agent_not_found` after an assignment appears
+under Codex's `Unsent draft`, use the owner `reconcile-bootstrap --record` path.
+Its provenance, transport proof, historical applied-row handling and cleanup
+contract are in `skills/herdr-foreman/references/bootstrap-recovery.md`.
+A missing agent alone never proves not_sent or permits closing a surviving pane.

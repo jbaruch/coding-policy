@@ -15,7 +15,45 @@ the utility alone records the saved notes and their separate index.
 | `<task-reports-dir>/TASK-LEDGER.md` | `herdr-foreman`, written by the foreman | Evidence-backed assignment acceptance and task completion across rounds |
 | `<canonical-state-path>.retrospectives/` | `herdr-foreman`, through its retrospective utility | Immutable retrospective notes, versioned index, and transition coverage |
 | `<canonical-state-path>.foreman-reset.json` | `skills/herdr-foreman/foreman/foreman_reset.py` | One record per explicitly requested foreman maintenance reset; see Foreman Reset Record below |
+| `<canonical-state-path>.bootstrap.json` | `skills/herdr-foreman/foreman/bootstrap_recovery.py` | Original Codex launch provenance and durable bootstrap transport/cleanup receipts |
 | Controller-configured private remote owner JSON | `skills/herdr-foreman/foreman/remote_owner.py` | Attested command context, current single-controller lease, indeterminate intent and task ingress; schema and writer/reader contract in `skills/herdr-foreman/references/remote-context.md` |
+
+## Bootstrap Transport Evidence
+
+`skills/herdr-foreman/foreman/bootstrap_recovery.py` is the sole writer/reader of
+`<canonical-state-path>.bootstrap.json`, under the selected state's owner lock.
+The sidecar, every origin and every outcome carry `schema_version: 1`.
+The top-level `origins` and `outcomes` arrays append evidence across invocations.
+This artifact uses the `rules/stateful-artifacts.md` gate-store exception.
+An open outcome (`closure: null`) withholds completed retirement and completed
+replay until the owner proves closure and resolves supervision. Missing files
+mean no usable provenance. Corrupt or unsupported versions refuse recovery and
+capture with an actionable update-owner diagnostic; they never clear that gate.
+Version 1 is the first schema, so no older version is accepted today. Only this
+owner may introduce migrations; every older version it accepts must be migrated
+and rewritten on read while preserving its provenance and outcomes.
+
+An origin stores `dispatch`, `at`, `pane_id`, positive `shell_pid`, and the original
+verified `process` (source, PID, pane, argv and tier). Normal Codex apply records
+it before sending input. Legacy import additionally stores an `evidence` file
+receipt from the original pre-exit process archive. No current shell is imported
+as original provenance.
+
+An outcome stores `dispatch`, `at`, exact `input`, saved pane `evidence` receipt,
+original `origin`, `historical_status`, `pane_sha256` of the first live visible
+observation after ANSI removal, and nullable `closure`. Before writing an
+outcome, the first live observation must match the foreman's saved failure-only
+evidence. Every close compares the current pane digest to that original
+observation. Capture and reconciliation validate timestamps before any write. `closure` becomes the complete
+lifecycle result (`pane_id`, `agent`, `closed: true`, boolean `replayed`) after
+supervision resolves. Its pane and agent must match the original dispatch.
+Interrupted cleanup leaves null and is replayable only with unchanged inputs and
+receipts. Completed outcomes replay without another terminal effect.
+Assignments and applied dispatch history are never migrated or rewritten by this
+sidecar. Pending transport uses the existing reconciliation shape with
+`observed_state: absent`, `observed_session: null`; no native continuity is inferred.
+The input and output contracts live in
+`skills/herdr-foreman/references/bootstrap-recovery.md`.
 
 ## Home Migration
 

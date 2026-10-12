@@ -28,7 +28,7 @@ from . import runnable
 from . import __version__
 from .assign import apply as apply_assignments
 from .assign import APPLY_SCHEMA_VERSION, dry_run, freeze_decision, freeze_paths, read_frozen, native_context_session, normalize_assignments, resolve_paths, validate_context_mode, validate_fix_history
-from . import model_unavailability, probe_recovery, renderable
+from . import bootstrap_recovery, model_unavailability, probe_recovery, renderable
 from . import attention, capabilities, chronology, churn, composition, engagement, foreman_queue, foreman_reset, historical, home, lifecycle, load_set, members, memory, oracle, partition, recovery, report_delivery, report_gates, restoration, role_clear, retrospective, retrospective_runtime, supervision, supervision_gate, supervision_runtime, triggers
 from .config import FOREMAN_CONFIG_VERSION, default_config_path, load_config, load_foreman, load_judge, load_role_costs, select_agents
 from .errors import AgentBusyError, IDENTIFIER_UNAVAILABLE_KIND, IDENTIFIER_UNAVAILABLE_RECOVERY, TRANSIENT_LAUNCH_KIND, PlanError, StateError, ForemanError, HerdrError, UsageError, owner_recovery
@@ -83,6 +83,7 @@ def now_iso():
 
 #: Recovery subcommands whose help says more than the generic line (#625).
 RECOVERY_HELP = {
+    "reconcile-bootstrap": "Record a proved Codex unsent bootstrap failure and close only its original owned shell; see bootstrap-recovery.md.",
     "assess-specialist": "Record a delivered reviewer, tester or consultation report's contract lines "
                          "(VERDICT, ACCEPTANCE, CONTRIBUTION); a gap records only a declared design or implementation contribution.",
     "record-report": "Record a reviewer's verdict on a developer dispatch; the report's own VERDICT line must match it.",
@@ -432,7 +433,7 @@ def build_parser():
     resolve_probe_parser = sub.add_parser("resolve-probe", parents=[common], help="Prove and close an owner-retained disposable startup or cleanup probe after its native surface resolves.")
     resolve_probe_parser.add_argument("--agent", required=True, help="Exact retained probe name from the normal measure receipt.")
 
-    for command in ("task", "checkpoint", "authorize-corrections", "authorize-approach", "recover-context", "recover-role-clear", "record-report", "record-refusal", "authorize-refused-dispatch", "diagnose", "reconcile", "record-release-clear", "import-correction", "record-historical-review", "recover-report", "assess-specialist", "close-task"):
+    for command in ("task", "checkpoint", "authorize-corrections", "authorize-approach", "recover-context", "recover-role-clear", "record-report", "record-refusal", "authorize-refused-dispatch", "diagnose", "reconcile", "reconcile-bootstrap", "record-release-clear", "import-correction", "record-historical-review", "recover-report", "assess-specialist", "close-task"):
         record_parser = sub.add_parser(command, parents=[common], help=RECOVERY_HELP.get(command, "Record owner-managed {} evidence.".format(command)))
         if command == "reconcile":
             source = record_parser.add_mutually_exclusive_group(required=True)
@@ -1858,6 +1859,10 @@ def _apply(args, client, warn, trace, hold_gates):
                 native = observed_native(step["role"], step["agent"], context)
                 _supervision_enrollment(state_path, dispatches[step["role"]]["id"], args.task, step["role"], step["agent"], reports[step["role"]], at,
                                         pane_id=step["pane_id"], native=native, persist=True)
+            if fresh_workers and agents_by_name[step["agent"]].kind == "codex":
+                bootstrap_recovery.remember(
+                    state_path, dispatches[step["role"]]["id"], step["pane_id"],
+                    spawn_roots[step["agent"]], context["tier"]["verified"], at)
             # Protect uncertain persistence/transport only once all pre-send
             # observation and enrollment work has completed.
             sending.add(step["agent"])
@@ -2006,6 +2011,7 @@ def _apply(args, client, warn, trace, hold_gates):
                     "The owner must prove closure and durable not_sent; preserve unknown or sent work.")
 
     spawned = {}
+    spawn_roots = {}
     enrolled = {}
     sending = set()
     if fresh_workers:
@@ -2025,10 +2031,11 @@ def _apply(args, client, warn, trace, hold_gates):
                         "brief": paths[role], "common": paths["common"],
                         "report": None, "unavailable": None, "pane": pane,
                     })
+                owned = {}
                 try:
                     pane = lifecycle.spawn(
                         client, agents_by_name[name], tier,
-                        history=state["assignments"], before_start=preflight_start,
+                        history=state["assignments"], before_start=preflight_start, owned=owned,
                     )
                 except HerdrError as exc:
                     if exc.details.get("failure_kind") == TRANSIENT_LAUNCH_KIND:
@@ -2041,6 +2048,7 @@ def _apply(args, client, warn, trace, hold_gates):
                         exc.details["launch_attempt"] = attempt
                     raise
                 spawned[name] = pane
+                spawn_roots[name] = owned.get("shell_pid")
                 identifier = dispatches[role]["id"]
                 _supervision_enrollment(
                     state_path, identifier, args.task, role, name, reports[role], at,
@@ -2463,6 +2471,9 @@ def _run_recovery(args, state_path, warn, client, trace):
     cleanup_dispatch = getattr(args, "dispatch", None) if args.command == "reconcile" else None
     selected_cleanup = _recorded_no_send_cleanup(state_path, state, cleanup_dispatch) if cleanup_dispatch else None
     data, at = (_read_record(args.record) if args.record is not None else {}), args.now or now_iso()
+    if args.command == "reconcile-bootstrap":
+        client = client if client is not None else _client(args, trace=trace)
+        return bootstrap_recovery.reconcile(state_path, state, data, at, client), None
     if args.command == "task":
         result = recovery.register_task(store, data, at)
     elif args.command == "close-task":
@@ -2634,7 +2645,14 @@ def _run_recovery(args, state_path, warn, client, trace):
                                   if args.command == "reconcile" else None)
         live = None
         if scoped_not_sent_replay is None:
-            live = client.agent_get(name)
+            try:
+                live = client.agent_get(name)
+            except HerdrError as exc:
+                if args.command != "reconcile" or error_code(exc) != "agent_not_found":
+                    raise
+                raise owner_recovery(exc, "missing_dispatch_runtime",
+                    runnable.command("reconcile-bootstrap --record RECORD --state " + shlex.quote(str(state_path))),
+                    "For a Codex account/read bootstrap failure, supply the original unsent draft and launch provenance through the bootstrap recovery owner. Missing identity alone proves no transport outcome; preserve unknown or accepted work.") from exc
             recovery.require_recovery_ready(live)
         if args.command == "recover-context":
             result = recovery.authorize_context(store, history, data, at, native_context_session(live, agents[name].kind))
@@ -3260,7 +3278,7 @@ COMMANDS = {
     "close-member": cmd_close_member,
     "check-member": cmd_check_member,
     "load-set": cmd_load_set,
-    **{command: cmd_recovery for command in ("task", "checkpoint", "authorize-corrections", "authorize-approach", "recover-context", "recover-role-clear", "record-report", "record-refusal", "authorize-refused-dispatch", "diagnose", "reconcile", "record-release-clear", "import-correction", "record-historical-review", "recover-report", "assess-specialist", "close-task")},
+    **{command: cmd_recovery for command in ("task", "checkpoint", "authorize-corrections", "authorize-approach", "recover-context", "recover-role-clear", "record-report", "record-refusal", "authorize-refused-dispatch", "diagnose", "reconcile", "reconcile-bootstrap", "record-release-clear", "import-correction", "record-historical-review", "recover-report", "assess-specialist", "close-task")},
     "detect-triggers": cmd_detect_triggers,
     "finding-churn": cmd_finding_churn,
     "validate-partition": cmd_validate_partition,

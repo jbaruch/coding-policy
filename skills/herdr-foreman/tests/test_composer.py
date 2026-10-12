@@ -734,6 +734,11 @@ class SendMessageTest(unittest.TestCase):
         self.assertTrue(result["landed"])
         self.assertTrue(result["started"])
 
+    def test_codex_unsent_draft_does_not_prove_landing(self):
+        result = self._send(self._runner([NOTHING, "Unsent draft:\n" + OPENING + "\nError: account/read failed during TUI bootstrap"], wait_ok=False))
+        self.assertFalse(result["landed"])
+        self.assertFalse(result["started"])
+
     def test_the_unknown_skill_transcript_fails_the_agent(self):
         with self.assertRaises(HerdrError) as caught:
             self._send(self._runner([NOTHING, UNKNOWN_SKILL]))
