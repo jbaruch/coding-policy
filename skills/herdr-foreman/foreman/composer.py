@@ -575,18 +575,30 @@ def _stuck_composer_error(agent, pane_id, composer, reason):
     )
 
 
+def codex_startup_pending(text, agent):
+    """Recognize the current native startup footer, not transcript mentions."""
+    rows = [" ".join(row.split()) for row in strip_ansi(text).splitlines() if row.strip()]
+    return agent.kind == "codex" and bool(rows) and rows[-1] in (
+        "Waiting for startup", "Waiting for startup · esc cancel")
+
+
 def _wait_for_visible_composer(client, agent, pane_id, text, ansi, sleep, warn):
-    """Return `(text, ansi, composer)` once a configured prompt is visible."""
+    """Return a visible prompt after any native startup footer has cleared."""
     composer = inspect_composer(text, agent, ansi=ansi)
-    if not checkable(agent) or composer.visible:
+    if (not checkable(agent) or composer.visible) and not codex_startup_pending(text, agent):
         return text, ansi, composer
     for attempt in range(1, COMPOSER_VISIBLE_ATTEMPTS + 1):
         if attempt < COMPOSER_VISIBLE_ATTEMPTS:
             sleep(COMPOSER_VISIBLE_INTERVAL)
         text, ansi = read_pane(client, agent, warn=warn)
         composer = inspect_composer(text, agent, ansi=ansi)
-        if composer.visible:
+        if composer.visible and not codex_startup_pending(text, agent):
             return text, ansi, composer
+    if codex_startup_pending(text, agent):
+        raise HerdrError(
+            "{} in pane {} still shows Waiting for startup after {} reads. Inspect native startup before retrying; an empty composer does not prove readiness.".format(
+                agent.name, pane_id, COMPOSER_VISIBLE_ATTEMPTS),
+            {"agent": agent.name, "pane_id": pane_id, "attempts": COMPOSER_VISIBLE_ATTEMPTS})
     raise HerdrError(
         "{}'s prompt is not on screen in pane {} after {} reads; something is drawn over it -- a startup review or permission dialog takes the input meant for the worker. Read the pane, clear what is on it, and retry. Nothing was sent.".format(
             agent.name, pane_id, COMPOSER_VISIBLE_ATTEMPTS),
@@ -688,7 +700,7 @@ def _settle_fresh_composer(client, agent, pane_id, observe, sleep, warn):
         rows = [row.strip() for row in strip_ansi(text).splitlines()]
         if agent.kind == "codex" and "Hooks need review" in rows and any("1. Review hooks" in row for row in rows):
             raise startup_pending_error(agent, pane_id)
-        if not ansi or not composer.visible:
+        if not ansi or not composer.visible or codex_startup_pending(text, agent):
             if not ansi:
                 raise _fresh_startup_error("startup_evidence_missing", "Fresh startup lacks ANSI composer evidence; nothing was sent.", {"pane_id": pane_id, "ansi_read": ansi})
             # Startup paint can precede the composer. Wait without keys, but
@@ -923,6 +935,11 @@ def send_command(client, agent, pane_id, command, session=None, sleep=time.sleep
     # out is what let an unsent /new pass as consumed.
     extra_enters = 0
     while command_still_present(text, agent, command) and extra_enters < max_extra_enters:
+        if codex_startup_pending(text, agent):
+            text, ansi, _ = _wait_for_visible_composer(
+                client, agent, pane_id, text, ansi, sleep, warn)
+            if not command_still_present(text, agent, command):
+                break
         extra_enters += 1
         warn(
             "{} still shows {!r} in its composer. Pressing Enter "

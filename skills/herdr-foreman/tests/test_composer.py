@@ -1253,6 +1253,7 @@ class SlashEnterCountTest(unittest.TestCase):
 class FreshStartupDeliveryTest(unittest.TestCase):
     EMPTY = "\x1b[2m› Ask Codex to do anything\x1b[0m"
     ANIMATED = "\x1b[2m› Ask Codex to do anything ✦\x1b[0m"
+    STARTUP = painted_codex_composer() + "\n  \x1b[1mWaiting for startup\x1b[0m  · \x1b[1mesc\x1b[0m cancel\n"
 
     def run_send(self, frames, *, observe=None, agent=None):
         from unittest.mock import Mock, patch
@@ -1267,6 +1268,73 @@ class FreshStartupDeliveryTest(unittest.TestCase):
                                   startup_observe=observe or (lambda: ("p1", 42, "model", "high")),
                                   before_prompt=boundary, sleep=NO_SLEEP, attempts=1)
         return client, boundary, writes, result
+
+    def test_startup_footer_resets_empty_readiness_before_one_prompt(self):
+        client, boundary, writes, result = self.run_send([
+            (self.EMPTY, True), (self.STARTUP, True), (self.EMPTY, True),
+            (self.EMPTY, True), ("immutable brief", True)])
+        self.assertTrue(result["landed"])
+        self.assertEqual(writes, [("codex", "immutable brief")])
+        boundary.assert_called_once()
+        client.agent_send_keys.assert_not_called()
+        client.pane_send_keys.assert_not_called()
+
+    def test_persistent_startup_footer_retains_preinput_recovery_at_read_bound(self):
+        from unittest.mock import Mock, patch
+        client, boundary, sleep = Mock(), Mock(), Mock()
+        with patch("foreman.composer.read_pane", return_value=(self.STARTUP, True)) as reads, self.assertRaises(HerdrError) as caught:
+            send_message(client, BY_NAME["codex"], "brief", "brief", pane_id="p1",
+                         before_prompt=boundary, startup_observe=lambda: ("p1", 42), sleep=sleep)
+        self.assertEqual(caught.exception.details["failure_kind"], "startup_dialog_pending")
+        self.assertEqual(reads.call_count, FRESH_COMPOSER_ATTEMPTS)
+        self.assertEqual(sleep.call_count, FRESH_COMPOSER_ATTEMPTS - 1)
+        boundary.assert_not_called()
+        client.agent_prompt.assert_not_called()
+        client.agent_send_keys.assert_not_called()
+        client.pane_send_keys.assert_not_called()
+
+    def test_startup_wait_does_not_hide_changed_owner(self):
+        from unittest.mock import Mock, patch
+        client = Mock()
+        with patch("foreman.composer.read_pane", return_value=(self.STARTUP, True)), self.assertRaises(HerdrError) as caught:
+            send_message(client, BY_NAME["codex"], "brief", "brief", pane_id="p1",
+                         startup_observe=Mock(side_effect=[("p1", 42), ("p1", 43)]), sleep=NO_SLEEP)
+        self.assertEqual(caught.exception.details["failure_kind"], "startup_identity_changed")
+        client.agent_prompt.assert_not_called()
+        client.agent_send_keys.assert_not_called()
+
+    def test_historical_startup_mention_does_not_block_ready_composer(self):
+        frame = "Waiting for startup  · esc cancel\n" + self.EMPTY
+        _, _, writes, result = self.run_send([(frame, True), (frame, True), ("immutable brief", True)])
+        self.assertTrue(result["landed"])
+        self.assertEqual(writes, [("codex", "immutable brief")])
+
+    def test_usage_delivery_waits_until_startup_clears_and_proves_consumption(self):
+        from unittest.mock import Mock, patch
+        client = Mock()
+        frames = iter([(self.STARTUP, True), (self.STARTUP, True), (self.EMPTY, True),
+                       ("Weekly limit: 80% left\n" + self.EMPTY, True)])
+        with patch("foreman.composer.read_pane", side_effect=lambda *_a, **_k: next(frames)):
+            result = send_command(client, BY_NAME["codex"], "p1", "/status", sleep=NO_SLEEP, screen_attempts=0)
+        self.assertTrue(result["consumed"])
+        self.assertTrue(result["screen_changed"])
+        client.deliver_slash_command.assert_called_once()
+        client.pane_send_keys.assert_not_called()
+        client.agent_send_keys.assert_not_called()
+
+    def test_persistent_startup_blocks_usage_input_and_postsend_extra_enters(self):
+        from unittest.mock import Mock, patch
+        for already_sent in (False, True):
+            with self.subTest(already_sent=already_sent):
+                client = Mock()
+                pending = self.STARTUP.replace("Ask Codex to do anything", "/status") if already_sent else self.STARTUP
+                def read(*_a, **_k):
+                    return (pending if not already_sent or client.deliver_slash_command.called else self.EMPTY, True)
+                with patch("foreman.composer.read_pane", side_effect=read), self.assertRaisesRegex(HerdrError, "Waiting for startup"):
+                    send_command(client, BY_NAME["codex"], "p1", "/status", sleep=NO_SLEEP)
+                self.assertEqual(client.deliver_slash_command.call_count, int(already_sent))
+                client.pane_send_keys.assert_not_called()
+                client.agent_send_keys.assert_not_called()
 
     def test_native_intensity_reset_startup_sends_once_after_two_empty_reads(self):
         client, boundary, writes, result = self.run_send([

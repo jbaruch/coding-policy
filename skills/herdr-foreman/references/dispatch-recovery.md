@@ -147,6 +147,9 @@ nonexistent outgoing work; unknown sends preserve the pane and reconciliation.
 The exact settling predicate and bounds are owned by
 `skills/herdr-foreman/foreman/composer.py` (`FRESH_COMPOSER_*`, `_settle_fresh_composer`), rather than
 restated here.
+Codex's native `Waiting for startup` footer resets empty-composer readiness;
+an empty hint or Herdr interactive status cannot override it. A persistent
+footer follows the same `startup_dialog_pending` owner recovery path.
 
 The delivery mechanics behind those outcomes — composer confirmation, recovery
 keys, ghost text, the rejection strings, the settle knobs — are in:
