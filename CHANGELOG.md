@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.403 — 2026-10-12
+
 ### Added
 
 - Expose a versioned Python sidecar boundary for remote task inspection, verified report retrieval, asynchronous cancel/resume and lost-response lookup while preserving exact task admission/query schemas. Host operation IDs remain separate from internal effect reconciliation; owner-issued identity/policy receipts and durable control history survive same-lease restarts. Lease/policy reattachment remains unsupported and production deployment stays disabled (#760).
