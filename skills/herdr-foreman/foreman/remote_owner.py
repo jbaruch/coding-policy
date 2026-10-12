@@ -105,7 +105,7 @@ def live_identity(context, runner):
 
 
 class RemoteForemanOwner:
-    """Privileged owner; service transports expose only `task_request`/`task_query`."""
+    """Privileged owner; caller transports use the remote_service allowlist."""
 
     def __init__(self, *, context, store_path, plugin_root, lease_reader, state_path=None):
         if not isinstance(context, HerdrCommandContext) or context.mode != "attested-remote":
@@ -165,8 +165,9 @@ class RemoteForemanOwner:
         except (OSError, ValueError):
             raise refuse("remote_owner_record_missing_or_unreadable") from None
         if (not isinstance(document, dict) or type(document.get("schema_version")) is not int
-                or document.get("schema_version") != 1
-                or set(document) != {"schema_version", "attestation", "state_path", "owner_store_path", "pending", "reconciliations", "requests"}
+                or document.get("schema_version") not in {1, 2}
+                or set(document) != ({"schema_version", "attestation", "state_path", "owner_store_path", "pending", "reconciliations", "requests"}
+                                     | ({"controls"} if document.get("schema_version") == 2 else set()))
                 or document.get("attestation") != asdict(remote_receipt(self.context))
                 or document.get("state_path") != str(self.state_path)
                 or document.get("owner_store_path") != str(self.path.resolve())
@@ -188,11 +189,15 @@ class RemoteForemanOwner:
                     or not self._hex(row.get("operation_id"), 32) or not self._hex(row.get("evidence_digest"), 64)):
                 raise refuse("remote_reconciliation_record_invalid")
         requests, tasks = set(), set()
-        migrated = False
+        migrated = document["schema_version"] == 1
+        if migrated:
+            document.update(schema_version=2, controls=[])
         for row in document["requests"]:
             if (not isinstance(row, dict) or set(row) != {"schema_version", "request_id", "task", "task_id", "status"}
-                    or type(row.get("schema_version")) is not int or row["schema_version"] not in {1, 2}
-                    or row.get("status") not in ({"queued"} if row["schema_version"] == 1 else {"queued", "registered"})
+                    or type(row.get("schema_version")) is not int or row["schema_version"] not in {1, 2, 3}
+                    or not isinstance(row.get("status"), str)
+                    or row.get("status") not in ({"queued"} if row["schema_version"] == 1 else
+                                                {"queued", "registered", "cancelled"} if row["schema_version"] == 3 else {"queued", "registered"})
                     or not self._hex(row.get("task_id"), 32)
                     or not isinstance(row.get("request_id"), str) or not row["request_id"].strip()
                     or not isinstance(row.get("task"), str) or not row["task"].strip()
@@ -207,6 +212,10 @@ class RemoteForemanOwner:
                 row["schema_version"] = 2
                 row["status"] = "registered"
                 migrated = True
+            if row["schema_version"] == 2:
+                row["schema_version"] = 3
+                migrated = True
+        self._validate_controls(document, tasks)
         if loaded_policy(self.plugin_root) != self._loaded_policy:
             raise refuse("loaded_policy_changed_after_attachment")
         if migrated:
@@ -231,10 +240,10 @@ class RemoteForemanOwner:
                 # before writing anything that could erase an uncertain effect.
                 if supervision.dispatch_binding(self.state_path, root=self.path.parent / "bindings") is not None:
                     raise refuse("remote_owner_record_lost_restore_original_intents_and_requests")
-                save_state(self.path, {"schema_version": 1, "attestation": asdict(remote_receipt(self.context)),
+                save_state(self.path, {"schema_version": 2, "attestation": asdict(remote_receipt(self.context)),
                                       "state_path": str(self.state_path),
                                       "owner_store_path": str(self.path.resolve()),
-                                      "pending": None, "reconciliations": [], "requests": []})
+                                      "pending": None, "reconciliations": [], "requests": [], "controls": []})
             existing = supervision.load(self.state_path)["binding"]
             expected = supervision.remote_identity(self.context.attestation, self.plugin_root,
                                                    owner_store_path=self.path)
@@ -382,7 +391,7 @@ class RemoteForemanOwner:
                     if row["task"] != payload["task"]:
                         raise refuse("task_request_identity_conflict")
                     return {"task_id": row["task_id"], "status": row["status"]}
-            row = {"schema_version": 2, **payload, "task_id": uuid.uuid4().hex, "status": "queued"}
+            row = {"schema_version": 3, **payload, "task_id": uuid.uuid4().hex, "status": "queued"}
             document["requests"].append(row)
             save_state(self.path, document)
             return {"task_id": row["task_id"], "status": row["status"]}
@@ -413,6 +422,15 @@ class RemoteForemanOwner:
     @staticmethod
     def _task_status(row, state):
         task_id = row["task_id"]
+        if state is not None and task_id not in state["recovery"]["tasks"] and (
+                any(item.get("task") == task_id for item in state["assignments"])
+                or any(item["task"] == task_id for item in state["recovery"]["dispatches"])):
+            raise refuse("remote_policy_task_state_lost")
+        if row["status"] == "cancelled":
+            if state is not None and (task_id in state["recovery"]["tasks"]
+                    or any(item.get("task") == task_id for item in state["assignments"])):
+                raise refuse("remote_cancelled_task_registered")
+            return "cancelled", False
         if state is not None and task_id in state["recovery"]["tasks"]:
             changed = row["status"] != "registered"
             row["status"] = "registered"
@@ -431,6 +449,8 @@ class RemoteForemanOwner:
             rows = [row for row in document["requests"] if row["task_id"] == task_id]
             if len(rows) != 1:
                 raise refuse("task_not_found")
+            if rows[0]["status"] == "cancelled":
+                raise refuse("remote_cancelled_task_registered")
             rows[0]["status"] = "registered"
             save_state(self.path, document)
 
@@ -449,3 +469,205 @@ class RemoteForemanOwner:
             if changed:
                 save_state(self.path, document)
             return queued
+
+    @staticmethod
+    def _caller_fields(payload, fields):
+        if (not isinstance(payload, dict) or set(payload) != set(fields)
+                or any(not isinstance(value, str) or not value.strip() or len(value) > 128
+                       for value in payload.values())):
+            raise refuse("task_lifecycle_fields_invalid")
+
+    @staticmethod
+    def _digest(value):
+        return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
+
+    def _validate_controls(self, document, task_ids):
+        controls = document["controls"]
+        if not isinstance(controls, list):
+            raise refuse("remote_task_control_record_invalid")
+        seen, pending_tasks = set(), set()
+        for row in controls:
+            if (not isinstance(row, dict) or set(row) != {"schema_version", "operation_id", "task_id", "action", "status", "evidence"}
+                    or type(row.get("schema_version")) is not int or row["schema_version"] != 1
+                    or not isinstance(row.get("operation_id"), str) or not row["operation_id"].strip()
+                    or len(row["operation_id"]) > 128 or row["operation_id"] in seen
+                    or not isinstance(row.get("task_id"), str) or row["task_id"] not in task_ids
+                    or not isinstance(row.get("action"), str) or row["action"] not in {"cancel", "resume"}
+                    or not isinstance(row.get("status"), str) or row["status"] not in {"pending", "completed"}):
+                raise refuse("remote_task_control_record_invalid")
+            seen.add(row["operation_id"])
+            evidence = row["evidence"]
+            if row["status"] == "pending":
+                if evidence is not None or row["task_id"] in pending_tasks:
+                    raise refuse("remote_task_control_record_invalid")
+                pending_tasks.add(row["task_id"])
+            elif (not isinstance(evidence, dict) or set(evidence) != {"schema_version", "outcome", "ledger_digest"}
+                    or type(evidence.get("schema_version")) is not int or evidence["schema_version"] != 1
+                    or not isinstance(evidence.get("outcome"), str)
+                    or evidence["outcome"] not in ({"cancelled_before_dispatch", "cancelled"} if row["action"] == "cancel" else {"resumed"})
+                    or not self._hex(evidence.get("ledger_digest"), 64)):
+                raise refuse("remote_task_control_record_invalid")
+
+        for request in document["requests"]:
+            matching = [row for row in controls if row["task_id"] == request["task_id"]]
+            before_dispatch = [row for row in matching if row["evidence"] is not None
+                               and row["evidence"]["outcome"] == "cancelled_before_dispatch"]
+            if request["status"] == "cancelled":
+                if (len(matching) != 1 or len(before_dispatch) != 1
+                        or before_dispatch[0]["evidence"]["ledger_digest"] != self._digest(request)):
+                    raise refuse("remote_task_control_record_invalid")
+            elif before_dispatch or (matching and request["status"] != "registered"):
+                raise refuse("remote_task_control_record_invalid")
+
+    @staticmethod
+    def _request_row(document, task_id):
+        row = next((item for item in document["requests"] if item["task_id"] == task_id), None)
+        if row is None:
+            raise refuse("task_not_found")
+        return row
+
+    def caller_receipt(self):
+        """Owner-issued identity evidence, never a production-enablement receipt."""
+        with self._lease():
+            self._load()
+            self._binding()
+            return {"schema_version": 1, "attestation": asdict(remote_receipt(self.context)),
+                    "production_enabled": False, "reattachment_supported": False}
+
+    def task_reconcile(self, payload):
+        """Recover a lost admission response by its HOST request ID; no replay."""
+        self._caller_fields(payload, {"request_id"})
+        with self._lease():
+            document = self._load()
+            self._binding()
+            row = next((item for item in document["requests"] if item["request_id"] == payload["request_id"]), None)
+            if row is None:
+                return {"found": False, "task_id": None, "status": None}
+            status, changed = self._task_status(row, self._task_state())
+            if changed:
+                save_state(self.path, document)
+            return {"found": True, "task_id": row["task_id"], "status": status}
+
+    def operation_query(self, payload):
+        """Observe a host cancel/resume operation; never reconcile a Herdr effect."""
+        self._caller_fields(payload, {"operation_id"})
+        with self._lease():
+            document = self._load()
+            self._binding()
+            row = next((item for item in document["controls"] if item["operation_id"] == payload["operation_id"]), None)
+            return {"found": row is not None, "operation": row}
+
+    def task_cancel(self, payload):
+        return self._task_control(payload, "cancel")
+
+    def task_resume(self, payload):
+        return self._task_control(payload, "resume")
+
+    def _task_control(self, payload, action):
+        self._caller_fields(payload, {"operation_id", "task_id"})
+        with self._lease():
+            document = self._load()
+            self._binding()
+            previous = next((item for item in document["controls"] if item["operation_id"] == payload["operation_id"]), None)
+            if previous is not None:
+                if previous["task_id"] != payload["task_id"] or previous["action"] != action:
+                    raise refuse("task_control_identity_conflict")
+                return previous
+            row = self._request_row(document, payload["task_id"])
+            state = self._task_state()
+            status, _ = self._task_status(row, state)
+            if any(item["task_id"] == row["task_id"] and item["status"] == "pending" for item in document["controls"]):
+                raise refuse("task_control_pending")
+            if status in {"closed", "cancelled"}:
+                raise refuse("task_control_terminal")
+            if action == "resume" and status not in {"diagnosed_stop", "awaiting_diagnosis", "checkpoint_required"}:
+                raise refuse("task_resume_not_blocked")
+            control = {"schema_version": 1, **payload, "action": action, "status": "pending", "evidence": None}
+            if action == "cancel" and status == "queued":
+                row["status"] = "cancelled"
+                control.update(status="completed", evidence={"schema_version": 1,
+                    "outcome": "cancelled_before_dispatch", "ledger_digest": self._digest(row)})
+            document["controls"].append(control)
+            save_state(self.path, document)
+            return control
+
+    def pending_task_controls(self):
+        """Trusted foreman inbox; callers cannot turn controls into worker commands."""
+        with self._lease():
+            document = self._load()
+            self._binding()
+            return [row for row in document["controls"] if row["status"] == "pending"]
+
+    def resolve_task_control(self, operation_id, *, runner):
+        """Trusted foreman records a proved policy outcome, without performing effects."""
+        with self._lease():
+            document = self._load()
+            self._binding()
+            control = next((item for item in document["controls"] if item["operation_id"] == operation_id), None)
+            if control is None:
+                raise refuse("task_control_not_found")
+            if control["status"] == "completed":
+                return control
+            if document["pending"] is not None:
+                raise self._indeterminate(document["pending"])
+            live_identity(self.context, runner)
+            self._current_lease()
+            row = self._request_row(document, control["task_id"])
+            state = self._task_state()
+            status, _ = self._task_status(row, state)
+            if state is None:
+                raise refuse("remote_policy_task_state_lost")
+            if control["action"] == "cancel":
+                closure = recovery.task_closure(state["recovery"], state["assignments"], row["task_id"])
+                active = any(member["active"] and member["assignment"].get("task") == row["task_id"]
+                             for member in supervision.load(self.state_path)["members"])
+                uncertain = any(item["task"] == row["task_id"] and item["status"] in recovery.PENDING_STATUSES
+                                for item in state["recovery"]["dispatches"])
+                if closure is None or closure["details"]["outcome"] != "abandoned" or active or uncertain:
+                    raise refuse("task_cancel_cleanup_unproved")
+                outcome = "cancelled"
+            else:
+                if status != "within_authorized_budget":
+                    raise refuse("task_resume_policy_unresolved")
+                outcome = "resumed"
+            control.update(status="completed", evidence={"schema_version": 1, "outcome": outcome,
+                                                          "ledger_digest": self._digest(state)})
+            save_state(self.path, document)
+            return control
+
+    def task_inspect(self, payload):
+        self._caller_fields(payload, {"task_id"})
+        with self._lease():
+            document = self._load()
+            self._binding()
+            row = self._request_row(document, payload["task_id"])
+            state = self._task_state()
+            status, changed = self._task_status(row, state)
+            if changed:
+                save_state(self.path, document)
+            closure = recovery.task_closure(state["recovery"], state["assignments"], row["task_id"]) if state else None
+            reports = [{"schema_version": 1, "report_id": self._digest({"assessment_id": item["id"]}), "evidence": item["report_evidence"],
+                        "verdict": item["verdict"], "acceptance": item["acceptance"]}
+                       for item in state["specialist_assessments"] if item["task"] == row["task_id"]] if state else []
+            return {"task_id": row["task_id"], "status": status, "terminal": status in {"closed", "cancelled"},
+                    "closure": closure, "reports": reports,
+                    "controls": [item for item in document["controls"] if item["task_id"] == row["task_id"]],
+                    "effect_reconciliation_required": document["pending"] is not None}
+
+    def task_report(self, payload):
+        self._caller_fields(payload, {"task_id", "report_id"})
+        view = self.task_inspect({"task_id": payload["task_id"]})
+        report = next((row for row in view["reports"] if row["report_id"] == payload["report_id"]), None)
+        if report is None:
+            raise refuse("task_report_not_found")
+        try:
+            with Path(report["evidence"]["path"]).open("rb") as stream:
+                content = stream.read(1048577)
+            if len(content) > 1048576 or hashlib.sha256(content).hexdigest() != report["evidence"]["sha256"]:
+                raise refuse("task_report_evidence_changed")
+            text = content.decode("utf-8")
+        except (OSError, UnicodeError):
+            raise refuse("task_report_evidence_unavailable") from None
+        # Reading the artifact can outlive revocation; authenticate again before release.
+        self.caller_receipt()
+        return {"task_id": payload["task_id"], "report": report, "content": text}

@@ -77,7 +77,7 @@ class ContextTest(unittest.TestCase):
             self.assertNotIn("ssh://secret", str(caught.exception))
 
 
-class RemoteOwnerTest(unittest.TestCase):
+class RemoteOwnerFixture(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
@@ -121,6 +121,8 @@ class RemoteOwnerTest(unittest.TestCase):
     def effects(self):
         return [argv for argv in self.calls if argv[3:5] not in (["status", "server"], ["api", "snapshot"])]
 
+
+class RemoteOwnerTest(RemoteOwnerFixture):
     def test_all_builders_prefix_once_and_preserve_literal_text(self):
         c = self.client
         commands = [c.argv_agent_get("worker"), c.argv_agent_list(), c.argv_agent_read("worker"),
@@ -269,11 +271,11 @@ class RemoteOwnerTest(unittest.TestCase):
 
     def test_unknown_schema_and_untrusted_store_do_not_reset_pending(self):
         document = json.loads(self.store.read_text(encoding="utf-8"))
-        document["schema_version"] = 2
+        document["schema_version"] = 3
         save_state(self.store, document)
         with self.assertRaises(RemoteContextError):
             self.client.pane_close("w1:p2")
-        self.assertEqual(json.loads(self.store.read_text(encoding="utf-8"))["schema_version"], 2)
+        self.assertEqual(json.loads(self.store.read_text(encoding="utf-8"))["schema_version"], 3)
         self.store.chmod(0o644)
         with self.assertRaises(RemoteContextError):
             self.owner.task_query({"task_id": "unknown"})
@@ -455,7 +457,7 @@ class RemoteOwnerTest(unittest.TestCase):
         save_state(self.store, document)
         self.assertEqual(self.owner.queued_tasks(), [])
         migrated = json.loads(self.store.read_text(encoding="utf-8"))["requests"][0]
-        self.assertEqual((migrated["schema_version"], migrated["status"]), (2, "registered"))
+        self.assertEqual((migrated["schema_version"], migrated["status"]), (3, "registered"))
         self.owner.state_path.unlink()
         with self.assertRaises(RemoteContextError):
             self.owner.queued_tasks()
