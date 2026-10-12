@@ -67,12 +67,18 @@ through its authenticated controller runtime before enabling a team round.
 
 ## Caller Boundary
 
-The service transport exposes only these two methods:
+The original admission and query methods keep their exact request schemas:
 
 | Operation | Accepted request | Result |
 | --- | --- | --- |
 | Request task | `{"request_id": "stable-source-id", "task": "requested outcome"}` | `task_id`, `status` |
 | Query task | `{"task_id": "existing-id"}` | `task_id`, `status` |
+
+The supported Python sidecar adds typed inspect/report, cancel, resume and
+host-operation lookup methods. Its complete caller wire contract, authorization
+requirements, controller inbox, restart behavior and receipt schema are in
+`skills/herdr-foreman/references/remote-task-service.md`. Callers use that
+allowlist; they never receive the privileged owner or client.
 
 Every additional field is rejected. Requests cannot supply executables, argv,
 SSH details, shell text, worker/provider/model choices, pane commands, provider
@@ -90,7 +96,7 @@ observed registration. Missing registered tasks or a lost ledger refuse queries
 and queue scans until the original history is restored.
 Queue acceptance is not a dispatch or a completed task. Transport code
 does not plan, dispatch, adjudicate, correct or publish. Do not expose the
-owner object, client, initialization, reconciliation or internal CLI to callers.
+owner object, client, initialization, internal effect reconciliation or internal CLI to callers.
 `claim_task` is likewise trusted coordination, not caller ingress.
 
 ## Effect and Reconciliation Contract
@@ -139,11 +145,11 @@ host proof keeps that replacement disabled; the thin anchor is never reset.
 ## Schema and Writer / Reader Contract
 
 `RemoteForemanOwner` is the sole writer of the configured owner JSON. Service
-transports use its request/query methods; they never edit or migrate it.
+transports use its documented caller methods; they never edit or migrate it.
 
-Document schema 1 has exactly:
+Document schema 2 has exactly:
 
-- `schema_version`: integer 1.
+- `schema_version`: integer 2.
 - `attestation`: all receipt fields above.
 - `state_path`: canonical absolute path of the existing foreman task state.
 - `owner_store_path`: canonical absolute path of this owner record, also pinned
@@ -153,19 +159,28 @@ Document schema 1 has exactly:
   saved in this intent.
 - `reconciliations`: schema-1 rows with `operation_id`, `outcome` and
   `evidence_digest`.
-- `requests`: schema-2 rows with `request_id`, untrusted `task`, `task_id` and
-  `status: "queued" | "registered"`. The latter is a durable handoff marker,
+- `requests`: schema-3 rows with `request_id`, untrusted `task`, `task_id` and
+  `status: "queued" | "registered" | "cancelled"`. Registered is a durable handoff marker,
   not task completion. Progress remains owned by the existing task ledger.
-  The owner migrates schema-1 request rows to schema 2 only when the original
+  The owner migrates schema-1 request rows to schema 3 only when the original
   ledger proves registration, marking them registered and rewriting the store.
-  Otherwise it refuses without writing: the old queued field cannot distinguish
+  Schema-2 requests migrate to 3 without changing their status or identity.
+  Otherwise it refuses without writing: the old schema-1 queued field cannot distinguish
   never-dispatched work from lost registration history. Non-owner readers must
-  update to schema 2; unknown request versions refuse under the gate-store rule.
+  update to schema 3; unknown request versions refuse under the gate-store rule.
+- `controls`: schema-1 host cancel/resume operation records. Their exact fields,
+  completion evidence and consistency checks are documented in
+  `skills/herdr-foreman/references/remote-task-service.md` Owner Records.
+  The owner migrates document schema 1 to 2 by adding an empty controls list.
+  Existing requests, pending effects, reconciliations, identities and paths are
+  preserved. Migration commits only after the whole document and policy pass
+  validation. Old owners refuse the newer gate document. Schema migration
+  grants no lease or policy reattachment; those limitations still apply.
 
 This is a gate store under `rules/stateful-artifacts.md`: missing owner records
 require explicit first-use initialization. Corrupt or unsupported document
-versions refuse and remain untouched; document schema 1 has no older supported
-document version. Request-row migration is specified above. Never discard a
+versions refuse and remain untouched; only document schemas 1 and 2 are supported.
+Request-row migration is specified above. Never discard a
 pending record to unblock a deployment.
 An existing supervision binding or discovery record proves prior ownership.
 If the remote owner record is missing, initialization refuses before recreating
