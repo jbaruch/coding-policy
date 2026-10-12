@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.401 — 2026-10-12
+
 ### Fixed
 
 - Recover disappeared assignment-scoped Codex bootstrap runtimes through owner evidence: preserve frozen prompts and attempt history, prove the original shell, record the unsent transport outcome, and finish cleanup idempotently. Codex `Unsent draft` echoes no longer count as prompt landing (#756).
