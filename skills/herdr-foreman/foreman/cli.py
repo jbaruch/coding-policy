@@ -31,7 +31,7 @@ from .assign import APPLY_SCHEMA_VERSION, dry_run, freeze_decision, freeze_paths
 from . import no_work_recovery, bootstrap_recovery, model_unavailability, probe_recovery, renderable
 from . import attention, capabilities, chronology, churn, composition, engagement, foreman_queue, foreman_reset, historical, home, lifecycle, load_set, members, memory, oracle, partition, recovery, report_delivery, report_gates, restoration, role_clear, retrospective, retrospective_runtime, supervision, supervision_gate, supervision_runtime, triggers
 from .config import FOREMAN_CONFIG_VERSION, default_config_path, load_config, load_foreman, load_judge, load_role_costs, select_agents
-from .errors import AgentBusyError, IDENTIFIER_UNAVAILABLE_KIND, IDENTIFIER_UNAVAILABLE_RECOVERY, TRANSIENT_LAUNCH_KIND, PlanError, StateError, ForemanError, HerdrError, UsageError, owner_recovery
+from .errors import AgentBusyError, IDENTIFIER_UNAVAILABLE_KIND, IDENTIFIER_UNAVAILABLE_RECOVERY, TRANSIENT_LAUNCH_KIND, PREFLIGHT_LAUNCH_KIND, PlanError, StateError, ForemanError, HerdrError, UsageError, owner_recovery
 from .herdr import (
     error_code,
     DEFAULT_MARKER_TIMEOUT_MS,
@@ -1979,7 +1979,7 @@ def _apply(args, client, warn, trace, hold_gates):
         if isinstance(primary, ForemanError):
             # A native start refusal closes its own pane before any reservation, so the
             # failed seat is in neither `names` nor `prepared`; that proof stands in.
-            spawn_closed = (primary.details.get("failure_kind") in (IDENTIFIER_UNAVAILABLE_KIND, TRANSIENT_LAUNCH_KIND)
+            spawn_closed = (primary.details.get("failure_kind") in (IDENTIFIER_UNAVAILABLE_KIND, TRANSIENT_LAUNCH_KIND, PREFLIGHT_LAUNCH_KIND)
                 and bool(primary.details.get("spawn_pane_closed")) and len(prepared) == len(names))
             known_closed = (((bool(names) and bool(prepared)) or spawn_closed) and not retained and not failures and not sending
                 and state_saved and all(next(row for row in store["dispatches"] if row["id"] == identifier)["status"] == "not_sent" for identifier in prepared))
@@ -2046,7 +2046,7 @@ def _apply(args, client, warn, trace, hold_gates):
                         history=state["assignments"], before_start=preflight_start, owned=owned,
                     )
                 except HerdrError as exc:
-                    if exc.details.get("failure_kind") == TRANSIENT_LAUNCH_KIND:
+                    if exc.details.get("failure_kind") in (TRANSIENT_LAUNCH_KIND, PREFLIGHT_LAUNCH_KIND):
                         attempt = recovery.record_transient_launch_failure(store, args.task, launch_scopes[role], at)
                         try:
                             save_state(state_path, state)

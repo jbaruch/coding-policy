@@ -191,7 +191,7 @@ the identical apply launches the same unavailable id, so follow
 first. Detection belongs to that reference's named owners.
 
 A native-start `model_identifier_unavailable` takes the same `plan` recovery.
-For `launch_transient`, follow `details.recovery.outcome`: `retryable` permits
+For `launch_transient` or `launch_preflight`, follow `details.recovery.outcome`: `retryable` permits
 the unchanged normal apply after proved closure; `exhausted` forbids another
 identical start and routes causal investigation through Judgment Routes.
 `blocked` requires the named cleanup/storage recovery first. Neither class
@@ -202,6 +202,17 @@ and process restarts. Keep the original task and correction count.
 Never rename the task, reword its brief or change a configured row solely to
 refill the budget. A materially changed recovery follows Judgment Routes and
 carries the original failure evidence into its self-contained brief.
+
+`launch_preflight` identifies a runtime observation failure in the fresh-pane
+retrospective callback before native start. It does not classify the shell's
+cause or grant permission from a missing worker identity. Proved closure and
+the durable shared launch-budget count permit the identical normal apply even
+when no dispatch or supervision enrollment was created. No reconciliation
+receipt is required or invented for that absent dispatch. The existing callback
+still runs on the new pane; retrospective policy refusals, uncertain native
+start outcomes, failed cleanup and failed persistence remain blocked. The
+classification boundary belongs to `_start_fresh_worker` in
+`skills/herdr-foreman/foreman/lifecycle.py`.
 
 For `startup_dialog_pending`, the foreman reads the retained native pane and
 follows `skills/herdr-foreman/references/herdr.md` Runtime Dialogs. Review the

@@ -87,6 +87,7 @@
     "skills/herdr-foreman/tests/test_billing.py",
     "skills/herdr-foreman/tests/test_bootstrap_recovery.py",
     "skills/herdr-foreman/tests/test_no_work_recovery.py",
+    "skills/herdr-foreman/tests/test_preflight_retry.py",
     "skills/herdr-foreman/tests/test_capabilities.py",
     "skills/herdr-foreman/tests/test_successors.py",
     "skills/herdr-foreman/tests/test_capability_routing.py",

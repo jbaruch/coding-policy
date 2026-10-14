@@ -18,7 +18,7 @@ import time
 from .config import assignment_worker
 from .composer import ensure_ready, startup_pending_error
 from .errors import (IDENTIFIER_ERROR_CODES, IDENTIFIER_UNAVAILABLE_KIND, IDENTIFIER_UNAVAILABLE_RECOVERY,
-                     TRANSIENT_LAUNCH_ERROR_CODES, TRANSIENT_LAUNCH_KIND, ForemanError, HerdrError,
+                     TRANSIENT_LAUNCH_ERROR_CODES, TRANSIENT_LAUNCH_KIND, PREFLIGHT_LAUNCH_KIND, ForemanError, HerdrError,
                      StartShellNotReadyError, UsageError, owner_recovery)
 from .herdr import READY_STATES, error_code, format_argv, scrub_for_trace
 from .launch import (foreground_identity_evidence, holds_initializing_shell, holds_only_shell,
@@ -171,6 +171,14 @@ def _start_fresh_worker(client, worker, pane, tier, shell, before_start, sleep):
                 raise
             evidence = {"pane": pane, "shell_pid": shell,
                         "foreground_pids": exc.details.get("foreground_pids")}
+        except HerdrError as exc:
+            # The retrospective callback only observes; native start below has
+            # not run. Earlier loop iterations can only have returned the
+            # dependency-verified pre-input agent_pane_busy refusal. Keep this
+            # separate from provider errors and retrospective policy refusals.
+            raise owner_recovery(exc, PREFLIGHT_LAUNCH_KIND, runnable.command("supervision-status"),
+                "The fresh-pane preflight failed before native start. Retry requires proved owned closure "
+                "and a persisted launch-budget attempt; preserve the actual observation without inferring its cause.")
         else:
             info, evidence = _fresh_shell_info(client, pane, shell, allow_absent_foreground=True)
             if not holds_only_shell(info):

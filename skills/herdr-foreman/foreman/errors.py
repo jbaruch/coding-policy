@@ -111,3 +111,8 @@ IDENTIFIER_ERROR_CODES = frozenset({"model_not_found", "unsupported_model"})
 TRANSIENT_LAUNCH_KIND = "launch_transient"
 TRANSIENT_LAUNCH_ERROR_CODES = frozenset({
     "service_unavailable", "bad_gateway", "gateway_timeout", "internal_error", "overloaded"})
+
+#: A fresh owner's read-only preflight failed before native start. This names
+#: the failure boundary, not a shell/provider cause. Retry still requires
+#: proved owned closure and the persisted shared pre-input launch budget.
+PREFLIGHT_LAUNCH_KIND = "launch_preflight"
