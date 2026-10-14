@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.405 — 2026-10-14
+
 ### Fixed
 
 - Return a bounded unchanged-apply retry when a fresh assignment's retrospective
