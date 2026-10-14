@@ -631,6 +631,7 @@ class EngagementTest(unittest.TestCase):
         del old["recovery"]["diagnoses"]
         del old["recovery"]["legacy_ruling_recoveries"]
         del old["recovery"]["approaches"]
+        del old["recovery"]["no_work_recoveries"]
         original = old["assignments"][0]
         original["schema_version"] = 5
         original.pop("requirements")

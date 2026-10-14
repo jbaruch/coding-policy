@@ -915,3 +915,11 @@ under Codex's `Unsent draft`, use the owner `reconcile-bootstrap --record` path.
 Its provenance, transport proof, historical applied-row handling and cleanup
 contract are in `skills/herdr-foreman/references/bootstrap-recovery.md`.
 A missing agent alone never proves not_sent or permits closing a surviving pane.
+
+## Owner-Closed Initial No-Work Stalls
+
+A proved no-work initial developer assignment whose pane was already closed
+uses `recover-no-work --record FILE`, not live-worker reconciliation or unsent
+bootstrap recovery. Read `skills/herdr-foreman/references/no-work-recovery.md`
+for the original wait/closure/ledger inputs and normal plan/apply continuation.
+The operation preserves applied history and the original correction allowance.

@@ -58,7 +58,8 @@ RECOVERY_SCHEMA_VERSION = 1
 #: refusal v2's verified native model error. Historical scopes stay absent.
 #: Version 17 adds durable seat-local transient launch failures. An older
 #: store cannot silently ignore these retry gates.
-RECOVERY_STORE_VERSION = 17
+#: Version 18 owns closed no-work recovery receipts and their retry bindings.
+RECOVERY_STORE_VERSION = 18
 #: Three confirmed pre-input service failures buy no further identical start.
 #: Scope binds task/role/brief/account/template/model/effort, not pane, fresh
 #: identity or report destination. Exhaustion routes to causal diagnosis,
@@ -151,7 +152,7 @@ def empty_recovery():
             "plans": [], "dispatches": [], "context_permissions": [], "events": [],
             "hand_clearances": [], "historical_attempts": [], "role_clearances": [], "delivery_recoveries": [],
             "refusal_authorizations": [], "diagnoses": [], "legacy_ruling_recoveries": [],
-            "approaches": []}
+            "approaches": [], "no_work_recoveries": []}
 
 
 def _migrate_checkpoints(store):
@@ -281,6 +282,8 @@ def _refuse_unowned_legacy(store, version):
         if any(not isinstance(row, dict) or row.get("schema_version") != 1 for row in deliveries):
             raise UsageError("Older recovery contains unowned newer delivery records; preserve it for owner recovery.", {})
     added = [] if version >= 11 else ["approaches"]
+    if version < 18:
+        added.append("no_work_recoveries")
     if version < 9:
         added.append("legacy_ruling_recoveries")
     if version < 8:
@@ -1420,6 +1423,7 @@ def reserve(store, record, at):
     if canonical_role(record.get("role")) == "judge" and record.get("judge_mode") is None:
         raise UsageError("A judge dispatch declares its mode, one of {}, before it is reserved; "
                          "pass judge_mode.".format(" | ".join(JUDGE_MODES)), {"dispatch": record.get("id")})
+    from . import no_work_recovery
     if prior:
         if prior["status"] != "not_sent" or prior["fingerprint"] != record["fingerprint"]:
             raise UsageError("Dispatch already exists; inspect its recorded result instead of sending again.", {})
@@ -1427,6 +1431,7 @@ def reserve(store, record, at):
         after_metadata = {key: value for key, value in _dispatch_metadata(record).items() if key != "launch_scope"}
         if prior["schema_version"] != version or before_metadata != after_metadata:
             raise UsageError("Retry changes the original composition metadata; restore the recorded dispatch inputs instead of reusing its identity.", {})
+        no_work_recovery.reserve(store, record, at)
         _event(store, at, "dispatch_transport_retry", record["task"], {"dispatch": prior["id"], "previous": dict(prior)})
         prior.update(status="reserved", report=None, result=None)
         # The fingerprint does not cover these, so a retry after a config
@@ -1440,6 +1445,7 @@ def reserve(store, record, at):
         prior.pop("reconciliation", None)
         item = prior
     else:
+        no_work_recovery.reserve(store, record, at)
         item = {"at": at, **record, "schema_version": version,
                 "status": "reserved", "result": None, "report": None}
         if version >= SPECIALIST_DISPATCH_VERSION:
@@ -2049,7 +2055,7 @@ def validate_store(store, assignments):
     try:
         if not isinstance(store["tasks"], dict):
             raise UsageError("Recovery tasks must be an object; restore the owner-written ledger.", {})
-        for name in ("checkpoints", "plans", "dispatches", "context_permissions", "events", "hand_clearances", "historical_attempts", "role_clearances", "delivery_recoveries", "refusal_authorizations", "diagnoses", "legacy_ruling_recoveries", "approaches"):
+        for name in ("checkpoints", "plans", "dispatches", "context_permissions", "events", "hand_clearances", "historical_attempts", "role_clearances", "delivery_recoveries", "refusal_authorizations", "diagnoses", "legacy_ruling_recoveries", "approaches", "no_work_recoveries"):
             if not isinstance(store[name], list):
                 raise UsageError("Recovery {} must be an array; restore the owner-written ledger.".format(name), {})
             identifiers = []
@@ -2170,6 +2176,8 @@ def validate_store(store, assignments):
                 previous = _item(store["plans"][:store["plans"].index(row)], row["supersedes"], "superseded plan")
                 if previous["task"] != row["task"] or previous["base_revision"] != row["base_revision"]:
                     raise UsageError("A changed decision cannot supersede another task or original base.", {})
+        from . import no_work_recovery
+        no_work_recovery.validate(store, assignments)
         applied_slots = {}
         pending_workers = set()
         pending_tasks = set()
@@ -2242,8 +2250,9 @@ def validate_store(store, assignments):
                     if slot in applied_slots:
                         previous = applied_slots[slot]
                         move = row.get("refusal_move") or {}
-                        if ((previous.get("refusal") or {}).get("schema_version") != 2
-                                or move.get("from") != previous["id"]):
+                        if (not no_work_recovery.follows(store, previous, row)
+                                and ((previous.get("refusal") or {}).get("schema_version") != 2
+                                     or move.get("from") != previous["id"])):
                             raise UsageError("A correction number was consumed twice; preserve the ledger and reconcile the duplicate.", {})
                         if not assignment_after(assignments, index, previous["assignment_index"]):
                             raise UsageError("A native-unavailability handoff must follow its failed attempt; preserve the original event chronology.", {})

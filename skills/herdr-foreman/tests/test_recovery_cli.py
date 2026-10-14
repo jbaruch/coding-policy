@@ -508,6 +508,7 @@ class RecoveryCommandTests(fixture.CliCase):
         from foreman import recovery as recovery_module
         store = recovery_module.empty_recovery()
         store["schema_version"] = 11
+        store.pop("no_work_recoveries", None)
         store["dispatches"].append({"schema_version": 1, "id": "d", "role": "judge", "agent": "claude",
                                     "task": TASK, "status": "sending", "judge_mode": "diagnosis"})
         with self.assertRaisesRegex(UsageError, "judge mode this version never wrote"):
@@ -517,6 +518,7 @@ class RecoveryCommandTests(fixture.CliCase):
         from foreman import recovery as recovery_module
         store = recovery_module.empty_recovery()
         store["schema_version"] = 12
+        store.pop("no_work_recoveries", None)
         store["events"].append({"schema_version": 1, "sequence": 1, "at": AT, "kind": "task_closed",
                                 "task": TASK, "details": {"outcome": "merged", "evidence": "pr"}})
         with self.assertRaisesRegex(UsageError, "task closure this version never wrote"):
@@ -527,6 +529,7 @@ class RecoveryCommandTests(fixture.CliCase):
         from foreman import recovery as recovery_module
         store = recovery_module.empty_recovery()
         store["schema_version"] = 13
+        store.pop("no_work_recoveries", None)
         store["dispatches"].append({"schema_version": 1, "id": "d", "role": "developer", "agent": "claude",
                                     "task": TASK, "status": "applied",
                                     "oracle": {"kind": "digest", "value": "a" * 64}})
@@ -537,6 +540,7 @@ class RecoveryCommandTests(fixture.CliCase):
         from foreman import recovery as recovery_module
         store = recovery_module.empty_recovery()
         store["schema_version"] = 13
+        store.pop("no_work_recoveries", None)
         store["dispatches"].append({"schema_version": 1, "id": "d", "role": "developer", "agent": "claude",
                                     "task": TASK, "status": "applied"})
         self.assertTrue(recovery_module.migrate_store(store))
@@ -547,6 +551,7 @@ class RecoveryCommandTests(fixture.CliCase):
         from foreman import recovery as recovery_module
         store = recovery_module.empty_recovery()
         store["schema_version"] = 13
+        store.pop("no_work_recoveries", None)
         store["events"].append({"schema_version": 1, "sequence": 1, "at": AT, "kind": "task_closed",
                                 "task": TASK, "details": {"outcome": "merged", "evidence": "pr"}})
         self.assertTrue(recovery_module.migrate_store(store))
@@ -577,6 +582,7 @@ class RecoveryCommandTests(fixture.CliCase):
         from foreman import recovery as recovery_module
         store = recovery_module.empty_recovery()
         store["schema_version"] = 12
+        store.pop("no_work_recoveries", None)
         store["dispatches"].append({"schema_version": 3, "id": "d", "role": "judge", "agent": "claude",
                                     "task": TASK, "status": "sending", "judge_mode": "diagnosis"})
         self.assertTrue(recovery_module.migrate_store(store))
@@ -591,6 +597,7 @@ class RecoveryCommandTests(fixture.CliCase):
             with self.subTest(version=version):
                 store = recovery_module.empty_recovery()
                 store["schema_version"] = version
+                store.pop("no_work_recoveries", None)
                 if version == 10:
                     del store["approaches"]
                 store["dispatches"].append({"schema_version": 1, "id": "d", "role": "reviewer#api",

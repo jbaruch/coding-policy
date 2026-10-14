@@ -28,7 +28,7 @@ from . import runnable
 from . import __version__
 from .assign import apply as apply_assignments
 from .assign import APPLY_SCHEMA_VERSION, dry_run, freeze_decision, freeze_paths, read_frozen, native_context_session, normalize_assignments, resolve_paths, validate_context_mode, validate_fix_history
-from . import bootstrap_recovery, model_unavailability, probe_recovery, renderable
+from . import no_work_recovery, bootstrap_recovery, model_unavailability, probe_recovery, renderable
 from . import attention, capabilities, chronology, churn, composition, engagement, foreman_queue, foreman_reset, historical, home, lifecycle, load_set, members, memory, oracle, partition, recovery, report_delivery, report_gates, restoration, role_clear, retrospective, retrospective_runtime, supervision, supervision_gate, supervision_runtime, triggers
 from .config import FOREMAN_CONFIG_VERSION, default_config_path, load_config, load_foreman, load_judge, load_role_costs, select_agents
 from .errors import AgentBusyError, IDENTIFIER_UNAVAILABLE_KIND, IDENTIFIER_UNAVAILABLE_RECOVERY, TRANSIENT_LAUNCH_KIND, PlanError, StateError, ForemanError, HerdrError, UsageError, owner_recovery
@@ -83,6 +83,7 @@ def now_iso():
 
 #: Recovery subcommands whose help says more than the generic line (#625).
 RECOVERY_HELP = {
+    "recover-no-work": "Authorize one initial retry after an owner-closed no-work stall; see no-work-recovery.md.",
     "reconcile-bootstrap": "Record a proved Codex unsent bootstrap failure and close only its original owned shell; see bootstrap-recovery.md.",
     "assess-specialist": "Record a delivered reviewer, tester or consultation report's contract lines "
                          "(VERDICT, ACCEPTANCE, CONTRIBUTION); a gap records only a declared design or implementation contribution.",
@@ -433,7 +434,7 @@ def build_parser():
     resolve_probe_parser = sub.add_parser("resolve-probe", parents=[common], help="Prove and close an owner-retained disposable startup or cleanup probe after its native surface resolves.")
     resolve_probe_parser.add_argument("--agent", required=True, help="Exact retained probe name from the normal measure receipt.")
 
-    for command in ("task", "checkpoint", "authorize-corrections", "authorize-approach", "recover-context", "recover-role-clear", "record-report", "record-refusal", "authorize-refused-dispatch", "diagnose", "reconcile", "reconcile-bootstrap", "record-release-clear", "import-correction", "record-historical-review", "recover-report", "assess-specialist", "close-task"):
+    for command in ("task", "checkpoint", "authorize-corrections", "authorize-approach", "recover-context", "recover-role-clear", "record-report", "record-refusal", "authorize-refused-dispatch", "diagnose", "reconcile", "recover-no-work", "reconcile-bootstrap", "record-release-clear", "import-correction", "record-historical-review", "recover-report", "assess-specialist", "close-task"):
         record_parser = sub.add_parser(command, parents=[common], help=RECOVERY_HELP.get(command, "Record owner-managed {} evidence.".format(command)))
         if command == "reconcile":
             source = record_parser.add_mutually_exclusive_group(required=True)
@@ -1773,6 +1774,13 @@ def _apply(args, client, warn, trace, hold_gates):
                  for role, tier in tiers.items()}
     client = client if client is not None else _client(args, trace=trace)
 
+    if "developer" in assignments:
+        no_work_recovery.prepare(
+            state_path, state, args.task, args.fix_round,
+            recovery.brief_identity(paths, "developer", reports.get("developer"), contents),
+            reports.get("developer"), oracles.get("developer"), client,
+        )
+
     if args.retain_specialist:
         engagement.require_followup(state, state_path, assignments)
 
@@ -2474,7 +2482,10 @@ def _run_recovery(args, state_path, warn, client, trace):
     if args.command == "reconcile-bootstrap":
         client = client if client is not None else _client(args, trace=trace)
         return bootstrap_recovery.reconcile(state_path, state, data, at, client), None
-    if args.command == "task":
+    if args.command == "recover-no-work":
+        client = client if client is not None else _client(args, trace=trace)
+        result = no_work_recovery.record(state_path, state, data, at, client)
+    elif args.command == "task":
         result = recovery.register_task(store, data, at)
     elif args.command == "close-task":
         result = recovery.close_task(store, history, data, at)
@@ -2650,9 +2661,16 @@ def _run_recovery(args, state_path, warn, client, trace):
             except HerdrError as exc:
                 if args.command != "reconcile" or error_code(exc) != "agent_not_found":
                     raise
+                dispatch = next((row for row in store["dispatches"] if row["id"] == data.get("dispatch")), None)
+                closed_initial = (dispatch is not None and dispatch["status"] == "applied"
+                    and dispatch["role"] == "developer" and dispatch["fix_round"] is None
+                    and isinstance(dispatch.get("worker_kind"), str)
+                    and any(row["id"] == dispatch["id"] and not row["active"]
+                            for row in supervision.load(state_path)["members"]))
+                operation = "recover-no-work" if closed_initial else "reconcile-bootstrap"
                 raise owner_recovery(exc, "missing_dispatch_runtime",
-                    runnable.command("reconcile-bootstrap --record RECORD --state " + shlex.quote(str(state_path))),
-                    "For a Codex account/read bootstrap failure, supply the original unsent draft and launch provenance through the bootstrap recovery owner. Missing identity alone proves no transport outcome; preserve unknown or accepted work.") from exc
+                    runnable.command(operation + " --record RECORD --state " + shlex.quote(str(state_path))),
+                    "For an owner-closed initial no_work stall, use `{}` with the original wait, closure and ledger evidence. For a Codex account/read bootstrap failure, supply the original unsent draft and launch provenance through the bootstrap recovery owner. Missing identity alone proves no transport outcome; preserve unknown or accepted work.".format(runnable.command("recover-no-work"))) from exc
             recovery.require_recovery_ready(live)
         if args.command == "recover-context":
             result = recovery.authorize_context(store, history, data, at, native_context_session(live, agents[name].kind))
@@ -3278,7 +3296,7 @@ COMMANDS = {
     "close-member": cmd_close_member,
     "check-member": cmd_check_member,
     "load-set": cmd_load_set,
-    **{command: cmd_recovery for command in ("task", "checkpoint", "authorize-corrections", "authorize-approach", "recover-context", "recover-role-clear", "record-report", "record-refusal", "authorize-refused-dispatch", "diagnose", "reconcile", "reconcile-bootstrap", "record-release-clear", "import-correction", "record-historical-review", "recover-report", "assess-specialist", "close-task")},
+    **{command: cmd_recovery for command in ("task", "checkpoint", "authorize-corrections", "authorize-approach", "recover-context", "recover-role-clear", "record-report", "record-refusal", "authorize-refused-dispatch", "diagnose", "reconcile", "recover-no-work", "reconcile-bootstrap", "record-release-clear", "import-correction", "record-historical-review", "recover-report", "assess-specialist", "close-task")},
     "detect-triggers": cmd_detect_triggers,
     "finding-churn": cmd_finding_churn,
     "validate-partition": cmd_validate_partition,

@@ -117,6 +117,7 @@ class StaleGrokDeliveryTests(unittest.TestCase):
         del self.document['recovery']['diagnoses']
         del self.document['recovery']['legacy_ruling_recoveries']
         del self.document['recovery']['approaches']
+        del self.document['recovery']['no_work_recoveries']
         state.save_state(ledger_path, self.document)
         record_path.write_text(json.dumps(self.data))
         original_bytes = {key: Path(value).read_bytes() for key, value in self.data.items() if key not in ('id', 'dispatch')}
@@ -440,9 +441,10 @@ class StaleGrokDeliveryTests(unittest.TestCase):
         del document['recovery']['diagnoses']
         del document['recovery']['legacy_ruling_recoveries']
         del document['recovery']['approaches']
+        del document['recovery']['no_work_recoveries']
         before = copy.deepcopy(document)
         self.assertTrue(recovery.migrate_store(document['recovery']))
-        self.assertEqual(document['recovery'], {**before['recovery'], 'schema_version': recovery.RECOVERY_STORE_VERSION, 'refusal_authorizations': [], 'diagnoses': [], 'legacy_ruling_recoveries': [], 'approaches': []})
+        self.assertEqual(document['recovery'], {**before['recovery'], 'schema_version': recovery.RECOVERY_STORE_VERSION, 'refusal_authorizations': [], 'diagnoses': [], 'legacy_ruling_recoveries': [], 'approaches': [], 'no_work_recoveries': []})
         self.assertEqual(document['recovery']['delivery_recoveries'], [original_receipt])
         record = self.recover()
         self.document['recovery']['schema_version'] = 3

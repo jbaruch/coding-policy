@@ -665,7 +665,8 @@ def validate_fix_history(assignments, history, task, fix_round, *, recovery=None
     """A worker change cannot reset or skip the task's confirmed fix count."""
     if "developer" not in assignments or task is None:
         return
-    if native_refusal_retry(recovery, history, task, fix_round):
+    from .no_work_recovery import eligible
+    if eligible(recovery, history, task, fix_round) is not None or native_refusal_retry(recovery, history, task, fix_round):
         return
     prior = [row for row in (history or []) if row.get("task") == task
              and row.get("role") == "developer" and row.get("status") == "applied"]

@@ -1,5 +1,15 @@
 # Changelog
 
+### Fixed
+
+- Recover an owner-closed initial no-work developer assignment through
+  `recover-no-work`, retaining the actual applied transport, original task/base
+  and oracle, contributor history, and all five correction attempts. The owner
+  verifies the saved wait, closure and ledger evidence plus current checkout and
+  runtime absence before permitting one fresh replacement. Repeated recovery and
+  completed dispatch replay remain idempotent; unknown, partial, committed or
+  reported work remains protected (#762).
+
 ## 0.3.403 — 2026-10-12
 
 ### Added
