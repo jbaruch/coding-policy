@@ -59,6 +59,7 @@ class SchemaNineCompatibilityTests(unittest.TestCase):
         store["schema_version"] = 8
         del store["legacy_ruling_recoveries"]
         del store["approaches"]
+        del store["no_work_recoveries"]
         self.write_state()
 
     def write_state(self):
@@ -96,6 +97,7 @@ class SchemaNineCompatibilityTests(unittest.TestCase):
         expected["recovery"]["schema_version"] = RECOVERY_STORE_VERSION
         expected["recovery"]["legacy_ruling_recoveries"] = []
         expected["recovery"]["approaches"] = []
+        expected["recovery"]["no_work_recoveries"] = []
         self.assertEqual(restored, expected)
         self.assertEqual(restored["recovery"]["checkpoints"], before["recovery"]["checkpoints"])
         self.assertEqual(restored["assignments"], before["assignments"])
@@ -114,6 +116,7 @@ class SchemaNineCompatibilityTests(unittest.TestCase):
         expected = copy.deepcopy(before)
         expected["recovery"]["schema_version"] = RECOVERY_STORE_VERSION
         expected["recovery"]["approaches"] = []
+        expected["recovery"]["no_work_recoveries"] = []
         self.assertEqual(restored, expected)
         self.assertEqual(len(restored["recovery"]["legacy_ruling_recoveries"]), 1)
         self.assertEqual(restored["recovery"]["legacy_ruling_recoveries"][0]["checkpoints"],
@@ -128,6 +131,7 @@ class SchemaNineCompatibilityTests(unittest.TestCase):
         self.install_receipts()
         self.state["recovery"]["schema_version"] = RECOVERY_STORE_VERSION
         self.state["recovery"]["approaches"] = []
+        self.state["recovery"]["no_work_recoveries"] = []
         self.write_state()
         raw = self.path.read_bytes()
         restored, usable = load_state_checked(self.path)

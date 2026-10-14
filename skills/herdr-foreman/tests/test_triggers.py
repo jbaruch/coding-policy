@@ -1472,6 +1472,7 @@ class LegacyReviewCommandTest(TempCase):
     def test_old_owner_history_refuses_without_persisting_a_migration(self):
         state = self.owner.saved()
         state["recovery"]["schema_version"] = 16
+        del state["recovery"]["no_work_recoveries"]
         self.owner.state.write_text(json.dumps(state))
         before = self.owner.state.read_bytes()
         self.assertIn("owner migration", self.refused())

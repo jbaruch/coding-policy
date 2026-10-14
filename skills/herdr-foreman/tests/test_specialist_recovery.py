@@ -164,6 +164,7 @@ class SpecialistRecoveryTest(unittest.TestCase):
                 del old["diagnoses"]
                 del old["legacy_ruling_recoveries"]
                 del old["approaches"]
+                del old["no_work_recoveries"]
                 for row in old["dispatches"]:
                     row.pop("provider", None)
                     row.pop("brief_identity", None)

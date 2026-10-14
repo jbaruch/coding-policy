@@ -651,7 +651,7 @@ document and arrives already stamped.
 
 ## Recovery records
 
-The recovery document uses `schema_version: 17`; individual records retain their
+The recovery document uses `schema_version: 18`; individual records retain their
 independent versions. Version 6 adds the dispatch fields `brief_identity`, `refusal` and
 `refusal_move` and the `refusal_authorizations` collection; version 7 adds the
 dispatch's send-time `provider`; version 8 adds the `diagnoses` collection;
@@ -760,7 +760,37 @@ standing-worker retained-specialist intent enter the dispatch fingerprint only
 when present; legacy retry identities remain unchanged. Assignment-scoped
 dispatches never carry retained-specialist intent.
 
-### Specialist assessment records
+### Closed No-Work Recovery
+
+Recovery store version 18 adds `no_work_recoveries`. The foreman recovery owner
+migrates supported older stores on read, writes an empty collection, and
+preserves every existing dispatch and assignment. An older store already
+carrying this collection is refused as unowned newer data. Unsupported newer
+stores produce no usable state; mutating CLI owners refuse that condition and
+leave the original file untouched.
+
+`skills/herdr-foreman/foreman/no_work_recovery.py` owns schema-1 receipts in
+this collection. `recover-no-work` writes them under the state transaction lock;
+normal dispatch reservation records each authorized retry in the same state
+save as its dispatch. Planning, apply and store validation read them. No reader
+migrates independently or supplies a receipt when the collection is absent.
+
+Each receipt has `schema_version`, `id` (source dispatch ID), `task`, `at`,
+`assignment_index`, `input`, `evidence`, `source_sha256`, `task_sha256`, `binding`
+and `retries`. `input` is the original command record. `evidence` contains the
+`wait`, `closure` and `ledger` file receipts in the recovery owner's normal
+`{path, sha256}` shape. The source and task digests bind their original complete
+records. `binding` preserves the resolved supervision assignment identity.
+`retries` is an ordered list of dispatch IDs; their original transport statuses
+remain authoritative. Every receipt and dispatch remains auditable after the
+replacement applies. The original task and assignment record schemas do not
+change.
+
+The command's input/output and continuation contract is
+`skills/herdr-foreman/references/no-work-recovery.md`. The source-binding and
+one-replacement validation lives in the owner module's `validate` function.
+
+## Specialist assessment records
 
 `assess-specialist` appends records to the main state's `specialist_assessments`.
 Its input is exactly `id`, `dispatch`, `report` and `delivery`; `outcome`,

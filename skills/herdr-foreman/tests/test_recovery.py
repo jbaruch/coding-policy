@@ -66,6 +66,7 @@ class RecoveryTests(unittest.TestCase):
     def test_older_launch_history_migrates_without_inventing_failures(self):
         from foreman.recovery import transient_launch_attempts
         self.store["schema_version"] = 16
+        self.store.pop("no_work_recoveries")
         previous_events = copy.deepcopy(self.store["events"])
         self.assertTrue(migrate_store(self.store))
         validate_store(self.store, self.history)
@@ -1291,6 +1292,7 @@ class RecoveryTests(unittest.TestCase):
     def test_store_version_fourteen_migrates_only_without_scoped_fields(self):
         clean = copy.deepcopy(self.store)
         clean["schema_version"] = 14
+        clean.pop("no_work_recoveries")
         self.assertTrue(migrate_store(clean))
         self.assertEqual(clean["schema_version"], RECOVERY_STORE_VERSION)
 
@@ -1309,6 +1311,7 @@ class RecoveryTests(unittest.TestCase):
         self.dispatch_tester(1, "codex-a")
         clean = copy.deepcopy(self.store)
         clean["schema_version"] = 15
+        clean.pop("no_work_recoveries")
         self.assertTrue(migrate_store(clean))
         self.assertNotIn("launch_scope", clean["dispatches"][0])
         self.assertEqual(clean["dispatches"][0]["schema_version"], 1)
@@ -1551,6 +1554,7 @@ class RecoveryTests(unittest.TestCase):
         del old["diagnoses"]
         del old["legacy_ruling_recoveries"]
         del old["approaches"]
+        del old["no_work_recoveries"]
         for row in old["dispatches"]:
             del row["brief_identity"]
             del row["provider"]
@@ -1561,12 +1565,14 @@ class RecoveryTests(unittest.TestCase):
         self.assertEqual(old.pop("diagnoses"), [])
         self.assertEqual(old.pop("legacy_ruling_recoveries"), [])
         self.assertEqual(old.pop("approaches"), [])
+        self.assertEqual(old.pop("no_work_recoveries"), [])
         self.assertEqual({key: value for key, value in old.items() if key != "schema_version"},
                          {key: value for key, value in before.items() if key != "schema_version"})
         old["refusal_authorizations"] = []
         old["diagnoses"] = []
         old["legacy_ruling_recoveries"] = []
         old["approaches"] = []
+        old["no_work_recoveries"] = []
         validate_store(old, self.history)
         self.assertFalse(migrate_store(old))
         stale = copy.deepcopy(self.store)
@@ -1589,6 +1595,7 @@ class RecoveryTests(unittest.TestCase):
         del six["diagnoses"]
         del six["legacy_ruling_recoveries"]
         del six["approaches"]
+        del six["no_work_recoveries"]
         for row in six["dispatches"]:
             del row["provider"]
         self.assertTrue(migrate_store(six))

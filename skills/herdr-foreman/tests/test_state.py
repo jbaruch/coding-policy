@@ -65,7 +65,7 @@ class EmptyStateTest(unittest.TestCase):
                           "dispatches": [], "context_permissions": [], "events": [],
                           "hand_clearances": [], "historical_attempts": [], "role_clearances": [], "delivery_recoveries": [],
                           "refusal_authorizations": [], "diagnoses": [], "legacy_ruling_recoveries": [],
-                          "approaches": []}},
+                          "approaches": [], "no_work_recoveries": []}},
         )
 
 
