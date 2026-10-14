@@ -60,7 +60,7 @@ RECOVERY_SCHEMA_VERSION = 1
 #: store cannot silently ignore these retry gates.
 #: Version 18 owns closed no-work recovery receipts and their retry bindings.
 RECOVERY_STORE_VERSION = 18
-#: Three confirmed pre-input service failures buy no further identical start.
+#: Three confirmed pre-input service/preflight failures buy no further identical start.
 #: Scope binds task/role/brief/account/template/model/effort, not pane, fresh
 #: identity or report destination. Exhaustion routes to causal diagnosis,
 #: never a provider retirement or developer correction count.
@@ -431,7 +431,7 @@ def transient_launch_attempts(store, task, scope):
 
 
 def record_transient_launch_failure(store, task, scope, at):
-    """Record an actual structured pre-input service failure, never a guess."""
+    """Count a proved pre-input service/preflight failure, never a guessed send."""
     attempt = transient_launch_attempts(store, task, scope) + 1
     _event(store, at, "launch_transient_failure", task, {"scope": scope, "attempt": attempt})
     return attempt

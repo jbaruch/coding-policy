@@ -690,6 +690,12 @@ failures; older stores already carrying these events refuse as unowned data.
 The event writer and validator are in
 `skills/herdr-foreman/foreman/recovery.py`; CLI apply owns
 the serialized write before advertising another retry.
+The unchanged `launch_transient_failure` event also counts an owner-proved
+pre-input retrospective runtime failure (`launch_preflight` in error output).
+Both consume the same seat budget; the event records a retry count, not a
+diagnosis of the shell or provider. No dispatch, assignment or enrollment is
+fabricated for a failure before those owners ran. The lifecycle owner must
+prove closure before apply can advertise this retry.
 Version-5 rows may carry the existing composition, judge and scoped
 lifecycle fields. Version-2 refusals add the original `launch_scope` or null and
 `unavailability` schema 1 (source-bound model/error/account-class/CLI-version,

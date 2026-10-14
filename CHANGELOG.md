@@ -1,5 +1,15 @@
 # Changelog
 
+### Fixed
+
+- Return a bounded unchanged-apply retry when a fresh assignment's retrospective
+  runtime check fails before native start and the lifecycle owner proves its
+  pane closed. Persist the shared seat retry count before returning permission,
+  including when no dispatch or supervision enrollment exists yet. This avoids
+  directing the foreman to reconcile an identity that was never recorded;
+  unknown native outcomes, cleanup/storage failures and retrospective policy
+  refusals remain blocked (#764).
+
 ## 0.3.404 — 2026-10-14
 
 ### Fixed
