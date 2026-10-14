@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.404 — 2026-10-14
+
 ### Fixed
 
 - Recover an owner-closed initial no-work developer assignment through
