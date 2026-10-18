@@ -38,8 +38,8 @@ main() {
     echo 'publish-acr: publish only a clean repository root with committed package files' >&2
     return 2
   fi
-  if ! git -C "$root" fetch origin --tags \
-      || ! git -C "$root" remote set-head origin --auto >/dev/null \
+  if ! git -C "$root" fetch origin --tags >/dev/null 2>&1 \
+      || ! git -C "$root" remote set-head origin --auto >/dev/null 2>&1 \
       || ! default="$(git -C "$root" symbolic-ref --short refs/remotes/origin/HEAD)"; then
     echo 'publish-acr: restore origin access and its default-branch ref before retrying' >&2
     return 2
@@ -72,7 +72,7 @@ main() {
       return 2
     fi
   elif (( rc == 1 )); then
-    if ! git -C "$root" tag "$tag" "$head"; then
+    if ! git -C "$root" tag "$tag" "$head" >/dev/null 2>&1; then
       echo "publish-acr: cannot create ${tag}; repair local Git write access and refs, then retry the same reviewed commit without moving an existing tag" >&2
       return 2
     fi
@@ -80,7 +80,7 @@ main() {
     echo "publish-acr: cannot read ${tag}; repair Git refs before retrying" >&2
     return 2
   fi
-  if ! git -C "$root" push origin "refs/tags/$tag"; then
+  if ! git -C "$root" push origin "refs/tags/$tag" >/dev/null 2>&1; then
     echo "publish-acr: cannot push ${tag}; restore origin write access and reconcile any conflicting remote tag without moving it, then retry" >&2
     return 2
   fi

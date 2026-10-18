@@ -9,6 +9,7 @@
 - Ship the hook throttle-stamp schema beside its release-skill owner through both package formats.
 - Report a broken generic hook installation with a nonzero status and an actionable diagnostic, preserving the selected hook's normal input/output contract.
 - Refuse immutable ACR tags that point to non-commit objects with the documented setup status and recovery instruction, preserving the tag.
+- Withhold Git network diagnostics from publication logs and exercise the reusable ACR action's package, binary-directory and source-commit forwarding against a real repository fixture.
 
 ## 0.3.407 — 2026-10-18
 

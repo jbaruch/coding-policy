@@ -2,6 +2,7 @@
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -10,6 +11,7 @@ from pathlib import Path
 
 
 SOURCE = Path(__file__).resolve().parents[3] / "skills/release/publish-acr.sh"
+ACTION = SOURCE.parents[2] / ".github/actions/publish-acr/action.yml"
 
 
 class PublishAcrTest(unittest.TestCase):
@@ -96,16 +98,53 @@ class PublishAcrTest(unittest.TestCase):
         fake.write_text("#!/usr/bin/env python3\nimport os,sys\n"
                         "args=sys.argv[1:]\n"
                         "operation=args[2] if len(args)>2 and args[0]=='-C' else args[0]\n"
-                        "if operation==os.environ['PUBLISH_FAIL_OPERATION']: sys.exit(1)\n"
+                        "if operation==os.environ['PUBLISH_FAIL_OPERATION']:\n"
+                        " sys.stderr.write('private transport fixture')\n"
+                        " sys.exit(1)\n"
                         "os.execv(" + repr(real_git) + ", ['git',*args])\n")
         fake.chmod(0o755)
-        for operation, recovery in (("tag", "repair local Git write access"), ("push", "restore origin write access")):
+        for operation, recovery in (("fetch", "restore origin access"), ("remote", "restore origin access"),
+                                    ("tag", "repair local Git write access"), ("push", "restore origin write access")):
             with self.subTest(operation=operation):
                 self.env["PUBLISH_FAIL_OPERATION"] = operation
                 result = self.publish()
                 self.assertEqual((result.returncode, result.stdout), (2, ""))
                 self.assertIn(recovery, result.stderr)
+                self.assertNotIn("private transport fixture", result.stdout + result.stderr)
                 self.assertFalse((self.root / "published").exists())
+
+    def test_composite_action_forwards_package_binary_and_source_from_foreign_cwd(self):
+        # Execute this action's checked-in single Bash step. This fixture reads
+        # only its fixed env-expression/one-line-run layout, not arbitrary YAML.
+        text = ACTION.read_text()
+        self.assertIn("      shell: bash\n", text)
+        bindings, run = text.split("      env:\n", 1)[1].split("      run: ", 1)
+        inputs = {"path": str(self.repo), "bin-directory": str(self.bin), "source-commit": self.head}
+        environment = dict(self.env, GITHUB_ACTION_PATH=str(ACTION.parent))
+        for line in bindings.splitlines():
+            match = re.fullmatch(r"        ([A-Z_]+): \$\{\{ inputs\.([a-z-]+) \}\}", line)
+            self.assertIsNotNone(match, "update the strict fixture for the action's declared layout")
+            assert match is not None
+            environment[match[1]] = inputs[match[2]]
+        self.assertEqual(len(run.splitlines()), 1)
+        # A stale HEAD requires the explicit source argument to be forwarded.
+        (self.repo / "advance").write_text("new default\n")
+        self.git("add", ".")
+        self.git("commit", "-qm", "advance")
+        self.git("push", "-q", "origin", "main")
+        self.git("checkout", "-q", self.head)
+        # The supplied bin directory must win over the caller's PATH.
+        poison = self.root / "wrong acr"
+        poison.mkdir()
+        (poison / "acr").write_text("#!/bin/sh\nexit 91\n")
+        (poison / "acr").chmod(0o755)
+        environment["PATH"] = str(poison) + os.pathsep + os.environ["PATH"]
+        result = subprocess.run(["bash", "-euo", "pipefail", "-c", run], cwd=self.root, env=environment,
+                                capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue(json.loads(result.stdout)["ok"])
+        self.assertTrue((self.root / "published").exists())
+        self.assertEqual(self.git("rev-parse", "v0.4.0").strip(), self.head)
 
     def test_dirty_or_stale_default_never_creates_a_release_tag(self):
         (self.repo / "untracked").write_text("keep\n")
