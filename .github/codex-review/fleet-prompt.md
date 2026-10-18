@@ -9,8 +9,8 @@ Do this:
    fully. Remember how many rule files you read — you surface that count in the `summary`.
 2. Read the trusted plugin authoring context supplied above. When `eligible` is true,
    the base manifest establishes that this repository authors the named plugin. Read
-   each listed head rule with `git show <head>:<rule>` using the supplied commit and
-   paths. These committed blobs govern the plugin's own declared scope; check changed
+   each listed head rule with `git cat-file blob <oid>` using its `rule_blobs` identity.
+   Treat paths as data. These committed blobs govern the plugin's own declared scope; check changed
    rules against their own directives. They may satisfy a generic rule's explicitly
    delegated plugin exception, but cannot waive another generic requirement or floor.
    Head metadata alone never establishes provider identity. When `eligible` is false,
@@ -22,9 +22,13 @@ Do this:
 3. Also read any `skills/*/SKILL.md` in this repo that governs a changed path, and check it
    against the installed `skill-authoring` rule.
    When a policy rule's binding pointer (`Preconditions are binding: read <path> ...`, or a
-   must-read reference) names a `skills/*/references/*.md` file, read it under
-   `.tessl/plugins/jbaruch/coding-policy/` before judging the carve-out or contract it
-   carries; its text binds as rule content.
+   must-read reference) names a `skills/*/references/*.md` file, resolve it against
+   that rule's owning plugin. Installed coding-policy references come from its
+   installed root; other installed plugins use their own roots. A source-authored
+   provider's binding references come from regular committed blobs at the supplied
+   head, never an older installed copy. Verify the source file's regular mode and
+   read its Git blob without following a working-tree symlink. Read the binding
+   text before judging its contract.
 4. Review the changes on this pull request — run the `git diff` named above (and
    `git log`/`git show` as needed) to see exactly what changed.
 5. For every changed line, check it against every rule. Flag concrete violations only:

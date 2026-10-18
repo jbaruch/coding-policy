@@ -94,6 +94,18 @@ class AuthoringContextTest(unittest.TestCase):
         self.assertTrue(result["eligible"])
         self.assertEqual(result["manifest"], "tile.json")
 
+    def test_directory_form_selects_nested_markdown_blobs_without_reading_bodies(self):
+        base = self.provider()
+        self.declare(rules="rules/")
+        self.write("rules/one.md", "source rule, not executed\n")
+        self.write("rules/nested/two.md", "nested rule\n")
+        self.write("rules/notes.txt", "not a rule\n")
+        head = self.save()
+        result = MODULE.context("jbaruch/example", base)
+        self.assertEqual(result["rules"], ["rules/nested/two.md", "rules/one.md"])
+        self.assertEqual(result["rule_blobs"]["rules/one.md"], self.git("rev-parse", head + ":rules/one.md"))
+        self.assertNotIn("source rule, not executed", json.dumps(result))
+
     def test_malformed_manifest_or_changed_identity_fails_visibly(self):
         base = self.provider()
         for body in ("[]", "not json", json.dumps({"name": "another/plugin"})):
@@ -105,6 +117,7 @@ class AuthoringContextTest(unittest.TestCase):
 
     def test_unsafe_missing_duplicate_and_non_file_rules_are_refused(self):
         base = self.provider()
+        self.write("rules/one.md", "regular rule for the duplicate-path case\n")
         for rules in (["../private.md"], ["rules/missing.md"], ["rules/one.md", "rules/one.md"], [False]):
             with self.subTest(rules=rules):
                 self.declare(rules=rules)

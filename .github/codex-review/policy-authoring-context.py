@@ -9,13 +9,13 @@ The trusted base establishes provider identity; head metadata cannot create it.
 
 import argparse
 import json
+from pathlib import PurePosixPath
 import re
 import subprocess
 import sys
 
 
 MANIFESTS = (".tessl-plugin/plugin.json", "tile.json")
-RULE_PATH = re.compile(r"rules/[a-z0-9][a-z0-9_-]*\.md")
 
 
 class ContextError(ValueError):
@@ -39,24 +39,34 @@ def commit(ref):
     return value
 
 
-def regular_blob(ref, path):
-    entries = git("ls-tree", "-z", ref, "--", path).rstrip("\0")
-    if not entries:
-        return False
-    metadata, found = entries.split("\t", 1)
-    mode, kind, _oid = metadata.split()
-    if found != path or mode not in ("100644", "100755") or kind != "blob":
+def tree(ref):
+    result = {}
+    for entry in git("ls-tree", "-r", "-z", ref).split("\0"):
+        if entry:
+            metadata, path = entry.split("\t", 1)
+            result[path] = metadata.split()
+    return result
+
+
+def regular_blob(index, path):
+    row = index.get(path)
+    if row is None:
+        return None
+    mode, kind, oid = row
+    if (mode not in ("100644", "100755") or kind != "blob"
+            or re.fullmatch(r"[a-f0-9]{40}(?:[a-f0-9]{24})?", oid) is None):
         raise ContextError("Authority metadata must be committed regular files; replace symlink or non-file declarations")
-    return True
+    return oid
 
 
-def blob(ref, path):
-    return git("cat-file", "blob", ref + ":" + path) if regular_blob(ref, path) else None
+def blob(index, path):
+    oid = regular_blob(index, path)
+    return git("cat-file", "blob", oid) if oid else None
 
 
-def manifest(ref):
+def manifest(index):
     for path in MANIFESTS:
-        body = blob(ref, path)
+        body = blob(index, path)
         if body is not None:
             try:
                 value = json.loads(body)
@@ -68,26 +78,55 @@ def manifest(ref):
     return None, None
 
 
+def relative_path(value):
+    if not isinstance(value, str) or not value or "\0" in value or "\\" in value:
+        raise ContextError("Rule declarations need relative POSIX paths inside the plugin")
+    path = PurePosixPath(value)
+    if path.is_absolute() or ".." in path.parts:
+        raise ContextError("Rule declarations cannot escape the plugin tree")
+    return path.as_posix()
+
+
+def rule_paths(declaration, index):
+    if isinstance(declaration, str):
+        directory = relative_path(declaration)
+        if directory in index:
+            raise ContextError("A directory-form rule declaration names a file or symlink; select a committed directory")
+        prefix = "" if directory == "." else directory + "/"
+        children = [path for path in index if path.startswith(prefix)]
+        if not children:
+            raise ContextError("The declared rule directory is missing; restore its committed contents")
+        paths = [path for path in children if path.endswith(".md")]
+    elif isinstance(declaration, list):
+        paths = [relative_path(path) for path in declaration]
+    else:
+        raise ContextError("Declare a rule directory or an array of rule-file paths")
+    if any(not path.endswith(".md") for path in paths) or len(set(paths)) != len(paths):
+        raise ContextError("Declare unique Markdown rule paths before reviewing their authority")
+    return sorted(paths)
+
+
 def context(repo, base, head="HEAD"):
     if re.fullmatch(r"[A-Za-z0-9_-]+/[A-Za-z0-9_.-]+", repo) is None:
         raise ContextError("Supply the trusted owner/repository identity from the review driver")
     base_sha, head_sha = commit(base), commit(head)
-    path, trusted = manifest(base_sha)
+    path, trusted = manifest(tree(base_sha))
     result = {"schema_version": 1, "repo": repo, "base": base_sha, "head": head_sha,
-              "eligible": False, "rules": []}
+              "eligible": False, "rules": [], "rule_blobs": {}}
     if trusted is None or trusted.get("name") != repo:
         return result
-    authored = manifest(head_sha)[1]
+    head_tree = tree(head_sha)
+    authored = manifest(head_tree)[1]
     if authored is None or authored.get("name") != repo:
         raise ContextError("Head plugin identity differs from its trusted base; review the identity migration explicitly")
-    rules = authored.get("rules", [])
-    if (not isinstance(rules, list) or any(not isinstance(p, str) or RULE_PATH.fullmatch(p) is None for p in rules)
-            or len(set(rules)) != len(rules)):
-        raise ContextError("Declare unique rules/<name>.md paths in the head manifest before reviewing their authority")
+    rules = rule_paths(authored.get("rules", []), head_tree)
+    rule_blobs = {}
     for rule in rules:
-        if not regular_blob(head_sha, rule):
+        oid = regular_blob(head_tree, rule)
+        if oid is None:
             raise ContextError("A declared head rule is missing; restore it or correct the manifest")
-    return {**result, "eligible": True, "manifest": path, "rules": sorted(rules)}
+        rule_blobs[rule] = oid
+    return {**result, "eligible": True, "manifest": path, "rules": rules, "rule_blobs": rule_blobs}
 
 
 def main():
