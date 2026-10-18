@@ -1,7 +1,7 @@
 ## Step 7 — Merge + Cleanup
 
 Only proceed when:
-- Step 5's watcher returned `.watch.result` as `ready` — its exit-0 readiness conjunction (mergeable, CI `success`/`none`, both bots posted, no Copilot review still owed, the policy reviewer not `CHANGES_REQUESTED`); the field predicate is the watcher's, not restated here (`rules/script-as-black-box.md` — see `skills/release/watch-pr-reviews.sh` header). `ready` already requires each bot's `state` to have left `none`, so a reviewer that never ran cannot satisfy the gate vacuously, AND
+- Step 5 returned `.watch.result` as `ready`; use that step's script-contract reference for its meaning, AND
 - Every `review_bodies[].body` in the returned snapshot has been read in full, from every author, page and review state, and any blocking finding has been addressed per Step 6, AND
 - Every `inline_comment_bodies[].body` in Step 5's snapshot has been read in full and any blocking finding has been addressed per Step 6. Ordinary advisory acknowledgments and thread resolution are outside the merge predicate, AND
 - A ruled finding's reply cites its ruling, per Step 6.
@@ -50,7 +50,7 @@ git remote prune origin
 
 ```bash
 # Merge (running from inside the worktree is fine)
-gh pr merge <N> --merge --delete-branch
+gh pr merge <N> --merge
 
 # Return to the base checkout, fast-forward main
 cd <path-to-base-checkout>
@@ -68,9 +68,8 @@ git remote prune origin
 
 Order in (B) is mandatory: `git branch -d` refuses to delete a branch that is checked out in any worktree, so the `git worktree remove` step must come before `git branch -d`. Reversing the order produces a "checked out at `<path>`" error and leaves a stranded branch.
 
-After merge — per the release contract's Publication Confirmation, run each gate its channels owe, in order:
+After merge, verify the merge landed on main and complete the issue checks:
 
-- Verify the merge landed on main (`git pull --ff-only` succeeds; `git log -1 --oneline` shows the merge commit)
 - Confirm every closing issue closed:
 
   ```bash
@@ -84,22 +83,18 @@ After merge — per the release contract's Publication Confirmation, run each ga
   - Read each partial issue's repository and number from `partial_references`
   - In a repository the operator owns, comment on each partial issue with what shipped and what remains
   - Anywhere else, report the still-open or partly resolved issue to the operator instead of commenting
-- **GitHub tag/asset publication:** push the release tag from the fast-forwarded `main` before resolving anything. Its publish workflow fires on the tag, never on the merge. The version follows Step 3
-- **Every publication, whatever channel carries it:** resolve that publication's own run with `resolve-publish-run.sh`
-- Bind that resolution to the workflow, the exact commit, the `push` event and the ref that fired it, never to "latest on main"
-- Watch the resolved run to a terminal state
-- Require its `conclusion` to be `success`
-- Each channel keeps its own run id; a mixed publication holds both at once, and each confirmation below reads the id for its own channel
-- **Tessl publication:** confirm conjuncts 1 and 2 with `confirm-tessl-landed.sh`, passing `<pre>` and the resolved run id. Which conjuncts it reads is the script's decision contract — see `PUBLICATION.md`
-- Gate on that helper's exit code
-- Keep the version it prints for the moderation gate
-- A non-zero exit stops the release there, with no fall-through to moderation
-- Do not compare against a specific expected version
-- **Tessl publication:** confirm conjunct 3 with `verify-moderation-cleared.sh` on that `current` version. A freshly published version can be install-blocked until its moderation state reaches `pass`. Never report the release confirmed until this clears
-- **GitHub tag/asset publication:** confirm its own conjuncts with `verify-github-release.sh`, passing the tag and its resolved run id. Which conjuncts it reads is the script's decision contract — see `PUBLICATION.md`
-- Run none of the three Tessl helpers for a tag/asset publication
-- Report the outcome: merged PR URL, the version published, and each publication's own confirmation — registry advance plus moderation clear for a Tessl publication, the published release and its retrievable assets for a tag publication, both for a package on both channels
 
-When this step is wrapped in a reusable script (e.g., `merge-and-cleanup.sh` that other devs run unattended), see `skills/release/references/SCRIPTING.md` for the gates the script must enforce.
+Complete every selected channel's post-merge sequence in the publication
+reference named above. It owns publisher resolution, terminal watching,
+confirmation commands and failure recovery. Preserve each recorded baseline
+and its corresponding source-bound run id through those steps. A package on
+both channels owes both sequences.
 
-Finish here — the skill is complete.
+Report the merged PR URL, published version and each channel's actual
+confirmation. Wrappers retain the scripting requirements:
+
+```text
+skills/release/references/SCRIPTING.md
+```
+
+Finish here only after every selected channel is confirmed.
