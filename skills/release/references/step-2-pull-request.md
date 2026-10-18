@@ -47,4 +47,3 @@ skills/release/references/SCRIPTING.md
 ```
 
 Proceed immediately to Step 3.
-

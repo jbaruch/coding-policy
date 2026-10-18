@@ -28,4 +28,3 @@ The scope and observation contract live in `skills/release/check-leftovers.sh`
   - the script's own fixture test must pass
 - The policy reviewer is a backstop, not the first read
 - If anything fails, fix it before proceeding
-

@@ -34,7 +34,7 @@ class PrCreateRepoBindingTest(unittest.TestCase):
                 # Whitespace-normalized: a Markdown line wrap never changes an instruction.
                 source = SKILLS / skill / "SKILL.md"
                 section = step(source.read_text(encoding="utf-8"), number)
-                routes = re.findall(r"\]\((references/step-[^)]+\.md)\)", section)
+                routes = re.findall(r"^skills/release/(references/step-[^\n]+\.md)$", section, re.M)
                 if routes:
                     self.assertEqual(len(routes), 1)
                     target = (source.parent / routes[0]).resolve()

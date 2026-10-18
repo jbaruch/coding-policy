@@ -671,7 +671,7 @@ stages = re.split(r"(?=^## Step [1-7] — )", release, flags=re.M)[1:]
 assert len(stages) == 7, "release router lost a stage"
 for number, stage in enumerate(stages, 1):
     assert stage.startswith("## Step {} — ".format(number))
-    routes = re.findall(r"\]\((references/step-[^)]+\.md)\)", stage)
+    routes = re.findall(r"^skills/release/(references/step-[^\n]+\.md)$", stage, re.M)
     assert len(routes) == 1, (number, routes)
     target = (root / "skills/release" / routes[0]).resolve()
     assert target.is_relative_to((root / "skills/release/references").resolve())

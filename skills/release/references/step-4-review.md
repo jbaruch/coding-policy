@@ -19,4 +19,3 @@ bash "$CP/skills/release/request-copilot-review.sh" <owner> <repo> <pr-number>
 ```
 
 Proceed immediately to Step 5.
-
