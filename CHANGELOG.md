@@ -1,5 +1,18 @@
 # Changelog
 
+### Repair the release skill review bundle
+
+Publication of the source-authoring compatibility fix stopped at the required
+skill review (83%, below 85%). The reviewer received SKILL.md and recognized
+reference directories, but the release execution plan pointed to root-level
+PUBLICATION.md, REVIEW_DETAILS.md and SCRIPTING.md that were outside that review
+bundle. Move these documents into references/ and split the existing ordered
+execution plan into seven elected step references. Preserve the command bodies,
+review-reading obligations, baseline/merge order, worktree cleanup and separate
+channel confirmation contracts. SKILL.md now routes the same seven steps with
+binding links instead of loading every command and failure branch on invocation.
+
+
 ### Changed
 
 - Recognize scoped lookup/output contracts owned by another plugin, including a
