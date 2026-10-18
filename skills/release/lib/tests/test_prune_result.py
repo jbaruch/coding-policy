@@ -5,7 +5,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from foreman.prune_result import prune_schema_error, remote_schema_error
+from prune_result import prune_schema_error, remote_schema_error
 
 
 def prune_doc(**over):

@@ -142,9 +142,9 @@ main() {
 
   echo "7. a spent budget is a could-not-check line"
   local stand="$TMP/stand"
-  mkdir -p "$stand/hooks" "$stand/skills/herdr-foreman" || die "mkdir failed"
+  mkdir -p "$stand/hooks" "$stand/skills/release/lib" "$stand/skills/herdr-foreman" || die "mkdir failed"
   cp "$HOOK" "$stand/hooks/" || die "cp hook failed"
-  printf '%s\n' '#!/usr/bin/env bash' 'exit 124' > "$stand/skills/herdr-foreman/bounded-run.sh" || die "stub failed"
+  printf '%s\n' '#!/usr/bin/env bash' 'exit 124' > "$stand/skills/release/lib/bounded-run.sh" || die "stub failed"
   printf '%s\n' 'raise SystemExit(0)' > "$stand/skills/herdr-foreman/prune-report-caches.py" || die "stub failed"
   RC=0
   OUT="$(cd "$plain" && env -u HERDR_ENV -u SESSION_START_MODE bash "$stand/hooks/check-report-caches.sh" </dev/null 2>"$TMP/err")" || RC=$?

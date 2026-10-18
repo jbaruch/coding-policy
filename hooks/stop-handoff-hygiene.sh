@@ -24,8 +24,8 @@
 #
 # Blocking findings (gate the stop, once):
 #   - Spent worktrees and local branches, as the owner script decides them:
-#     `skills/herdr-foreman/prune-worktrees.sh <shared-checkout> --dry-run`,
-#     run under skills/herdr-foreman/bounded-run.sh for STOP_PRUNE_BUDGET_SEC. Its would-remove
+#     `skills/release/lib/prune-worktrees.sh <shared-checkout> --dry-run`,
+#     run under lib/bounded-run.sh for STOP_PRUNE_BUDGET_SEC. Its would-remove
 #     worktrees and would-delete branches block, with the one command that
 #     removes them all (the same script, live). Its idle dirty or unpushed
 #     worktrees and unpushed branches are reported, never blocking: that work
@@ -259,8 +259,8 @@ read_owner_decisions() {
   here="$(CDPATH='' cd -- "${dir:-/}" && pwd && printf x)" || { warn "cannot resolve the hooks directory — skipping the worktree check; restore access to the plugin directory or reinstall the plugin"; return 0; }
   here="${here%x}"
   here="${here%$'\n'}"
-  prune="${here}/../skills/herdr-foreman/prune-worktrees.sh"
-  runner="${here}/../skills/herdr-foreman/bounded-run.sh"
+  prune="${here}/../skills/release/lib/prune-worktrees.sh"
+  runner="${here}/../skills/release/lib/bounded-run.sh"
   if [[ ! -f "$prune" || ! -r "$prune" || ! -f "$runner" || ! -r "$runner" ]]; then
     warn "${prune} or ${runner} is not readable — reinstall the plugin; skipping the worktree check"
     return 0

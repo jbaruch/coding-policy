@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Outcome-based tests for skills/herdr-foreman/prune-worktrees.sh.
+# Outcome-based tests for lib/prune-worktrees.sh.
 #
 # Real local git repos, driven offline: a bare "origin" plus a shared checkout
 # cloned from it, per scenario, so the cases share no state and run in any
@@ -123,7 +123,7 @@
 #                             removal keeps a merged worktree and branch.
 #  84. Unreadable subdir    -> the nested-repository walk keeps the worktree.
 #
-# Run: bash skills/herdr-foreman/tests/test_prune_worktrees.sh
+# Run: bash lib/tests/test_prune_worktrees.sh
 set -uo pipefail
 
 die() { echo "fatal: $*" >&2; exit 2; }

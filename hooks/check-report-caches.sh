@@ -123,7 +123,7 @@ main() {
   fi
   here="${here%x}"
   here="${here%$'\n'}"
-  local runner="${here}/../skills/herdr-foreman/bounded-run.sh"
+  local runner="${here}/../skills/release/lib/bounded-run.sh"
   local prune="${here}/../skills/herdr-foreman/prune-report-caches.py" f
   for f in "$runner" "$prune"; do
     if [[ ! -f "$f" || ! -r "$f" ]]; then

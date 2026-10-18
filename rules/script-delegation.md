@@ -89,7 +89,7 @@ Scripts follow the baseline in `rules/file-hygiene.md` (exit codes, stderr, idem
   3. Each distinct verdict of the helper it wraps reaches the caller as a distinct exit code
 - Every other release script retains the JSON-producing requirement
 
-- Narrow exception for `skills/herdr-foreman/bounded-run.sh` pass-through stdout.
+- Narrow exception for `skills/release/lib/bounded-run.sh` pass-through stdout.
 - Applies when a caller runs another script under a wall-clock budget
 - Preconditions (all required):
   1. The runner's stdout is exactly the wrapped command's stdout

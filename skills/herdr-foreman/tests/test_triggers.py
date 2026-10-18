@@ -400,7 +400,7 @@ class ThisRepoDeclarationTest(unittest.TestCase):
     def test_a_shipped_shell_command_is_a_cli_surface(self):
         # A shell command carries its own flags and refusals, and a new one
         # must fire UX and product the way a new Python flag does.
-        for path, line in (("skills/herdr-foreman/prune-worktrees.sh",
+        for path, line in (("skills/release/lib/prune-worktrees.sh",
                             '      --dry-run) warn "usage: prune-worktrees.sh <shared-checkout>"; return 1 ;;'),
                            ("skills/release/watch-pr-reviews.sh", 'echo "usage: watch-pr-reviews.sh" >&2'),
                            ("scripts/run-tests.sh", 'echo "Usage: run-tests.sh [base-dir]" >&2')):
