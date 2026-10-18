@@ -79,6 +79,7 @@ The scope and observation contract live in `skills/release/check-leftovers.sh`
   - **Issue lines**, one or more of, each on a line of its own:
     - `Closes #<n>`, one line per issue the PR fully resolves
     - `Part of #<n>` for an issue it only partly resolves
+    - `Part of https://github.com/<owner>/<repo>/issues/<n>` for partial work tracked in another repository
     - `No issue` for work with no tracking issue
   - `Refs #<n>`, `Related #<n>` and a bare `#<n>` close nothing
 - Check the link GitHub resolved from the body:
@@ -292,7 +293,8 @@ After merge — per the release contract's Publication Confirmation, run each ga
 - Exit 1 (`still_open`) names each closing issue still open at the script's poll budget
 - Every issue comment below is an action on that issue's repository, governed by `rules/external-repo-contributions.md`:
   - In a repository the operator owns, close each still-open issue with a comment naming the PR
-  - In a repository the operator owns, comment on each `Part of #<n>` issue with what shipped and what remains
+  - Read each partial issue's repository and number from `partial_references`
+  - In a repository the operator owns, comment on each partial issue with what shipped and what remains
   - Anywhere else, report the still-open or partly resolved issue to the operator instead of commenting
 - **GitHub tag/asset publication:** push the release tag from the fast-forwarded `main` before resolving anything. Its publish workflow fires on the tag, never on the merge. The version follows Step 3
 - **Every publication, whatever channel carries it:** resolve that publication's own run with `resolve-publish-run.sh`

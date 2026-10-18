@@ -2,6 +2,11 @@
 
 ### Changed
 
+- Accept canonical GitHub issue URLs in partial PR issue links and preserve
+  their repository identity. Extraction PRs can track work in herdr-policy
+  without closing unfinished issues or treating their numbers as coding-policy
+  issues.
+
 - Move command budgeting, worktree and branch cleanup, and prune-result
   validation to the shared `skills/release/lib/` runtime with their existing regression
   suites. General hygiene hooks no longer import the foreman package; team

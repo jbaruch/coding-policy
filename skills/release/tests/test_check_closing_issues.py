@@ -99,6 +99,36 @@ class BeforeMerge(unittest.TestCase):
         code, report, _ = run(FakeGh(open_pr("## Summary\n\nNo issue\n")), "12")
         self.assertEqual((code, report["no_issue"]), (0, True))
 
+    def test_a_cross_repository_partial_link_keeps_its_owner_and_never_closes(self):
+        code, report, _ = run(FakeGh(open_pr(
+            "Part of https://github.com/jbaruch/herdr-policy/issues/20\n")), "12")
+        self.assertEqual((code, report["closing"], report["partial"]), (0, [], []))
+        self.assertEqual(report["partial_references"], [{"repo": "jbaruch/herdr-policy", "number": 20}])
+
+    def test_partial_links_are_deduplicated_without_conflating_repositories(self):
+        body = ("Part of #20\n"
+                "Part of https://github.com/jbaruch/coding-policy/issues/20\n"
+                "Part of https://github.com/jbaruch/herdr-policy/issues/20\n"
+                "Part of https://github.com/jbaruch/herdr-policy/issues/20\n")
+        code, report, _ = run(FakeGh(open_pr(body)), "12")
+        self.assertEqual((code, report["partial"]), (0, [20]))
+        self.assertEqual(report["partial_references"], [
+            {"repo": "jbaruch/coding-policy", "number": 20},
+            {"repo": "jbaruch/herdr-policy", "number": 20},
+        ])
+
+    def test_noncanonical_or_embedded_issue_urls_do_not_satisfy_the_gate(self):
+        for body in (
+            "This is Part of https://github.com/jbaruch/herdr-policy/issues/20\n",
+            "Part of https://github.com/jbaruch/herdr-policy/issues/20 remains open\n",
+            "Part of https://github.com.evil/jbaruch/herdr-policy/issues/20\n",
+            "Part of https://github.com/jbaruch/herdr-policy/pull/20\n",
+            "Part of https://github.com/jbaruch/herdr-policy/issues/0\n",
+        ):
+            with self.subTest(body=body):
+                code, _, _ = run(FakeGh(open_pr(body)), "12")
+                self.assertEqual(code, 1)
+
     def test_lines_that_only_start_like_the_alternatives_do_not_count(self):
         for body in ("This is part of #483 work.\n", "Part of #483 remains open\n", "No issue found\n"):
             with self.subTest(body=body):
@@ -107,6 +137,14 @@ class BeforeMerge(unittest.TestCase):
 
 
 class AfterMerge(unittest.TestCase):
+    def test_cross_repository_partial_issue_is_not_polled_for_closure(self):
+        fake = FakeGh({"state": "MERGED", "body":
+                       "Part of https://github.com/jbaruch/herdr-policy/issues/20\n",
+                       "closingIssuesReferences": []})
+        code, report, _ = run(fake, "12", "--merged")
+        self.assertEqual((code, report["closing"]), (0, []))
+        self.assertTrue(all(args[:2] == ["pr", "view"] for args, _ in fake.calls))
+
     def test_closed_issues_pass(self):
         fake = FakeGh(merged_pr([ref(1)]), {"jbaruch/coding-policy#1": ["CLOSED"]})
         code, report, _ = run(fake, "12", "--merged")

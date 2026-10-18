@@ -12,7 +12,8 @@ This script reads what GitHub resolved from them.
 Modes:
   default (before merge)
     Reads `closingIssuesReferences`. Passes when it names at least one issue,
-    or when the body carries a whole `Part of #N` line (a partial resolution)
+    or when the body carries a whole `Part of #N` or `Part of <GitHub issue URL>`
+    line (a partial resolution)
     or a whole `No issue` line (work with no tracking issue). Refuses
     otherwise: the body names no issue GitHub will close and declares no
     alternative.
@@ -32,6 +33,7 @@ Output contract (rules/script-delegation.md -- structured stdout):
   stdout: one JSON object --
     {"pr": N, "state": "OPEN|MERGED|CLOSED", "closing": [{"repo": "o/r",
      "number": N, "state": "OPEN|CLOSED|null"}], "partial": [N, ...],
+     "partial_references": [{"repo": "o/r", "number": N}, ...],
      "no_issue": bool, "verdict": "ok|unlinked|still_open|not_merged"}
   stderr: an actionable diagnostic for every non-ok verdict.
 
@@ -56,6 +58,10 @@ ISSUE_STATES = frozenset({"OPEN", "CLOSED"})
 # The two non-closing issue lines the Step 2 template allows, each a whole
 # line, so "No issue found" or "Part of #483 remains open" does not count.
 PART_OF = re.compile(r"^[ \t]*Part of #(\d+)[ \t]*$", re.MULTILINE)
+PART_OF_URL = re.compile(
+    r"^[ \t]*Part of https://github\.com/([A-Za-z0-9-]+)/([A-Za-z0-9_.-]+)/issues/([1-9]\d*)[ \t]*$",
+    re.MULTILINE,
+)
 NO_ISSUE = re.compile(r"^[ \t]*No issue[ \t]*$", re.MULTILINE)
 
 
@@ -128,11 +134,17 @@ def read_pr(owner, repo, pr, gh):
         owner_login = who.get("login") or owner
         closing.append({"repo": "{}/{}".format(owner_login, where.get("name") or repo),
                         "number": ref["number"], "state": None})
+    partial = sorted({int(n) for n in PART_OF.findall(body)})
+    partial_references = {(owner + "/" + repo, number) for number in partial}
+    partial_references.update((ref_owner + "/" + ref_repo, int(number))
+                              for ref_owner, ref_repo, number in PART_OF_URL.findall(body))
     return {
         "pr": int(pr),
         "state": data["state"],
         "closing": closing,
-        "partial": sorted({int(n) for n in PART_OF.findall(body)}),
+        "partial": partial,
+        "partial_references": [{"repo": repository, "number": number}
+                               for repository, number in sorted(partial_references)],
         "no_issue": bool(NO_ISSUE.search(body)),
     }
 
@@ -144,7 +156,7 @@ def issue_state(repo, number, gh, timeout):
 
 
 def check_linked(report):
-    if report["closing"] or report["partial"] or report["no_issue"]:
+    if report["closing"] or report["partial"] or report.get("partial_references") or report["no_issue"]:
         return "ok"
     return "unlinked"
 
@@ -171,7 +183,7 @@ def check_closed(report, gh, interval, budget, *, sleep=time.sleep, clock=time.m
 
 DIAGNOSTICS = {
     "unlinked": ("PR #{pr} names no issue GitHub will close. Add `Closes #<n>` for each issue it "
-                 "resolves, a whole `Part of #<n>` line for one it only partly resolves, or a whole "
+                 "resolves, a whole `Part of #<n>` or `Part of <GitHub issue URL>` line for partial work, or a whole "
                  "`No issue` line; `Refs`, `Related` and a bare `#<n>` do not close anything."),
     "not_merged": "PR #{pr} is {state}, not MERGED. Run --merged only after the merge lands.",
     "still_open": ("PR #{pr} merged but these closing issues are still open after {budget:g}s: {open}. "
