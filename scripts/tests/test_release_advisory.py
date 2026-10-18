@@ -8,8 +8,8 @@ class ReleaseAdvisoryTest(unittest.TestCase):
         import sys
         from pathlib import Path
         root = Path(__file__).resolve().parents[2] / "skills"
-        release = (root / "release/SKILL.md").read_text()
-        mechanics = (root / "release/SCRIPTING.md").read_text()
+        release = "\n".join((root / path).read_text() for path in ("release/SKILL.md", "release/references/step-6-feedback.md", "release/references/step-7-delivery.md"))
+        mechanics = (root / "release/references/SCRIPTING.md").read_text()
         rules = root.parent / "rules"
         boy_scout = (rules / "boy-scout.md").read_text()
         severity = (rules / "review-severity.md").read_text()
