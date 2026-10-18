@@ -78,6 +78,17 @@ class PublishAcrTest(unittest.TestCase):
         self.assertEqual(self.git("rev-parse", "v0.4.0").strip(), self.head)
         self.assertFalse((self.root / "published").exists())
 
+    def test_non_commit_tag_is_preserved_and_refused_with_recovery(self):
+        blob = self.git("hash-object", "agent-plugin.yaml").strip()
+        self.git("tag", "v0.4.0", blob)
+        self.git("push", "-q", "origin", "v0.4.0")
+        result = self.publish()
+        self.assertEqual((result.returncode, result.stdout), (2, ""))
+        self.assertIn("non-commit object", result.stderr)
+        self.assertIn("reconcile the existing publication", result.stderr)
+        self.assertEqual(self.git("rev-parse", "v0.4.0").strip(), blob)
+        self.assertFalse((self.root / "published").exists())
+
     def test_tag_creation_and_push_failures_are_actionable_and_do_not_publish(self):
         real_git = shutil.which("git")
         self.assertIsNotNone(real_git)

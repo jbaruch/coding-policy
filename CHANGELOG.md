@@ -8,6 +8,7 @@
 - Confirm a first Tessl publication using a verified absent-plugin baseline. The new Herdr package returns a structured registry 404 before its first publish; authentication and transport errors remain indeterminate rather than becoming guessed version baselines.
 - Ship the hook throttle-stamp schema beside its release-skill owner through both package formats.
 - Report a broken generic hook installation with a nonzero status and an actionable diagnostic, preserving the selected hook's normal input/output contract.
+- Refuse immutable ACR tags that point to non-commit objects with the documented setup status and recovery instruction, preserving the tag.
 
 ## 0.3.407 — 2026-10-18
 

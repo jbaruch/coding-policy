@@ -63,7 +63,10 @@ main() {
   tag="v${version}"
   git -C "$root" show-ref --verify --quiet "refs/tags/$tag" || rc=$?
   if (( rc == 0 )); then
-    tagged="$(git -C "$root" rev-parse "${tag}^{commit}")"
+    if ! tagged="$(git -C "$root" rev-parse "${tag}^{commit}" 2>/dev/null)"; then
+      echo "publish-acr: immutable ${tag} names a non-commit object; preserve the tag and reconcile the existing publication before selecting a new package version" >&2
+      return 2
+    fi
     if [[ "$tagged" != "$head" ]]; then
       echo "publish-acr: immutable ${tag} already names another commit; reconcile that publication without moving it" >&2
       return 2
