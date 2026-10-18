@@ -32,7 +32,15 @@ class PrCreateRepoBindingTest(unittest.TestCase):
         for skill, number in PR_STEPS:
             with self.subTest(skill=skill):
                 # Whitespace-normalized: a Markdown line wrap never changes an instruction.
-                body = " ".join(step((SKILLS / skill / "SKILL.md").read_text(encoding="utf-8"), number).split())
+                source = SKILLS / skill / "SKILL.md"
+                section = step(source.read_text(encoding="utf-8"), number)
+                routes = re.findall(r"^skills/release/(references/step-[^\n]+\.md)$", section, re.M)
+                if routes:
+                    self.assertEqual(len(routes), 1)
+                    target = (source.parent / routes[0]).resolve()
+                    self.assertTrue(target.is_relative_to((source.parent / "references").resolve()))
+                    section = step(target.read_text(encoding="utf-8"), number)
+                body = " ".join(section.split())
                 found = COMMAND.findall(body)
                 self.assertTrue(found, "{} Step {} has no gh pr create command".format(skill, number))
                 self.assertIn(RESOLVE, body)

@@ -43,7 +43,9 @@ set -uo pipefail
 # by a mount path a clone does not have. onboard-repo and migrate-to-plugin
 # invoked theirs by the project-local mount alone, which a global-only
 # install does not have (#599).
-SKILLS=(herdr-foreman herdr-standup release adopt-fork-pr onboard-repo migrate-to-plugin)
+# Release is a declarative router; its seven executable/detail stages and
+# navigation are checked below.
+SKILLS=(herdr-foreman herdr-standup adopt-fork-pr onboard-repo migrate-to-plugin)
 
 # Reference files whose command blocks the bootstrap carve-out also covers.
 REFERENCES=(herdr-foreman/references/round-setup.md herdr-foreman/references/judge-round.md
@@ -51,7 +53,11 @@ REFERENCES=(herdr-foreman/references/round-setup.md herdr-foreman/references/jud
             herdr-foreman/references/round-preflight.md herdr-foreman/references/role-planning.md
             herdr-foreman/references/assignment-delivery.md herdr-foreman/references/fleet-checkpoint.md
             herdr-foreman/references/round-gate.md herdr-foreman/references/round-completion.md
-            release/PUBLICATION.md)
+            release/references/PUBLICATION.md
+            release/references/step-1-readiness.md release/references/step-2-pull-request.md
+            release/references/step-3-versioning.md release/references/step-4-review.md
+            release/references/step-5-watch.md release/references/step-6-feedback.md
+            release/references/step-7-delivery.md)
 
 # herdr-foreman alone carries the standalone/Herdr mode gate. herdr-standup
 # turns a non-Herdr agent away through roster.sh's exit 1, not by reading.
@@ -113,14 +119,20 @@ check_invocations() { # <skill-name> <skill-file>
     *) die "grep failed scanning ${skill} for bare invocations (exit ${rc})" ;;
   esac
 
-  # 2. The `bash ` convention is actually present, so a future rewrite that
-  # drops every invocation cannot pass check 1 vacuously.
+  # 2. Executable stages contain an explicit interpreter invocation. The
+  # release router and versioning-only stage are declarative; their complete
+  # seven-step navigation is checked separately below.
   local invocations
   rc=0
-  invocations="$(grep -cE '^[[:space:]]*bash "[$]CP/[^[:space:]]+\.sh"' "$skill")" || rc=$?
+  invocations="$(grep -cE '^[[:space:]]*(bash|python3) "[$]CP/[^[:space:]]+\.(sh|py)"' "$skill")" || rc=$?
   case "$rc" in
     0) if (( invocations > 0 )); then pass; else fail "${name}: no bash-prefixed invocations found"; fi ;;
-    1) fail "${name}: no bash-prefixed invocations found — the convention regressed" ;;
+    1)
+      case "$name" in
+        release|release/references/step-3-versioning.md) pass ;;
+        *) fail "${name}: no interpreter-prefixed invocations found — the convention regressed" ;;
+      esac
+      ;;
     *) die "grep failed counting invocations in ${skill} (exit ${rc})" ;;
   esac
 
@@ -537,9 +549,9 @@ check_release_advisory_contract() {
 import sys
 from pathlib import Path
 root = Path(sys.argv[1])
-release = (root / "release/SKILL.md").read_text()
+release = "\n".join((root / path).read_text() for path in ("release/SKILL.md", "release/references/step-6-feedback.md", "release/references/step-7-delivery.md"))
 brief = (root / "herdr-foreman/templates/brief-release.md").read_text()
-mechanics = (root / "release/SCRIPTING.md").read_text()
+mechanics = (root / "release/references/SCRIPTING.md").read_text()
 rules = root.parent / "rules"
 boy_scout = (rules / "boy-scout.md").read_text()
 severity = (rules / "review-severity.md").read_text()
@@ -653,12 +665,25 @@ for number, section in enumerate(sections[1:], 1):
     assert heading in detail.splitlines(), (number, "contract lost its step", routes[0])
     assert "only the current step" in detail, routes[0]
 assert len(skill.encode("utf-8")) <= 20000, "entry point exceeds the 5000-token approximation"
+
+release = (root / "skills/release/SKILL.md").read_text()
+stages = re.split(r"(?=^## Step [1-7] — )", release, flags=re.M)[1:]
+assert len(stages) == 7, "release router lost a stage"
+for number, stage in enumerate(stages, 1):
+    assert stage.startswith("## Step {} — ".format(number))
+    routes = re.findall(r"^skills/release/(references/step-[^\n]+\.md)$", stage, re.M)
+    assert len(routes) == 1, (number, routes)
+    target = (root / "skills/release" / routes[0]).resolve()
+    assert target.is_relative_to((root / "skills/release/references").resolve())
+    assert target.is_file(), (number, routes[0])
+    assert target.read_text().startswith("## Step {} — ".format(number))
+
 rule = (root / "rules/script-delegation.md").read_text()
 scope = next(line for line in rule.splitlines() if line.startswith("- Applies only to command blocks in "))
 allowed = set(re.findall(r"`(skills/[^`]+\.md)`", scope))
 for file in (root / "skills").rglob("*.md"):
     if re.search(r"^[ \t]*CP=\.tessl/plugins/jbaruch/coding-policy;", file.read_text(), re.M):
-        assert file.relative_to(root).as_posix() in allowed, (file, "bootstrap is outside its exact policy scope")
+        assert any(file.relative_to(root).match(pattern) for pattern in allowed), (file, "bootstrap is outside its declared policy scope")
 PYCONTRACT
   then pass; else fail "foreman step routes must preserve compact, shipped resume contracts"; fi
 }
@@ -680,7 +705,10 @@ run_suite() {
   for ref in "${REFERENCES[@]}"; do
     [[ -r "$skills_root/$ref" ]] || die "reference not found at $skills_root/$ref"
     check_invocations "$ref" "$skills_root/$ref"
-    check_install_shapes "$skills_root/$ref"
+    case "$ref" in
+      release/references/step-3-versioning.md) ;; # no executable commands
+      *) check_install_shapes "$skills_root/$ref" ;;
+    esac
   done
   check_cleanup_retry
   check_release_advisory_contract "$skills_root"
