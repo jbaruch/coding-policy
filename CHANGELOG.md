@@ -1,5 +1,40 @@
 # Changelog
 
+## Unreleased` heading that blocked the stamp), plus two deliberate
+  rewrites of published entries (#357's consolidation, #247's prose pass)
+  that would now carry a trailer, and nothing else.
+
+  Prevention runs at publish time. The stamp-changelog action now runs the
+  check with a new `--since-last-publish` mode before stamping, so a push
+  that parks a new entry fails the publish instead of shipping an unheaded
+  version. The baseline is the last stamp or version-bump commit
+  `github-actions[bot]` wrote, not the push's before-commit. Measuring from
+  the before-commit (the first cut) left two holes the reviewers found: a
+  stopped publish leaves the misfiled merge on `main`, so the next push
+  would count it as already known and carry it through, and a manual
+  `workflow_dispatch` has no before-commit at all. A stopped publish writes
+  no bookkeeping commit, so both are now measured from the last real publish.
+  A shallow checkout is a tool error that names `fetch-depth: 0`; a history
+  with no bookkeeping commit yet has nothing to measure.
+
+  The checker now answers in one JSON verdict on stdout for every outcome,
+  usage errors included (`pass`, `nothing_to_measure`, `misfiled`, `error`),
+  with diagnostics on stderr. Two ways it could fail open or misreport went
+  with it: `git` output that is not UTF-8 raised past the error handler and
+  exited 1, the misfiling verdict, instead of 2; and the bookkeeping-commit
+  file list was split on whitespace, so a changelog path holding a space
+  never matched, no baseline was found, and the publish gate passed having
+  measured nothing. It reads NUL-delimited paths now.
+
+  Archive repairs in the same change: 0.3.291 gets its heading above #527;
+  #523's entry moves from under 0.3.305 back to the 0.3.301 heading that
+  published it, and the stray second `## 0.3.301` goes; the three stamps
+  from 2026-09-25 04:09Z to 05:36Z read the registry one version behind, so
+  their headings move up by one (0.3.269, 0.3.270, 0.3.271), ending the
+  duplicate `## 0.3.268`. The 0.3.258 entry is rewritten as an archive entry
+  instead of a restatement of #502's PR body.
+
+
 ## 0.3.407 — 2026-10-18
 
 ### Repair the release skill review bundle

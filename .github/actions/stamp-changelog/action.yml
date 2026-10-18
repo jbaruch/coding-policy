@@ -125,7 +125,7 @@ runs:
 
         # The deterministic git side effects (stage / commit with a guaranteed
         # `[skip ci]` / self-push) live in a script so they are testable against
-        # a temporary remote — see skills/release/tests/test_commit_stamp.sh.
+        # a temporary remote — see tests/release/tests/test_commit_stamp.sh.
         # Same three-levels-up resolution as the python script above.
         commit_script="$GITHUB_ACTION_PATH/../../../skills/release/commit-stamp.sh"
         if [ ! -f "$commit_script" ]; then

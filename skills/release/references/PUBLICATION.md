@@ -19,8 +19,8 @@ Read the repo's publish workflow and its manifest:
 A publication on another channel skips this gate.
 
 ```bash
-CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"; [ -d "$CP" ] || case "$(git config --get remote.origin.url)" in git@github.com:jbaruch/coding-policy|git@github.com:jbaruch/coding-policy.git|https://github.com/jbaruch/coding-policy|https://github.com/jbaruch/coding-policy.git|ssh://git@github.com/jbaruch/coding-policy|ssh://git@github.com/jbaruch/coding-policy.git) CP=. ;; *) echo "coding-policy plugin not found: run tessl install jbaruch/coding-policy" >&2; exit 1 ;; esac
-bash "$CP/skills/release/registry-baseline.sh" <workspace> <plugin>
+KS=.tessl/plugins/jbaruch/coding-policy/skills/release; [ -d "$KS" ] || KS="$HOME/$KS"; [ -d "$KS" ] || case "$(git config --get remote.origin.url)" in git@github.com:jbaruch/coding-policy|git@github.com:jbaruch/coding-policy.git|https://github.com/jbaruch/coding-policy|https://github.com/jbaruch/coding-policy.git|ssh://git@github.com/jbaruch/coding-policy|ssh://git@github.com/jbaruch/coding-policy.git) KS=skills/release ;; *) echo "coding-policy skill not found: install jbaruch/coding-policy" >&2; exit 1 ;; esac
+bash "$KS/registry-baseline.sh" <workspace> <plugin>
 ```
 
 Exit 0 prints the version and nothing else; record it as `<pre>`. Any other exit means the baseline could not be vouched for and the release stops: an empty `<pre>` passes the registry-advance conjunct vacuously, reporting a publish that never happened. Which conditions it refuses, and why it has no verdict exit, are the script's contract — see `skills/release/registry-baseline.sh` header, not restated here (`rules/script-as-black-box.md`).
@@ -48,8 +48,8 @@ gh pr view <N> --json mergeCommit --jq '.mergeCommit.oid'
 Resolve its run:
 
 ```bash
-CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"; [ -d "$CP" ] || case "$(git config --get remote.origin.url)" in git@github.com:jbaruch/coding-policy|git@github.com:jbaruch/coding-policy.git|https://github.com/jbaruch/coding-policy|https://github.com/jbaruch/coding-policy.git|ssh://git@github.com/jbaruch/coding-policy|ssh://git@github.com/jbaruch/coding-policy.git) CP=. ;; *) echo "coding-policy plugin not found: run tessl install jbaruch/coding-policy" >&2; exit 1 ;; esac
-bash "$CP/skills/release/resolve-publish-run.sh" <owner> <repo> <merge-sha> "<tessl-publish-workflow>"
+KS=.tessl/plugins/jbaruch/coding-policy/skills/release; [ -d "$KS" ] || KS="$HOME/$KS"; [ -d "$KS" ] || case "$(git config --get remote.origin.url)" in git@github.com:jbaruch/coding-policy|git@github.com:jbaruch/coding-policy.git|https://github.com/jbaruch/coding-policy|https://github.com/jbaruch/coding-policy.git|ssh://git@github.com/jbaruch/coding-policy|ssh://git@github.com/jbaruch/coding-policy.git) KS=skills/release ;; *) echo "coding-policy skill not found: install jbaruch/coding-policy" >&2; exit 1 ;; esac
+bash "$KS/resolve-publish-run.sh" <owner> <repo> <merge-sha> "<tessl-publish-workflow>"
 ```
 
 Record the emitted `database_id` as `<tessl-run-id>` and watch it:
@@ -67,8 +67,8 @@ git rev-list -n 1 "<tag>"
 Resolve its run, passing the tag as the fifth argument and its commit as the third:
 
 ```bash
-CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"; [ -d "$CP" ] || case "$(git config --get remote.origin.url)" in git@github.com:jbaruch/coding-policy|git@github.com:jbaruch/coding-policy.git|https://github.com/jbaruch/coding-policy|https://github.com/jbaruch/coding-policy.git|ssh://git@github.com/jbaruch/coding-policy|ssh://git@github.com/jbaruch/coding-policy.git) CP=. ;; *) echo "coding-policy plugin not found: run tessl install jbaruch/coding-policy" >&2; exit 1 ;; esac
-bash "$CP/skills/release/resolve-publish-run.sh" <owner> <repo> <tag-sha> "<tag-publish-workflow>" "<tag>"
+KS=.tessl/plugins/jbaruch/coding-policy/skills/release; [ -d "$KS" ] || KS="$HOME/$KS"; [ -d "$KS" ] || case "$(git config --get remote.origin.url)" in git@github.com:jbaruch/coding-policy|git@github.com:jbaruch/coding-policy.git|https://github.com/jbaruch/coding-policy|https://github.com/jbaruch/coding-policy.git|ssh://git@github.com/jbaruch/coding-policy|ssh://git@github.com/jbaruch/coding-policy.git) KS=skills/release ;; *) echo "coding-policy skill not found: install jbaruch/coding-policy" >&2; exit 1 ;; esac
+bash "$KS/resolve-publish-run.sh" <owner> <repo> <tag-sha> "<tag-publish-workflow>" "<tag>"
 ```
 
 Record the emitted `database_id` as `<tag-run-id>` and watch it:
@@ -84,8 +84,8 @@ Omit `--exit-status` from the watch. Read the run conclusion through each channe
 ## After the merge — Tessl: conjuncts 1 and 2
 
 ```bash
-CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"; [ -d "$CP" ] || case "$(git config --get remote.origin.url)" in git@github.com:jbaruch/coding-policy|git@github.com:jbaruch/coding-policy.git|https://github.com/jbaruch/coding-policy|https://github.com/jbaruch/coding-policy.git|ssh://git@github.com/jbaruch/coding-policy|ssh://git@github.com/jbaruch/coding-policy.git) CP=. ;; *) echo "coding-policy plugin not found: run tessl install jbaruch/coding-policy" >&2; exit 1 ;; esac
-bash "$CP/skills/release/confirm-tessl-landed.sh" <workspace> <plugin> <pre> <tessl-run-id>
+KS=.tessl/plugins/jbaruch/coding-policy/skills/release; [ -d "$KS" ] || KS="$HOME/$KS"; [ -d "$KS" ] || case "$(git config --get remote.origin.url)" in git@github.com:jbaruch/coding-policy|git@github.com:jbaruch/coding-policy.git|https://github.com/jbaruch/coding-policy|https://github.com/jbaruch/coding-policy.git|ssh://git@github.com/jbaruch/coding-policy|ssh://git@github.com/jbaruch/coding-policy.git) KS=skills/release ;; *) echo "coding-policy skill not found: install jbaruch/coding-policy" >&2; exit 1 ;; esac
+bash "$KS/confirm-tessl-landed.sh" <workspace> <plugin> <pre> <tessl-run-id>
 ```
 
 Exit 0 prints the landed version; record it as `<current>` for the moderation gate that follows. Exit 1 is a definitive "did not land"; exit 2 is "cannot tell yet" — the run is not terminal, or a tool is unreachable. Neither proceeds to moderation, and the two are kept apart because their recoveries differ: a caller that collapses them reports an unreachable `gh` as a failed release. The wrapper owns that dispatch so no caller retypes it; its contract and the underlying envelope are the scripts' — see `skills/release/confirm-tessl-landed.sh` and `skills/release/verify-publish-landed.sh` headers, not restated here (`rules/script-as-black-box.md`). Do not compare against a specific expected version. See `rules/ci-safety.md` for full release-contract semantics and failed-publish recovery.
@@ -95,8 +95,8 @@ Exit 0 prints the landed version; record it as `<current>` for the moderation ga
 A freshly published version can be install-blocked until its moderation state reaches `pass`; poll with exponential backoff (the script owns the backoff constants and the cleared/blocked decision).
 
 ```bash
-CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"; [ -d "$CP" ] || case "$(git config --get remote.origin.url)" in git@github.com:jbaruch/coding-policy|git@github.com:jbaruch/coding-policy.git|https://github.com/jbaruch/coding-policy|https://github.com/jbaruch/coding-policy.git|ssh://git@github.com/jbaruch/coding-policy|ssh://git@github.com/jbaruch/coding-policy.git) CP=. ;; *) echo "coding-policy plugin not found: run tessl install jbaruch/coding-policy" >&2; exit 1 ;; esac
-bash "$CP/skills/release/verify-moderation-cleared.sh" <workspace> <plugin> <current>
+KS=.tessl/plugins/jbaruch/coding-policy/skills/release; [ -d "$KS" ] || KS="$HOME/$KS"; [ -d "$KS" ] || case "$(git config --get remote.origin.url)" in git@github.com:jbaruch/coding-policy|git@github.com:jbaruch/coding-policy.git|https://github.com/jbaruch/coding-policy|https://github.com/jbaruch/coding-policy.git|ssh://git@github.com/jbaruch/coding-policy|ssh://git@github.com/jbaruch/coding-policy.git) KS=skills/release ;; *) echo "coding-policy skill not found: install jbaruch/coding-policy" >&2; exit 1 ;; esac
+bash "$KS/verify-moderation-cleared.sh" <workspace> <plugin> <current>
 ```
 
 Exit 0 = moderation cleared. Exit 1 = blocked or still-pending at budget exhaustion — an unconfirmed release; surface it and do not report success. Exit 2 = a usage or tool-state error, never a moderation verdict. Which condition lands in which rc is the script's decision contract — see `skills/release/verify-moderation-cleared.sh` header, not restated here (`rules/script-as-black-box.md`). Never report the release confirmed until this clears. See `rules/ci-safety.md` for the full three-conjunct contract. Every Tessl publication keeps this whole contract, mixed distribution included.
@@ -108,8 +108,8 @@ The resolved run's `conclusion` is `success`, AND the release the run was suppos
 Gate on the exit code, the same way the Tessl path gates on `confirm-tessl-landed.sh`. Pass THIS channel's run id: its conclusion is this check's first conjunct, and a mixed publication must not confirm the tag release against the Tessl run.
 
 ```bash
-CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"; [ -d "$CP" ] || case "$(git config --get remote.origin.url)" in git@github.com:jbaruch/coding-policy|git@github.com:jbaruch/coding-policy.git|https://github.com/jbaruch/coding-policy|https://github.com/jbaruch/coding-policy.git|ssh://git@github.com/jbaruch/coding-policy|ssh://git@github.com/jbaruch/coding-policy.git) CP=. ;; *) echo "coding-policy plugin not found: run tessl install jbaruch/coding-policy" >&2; exit 1 ;; esac
-bash "$CP/skills/release/verify-github-release.sh" <owner> <repo> "<tag>" <tag-run-id>
+KS=.tessl/plugins/jbaruch/coding-policy/skills/release; [ -d "$KS" ] || KS="$HOME/$KS"; [ -d "$KS" ] || case "$(git config --get remote.origin.url)" in git@github.com:jbaruch/coding-policy|git@github.com:jbaruch/coding-policy.git|https://github.com/jbaruch/coding-policy|https://github.com/jbaruch/coding-policy.git|ssh://git@github.com/jbaruch/coding-policy|ssh://git@github.com/jbaruch/coding-policy.git) KS=skills/release ;; *) echo "coding-policy skill not found: install jbaruch/coding-policy" >&2; exit 1 ;; esac
+bash "$KS/verify-github-release.sh" <owner> <repo> "<tag>" <tag-run-id>
 ```
 
 Exit 0 = both conjuncts hold. Exit 1 = a definitive no — an unconfirmed release; surface it and do not report success. Exit 2 = indeterminate or a usage error; an indeterminate answer is never a landing. Which conjuncts it reads, and which conditions land in which exit code, are the script's decision contract — see `skills/release/verify-github-release.sh` header, not restated here (`rules/script-as-black-box.md`).

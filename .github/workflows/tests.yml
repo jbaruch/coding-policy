@@ -44,6 +44,24 @@ jobs:
       - name: Lint plugin
         run: tessl plugin lint
 
+  acr-manifest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7
+        with:
+          repository: jbaruch/agentic-context-registry
+          ref: f8dffcecc0eb98f13b2d7d90cd399f99208becf2
+          path: .test-dependencies/acr
+          persist-credentials: false
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: .test-dependencies/acr/go.mod
+          cache-dependency-path: .test-dependencies/acr/go.sum
+      - name: Validate ACR manifest and selected files
+        working-directory: .test-dependencies/acr
+        run: go run ./cmd/acr validate ../.. --json
+
   changelog-placement:
     # Prevention on the pull request, detection on `main`. The pull-request run
     # alone can be outrun: it passes against the base of the moment, another
@@ -82,7 +100,7 @@ jobs:
           python3 skills/release/check-changelog-placement.py --base "$base"
 
   unit-tests:
-    needs: [diagnostics, lint]
+    needs: [diagnostics, lint, acr-manifest]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7

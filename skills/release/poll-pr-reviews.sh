@@ -215,7 +215,7 @@ latest_review_by() {
 # `review_dismissed` timeline event carries a message starting RULED_MARKER.
 # Any other dismissal stays "none". Head binding is resolve_review_against_head's
 # job — a RULED review on an older commit collapses to "none" there.
-# skills/release/tests/test_dismiss_ruled_review.sh feeds the message
+# tests/release/tests/test_dismiss_ruled_review.sh feeds the message
 # dismiss-ruled-review.sh sends through this resolver end to end.
 RULED_MARKER="JUDGE-RULED:"
 

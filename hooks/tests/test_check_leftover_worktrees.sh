@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Outcome-based tests for hooks/check-leftover-worktrees.sh.
+# Outcome-based tests for skills/release/hooks/check-leftover-worktrees.sh.
 #
 # Each case builds its own bare "origin", a shared clone, its own worktree
 # root and a fake `gh` first on PATH that answers from files in the case's
@@ -59,7 +59,7 @@
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-HOOK="${HERE}/../check-leftover-worktrees.sh"
+HOOK="${HERE}/../../skills/release/hooks/check-leftover-worktrees.sh"
 PASS=0
 FAIL=0
 TMP=""
@@ -271,22 +271,22 @@ SH
 # as the plugin ships them. Each case adds its own owner scripts.
 stage_plugin() { # <dir> [hooks-dir-name]
   local hooks="${2:-hooks}"
-  mkdir -p "$1/$hooks" "$1/skills/release/lib" || die "mkdir stage $1 failed"
+  mkdir -p "$1/$hooks" "$1/lib" || die "mkdir stage $1 failed"
   cp "$HOOK" "$1/$hooks/" || die "stage the hook failed"
   cp "${HERE}/../../skills/release/lib/prune_result.py" \
-    "$1/skills/release/lib/" || die "stage the result checks failed"
+    "$1/lib/" || die "stage the result checks failed"
 }
 
 # A staged plugin with the real runner and owner scripts that record their
 # name and GIT_SSH_COMMAND to <calls>, then fail.
 stage_recording_plugin() { # <dir> <calls>
   stage_plugin "$1"
-  cp "${HERE}/../../skills/release/lib/bounded-run.sh" "$1/skills/release/lib/" || die "stage the runner failed"
+  cp "${HERE}/../../skills/release/lib/bounded-run.sh" "$1/lib/" || die "stage the runner failed"
   local owner
   for owner in prune-worktrees.sh prune-remote-branches.sh; do
     # shellcheck disable=SC2016  # GIT_SSH_COMMAND expands in the stand-in, not here.
     printf '#!/usr/bin/env bash\nset -euo pipefail\nprintf "%%s %%s\\n" "%s" "${GIT_SSH_COMMAND:-}" >> %q\nexit 1\n' "$owner" "$2" \
-      > "$1/skills/release/lib/$owner" || die "write the recording $owner failed"
+      > "$1/lib/$owner" || die "write the recording $owner failed"
   done
 }
 
@@ -424,8 +424,8 @@ main() {
   local stage="$CASE/stage"
   stage_plugin "$stage"
   cp "${HERE}/../../skills/release/lib/prune-worktrees.sh" "${HERE}/../../skills/release/lib/prune-remote-branches.sh" \
-    "$stage/skills/release/lib/" || die "stage the owner scripts failed"
-  printf '#!/usr/bin/env bash\nset -euo pipefail\necho "bounded-run: stand-in budget spent" >&2\nexit 124\n' > "$stage/skills/release/lib/bounded-run.sh" \
+    "$stage/lib/" || die "stage the owner scripts failed"
+  printf '#!/usr/bin/env bash\nset -euo pipefail\necho "bounded-run: stand-in budget spent" >&2\nexit 124\n' > "$stage/lib/bounded-run.sh" \
     || die "write the stand-in runner failed"
   local real_hook="$HOOK"
   HOOK="$stage/hooks/$(basename "$real_hook")"
@@ -458,10 +458,10 @@ main() {
   push_branch feat/remote-merged 1
   local stage13="$CASE/stage13" calls13="$CASE/calls13"
   stage_plugin "$stage13"
-  cp "${HERE}/../../skills/release/lib/bounded-run.sh" "$stage13/skills/release/lib/" || die "stage the runner failed"
+  cp "${HERE}/../../skills/release/lib/bounded-run.sh" "$stage13/lib/" || die "stage the runner failed"
   local owner
   for owner in prune-worktrees.sh prune-remote-branches.sh; do
-    printf '#!/usr/bin/env bash\nset -euo pipefail\nprintf "%%s\\n" "%s" >> %q\nexit 1\n' "$owner" "$calls13" > "$stage13/skills/release/lib/$owner" \
+    printf '#!/usr/bin/env bash\nset -euo pipefail\nprintf "%%s\\n" "%s" >> %q\nexit 1\n' "$owner" "$calls13" > "$stage13/lib/$owner" \
       || die "write the recording $owner failed"
   done
   local refs_before refs_after
@@ -478,10 +478,10 @@ main() {
   mk_case c12
   local stage12="$CASE/stage"
   stage_plugin "$stage12"
-  cp "${HERE}/../../skills/release/lib/bounded-run.sh" "$stage12/skills/release/lib/" || die "stage the runner failed"
-  printf '#!/usr/bin/env bash\nset -euo pipefail\nprintf "{}\\n"\n' > "$stage12/skills/release/lib/prune-worktrees.sh" || die "write the stand-in prune failed"
+  cp "${HERE}/../../skills/release/lib/bounded-run.sh" "$stage12/lib/" || die "stage the runner failed"
+  printf '#!/usr/bin/env bash\nset -euo pipefail\nprintf "{}\\n"\n' > "$stage12/lib/prune-worktrees.sh" || die "write the stand-in prune failed"
   printf '#!/usr/bin/env bash\nset -euo pipefail\nprintf "{\\"deleted\\": [], \\"questionable\\": [{\\"branch\\": 7}], \\"kept\\": [], \\"failed\\": [], \\"could_not_check\\": null, \\"default_branch\\": \\"main\\"}\\n"\n' \
-    > "$stage12/skills/release/lib/prune-remote-branches.sh" || die "write the stand-in remote pass failed"
+    > "$stage12/lib/prune-remote-branches.sh" || die "write the stand-in remote pass failed"
   local real_hook12="$HOOK"
   HOOK="$stage12/hooks/$(basename "$real_hook12")"
   run_hook "$SHARED"
@@ -559,10 +559,10 @@ main() {
     local stage16="$CASE/stage16"
     stage_plugin "$stage16" "hooks${nl}"
     cp "${HERE}/../../skills/release/lib/bounded-run.sh" "${HERE}/../../skills/release/lib/prune-worktrees.sh" \
-      "${HERE}/../../skills/release/lib/prune-remote-branches.sh" "$stage16/skills/release/lib/" \
+      "${HERE}/../../skills/release/lib/prune-remote-branches.sh" "$stage16/lib/" \
       || die "stage the owner scripts failed"
-    mkdir -p "$stage16/skills/release" || die "mkdir the staged release skill failed"
-    cp "${HERE}/../../skills/release/origin-repo.py" "$stage16/skills/release/" || die "stage origin-repo.py failed"
+    mkdir -p "$stage16" || die "mkdir the staged release skill failed"
+    cp "${HERE}/../../skills/release/origin-repo.py" "$stage16/" || die "stage origin-repo.py failed"
     local real_hook16="$HOOK"
     HOOK="$stage16/hooks${nl}/$(basename "$real_hook16")"
     run_hook "$SHARED"

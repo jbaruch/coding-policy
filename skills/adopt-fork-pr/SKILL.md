@@ -21,8 +21,8 @@ Classify a referenced pull request and, when it comes from a fork, adopt its bra
 Resolve origin's repository first; every `gh pr` call in this skill names it, never `gh`'s own default (`gh repo set-default`).
 
 ```bash
-CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"; [ -d "$CP" ] || case "$(git config --get remote.origin.url)" in git@github.com:jbaruch/coding-policy|git@github.com:jbaruch/coding-policy.git|https://github.com/jbaruch/coding-policy|https://github.com/jbaruch/coding-policy.git|ssh://git@github.com/jbaruch/coding-policy|ssh://git@github.com/jbaruch/coding-policy.git) CP=. ;; *) echo "coding-policy plugin not found: run tessl install jbaruch/coding-policy" >&2; exit 1 ;; esac
-python3 "$CP/skills/release/origin-repo.py" .
+KS=.tessl/plugins/jbaruch/coding-policy/skills/release; [ -d "$KS" ] || KS="$HOME/$KS"; [ -d "$KS" ] || case "$(git config --get remote.origin.url)" in git@github.com:jbaruch/coding-policy|git@github.com:jbaruch/coding-policy.git|https://github.com/jbaruch/coding-policy|https://github.com/jbaruch/coding-policy.git|ssh://git@github.com/jbaruch/coding-policy|ssh://git@github.com/jbaruch/coding-policy.git) KS=skills/release ;; *) echo "coding-policy skill not found: install jbaruch/coding-policy" >&2; exit 1 ;; esac
+python3 "$KS/origin-repo.py" .
 ```
 
 Contract: see `skills/release/origin-repo.py` — top-of-file docstring. Emits `{ "repo", "owner", "name" }`. A non-zero exit means origin is not a GitHub repository this skill can act on: report its stderr diagnostic and finish here.
@@ -56,8 +56,8 @@ The block resolves `CP` to the project-local plugin, falling back to
 clone, and stops with an install instruction anywhere else.
 
 ```bash
-CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"; [ -d "$CP" ] || case "$(git config --get remote.origin.url)" in git@github.com:jbaruch/coding-policy|git@github.com:jbaruch/coding-policy.git|https://github.com/jbaruch/coding-policy|https://github.com/jbaruch/coding-policy.git|ssh://git@github.com/jbaruch/coding-policy|ssh://git@github.com/jbaruch/coding-policy.git) CP=. ;; *) echo "coding-policy plugin not found: run tessl install jbaruch/coding-policy" >&2; exit 1 ;; esac
-bash "$CP/skills/adopt-fork-pr/adopt.sh" <N>
+KS=.tessl/plugins/jbaruch/coding-policy/skills/adopt-fork-pr; [ -d "$KS" ] || KS="$HOME/$KS"; [ -d "$KS" ] || case "$(git config --get remote.origin.url)" in git@github.com:jbaruch/coding-policy|git@github.com:jbaruch/coding-policy.git|https://github.com/jbaruch/coding-policy|https://github.com/jbaruch/coding-policy.git|ssh://git@github.com/jbaruch/coding-policy|ssh://git@github.com/jbaruch/coding-policy.git) KS=skills/adopt-fork-pr ;; *) echo "coding-policy skill not found: install jbaruch/coding-policy" >&2; exit 1 ;; esac
+bash "$KS/adopt.sh" <N>
 ```
 
 Contract: see `skills/adopt-fork-pr/adopt.sh` — top-of-file docstring carries the branch-naming rule, the verbatim new-PR-body and original-PR-comment templates, the idempotency states, and the exit codes. It checks out the fork head, pushes it to a base-repo branch preserving the original commits, opens a same-repo PR, and comments on the original fork PR linking the adopted one. Emits `{ "state", "adopted_branch", "new_pr_url", "original_pr", "author" }`.

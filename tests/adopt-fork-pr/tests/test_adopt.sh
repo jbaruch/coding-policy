@@ -1,0 +1,218 @@
+#!/usr/bin/env bash
+# Tests for adopt.sh. Sources the script (the main() guard prevents auto-run),
+# mocks `gh` and `git` as functions dispatching on subcommand, and drives
+# scenarios through env vars. Deterministic: no network, no real gh. The one
+# real git read is origin-repo.py's `git remote get-url`, against a throwaway
+# `git init` whose origin is configured, never fetched.
+set -uo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../skills/adopt-fork-pr" && pwd)"
+# shellcheck source=/dev/null
+source "$SCRIPT_DIR/adopt.sh"
+set +e  # relax errexit in the harness; each main() runs under its own set -e
+
+pass=0; fail=0
+
+# ---- fixture checkout: origin names owner/blog-writer ----------------------
+ORIGIN_REPO=owner/blog-writer
+FIXTURE_DIR=$(mktemp -d) || { echo "fatal: mktemp -d failed" >&2; exit 2; }
+fixture_cleanup() {
+  if ! rm -rf "$FIXTURE_DIR"; then echo "warn: could not remove $FIXTURE_DIR — remove it by hand" >&2; fi
+  return 0
+}
+trap fixture_cleanup EXIT
+: > "$FIXTURE_DIR/gitconfig" || { echo "fatal: cannot write an empty git config" >&2; exit 2; }
+# The operator's git config (insteadOf rewrites included) never reaches the fixture.
+export GIT_CONFIG_GLOBAL="$FIXTURE_DIR/gitconfig" GIT_CONFIG_NOSYSTEM=1
+if ! { command git init -q "$FIXTURE_DIR/repo" \
+  && command git -C "$FIXTURE_DIR/repo" remote add origin "https://github.com/${ORIGIN_REPO}.git" \
+  && cd "$FIXTURE_DIR/repo"; }; then
+  echo "fatal: cannot build the fixture checkout" >&2; exit 2
+fi
+GH_ARGV="$FIXTURE_DIR/gh-argv"
+ok()    { printf 'ok   - %s\n' "$1"; pass=$((pass+1)); }
+bad()   { printf 'FAIL - %s\n' "$1"; fail=$((fail+1)); }
+eq()    { if [ "$1" = "$2" ];   then ok "$3"; else bad "$3 (got: $1)"; fi; }
+rc_is() { if [ "$1" -eq "$2" ]; then ok "$3"; else bad "$3 (rc=$1)"; fi; }
+
+# ---- mocks ---------------------------------------------------------------
+# Scenario knobs (defaults = open fork PR, adopted branch not yet on origin):
+: "${FIXTURE_IS_FORK:=true}"
+: "${FIXTURE_STATE:=OPEN}"
+: "${FIXTURE_BRANCH_EXISTS:=0}"
+: "${FIXTURE_OPEN_PR:=0}"        # 1 = an open PR already exists for the adopted branch
+: "${FIXTURE_LSREMOTE_FAIL:=0}"  # 1 = git ls-remote fails (network/auth)
+: "${FIXTURE_PRLIST_FAIL:=0}"    # 1 = gh pr list fails (auth/API)
+: "${FIXTURE_COMMENT_FAIL:=0}"        # 1 = gh pr comment fails
+: "${FIXTURE_COMMENT_EXISTS:=0}"      # 1 = original PR already links the adopted URL
+: "${FIXTURE_COMMENTSREAD_FAIL:=0}"   # 1 = gh pr view --json comments fails
+
+# Every call appends one line to GH_ARGV: "bound" or "UNBOUND", then its
+# subcommand. A call that does not name origin's repository with --repo
+# reaches gh's default repository, a different one, and fails.
+gh() {
+  local prev="" a bound=0
+  for a in "$@"; do
+    if [ "$prev" = "--repo" ] && [ "$a" = "$ORIGIN_REPO" ]; then bound=1; fi
+    prev="$a"
+  done
+  if [ "$bound" = 1 ]; then printf 'bound %s %s\n' "$1" "$2"; else printf 'UNBOUND %s %s\n' "$1" "$2"; fi >> "$GH_ARGV"
+  if [ "$bound" != 1 ]; then echo "fake gh: reached gh's default repository upstream/blog-writer: $*" >&2; return 9; fi
+  case "$1 $2" in
+    "pr view")
+      if [[ "$*" == *"--json comments"* ]]; then
+        if [ "$FIXTURE_COMMENTSREAD_FAIL" = "1" ]; then return 6; fi
+        if [ "$FIXTURE_COMMENT_EXISTS" = "1" ]; then
+          printf '{"comments":[{"body":"Adopted into the base repo as https://github.com/owner/blog-writer/pull/99"}]}\n'
+        else
+          printf '{"comments":[]}\n'
+        fi
+      else
+        cat <<JSON
+{"number":${3},"isCrossRepository":${FIXTURE_IS_FORK},"headRefName":"feat/cool-thing",
+ "headRepositoryOwner":{"login":"contributor"},"headRepository":{"name":"blog-writer"},
+ "author":{"login":"contributor"},"title":"feat: a cool thing","url":"https://github.com/owner/blog-writer/pull/${3}",
+ "state":"${FIXTURE_STATE}","baseRefName":"main"}
+JSON
+      fi
+      ;;
+    "pr checkout") return 0 ;;
+    "pr create")
+      printf 'https://github.com/owner/blog-writer/pull/99\n' ;;
+    "pr comment") if [ "$FIXTURE_COMMENT_FAIL" = "1" ]; then return 5; fi; return 0 ;;
+    "pr list")
+      if [ "$FIXTURE_PRLIST_FAIL" = "1" ]; then return 4; fi
+      if [ "$FIXTURE_OPEN_PR" = "1" ]; then printf 'https://github.com/owner/blog-writer/pull/42\n'; else printf '\n'; fi ;;
+    *) return 0 ;;
+  esac
+}
+
+git() {
+  case "$*" in
+    "rev-parse --is-inside-work-tree") return 0 ;;
+    "rev-parse HEAD") printf 'deadbeef\n' ;;
+    "diff --quiet"|"diff --cached --quiet") return 0 ;;
+    "symbolic-ref --quiet --short HEAD") printf 'main\n' ;;
+    "ls-remote --heads origin refs/heads/"*)
+      if [ "$FIXTURE_LSREMOTE_FAIL" = "1" ]; then return 2; fi
+      if [ "$FIXTURE_BRANCH_EXISTS" = "1" ]; then printf 'deadbeef\trefs/heads/adopted\n'; fi
+      return 0 ;;
+    "push origin HEAD:refs/heads/"*) return 0 ;;
+    "checkout --quiet "*) return 0 ;;
+    *) return 0 ;;
+  esac
+}
+
+run_main() { ( set -euo pipefail; main "$@" ); }  # subshell: capture exit + stdout
+
+# Every gh call since the last reset named origin's repository with --repo.
+all_gh_bound() {
+  [ -s "$GH_ARGV" ] && ! grep -q '^UNBOUND' "$GH_ARGV"
+}
+
+# ---- slugify (pure) ------------------------------------------------------
+eq "$(slugify 'feat/framework-md-persona-override')" "feat-framework-md-persona-override" "slugify keeps alnum, folds slash"
+eq "$(slugify 'Foo_Bar Baz!!')" "foo-bar-baz" "slugify lowercases and squeezes"
+eq "$(slugify '---weird///')" "weird" "slugify trims leading/trailing dashes"
+
+# ---- emit_jq_missing: stdout JSON envelope + stderr diagnostic -----------
+jqm_err=$(mktemp)
+jqm_out=$(emit_jq_missing 2>"$jqm_err")
+if [ "$(jq -r '.state' <<<"$jqm_out" 2>/dev/null)" = "error" ] && grep -q 'jq is required' "$jqm_err"; then
+  ok "jq-missing emits stdout JSON and stderr diagnostic"
+else
+  bad "jq-missing emits stdout JSON and stderr diagnostic (out=$jqm_out err=$(cat "$jqm_err" 2>/dev/null))"
+fi
+rm -f "$jqm_err"
+
+# ---- argument validation -------------------------------------------------
+run_main >/dev/null 2>&1;     rc_is "$?" 2 "no arg → exit 2"
+run_main abc >/dev/null 2>&1; rc_is "$?" 2 "non-numeric → exit 2"
+run_main 0 >/dev/null 2>&1;   rc_is "$?" 2 "zero → exit 2"
+
+# ---- not-a-fork refusal --------------------------------------------------
+FIXTURE_IS_FORK=false run_main 6 >/dev/null 2>&1; rc_is "$?" 3 "same-repo PR → exit 3"
+
+# ---- non-OPEN refusal ----------------------------------------------------
+FIXTURE_STATE=MERGED run_main 6 >/dev/null 2>&1; rc_is "$?" 1 "non-OPEN fork PR → exit 1"
+
+# ---- ls-remote failure (network/auth) → exit 1, not silent fresh-adoption -
+FIXTURE_LSREMOTE_FAIL=1 run_main 6 >/dev/null 2>&1; rc_is "$?" 1 "ls-remote failure → exit 1"
+
+# ---- gh pr list failure on existing branch → exit 1, not false recovery --
+FIXTURE_BRANCH_EXISTS=1 FIXTURE_PRLIST_FAIL=1 run_main 6 >/dev/null 2>&1; rc_is "$?" 1 "gh pr list failure → exit 1"
+
+# ---- pointer-comment failure is fatal (not a warning) --------------------
+FIXTURE_COMMENT_FAIL=1 run_main 6 >/dev/null 2>&1; rc_is "$?" 1 "pointer-comment failure → exit 1"
+
+# ---- comments-read probe failure is fatal (not "no comment") -------------
+FIXTURE_COMMENTSREAD_FAIL=1 run_main 6 >/dev/null 2>&1; rc_is "$?" 1 "comments-read failure → exit 1"
+
+# ---- pointer comment is idempotent (already linked → no re-post) ----------
+out=$(FIXTURE_COMMENT_EXISTS=1 FIXTURE_COMMENT_FAIL=1 run_main 6 2>/dev/null); rc=$?
+if [ "$rc" -eq 0 ] && [ "$(jq -r '.state' <<<"$out")" = "adopted" ]; then
+  ok "existing pointer link → idempotent skip, adoption succeeds"
+else
+  bad "existing pointer link → idempotent skip (got: $out rc=$rc)"
+fi
+
+# ---- non-GitHub origin: refused before any gh call ------------------------
+: > "$GH_ARGV"
+command git remote set-url origin https://gitlab.com/owner/blog-writer.git \
+  || { echo "fatal: cannot point origin at gitlab" >&2; exit 2; }
+run_main 6 >/dev/null 2>&1; rc=$?
+if [ "$rc" -eq 1 ] && [ ! -s "$GH_ARGV" ]; then
+  ok "non-GitHub origin → exit 1, no gh call"
+else
+  bad "non-GitHub origin → exit 1, no gh call (rc=$rc calls=$(cat "$GH_ARGV"))"
+fi
+command git remote set-url origin "git@github.com:${ORIGIN_REPO}.git" \
+  || { echo "fatal: cannot point origin back at GitHub" >&2; exit 2; }
+
+# ---- happy path ----------------------------------------------------------
+: > "$GH_ARGV"
+out=$(run_main 6 2>/dev/null); rc=$?
+if [ "$rc" -eq 0 ] \
+   && [ "$(jq -r '.state' <<<"$out")" = "adopted" ] \
+   && [ "$(jq -r '.adopted_branch' <<<"$out")" = "adopt/pr-6-feat-cool-thing" ] \
+   && [ "$(jq -r '.new_pr_url' <<<"$out")" = "https://github.com/owner/blog-writer/pull/99" ] \
+   && [ "$(jq -r '.original_pr' <<<"$out")" = "6" ] \
+   && [ "$(jq -r '.author' <<<"$out")" = "contributor" ]; then
+  ok "happy path → adopted JSON with expected fields"
+else
+  bad "happy path → adopted JSON with expected fields (got: $out rc=$rc)"
+fi
+if all_gh_bound; then
+  ok "happy path → every gh call names origin's repository"
+else
+  bad "happy path → every gh call names origin's repository (calls: $(cat "$GH_ARGV"))"
+fi
+
+# ---- idempotency: branch on origin AND an open PR exists → no-op ----------
+out=$(FIXTURE_BRANCH_EXISTS=1 FIXTURE_OPEN_PR=1 run_main 6 2>/dev/null); rc=$?
+if [ "$rc" -eq 0 ] \
+   && [ "$(jq -r '.state' <<<"$out")" = "already-adopted" ] \
+   && [ "$(jq -r '.new_pr_url' <<<"$out")" = "https://github.com/owner/blog-writer/pull/42" ]; then
+  ok "branch + open PR → already-adopted no-op with existing URL"
+else
+  bad "branch + open PR → already-adopted no-op with existing URL (got: $out rc=$rc)"
+fi
+
+# ---- partial-run recovery: branch on origin but NO open PR → adopt --------
+: > "$GH_ARGV"
+out=$(FIXTURE_BRANCH_EXISTS=1 FIXTURE_OPEN_PR=0 run_main 6 2>/dev/null); rc=$?
+if [ "$rc" -eq 0 ] \
+   && [ "$(jq -r '.state' <<<"$out")" = "adopted" ] \
+   && [ "$(jq -r '.new_pr_url' <<<"$out")" = "https://github.com/owner/blog-writer/pull/99" ]; then
+  ok "branch but no PR → recovers by opening the PR"
+else
+  bad "branch but no PR → recovers by opening the PR (got: $out rc=$rc)"
+fi
+if all_gh_bound; then
+  ok "recovery → every gh call names origin's repository"
+else
+  bad "recovery → every gh call names origin's repository (calls: $(cat "$GH_ARGV"))"
+fi
+
+printf '\n%d passed, %d failed\n' "$pass" "$fail"
+[ "$fail" -eq 0 ]

@@ -6,7 +6,7 @@
 # only sanctioned path for that dismissal; a hand dismissal is not.
 # Who ruled follows the mode: standalone (HERDR_ENV unset) the operator, in a
 # Herdr team round (HERDR_ENV set, any value) the pinned judge
-# (skills/herdr-foreman/references/team-operation.md Judge Seat). The ruling's AUTHORITY line must
+# (jbaruch/herdr-policy team-operation contract Judge Seat). The ruling's AUTHORITY line must
 # name the authority the mode requires, and a team-round ruling must be the
 # report the foreman's owner records enrolled for the pinned judge's weighing.
 #
@@ -23,7 +23,7 @@
 #     changes its shape.
 #   Writers: standalone, the release skill's agent, from the operator's answer;
 #     in a team round, the pinned judge, whose weighing report
-#     (skills/herdr-foreman/templates/brief-judge-weighing.md) is the ruling
+#     (herdr-policy weighing report) is the ruling
 #     file. One file per gate.
 #   Readers, two:
 #     - This script reads every line. It accepts only RULING_SCHEMA; a missing
@@ -32,7 +32,7 @@
 #       unless the whole predicate holds.
 #       A version newer than RULING_SCHEMA, in either mode, is refused (exit 1)
 #       as a lagging reader, the file untouched: update the plugin, then rerun.
-#     - `foreman verify-ruling` (skills/herdr-foreman/foreman/cli.py
+#     - `foreman verify-ruling` (the optional herdr-policy owner
 #       `cmd_verify_ruling`), called by this script for `AUTHORITY: judge`,
 #       reads the file's bytes and nothing inside them. It accepts the file
 #       only when its absolute path is the report of exactly one supervision
@@ -99,7 +99,7 @@
 #   <RULED_MARKER> <digest> covers <n> blocking findings at <head>; tracked in #<issue>
 # poll-pr-reviews.sh reads a dismissal carrying RULED_MARKER as state RULED, and
 # dismiss-stale-reviews.sh counts it as an all-clear.
-# skills/release/tests/test_dismiss_ruled_review.sh feeds the message this
+# tests/release/tests/test_dismiss_ruled_review.sh feeds the message this
 # script sends to both readers and asserts they accept it.
 #
 # Out: one JSON object on stdout (exit 0 or 1):
@@ -123,7 +123,7 @@ POLICY_REVIEW_LOGINS=("github-actions[bot]" "coding-policy-fleet-reviewer[bot]")
 WORK_DIR=""
 
 # This script's directory, resolved once while BASH_SOURCE still names this
-# file, so a caller that sources it reaches the sibling herdr-foreman skill.
+# file, so a caller that sources it resolves the selected optional team owner.
 # Parameter expansion and a sentinel keep a trailing newline in the name (#592).
 case "${BASH_SOURCE[0]}" in
   */*) _dismiss_src="${BASH_SOURCE[0]%/*}" ;;
@@ -436,9 +436,15 @@ PY
 # Returns non-zero only when the check could not run.
 # decide() hashes the bytes it parses and refuses a digest that differs.
 verify_judge_ruling() { # <task> <ruling> <out>
-  local foreman="${DISMISS_DIR}/../herdr-foreman/foreman.sh"
+  local owner_root foreman
+  case "${DISMISS_DIR##*/}" in
+    acr__jbaruch__coding-policy__release)
+      owner_root="${DISMISS_DIR}/../acr__jbaruch__herdr-policy__herdr-foreman" ;;
+    *) owner_root="${DISMISS_DIR}/../../../herdr-policy/skills/herdr-foreman" ;;
+  esac
+  foreman="${owner_root}/foreman.sh"
   if [[ ! ( -f "$foreman" && -r "$foreman" ) ]]; then
-    echo "error: ${foreman} is not readable — reinstall the coding-policy plugin, then re-run" >&2
+    echo "error: ${foreman} is not readable — install or repair the compatible herdr-policy plugin, then re-run" >&2
     return 2
   fi
   local rc=0
@@ -453,22 +459,22 @@ try:
     with open(sys.argv[1], encoding="utf-8") as fh:
         digest = json.load(fh).get("sha256")
 except (OSError, ValueError, AttributeError) as exc:
-    print(f"error: foreman verify-ruling succeeded without a readable JSON result ({exc}) — reinstall the coding-policy plugin, then re-run", file=sys.stderr)
+    print(f"error: foreman verify-ruling succeeded without a readable JSON result ({exc}) — install or repair the compatible herdr-policy plugin, then re-run", file=sys.stderr)
     sys.exit(2)
 if not isinstance(digest, str) or re.fullmatch(r"[0-9a-f]{64}", digest) is None:
-    print("error: foreman verify-ruling succeeded without the verified sha256 — reinstall the coding-policy plugin, then re-run", file=sys.stderr)
+    print("error: foreman verify-ruling succeeded without the verified sha256 — install or repair the compatible herdr-policy plugin, then re-run", file=sys.stderr)
     sys.exit(2)
 with open(sys.argv[2], "w", encoding="utf-8") as fh:
     fh.write("ok " + digest)
 PY
     return
   fi
-  # The foreman CLI contract (skills/herdr-foreman/foreman/cli.py `main`): a
+  # The foreman CLI contract (the optional herdr-policy owner `main`): a
   # refusal exits 1 with a JSON object {"error", "message", "details"} on
   # stderr, after any `foreman:` diagnostic lines. Only that is a binding
   # refusal; every other exit or diagnostic is a tool error.
   if (( rc != 1 )); then
-    echo "error: foreman verify-ruling exited ${rc} instead of answering: $(cat "${3}.err") — repair or reinstall the coding-policy plugin, then re-run" >&2
+    echo "error: foreman verify-ruling exited ${rc} instead of answering: $(cat "${3}.err") — repair or install or repair the compatible herdr-policy plugin, then re-run" >&2
     return 2
   fi
   python3 - "${3}.err" "$3" <<'PY'
@@ -479,7 +485,7 @@ try:
     with open(sys.argv[1], encoding="utf-8") as fh:
         lines = fh.read().splitlines()
 except (OSError, UnicodeError) as exc:
-    print(f"error: cannot read foreman verify-ruling's diagnostic ({exc}) — repair or reinstall the coding-policy plugin, then re-run", file=sys.stderr)
+    print(f"error: cannot read foreman verify-ruling's diagnostic ({exc}) — repair or install or repair the compatible herdr-policy plugin, then re-run", file=sys.stderr)
     sys.exit(2)
 start = next((i for i, ln in enumerate(lines) if ln.startswith("{")), None)
 try:
@@ -488,7 +494,7 @@ except ValueError:
     refusal = None
 if (not isinstance(refusal, dict) or not isinstance(refusal.get("error"), str)
         or not isinstance(refusal.get("message"), str) or not refusal["message"].strip()):
-    print("error: foreman verify-ruling exited 1 without its refusal diagnostic — repair or reinstall the coding-policy plugin, then re-run", file=sys.stderr)
+    print("error: foreman verify-ruling exited 1 without its refusal diagnostic — repair or install or repair the compatible herdr-policy plugin, then re-run", file=sys.stderr)
     sys.exit(2)
 with open(sys.argv[2], "w", encoding="utf-8") as fh:
     fh.write(refusal["message"])

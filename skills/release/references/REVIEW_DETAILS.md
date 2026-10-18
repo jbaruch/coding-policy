@@ -35,15 +35,9 @@ The operator requests Copilot via `skills/release/request-copilot-review.sh <own
 
 Reference for Step 6 — how a marginal blocking finding reaches a weighing and how the ruling clears the gating policy review (`rules/review-severity.md` Judge-Weighed Finding Carve-Out; `rules/ci-safety.md` Judge-Ruled-Review Dismissal Carve-Out).
 
-### Team round
+### Optional team ruling
 
-With `HERDR_ENV` set, the release worker asks nobody and nominates nothing:
-
-1. Report the blocking findings to the foreman under `## BLOCKED`, with the JSON `dismiss-ruled-review.sh` prints without `--ruling`.
-2. The foreman nominates from them; the pinned judge weighs the nominations, and its weighing report is the ruling file.
-3. The next release brief names that report, the follow-up issue and the task. Run the team-round invocation from Step 6, with `--task`; the script binds the report to the judge's weighing through `foreman verify-ruling`.
-
-The question and the standalone ruling file below do not apply in a team round.
+When a verified team policy applies, follow its nomination, report and correction contract. The optional integration and fail-closed verification protocol are in `skills/release/references/team-ruling-interface.md`. A standalone release requires only the operator ruling below.
 
 ### The question (standalone)
 
@@ -61,7 +55,7 @@ Standalone, the question never blocks. Keep working the fix loop; a finding the 
 
 ### The ruling file
 
-Write the operator's answer into a ruling file with `AUTHORITY: operator`. Its format, `schema_version`, required `ANSWER:` line and writer/reader contract are in the `skills/release/dismiss-ruled-review.sh` header. In a Herdr team round the pinned judge's weighing report is the ruling file instead, and the release brief names it. Keep the file for the life of the PR; the dismissal message pins its sha256 digest.
+Write the operator's answer into a ruling file with `AUTHORITY: operator`. Its format, `schema_version`, required `ANSWER:` line and writer/reader contract are in the `skills/release/dismiss-ruled-review.sh` header. A selected team policy may instead supply its independently enrolled ruling through the optional interface. Keep the file for the life of the PR; the dismissal message pins its sha256 digest.
 
 ### Order of work
 

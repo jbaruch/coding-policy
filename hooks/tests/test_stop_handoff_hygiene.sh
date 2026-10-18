@@ -43,7 +43,7 @@
 # Run: bash hooks/tests/test_stop_handoff_hygiene.sh
 set -uo pipefail
 
-HOOK="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/stop-handoff-hygiene.sh"
+HOOK="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../skills/release/hooks" && pwd)/stop-handoff-hygiene.sh"
 
 die() { echo "fatal: $*" >&2; exit 2; }
 cleanup() { [[ -n "${TMP:-}" ]] && ! rm -rf "$TMP" && echo "warn: could not remove $TMP" >&2; return 0; }
@@ -282,7 +282,7 @@ main() {
     pass; else fail "worker diagnostics: expected a diagnostics block without the worktree finding, got RC=$RC OUT=$OUT"; fi
   rm -f "$TMP/wt/r4-worker/bad.sh" || die "r4-worker cleanup failed"
 
-  # HERDR_ENV set but empty is still a Herdr session (rules/agent-team-operation.md
+  # HERDR_ENV set but empty is still a Herdr session (rules/agent-delegation.md
   # Two Modes): the worker's worktree finding stays suppressed.
   run_hook "$TMP/wt/r4-worker" '{"stop_hook_active":false}' "$PATH" HERDR_ENV=
   if [[ $RC -eq 0 && -z "$OUT" ]]; then
@@ -312,10 +312,10 @@ main() {
     g -C "$TMP/r4h" worktree add -q "$TMP/wt/r4h-wt" -b feat/r4h || die "r4h worktree add failed"
     age_wt "$TMP/wt/r4h-wt"
     local stage4h="$TMP/stage4h" real_hook4h="$HOOK"
-    mkdir -p "$stage4h/hooks${nl}" "$stage4h/skills/release/lib" || die "mkdir the 4h stage failed"
+    mkdir -p "$stage4h/hooks${nl}" "$stage4h/lib" || die "mkdir the 4h stage failed"
     cp "$real_hook4h" "$stage4h/hooks${nl}/" || die "stage the hook failed"
-    cp "$(dirname "$real_hook4h")/../skills/release/lib/prune-worktrees.sh" \
-      "$(dirname "$real_hook4h")/../skills/release/lib/bounded-run.sh" "$stage4h/skills/release/lib/" \
+    cp "$(dirname "$real_hook4h")/../lib/prune-worktrees.sh" \
+      "$(dirname "$real_hook4h")/../lib/bounded-run.sh" "$stage4h/lib/" \
       || die "stage the owner scripts failed"
     HOOK="$stage4h/hooks${nl}/$(basename "$real_hook4h")"
     run_hook "$TMP/r4h" '{"stop_hook_active":false}'
@@ -347,11 +347,11 @@ main() {
   # 4d. The foreman's own session (main checkout) still blocks with HERDR_ENV
   # set: the suppression keys on being in a linked worktree, not on Herdr alone.
   run_hook "$TMP/r4" '{"stop_hook_active":false}' "$PATH" HERDR_ENV=1
-  if [[ $RC -eq 0 ]] && reason_has "r4-wt" && reason_has "sweep-worktrees.sh" && ! reason_has "prune-worktrees.sh"; then
-    pass; else fail "foreman session: expected the worktree block naming the sweep, got RC=$RC OUT=$OUT ERR=$ERRTEXT"; fi
+  if [[ $RC -eq 0 && -z "$OUT" && -z "$ERRTEXT" ]]; then
+    pass; else fail "team coordinator: expected general cleanup to defer silently, got RC=$RC OUT=$OUT ERR=$ERRTEXT"; fi
   run_hook "$TMP/r4" '{"stop_hook_active":false}' "$PATH" HERDR_ENV=
-  if [[ $RC -eq 0 ]] && reason_has "r4-wt" && reason_has "sweep-worktrees.sh" && ! reason_has "prune-worktrees.sh"; then
-    pass; else fail "empty HERDR_ENV foreman session: expected the worktree block naming the sweep, got RC=$RC OUT=$OUT ERR=$ERRTEXT"; fi
+  if [[ $RC -eq 0 && -z "$OUT" && -z "$ERRTEXT" ]]; then
+    pass; else fail "empty HERDR_ENV team coordinator: expected general cleanup to defer silently, got RC=$RC OUT=$OUT ERR=$ERRTEXT"; fi
 
   # 4g. HERDR_ENV set and the role probes fail (a git shim on PATH refuses
   #     them): the role is unknown, so the foreman-only worktree check never
@@ -368,17 +368,15 @@ main() {
   for probe in both common; do
     run_hook "$TMP/r4g" '{"stop_hook_active":false}' "$TMP/shim4g-$probe:$PATH" HERDR_ENV=1
     if [[ $RC -eq 0 && -z "$OUT" ]] \
-       && [[ "$ERRTEXT" == *"Worktree and branch check skipped"* ]] \
-       && [[ "$ERRTEXT" == *"\`git rev-parse --absolute-git-dir --path-format=absolute --git-common-dir\`"* ]] \
-       && [[ "$ERRTEXT" != *r4g-wt* && "$ERRTEXT" != *"worktree check could not"* ]]; then
-      pass; else fail "unknown role ($probe probe fails): expected no worktree check and a skip report, got RC=$RC OUT=$OUT ERR=$ERRTEXT"; fi
+       && [[ -z "$ERRTEXT" ]]; then
+      pass; else fail "team mode ($probe probe denied): expected no role probe or cleanup, got RC=$RC OUT=$OUT ERR=$ERRTEXT"; fi
   done
   # The unknown role still gates the session's own changed files. A stubbed
   # engine that reports a finding keeps the case host-independent.
   printf '#!/usr/bin/env bash\necho hi\n' > "$TMP/r4g/new.sh" || die "r4g new.sh failed"
   mk_stub_bin "$TMP/r4g-bin" 1 0
   run_hook "$TMP/r4g" '{"stop_hook_active":false}' "$TMP/shim4g-both:$TMP/r4g-bin:$PATH" HERDR_ENV=1
-  if [[ $RC -eq 0 ]] && reason_has "shellcheck findings" && reason_has "Worktree and branch check skipped" && ! reason_has "r4g-wt"; then
+  if [[ $RC -eq 0 ]] && reason_has "shellcheck findings" && ! reason_has "Worktree and branch check skipped" && ! reason_has "r4g-wt"; then
     pass; else fail "unknown role diagnostics: expected a diagnostics block without the worktree finding, got RC=$RC OUT=$OUT ERR=$ERRTEXT"; fi
 
   # 5. dirty tree only -> allow (report-only).
@@ -505,12 +503,12 @@ main() {
   make_gone_branch "$TMP/r12" feat/ssh
   g -C "$TMP/r12" switch -q main || die "r12 switch main failed"
   local stage12="$TMP/stage12" calls12="$TMP/calls12" set12 unset12 real_hook12="$HOOK"
-  mkdir -p "$stage12/hooks" "$stage12/skills/release/lib" || die "stage12 mkdir failed"
+  mkdir -p "$stage12/hooks" "$stage12/lib" || die "stage12 mkdir failed"
   cp "$HOOK" "$stage12/hooks/" || die "stage the stop hook failed"
-  cp "$(dirname "$HOOK")/../skills/release/lib/bounded-run.sh" "$stage12/skills/release/lib/" || die "stage the runner failed"
+  cp "$(dirname "$HOOK")/../lib/bounded-run.sh" "$stage12/lib/" || die "stage the runner failed"
   # shellcheck disable=SC2016  # GIT_SSH_COMMAND expands in the stand-in, not here.
   printf '#!/usr/bin/env bash\nset -euo pipefail\nprintf "%%s\\n" "${GIT_SSH_COMMAND:-}" >> %q\nexit 1\n' "$calls12" \
-    > "$stage12/skills/release/lib/prune-worktrees.sh" || die "write the recording prune failed"
+    > "$stage12/lib/prune-worktrees.sh" || die "write the recording prune failed"
   HOOK="$stage12/hooks/stop-handoff-hygiene.sh"
   run_hook "$TMP/r12" '{"stop_hook_active":false}' "$PATH" GIT_SSH_COMMAND="ssh -i /keys/case12"
   set12="$(head -n 1 "$calls12")"
