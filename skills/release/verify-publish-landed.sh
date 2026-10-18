@@ -35,6 +35,8 @@
 # the workflow design layer — keep publish as the last step.
 #
 # Usage: verify-publish-landed.sh <workspace> <plugin> <pre-baseline> <run-id>
+# The pre-baseline is numeric MAJOR.MINOR.PATCH or the literal unpublished
+# emitted only after registry-baseline.sh verifies an absent publication.
 # Out:   JSON contract differs by exit code (per rules/script-delegation.md
 #        "JSON-producing"):
 #          - rc 0/1 (publish-landed finding): one JSON object on stdout
@@ -148,7 +150,11 @@ main() {
     exit 2
   fi
   if [[ -z "$pre" ]]; then
-    echo "error: <pre-baseline> is empty — capture it before merge with 'skills/release/capture-registry-baseline.sh ${workspace} ${tile}' and read .version (the guarded script this repo extracted, never a raw 'tessl plugin info | grep | awk' pipeline)" >&2
+    echo "error: <pre-baseline> is empty — run 'bash skills/release/registry-baseline.sh ${workspace} ${tile}' before merging and preserve its version or verified unpublished sentinel" >&2
+    exit 2
+  fi
+  if [[ "$pre" != unpublished && ! "$pre" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    echo "error: invalid pre-baseline — capture a numeric version or the verified unpublished sentinel with registry-baseline.sh before merging" >&2
     exit 2
   fi
 
@@ -219,7 +225,7 @@ main() {
       "publish run ${run_id} concluded success but registry's Latest Version is still ${pre} — workflow exited cleanly without publishing (conditional skip or no-op publish step); inspect the run's job/step logs to confirm the publish step ran" \
       "$conclusion" "$pre" "$current" 1
   fi
-  if ! version_gt "$current" "$pre"; then
+  if [[ "$pre" != unpublished ]] && ! version_gt "$current" "$pre"; then
     emit_and_exit "false" \
       "publish run ${run_id} concluded success but registry's Latest Version ${current} is not greater than baseline ${pre} — investigate the registry state" \
       "$conclusion" "$pre" "$current" 1

@@ -56,6 +56,16 @@ case "$1" in
         printf '{"data":[{"attributes":{"version":"0.3.20"}},{"attributes":{"version":"0.3.119"}},{"attributes":{"version":"0.0.1"}}]}\n' ;;
       empty)
         printf '{"data":[]}\n' ;;
+      absent_zero|absent_nonzero)
+        printf '{"error":{"title":"Not Found","status":404,"message":"Not Found"}}\n'
+        if [[ "$MOCK_MODE" == absent_nonzero ]]; then exit 1; fi ;;
+      unauthorized|server_error|unstructured_absent)
+        case "$MOCK_MODE" in
+          unauthorized) printf '{"error":{"title":"Unauthorized","status":401}}\n' ;;
+          server_error) printf '{"error":{"title":"Server Error","status":503}}\n' ;;
+          unstructured_absent) printf '{"error":{"status":404}}\n' ;;
+        esac
+        exit 1 ;;
       warning_on_stderr)
         echo "warn: registry cache stale, refetching" >&2
         printf '{"data":[{"attributes":{"version":"0.3.31"}}]}\n' ;;
@@ -103,6 +113,23 @@ else
 fi
 
 # --- a tessl warning on stderr must not poison the parsed version ---
+for mode in absent_zero absent_nonzero; do
+  invoke "$mode"
+  if [[ "$CODE" == 0 && "$OUT" == '{"version":null}' ]]; then
+    pass "$mode -> a verified first-publication baseline"
+  else
+    fail "$mode: code=$CODE out='$OUT' err='$ERR'"
+  fi
+done
+for mode in unauthorized server_error unstructured_absent; do
+  invoke "$mode"
+  if [[ "$CODE" == 2 && -z "$OUT" && -n "$ERR" ]]; then
+    pass "$mode -> indeterminate, never a first-publication baseline"
+  else
+    fail "$mode: code=$CODE out='$OUT' err='$ERR'"
+  fi
+done
+
 invoke warning_on_stderr
 if [[ "$CODE" == 0 ]] && [[ "$OUT" == '{"version":"0.3.31"}' ]]; then
   pass "stderr warning does not poison the parsed version"

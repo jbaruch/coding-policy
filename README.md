@@ -19,7 +19,7 @@ Coding policy plugin for Baruch's AI agents. Language-agnostic code quality rule
 - `session-start` hook — the plugin's one `SessionStart` entry, native for Claude Code and Codex and portable for other agents: runs every SessionStart hook and merges their statuses into one payload
 - `check-git-sync` hook — fetches origin every session and fast-forwards a local default branch strictly behind `origin/<default>` (`rules/sync-before-work.md`). Diverged and Herdr-worker sessions are reported only. Never blocks
 - Policy review runs on the OpenAI Codex CLI authenticated by a ChatGPT subscription (no API key) via `.github/workflows/review-codex.yml`, reviewing every PR against the in-tree `rules/*.md`; Copilot stays as the complementary code-quality lane
-- 26 rules — 20 always-on, 6 conditional (scoped via `applyTo:` to the files where the rule's prescriptions actually fire). Breakdown: 10 covering code quality, 7 covering plugin authoring, 1 covering concurrency, 1 covering review discipline, 1 covering reviewer-feedback reading, 1 covering review severity, 1 covering external-repo action scope, 1 covering response communication, 1 covering merge/ship autonomy, 1 covering hook-status reporting, 1 covering multi-agent team operation
+- 26 rules — 20 always-on, 6 conditional (scoped via `applyTo:` to the files where the rule's prescriptions actually fire). Breakdown: 10 covering code quality, 7 covering plugin authoring, 1 covering concurrency, 1 covering review discipline, 1 covering reviewer-feedback reading, 1 covering review severity, 1 covering external-repo action scope, 1 covering response communication, 1 covering merge/ship autonomy, 1 covering hook-status reporting, 1 covering delegation boundaries
 - `release` skill — structured PR + merge workflow gated on the Codex policy review's blocking findings; Copilot is the complementary code-quality lane and is always advisory
 - `onboard-repo` skill (renamed from `install-reviewer`) — bootstrap a consumer repo onto coding-policy: enroll it in the central fleet policy reviewer, pin its `jbaruch/*` tessl deps to `latest`, and add the tessl-generated-artifacts `.gitignore` block so agents never commit per-developer output
 - `adopt-fork-pr` skill — bring a fork PR's branch into the base repo as a same-repo PR the reviewer can run on
@@ -39,6 +39,7 @@ tessl install jbaruch/coding-policy
 | Category | Rule | Summary |
 |----------|------|---------|
 | Git | [commit-conventions](rules/commit-conventions.md) | Imperative mood, one change per commit, PR hygiene |
+| Delegation | [agent-delegation](rules/agent-delegation.md) | Direct standalone work, authorized Herdr delegation and the native-spawn restriction |
 | Git | [sync-before-work](rules/sync-before-work.md) | Fetch and branch from the fresh remote default |
 | Testing | [testing-standards](rules/testing-standards.md) | Outcome-based, deterministic, no binary fixtures |
 | Errors | [error-handling](rules/error-handling.md) | Specific exceptions (with outer-boundary process-contract carve-out), actionable messages, structured logging |
@@ -98,4 +99,4 @@ tessl install jbaruch/coding-policy
 
 The retained general rules, skills and hooks are declared in `agent-plugin.yaml` at the same explicit version as the Tessl manifest. Install with `acr install github:jbaruch/coding-policy@0.4.0`, then `acr realize`. Herdr teams additionally install the compatible `jbaruch/herdr-policy` package. ACR v1 has no package dependency field, so the pair is selected explicitly.
 
-The serialized publish workflow preserves the manifest version, confirms Tessl availability, then publishes the immutable ACR tag and release asset. A partial publication is reconciled at the same version and commit; never move an existing tag or infer one channel's success from the other. Subsequent releases must update both manifest versions together.
+The serialized publish workflow preserves the manifest version, confirms Tessl availability, then publishes the immutable ACR tag and release asset in a dependent job. Retry a failed ACR job on the same run with `gh run rerun <run-id> --failed`; keep the original successful Tessl job and registry baseline. A partial publication is reconciled at the same version and commit; never move an existing tag or infer one channel's success from the other. Subsequent releases must update both manifest versions together.

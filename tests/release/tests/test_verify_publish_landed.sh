@@ -203,6 +203,22 @@ t_downgrade_returns_not_ok() {
   assert_eq "ok"        "false"   "$(echo "$out" | jq -r .ok)"
 }
 
+t_first_publication_requires_success_and_a_published_version() {
+  MOCK_REGISTRY_VERSION="0.2.0"
+  local outcome out rc
+  for outcome in success failure; do
+    MOCK_RUN_CONCLUSION="$outcome"
+    rc=0
+    out=$(main jbaruch coding-policy unpublished 12345) || rc=$?
+    if [[ "$outcome" == success ]]; then
+      assert_eq "first publication exit" 0 "$rc" || return 1
+      assert_eq "first publication" true "$(echo "$out" | jq -r .ok)" || return 1
+    else
+      assert_eq "failed run cannot confirm first publication" 1 "$rc" || return 1
+    fi
+  done
+}
+
 # Argument validation. Non-numeric run-id must exit 2 (input error),
 # not 1 (publish failed) — the script can't make a finding without a
 # valid input.
@@ -403,6 +419,7 @@ run "failure + no advance -> ok=false"                             t_failure_wit
 run "cancelled conclusion + advance -> ok=false"                   t_cancelled_conclusion_returns_not_ok
 run "semver: 0.3.9 -> 0.3.10 (success) -> ok=true"                 t_semver_advance_double_digit_patch_returns_ok
 run "downgrade (success) -> ok=false"                              t_downgrade_returns_not_ok
+run "first publication still requires a successful bound run"     t_first_publication_requires_success_and_a_published_version
 run "non-numeric run-id exits 2"                                   t_invalid_run_id_exits_two
 run "empty pre-baseline exits 2"                                   t_empty_pre_baseline_exits_two
 run "wrong arg count exits 2"                                      t_wrong_arg_count_exits_two

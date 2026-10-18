@@ -24,7 +24,7 @@ main() {
   cleanup() { rm -rf "$TMP"; return 0; }
   trap cleanup EXIT
 
-  run_baseline() { # runs registry-baseline.sh against the stubbed capture helper
+  run_baseline() { # runs registry-baseline.sh against the stubbed API helper
     OUT="$(bash "$TMP/registry-baseline.sh" ws plug 2>"$TMP/err")"
     RC=$?
     ERRTEXT="$(cat "$TMP/err")"
@@ -51,21 +51,29 @@ main() {
 
   echo "▶ registry-baseline.sh" >&2
 
-  install_wrapper registry-baseline.sh capture-registry-baseline.sh 0 '{"version":"0.3.9"}'
+  install_wrapper registry-baseline.sh registry-version.sh 0 '{"version":"0.3.9"}'
   run_baseline
   if [[ $RC -eq 0 && "$OUT" == "0.3.9" ]]; then pass; else fail "a good baseline prints its version, got RC=$RC OUT=$OUT"; fi
 
-  install_wrapper registry-baseline.sh capture-registry-baseline.sh 2 '' 'registry unreachable'
+  install_wrapper registry-baseline.sh registry-version.sh 0 '{"version":null}'
+  run_baseline
+  if [[ $RC -eq 0 && "$OUT" == unpublished ]]; then pass; else fail "a verified absent publication prints unpublished, got RC=$RC OUT=$OUT"; fi
+
+  install_wrapper registry-baseline.sh registry-version.sh 0 '{"version":"unpublished"}'
+  run_baseline
+  if [[ $RC -eq 2 && -z "$OUT" ]]; then pass; else fail "a fabricated sentinel string must fail, got RC=$RC OUT=$OUT"; fi
+
+  install_wrapper registry-baseline.sh registry-version.sh 2 '' 'registry unreachable'
   run_baseline
   if [[ $RC -eq 2 && -z "$OUT" ]] && printf '%s' "$ERRTEXT" | grep -q "could not read the registry baseline"; then
     pass; else fail "a failing capture exits 2, got RC=$RC OUT=$OUT"; fi
 
-  install_wrapper registry-baseline.sh capture-registry-baseline.sh 0 '{"other":"field"}'
+  install_wrapper registry-baseline.sh registry-version.sh 0 '{"other":"field"}'
   run_baseline
   if [[ $RC -eq 2 && -z "$OUT" ]] && printf '%s' "$ERRTEXT" | grep -qF "carries no .version"; then
     pass; else fail "a payload without .version exits 2, got RC=$RC OUT=$OUT ERR=$ERRTEXT"; fi
 
-  install_wrapper registry-baseline.sh capture-registry-baseline.sh 0 'not json'
+  install_wrapper registry-baseline.sh registry-version.sh 0 'not json'
   run_baseline
   if [[ $RC -eq 2 && -z "$OUT" ]]; then pass; else fail "a non-JSON payload exits 2, got RC=$RC OUT=$OUT"; fi
 
@@ -111,7 +119,7 @@ main() {
 
   # `registry-baseline.sh` carries the same guard and was uncovered: the suite
   # proved the absent-jq path for one wrapper and assumed it for the other.
-  install_wrapper registry-baseline.sh capture-registry-baseline.sh 0 '{"version":"0.3.9"}'
+  install_wrapper registry-baseline.sh registry-version.sh 0 '{"version":"0.3.9"}'
   OUT="$(PATH="$TMP/nojq" bash "$TMP/registry-baseline.sh" ws plug 2>"$TMP/err")"
   RC=$?
   ERRTEXT="$(cat "$TMP/err")"

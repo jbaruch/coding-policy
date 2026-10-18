@@ -8,33 +8,6 @@
 - Confirm a first Tessl publication using a verified absent-plugin baseline. The new Herdr package returns a structured registry 404 before its first publish; authentication and transport errors remain indeterminate rather than becoming guessed version baselines.
 - Ship the hook throttle-stamp schema beside its release-skill owner through both package formats.
 
-### Repair the release skill review bundle
-
-Publication of the source-authoring compatibility fix stopped at the required
-skill review (83%, below 85%). The reviewer received SKILL.md and recognized
-reference directories, but the release execution plan pointed to root-level
-PUBLICATION.md, REVIEW_DETAILS.md and SCRIPTING.md that were outside that review
-bundle. Move these documents into references/ and split the existing ordered
-execution plan into seven elected step references. Preserve the command bodies,
-review-reading obligations, baseline/merge order, worktree cleanup and separate
-channel confirmation contracts. SKILL.md now routes the same seven steps with
-binding links instead of loading every command and failure branch on invocation.
-
-
-### Changed
-
-- Recognize scoped lookup/output contracts owned by another plugin, including a
-  plugin being developed in its own repository. The fleet reviewer derives that
-  authoring role from trusted base metadata and reads declared head rule blobs
-  without installing or executing the candidate. A PR cannot create its own
-  provider identity or waive generic safety/release floors. This removes the
-  first-publication dependency cycle blocking the Herdr extraction.
-- Keep the always-loaded rule set within its existing budget by moving version
-  stdout and bounded-runner preconditions to a binding release reference. Their
-  failure and exit-code obligations remain unchanged. Recognize a verified
-  first-publication baseline sentinel, used by the prepared cutover publisher;
-  failed or indeterminate registry reads still authorize no publication claim.
-
 ## 0.3.407 — 2026-10-18
 
 ### Repair the release skill review bundle

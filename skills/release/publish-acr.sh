@@ -1,14 +1,16 @@
 #!/usr/bin/env bash
 # Publish an explicitly versioned ACR package from its fetched default branch.
-# argv: package root. stdout: acr publish --json's result. stderr: diagnostics.
+# argv: package root [explicit reviewed source commit]. stdout: acr publish
+# --json's result. stderr: diagnostics. An explicit source must equal HEAD and
+# remain reachable from the fetched default; normal calls require its exact tip.
 # Exit 2 on setup/precondition failure, otherwise acr's status. Creates/pushes
 # v<manifest-version> once; never moves a tag. A partial publication is retried
 # from that same commit/version and independently verified by the release flow.
 set -euo pipefail
 
 main() {
-  if (( $# != 1 )) || [[ ! -d "$1" ]]; then
-    echo 'usage: publish-acr.sh <package-root>' >&2
+  if (( $# < 1 || $# > 2 )) || [[ ! -d "$1" ]]; then
+    echo 'usage: publish-acr.sh <package-root> [explicit-reviewed-source-commit]' >&2
     return 2
   fi
   local root tool validation version head default tag tagged top status rc=0
@@ -43,12 +45,21 @@ main() {
     return 2
   fi
   head="$(git -C "$root" rev-parse HEAD)"
-  if [[ "$(git -C "$root" rev-parse "$default")" != "$head" ]]; then
-    echo 'publish-acr: HEAD must equal the fetched remote default branch' >&2
+  if [[ -n "${2:-}" ]]; then
+    if [[ ! "$2" =~ ^[0-9a-f]{40}$ || "$2" != "$head" ]] \
+        || ! git -C "$root" merge-base --is-ancestor "$head" "$default"; then
+      echo 'publish-acr: explicit source must equal HEAD and belong to the fetched remote default history' >&2
+      return 2
+    fi
+  elif [[ "$(git -C "$root" rev-parse "$default")" != "$head" ]]; then
+      echo 'publish-acr: HEAD must equal the fetched remote default branch' >&2
+      return 2
+  fi
+  if ! validation="$(acr validate "$root" --json)" \
+      || ! version="$(printf '%s' "$validation" | jq -er '.result | select(.valid == true) | .version | select(type == "string" and length > 0)')"; then
+    echo 'publish-acr: repair the manifest and selected package files, then rerun acr validate before publishing' >&2
     return 2
   fi
-  validation="$(acr validate "$root" --json)" || return 2
-  version="$(printf '%s' "$validation" | jq -er '.result | select(.valid == true) | .version')" || return 2
   tag="v${version}"
   git -C "$root" show-ref --verify --quiet "refs/tags/$tag" || rc=$?
   if (( rc == 0 )); then

@@ -2,6 +2,7 @@
 
 import os
 import re
+import shutil
 import subprocess
 import tempfile
 import unittest
@@ -21,23 +22,37 @@ ACCEPTED_ORIGINS = (
 )
 
 
+def block_calls(file, block):
+    lines = block.strip().splitlines()
+    owned = re.compile(r"\$(?:KS|CP)/|\.tessl/plugins/jbaruch/coding-policy/skills/|^[ \t]*(?:bash|python3) +[\"']?skills/", re.M)
+    if not owned.search(block):
+        return []
+    if not lines or not lines[0].lstrip().startswith("KS="):
+        raise AssertionError("covered invocation lacks the KS bootstrap in " + str(file))
+    bootstrap = lines[0].strip()
+    target = re.match(r"KS=\.tessl/plugins/jbaruch/coding-policy/skills/([a-z-]+);", bootstrap)
+    if target is None:
+        raise AssertionError("unsupported bootstrap in " + str(file))
+    result = []
+    for line in lines[1:]:
+        if not owned.search(line) or re.search(r"\.(?:sh|py)(?:[\"' \t]|$)", line) is None:
+            continue
+        match = re.match(r'\s*(bash|python3) "\$KS/([^"\n]+)"', line)
+        if match is None:
+            raise AssertionError("covered script needs an explicit interpreter and quoted KS path in " + str(file))
+        result.append((file, target.group(1), bootstrap, match.group(1), match.group(2)))
+    if not result:
+        raise AssertionError("bootstrap without a co-shipped script invocation in " + str(file))
+    return result
+
+
 def invocations():
     result = []
     for file in sorted((ROOT / "skills").rglob("*.md")):
         if "tests" in file.relative_to(ROOT).parts:
             continue
         for block in re.findall(r"```bash\n(.*?)```", file.read_text(), re.S):
-            lines = block.strip().splitlines()
-            if not lines or not lines[0].lstrip().startswith("KS="):
-                continue
-            bootstrap = lines[0].strip()
-            target = re.match(r"KS=\.tessl/plugins/jbaruch/coding-policy/skills/([a-z-]+);", bootstrap)
-            if target is None:
-                raise AssertionError("unsupported bootstrap in " + str(file))
-            for line in lines[1:]:
-                match = re.match(r'\s*(bash|python3) "\$KS/([^"\n]+)"', line)
-                if match is not None:
-                    result.append((file, target.group(1), bootstrap, match.group(1), match.group(2)))
+            result.extend(block_calls(file, block))
     return result
 
 
@@ -88,6 +103,32 @@ class SkillBootstrapTest(unittest.TestCase):
                     self.assertEqual(bootstrap, bootstraps[kind])
                 bootstraps[kind] = bootstrap
         self.assertEqual(set(bootstraps), {"release", "adopt-fork-pr", "onboard-repo", "migrate-to-plugin"})
+
+    def test_legacy_missing_or_unquoted_bootstraps_cannot_escape_discovery(self):
+        item = self.representative("release")
+        file, _kind, bootstrap, interpreter, relative = item
+        invocation = interpreter + ' "$KS/' + relative + '"'
+        malformed = [invocation, "CP=.tessl/plugins/jbaruch/coding-policy\n" + invocation,
+                     bootstrap + "\n" + interpreter + ' "$CP/skills/release/' + relative + '"',
+                     bootstrap + "\n$KS/" + relative,
+                     bootstrap + "\n" + interpreter + " $KS/" + relative,
+                     bootstrap + "\n"]
+        for block in malformed:
+            with self.subTest(block=block):
+                with self.assertRaises(AssertionError):
+                    block_calls(file, block)
+
+    def test_every_documented_target_runs_from_local_and_global_roots(self):
+        calls = invocations()
+        for item in calls:
+            self.stub(self.project / OWN_ROOT / item[1], item[4], item[3], "all-local")
+            result = self.execute(item)
+            self.assertEqual((result.returncode, result.stdout), (0, "all-local\n"), result.stderr)
+        shutil.rmtree(self.project / ".tessl")
+        for item in calls:
+            self.stub(self.fixture_home / OWN_ROOT / item[1], item[4], item[3], "all-global")
+            result = self.execute(item)
+            self.assertEqual((result.returncode, result.stdout), (0, "all-global\n"), result.stderr)
 
     def test_project_local_lookup_precedes_global(self):
         for kind in ("release", "adopt-fork-pr", "onboard-repo", "migrate-to-plugin"):

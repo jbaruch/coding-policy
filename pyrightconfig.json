@@ -41,6 +41,5 @@
     }
   ],
   "pythonVersion": "3.11",
-  "typeCheckingMode": "standard",
-  "reportMissingModuleSource": "none"
+  "typeCheckingMode": "standard"
 }

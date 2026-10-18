@@ -51,6 +51,7 @@ jobs:
       - uses: actions/checkout@v7
         with:
           repository: jbaruch/agentic-context-registry
+          # Review monthly and after ACR release-contract changes; re-pin in a dedicated dependency PR.
           ref: f8dffcecc0eb98f13b2d7d90cd399f99208becf2
           path: .test-dependencies/acr
           persist-credentials: false

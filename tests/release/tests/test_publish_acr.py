@@ -43,8 +43,8 @@ class PublishAcrTest(unittest.TestCase):
                                 capture_output=True, text=True, check=True)
         return result.stdout
 
-    def publish(self):
-        return subprocess.run(["bash", str(SOURCE), str(self.repo)], cwd=self.root,
+    def publish(self, source=None):
+        return subprocess.run(["bash", str(SOURCE), str(self.repo), *([source] if source else [])], cwd=self.root,
                               env=self.env, capture_output=True, text=True)
 
     def test_new_tag_publishes_and_same_commit_retry_preserves_it(self):
@@ -55,6 +55,15 @@ class PublishAcrTest(unittest.TestCase):
         second = self.publish()
         self.assertEqual(second.returncode, 0, second.stderr)
         self.assertEqual(self.git("rev-parse", "v0.4.0").strip(), self.head)
+
+    def test_invalid_validation_result_has_an_actionable_diagnostic_and_no_tag(self):
+        for result in ({"valid": False}, {"valid": True}, {"valid": True, "version": ""}):
+            with self.subTest(result=result):
+                (self.bin / "acr").write_text("#!/usr/bin/env python3\nprint(" + repr(json.dumps({"result": result})) + ")\n")
+                failure = self.publish()
+                self.assertEqual((failure.returncode, failure.stdout), (2, ""))
+                self.assertIn("repair the manifest", failure.stderr)
+                self.assertEqual(self.git("tag"), "")
 
     def test_an_existing_version_at_another_commit_is_never_moved(self):
         self.git("tag", "v0.4.0")
@@ -82,6 +91,9 @@ class PublishAcrTest(unittest.TestCase):
         self.assertEqual((result.returncode, result.stdout), (2, ""))
         self.assertIn("fetched remote default", result.stderr)
         self.assertEqual(self.git("tag"), "")
+        pinned = self.publish(self.head)
+        self.assertEqual(pinned.returncode, 0, pinned.stderr)
+        self.assertEqual(self.git("rev-parse", "v0.4.0").strip(), self.head)
 
 
 if __name__ == "__main__":

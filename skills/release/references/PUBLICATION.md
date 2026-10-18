@@ -2,7 +2,7 @@
 
 Step 7 names the publication gates in order and leaves the mechanics here: how each channel is recognized, the command for each gate, and the exit-code contract of each helper. Pulled out of SKILL.md to keep the ordered execution plan scannable.
 
-Each command block resolves `CP` the same way SKILL.md does. Each block runs in a fresh shell, so a value one block prints reaches the next as a placeholder you fill in (`<pre>`, `<tessl-run-id>`, `<current>`), never as a shell variable.
+Each command block resolves `KS` the same way SKILL.md does. Each block runs in a fresh shell, so a value one block prints reaches the next as a placeholder you fill in (`<pre>`, `<tessl-run-id>`, `<current>`), never as a shell variable.
 
 The confirmation a release owes is keyed on the publication, never on the package. A package that publishes through more than one channel owes the duty once per publication, each confirmed against the channel that carried it (`skills/release/references/release-contract.md` Publication Confirmation).
 
@@ -11,7 +11,7 @@ The confirmation a release owes is keyed on the publication, never on the packag
 Read the repo's publish workflow and its manifest:
 
 - **Tessl** — a Tessl plugin manifest (`.tessl-plugin/plugin.json`, legacy `tile.json`), or a publish path calling `tessl plugin publish` or `tesslio/patch-version-publish`
-- **GitHub tag/asset** — a publish workflow triggered on a tag push (`on: push: tags:`) that creates a release carrying the package's assets, an ACR package published by `acr publish`
+- **GitHub tag/asset** — a workflow that creates a published release and assets at an immutable tag, including `acr publish`; its trigger may be a tag push or a merge push
 - **Both** — every gate marked Tessl AND every gate marked tag/asset, each read from its own channel. A green GitHub release confirms nothing about a pending Tessl moderation, and a cleared Tessl publish confirms nothing about an absent GitHub asset
 
 ## Before the merge — Tessl registry baseline
@@ -23,11 +23,11 @@ KS=.tessl/plugins/jbaruch/coding-policy/skills/release; [ -d "$KS" ] || KS="$HOM
 bash "$KS/registry-baseline.sh" <workspace> <plugin>
 ```
 
-Exit 0 prints the version and nothing else; record it as `<pre>`. Any other exit means the baseline could not be vouched for and the release stops: an empty `<pre>` passes the registry-advance conjunct vacuously, reporting a publish that never happened. Which conditions it refuses, and why it has no verdict exit, are the script's contract — see `skills/release/registry-baseline.sh` header, not restated here (`rules/script-as-black-box.md`).
+Exit 0 prints the version or the verified `unpublished` sentinel; record it as `<pre>`. Any other exit stops the release before merge. Empty or guessed baselines are invalid. The output and refusal contract belongs to `skills/release/registry-baseline.sh`.
 
 ## After the merge — GitHub tag/asset: push the tag
 
-The tag publication's workflow fires on the tag, never on the merge, so push it from the fast-forwarded `main` before resolving anything. The version follows SKILL.md Step 3.
+Push the tag below only when the inspected workflow is tag-triggered. A merge-triggered dual publisher creates its own tag from the reviewed source commit; skip this command and resolve the merge-triggered run instead. Never move a tag or create a competing tag. The version follows SKILL.md Step 3.
 
 ```bash
 git tag <tag> && git push origin <tag>
@@ -37,7 +37,7 @@ git tag <tag> && git push origin <tag>
 
 Bind the resolution to the workflow, the exact commit, the `push` event and the ref that fired it, never to "latest on main". The lookup polls until the run is listed, past the publish workflow's enqueue latency.
 
-Each channel keeps its own run id. A mixed publication runs both sequences and holds both ids at once; each confirmation below reads the id for its own channel.
+Each channel uses its actual publisher run. Separate workflows have separate ids. A merge-triggered workflow containing both publication jobs uses one id for both independent confirmation helpers; it still owes both sets of artifact evidence.
 
 **Tessl** — the publish workflow fires on the merge commit. Read that commit and record it as `<merge-sha>`:
 
@@ -58,7 +58,7 @@ Record the emitted `database_id` as `<tessl-run-id>` and watch it:
 gh run watch <tessl-run-id>
 ```
 
-**GitHub tag/asset** — the publish workflow fires on the pushed tag, whose run carries the tag name as its `headBranch`. Read the commit the tag points at and record it as `<tag-sha>`:
+**Tag-triggered GitHub tag/asset** — its run carries the pushed tag as `headBranch`. Read the commit the tag points at and record it as `<tag-sha>`:
 
 ```bash
 git rev-list -n 1 "<tag>"
@@ -76,6 +76,8 @@ Record the emitted `database_id` as `<tag-run-id>` and watch it:
 ```bash
 gh run watch <tag-run-id>
 ```
+
+**Merge-triggered dual publisher** — resolve the workflow with the reviewed merge SHA, `push` event and default-branch ref, using the same command as the Tessl merge-triggered case. It creates `v<explicit-manifest-version>` itself. Record that id for both channels, watch it once, and independently verify the Tessl registry/moderation and the exact GitHub tag/assets. The ACR owner receives the triggering source SHA and refuses source outside the fetched default history. A Tessl-only run never substitutes for an ACR publisher run.
 
 Omit `--exit-status` from the watch. Read the run conclusion through each channel's confirmation helper — `confirm-tessl-landed.sh` for Tessl, `verify-github-release.sh` for a tag publication.
 
@@ -105,7 +107,7 @@ Exit 0 = moderation cleared. Exit 1 = blocked or still-pending at budget exhaust
 
 The resolved run's `conclusion` is `success`, AND the release the run was supposed to create exists at that exact tag, is published, and carries retrievable assets. Run none of the three Tessl helpers above for it.
 
-Gate on the exit code, the same way the Tessl path gates on `confirm-tessl-landed.sh`. Pass THIS channel's run id: its conclusion is this check's first conjunct, and a mixed publication must not confirm the tag release against the Tessl run.
+Gate on the exit code, the same way the Tessl path gates on `confirm-tessl-landed.sh`. Pass the run that actually includes this channel's publication job. A dual workflow uses its shared run id; a separate Tessl-only run cannot confirm GitHub assets.
 
 ```bash
 KS=.tessl/plugins/jbaruch/coding-policy/skills/release; [ -d "$KS" ] || KS="$HOME/$KS"; [ -d "$KS" ] || case "$(git config --get remote.origin.url)" in git@github.com:jbaruch/coding-policy|git@github.com:jbaruch/coding-policy.git|https://github.com/jbaruch/coding-policy|https://github.com/jbaruch/coding-policy.git|ssh://git@github.com/jbaruch/coding-policy|ssh://git@github.com/jbaruch/coding-policy.git) KS=skills/release ;; *) echo "coding-policy skill not found: install jbaruch/coding-policy" >&2; exit 1 ;; esac
@@ -116,8 +118,17 @@ Exit 0 = both conjuncts hold. Exit 1 = a definitive no — an unconfirmed releas
 
 ## Walkthroughs
 
-**Tessl-only** (this repo). Name the channel from `.tessl-plugin/plugin.json`. Record `<pre>` before merging. Merge, fast-forward `main`, verify the merge commit. Resolve the publish run by merge SHA, watch it. Run `confirm-tessl-landed.sh` with `<pre>` and the run id; gate on its exit code and keep the version it prints as `<current>`. Run `verify-moderation-cleared.sh` on `<current>`. Report the PR URL, `<current>`, the registry advance and the moderation clear. Push no tag and run `verify-github-release.sh` for nothing.
+**Tessl-only.** Name the channel from `.tessl-plugin/plugin.json`. Record `<pre>` before merging. Merge, fast-forward `main`, verify the merge commit. Resolve the publish run by merge SHA, watch it. Run `confirm-tessl-landed.sh` with `<pre>` and the run id; gate on its exit code and keep the version it prints as `<current>`. Run `verify-moderation-cleared.sh` on `<current>`. Report the PR URL, `<current>`, the registry advance and the moderation clear. Push no tag and run `verify-github-release.sh` for nothing.
 
 **GitHub tag/asset-only** (an ACR package). Name the channel from the publish workflow's `on: push: tags:`. Skip the registry baseline. Write the version into the package manifest in the PR per Step 3. Merge, fast-forward `main`, verify the merge commit, then `git tag <tag> && git push origin <tag>`. Resolve the run by the tag's commit with the tag as the fifth argument, watch it. Run `verify-github-release.sh` with the tag and that run id. Report the PR URL, the tag, the published release and its retrievable assets. Run none of the Tessl helpers.
 
-**Both.** Set one version explicitly in every channel's manifest in the PR and confirm the Tessl publisher preserves it without auto-bumping (Step 3). Record `<pre>` before merging. Merge, fast-forward `main`, push the tag. Resolve TWO runs — `<tessl-run-id>` from the merge SHA, `<tag-run-id>` from the tag — and watch both. Run `confirm-tessl-landed.sh` and `verify-moderation-cleared.sh` against the Tessl channel, and `verify-github-release.sh` against `<tag-run-id>`. Report both confirmations. Neither channel's result stands in for the other's.
+**Both, separate workflows.** Set one version explicitly in every channel's manifest in the PR and confirm the Tessl publisher preserves it without auto-bumping (Step 3). Record `<pre>` before merging. Merge, fast-forward `main`, push the tag. Resolve TWO runs — `<tessl-run-id>` from the merge SHA, `<tag-run-id>` from the tag — and watch both. Run `confirm-tessl-landed.sh` and `verify-moderation-cleared.sh` against the Tessl channel, and `verify-github-release.sh` against `<tag-run-id>`. Report both confirmations. Neither channel's result stands in for the other's.
+
+
+**Both, merge-triggered jobs (this repository).** Set aligned manifest versions in the PR. Capture `<pre>` before merge. Resolve and watch `publish.yml` by its reviewed merge SHA and `main` push. The Tessl job confirms registry advance; the dependent ACR job creates the immutable version tag and publishes assets from that same reviewed source. Tessl may commit its changelog stamp separately; it changes no shared runtime/version surface. Run `confirm-tessl-landed.sh`, `verify-moderation-cleared.sh` and `verify-github-release.sh` with the actual run and exact version tag. Report both channel results.
+
+## Partial publication recovery
+
+For a first Tessl publication, `registry-baseline.sh` prints `unpublished` only after a verified absent-plugin response or an empty versions array. Preserve that literal as `<pre>`; `confirm-tessl-landed.sh` requires a successful bound run and a real published version. Empty output, authentication failures and unreadable responses remain errors. Never substitute a guessed `0.0.0` baseline.
+
+When Tessl succeeds and the downstream ACR job fails, preserve the original baseline and source commit. Use `gh run rerun <run-id> --failed` to retry only the failed job; its successful Tessl prerequisite remains completed. Do not dispatch a new full publish or rerun the successful Tessl job against an already-published version. Watch the same run to a terminal result, then recheck each channel's artifacts independently. Existing matching tags are reused; another commit at that version is a refusal, never a force-push. An unknown external effect remains unconfirmed until readback proves it.
