@@ -5,6 +5,10 @@ inputs:
     description: Package repository root
     required: false
     default: '.'
+  bin-directory:
+    description: Optional directory containing the pinned acr executable
+    required: false
+    default: ''
 runs:
   using: composite
   steps:
@@ -12,4 +16,5 @@ runs:
       shell: bash
       env:
         PACKAGE_ROOT: ${{ inputs.path }}
-      run: bash "$GITHUB_ACTION_PATH/../../../skills/release/publish-acr.sh" "$PACKAGE_ROOT"
+        ACR_BIN_DIRECTORY: ${{ inputs.bin-directory }}
+      run: PATH="${ACR_BIN_DIRECTORY:+$ACR_BIN_DIRECTORY:}$PATH" bash "$GITHUB_ACTION_PATH/../../../skills/release/publish-acr.sh" "$PACKAGE_ROOT"
