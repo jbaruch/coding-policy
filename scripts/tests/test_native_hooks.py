@@ -46,11 +46,22 @@ class NativeHooksTest(unittest.TestCase):
             hook.parent.mkdir()
             hook.write_text(SOURCE.read_text())
             missing = subprocess.run(["bash", str(hook), "session-start"], capture_output=True, text=True)
-            self.assertEqual((missing.returncode, missing.stdout), (0, ""))
+            self.assertEqual((missing.returncode, missing.stdout), (1, ""))
             self.assertIn("repair the complete release skill", missing.stderr)
             invalid = subprocess.run(["bash", str(hook), "unknown"], capture_output=True, text=True)
             self.assertEqual((invalid.returncode, invalid.stdout), (2, ""))
             self.assertIn("usage", invalid.stderr)
+
+    def test_disappeared_installation_directory_fails_visibly(self):
+        with tempfile.TemporaryDirectory() as scratch:
+            hook = Path(scratch) / "release/native-hook.sh"
+            hook.parent.mkdir()
+            hook.write_text(SOURCE.read_text())
+            command = 'source "$1"; rm "$1"; rmdir "${1%/*}"; main session-start'
+            result = subprocess.run(["bash", "-c", command, "fixture", str(hook)],
+                                    capture_output=True, text=True)
+            self.assertEqual((result.returncode, result.stdout), (1, ""))
+            self.assertIn("restore read/search access", result.stderr)
 
 
 if __name__ == "__main__":

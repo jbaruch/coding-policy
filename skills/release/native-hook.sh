@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Run a generic policy hook from a Tessl skill or an ACR native hook copy.
 # argv: session-start|stop-handoff. stdin/stdout and status belong to the owner.
-# Exit 2 on invalid event, 0 with an actionable diagnostic on installation failure.
+# Exit 2 on invalid event, 1 with a stderr diagnostic on installation failure.
 set -euo pipefail
 
 main() {
@@ -17,7 +17,7 @@ main() {
   esac
   if ! here="$(CDPATH='' cd -- "$src" && pwd -P && printf x)"; then
     echo 'coding-policy hook: restore read/search access to the installed skill' >&2
-    return 0
+    return 1
   fi
   here="${here%x}"
   here="${here%$'\n'}"
@@ -30,7 +30,7 @@ main() {
   esac
   if [[ ! -f "$skill/hooks/$owner" || ! -r "$skill/hooks/$owner" ]]; then
     echo 'coding-policy hook: repair the complete release skill before retrying' >&2
-    return 0
+    return 1
   fi
   bash "$skill/hooks/$owner"
 }
