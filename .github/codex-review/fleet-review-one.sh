@@ -51,11 +51,12 @@ main() {
   # pair that reads in-tree rules/ — wrong for reviewing consumers.)
   local schema="${CENTRAL_DIR}/.github/codex-review/fleet-schema.json"
   local prompt="${CENTRAL_DIR}/.github/codex-review/fleet-prompt.md"
+  local authoring="${CENTRAL_DIR}/.github/codex-review/policy-authoring-context.py"
   # Mechanical drivers (policy-path-agnostic) are shared with the self-review.
   local assert="${CENTRAL_DIR}/.github/codex-review/assert-no-secret-leak.sh"
   local poster="${CENTRAL_DIR}/.github/codex-review/post-review.sh"
   local f
-  for f in "$schema" "$prompt" "$assert" "$poster"; do
+  for f in "$schema" "$prompt" "$authoring" "$assert" "$poster"; do
     [[ -f "$f" ]] || { echo "error: central driver file missing: $f" >&2; exit 1; }
   done
 
@@ -83,6 +84,12 @@ main() {
     # consistent. Log exactly which SHA was reviewed.
     echo "reviewing ${full}#${pr} at $(git rev-parse HEAD)" >&2
   ) || exit 1
+
+  local authoring_context
+  if ! authoring_context=$(cd "$work" && python3 -I "$authoring" --repo "$full" --base "origin/${base}"); then
+    echo "error: cannot establish plugin authoring context for ${full}; restore the fetched metadata before reviewing" >&2
+    exit 1
+  fi
 
   # Install the policy to a NON-workspace path (rules/dependency-management.md — CI
   # agents install Tessl plugins outside the workspace, never vendored into it),
@@ -150,7 +157,7 @@ main() {
     # refresh (rules/dependency-management.md Freshness). Sol's own default
     # effort is low, too shallow for a policy review. Keep in step with
     # .github/workflows/review-codex.yml.
-    { printf 'This PR targets base branch `%s`; review the diff `git diff origin/%s...HEAD`.\n\n' "$base" "$base"; cat "$prompt"; } \
+    { printf 'This PR targets base branch `%s`; review the diff `git diff origin/%s...HEAD`.\nTrusted plugin authoring context: %s\n\n' "$base" "$base" "$authoring_context"; cat "$prompt"; } \
       | env -u GH_TOKEN CODEX_HOME="$codex_home" codex exec \
           --json \
           --skip-git-repo-check \
