@@ -322,7 +322,7 @@ PY
   if [ ! -d "$wroot" ]; then
     record worktrees ok "" 0 ""
   else
-    bash "${HERE}/bounded-run.sh" "$SWEEP_BUDGET_SEC" bash "${HERE}/sweep-worktrees.sh" "$wroot" \
+    bash "${HERE}/../release/lib/bounded-run.sh" "$SWEEP_BUDGET_SEC" bash "${HERE}/sweep-worktrees.sh" "$wroot" \
       > "${scratch}/sweep.json" 2>"${scratch}/sweep.err"
     rc=$?
     cat "${scratch}/sweep.err" >&2

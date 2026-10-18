@@ -236,11 +236,11 @@ main() {
 
   # --- 12. a prune exiting 0 with unreadable JSON fails the sweep.
   fresh_pair 12
-  local shadow="$TMP/shadow12"
-  mkdir -p "$shadow" || die "mkdir shadow failed"
+  local shadow="$TMP/shadow12/skills/herdr-foreman"
+  mkdir -p "$shadow" "$shadow/../release/lib" || die "mkdir shadow failed"
   cp "$SCRIPT" "$shadow/" || die "copy sweep failed"
-  cp -R "$(dirname "$SCRIPT")/foreman" "$shadow/" || die "copy the foreman package failed"
-  printf '#!/usr/bin/env bash\nset -euo pipefail\nprintf "not json\\n"\n' > "$shadow/prune-worktrees.sh" || die "stub prune failed"
+  cp "$(dirname "$SCRIPT")/../release/lib/prune_result.py" "$shadow/../release/lib/" || die "copy the result checks failed"
+  printf '#!/usr/bin/env bash\nset -euo pipefail\nprintf "not json\\n"\n' > "$shadow/../release/lib/prune-worktrees.sh" || die "stub prune failed"
   local root12="$TMP/worktrees12"
   mkdir -p "$root12" || die "mkdir root12 failed"
   quiet "alpha twelve failed" "${G[@]}" -C "$alpha" worktree add -q -b review/twelve "$root12/alpha-twelve" origin/main
@@ -255,7 +255,7 @@ main() {
   # --- 12b. a prune exiting 0 with JSON outside its shape fails the sweep,
   # and the sweep still prints its own JSON and report.
   printf '#!/usr/bin/env bash\nset -euo pipefail\nprintf "%%s\\n" '"'"'{"worktrees_removed":[],"worktrees_kept":[null],"branches_deleted":[],"branches_kept":[],"failed":[]}'"'"'\n' \
-    > "$shadow/prune-worktrees.sh" || die "stub malformed prune failed"
+    > "$shadow/../release/lib/prune-worktrees.sh" || die "stub malformed prune failed"
   RUN_SEQ=$((RUN_SEQ+1))
   OUT="$(bash "$shadow/sweep-worktrees.sh" "$root12" 2>"$TMP/err.$RUN_SEQ")"; RC=$?
   ERRTEXT="$(cat "$TMP/err.$RUN_SEQ")"

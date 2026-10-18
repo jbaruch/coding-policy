@@ -14,7 +14,7 @@
 # Covers:
 #   1. foreman.sh            -> puts its own directory on PYTHONPATH.
 #   2. start-judge-worker.sh -> runs the foreman.sh beside it.
-#   3. sweep-worktrees.sh    -> imports foreman.prune_result from beside it.
+#   3. sweep-worktrees.sh    -> imports the shared prune-result checker.
 #
 # Run: bash skills/herdr-foreman/tests/test_script_dir_newline.sh
 set -uo pipefail
@@ -85,12 +85,11 @@ STUB
   if [[ $rc -eq 0 && -f "$marker" && "$(cat "$marker")" == start-judge ]]; then
     pass; else fail "start-judge-worker.sh: expected foreman.sh start-judge run, got rc=$rc out=$out err=$err"; fi
 
-  # 3. The sweep imports the shared result-shape module from beside itself
+  # 3. The sweep imports the shared result-shape module through its own directory
   #    before it looks at any repository; an empty root needs nothing else.
   stage sweep sweep-worktrees.sh
-  mkdir -p "$STAGE/foreman" "$TMP/sweep-root" || die "create the sweep fixtures"
-  : > "$STAGE/foreman/__init__.py" || die "write the package marker"
-  cat > "$STAGE/foreman/prune_result.py" <<'PY' || die "write the prune_result stand-in"
+  mkdir -p "$STAGE/../release/lib" "$TMP/sweep-root" || die "create the sweep fixtures"
+  cat > "$STAGE/../release/lib/prune_result.py" <<'PY' || die "write the prune_result stand-in"
 import os
 
 with open(os.environ["MARKER"], "w", encoding="utf-8") as handle:
@@ -104,7 +103,7 @@ PY
   out="$(MARKER="$marker" bash "$STAGE/sweep-worktrees.sh" "$TMP/sweep-root" 2>"$TMP/err")"; rc=$?
   err="$(cat "$TMP/err")"
   if [[ $rc -eq 0 && -f "$marker" && "$(cat "$marker")" == imported ]]; then
-    pass; else fail "sweep-worktrees.sh: expected foreman.prune_result imported from beside it, got rc=$rc out=$out err=$err"; fi
+    pass; else fail "sweep-worktrees.sh: expected the shared prune_result imported, got rc=$rc out=$out err=$err"; fi
 
   echo "─────────────────────────────────────────────" >&2
   if [[ $FAIL -gt 0 ]]; then echo "FAILED: ${FAIL} failed, ${PASS} passed" >&2; exit 1; fi

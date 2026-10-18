@@ -32,7 +32,7 @@ alwaysApply: true
 - It removes an idle clean worktree whose HEAD origin holds
 - It deletes a local branch whose tip origin holds or whose tip origin's default branch contains
 - It deletes an unprotected branch on origin merged into the default branch with no open pull request
-- The removal and deletion predicates live in `skills/herdr-foreman/prune-worktrees.sh` and `skills/herdr-foreman/prune-remote-branches.sh` (top-of-file docstrings)
+- The removal and deletion predicates live in `skills/release/lib/prune-worktrees.sh` and `skills/release/lib/prune-remote-branches.sh` (top-of-file docstrings)
 - A dirty or unpushed idle worktree is reported, never removed automatically
 - A local branch holding commits origin lacks is never deleted automatically
 - It is reported once idle

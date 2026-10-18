@@ -109,7 +109,7 @@ main() {
   fi
   here="${here%x}"
   here="${here%$'\n'}"
-  python3 - "$root" "$dry" "${here}/prune-worktrees.sh" <<'PY'
+  python3 - "$root" "$dry" "${here}/../release/lib/prune-worktrees.sh" <<'PY'
 import json
 import os
 import stat
@@ -119,7 +119,7 @@ import sys
 root, dry, prune = os.path.realpath(sys.argv[1]), sys.argv[2] == "1", sys.argv[3]
 # The prune result's shape is checked by the module every reader shares.
 sys.path.insert(0, os.path.dirname(prune))
-from foreman.prune_result import prune_schema_error
+from prune_result import prune_schema_error
 
 
 class Run:

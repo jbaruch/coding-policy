@@ -59,7 +59,7 @@
     "skills/herdr-foreman/foreman/provision.py",
     "skills/herdr-foreman/foreman/probe.py",
     "skills/herdr-foreman/foreman/probe_recovery.py",
-    "skills/herdr-foreman/foreman/prune_result.py",
+    "skills/release/lib/prune_result.py",
     "skills/herdr-foreman/foreman/recovery.py",
     "skills/herdr-foreman/foreman/remote_owner.py",
     "skills/herdr-foreman/foreman/renderable.py",
@@ -164,7 +164,7 @@
     "skills/herdr-foreman/tests/test_supervision_replay.py",
     "skills/herdr-foreman/tests/test_tier_integration.py",
     "skills/herdr-foreman/tests/test_prune_report_caches.py",
-    "skills/herdr-foreman/tests/test_prune_result.py",
+    "skills/release/lib/tests/test_prune_result.py",
     "skills/herdr-foreman/tests/test_tiers.py",
     "skills/herdr-foreman/tests/test_minimum_adequate.py",
     "skills/herdr-foreman/tests/test_triggers.py",
@@ -180,6 +180,12 @@
     "skills/release/tests/test_pr_create_repo_binding.py"
   ],
   "executionEnvironments": [
+    {
+      "root": "skills/release/lib",
+      "extraPaths": [
+        "skills/release/lib"
+      ]
+    },
     {
       "root": "skills/herdr-foreman",
       "extraPaths": [

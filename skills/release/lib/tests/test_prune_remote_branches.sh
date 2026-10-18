@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Outcome-based tests for skills/herdr-foreman/prune-remote-branches.sh.
+# Outcome-based tests for lib/prune-remote-branches.sh.
 #
 # A bare "origin" plus a clone of it, per case, and a fake `gh` first on PATH
 # that answers from files in the case's own directory, so the cases share no
@@ -34,7 +34,7 @@
 #  19. Non-GitHub origin        -> nothing deleted, could_not_check, no gh call.
 #   3 also checks the reported delete command is leased to the judged tip.
 #
-# Run: bash skills/herdr-foreman/tests/test_prune_remote_branches.sh
+# Run: bash lib/tests/test_prune_remote_branches.sh
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

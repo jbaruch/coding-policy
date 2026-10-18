@@ -8,8 +8,8 @@
 # origin holds, local branches origin holds or merged, and branches on origin
 # merged with no open pull request. The decisions are the owner scripts', never
 # this hook's (rules/script-as-black-box.md):
-#   - skills/herdr-foreman/prune-worktrees.sh — worktrees and local branches
-#   - skills/herdr-foreman/prune-remote-branches.sh — branches on origin
+#   - lib/prune-worktrees.sh — worktrees and local branches
+#   - lib/prune-remote-branches.sh — branches on origin
 # What they keep because it exists nowhere else is listed for the operator:
 # idle dirty or unpushed worktrees, idle local branches with unpushed commits,
 # and stale branches on origin merged nowhere with no pull request. Nothing
@@ -194,8 +194,8 @@ sys.stdout.buffer.write(first[0][len(b"worktree "):] + b"x")
   fi
   here="${here%x}"
   here="${here%$'\n'}"
-  local runner="${here}/../skills/herdr-foreman/bounded-run.sh" prune="${here}/../skills/herdr-foreman/prune-worktrees.sh"
-  local remote="${here}/../skills/herdr-foreman/prune-remote-branches.sh" f
+  local runner="${here}/../skills/release/lib/bounded-run.sh" prune="${here}/../skills/release/lib/prune-worktrees.sh"
+  local remote="${here}/../skills/release/lib/prune-remote-branches.sh" f
   for f in "$runner" "$prune" "$remote"; do
     if [[ ! -f "$f" || ! -r "$f" ]]; then
       cannot_check "${f} is not readable; reinstall the plugin."
@@ -242,9 +242,9 @@ items, failures = [], []
 
 
 # The result shapes are the prune scripts' own; one module checks them for
-# every reader (skills/herdr-foreman/foreman/prune_result.py).
+# every reader (lib/prune_result.py).
 sys.path.insert(0, os.path.dirname(prune))
-from foreman.prune_result import prune_schema_error, remote_schema_error
+from prune_result import prune_schema_error, remote_schema_error
 
 SCHEMA = {prune: prune_schema_error, remote: remote_schema_error}
 

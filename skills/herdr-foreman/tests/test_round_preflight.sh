@@ -52,8 +52,8 @@ stub() { # <dir> <name> <exit> <stdout>
 # A shadow plugin dir: the real preflight beside stubbed collaborators, so the
 # script under test is the only unstubbed thing in it.
 shadow() { # <dir> [roster-rc] [authority-rc] [prune-rc] [capability-due] [authorized]
-  local dir="$1" roster="${2:-0}" authority="${3:-0}" prune="${4:-0}" due="${5:-false}" authorized="${6:-true}"
-  mkdir -p "$dir" || die "mkdir $dir"
+  local package="$1" dir="$1/skills/herdr-foreman" roster="${2:-0}" authority="${3:-0}" prune="${4:-0}" due="${5:-false}" authorized="${6:-true}"
+  mkdir -p "$dir" "$package/skills/release/lib" || die "mkdir $dir"
   cp "$REAL/round-preflight.sh" "$dir/" || die "copy the script under test"
   cp "$REAL/foreman-tier-check.py" "$dir/" || die "copy the composite foreman-tier check"
   stub "$dir" roster.sh "$roster" '{"agents":[{"name":"grok"}]}'
@@ -68,9 +68,9 @@ shadow() { # <dir> [roster-rc] [authority-rc] [prune-rc] [capability-due] [autho
   esac
   stub "$dir" sweep-worktrees.sh "$prune" "$sweep_out"
   if [[ "$prune" == timeout ]]; then
-    printf '#!/usr/bin/env bash\nset -euo pipefail\necho "bounded-run: stand-in budget spent" >&2\nexit 124\n' > "$dir/bounded-run.sh" || die "write runner stub"
+    printf '#!/usr/bin/env bash\nset -euo pipefail\necho "bounded-run: stand-in budget spent" >&2\nexit 124\n' > "$package/skills/release/lib/bounded-run.sh" || die "write runner stub"
   else
-    cp "$REAL/bounded-run.sh" "$dir/" || die "copy the bounded runner"
+    cp "$REAL/../release/lib/bounded-run.sh" "$package/skills/release/lib/" || die "copy the bounded runner"
   fi
   stub "$dir" resolve-gates.sh 0 '{"instructions":["AGENTS.md"],"workflows":[],"runners":[]}'
   # The stub's `$*` and `$FOREMAN_TIER_*` expand when the stub runs, not here.
@@ -81,7 +81,7 @@ shadow() { # <dir> [roster-rc] [authority-rc] [prune-rc] [capability-due] [autho
 }
 
 run() { # <dir> [extra args...]
-  local dir="$1"; shift
+  local dir="$1/skills/herdr-foreman"; shift
   OUT="$(HERDR_ENV=fixture WORKTREE_ROOT="$TMP" bash "$dir/round-preflight.sh" \
     --repo owner/repo --checkout /tmp "$@" 2>"$ERRFILE")"
   RC=$?
@@ -130,7 +130,7 @@ main() {
     pass; else fail "an unconfigured foreman warns without blocking, got RC=$RC OUT=$OUT ERR=$ERRTEXT"; fi
 
   shadow "$TMP/roster"
-  OUT="$(HERDR_ENV='' WORKTREE_ROOT="$TMP" bash "$TMP/roster/round-preflight.sh" --repo o/r --checkout /tmp 2>"$ERRFILE")"
+  OUT="$(HERDR_ENV='' WORKTREE_ROOT="$TMP" bash "$TMP/roster/skills/herdr-foreman/round-preflight.sh" --repo o/r --checkout /tmp 2>"$ERRFILE")"
   RC=$?
   if [[ $RC -eq 1 ]] && [[ "$(field "$OUT" 'd["checks"]["mode"]["status"]')" == '"standalone"' ]] \
      && ! printf '%s' "$OUT" | grep -q '"roster"'; then
@@ -204,8 +204,8 @@ main() {
   # Exit 0 with valid JSON that is not an object is not the check's evidence.
   for shape in '[]' 'null' '7'; do
     shadow "$TMP/shape-$shape"
-    stub "$TMP/shape-$shape" roster.sh 0 "$shape"
-    stub "$TMP/shape-$shape" resolve-gates.sh 0 "$shape"
+    stub "$TMP/shape-$shape/skills/herdr-foreman" roster.sh 0 "$shape"
+    stub "$TMP/shape-$shape/skills/herdr-foreman" resolve-gates.sh 0 "$shape"
     run "$TMP/shape-$shape"
     # The backticks are literal Markdown in the reason, not command substitution.
     # shellcheck disable=SC2016
@@ -221,7 +221,7 @@ main() {
   # The authority and capability verdicts parse a field out of the payload; a
   # non-object there is an unreadable verdict, never a crash or a pass.
   shadow "$TMP/shape-authority"
-  stub "$TMP/shape-authority" verify-authority.sh 0 '[]'
+  stub "$TMP/shape-authority/skills/herdr-foreman" verify-authority.sh 0 '[]'
   run "$TMP/shape-authority"
   if [[ $RC -eq 1 ]] && [[ "$(field "$OUT" 'd["checks"]["authority"]["status"]')" == '"failed"' ]] \
      && ! printf '%s' "$ERRTEXT" | grep -q 'Traceback'; then
@@ -231,7 +231,7 @@ main() {
   # The stub's `$*` and `$FOREMAN_TIER_*` expand when the stub runs, not here.
   # shellcheck disable=SC2016
   printf '#!/usr/bin/env bash\nset -euo pipefail\ncase "$*" in\n  *capability-check*) printf %s; exit 0 ;;\n  *measure*) printf %s; exit 0 ;;\n  *verify-foreman*) printf %%s "$FOREMAN_TIER_OUT"; exit "$FOREMAN_TIER_RC" ;;\nesac\nexit 9\n' \
-    "'[]'" "'{\"agents\":{}}'" > "$TMP/shape-capability/foreman.sh" || die "write foreman stub"
+    "'[]'" "'{\"agents\":{}}'" > "$TMP/shape-capability/skills/herdr-foreman/foreman.sh" || die "write foreman stub"
   run "$TMP/shape-capability"
   if [[ $RC -eq 1 ]] && [[ "$(field "$OUT" 'd["checks"]["capability"]["status"]')" == '"failed"' ]] \
      && ! printf '%s' "$ERRTEXT" | grep -q 'Traceback'; then
@@ -268,7 +268,7 @@ main() {
   # The stub's `$*` and `$FOREMAN_TIER_*` expand when the stub runs, not here.
   # shellcheck disable=SC2016
   printf '#!/usr/bin/env bash\nset -euo pipefail\ncase "$*" in\n  *capability-check*) printf %s; exit 0 ;;\n  *measure*) echo "measure: probe failed" >&2; exit 3 ;;\n  *verify-foreman*) printf %%s "$FOREMAN_TIER_OUT"; exit "$FOREMAN_TIER_RC" ;;\nesac\nexit 9\n' \
-    "'{\"due\":false,\"entries\":0}'" > "$TMP/measurefails/foreman.sh" || die "write foreman stub"
+    "'{\"due\":false,\"entries\":0}'" > "$TMP/measurefails/skills/herdr-foreman/foreman.sh" || die "write foreman stub"
   run "$TMP/measurefails"
   if [[ $RC -eq 1 ]] && [[ "$(field "$OUT" 'd["checks"]["headroom"]["status"]')" == '"failed"' ]] \
      && [[ "$(field "$OUT" 'd["checks"]["foreman_tier"]["status"]')" == '"failed"' ]] \
@@ -292,7 +292,7 @@ main() {
   # The stub's `$*` and `$FOREMAN_TIER_*` expand when the stub runs, not here.
   # shellcheck disable=SC2016
   printf '#!/usr/bin/env bash\nset -euo pipefail\ncase "$*" in\n  *capability-check*) printf %s; exit 0 ;;\n  *measure*) printf not-json; exit 0 ;;\n  *verify-foreman*) printf %%s "$FOREMAN_TIER_OUT"; exit "$FOREMAN_TIER_RC" ;;\nesac\nexit 9\n' \
-    "'{\"due\":false,\"entries\":0}'" > "$TMP/measurebadjson/foreman.sh" || die "write foreman stub"
+    "'{\"due\":false,\"entries\":0}'" > "$TMP/measurebadjson/skills/herdr-foreman/foreman.sh" || die "write foreman stub"
   run "$TMP/measurebadjson"
   if [[ $RC -eq 1 ]] && [[ "$(field "$OUT" 'd["checks"]["headroom"]["status"]')" == '"blocked"' ]] \
      && [[ "$(field "$OUT" 'd["checks"]["foreman_tier"]["status"]')" == '"failed"' ]] \
@@ -323,9 +323,9 @@ main() {
     case_no=$((case_no + 1))
     code="${spec%%|*}"; json="${spec#*|}"; want="${json##*|}"; json="${json%|*}"
     shadow "$TMP/composite$case_no"
-    printf '%s' "$json" > "$TMP/composite$case_no/composite.out" || die "write composite fixture"
+    printf '%s' "$json" > "$TMP/composite$case_no/skills/herdr-foreman/composite.out" || die "write composite fixture"
     printf '#!/usr/bin/env python3\nimport pathlib, sys\nprint((pathlib.Path(__file__).parent / "composite.out").read_text())\nsys.exit(%s)\n' "$code" \
-      > "$TMP/composite$case_no/foreman-tier-check.py" || die "write composite stub"
+      > "$TMP/composite$case_no/skills/herdr-foreman/foreman-tier-check.py" || die "write composite stub"
     run "$TMP/composite$case_no"
     case "$want" in
       ready)
@@ -349,7 +349,7 @@ main() {
   shadow "$TMP/usage"
   for args in "--checkout /tmp" "--repo o/r"; do
     # shellcheck disable=SC2086  # deliberate word splitting of the fixture args
-    OUT="$(HERDR_ENV=fixture WORKTREE_ROOT="$TMP" bash "$TMP/usage/round-preflight.sh" $args 2>"$ERRFILE")"
+    OUT="$(HERDR_ENV=fixture WORKTREE_ROOT="$TMP" bash "$TMP/usage/skills/herdr-foreman/round-preflight.sh" $args 2>"$ERRFILE")"
     RC=$?
     ERRTEXT="$(cat "$ERRFILE")"
     if [[ $RC -eq 2 && -z "$OUT" ]] && printf '%s' "$ERRTEXT" | grep -q 'round-preflight:'; then

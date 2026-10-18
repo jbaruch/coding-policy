@@ -44,7 +44,7 @@ script's top-of-file contract.
 - **Exit 1** — no JSON; a precondition is unmet. Report the stderr
   diagnostic, repair what it names, then run the sweep again.
 
-The removal predicates live in `skills/herdr-foreman/prune-worktrees.sh`
+The removal predicates live in `skills/release/lib/prune-worktrees.sh`
 (top-of-file docstring).
 
 Then run once per writing worker and every worktree named in a brief:

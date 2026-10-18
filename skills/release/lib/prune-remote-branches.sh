@@ -143,7 +143,7 @@ resolve_repo() { # <shared>
     printf 'the script directory %s cannot be entered — reinstall the plugin\n' "${dir:-/}" > "$ERRFILE"; return 1
   fi
   here="${here%x}"; here="${here%$'\n'}"
-  helper="${here}/../release/origin-repo.py"
+  helper="${here}/../origin-repo.py"
   if [[ ! -f "$helper" || ! -r "$helper" ]]; then
     printf '%s is not readable, so origin cannot be matched to a GitHub repository — reinstall the plugin\n' "$helper" > "$ERRFILE"; return 1
   fi

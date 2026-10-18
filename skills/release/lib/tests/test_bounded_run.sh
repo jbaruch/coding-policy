@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Outcome-based tests for skills/herdr-foreman/bounded-run.sh.
+# Outcome-based tests for lib/bounded-run.sh.
 #
 # No case waits on a clock. Every budget is an hour, far past any case; the
 # expiry case ends it with SIGALRM, the runner's own documented trigger, and
@@ -22,7 +22,7 @@
 # The harness drops `set -e` to aggregate results (rules/error-handling.md
 # aggregate-reporting carve-out).
 #
-# Run: bash skills/herdr-foreman/tests/test_bounded_run.sh
+# Run: bash lib/tests/test_bounded_run.sh
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
