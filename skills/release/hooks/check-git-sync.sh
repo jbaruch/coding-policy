@@ -46,7 +46,7 @@
 #           the sync check does not apply, so those sessions stay quiet.
 #   state : $SYNC_STATE_DIR/sync-<repo-key> (default ${TMPDIR:-/tmp}/coding-policy-sync),
 #           a per-repo throttle stamp (keyed by toplevel path). Schema documented
-#           in hooks/state-schema.md: one line "<schema_version> <checked_at>".
+#           in skills/release/state-schema.md: one line "<schema_version> <checked_at>".
 #   env   : SYNC_THROTTLE_HOURS (default 0 = every session), SYNC_FETCH_TIMEOUT (default 10s),
 #           SYNC_STATE_DIR (tests), SYNC_NOW (test-only injected clock; defaults
 #           to `date +%s`).
@@ -280,7 +280,7 @@ main() {
   fi
   stamp="${STATE_DIR}/sync-${repo_key}"
 
-  # Throttle stamp schema (see hooks/state-schema.md): one line "<schema_version>
+  # Throttle stamp schema (see skills/release/state-schema.md): one line "<schema_version>
   # <checked_at-epoch>". Per rules/stateful-artifacts.md Migration Policy:
   #   - schema_version 1 within the window => throttle (skip the fetch).
   #   - a future version (sv > 1) => this hook is lagging: no usable prior state

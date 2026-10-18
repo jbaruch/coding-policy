@@ -97,9 +97,9 @@ main() {
 
   # 1.
   stage baseline registry-baseline.sh
-  stub "$STAGE/capture-registry-baseline.sh" 0 '{"version":"9.9.9"}'
+  stub "$STAGE/registry-version.sh" 0 '{"version":"9.9.9"}'
   run registry-baseline.sh ws plugin
-  if [[ $RC -eq 0 && "$OUT" == "9.9.9" ]] && reached capture-registry-baseline.sh; then
+  if [[ $RC -eq 0 && "$OUT" == "9.9.9" ]] && reached registry-version.sh; then
     pass; else fail "registry-baseline.sh: expected 9.9.9 from its sibling, got RC=$RC OUT=$OUT ERR=$ERRTEXT"; fi
 
   # 2.
