@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.407 — 2026-10-18
+
 ### Repair the release skill review bundle
 
 Publication of the source-authoring compatibility fix stopped at the required
