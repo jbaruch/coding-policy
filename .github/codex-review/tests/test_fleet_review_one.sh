@@ -57,6 +57,9 @@ EOF
   mkdir -p "$central/.github/codex-review"
   echo '{}'     > "$central/.github/codex-review/fleet-schema.json"
   echo 'prompt' > "$central/.github/codex-review/fleet-prompt.md"
+  cat > "$central/.github/codex-review/policy-authoring-context.py" <<'PY'
+print('{"schema_version":1,"eligible":false,"rules":[]}')
+PY
   printf '#!/usr/bin/env bash\nset -euo pipefail\nexit 0\n' > "$central/.github/codex-review/assert-no-secret-leak.sh"
   cat > "$central/.github/codex-review/post-review.sh" <<'EOF'
 #!/usr/bin/env bash
@@ -137,6 +140,21 @@ t_missing_driver() {
   if [[ $rc -eq 1 ]]; then ok "missing driver file -> exit 1"; else bad "missing_driver: expected exit 1 (rc=$rc)"; fi
 }
 
+t_invalid_authoring_context() {
+  local env_line; env_line=$(make_env) || exit 2
+  read -r BIN CENTRAL CODEXH <<< "$env_line"
+  printf 'raise SystemExit(2)\n' > "$CENTRAL/.github/codex-review/policy-authoring-context.py" || exit 2
+  local log="$CODEXH/codex.log" rc=0
+  PATH="$BIN:$PATH" GH_TOKEN=tok CENTRAL_DIR="$CENTRAL" CODEX_HOME="$CODEXH" CODEX_ARGV_LOG="$log" \
+    bash "$SCRIPT" jbaruch repo-a 7 main >/dev/null 2>&1 || rc=$?
+  if [[ $rc -ne 0 && ! -f "$log" ]]; then
+    ok "unusable authoring context stops before Codex"
+  else
+    bad "invalid authoring context reached review (rc=$rc)"
+  fi
+  rmwarn "$BIN" "$CENTRAL" "$CODEXH"
+}
+
 # --- missing GH_TOKEN -> non-zero (unset :? guard) ---
 t_missing_token() {
   local env_line; env_line=$(make_env) || exit 2   # propagate make_env setup failure (aggregate carve-out)
@@ -154,6 +172,7 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
   t_model_pin
   t_bad_args
   t_missing_driver
+  t_invalid_authoring_context
   t_missing_token
   echo "== summary: ${pass} passed, ${fail} failed =="
   [[ "$fail" -eq 0 ]]

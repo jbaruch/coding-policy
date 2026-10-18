@@ -74,6 +74,11 @@ Scripts follow the baseline in `rules/file-hygiene.md` (exit codes, stderr, idem
 - **Self-error-handling**: exit non-zero on failure, write a diagnostic message to stderr
 - **Single-purpose**: one script does one thing — compose scripts, don't build monoliths
 
+- Narrow exception for another plugin's scoped skill lookup or stdout contract.
+- Applies to an installed plugin or a plugin authored in its own verified repository.
+- Preconditions are binding: read `skills/release/references/script-output-contracts.md` Scoped Plugin Contracts before relying on it.
+- Every other command block follows Scripts Are Real Files and Script Requirements unchanged.
+
 - Narrow exception for `skills/herdr-foreman/review-package.sh` artifact-path stdout.
 - Preconditions (all required):
   1. Success emits only the absolute path of the completed review package and a newline
@@ -81,23 +86,14 @@ Scripts follow the baseline in `rules/file-hygiene.md` (exit codes, stderr, idem
   3. The package contains the resolved commit range, commit list, diff stat, and patch
 - Every other skill script retains the JSON-producing requirement
 
-- Narrow exception for `skills/release/registry-baseline.sh` and `skills/release/confirm-tessl-landed.sh` version stdout.
-- Applies when a release-gate wrapper's whole output is the version string its caller passes as an argument to the next gate command
-- Preconditions (all required):
-  1. Success emits only that version and a newline
-  2. Failure emits no version, exits non-zero, and writes an actionable diagnostic to stderr
-  3. Each distinct verdict of the helper it wraps reaches the caller as a distinct exit code
+- Narrow exception for `skills/release/registry-baseline.sh` and `skills/release/confirm-tessl-landed.sh` version or verified baseline stdout.
+- Applies when the wrapper's whole output becomes the next gate's version or baseline argument
+- Preconditions are binding: read `skills/release/references/script-output-contracts.md` Version Stdout before relying on it.
 - Every other release script retains the JSON-producing requirement
 
 - Narrow exception for `skills/release/lib/bounded-run.sh` pass-through stdout.
 - Applies when a caller runs another script under a wall-clock budget
-- Preconditions (all required):
-  1. The runner's stdout is exactly the wrapped command's stdout
-  2. The runner adds nothing to stdout on success
-  3. On a spent budget the runner adds nothing to stdout, writes a diagnostic to stderr, and exits 124
-  4. The runner's own failures exit non-zero and write only to stderr
-  5. The wrapped command itself satisfies Script Requirements
-  6. A caller discards the wrapped command's partial stdout on exit 124 or 125
+- Preconditions are binding: read `skills/release/references/script-output-contracts.md` Bounded Runner Stdout before relying on it.
 - Every other skill script retains the JSON-producing requirement
 
 ## Precheck Gating

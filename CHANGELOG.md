@@ -1,5 +1,19 @@
 # Changelog
 
+### Changed
+
+- Recognize scoped lookup/output contracts owned by another plugin, including a
+  plugin being developed in its own repository. The fleet reviewer derives that
+  authoring role from trusted base metadata and reads declared head rule blobs
+  without installing or executing the candidate. A PR cannot create its own
+  provider identity or waive generic safety/release floors. This removes the
+  first-publication dependency cycle blocking the Herdr extraction.
+- Keep the always-loaded rule set within its existing budget by moving version
+  stdout and bounded-runner preconditions to a binding release reference. Their
+  failure and exit-code obligations remain unchanged. Recognize a verified
+  first-publication baseline sentinel, used by the prepared cutover publisher;
+  failed or indeterminate registry reads still authorize no publication claim.
+
 ## 0.3.406 — 2026-10-18
 
 ### Changed
