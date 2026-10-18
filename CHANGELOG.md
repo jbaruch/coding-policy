@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.406 — 2026-10-18
+
 ### Changed
 
 - Accept canonical GitHub issue URLs in partial PR issue links and preserve
