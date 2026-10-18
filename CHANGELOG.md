@@ -1,39 +1,39 @@
 # Changelog
 
-## Unreleased` heading that blocked the stamp), plus two deliberate
-  rewrites of published entries (#357's consolidation, #247's prose pass)
-  that would now carry a trailer, and nothing else.
+### Changed
 
-  Prevention runs at publish time. The stamp-changelog action now runs the
-  check with a new `--since-last-publish` mode before stamping, so a push
-  that parks a new entry fails the publish instead of shipping an unheaded
-  version. The baseline is the last stamp or version-bump commit
-  `github-actions[bot]` wrote, not the push's before-commit. Measuring from
-  the before-commit (the first cut) left two holes the reviewers found: a
-  stopped publish leaves the misfiled merge on `main`, so the next push
-  would count it as already known and carry it through, and a manual
-  `workflow_dispatch` has no before-commit at all. A stopped publish writes
-  no bookkeeping commit, so both are now measured from the last real publish.
-  A shallow checkout is a tool error that names `fetch-depth: 0`; a history
-  with no bookkeeping commit yet has nothing to measure.
+- Extract Herdr coordination, native team hooks, role instructions and regression suites into `jbaruch/herdr-policy`. Retain standalone delegation limits and generic sync, review, release and hygiene contracts.
+- Distribute the retained general skills and rules through Tessl and ACR at one explicit version; keep runtime hooks inside the complete release skill and exclude development suites from installed payloads.
+- Verify optional team rulings through the separately installed Herdr owner without importing its runtime into standalone releases.
+- Confirm a first Tessl publication using a verified absent-plugin baseline. The new Herdr package returns a structured registry 404 before its first publish; authentication and transport errors remain indeterminate rather than becoming guessed version baselines.
+- Ship the hook throttle-stamp schema beside its release-skill owner through both package formats.
 
-  The checker now answers in one JSON verdict on stdout for every outcome,
-  usage errors included (`pass`, `nothing_to_measure`, `misfiled`, `error`),
-  with diagnostics on stderr. Two ways it could fail open or misreport went
-  with it: `git` output that is not UTF-8 raised past the error handler and
-  exited 1, the misfiling verdict, instead of 2; and the bookkeeping-commit
-  file list was split on whitespace, so a changelog path holding a space
-  never matched, no baseline was found, and the publish gate passed having
-  measured nothing. It reads NUL-delimited paths now.
+### Repair the release skill review bundle
 
-  Archive repairs in the same change: 0.3.291 gets its heading above #527;
-  #523's entry moves from under 0.3.305 back to the 0.3.301 heading that
-  published it, and the stray second `## 0.3.301` goes; the three stamps
-  from 2026-09-25 04:09Z to 05:36Z read the registry one version behind, so
-  their headings move up by one (0.3.269, 0.3.270, 0.3.271), ending the
-  duplicate `## 0.3.268`. The 0.3.258 entry is rewritten as an archive entry
-  instead of a restatement of #502's PR body.
+Publication of the source-authoring compatibility fix stopped at the required
+skill review (83%, below 85%). The reviewer received SKILL.md and recognized
+reference directories, but the release execution plan pointed to root-level
+PUBLICATION.md, REVIEW_DETAILS.md and SCRIPTING.md that were outside that review
+bundle. Move these documents into references/ and split the existing ordered
+execution plan into seven elected step references. Preserve the command bodies,
+review-reading obligations, baseline/merge order, worktree cleanup and separate
+channel confirmation contracts. SKILL.md now routes the same seven steps with
+binding links instead of loading every command and failure branch on invocation.
 
+
+### Changed
+
+- Recognize scoped lookup/output contracts owned by another plugin, including a
+  plugin being developed in its own repository. The fleet reviewer derives that
+  authoring role from trusted base metadata and reads declared head rule blobs
+  without installing or executing the candidate. A PR cannot create its own
+  provider identity or waive generic safety/release floors. This removes the
+  first-publication dependency cycle blocking the Herdr extraction.
+- Keep the always-loaded rule set within its existing budget by moving version
+  stdout and bounded-runner preconditions to a binding release reference. Their
+  failure and exit-code obligations remain unchanged. Recognize a verified
+  first-publication baseline sentinel, used by the prepared cutover publisher;
+  failed or indeterminate registry reads still authorize no publication claim.
 
 ## 0.3.407 — 2026-10-18
 
