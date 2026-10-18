@@ -69,12 +69,18 @@ main() {
       return 2
     fi
   elif (( rc == 1 )); then
-    git -C "$root" tag "$tag" "$head" || return 2
+    if ! git -C "$root" tag "$tag" "$head"; then
+      echo "publish-acr: cannot create ${tag}; repair local Git write access and refs, then retry the same reviewed commit without moving an existing tag" >&2
+      return 2
+    fi
   else
     echo "publish-acr: cannot read ${tag}; repair Git refs before retrying" >&2
     return 2
   fi
-  git -C "$root" push origin "refs/tags/$tag" || return 2
+  if ! git -C "$root" push origin "refs/tags/$tag"; then
+    echo "publish-acr: cannot push ${tag}; restore origin write access and reconcile any conflicting remote tag without moving it, then retry" >&2
+    return 2
+  fi
   acr publish "$root" --json
 }
 

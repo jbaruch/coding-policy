@@ -99,6 +99,7 @@ class SkillBootstrapTest(unittest.TestCase):
                 self.assertTrue(script.is_relative_to(root.resolve()))
                 self.assertTrue(script.is_file(), str(script))
                 self.assertEqual(interpreter, {".sh": "bash", ".py": "python3"}[script.suffix])
+                self.assertIn("run tessl install jbaruch/coding-policy", bootstrap)
                 if kind in bootstraps:
                     self.assertEqual(bootstrap, bootstraps[kind])
                 bootstraps[kind] = bootstrap
@@ -166,12 +167,12 @@ class SkillBootstrapTest(unittest.TestCase):
                 result = self.execute(item)
                 self.assertNotEqual(result.returncode, 0)
                 self.assertNotIn("impostor", result.stdout)
-                self.assertIn("install jbaruch/coding-policy", result.stderr)
+                self.assertIn("run tessl install jbaruch/coding-policy", result.stderr)
 
     def test_missing_installation_refuses_without_running_a_consumer_script(self):
         result = self.execute(self.representative("release"))
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("install jbaruch/coding-policy", result.stderr)
+        self.assertIn("run tessl install jbaruch/coding-policy", result.stderr)
 
     def test_recorded_native_reference_forms_work_without_a_tessl_tree(self):
         for host in (".codex/skills", ".claude/skills", ".cursor/skills", ".agents/skills"):

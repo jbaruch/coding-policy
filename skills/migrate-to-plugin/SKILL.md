@@ -21,7 +21,7 @@ Convert a legacy `tile.json` plugin to the `plugin.json` form and reconcile the 
 Run the deterministic migration from the repo root:
 
 ```bash
-KS=.tessl/plugins/jbaruch/coding-policy/skills/migrate-to-plugin; [ -d "$KS" ] || KS="$HOME/$KS"; [ -d "$KS" ] || case "$(git config --get remote.origin.url)" in git@github.com:jbaruch/coding-policy|git@github.com:jbaruch/coding-policy.git|https://github.com/jbaruch/coding-policy|https://github.com/jbaruch/coding-policy.git|ssh://git@github.com/jbaruch/coding-policy|ssh://git@github.com/jbaruch/coding-policy.git) KS=skills/migrate-to-plugin ;; *) echo "coding-policy skill not found: install jbaruch/coding-policy" >&2; exit 1 ;; esac
+KS=.tessl/plugins/jbaruch/coding-policy/skills/migrate-to-plugin; [ -d "$KS" ] || KS="$HOME/$KS"; [ -d "$KS" ] || case "$(git config --get remote.origin.url)" in git@github.com:jbaruch/coding-policy|git@github.com:jbaruch/coding-policy.git|https://github.com/jbaruch/coding-policy|https://github.com/jbaruch/coding-policy.git|ssh://git@github.com/jbaruch/coding-policy|ssh://git@github.com/jbaruch/coding-policy.git) KS=skills/migrate-to-plugin ;; *) echo "coding-policy skill not found: run tessl install jbaruch/coding-policy" >&2; exit 1 ;; esac
 bash "$KS/migrate.sh" .
 ```
 

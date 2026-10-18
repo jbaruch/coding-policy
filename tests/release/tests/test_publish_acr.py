@@ -2,6 +2,7 @@
 
 import json
 import os
+import shutil
 import subprocess
 import tempfile
 import unittest
@@ -76,6 +77,24 @@ class PublishAcrTest(unittest.TestCase):
         self.assertIn("immutable", result.stderr)
         self.assertEqual(self.git("rev-parse", "v0.4.0").strip(), self.head)
         self.assertFalse((self.root / "published").exists())
+
+    def test_tag_creation_and_push_failures_are_actionable_and_do_not_publish(self):
+        real_git = shutil.which("git")
+        self.assertIsNotNone(real_git)
+        fake = self.bin / "git"
+        fake.write_text("#!/usr/bin/env python3\nimport os,sys\n"
+                        "args=sys.argv[1:]\n"
+                        "operation=args[2] if len(args)>2 and args[0]=='-C' else args[0]\n"
+                        "if operation==os.environ['PUBLISH_FAIL_OPERATION']: sys.exit(1)\n"
+                        "os.execv(" + repr(real_git) + ", ['git',*args])\n")
+        fake.chmod(0o755)
+        for operation, recovery in (("tag", "repair local Git write access"), ("push", "restore origin write access")):
+            with self.subTest(operation=operation):
+                self.env["PUBLISH_FAIL_OPERATION"] = operation
+                result = self.publish()
+                self.assertEqual((result.returncode, result.stdout), (2, ""))
+                self.assertIn(recovery, result.stderr)
+                self.assertFalse((self.root / "published").exists())
 
     def test_dirty_or_stale_default_never_creates_a_release_tag(self):
         (self.repo / "untracked").write_text("keep\n")

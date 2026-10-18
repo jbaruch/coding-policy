@@ -3,9 +3,9 @@
 # retrievable GitHub release at <tag> on <owner>/<repo>?
 #
 # This is the non-Tessl channel's published-artifact evidence
-# (rules/ci-safety.md "Always Watch CI"). A package published by pushing
-# a release tag — an ACR package published by `acr publish` from a
-# tag-triggered workflow — has no registry to advance and no moderation
+# (rules/ci-safety.md "Always Watch CI"). A GitHub asset publisher can run
+# from a pushed tag or create its immutable tag from a reviewed merge push.
+# Both have no Tessl registry to advance and no moderation
 # state to clear, so the Tessl helpers say nothing about whether it
 # landed. What answers that is the release itself: it exists at the
 # exact tag the run published, it is not a draft, and its assets are
@@ -20,8 +20,10 @@
 # later step. Conjunct 2 alone passes an upload that never completed, a
 # draft left unpublished, or a release created at a different tag.
 #
-# The run id comes from `resolve-publish-run.sh`; `gh run watch` on it
-# is a timing precondition, never the gate. A run still in flight is
+# Resolve the actual publisher run with `resolve-publish-run.sh` before calling
+# this helper. A main-push dual workflow uses a shared run id with separate
+# artifact proof for each channel. `gh run watch` on that run is a timing
+# precondition, never the gate. A run still in flight is
 # INDETERMINATE (exit 2), the same reading verify-publish-landed.sh
 # gives a `null` conclusion.
 #

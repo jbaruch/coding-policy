@@ -5,12 +5,14 @@ per `rules/stateful-artifacts.md`.
 
 ## Artifacts
 
-| Stamp path | Owner (writer + reader) | Purpose |
+Owner skill: `skills/release`. The skill owns schema changes and migration;
+`skills/release/hooks/check-git-sync.sh` is its sole writer and reader.
+
+| Stamp path | Writer + reader | Purpose |
 | ---------- | ----------------------- | ------- |
 | `$SYNC_STATE_DIR/sync-<repo-key>` (default `${TMPDIR:-/tmp}/coding-policy-sync/sync-<repo-key>`) | `skills/release/hooks/check-git-sync.sh` | Throttle the `git fetch origin` call, per repo (`<repo-key>` = cksum of the repo toplevel path) |
 
-Each stamp has exactly one owner hook that both writes and reads it. No other
-skill or hook touches it.
+Each stamp belongs to the release skill. No other skill or hook touches it.
 
 ## Record Format
 
@@ -29,17 +31,17 @@ Example: `1 1734567890`
 
 ## Writer / Reader Contract
 
-- **Writer** (owner hook): writes `1 <now>` before running the throttled call,
+- **Writer** (release skill's hook): writes `1 <now>` before running the throttled call,
   so a slow or failed call still throttles the next session. Never writes when
   preserving a future-version record (see Migration).
-- **Reader** (owner hook): throttles only when the record's `schema_version` is
+- **Reader** (release skill's hook): throttles only when the record's `schema_version` is
   `1` **and** `checked_at` is an integer within the throttle window. Every other
   record is **no usable prior state**: the hook runs its call (no throttle).
 
 ## Migration
 
-Only the owner hook migrates, and it distinguishes older records from newer ones
-per `rules/stateful-artifacts.md` Migration Policy:
+Only the release skill migrates, through its hook. It distinguishes older records
+from newer ones per `rules/stateful-artifacts.md` Migration Policy:
 
 - **Older or corrupt record** — an old bare-integer stamp (pre-versioning), a
   non-integer field, or an absent stamp: no usable prior state, and the hook

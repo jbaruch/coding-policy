@@ -319,7 +319,7 @@ PY
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
   if ! main "$@"; then
     warn "internal error — no leftover report this session; run 'bash ${BASH_SOURCE[0]}' directly to see why"
-    static_cannot_check "the hook failed internally; run hooks/check-leftover-worktrees.sh by hand to see why."
+    static_cannot_check "the hook failed internally; run skills/release/hooks/check-leftover-worktrees.sh by hand to see why."
   fi
   exit 0
 fi
