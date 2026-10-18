@@ -1,0 +1,15 @@
+name: Publish immutable ACR package
+description: Publish the caller's clean explicit-version package through the canonical release owner.
+inputs:
+  path:
+    description: Package repository root
+    required: false
+    default: '.'
+runs:
+  using: composite
+  steps:
+    - name: Publish immutable tag and package
+      shell: bash
+      env:
+        PACKAGE_ROOT: ${{ inputs.path }}
+      run: bash "$GITHUB_ACTION_PATH/../../../skills/release/publish-acr.sh" "$PACKAGE_ROOT"

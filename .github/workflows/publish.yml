@@ -108,8 +108,8 @@ jobs:
           cache-dependency-path: .test-dependencies/acr/go.sum
       - name: Build pinned ACR publisher
         working-directory: .test-dependencies/acr
-        run: go build -o "$RUNNER_TEMP/acr" ./cmd/acr
+        run: go build -o /usr/local/bin/acr ./cmd/acr
       - name: Publish immutable ACR release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: PATH="$RUNNER_TEMP:$PATH" bash skills/release/publish-acr.sh .
+        uses: ./.github/actions/publish-acr
