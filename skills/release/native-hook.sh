@@ -5,7 +5,7 @@
 set -euo pipefail
 
 main() {
-  local event="${1:-}" owner src here skill
+  local event="${1:-}" owner src here skill hooks host
   case "$event" in
     session-start) owner=session-start.sh ;;
     stop-handoff) owner=stop-handoff-hygiene.sh ;;
@@ -24,9 +24,17 @@ main() {
   case "${here##*/}" in
     release|acr__jbaruch__coding-policy__release) skill="$here" ;;
     *)
-      # ACR rebases the owned skill literal; anchor it at the hook's project.
-      local runtime=.tessl/plugins/jbaruch/coding-policy/skills/release
-      skill="${here}/../../../${runtime}" ;;
+      # ACR copies hook assets unchanged; select the sibling native skill.
+      hooks="${here%/*}"
+      host="${hooks%/*}"
+      if [[ "${hooks##*/}" != hooks ]]; then
+        echo 'coding-policy hook: restore the managed hook under its native host' >&2
+        return 1
+      fi
+      case "${host##*/}" in
+        .codex|.claude|.cursor) skill="$host/skills/acr__jbaruch__coding-policy__release" ;;
+        *) echo 'coding-policy hook: restore the supported native host layout' >&2; return 1 ;;
+      esac ;;
   esac
   if [[ ! -f "$skill/hooks/$owner" || ! -r "$skill/hooks/$owner" ]]; then
     echo 'coding-policy hook: repair the complete release skill before retrying' >&2

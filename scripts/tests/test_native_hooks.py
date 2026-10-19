@@ -9,7 +9,6 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 SOURCE = ROOT / "skills/release/native-hook.sh"
-OWN_REFERENCE = ".tessl/plugins/jbaruch/coding-policy/skills/release"
 NATIVE = "acr__jbaruch__coding-policy__release"
 
 
@@ -21,16 +20,14 @@ class NativeHooksTest(unittest.TestCase):
             foreign.mkdir()
             for host in (None, ".codex", ".claude", ".cursor"):
                 if host is None:
-                    skill = project / OWN_REFERENCE
+                    skill = project / ".tessl/plugins/jbaruch/coding-policy/skills/release"
                     hook = skill / "native-hook.sh"
-                    text = SOURCE.read_text()
                 else:
                     skill = project / host / "skills" / NATIVE
                     hook = project / host / "hooks/acr__jbaruch__coding-policy__fixture/native-hook.sh"
-                    text = SOURCE.read_text().replace(OWN_REFERENCE, host + "/skills/" + NATIVE)
                 hook.parent.mkdir(parents=True, exist_ok=True)
                 (skill / "hooks").mkdir(parents=True)
-                hook.write_text(text)
+                hook.write_text(SOURCE.read_text())
                 for event, owner in (("session-start", "session-start.sh"), ("stop-handoff", "stop-handoff-hygiene.sh")):
                     target = skill / "hooks" / owner
                     target.write_text("#!/bin/bash\ncat\n")
