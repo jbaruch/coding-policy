@@ -45,6 +45,7 @@ set -euo pipefail
 # harness itself.
 SH_BIN="${SH_BIN:-bash}"
 PY_BIN="${PY_BIN:-python3}"
+export PYTHONDONTWRITEBYTECODE=1
 
 # A dispatcher fault must be distinguishable from a suite's own exit code.
 # No exit code can do that job: 2 collides with the harnesses here (they

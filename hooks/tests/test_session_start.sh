@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Outcome-based tests for hooks/session-start.sh.
+# Outcome-based tests for skills/release/hooks/session-start.sh.
 #
 # Each case copies the entry script into a scratch hooks directory beside fake
 # hooks written here, and picks them through SESSION_START_HOOKS.
@@ -57,7 +57,7 @@ context() { python3 -c 'import json,sys; d=json.loads(sys.stdin.read())["hookSpe
 
 main() {
   local here
-  here="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)" || die "cannot resolve the hooks directory"
+  here="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../skills/release/hooks" && pwd)" || die "cannot resolve the hooks directory"
   command -v python3 >/dev/null || die "python3 required for these tests"
   TMP="$(mktemp -d -t session-start-test.XXXXXX)" || die "mktemp failed"
   trap cleanup EXIT
@@ -92,13 +92,14 @@ main() {
     pass; else fail "bad output: expected a status naming it, got RC=$RC OUT=$OUT"; fi
 
   # 5. execute the manifest routes; quoting is proved by the delivered payload.
-  if python3 - "$here/../.tessl-plugin/plugin.json" "$DIR" "$TMP" <<'PY'
+  if python3 - "$here/../../../.tessl-plugin/plugin.json" "$DIR" "$TMP" <<'PY'
 import json, os, shlex, shutil, subprocess, sys
 from pathlib import Path
 
 d = json.loads(Path(sys.argv[1]).read_text())
 plugin = Path(sys.argv[3]) / "installed plugin with spaces"
-shutil.copytree(sys.argv[2], plugin / "hooks")
+shutil.copytree(sys.argv[2], plugin / "skills/release/hooks")
+shutil.copyfile(Path(sys.argv[1]).parents[1] / "skills/release/native-hook.sh", plugin / "skills/release/native-hook.sh")
 settings = plugin / ".claude"
 settings.mkdir()
 environment = {**os.environ, "SESSION_START_HOOKS": "one two quiet"}

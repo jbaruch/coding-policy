@@ -7,7 +7,7 @@ alwaysApply: true
 ## Surface the Status
 
 - A SessionStart hook emits an `additionalContext` payload beginning with `Session-start status — ` only when it has a status to report
-- Many outcomes emit nothing (non-repo, no matching dependency, no live Herdr team)
+- Many outcomes emit nothing (non-repo, no matching dependency)
 - At session start, collect every such payload the context carries (there may be none) and relay each in full as one block, before the first substantive action
 - A payload may span several lines, a marker line plus continuation lines such as an update list or a `NOTE:`
 - Relay the whole payload, never only its marker line
@@ -23,7 +23,6 @@ alwaysApply: true
 - Raise each listed item with the user, one question at a time
 - Offer the choices push, commit, open a pull request, delete, or keep
 - Never push, commit, stash, delete or discard a listed item unasked
-- In a Herdr team round the operator carries out the chosen resolution (see `skills/herdr-foreman/references/team-operation.md` Writers and Checkouts)
 
 ## Reconciliation With `response-clarity`
 

@@ -18,7 +18,7 @@ The full preconditions and authority-of-record detail of each `rules/dependency-
 - Covered manifest: the fleet's consumer `tessl.json`
 - tessl writes its resolved state into the gitignored `.tessl/`
 - `jbaruch/*`-owned dependencies use the `latest` specifier
-- Deterministic check: the plugin-shipped `hooks/check-tessl-latest.sh` `SessionStart` hook, which flags any `jbaruch/*` dependency not at `latest`
+- Deterministic check: the plugin-shipped `skills/release/hooks/check-tessl-latest.sh` `SessionStart` hook, which flags any `jbaruch/*` dependency not at `latest`
 - `skills/onboard-repo` sets `latest` and gitignores `.tessl/` at onboarding
 - Third-party dependencies (`tessl-labs/*`, `tessl/npm-*`) pin normally and stay out of scope
 
@@ -27,7 +27,7 @@ The full preconditions and authority-of-record detail of each `rules/dependency-
 - Covered manifest: the fleet's consumer ACR `agents.yaml`
 - ACR writes its resolved state into `.agents/registry.lock`, gitignored with the rest of `.agents/`
 - `github:jbaruch/*` dependencies use `requested: latest`
-- Deterministic check: the plugin-shipped `hooks/check-acr-latest.sh` `SessionStart` hook
+- Deterministic check: the plugin-shipped `skills/release/hooks/check-acr-latest.sh` `SessionStart` hook
 - The hook flags any `github:jbaruch/*` dependency not at `latest`
 - The hook refuses to update while `.agents/registry.lock` is tracked
 - `skills/onboard-repo` gitignores `.agents/` at onboarding

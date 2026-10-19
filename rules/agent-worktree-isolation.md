@@ -14,18 +14,17 @@ alwaysApply: true
 ## How to Isolate
 
 - "Worktree" here means an additional working tree created via `git worktree add` — distinct from the base checkout, on its own branch, sharing the same `.git` object store
-- Delegation follows `rules/agent-team-operation.md` Delegation
-- In a Herdr round the foreman provisions each writer's worktree under `skills/herdr-foreman/references/team-operation.md` Writers and Checkouts
+- Delegation follows `rules/agent-delegation.md` Delegation
 - For independent sessions outside a Herdr round, use `git worktree add -b <task-branch> ../<repo>-<task>` to create an isolated checkout on a new branch (or `git worktree add ../<repo>-<task> <existing-branch>` to attach to one that already exists), then `cd` in before any mutating operation
 
 ## Cleanup
 
 - A worktree's lifecycle ends when its branch merges or the worktree is abandoned
 - An idle clean worktree whose HEAD origin holds counts as abandoned
-- Outside a Herdr team round, the agent removes its own worktree after the merge
+- The agent removes its own worktree after the merge unless an explicitly applicable team contract assigns teardown to its coordinator
 - When the worktree's branch lands via `skills/release/SKILL.md` Step 7, the post-merge order is mandatory: `cd` back to the base checkout → fast-forward base `main` → `git worktree remove <worktree-path>` → `git branch -d <branch>`. Teardown precedes branch delete
 - Use `git worktree remove <path>`; never `rm -rf` the directory
-- The session-start hook `hooks/check-leftover-worktrees.sh` cleans the session's own repository in a native session
+- The session-start hook `skills/release/hooks/check-leftover-worktrees.sh` cleans the session's own repository in a native session
 - Under tessl (portable mode), it reports from a dry run in a main checkout and deletes nothing
 - Under tessl, it skips a linked worktree
 - In a Herdr worker session, it deletes nothing
@@ -40,7 +39,6 @@ alwaysApply: true
 - It is reported once stale
 - A protected branch on origin is never touched or reported
 - A reported item follows `rules/hook-action-reporting.md` Act on What It Names
-- In a Herdr team round, see `skills/herdr-foreman/references/team-operation.md` Writers and Checkouts
 - Leave no orphans in `git worktree list`
 
 ## Exception — Single-Reader Inspection

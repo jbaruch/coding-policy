@@ -1,15 +1,13 @@
 {
   "name": "jbaruch/coding-policy",
-  "version": "0.3.407",
+  "version": "0.4.0",
   "description": "General-purpose coding policy for Baruch's AI agents",
   "private": false,
   "skills": [
     "skills/release",
     "skills/onboard-repo",
     "skills/adopt-fork-pr",
-    "skills/migrate-to-plugin",
-    "skills/herdr-foreman",
-    "skills/herdr-standup"
+    "skills/migrate-to-plugin"
   ],
   "rules": [
     "rules/commit-conventions.md",
@@ -37,7 +35,7 @@
     "rules/response-clarity.md",
     "rules/ship-on-green.md",
     "rules/hook-action-reporting.md",
-    "rules/agent-team-operation.md"
+    "rules/agent-delegation.md"
   ],
   "hooks": {
     "SessionStart": [
@@ -47,7 +45,8 @@
             "type": "command",
             "command": "bash",
             "args": [
-              "${TESSL_PLUGIN_DIR}/hooks/session-start.sh"
+              "${TESSL_PLUGIN_DIR}/skills/release/native-hook.sh",
+              "session-start"
             ]
           }
         ]
@@ -56,12 +55,12 @@
   },
   "nativeHooks": {
     "claude-code": {
-      "UserPromptSubmit": [
+      "SessionStart": [
         {
           "hooks": [
             {
               "type": "command",
-              "command": "bash \"${TESSL_PLUGIN_DIR}/hooks/herdr-reset-input.sh\""
+              "command": "bash \"${TESSL_PLUGIN_DIR}/skills/release/native-hook.sh\" session-start"
             }
           ]
         }
@@ -71,33 +70,19 @@
           "hooks": [
             {
               "type": "command",
-              "command": "bash \"${TESSL_PLUGIN_DIR}/hooks/stop-handoff-hygiene.sh\""
-            },
-            {
-              "type": "command",
-              "command": "bash \"${TESSL_PLUGIN_DIR}/hooks/herdr-supervision-stop.sh\""
-            }
-          ]
-        }
-      ],
-      "SessionStart": [
-        {
-          "hooks": [
-            {
-              "type": "command",
-              "command": "bash \"${TESSL_PLUGIN_DIR}/hooks/session-start.sh\""
+              "command": "bash \"${TESSL_PLUGIN_DIR}/skills/release/native-hook.sh\" stop-handoff"
             }
           ]
         }
       ]
     },
     "codex": {
-      "UserPromptSubmit": [
+      "SessionStart": [
         {
           "hooks": [
             {
               "type": "command",
-              "command": "bash \"${TESSL_PLUGIN_DIR}/hooks/herdr-reset-input.sh\""
+              "command": "bash \"${TESSL_PLUGIN_DIR}/skills/release/native-hook.sh\" session-start"
             }
           ]
         }
@@ -107,21 +92,7 @@
           "hooks": [
             {
               "type": "command",
-              "command": "bash \"${TESSL_PLUGIN_DIR}/hooks/stop-handoff-hygiene.sh\""
-            },
-            {
-              "type": "command",
-              "command": "bash \"${TESSL_PLUGIN_DIR}/hooks/herdr-supervision-stop.sh\""
-            }
-          ]
-        }
-      ],
-      "SessionStart": [
-        {
-          "hooks": [
-            {
-              "type": "command",
-              "command": "bash \"${TESSL_PLUGIN_DIR}/hooks/session-start.sh\""
+              "command": "bash \"${TESSL_PLUGIN_DIR}/skills/release/native-hook.sh\" stop-handoff"
             }
           ]
         }

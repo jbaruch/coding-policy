@@ -1,0 +1,159 @@
+schemaVersion: 1
+name: jbaruch/coding-policy
+version: 0.4.0
+description: General-purpose coding policy for AI agents
+source:
+  repository: https://github.com/jbaruch/coding-policy
+artifacts:
+  rules:
+    - id: commit-conventions
+      path: rules/commit-conventions.md
+      activation:
+        mode: always
+    - id: sync-before-work
+      path: rules/sync-before-work.md
+      activation:
+        mode: always
+    - id: testing-standards
+      path: rules/testing-standards.md
+      activation:
+        mode: always
+    - id: error-handling
+      path: rules/error-handling.md
+      activation:
+        mode: always
+    - id: dependency-management
+      path: rules/dependency-management.md
+      activation:
+        mode: always
+    - id: file-hygiene
+      path: rules/file-hygiene.md
+      activation:
+        mode: always
+    - id: ci-safety
+      path: rules/ci-safety.md
+      activation:
+        mode: always
+    - id: no-secrets
+      path: rules/no-secrets.md
+      activation:
+        mode: always
+    - id: code-formatting
+      path: rules/code-formatting.md
+      activation:
+        mode: always
+    - id: language-diagnostics
+      path: rules/language-diagnostics.md
+      activation:
+        mode: always
+    - id: context-artifacts
+      path: rules/context-artifacts.md
+      activation:
+        mode: paths
+        paths:
+          - ".tessl-plugin/plugin.json"
+          - "agent-plugin.yaml"
+          - "rules/**"
+          - "skills/**"
+          - ".tesslignore"
+          - "CHANGELOG.md"
+          - "README.md"
+    - id: context-writing-style
+      path: rules/context-writing-style.md
+      activation:
+        mode: paths
+        paths:
+          - "rules/**/*.md"
+          - "skills/**/SKILL.md"
+          - "README.md"
+          - "CHANGELOG.md"
+    - id: rule-frontmatter
+      path: rules/rule-frontmatter.md
+      activation:
+        mode: paths
+        paths:
+          - "rules/**/*.md"
+    - id: skill-authoring
+      path: rules/skill-authoring.md
+      activation:
+        mode: paths
+        paths:
+          - "skills/**/SKILL.md"
+          - "skills/**/*.md"
+          - ".tessl-plugin/plugin.json"
+          - "agent-plugin.yaml"
+    - id: script-delegation
+      path: rules/script-delegation.md
+      activation:
+        mode: paths
+        paths:
+          - "skills/**"
+          - "scripts/**"
+          - "skills/**/*.sh"
+          - "skills/**/*.py"
+          - "skills/**/SKILL.md"
+    - id: script-as-black-box
+      path: rules/script-as-black-box.md
+      activation:
+        mode: paths
+        paths:
+          - "skills/**/SKILL.md"
+          - "skills/**/*.md"
+    - id: stateful-artifacts
+      path: rules/stateful-artifacts.md
+      activation:
+        mode: always
+    - id: agent-worktree-isolation
+      path: rules/agent-worktree-isolation.md
+      activation:
+        mode: always
+    - id: boy-scout
+      path: rules/boy-scout.md
+      activation:
+        mode: always
+    - id: external-repo-contributions
+      path: rules/external-repo-contributions.md
+      activation:
+        mode: always
+    - id: reviewer-feedback-reading
+      path: rules/reviewer-feedback-reading.md
+      activation:
+        mode: always
+    - id: review-severity
+      path: rules/review-severity.md
+      activation:
+        mode: always
+    - id: response-clarity
+      path: rules/response-clarity.md
+      activation:
+        mode: always
+    - id: ship-on-green
+      path: rules/ship-on-green.md
+      activation:
+        mode: always
+    - id: hook-action-reporting
+      path: rules/hook-action-reporting.md
+      activation:
+        mode: always
+    - id: agent-delegation
+      path: rules/agent-delegation.md
+      activation:
+        mode: always
+  skills:
+    - id: release
+      path: skills/release
+    - id: onboard-repo
+      path: skills/onboard-repo
+    - id: adopt-fork-pr
+      path: skills/adopt-fork-pr
+    - id: migrate-to-plugin
+      path: skills/migrate-to-plugin
+  hooks:
+    - id: coding-session-start
+      event: session-start
+      path: skills/release/native-hook.sh
+      args: [session-start]
+    - id: coding-stop-handoff
+      event: stop
+      path: skills/release/native-hook.sh
+      args: [stop-handoff]

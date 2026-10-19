@@ -1,6 +1,6 @@
 ---
 alwaysApply: false
-applyTo: "skills/**/SKILL.md, skills/**/*.md, .tessl-plugin/plugin.json — when authoring or modifying skills"
+applyTo: "skills/**/SKILL.md, skills/**/*.md, .tessl-plugin/plugin.json, agent-plugin.yaml — when authoring or modifying skills or their manifests"
 description: SKILL.md structure, frontmatter, execution-mode preamble, flat step numbering, typed Skill() calls, plugin.json reference
 ---
 
@@ -67,7 +67,7 @@ description: SKILL.md structure, frontmatter, execution-mode preamble, flat step
 - In step bodies, use the path that resolves at the invocation site
 - Repo-relative when the skill runs only from a clone of this repo: `skills/<name>/<script>`
 - Plugin-mount path when the skill runs only inside a consumer: `.tessl/plugins/<workspace>/<plugin>/skills/<name>/<script>`
-- A resolved `$CP` path when the skill runs in both, under the installed-plugin bootstrap in `rules/script-delegation.md` Scripts Are Real Files
+- A resolved plugin or skill root when the skill runs in both, under the scoped installed-plugin bootstrap in `rules/script-delegation.md` or that plugin's own named lookup rule
 - Don't mix conventions inside one SKILL.md — if one step invokes via a mount path, every other script-invoking step must too
 - Include the expected input/output contract in the step description
 

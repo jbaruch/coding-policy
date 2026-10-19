@@ -14,3 +14,4 @@ tessl.json
 # Kept out of git as machine-local configuration, not a committed artifact.
 .mcp.json
 __pycache__/
+.test-dependencies/

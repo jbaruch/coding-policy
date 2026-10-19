@@ -34,13 +34,6 @@ description: Review findings carry a severity — blocking gates the merge, advi
 - The merge watcher gates on the policy reviewer's `CHANGES_REQUESTED` alone (see `skills/release/watch-pr-reviews.sh` header)
 - Copilot never gates
 
-## Judge-Accepted Defect Carve-Out
-
-- Narrow exception for shipping with a blocking finding still open
-- Applies when a fix loop did not converge and the pinned judge's diagnosis answers it with `REMEDY: stop`
-- Preconditions are binding: read `skills/release/references/review-severity-carve-outs.md` Judge-Accepted Defect Carve-Out before relying on it
-- Every other blocking finding is fixed before merge
-
 ## Judge-Weighed Finding Carve-Out
 
 - Narrow exception for merging with a blocking finding a weighing ruled `defer` or `decline`
@@ -52,7 +45,6 @@ description: Review findings carry a severity — blocking gates the merge, advi
 
 - Read every finding in full first — severity never licenses skipping a body (see `rules/reviewer-feedback-reading.md`)
 - Blocking → fix before merge
-- Advisory in a team round → acknowledge in the existing task report or round log
-- Advisory standalone → note it directly in the existing review conversation without simulating team artifacts
+- Advisory → note it directly in the existing review conversation or the authorized task record without simulating team artifacts
 - Fold an advisory only when an already-required blocking correction touches the same surface and it adds no push or verification round
 - Never make an advisory a task prerequisite or spend a push, review round, issue, or pull request solely on it

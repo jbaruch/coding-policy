@@ -58,7 +58,7 @@ run() {
 has() { printf '%s' "$OUT" | jq -e ".additionalContext | test(\"$1\")" >/dev/null 2>&1; }
 
 main() {
-  SCRIPT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/check-tessl-latest.sh"
+  SCRIPT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../skills/release/hooks" && pwd)/check-tessl-latest.sh"
   [[ -f "$SCRIPT" && -r "$SCRIPT" ]] || die "hook not found/readable at $SCRIPT"
   command -v jq >/dev/null 2>&1 || die "jq required for these tests"
 

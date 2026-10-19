@@ -31,7 +31,8 @@
 # Usage: registry-version.sh <workspace> <plugin>
 # Out:   one JSON object on stdout — {"version": "<major.minor.patch>"} for a
 #        published tile, or {"version": null} when the tile has never published
-#        (an empty registry is a valid first-publish baseline, not an error).
+#        (an empty registry or a structured Not Found/404 is a first-publish
+#        baseline; authentication, transport and other errors remain failures).
 #        Callers parse `.version`: the gate's capture phase reads null as "no
 #        baseline yet". Diagnostics go to stderr.
 # Exit:  0 on a successful read (published version OR never-published null);
@@ -82,8 +83,15 @@ registry_version() {
   # version — same capture discipline as verify-moderation-cleared.sh. One page
   # suffices: the endpoint returns newest-first and a publish only ever adds a
   # new highest version, so the maximum is always on page 1.
-  local versions_json
-  if ! versions_json=$(tessl api "$endpoint" 2>"$RV_ERR_FILE"); then
+  local versions_json call_rc=0
+  versions_json=$(tessl api "$endpoint" 2>"$RV_ERR_FILE") || call_rc=$?
+  # The versions endpoint returns this structured 404 for a new plugin. The
+  # CLI can exit nonzero for it; classify the body before the transport status.
+  if printf '%s' "$versions_json" | jq -e 'type == "object" and .error.status == 404 and .error.title == "Not Found" and (has("data") | not)' >/dev/null 2>&1; then
+    cleanup_rv_err_file
+    return 0
+  fi
+  if (( call_rc != 0 )); then
     local err; err=$(cat "$RV_ERR_FILE")
     cleanup_rv_err_file
     echo "error: 'tessl api ${endpoint}' failed: ${err} — verify (1) tessl CLI is installed and on PATH ('command -v tessl'), (2) the workspace/plugin slug is correct, (3) you have network access to the registry, then re-run 'tessl api ${endpoint}' directly to inspect the failure" >&2

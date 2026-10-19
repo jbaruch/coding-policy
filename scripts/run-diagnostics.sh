@@ -65,6 +65,7 @@ main() {
   local roots=()
   [[ -d "$base/skills" ]] && roots+=("$base/skills")
   [[ -d "$base/scripts" ]] && roots+=("$base/scripts")
+  [[ -d "$base/tests" ]] && roots+=("$base/tests")
   # First-party hook scripts (hooks/*.sh + their tests) — gate them at the
   # same zero-findings bar as every other shipped shell script.
   [[ -d "$base/hooks" ]] && roots+=("$base/hooks")

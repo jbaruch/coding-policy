@@ -90,7 +90,7 @@ pass() { PASS=$((PASS+1)); }
 fail() { FAIL=$((FAIL+1)); echo "  ✗ FAIL: $1" >&2; }
 
 main() {
-  SCRIPT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/check-git-sync.sh"
+  SCRIPT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../skills/release/hooks" && pwd)/check-git-sync.sh"
   [[ -f "$SCRIPT" && -r "$SCRIPT" ]] || die "hook not found/readable at $SCRIPT"
   command -v jq  >/dev/null 2>&1 || die "jq required for these tests"
   command -v git >/dev/null 2>&1 || die "git required for these tests"

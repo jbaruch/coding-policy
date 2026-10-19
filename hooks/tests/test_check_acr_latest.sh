@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Outcome-based tests for hooks/check-acr-latest.sh.
+# Outcome-based tests for skills/release/hooks/check-acr-latest.sh.
 #
 # Every case points ACR_BIN at a fake acr this harness writes, which records its
 # arguments and replays a scripted output and exit code, and every project
@@ -107,7 +107,7 @@ read_calls() {
 }
 
 main() {
-  SCRIPT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/check-acr-latest.sh"
+  SCRIPT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../skills/release/hooks" && pwd)/check-acr-latest.sh"
   [[ -f "$SCRIPT" ]] || die "hook not found at $SCRIPT"
   command -v python3 >/dev/null || die "python3 required for these tests"
   command -v git >/dev/null || die "git required for these tests"

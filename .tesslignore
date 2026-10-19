@@ -5,3 +5,11 @@ pyrightconfig.json
 *.bak
 *.tmp
 .herdr/
+**/tests/
+AGENTS.md
+.claude/
+.editorconfig
+.gitignore
+agent-plugin.yaml
+tests/
+.test-dependencies/
