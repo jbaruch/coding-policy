@@ -12,7 +12,7 @@
 # plus the two `gh api` surfaces for reviews/comments. jq runs locally
 # so the script's filter logic is exercised, not duplicated in the test.
 #
-# Run: bash skills/release/tests/test_poll_pr_reviews.sh
+# Run: bash tests/release/tests/test_poll_pr_reviews.sh
 # Exit 0 on all-pass; non-zero with a per-test diagnostic on failure.
 
 set -uo pipefail
@@ -702,6 +702,24 @@ t_ci_status_only_cancels_is_pending() {
   assert_eq "all-cancelled reads pending" "pending" "$ci"
 }
 
+t_ci_status_unreplaced_cancel_with_other_passes_is_pending() {
+  local MOCK_MERGE_STATE=clean
+  local MOCK_CHECKS_BODY='[{"name":"extraction","bucket":"cancel"},{"name":"skill-review","bucket":"pass"},{"name":"trigger","bucket":"pass"}]'
+  local out ci
+  out=$(main "owner" "repo" "1")
+  ci=$(echo "$out" | jq -r '.ci.status')
+  assert_eq "other passing checks do not settle the cancelled job" "pending" "$ci"
+}
+
+t_ci_status_replacement_does_not_cover_another_cancelled_job() {
+  local MOCK_MERGE_STATE=clean
+  local MOCK_CHECKS_BODY='[{"name":"CI","bucket":"cancel"},{"name":"CI","bucket":"pass"},{"name":"deployment","bucket":"cancel"}]'
+  local out ci
+  out=$(main "owner" "repo" "1")
+  ci=$(echo "$out" | jq -r '.ci.status')
+  assert_eq "each cancelled check requires its own replacement" "pending" "$ci"
+}
+
 # A real failure on head still fails, even next to a cancelled run.
 t_ci_status_fail_with_cancel_is_failure() {
   MOCK_MERGE_STATE=clean
@@ -813,6 +831,8 @@ run_suite() {
   run "main fails loudly on an empty headRefOid"                        t_main_no_head_sha_fails
   run "ci.status: success next to a cancelled twin is success (#182)"   t_ci_status_cancel_with_success_is_success
   run "ci.status: only-cancels reads pending (#182)"                    t_ci_status_only_cancels_is_pending
+  run "ci.status: an unreplaced cancellation stays pending"            t_ci_status_unreplaced_cancel_with_other_passes_is_pending
+  run "ci.status: one replacement cannot settle a different cancel"    t_ci_status_replacement_does_not_cover_another_cancelled_job
   run "ci.status: a real fail next to a cancel still fails (#182)"      t_ci_status_fail_with_cancel_is_failure
   run "requested_among: a pending bot request matches (#369)"           t_requested_among_matches_a_pending_bot
   run "requested_among: no pending request reads false (#369)"          t_requested_among_is_false_when_nobody_asked
