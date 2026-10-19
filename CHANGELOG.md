@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.1 — 2026-10-19
+
+### Fixed
+
+- Keep CI pending when a canceled check has no same-name live replacement. Other passing jobs cannot settle that cancellation; a successful replacement still permits the existing green result.
+
 ## 0.4.0 — 2026-10-19
 
 ### Changed
