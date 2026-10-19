@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.4.0 — 2026-10-19
+
 ### Changed
 
 - Extract Herdr coordination, native team hooks, role instructions and regression suites into `jbaruch/herdr-policy`. Retain standalone delegation limits and generic sync, review, release and hygiene contracts.
