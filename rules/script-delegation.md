@@ -56,14 +56,15 @@ description: Deterministic operations → script, a fixed answer set read by mea
 - Narrow exception for the installed-plugin bootstrap.
 - Applies only to command blocks in `skills/release/SKILL.md`, `skills/release/references/*.md`, `skills/adopt-fork-pr/SKILL.md`, `skills/onboard-repo/SKILL.md`, and `skills/migrate-to-plugin/SKILL.md`.
 - Preconditions (all required):
-  1. The block initializes `KS` to `.tessl/plugins/jbaruch/coding-policy/skills/<name>`, with `<name>` the co-shipped skill invoked by that block
+  1. The block initializes `KS` to `.tessl/plugins/jbaruch/coding-policy/skills/<name>/`, with `<name>` the co-shipped skill invoked by that block
   2. The inline branches are exactly three: a directory test on `KS` falling back to the same path under `$HOME`, a second directory test, and one `case` on `git config --get remote.origin.url`
-  3. The `case` selects `skills/<same-name>` only on a whole-string match against an enumerated set: `git@github.com:jbaruch/coding-policy`, `https://github.com/jbaruch/coding-policy` and `ssh://git@github.com/jbaruch/coding-policy`, each with or without `.git`
+  3. The `case` selects `skills/<same-name>/` only on a whole-string match against an enumerated set: `git@github.com:jbaruch/coding-policy`, `https://github.com/jbaruch/coding-policy` and `ssh://git@github.com/jbaruch/coding-policy`, each with or without `.git`
   4. No accepted pattern carries a wildcard; every other origin, or none, exits non-zero with an instruction to run `tessl install jbaruch/coding-policy`
   5. The block invokes only co-shipped scripts through quoted `$KS` paths with an explicit interpreter; each independent call repeats the bootstrap
   6. Bootstrap performs no writes, network access, permission changes, sourcing, or evaluation of repository-controlled code
   7. All work after root selection stays in the invoked script; no inline business logic, loops, or additional selection heuristics
   8. `scripts/tests/test_skill_bootstrap.py` checks every covered block and executes fixtures for local precedence, global fallback, clone fallback, impostor refusal, missing installs, spaces, and mode-0644 scripts
+  9. ACR consumers use the renderer's owned native skill directories with the same trailing slash and lookup branches
 - Every other command block follows Scripts Are Real Files unchanged.
 
 ## Script Requirements

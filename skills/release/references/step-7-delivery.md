@@ -13,7 +13,7 @@ Once these conditions hold, merge automatically per `rules/ship-on-green.md` —
 **Clear superseded review gates first.** This applies to coding-policy's OWN releases, where the policy reviewer posts as `github-actions[bot]`, which cannot `APPROVE` (GitHub returns HTTP 422), so a clean re-review lands as a `COMMENT` that does NOT supersede the bot's earlier `CHANGES_REQUESTED` — the stale request keeps `merge_state.status` at `BLOCKED`. On consumer repos the reviewer is the central fleet App `coding-policy-fleet-reviewer[bot]` (coding-policy#202), which CAN `APPROVE` and supersedes its own earlier `CHANGES_REQUESTED` directly — no dismissal needed there. Dismiss every superseded `github-actions[bot]` review before merging:
 
 ```bash
-KS=.tessl/plugins/jbaruch/coding-policy/skills/release; [ -d "$KS" ] || KS="$HOME/$KS"; [ -d "$KS" ] || case "$(git config --get remote.origin.url)" in git@github.com:jbaruch/coding-policy|git@github.com:jbaruch/coding-policy.git|https://github.com/jbaruch/coding-policy|https://github.com/jbaruch/coding-policy.git|ssh://git@github.com/jbaruch/coding-policy|ssh://git@github.com/jbaruch/coding-policy.git) KS=skills/release ;; *) echo "coding-policy skill not found: run tessl install jbaruch/coding-policy" >&2; exit 1 ;; esac
+KS=.tessl/plugins/jbaruch/coding-policy/skills/release/; [ -d "$KS" ] || KS="$HOME/$KS"; [ -d "$KS" ] || case "$(git config --get remote.origin.url)" in git@github.com:jbaruch/coding-policy|git@github.com:jbaruch/coding-policy.git|https://github.com/jbaruch/coding-policy|https://github.com/jbaruch/coding-policy.git|ssh://git@github.com/jbaruch/coding-policy|ssh://git@github.com/jbaruch/coding-policy.git) KS=skills/release/ ;; *) echo "coding-policy skill not found: run tessl install jbaruch/coding-policy" >&2; exit 1 ;; esac
 bash "$KS/dismiss-stale-reviews.sh" <owner> <repo> <pr-number>
 ```
 
@@ -73,7 +73,7 @@ After merge, verify the merge landed on main and complete the issue checks:
 - Confirm every closing issue closed:
 
   ```bash
-  KS=.tessl/plugins/jbaruch/coding-policy/skills/release; [ -d "$KS" ] || KS="$HOME/$KS"; [ -d "$KS" ] || case "$(git config --get remote.origin.url)" in git@github.com:jbaruch/coding-policy|git@github.com:jbaruch/coding-policy.git|https://github.com/jbaruch/coding-policy|https://github.com/jbaruch/coding-policy.git|ssh://git@github.com/jbaruch/coding-policy|ssh://git@github.com/jbaruch/coding-policy.git) KS=skills/release ;; *) echo "coding-policy skill not found: run tessl install jbaruch/coding-policy" >&2; exit 1 ;; esac
+  KS=.tessl/plugins/jbaruch/coding-policy/skills/release/; [ -d "$KS" ] || KS="$HOME/$KS"; [ -d "$KS" ] || case "$(git config --get remote.origin.url)" in git@github.com:jbaruch/coding-policy|git@github.com:jbaruch/coding-policy.git|https://github.com/jbaruch/coding-policy|https://github.com/jbaruch/coding-policy.git|ssh://git@github.com/jbaruch/coding-policy|ssh://git@github.com/jbaruch/coding-policy.git) KS=skills/release/ ;; *) echo "coding-policy skill not found: run tessl install jbaruch/coding-policy" >&2; exit 1 ;; esac
   python3 "$KS/check-closing-issues.py" <owner> <repo> <pr-number> --merged
   ```
 

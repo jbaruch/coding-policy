@@ -30,7 +30,7 @@ def block_calls(file, block):
     if not lines or not lines[0].lstrip().startswith("KS="):
         raise AssertionError("covered invocation lacks the KS bootstrap in " + str(file))
     bootstrap = lines[0].strip()
-    target = re.match(r"KS=\.tessl/plugins/jbaruch/coding-policy/skills/([a-z-]+);", bootstrap)
+    target = re.match(r"KS=\.tessl/plugins/jbaruch/coding-policy/skills/([a-z-]+)/;", bootstrap)
     if target is None:
         raise AssertionError("unsupported bootstrap in " + str(file))
     result = []
@@ -109,7 +109,8 @@ class SkillBootstrapTest(unittest.TestCase):
         item = self.representative("release")
         file, _kind, bootstrap, interpreter, relative = item
         invocation = interpreter + ' "$KS/' + relative + '"'
-        malformed = [invocation, "CP=.tessl/plugins/jbaruch/coding-policy\n" + invocation,
+        malformed = [invocation, bootstrap.replace("release/;", "release;") + "\n" + invocation,
+                     "CP=.tessl/plugins/jbaruch/coding-policy\n" + invocation,
                      bootstrap + "\n" + interpreter + ' "$CP/skills/release/' + relative + '"',
                      bootstrap + "\n$KS/" + relative,
                      bootstrap + "\n" + interpreter + " $KS/" + relative,
