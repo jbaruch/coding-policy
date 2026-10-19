@@ -99,6 +99,6 @@ The release skill owns the hooks and their packaged [throttle-stamp schema](skil
 
 ## ACR distribution
 
-The retained general rules, skills and hooks are declared in `agent-plugin.yaml` at the same explicit version as the Tessl manifest. Install with `acr install github:jbaruch/coding-policy@0.4.0`, then `acr realize`. Herdr teams additionally install the compatible `jbaruch/herdr-policy` package. ACR v1 has no package dependency field, so the pair is selected explicitly.
+The retained general rules, skills and hooks are declared in `agent-plugin.yaml` at the same explicit version as the Tessl manifest. Install with `acr install github:jbaruch/coding-policy@latest`, then `acr realize`. Herdr teams additionally run `acr install github:jbaruch/herdr-policy@latest` and `acr realize` after both compatible releases are confirmed. The extracted pair requires coding-policy 0.4.x and Herdr 0.2.x; keep teams stopped during migration from the combined 0.3.x package. ACR v1 has no package dependency field, so the pair is selected explicitly.
 
 The serialized publish workflow preserves the manifest version, confirms Tessl availability, then publishes the immutable ACR tag and release asset in a dependent job. Retry a failed ACR job on the same run with `gh run rerun <run-id> --failed`; keep the original successful Tessl job and registry baseline. A partial publication is reconciled at the same version and commit; never move an existing tag or infer one channel's success from the other. Subsequent releases must update both manifest versions together.

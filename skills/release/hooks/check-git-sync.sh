@@ -100,8 +100,8 @@ emit_notice() { # <notice-text>
 # linked worktree. In a linked worktree `--git-dir` and `--git-common-dir`
 # resolve differently; in the main checkout they are the same.
 #
-# HERDR_ENV counts when set at all, empty included (rules/agent-delegation.md
-# Two Modes). Under tessl (SESSION_START_MODE=portable) the environment is
+# HERDR_ENV counts when set at all, empty included.
+# Under tessl (SESSION_START_MODE=portable) the environment is
 # stripped, so an unset HERDR_ENV proves nothing there and a linked worktree
 # may be a worker's.
 #

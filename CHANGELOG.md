@@ -10,6 +10,7 @@
 - Report a broken generic hook installation with a nonzero status and an actionable diagnostic, preserving the selected hook's normal input/output contract.
 - Resolve unchanged ACR hook copies against the sibling native release skill rather than relying on embedded path rewriting.
 - Preserve trailing slashes on skill roots so ACR renders command selectors into native directories; verify the installed selectors and targets with the split-package conformance suite.
+- Activate skill-authoring policy for both channel manifests, document moving `latest` consumer selections, and distinguish tag-triggered release tagging from merge-triggered publisher ownership.
 - Refuse immutable ACR tags that point to non-commit objects with the documented setup status and recovery instruction, preserving the tag.
 - Withhold Git network diagnostics from publication logs and exercise the reusable ACR action's package, binary-directory and source-commit forwarding against a real repository fixture.
 

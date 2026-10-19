@@ -81,6 +81,7 @@ artifacts:
           - "skills/**/SKILL.md"
           - "skills/**/*.md"
           - ".tessl-plugin/plugin.json"
+          - "agent-plugin.yaml"
     - id: script-delegation
       path: rules/script-delegation.md
       activation:
