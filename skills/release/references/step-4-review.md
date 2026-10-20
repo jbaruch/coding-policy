@@ -16,7 +16,7 @@ in skills/release/review-lanes.sh. Both reviewers classify findings as blocking 
 rules/review-severity.md. Blocking findings from either hold the merge; both
 review bodies must arrive and be read.
 
-Fork heads receive no credentials. Adopt them through the adopt-fork-pr skill.
+Fork heads receive no credentials. Adopt them with `Skill(skill: "adopt-fork-pr")`.
 A push without an open PR does not trigger these reviewers. If a lane fails to
 arrive, inspect its workflow and authentication, repair the cause and rerun the
 failed job; do not request Copilot or invent a replacement polling loop.

@@ -65,7 +65,8 @@ alwaysApply: true
 - Watch the event, not a stopwatch: bind the watch to the terminal signal it awaits — a run's `conclusion`, a review verdict posted, a moderation `pass` — never to an agent-chosen elapsed time
 - Poll interval and give-up budget are script-owned constants (the `*_INTERVAL_SEC` / `*_BUDGET_SEC` env vars in the release watch scripts), never numbers an agent picks per run
 - Never wrap a watch in an invented wall-clock `timeout` — no blanket minute count exists in this policy to cite; a watcher gives up only at its own documented budget
-- Watch only the fields the gate reads. For PR reviews that is each gating bot's latest review state resolved by bot login, CI status, and merge state — not the appearance of inline comments, and not a hand-picked run / comment / check id
+- Watch only the fields the gate reads. For PR reviews that is each review lane's latest state resolved by trusted bot login and lane marker, CI status, and merge state — not the appearance of inline comments, and not a hand-picked run / comment / check id
+- A shared bot login's newer review in another lane never supersedes this lane's verdict
 - A bot review is complete when its verdict posts (state leaves `none`), zero inline comments included — never wait for comments to appear
 - For a reviewer workflow, the run `conclusion` reports only that the workflow finished, never that the review happened
 - A fail-open gate can report `success` having reviewed nothing

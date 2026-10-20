@@ -20,7 +20,10 @@ case "$REVIEW_LANE" in
 esac
 REVIEW_MODULE_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../../skills/release" && pwd)"
 # shellcheck source=skills/release/review-lanes.sh
-source "$REVIEW_MODULE_DIR/review-lanes.sh"
+if ! source "$REVIEW_MODULE_DIR/review-lanes.sh"; then
+  echo "error: cannot load ${REVIEW_MODULE_DIR}/review-lanes.sh — restore the complete coding-policy checkout and retry" >&2
+  exit 2
+fi
 
 command -v jq >/dev/null 2>&1 || { echo "error: jq is not installed" >&2; exit 2; }
 

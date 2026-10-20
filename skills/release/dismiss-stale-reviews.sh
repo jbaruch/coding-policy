@@ -52,7 +52,10 @@ case "${BASH_SOURCE[0]}" in
   *) _review_src=. ;;
 esac
 # shellcheck source=skills/release/review-lanes.sh
-source "${_review_src:-/}/review-lanes.sh"
+if ! source "${_review_src:-/}/review-lanes.sh"; then
+  echo "error: cannot load ${_review_src:-/}/review-lanes.sh — restore the release skill tree by re-cloning or reinstalling the plugin, then retry" >&2
+  exit 2
+fi
 
 # The bot logins whose CHANGES_REQUESTED reviews gate the merge — the same
 # two the release skill polls (skills/release/poll-pr-reviews.sh). An array

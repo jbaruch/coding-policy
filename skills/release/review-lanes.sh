@@ -17,6 +17,10 @@ JQ
 }
 
 main() {
+  if ! command -v jq >/dev/null 2>&1; then
+    echo "error: jq is not installed — install it with 'brew install jq' (macOS) or 'apt install jq' (Debian/Ubuntu), then retry" >&2
+    return 2
+  fi
   jq -n "$(review_lanes_jq)"' {quality_marker: quality_marker}'
 }
 

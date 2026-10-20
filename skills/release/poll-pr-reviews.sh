@@ -111,7 +111,10 @@ if ! source "${_ppr_dir}/copilot-run.sh"; then
 fi
 
 # shellcheck source=skills/release/review-lanes.sh
-source "${_ppr_dir}/review-lanes.sh"
+if ! source "${_ppr_dir}/review-lanes.sh"; then
+  echo "error: cannot load ${_ppr_dir}/review-lanes.sh — restore the release skill tree by re-cloning or reinstalling the plugin, then retry" >&2
+  exit 2
+fi
 
 # Bot logins, by surface. A reviewer does NOT necessarily author its reviews
 # and its inline comments under the same login, and the policy reviewer's login
