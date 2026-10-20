@@ -12,7 +12,7 @@
   - Declined: `Declining — <reason with cited evidence>` (em dash `—`, not hyphen or period)
   - Advisory: standalone, `Acknowledged — advisory noted`; in a team round, `Acknowledged — recorded in <task report or round-log ref>`. Use the existing record; never simulate a team report or create a new follow-up obligation
   - Judge-weighed deferral keeps `Acknowledged — deferred to #<follow-up issue> (judge ruling <digest>)` under `skills/release/references/REVIEW_DETAILS.md`; its ruling and issue obligations are unchanged
-- **Marginal blocking finding:** a nominated finding may go to a weighing instead of a fix (`rules/review-severity.md` Judge-Weighed Finding Carve-Out)
+- **Marginal blocking policy finding:** a nominated policy finding may go to a weighing instead of a fix (`rules/review-severity.md` Judge-Weighed Finding Carve-Out)
   - Standalone, the operator is the judge
   - Standalone, nominate a finding only when it sits on lines the previous fix push added, or with a cited reachability claim marking it marginal
   - Standalone, ask one decision question per gate, carrying every nomination

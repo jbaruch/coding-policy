@@ -787,12 +787,12 @@ t_main_streams_large_review_and_comment_bodies() (
 
 # `run_suite`, not `main`: the sourced script under test owns `main`.
 # Progress goes to stderr; stdout carries one JSON result.
-t_lanes_from_same_bot_are_independent() {
+t_lanes_from_distinct_bots_are_independent() {
   local MOCK_MERGE_STATE=clean MOCK_REQUESTED_BODY='[]' MOCK_TIMELINE_BODY='[]'
   local MOCK_REVIEWS_BODY
-  MOCK_REVIEWS_BODY=$(jq -n --arg h "$HEAD_SHA" '[
+  MOCK_REVIEWS_BODY=$(jq -n --arg h "$HEAD_SHA" --arg q "$CLAUDE_REVIEW_LOGIN" '[
     {id:1,user:{login:"github-actions[bot]"},commit_id:$h,state:"CHANGES_REQUESTED",submitted_at:"2026-10-20T01:00:00Z",body:"blocking policy"},
-    {id:2,user:{login:"github-actions[bot]"},commit_id:$h,state:"COMMENTED",submitted_at:"2026-10-20T02:00:00Z",body:"<!-- coding-policy:claude-quality-review:v1 -->\nquality advisory"}]')
+    {id:2,user:{login:$q},commit_id:$h,state:"COMMENTED",submitted_at:"2026-10-20T02:00:00Z",body:"<!-- coding-policy:claude-quality-review:v1 -->\nquality advisory"}]')
   local out
   out=$(main owner repo 1) || return 1
   assert_eq "policy block remains" "CHANGES_REQUESTED" "$(jq -r '.reviews.codex.state' <<<"$out")" || return 1
@@ -804,7 +804,7 @@ t_lanes_from_same_bot_are_independent() {
 }
 
 run_suite() {
-  run "same bot policy and quality verdicts cannot mask each other" t_lanes_from_same_bot_are_independent
+  run "distinct policy and quality identities cannot mask each other" t_lanes_from_distinct_bots_are_independent
   echo "== poll-pr-reviews.sh tests ==" >&2
   run "main reads all inline bodies and replies across pages" t_main_reads_inline_bodies_and_replies_from_every_page
   run "main reads every review body while preserving bot verdict routing" t_main_reads_every_review_body_without_changing_bot_verdicts

@@ -29,17 +29,11 @@ class ReviewError(Exception):
     """An actionable failure safe to print without credentials or model output."""
 
 
-class GitHubValidationError(ReviewError):
-    """HTTP 422, including GitHub's refusal to approve one's own pull request."""
-
-
 def run(args: list[str], *, cwd: Path | None = None,
         env: dict[str, str] | None = None, data: str | None = None) -> str:
     result = subprocess.run(args, cwd=cwd, env=env, input=data, text=True,
                             capture_output=True, check=False)
     if result.returncode:
-        if args[0] == "gh" and "(HTTP 422)" in result.stderr:
-            raise GitHubValidationError("GitHub rejected the review payload (HTTP 422)")
         # Child output can contain credentials or prompt-injected source text.
         raise ReviewError(f"{args[0]} failed (exit {result.returncode}); "
                           "check CI authentication, permissions and CLI availability")
@@ -50,15 +44,7 @@ def api(endpoint: str, payload: dict | None = None) -> dict:
     args = ["gh", "api", endpoint]
     if payload is not None:
         args += ["--method", "POST", "--input", "-"]
-    try:
-        raw = run(args, data=json.dumps(payload) if payload else None)
-    except GitHubValidationError:
-        if not payload or payload.get("event") != "APPROVE":
-            raise
-        # github-actions[bot] cannot approve its own repository's PRs. A clean
-        # COMMENT carries the same lane marker; blocking reviews never fall back.
-        return api(endpoint, {**payload, "event": "COMMENT"})
-    value = json.loads(raw)
+    value = json.loads(run(args, data=json.dumps(payload) if payload else None))
     if not isinstance(value, dict):
         raise ReviewError("GitHub API returned a non-object response; retry the review")
     return value
@@ -108,6 +94,9 @@ def claude_command() -> list[str]:
 
 
 def review_pr(owner: str, repo: str, pr: str, base: str) -> dict:
+    lane = json.loads(run(["bash", str(HERE.parents[1] / "skills/release/review-lanes.sh")]))
+    if os.environ.get("REVIEWER_LOGIN") != lane["quality_login"]:
+        raise ReviewError("Claude requires its dedicated reviewer App identity; correct CLAUDE_REVIEW_APP_ID and CLAUDE_REVIEW_APP_PRIVATE_KEY")
     endpoint = f"repos/{owner}/{repo}/pulls/{pr}"
     current = api(endpoint)
     if current["state"] != "open" or current["head"]["repo"]["full_name"] != f"{owner}/{repo}":
@@ -150,7 +139,7 @@ def review_pr(owner: str, repo: str, pr: str, base: str) -> dict:
     latest = api(endpoint)
     if latest["state"] != "open" or latest["head"]["sha"] != head or latest["base"]["ref"] != base:
         raise ReviewError("PR changed during review; refusing to post a stale verdict; retry")
-    marker = json.loads(run(["bash", str(HERE.parents[1] / "skills/release/review-lanes.sh")]))["quality_marker"]
+    marker = lane["quality_marker"]
     body = f"{marker}\n## Claude code review\n\n{review['summary']}\n\n"
     body += f"Reviewed commit: {head}. Code quality and bugs only.\n"
     blocking = [finding for finding in review["findings"] if finding["severity"] == "blocking"]
@@ -160,10 +149,13 @@ def review_pr(owner: str, repo: str, pr: str, base: str) -> dict:
             body += f"\n## {severity} findings\n"
             for finding in findings:
                 body += f"\n- {finding['path']}:{finding['line']} — {finding['message']}\n"
-    event = "REQUEST_CHANGES" if blocking else "COMMENT" if advisory else "APPROVE"
+    # An App's COMMENT does not supersede its earlier REQUEST_CHANGES. Approve
+    # every nonblocking result, with advisory notes in the body. The dedicated
+    # App is distinct from PR authors and the policy reviewer.
+    event = "REQUEST_CHANGES" if blocking else "APPROVE"
     posted = api(endpoint + "/reviews", {"commit_id": head, "event": event, "body": body})
-    states = {"CHANGES_REQUESTED"} if blocking else {"COMMENTED"} if advisory else {"APPROVED", "COMMENTED"}
-    if posted.get("state") not in states or posted.get("commit_id") != head:
+    states = {"CHANGES_REQUESTED"} if blocking else {"APPROVED"}
+    if posted.get("state") not in states or posted.get("commit_id") != head or posted.get("user", {}).get("login") != lane["quality_login"]:
         raise ReviewError("GitHub did not confirm the posted review at the analyzed head; inspect PR reviews")
     return {"state": "posted", "reviewer": "claude", "head_sha": head,
             "findings": len(review["findings"]), "blocking": len(blocking),
@@ -174,8 +166,8 @@ def main() -> int:
     if len(sys.argv) != 5 or not all(re.fullmatch(r"[A-Za-z0-9._-]+", s) for s in sys.argv[1:3]) or not sys.argv[3].isdigit():
         print("usage: review.py OWNER REPO PR BASE", file=sys.stderr)
         return 2
-    if not os.environ.get("GH_TOKEN") or not os.environ.get("CLAUDE_CODE_OAUTH_TOKEN"):
-        print("error: set GH_TOKEN and the subscription CLAUDE_CODE_OAUTH_TOKEN secret (claude setup-token)", file=sys.stderr)
+    if not os.environ.get("GH_TOKEN") or not os.environ.get("CLAUDE_CODE_OAUTH_TOKEN") or not os.environ.get("REVIEWER_LOGIN"):
+        print("error: set GH_TOKEN, REVIEWER_LOGIN from the Claude App token step and the subscription CLAUDE_CODE_OAUTH_TOKEN secret (claude setup-token)", file=sys.stderr)
         return 2
     try:
         print(json.dumps(review_pr(*sys.argv[1:])))

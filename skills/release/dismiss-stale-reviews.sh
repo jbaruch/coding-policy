@@ -17,7 +17,6 @@
 # needed. It is intentionally NOT in GATING_BOTS below — a bot that can approve
 # never needs its review dismissed.
 #
-# Policy and quality are resolved separately; neither can clear the other.
 # Decision, per gating bot (see GATING_BOTS below):
 #   - latest review state == CHANGES_REQUESTED => leave it; the bot is
 #     currently requesting changes, nothing to dismiss.
@@ -46,16 +45,6 @@
 #        diagnostic on API/argument failure.
 
 set -euo pipefail
-
-case "${BASH_SOURCE[0]}" in
-  */*) _review_src="${BASH_SOURCE[0]%/*}" ;;
-  *) _review_src=. ;;
-esac
-# shellcheck source=skills/release/review-lanes.sh
-if ! source "${_review_src:-/}/review-lanes.sh"; then
-  echo "error: cannot load ${_review_src:-/}/review-lanes.sh — restore the release skill tree by re-cloning or reinstalling the plugin, then retry" >&2
-  exit 2
-fi
 
 # The bot logins whose CHANGES_REQUESTED reviews gate the merge — the same
 # two the release skill polls (skills/release/poll-pr-reviews.sh). An array
@@ -92,11 +81,10 @@ fi
 # truncate and hide the latest verdict — same discipline as
 # poll-pr-reviews.sh.
 reviews_by() {
-  local owner="$1" repo="$2" pr="$3" login="$4" lane="${5:-policy}"
+  local owner="$1" repo="$2" pr="$3" login="$4"
   gh api --paginate "repos/${owner}/${repo}/pulls/${pr}/reviews?per_page=100" \
-    | jq -s --arg login "$login" --arg lane "$lane" \
-        "$(review_lanes_jq)"' (add // []) | [.[] | select(.user.login == $login)
-          | select(in_review_lane($lane)) | {id, state, commit_id, submitted_at}]'
+    | jq -s --arg login "$login" \
+        '(add // []) | [.[] | select(.user.login == $login) | {id, state, commit_id, submitted_at}]'
 }
 
 # Marker a ruled dismissal's message starts with. The message
@@ -148,15 +136,10 @@ main() {
   fi
 
   local dismissed="[]" left_active="[]"
-  local login reviews latest_state stale lane
+  local login reviews latest_state stale
 
-  for lane in policy quality; do
   for login in "${GATING_BOTS[@]}" "${RULED_ONLY_BOTS[@]}"; do
-    # Fleet approvals supersede themselves; only policy has a ruled dismissal.
-    if [[ "$lane" == quality ]] && is_ruled_only_bot "$login"; then
-      continue
-    fi
-    reviews=$(reviews_by "$owner" "$repo" "$pr" "$login" "$lane") \
+    reviews=$(reviews_by "$owner" "$repo" "$pr" "$login") \
       || { echo "error: failed to fetch reviews for ${login} on ${owner}/${repo}#${pr} — run 'gh auth status' to verify auth, then retry" >&2; exit 1; }
 
     # No reviews from this bot yet — nothing to do.
@@ -206,8 +189,6 @@ main() {
       dismissed=$(jq --arg login "$login" --arg cid "$cid" \
         '. + [{login: $login, review_id: '"$rid"', commit_id: $cid}]' <<<"$dismissed")
     done <<<"$stale"
-  done
-
   done
 
   jq -n \

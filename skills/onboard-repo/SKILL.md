@@ -19,7 +19,7 @@ Process steps in order. Do not skip ahead.
 
 Add the files that run the `jbaruch/coding-policy` coding-rule review on a repo's pull requests — `jbaruch/coding-policy` holds the shared coding rules, reviewed by the `coding-policy-fleet-reviewer` GitHub App with the Codex CLI on a ChatGPT subscription. `.github/workflows/review-trigger.yml`, on each PR event, starts a review of that PR against the coding-policy rules so the result is available before merge; the `.github/fleet-review-enabled` marker makes the same review run on a schedule as a backstop. The consumer holds the marker, the trigger workflow, and one `FLEET_DISPATCH_TOKEN` secret that the workflow reads. Claude reviews code quality and bugs without loading policy or agent context. Both reviewers use subscription credentials held only in coding-policy. This skill commits the opt-in files and opens a PR.
 
-Precondition: the App is installed on the account with access to this repo (installed on all repositories).
+Precondition: both reviewer Apps (coding-policy-fleet-reviewer and jbaruch-claude-reviewer) are installed on the account with access to this repo.
 
 The skill runs in one of two modes determined by the user's request:
 

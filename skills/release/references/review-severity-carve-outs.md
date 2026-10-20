@@ -4,6 +4,9 @@ The full preconditions of each `rules/review-severity.md` carve-out, moved out o
 
 ## Judge-Weighed Finding Carve-Out
 
+Applies to policy-review findings only. Claude code-quality blocking findings are fixed before merge.
+
+
 - A weighing asks whether fixing a finding is worth its cost, never whether the finding is real
 - The ruling file follows the format the `skills/release/dismiss-ruled-review.sh` header names
 - An explicitly selected team policy may supply a verified ruling through `skills/release/references/team-ruling-interface.md`; its own nomination and report contract applies.

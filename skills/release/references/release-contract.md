@@ -6,10 +6,10 @@ Moved from `rules/ci-safety.md` (#642) to keep the always-loaded rules under the
 
 - Reading an open PR's current gate evidence without merging runs `skills/release/poll-pr-reviews.sh` once, never the blocking watch
 - Both reviewers run on same-repository PR events; neither needs a review request
-- The snapshot resolves Codex policy and Claude quality separately, even when one bot identity posts both
-- The shared lane classifier is skills/release/review-lanes.sh; legacy unmarked trusted-bot reviews belong to policy
+- The snapshot resolves Codex policy and Claude quality by their distinct trusted bot identities
+- The quality login and marker are owned by skills/release/review-lanes.sh; legacy unmarked policy-bot reviews remain policy
 - A current-head posted verdict is required for each lane; a failed or missing quality review is never inferred clean from workflow success
-- Both reviewers classify findings as blocking or advisory; either CHANGES_REQUESTED gates, advisory-only COMMENTED does not
+- Both reviewers classify findings as blocking or advisory; either CHANGES_REQUESTED gates, advisory findings do not
 - The gating reviewer's bot login varies by repository — resolved inside poll-pr-reviews.sh
 - A non-gating check that reds and surfaces as the watcher's `ci_failure` result is not a reason to hand-roll
 - On a `ci_failure` result, read the returned snapshot and act on the check that actually failed

@@ -144,6 +144,8 @@ fi
 # full reading required by the release skill. Comment counting therefore matches a
 # SET of logins per reviewer. A comment carries exactly one author, so listing
 # multiple logins cannot double-count.
+# Claude uses the dedicated identity from review-lanes.sh; its native approval
+# cannot supersede a policy change request from either policy identity.
 CODEX_REVIEW_LOGINS=("github-actions[bot]" "coding-policy-fleet-reviewer[bot]")
 COPILOT_REVIEW_LOGIN="copilot-pull-request-reviewer[bot]"
 CODEX_COMMENT_LOGINS=("github-actions[bot]" "coding-policy-fleet-reviewer[bot]")
@@ -369,7 +371,7 @@ main() {
     || { echo "error: failed to fetch Codex review state" >&2; exit 1; }
   copilot_review=$(REVIEW_LANE=policy latest_review_by "$owner" "$repo" "$pr_number" "$COPILOT_REVIEW_LOGIN") \
     || { echo "error: failed to fetch Copilot review state" >&2; exit 1; }
-  claude_review=$(REVIEW_LANE=quality latest_review_by "$owner" "$repo" "$pr_number" "${CODEX_REVIEW_LOGINS[@]}") \
+  claude_review=$(REVIEW_LANE=quality latest_review_by "$owner" "$repo" "$pr_number" "$CLAUDE_REVIEW_LOGIN") \
     || { echo "error: failed to fetch Claude review state" >&2; exit 1; }
   claude_review=$(printf '%s' "$claude_review" | jq 'del(._dismissed_review_id)')
   claude_review=$(resolve_review_against_head "$claude_review" "$head_sha")

@@ -3,6 +3,8 @@
 # Sourcing defines review_lanes_jq; execution emits the marker as JSON.
 set -euo pipefail
 
+CLAUDE_REVIEW_LOGIN="jbaruch-claude-reviewer[bot]"
+
 review_lanes_jq() {
   cat <<'JQ'
 # Shared by fleet deduplication, release snapshots and stale-review dismissal.
@@ -21,7 +23,7 @@ main() {
     echo "error: jq is not installed — install it with 'brew install jq' (macOS) or 'apt install jq' (Debian/Ubuntu), then retry" >&2
     return 2
   fi
-  jq -n "$(review_lanes_jq)"' {quality_marker: quality_marker}'
+  jq -n --arg login "$CLAUDE_REVIEW_LOGIN" "$(review_lanes_jq)"' {quality_marker: quality_marker, quality_login: $login}'
 }
 
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then

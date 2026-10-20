@@ -22,7 +22,7 @@ class ReviewTest(unittest.TestCase):
     def setUp(self):
         self.env = patch.dict(os.environ, {"GH_TOKEN": "github-secret", "GITHUB_TOKEN": "other-secret",
                               "CLAUDE_CODE_OAUTH_TOKEN": "subscription-secret",
-                              "ANTHROPIC_API_KEY": "api-secret", "OPENAI_API_KEY": "openai-secret"})
+                              "REVIEWER_LOGIN": "jbaruch-claude-reviewer[bot]", "ANTHROPIC_API_KEY": "api-secret", "OPENAI_API_KEY": "openai-secret"})
         self.env.start()
         self.addCleanup(self.env.stop)
         self.posts = []
@@ -44,7 +44,7 @@ class ReviewTest(unittest.TestCase):
     def api(self, endpoint, payload=None):
         if payload is not None:
             self.posts.append(payload)
-            return {"state": {"REQUEST_CHANGES": "CHANGES_REQUESTED", "COMMENT": "COMMENTED", "APPROVE": "APPROVED"}[payload["event"]], "commit_id": payload["commit_id"], "html_url": "https://github.com/o/r/pull/1#review"}
+            return {"state": {"REQUEST_CHANGES": "CHANGES_REQUESTED", "COMMENT": "COMMENTED", "APPROVE": "APPROVED"}[payload["event"]], "commit_id": payload["commit_id"], "html_url": "https://github.com/o/r/pull/1#review", "user": {"login": "jbaruch-claude-reviewer[bot]"}}
         self.api_reads += 1
         return {"state": "open", "base": {"ref": "main"},
                 "head": {"sha": "b" * 40 if self.changed and self.api_reads > 1 else HEAD,
@@ -95,11 +95,11 @@ class ReviewTest(unittest.TestCase):
         self.assertEqual(self.review()["findings"], 0)
         self.assertEqual(len(self.posts), 1)
 
-    def test_advisory_only_comments_and_mixed_findings_request_changes(self):
+    def test_advisory_approval_clears_old_blocks_and_mixed_findings_request_changes(self):
         finding = self.output["structured_output"]["findings"][0]
         finding["severity"] = "advisory"
         self.assertEqual(self.review()["blocking"], 0)
-        self.assertEqual(self.posts[-1]["event"], "COMMENT")
+        self.assertEqual(self.posts[-1]["event"], "APPROVE")
         self.assertIn("## Advisory findings", self.posts[-1]["body"])
         self.output["structured_output"]["findings"].append(
             {**finding, "severity": "blocking", "message": "Empty input crashes."})
@@ -107,15 +107,19 @@ class ReviewTest(unittest.TestCase):
         self.assertEqual(self.posts[-1]["event"], "REQUEST_CHANGES")
         self.assertIn("## Blocking findings", self.posts[-1]["body"])
 
-    def test_approval_422_falls_back_but_blocking_422_fails(self):
-        with patch.object(reviewer, "api", API), patch.object(reviewer, "run", side_effect=[reviewer.GitHubValidationError("422"),
-                         json.dumps({"state": "COMMENTED", "commit_id": HEAD})]) as run:
-            API("repos/o/r/pulls/1/reviews", {"event": "APPROVE", "commit_id": HEAD, "body": "clean"})
-            self.assertEqual(json.loads(run.call_args.kwargs["data"])["event"], "COMMENT")
-        with patch.object(reviewer, "run", side_effect=reviewer.GitHubValidationError("422")) as run:
-            with self.assertRaises(reviewer.GitHubValidationError):
-                API("repos/o/r/pulls/1/reviews", {"event": "REQUEST_CHANGES", "commit_id": HEAD, "body": "defect"})
-            self.assertEqual(run.call_count, 1)
+    def test_wrong_app_identity_is_refused_before_any_model_or_post(self):
+        with patch.dict(os.environ, {"REVIEWER_LOGIN": "coding-policy-fleet-reviewer[bot]"}):
+            with self.assertRaisesRegex(reviewer.ReviewError, "dedicated"):
+                self.review()
+        self.assertEqual(self.posts, [])
+        self.assertEqual(self.claude_calls, [])
+
+    def test_post_errors_never_become_a_clean_review(self):
+        for event in ("APPROVE", "REQUEST_CHANGES"):
+            with patch.object(reviewer, "run", side_effect=reviewer.ReviewError("post failed")) as run:
+                with self.assertRaises(reviewer.ReviewError):
+                    API("repos/o/r/pulls/1/reviews", {"event": event, "commit_id": HEAD, "body": "review"})
+                self.assertEqual(run.call_count, 1)
 
     def test_invalid_output_never_becomes_a_clean_review(self):
         for output in ({"is_error": True}, {"is_error": False, "subtype": "success"},

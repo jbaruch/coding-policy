@@ -9,10 +9,11 @@ name: Fleet Reviews (Codex policy, Claude quality)
 #   CODEX_AUTH_JSON       — the ChatGPT-subscription token (see review-codex.yml header)
 #   CLAUDE_CODE_OAUTH_TOKEN — Claude subscription token from claude setup-token
 #   FLEET_APP_ID          — the coding-policy-fleet-reviewer GitHub App's App ID
+#   CLAUDE_REVIEW_APP_ID / CLAUDE_REVIEW_APP_PRIVATE_KEY — separate quality App
 #   FLEET_APP_PRIVATE_KEY — that App's private key (PEM)
 #   TESSL_TOKEN           — to `tessl install jbaruch/coding-policy` in CI
 #
-# The App (Pull requests: RW, Contents: RO, Metadata: RO) must be installed on
+# Both Apps (Pull requests: RW, Contents: RO, Metadata: RO) must be installed on
 # every reviewed repo. It posts reviews as `<app-slug>[bot]`; a pass posts as
 # APPROVE and a violation as REQUEST_CHANGES (post-review.sh). The App identity
 # can APPROVE (unlike github-actions[bot], which gets HTTP 422 and falls back to
@@ -44,6 +45,12 @@ on:
         description: "Base branch of the PR"
         required: false
 
+      reviewer:
+        description: "Review lane (all by default; select one for recovery or a canary)"
+        type: choice
+        options: [all, policy, quality]
+        default: all
+
 permissions:
   contents: read
 
@@ -51,7 +58,7 @@ concurrency:
   # Single-PR dispatches get a per-PR group so they run immediately instead of
   # queuing behind a running cron poll; a new push to that PR cancels its prior
   # review. The cron poll keeps its own group and never cancels in-progress.
-  group: fleet-review-${{ github.event.inputs.repo || 'poll' }}-${{ github.event.inputs.pr || 'all' }}
+  group: fleet-review-${{ github.event.inputs.repo || 'poll' }}-${{ github.event.inputs.pr || 'all' }}-${{ github.event.inputs.reviewer || 'all' }}
   cancel-in-progress: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.pr != '' }}
 
 jobs:
@@ -59,7 +66,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        lane: [policy, quality]
+        lane: ${{ fromJSON(github.event.inputs.reviewer == 'quality' && '["quality"]' || github.event.inputs.reviewer == 'policy' && '["policy"]' || '["policy","quality"]') }}
     # Dormant until activated: set repo variable FLEET_REVIEWER_ENABLED=true once
     # the GitHub App is installed and FLEET_APP_ID / FLEET_APP_PRIVATE_KEY /
     # CODEX_AUTH_JSON / CLAUDE_CODE_OAUTH_TOKEN / TESSL_TOKEN secrets are set. Until then scheduled runs
@@ -98,8 +105,8 @@ jobs:
         id: apptoken
         uses: actions/create-github-app-token@v3
         with:
-          app-id: ${{ secrets.FLEET_APP_ID }}
-          private-key: ${{ secrets.FLEET_APP_PRIVATE_KEY }}
+          app-id: ${{ secrets[matrix.lane == 'quality' && 'CLAUDE_REVIEW_APP_ID' || 'FLEET_APP_ID'] }}
+          private-key: ${{ secrets[matrix.lane == 'quality' && 'CLAUDE_REVIEW_APP_PRIVATE_KEY' || 'FLEET_APP_PRIVATE_KEY'] }}
           owner: ${{ github.repository_owner }}
 
       - name: Write auth.json from the secret (runtime-only, never persisted)
@@ -158,6 +165,7 @@ jobs:
         env:
           GH_TOKEN: ${{ steps.apptoken.outputs.token }}
           CENTRAL_DIR: ${{ github.workspace }}
+          REVIEWER_LOGIN: ${{ steps.apptoken.outputs.app-slug }}[bot]
           REVIEW_LANE: ${{ matrix.lane }}
           CLAUDE_CODE_OAUTH_TOKEN: ${{ matrix.lane == 'quality' && secrets.CLAUDE_CODE_OAUTH_TOKEN || '' }}
         run: |

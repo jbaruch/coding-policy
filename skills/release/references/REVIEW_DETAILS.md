@@ -32,13 +32,20 @@ Codex checks policy compliance. Claude uses the replacement system prompt in
 reliability, performance and concrete test gaps. Its isolated session loads no
 policy, agent instructions, memory, plugins, skills, hooks or MCP servers and
 has only read-only source tools. Authentication uses CLAUDE_CODE_OAUTH_TOKEN
-from claude setup-token; the token is held only in coding-policy.
+from claude setup-token; the token is held only in coding-policy. Its dedicated GitHub App uses CLAUDE_REVIEW_APP_ID and CLAUDE_REVIEW_APP_PRIVATE_KEY, also held only in coding-policy (see .env.example).
 
 Both reviews run on PR events. The central fleet workflow runs them as separate
-jobs; existing consumer dispatches start both. The quality result posts as a
+jobs using distinct reviewer Apps; existing consumer dispatches start both. The quality result posts as a
 severity-derived verdict with the exact analyzed commit and the marker owned by
 skills/release/review-lanes.sh. Snapshot, dedup and stale-dismissal paths use
-that classifier so a quality comment cannot clear a policy block.
+that classifier and their separate logins. Claude posts as jbaruch-claude-reviewer[bot], independently of the Codex policy identity.
+
+Claude approves nonblocking results, including advisory notes. An App's approval
+supersedes its earlier change request; a plain comment would leave that request
+active. The dedicated App can approve on coding-policy and consumer repositories.
+The policy reviewer retains its existing self-review fallback and cleanup.
+
+Both reviewers emit findings in their review bodies. Reply in a PR comment citing the review and finding; use an inline thread only for an actual inline comment. Claude blocking findings are fixed before merge.
 
 Read both bodies before merge. On failed authentication, renew the subscription
 token in coding-policy and rerun the failed job. Do not use API-key fallback or
@@ -74,7 +81,7 @@ Write the operator's answer into a ruling file with `AUTHORITY: operator`. Its f
 ### Order of work
 
 1. Run `dismiss-ruled-review.sh` with `--ruling` and `--followup-issue` (Step 6 command block). It posts the ruled findings to the follow-up issue — `defer`, or `decline` labelled won't-fix — then dismisses the review. Exit 1 names each unmet condition in `.unmet`; fix those findings instead.
-2. Reply citing the ruling, with `<digest>` the 16-hex digest from the script's `.message`. Policy findings live in the review body, so their replies go in one PR comment; Claude findings get a reply on their own thread:
+2. Reply citing the ruling, with `<digest>` the 16-hex digest from the script's `.message`. Policy findings appear in the review body; reply in a PR comment citing the review and finding:
    - Declined: `Declining — judge ruling <digest>: <reason from the ruling>`
    - Deferred: `Acknowledged — deferred to #<follow-up issue> (judge ruling <digest>)`
 3. Run `dismiss-stale-reviews.sh` (Step 7), then re-run the Step 5 watcher. `poll-pr-reviews.sh` reads the dismissed review as `RULED`, which the watcher's ready test accepts.

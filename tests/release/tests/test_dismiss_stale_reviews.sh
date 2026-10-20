@@ -315,7 +315,7 @@ t_failed_put_not_dismissed_is_failure() {
 t_quality_does_not_clear_policy_block() {
   MOCK_REVIEWS_BODY='[
     {"id":901,"state":"CHANGES_REQUESTED","commit_id":"aaa","submitted_at":"2026-10-20T01:00:00Z","user":{"login":"github-actions[bot]"},"body":"blocking policy"},
-    {"id":902,"state":"COMMENTED","commit_id":"aaa","submitted_at":"2026-10-20T02:00:00Z","user":{"login":"github-actions[bot]"},"body":"<!-- coding-policy:claude-quality-review:v1 --> clean quality"}]'
+    {"id":902,"state":"COMMENTED","commit_id":"aaa","submitted_at":"2026-10-20T02:00:00Z","user":{"login":"jbaruch-claude-reviewer[bot]"},"body":"<!-- coding-policy:claude-quality-review:v1 --> clean quality"}]'
   local out
   out=$(main owner repo 1) || return 1
   assert_eq "policy remains active" "901" "$(jq -r '.left_active[0].review_id' <<<"$out")" || return 1
