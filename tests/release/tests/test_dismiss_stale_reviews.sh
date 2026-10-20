@@ -312,7 +312,18 @@ t_failed_put_not_dismissed_is_failure() {
 
 # `run_suite`, not `main`: the sourced script under test owns `main`.
 # Progress goes to stderr; stdout carries one JSON result.
+t_quality_does_not_clear_policy_block() {
+  MOCK_REVIEWS_BODY='[
+    {"id":901,"state":"CHANGES_REQUESTED","commit_id":"aaa","submitted_at":"2026-10-20T01:00:00Z","user":{"login":"github-actions[bot]"},"body":"blocking policy"},
+    {"id":902,"state":"COMMENTED","commit_id":"aaa","submitted_at":"2026-10-20T02:00:00Z","user":{"login":"github-actions[bot]"},"body":"<!-- coding-policy:claude-quality-review:v1 --> clean quality"}]'
+  local out
+  out=$(main owner repo 1) || return 1
+  assert_eq "policy remains active" "901" "$(jq -r '.left_active[0].review_id' <<<"$out")" || return 1
+  assert_eq "no cross-lane dismissal" "0" "$(jq '.dismissed | length' <<<"$out")"
+}
+
 run_suite() {
+  run "quality cannot dismiss policy findings" t_quality_does_not_clear_policy_block
   echo "test_dismiss_stale_reviews.sh" >&2
   run "stale CR then COMMENT is dismissed"        t_stale_cr_then_comment_is_dismissed
   run "latest CR is left active"                  t_latest_cr_is_left_active

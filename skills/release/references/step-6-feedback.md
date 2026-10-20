@@ -46,6 +46,6 @@
   ```
 
 - Push fixes to the same branch
-- **Re-request Copilot after every push** with Step 4's command block. Copilot does not re-post on its own.
+- Both reviewers run automatically after each required push; return to Step 5.
 - The policy reviewer re-runs automatically on every push (coding-policy via `review-codex.yml` `pull_request: synchronize`; consumers via `review-trigger.yml` re-dispatching the fleet App). No manual re-request.
-- Repeat Step 5 until the policy reviewer carries no blocking finding — `APPROVED`, `COMMENTED` with its body read and only advisories, or `RULED` after a ruled dismissal — with addressed blocking findings replied to. Proceed immediately to Step 7.
+- Repeat Step 5 until neither reviewer carries a blocking finding — `APPROVED`, `COMMENTED` with its body read and only advisories, or a policy `RULED` after a ruled dismissal — with addressed blocking findings replied to. Proceed immediately to Step 7.

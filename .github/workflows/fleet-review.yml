@@ -1,12 +1,13 @@
-name: Fleet Policy Review (Codex, central)
+name: Fleet Reviews (Codex policy, Claude quality)
 
 # Central cron poller: reviews every open same-repo PR across the reviewer App's
-# installation against the jbaruch/coding-policy rules, using ONE ChatGPT-
-# subscription credential held only in this repo. Replaces the per-repo
+# installation in independent policy and code-quality lanes. Both subscription
+# credentials are held only in this repo. Replaces the per-repo
 # review-codex.yml fleet (blast radius for CODEX_AUTH_JSON drops from 22 to 1).
 #
 # Secrets required in THIS repo only:
 #   CODEX_AUTH_JSON       — the ChatGPT-subscription token (see review-codex.yml header)
+#   CLAUDE_CODE_OAUTH_TOKEN — Claude subscription token from claude setup-token
 #   FLEET_APP_ID          — the coding-policy-fleet-reviewer GitHub App's App ID
 #   FLEET_APP_PRIVATE_KEY — that App's private key (PEM)
 #   TESSL_TOKEN           — to `tessl install jbaruch/coding-policy` in CI
@@ -55,9 +56,13 @@ concurrency:
 
 jobs:
   review:
+    strategy:
+      fail-fast: false
+      matrix:
+        lane: [policy, quality]
     # Dormant until activated: set repo variable FLEET_REVIEWER_ENABLED=true once
     # the GitHub App is installed and FLEET_APP_ID / FLEET_APP_PRIVATE_KEY /
-    # CODEX_AUTH_JSON / TESSL_TOKEN secrets are set. Until then scheduled runs
+    # CODEX_AUTH_JSON / CLAUDE_CODE_OAUTH_TOKEN / TESSL_TOKEN secrets are set. Until then scheduled runs
     # are skipped (neutral, no failure noise) and workflow_dispatch is a no-op.
     if: vars.FLEET_REVIEWER_ENABLED == 'true'
     runs-on: ubuntu-latest
@@ -71,12 +76,23 @@ jobs:
           node-version: "24"
 
       - uses: tesslio/setup-tessl@v2
+        if: matrix.lane == 'policy'
         with:
           token: ${{ secrets.TESSL_TOKEN }}
 
       # renovate: datasource=npm depName=@openai/codex
       - name: Install Codex CLI
+        if: matrix.lane == 'policy'
         run: npm install -g @openai/codex@0.162.0
+
+      # renovate: datasource=npm depName=@anthropic-ai/claude-code
+      - name: Install Claude CLI
+        if: matrix.lane == 'quality'
+        run: npm install -g @anthropic-ai/claude-code@2.1.304
+
+      - name: Verify real CLI context isolation
+        if: matrix.lane == 'quality'
+        run: python3 .github/claude-review/check-isolation.py
 
       - name: Mint the reviewer App installation token
         id: apptoken
@@ -87,6 +103,7 @@ jobs:
           owner: ${{ github.repository_owner }}
 
       - name: Write auth.json from the secret (runtime-only, never persisted)
+        if: matrix.lane == 'policy'
         env:
           CODEX_AUTH_JSON: ${{ secrets.CODEX_AUTH_JSON }}
         run: |
@@ -101,12 +118,14 @@ jobs:
           chmod 600 "$CODEX_HOME/auth.json"
 
       - name: Redact the credential from CI logs
+        if: matrix.lane == 'policy'
         run: bash .github/codex-review/mask-secrets.sh "$HOME/.codex/auth.json"
 
       - name: Build the review worklist
         env:
           GH_TOKEN: ${{ steps.apptoken.outputs.token }}
           REVIEWER_LOGIN: ${{ steps.apptoken.outputs.app-slug }}[bot]
+          REVIEW_LANE: ${{ matrix.lane }}
           DISPATCH_REPO: ${{ github.event.inputs.repo }}
           DISPATCH_PR: ${{ github.event.inputs.pr }}
           DISPATCH_BASE: ${{ github.event.inputs.base }}
@@ -139,6 +158,8 @@ jobs:
         env:
           GH_TOKEN: ${{ steps.apptoken.outputs.token }}
           CENTRAL_DIR: ${{ github.workspace }}
+          REVIEW_LANE: ${{ matrix.lane }}
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ matrix.lane == 'quality' && secrets.CLAUDE_CODE_OAUTH_TOKEN || '' }}
         run: |
           set -uo pipefail
           # Explicitly validate the worklist shape: a malformed worklist.json must
@@ -161,7 +182,12 @@ jobs:
             n=$(jq -r .number    <<<"$item")
             b=$(jq -r .base_ref  <<<"$item")
             echo "::group::review ${o}/${r}#${n} (head $(jq -r .head_sha <<<"$item"))"
-            if bash .github/codex-review/fleet-review-one.sh "$o" "$r" "$n" "$b"; then
+            if [ "$REVIEW_LANE" = quality ]; then
+              driver=(python3 .github/claude-review/review.py)
+            else
+              driver=(bash .github/codex-review/fleet-review-one.sh)
+            fi
+            if "${driver[@]}" "$o" "$r" "$n" "$b"; then
               echo "reviewed ${o}/${r}#${n}"
             else
               echo "::warning::fleet review failed for ${o}/${r}#${n}"
@@ -172,5 +198,5 @@ jobs:
           exit "$fail"
 
       - name: Drop the Codex credential
-        if: always()
+        if: always() && matrix.lane == 'policy'
         run: rm -f "$HOME/.codex/auth.json"

@@ -1,66 +1,15 @@
 #!/usr/bin/env bash
-# Block until a PR reaches a merge-gate-relevant terminal state, polling
-# poll-pr-reviews.sh at a script-owned interval up to a script-owned budget.
+# Watch CI, mergeability and both current-head review lanes until terminal.
+# Either lane's CHANGES_REQUESTED blocks. Advisory findings never block; both
+# posted review bodies must still arrive and be read. Both lanes are
+# PR-event triggered, so no manual reviewer request is required.
 #
-# poll-pr-reviews.sh is a single non-blocking snapshot; the loop that wraps
-# it — how often to poll, how long to wait, what state ends it — used to be
-# hand-rolled per agent, which is how invented wall-clock timeouts (and
-# fabricated "N minutes in the policy" citations) crept in. This script owns
-# that loop so the cadence and give-up budget are one tuned constant, not an
-# agent choice, and it watches EXACTLY the fields the Step 7 merge gate reads:
-# both bots' LATEST review state (resolved by bot login inside
-# poll-pr-reviews.sh), CI status, and merge state. Only the policy reviewer
-# gates (rules/review-severity.md — Copilot is always advisory); it waits for
-# Copilot to post so its body can be read, never gates on its verdict. It does
-# NOT wait for inline comments to appear (a verdict with zero inline comments is
-# a complete review) and does NOT key off any hand-picked run/comment/check id.
-#
-# Usage: watch-pr-reviews.sh <owner> <repo> <pr-number>
-# Out:   the full poll-pr-reviews.sh snapshot with an added top-level object:
-#          "watch": {"result": "<result>", "attempts": N, "elapsed_seconds": N}
-#        emitted on stdout when a terminal state is reached (rc 0 or 1).
-# Exit / result matrix (branch on .watch.result):
-#   rc 0, result "ready"             — mergeable, CI success/none, both bots
-#                                      posted (so their bodies can be read), no
-#                                      Copilot review still owed (`requested`
-#                                      true: a re-request or a run in flight
-#                                      keeps it waiting past an older review at
-#                                      the same head), and the policy reviewer
-#                                      is not CHANGES_REQUESTED. Copilot may be
-#                                      CHANGES_REQUESTED and this still reaches
-#                                      ready (Copilot is always advisory). A
-#                                      policy state of RULED (dismissed by
-#                                      dismiss-ruled-review.sh, see
-#                                      poll-pr-reviews.sh) counts as posted
-#                                      and not CHANGES_REQUESTED.
-#   rc 0, result "changes_requested" — the policy reviewer's latest verdict is
-#                                      CHANGES_REQUESTED (a blocking finding is
-#                                      present — advisory-only reviews post
-#                                      COMMENT, see rules/review-severity.md).
-#                                      Copilot is always advisory and never
-#                                      produces this result. Address and re-push.
-#   rc 0, result "ci_failure"        — a check failed. Fix and re-push.
-#   rc 0, result "dirty"             — branch conflicts with the base; GitHub
-#                                      skipped the pull_request: workflows.
-#                                      Rebase, resolve, force-push, re-run.
-#   rc 1, result "review_unrequested" — Copilot has no verdict at this head,
-#                                      no pending request and no run in
-#                                      flight, so no wait can produce one. Request it
-#                                      (request-copilot-review.sh) and re-run.
-#                                      The policy reviewer runs on the push and
-#                                      never produces this result.
-#   rc 1, result "pending_at_budget" — a signal never arrived within the
-#                                      budget (a reviewer that never posted,
-#                                      CI stuck pending). Inspect which field
-#                                      is still none/pending in the snapshot.
-#   rc 2 — argument/env validation error, missing jq, or a poll-pr-reviews.sh
-#          failure; stderr-only diagnostic, stdout empty. The watch is
-#          idempotent — it re-derives state from scratch — so re-run to resume.
-#
-# The interval and budget are the constants below (override via the matching
-# env vars, used by the test harness to keep runs fast) — never by wrapping
-# this call in `timeout`. rules/ci-safety.md "Always Watch CI" names the
-# contract and points here rather than restating these.
+# Usage: watch-pr-reviews.sh OWNER REPO PR
+# stdout: snapshot plus watch {result, attempts, elapsed_seconds}.
+# rc 0: ready, changes_requested, ci_failure or dirty (act on result).
+# rc 1: pending_at_budget (inspect missing signal and retry after recovery).
+# rc 2: setup/poll failure, stderr diagnostic. Script-owned interval and budget
+# are overridable for tests; never wrap a watch in an invented timeout.
 
 set -euo pipefail
 
@@ -141,20 +90,12 @@ main() {
       exit 2
     fi
 
-    local mergeable mstatus ci codex copilot copilot_requested
+    local mergeable mstatus ci codex claude
     mergeable=$(printf '%s' "$snapshot" | jq -r '.merge_state.mergeable')
     mstatus=$(printf '%s'   "$snapshot" | jq -r '.merge_state.status')
     ci=$(printf '%s'        "$snapshot" | jq -r '.ci.status')
     codex=$(printf '%s'     "$snapshot" | jq -r '.reviews.codex.state')
-    copilot=$(printf '%s'   "$snapshot" | jq -r '.reviews.copilot.state')
-    # `// true` would be wrong here: jq's alternative operator takes the right
-    # side for `false` as well as for null, which is exactly the value this
-    # branch exists to read. Absence alone defaults to waiting.
-    copilot_requested=$(printf '%s' "$snapshot" | jq -r '.reviews.copilot | if has("requested") then .requested else true end')
-    # A review still owed blocks `ready` only when the snapshot says so: an
-    # older poll-pr-reviews.sh carries no `requested`, and reads as not owed.
-    local copilot_owed
-    copilot_owed=$(printf '%s' "$snapshot" | jq -r '.reviews.copilot.requested == true')
+    claude=$(printf '%s' "$snapshot" | jq -r '.reviews.claude.state // "none"')
 
     # Order matters: a conflicting branch or a failed check or a blocking
     # CHANGES_REQUESTED verdict is terminal-for-this-round — the agent must
@@ -165,37 +106,19 @@ main() {
     if [[ "$ci" == "failure" ]]; then
       emit_and_exit "ci_failure" "$attempts" "$elapsed" "$snapshot" 0
     fi
-    # Only the policy reviewer gates. Its CHANGES_REQUESTED means a blocking
-    # finding is present (post-review.sh derives the event from per-finding
-    # severity; advisory-only reviews post COMMENT). Copilot is always advisory
-    # (rules/review-severity.md) — its verdict never produces this result; the
-    # agent still reads its body per rules/reviewer-feedback-reading.md.
-    if [[ "$codex" == "CHANGES_REQUESTED" ]]; then
+    # Both lanes derive CHANGES_REQUESTED from blocking findings. Advisory
+    # findings post COMMENT and must be read, but do not block the merge.
+    if [[ "$codex" == "CHANGES_REQUESTED" || "$claude" == "CHANGES_REQUESTED" ]]; then
       emit_and_exit "changes_requested" "$attempts" "$elapsed" "$snapshot" 0
     fi
 
-    # Ready = the exact Step 7 merge-gate field conjunction: mergeable, CI
-    # green-or-absent, and BOTH bots have posted a verdict (state left "none")
-    # so each body can be read before merge, and no Copilot review is still
-    # owed — an older same-head review is not the one a re-request or a run in
-    # flight will post. The policy reviewer is not CHANGES_REQUESTED here —
-    # the guard above returned; Copilot never gates.
+    # Both current-head verdicts must have arrived; findings remain readable
+    # in the snapshot. Blocking findings returned above.
     if [[ "$mergeable" == "MERGEABLE" \
        && ( "$ci" == "success" || "$ci" == "none" ) \
        && "$codex" != "none" \
-       && "$copilot" != "none" \
-       && "$copilot_owed" == "false" ]]; then
+       && "$claude" != "none" ]]; then
       emit_and_exit "ready" "$attempts" "$elapsed" "$snapshot" 0
-    fi
-
-    # Copilot is request-triggered: with no posted verdict at this head, no
-    # pending request and no run in flight, nothing is coming and the budget would be spent proving
-    # it. Say so at once instead (rules/ci-safety.md Always Watch CI). The
-    # policy reviewer is push-triggered and never carries a pending request, so
-    # it is not read this way.
-    if [[ "$copilot" == "none" && "$copilot_requested" == "false" ]]; then
-      echo "error: Copilot has no review at this head, no pending request and no run in flight on ${owner}/${repo}#${pr} — run 'bash ${SCRIPT_DIR}/request-copilot-review.sh ${owner} ${repo} ${pr}' and re-run this watch; waiting cannot produce a review nobody asked for" >&2
-      emit_and_exit "review_unrequested" "$attempts" "$elapsed" "$snapshot" 1
     fi
 
     # Still pending (UNKNOWN mergeability, CI pending, or a bot yet to post).

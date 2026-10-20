@@ -1,0 +1,45 @@
+name: PR Code Review (Claude, subscription)
+
+# Same-repo writer trust matches review-codex.yml (#192). Forks receive no
+# secrets. The model has read-only source tools and no GitHub credential.
+# Seed CLAUDE_CODE_OAUTH_TOKEN with claude setup-token; no API billing fallback.
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: claude-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  review:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      # renovate: datasource=github-tags depName=actions/checkout
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      # renovate: datasource=github-tags depName=actions/setup-node
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: "24"
+      # renovate: datasource=npm depName=@anthropic-ai/claude-code
+      - name: Install Claude CLI
+        run: npm install -g @anthropic-ai/claude-code@2.1.304
+      - name: Verify real CLI context isolation
+        run: python3 .github/claude-review/check-isolation.py
+      - name: Review code quality and bugs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          REVIEW_OWNER: ${{ github.repository_owner }}
+          REVIEW_REPO: ${{ github.event.repository.name }}
+          REVIEW_PR: ${{ github.event.pull_request.number }}
+          REVIEW_BASE: ${{ github.event.pull_request.base.ref }}
+        run: python3 .github/claude-review/review.py "$REVIEW_OWNER" "$REVIEW_REPO" "$REVIEW_PR" "$REVIEW_BASE"

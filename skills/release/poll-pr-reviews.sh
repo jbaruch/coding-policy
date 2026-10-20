@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Snapshot CI status, bot verdicts, and every review and inline comment body for a PR.
+# Snapshot CI, policy and Claude quality verdicts, and every review/comment body.
+# Copilot fields remain for compatibility; the merge watcher uses codex + claude.
 # Non-blocking — call repeatedly to observe transitions.
 #
 # Usage: poll-pr-reviews.sh <owner> <repo> <pr-number>
@@ -18,6 +19,9 @@
 #     "head_sha": "<PR head commit SHA>",
 #     "ci":   {"status": "pending|success|failure|none", "checks": [...]},
 #     "reviews": {
+#       "claude":  {"state": "APPROVED|CHANGES_REQUESTED|COMMENTED|none", "commit_id": "SHA|null",
+#                   "submitted_at": "ISO-8601|null", "body": "text|null",
+#                   "stale": bool, "requested": false},
 #       "codex":   {"state": "APPROVED|CHANGES_REQUESTED|COMMENTED|RULED|none",
 #                   "submitted_at": "ISO-8601|null", "body": "text|null",
 #                   "commit_id": "<SHA the review is bound to>|null",
@@ -106,6 +110,9 @@ if ! source "${_ppr_dir}/copilot-run.sh"; then
   exit 2
 fi
 
+# shellcheck source=skills/release/review-lanes.sh
+source "${_ppr_dir}/review-lanes.sh"
+
 # Bot logins, by surface. A reviewer does NOT necessarily author its reviews
 # and its inline comments under the same login, and the policy reviewer's login
 # depends on WHICH repo the PR is in:
@@ -187,12 +194,12 @@ slurp_api_array() {
 # superseded verdict — so select the max by submitted_at explicitly.
 latest_review_by() {
   local owner="$1" repo="$2" pr="$3"; shift 3
-  local logins_json
+  local logins_json lane="${REVIEW_LANE:-policy}"
   logins_json=$(jq -n '$ARGS.positional' --args "$@") \
     || { echo "error: failed to encode login list for review lookup" >&2; return 1; }
   slurp_api_array "repos/${owner}/${repo}/pulls/${pr}/reviews?per_page=100" "review" \
-    | jq --argjson logins "$logins_json" '
-        [.[] | select(.user.login | IN($logins[]))]
+    | jq --arg lane "$lane" --argjson logins "$logins_json" "$(review_lanes_jq)"'
+        [.[] | select(.user.login | IN($logins[])) | select(in_review_lane($lane))]
         | (group_by(.user.login) | map(max_by(.submitted_at))) as $per_login_latest
         | ( ($per_login_latest | map(select(.state == "CHANGES_REQUESTED")) | first)
             // ($per_login_latest | sort_by(.submitted_at) | last) )
@@ -354,11 +361,16 @@ main() {
     copilot_started_at=$(printf '%s' "$flight" | jq -r '.started_at // empty')
   fi
 
-  local codex_review copilot_review codex_comments copilot_comments comment_bodies review_bodies
-  codex_review=$(latest_review_by   "$owner" "$repo" "$pr_number" "${CODEX_REVIEW_LOGINS[@]}") \
+  local codex_review claude_review copilot_review codex_comments copilot_comments comment_bodies review_bodies
+  codex_review=$(REVIEW_LANE=policy latest_review_by   "$owner" "$repo" "$pr_number" "${CODEX_REVIEW_LOGINS[@]}") \
     || { echo "error: failed to fetch Codex review state" >&2; exit 1; }
-  copilot_review=$(latest_review_by "$owner" "$repo" "$pr_number" "$COPILOT_REVIEW_LOGIN") \
+  copilot_review=$(REVIEW_LANE=policy latest_review_by "$owner" "$repo" "$pr_number" "$COPILOT_REVIEW_LOGIN") \
     || { echo "error: failed to fetch Copilot review state" >&2; exit 1; }
+  claude_review=$(REVIEW_LANE=quality latest_review_by "$owner" "$repo" "$pr_number" "${CODEX_REVIEW_LOGINS[@]}") \
+    || { echo "error: failed to fetch Claude review state" >&2; exit 1; }
+  claude_review=$(printf '%s' "$claude_review" | jq 'del(._dismissed_review_id)')
+  claude_review=$(resolve_review_against_head "$claude_review" "$head_sha")
+  claude_review=$(printf '%s' "$claude_review" | jq '. + {requested: false}')
   # Only the policy reviewer's review is ever ruled-dismissed.
   codex_review=$(resolve_ruled_dismissal "$owner" "$repo" "$pr_number" "$codex_review") \
     || { echo "error: failed to read the dismissal of the policy review on ${owner}/${repo}#${pr_number} — inspect 'gh api --paginate repos/${owner}/${repo}/issues/${pr_number}/timeline', then retry" >&2; exit 1; }
@@ -389,7 +401,7 @@ main() {
   # Review text can exceed a platform's per-argument limit. Stream every
   # potentially large JSON payload instead of passing it through --argjson.
   printf '%s\n' "$checks_json" "$codex_review" "$copilot_review" \
-    "$comment_bodies" "$review_bodies" "$merge_state" | jq -s \
+    "$comment_bodies" "$review_bodies" "$merge_state" "$claude_review" | jq -s \
     --argjson pr_number "$pr_number" \
     --arg head_sha "$head_sha" \
     --arg ci_status "$ci_status" \
@@ -399,7 +411,7 @@ main() {
       pr_number: $pr_number,
       head_sha: $head_sha,
       ci: {status: $ci_status, checks: .[0]},
-      reviews: {codex: .[1], copilot: .[2]},
+      reviews: {codex: .[1], claude: .[6], copilot: .[2]},
       review_bodies: .[4],
       inline_comments: {codex: $codex_comments, copilot: $copilot_comments},
       inline_comment_bodies: .[3],

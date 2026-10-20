@@ -1,5 +1,8 @@
 {
   "include": [
+    ".github/claude-review/review.py",
+    ".github/claude-review/check-isolation.py",
+    ".github/claude-review/tests/test_review.py",
     ".github/codex-review/policy-authoring-context.py",
     ".github/codex-review/tests/test_policy_authoring_context.py",
     ".github/codex-accept/contract.py",

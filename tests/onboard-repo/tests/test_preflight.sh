@@ -141,7 +141,6 @@ with_sourced_sandbox() {
     mkdir -p .github/workflows
     printf '# fleet-review marker\n' > .github/fleet-review-enabled
     printf 'name: trigger\n' > .github/workflows/review-trigger.yml
-    printf '# Copilot\n' > .github/copilot-instructions.md
     git add -A
     git -c user.email=t@t -c user.name=t commit -q -m targets
   ) || { local s=$?; rm -rf "$sandbox"; return $s; }
@@ -175,24 +174,24 @@ t_tracked_deletion_via_rm_flagged() {
 # stays in HEAD until the deletion is committed. The diff-filter=D
 # check must catch this case too.
 t_tracked_deletion_via_git_rm_flagged() {
-  git rm -q .github/copilot-instructions.md
+  git rm -q .github/fleet-review-enabled
   failures=()
   check_no_dirty_target_edits
   [[ ${#failures[@]} -eq 1 ]] || { echo "    FAIL: expected 1 failure, got ${#failures[@]}: ${failures[*]}" >&2; return 1; }
   echo "${failures[0]}" | grep -q "tracked deletion" || { echo "    FAIL: expected 'tracked deletion' marker; got: ${failures[0]}" >&2; return 1; }
-  echo "${failures[0]}" | grep -q "copilot-instructions\.md" || { echo "    FAIL: expected copilot-instructions.md path; got: ${failures[0]}" >&2; return 1; }
+  echo "${failures[0]}" | grep -q "fleet-review-enabled" || { echo "    FAIL: expected fleet-review-enabled path; got: ${failures[0]}" >&2; return 1; }
 }
 
 # Multi-target deletion: every deleted target must surface, not just
 # the first one found.
 t_multiple_tracked_deletions_all_flagged() {
   rm .github/fleet-review-enabled
-  git rm -q .github/copilot-instructions.md
+  git rm -q .github/workflows/review-trigger.yml
   failures=()
   check_no_dirty_target_edits
   [[ ${#failures[@]} -eq 1 ]] || { echo "    FAIL: expected 1 aggregated failure, got ${#failures[@]}: ${failures[*]}" >&2; return 1; }
   echo "${failures[0]}" | grep -q "fleet-review-enabled (tracked deletion)" || { echo "    FAIL: missing fleet-review-enabled in: ${failures[0]}" >&2; return 1; }
-  echo "${failures[0]}" | grep -q "copilot-instructions\.md (tracked deletion)" || { echo "    FAIL: missing copilot-instructions.md in: ${failures[0]}" >&2; return 1; }
+  echo "${failures[0]}" | grep -q "review-trigger.yml (tracked deletion)" || { echo "    FAIL: missing review-trigger.yml in: ${failures[0]}" >&2; return 1; }
 }
 
 # Sanity: with all targets present and unmodified, the check must not
@@ -207,11 +206,11 @@ t_unmodified_targets_not_flagged() {
 # Uncommitted edits on a tracked reviewer target must surface in override mode,
 # so a consumer's unrelated pending change isn't swept into the upgrade commit.
 t_uncommitted_edits_flagged() {
-  printf "\n# consumer edit\n" >> .github/copilot-instructions.md
+  printf "\n# consumer edit\n" >> .github/fleet-review-enabled
   failures=()
   check_no_dirty_target_edits
   [[ ${#failures[@]} -eq 1 ]] || { echo "    FAIL: expected 1 failure, got ${#failures[@]}: ${failures[*]}" >&2; return 1; }
-  echo "${failures[0]}" | grep -q "copilot-instructions.md (uncommitted edits)" || { echo "    FAIL: expected copilot-instructions.md (uncommitted edits); got: ${failures[0]}" >&2; return 1; }
+  echo "${failures[0]}" | grep -q "fleet-review-enabled (uncommitted edits)" || { echo "    FAIL: expected fleet-review-enabled (uncommitted edits); got: ${failures[0]}" >&2; return 1; }
 }
 
 # --- driver ---

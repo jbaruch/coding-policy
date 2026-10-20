@@ -130,12 +130,10 @@ TEMPLATE_DIR=".tessl/plugins/jbaruch/coding-policy/skills/onboard-repo/templates
 TEMPLATES=(
   "${TEMPLATE_DIR}/fleet-review-enabled.md"
   "${TEMPLATE_DIR}/review-trigger.yml.md"
-  "${TEMPLATE_DIR}/copilot-instructions.md"
 )
 TARGETS=(
   ".github/fleet-review-enabled"
   ".github/workflows/review-trigger.yml"
-  ".github/copilot-instructions.md"
 )
 
 declare -a failures=()
@@ -211,7 +209,6 @@ check_branch_not_remote() {
 # Override-mode safety check: refuse to upgrade if the consumer has dirty
 # working-tree state on any reviewer target the upgrade overwrites and stages
 # (the review-codex.yml workflow, the .github/codex-review/* scripts, and
-# .github/copilot-instructions.md). Each is overwritten wholesale, so a
 # consumer's unrelated pending edits would be swept into the reviewer-upgrade
 # commit. A never-tracked, not-yet-created target (fresh install/upgrade) has
 # nothing to clobber and is not flagged. Mirrors how `git pull` refuses to

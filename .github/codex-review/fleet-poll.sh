@@ -13,6 +13,15 @@
 # Exit: 0 on success (array may be empty); non-zero with a stderr diagnostic.
 set -euo pipefail
 
+REVIEW_LANE="${REVIEW_LANE:-policy}"
+case "$REVIEW_LANE" in
+  policy|quality) ;;
+  *) echo "error: REVIEW_LANE must be policy or quality" >&2; exit 2 ;;
+esac
+REVIEW_MODULE_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../../skills/release" && pwd)"
+# shellcheck source=skills/release/review-lanes.sh
+source "$REVIEW_MODULE_DIR/review-lanes.sh"
+
 command -v jq >/dev/null 2>&1 || { echo "error: jq is not installed" >&2; exit 2; }
 
 main() {
@@ -70,8 +79,9 @@ main() {
         echo "warn: could not read reviews for ${full}#${number} — treating as needs-review" >&2
         reviews_json="[]"
       fi
-      reviewed=$(jq -r --arg who "$REVIEWER_LOGIN" --arg sha "$head" \
-                   'any(.[]; .user.login==$who and .commit_id==$sha)' <<<"$reviews_json")
+      reviewed=$(jq -s -r --arg lane "$REVIEW_LANE" --arg who "$REVIEWER_LOGIN" --arg sha "$head" \
+                   "$(review_lanes_jq)"' (add // []) | any(.[]; .user.login==$who and .commit_id==$sha
+                     and (.state | IN("APPROVED", "COMMENTED", "CHANGES_REQUESTED")) and in_review_lane($lane))' <<<"$reviews_json")
       [[ "$reviewed" == "true" ]] && continue
 
       worklist=$(jq -c \

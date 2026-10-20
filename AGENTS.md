@@ -19,5 +19,5 @@ authoritative policy for the review.
   `rules/no-secrets.md`, `rules/code-formatting.md`, and the rest.
 - Cite each finding as `rule: <name>` (e.g. `rule: ci-safety`) with the file, the line, the clause
   violated, and the fix. Rules are ground truth — never propose a change that contradicts them.
-- General code quality (correctness, bugs, security, tests) is Copilot's lane
-  (`.github/copilot-instructions.md`). Focus these guidelines on policy compliance.
+- General code quality (correctness, bugs, security, tests) is Claude's lane
+  (`.github/claude-review/system-prompt.md`). Focus these guidelines on policy compliance.

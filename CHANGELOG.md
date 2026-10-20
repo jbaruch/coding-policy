@@ -1,3 +1,8 @@
+### Claude subscription code review
+
+- Add an independent Claude reviewer for code quality and bugs, with a replacement system prompt and no loaded agent or policy context.
+- Run policy and quality reviews separately in the central fleet; gate on blocking findings from either reviewer, keep advisory findings nonblocking, and stop requiring Copilot.
+
 # Changelog
 
 ## 0.4.1 — 2026-10-19

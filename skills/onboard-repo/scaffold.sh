@@ -6,7 +6,6 @@
 #   .github/workflows/review-trigger.yml    — PR-time trigger; fires an immediate
 #                                             single-PR review so the verdict lands
 #                                             before merge (the poll is a backstop)
-#   .github/copilot-instructions.md         — the Copilot complementary lane
 # and document the one operator secret the trigger needs:
 #   .env.example                            — appends a FLEET_DISPATCH_TOKEN entry
 #                                             with the repo's Actions-secrets URL
@@ -40,7 +39,6 @@ TEMPLATE_DIR=".tessl/plugins/jbaruch/coding-policy/skills/onboard-repo/templates
 MANIFEST=(
   "fleet-review-enabled.md:.github/fleet-review-enabled"
   "review-trigger.yml.md:.github/workflows/review-trigger.yml"
-  "copilot-instructions.md:.github/copilot-instructions.md"
 )
 
 # .env.example is handled separately from MANIFEST: it is appended-to (not

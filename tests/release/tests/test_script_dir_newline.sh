@@ -148,6 +148,7 @@ main() {
   #      shows the script got past it.
   for _script in poll-pr-reviews.sh request-copilot-review.sh; do
     stage "copilot-run-${_script%.sh}" "$_script"
+    cp "$REAL/review-lanes.sh" "$STAGE/review-lanes.sh" || die "copy review-lanes.sh"
     lib_stub "$STAGE/copilot-run.sh" copilot_run_in_flight
     run "$_script"
     if [[ $RC -eq 2 && "$ERRTEXT" == *usage:* ]] && reached copilot-run.sh; then

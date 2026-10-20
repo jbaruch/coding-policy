@@ -3,7 +3,7 @@ name: release
 description: >
   Structured workflow for shipping code via GitHub pull requests: PR creation,
   dual-lens automated review (the Codex code-review app for `rules/*.md`
-  compliance + Copilot for correctness and risk), merge, and branch cleanup. Covers
+  compliance + Claude for correctness and risk), merge, and branch cleanup. Covers
   readiness checks, version
   reasoning, review polling, feedback handling, and post-merge verification.
   Use when the user wants to open a pull request, ship code, merge a branch,
@@ -52,7 +52,7 @@ Proceed immediately to Step 4.
 skills/release/references/step-4-review.md
 ```
 
-Confirm the policy reviewer was triggered and request Copilot.
+Confirm both automatic reviewers were triggered.
 Proceed immediately to Step 5.
 
 ## Step 5 — Watch PR State
@@ -71,9 +71,9 @@ skills/release/references/step-6-feedback.md
 ```
 
 Read every review body and inline comment in full before judging findings.
-Fix blocking policy findings and CI failures. Copilot remains advisory;
+Fix blocking findings from either reviewer and CI failures;
 advisory-only feedback creates no repair or re-review round.
-After each required push, re-request Copilot and return to Step 5.
+After each required push, both reviewers run automatically; return to Step 5.
 Proceed immediately to Step 7 after the reference's gates are satisfied.
 
 ## Step 7 — Deliver

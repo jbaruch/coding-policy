@@ -162,7 +162,24 @@ JSON
   ok "across repos, only the un-reviewed PR surfaces"; teardown
 }
 
+t_lanes_deduplicate_separately() {
+  setup; MOCK_REPOS=(jbaruch/repo-a)
+  writef "$MOCK_DIR/jbaruch__repo-a.pulls.json" <<'JSON'
+[{"number":7,"base":{"ref":"main"},"head":{"sha":"aaa111","repo":{"full_name":"jbaruch/repo-a"}}}]
+JSON
+  writef "$MOCK_DIR/jbaruch__repo-a.reviews.7.json" <<'JSON'
+[{"user":{"login":"app[bot]"},"commit_id":"aaa111","state":"COMMENTED","body":"<!-- coding-policy:claude-quality-review:v1 -->"}]
+JSON
+  local out
+  out=$(REVIEW_LANE=policy run_main)
+  [[ "$(jq length <<<"$out")" == 1 ]] || { bad "quality cannot suppress missing policy"; teardown; return; }
+  out=$(REVIEW_LANE=quality run_main)
+  [[ "$(jq length <<<"$out")" == 0 ]] || { bad "quality dedup recognizes its own result"; teardown; return; }
+  ok "policy and quality deduplicate separately"; teardown
+}
+
 echo "== fleet-poll.sh tests =="
+t_lanes_deduplicate_separately
 t_needs_review
 t_already_reviewed
 t_head_advanced
