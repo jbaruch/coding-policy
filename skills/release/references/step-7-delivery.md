@@ -6,7 +6,7 @@ Only proceed when:
 - Every `inline_comment_bodies[].body` in Step 5's snapshot has been read in full and any blocking finding has been addressed per Step 6. Ordinary advisory acknowledgments and thread resolution are outside the merge predicate, AND
 - A ruled finding's reply cites its ruling, per Step 6.
 
-A `COMMENTED` review never gates the merge on its state alone — but its body must be read before merge, zero inline comments included. Every inline comment must also be read. Advisory findings (the reviewer's `## Advisory findings` section, and every Copilot comment) do not block the merge or require thread closure; use Step 6's standalone or team acknowledgment form during the existing review work. Only a blocking finding gates.
+A `COMMENTED` review never gates the merge on its state alone — but its body must be read before merge, zero inline comments included. Every inline comment must also be read. Advisory findings (either reviewer's `## Advisory findings` section) do not block the merge or require thread closure; use Step 6's standalone or team acknowledgment form during the existing review work. Only a blocking finding gates.
 
 Once these conditions hold, merge automatically per `rules/ship-on-green.md` — the green gates are the approval, stakes raise care not permission, and the only blocks are its three objective exits (Red / No undo / Murky). Do not pause to ask a human whether to merge.
 

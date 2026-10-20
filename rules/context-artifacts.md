@@ -53,7 +53,7 @@ description: Plugin structure, rule/skill format, review pipeline, surface sync,
 - Mixed distribution keeps the gate — a plugin that also ships through another channel still reviews every changed skill before its Tessl publish
 - Deleting the Tessl manifest exempts nothing while the content still publishes through Tessl
 - Adding another channel's manifest exempts nothing either
-- A skill distributed through no Tessl path owes `rules/skill-authoring.md` in full, its repo's CI gates, and its external policy and Copilot review — never this command
+- A skill distributed through no Tessl path owes `rules/skill-authoring.md` in full, its repo's CI gates, and its external policy and Claude review — never this command
 - CI wiring and the review rubric are binding: read `skills/release/references/skill-review-gate.md` CI Wiring before wiring or changing the review step
 - Act on concrete feedback (tighter triggers, extracted reference material, tightened descriptions); re-review until the gate passes
 - Credit-outage tolerance is opt-in and narrow — see Credit-Outage Review Carve-Out

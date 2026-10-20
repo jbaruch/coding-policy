@@ -632,6 +632,7 @@ t_hostile_cdpath_keeps_the_sibling_foreman() {
   local decoy="${TMPDIR_TEST}/decoy" stage="${TMPDIR_TEST}/stage" out
   mkdir -p "${decoy}/release" "${stage}/coding-policy/skills/release" "${stage}/herdr-policy/skills/herdr-foreman" \
     || { echo "    FAIL: cannot build the CDPATH fixture" >&2; return 1; }
+  cp "${SCRIPT%/*}/review-lanes.sh" "${stage}/coding-policy/skills/release/review-lanes.sh" || return 1
   cp "$SCRIPT" "${stage}/coding-policy/skills/release/dismiss-ruled-review.sh" || { echo "    FAIL: cannot stage the script" >&2; return 1; }
   printf '#!/usr/bin/env bash\necho "sibling $*" > "%s"\necho "{\\"sha256\\": \\"%s\\"}"\nexit 0\n' "${TMPDIR_TEST}/foreman-called" "$(printf 'a%.0s' {1..64})" \
     > "${stage}/herdr-policy/skills/herdr-foreman/foreman.sh" || { echo "    FAIL: cannot stage the foreman stub" >&2; return 1; }

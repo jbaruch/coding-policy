@@ -6,7 +6,7 @@ Reference for Step 4 of the `release` skill — how the two PR reviewers are wir
 
 The policy reviewer reviews the PR diff against the in-tree `rules/*.md` and posts the verdict as a PR review. It runs one of two ways depending on the repo. Normally exactly one deployment reviews a given PR; a repo mid fleet-migration can transiently carry both, which is why the release scripts resolve the verdict fail-safe across both logins (`skills/release/poll-pr-reviews.sh` login table).
 
-Both derive the review event from per-finding severity (`rules/review-severity.md`; `.github/codex-review/post-review.sh` header) — any blocking finding posts `REQUEST_CHANGES`, advisory-only findings post `COMMENT`, a clean pass posts `APPROVE`.
+Both derive the review event from per-finding severity (`rules/review-severity.md`; `.github/codex-review/post-review.sh` header) — any blocking finding posts `REQUEST_CHANGES`; nonblocking results approve with any advisory notes included, falling back to `COMMENT` only when GitHub forbids approval.
 
 ### A. coding-policy's own PRs — in-repo `review-codex.yml`
 
@@ -25,11 +25,31 @@ Consumer repos carry no per-repo Codex review workflow (`review-codex.yml`) and 
 - **Authorship:** submitted as `coding-policy-fleet-reviewer[bot]`.
 - **APPROVE:** the App CAN `APPROVE`, so a clean re-review supersedes its own earlier `CHANGES_REQUESTED` natively — no dismissal step is needed on consumer repos. Which reviews are dismissal-eligible is the script's decision (see the `skills/release/dismiss-stale-reviews.sh` header).
 
-## Copilot — second reviewer with a different lens
+## Claude — independent code-quality review
 
-The skill keeps Copilot as a deliberate second reviewer alongside the policy reviewer, not as a temporary trial. They have complementary lenses: the policy reviewer enforces `rules/*.md` compliance (per `.github/codex-review/prompt.md` and `AGENTS.md ## Review guidelines`), while Copilot reads for correctness, bugs, security, and test-coverage gaps that no rule file specifically targets (scoped via `.github/copilot-instructions.md`). PRs through this skill regularly see each catch issues the other misses.
+Codex checks policy compliance. Claude uses the replacement system prompt in
+.github/claude-review/system-prompt.md for correctness, bugs, security,
+reliability, performance and concrete test gaps. Its isolated session loads no
+policy, agent instructions, memory, plugins, skills, hooks or MCP servers and
+has only read-only source tools. Authentication uses CLAUDE_CODE_OAUTH_TOKEN
+from claude setup-token; the token is held only in coding-policy. Its dedicated GitHub App uses CLAUDE_REVIEW_APP_ID and CLAUDE_REVIEW_APP_PRIVATE_KEY, also held only in coding-policy (see .env.example).
 
-The operator requests Copilot via `skills/release/request-copilot-review.sh <owner> <repo> <pr>` — it requests the Copilot reviewer and verifies it landed, exiting non-zero on failure and emitting a JSON summary on success. The request mechanism, bot-id handling, and fallback discovery live in the script header (`rules/script-as-black-box.md`). Copilot is always advisory (`rules/review-severity.md`): its comments must be read (`rules/reviewer-feedback-reading.md`) but never gate the merge — only the policy reviewer's blocking findings gate per Step 7.
+Both reviews run on PR events. The central fleet workflow runs them as separate
+jobs using distinct reviewer Apps; existing consumer dispatches start both. The quality result posts as a
+severity-derived verdict with the exact analyzed commit and the marker owned by
+`skills/release/review-lanes.sh` — `CLAUDE_REVIEW_LOGIN` and `review_lanes_jq`. Snapshot and dedup use that classifier and the separate logins. Claude posts as jbaruch-claude-reviewer[bot], independently of the Codex policy identity.
+
+Claude approves nonblocking results, including advisory notes. An App's approval
+supersedes its earlier change request; a plain comment would leave that request
+active. The dedicated App can approve on coding-policy and consumer repositories.
+The policy reviewer retains its existing self-review fallback and cleanup.
+
+Both reviewers emit findings in their review bodies. Reply in a PR comment citing the review and finding; use an inline thread only for an actual inline comment. Claude blocking findings are fixed before merge.
+
+Read both bodies before merge. On failed authentication, renew the subscription
+token in coding-policy and rerun the failed job. Do not use API-key fallback or
+request Copilot. The workflow pins the Claude CLI; recheck the model pin when
+Renovate updates the CLI and at the weekly capability refresh.
 
 ## Weighed findings and the ruled dismissal
 
@@ -60,7 +80,7 @@ Write the operator's answer into a ruling file with `AUTHORITY: operator`. Its f
 ### Order of work
 
 1. Run `dismiss-ruled-review.sh` with `--ruling` and `--followup-issue` (Step 6 command block). It posts the ruled findings to the follow-up issue — `defer`, or `decline` labelled won't-fix — then dismisses the review. Exit 1 names each unmet condition in `.unmet`; fix those findings instead.
-2. Reply citing the ruling, with `<digest>` the 16-hex digest from the script's `.message`. Policy findings live in the review body, so their replies go in one PR comment; Copilot findings get a reply on their own thread:
+2. Reply citing the ruling, with `<digest>` the 16-hex digest from the script's `.message`. Policy findings appear in the review body; reply in a PR comment citing the review and finding:
    - Declined: `Declining — judge ruling <digest>: <reason from the ruling>`
    - Deferred: `Acknowledged — deferred to #<follow-up issue> (judge ruling <digest>)`
 3. Run `dismiss-stale-reviews.sh` (Step 7), then re-run the Step 5 watcher. `poll-pr-reviews.sh` reads the dismissed review as `RULED`, which the watcher's ready test accepts.

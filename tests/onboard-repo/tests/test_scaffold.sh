@@ -16,7 +16,7 @@ SCRIPT="${SKILL_DIR}/scaffold.sh"
 [[ -f "$SCRIPT" && -r "$SCRIPT" ]] || { echo "fatal: scaffold.sh not readable at $SCRIPT" >&2; exit 2; }
 
 TEMPLATE_MOUNT=".tessl/plugins/jbaruch/coding-policy/skills/onboard-repo/templates"
-TARGETS=(.github/fleet-review-enabled .github/workflows/review-trigger.yml .github/copilot-instructions.md)
+TARGETS=(.github/fleet-review-enabled .github/workflows/review-trigger.yml)
 ENV_FILE=".env.example"
 
 pass=0; fail=0
@@ -37,7 +37,6 @@ with_repo() {
     mkdir -p "$TEMPLATE_MOUNT"
     cp "${SKILL_DIR}/templates/fleet-review-enabled.md" "$TEMPLATE_MOUNT/"
     cp "${SKILL_DIR}/templates/review-trigger.yml.md"    "$TEMPLATE_MOUNT/"
-    cp "${SKILL_DIR}/templates/copilot-instructions.md" "$TEMPLATE_MOUNT/"
   ) || { local s=$?; rm -rf "$sandbox"; return $s; }
   ( cd "$sandbox" && "$fn" )
   local rc=$?
@@ -50,7 +49,7 @@ all_targets_present() { local t; for t in "${TARGETS[@]}"; do [[ -f "$t" ]] || r
 t_install_creates_all() {
   local out; out=$(bash "$SCRIPT") || { echo "    FAIL: scaffold exited non-zero" >&2; return 1; }
   [[ "$(jq -r .state <<<"$out")" == "scaffolded" ]] || { echo "    FAIL: state != scaffolded: $out" >&2; return 1; }
-  [[ "$(jq '.files | length' <<<"$out")" == "4" ]] || { echo "    FAIL: expected 4 files (3 templates + .env.example): $out" >&2; return 1; }
+  [[ "$(jq '.files | length' <<<"$out")" == "3" ]] || { echo "    FAIL: expected 3 files (2 templates + .env.example): $out" >&2; return 1; }
   all_targets_present || { echo "    FAIL: not all 3 template targets written" >&2; return 1; }
   [[ -f "$ENV_FILE" ]] || { echo "    FAIL: .env.example not written" >&2; return 1; }
   grep -q "FLEET_DISPATCH_TOKEN=" "$ENV_FILE" || { echo "    FAIL: FLEET_DISPATCH_TOKEN not in .env.example" >&2; return 1; }
@@ -128,10 +127,10 @@ t_install_refuses_existing() {
 
 t_upgrade_overwrites() {
   bash "$SCRIPT" >/dev/null || return 1
-  printf 'tampered\n' > .github/copilot-instructions.md
+  printf 'tampered\n' > .github/fleet-review-enabled
   local out; out=$(bash "$SCRIPT" --override) || return 1
   [[ "$(jq -r .override <<<"$out")" == "true" ]] || { echo "    FAIL: override flag not true" >&2; return 1; }
-  grep -q "complementary lane" .github/copilot-instructions.md || { echo "    FAIL: copilot-instructions not restored from template" >&2; return 1; }
+  grep -q "Opts this repository" .github/fleet-review-enabled || { echo "    FAIL: fleet marker not restored from template" >&2; return 1; }
 }
 
 t_upgrade_noop_when_identical() {
@@ -142,15 +141,15 @@ t_upgrade_noop_when_identical() {
 
 t_symlink_target_refused() {
   mkdir -p .github
-  ln -s /etc/hostname .github/copilot-instructions.md
+  ln -s /etc/hostname .github/fleet-review-enabled
   local rc=0; bash "$SCRIPT" --override >/dev/null 2>&1 || rc=$?
-  [[ $rc -ne 0 && -L .github/copilot-instructions.md ]] || { echo "    FAIL: symlink target not refused (rc=$rc)" >&2; return 1; }
+  [[ $rc -ne 0 && -L .github/fleet-review-enabled ]] || { echo "    FAIL: symlink target not refused (rc=$rc)" >&2; return 1; }
 }
 
 t_nonregular_target_refused() {
-  mkdir -p .github/copilot-instructions.md
+  mkdir -p .github/fleet-review-enabled
   local rc=0; bash "$SCRIPT" --override >/dev/null 2>&1 || rc=$?
-  [[ $rc -ne 0 && -d .github/copilot-instructions.md ]] || { echo "    FAIL: directory target not refused (rc=$rc)" >&2; return 1; }
+  [[ $rc -ne 0 && -d .github/fleet-review-enabled ]] || { echo "    FAIL: directory target not refused (rc=$rc)" >&2; return 1; }
 }
 
 t_missing_template_fails() {

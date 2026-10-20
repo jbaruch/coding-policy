@@ -11,7 +11,6 @@
 # Staged paths:
 #   .github/fleet-review-enabled
 #   .github/workflows/review-trigger.yml
-#   .github/copilot-instructions.md
 #   .env.example                          (FLEET_DISPATCH_TOKEN documentation)
 #
 # Usage: commit.sh [--override]
@@ -49,7 +48,6 @@ fi
 FILES=(
   .github/fleet-review-enabled
   .github/workflows/review-trigger.yml
-  .github/copilot-instructions.md
   .env.example
 )
 

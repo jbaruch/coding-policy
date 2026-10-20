@@ -23,23 +23,21 @@ description: Review findings carry a severity — blocking gates the merge, advi
 
 - Pure prose and style: `context-writing-style` connective or em-dash placement, a presentation-only atomic-bullet split
 - CHANGELOG wording, naming taste, synonym preference
-- Copilot findings are always advisory regardless of Copilot's review state — even a Copilot `CHANGES_REQUESTED` never gates the agent's flow
 - Anything whose fix changes only presentation, not behavior
 
 ## Gating Predicate
 
 - Any blocking finding present → the reviewer posts `CHANGES_REQUESTED` and the merge gates
-- Only advisory findings → the reviewer posts `COMMENTED` and the merge is allowed
-- The policy reviewer's posted state already encodes this — the event is derived from per-finding severity (see `.github/codex-review/post-review.sh` header)
-- The merge watcher gates on the policy reviewer's `CHANGES_REQUESTED` alone (see `skills/release/watch-pr-reviews.sh` header)
-- Copilot never gates
+- Only advisory findings → the reviewer posts `APPROVED` or `COMMENTED` and the merge is allowed
+- Each reviewer's posted state already encodes this — the event is derived from per-finding severity (see `.github/codex-review/post-review.sh` and `.github/claude-review/review.py`)
+- The merge watcher gates on either Codex policy or Claude quality `CHANGES_REQUESTED` (see `skills/release/watch-pr-reviews.sh` header)
 
 ## Judge-Weighed Finding Carve-Out
 
-- Narrow exception for merging with a blocking finding a weighing ruled `defer` or `decline`
-- Applies when fixing the finding costs more than the failure it prevents
+- Narrow exception for merging with a blocking policy finding a weighing ruled `defer` or `decline`
+- Applies only to policy findings when fixing costs more than the failure it prevents
 - Preconditions are binding: read `skills/release/references/review-severity-carve-outs.md` Judge-Weighed Finding Carve-Out before relying on it
-- Every other blocking finding is fixed before merge
+- Every other blocking finding is fixed before merge, including Claude code-quality findings
 
 ## Split Reading From Acting
 

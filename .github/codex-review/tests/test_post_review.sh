@@ -99,7 +99,7 @@ JSON
   rm -rf "$dir"
 }
 
-# --- advisory-only findings -> COMMENT (never gates), Advisory section ---
+# --- advisory-only findings -> APPROVE (clears an older block), Advisory section ---
 t_advisory_only() {
   local dir; dir=$(mktemp -d)
   GH_CAPTURE="$dir/payload.json"; MOCK_422_ON_APPROVE=0
@@ -110,14 +110,14 @@ JSON
   local out; out=$(run_main owner repo 9 "$dir/final.json")
   local rc=$?
   [[ $rc -eq 0 ]]                                                     || { bad "advisory: exit 0 (rc=$rc)"; rm -rf "$dir"; return; }
-  [[ "$(jq -r .event <<<"$out")" == "COMMENT" ]]                    || { bad "advisory: event COMMENT (got $out)"; rm -rf "$dir"; return; }
+  [[ "$(jq -r .event <<<"$out")" == "APPROVE" ]]                    || { bad "advisory: event APPROVE (got $out)"; rm -rf "$dir"; return; }
   [[ "$(jq -r .findings <<<"$out")" == "1" ]]                       || { bad "advisory: findings 1 (got $out)"; rm -rf "$dir"; return; }
   [[ "$(jq -r .blocking <<<"$out")" == "0" ]]                       || { bad "advisory: blocking 0 (got $out)"; rm -rf "$dir"; return; }
   [[ "$(jq -r .advisory <<<"$out")" == "1" ]]                       || { bad "advisory: advisory 1 (got $out)"; rm -rf "$dir"; return; }
-  [[ "$(jq -r .event "$GH_CAPTURE")" == "COMMENT" ]]               || { bad "advisory: payload event COMMENT"; rm -rf "$dir"; return; }
+  [[ "$(jq -r .event "$GH_CAPTURE")" == "APPROVE" ]]               || { bad "advisory: payload event APPROVE"; rm -rf "$dir"; return; }
   jq -r .body "$GH_CAPTURE" | grep -q "## Advisory findings"        || { bad "advisory: body has an Advisory section"; rm -rf "$dir"; return; }
   if jq -r .body "$GH_CAPTURE" | grep -q "## Blocking findings"; then bad "advisory: body must not have a Blocking section"; rm -rf "$dir"; return; fi
-  ok "advisory-only -> COMMENT (never gates), Advisory section"
+  ok "advisory-only -> APPROVE (never gates), Advisory section"
   rm -rf "$dir"
 }
 

@@ -115,6 +115,17 @@
 
 set -euo pipefail
 
+case "${BASH_SOURCE[0]}" in
+  */*) _review_src="${BASH_SOURCE[0]%/*}" ;;
+  *) _review_src=. ;;
+esac
+# shellcheck source=skills/release/review-lanes.sh
+if ! source "${_review_src:-/}/review-lanes.sh"; then
+  echo "error: cannot load ${_review_src:-/}/review-lanes.sh — restore the release skill tree by re-cloning or reinstalling the plugin, then retry" >&2
+  exit 2
+fi
+
+
 RULED_MARKER="JUDGE-RULED:"
 RULING_SCHEMA="2"
 FLOOR_RULES=(no-secrets ci-safety)
@@ -587,7 +598,7 @@ main() {
     exit 2
   fi
   local tool
-  for tool in gh python3; do
+  for tool in gh python3 jq; do
     command -v "$tool" >/dev/null || { echo "error: ${tool} is not on PATH — install it and re-run" >&2; exit 2; }
   done
   if [[ -n "$ruling" && -z "${HERDR_ENV+x}" ]]; then
@@ -602,7 +613,8 @@ main() {
   head=$(gh pr view "$pr" --repo "${owner}/${repo}" --json headRefOid --jq .headRefOid) \
     || { echo "error: failed to read the head of ${owner}/${repo}#${pr} — run 'gh auth status', then retry" >&2; exit 2; }
   [[ -n "$head" ]] || { echo "error: ${owner}/${repo}#${pr} returned no headRefOid — verify the PR number" >&2; exit 2; }
-  gh api --paginate "repos/${owner}/${repo}/pulls/${pr}/reviews?per_page=100" > "${tmp}/reviews.json" \
+  gh api --paginate "repos/${owner}/${repo}/pulls/${pr}/reviews?per_page=100" \
+    | jq "$(review_lanes_jq)"' [.[] | select(in_review_lane("policy"))]' > "${tmp}/reviews.json" \
     || { echo "error: failed to fetch reviews for ${owner}/${repo}#${pr} — run 'gh auth status', then retry" >&2; exit 2; }
   if [[ -n "$ruling" ]]; then
     fetch_checks "$owner" "$repo" "$pr" "${tmp}/checks.json" || exit 2

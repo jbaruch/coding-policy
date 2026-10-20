@@ -12,10 +12,9 @@ List the files this PR adds to run the `jbaruch/coding-policy` coding-rule revie
 
 - `.github/workflows/review-trigger.yml` — on each pull request, starts a review of that PR against the `jbaruch/coding-policy` rules so the result is available before merge.
 - `.github/fleet-review-enabled` — an opt-in marker; while it is present, the same review also runs on a schedule as a backstop. The result posts as a `<app-slug>[bot]` review.
-- `.github/copilot-instructions.md` — points Copilot at the code-quality lane (correctness, bugs, security, test gaps).
 - `.env.example` — records the `FLEET_DISPATCH_TOKEN` name and where to set it, per the `no-secrets` rule.
 
-The rule review and Copilot are separate lanes. The rule review gates the merge on blocking findings (correctness, security, policy-contract); Copilot is always advisory — read it, but it never gates.
+Codex checks policy compliance; Claude independently reviews code quality and bugs without loaded policy or agent context. They post as separate GitHub Apps; both Apps need access to this repository. Each reviewer classifies findings as blocking or advisory. Blocking findings hold the merge; advisory findings do not. Read both complete review bodies.
 
 ### 2. Required secret
 

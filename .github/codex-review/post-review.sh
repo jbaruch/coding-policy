@@ -11,12 +11,12 @@
 # verdict (rules/review-severity.md — the gate is a deterministic function of
 # severities, rules/script-delegation.md):
 #   - any finding with severity "blocking"  -> REQUEST_CHANGES (gates the merge)
-#   - findings, all "advisory"              -> COMMENT (visible, never gates)
+#   - findings, all "advisory"              -> APPROVE (advisories remain visible)
 #   - no findings                           -> APPROVE (clean pass)
 #
 # The review is authored by whoever GH_TOKEN belongs to. A token GitHub forbids
 # from approving (`github-actions[bot]` — HTTP 422) falls back to COMMENT on a
-# clean pass, so the verdict is never lost.
+# nonblocking result, so the verdict is never lost.
 #
 # Usage: post-review.sh <owner> <repo> <pr-number> <result-json-file>
 # Out:   one JSON object on stdout:
@@ -88,7 +88,6 @@ main() {
   # Derive the event from severity (rules/review-severity.md), never a model verdict.
   local event
   if   (( blocking_count > 0 )); then event="REQUEST_CHANGES"
-  elif (( findings_count > 0 )); then event="COMMENT"
   else                                event="APPROVE"
   fi
 

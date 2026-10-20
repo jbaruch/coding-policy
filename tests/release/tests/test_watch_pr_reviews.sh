@@ -3,18 +3,17 @@
 #
 # Covers the behaviors the watcher promises:
 #   1. Ready on first poll — mergeable, CI success, both bots posted, the policy
-#      reviewer not CHANGES_REQUESTED (Copilot may be) → "ready", exit 0.
+#      reviewer and Claude not CHANGES_REQUESTED → "ready", exit 0.
 #   2. Deferred ready — first snapshot pending (one bot not yet posted), a
 #      later snapshot ready → polls, reaches "ready", exit 0.
-#   3. Both-bots-required — a lone codex verdict with copilot still "none"
+#   3. Both-bots-required — a lone codex verdict with claude still "none"
 #      is NOT ready (proves the watcher waits for the full merge-gate set,
 #      not the first verdict to land).
 #   4. Zero inline comments is still ready — a clean verdict with no inline
 #      comments is complete; the watcher does not wait for comments.
 #   5. ci "none" (no checks configured) is accepted as ready.
 #   6. changes_requested — the policy reviewer's CHANGES_REQUESTED is terminal.
-#  6b. Copilot advisory — a Copilot CHANGES_REQUESTED does NOT gate; with codex
-#      approved + mergeable it is "ready" (rules/review-severity.md).
+#  6b. Claude blocking — a Claude CHANGES_REQUESTED gates independently.
 #   7. ci_failure — a failed check is terminal.
 #   8. dirty — CONFLICTING mergeability is terminal.
 #   9. pending_at_budget — every poll pending → exit 1, snapshot preserved.
@@ -116,28 +115,28 @@ queue() { for s in "$@"; do echo "$s" >> "$MOCK_QUEUE_FILE"; done; }
 calls() { wc -l < "$MOCK_CALLS_FILE" | tr -d ' '; }
 sleeps() { [[ -f "$TMPDIR_TEST/sleeps" ]] || { echo 0; return; }; wc -l < "$TMPDIR_TEST/sleeps" | tr -d ' '; }
 
-# Build a compact snapshot JSON. Args: mergeable mstatus ci codex copilot [gh_comments copilot_comments]
+# Build a compact snapshot JSON. Args: mergeable mstatus ci codex claude [gh_comments claude_comments]
 snap() {
-  local mergeable="$1" mstatus="$2" ci="$3" codex="$4" copilot="$5"
+  local mergeable="$1" mstatus="$2" ci="$3" codex="$4" claude="$5"
   local ghc="${6:-0}" cpc="${7:-0}"
-  # `requested` defaults to true while Copilot has not posted (a lane asked
+  # `requested` defaults to true while Claude has not posted (a lane asked
   # for and not answered yet, which is what waiting is for, #369) and to false
   # once it has (the owed review arrived, #641).
   local cpr_default=false
-  [[ "$copilot" == "none" ]] && cpr_default=true
+  [[ "$claude" == "none" ]] && cpr_default=true
   local cpr="${8:-$cpr_default}"
   jq -cn \
     --arg mergeable "$mergeable" --arg mstatus "$mstatus" --arg ci "$ci" \
-    --arg codex "$codex" --arg copilot "$copilot" \
+    --arg codex "$codex" --arg claude "$claude" \
     --argjson ghc "$ghc" --argjson cpc "$cpc" --argjson cpr "$cpr" \
     '{
       pr_number: 42,
       ci: {status: $ci, checks: []},
       reviews: {
         codex:   {state: $codex,   submitted_at: null, body: null, requested: false},
-        copilot: {state: $copilot, submitted_at: null, body: null, requested: $cpr}
+        claude: {state: $claude, submitted_at: null, body: null, requested: $cpr}
       },
-      inline_comments: {codex: $ghc, copilot: $cpc},
+      inline_comments: {codex: $ghc, claude: $cpc},
       merge_state: {status: $mstatus, mergeable: $mergeable}
     }'
 }
@@ -145,27 +144,9 @@ snap() {
 result_of() { echo "$1" | jq -r '.watch.result // empty'; }
 
 # --- Test 0: a lane nobody requested is diagnosed at once ---------------------
-test_unrequested_copilot_is_immediate() {
-  reset_mocks
-  # Copilot has no verdict at this head AND no pending request: waiting cannot
-  # produce one, so the budget is not spent proving it (#369).
-  queue "$(snap MERGEABLE CLEAN success APPROVED none 0 0 false)"
-  # stdout and stderr apart: the JSON envelope is parsed, the diagnostic read.
-  local out err rc=0
-  err="$TMPDIR_TEST/unrequested.err"
-  out=$(main jbaruch coding-policy 42 2>"$err") || rc=$?
-  assert_eq "exit code" "1" "$rc" || return 1
-  assert_eq "result" "review_unrequested" "$(result_of "$out")" || return 1
-  assert_eq "poll count" "1" "$(calls)" || return 1
-  assert_eq "sleep count" "0" "$(sleeps)" || return 1
-  case "$(cat "$err")" in
-    *request-copilot-review.sh*) ;;
-    *) echo "    expected the diagnostic to name the request command" >&2; return 1 ;;
-  esac
-}
 
 # A requested-but-silent lane is what the budget exists for, and still waits.
-test_requested_copilot_still_waits() {
+test_requested_claude_still_waits() {
   reset_mocks
   queue "$(snap MERGEABLE CLEAN success APPROVED none 0 0 true)" \
         "$(snap MERGEABLE CLEAN success APPROVED COMMENTED 0 0 false)"
@@ -176,37 +157,19 @@ test_requested_copilot_still_waits() {
   assert_eq "poll count" "2" "$(calls)" || return 1
 }
 
-# #641: an older same-head Copilot review is not the review a re-request or a
+# #641: an older same-head Claude review is not the review a re-request or a
 # run in flight owes. While `requested` is true the watcher keeps waiting; it
 # reaches ready only once the owed review posts and `requested` goes false.
-test_owed_copilot_review_blocks_ready() {
-  reset_mocks
-  queue "$(snap MERGEABLE CLEAN success APPROVED COMMENTED 0 0 true)" \
-        "$(snap MERGEABLE CLEAN success APPROVED COMMENTED 0 0 false)"
-  local out rc=0
-  out=$(main jbaruch coding-policy 42 2>&1) || rc=$?
-  assert_eq "exit code" "0" "$rc" || return 1
-  assert_eq "result" "ready" "$(result_of "$out")" || return 1
-  assert_eq "poll count" "2" "$(calls)" || return 1
-}
 
 # A review still owed for the whole budget ends pending, never ready.
-test_owed_copilot_review_pends_at_budget() {
-  reset_mocks
-  queue "$(snap MERGEABLE CLEAN success APPROVED COMMENTED 0 0 true)"
-  local out rc=0
-  out=$(main jbaruch coding-policy 42 2>/dev/null) || rc=$?
-  assert_eq "exit code" "1" "$rc" || return 1
-  assert_eq "result" "pending_at_budget" "$(result_of "$out")"
-}
 
 # A snapshot from an older poll-pr-reviews.sh carries no `requested` field; the
 # watcher must keep waiting rather than read its absence as "nobody asked".
 test_missing_requested_field_still_waits() {
   reset_mocks
   queue "$(jq -cn '{pr_number: 42, ci: {status: "success", checks: []},
-                    reviews: {codex: {state: "APPROVED"}, copilot: {state: "none"}},
-                    inline_comments: {codex: 0, copilot: 0},
+                    reviews: {codex: {state: "APPROVED"}, claude: {state: "none"}},
+                    inline_comments: {codex: 0, claude: 0},
                     merge_state: {status: "CLEAN", mergeable: "MERGEABLE"}}')" \
         "$(snap MERGEABLE CLEAN success APPROVED COMMENTED)"
   local out rc=0
@@ -254,7 +217,7 @@ test_deferred_ready() {
 # --- Test 3: both bots required (a lone verdict is not ready) -----------------
 test_both_bots_required() {
   reset_mocks
-  # Copilot never posts — mergeable + codex approved is NOT enough.
+  # Claude never posts — mergeable + codex approved is NOT enough.
   queue "$(snap MERGEABLE CLEAN success APPROVED none)"
   local out rc=0
   out=$(main jbaruch coding-policy 42 2>&1) || rc=$?
@@ -294,16 +257,15 @@ test_changes_requested() {
   assert_eq "poll count" "1" "$(calls)" || return 1
 }
 
-# --- Test 6b: Copilot is always advisory — its CHANGES_REQUESTED does NOT gate -
-test_copilot_advisory_not_terminal() {
+# --- Test 6b: Claude is always advisory — its CHANGES_REQUESTED does NOT gate -
+test_claude_blocking_is_terminal() {
   reset_mocks
-  # Copilot CHANGES_REQUESTED with codex approved + mergeable is READY, not
-  # changes_requested — only the policy reviewer gates (rules/review-severity.md).
   queue "$(snap MERGEABLE CLEAN success APPROVED CHANGES_REQUESTED)"
   local out rc=0
   out=$(main jbaruch coding-policy 42 2>&1) || rc=$?
   assert_eq "exit code" "0" "$rc" || return 1
-  assert_eq "result" "ready" "$(result_of "$out")" || return 1
+  assert_eq "result" "changes_requested" "$(result_of "$out")" || return 1
+
 }
 
 # --- Test 7: ci_failure is terminal ------------------------------------------
@@ -395,10 +357,7 @@ test_non_json() {
 # Progress goes to stderr; stdout carries one JSON result.
 run_suite() {
   echo "test_watch_pr_reviews.sh" >&2
-  run "an unrequested Copilot lane is diagnosed without waiting" test_unrequested_copilot_is_immediate
-  run "a requested Copilot lane still waits for its verdict" test_requested_copilot_still_waits
-  run "an owed Copilot review blocks ready past an older one (#641)" test_owed_copilot_review_blocks_ready
-  run "an owed Copilot review pends at budget, never ready (#641)" test_owed_copilot_review_pends_at_budget
+  run "a requested Claude lane still waits for its verdict" test_requested_claude_still_waits
   run "a snapshot without the requested field keeps waiting" test_missing_requested_field_still_waits
   run "ready on first poll — no sleep" test_ready_first_poll
   run "RULED policy review plus green is ready" test_ruled_is_ready
@@ -407,7 +366,7 @@ run_suite() {
   run "zero inline comments is a complete review — ready" test_zero_comments_ready
   run "ci 'none' (no checks) counts as ready" test_ci_none_ready
   run "changes_requested is a terminal verdict" test_changes_requested
-  run "Copilot CHANGES_REQUESTED does not gate — advisory only" test_copilot_advisory_not_terminal
+  run "Claude blocking findings gate independently" test_claude_blocking_is_terminal
   run "ci failure is terminal (before waiting on reviews)" test_ci_failure
   run "conflicting branch surfaces as dirty" test_dirty
   run "pending forever exits 1 with the snapshot intact" test_pending_at_budget

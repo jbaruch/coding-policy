@@ -5,14 +5,12 @@ Moved from `rules/ci-safety.md` (#642) to keep the always-loaded rules under the
 ## Pre-Merge Watch Mechanics
 
 - Reading an open PR's current gate evidence without merging runs `skills/release/poll-pr-reviews.sh` once, never the blocking watch
-- The snapshot's `requested` is exactly one fact: a review for that login is still owed on a request
-- Owed means a request still pending on the PR, or a Copilot run that consumed one with no review posted since — predicate in `skills/release/copilot-run.sh` `copilot_run_in_flight`
-- It is false once the owed review has posted, and false for a push-triggered reviewer, which is never requested at all
-- A same-head review posted before the request or run it answers does not clear it
-- Resolve a reviewer's arrival by how it is triggered: a push-triggered review is owed by the push, a request-triggered one only once requested
-- A request-triggered lane with no posted review and `requested` false is diagnosed and named, never waited out
-- Never wait on a request-triggered review the waiting role has no scope to request
-- The gating reviewer's bot login varies by repository — resolved inside `poll-pr-reviews.sh`
+- Both reviewers run on same-repository PR events; neither needs a review request
+- The snapshot resolves Codex policy and Claude quality by their distinct trusted bot identities
+- Identity and provenance follow skills/release/references/REVIEW_DETAILS.md, “Claude — independent code-quality review”; legacy unmarked policy-bot reviews remain policy
+- A current-head posted verdict is required for each lane; a failed or missing quality review is never inferred clean from workflow success
+- Both reviewers classify findings as blocking or advisory; either CHANGES_REQUESTED gates, advisory findings do not
+- The gating reviewer's bot login varies by repository — resolved inside poll-pr-reviews.sh
 - A non-gating check that reds and surfaces as the watcher's `ci_failure` result is not a reason to hand-roll
 - On a `ci_failure` result, read the returned snapshot and act on the check that actually failed
 - The gating signal is not always a PR status check
