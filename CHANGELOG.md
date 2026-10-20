@@ -1,3 +1,5 @@
+## 0.5.1 — 2026-10-20
+
 ### Correct schema ownership and approved classification
 
 - Recognize the skill, runtime or service that owns an artifact's schema and migrations. Runtime-owned database readers reference the actual migration and installed reader contract rather than inventing an owner skill (#773).
