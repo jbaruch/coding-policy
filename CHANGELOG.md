@@ -1,3 +1,9 @@
+### Correct schema ownership and approved classification
+
+- Recognize the skill, runtime or service that owns an artifact's schema and migrations. Runtime-owned database readers reference the actual migration and installed reader contract rather than inventing an owner skill (#773).
+- Let standing operator-approved bounded classifications route directly using their approved score field, thresholds and action mapping, including handling routine items or sending reminders to the operator's own chat. Keep uncertainty fallbacks and unrelated gates; remove repeated model adjudication of approved decisions (#775).
+- Align the fleet review prompt with both corrected contracts.
+
 ## 0.5.0 — 2026-10-20
 
 ### Claude subscription code review

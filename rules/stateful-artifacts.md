@@ -12,10 +12,12 @@ alwaysApply: true
 
 ## Required Attributes
 
-- A **schema** documented next to the owner skill (e.g., `skills/<name>/state-schema.md` or a JSON Schema file); no schema, no artifact
-- A single **owner skill** responsible for shape changes — shared ownership means no one owns the migration
+- A **schema** documented by its owning component; skill-owned schemas stay beside the owner skill
+- A single **owner component** responsible for shape changes: a skill, runtime or service
+- A runtime-owned database table's versioned migrations are its schema of record
+- Skill readers of runtime-owned tables cite an installed contract naming those migrations and the reader contract
 - A `schema_version` field on every record so migrations are auditable
-- A **writer / reader contract** — which skills write, which read, what each promises about field presence, defaults, and format
+- A **writer / reader contract** — which components write, which read, what each promises about field presence, defaults, and format
 
 ## Hints, Not Authority
 
@@ -25,9 +27,9 @@ alwaysApply: true
 ## Migration Policy
 
 - Bump `schema_version` for any shape change — don't repurpose a field silently
-- Only the owner skill migrates: on reading an older record, detect the old `schema_version`, upgrade the record, rewrite
-- Non-owner reader skills must not migrate
-- On an older record, a reader treats it as read-only "no usable prior state" — the next owner-skill run upgrades it
+- Only the owner migrates: detect accepted older versions, upgrade and rewrite through its documented migration path
+- Non-owner readers must not migrate
+- On an older record, a reader treats it as read-only "no usable prior state" — the next owner run upgrades it
 - On a record newer than it accepts, a reader is lagging, not awaiting migration — treat it as "no usable prior state" and update the reader to accept the new version (see Cross-Pipeline Schema Bumps when writer and readers deploy through separate pipelines)
 - Narrow exception for a gate store.
 - Applies when an open record in the artifact refuses an action, so "no usable prior state" reads as no gate
@@ -39,7 +41,7 @@ alwaysApply: true
 
 ## Rename / Removal
 
-- Renaming or removing an artifact follows surface sync (see `rules/context-artifacts.md`): update the owner skill's schema doc, update every reader skill, add a CHANGELOG entry
+- Renaming or removing an artifact follows surface sync (see `rules/context-artifacts.md`): update the owner's schema doc, update every reader, add a CHANGELOG entry
 - Keep reader skills tolerant of missing artifacts — an artifact that was never written (first run) is indistinguishable from one that was removed; both mean "no prior state"
 
 ## Cross-Pipeline Schema Bumps
