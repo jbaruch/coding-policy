@@ -81,7 +81,7 @@ main() {
       fi
       reviewed=$(jq -s -r --arg lane "$REVIEW_LANE" --arg who "$REVIEWER_LOGIN" --arg sha "$head" \
                    "$(review_lanes_jq)"' (add // []) | any(.[]; .user.login==$who and .commit_id==$sha
-                     and (.state | IN("APPROVED", "COMMENTED", "CHANGES_REQUESTED")) and in_review_lane($lane))' <<<"$reviews_json")
+                     and (.state | IN("APPROVED", "COMMENTED", "CHANGES_REQUESTED", "DISMISSED")) and in_review_lane($lane))' <<<"$reviews_json")
       [[ "$reviewed" == "true" ]] && continue
 
       worklist=$(jq -c \

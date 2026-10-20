@@ -178,7 +178,24 @@ JSON
   ok "policy and quality deduplicate separately"; teardown
 }
 
+t_dismissed_review_does_not_reenter_worklist() {
+  setup; MOCK_REPOS=(jbaruch/repo-a)
+  writef "$MOCK_DIR/jbaruch__repo-a.pulls.json" <<'JSON'
+[{"number":7,"base":{"ref":"main"},"head":{"sha":"aaa111","repo":{"full_name":"jbaruch/repo-a"}}}]
+JSON
+  writef "$MOCK_DIR/jbaruch__repo-a.reviews.7.json" <<'JSON'
+[{"user":{"login":"app[bot]"},"commit_id":"aaa111","state":"DISMISSED","body":"ruled policy findings"}]
+JSON
+  local out
+  out=$(run_main)
+  [[ "$(jq length <<<"$out")" == 0 ]] || { bad "dismissed current-head policy review must stay deduplicated"; teardown; return; }
+  out=$(REVIEW_LANE=quality run_main)
+  [[ "$(jq length <<<"$out")" == 1 ]] || { bad "dismissed policy review cannot suppress quality review"; teardown; return; }
+  ok "a dismissed policy review preserves its ruling without suppressing quality"; teardown
+}
+
 echo "== fleet-poll.sh tests =="
+t_dismissed_review_does_not_reenter_worklist
 t_lanes_deduplicate_separately
 t_needs_review
 t_already_reviewed
