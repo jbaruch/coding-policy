@@ -25,6 +25,7 @@ source "$SCRIPT" || true
 set +e
 
 FAIL_COUNT=0
+COPILOT_COMMENT_LOGINS=("Copilot" "copilot-pull-request-reviewer[bot]")
 PASS_COUNT=0
 
 # The head SHA the mock's `gh pr view` returns. A review fixture whose
@@ -57,6 +58,11 @@ run() {
 # MOCK_MERGE_STATE selects the fixture for `gh pr view`; other surfaces
 # return minimal fixtures so main() can complete.
 gh() {
+  if [[ "${MOCK_COPILOT_UNAVAILABLE:-0}" == 1 ]]; then
+    case "$*" in
+      *graphql*|*timeline*) echo "Copilot endpoints unavailable" >&2; return 1 ;;
+    esac
+  fi
   case "$1" in
     pr)
       local subcmd="$2"
@@ -95,13 +101,6 @@ gh() {
       esac
       ;;
     api)
-      # `gh api graphql -f query=... --jq ...` — the pending review requests.
-      # GraphQL, not REST: the REST endpoint omits bot reviewers entirely
-      # (#276), so every bot lane would read "never requested" there (#369).
-      if [[ "${2:-}" == "graphql" ]]; then
-        printf '%s' "${MOCK_REQUESTED_BODY:-[]}"
-        return 0
-      fi
       # gh api --paginate repos/<o>/<r>/pulls/<N>/reviews?per_page=100
       # gh api --paginate repos/<o>/<r>/pulls/<N>/comments?per_page=100
       # The script pipes the raw paginated output through `jq -s` itself,
@@ -119,24 +118,10 @@ gh() {
         esac
       done
       [[ $saw_paginate -eq 1 ]] || { echo "mock gh api: missing --paginate (required so the script never silently misses page 2+)" >&2; return 99; }
-      # MOCK_TIMELINE_READ_FLAG, when set, names a file a timeline read
-      # creates; reviews read after it return MOCK_REVIEWS_AFTER_TIMELINE, as
-      # if a review posted between the two reads.
       case "$path" in
-        *reviews*)
-          if [[ -n "${MOCK_TIMELINE_READ_FLAG:-}" && -f "$MOCK_TIMELINE_READ_FLAG" ]]; then
-            echo "${MOCK_REVIEWS_AFTER_TIMELINE:-[]}"
-          else
-            echo "${MOCK_REVIEWS_BODY:-[]}"
-          fi
-          ;;
+        *reviews*) echo "${MOCK_REVIEWS_BODY:-[]}" ;;
         *comments*) echo "${MOCK_COMMENTS_BODY:-[]}" ;;
-        *timeline*)
-          if [[ -n "${MOCK_TIMELINE_READ_FLAG:-}" ]]; then
-            : > "$MOCK_TIMELINE_READ_FLAG" || { echo "mock gh api: cannot write $MOCK_TIMELINE_READ_FLAG" >&2; return 2; }
-          fi
-          echo "${MOCK_TIMELINE_BODY:-[]}"
-          ;;
+        *timeline*) echo "${MOCK_TIMELINE_BODY:-[]}" ;;
         *) echo "mock gh api: unsupported path: $path" >&2; return 2 ;;
       esac
       ;;
@@ -145,123 +130,6 @@ gh() {
 }
 
 # --- test bodies ---
-
-# --- pending review requests (#369) ---
-# A lane nobody requested is not a lane that is running late: a developer
-# reading its own current-tip evidence must be able to tell the two apart
-# without sitting out a pre-merge budget on a review it cannot itself request.
-
-t_requested_among_matches_a_pending_bot() {
-  local out
-  out=$(requested_among '["copilot-pull-request-reviewer"]' "copilot-pull-request-reviewer[bot]")
-  assert_eq "requested" "true" "$out"
-}
-
-t_requested_among_is_false_when_nobody_asked() {
-  local out
-  out=$(requested_among '[]' "copilot-pull-request-reviewer[bot]")
-  assert_eq "requested" "false" "$out"
-}
-
-t_requested_among_ignores_another_reviewer() {
-  local out
-  out=$(requested_among '["some-human"]' "copilot-pull-request-reviewer[bot]")
-  assert_eq "requested" "false" "$out"
-}
-
-t_main_marks_an_unrequested_lane() {
-  MOCK_MERGE_STATE=clean
-  MOCK_REQUESTED_BODY='[]'
-  local out
-  out=$(main owner repo 1)
-  assert_eq "copilot state"     "none"  "$(echo "$out" | jq -r '.reviews.copilot.state')" || return 1
-  assert_eq "copilot requested" "false" "$(echo "$out" | jq -r '.reviews.copilot.requested')" || return 1
-  assert_eq "copilot stale"     "false" "$(echo "$out" | jq -r '.reviews.copilot.stale')"
-}
-
-t_main_marks_a_pending_lane_requested() {
-  MOCK_MERGE_STATE=clean
-  MOCK_REQUESTED_BODY='["copilot-pull-request-reviewer"]'
-  local out
-  out=$(main owner repo 1)
-  assert_eq "copilot state"     "none" "$(echo "$out" | jq -r '.reviews.copilot.state')" || return 1
-  assert_eq "copilot requested" "true" "$(echo "$out" | jq -r '.reviews.copilot.requested')"
-}
-
-# #641: a started Copilot run consumes its request, so `requested` read false
-# while the review was running and the watcher returned review_unrequested. A
-# work-started event newer than the latest Copilot request and review on the
-# timeline marks the lane requested. Locals keep the fixtures out of later
-# tests.
-t_main_marks_copilot_in_flight_requested() {
-  local MOCK_MERGE_STATE=clean MOCK_REQUESTED_BODY='[]'
-  local MOCK_REVIEWS_BODY='[{"user":{"login":"copilot-pull-request-reviewer[bot]"},"state":"COMMENTED","submitted_at":"2026-09-29T17:00:00Z","body":"old","commit_id":"'"$OLD_SHA"'"}]'
-  local MOCK_TIMELINE_BODY='[{"event":"reviewed","user":{"login":"Copilot"},"submitted_at":"2026-09-29T17:00:00Z"},{"event":"review_requested","requested_reviewer":{"login":"Copilot"},"created_at":"2026-09-29T18:31:54Z"},{"event":"copilot_work_started","created_at":"2026-09-29T18:32:51Z"}]'
-  local out
-  out=$(main owner repo 1)
-  assert_eq "copilot state"     "none" "$(echo "$out" | jq -r '.reviews.copilot.state')" || return 1
-  assert_eq "copilot requested" "true" "$(echo "$out" | jq -r '.reviews.copilot.requested')"
-}
-
-# #641: the timeline is read before the reviews, so a Copilot review posted
-# between the two reads is seen by the review fetch rather than missed.
-t_main_sees_review_posted_after_timeline_read() {
-  local MOCK_MERGE_STATE=clean MOCK_REQUESTED_BODY='[]' MOCK_REVIEWS_BODY='[]'
-  local MOCK_TIMELINE_BODY='[]' MOCK_TIMELINE_READ_FLAG out rc
-  local MOCK_REVIEWS_AFTER_TIMELINE='[{"user":{"login":"copilot-pull-request-reviewer[bot]"},"state":"COMMENTED","submitted_at":"2026-09-29T18:40:00Z","body":"done","commit_id":"'"$HEAD_SHA"'"}]'
-  MOCK_TIMELINE_READ_FLAG=$(mktemp -u) || { echo "    FAIL: mktemp failed" >&2; return 1; }
-  out=$(main owner repo 1)
-  rc=$?
-  if ! rm -f "$MOCK_TIMELINE_READ_FLAG"; then
-    echo "    FAIL: could not remove the flag file ${MOCK_TIMELINE_READ_FLAG} — delete it by hand and check TMPDIR is writable" >&2
-    return 1
-  fi
-  if [[ $rc -ne 0 ]]; then
-    echo "    FAIL: main exited ${rc} — run the suite with stderr visible to see the poll-pr-reviews.sh diagnostic" >&2
-    return 1
-  fi
-  assert_eq "copilot state"     "COMMENTED" "$(echo "$out" | jq -r '.reviews.copilot.state')" || return 1
-  assert_eq "copilot requested" "false"     "$(echo "$out" | jq -r '.reviews.copilot.requested')"
-}
-
-# #641: the timeline showed a run in flight, and its review posted before the
-# reviews read. The owed review has arrived, so nothing is owed.
-t_main_clears_in_flight_when_its_review_posts_between_reads() {
-  local MOCK_MERGE_STATE=clean MOCK_REQUESTED_BODY='[]' MOCK_REVIEWS_BODY='[]'
-  local MOCK_TIMELINE_BODY='[{"event":"review_requested","requested_reviewer":{"login":"Copilot"},"created_at":"2026-09-29T18:31:54Z"},{"event":"copilot_work_started","created_at":"2026-09-29T18:32:51Z"}]'
-  local MOCK_REVIEWS_AFTER_TIMELINE='[{"user":{"login":"copilot-pull-request-reviewer[bot]"},"state":"COMMENTED","submitted_at":"2026-09-29T18:40:00Z","body":"done","commit_id":"'"$HEAD_SHA"'"}]'
-  local MOCK_TIMELINE_READ_FLAG out rc
-  MOCK_TIMELINE_READ_FLAG=$(mktemp -u) || { echo "    FAIL: mktemp failed" >&2; return 1; }
-  out=$(main owner repo 1)
-  rc=$?
-  if ! rm -f "$MOCK_TIMELINE_READ_FLAG"; then
-    echo "    FAIL: could not remove the flag file ${MOCK_TIMELINE_READ_FLAG} — delete it by hand and check TMPDIR is writable" >&2
-    return 1
-  fi
-  if [[ $rc -ne 0 ]]; then
-    echo "    FAIL: main exited ${rc} — run the suite with stderr visible to see the poll-pr-reviews.sh diagnostic" >&2
-    return 1
-  fi
-  assert_eq "copilot state"     "COMMENTED" "$(echo "$out" | jq -r '.reviews.copilot.state')" || return 1
-  assert_eq "copilot requested" "false"     "$(echo "$out" | jq -r '.reviews.copilot.requested')"
-}
-
-t_main_marks_copilot_in_flight_with_no_review_requested() {
-  local MOCK_MERGE_STATE=clean MOCK_REQUESTED_BODY='[]' MOCK_REVIEWS_BODY='[]'
-  local MOCK_TIMELINE_BODY='[{"event":"review_requested","requested_reviewer":{"login":"Copilot"},"created_at":"2026-09-29T18:31:54Z"},{"event":"copilot_work_started","created_at":"2026-09-29T18:32:51Z"}]'
-  local out
-  out=$(main owner repo 1)
-  assert_eq "copilot requested" "true" "$(echo "$out" | jq -r '.reviews.copilot.requested')"
-}
-
-t_main_copilot_run_finished_by_posted_review_is_not_requested() {
-  local MOCK_MERGE_STATE=clean MOCK_REQUESTED_BODY='[]'
-  local MOCK_REVIEWS_BODY='[{"user":{"login":"copilot-pull-request-reviewer[bot]"},"state":"COMMENTED","submitted_at":"2026-09-29T18:40:00Z","body":"done","commit_id":"'"$OLD_SHA"'"}]'
-  local MOCK_TIMELINE_BODY='[{"event":"review_requested","requested_reviewer":{"login":"Copilot"},"created_at":"2026-09-29T18:31:54Z"},{"event":"copilot_work_started","created_at":"2026-09-29T18:32:51Z"},{"event":"reviewed","user":{"login":"Copilot"},"submitted_at":"2026-09-29T18:40:00Z"}]'
-  local out
-  out=$(main owner repo 1)
-  assert_eq "copilot requested" "false" "$(echo "$out" | jq -r '.reviews.copilot.requested')"
-}
 
 t_fetch_merge_state_clean_returns_mergeable_envelope() {
   MOCK_MERGE_STATE=clean
@@ -733,7 +601,7 @@ t_ci_status_fail_with_cancel_is_failure() {
 # --- driver ---
 
 t_main_reads_inline_bodies_and_replies_from_every_page() {
-  local MOCK_MERGE_STATE=clean MOCK_REQUESTED_BODY='[]' MOCK_REVIEWS_BODY='[]' MOCK_TIMELINE_BODY='[]'
+  local MOCK_MERGE_STATE=clean MOCK_REVIEWS_BODY='[]' MOCK_TIMELINE_BODY='[]'
   local MOCK_COMMENTS_BODY='[{"id":1,"user":{"login":"Copilot"},"body":"First finding","path":"a.py","line":4}]
 [{"id":2,"user":{"login":"human"},"body":"Second finding","path":"b.py","line":8},{"id":3,"in_reply_to_id":1,"user":{"login":"owner"},"body":"Fixed in abc"}]'
   local out
@@ -745,7 +613,7 @@ t_main_reads_inline_bodies_and_replies_from_every_page() {
 }
 
 t_main_reads_every_review_body_without_changing_bot_verdicts() {
-  local MOCK_MERGE_STATE=clean MOCK_REQUESTED_BODY='[]' MOCK_COMMENTS_BODY='[]' MOCK_TIMELINE_BODY='[]'
+  local MOCK_MERGE_STATE=clean MOCK_COMMENTS_BODY='[]' MOCK_TIMELINE_BODY='[]'
   local MOCK_REVIEWS_BODY='[{"id":1,"user":{"login":"github-actions[bot]"},"state":"COMMENTED","body":"Policy clear","commit_id":"'"$HEAD_SHA"'","submitted_at":"2026-10-07T00:00:00Z"},{"id":2,"user":{"login":"human"},"state":"APPROVED","body":"Read my concern","commit_id":"'"$OLD_SHA"'"}]
 [{"id":3,"user":{"login":"other-bot"},"state":"DISMISSED","body":"Historical concern"},{"id":4,"user":{"login":"human"},"state":"PENDING","body":"Pending concern"},{"id":5,"body":""},{"id":6,"body":null}]'
   local out
@@ -762,7 +630,7 @@ t_main_reads_every_review_body_without_changing_bot_verdicts() {
 }
 
 t_main_streams_large_review_and_comment_bodies() (
-  local MOCK_MERGE_STATE=clean MOCK_REQUESTED_BODY='[]' MOCK_TIMELINE_BODY='[]'
+  local MOCK_MERGE_STATE=clean MOCK_TIMELINE_BODY='[]'
   local MOCK_REVIEWS_BODY MOCK_COMMENTS_BODY out
   MOCK_REVIEWS_BODY=$(jq -n '[{id:1, user:{login:"human"}, state:"COMMENTED", body:("r" * 160000)}]') || return 1
   MOCK_COMMENTS_BODY=$(jq -n '[{id:2, user:{login:"human"}, body:("c" * 160000)}]') || return 1
@@ -788,7 +656,7 @@ t_main_streams_large_review_and_comment_bodies() (
 # `run_suite`, not `main`: the sourced script under test owns `main`.
 # Progress goes to stderr; stdout carries one JSON result.
 t_lanes_from_distinct_bots_are_independent() {
-  local MOCK_MERGE_STATE=clean MOCK_REQUESTED_BODY='[]' MOCK_TIMELINE_BODY='[]'
+  local MOCK_MERGE_STATE=clean MOCK_TIMELINE_BODY='[]'
   local MOCK_REVIEWS_BODY
   MOCK_REVIEWS_BODY=$(jq -n --arg h "$HEAD_SHA" --arg q "$CLAUDE_REVIEW_LOGIN" '[
     {id:1,user:{login:"github-actions[bot]"},commit_id:$h,state:"CHANGES_REQUESTED",submitted_at:"2026-10-20T01:00:00Z",body:"blocking policy"},
@@ -803,7 +671,25 @@ t_lanes_from_distinct_bots_are_independent() {
   assert_eq "policy comment separate" "COMMENTED" "$(jq -r '.reviews.codex.state' <<<"$out")"
 }
 
+t_copilot_unavailable_does_not_block_new_reviewers() (
+  local MOCK_MERGE_STATE=clean MOCK_REVIEWS_BODY
+  MOCK_REVIEWS_BODY=$(jq -n --arg h "$HEAD_SHA" --arg q "$CLAUDE_REVIEW_LOGIN" '[
+    {user:{login:"github-actions[bot]"},commit_id:$h,state:"APPROVED",submitted_at:"2026-10-20T01:00:00Z",body:"policy clean"},
+    {user:{login:$q},commit_id:$h,state:"APPROVED",submitted_at:"2026-10-20T02:00:00Z",body:"<!-- coding-policy:claude-quality-review:v1 --> clean"}]')
+  local out MOCK_COPILOT_UNAVAILABLE=1
+  out=$(main owner repo 1) || return 1
+  # shellcheck disable=SC1090,SC1091  # The separately checked watcher is loaded by a test-derived path.
+  source "${SCRIPT%/*}/watch-pr-reviews.sh" || true
+  set +e
+  # shellcheck disable=SC2329  # Called by the sourced watcher's main through its snapshot interface.
+  fetch_snapshot() { printf '%s' "$out"; }
+  local result
+  result=$(main owner repo 1) || return 1
+  assert_eq "ready without Copilot APIs" "ready" "$(jq -r '.watch.result' <<<"$result")"
+)
+
 run_suite() {
+  run "Copilot endpoint failures cannot block Codex/Claude readiness" t_copilot_unavailable_does_not_block_new_reviewers
   run "distinct policy and quality identities cannot mask each other" t_lanes_from_distinct_bots_are_independent
   echo "== poll-pr-reviews.sh tests ==" >&2
   run "main reads all inline bodies and replies across pages" t_main_reads_inline_bodies_and_replies_from_every_page
@@ -851,16 +737,6 @@ run_suite() {
   run "ci.status: an unreplaced cancellation stays pending"            t_ci_status_unreplaced_cancel_with_other_passes_is_pending
   run "ci.status: one replacement cannot settle a different cancel"    t_ci_status_replacement_does_not_cover_another_cancelled_job
   run "ci.status: a real fail next to a cancel still fails (#182)"      t_ci_status_fail_with_cancel_is_failure
-  run "requested_among: a pending bot request matches (#369)"           t_requested_among_matches_a_pending_bot
-  run "requested_among: no pending request reads false (#369)"          t_requested_among_is_false_when_nobody_asked
-  run "requested_among: another reviewer's request is not this one"     t_requested_among_ignores_another_reviewer
-  run "main marks a lane nobody requested (#369)"                       t_main_marks_an_unrequested_lane
-  run "main marks a requested-and-pending lane (#369)"                  t_main_marks_a_pending_lane_requested
-  run "main marks an in-flight Copilot run requested (#641)"            t_main_marks_copilot_in_flight_requested
-  run "main marks an in-flight first Copilot run requested (#641)"      t_main_marks_copilot_in_flight_with_no_review_requested
-  run "main sees a review posted after the timeline read (#641)"      t_main_sees_review_posted_after_timeline_read
-  run "main clears an in-flight run whose review posted (#641)"       t_main_clears_in_flight_when_its_review_posts_between_reads
-  run "main: a review after the run started is not requested (#641)"   t_main_copilot_run_finished_by_posted_review_is_not_requested
   printf '{"suite":"test_poll_pr_reviews.sh","passed":%d,"failed":%d}\n' "$PASS_COUNT" "$FAIL_COUNT"
   [[ $FAIL_COUNT -eq 0 ]]
 }

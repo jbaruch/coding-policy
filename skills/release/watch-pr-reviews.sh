@@ -107,7 +107,7 @@ main() {
       emit_and_exit "ci_failure" "$attempts" "$elapsed" "$snapshot" 0
     fi
     # Both lanes derive CHANGES_REQUESTED from blocking findings. Advisory
-    # findings post COMMENT and must be read, but do not block the merge.
+    # findings approve or comment and must be read, but do not block the merge.
     if [[ "$codex" == "CHANGES_REQUESTED" || "$claude" == "CHANGES_REQUESTED" ]]; then
       emit_and_exit "changes_requested" "$attempts" "$elapsed" "$snapshot" 0
     fi

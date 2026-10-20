@@ -1,6 +1,7 @@
 ### Claude subscription code review
 
 - Add an independent Claude reviewer for code quality and bugs, with a replacement system prompt and no loaded agent or policy context.
+- Retire Copilot request/run plumbing, including mandatory compatibility API calls.
 - Give Claude a separate GitHub reviewer identity and run both lanes in the central fleet; gate on blocking findings from either reviewer, keep advisory findings nonblocking, and stop requiring Copilot.
 
 # Changelog

@@ -6,7 +6,7 @@ Reference for Step 4 of the `release` skill — how the two PR reviewers are wir
 
 The policy reviewer reviews the PR diff against the in-tree `rules/*.md` and posts the verdict as a PR review. It runs one of two ways depending on the repo. Normally exactly one deployment reviews a given PR; a repo mid fleet-migration can transiently carry both, which is why the release scripts resolve the verdict fail-safe across both logins (`skills/release/poll-pr-reviews.sh` login table).
 
-Both derive the review event from per-finding severity (`rules/review-severity.md`; `.github/codex-review/post-review.sh` header) — any blocking finding posts `REQUEST_CHANGES`, advisory-only findings post `COMMENT`, a clean pass posts `APPROVE`.
+Both derive the review event from per-finding severity (`rules/review-severity.md`; `.github/codex-review/post-review.sh` header) — any blocking finding posts `REQUEST_CHANGES`; nonblocking results approve with any advisory notes included, falling back to `COMMENT` only when GitHub forbids approval.
 
 ### A. coding-policy's own PRs — in-repo `review-codex.yml`
 
@@ -37,8 +37,7 @@ from claude setup-token; the token is held only in coding-policy. Its dedicated 
 Both reviews run on PR events. The central fleet workflow runs them as separate
 jobs using distinct reviewer Apps; existing consumer dispatches start both. The quality result posts as a
 severity-derived verdict with the exact analyzed commit and the marker owned by
-skills/release/review-lanes.sh. Snapshot, dedup and stale-dismissal paths use
-that classifier and their separate logins. Claude posts as jbaruch-claude-reviewer[bot], independently of the Codex policy identity.
+`skills/release/review-lanes.sh` — `CLAUDE_REVIEW_LOGIN` and `review_lanes_jq`. Snapshot and dedup use that classifier and the separate logins. Claude posts as jbaruch-claude-reviewer[bot], independently of the Codex policy identity.
 
 Claude approves nonblocking results, including advisory notes. An App's approval
 supersedes its earlier change request; a plain comment would leave that request

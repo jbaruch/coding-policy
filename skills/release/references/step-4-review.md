@@ -11,8 +11,8 @@ plugins, skills, hooks or memory. Both authenticate through subscriptions.
   scheduled poll is a backstop, deduplicated separately for each lane.
 
 Policy and quality use distinct GitHub identities. An approval from either
-cannot supersede the other's change request in GitHub. The quality login and
-body marker are owned by skills/release/review-lanes.sh. Both reviewers classify
+cannot supersede the other's change request in GitHub. Identity and provenance follow
+skills/release/references/REVIEW_DETAILS.md, “Claude — independent code-quality review.” Both reviewers classify
 findings as blocking or advisory under rules/review-severity.md. Blocking
 findings from either hold the merge; both bodies must arrive and be read.
 
