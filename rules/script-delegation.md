@@ -32,11 +32,13 @@ description: Deterministic operations → script, a fixed answer set read by mea
 - One of the allowed answers is "not enough evidence to tell"
 - When it answers that, the question goes to the reasoning round instead
 - An unavailable classifier or an answer outside the list takes the same path, never a retry into another answer
-- The label never triggers an action that cannot be undone (see `rules/ship-on-green.md`)
-- A label may add a reversible gate
+- Standing operator approval names the question/model versions, score field, thresholds and answer-to-action mapping
+- Cite the approving issue and question version beside the question constant
+- Within that approval, route directly: skip reasoning, mark handled or message the operator's own chat without per-item model review
+- A script applies thresholds to the approved probability or API confidence field
+- Unapproved labels may add reversible gates; they never remove gates, approve, accept or skip checks
 - A reversible gate is a recorded obligation that a recorded clear removes
-- A label never removes a gate, approves, accepts, or skips a check
-- A gate's level is decided by a script from the label's recorded probabilities, never by the label's own claim
+- Classification approval waives no unrelated required gate and authorizes no third-party communication, data deletion or merge
 
 ## The Regex Trap
 

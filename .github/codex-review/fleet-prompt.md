@@ -34,6 +34,8 @@ Do this:
 5. For every changed line, check it against every rule. Flag concrete violations only:
    secrets, missing error handling, formatting, dependency hygiene, `ci-safety`, `no-secrets`,
    `testing-standards`, and the rest.
+   Apply the loaded `script-delegation` standing-approval and `stateful-artifacts` runtime-ownership
+   contracts. Do not demand per-item model review or an owner skill for cases those contracts permit.
 6. Minor style preferences that no rule covers are NOT grounds for a finding.
 7. Assign each finding a `severity` per the `review-severity` rule:
    - `blocking` — fixing it changes behavior or closes a contract gap: correctness, security,
