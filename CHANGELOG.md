@@ -1,3 +1,5 @@
+## 0.5.0 — 2026-10-20
+
 ### Claude subscription code review
 
 - Add an independent Claude reviewer for code quality and bugs, with a replacement system prompt and no loaded agent or policy context.
