@@ -33,7 +33,8 @@ description: Deterministic operations → script, a fixed answer set read by mea
 - When it answers that, the question goes to the reasoning round instead
 - An unavailable classifier or an answer outside the list takes the same path, never a retry into another answer
 - Standing operator approval names the question/model versions, score field, thresholds and answer-to-action mapping
-- Cite the approving issue and question version beside the question constant
+- For new approvals, cite the approving issue and question version beside the question constant
+- Existing operator rulings in linked PRs or issues remain valid when they cover the same bounds
 - Within that approval, route directly: skip reasoning, mark handled or message the operator's own chat without per-item model review
 - A script applies thresholds to the approved probability or API confidence field
 - Unapproved labels may add reversible gates; they never remove gates, approve, accept or skip checks
