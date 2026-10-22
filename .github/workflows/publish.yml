@@ -114,7 +114,7 @@ jobs:
           ref: f8dffcecc0eb98f13b2d7d90cd399f99208becf2
           path: .test-dependencies/acr
           persist-credentials: false
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@v7
         with:
           go-version-file: .test-dependencies/acr/go.mod
           cache-dependency-path: .test-dependencies/acr/go.sum
