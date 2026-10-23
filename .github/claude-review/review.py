@@ -31,13 +31,14 @@ class ReviewError(Exception):
 
 def claude_failure_hint(stdout: str, stderr: str) -> str:
     """Return fixed diagnostic text only; CLI output may contain protected data."""
-    text = (stdout + "\n" + stderr).casefold()
+    text = (stdout + "\n" + stderr).casefold().replace("’", "'")
     signatures = (
         (("authentication_error", "invalid authentication credentials", "invalid bearer token",
-          "oauth token has expired", "token has expired", "401 unauthorized"),
+          "oauth token has expired", "token has expired", "401 unauthorized",
+          "invalid api key", "not logged in", "please run /login", "api error: 401"),
          "authentication rejected; refresh the CI subscription credential"),
         (("rate_limit_error", "you've hit your limit", "you have hit your limit",
-          "usage limit reached"),
+          "usage limit reached", "api error: 429"),
          "subscription usage limit reached; wait for its reset before retrying"),
         (("model_not_found", "invalid model", "does not exist or you do not have access"),
          "model unavailable; check the pinned model and subscription access"),
@@ -50,7 +51,15 @@ def claude_failure_hint(stdout: str, stderr: str) -> str:
     for patterns, hint in signatures:
         if any(pattern in text for pattern in patterns):
             return hint
-    return "unclassified CLI failure; check CI authentication, permissions and CLI availability"
+    # Only this fixed vocabulary may cross the log boundary for unknown errors.
+    # It reveals no raw word, identifier, source excerpt or credential fragment.
+    vocabulary = ("login", "subscription", "limit", "usage", "billing", "balance",
+                  "oauth", "permission", "model", "network", "timeout", "expired",
+                  "scope", "restricted", "schema", "rate", "401", "403", "429",
+                  "400", "invalid_request_error", "module", "node", "config", "internal")
+    markers = ",".join(word for word in vocabulary if word in text) or "none"
+    return ("unclassified CLI failure; check CI authentication, permissions and CLI availability; "
+            f"fixed diagnostic markers: {markers}")
 
 
 def run(args: list[str], *, cwd: Path | None = None,

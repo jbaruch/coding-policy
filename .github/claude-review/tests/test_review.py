@@ -166,6 +166,8 @@ class FailureDiagnosticsTest(unittest.TestCase):
         cases = (
             ("authentication_error: secret-token", "authentication rejected"),
             ("OAuth token has expired: secret-token", "refresh the CI subscription credential"),
+            ("Invalid API key secret-token", "authentication rejected"),
+            ("You’ve hit your limit: private-source", "subscription usage limit reached"),
             ("You've hit your limit: private-source", "subscription usage limit reached"),
             ("model_not_found: private-source", "model unavailable"),
             ("unknown option '--private-source'", "CLI argument rejected"),
@@ -189,6 +191,12 @@ class FailureDiagnosticsTest(unittest.TestCase):
         result = subprocess.CompletedProcess(["claude"], 0, '{"ok":true}', "")
         with patch.object(reviewer.subprocess, "run", return_value=result):
             self.assertEqual(reviewer.run(["claude", "--print"]), '{"ok":true}')
+
+    def test_unknown_error_reports_only_fixed_vocabulary(self):
+        message = reviewer.claude_failure_hint("private-source OAuth scope secret-token", "")
+        self.assertTrue(message.endswith("fixed diagnostic markers: oauth,scope"))
+        self.assertNotIn("secret-token", message)
+        self.assertNotIn("private-source", message)
 
     def test_other_command_failures_do_not_claim_a_claude_diagnosis(self):
         result = subprocess.CompletedProcess(["git"], 128, "", "authentication_error secret-token")
