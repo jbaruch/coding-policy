@@ -93,7 +93,7 @@ chmod +x "${STUB_DIR}/gh"
 golden_body() { # <codex-result-json>
   local result="${TMPDIR_TEST}/final.json" capture="${TMPDIR_TEST}/payload.json"
   printf '%s' "$1" > "$result"
-  if ! GH_CAPTURE="$capture" PATH="${STUB_DIR}:${PATH}" bash "$POSTER" owner repo 9 "$result" >/dev/null; then
+  if ! GH_CAPTURE="$capture" PATH="${STUB_DIR}:${PATH}" bash "$POSTER" owner repo 9 "$result" "$HEAD_SHA" >/dev/null; then
     echo "fatal: post-review.sh failed to build the golden body" >&2
     return 1
   fi

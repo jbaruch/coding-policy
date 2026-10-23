@@ -79,11 +79,15 @@ main() {
     git -c "http.https://github.com/.extraheader=${authhdr}" fetch --quiet --no-tags origin "pull/${pr}/head:pr-head" \
       || { echo "error: could not fetch pull/${pr}/head in ${full}" >&2; exit 1; }
     git checkout --quiet pr-head
-    # Review the live PR head — GitHub records the posted review's commit_id as the
-    # PR head at post time, so reviewing the live head keeps review and dedup key
-    # consistent. Log exactly which SHA was reviewed.
-    echo "reviewing ${full}#${pr} at $(git rev-parse HEAD)" >&2
   ) || exit 1
+  # Capture once before analysis. A later push must never retarget this verdict.
+  local reviewed_sha
+  reviewed_sha=$(cd "$work" && git rev-parse HEAD) || exit 1
+  if [[ ! "$reviewed_sha" =~ ^[a-f0-9]{40}$ ]]; then
+    echo 'error: checkout returned an invalid source SHA — restore git and rerun this review' >&2
+    exit 1
+  fi
+  echo "reviewing ${full}#${pr} at ${reviewed_sha}" >&2
 
   local authoring_context
   if ! authoring_context=$(cd "$work" && python3 -I "$authoring" --repo "$full" --base "origin/${base}"); then
@@ -173,7 +177,7 @@ main() {
   bash "$assert" "${codex_home}/auth.json" "$out"
 
   # Post the verdict back as the App (post-review.sh reads GH_TOKEN).
-  bash "$poster" "$owner" "$repo" "$pr" "$out"
+  bash "$poster" "$owner" "$repo" "$pr" "$out" "$reviewed_sha"
 }
 
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then

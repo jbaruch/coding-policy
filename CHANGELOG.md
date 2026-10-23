@@ -1,3 +1,8 @@
+### Bind policy reviews to the analyzed source
+
+- Keep fleet and self policy reviews attached to the exact analyzed commit when a PR advances during analysis. Preserve the source binding through retries and approval-to-comment fallback; refuse missing or malformed provenance (#780).
+- Check out the PR head explicitly for self review. The independent Claude lane already pins its analyzed source and rejects a changed head.
+
 ## 0.5.1 — 2026-10-20
 
 ### Correct schema ownership and approved classification

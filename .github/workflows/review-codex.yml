@@ -53,6 +53,7 @@ jobs:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha }}
 
       - uses: actions/setup-node@v7
         with:
@@ -117,9 +118,10 @@ jobs:
       - name: Post the review
         env:
           GH_TOKEN: ${{ github.token }}
+          REVIEWED_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           bash .github/codex-review/post-review.sh \
             "${{ github.repository_owner }}" \
             "${{ github.event.repository.name }}" \
             "${{ github.event.pull_request.number }}" \
-            /tmp/codex-final.json
+            /tmp/codex-final.json "$REVIEWED_SHA"
