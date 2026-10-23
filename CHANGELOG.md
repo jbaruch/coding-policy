@@ -1,3 +1,7 @@
+### Classify Claude CI review failures safely
+
+The quality reviewer previously collapsed every nonzero Claude exit into an authentication/permissions hint. It now reports a fixed actionable category for authentication, subscription usage limits, unavailable models, unsupported CLI options, or network/TLS failures. Raw child output, source text and credentials remain absent from diagnostics. Failures still stop the review without posting a verdict; successful output and exact-commit posting gates are unchanged.
+
 ## 0.5.1 — 2026-10-20
 
 ### Correct schema ownership and approved classification

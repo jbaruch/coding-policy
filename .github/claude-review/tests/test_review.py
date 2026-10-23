@@ -161,5 +161,44 @@ class ReviewTest(unittest.TestCase):
         self.assertEqual(self.posts, [])
 
 
+class FailureDiagnosticsTest(unittest.TestCase):
+    def test_failed_cli_emits_fixed_actionable_categories_without_echoing_output(self):
+        cases = (
+            ("authentication_error: secret-token", "authentication rejected"),
+            ("OAuth token has expired: secret-token", "refresh the CI subscription credential"),
+            ("You've hit your limit: private-source", "subscription usage limit reached"),
+            ("model_not_found: private-source", "model unavailable"),
+            ("unknown option '--private-source'", "CLI argument rejected"),
+            ("ECONNRESET private-source", "network or TLS failure"),
+            ("unexpected private-source secret-token", "unclassified CLI failure"),
+        )
+        for output, expected in cases:
+            for stdout, stderr in ((output, ""), ("", output)):
+                with self.subTest(output=output, stream=bool(stdout)):
+                    result = subprocess.CompletedProcess(["claude"], 1, stdout, stderr)
+                    with patch.object(reviewer.subprocess, "run", return_value=result):
+                        with self.assertRaises(reviewer.ReviewError) as caught:
+                            reviewer.run(["claude", "--print"])
+                    message = str(caught.exception)
+                    self.assertIn(expected, message)
+                    self.assertIn("exit 1", message)
+                    self.assertNotIn("secret-token", message)
+                    self.assertNotIn("private-source", message)
+
+    def test_success_output_remains_unchanged(self):
+        result = subprocess.CompletedProcess(["claude"], 0, '{"ok":true}', "")
+        with patch.object(reviewer.subprocess, "run", return_value=result):
+            self.assertEqual(reviewer.run(["claude", "--print"]), '{"ok":true}')
+
+    def test_other_command_failures_do_not_claim_a_claude_diagnosis(self):
+        result = subprocess.CompletedProcess(["git"], 128, "", "authentication_error secret-token")
+        with patch.object(reviewer.subprocess, "run", return_value=result):
+            with self.assertRaises(reviewer.ReviewError) as caught:
+                reviewer.run(["git", "fetch"])
+        self.assertIn("git failed (exit 128)", str(caught.exception))
+        self.assertNotIn("authentication rejected", str(caught.exception))
+        self.assertNotIn("secret-token", str(caught.exception))
+
+
 if __name__ == "__main__":
     unittest.main()
