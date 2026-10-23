@@ -51,6 +51,8 @@ def claude_failure_hint(stdout: str, stderr: str) -> str:
     for patterns, hint in signatures:
         if any(pattern in text for pattern in patterns):
             return hint
+    if re.search(r"(?<!\d)429(?!\d)", text) and ("limit" in text or "usage" in text):
+        return "provider rate or usage limit (HTTP 429); check subscription usage and the provider's reset before retrying"
     # Only this fixed vocabulary may cross the log boundary for unknown errors.
     # It reveals no raw word, identifier, source excerpt or credential fragment.
     vocabulary = ("login", "subscription", "limit", "usage", "billing", "balance",

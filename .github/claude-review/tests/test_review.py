@@ -169,6 +169,7 @@ class FailureDiagnosticsTest(unittest.TestCase):
             ("Invalid API key secret-token", "authentication rejected"),
             ("You’ve hit your limit: private-source", "subscription usage limit reached"),
             ("You've hit your limit: private-source", "subscription usage limit reached"),
+            ('{"status":429,"message":"usage limit: private-source"}', "provider rate or usage limit (HTTP 429)"),
             ("model_not_found: private-source", "model unavailable"),
             ("unknown option '--private-source'", "CLI argument rejected"),
             ("ECONNRESET private-source", "network or TLS failure"),
