@@ -20,6 +20,11 @@ import tempfile
 
 
 HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE.parent))
+from reviewer_failure import reviewer_failure_hint
+
+# Compatibility for existing diagnostic callers; both providers share the owner.
+claude_failure_hint = reviewer_failure_hint
 # Model IDs are version pins. Recheck alongside the Claude CLI Renovate update
 # and the weekly capability refresh (rules/dependency-management.md Freshness).
 MODEL = "claude-sonnet-5-5"
@@ -29,12 +34,17 @@ class ReviewError(Exception):
     """An actionable failure safe to print without credentials or model output."""
 
 
+
+
 def run(args: list[str], *, cwd: Path | None = None,
         env: dict[str, str] | None = None, data: str | None = None) -> str:
     result = subprocess.run(args, cwd=cwd, env=env, input=data, text=True,
                             capture_output=True, check=False)
     if result.returncode:
         # Child output can contain credentials or prompt-injected source text.
+        if args[0] == "claude":
+            raise ReviewError(f"claude failed (exit {result.returncode}); "
+                              + claude_failure_hint(result.stdout, result.stderr))
         raise ReviewError(f"{args[0]} failed (exit {result.returncode}); "
                           "check CI authentication, permissions and CLI availability")
     return result.stdout

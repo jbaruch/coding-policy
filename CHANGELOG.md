@@ -1,3 +1,7 @@
+### Classify reviewer CI failures safely
+
+Claude and Codex now share fixed actionable failure categories for authentication, subscription usage limits, unavailable models, unsupported CLI options and network/TLS failures. Both self and fleet Codex review use the same classifier. Raw child output, source text and credentials remain absent from diagnostics. Failures still stop the review without posting a verdict; successful output and exact-commit posting gates are unchanged.
+
 ## 0.5.2 — 2026-10-24
 
 ### Bind policy reviews to the analyzed source

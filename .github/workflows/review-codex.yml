@@ -92,7 +92,7 @@ jobs:
           # capability-table refresh (rules/dependency-management.md Freshness).
           # Sol's own default effort is low, too shallow for a policy review.
           # Keep in step with .github/codex-review/fleet-review-one.sh.
-          codex exec \
+          python3 .github/reviewer_failure.py run codex -- codex exec \
             --json \
             --skip-git-repo-check \
             --dangerously-bypass-approvals-and-sandbox \

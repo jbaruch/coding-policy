@@ -54,9 +54,10 @@ main() {
   local authoring="${CENTRAL_DIR}/.github/codex-review/policy-authoring-context.py"
   # Mechanical drivers (policy-path-agnostic) are shared with the self-review.
   local assert="${CENTRAL_DIR}/.github/codex-review/assert-no-secret-leak.sh"
+  local runner="${CENTRAL_DIR}/.github/reviewer_failure.py"
   local poster="${CENTRAL_DIR}/.github/codex-review/post-review.sh"
   local f
-  for f in "$schema" "$prompt" "$authoring" "$assert" "$poster"; do
+  for f in "$schema" "$prompt" "$authoring" "$assert" "$poster" "$runner"; do
     [[ -f "$f" ]] || { echo "error: central driver file missing: $f" >&2; exit 1; }
   done
 
@@ -162,7 +163,7 @@ main() {
     # effort is low, too shallow for a policy review. Keep in step with
     # .github/workflows/review-codex.yml.
     { printf 'This PR targets base branch `%s`; review the diff `git diff origin/%s...HEAD`.\nTrusted plugin authoring context: %s\n\n' "$base" "$base" "$authoring_context"; cat "$prompt"; } \
-      | env -u GH_TOKEN CODEX_HOME="$codex_home" codex exec \
+      | env -u GH_TOKEN CODEX_HOME="$codex_home" python3 "$runner" run codex -- codex exec \
           --json \
           --skip-git-repo-check \
           --dangerously-bypass-approvals-and-sandbox \
@@ -170,7 +171,7 @@ main() {
           -c 'model_reasoning_effort="high"' \
           --output-schema "$schema" \
           --output-last-message "$out" \
-          -
+          - >/dev/null
   ) || { echo "error: codex exec failed for ${full}#${pr}" >&2; exit 1; }
 
   # Refuse to post if the output echoes the Codex credential.
