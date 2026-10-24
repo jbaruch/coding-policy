@@ -16,6 +16,24 @@ and re-run. Exit 2 is a usage or tool-state error, never a verdict.
 The scope and observation contract live in `skills/release/check-leftovers.sh`
 (header). The repository-wide inspection mode is not a release prerequisite.
 
+For an explicit `existing-pr <GitHub PR URL>` invocation, run from the PR's
+source checkout. Before running its tests, bind the requested PR to that
+checkout:
+
+```bash
+KS=.tessl/plugins/jbaruch/coding-policy/skills/release/; [ -d "$KS" ] || KS="$HOME/$KS"; [ -d "$KS" ] || case "$(git config --get remote.origin.url)" in git@github.com:jbaruch/coding-policy|git@github.com:jbaruch/coding-policy.git|https://github.com/jbaruch/coding-policy|https://github.com/jbaruch/coding-policy.git|ssh://git@github.com/jbaruch/coding-policy|ssh://git@github.com/jbaruch/coding-policy.git) KS=skills/release/ ;; *) echo "coding-policy skill not found: run tessl install jbaruch/coding-policy" >&2; exit 1 ;; esac
+python3 "$KS/existing-pr.py" "<explicit PR URL>" .
+```
+
+Exit 0 returns the selection's repository, PR number, URL, source branch/head,
+base and draft status. Retain it for Step 2. Exit 1 refuses the selection;
+exit 2 requires repairing the read route or tools. Resolve the diagnostic and
+repeat this check before continuing; never fall back to creating another PR.
+The read-only contract is owned by `skills/release/existing-pr.py` (docstring).
+The caller prepares the source checkout; this helper neither clones nor
+switches it. Without the explicit existing-PR argument, follow the normal
+new-PR path.
+
 - Confirm you're on a feature branch (not `main`/`master`)
 - Run the test suite — all tests must pass
 - Run the linter — no warnings or errors
