@@ -1,3 +1,5 @@
+## 0.5.2 — 2026-10-24
+
 ### Bind policy reviews to the analyzed source
 
 - Keep fleet and self policy reviews attached to the exact analyzed commit when a PR advances during analysis. Preserve the source binding through retries and approval-to-comment fallback; refuse missing or malformed provenance (#780).
