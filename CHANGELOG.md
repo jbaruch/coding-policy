@@ -1,3 +1,7 @@
+### Resume an existing PR through the canonical release flow
+
+Add an explicit `existing-pr <URL>` invocation for a PR whose source is already checked out. The read-only selector binds its repository, branch and complete head to the clean checkout, reads local/remote state again, and refuses forks, closed PRs, mismatched origins and stale source without creating or pushing another PR. Selection runs before readiness tests and repeats at Step 2; the existing issue declaration, review, merge, publication and cleanup gates still apply. This enables a host-created NanoClaw learning promotion to enter the same release workflow instead of hitting unconditional PR creation (jbaruch/nanoclaw-admin#570). Both distribution manifests advance together to 0.5.4.
+
 ## 0.5.3 — 2026-10-24
 
 ### Classify reviewer CI failures safely
@@ -28,10 +32,6 @@ Claude and Codex now share fixed actionable failure categories for authenticatio
 - Give Claude a separate GitHub reviewer identity and run both lanes in the central fleet; gate on blocking findings from either reviewer, keep advisory findings nonblocking, and stop requiring Copilot.
 
 # Changelog
-
-### Resume an existing PR through the canonical release flow
-
-Add an explicit `existing-pr <URL>` invocation for a PR whose source is already checked out. The read-only selector binds its repository, branch and complete head to the clean checkout, reads local/remote state again, and refuses forks, closed PRs, mismatched origins and stale source without creating or pushing another PR. Selection runs before readiness tests and repeats at Step 2; the existing issue declaration, review, merge, publication and cleanup gates still apply. This enables a host-created NanoClaw learning promotion to enter the same release workflow instead of hitting unconditional PR creation (jbaruch/nanoclaw-admin#570). Both distribution manifests advance together to 0.5.4.
 
 ## 0.4.1 — 2026-10-19
 
