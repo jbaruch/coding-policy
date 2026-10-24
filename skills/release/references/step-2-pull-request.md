@@ -1,4 +1,11 @@
-## Step 2 — Create PR
+## Step 2 — Select PR
+
+For an explicit `existing-pr <URL>` invocation, repeat Step 1's read-only
+selection command after readiness checks. Use its returned repository and
+PR number. A refusal returns to that diagnostic; it never creates a PR.
+Skip the New PR section below and proceed immediately to Issue declaration.
+
+### New PR
 
 - Once Step 1's readiness checks pass, create the PR automatically — the green readiness checks are the gate. Do not pause to ask a human whether to open it.
 - Push the branch: `git push -u origin <branch>`
@@ -28,7 +35,10 @@
     - `Part of https://github.com/<owner>/<repo>/issues/<n>` for partial work tracked in another repository
     - `No issue` for work with no tracking issue
   - `Refs #<n>`, `Related #<n>` and a bare `#<n>` close nothing
-- Check the link GitHub resolved from the body:
+
+### Issue declaration
+
+For both new and existing PRs, check the link GitHub resolved from the body:
 
   ```bash
   KS=.tessl/plugins/jbaruch/coding-policy/skills/release/; [ -d "$KS" ] || KS="$HOME/$KS"; [ -d "$KS" ] || case "$(git config --get remote.origin.url)" in git@github.com:jbaruch/coding-policy|git@github.com:jbaruch/coding-policy.git|https://github.com/jbaruch/coding-policy|https://github.com/jbaruch/coding-policy.git|ssh://git@github.com/jbaruch/coding-policy|ssh://git@github.com/jbaruch/coding-policy.git) KS=skills/release/ ;; *) echo "coding-policy skill not found: run tessl install jbaruch/coding-policy" >&2; exit 1 ;; esac
