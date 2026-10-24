@@ -17,6 +17,36 @@ Preconditions (all required):
 
 Every other command block follows Scripts Are Real Files and Script Requirements unchanged.
 
+## Release Readback Consumers
+
+`rules/ci-safety.md` names the release readback scope and co-shipped targets.
+The consumer resolves only the host-installed `jbaruch/coding-policy` provider;
+caller data cannot choose a replacement root or executable. Resolve an
+installation-root alias once, then validate the actual provider manifest's
+name, version, declared release skill and declared authority rule. Each target
+must be a regular contained file under that same provider. Refuse linked
+target components, missing files and provider/target substitution before
+execution. Retain the verified provider identity across the readback sequence.
+
+The helpers retain their own watch budgets and publication gates:
+
+| Target | Failure contract |
+| --- | --- |
+| `skills/release/resolve-publish-run.sh` | Exit 1 means no unique source-bound run was resolved or lookup failed; exit 2 means invalid usage/configuration; neither emits a run id |
+| `skills/release/confirm-tessl-landed.sh` | Exit 1 means did not land; exit 2 means indeterminate; both emit no version and require separate recovery |
+| `skills/release/verify-moderation-cleared.sh` | Exit 1 carries a JSON unconfirmed moderation verdict; exit 2 is a tool/usage failure; parse its verdict only for exits 0 or 1 |
+
+The confirmation helper's successful version stdout follows Version Stdout
+below. `skills/release/references/PUBLICATION.md` owns the full gate sequence.
+A successful lookup never substitutes for successful source-bound publication,
+registry advance or moderation. Readback grants no approval of changed bytes.
+
+Provider regressions live in `tests/release/tests/test_resolve_publish_run.sh`,
+`tests/release/tests/test_confirm_publish_landed.sh` and
+`tests/release/tests/test_verify_moderation_cleared.sh`. Consumer lookup and
+link/substitution refusal coverage lives in `jbaruch/nanoclaw-admin`
+`tests/test_learning_delivery.py`.
+
 ## Version Stdout
 
 Applies to `skills/release/registry-baseline.sh` and

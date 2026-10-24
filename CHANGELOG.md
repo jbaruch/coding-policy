@@ -1,3 +1,7 @@
+### Define canonical release readback lookup
+
+Declare the three source-bound publication readback helpers as a scoped provider contract for the learning finalizer in jbaruch/nanoclaw-admin#570. Require installed provider identity, regular contained targets and substitution refusal without adding runtime authority or relaxing any publication gate. Preserve the helpers' distinct output and exit-code contracts and name provider/consumer regression coverage. Both distribution manifests advance together to 0.5.5; the merge-triggered publisher preserves that explicit version for Tessl and ACR.
+
 ## 0.5.4 — 2026-10-24
 
 ### Resume an existing PR through the canonical release flow

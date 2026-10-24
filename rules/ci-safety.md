@@ -79,6 +79,20 @@ alwaysApply: true
 - For plugin/package releases, the duty extends past merge to each publication
 - Publication confirmation is binding: read `skills/release/references/release-contract.md` Publication Confirmation before reporting a release confirmed
 
+## Canonical Release Readback
+
+- `jbaruch/coding-policy` owns the scoped helper contract for `skills/release/**` and `skills/learning-pass/scripts/learning-delivery.py` consumers.
+- These co-shipped targets live under `skills/release/`:
+
+| Target | Input → successful output |
+| --- | --- |
+| `resolve-publish-run.sh` | owner, repository, source commit, workflow and optional ref → JSON `database_id` |
+| `confirm-tessl-landed.sh` | workspace, plugin, captured baseline and run id → landed version plus newline |
+| `verify-moderation-cleared.sh` | workspace, plugin and published version → JSON moderation verdict |
+
+- Lookup, refusal, exit-code and regression contracts are binding: read `skills/release/references/script-output-contracts.md` Release Readback Consumers before invoking these targets from another plugin.
+- Lookup supplies no merge, publication, installation or operator authority.
+
 ## Publish Outcomes
 
 - A red publish run is never proof that publishing was blocked
