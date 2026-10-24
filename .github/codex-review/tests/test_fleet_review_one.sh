@@ -37,6 +37,10 @@ make_env() (
 set -euo pipefail
 # clone <flags..> <url> <dest>: create an empty checkout at dest; everything else is a no-op.
 if [ "${1:-}" = "clone" ]; then dest="${!#}"; mkdir -p "$dest/.git"; fi
+if [ "${1:-}" = "rev-parse" ]; then
+  if [ -n "${FAKE_HEAD_FILE:-}" ]; then cat "$FAKE_HEAD_FILE";
+  else printf '%s\n' "${FAKE_HEAD_SHA:-1111111111111111111111111111111111111111}"; fi
+fi
 exit 0
 EOF
   printf '#!/usr/bin/env bash\nset -euo pipefail\nexit 0\n' > "$bin/tessl"
@@ -49,6 +53,7 @@ if [ -n "${CODEX_ARGV_LOG:-}" ]; then printf '%s\n' "$@" > "$CODEX_ARGV_LOG"; fi
 out=""
 while [ $# -gt 0 ]; do [ "$1" = "--output-last-message" ] && out="${2:-}"; shift; done
 [ -n "$out" ] && printf '{"summary":"Policy loaded: 21 rule files from jbaruch/coding-policy.","findings":[]}' > "$out"
+if [ -n "${FAKE_HEAD_FILE:-}" ]; then printf '%s\n' 2222222222222222222222222222222222222222 > "$FAKE_HEAD_FILE"; fi
 exit 0
 EOF
   chmod +x "$bin"/*
@@ -64,8 +69,8 @@ PY
   cat > "$central/.github/codex-review/post-review.sh" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
-# args: <owner> <repo> <pr> <result-json> — echo them back so the test can assert routing.
-printf '{"state":"posted","owner":"%s","repo":"%s","pr":"%s"}\n' "$1" "$2" "$3"
+# args: <owner> <repo> <pr> <result-json> <reviewed-sha>.
+printf '{"state":"posted","owner":"%s","repo":"%s","pr":"%s","head_sha":"%s"}\n' "$1" "$2" "$3" "$5"
 EOF
 
   echo '{"tokens":{"access_token":"x"}}' > "$codexh/auth.json"
@@ -76,8 +81,9 @@ EOF
 t_happy() {
   local env_line; env_line=$(make_env) || exit 2   # propagate make_env setup failure (aggregate carve-out)
   read -r BIN CENTRAL CODEXH <<< "$env_line"
+  printf '%s\n' 1111111111111111111111111111111111111111 > "$CODEXH/head" || exit 2
   local out rc
-  out=$(PATH="$BIN:$PATH" GH_TOKEN=tok CENTRAL_DIR="$CENTRAL" CODEX_HOME="$CODEXH" \
+  out=$(PATH="$BIN:$PATH" GH_TOKEN=tok CENTRAL_DIR="$CENTRAL" CODEX_HOME="$CODEXH" FAKE_HEAD_FILE="$CODEXH/head" \
         bash "$SCRIPT" jbaruch repo-a 7 main 2>/dev/null); rc=$?
   rmwarn "$BIN" "$CENTRAL" "$CODEXH"
   [[ $rc -eq 0 ]]                                        || { bad "happy: exit 0 (rc=$rc, out=$out)"; return; }
@@ -85,7 +91,8 @@ t_happy() {
   [[ "$(jq -r .owner <<<"$out")" == "jbaruch" ]]        || { bad "happy: owner routed ($out)"; return; }
   [[ "$(jq -r .repo  <<<"$out")" == "repo-a" ]]         || { bad "happy: repo routed ($out)"; return; }
   [[ "$(jq -r .pr    <<<"$out")" == "7" ]]              || { bad "happy: pr routed ($out)"; return; }
-  ok "happy path routes to the poster with owner/repo/pr"
+  [[ "$(jq -r .head_sha <<<"$out")" == "1111111111111111111111111111111111111111" ]] || { bad "happy: head advance retargeted the verdict ($out)"; return; }
+  ok "head advance during analysis retains the original reviewed source"
 }
 
 # The reviewer's model pin. Renewing the pin in fleet-review-one.sh means
@@ -155,6 +162,17 @@ t_invalid_authoring_context() {
   rmwarn "$BIN" "$CENTRAL" "$CODEXH"
 }
 
+t_invalid_source_sha() {
+  local env_line; env_line=$(make_env) || exit 2
+  read -r BIN CENTRAL CODEXH <<< "$env_line"
+  local log="$CODEXH/codex.log" rc=0
+  PATH="$BIN:$PATH" GH_TOKEN=tok CENTRAL_DIR="$CENTRAL" CODEX_HOME="$CODEXH" FAKE_HEAD_SHA=invalid CODEX_ARGV_LOG="$log" \
+    bash "$SCRIPT" jbaruch repo-a 7 main >/dev/null 2>&1 || rc=$?
+  if [[ $rc -ne 0 && ! -f "$log" ]]; then ok "invalid source SHA stops before review";
+  else bad "invalid source SHA reached review (rc=$rc)"; fi
+  rmwarn "$BIN" "$CENTRAL" "$CODEXH"
+}
+
 # --- missing GH_TOKEN -> non-zero (unset :? guard) ---
 t_missing_token() {
   local env_line; env_line=$(make_env) || exit 2   # propagate make_env setup failure (aggregate carve-out)
@@ -173,6 +191,7 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
   t_bad_args
   t_missing_driver
   t_invalid_authoring_context
+  t_invalid_source_sha
   t_missing_token
   echo "== summary: ${pass} passed, ${fail} failed =="
   [[ "$fail" -eq 0 ]]
