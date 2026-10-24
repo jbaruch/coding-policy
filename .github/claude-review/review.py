@@ -20,6 +20,11 @@ import tempfile
 
 
 HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE.parent))
+from reviewer_failure import reviewer_failure_hint
+
+# Compatibility for existing diagnostic callers; both providers share the owner.
+claude_failure_hint = reviewer_failure_hint
 # Model IDs are version pins. Recheck alongside the Claude CLI Renovate update
 # and the weekly capability refresh (rules/dependency-management.md Freshness).
 MODEL = "claude-sonnet-5-5"
@@ -29,39 +34,6 @@ class ReviewError(Exception):
     """An actionable failure safe to print without credentials or model output."""
 
 
-def claude_failure_hint(stdout: str, stderr: str) -> str:
-    """Return fixed diagnostic text only; CLI output may contain protected data."""
-    text = (stdout + "\n" + stderr).casefold().replace("’", "'")
-    signatures = (
-        (("authentication_error", "invalid authentication credentials", "invalid bearer token",
-          "oauth token has expired", "token has expired", "401 unauthorized",
-          "invalid api key", "not logged in", "please run /login", "api error: 401"),
-         "authentication rejected; refresh the CI subscription credential"),
-        (("rate_limit_error", "you've hit your limit", "you have hit your limit",
-          "usage limit reached", "api error: 429"),
-         "subscription usage limit reached; wait for its reset before retrying"),
-        (("model_not_found", "invalid model", "does not exist or you do not have access"),
-         "model unavailable; check the pinned model and subscription access"),
-        (("unknown option", "unknown argument", "unrecognized option"),
-         "CLI argument rejected; check the pinned CLI's supported options"),
-        (("econnreset", "econnrefused", "etimedout", "enotfound",
-          "certificate verify failed", "unable to verify the first certificate"),
-         "network or TLS failure; check runner connectivity and certificate trust"),
-    )
-    for patterns, hint in signatures:
-        if any(pattern in text for pattern in patterns):
-            return hint
-    if re.search(r"(?<!\d)429(?!\d)", text) and ("limit" in text or "usage" in text):
-        return "provider rate or usage limit (HTTP 429); check subscription usage and the provider's reset before retrying"
-    # Only this fixed vocabulary may cross the log boundary for unknown errors.
-    # It reveals no raw word, identifier, source excerpt or credential fragment.
-    vocabulary = ("login", "subscription", "limit", "usage", "billing", "balance",
-                  "oauth", "permission", "model", "network", "timeout", "expired",
-                  "scope", "restricted", "schema", "rate", "401", "403", "429",
-                  "400", "invalid_request_error", "module", "node", "config", "internal")
-    markers = ",".join(word for word in vocabulary if word in text) or "none"
-    return ("unclassified CLI failure; check CI authentication, permissions and CLI availability; "
-            f"fixed diagnostic markers: {markers}")
 
 
 def run(args: list[str], *, cwd: Path | None = None,

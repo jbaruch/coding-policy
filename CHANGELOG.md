@@ -1,6 +1,13 @@
-### Classify Claude CI review failures safely
+### Classify reviewer CI failures safely
 
-The quality reviewer previously collapsed every nonzero Claude exit into an authentication/permissions hint. It now reports a fixed actionable category for authentication, subscription usage limits, unavailable models, unsupported CLI options, or network/TLS failures. Raw child output, source text and credentials remain absent from diagnostics. Failures still stop the review without posting a verdict; successful output and exact-commit posting gates are unchanged.
+Claude and Codex now share fixed actionable failure categories for authentication, subscription usage limits, unavailable models, unsupported CLI options and network/TLS failures. Both self and fleet Codex review use the same classifier. Raw child output, source text and credentials remain absent from diagnostics. Failures still stop the review without posting a verdict; successful output and exact-commit posting gates are unchanged.
+
+## 0.5.2 — 2026-10-24
+
+### Bind policy reviews to the analyzed source
+
+- Keep fleet and self policy reviews attached to the exact analyzed commit when a PR advances during analysis. Preserve the source binding through retries and approval-to-comment fallback; refuse missing or malformed provenance (#780).
+- Check out the PR head explicitly for self review. The independent Claude lane already pins its analyzed source and rejects a changed head.
 
 ## 0.5.1 — 2026-10-20
 

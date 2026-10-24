@@ -18,9 +18,9 @@
 # from approving (`github-actions[bot]` — HTTP 422) falls back to COMMENT on a
 # nonblocking result, so the verdict is never lost.
 #
-# Usage: post-review.sh <owner> <repo> <pr-number> <result-json-file>
+# Usage: post-review.sh <owner> <repo> <pr-number> <result-json-file> <reviewed-sha>
 # Out:   one JSON object on stdout:
-#          {"state":"posted","event":"...","findings":N,"blocking":N,"advisory":N}
+#          {"state":"posted","event":"...","head_sha":"...","findings":N,"blocking":N,"advisory":N}
 # Exit:  0 on success; non-zero with a stderr diagnostic on failure.
 
 set -euo pipefail
@@ -31,13 +31,13 @@ if ! command -v jq >/dev/null 2>&1; then
 fi
 
 # Submit ONE review event to the PR, retrying transient failures with backoff.
-# Args: <owner> <repo> <pr> <event> <body>
+# Args: <owner> <repo> <pr> <event> <body> <reviewed-sha>
 # Return: 0 posted; 22 the event was rejected as unprocessable (HTTP 422 — e.g.
 #   an APPROVE from a token that cannot approve); 1 other failure after retries.
 submit_review() {
-  local owner="$1" repo="$2" pr="$3" event="$4" body="$5"
+  local owner="$1" repo="$2" pr="$3" event="$4" body="$5" reviewed_sha="$6"
   local payload attempt=0 max=3 err
-  payload=$(jq -n --arg event "$event" --arg body "$body" '{event: $event, body: $body}')
+  payload=$(jq -n --arg event "$event" --arg body "$body" --arg commit "$reviewed_sha" '{event: $event, body: $body, commit_id: $commit}')
   while :; do
     attempt=$((attempt + 1))
     # Capture stderr (stdout discarded) so a non-retryable 422 can be told apart
@@ -61,11 +61,15 @@ submit_review() {
 }
 
 main() {
-  if [[ $# -ne 4 ]]; then
-    echo "usage: $0 <owner> <repo> <pr-number> <result-json-file>" >&2
+  if [[ $# -ne 5 ]]; then
+    echo "usage: $0 <owner> <repo> <pr-number> <result-json-file> <reviewed-sha> — pass the source commit captured before review" >&2
     exit 2
   fi
-  local owner="$1" repo="$2" pr="$3" result="$4"
+  local owner="$1" repo="$2" pr="$3" result="$4" reviewed_sha="$5"
+  if [[ ! "$reviewed_sha" =~ ^[a-f0-9]{40}$ ]]; then
+    echo 'error: reviewed-sha must be the complete lowercase source commit captured before review — rerun the driver against a verified checkout' >&2
+    exit 2
+  fi
 
   if [[ ! -f "$result" ]]; then
     echo "error: result file not found: ${result} — codex exec did not write its --output-last-message file; check the review step logs" >&2
@@ -108,20 +112,21 @@ main() {
   # cannot approve (github-actions[bot] — HTTP 422) falls back to COMMENT so the
   # verdict is never lost. The output reports the event actually posted.
   local posted="$event" rc=0
-  submit_review "$owner" "$repo" "$pr" "$event" "$body" || rc=$?
+  submit_review "$owner" "$repo" "$pr" "$event" "$body" "$reviewed_sha" || rc=$?
   if (( rc == 22 )) && [[ "$event" == "APPROVE" ]]; then
     echo "post-review: APPROVE rejected as unprocessable (HTTP 422) — this token cannot approve; posting COMMENT instead" >&2
     posted="COMMENT"
-    submit_review "$owner" "$repo" "$pr" "COMMENT" "$body" || exit 1
+    submit_review "$owner" "$repo" "$pr" "COMMENT" "$body" "$reviewed_sha" || exit 1
   elif (( rc != 0 )); then
     exit 1
   fi
 
   jq -n --arg event "$posted" \
+    --arg head_sha "$reviewed_sha" \
     --argjson findings "$findings_count" \
     --argjson blocking "$blocking_count" \
     --argjson advisory "$advisory_count" \
-    '{state: "posted", event: $event, findings: $findings, blocking: $blocking, advisory: $advisory}'
+    '{state: "posted", event: $event, head_sha: $head_sha, findings: $findings, blocking: $blocking, advisory: $advisory}'
 }
 
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then

@@ -27,7 +27,9 @@
     "tests/release/tests/test_origin_repo.py",
     "tests/release/tests/test_pr_create_repo_binding.py",
     "tests/release/tests/test_publish_acr.py",
-    "tests/release/tests/test_stamp_changelog.py"
+    "tests/release/tests/test_stamp_changelog.py",
+    ".github/reviewer_failure.py",
+    ".github/tests/test_reviewer_failure.py"
   ],
   "executionEnvironments": [
     {
@@ -40,6 +42,18 @@
       "root": "skills/release/lib",
       "extraPaths": [
         "skills/release/lib"
+      ]
+    },
+    {
+      "root": ".github/claude-review",
+      "extraPaths": [
+        ".github"
+      ]
+    },
+    {
+      "root": ".github/tests",
+      "extraPaths": [
+        ".github"
       ]
     }
   ],

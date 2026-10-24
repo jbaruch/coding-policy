@@ -53,6 +53,7 @@ jobs:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha }}
 
       - uses: actions/setup-node@v7
         with:
@@ -91,7 +92,7 @@ jobs:
           # capability-table refresh (rules/dependency-management.md Freshness).
           # Sol's own default effort is low, too shallow for a policy review.
           # Keep in step with .github/codex-review/fleet-review-one.sh.
-          codex exec \
+          python3 .github/reviewer_failure.py run codex -- codex exec \
             --json \
             --skip-git-repo-check \
             --dangerously-bypass-approvals-and-sandbox \
@@ -117,9 +118,10 @@ jobs:
       - name: Post the review
         env:
           GH_TOKEN: ${{ github.token }}
+          REVIEWED_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           bash .github/codex-review/post-review.sh \
             "${{ github.repository_owner }}" \
             "${{ github.event.repository.name }}" \
             "${{ github.event.pull_request.number }}" \
-            /tmp/codex-final.json
+            /tmp/codex-final.json "$REVIEWED_SHA"

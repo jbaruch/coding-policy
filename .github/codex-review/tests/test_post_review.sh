@@ -24,10 +24,13 @@ bad() { printf 'FAIL - %s\n' "$1"; fail=$((fail+1)); }
 # would), so the fallback-to-COMMENT path can be exercised.
 GH_CAPTURE=""
 MOCK_422_ON_APPROVE=0
+REVIEWED_SHA=1111111111111111111111111111111111111111
+LATER_HEAD_SHA=2222222222222222222222222222222222222222
 gh() {
   if [[ "${1:-}" == "api" && "$*" == */reviews* ]]; then
     local payload; payload=$(cat)
-    printf '%s' "$payload" > "$GH_CAPTURE"
+    # GitHub defaults an omitted commit_id to the newer post-time head.
+    jq --arg latest "$LATER_HEAD_SHA" '.commit_id //= $latest' <<<"$payload" > "$GH_CAPTURE"
     local ev; ev=$(jq -r '.event' <<<"$payload")
     if [[ "$MOCK_422_ON_APPROVE" == "1" && "$ev" == "APPROVE" ]]; then
       echo "gh: Unprocessable Entity (HTTP 422)" >&2
@@ -38,7 +41,7 @@ gh() {
   return 0
 }
 
-run_main() { ( set -euo pipefail; main "$@" ); }
+run_main() { ( set -euo pipefail; main "$@" "$REVIEWED_SHA" ); }
 
 # --- pass, no findings -> APPROVE (token can approve), body is the summary ---
 t_pass() {
@@ -51,6 +54,8 @@ t_pass() {
   [[ "$(jq -r .event <<<"$out")" == "APPROVE" ]]             || { bad "pass: event APPROVE (got $out)"; rm -rf "$dir"; return; }
   [[ "$(jq -r .findings <<<"$out")" == "0" ]]                 || { bad "pass: findings 0 (got $out)"; rm -rf "$dir"; return; }
   [[ "$(jq -r .event "$GH_CAPTURE")" == "APPROVE" ]]         || { bad "pass: payload event APPROVE"; rm -rf "$dir"; return; }
+  [[ "$(jq -r .commit_id "$GH_CAPTURE")" == "$REVIEWED_SHA" ]] || { bad "pass: a newer head must not inherit approval"; rm -rf "$dir"; return; }
+  [[ "$(jq -r .head_sha <<<"$out")" == "$REVIEWED_SHA" ]] || { bad "pass: receipt must identify analyzed source"; rm -rf "$dir"; return; }
   # Assert the body begins with the load indicator (schema contract), not merely
   # that some line within it does — `grep -E "^..."` anchors per line, so a
   # preamble line before the summary would pass it. Here `=~` matches against the
@@ -74,6 +79,7 @@ t_pass_422_fallback() {
   [[ $rc -eq 0 ]]                                              || { bad "fallback: exit 0 (rc=$rc)"; rm -rf "$dir"; return; }
   [[ "$(jq -r .event <<<"$out")" == "COMMENT" ]]             || { bad "fallback: output event COMMENT (got $out)"; rm -rf "$dir"; return; }
   [[ "$(jq -r .event "$GH_CAPTURE")" == "COMMENT" ]]         || { bad "fallback: last payload event COMMENT"; rm -rf "$dir"; return; }
+  [[ "$(jq -r .commit_id "$GH_CAPTURE")" == "$REVIEWED_SHA" ]] || { bad "fallback: COMMENT must retain the analyzed source"; rm -rf "$dir"; return; }
   ok "pass + APPROVE 422 -> falls back to COMMENT"
   rm -rf "$dir"
 }
@@ -91,6 +97,7 @@ JSON
   [[ $rc -eq 0 ]]                                                     || { bad "blocking: exit 0 (rc=$rc)"; rm -rf "$dir"; return; }
   [[ "$(jq -r .event <<<"$out")" == "REQUEST_CHANGES" ]]            || { bad "blocking: event REQUEST_CHANGES (got $out)"; rm -rf "$dir"; return; }
   [[ "$(jq -r .findings <<<"$out")" == "1" ]]                       || { bad "blocking: findings 1 (got $out)"; rm -rf "$dir"; return; }
+  [[ "$(jq -r .commit_id "$GH_CAPTURE")" == "$REVIEWED_SHA" ]] || { bad "blocking: findings must retain the analyzed source"; rm -rf "$dir"; return; }
   [[ "$(jq -r .blocking <<<"$out")" == "1" ]]                       || { bad "blocking: blocking 1 (got $out)"; rm -rf "$dir"; return; }
   jq -r .body "$GH_CAPTURE" | grep -q "## Blocking findings"        || { bad "blocking: body has a Blocking section"; rm -rf "$dir"; return; }
   jq -r .body "$GH_CAPTURE" | grep -q "skills/x/run.sh:3"           || { bad "blocking: body cites the finding path:line"; rm -rf "$dir"; return; }
@@ -175,6 +182,21 @@ t_invalid_json() {
   rm -rf "$dir"
 }
 
+t_missing_or_invalid_source() {
+  local dir; dir=$(mktemp -d) || exit 2
+  GH_CAPTURE="$dir/payload.json"
+  printf '{"summary":"Clean","findings":[]}' > "$dir/final.json"
+  local rc=0
+  (set -euo pipefail; main owner repo 1 "$dir/final.json") >/dev/null 2>&1 || rc=$?
+  if [[ $rc -eq 2 && ! -f "$GH_CAPTURE" ]]; then ok "missing source refuses to post";
+  else bad "missing source was not refused (rc=$rc)"; fi
+  rc=0
+  (set -euo pipefail; main owner repo 1 "$dir/final.json" invalid) >/dev/null 2>&1 || rc=$?
+  if [[ $rc -eq 2 && ! -f "$GH_CAPTURE" ]]; then ok "invalid source refuses to post";
+  else bad "invalid source was not refused (rc=$rc)"; fi
+  rm -rf "$dir"
+}
+
 echo "== post-review.sh tests =="
 t_pass
 t_pass_422_fallback
@@ -184,5 +206,6 @@ t_mixed
 t_missing_severity_blocks
 t_missing_file
 t_invalid_json
+t_missing_or_invalid_source
 echo "== summary: ${pass} passed, ${fail} failed =="
 [[ "$fail" -eq 0 ]]

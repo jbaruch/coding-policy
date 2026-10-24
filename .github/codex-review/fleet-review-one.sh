@@ -54,9 +54,10 @@ main() {
   local authoring="${CENTRAL_DIR}/.github/codex-review/policy-authoring-context.py"
   # Mechanical drivers (policy-path-agnostic) are shared with the self-review.
   local assert="${CENTRAL_DIR}/.github/codex-review/assert-no-secret-leak.sh"
+  local runner="${CENTRAL_DIR}/.github/reviewer_failure.py"
   local poster="${CENTRAL_DIR}/.github/codex-review/post-review.sh"
   local f
-  for f in "$schema" "$prompt" "$authoring" "$assert" "$poster"; do
+  for f in "$schema" "$prompt" "$authoring" "$assert" "$poster" "$runner"; do
     [[ -f "$f" ]] || { echo "error: central driver file missing: $f" >&2; exit 1; }
   done
 
@@ -79,11 +80,15 @@ main() {
     git -c "http.https://github.com/.extraheader=${authhdr}" fetch --quiet --no-tags origin "pull/${pr}/head:pr-head" \
       || { echo "error: could not fetch pull/${pr}/head in ${full}" >&2; exit 1; }
     git checkout --quiet pr-head
-    # Review the live PR head — GitHub records the posted review's commit_id as the
-    # PR head at post time, so reviewing the live head keeps review and dedup key
-    # consistent. Log exactly which SHA was reviewed.
-    echo "reviewing ${full}#${pr} at $(git rev-parse HEAD)" >&2
   ) || exit 1
+  # Capture once before analysis. A later push must never retarget this verdict.
+  local reviewed_sha
+  reviewed_sha=$(cd "$work" && git rev-parse HEAD) || exit 1
+  if [[ ! "$reviewed_sha" =~ ^[a-f0-9]{40}$ ]]; then
+    echo 'error: checkout returned an invalid source SHA — restore git and rerun this review' >&2
+    exit 1
+  fi
+  echo "reviewing ${full}#${pr} at ${reviewed_sha}" >&2
 
   local authoring_context
   if ! authoring_context=$(cd "$work" && python3 -I "$authoring" --repo "$full" --base "origin/${base}"); then
@@ -158,7 +163,7 @@ main() {
     # effort is low, too shallow for a policy review. Keep in step with
     # .github/workflows/review-codex.yml.
     { printf 'This PR targets base branch `%s`; review the diff `git diff origin/%s...HEAD`.\nTrusted plugin authoring context: %s\n\n' "$base" "$base" "$authoring_context"; cat "$prompt"; } \
-      | env -u GH_TOKEN CODEX_HOME="$codex_home" codex exec \
+      | env -u GH_TOKEN CODEX_HOME="$codex_home" python3 "$runner" run codex -- codex exec \
           --json \
           --skip-git-repo-check \
           --dangerously-bypass-approvals-and-sandbox \
@@ -166,14 +171,14 @@ main() {
           -c 'model_reasoning_effort="high"' \
           --output-schema "$schema" \
           --output-last-message "$out" \
-          -
+          - >/dev/null
   ) || { echo "error: codex exec failed for ${full}#${pr}" >&2; exit 1; }
 
   # Refuse to post if the output echoes the Codex credential.
   bash "$assert" "${codex_home}/auth.json" "$out"
 
   # Post the verdict back as the App (post-review.sh reads GH_TOKEN).
-  bash "$poster" "$owner" "$repo" "$pr" "$out"
+  bash "$poster" "$owner" "$repo" "$pr" "$out" "$reviewed_sha"
 }
 
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
