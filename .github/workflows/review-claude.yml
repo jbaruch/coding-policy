@@ -30,7 +30,7 @@ jobs:
           node-version: "24"
       # renovate: datasource=npm depName=@anthropic-ai/claude-code
       - name: Install Claude CLI
-        run: npm install -g @anthropic-ai/claude-code@2.1.304
+        run: npm install -g @anthropic-ai/claude-code@2.1.310
       - name: Verify real CLI context isolation
         run: python3 .github/claude-review/check-isolation.py
       - name: Mint the dedicated Claude reviewer App token
