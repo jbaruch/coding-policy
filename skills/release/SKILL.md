@@ -6,8 +6,9 @@ description: >
   compliance + Claude for correctness and risk), merge, and branch cleanup. Covers
   readiness checks, version
   reasoning, review polling, feedback handling, and post-merge verification.
-  Use when the user wants to open a pull request, ship code, merge a branch,
-  or handle post-merge cleanup on GitHub.
+  Use when the user wants to open a pull request, resume an existing PR,
+  ship code, merge a branch, or handle post-merge cleanup on GitHub.
+argument-hint: "[existing-pr <GitHub PR URL>]"
 ---
 
 # Release Skill
@@ -28,13 +29,14 @@ skills/release/references/step-1-readiness.md
 Resolve the selected checkout's authorized blockers and preserve unrelated
 work. Proceed immediately to Step 2 after required readiness checks pass.
 
-## Step 2 — Create PR
+## Step 2 — Select PR
 
 ```text
 skills/release/references/step-2-pull-request.md
 ```
 
-Push the branch, create the PR in its origin repository and verify its issue
+For an explicit `existing-pr <URL>` invocation, reuse the source-verified PR.
+Otherwise create the PR in the checkout's origin repository. Verify its issue
 declaration. Proceed immediately to Step 3.
 
 ## Step 3 — Reason About Versioning

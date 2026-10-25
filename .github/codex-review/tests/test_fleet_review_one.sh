@@ -60,6 +60,7 @@ EOF
 
   # Fleet prompt/schema + the shared drivers all live under .github/codex-review.
   mkdir -p "$central/.github/codex-review"
+  cp "$(dirname "$SCRIPT")/../reviewer_failure.py" "$central/.github/reviewer_failure.py"
   echo '{}'     > "$central/.github/codex-review/fleet-schema.json"
   echo 'prompt' > "$central/.github/codex-review/fleet-prompt.md"
   cat > "$central/.github/codex-review/policy-authoring-context.py" <<'PY'

@@ -21,15 +21,28 @@ bad() { printf 'FAIL - %s\n' "$1"; fail=$((fail+1)); }
 
 MOCK_DIR=""
 declare -a MOCK_REPOS=()
+MOCK_ARCHIVED_REPOS='[]'
+MOCK_DISABLED_REPOS='[]'
 
 # Mock gh: serve installation repos, per-repo open PRs, and per-PR reviews from
 # fixture files written by each test. Routes on the first /-prefixed argument.
 gh() {
-  local a url=""
+  local a url="" query="" previous=""
   for a in "$@"; do case "$a" in /*) url="$a"; break;; esac; done
+  for a in "$@"; do
+    if [[ "$previous" == --jq ]]; then query="$a"; fi
+    previous="$a"
+  done
+  printf '%s\n' "$url" >> "$MOCK_DIR/requests.log" || return 1
   case "$url" in
     /installation/repositories)
-      printf '%s\n' "${MOCK_REPOS[@]}"
+      local metadata
+      metadata=$(printf '%s\n' "${MOCK_REPOS[@]}" | jq -Rn \
+        --argjson archived "$MOCK_ARCHIVED_REPOS" --argjson disabled "$MOCK_DISABLED_REPOS" \
+        '{repositories: [inputs | select(length > 0) | . as $name | {full_name: $name,
+          archived: ($archived | index($name) != null),
+          disabled: ($disabled | index($name) != null)}]}') || return 1
+      jq -r "$query" <<< "$metadata"
       ;;
     */contents/.github/fleet-review-enabled)
       # Marker present by default; a <repo>.unmarked fixture makes it a 404, so
@@ -57,7 +70,10 @@ gh() {
 
 run_main() { ( set -euo pipefail; REVIEWER_LOGIN="app[bot]" main ); }
 
-setup() { MOCK_DIR=$(mktemp -d) || { echo "fatal: mktemp -d failed" >&2; exit 2; }; MOCK_REPOS=(); }
+setup() {
+  MOCK_DIR=$(mktemp -d) || { echo "fatal: mktemp -d failed" >&2; exit 2; }
+  MOCK_REPOS=(); MOCK_ARCHIVED_REPOS='[]'; MOCK_DISABLED_REPOS='[]'
+}
 teardown() { rm -rf "$MOCK_DIR" || echo "test_fleet_poll: warning: could not remove ${MOCK_DIR}" >&2; }
 
 # Guarded fixture write: reads a heredoc on stdin and aborts loudly on a failed
@@ -194,7 +210,33 @@ JSON
   ok "a dismissed policy review preserves its ruling without suppressing quality"; teardown
 }
 
+t_retired_repositories_are_never_queried() {
+  local lane out
+  for lane in policy quality; do
+    setup
+    MOCK_REPOS=(jbaruch/archived jbaruch/disabled jbaruch/active)
+    MOCK_ARCHIVED_REPOS='["jbaruch/archived"]'
+    MOCK_DISABLED_REPOS='["jbaruch/disabled"]'
+    writef "$MOCK_DIR/jbaruch__active.pulls.json" <<'JSON'
+[{"number":9,"base":{"ref":"main"},"head":{"sha":"abc123","repo":{"full_name":"jbaruch/active"}}}]
+JSON
+    out=$(REVIEW_LANE="$lane" run_main)
+    if [[ "$(jq -r 'map(.repo) | join(",")' <<< "$out")" != active ]]; then
+      bad "${lane}: active unreviewed repository must remain selected ($out)"; teardown; return
+    fi
+    if grep -Eq '/repos/jbaruch/(archived|disabled)/' "$MOCK_DIR/requests.log"; then
+      bad "${lane}: retired repositories received a marker, PR or review query"; teardown; return
+    else
+      local rc=$?
+      if [[ "$rc" != 1 ]]; then bad "${lane}: cannot inspect API request trace"; teardown; return; fi
+    fi
+    ok "${lane} excludes archived and disabled repositories before querying them"
+    teardown
+  done
+}
+
 echo "== fleet-poll.sh tests =="
+t_retired_repositories_are_never_queried
 t_dismissed_review_does_not_reenter_worklist
 t_lanes_deduplicate_separately
 t_needs_review

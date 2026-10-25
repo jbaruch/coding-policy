@@ -82,6 +82,7 @@ exit 0
 EOF
     chmod +x "$bin/git" "$bin/codex"
     mkdir -p "$work/.github/codex-review"
+    cp "$(dirname "$WORKFLOW")/../reviewer_failure.py" "$work/.github/reviewer_failure.py"
     echo 'prompt' > "$work/.github/codex-review/prompt.md"
     # GitHub expressions are substituted before the shell sees the block. sed,
     # not ${script//...}: a glob `*` is greedy and would swallow the text

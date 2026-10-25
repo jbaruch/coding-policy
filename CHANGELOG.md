@@ -1,3 +1,29 @@
+## 0.5.6 — 2026-10-25
+
+### Exclude retired repositories from the scheduled fleet sweep (#784)
+
+Filter archived and disabled repositories from installation metadata before marker, pull-request or review queries. Old open PRs in retired repositories no longer keep the quality sweep failing every cycle. Active opted-in repositories retain exact-head, lane-specific review selection. Regression fixtures exercise both policy and quality and prove excluded repositories receive no per-repository API calls. Both distribution manifests advance to 0.5.6; review gates and workflow YAML are unchanged.
+
+## 0.5.5 — 2026-10-24
+
+### Define canonical release readback lookup
+
+Declare the three source-bound publication readback helpers as a scoped provider contract for the learning finalizer in jbaruch/nanoclaw-admin#570. Require installed provider identity, regular contained targets and substitution refusal without adding runtime authority or relaxing any publication gate. Preserve the helpers' distinct output and exit-code contracts and name provider/consumer regression coverage. Both distribution manifests advance together to 0.5.5; the merge-triggered publisher preserves that explicit version for Tessl and ACR.
+
+## 0.5.4 — 2026-10-24
+
+### Resume an existing PR through the canonical release flow
+
+Add an explicit `existing-pr <URL>` invocation for a PR whose source is already checked out. The read-only selector binds its repository, branch and complete head to the clean checkout, reads local/remote state again, and refuses forks, closed PRs, mismatched origins and stale source without creating or pushing another PR. Selection runs before readiness tests and repeats at Step 2; the existing issue declaration, review, merge, publication and cleanup gates still apply. This enables a host-created NanoClaw learning promotion to enter the same release workflow instead of hitting unconditional PR creation (jbaruch/nanoclaw-admin#570). Both distribution manifests advance together to 0.5.4.
+
+## 0.5.3 — 2026-10-24
+
+### Classify reviewer CI failures safely
+
+Claude and Codex now share fixed actionable failure categories for authentication, subscription usage limits, unavailable models, unsupported CLI options and network/TLS failures. Both self and fleet Codex review use the same classifier. Raw child output, source text and credentials remain absent from diagnostics. Failures still stop the review without posting a verdict; successful output and exact-commit posting gates are unchanged.
+
+## 0.5.2 — 2026-10-24
+
 ### Bind policy reviews to the analyzed source
 
 - Keep fleet and self policy reviews attached to the exact analyzed commit when a PR advances during analysis. Preserve the source binding through retries and approval-to-comment fallback; refuse missing or malformed provenance (#780).
