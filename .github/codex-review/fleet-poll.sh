@@ -31,7 +31,9 @@ main() {
   : "${REVIEWER_LOGIN:?set REVIEWER_LOGIN to the reviewer App bot login, e.g. coding-policy-fleet-reviewer[bot]}"
 
   local repos
-  repos=$(gh api --paginate /installation/repositories --jq '.repositories[].full_name') \
+  # Retired repositories cannot accept reviews, even when old PRs remain open.
+  repos=$(gh api --paginate /installation/repositories \
+    --jq '.repositories[] | select(.archived != true and .disabled != true) | .full_name') \
     || { echo "error: could not list installation repositories — check GH_TOKEN (App installation token)" >&2; exit 1; }
 
   local worklist="[]"

@@ -1,3 +1,7 @@
+### Exclude retired repositories from the scheduled fleet sweep (#784)
+
+Filter archived and disabled repositories from installation metadata before marker, pull-request or review queries. Old open PRs in retired repositories no longer keep the quality sweep failing every cycle. Active opted-in repositories retain exact-head, lane-specific review selection. Regression fixtures exercise both policy and quality and prove excluded repositories receive no per-repository API calls. Both distribution manifests advance to 0.5.6; review gates and workflow YAML are unchanged.
+
 ## 0.5.5 — 2026-10-24
 
 ### Define canonical release readback lookup
