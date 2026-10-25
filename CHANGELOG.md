@@ -1,3 +1,9 @@
+## 0.5.7 — 2026-10-25
+
+### Refresh the review CLIs and Go setup action (#777, #772, #752)
+
+Update the policy reviewer to Codex 0.164.0, the code-quality reviewer to Claude Code 2.1.310, and Go setup to the immutable v7.0.0 action revision. Keep both review lanes and existing context isolation. Let Renovate close its dependency dashboard when no updates remain (#160); update discovery and review gates remain active. Both distribution manifests advance together to 0.5.7.
+
 ## 0.5.6 — 2026-10-25
 
 ### Exclude retired repositories from the scheduled fleet sweep (#784)
