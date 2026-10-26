@@ -21,8 +21,9 @@ before the affected action:
 
 ```text
 skills/coding-contracts/references/<rule-name>.md
-``` Resolve
-paths within this installed plugin, or this repository when maintaining it.
+```
+
+Resolve paths within this installed plugin, or this repository when maintaining it.
 References retain the complete binding policy; load additional references
 only when their own rule triggers apply. A section cited through a router
 belongs to its full reference. Missing or unreadable content stops the
