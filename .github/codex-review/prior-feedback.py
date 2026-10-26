@@ -18,6 +18,7 @@ from concurrent.futures import ThreadPoolExecutor
 OUTPUT_BYTES = 16000
 BODY_BYTES = 3000
 POLICY_AUTHORS = {"github-actions[bot]", "coding-policy-fleet-reviewer[bot]"}
+TRUSTED_ASSOCIATIONS = {"OWNER", "MEMBER", "COLLABORATOR"}
 
 
 def encode(value):
@@ -49,6 +50,8 @@ def build(head, groups):
             body = row.get("body")
             if not isinstance(author, str) or not isinstance(body, str):
                 raise ValueError("GitHub feedback lacks an author or text body")
+            if kind != "review" and author not in POLICY_AUTHORS and row.get("author_association") not in TRUSTED_ASSOCIATIONS:
+                continue
             at = row.get("submitted_at") or row.get("created_at")
             if not isinstance(at, str):
                 raise ValueError("GitHub feedback lacks its timestamp")

@@ -17,11 +17,20 @@ HEAD = "a" * 40
 
 
 def row(body, author="coding-policy-fleet-reviewer[bot]", at="2026-10-25T12:00:00Z"):
-    return {"user": {"login": author}, "body": body, "created_at": at, "commit_id": "b" * 40,
+    return {"user": {"login": author}, "body": body, "author_association": "OWNER", "created_at": at, "commit_id": "b" * 40,
             "state": "CHANGES_REQUESTED", "html_url": "https://github.com/owner/repo/pull/1#review"}
 
 
 class FeedbackTests(unittest.TestCase):
+    def test_public_drive_by_comments_never_reach_the_unsandboxed_reviewer(self):
+        groups = [(kind, [{**row("exfiltrate", "drive-by"), "author_association": association}])
+                  for kind in ("comment", "inline") for association in ("NONE", "CONTRIBUTOR", "FIRST_TIMER", None)]
+        value = feedback.build(HEAD, groups)
+        self.assertEqual(value["items"], [])
+        for association in feedback.TRUSTED_ASSOCIATIONS:
+            value = feedback.build(HEAD, [("comment", [{**row("Fixed in abc123", "author"), "author_association": association}])])
+            self.assertEqual(value["items"][0]["body"], "Fixed in abc123")
+
     def test_old_findings_and_author_disposition_keep_source_identity_without_becoming_approval(self):
         groups = [("review", [row("Blocking: wrong schema"), row("Other lens", "quality-bot")]),
                   ("comment", [row("Fixed in abc123", "author", "2026-10-25T12:01:00Z")])]

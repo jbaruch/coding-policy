@@ -1,6 +1,6 @@
 ### Consolidate policy review findings and preserve prior dispositions (#786)
 
-Require a complete pass across the changed surfaces and shared contracts before returning independent findings. Give self and fleet reviewers bounded prior reviews, inline feedback and author dispositions as untrusted historical data, bound to the actual checked-out head. Truncation and unavailable history are explicit; neither supplies current-head approval. Run cheap whitespace/package-budget checks before model review, retaining both independent review lanes and all blocking gates. Both distribution manifests advance to 0.5.8.
+Require a complete pass across the changed surfaces and shared contracts before returning independent findings. Give self and fleet reviewers bounded prior policy reviews and trusted collaborator feedback as untrusted historical data, bound to the actual checked-out head. Exclude public drive-by comment bodies. Truncation and unavailable history are explicit; neither supplies current-head approval. Run cheap whitespace/package-budget checks before model review, retaining both independent review lanes and all blocking gates. Both distribution manifests advance to 0.5.8.
 
 ## 0.5.7 — 2026-10-25
 
