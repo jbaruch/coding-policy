@@ -28,12 +28,12 @@ Observed with Claude Code 2.1.310, Haiku 5.5, low effort:
 | --- | --- | --- |
 | Startup warning | 90 files, 258.9k characters, over 150.0k | No warning |
 | Native `/memory` imported-file inventory | 90 instruction files | Same 90 paths; detail references absent from startup |
-| Native `/context` memory estimate | 97.2k tokens | 47.5k tokens |
-| One-turn READY probe input + cache tokens | 107,456 | 57,478 |
+| Native `/context` memory estimate | 97.2k tokens | 50.4k tokens |
+| One-turn READY probe input + cache tokens | 107,456 | 60,408 |
 | READY probe output | 4 tokens, success | 4 tokens, success |
 
-The candidate's raw decoded import-graph total is 134,976 characters, including
-frontmatter. This is a conservative upper bound with 15,024 characters of
+The candidate's raw decoded import-graph total is 141,979 characters, including
+frontmatter. This is a conservative upper bound with 8,021 characters of
 headroom. Claude's native warning strips rule metadata; its count differs from
 raw file sizes. The bound was checked against the actual native inventory,
 not coding-policy's source rule directory alone.
@@ -52,8 +52,9 @@ provider access. Its tool trace read the applicable installed rule router, then
 that router's full co-shipped reference. It loaded no unrelated detail reference.
 The run succeeded without a provider operation or a write tool.
 
-All 47 extracted original rule bodies were compared byte-for-byte with their
-binding references: 13 coding-policy, 19 host and 15 admin. The compact startup
+All 43 extracted original rule bodies were compared byte-for-byte with their
+binding references: 13 coding-policy, 19 host and 11 admin. The four legacy admin session-state, cadence-lock, event-filter and timezone
+contracts remain unchanged at their original startup rule paths. The compact startup
 rules preserve the applicable role, ownership, credential, approval and failure
 boundaries. Missing references stop the affected action. References load by
 explicit reads; `@` imports would restore the startup load and are forbidden.
