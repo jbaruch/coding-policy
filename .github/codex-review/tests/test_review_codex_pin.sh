@@ -85,6 +85,7 @@ EOF
     cp "$(dirname "$WORKFLOW")/../reviewer_failure.py" "$work/.github/reviewer_failure.py"
     echo 'prompt' > "$work/.github/codex-review/prompt.md"
     printf '{"status":"available","items":[]}\n' > "$work/codex-prior-feedback.json"
+    printf 'clean\n' > "$work/codex-whitespace-status.txt"
     # GitHub expressions are substituted before the shell sees the block. sed,
     # not ${script//...}: a glob `*` is greedy and would swallow the text
     # between two expressions on one line.
