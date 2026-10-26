@@ -6,7 +6,7 @@ alwaysApply: true
 
 ## Required Read
 
-- Before creating or naming branches, editing CI, pushing, watching or diagnosing CI and reviews, merging, publishing, or relying on a CI carve-out, read `skills/coding-contracts/references/ci-safety.md` in full.
+- Before branch, commit or CI work, authoring commit messages, reading or handling PR reviews, merges, publication, release-helper lookup, or any CI exception, read `skills/coding-contracts/references/ci-safety.md` in full.
 - Its full text and named sections bind as rule content.
 - Resolve the reference within its owning installed plugin.
 - Missing or unreadable content stops the affected action until the plugin is repaired.
@@ -19,3 +19,4 @@ alwaysApply: true
 - Never skip failing tests or bypass review.
 - Never push directly to protected branches outside a binding carve-out.
 - Watch every push to its required terminal gates.
+- Helper lookup grants no merge, publication, installation or operator authority.

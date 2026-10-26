@@ -8,7 +8,7 @@ description: Frontmatter conventions for rule files — what to set for always-o
 
 ## Required Read
 
-- Before authoring, interpreting or changing rule frontmatter and activation scope, read `skills/coding-contracts/references/rule-frontmatter.md` in full.
+- Before authoring, interpreting or changing rule frontmatter and activation scope, or relying on any exception to this rule, read `skills/coding-contracts/references/rule-frontmatter.md` in full.
 - Its full text and named sections bind as rule content.
 - Resolve the reference within its owning installed plugin.
 - Missing or unreadable content stops the affected action until the plugin is repaired.

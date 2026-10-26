@@ -6,7 +6,7 @@ alwaysApply: true
 
 ## Required Read
 
-- Before handling errors, choosing fallbacks, writing or reviewing logging, exception handlers, shell failure paths or process boundaries, read `skills/coding-contracts/references/error-handling.md` in full.
+- Before handling errors, choosing fallbacks, writing or reviewing logging, exception handlers, shell failure paths or process boundaries, or relying on any exception to this rule, read `skills/coding-contracts/references/error-handling.md` in full.
 - Its full text and named sections bind as rule content.
 - Resolve the reference within its owning installed plugin.
 - Missing or unreadable content stops the affected action until the plugin is repaired.

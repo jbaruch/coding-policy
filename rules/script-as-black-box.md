@@ -8,7 +8,7 @@ description: Skills reference the script's contract (inputs, outputs, exit codes
 
 ## Required Read
 
-- Before authoring skills or references that invoke scripts, read `skills/coding-contracts/references/script-as-black-box.md` in full.
+- Before authoring skills or references that invoke scripts, or relying on any exception to this rule, read `skills/coding-contracts/references/script-as-black-box.md` in full.
 - Its full text and named sections bind as rule content.
 - Resolve the reference within its owning installed plugin.
 - Missing or unreadable content stops the affected action until the plugin is repaired.

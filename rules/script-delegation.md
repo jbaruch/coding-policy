@@ -8,7 +8,7 @@ description: Deterministic operations → script, a fixed answer set read by mea
 
 ## Required Read
 
-- Before choosing, authoring or invoking scripts, bounded classifiers and automation, or choosing model reasoning, read `skills/coding-contracts/references/script-delegation.md` in full.
+- Before choosing, authoring or invoking scripts, bounded classifiers and automation, or choosing model reasoning, or relying on any exception to this rule, read `skills/coding-contracts/references/script-delegation.md` in full.
 - Its full text and named sections bind as rule content.
 - Resolve the reference within its owning installed plugin.
 - Missing or unreadable content stops the affected action until the plugin is repaired.

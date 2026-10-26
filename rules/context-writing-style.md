@@ -8,7 +8,7 @@ description: Prose discipline for rules, skills, and READMEs — what to cut, wh
 
 ## Required Read
 
-- Before writing plugin prose, maintaining its CHANGELOG, judging policy edge cases, debugging directives or auditing rules, read `skills/coding-contracts/references/context-writing-style.md` in full.
+- Before writing plugin prose, maintaining its CHANGELOG, judging policy edge cases, debugging directives or auditing rules, or relying on any exception to this rule, read `skills/coding-contracts/references/context-writing-style.md` in full.
 - Its full text and named sections bind as rule content.
 - Resolve the reference within its owning installed plugin.
 - Missing or unreadable content stops the affected action until the plugin is repaired.
