@@ -613,12 +613,12 @@ t_unbound_judge_ruling_refuses() {
   assert_eq "nothing posted" "0" "$(wc -l < "$EVENTS" | tr -d ' ')"
 }
 
-# The real check reaches the sibling foreman and turns its refusal into a
-# reason: empty XDG homes hold no pinned judge and no dispatch state.
+# Exercise a missing optional owner independently of sibling plugin installs.
 t_real_binding_reports_the_foreman_refusal() {
   write_judge_ruling "$HEAD_SHA" "$DECLINE_ONE"
-  local out="${TMPDIR_TEST}/real-binding" rc=0
-  XDG_CONFIG_HOME="${TMPDIR_TEST}/xdg-config" XDG_STATE_HOME="${TMPDIR_TEST}/xdg-state" \
+  local out="${TMPDIR_TEST}/real-binding" rc=0 stage="${TMPDIR_TEST}/missing-owner/coding-policy/skills/release"
+  mkdir -p "$stage" || { echo "    FAIL: cannot create missing-owner fixture" >&2; return 1; }
+  DISMISS_DIR="$stage" XDG_CONFIG_HOME="${TMPDIR_TEST}/xdg-config" XDG_STATE_HOME="${TMPDIR_TEST}/xdg-state" \
     real_verify_judge_ruling t-632 "$RULING" "$out" 2>"${TMPDIR_TEST}/stderr" || rc=$?
   assert_eq "missing optional owner is a tool failure" "2" "$rc" || return 1
   [[ ! -e "$out" ]] || { echo "    FAIL: missing owner must emit no binding" >&2; return 1; }
