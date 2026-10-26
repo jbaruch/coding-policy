@@ -9,9 +9,13 @@ description: Skills reference the script's contract (inputs, outputs, exit codes
 ## Required Read
 
 - Before authoring skills or references that invoke scripts, read `skills/coding-contracts/references/script-as-black-box.md` in full.
-- Its full text and named sections bind as rule content. Missing or unreadable content stops the affected action until the plugin is repaired.
-- Read explicitly when triggered; never `@`-import the reference.
+- Its full text and named sections bind as rule content.
+- Resolve the reference within its owning installed plugin.
+- Missing or unreadable content stops the affected action until the plugin is repaired.
+- Read explicitly when triggered.
+- Never `@`-import the reference.
 
 ## Boundary
 
-- Describe inputs, outputs, failures and side effects; the script owns internal thresholds, predicates and allowlists.
+- Describe inputs, outputs, failures and side effects.
+- The script owns internal thresholds, predicates and allowlists.

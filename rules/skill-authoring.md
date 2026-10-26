@@ -9,9 +9,14 @@ description: SKILL.md structure, frontmatter, execution-mode preamble, flat step
 ## Required Read
 
 - Before authoring, modifying or reviewing a skill, its references or a plugin manifest, read `skills/coding-contracts/references/skill-authoring.md` in full.
-- Its full text and named sections bind as rule content. Missing or unreadable content stops the affected action until the plugin is repaired.
-- Read explicitly when triggered; never `@`-import the reference.
+- Its full text and named sections bind as rule content.
+- Resolve the reference within its owning installed plugin.
+- Missing or unreadable content stops the affected action until the plugin is repaired.
+- Read explicitly when triggered.
+- Never `@`-import the reference.
 
 ## Boundary
 
-- Keep SKILL.md an ordered execution plan; use typed cross-skill calls and the declared script lookup contract.
+- Keep SKILL.md an ordered execution plan.
+- Use typed cross-skill calls.
+- Use the declared script lookup contract.

@@ -9,9 +9,13 @@ description: Plugin structure, rule/skill format, review pipeline, surface sync,
 ## Required Read
 
 - Before authoring, modifying, reviewing or publishing plugin artifacts in any distribution, read `skills/coding-contracts/references/context-artifacts.md` in full.
-- Its full text and named sections bind as rule content. Missing or unreadable content stops the affected action until the plugin is repaired.
-- Read explicitly when triggered; never `@`-import the reference.
+- Its full text and named sections bind as rule content.
+- Resolve the reference within its owning installed plugin.
+- Missing or unreadable content stops the affected action until the plugin is repaired.
+- Read explicitly when triggered.
+- Never `@`-import the reference.
 
 ## Boundary
 
-- Keep plugin surfaces synchronized; validate and review every applicable distribution before publication.
+- Keep plugin surfaces synchronized.
+- Validate and review every applicable distribution before publication.

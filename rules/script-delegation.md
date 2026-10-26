@@ -9,9 +9,14 @@ description: Deterministic operations → script, a fixed answer set read by mea
 ## Required Read
 
 - Before choosing between a script, bounded classification and reasoning, or authoring scripts and their invocation, read `skills/coding-contracts/references/script-delegation.md` in full.
-- Its full text and named sections bind as rule content. Missing or unreadable content stops the affected action until the plugin is repaired.
-- Read explicitly when triggered; never `@`-import the reference.
+- Its full text and named sections bind as rule content.
+- Resolve the reference within its owning installed plugin.
+- Missing or unreadable content stops the affected action until the plugin is repaired.
+- Read explicitly when triggered.
+- Never `@`-import the reference.
 
 ## Boundary
 
-- Deterministic logic uses executable scripts; bounded classification needs its approved bounds; reasoning stays with the model.
+- Deterministic logic uses executable scripts.
+- Bounded classification needs its approved bounds.
+- Reasoning stays with the model.
