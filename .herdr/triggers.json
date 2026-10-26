@@ -24,7 +24,8 @@
     "skills/herdr-foreman/references/team-operation.md",
     "skills/onboard-repo/references/*",
     "skills/release/*",
-    ".github/codex-accept/*"
+    ".github/codex-accept/*",
+    "skills/coding-contracts/*"
   ],
   "cli_spec_paths": [
     "skills/herdr-foreman/foreman/*.py",
