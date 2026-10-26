@@ -6,91 +6,17 @@ description: SKILL.md structure, frontmatter, execution-mode preamble, flat step
 
 # Skill Authoring
 
-## SKILL.md Frontmatter
+## Required Read
 
-- Required fields: `name`, `description` (include trigger phrases so the agent knows when to activate)
-- Optional fields include `allowed-tools`, `disable-model-invocation`, `user-invocable` (set to `false` for background-knowledge skills the runtime loads as context but the user should never invoke directly), and `argument-hint`
-- `argument-hint` is a Claude Code slash-command UI hint — a string naming the expected arguments, e.g. `[init|status|use|uninit|help] [feature]`
-- This list is not a closed allow-list — agents preserve unrecognized skill frontmatter and ignore fields they don't use (see `rules/rule-frontmatter.md`)
-- The `description` field is your discovery surface — write it for the agent, not a human audience
+- Before authoring or reviewing skills, references and manifests, or relying on a skill invocation or lookup exception, or relying on any exception to this rule, read `skills/coding-contracts/references/skill-authoring.md` in full.
+- Its full text and named sections bind as rule content.
+- Resolve the reference within its owning installed plugin.
+- Missing or unreadable content stops the affected action until the plugin is repaired.
+- Read explicitly when triggered.
+- Never `@`-import the reference.
 
-## Title and Preamble
+## Boundary
 
-- Start the body with an `# H1` title naming the skill (e.g., `# Release Skill` for `skills/release/SKILL.md`)
-- The first content line after the H1 declares the execution mode and prevents the agent from parallelizing or freelancing
-- Sequential workflows (default — release, deploy, migrate): preamble `Process steps in order. Do not skip ahead.`
-- Action routers (group-management, scheduler-config — agent picks one of several alternatives by user intent): preamble `This skill is an action router — pick the step that matches the user's intent and execute only that step. Do not run other steps; do not parallelize.` List the available actions in the skill's `description` so the runtime can match intent
-
-## Step Structure
-
-- Use flat numbered headings with descriptive titles: `## Step 1 — Verify Readiness`, `## Step 2 — Create PR`
-- The same flat-numbering format applies to both sequential workflows and action routers — in routers, "Step N" labels each alternative action rather than each phase of a workflow
-- No decimals, no sub-steps — flat numbering only
-- When inserting a step, renumber all subsequent steps
-- Each step is one action. The check is a title heuristic: if the step's title combines two verbs with "and" or "&" (e.g., "Build and Deploy"), split it. A step's body may list sub-tasks all serving one cohesive action
-- Action-router preambles are exhaustive on chaining: if a step chains to another ("after registering a group, also configure mounts"), say so explicitly. Default in routers: execute only the chosen step and finish
-
-## Step Continuity
-
-- Default handoff between steps is "continue immediately" — never "pause and wait for the user"
-- State continuations explicitly ("Proceed immediately to Step N"); do not rely on implicit reading order
-- If a step can legitimately end the skill, say so explicitly ("Finish here")
-
-## Keep Skills Compact
-
-- SKILL.md is the execution plan, not a reference manual
-- Move detailed reference material (API docs, long examples, lookup tables) to separate files
-- Reference them with typed code blocks and full relative paths
-
-## Typed Calls
-
-- Invoke other skills with typed `Skill(skill: "name")` calls, never prose references
-- Never call `Skill()` on a rule (rules are auto-loaded, not invoked via Skill)
-- Narrow exception for mid-session-install recovery.
-- Applies when the authored flow's typed `Skill(skill: "name")` call targets a skill whose plugin was installed earlier in the same session and the harness throws "Unknown skill"
-- Preconditions (all required):
-  1. The typed `Skill(skill: "name")` call stays the sole invocation path in authored flow
-  2. The skill text presents the recovery as error handling for the failed typed call, never as an alternative invocation
-  3. The recovery reads the target skill's mounted `SKILL.md` at its plugin mount path (`.tessl/plugins/<workspace>/<plugin>/skills/<name>/SKILL.md`) and executes its steps
-  4. The recovery is scoped to the installing session
-  5. The skill text states that later sessions use the typed call
-- Every other cross-skill reference is a typed `Skill(skill: "name")` call
-
-## Silence Instructions
-
-- If a step can legitimately produce no output, say so explicitly: "If no issues found, proceed silently"
-
-## Script References
-
-- Deterministic operations must be executable script files, not inline code blocks for the agent to copy-paste — see `rules/script-delegation.md`
-- In rule prose, documentation, and skill cross-references, use repo-relative paths (`skills/<name>/<file>.<ext>`)
-- In step bodies, use the path that resolves at the invocation site
-- Repo-relative when the skill runs only from a clone of this repo: `skills/<name>/<script>`
-- Plugin-mount path when the skill runs only inside a consumer: `.tessl/plugins/<workspace>/<plugin>/skills/<name>/<script>`
-- A resolved plugin or skill root when the skill runs in both, under the scoped installed-plugin bootstrap in `rules/script-delegation.md` or that plugin's own named lookup rule
-- Don't mix conventions inside one SKILL.md — if one step invokes via a mount path, every other script-invoking step must too
-- Include the expected input/output contract in the step description
-
-## plugin.json Manifest Reference
-
-The Tessl plugin manifest lives at `.tessl-plugin/plugin.json`. A plugin distributed
-through another channel declares the same surfaces in that channel's manifest. The
-rest of this rule is distribution-independent, save the two provisions that name a
-Tessl mount path — the Typed Calls recovery carve-out's precondition 3 and Script
-References' plugin-mount form — which reach a plugin installed at such a path.
-
-Required fields:
-- `name` — `<workspace>/<plugin-name>` format
-- `version` — semver string
-- `description` — one-sentence overview of the plugin
-
-Optional fields:
-- `private` — `true` to prevent publishing to the public registry (defaults to `true`; set `false` to publish)
-- `skills` — directory path (`"skills/"`) or array of skill directory paths (`"skills/<name>"`)
-- `rules` — directory path (`"rules/"`) or array of rule-file paths (`"rules/<name>.md"`); every `.md` file in a declared directory is included
-- `repository`, `homepage`, `license` — provenance and discovery metadata
-- `author` — object with `name`, `email`, `url`
-- `hooks` — cross-agent hook declarations keyed by event (`PreToolUse`, `PostToolUse`, `UserPromptSubmit`, `SessionStart`, `Stop`), each mapping to hook groups (`matcher` optional, `hooks` array of `{type:"command", command, args?}`); Tessl translates the consensus payload to each agent's native form
-- `nativeHooks` — per-agent hook declarations keyed by agent id (`claude-code`), same group shape, written straight to that agent's native config
-
-`alwaysApply` and `applyTo:` are not manifest fields — rule scope lives in the rule file frontmatter per `rules/rule-frontmatter.md`.
+- Keep SKILL.md an ordered execution plan.
+- Use typed cross-skill calls.
+- Use the declared script lookup contract.

@@ -36,6 +36,12 @@ tessl install jbaruch/coding-policy
 
 ## What's Included
 
+Compact rule routers retain startup boundaries and require their complete
+[coding contracts](skills/coding-contracts/SKILL.md) before the affected action.
+References load through explicit reads; conditional frontmatter does not reduce
+Tessl imports. Combined native-session acceptance lives in
+[the acceptance record](docs/installed-context-acceptance.md).
+
 | Category | Rule | Summary |
 |----------|------|---------|
 | Git | [commit-conventions](rules/commit-conventions.md) | Imperative mood, one change per commit, PR hygiene |
@@ -71,6 +77,7 @@ tessl install jbaruch/coding-policy
 
 | Skill | Description |
 |-------|-------------|
+| [coding-contracts](skills/coding-contracts/SKILL.md) | Binding policy detail loaded before the action named by each rule router; ordinary startup loads the compact boundaries. |
 | [release](skills/release/SKILL.md) | PR creation or explicit source-verified existing-PR resumption, Codex policy review + Claude code-quality review, merge + publication confirmation and cleanup |
 | [onboard-repo](skills/onboard-repo/SKILL.md) | Bootstrap a consumer repo onto coding-policy, then open a PR. Scaffolds the fleet reviewer (`.github/fleet-review-enabled` marker, a thin `.github/workflows/review-trigger.yml` that fires immediate Codex policy and Claude quality reviews in `coding-policy`); pins `jbaruch/*` tessl deps to `latest` (third-party pins left as-is); and adds the tessl-generated-artifacts `.gitignore` block (keeping `AGENTS.md`/`CLAUDE.md`/`GEMINI.md` committed). The `coding-policy-fleet-reviewer` GitHub App reviews policy with Codex; the separate `jbaruch-claude-reviewer` App reviews code quality with Claude; both subscription credentials live only in `coding-policy`; the consumer sets one `FLEET_DISPATCH_TOKEN` PAT. Supports `--override` for in-place upgrades. |
 | [adopt-fork-pr](skills/adopt-fork-pr/SKILL.md) | Classify a PR by number. Same-repo PRs pass through to the reviewer; fork PRs get adopted into the base repo as a same-repo PR, preserving the contributor's commits. |

@@ -28,7 +28,7 @@ set -euo pipefail
 
 # The budget. Raising it is a policy change for its own PR: move text into a
 # skill's references/ first.
-readonly DEFAULT_RULES_BUDGET_BYTES=95000
+readonly DEFAULT_RULES_BUDGET_BYTES=35000
 
 main() {
   local rules_dir="${1:-}"

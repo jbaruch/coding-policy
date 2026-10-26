@@ -1,3 +1,7 @@
+### Load detailed coding contracts for the affected task (#642)
+
+Keep role, security and core coding boundaries in always-loaded rule routers. Retain the full plugin-authoring, scripting, isolation, diagnostics, error, dependency, state, testing and CI contracts under the co-shipped coding-contracts skill, with mandatory explicit reads before affected actions and closed failure on missing references. Tessl frontmatter remains applicability metadata; references are not native instruction imports. Coordinated host and admin extraction keeps a representative five-plugin native NanoClaw session under the limit with headroom; acceptance and separate disposable quota/read-routing results are recorded in docs/installed-context-acceptance.md. Tighten the coding-policy startup rule budget to 35KB. Define the full-contract-router exception with binding preservation, security, packaging and native-read preconditions.
+
 ## 0.5.8 — 2026-10-26
 
 ### Consolidate policy review findings and preserve prior dispositions (#786)
