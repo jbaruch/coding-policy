@@ -37,6 +37,7 @@ make_env() (
 set -euo pipefail
 # clone <flags..> <url> <dest>: create an empty checkout at dest; everything else is a no-op.
 if [ "${1:-}" = "clone" ]; then dest="${!#}"; mkdir -p "$dest/.git"; fi
+if [ "${1:-}" = diff ] && [ "${2:-}" = --check ]; then exit "${FAKE_DIFF_CHECK_RC:-0}"; fi
 if [ "${1:-}" = "rev-parse" ]; then
   if [ -n "${FAKE_HEAD_FILE:-}" ]; then cat "$FAKE_HEAD_FILE";
   else printf '%s\n' "${FAKE_HEAD_SHA:-1111111111111111111111111111111111111111}"; fi
@@ -50,6 +51,7 @@ set -euo pipefail
 # Record argv one arg per line (so the test can assert the model pin), then
 # write the canned structured result to the --output-last-message path.
 if [ -n "${CODEX_ARGV_LOG:-}" ]; then printf '%s\n' "$@" > "$CODEX_ARGV_LOG"; fi
+if [ -n "${CODEX_PROMPT_LOG:-}" ]; then cat > "$CODEX_PROMPT_LOG"; else cat >/dev/null; fi
 out=""
 while [ $# -gt 0 ]; do [ "$1" = "--output-last-message" ] && out="${2:-}"; shift; done
 [ -n "$out" ] && printf '{"summary":"Policy loaded: 21 rule files from jbaruch/coding-policy.","findings":[]}' > "$out"
@@ -63,6 +65,9 @@ EOF
   cp "$(dirname "$SCRIPT")/../reviewer_failure.py" "$central/.github/reviewer_failure.py"
   echo '{}'     > "$central/.github/codex-review/fleet-schema.json"
   echo 'prompt' > "$central/.github/codex-review/fleet-prompt.md"
+  cat > "$central/.github/codex-review/prior-feedback.py" <<'PY'
+print('{"status":"available","items":[]}')
+PY
   cat > "$central/.github/codex-review/policy-authoring-context.py" <<'PY'
 print('{"schema_version":1,"eligible":false,"rules":[]}')
 PY
@@ -130,6 +135,25 @@ t_model_pin() {
   ok "codex runs with --model $PIN_MODEL and -c $PIN_EFFORT"
 }
 
+t_nonzero_whitespace_still_posts_review() {
+  local check_rc env_line out rc prompt saw_status
+  for check_rc in 2 128; do
+    env_line=$(make_env) || exit 2
+    read -r BIN CENTRAL CODEXH <<< "$env_line"
+    prompt="$CODEXH/prompt.txt"
+    rc=0
+    out=$(PATH="$BIN:$PATH" GH_TOKEN=tok CENTRAL_DIR="$CENTRAL" CODEX_HOME="$CODEXH" \
+      FAKE_DIFF_CHECK_RC="$check_rc" CODEX_PROMPT_LOG="$prompt" \
+      bash "$SCRIPT" jbaruch repo-a 7 main 2>/dev/null) || rc=$?
+    saw_status=1
+    if [[ -f "$prompt" ]] && grep -q needs_inspection "$prompt"; then saw_status=0; fi
+    rmwarn "$BIN" "$CENTRAL" "$CODEXH"
+    [[ $rc -eq 0 && "$out" == *'"state":"posted"'* && $saw_status -eq 0 ]] \
+      || { bad "whitespace exit $check_rc must reach review with an explicit inspection result"; return; }
+  done
+  ok "nonzero whitespace and tool errors cannot strand the policy review"
+}
+
 # --- wrong arg count -> exit 2 ---
 t_bad_args() {
   local rc=0; bash "$SCRIPT" only three args >/dev/null 2>&1 || rc=$?
@@ -189,6 +213,7 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
   echo "== fleet-review-one.sh tests =="
   t_happy
   t_model_pin
+  t_nonzero_whitespace_still_posts_review
   t_bad_args
   t_missing_driver
   t_invalid_authoring_context

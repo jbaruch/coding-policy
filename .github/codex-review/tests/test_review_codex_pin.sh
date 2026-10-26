@@ -84,6 +84,8 @@ EOF
     mkdir -p "$work/.github/codex-review"
     cp "$(dirname "$WORKFLOW")/../reviewer_failure.py" "$work/.github/reviewer_failure.py"
     echo 'prompt' > "$work/.github/codex-review/prompt.md"
+    printf '{"status":"available","items":[]}\n' > "$work/codex-prior-feedback.json"
+    printf 'clean\n' > "$work/codex-whitespace-status.txt"
     # GitHub expressions are substituted before the shell sees the block. sed,
     # not ${script//...}: a glob `*` is greedy and would swallow the text
     # between two expressions on one line.
@@ -94,7 +96,7 @@ EOF
   fi
 
   local log="$work/argv.log" rc=0 model_ok=1 effort_ok=1 out
-  out=$(cd "$work" && PATH="$bin:$PATH" CODEX_ARGV_LOG="$log" bash step.sh 2>&1) || rc=$?
+  out=$(cd "$work" && PATH="$bin:$PATH" RUNNER_TEMP="$work" CODEX_ARGV_LOG="$log" bash step.sh 2>&1) || rc=$?
   if [[ -f "$log" ]]; then
     has_pair "$log" --model "$PIN_MODEL" && model_ok=0
     has_pair "$log" -c "$PIN_EFFORT" && effort_ok=0
