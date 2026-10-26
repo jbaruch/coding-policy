@@ -6,34 +6,12 @@ description: Skills reference the script's contract (inputs, outputs, exit codes
 
 # Script as Black Box
 
-## The Principle
+## Required Read
 
-- Skill prose names the script's contract — required inputs, output shape, exit codes, side effects, comment-text shapes the script emits verbatim
-- Skill prose does not restate the script's internal logic — thresholds, predicates, formulas, allowlists, source lists, filter rules
-- The script is the source of truth; skill prose points at it (`see <script-path> — named constants at the top of the file, docstring, or named frozenset`)
-- Script paths follow `rules/skill-authoring.md` Script References
-- See `rules/script-delegation.md`
+- Before authoring skills or references that invoke scripts, read `skills/coding-contracts/references/script-as-black-box.md` in full.
+- Its full text and named sections bind as rule content. Missing or unreadable content stops the affected action until the plugin is repaired.
+- Read explicitly when triggered; never `@`-import the reference.
 
-## What Skills Do Not Restate
+## Boundary
 
-- Numeric thresholds, multipliers, percentages, time windows, minimum-history requirements
-- Boolean predicates and condition expressions (`fires >= 1 AND gated_likely == 0`)
-- Enumerated allowlists, blocklists, source lists, per-source / per-tier classification rules
-- Formulas and computed values (proposed-cap arithmetic, regression-drop calculation)
-- Rationale paragraphs explaining why a constant is set at its current value — that belongs in the script's docstring or the CHANGELOG, not the skill
-- A bounded classification's question text, its version and its answer space
-
-## What Skills Do Carry
-
-- Required inputs and output shape
-- Exit codes and error conditions
-- Suppression conditions that affect skill flow (e.g., `prior snapshot absent ⇒ no fire`)
-- Verbatim-posted text shapes the script emits, surfaced as templates
-
-## How to Reference
-
-- Name the file and an anchor inside it — top-of-file constants, named frozenset, docstring, function name
-- Example: `see skills/release/resolve-publish-run.sh — argument contract and filter logic in the top-of-file docstring`
-- One reference per concept across all of a skill's files
-- Do not fan the same reference across `SKILL.md` and `references/*.md`
-- Pick the file closest to where the agent reads the contract and reference from the others
+- Describe inputs, outputs, failures and side effects; the script owns internal thresholds, predicates and allowlists.
