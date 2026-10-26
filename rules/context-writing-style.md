@@ -8,7 +8,7 @@ description: Prose discipline for rules, skills, and READMEs — what to cut, wh
 
 ## Required Read
 
-- Before writing auto-loaded plugin prose or deciding what belongs in its CHANGELOG archive, read `skills/coding-contracts/references/context-writing-style.md` in full.
+- Before writing plugin prose, maintaining its CHANGELOG, judging policy edge cases, debugging directives or auditing rules, read `skills/coding-contracts/references/context-writing-style.md` in full.
 - Its full text and named sections bind as rule content.
 - Resolve the reference within its owning installed plugin.
 - Missing or unreadable content stops the affected action until the plugin is repaired.
@@ -30,10 +30,14 @@ description: Prose discipline for rules, skills, and READMEs — what to cut, wh
   2. Require the full reference before every affected action, including reliance on an exception.
   3. Preserve every original directive, carve-out trigger, applies-when clause, precondition, pointer and reset in the reference.
   4. Keep unconditional role, authorization and security boundaries in the startup rules.
-  5. Resolve the reference within its owning installed plugin; missing or unreadable content stops the affected action.
-  6. Read references explicitly when triggered, never through an `@` import.
-  7. Package every reference in each distribution and retain trust-boundary review coverage.
-  8. Verify complete contract retention and the required native reference read in representative installed-session acceptance.
+  5. Resolve the reference within its owning installed plugin.
+  6. Missing or unreadable content stops the affected action.
+  7. Read references explicitly when triggered.
+  8. Never load a reference through an `@` import.
+  9. Package every reference in each distribution.
+  10. Retain trust-boundary review coverage.
+  11. Verify complete contract retention in installed-session acceptance.
+  12. Verify the required native reference read in that acceptance.
 - A qualifying router may use two H2 sections and fewer than 25 lines.
 - A qualifying router keeps one whole-contract read gate instead of repeating the moved carve-out catalog.
 - Every other rule follows the reference's Structure clause unchanged.

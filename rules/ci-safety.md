@@ -6,7 +6,7 @@ alwaysApply: true
 
 ## Required Read
 
-- Before editing CI configuration, pushing, watching checks or reviews, merging, publishing, or relying on a CI carve-out, read `skills/coding-contracts/references/ci-safety.md` in full.
+- Before creating or naming branches, editing CI, pushing, watching or diagnosing CI and reviews, merging, publishing, or relying on a CI carve-out, read `skills/coding-contracts/references/ci-safety.md` in full.
 - Its full text and named sections bind as rule content.
 - Resolve the reference within its owning installed plugin.
 - Missing or unreadable content stops the affected action until the plugin is repaired.

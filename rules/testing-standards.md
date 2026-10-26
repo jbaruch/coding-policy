@@ -6,7 +6,7 @@ alwaysApply: true
 
 ## Required Read
 
-- Before writing, modifying or reviewing shipped code, tests or test-exemption claims, read `skills/coding-contracts/references/testing-standards.md` in full.
+- Before writing or reviewing shipped code, building fixtures, running tests or relying on a test exemption, read `skills/coding-contracts/references/testing-standards.md` in full.
 - Its full text and named sections bind as rule content.
 - Resolve the reference within its owning installed plugin.
 - Missing or unreadable content stops the affected action until the plugin is repaired.

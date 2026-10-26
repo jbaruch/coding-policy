@@ -19,3 +19,4 @@ alwaysApply: true
 - Main-checkout concurrent inspection stays read-only.
 - Preserve unrelated work.
 - Remove only this task's owned worktree through the binding cleanup order.
+- Never touch or report a protected origin branch.
