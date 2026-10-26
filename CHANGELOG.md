@@ -1,3 +1,5 @@
+## 0.5.10 — 2026-10-26
+
 ### Update the Codex acceptance CI Python pin (#789)
 
 Run the ACR Codex acceptance workflow on Python 3.12.16 and align its step label with the installed version. Both plugin manifests advance together to 0.5.10 for the merge-triggered Tessl and ACR publication.
