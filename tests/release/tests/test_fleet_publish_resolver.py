@@ -213,6 +213,7 @@ class Fixture:
         native = {
             "id": int(run),
             "run_attempt": 1,
+            "created_at": "2024-10-20T10:00:00Z",
             "workflow_id": 77,
             "path": ".github/workflows/fleet-publish.yml",
             "event": "workflow_dispatch",
@@ -239,7 +240,7 @@ class Fixture:
             and "display_title" in value
         ]
         self.routes[
-            f"repos/{CENTRAL}/actions/workflows/77/runs?event=workflow_dispatch&per_page=100&page=1"
+            f"repos/{CENTRAL}/actions/workflows/77/runs?event=workflow_dispatch&created=%3E%3D2024-10-20T10%3A00%3A00Z&per_page=100&page=1"
         ] = {"total_count": len(rows), "workflow_runs": rows}
 
     def receipt(self, intent, sha, **changes):
@@ -437,9 +438,7 @@ class ResolverTests(unittest.TestCase):
 
     def test_changed_duplicate_or_truncated_native_catalog_never_proves_uniqueness(self):
         f = self.fixture
-        route = (
-            f"repos/{CENTRAL}/actions/workflows/77/runs?event=workflow_dispatch&per_page=100&page=1"
-        )
+        route = f"repos/{CENTRAL}/actions/workflows/77/runs?event=workflow_dispatch&created=%3E%3D2024-10-20T10%3A00%3A00Z&per_page=100&page=1"
         page = copy.deepcopy(f.routes[route])
         f.routes[route] = {"total_count": 2, "workflow_runs": page["workflow_runs"]}
         self.hold(lambda: resolver.select(f, REPO, f.source), "unavailable")
@@ -464,9 +463,7 @@ class ResolverTests(unittest.TestCase):
     def test_stable_empty_verified_catalog_can_return_not_found_no_runid(self):
         f = self.fixture
         f.default(f.source)
-        route = (
-            f"repos/{CENTRAL}/actions/workflows/77/runs?event=workflow_dispatch&per_page=100&page=1"
-        )
+        route = f"repos/{CENTRAL}/actions/workflows/77/runs?event=workflow_dispatch&created=%3E%3D2024-10-20T10%3A00%3A00Z&per_page=100&page=1"
         f.routes[route] = {"total_count": 0, "workflow_runs": []}
         self.hold(lambda: resolver.select(f, REPO, f.source), "not_found")
 
@@ -483,6 +480,65 @@ class ResolverTests(unittest.TestCase):
             self.assertEqual(result, 1)
             self.assertNotIn("PRIVATE", stdout.getvalue() + stderr.getvalue())
             self.assertEqual(json.loads(stdout.getvalue())["status"], "hold")
+
+    def test_native_created_cutoff_accepts_equal_but_refuses_premerge_missing_and_invalid_time(
+        self,
+    ):
+        f = self.fixture
+        original = copy.deepcopy(f.routes[f"repos/{CENTRAL}/actions/runs/{RUN}"])
+        for created in (
+            "2024-10-20T09:59:59Z",
+            None,
+            "2024-02-30T10:00:00Z",
+            "2024-10-20T11:00:00+01:00",
+        ):
+            for suffix in ("", "/attempts/1"):
+                f.routes[f"repos/{CENTRAL}/actions/runs/{RUN}{suffix}"] = {
+                    **original,
+                    "created_at": created,
+                }
+            f.catalog()
+            self.hold(lambda: resolver.select(f, REPO, f.source), "workflow_binding")
+        for suffix in ("", "/attempts/1"):
+            f.routes[f"repos/{CENTRAL}/actions/runs/{RUN}{suffix}"] = copy.deepcopy(original)
+        f.catalog()
+        self.assertEqual(resolver.resolve(f, REPO, f.source), f.records[RUN, "receipt"])
+
+    def test_source_window_binds_actual_full_pr_merge_not_hint_or_commit_time(self):
+        f = self.fixture
+        old_route = f"repos/{CENTRAL}/actions/workflows/77/runs?event=workflow_dispatch&created=%3E%3D2024-10-20T10%3A00%3A00Z&per_page=100&page=1"
+        newer_route = old_route.replace("2024-10-20", "2024-10-21")
+        f.routes[f"repos/{REPO}/pulls/7"]["merged_at"] = "2024-10-21T10:00:00Z"
+        for suffix in ("", "/attempts/1"):
+            f.routes[f"repos/{CENTRAL}/actions/runs/{RUN}{suffix}"]["created_at"] = (
+                "2024-10-21T10:00:00Z"
+            )
+        f.catalog()
+        f.routes[newer_route] = f.routes.pop(old_route)
+        self.assertEqual(resolver.resolve(f, REPO, f.source), f.records[RUN, "receipt"])
+        self.assertTrue(any(call == ("json", newer_route) for call in f.calls))
+        self.assertFalse(any(call == ("json", old_route) for call in f.calls))
+
+    def test_unrelated_historical_fleet_volume_cannot_force_global_catalog(self):
+        f = self.fixture
+        # These actual-ID rows are outside the response to the requested
+        # native merge-time window; the resolver must never query them or an
+        # unfiltered global catalog to prove this source's temporal uniqueness.
+        for index in range(1500):
+            f.routes[f"repos/{CENTRAL}/actions/runs/{600000000 + index}"] = {
+                "created_at": "2020-01-01T00:00:00Z"
+            }
+        self.assertEqual(resolver.resolve(f, REPO, f.source), f.records[RUN, "receipt"])
+        self.assertFalse(
+            any(call[0] == "json" and "/actions/runs/6" in call[1] for call in f.calls)
+        )
+        catalog_calls = [
+            call[1] for call in f.calls if call[0] == "json" and "/workflows/77/runs?" in call[1]
+        ]
+        self.assertEqual(len(catalog_calls), 2)
+        self.assertTrue(
+            all("created=%3E%3D2024-10-20T10%3A00%3A00Z" in route for route in catalog_calls)
+        )
 
     def test_many_unrelated_runs_use_trusted_list_rows_not_per_run_downloads(self):
         f = self.fixture
@@ -508,9 +564,7 @@ class ResolverTests(unittest.TestCase):
 
     def test_empty_catalog_with_retained_claim_is_unknown_not_fresh_absence(self):
         f = self.fixture
-        route = (
-            f"repos/{CENTRAL}/actions/workflows/77/runs?event=workflow_dispatch&per_page=100&page=1"
-        )
+        route = f"repos/{CENTRAL}/actions/workflows/77/runs?event=workflow_dispatch&created=%3E%3D2024-10-20T10%3A00%3A00Z&per_page=100&page=1"
         f.routes[route] = {"total_count": 0, "workflow_runs": []}
         self.hold(lambda: resolver.select(f, REPO, f.source), "unavailable")
 

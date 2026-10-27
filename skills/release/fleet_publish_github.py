@@ -21,6 +21,7 @@ import subprocess
 import time
 import zipfile
 import zlib
+from datetime import datetime
 from typing import Literal, NoReturn
 from urllib.parse import parse_qsl, urlsplit
 
@@ -113,10 +114,17 @@ def _route(route: str) -> None:
             or not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", key)
             or any(ord(char) < 32 or ord(char) == 127 for char in value)
             or "://" in value
-            or not re.fullmatch(r"[A-Za-z0-9_.~:/@ +,=-]*", value)
+            or (key != "created" and not re.fullmatch(r"[A-Za-z0-9_.~:/@ +,=-]*", value))
             or "%" in value
         ):
             _refuse("invalid_route")
+        if key == "created":
+            if not re.fullmatch(r">=[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z", value):
+                _refuse("invalid_route")
+            try:
+                datetime.fromisoformat(value[2:])
+            except ValueError:
+                _refuse("invalid_route")
         keys.add(key)
 
 

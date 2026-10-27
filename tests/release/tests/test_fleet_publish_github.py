@@ -326,6 +326,28 @@ class GitHubClientTests(unittest.TestCase):
             self.evidence(binary)
             self.refuse(lambda: client.GitHubClient().artifact(RUN, "intent"))
 
+    def test_created_cutoff_uses_fixed_get_transport_and_only_canonical_utc_comparison(self):
+        route = "repos/jbaruch/coding-policy/actions/workflows/fleet-publish.yml/runs?event=workflow_dispatch&created=%3E%3D2024-10-20T10%3A00%3A00Z&per_page=100&page=1"
+        self.replies({route: {"json": {"total_count": 0, "workflow_runs": []}}})
+        self.assertEqual(client.GitHubClient().json(route), {"total_count": 0, "workflow_runs": []})
+        self.assertEqual(self.calls()[0][-1], route)
+        for query in (
+            "created=%3E%3D2024-02-30T10%3A00%3A00Z",
+            "created=%3E%3D2024-10-20T10%3A00%3A00%2B01%3A00",
+            "created=%3E2024-10-20T10%3A00%3A00Z",
+            "created=%3C%3D2024-10-20T10%3A00%3A00Z",
+            "created=2024-10-20T10%3A00%3A00Z",
+            "created=%253E%253D2024-10-20T10%3A00%3A00Z",
+            "x=%3E%3D2024-10-20T10%3A00%3A00Z",
+        ):
+            self.refuse(
+                lambda query=query: client.GitHubClient().json(
+                    "repos/jbaruch/coding-policy/actions/runs?" + query
+                ),
+                "invalid_route",
+            )
+        self.assertEqual(len(self.calls()), 1)
+
     def test_routes_reject_urls_flags_controls_shell_and_encoded_traversal(self):
         for route in (
             "https://github.com/PRIVATE",

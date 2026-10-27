@@ -18,6 +18,7 @@ import re
 import sys
 from datetime import datetime
 from typing import Any, NoReturn
+from urllib.parse import quote
 
 from fleet_publish_github import FleetPublishLookupError, GitHubClient
 from fleet_publish_producer import verify_workflow_protocol
@@ -350,8 +351,14 @@ class _Evidence:
             "source_binding",
         )
         try:
-            merged = datetime.fromisoformat(pull["merged_at"])
-            _need(merged.utcoffset() is not None, "source_binding")
+            _need(
+                re.fullmatch(
+                    r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z", pull["merged_at"]
+                ),
+                "source_binding",
+            )
+            self.merged_at = pull["merged_at"]
+            self.cutoff = datetime.fromisoformat(self.merged_at)
         except (ValueError, KeyError, TypeError):
             _hold("source_binding")
 
@@ -363,7 +370,23 @@ class _Evidence:
             self.artifacts[key] = None if actual is None else parse_record(actual)
         return self.artifacts[key]
 
+    def catalog_route(self) -> str:
+        return (
+            f"repos/{CENTRAL_REPOSITORY}/actions/workflows/{self.workflow_id}/runs"
+            f"?event=workflow_dispatch&created={quote('>=' + self.merged_at, safe='')}"
+        )
+
     def native_row(self, row: dict[str, Any], run_id: str) -> None:
+        created = _text(row.get("created_at"), "workflow_binding")
+        _need(
+            isinstance(created, str)
+            and re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z", created),
+            "workflow_binding",
+        )
+        try:
+            _need(datetime.fromisoformat(created) >= self.cutoff, "workflow_binding")
+        except (ValueError, TypeError):
+            _hold("workflow_binding")
         _need(
             _positive(row.get("id"))
             and str(row["id"]) == run_id
@@ -415,6 +438,7 @@ class _Evidence:
         return (
             str(row["id"]),
             row.get("head_sha"),
+            row.get("created_at"),
             row.get("run_attempt"),
             row.get("display_title"),
             row.get("workflow_id"),
@@ -497,7 +521,7 @@ class _Evidence:
 
     def originals(self) -> dict[str, FleetPublishRecord]:
         rows = self.pages(
-            f"repos/{CENTRAL_REPOSITORY}/actions/workflows/{self.workflow_id}/runs?event=workflow_dispatch",
+            self.catalog_route(),
             "workflow_runs",
         )
         seen = set()
@@ -647,7 +671,7 @@ class _Evidence:
     def stable(self) -> None:
         _need(self.default() == (self.ref, self.tip), "source_binding")
         rows = self.pages(
-            f"repos/{CENTRAL_REPOSITORY}/actions/workflows/{self.workflow_id}/runs?event=workflow_dispatch",
+            self.catalog_route(),
             "workflow_runs",
         )
         snapshot = []
