@@ -10,18 +10,86 @@ from __future__ import annotations
 import json
 import os
 import sys
+from datetime import datetime, timezone
 
 from fleet_publish import (
     GitHub,
     PublishRefused,
     default_tip,
+    dispatch_catalog_route,
     enrollment,
     pending_sources,
     previous,
     require,
     tree,
+    gate_source,
+    utc_time,
 )
-from fleet_publish_record import CENTRAL_REPOSITORY, valid_repository
+from fleet_publish_record import CENTRAL_REPOSITORY, CENTRAL_WORKFLOW, valid_repository
+
+FAILED_DISPATCH_BACKOFF_SECONDS = 6 * 60 * 60
+
+
+def current_time() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def dispatch_deferred(github: GitHub, repo: str, source: str, merged_at: str) -> bool:
+    """Native locator backpressure only; this grants no effect/retry authority."""
+    cutoff, now = utc_time(merged_at), current_time()
+    runs = github.pages(dispatch_catalog_route(merged_at), "workflow_runs")
+    locator = f"fleet-publish-v1:{repo}:{source}"
+    for run in runs:
+        require(
+            utc_time(run.get("created_at")) >= cutoff,
+            "Native dispatch search is outside its source window.",
+        )
+        if run.get("display_title") != locator:
+            continue
+        require(
+            run.get("path") == CENTRAL_WORKFLOW
+            and run.get("event") == "workflow_dispatch"
+            and run.get("head_repository", {}).get("full_name") == CENTRAL_REPOSITORY,
+            "Matching dispatch has unsupported native identity.",
+        )
+        status = run.get("status")
+        require(
+            status
+            in (
+                "queued",
+                "in_progress",
+                "waiting",
+                "requested",
+                "pending",
+                "completed",
+            ),
+            "Matching dispatch state is unavailable.",
+        )
+        if status != "completed":
+            return True
+        conclusion = run.get("conclusion")
+        require(
+            conclusion
+            in (
+                "success",
+                "failure",
+                "cancelled",
+                "timed_out",
+                "action_required",
+                "neutral",
+                "skipped",
+                "stale",
+                "startup_failure",
+            ),
+            "Matching dispatch conclusion is unavailable.",
+        )
+        if (
+            conclusion != "success"
+            and (now - utc_time(run.get("updated_at"))).total_seconds()
+            < FAILED_DISPATCH_BACKOFF_SECONDS
+        ):
+            return True
+    return False
 
 
 def targets(github: GitHub) -> tuple[list[dict[str, str]], list[str]]:
@@ -34,19 +102,20 @@ def targets(github: GitHub) -> tuple[list[dict[str, str]], list[str]]:
             continue
         if metadata.get("archived") or metadata.get("disabled"):
             continue
+        consumer = github.fresh_consumer()
         try:
-            if github.optional_marker(repo) is None:
+            if consumer.optional_marker(repo) is None:
                 continue
-            ref, sha = default_tip(github, repo)
-            _, entries = tree(github, repo, sha)
-            enrollment(github, repo, entries)
-            prior = previous(github, repo, entries)
+            ref, sha = default_tip(consumer, repo)
+            _, entries = tree(consumer, repo, sha)
+            enrollment(consumer, repo, entries)
+            prior = previous(consumer, repo, entries)
             if prior and prior["state"] == "published":
                 # Moderation holds require explicit new selected recovery runs;
                 # scheduled polling never repeats a publication or billing call.
                 continue
             pending = pending_sources(
-                github, repo, sha, prior, enrollment(github, repo, entries)
+                consumer, repo, sha, prior, enrollment(consumer, repo, entries)
             )
             if not pending and prior and sha == prior["bookkeeping_sha"]:
                 continue
@@ -54,6 +123,9 @@ def targets(github: GitHub) -> tuple[list[dict[str, str]], list[str]]:
                 pending,
                 "Unclassified main change cannot be silently treated as published.",
             )
+            merged_at = gate_source(consumer, repo, pending[0], ref)
+            if dispatch_deferred(consumer, repo, pending[0], merged_at):
+                continue
             selected.append(
                 {"repository": repo, "source_sha": pending[0], "source_ref": ref}
             )

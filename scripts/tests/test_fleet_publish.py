@@ -20,6 +20,8 @@ import tarfile
 import unittest
 from unittest.mock import patch
 import zipfile
+from datetime import datetime, timezone
+from urllib.parse import parse_qs, urlsplit
 
 # Standalone runner discovers this file outside a package; load trusted scripts.
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -94,7 +96,9 @@ class NativeGitHub(publisher.GitHub):
                 "body": "<!-- coding-policy:claude-quality-review:v1 -->\nApproved.",
             },
         ]
-        self.checks = [{"status": "completed", "conclusion": "success"}]
+        self.checks: list[dict[str, Any]] = [
+            {"status": "completed", "conclusion": "success"}
+        ]
         self.status = {"state": "pending", "statuses": []}
         self.history: list[object] = []
         self.records: dict[str, bytes] = {}
@@ -105,6 +109,22 @@ class NativeGitHub(publisher.GitHub):
         self.other_runs: dict[str, dict[str, Any]] = {}
         self.other_records: dict[str, dict[str, bytes]] = {}
         self.native_jobs: dict[str, list[dict[str, Any]]] = {}
+        self.source_merged_at = "2026-10-27T01:02:00Z"
+        self.current_pull_source = SOURCE
+        self.required_branch: dict[str, Any] = {
+            "name": "main",
+            "protected": False,
+            "commit": {"sha": SOURCE},
+            "protection": {
+                "enabled": False,
+                "required_status_checks": {
+                    "contexts": [],
+                    "checks": [],
+                    "enforcement_level": "off",
+                },
+            },
+        }
+        self.rules: list[dict[str, Any]] = []
         self.refuse_push = False
         self.reset_before_graphql: str | None = None
         self.created_tree: list[dict[str, str]] = []
@@ -138,10 +158,15 @@ class NativeGitHub(publisher.GitHub):
             "head_repository": {"full_name": publisher.CENTRAL_REPOSITORY},
             "status": self.run_status,
             "conclusion": self.run_conclusion,
+            "created_at": "2026-10-27T01:03:00Z",
+            "updated_at": "2026-10-27T01:03:00Z",
             "display_title": f"fleet-publish-v1:{REPO}:{self.dispatch_sources.get(run_id, SOURCE)}",
         }
         value.update(self.other_runs.get(run_id, {}))
         return value
+
+    def fresh_consumer(self) -> publisher.GitHub:
+        return self  # One synthetic consumer; fleet isolation has its own fixture.
 
     def api(
         self,
@@ -174,6 +199,18 @@ class NativeGitHub(publisher.GitHub):
             }
         if path == f"repos/{REPO}":
             return deepcopy(self.metadata)
+        if path == f"repos/{REPO}/pulls/7":
+            return {
+                "number": 7,
+                "merged": True,
+                "state": "closed",
+                "merge_commit_sha": self.current_pull_source,
+                "merged_at": self.source_merged_at,
+                "head": {"sha": HEAD, "repo": {"full_name": REPO}},
+                "base": {"ref": "main", "repo": {"full_name": REPO}},
+            }
+        if path == f"repos/{REPO}/branches/main":
+            return deepcopy(self.required_branch)
         if path == f"repos/{REPO}/git/ref/heads/main":
             return {"object": {"sha": self.tip, "type": "commit"}}
         if path.startswith(f"repos/{REPO}/git/commits/"):
@@ -234,22 +271,31 @@ class NativeGitHub(publisher.GitHub):
 
     def pages(self, route: str, key: str | None = None) -> list[Any]:
         path = route
-        if (
-            path
-            == "repos/jbaruch/coding-policy/actions/workflows/fleet-publish.yml/runs?event=workflow_dispatch"
+        if path.startswith(
+            "repos/jbaruch/coding-policy/actions/workflows/fleet-publish.yml/runs?event=workflow_dispatch"
         ):
             ids = (
                 set(self.dispatch_sources)
                 | set(self.other_runs)
                 | {getattr(self, "current_run", "101")}
             )
-            return [self.native_run(run_id) for run_id in sorted(ids)]
+            runs = [self.native_run(run_id) for run_id in sorted(ids)]
+            created = parse_qs(urlsplit(path).query).get("created")
+            if created:
+                cutoff = publisher.utc_time(created[0].removeprefix(">="))
+                runs = [
+                    run
+                    for run in runs
+                    if publisher.utc_time(run["created_at"]) >= cutoff
+                ]
+            return runs
         match = re.fullmatch(
             r"repos/jbaruch/coding-policy/actions/runs/(\d+)/attempts/\d+/jobs", path
         )
         if match:
             return self.native_jobs.get(match[1], [])
         if path == f"repos/{REPO}/commits/{SOURCE}/pulls":
+            self.current_pull_source = SOURCE
             return [
                 {
                     "merge_commit_sha": SOURCE,
@@ -265,6 +311,8 @@ class NativeGitHub(publisher.GitHub):
             return self.checks
         if path == f"repos/{REPO}/commits/{HEAD}/status":
             return self.status["statuses"]
+        if path == f"repos/{REPO}/rules/branches/main":
+            return self.rules
         if path.startswith(f"repos/{REPO}/commits?path="):
             if "fleet-publish-enabled" in path:
                 return [{"sha": SOURCE}]
@@ -1045,6 +1093,7 @@ class HistoryGitHub(NativeGitHub):
     def pages(self, route: str, key: str | None = None) -> list[Any]:
         match = re.fullmatch(f"repos/{REPO}/commits/([a-f0-9]{{40}})/pulls", route)
         if match and match[1] in (SOURCE, self.SECOND, self.THIRD):
+            self.current_pull_source = match[1]
             return [
                 {
                     "merge_commit_sha": match[1],
@@ -1652,6 +1701,348 @@ class PackagingCliTests(unittest.TestCase):
             )
             with tarfile.open(old_archive, "r:gz") as old_packed:
                 self.assertIn("skills/fixture/dormant/held.py", old_packed.getnames())
+
+
+class RequiredContextTests(PublisherFixture):
+    def legacy(self, context: str, app_id: int | None) -> None:
+        self.github.required_branch["protected"] = True
+        self.github.required_branch["protection"] = {
+            "enabled": True,
+            "required_status_checks": {
+                "contexts": [context],
+                "checks": [{"context": context, "app_id": app_id}],
+                "enforcement_level": "everyone",
+            },
+        }
+
+    def ruleset(self, context: str, app_id: int | None) -> None:
+        self.github.rules = [
+            {
+                "type": "required_status_checks",
+                "ruleset_id": 1,
+                "ruleset_source_type": "Repository",
+                "ruleset_source": REPO,
+                "parameters": {
+                    "required_status_checks": [
+                        {"context": context, "integration_id": app_id}
+                    ]
+                },
+            }
+        ]
+
+    def test_actual_unprotected_native_shape_proves_no_configured_contexts(
+        self,
+    ) -> None:
+        # Sanitized construction branch response had this complete shape;
+        # independent active rules returned HTTP200 [] (never a403 fallback).
+        self.github.checks = []
+        self.assertEqual(
+            publisher.gate_source(self.github, REPO, SOURCE, "refs/heads/main"),
+            self.github.source_merged_at,
+        )
+
+    def test_empty_native_contexts_do_not_replace_both_current_review_lanes(
+        self,
+    ) -> None:
+        self.github.checks = []
+        for lane in range(2):
+            reviews = self.github.native_reviews
+            self.github.native_reviews = [
+                review for i, review in enumerate(reviews) if i != lane
+            ]
+            with (
+                self.subTest(missing_lane=lane),
+                self.assertRaises(publisher.PublishRefused),
+            ):
+                publisher.gate_source(self.github, REPO, SOURCE, "refs/heads/main")
+            self.github.native_reviews = reviews
+
+    def test_missing_required_context_is_not_replaced_by_unrelated_success(
+        self,
+    ) -> None:
+        self.legacy("required-build", None)
+        self.github.checks = [
+            {"name": "unrelated", "status": "completed", "conclusion": "success"}
+        ]
+        with self.assertRaises(publisher.PublishRefused):
+            publisher.gate_source(self.github, REPO, SOURCE, "refs/heads/main")
+
+    def test_required_check_must_be_green_and_from_its_bound_app(self) -> None:
+        self.legacy("required-build", 42)
+        for status, conclusion, app_id in (
+            ("in_progress", None, 42),
+            ("completed", "failure", 42),
+            ("completed", "success", 43),
+            ("completed", "skipped", 42),
+        ):
+            self.github.checks = [
+                {
+                    "name": "required-build",
+                    "status": status,
+                    "conclusion": conclusion,
+                    "app": {"id": app_id},
+                }
+            ]
+            with (
+                self.subTest(status=status, conclusion=conclusion, app=app_id),
+                self.assertRaises(publisher.PublishRefused),
+            ):
+                publisher.gate_source(self.github, REPO, SOURCE, "refs/heads/main")
+        self.github.checks = [
+            {
+                "name": "required-build",
+                "status": "completed",
+                "conclusion": "success",
+                "app": {"id": 42},
+            }
+        ]
+        self.assertEqual(
+            publisher.gate_source(self.github, REPO, SOURCE, "refs/heads/main"),
+            self.github.source_merged_at,
+        )
+
+    def test_legacy_and_ruleset_requirements_are_both_required(self) -> None:
+        self.legacy("legacy-build", None)
+        self.ruleset("ruleset-build", 42)
+        self.github.checks = [
+            {"name": "legacy-build", "status": "completed", "conclusion": "success"}
+        ]
+        with self.assertRaises(publisher.PublishRefused):
+            publisher.gate_source(self.github, REPO, SOURCE, "refs/heads/main")
+        self.github.checks.append(
+            {
+                "name": "ruleset-build",
+                "status": "completed",
+                "conclusion": "success",
+                "app": {"id": 42},
+            }
+        )
+        self.assertEqual(
+            publisher.gate_source(self.github, REPO, SOURCE, "refs/heads/main"),
+            self.github.source_merged_at,
+        )
+
+    def test_unbound_required_status_can_be_satisfied_by_native_status(self) -> None:
+        self.legacy("external-ci", None)
+        self.github.checks = []
+        self.github.status["statuses"] = [
+            {"id": 9, "context": "external-ci", "state": "success"}
+        ]
+        self.assertEqual(
+            publisher.gate_source(self.github, REPO, SOURCE, "refs/heads/main"),
+            self.github.source_merged_at,
+        )
+        self.legacy("external-ci", 42)
+        with self.assertRaises(publisher.PublishRefused):
+            publisher.gate_source(self.github, REPO, SOURCE, "refs/heads/main")
+
+    def test_unknown_required_workflow_or_app_binding_holds(self) -> None:
+        for rule in (
+            {
+                "type": "workflows",
+                "parameters": {
+                    "workflows": [{"path": ".github/workflows/required.yml"}]
+                },
+            },
+            {
+                "type": "required_status_checks",
+                "parameters": {"required_status_checks": [{"context": "build"}]},
+            },
+            {
+                "type": "required_status_checks",
+                "parameters": {
+                    "required_status_checks": [
+                        {"context": "build", "integration_id": "unknown"}
+                    ]
+                },
+            },
+        ):
+            self.github.rules = [rule]
+            with self.subTest(rule=rule), self.assertRaises(publisher.PublishRefused):
+                publisher.gate_source(self.github, REPO, SOURCE, "refs/heads/main")
+
+    def test_partial_or_unavailable_required_metadata_never_means_none(self) -> None:
+        for missing in ("protection", "protected"):
+            original = deepcopy(self.github.required_branch)
+            del self.github.required_branch[missing]
+            with (
+                self.subTest(missing=missing),
+                self.assertRaises(publisher.PublishRefused),
+            ):
+                publisher.gate_source(self.github, REPO, SOURCE, "refs/heads/main")
+            self.github.required_branch = original
+        original_pages = self.github.pages
+        with patch.object(
+            self.github,
+            "pages",
+            side_effect=lambda route, key=None: (_ for _ in ()).throw(
+                publisher.PublishRefused("HTTP403")
+            )
+            if "/rules/branches/" in route
+            else original_pages(route, key),
+        ):
+            with self.assertRaises(publisher.PublishRefused):
+                publisher.gate_source(self.github, REPO, SOURCE, "refs/heads/main")
+
+    def test_native_rules_use_complete_ruleset_type_identity(self) -> None:
+        client = publisher.GitHub()
+        rule = {
+            "type": "required_status_checks",
+            "ruleset_id": 17,
+            "ruleset_source_type": "Repository",
+            "ruleset_source": REPO,
+            "parameters": {
+                "required_status_checks": [{"context": "build", "integration_id": None}]
+            },
+        }
+        with patch.object(client, "api", return_value=[rule]):
+            self.assertEqual(client.pages(f"repos/{REPO}/rules/branches/main"), [rule])
+
+
+class PollDispatchTests(PublisherFixture):
+    def test_twenty_four_consumers_do_not_share_a_lifetime_command_allowance(
+        self,
+    ) -> None:
+        clients = []
+
+        class BudgetClient:
+            def __init__(self) -> None:
+                self.calls = 0
+                clients.append(self)
+
+            def artifact(self, _run: str, _kind: str) -> None:
+                self.calls += 2  # Native artifact list + bounded ZIP read.
+                if self.calls > 128:
+                    raise publisher.FleetPublishLookupError("command_budget")
+
+        def previous_reads(client: publisher.GitHub, _repo: str, _entries: Any) -> None:
+            # Exercise the genuine facade/auth scope, with a synthetic native
+            # command counter. Source authority is covered by the other suites.
+            for _ in range(4):
+                client.record("101", "intent")
+
+        with (
+            patch.object(publisher, "GitHubClient", BudgetClient),
+            patch.dict(os.environ, {"FLEET_CENTRAL_TOKEN": "fake-central"}),
+        ):
+            root = publisher.GitHub()
+            metadata = [
+                {
+                    "full_name": f"jbaruch/fixture-{i}",
+                    "archived": False,
+                    "disabled": False,
+                }
+                for i in range(24)
+            ]
+            with (
+                patch.object(root, "pages", return_value=metadata),
+                patch.object(publisher.GitHub, "optional_marker", return_value={}),
+                patch.object(
+                    poller, "default_tip", return_value=("refs/heads/main", SOURCE)
+                ),
+                patch.object(poller, "tree", return_value=(TREE, {})),
+                patch.object(poller, "enrollment", return_value="jbaruch/fixture"),
+                patch.object(poller, "previous", side_effect=previous_reads),
+                patch.object(poller, "pending_sources", return_value=[SOURCE]),
+                patch.object(
+                    poller, "gate_source", return_value=self.github.source_merged_at
+                ),
+                patch.object(poller, "dispatch_deferred", return_value=False),
+            ):
+                selected, held = poller.targets(root)
+        self.assertEqual(len(selected), 24)
+        self.assertEqual(held, [])
+        self.assertEqual(len(clients), 25)
+        self.assertEqual([client.calls for client in clients], [0] + [8] * 24)
+
+    def test_poll_checks_cheap_source_gates_before_dispatching(self) -> None:
+        self.github.native_reviews[0]["state"] = "CHANGES_REQUESTED"
+        selected, held = poller.targets(self.github)
+        self.assertEqual(selected, [])
+        self.assertEqual(held, [REPO])
+        self.assertNotIn("smart-publish.sh", self.helpers)
+
+    def test_unmerged_native_source_is_held_before_dispatch(self) -> None:
+        original = self.github.api
+
+        def native(path: str, *args: Any, **kwargs: Any) -> Any:
+            value = original(path, *args, **kwargs)
+            if path == f"repos/{REPO}/pulls/7":
+                assert isinstance(value, dict)
+                value["merged"] = False
+            return value
+
+        with patch.object(self.github, "api", side_effect=native):
+            selected, held = poller.targets(self.github)
+        self.assertEqual(selected, [])
+        self.assertEqual(held, [REPO])
+        self.assertFalse(self.cli.called)
+        self.assertFalse(any("/dispatches" in route for route, _ in self.github.calls))
+
+    def test_all_inflight_states_suppress_duplicate_source_dispatch(self) -> None:
+        for status in ("queued", "in_progress", "waiting", "requested", "pending"):
+            self.github.other_runs["101"] = {"status": status, "conclusion": None}
+            with self.subTest(status=status):
+                self.assertEqual(poller.targets(self.github), ([], []))
+
+    def test_recent_failed_source_is_backed_off_then_only_reconsidered(self) -> None:
+        self.github.other_runs["101"] = {"conclusion": "failure"}
+        with patch.object(
+            poller,
+            "current_time",
+            return_value=datetime(2026, 10, 27, 2, 0, tzinfo=timezone.utc),
+        ):
+            self.assertEqual(poller.targets(self.github), ([], []))
+        with patch.object(
+            poller,
+            "current_time",
+            return_value=datetime(2026, 10, 27, 8, 0, tzinfo=timezone.utc),
+        ):
+            selected, held = poller.targets(self.github)
+            self.assertEqual(held, [])
+            self.assertEqual(selected[0]["source_sha"], SOURCE)
+        self.assertNotIn("smart-publish.sh", self.helpers)
+
+    def test_each_consumer_gets_a_new_bounded_record_client(self) -> None:
+        root = publisher.GitHub()
+        root._record_client._commands = 128
+        first, second = root.fresh_consumer(), root.fresh_consumer()
+        self.assertIsNot(first._record_client, root._record_client)
+        self.assertIsNot(first._record_client, second._record_client)
+        self.assertEqual(first._record_client._commands, 0)
+        self.assertEqual(second._record_client._commands, 0)
+
+    def test_dispatch_lookup_uses_native_merge_time_window(self) -> None:
+        original = self.github.pages
+        with patch.object(self.github, "pages", side_effect=original) as pages:
+            selected, held = poller.targets(self.github)
+        self.assertEqual(held, [])
+        self.assertEqual(selected[0]["source_sha"], SOURCE)
+        catalogs = [
+            call.args[0]
+            for call in pages.call_args_list
+            if "/workflows/fleet-publish.yml/runs?" in call.args[0]
+        ]
+        self.assertTrue(catalogs)
+        self.assertTrue(
+            all(
+                parse_qs(urlsplit(route).query)["created"]
+                == [">=" + self.github.source_merged_at]
+                for route in catalogs
+            )
+        )
+
+    def test_dispatch_queued_before_source_merge_cannot_publish(self) -> None:
+        self.github.other_runs["101"] = {"created_at": "2026-10-27T01:01:59Z"}
+        with self.assertRaises(publisher.PublishRefused):
+            self.prepare()
+        self.assertFalse((self.work / "intent.json").exists())
+        self.assertFalse(self.cli.called)
+
+    def test_same_native_second_boundary_remains_included(self) -> None:
+        self.github.other_runs["101"] = {"created_at": self.github.source_merged_at}
+        self.prepare()
+        self.assertTrue((self.work / "intent.json").is_file())
 
 
 if __name__ == "__main__":

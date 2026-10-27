@@ -9,7 +9,6 @@ failures, incomplete history and unavailable artifacts remain unknown/blocked.
 
 from __future__ import annotations
 
-import argparse
 import base64
 import importlib.util
 import json
@@ -19,6 +18,7 @@ import re
 import subprocess
 import sys
 from typing import Any
+from datetime import datetime, timezone
 from urllib.parse import quote
 
 POLICY = Path(__file__).resolve().parents[1]
@@ -85,6 +85,10 @@ class GitHub:
 
     def __init__(self) -> None:
         self._record_client = GitHubClient()
+
+    def fresh_consumer(self) -> GitHub:
+        """A consumer gets its own bounded evidence-client command allowance."""
+        return GitHub()
 
     def json(self, route: str) -> object:
         """Read-only facade for the shared fixed central protocol verifier."""
@@ -213,6 +217,23 @@ class GitHub:
                     if type(native_id) is int and native_id > 0
                     else (sha if valid_sha(sha) else None)
                 )
+                if "/rules/branches/" in route:
+                    ruleset_id, kind = item.get("ruleset_id"), item.get("type")
+                    source_type, source_name = (
+                        item.get("ruleset_source_type"),
+                        item.get("ruleset_source"),
+                    )
+                    require(
+                        type(ruleset_id) is int
+                        and ruleset_id > 0
+                        and isinstance(kind, str)
+                        and kind
+                        and source_type in ("Repository", "Organization")
+                        and isinstance(source_name, str)
+                        and source_name,
+                        "Native branch rule identity is unavailable.",
+                    )
+                    identity = f"rule:{source_type}:{source_name}:{ruleset_id}:{kind}"
                 require(
                     isinstance(identity, str)
                     and identity
@@ -345,8 +366,24 @@ def default_tip(github: GitHub, repo: str) -> tuple[str, str]:
     return "refs/heads/" + branch, sha
 
 
-def gate_source(github: GitHub, repo: str, sha: str, ref: str) -> None:
-    """Require actual same-repo merged PR, current independent reviews and CI."""
+def utc_time(value: object) -> datetime:
+    require(
+        isinstance(value, str)
+        and re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?Z", value),
+        "Native UTC timestamp is unavailable.",
+    )
+    if not isinstance(value, str):
+        raise PublishRefused("Native UTC timestamp is unavailable.")
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone(
+            timezone.utc
+        )
+    except ValueError as error:
+        raise PublishRefused("Native UTC timestamp is invalid.") from error
+
+
+def merged_source(github: GitHub, repo: str, sha: str, ref: str) -> dict[str, Any]:
+    """Read the actual merged PR, including its host-assigned merge timestamp."""
     pulls = github.pages(f"repos/{repo}/commits/{sha}/pulls")
     matches = [
         p
@@ -359,7 +396,150 @@ def gate_source(github: GitHub, repo: str, sha: str, ref: str) -> None:
     require(
         len(matches) == 1, "Source tip requires one verified merged same-repository PR."
     )
-    pull = matches[0]
+    summary = matches[0]
+    require(
+        type(summary.get("number")) is int and summary["number"] > 0,
+        "Native source PR number is invalid.",
+    )
+    pull = github.api(f"repos/{repo}/pulls/{summary['number']}")
+    require(
+        pull.get("number") == summary["number"]
+        and pull.get("merged") is True
+        and pull.get("state") == "closed"
+        and pull.get("merge_commit_sha") == sha
+        and pull.get("base", {}).get("ref") == ref.removeprefix("refs/heads/")
+        and pull.get("base", {}).get("repo", {}).get("full_name") == repo
+        and pull.get("head", {}).get("repo", {}).get("full_name") == repo,
+        "Actual native PR does not bind this merged source and default branch.",
+    )
+    utc_time(pull.get("merged_at"))
+    return pull
+
+
+def required_contexts(
+    github: GitHub, repo: str, ref: str
+) -> set[tuple[str, int | None]]:
+    """Union explicit legacy and active ruleset requirements; never infer 403/absence."""
+    branch = ref.removeprefix("refs/heads/")
+    route_branch = quote(branch, safe="")
+    native = github.api(f"repos/{repo}/branches/{route_branch}")
+    require(
+        native.get("name") == branch
+        and type(native.get("protected")) is bool
+        and valid_sha(native.get("commit", {}).get("sha")),
+        "Native default-branch protection metadata is unavailable.",
+    )
+    requirements: set[tuple[str, int | None]] = set()
+
+    def context(value: object) -> str:
+        require(
+            isinstance(value, str)
+            and 0 < len(value) <= 255
+            and not any(ord(c) < 32 or ord(c) == 127 for c in value),
+            "Required CI context is unsupported.",
+        )
+        if not isinstance(value, str):
+            raise PublishRefused("Required CI context is unavailable.")
+        return value
+
+    def app(value: object) -> int | None:
+        require(
+            value is None or type(value) is int and value > 0,
+            "Required CI application binding is unknown.",
+        )
+        return value if type(value) is int else None
+
+    protection = native.get("protection")
+    require(
+        isinstance(protection, dict) and type(protection.get("enabled")) is bool,
+        "Legacy branch requirements are incomplete.",
+    )
+    legacy = protection.get("required_status_checks")
+    if not isinstance(legacy, dict):
+        raise PublishRefused("Legacy required context/app data is unavailable.")
+    require(
+        isinstance(legacy, dict)
+        and isinstance(legacy.get("contexts"), list)
+        and isinstance(legacy.get("checks"), list),
+        "Legacy required context/app data is incomplete.",
+    )
+    contexts = {context(name) for name in legacy["contexts"]}
+    checks = legacy["checks"]
+    require(
+        len(legacy["contexts"]) <= 256 and len(checks) <= 256,
+        "Too many required CI contexts.",
+    )
+    bound_names = set()
+    for check in checks:
+        require(
+            isinstance(check, dict) and "app_id" in check,
+            "Legacy required application binding is missing.",
+        )
+        name = context(check.get("context"))
+        requirements.add((name, app(check["app_id"])))
+        bound_names.add(name)
+    require(
+        contexts == bound_names, "Legacy contexts and application bindings disagree."
+    )
+    if protection["enabled"] is False:
+        require(
+            not requirements, "Disabled legacy protection contradicts required checks."
+        )
+    if native["protected"] is False:
+        require(
+            protection["enabled"] is False and not requirements,
+            "Unprotected legacy branch metadata contradicts required checks.",
+        )
+    rules = github.pages(f"repos/{repo}/rules/branches/{route_branch}")
+    if native["protected"] is True and protection["enabled"] is False:
+        require(
+            rules, "Protected branch has no complete legacy or active ruleset metadata."
+        )
+    non_ci_rules = {
+        "creation",
+        "update",
+        "deletion",
+        "non_fast_forward",
+        "required_linear_history",
+        "required_signatures",
+        "pull_request",
+    }
+    for rule in rules:
+        require(
+            isinstance(rule, dict) and isinstance(rule.get("type"), str),
+            "Active branch rule is malformed.",
+        )
+        kind = rule["type"]
+        if kind in non_ci_rules:
+            continue
+        require(
+            kind == "required_status_checks",
+            "An unknown required workflow or CI rule must be inspected before publication.",
+        )
+        parameters = rule.get("parameters")
+        if not isinstance(parameters, dict):
+            raise PublishRefused("Active ruleset required checks are unavailable.")
+        require(
+            isinstance(parameters, dict)
+            and isinstance(parameters.get("required_status_checks"), list),
+            "Active ruleset required checks are unavailable.",
+        )
+        configured = parameters["required_status_checks"]
+        require(len(configured) <= 256, "Too many ruleset required checks.")
+        for check in configured:
+            require(
+                isinstance(check, dict) and "integration_id" in check,
+                "Ruleset required application binding is missing.",
+            )
+            requirements.add(
+                (context(check.get("context")), app(check["integration_id"]))
+            )
+    return requirements
+
+
+def gate_source(github: GitHub, repo: str, sha: str, ref: str) -> str:
+    """Require merged source + current dual reviews/CI; return native merge time."""
+    pull = merged_source(github, repo, sha, ref)
     head = pull["head"]["sha"]
     require(valid_sha(head), "Merged PR head is unavailable.")
     reviews = github.pages(f"repos/{repo}/pulls/{pull['number']}/reviews")
@@ -390,19 +570,49 @@ def gate_source(github: GitHub, repo: str, sha: str, ref: str) -> None:
         )
     checks = github.pages(f"repos/{repo}/commits/{head}/check-runs", "check_runs")
     statuses = github.pages(f"repos/{repo}/commits/{head}/status", "statuses")
+    required = required_contexts(github, repo, ref)
     require(
-        checks
-        and all(
+        all(
             c.get("status") == "completed"
             and c.get("conclusion") in ("success", "neutral", "skipped")
             for c in checks
         )
-        and any(c.get("conclusion") == "success" for c in checks),
+        and (not checks or any(c.get("conclusion") == "success" for c in checks)),
         "Merged PR CI is not complete and green.",
     )
     require(
         all(status.get("state") == "success" for status in statuses),
         "Merged PR commit status is not green.",
+    )
+    for name, app_id in required:
+        check_green = any(
+            check.get("name") == name
+            and check.get("status") == "completed"
+            and check.get("conclusion") == "success"
+            and (
+                app_id is None
+                or isinstance(check.get("app"), dict)
+                and type(check["app"].get("id")) is int
+                and check["app"]["id"] == app_id
+            )
+            for check in checks
+        )
+        status_green = app_id is None and any(
+            status.get("context") == name and status.get("state") == "success"
+            for status in statuses
+        )
+        require(
+            check_green or status_green,
+            "A configured required CI context is missing, incomplete, red, or from the wrong application.",
+        )
+    return pull["merged_at"]
+
+
+def dispatch_catalog_route(merged_at: str) -> str:
+    utc_time(merged_at)
+    return (
+        f"repos/{CENTRAL_REPOSITORY}/actions/workflows/fleet-publish.yml/runs"
+        f"?event=workflow_dispatch&created={quote('>=' + merged_at, safe='')}"
     )
 
 
@@ -1071,6 +1281,7 @@ def independent_source_claims(
     source: FleetPublishRecord,
     environment: dict[str, str],
     prior: FleetPublishRecord | None,
+    merged_at: str,
 ) -> None:
     """Consumer force-reset cannot erase a prior immutable CENTRAL intent.
 
@@ -1103,6 +1314,11 @@ def independent_source_claims(
         and current.get("run_attempt") == 1,
         "Current run cannot be excluded from uniqueness checks.",
     )
+    cutoff = utc_time(merged_at)
+    require(
+        utc_time(current.get("created_at")) >= cutoff,
+        "A dispatch queued before the native source merge cannot publish this source.",
+    )
     verified_protocols: set[str] = set()
 
     def protocol(sha: str) -> None:
@@ -1116,10 +1332,7 @@ def independent_source_claims(
             verified_protocols.add(sha)
 
     protocol(current["head_sha"])
-    runs = github.pages(
-        f"repos/{CENTRAL_REPOSITORY}/actions/workflows/fleet-publish.yml/runs?event=workflow_dispatch",
-        "workflow_runs",
-    )
+    runs = github.pages(dispatch_catalog_route(merged_at), "workflow_runs")
     found_current = False
     locator = f"fleet-publish-v1:{source['consumer_repository']}:{source['source_sha']}"
     require(
@@ -1130,6 +1343,10 @@ def independent_source_claims(
         require(
             isinstance(run, dict) and valid_sha(run.get("head_sha")),
             "Native dispatch listing is malformed.",
+        )
+        require(
+            utc_time(run.get("created_at")) >= cutoff,
+            "Native dispatch search returned an out-of-window run.",
         )
         # Verify reviewed template+input binding before trusting ANY locator to
         # exclude a different target. An unknown old version is never absence.
@@ -1274,7 +1491,8 @@ def prepare(
             origin_run_attempt=prior["origin_run_attempt"],
         )
         mode = "moderation_only"
-        independent_source_claims(github, record, environment, prior)
+        merged_at = merged_source(github, repo, prior["source_sha"], ref)["merged_at"]
+        independent_source_claims(github, record, environment, prior, merged_at)
     else:
         require(
             pending and pending[0] == expected_sha,
@@ -1282,7 +1500,7 @@ def prepare(
         )
         source_sha = pending[0]
         tree_sha, source_entries = tree(github, repo, source_sha)
-        gate_source(github, repo, source_sha, ref)
+        merged_at = gate_source(github, repo, source_sha, ref)
         manifest = projection(github, repo, source_entries, work / "package", plugin)
         original_manifest = dict(manifest)
         package_changelog = work / "package/CHANGELOG.md"
@@ -1302,7 +1520,7 @@ def prepare(
         record = initial_record(
             repo, source_sha, ref, tree_sha, plugin, baseline, version, environment
         )
-        independent_source_claims(github, record, environment, prior)
+        independent_source_claims(github, record, environment, prior, merged_at)
         bookkeeping_dir = work / "bookkeeping"
         bookkeeping_dir.mkdir(mode=0o700)
         main_changelog = file(github, repo, entries, "CHANGELOG.md").decode("utf-8")
@@ -1548,49 +1766,3 @@ def execute(github: GitHub, work: Path) -> bool:
         record["state"] = "confirmed"
     (work / "receipt.json").write_bytes(encoded(parse_record(record)))
     return record["state"] == "confirmed"
-
-
-def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("phase", choices=("prepare", "claim", "execute"))
-    parser.add_argument("--work", type=Path, required=True)
-    args = parser.parse_args()
-    require(
-        args.work.is_absolute() and args.work.is_dir(),
-        "Use a new centrally owned absolute work directory.",
-    )
-    github = GitHub()
-    if args.phase == "prepare":
-        prepare(
-            github,
-            os.environ.get("FLEET_CONSUMER_REPOSITORY", ""),
-            os.environ.get("FLEET_SOURCE_SHA", ""),
-            args.work,
-            dict(os.environ),
-        )
-    elif args.phase == "claim":
-        claim(github, args.work)
-    else:
-        return 0 if execute(github, args.work) else 1
-    return 0
-
-
-if __name__ == "__main__":
-    try:
-        raise SystemExit(main())
-    except (
-        PublishRefused,
-        OSError,
-        ValueError,
-        KeyError,
-        TypeError,
-        UnicodeError,
-    ) as error:
-        # outer-boundary-process-contract: no missing result is success; durable
-        # claimed intent survives abrupt failure. Fixed stderr, nonzero exit;
-        # propagating raw API/provider data would leak consumer/credential bytes.
-        print(
-            "Central publication refused. Inspect this run's intent/receipt and restore its exact prerequisite; never replay uncertain publication.",
-            file=sys.stderr,
-        )
-        raise SystemExit(1) from error
