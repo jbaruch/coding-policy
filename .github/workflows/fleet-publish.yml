@@ -93,6 +93,19 @@ jobs:
           FLEET_CONSUMER_REPOSITORY: ${{ inputs.repository }}
           FLEET_SOURCE_SHA: ${{ inputs.source_sha }}
         run: python3 scripts/fleet_publish_workflow.py prepare
+      - name: Review projected skills through canonical action
+        if: steps.prepare.outputs.review_required == 'true'
+        uses: ./.github/actions/skill-review
+        env:
+          GH_TOKEN: ''
+          GITHUB_TOKEN: ''
+          FLEET_CENTRAL_TOKEN: ''
+        with:
+          threshold: '85'
+          skills-dir: ${{ runner.temp }}/fleet-publish/package/skills
+          base-ref: ''
+          workspace: jbaruch
+          credit-outage: fail
       - name: Claim source atomically before publication
         if: steps.prepare.outputs.selected == 'true'
         env:

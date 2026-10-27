@@ -34,6 +34,7 @@ PRODUCER_PATHS = (
     "skills/release/fleet_publish_record.py",
     "skills/release/fleet_publish_github.py",
     "skills/release/stamp-changelog.py",
+    ".github/actions/skill-review/action.yml",
     ".github/actions/skill-review/review-skills.sh",
     "skills/release/smart-publish.sh",
     "skills/release/registry-baseline.sh",
@@ -49,10 +50,10 @@ PRODUCER_PATHS = (
 # avoiding a circular literal hash or a remote source's self-attestation.
 TRUSTED_PRODUCERS: tuple[dict[str, str], ...] = (
     {
-        ".github/workflows/fleet-publish.yml": "fef641a524d4e946c8561fa588e1f0de9fd129c5",
+        ".github/workflows/fleet-publish.yml": "12205f89e681d02f53f85d1ef55e450c579f6196",
         ".github/workflows/fleet-publish-finalize.yml": "a6dbeea9400979c59a7608d7f16eb8156e30e4e1",
-        "scripts/fleet_publish.py": "a98d3d4f1a055743ae0564bed536174b807d55e8",
-        "scripts/fleet_publish_workflow.py": "4dec9f39e32d15c5700503286f0c660ff14078ca",
+        "scripts/fleet_publish.py": "b367516abfba79de05d7868d06d26deb3ce3a845",
+        "scripts/fleet_publish_workflow.py": "64792b8f218dfe3c012f01691f01fc7f938faf9e",
         "scripts/fleet_publish_validate.py": "7d450d115f6a661f3a0e1d3d8ab1a85451bb7a47",
         "scripts/fleet_publish_targets.py": "541634a66c1a86dfcb9b2667878eb108216b6728",
         "scripts/fleet_publish_archive_write.py": "06a1fbad49b7f95b26e407e6040f48f373f69cd5",
@@ -60,6 +61,7 @@ TRUSTED_PRODUCERS: tuple[dict[str, str], ...] = (
         "skills/release/fleet_publish_record.py": "2068ec2bd83b6095e31e34e967ad39574e021b89",
         "skills/release/fleet_publish_github.py": "ca1897cf394723a30adc6f8a49c3a8fbbb06912e",
         "skills/release/stamp-changelog.py": "9bc1ef64bc6473fcbbf14ad0873f6a64614dd0dc",
+        ".github/actions/skill-review/action.yml": "bb12d1fd56feccb5ff1f844dbaefb57353b21fed",
         ".github/actions/skill-review/review-skills.sh": "9be33fad87c9b52183d22ff847197cf4852232b9",
         "skills/release/smart-publish.sh": "145178416aceea117b0997b61c1f04ccf28eeafb",
         "skills/release/registry-baseline.sh": "e6c55b47d6dd199fa5697f6cfe2531e8d5dd43b3",

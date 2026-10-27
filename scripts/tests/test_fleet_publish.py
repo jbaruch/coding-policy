@@ -495,11 +495,11 @@ class PublisherTests(PublisherFixture):
         )
         self.assertTrue((self.work / "package/skills/fixture/scripts/data.py").exists())
         self.assertEqual(
-            len(self.cli.call_args_list), 2
-        )  # lint + trusted reviewer only
+            len(self.cli.call_args_list), 1
+        )  # lint only; workflow owns the canonical composite review.
         self.assertNotIn("GH_TOKEN", self.cli.call_args_list[0].kwargs["env"])
         self.assertNotIn(
-            "FLEET_CENTRAL_TOKEN", self.cli.call_args_list[1].kwargs["env"]
+            "FLEET_CENTRAL_TOKEN", self.cli.call_args_list[0].kwargs["env"]
         )
 
     def test_missing_durable_source_index_after_claim_never_dispatches_publish(self):
@@ -805,7 +805,7 @@ class PublisherTests(PublisherFixture):
         publisher.prepare(self.github, REPO, SOURCE, self.work, ENV)
         self.assertTrue((self.work / "package/skills").is_dir())
         self.assertFalse(any((self.work / "package/skills").iterdir()))
-        self.assertEqual(len(self.cli.call_args_list), 2)
+        self.assertEqual(len(self.cli.call_args_list), 1)
 
     def test_lifecycle_hooks_fail_before_any_credentialed_cli(self) -> None:
         manifest = json.loads(self.github.files[publisher.MANIFEST])

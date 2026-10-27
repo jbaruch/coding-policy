@@ -271,7 +271,9 @@ class PhaseState:
         return value
 
 
-def selected_output(selected: bool, environment: dict[str, str]) -> None:
+def selected_output(
+    selected: bool, review_required: bool, environment: dict[str, str]
+) -> None:
     output = Path(environment["GITHUB_OUTPUT"])
     fd = os.open(output, os.O_WRONLY | os.O_APPEND | os.O_NOFOLLOW | os.O_NONBLOCK)
     try:
@@ -282,7 +284,17 @@ def selected_output(selected: bool, environment: dict[str, str]) -> None:
             and info.st_nlink == 1,
             REPAIR,
         )
-        os.write(fd, ("selected=" + str(selected).lower() + "\n").encode())
+        os.write(
+            fd,
+            (
+                "selected="
+                + str(selected).lower()
+                + "\n"
+                + "review_required="
+                + str(review_required).lower()
+                + "\n"
+            ).encode(),
+        )
     finally:
         os.close(fd)
 
@@ -362,7 +374,17 @@ def main() -> int:
                     selected=selection["mode"] != "already_confirmed",
                 )
                 owner.save(state)
-            selected_output(state["selected"], environment)
+            selection = decode((owner.root / "selection.json").read_bytes())
+            require(
+                isinstance(selection, dict)
+                and selection.get("mode")
+                in ("already_confirmed", "publish", "moderation_only")
+                and state["selected"] == (selection["mode"] != "already_confirmed"),
+                REPAIR,
+            )
+            selected_output(
+                state["selected"], selection["mode"] == "publish", environment
+            )
         elif phase == "claim":
             if state is None or state["selected"] is not True:
                 raise PublishRefused(REPAIR)

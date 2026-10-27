@@ -1781,27 +1781,6 @@ def prepare(
             ["tessl", "plugin", "lint"], cwd=work / "package", env=cli_env, check=False
         )
         require(lint.returncode == 0, "Package lint failed; no publication claimed.")
-        cli_env.update(
-            WORKSPACE="jbaruch",
-            THRESHOLD="85",
-            SKILLS_DIR="skills",
-            CREDIT_OUTAGE="fail",
-            EVENT_NAME="workflow_dispatch",
-            BASE_OVERRIDE="",
-            EVENT_BEFORE="",
-            GITHUB_OUTPUT=os.devnull,
-            GITHUB_STEP_SUMMARY=os.devnull,
-        )
-        reviewed = subprocess.run(
-            ["bash", str(POLICY / ".github/actions/skill-review/review-skills.sh")],
-            cwd=work / "package",
-            env=cli_env,
-            check=False,
-        )
-        require(
-            reviewed.returncode == 0,
-            "Mandatory skill review failed; no publication claimed.",
-        )
         mode = "publish"
     save(work / "intent.json", record)
     save(work / "selection.json", {"mode": mode, "expected_sha": tip})

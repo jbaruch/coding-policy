@@ -173,7 +173,10 @@ class WorkflowTests(unittest.TestCase):
             self.assertEqual(module.main(), 0)
             self.assertEqual(module.main(), 0)
             prepare.assert_called_once()
-        self.assertEqual(self.output.read_text(), "selected=false\nselected=false\n")
+        self.assertEqual(
+            self.output.read_text(),
+            "selected=false\nreview_required=false\nselected=false\nreview_required=false\n",
+        )
 
     def test_all_three_real_cli_routes_resume_without_double_effect(self):
         self.work.mkdir(mode=0o700)  # empty preexisting owned work is valid
@@ -184,7 +187,10 @@ class WorkflowTests(unittest.TestCase):
             self.ok(phase)
         self.assertEqual(self.calls(), ["prepare", "claim", "execute"])
         self.assertEqual((self.work / "receipt.json").read_bytes(), original)
-        self.assertEqual(self.output.read_text(), "selected=true\nselected=true\n")
+        self.assertEqual(
+            self.output.read_text(),
+            "selected=true\nreview_required=true\nselected=true\nreview_required=true\n",
+        )
 
     def test_known_failed_effect_returns_original_failed_result_without_replay(self):
         self.advance()
@@ -223,7 +229,10 @@ class WorkflowTests(unittest.TestCase):
     def test_already_confirmed_noop_never_claims_or_executes(self):
         self.ok("prepare", FIXTURE_MODE="already_confirmed")
         self.ok("prepare")
-        self.assertEqual(self.output.read_text(), "selected=false\nselected=false\n")
+        self.assertEqual(
+            self.output.read_text(),
+            "selected=false\nreview_required=false\nselected=false\nreview_required=false\n",
+        )
         for phase in ("claim", "execute"):
             self.assertEqual(self.run_phase(phase).returncode, 1)
         self.assertEqual(self.calls(), ["prepare"])
@@ -313,6 +322,148 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(
             self.run_phase("prepare", RUNNER_TEMP="relative-PRIVATE").returncode, 1
         )
+
+    def test_review_output_is_selection_bound_for_all_prepare_reentries(self):
+        for mode, selected, review in (
+            ("publish", True, True),
+            ("moderation_only", True, False),
+            ("already_confirmed", False, False),
+        ):
+            with self.subTest(mode=mode):
+                self.ok("prepare", FIXTURE_MODE=mode)
+                self.ok("prepare")
+                expected = (
+                    f"selected={str(selected).lower()}\n"
+                    f"review_required={str(review).lower()}\n"
+                )
+                self.assertEqual(self.output.read_text(), expected * 2)
+                self.assertEqual(self.calls(), ["prepare"])
+                shutil.rmtree(self.work)
+                (self.root / "calls").unlink()
+                self.output.write_text("")
+
+    def test_changed_selection_cannot_enable_skip_or_rewrite_review_output(self):
+        self.ok("prepare")
+        output = self.output.read_bytes()
+        (self.work / "selection.json").write_text('{"mode":"moderation_only"}')
+        self.assertEqual(self.run_phase("prepare").returncode, 1)
+        self.assertEqual(self.output.read_bytes(), output)
+        self.assertEqual(self.run_phase("claim").returncode, 1)
+        self.assertEqual(self.calls(), ["prepare"])
+
+    def test_canonical_composite_is_preclaim_and_receives_only_projected_skills(self):
+        workflow = (ROOT / ".github/workflows/fleet-publish.yml").read_text()
+        begin = workflow.index("      - name: Review projected skills")
+        end = workflow.index("      - name: Claim source atomically")
+        self.assertLess(workflow.index("id: prepare"), begin)
+        self.assertLess(begin, end)
+        review = workflow[begin:end]
+        for required in (
+            "if: steps.prepare.outputs.review_required == 'true'",
+            "uses: ./.github/actions/skill-review",
+            "skills-dir: ${{ runner.temp }}/fleet-publish/package/skills",
+            "threshold: '85'",
+            "base-ref: ''",
+            "workspace: jbaruch",
+            "credit-outage: fail",
+            "GH_TOKEN: ''",
+            "GITHUB_TOKEN: ''",
+            "FLEET_CENTRAL_TOKEN: ''",
+        ):
+            self.assertIn(required, review)
+        self.assertNotIn(
+            "review-skills.sh", (ROOT / "scripts/fleet_publish.py").read_text()
+        )
+        self.assertNotIn(
+            "always()",
+            workflow[end : workflow.index("      - name: Persist immutable")],
+        )
+
+    def test_actual_composite_body_reviews_absolute_projected_paths_and_blocks_failure(
+        self,
+    ):
+        action_dir = ROOT / ".github/actions/skill-review"
+        action = (action_dir / "action.yml").read_text()
+        lines = [
+            line.strip()[5:]
+            for line in action.splitlines()
+            if line.strip().startswith("run: ")
+        ]
+        self.assertEqual(lines, ['bash "$GITHUB_ACTION_PATH/review-skills.sh"'])
+        bin_dir = self.root / "bin"
+        bin_dir.mkdir()
+        log = self.root / "review-args"
+        cli = bin_dir / "tessl"
+        cli.write_text(
+            "#!/usr/bin/env python3\nimport json,os,sys\n"
+            'with open(os.environ["FIXTURE_REVIEW_ARGS"],"a") as f: '
+            'f.write(json.dumps(sys.argv[1:])+"\\n")\n'
+            'sys.exit(int(os.environ["FIXTURE_REVIEW_EXIT"]))\n'
+        )
+        cli.chmod(0o700)
+        projected = self.root / "projected package/skills"
+        projected.mkdir(parents=True)
+        (projected / "one").mkdir()
+        (projected / "one/SKILL.md").write_text("# Projected fixture\n")
+        (projected / "two").mkdir()
+        (projected / "two/SKILL.md").write_text("# Another projected fixture\n")
+        env = {
+            "PATH": f"{bin_dir}:{os.environ['PATH']}",
+            "GITHUB_ACTION_PATH": str(action_dir),
+            "EVENT_NAME": "workflow_dispatch",
+            "WORKSPACE": "jbaruch",
+            "THRESHOLD": "85",
+            "CREDIT_OUTAGE": "fail",
+            "BASE_OVERRIDE": "",
+            "SKILLS_DIR": str(projected),
+            "GITHUB_OUTPUT": str(self.output),
+            "GITHUB_STEP_SUMMARY": os.devnull,
+            "FIXTURE_REVIEW_ARGS": str(log),
+            "FIXTURE_REVIEW_EXIT": "0",
+        }
+        result = subprocess.run(
+            ["bash", "-c", lines[0]],
+            cwd=self.root,
+            env=env,
+            capture_output=True,
+            timeout=10,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(
+            [json.loads(line) for line in log.read_text().splitlines()],
+            [
+                [
+                    "review",
+                    "run",
+                    "--workspace",
+                    "jbaruch",
+                    "--threshold",
+                    "85",
+                    str(projected / name / "SKILL.md"),
+                ]
+                for name in ("one", "two")
+            ],
+        )
+        result = subprocess.run(
+            ["bash", "-c", lines[0]],
+            cwd=self.root,
+            env={**env, "FIXTURE_REVIEW_EXIT": "7"},
+            capture_output=True,
+            timeout=10,
+        )
+        self.assertEqual(result.returncode, 7)
+        log.unlink()
+        shutil.rmtree(projected)
+        projected.mkdir()
+        result = subprocess.run(
+            ["bash", "-c", lines[0]],
+            cwd=self.root,
+            env=env,
+            capture_output=True,
+            timeout=10,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse(log.exists())
 
 
 if __name__ == "__main__":
