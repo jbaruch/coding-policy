@@ -83,6 +83,7 @@ class NativeGitHub(publisher.GitHub):
         }
         self.native_reviews = [
             {
+                "id": 11,
                 "user": {"login": "coding-policy-fleet-reviewer[bot]"},
                 "commit_id": HEAD,
                 "state": "APPROVED",
@@ -90,6 +91,7 @@ class NativeGitHub(publisher.GitHub):
                 "body": "Policy loaded.",
             },
             {
+                "id": 12,
                 "user": {"login": "jbaruch-claude-reviewer[bot]"},
                 "commit_id": HEAD,
                 "state": "APPROVED",
@@ -2337,7 +2339,7 @@ class NullableNativeMetadataTests(PublisherFixture):
         self.github.other_runs["101"] = {"head_repository": None}
         self.assertEqual(poller.targets(self.github), ([], [REPO]))
 
-    def test_one_deleted_fork_consumer_cannot_starve_eligible_consumer_dispatch(self):
+    def test_one_nullable_consumer_cannot_starve_eligible_consumer_dispatch(self):
         class Aliased(NativeGitHub):
             def __init__(self, name, bad=False):
                 super().__init__()
@@ -2366,10 +2368,19 @@ class NullableNativeMetadataTests(PublisherFixture):
                     value[0]["head"]["repo"] = None
                 return value
 
+        for defect in ("deleted_fork", "null_review_time"):
+            with self.subTest(defect=defect):
+                self.check_eligible_consumer_dispatch(Aliased, defect)
+
+    def check_eligible_consumer_dispatch(self, aliased, defect):
         bad, good = (
-            Aliased("jbaruch/bad-fixture", True),
-            Aliased("jbaruch/good-fixture"),
+            aliased("jbaruch/bad-fixture", defect == "deleted_fork"),
+            aliased("jbaruch/good-fixture"),
         )
+        if defect == "null_review_time":
+            pending = deepcopy(bad.native_reviews[0])
+            pending.update(id=13, submitted_at=None)
+            bad.native_reviews.append(pending)
         root = publisher.GitHub()
         with (
             patch.object(
@@ -2403,6 +2414,55 @@ class NullableNativeMetadataTests(PublisherFixture):
             "repos/jbaruch/coding-policy/actions/workflows/fleet-publish.yml/dispatches",
             {"ref": "main", "inputs": {"repository": good.name, "source_sha": SOURCE}},
         )
+        self.assertNotIn("smart-publish.sh", self.helpers)
+
+
+class NativeReviewOrderingTests(PublisherFixture):
+    def test_equal_second_later_native_change_request_blocks_each_lane(self):
+        for lane in (0, 1):
+            for reverse in (False, True):
+                reviews = deepcopy(NativeGitHub().native_reviews)
+                later = deepcopy(reviews[lane])
+                later.update(id=13, state="CHANGES_REQUESTED")
+                reviews.append(later)
+                self.github.native_reviews = (
+                    list(reversed(reviews)) if reverse else reviews
+                )
+                with (
+                    self.subTest(lane=lane, reverse=reverse),
+                    self.assertRaises(publisher.PublishRefused),
+                ):
+                    publisher.gate_source(self.github, REPO, SOURCE, "refs/heads/main")
+        self.assertNotIn("smart-publish.sh", self.helpers)
+
+    def test_equal_second_later_native_approval_is_not_list_order_dependent(self):
+        for lane in (0, 1):
+            for reverse in (False, True):
+                reviews = deepcopy(NativeGitHub().native_reviews)
+                later = deepcopy(reviews[lane])
+                reviews[lane]["state"] = "CHANGES_REQUESTED"
+                later.update(id=13, state="APPROVED")
+                reviews.append(later)
+                self.github.native_reviews = (
+                    list(reversed(reviews)) if reverse else reviews
+                )
+                with self.subTest(lane=lane, reverse=reverse):
+                    self.assertEqual(
+                        publisher.gate_source(
+                            self.github, REPO, SOURCE, "refs/heads/main"
+                        ),
+                        self.github.source_merged_at,
+                    )
+
+    def test_missing_or_malformed_qualified_review_id_holds_without_authority(self):
+        for native_id in (None, 0, -1, True, "13", 1.5):
+            self.github.native_reviews = deepcopy(NativeGitHub().native_reviews)
+            self.github.native_reviews[0]["id"] = native_id
+            with (
+                self.subTest(native_id=native_id),
+                self.assertRaises(publisher.PublishRefused),
+            ):
+                publisher.gate_source(self.github, REPO, SOURCE, "refs/heads/main")
         self.assertNotIn("smart-publish.sh", self.helpers)
 
 

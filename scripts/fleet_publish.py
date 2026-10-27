@@ -673,6 +673,7 @@ def gate_source(github: GitHub, repo: str, sha: str, ref: str) -> str:
         attributed.append((login, review))
     for lane, logins in identities.items():
         latest: dict[str, Any] = {}
+        latest_order: dict[str, tuple[datetime, int]] = {}
         for login, review in attributed:
             if login not in logins or review.get("commit_id") != head:
                 continue
@@ -687,10 +688,13 @@ def gate_source(github: GitHub, repo: str, sha: str, ref: str) -> str:
             if quality != (lane == "quality"):
                 continue
             submitted = utc_time(review.get("submitted_at"))
-            if login not in latest or submitted > utc_time(
-                latest[login]["submitted_at"]
-            ):
+            review_id = review.get("id")
+            if type(review_id) is not int or review_id <= 0:
+                raise PublishRefused("Native bot review identity is unavailable.")
+            order = (submitted, review_id)
+            if login not in latest_order or order > latest_order[login]:
                 latest[login] = review
+                latest_order[login] = order
         require(
             latest and all(r.get("state") == "APPROVED" for r in latest.values()),
             "Both current-head independent review lanes must approve the merged PR.",
