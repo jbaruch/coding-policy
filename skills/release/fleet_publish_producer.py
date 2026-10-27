@@ -18,10 +18,19 @@ PRODUCER_PATHS = (
     "scripts/fleet_publish_workflow.py",
     "scripts/fleet_publish_validate.py",
 )
-# The earlier unactivated protocol lacked the native run-created cutoff.
-# It MUST NOT authorize temporal absence. Populate ONLY from the final combined
-# reviewed controller+adapter freeze; unknown/old source remains HOLD.
-TRUSTED_PRODUCERS: tuple[dict[str, str], ...] = ()
+# Reviewed coherent combined freeze bc4d6605 (controller + phase adapter).
+# This protocol rejects native runs created before the source PR merged, so
+# temporal catalog completeness is safe. The earlier unactivated 6c10 protocol
+# is deliberately NOT supported. This pins dispatch semantics, not transitive
+# execution dependencies; renew by reviewing all four source files together.
+TRUSTED_PRODUCERS: tuple[dict[str, str], ...] = (
+    {
+        ".github/workflows/fleet-publish.yml": "f5fbfd0ab44015c1afd96aef87b481ce0584083e",
+        "scripts/fleet_publish.py": "c4f4567a7e2ef278b8b5cf65f99245568ab928e2",
+        "scripts/fleet_publish_workflow.py": "afaa6d4814ab4d7836d26c14ce9a1d7e0e8478f6",
+        "scripts/fleet_publish_validate.py": "7d450d115f6a661f3a0e1d3d8ab1a85451bb7a47",
+    },
+)
 
 
 class GitHubRead(Protocol):
