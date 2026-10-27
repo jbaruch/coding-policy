@@ -86,7 +86,7 @@ bookkeeping commit remains independently bound.
 
 `skills/release/fleet_publish_archive.py` owns the separate versioned archive
 schema, canonical representation and read contract. The source-owned writer,
-`scripts/fleet_publish_archive_writer.py`, creates central Git records only in
+`scripts/fleet_publish_archive_write.py`, creates central Git records only in
 `refs/tags/fleet-publish-v1/`. This namespace is a durable authority of record,
 owned by the central publisher and its fixed completion finalizer. Never update,
 replace or delete a record to resume a queue. Existing identical records permit
