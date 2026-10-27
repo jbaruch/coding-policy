@@ -233,7 +233,10 @@ class NativeGitHub(publisher.GitHub):
                 "content": base64.b64encode(raw).decode(),
                 "size": len(raw),
             }
-        if path == f"repos/{REPO}/commits/{HEAD}/status":
+        if path in (
+            f"repos/{REPO}/commits/{HEAD}/status",
+            f"repos/{REPO}/commits/{CLAIM}/status",
+        ):
             return self.status
         if path == f"repos/{REPO}/git/blobs" and isinstance(payload, dict):
             raw = base64.b64decode(payload["content"])
@@ -307,9 +310,15 @@ class NativeGitHub(publisher.GitHub):
             ]
         if path == f"repos/{REPO}/pulls/7/reviews":
             return self.native_reviews
-        if path == f"repos/{REPO}/commits/{HEAD}/check-runs":
+        if path in (
+            f"repos/{REPO}/commits/{HEAD}/check-runs",
+            f"repos/{REPO}/commits/{CLAIM}/check-runs",
+        ):
             return self.checks
-        if path == f"repos/{REPO}/commits/{HEAD}/status":
+        if path in (
+            f"repos/{REPO}/commits/{HEAD}/status",
+            f"repos/{REPO}/commits/{CLAIM}/status",
+        ):
             return self.status["statuses"]
         if path == f"repos/{REPO}/rules/branches/main":
             return self.rules
@@ -1091,6 +1100,11 @@ class HistoryGitHub(NativeGitHub):
         return super().api(path, payload, binary=binary, method=method)
 
     def pages(self, route: str, key: str | None = None) -> list[Any]:
+        ci = re.fullmatch(
+            f"repos/{REPO}/commits/([a-f0-9]{{40}})/(check-runs|status)", route
+        )
+        if ci and ci[1] in self.commits:
+            return self.checks if ci[2] == "check-runs" else self.status["statuses"]
         match = re.fullmatch(f"repos/{REPO}/commits/([a-f0-9]{{40}})/pulls", route)
         if match and match[1] in (SOURCE, self.SECOND, self.THIRD):
             self.current_pull_source = match[1]
@@ -1897,6 +1911,97 @@ class RequiredContextTests(PublisherFixture):
         }
         with patch.object(client, "api", return_value=[rule]):
             self.assertEqual(client.pages(f"repos/{REPO}/rules/branches/main"), [rule])
+
+
+class ClaimedCiTests(PublisherFixture):
+    def test_claimed_commit_pending_then_green_blocks_effect_until_native_green(self):
+        self.claimed()
+        self.github.required_branch["protected"] = True
+        self.github.required_branch["protection"] = {
+            "enabled": True,
+            "required_status_checks": {
+                "contexts": ["build"],
+                "checks": [{"context": "build", "app_id": 42}],
+            },
+        }
+        self.github.checks = [
+            {
+                "name": "build",
+                "status": "in_progress",
+                "conclusion": None,
+                "app": {"id": 42},
+            }
+        ]
+
+        def turn_green(_seconds):
+            self.assertNotIn("smart-publish.sh", self.helpers)
+            self.github.checks = [
+                {
+                    "name": "build",
+                    "status": "completed",
+                    "conclusion": "success",
+                    "app": {"id": 42},
+                }
+            ]
+
+        with patch.object(publisher.time, "sleep", side_effect=turn_green) as sleep:
+            self.assertTrue(publisher.execute(self.github, self.work))
+        sleep.assert_called_once_with(publisher.CLAIM_CI_INTERVAL_SECONDS)
+        self.assertEqual(self.helpers.count("smart-publish.sh"), 1)
+
+    def test_missing_required_claim_context_exhausts_fixed_budget_without_effect(self):
+        self.claimed()
+        self.github.rules = [
+            {
+                "type": "required_status_checks",
+                "parameters": {
+                    "required_status_checks": [
+                        {"context": "missing", "integration_id": None}
+                    ]
+                },
+            }
+        ]
+        with (
+            patch.object(publisher.time, "sleep") as sleep,
+            self.assertRaises(publisher.PublishRefused),
+        ):
+            publisher.execute(self.github, self.work)
+        self.assertEqual(sleep.call_count, publisher.CLAIM_CI_MAX_READS - 1)
+        self.assertIn(publisher.STAMP, self.github.entries)
+        self.assertNotIn("smart-publish.sh", self.helpers)
+
+    def test_red_claim_checks_and_statuses_hold_immediately(self):
+        self.claimed()
+        for checks, statuses in (
+            ([{"status": "completed", "conclusion": "failure"}], []),
+            ([{"status": "completed", "conclusion": "success"}], [{"state": "error"}]),
+        ):
+            self.github.checks = checks
+            self.github.status["statuses"] = statuses
+            with (
+                patch.object(publisher.time, "sleep") as sleep,
+                self.assertRaises(publisher.PublishRefused),
+            ):
+                publisher.execute(self.github, self.work)
+            sleep.assert_not_called()
+            self.assertNotIn("smart-publish.sh", self.helpers)
+
+    def test_claim_gate_uses_claim_sha_and_zero_required_contexts_can_pass(self):
+        self.claimed()
+        self.github.checks = []
+        original = self.github.pages
+        with patch.object(self.github, "pages", side_effect=original) as calls:
+            self.assertTrue(publisher.execute(self.github, self.work))
+        for suffix in ("check-runs", "status"):
+            self.assertTrue(
+                any(
+                    call.args[0] == f"repos/{REPO}/commits/{CLAIM}/{suffix}"
+                    for call in calls.call_args_list
+                )
+            )
+        self.assertFalse(
+            any("/reviews" in call.args[0] for call in calls.call_args_list)
+        )
 
 
 class PollDispatchTests(PublisherFixture):

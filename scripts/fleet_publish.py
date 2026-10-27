@@ -17,6 +17,7 @@ from pathlib import Path, PurePosixPath
 import re
 import subprocess
 import sys
+import time
 from typing import Any
 from datetime import datetime, timezone
 from urllib.parse import quote
@@ -42,6 +43,8 @@ MANIFEST = ".tessl-plugin/plugin.json"
 MAX_BYTES = 16 * 1024 * 1024
 MAX_FILES = 4096
 MAX_IGNORE_BYTES = 64 * 1024
+CLAIM_CI_INTERVAL_SECONDS = 10
+CLAIM_CI_MAX_READS = 31  # Initial snapshot plus five minutes of bounded waiting.
 
 
 class PublishRefused(ValueError):
@@ -606,6 +609,71 @@ def gate_source(github: GitHub, repo: str, sha: str, ref: str) -> str:
             "A configured required CI context is missing, incomplete, red, or from the wrong application.",
         )
     return pull["merged_at"]
+
+
+def wait_claim_ci(github: GitHub, repo: str, sha: str, ref: str) -> None:
+    """Read only the exact claimed commit; a timeout preserves its STOP record."""
+    for attempt in range(CLAIM_CI_MAX_READS):
+        required = required_contexts(github, repo, ref)
+        checks = github.pages(f"repos/{repo}/commits/{sha}/check-runs", "check_runs")
+        statuses = github.pages(f"repos/{repo}/commits/{sha}/status", "statuses")
+        pending = False
+        for check in checks:
+            status, conclusion = check.get("status"), check.get("conclusion")
+            require(
+                status
+                in (
+                    "queued",
+                    "in_progress",
+                    "completed",
+                    "waiting",
+                    "requested",
+                    "pending",
+                ),
+                "Claimed commit CI status is unsupported; preserve the claim.",
+            )
+            if status != "completed":
+                require(
+                    conclusion is None,
+                    "Claimed commit CI metadata contradicts its pending state.",
+                )
+                pending = True
+            else:
+                require(
+                    conclusion in ("success", "neutral", "skipped"),
+                    "Claimed commit CI failed; preserve the claim without publication.",
+                )
+        for status in statuses:
+            require(
+                status.get("state") in ("pending", "success"),
+                "Claimed commit status failed or is unsupported; preserve the claim.",
+            )
+            pending |= status["state"] == "pending"
+        for name, app_id in required:
+            check_green = any(
+                check.get("name") == name
+                and check.get("status") == "completed"
+                and check.get("conclusion") == "success"
+                and (
+                    app_id is None
+                    or isinstance(check.get("app"), dict)
+                    and type(check["app"].get("id")) is int
+                    and check["app"]["id"] == app_id
+                )
+                for check in checks
+            )
+            status_green = app_id is None and any(
+                status.get("context") == name and status.get("state") == "success"
+                for status in statuses
+            )
+            pending |= not (check_green or status_green)
+        if not pending:
+            return
+        if attempt + 1 < CLAIM_CI_MAX_READS:
+            time.sleep(CLAIM_CI_INTERVAL_SECONDS)
+    raise PublishRefused(
+        "Claimed commit CI remains missing or pending after the fixed wait; preserve the claim and do not replay publication."
+    )
 
 
 def dispatch_catalog_route(merged_at: str) -> str:
@@ -1660,6 +1728,9 @@ def execute(github: GitHub, work: Path) -> bool:
         decode_record(file(github, record["consumer_repository"], claimed_tree, STAMP))
         == intent,
         "Durable pre-effect claim is missing or changed.",
+    )
+    wait_claim_ci(
+        github, record["consumer_repository"], claim_sha, record["source_ref"]
     )
     record["bookkeeping_sha"] = claim_sha
     # Persist conservative local terminal evidence BEFORE the effect. Workflow
