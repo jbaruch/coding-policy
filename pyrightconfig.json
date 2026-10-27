@@ -50,7 +50,8 @@
     "skills/release/fleet_publish_producer.py",
     "skills/release/fleet_publish_resolver.py",
     "tests/release/tests/test_fleet_publish_producer.py",
-    "tests/release/tests/test_fleet_publish_resolver.py"
+    "tests/release/tests/test_fleet_publish_resolver.py",
+    "scripts/tests/test_fleet_publish_workflow.py"
   ],
   "executionEnvironments": [
     {
