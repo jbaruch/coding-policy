@@ -120,8 +120,9 @@ class PollImmutableCache:
         self.requests = 0
 
     def request(self, *, dispatch: bool = False) -> None:
-        # Reserve two slots for the at-most-two selected dispatches. Every native
-        # command, including pagination/ZIP and failed reads, consumes one slot.
+        # Reserve two slots for the at-most-two selected dispatches. Every
+        # central-token evidence command, including pagination/ZIP and failed
+        # reads, consumes one slot; App-scoped consumer scans use their quota.
         if self.requests >= (200 if dispatch else 198):
             raise PollBudgetExhausted(
                 "Central poll budget reached; defer without dispatch or inferred absence."
@@ -294,12 +295,12 @@ class GitHub:
             args += ["--method", method, "--input", "-"]
         environment = dict(os.environ)
         cache = getattr(self, "_poll_cache", None)
-        if cache is not None and (
-            path == f"repos/{CENTRAL_REPOSITORY}"
-            or path.startswith(f"repos/{CENTRAL_REPOSITORY}/")
-        ):
+        is_central_route = path == f"repos/{CENTRAL_REPOSITORY}" or path.startswith(
+            f"repos/{CENTRAL_REPOSITORY}/"
+        )
+        if cache is not None and is_central_route:
             cache.request(dispatch=payload is not None)
-        if path.startswith(f"repos/{CENTRAL_REPOSITORY}/"):
+        if is_central_route:
             require(
                 environment.get("FLEET_CENTRAL_TOKEN"),
                 "Central artifact read credential is unavailable.",
@@ -1253,9 +1254,24 @@ def stamp_package(
 
 
 def pending_sources(
-    github: GitHub, repo: str, tip: str, prior: FleetPublishRecord | None, plugin: str
+    github: GitHub,
+    repo: str,
+    tip: str,
+    prior: FleetPublishRecord | None,
+    plugin: str,
+    *,
+    verified_tip_stamp_sha: str | None = None,
 ) -> list[str]:
     """First-parent queue, not a latest-tip coalescer. Bound or refuse history."""
+    require(
+        verified_tip_stamp_sha is None
+        or (
+            prior is not None
+            and prior["state"] == "confirmed"
+            and valid_sha(verified_tip_stamp_sha)
+        ),
+        "Only an internal fully verified prior may classify an exact native tip stamp.",
+    )
     pending: list[str] = []
     cursor = tip
     for _ in range(128):
@@ -1283,7 +1299,19 @@ def pending_sources(
             enrollment(github, repo, entries) == plugin,
             "Plugin identity changed inside the source queue.",
         )
-        bookkeeping = previous(github, repo, entries) if STAMP in entries else None
+        if (
+            verified_tip_stamp_sha is not None
+            and STAMP in entries
+            and entries[STAMP].get("sha") == verified_tip_stamp_sha
+        ):
+            # The poll already proved this exact native stamp against prior.
+            # Only the native receipt's exact bookkeeping SHA can be excluded;
+            # copied stamps never turn other source commits into bookkeeping.
+            bookkeeping = (
+                prior if prior and cursor == prior["bookkeeping_sha"] else None
+            )
+        else:
+            bookkeeping = previous(github, repo, entries) if STAMP in entries else None
         if bookkeeping is None or bookkeeping["bookkeeping_sha"] != cursor:
             pending.append(cursor)
         else:

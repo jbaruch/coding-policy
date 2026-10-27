@@ -26,6 +26,7 @@ from fleet_publish import (
     gate_source,
     utc_time,
     native_object,
+    STAMP,
 )
 from fleet_publish_record import (
     CENTRAL_REPOSITORY,
@@ -171,7 +172,7 @@ def _targets(
         try:
             ref, sha = default_tip(consumer, repo)
             _, entries = tree(consumer, repo, sha)
-            enrollment(consumer, repo, entries)
+            plugin = enrollment(consumer, repo, entries)
             prior = previous(consumer, repo, entries)
             if prior and prior["state"] == "published":
                 # Moderation holds require explicit new selected recovery runs;
@@ -194,8 +195,14 @@ def _targets(
                     and native_object(parents[0]).get("sha") == prior["source_sha"]
                 ):
                     continue
+            stamp = entries.get(STAMP)
+            known_stamp = (
+                stamp.get("sha")
+                if prior and prior["state"] == "confirmed" and stamp
+                else None
+            )
             pending = pending_sources(
-                consumer, repo, sha, prior, enrollment(consumer, repo, entries)
+                consumer, repo, sha, prior, plugin, verified_tip_stamp_sha=known_stamp
             )
             if not pending and prior and sha == prior["bookkeeping_sha"]:
                 continue
@@ -206,6 +213,23 @@ def _targets(
             merged_at = gate_source(consumer, repo, pending[0], ref)
             if dispatch_deferred(consumer, repo, pending[0], merged_at):
                 continue
+            # Queue classification reuses only immutable stamp identity. Mutable
+            # authority is fully refreshed after source gates and run catalog.
+            fresh_ref, fresh_sha = default_tip(consumer, repo)
+            require(
+                (fresh_ref, fresh_sha) == (ref, sha),
+                "Consumer advanced during poll proof; defer exact source until the next tick.",
+            )
+            _, fresh_entries = tree(consumer, repo, fresh_sha)
+            require(
+                enrollment(consumer, repo, fresh_entries) == plugin
+                and fresh_entries.get(STAMP) == entries.get(STAMP),
+                "Enrollment or exact native claim changed during poll; preserve its gate.",
+            )
+            require(
+                previous(consumer, repo, fresh_entries) == prior,
+                "Fresh native publication authority changed; preserve STOP without dispatch.",
+            )
             selected.append(
                 {"repository": repo, "source_sha": pending[0], "source_ref": ref}
             )

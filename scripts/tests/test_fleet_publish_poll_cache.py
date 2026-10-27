@@ -17,12 +17,13 @@ import fleet_publish_targets as poller  # noqa: E402
 import fleet_publish_producer as producer  # noqa: E402
 from fleet_publish_archive import make_intent, make_terminal, ref_name  # noqa: E402
 import test_fleet_publish_archive_write as fixture  # noqa: E402
+import test_fleet_publish as history_fixture  # noqa: E402
 
 CENTRAL = "repos/jbaruch/coding-policy"
 
 
 class NativeCentral(fixture.Git):
-    def __init__(self, count):
+    def __init__(self, count, overrides=None):
         super().__init__()
         self.reads = Counter()
         self.artifacts = {}
@@ -79,6 +80,7 @@ class NativeCentral(fixture.Git):
                 "consumer_repository": f"jbaruch/fixture-{index}",
                 "run_id": run,
                 "origin_run_id": run,
+                **(overrides or {}),
             }
             receipt = {
                 **self.records["receipt"],
@@ -339,6 +341,286 @@ class PollCacheTests(unittest.TestCase):
             cache.request(dispatch=True)
         self.assertEqual(cache.requests, 200)
 
+    def queued_poll(self, merges, *, bounded, late=None, walk_stamp=None):
+        class History(history_fixture.HistoryGitHub):
+            def record(self, run_id, kind):
+                return publisher.GitHub.record(self, run_id, kind)
+
+            def attempt_evidence(self, record, *, successful):
+                return publisher.GitHub.attempt_evidence(
+                    self, record, successful=successful
+                )
+
+            def pages(self, route, key=None):
+                if route.startswith(CENTRAL + "/"):
+                    assert self._poll_cache is not None
+                    self._poll_cache.request()
+                    native.reads[route] += 1
+                return super().pages(route, key)
+
+            def api(self, path, payload=None, *, binary=False, method="POST"):
+                if path == f"{CENTRAL}/actions/runs/777":
+                    assert self._poll_cache is not None
+                    self._poll_cache.request()
+                    native.reads[path] += 1
+                    return {
+                        "id": 777,
+                        "run_number": 19,
+                        "created_at": "2019-01-02T00:00:00Z",
+                        "run_attempt": 1,
+                        "head_sha": fixture.FLOW,
+                        "path": publisher.CENTRAL_WORKFLOW,
+                        "event": "schedule",
+                        "head_branch": "main",
+                        "repository": {"full_name": publisher.CENTRAL_REPOSITORY},
+                        "head_repository": {"full_name": publisher.CENTRAL_REPOSITORY},
+                    }
+                return super().api(path, payload, binary=binary, method=method)
+
+        graph = History()
+        native = NativeCentral(
+            1,
+            {
+                "consumer_repository": history_fixture.REPO,
+                "source_tree_sha": graph.commits[fixture.SOURCE]["tree"]["sha"],
+                "plugin_name": "jbaruch/nanoclaw-fixture",
+            },
+        )
+        graph.entries = deepcopy(
+            graph.trees[graph.commits[fixture.SOURCE]["tree"]["sha"]]
+        )
+        graph.put(
+            publisher.STAMP, publisher.encoded(native.artifacts[("100", "intent")])
+        )
+        graph.snapshot(fixture.CLAIM, [fixture.SOURCE], graph.entries)
+        graph.history = [{"sha": fixture.CLAIM}]
+        parent = fixture.CLAIM
+        for sha in (graph.SECOND, graph.THIRD)[:merges]:
+            if walk_stamp is not None:
+                if sha == graph.THIRD:
+                    graph.put(
+                        publisher.STAMP,
+                        publisher.encoded(native.artifacts[("100", "intent")]),
+                    )
+                elif walk_stamp == "missing":
+                    del graph.entries[publisher.STAMP]
+                elif walk_stamp == "unknown":
+                    graph.put(publisher.STAMP, b'{"schema_version":999}')
+                else:
+                    import json
+
+                    graph.put(
+                        publisher.STAMP,
+                        json.dumps(
+                            native.artifacts[("100", "intent")], indent=2
+                        ).encode(),
+                    )
+            graph.put("README.md", ("# Source " + sha).encode())
+            graph.snapshot(sha, [parent], graph.entries)
+            parent = sha
+        graph.tip = parent
+        original_catalog = poller.dispatch_deferred
+
+        def catalog(*args):
+            result = original_catalog(*args)
+            if late == "rerun":
+                native.runs["100"][0]["run_attempt"] = 2
+            elif late == "hold":
+                from fleet_publish_archive import make_hold
+
+                value = make_hold(
+                    "100",
+                    2,
+                    fixture.FLOW,
+                    finalizer={
+                        "workflow_path": ".github/workflows/fleet-publish-finalize.yml",
+                        "workflow_sha": fixture.FINAL,
+                        "run_id": "201",
+                        "run_attempt": 1,
+                    },
+                )
+                ref = ref_name("hold", run_id="100")
+                fixture.writer.create_only(
+                    native, ref, value, lambda: native.lookup(ref)
+                )
+            elif late is not None:
+                if late == "delete_stamp":
+                    del graph.entries[publisher.STAMP]
+                elif late == "change_stamp":
+                    graph.put(publisher.STAMP, b"{}")
+                elif late == "enrollment":
+                    graph.put(
+                        publisher.MARKER,
+                        publisher.encoded(
+                            {"schema_version": 1, "plugin_name": "jbaruch/changed"}
+                        ),
+                    )
+                graph.snapshot("8" * 40, [graph.tip], graph.entries)
+                graph.tip = "8" * 40
+            return result
+
+        with (
+            patch.object(publisher, "GitHubClient", return_value=native),
+            patch.object(
+                publisher,
+                "PollGitHubClient",
+                side_effect=lambda cache: CountedClient(native, cache),
+            ),
+            patch.object(
+                producer,
+                "TRUSTED_PRODUCERS",
+                (
+                    {
+                        k: v
+                        for k, v in native.pins.items()
+                        if k != producer.PRODUCER_OWNER_PATH
+                    },
+                ),
+            ),
+            patch.dict(
+                os.environ,
+                {
+                    "FLEET_CENTRAL_TOKEN": "fake-central",
+                    "GITHUB_REPOSITORY": publisher.CENTRAL_REPOSITORY,
+                    "GITHUB_EVENT_NAME": "schedule",
+                    "GITHUB_REF": "refs/heads/main",
+                    "GITHUB_RUN_ATTEMPT": "1",
+                    "GITHUB_RUN_ID": "777",
+                    "GITHUB_SHA": fixture.FLOW,
+                    "GITHUB_WORKFLOW_REF": "jbaruch/coding-policy/.github/workflows/fleet-publish.yml@refs/heads/main",
+                },
+            ),
+            patch.object(
+                poller,
+                "current_time",
+                return_value=history_fixture.datetime(
+                    2026, 10, 27, 2, tzinfo=history_fixture.timezone.utc
+                ),
+            ),
+            patch.object(poller, "dispatch_deferred", side_effect=catalog),
+        ):
+            with (
+                patch.object(publisher.PollImmutableCache, "request")
+                if not bounded
+                else nullcontext()
+            ):
+                result = poller.targets(graph)
+        return result, sum(native.reads.values())
+
+    def test_actual_one_and_two_queued_merge_cost(self):
+        for merges in (1, 2):
+            for bounded in (False, True):
+                result, reads = self.queued_poll(merges, bounded=bounded)
+                print(
+                    f"queued-merge-measurement merges={merges} bounded={bounded} reads={reads} result={result}"
+                )
+                self.assertEqual(
+                    result,
+                    (
+                        [
+                            {
+                                "repository": history_fixture.REPO,
+                                "source_sha": history_fixture.HistoryGitHub.SECOND,
+                                "source_ref": "refs/heads/main",
+                            }
+                        ],
+                        [],
+                        [],
+                    ),
+                )
+                if bounded:
+                    self.assertLessEqual(reads, 198)
+
+    def test_late_native_hold_rerun_and_changed_source_never_dispatch(self):
+        for late in (
+            "hold",
+            "rerun",
+            "delete_stamp",
+            "change_stamp",
+            "enrollment",
+            "advanced",
+        ):
+            with self.subTest(late=late):
+                result, _ = self.queued_poll(2, bounded=True, late=late)
+                self.assertEqual(result, ([], [history_fixture.REPO], []))
+
+    def test_different_missing_or_unknown_walked_stamp_keeps_full_old_proof(self):
+        result, _ = self.queued_poll(2, bounded=True, walk_stamp="unknown")
+        self.assertEqual(result, ([], [history_fixture.REPO], []))
+        # Sources may predate first bookkeeping (including recovery queues).
+        # Missing stamps retain the old candidate behavior, never exclusion.
+        missing, _ = self.queued_poll(2, bounded=True, walk_stamp="missing")
+        self.assertEqual(
+            missing[0][0]["source_sha"], history_fixture.HistoryGitHub.SECOND
+        )
+        result, reads = self.queued_poll(2, bounded=False, walk_stamp="different")
+        self.assertEqual(
+            result[0][0]["source_sha"], history_fixture.HistoryGitHub.SECOND
+        )
+        self.assertGreater(reads, 198)
+        bounded, _ = self.queued_poll(2, bounded=True, walk_stamp="different")
+        self.assertEqual(bounded, ([], [], [history_fixture.REPO]))
+
+    def test_internal_queue_hint_is_not_an_adapter_cli_field(self):
+        import subprocess
+
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(Path(__file__).resolve().parents[1] / "fleet_publish_workflow.py"),
+                "prepare",
+                "--verified-tip-stamp-sha",
+                "a" * 40,
+            ],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(result.stdout, "")
+        self.assertNotIn("a" * 40, result.stderr)
+
+    def test_actual_api_transport_central_root_and_nested_use_only_central_token(self):
+        from types import SimpleNamespace
+
+        recorded = []
+
+        def transport(argv, **kwargs):
+            recorded.append((list(argv), kwargs["env"]["GH_TOKEN"]))
+            return SimpleNamespace(returncode=0, stdout=b"{}", stderr=b"")
+
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "GH_TOKEN": "fake-app-not-a-real-token",
+                    "FLEET_CENTRAL_TOKEN": "fake-central-not-a-real-token",
+                },
+            ),
+            patch.object(publisher.subprocess, "run", side_effect=transport),
+        ):
+            github = publisher.GitHub()
+            with github.poll_immutable_reads():
+                for route in (
+                    CENTRAL,
+                    CENTRAL + "/git/ref/heads/main",
+                    "repos/jbaruch/fixture/git/ref/heads/main",
+                    "installation/repositories?per_page=100&page=1",
+                ):
+                    github.api(route)
+                assert github._poll_cache is not None
+                self.assertEqual(github._poll_cache.requests, 2)
+        self.assertEqual(
+            [token for _, token in recorded],
+            [
+                "fake-central-not-a-real-token",
+                "fake-central-not-a-real-token",
+                "fake-app-not-a-real-token",
+                "fake-app-not-a-real-token",
+            ],
+        )
+        self.assertTrue(all("fake-" not in " ".join(argv) for argv, _ in recorded))
+
     def test_verified_native_schedule_binding_consumes_one_request_and_refuses_unknown_context(
         self,
     ):
@@ -439,7 +721,7 @@ class PollCacheTests(unittest.TestCase):
                 attempts.append(repo)
                 if len(attempts) == 1:
                     first_slots.append(repo)
-                for _ in range(197):
+                for _ in range(98):
                     consumer._poll_cache.request()
                 return None
 
@@ -462,7 +744,7 @@ class PollCacheTests(unittest.TestCase):
                 patch.object(poller, "dispatch_deferred", return_value=False),
             ):
                 selected, held, deferred = poller.targets(root)
-            self.assertEqual(len(attempts), 2)
+            self.assertEqual(len(set(attempts)), 2)
             self.assertEqual(len(selected), 1)
             self.assertEqual(held, [])
             self.assertEqual(len(deferred), 23)

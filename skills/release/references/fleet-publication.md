@@ -122,7 +122,8 @@ remain unsupported. Readers never repair records or infer a new baseline from
 registry agreement and a consumer stamp. Preserve native source/run/version and
 repair evidence through the owning controller.
 
-The current local-owner proof supports only the explicit 19-path protocol set.
+The current local-owner proof supports only the explicit protocol set named by
+`skills/release/fleet_publish_producer.py`.
 Before upgrading an owner or executable-pin renewal with activated history,
 require a reviewed historical-source proof strategy and regressions over the
 previously activated intents and terminal records. Unknown historical owners

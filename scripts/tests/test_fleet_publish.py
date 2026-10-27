@@ -2137,8 +2137,8 @@ class PollDispatchTests(PublisherFixture):
         self.assertEqual(len(selected), 2)
         self.assertEqual(len(deferred), 22)
         self.assertEqual(held, [])
-        self.assertEqual(len(clients), 33)  # root +24 consumers +8 bounded proofs
-        self.assertEqual(sum(client.calls for client in clients), 16)
+        self.assertEqual(len(clients), 41)  # root +24 consumers +16 fresh proofs
+        self.assertEqual(sum(client.calls for client in clients), 32)
         self.assertEqual(sum(client.calls == 0 for client in clients), 25)
         self.assertEqual(max(client.calls for client in clients), 2)
 
