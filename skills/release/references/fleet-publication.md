@@ -122,6 +122,13 @@ remain unsupported. Readers never repair records or infer a new baseline from
 registry agreement and a consumer stamp. Preserve native source/run/version and
 repair evidence through the owning controller.
 
+The current local-owner proof supports only the explicit 19-path protocol set.
+Before upgrading an owner or executable-pin renewal with activated history,
+require a reviewed historical-source proof strategy and regressions over the
+previously activated intents and terminal records. Unknown historical owners
+remain fail-closed; no automatic backward-compatibility fallback exists. This
+maintenance obligation adds no activation prerequisite for the current set.
+
 A moderation recovery is a new central run bound to its original successful
 publication. It writes its own claim/bookkeeping and performs registry and
 moderation reads only. It must not publish again. A failed publish exit or
