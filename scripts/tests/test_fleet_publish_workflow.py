@@ -116,6 +116,38 @@ class WorkflowTests(unittest.TestCase):
         self.ok("prepare")
         self.ok("claim")
 
+    def test_actual_validate_cli_binds_repository_output_and_redacts_invalid_coordinates(
+        self,
+    ):
+        script = self.root / "fleet_publish_validate.py"
+        shutil.copyfile(ROOT / "scripts/fleet_publish_validate.py", script)
+
+        def validate(environment):
+            return subprocess.run(
+                [sys.executable, str(script)],
+                env=environment,
+                stdin=subprocess.DEVNULL,
+                capture_output=True,
+                timeout=10,
+                check=False,
+            )
+
+        result = validate(self.env)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, b"")
+        self.assertEqual(self.output.read_text(), "repository_name=nanoclaw-fixture\n")
+        before = self.output.read_bytes()
+        for changes in (
+            {"FLEET_CONSUMER_REPOSITORY": "other/PRIVATE"},
+            {"FLEET_SOURCE_SHA": "PRIVATE"},
+        ):
+            result = validate({**self.env, **changes})
+            self.assertEqual(result.returncode, 1)
+            self.assertEqual(result.stdout, b"")
+            self.assertNotIn(b"PRIVATE", result.stderr)
+            self.assertEqual(self.output.read_bytes(), before)
+        self.assertEqual(self.calls(), [])
+
     def test_actual_module_import_is_inert_and_routes_real_functions(self):
         module = load_real()
         with (
