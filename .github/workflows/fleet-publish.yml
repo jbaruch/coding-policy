@@ -48,7 +48,7 @@ jobs:
         run: python3 scripts/fleet_publish_targets.py --dispatch
 
   publish:
-    if: github.event_name == 'workflow_dispatch' && vars.FLEET_PUBLISHER_ENABLED == 'true'
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.run_attempt == 1 && vars.FLEET_PUBLISHER_ENABLED == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 40
     steps:

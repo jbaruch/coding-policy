@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Trusted central publisher. Consumer files are data, never commands or hooks.
 
-The workflow uploads intent.json before claim(), and receipt.json afterwards.
+The workflow claims source, uploads intent.json, then publishes once and uploads
+receipt.json. Both claim and immutable intent precede the publication effect.
 A claimed source stamp is a STOP record, never a retry credential. GitHub API
 failures, incomplete history and unavailable artifacts remain unknown/blocked.
 """
@@ -165,13 +166,59 @@ class GitHub:
 
     def pages(self, route: str, key: str | None = None) -> list[Any]:
         values: list[Any] = []
+        identities: set[str] = set()
+        expected_total: int | None = None
         for page in range(1, 11):
             joiner = "&" if "?" in route else "?"
             response = self.api(f"{route}{joiner}per_page=100&page={page}")
+            require(
+                not key or isinstance(response, dict) and key in response,
+                "Native list envelope is malformed.",
+            )
             items = response[key] if key else response
-            require(isinstance(items, list), "GitHub pagination is malformed.")
+            require(
+                isinstance(items, list) and len(items) <= 100,
+                "GitHub pagination is malformed.",
+            )
+            if key:
+                total = response.get("total_count")
+                if type(total) is not int:
+                    raise PublishRefused("Native pagination total is missing.")
+                require(
+                    type(total) is int
+                    and 0 <= total <= 1000
+                    and (expected_total is None or expected_total == total),
+                    "Native pagination total is missing, changed, or beyond its bound.",
+                )
+                expected_total = total
+                require(
+                    len(items) == min(100, total - len(values)),
+                    "Native pagination is incomplete; no absence or green gate inferred.",
+                )
+            for item in items:
+                require(
+                    isinstance(item, dict), "Native list contains a malformed object."
+                )
+                native_id = item.get("id")
+                sha = item.get("sha")
+                identity = (
+                    str(native_id)
+                    if type(native_id) is int and native_id > 0
+                    else (sha if valid_sha(sha) else None)
+                )
+                require(
+                    isinstance(identity, str)
+                    and identity
+                    and identity not in identities,
+                    "Native pagination repeats or omits an object identity.",
+                )
+                if not isinstance(identity, str):
+                    raise PublishRefused("Native object identity is missing.")
+                identities.add(identity)
             values.extend(items)
-            if len(items) < 100:
+            if (expected_total is not None and len(values) == expected_total) or (
+                not key and len(items) < 100
+            ):
                 return values
         raise PublishRefused(
             "GitHub pagination exceeds the bound; no absence or completion inferred."
@@ -335,7 +382,7 @@ def gate_source(github: GitHub, repo: str, sha: str, ref: str) -> None:
             "Both current-head independent review lanes must approve the merged PR.",
         )
     checks = github.pages(f"repos/{repo}/commits/{head}/check-runs", "check_runs")
-    statuses = github.api(f"repos/{repo}/commits/{head}/status")
+    statuses = github.pages(f"repos/{repo}/commits/{head}/status", "statuses")
     require(
         checks
         and all(
@@ -347,9 +394,7 @@ def gate_source(github: GitHub, repo: str, sha: str, ref: str) -> None:
         "Merged PR CI is not complete and green.",
     )
     require(
-        statuses.get("state") in ("success", "pending")
-        and not statuses.get("statuses")
-        or statuses.get("state") == "success",
+        all(status.get("state") == "success" for status in statuses),
         "Merged PR commit status is not green.",
     )
 
@@ -385,10 +430,15 @@ def verify_attempt(
         str(run.get("id")) == record["run_id"]
         and run.get("run_attempt") == record["run_attempt"] == 1
         and run.get("head_sha") == record["workflow_sha"]
+        and run.get("head_branch") == "main"
         and run.get("path") == CENTRAL_WORKFLOW
         and run.get("event") == "workflow_dispatch"
         and run.get("head_repository", {}).get("full_name") == CENTRAL_REPOSITORY
         and attempt.get("head_sha") == record["workflow_sha"]
+        and str(attempt.get("id")) == record["run_id"]
+        and attempt.get("head_branch") == "main"
+        and attempt.get("event") == "workflow_dispatch"
+        and attempt.get("path") == CENTRAL_WORKFLOW
         and attempt.get("run_attempt") == record["run_attempt"],
         "Central run/attempt binding is invalid.",
     )
@@ -402,7 +452,8 @@ def verify_attempt(
         f"repos/{record['consumer_repository']}/git/commits/{record['source_sha']}"
     )
     require(
-        commit.get("tree", {}).get("sha") == record["source_tree_sha"],
+        commit.get("sha") == record["source_sha"]
+        and commit.get("tree", {}).get("sha") == record["source_tree_sha"],
         "Source tree binding changed.",
     )
 
@@ -922,10 +973,12 @@ def prepare(
             "Source history diverged from the proven publication.",
         )
     if prior and prior["state"] == "published":
-        require(
-            tip == prior["bookkeeping_sha"],
-            "Resolve pending moderation before publishing newer source.",
-        )
+        if tip != prior["bookkeeping_sha"]:
+            old_claim = decode_record(file(github, repo, entries, STAMP))
+            prior_bookkeeping = prior["bookkeeping_sha"]
+            if prior_bookkeeping is None:
+                raise PublishRefused("Pending moderation bookkeeping is missing.")
+            retained_claim(github, old_claim, prior_bookkeeping, tip)
         require(
             expected_sha == prior["source_sha"],
             "Select the original published source for moderation recovery.",
@@ -1136,9 +1189,18 @@ def execute(github: GitHub, work: Path) -> bool:
         require(
             isinstance(output, dict)
             and type(output.get("publish_exit_code")) is int
-            and type(output.get("landed_after_error")) is bool,
+            and type(output.get("landed_after_error")) is bool
+            and (
+                output.get("version") is None
+                or output.get("version") == intent["version"]
+            ),
             "Publish result is malformed; preserve uncertainty.",
         )
+        if result.returncode == 0 and output.get("outcome") == "success":
+            require(
+                output.get("version") == intent["version"],
+                "Published version does not match the exact prepared source intent.",
+            )
         record.update(
             publish_exit_code=output["publish_exit_code"],
             landed_after_error=output["landed_after_error"],

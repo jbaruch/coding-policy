@@ -177,6 +177,7 @@ class NativeGitHub(publisher.GitHub):
                 "id": 101,
                 "run_attempt": self.current_attempt,
                 "head_sha": WORKFLOW,
+                "head_branch": "main",
                 "path": publisher.CENTRAL_WORKFLOW,
                 "event": "workflow_dispatch",
                 "head_repository": {"full_name": publisher.CENTRAL_REPOSITORY},
@@ -207,6 +208,8 @@ class NativeGitHub(publisher.GitHub):
             return self.native_reviews
         if path == f"repos/{REPO}/commits/{HEAD}/check-runs":
             return self.checks
+        if path == f"repos/{REPO}/commits/{HEAD}/status":
+            return self.status["statuses"]
         if path.startswith(f"repos/{REPO}/commits?path="):
             if "fleet-publish-enabled" in path:
                 return [{"sha": SOURCE}]
@@ -609,6 +612,128 @@ class PublisherTests(PublisherFixture):
         self.assertFalse(self.cli.called)
         self.assertNotIn("smart-publish.sh", self.helpers)
 
+    def test_publish_helper_cannot_confirm_different_source_version(self) -> None:
+        self.claimed()
+        original = self.helper
+
+        def helper(
+            name: str, *args: str, **kwargs: Any
+        ) -> subprocess.CompletedProcess[bytes]:
+            result = original(name, *args, **kwargs)
+            if name == "smart-publish.sh":
+                value = json.loads(result.stdout)
+                value["version"] = "9.9.9"
+                return subprocess.CompletedProcess([], 0, publisher.encoded(value))
+            return result
+
+        with patch.object(publisher, "helper", side_effect=helper):
+            with self.assertRaises(publisher.PublishRefused):
+                publisher.execute(self.github, self.work)
+        self.assertEqual(self.receipt()["state"], "uncertain")
+        self.assertNotIn("verify-moderation-cleared.sh", self.helpers)
+
+    def test_native_attempt_must_match_actual_id_main_branch_and_source_identity(
+        self,
+    ) -> None:
+        record = publisher.initial_record(
+            REPO,
+            SOURCE,
+            "refs/heads/main",
+            TREE,
+            "jbaruch/nanoclaw-fixture",
+            "0.1.0",
+            "0.1.1",
+            ENV,
+        )
+        original = self.github.api
+        for fragment, field, wrong in (
+            ("/actions/runs/101", "head_branch", "feature/not-main"),
+            ("/attempts/1", "id", 102),
+            (f"/git/commits/{SOURCE}", "sha", "f" * 40),
+        ):
+
+            def api(route: str, *args: Any, **kwargs: Any) -> Any:
+                value = deepcopy(original(route, *args, **kwargs))
+                if not isinstance(value, dict):
+                    raise AssertionError("Expected fake native JSON object.")
+                if fragment in route:
+                    value[field] = wrong
+                return value
+
+            with (
+                self.subTest(field=field),
+                patch.object(self.github, "api", side_effect=api),
+            ):
+                with self.assertRaises(publisher.PublishRefused):
+                    publisher.verify_attempt(self.github, record, successful=True)
+
+    def test_combined_commit_status_contexts_must_all_succeed(self) -> None:
+        for state in ("pending", "failure", "error", None):
+            self.github.status["statuses"] = [{"id": 7, "state": state}]
+            with self.subTest(state=state), self.assertRaises(publisher.PublishRefused):
+                publisher.gate_source(self.github, REPO, SOURCE, "refs/heads/main")
+
+    def test_native_page_envelopes_require_exact_totals_not_short_page_absence(
+        self,
+    ) -> None:
+        native = publisher.GitHub()
+        for response in (
+            {"total_count": 2, "check_runs": [{"id": 1}]},
+            {"total_count": True, "check_runs": []},
+            {"check_runs": []},
+            {"total_count": 1, "check_runs": []},
+            {"total_count": 1, "check_runs": [{"id": 1}, {"id": 2}]},
+        ):
+            with (
+                self.subTest(response=response),
+                patch.object(native, "api", return_value=response),
+            ):
+                with self.assertRaises(publisher.PublishRefused):
+                    native.pages(
+                        f"repos/{REPO}/commits/{HEAD}/check-runs", "check_runs"
+                    )
+
+    def test_native_multi_page_totals_and_ids_are_complete_and_stable(self) -> None:
+        native = publisher.GitHub()
+        first = {"total_count": 101, "check_runs": [{"id": i} for i in range(1, 101)]}
+        second = {"total_count": 101, "check_runs": [{"id": 101}]}
+        with patch.object(native, "api", side_effect=[first, second]) as api:
+            self.assertEqual(
+                len(
+                    native.pages(
+                        f"repos/{REPO}/commits/{HEAD}/check-runs", "check_runs"
+                    )
+                ),
+                101,
+            )
+            self.assertEqual(api.call_count, 2)
+        for bad in (
+            {"total_count": 102, "check_runs": [{"id": 101}, {"id": 102}]},
+            {"total_count": 101, "check_runs": [{"id": 1}]},
+        ):
+            with (
+                self.subTest(bad=bad),
+                patch.object(native, "api", side_effect=[first, bad]),
+            ):
+                with self.assertRaises(publisher.PublishRefused):
+                    native.pages(
+                        f"repos/{REPO}/commits/{HEAD}/check-runs", "check_runs"
+                    )
+
+    def test_native_empty_contexts_need_total_zero(self) -> None:
+        native = publisher.GitHub()
+        with patch.object(
+            native, "api", return_value={"total_count": 0, "statuses": []}
+        ):
+            self.assertEqual(
+                native.pages(f"repos/{REPO}/commits/{HEAD}/status", "statuses"), []
+            )
+        with patch.object(
+            native, "api", return_value={"total_count": 1, "statuses": []}
+        ):
+            with self.assertRaises(publisher.PublishRefused):
+                native.pages(f"repos/{REPO}/commits/{HEAD}/status", "statuses")
+
 
 class HistoryGitHub(NativeGitHub):
     """Actual immutable native commit/tree graph, including rapid merge backlog."""
@@ -711,6 +836,7 @@ class HistoryGitHub(NativeGitHub):
                 "id": int(run),
                 "run_attempt": 1,
                 "head_sha": WORKFLOW,
+                "head_branch": "main",
                 "path": publisher.CENTRAL_WORKFLOW,
                 "event": "workflow_dispatch",
                 "head_repository": {"full_name": publisher.CENTRAL_REPOSITORY},
@@ -1006,6 +1132,42 @@ class QueueTests(PublisherFixture):
             publisher.pending_sources(
                 github, REPO, github.tip, None, "jbaruch/nanoclaw-fixture"
             )
+
+    def test_moderation_recovery_after_later_merge_keeps_newer_code_and_source_queue(
+        self,
+    ) -> None:
+        github = self.finish_first(moderation="pending")
+        old_claim = github.tip
+        github.put("README.md", b"# Later source must survive recovery\n")
+        later = "8" * 40
+        github.snapshot(later, [old_claim], github.entries)
+        github.tip = later
+        before_changelog = publisher.file(github, REPO, github.entries, "CHANGELOG.md")
+        github.archived_records["101"] = dict(github.records)
+        github.current_run = "102"
+        github.records = {}
+        self.moderation = "pass"
+        recovery = self.work / "recovery-later"
+        recovery.mkdir()
+        publisher.prepare(
+            github, REPO, SOURCE, recovery, {**ENV, "GITHUB_RUN_ID": "102"}
+        )
+        publisher.claim(github, recovery)
+        github.records["intent"] = (recovery / "intent.json").read_bytes()
+        self.assertTrue(publisher.execute(github, recovery))
+        github.records["receipt"] = (recovery / "receipt.json").read_bytes()
+        self.assertEqual(
+            publisher.file(github, REPO, github.entries, "README.md"),
+            b"# Later source must survive recovery\n",
+        )
+        self.assertEqual(
+            publisher.file(github, REPO, github.entries, "CHANGELOG.md"),
+            before_changelog,
+        )
+        self.assertEqual(self.helpers.count("smart-publish.sh"), 1)
+        selected, held = poller.targets(github)
+        self.assertEqual(held, [])
+        self.assertEqual(selected[0]["source_sha"], github.SECOND)
 
 
 if __name__ == "__main__":
