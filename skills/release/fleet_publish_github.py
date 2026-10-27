@@ -52,7 +52,11 @@ class FleetPublishLookupError(RuntimeError):
     """Repair the native lookup; absent evidence never authorizes a publish retry."""
 
     def __init__(
-        self, kind: str, *, returncode: int | None = None, stderr_sha256: str | None = None
+        self,
+        kind: str,
+        *,
+        returncode: int | None = None,
+        stderr_sha256: str | None = None,
     ) -> None:
         super().__init__(
             "Restore bounded gh read access and complete central publication evidence; "
@@ -90,7 +94,8 @@ def _route(route: str) -> None:
         or segments[:2] != ["repos", "jbaruch"]
         or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,99}", segments[2])
         or any(
-            segment in (".", "..") or not re.fullmatch(r"[A-Za-z0-9_.~-]{1,256}", segment)
+            segment in (".", "..")
+            or not re.fullmatch(r"[A-Za-z0-9_.~-]{1,256}", segment)
             for segment in segments[3:]
         )
         or not re.fullmatch(r"[A-Za-z0-9_.~%:/@+,&=*-]*", parts.query)
@@ -114,12 +119,16 @@ def _route(route: str) -> None:
             or not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", key)
             or any(ord(char) < 32 or ord(char) == 127 for char in value)
             or "://" in value
-            or (key != "created" and not re.fullmatch(r"[A-Za-z0-9_.~:/@ +,=-]*", value))
+            or (
+                key != "created" and not re.fullmatch(r"[A-Za-z0-9_.~:/@ +,=-]*", value)
+            )
             or "%" in value
         ):
             _refuse("invalid_route")
         if key == "created":
-            if not re.fullmatch(r">=[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z", value):
+            if not re.fullmatch(
+                r">=[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z", value
+            ):
                 _refuse("invalid_route")
             try:
                 datetime.fromisoformat(value[2:])
@@ -166,7 +175,9 @@ def _decode(raw: bytes) -> object:
             if isinstance(item, str):
                 item.encode("utf-8")
             elif isinstance(item, dict):
-                pending.extend((child, depth + 1) for pair in item.items() for child in pair)
+                pending.extend(
+                    (child, depth + 1) for pair in item.items() for child in pair
+                )
             elif isinstance(item, list):
                 pending.extend((child, depth + 1) for child in item)
         return value
@@ -259,7 +270,9 @@ class GitHubClient:
             if failure is not None:
                 _retire(child)
                 raise FleetPublishLookupError(
-                    failure, returncode=child.returncode, stderr_sha256=err_hash.hexdigest()
+                    failure,
+                    returncode=child.returncode,
+                    stderr_sha256=err_hash.hexdigest(),
                 )
             if child.returncode != 0:
                 _retire(child)
@@ -271,7 +284,9 @@ class GitHubClient:
             return bytes(out)
         except OSError:
             raise FleetPublishLookupError(
-                "command_io_failed", returncode=child.poll(), stderr_sha256=err_hash.hexdigest()
+                "command_io_failed",
+                returncode=child.poll(),
+                stderr_sha256=err_hash.hexdigest(),
             ) from None
         finally:
             selector.close()
@@ -357,7 +372,8 @@ class GitHubClient:
         if found is None:
             return None
         archive = self._read(
-            f"repos/{CENTRAL_REPOSITORY}/actions/artifacts/{found}/zip", MAX_ARCHIVE_BYTES
+            f"repos/{CENTRAL_REPOSITORY}/actions/artifacts/{found}/zip",
+            MAX_ARCHIVE_BYTES,
         )
         try:
             with zipfile.ZipFile(io.BytesIO(archive)) as zipped:
@@ -372,7 +388,8 @@ class GitHubClient:
                     or not stat.S_ISREG(info.external_attr >> 16)
                     or info.flag_bits & (1 | 0x40 | 0x2000)
                     or info.external_attr & 0x10
-                    or info.compress_type not in (zipfile.ZIP_STORED, zipfile.ZIP_DEFLATED)
+                    or info.compress_type
+                    not in (zipfile.ZIP_STORED, zipfile.ZIP_DEFLATED)
                     or not 0 < info.file_size <= MAX_RECORD_BYTES
                 ):
                     _refuse("invalid_archive_member")

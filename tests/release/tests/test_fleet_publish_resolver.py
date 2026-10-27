@@ -52,13 +52,16 @@ class Fixture:
         self.files: dict[tuple[str, str], dict[str, bytes]] = {}
         self.pinset = {}
         definitions = {
-            name: ("fixed reviewed fixture " + name).encode() for name in producer.PRODUCER_PATHS
+            name: ("fixed reviewed fixture " + name).encode()
+            for name in producer.PRODUCER_PATHS
         }
         self.workflow = self.commit(CENTRAL, [], definitions)
         for name, raw in definitions.items():
             self.pinset[name] = git_hash("blob", raw)
         self.central_tip = self.commit(
-            CENTRAL, [self.workflow], {**definitions, "README.md": b"later central metadata"}
+            CENTRAL,
+            [self.workflow],
+            {**definitions, "README.md": b"later central metadata"},
         )
         self.routes[f"repos/{CENTRAL}"] = {
             "full_name": CENTRAL,
@@ -80,9 +83,13 @@ class Fixture:
             "path": ".github/workflows/fleet-publish.yml",
             "state": "active",
         }
-        self.routes[f"repos/{CENTRAL}/actions/workflows/fleet-publish.yml"] = workflow_metadata
+        self.routes[f"repos/{CENTRAL}/actions/workflows/fleet-publish.yml"] = (
+            workflow_metadata
+        )
         initial = {
-            ".github/fleet-publish-enabled": encoded({"schema_version": 1, "plugin_name": REPO}),
+            ".github/fleet-publish-enabled": encoded(
+                {"schema_version": 1, "plugin_name": REPO}
+            ),
             ".tessl-plugin/plugin.json": encoded({"name": REPO, "version": "0.1.0"}),
             "CHANGELOG.md": b"# Changelog\n",
             "code.py": b"fixed source\n",
@@ -98,7 +105,11 @@ class Fixture:
         )
         self.default(self.tip)
         self.routes[f"repos/{REPO}/commits/{self.source}/pulls?per_page=100&page=1"] = [
-            {"number": 7, "merge_commit_sha": self.source, "merged_at": "2024-10-20T10:00:00Z"}
+            {
+                "number": 7,
+                "merge_commit_sha": self.source,
+                "merged_at": "2024-10-20T10:00:00Z",
+            }
         ]
         self.routes[f"repos/{REPO}/pulls/7"] = {
             "number": 7,
@@ -116,9 +127,12 @@ class Fixture:
         rows = []
         raw = bytearray()
         for name, (mode, kind, sha) in sorted(
-            entries.items(), key=lambda pair: pair[0] + ("/" if pair[1][1] == "tree" else "")
+            entries.items(),
+            key=lambda pair: pair[0] + ("/" if pair[1][1] == "tree" else ""),
         ):
-            raw.extend((mode.lstrip("0") + " " + name + "\0").encode() + bytes.fromhex(sha))
+            raw.extend(
+                (mode.lstrip("0") + " " + name + "\0").encode() + bytes.fromhex(sha)
+            )
             rows.append({"path": name, "mode": mode, "type": kind, "sha": sha})
         digest = git_hash("tree", bytes(raw))
         self.routes[f"repos/{repo}/git/trees/{digest}"] = {
@@ -193,7 +207,9 @@ class Fixture:
 
     def claim_commit(self, parent, intent):
         return self.commit(
-            REPO, [parent], {**self.files[REPO, parent], resolver.STAMP: encoded(intent)}
+            REPO,
+            [parent],
+            {**self.files[REPO, parent], resolver.STAMP: encoded(intent)},
         )
 
     def default(self, tip):
@@ -209,7 +225,9 @@ class Fixture:
             "object": {"type": "commit", "sha": tip},
         }
 
-    def add_run(self, run, intent=None, *, title=None, status="completed", conclusion="success"):
+    def add_run(
+        self, run, intent=None, *, title=None, status="completed", conclusion="success"
+    ):
         native = {
             "id": int(run),
             "run_attempt": 1,
@@ -226,7 +244,9 @@ class Fixture:
             "display_title": title or f"fleet-publish-v1:{REPO}:{self.source}",
         }
         self.routes[f"repos/{CENTRAL}/actions/runs/{run}"] = copy.deepcopy(native)
-        self.routes[f"repos/{CENTRAL}/actions/runs/{run}/attempts/1"] = copy.deepcopy(native)
+        self.routes[f"repos/{CENTRAL}/actions/runs/{run}/attempts/1"] = copy.deepcopy(
+            native
+        )
         self.records[run, "intent"] = copy.deepcopy(intent)
         self.catalog()
 
@@ -295,7 +315,12 @@ class ResolverTests(unittest.TestCase):
         selected = resolver.select(f, REPO, f.source)
         self.assertEqual(
             selected,
-            {"schema_version": 1, "database_id": int(RUN), "confirmed": False, "record": f.intent},
+            {
+                "schema_version": 1,
+                "database_id": int(RUN),
+                "confirmed": False,
+                "record": f.intent,
+            },
         )
         self.hold(lambda: resolver.resolve(f, REPO, f.source), "pending")
 
@@ -309,7 +334,9 @@ class ResolverTests(unittest.TestCase):
         f = self.fixture
         f.records[RUN, "receipt"].update(state="published", moderation="pending")
         for suffix in ("", "/attempts/1"):
-            f.routes[f"repos/{CENTRAL}/actions/runs/{RUN}{suffix}"]["conclusion"] = "failure"
+            f.routes[f"repos/{CENTRAL}/actions/runs/{RUN}{suffix}"]["conclusion"] = (
+                "failure"
+            )
         recovery = f.new_intent(RECOVERY, origin=RUN)
         claim = f.claim_commit(f.tip, recovery)
         f.default(claim)
@@ -317,7 +344,8 @@ class ResolverTests(unittest.TestCase):
         f.records[RECOVERY, "receipt"] = f.receipt(recovery, claim)
         self.hold(lambda: resolver.resolve(f, REPO, f.source), "unconfirmed")
         self.assertEqual(
-            resolver.resolve(f, REPO, f.source, run_id=RECOVERY), f.records[RECOVERY, "receipt"]
+            resolver.resolve(f, REPO, f.source, run_id=RECOVERY),
+            f.records[RECOVERY, "receipt"],
         )
         f.records[RUN, "receipt"]["publish_exit_code"] = 1
         self.hold(lambda: resolver.resolve(f, REPO, f.source, run_id=RECOVERY))
@@ -384,7 +412,9 @@ class ResolverTests(unittest.TestCase):
         ]:
             with self.subTest(key=key):
                 f.routes[route] = {**original, key: value}
-                self.hold(lambda: resolver.select(f, REPO, f.source), "workflow_binding")
+                self.hold(
+                    lambda: resolver.select(f, REPO, f.source), "workflow_binding"
+                )
         f.routes[route] = original
 
     def test_receipt_missing_expired_unknown_and_native_failure_never_confirm(self):
@@ -400,13 +430,17 @@ class ResolverTests(unittest.TestCase):
             f.records[RUN, "receipt"] = value
             self.hold(lambda: resolver.resolve(f, REPO, f.source))
         f.records[RUN, "receipt"] = original
-        f.routes[f"repos/{CENTRAL}/actions/runs/{RUN}/attempts/1"]["conclusion"] = "failure"
+        f.routes[f"repos/{CENTRAL}/actions/runs/{RUN}/attempts/1"]["conclusion"] = (
+            "failure"
+        )
         self.hold(lambda: resolver.resolve(f, REPO, f.source), "unconfirmed")
 
     def test_missing_intent_only_positive_skipped_claim_and_effect_excludes(self):
         f = self.fixture
         f.add_run(OTHER, None)
-        jobsroute = f"repos/{CENTRAL}/actions/runs/{OTHER}/attempts/1/jobs?per_page=100&page=1"
+        jobsroute = (
+            f"repos/{CENTRAL}/actions/runs/{OTHER}/attempts/1/jobs?per_page=100&page=1"
+        )
         job = {
             "id": 9001,
             "name": "publish",
@@ -416,8 +450,16 @@ class ResolverTests(unittest.TestCase):
             "status": "completed",
             "conclusion": "failure",
             "steps": [
-                {"name": resolver.CLAIM_STEP, "status": "completed", "conclusion": "skipped"},
-                {"name": resolver.EFFECT_STEP, "status": "completed", "conclusion": "skipped"},
+                {
+                    "name": resolver.CLAIM_STEP,
+                    "status": "completed",
+                    "conclusion": "skipped",
+                },
+                {
+                    "name": resolver.EFFECT_STEP,
+                    "status": "completed",
+                    "conclusion": "skipped",
+                },
             ],
         }
         f.routes[jobsroute] = {"total_count": 1, "jobs": [job]}
@@ -436,7 +478,9 @@ class ResolverTests(unittest.TestCase):
         f.catalog()
         self.hold(lambda: resolver.resolve(f, REPO, f.source), "workflow_binding")
 
-    def test_changed_duplicate_or_truncated_native_catalog_never_proves_uniqueness(self):
+    def test_changed_duplicate_or_truncated_native_catalog_never_proves_uniqueness(
+        self,
+    ):
         f = self.fixture
         route = f"repos/{CENTRAL}/actions/workflows/77/runs?event=workflow_dispatch&created=%3E%3D2024-10-20T10%3A00%3A00Z&per_page=100&page=1"
         page = copy.deepcopy(f.routes[route])
@@ -500,7 +544,9 @@ class ResolverTests(unittest.TestCase):
             f.catalog()
             self.hold(lambda: resolver.select(f, REPO, f.source), "workflow_binding")
         for suffix in ("", "/attempts/1"):
-            f.routes[f"repos/{CENTRAL}/actions/runs/{RUN}{suffix}"] = copy.deepcopy(original)
+            f.routes[f"repos/{CENTRAL}/actions/runs/{RUN}{suffix}"] = copy.deepcopy(
+                original
+            )
         f.catalog()
         self.assertEqual(resolver.resolve(f, REPO, f.source), f.records[RUN, "receipt"])
 
@@ -533,11 +579,16 @@ class ResolverTests(unittest.TestCase):
             any(call[0] == "json" and "/actions/runs/6" in call[1] for call in f.calls)
         )
         catalog_calls = [
-            call[1] for call in f.calls if call[0] == "json" and "/workflows/77/runs?" in call[1]
+            call[1]
+            for call in f.calls
+            if call[0] == "json" and "/workflows/77/runs?" in call[1]
         ]
         self.assertEqual(len(catalog_calls), 2)
         self.assertTrue(
-            all("created=%3E%3D2024-10-20T10%3A00%3A00Z" in route for route in catalog_calls)
+            all(
+                "created=%3E%3D2024-10-20T10%3A00%3A00Z" in route
+                for route in catalog_calls
+            )
         )
 
     def test_many_unrelated_runs_use_trusted_list_rows_not_per_run_downloads(self):
@@ -550,7 +601,9 @@ class ResolverTests(unittest.TestCase):
             )
         self.assertEqual(resolver.resolve(f, REPO, f.source), f.records[RUN, "receipt"])
         self.assertLess(len(f.calls), 100)
-        self.assertFalse(any(call[0] == "artifact" and call[1] != RUN for call in f.calls))
+        self.assertFalse(
+            any(call[0] == "artifact" and call[1] != RUN for call in f.calls)
+        )
         self.assertFalse(
             any(call[0] == "json" and "/actions/runs/4" in call[1] for call in f.calls)
         )

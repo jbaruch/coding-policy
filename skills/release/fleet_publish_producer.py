@@ -66,10 +66,14 @@ def verify_workflow_protocol(client: GitHubRead, workflow_sha: str) -> None:
         raise FleetPublishLookupError("workflow_metadata")
     tip = obj.get("sha")
     _require(
-        ref.get("ref") == "refs/heads/main" and obj.get("type") == "commit" and valid_sha(tip),
+        ref.get("ref") == "refs/heads/main"
+        and obj.get("type") == "commit"
+        and valid_sha(tip),
         "workflow_metadata",
     )
-    comparison = client.json(f"repos/{CENTRAL_REPOSITORY}/compare/{workflow_sha}...{tip}")
+    comparison = client.json(
+        f"repos/{CENTRAL_REPOSITORY}/compare/{workflow_sha}...{tip}"
+    )
     _require(isinstance(comparison, dict), "workflow_ancestry")
     if not isinstance(comparison, dict):
         raise FleetPublishLookupError("workflow_ancestry")
@@ -138,11 +142,17 @@ def verify_workflow_protocol(client: GitHubRead, workflow_sha: str) -> None:
             if entry is None:
                 raise FleetPublishLookupError("unknown_producer")
             if index + 1 == len(parts):
-                _require(entry.get("type") == "blob" and entry.get("mode") in ("100644", "100755"))
+                _require(
+                    entry.get("type") == "blob"
+                    and entry.get("mode") in ("100644", "100755")
+                )
                 actual[path] = entry["sha"]
             else:
                 _require(entry.get("type") == "tree" and entry.get("mode") == "040000")
                 sha = entry["sha"]
     _require(
-        any(set(pinset) == set(PRODUCER_PATHS) and actual == pinset for pinset in TRUSTED_PRODUCERS)
+        any(
+            set(pinset) == set(PRODUCER_PATHS) and actual == pinset
+            for pinset in TRUSTED_PRODUCERS
+        )
     )

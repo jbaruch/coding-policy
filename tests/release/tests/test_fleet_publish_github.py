@@ -81,7 +81,10 @@ def zipped(
 
 
 def artifact(
-    *, identifier: object = 99, name: object = "fleet-publish-intent-v1", **changes: object
+    *,
+    identifier: object = 99,
+    name: object = "fleet-publish-intent-v1",
+    **changes: object,
 ) -> dict[str, object]:
     return {
         "id": identifier,
@@ -169,9 +172,12 @@ class GitHubClientTests(unittest.TestCase):
     def test_json_actual_get_transport_is_fixed_and_import_is_inert(self):
         self.assertEqual(self.calls(), [])
         self.replies({ROUTE: {"json": {"workflow_runs": [], "total_count": 0}}})
-        self.assertEqual(client.GitHubClient().json(ROUTE), {"workflow_runs": [], "total_count": 0})
         self.assertEqual(
-            self.calls(), [["api", "--hostname", "github.com", "--method", "GET", ROUTE]]
+            client.GitHubClient().json(ROUTE), {"workflow_runs": [], "total_count": 0}
+        )
+        self.assertEqual(
+            self.calls(),
+            [["api", "--hostname", "github.com", "--method", "GET", ROUTE]],
         )
 
     def test_exact_intent_and_receipt_download_by_id_without_following_url(self):
@@ -184,7 +190,9 @@ class GitHubClientTests(unittest.TestCase):
 
     def test_complete_zero_or_other_artifacts_are_the_only_none_results(self):
         for rows in ([], [artifact(name="unrelated")]):
-            self.replies({LIST: {"json": {"total_count": len(rows), "artifacts": rows}}})
+            self.replies(
+                {LIST: {"json": {"total_count": len(rows), "artifacts": rows}}}
+            )
             self.assertIsNone(client.GitHubClient().artifact(RUN, "intent"))
         self.assertEqual([call[-1] for call in self.calls()], [LIST, LIST])
 
@@ -200,19 +208,36 @@ class GitHubClientTests(unittest.TestCase):
         self.assertEqual(client.GitHubClient().artifact(RUN, "intent"), record())
         self.assertEqual([call[-1] for call in self.calls()], [LIST, SECOND, ZIP])
         self.replies(
-            {SECOND: {"json": {"total_count": 101, "artifacts": [artifact(name="not-target")]}}}
+            {
+                SECOND: {
+                    "json": {
+                        "total_count": 101,
+                        "artifacts": [artifact(name="not-target")],
+                    }
+                }
+            }
         )
         self.assertIsNone(client.GitHubClient().artifact(RUN, "intent"))
 
     def test_duplicate_name_on_later_page_refuses_before_download(self):
-        rows = [artifact(), *[artifact(identifier=1000 + i, name=f"other-{i}") for i in range(99)]]
+        rows = [
+            artifact(),
+            *[artifact(identifier=1000 + i, name=f"other-{i}") for i in range(99)],
+        ]
         self.replies(
             {
                 LIST: {"json": {"total_count": 101, "artifacts": rows}},
-                SECOND: {"json": {"total_count": 101, "artifacts": [artifact(identifier=100)]}},
+                SECOND: {
+                    "json": {
+                        "total_count": 101,
+                        "artifacts": [artifact(identifier=100)],
+                    }
+                },
             }
         )
-        self.refuse(lambda: client.GitHubClient().artifact(RUN, "intent"), "duplicate_artifact")
+        self.refuse(
+            lambda: client.GitHubClient().artifact(RUN, "intent"), "duplicate_artifact"
+        )
         self.assertEqual([call[-1] for call in self.calls()], [LIST, SECOND])
 
     def test_target_expired_oversize_and_bad_identity_are_errors_not_absence(self):
@@ -225,7 +250,9 @@ class GitHubClientTests(unittest.TestCase):
         ):
             with self.subTest(changes=changes):
                 self.evidence(row=artifact(**changes))
-                self.refuse(lambda: client.GitHubClient().artifact(RUN, "intent"), expected)
+                self.refuse(
+                    lambda: client.GitHubClient().artifact(RUN, "intent"), expected
+                )
         self.assertTrue(all(call[-1] == LIST for call in self.calls()))
 
     def test_short_changed_duplicate_and_over_budget_pages_never_prove_absence(self):
@@ -234,11 +261,16 @@ class GitHubClientTests(unittest.TestCase):
             ({"total_count": True, "artifacts": []}, "invalid_artifact_listing"),
             ({"total_count": 2, "artifacts": []}, "incomplete_artifact_listing"),
             ({"total_count": 2001, "artifacts": []}, "invalid_artifact_listing"),
-            ({"total_count": 2, "artifacts": [artifact(), artifact()]}, "invalid_artifact_listing"),
+            (
+                {"total_count": 2, "artifacts": [artifact(), artifact()]},
+                "invalid_artifact_listing",
+            ),
         ):
             with self.subTest(page=page):
                 self.replies({LIST: {"json": page}})
-                self.refuse(lambda: client.GitHubClient().artifact(RUN, "intent"), expected)
+                self.refuse(
+                    lambda: client.GitHubClient().artifact(RUN, "intent"), expected
+                )
         self.replies(
             {
                 LIST: {"json": {"total_count": 101, "artifacts": first}},
@@ -246,18 +278,25 @@ class GitHubClientTests(unittest.TestCase):
             }
         )
         self.refuse(
-            lambda: client.GitHubClient().artifact(RUN, "intent"), "changed_artifact_listing"
+            lambda: client.GitHubClient().artifact(RUN, "intent"),
+            "changed_artifact_listing",
         )
 
     def test_record_run_binding_unknown_version_and_missing_fields_refuse(self):
-        for changes in ({"run_id": "234567890"}, {"schema_version": 2}, {"state": "PRIVATE"}):
+        for changes in (
+            {"run_id": "234567890"},
+            {"schema_version": 2},
+            {"state": "PRIVATE"},
+        ):
             with self.subTest(changes=changes):
                 self.evidence(zipped(raw=json.dumps({**record(), **changes}).encode()))
                 self.refuse(lambda: client.GitHubClient().artifact(RUN, "intent"))
         missing = record()
         del missing["source_sha"]
         self.evidence(zipped(raw=json.dumps(missing).encode()))
-        self.refuse(lambda: client.GitHubClient().artifact(RUN, "intent"), "invalid_record")
+        self.refuse(
+            lambda: client.GitHubClient().artifact(RUN, "intent"), "invalid_record"
+        )
 
     def test_exact_member_regular_type_and_archive_cardinality(self):
         cases = [
@@ -280,7 +319,8 @@ class GitHubClientTests(unittest.TestCase):
             with self.subTest(case=index):
                 self.evidence(binary)
                 self.refuse(
-                    lambda: client.GitHubClient().artifact(RUN, "intent"), "invalid_archive_member"
+                    lambda: client.GitHubClient().artifact(RUN, "intent"),
+                    "invalid_archive_member",
                 )
 
     def test_duplicate_archive_names_and_nul_original_name_cannot_alias(self):
@@ -297,7 +337,8 @@ class GitHubClientTests(unittest.TestCase):
         for binary in (duplicate, nul):
             self.evidence(binary)
             self.refuse(
-                lambda: client.GitHubClient().artifact(RUN, "intent"), "invalid_archive_member"
+                lambda: client.GitHubClient().artifact(RUN, "intent"),
+                "invalid_archive_member",
             )
 
     def test_encrypted_member_and_oversize_inflation_refuse_before_record(self):
@@ -305,12 +346,19 @@ class GitHubClientTests(unittest.TestCase):
         for signature, offset in ((b"PK\x03\x04", 6), (b"PK\x01\x02", 8)):
             position = encrypted.index(signature) + offset
             struct.pack_into(
-                "<H", encrypted, position, struct.unpack_from("<H", encrypted, position)[0] | 1
+                "<H",
+                encrypted,
+                position,
+                struct.unpack_from("<H", encrypted, position)[0] | 1,
             )
-        for binary in (bytes(encrypted), zipped(raw=b" " * (client.MAX_RECORD_BYTES + 1))):
+        for binary in (
+            bytes(encrypted),
+            zipped(raw=b" " * (client.MAX_RECORD_BYTES + 1)),
+        ):
             self.evidence(binary)
             self.refuse(
-                lambda: client.GitHubClient().artifact(RUN, "intent"), "invalid_archive_member"
+                lambda: client.GitHubClient().artifact(RUN, "intent"),
+                "invalid_archive_member",
             )
 
     def test_corrupt_archive_crc_compressed_data_and_record_refuse(self):
@@ -326,10 +374,14 @@ class GitHubClientTests(unittest.TestCase):
             self.evidence(binary)
             self.refuse(lambda: client.GitHubClient().artifact(RUN, "intent"))
 
-    def test_created_cutoff_uses_fixed_get_transport_and_only_canonical_utc_comparison(self):
+    def test_created_cutoff_uses_fixed_get_transport_and_only_canonical_utc_comparison(
+        self,
+    ):
         route = "repos/jbaruch/coding-policy/actions/workflows/fleet-publish.yml/runs?event=workflow_dispatch&created=%3E%3D2024-10-20T10%3A00%3A00Z&per_page=100&page=1"
         self.replies({route: {"json": {"total_count": 0, "workflow_runs": []}}})
-        self.assertEqual(client.GitHubClient().json(route), {"total_count": 0, "workflow_runs": []})
+        self.assertEqual(
+            client.GitHubClient().json(route), {"total_count": 0, "workflow_runs": []}
+        )
         self.assertEqual(self.calls()[0][-1], route)
         for query in (
             "created=%3E%3D2024-02-30T10%3A00%3A00Z",
@@ -367,7 +419,10 @@ class GitHubClientTests(unittest.TestCase):
             "repos/jbaruch/repo?x=%24%28PRIVATE%29",
         ):
             with self.subTest(route=route):
-                self.refuse(lambda route=route: client.GitHubClient().json(route), "invalid_route")
+                self.refuse(
+                    lambda route=route: client.GitHubClient().json(route),
+                    "invalid_route",
+                )
         self.assertEqual(self.calls(), [])
 
     def test_selection_rejects_invalid_run_kind_without_subprocess(self):
@@ -384,7 +439,14 @@ class GitHubClientTests(unittest.TestCase):
         self.assertEqual(self.calls(), [])
 
     def test_json_duplicates_nonfinite_surrogates_and_invalid_utf8_refuse(self):
-        for raw in (b'{"id":1,"id":2}', b"NaN", b"1e999", b'"\\ud800"', b"\xff", b"PRIVATE"):
+        for raw in (
+            b'{"id":1,"id":2}',
+            b"NaN",
+            b"1e999",
+            b'"\\ud800"',
+            b"\xff",
+            b"PRIVATE",
+        ):
             self.replies({ROUTE: {"raw": base64.b64encode(raw).decode()}})
             self.refuse(lambda: client.GitHubClient().json(ROUTE), "invalid_json")
 
@@ -411,7 +473,9 @@ class GitHubClientTests(unittest.TestCase):
             self.refuse(lambda: client.GitHubClient().json(ROUTE), "stderr_budget")
         self.evidence()
         self.replies({ZIP: {"stdout_repeat": client.MAX_ARCHIVE_BYTES + 1}})
-        self.refuse(lambda: client.GitHubClient().artifact(RUN, "intent"), "stdout_budget")
+        self.refuse(
+            lambda: client.GitHubClient().artifact(RUN, "intent"), "stdout_budget"
+        )
         self.replies({ROUTE: {"json": {}}})
         api = client.GitHubClient()
         with patch.object(client, "MAX_COMMANDS", 1):
@@ -423,7 +487,9 @@ class GitHubClientTests(unittest.TestCase):
     def test_missing_download_and_incomplete_later_page_never_return_none(self):
         self.evidence()
         self.replies({ZIP: {"exit": 37, "stderr": "PRIVATE unavailable download"}})
-        self.refuse(lambda: client.GitHubClient().artifact(RUN, "intent"), "command_failed")
+        self.refuse(
+            lambda: client.GitHubClient().artifact(RUN, "intent"), "command_failed"
+        )
         first = [artifact(identifier=1000 + i, name=f"other-{i}") for i in range(100)]
         self.replies(
             {
@@ -432,7 +498,8 @@ class GitHubClientTests(unittest.TestCase):
             }
         )
         self.refuse(
-            lambda: client.GitHubClient().artifact(RUN, "intent"), "incomplete_artifact_listing"
+            lambda: client.GitHubClient().artifact(RUN, "intent"),
+            "incomplete_artifact_listing",
         )
 
     def test_corrupt_deflate_empty_zip_and_duplicate_record_keys_refuse(self):
@@ -447,25 +514,37 @@ class GitHubClientTests(unittest.TestCase):
         duplicate = json.dumps(record()).replace(
             '"schema_version": 1', '"schema_version": 1, "schema_version": 1'
         )
-        for binary in (bytes(compressed), empty.getvalue(), zipped(raw=duplicate.encode())):
+        for binary in (
+            bytes(compressed),
+            empty.getvalue(),
+            zipped(raw=duplicate.encode()),
+        ):
             self.evidence(binary)
             self.refuse(lambda: client.GitHubClient().artifact(RUN, "intent"))
 
     def test_hung_command_timeout_is_not_absence(self):
         self.replies({ROUTE: {"sleep": True}})
         with patch.object(client, "COMMAND_TIMEOUT_SECONDS", 0.05):
-            error = self.refuse(lambda: client.GitHubClient().json(ROUTE), "command_timeout")
+            error = self.refuse(
+                lambda: client.GitHubClient().json(ROUTE), "command_timeout"
+            )
         self.assertIsNotNone(error.returncode)
 
     def test_cleanup_failure_remains_fixed_lookup_error_without_child_data(self):
         fake = SimpleNamespace(pid=123, poll=lambda: None)
-        with patch.object(client.os, "killpg", side_effect=PermissionError(1, "PRIVATE failure")):
-            error = self.refuse(lambda: client._retire(fake), "command_retirement_failed")
+        with patch.object(
+            client.os, "killpg", side_effect=PermissionError(1, "PRIVATE failure")
+        ):
+            error = self.refuse(
+                lambda: client._retire(fake), "command_retirement_failed"
+            )
         self.assertIsNone(error.returncode)
 
     def test_missing_gh_is_fixed_lookup_failure(self):
         with patch.dict(os.environ, {"PATH": str(self.root / "missing")}):
-            self.refuse(lambda: client.GitHubClient().json(ROUTE), "command_unavailable")
+            self.refuse(
+                lambda: client.GitHubClient().json(ROUTE), "command_unavailable"
+            )
 
 
 if __name__ == "__main__":

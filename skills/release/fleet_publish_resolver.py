@@ -111,7 +111,11 @@ def _json_file(raw: bytes) -> dict[str, Any]:
     _need(len(raw) <= MAX_RECORD_BYTES, "source_binding")
     try:
         return _object(
-            json.loads(raw.decode("utf-8"), object_pairs_hook=_unique, parse_constant=_unsupported),
+            json.loads(
+                raw.decode("utf-8"),
+                object_pairs_hook=_unique,
+                parse_constant=_unsupported,
+            ),
             "source_binding",
         )
     except (UnicodeError, ValueError, RecursionError):
@@ -163,18 +167,25 @@ class _Evidence:
                 except FleetRecordError:
                     _hold("claim_binding")
                 _need(
-                    claim["state"] == "claimed" and claim["consumer_repository"] == self.repo,
+                    claim["state"] == "claimed"
+                    and claim["consumer_repository"] == self.repo,
                     "claim_binding",
                 )
-            if claim != previous and claim is not None and claim["source_sha"] == self.source:
+            if (
+                claim != previous
+                and claim is not None
+                and claim["source_sha"] == self.source
+            ):
                 _need(
-                    sha != self.source and len(self.commit(self.repo, sha)["parents"]) == 1,
+                    sha != self.source
+                    and len(self.commit(self.repo, sha)["parents"]) == 1,
                     "claim_binding",
                 )
                 self.claims.append((claim, sha))
             previous = claim
         workflow = self.obj(
-            f"repos/{CENTRAL_REPOSITORY}/actions/workflows/fleet-publish.yml", "workflow_binding"
+            f"repos/{CENTRAL_REPOSITORY}/actions/workflows/fleet-publish.yml",
+            "workflow_binding",
         )
         _need(
             _positive(workflow.get("id"))
@@ -226,7 +237,10 @@ class _Evidence:
             seen = set()
             for parent in parents:
                 value = _object(parent, "source_binding").get("sha")
-                _need(valid_sha(value) and value != sha and value not in seen, "source_binding")
+                _need(
+                    valid_sha(value) and value != sha and value not in seen,
+                    "source_binding",
+                )
                 seen.add(value)
             self.commits[key] = raw
         return self.commits[key]
@@ -268,7 +282,10 @@ class _Evidence:
             if item is None:
                 return None
             if index + 1 != len(parts):
-                _need(item.get("type") == "tree" and item.get("mode") == "040000", "source_binding")
+                _need(
+                    item.get("type") == "tree" and item.get("mode") == "040000",
+                    "source_binding",
+                )
                 sha = item["sha"]
                 continue
             _need(
@@ -277,8 +294,13 @@ class _Evidence:
             )
             key = repo, item["sha"]
             if key not in self.blobs:
-                raw = self.obj(f"repos/{repo}/git/blobs/{item['sha']}", "source_binding")
-                content, size = _text(raw.get("content"), "source_binding"), raw.get("size")
+                raw = self.obj(
+                    f"repos/{repo}/git/blobs/{item['sha']}", "source_binding"
+                )
+                content, size = (
+                    _text(raw.get("content"), "source_binding"),
+                    raw.get("size"),
+                )
                 _need(
                     raw.get("sha") == item["sha"]
                     and raw.get("encoding") == "base64"
@@ -294,7 +316,9 @@ class _Evidence:
                     )
                 except (ValueError, binascii.Error):
                     _hold("source_binding")
-                digest = hashlib.sha1(f"blob {len(value)}\0".encode() + value).hexdigest()
+                digest = hashlib.sha1(
+                    f"blob {len(value)}\0".encode() + value
+                ).hexdigest()
                 _need(len(value) == size and digest == item["sha"], "source_binding")
                 self.blobs[key] = value
             return self.blobs[key]
@@ -312,7 +336,10 @@ class _Evidence:
             else:
                 obj = _object(data, "unavailable")
                 count = obj.get("total_count")
-                _need(type(count) is int and 0 <= count <= MAX_PAGES * PAGE_SIZE, "unavailable")
+                _need(
+                    type(count) is int and 0 <= count <= MAX_PAGES * PAGE_SIZE,
+                    "unavailable",
+                )
                 _need(total is None or total == count, "unavailable")
                 total = count
                 rows = obj.get(key)
@@ -334,8 +361,12 @@ class _Evidence:
             row = _object(raw, "source_binding")
             if row.get("merge_commit_sha") == self.source and row.get("merged_at"):
                 matches.append(row)
-        _need(len(matches) == 1 and _positive(matches[0].get("number")), "source_binding")
-        pull = self.obj(f"repos/{self.repo}/pulls/{matches[0]['number']}", "source_binding")
+        _need(
+            len(matches) == 1 and _positive(matches[0].get("number")), "source_binding"
+        )
+        pull = self.obj(
+            f"repos/{self.repo}/pulls/{matches[0]['number']}", "source_binding"
+        )
         base = _object(pull.get("base"), "source_binding")
         head = _object(pull.get("head"), "source_binding")
         _need(
@@ -344,8 +375,10 @@ class _Evidence:
             and pull.get("state") == "closed"
             and pull.get("merge_commit_sha") == self.source
             and base.get("ref") == self.ref.removeprefix("refs/heads/")
-            and _object(base.get("repo"), "source_binding").get("full_name") == self.repo
-            and _object(head.get("repo"), "source_binding").get("full_name") == self.repo
+            and _object(base.get("repo"), "source_binding").get("full_name")
+            == self.repo
+            and _object(head.get("repo"), "source_binding").get("full_name")
+            == self.repo
             and valid_sha(head.get("sha"))
             and isinstance(pull.get("merged_at"), str),
             "source_binding",
@@ -353,7 +386,8 @@ class _Evidence:
         try:
             _need(
                 re.fullmatch(
-                    r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z", pull["merged_at"]
+                    r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z",
+                    pull["merged_at"],
                 ),
                 "source_binding",
             )
@@ -380,7 +414,9 @@ class _Evidence:
         created = _text(row.get("created_at"), "workflow_binding")
         _need(
             isinstance(created, str)
-            and re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z", created),
+            and re.fullmatch(
+                r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z", created
+            ),
             "workflow_binding",
         )
         try:
@@ -405,7 +441,8 @@ class _Evidence:
         )
         status, conclusion = row.get("status"), row.get("conclusion")
         _need(
-            status in ("queued", "in_progress", "waiting", "requested", "pending", "completed")
+            status
+            in ("queued", "in_progress", "waiting", "requested", "pending", "completed")
             and "conclusion" in row,
             "workflow_binding",
         )
@@ -452,9 +489,12 @@ class _Evidence:
     def run(
         self, run_id: str, expected_sha: str | None = None, *, successful: bool = False
     ) -> dict[str, Any]:
-        raw = self.obj(f"repos/{CENTRAL_REPOSITORY}/actions/runs/{run_id}", "workflow_binding")
+        raw = self.obj(
+            f"repos/{CENTRAL_REPOSITORY}/actions/runs/{run_id}", "workflow_binding"
+        )
         attempt = self.obj(
-            f"repos/{CENTRAL_REPOSITORY}/actions/runs/{run_id}/attempts/1", "workflow_binding"
+            f"repos/{CENTRAL_REPOSITORY}/actions/runs/{run_id}/attempts/1",
+            "workflow_binding",
         )
         self.native_row(raw, run_id)
         self.native_row(attempt, run_id)
@@ -469,7 +509,8 @@ class _Evidence:
         if successful:
             _need(
                 all(
-                    row.get("status") == "completed" and row.get("conclusion") == "success"
+                    row.get("status") == "completed"
+                    and row.get("conclusion") == "success"
                     for row in (raw, attempt)
                 ),
                 "unconfirmed",
@@ -493,7 +534,11 @@ class _Evidence:
             "unavailable",
         )
         _need(len({job["id"] for job in jobs}) == len(jobs), "unavailable")
-        publish = [row for row in jobs if isinstance(row, dict) and row.get("name") == "publish"]
+        publish = [
+            row
+            for row in jobs
+            if isinstance(row, dict) and row.get("name") == "publish"
+        ]
         _need(len(publish) == 1, "unavailable")
         job = publish[0]
         _need(
@@ -510,7 +555,11 @@ class _Evidence:
         if job.get("conclusion") == "skipped" and not steps:
             return True
         for name in (CLAIM_STEP, EFFECT_STEP):
-            matches = [row for row in steps if isinstance(row, dict) and row.get("name") == name]
+            matches = [
+                row
+                for row in steps
+                if isinstance(row, dict) and row.get("name") == name
+            ]
             if (
                 len(matches) != 1
                 or matches[0].get("status") != "completed"
@@ -539,7 +588,8 @@ class _Evidence:
             _need(
                 isinstance(title, str)
                 and re.fullmatch(
-                    r"fleet-publish-v1:jbaruch/[A-Za-z0-9][A-Za-z0-9_.-]{0,99}:[a-f0-9]{40}", title
+                    r"fleet-publish-v1:jbaruch/[A-Za-z0-9][A-Za-z0-9_.-]{0,99}:[a-f0-9]{40}",
+                    title,
                 ),
                 "workflow_binding",
             )
@@ -554,7 +604,8 @@ class _Evidence:
                 continue
             self.identity(intent)
             _need(
-                intent["run_id"] == run_id and intent["workflow_sha"] == run["head_sha"],
+                intent["run_id"] == run_id
+                and intent["workflow_sha"] == run["head_sha"],
                 "workflow_binding",
             )
             self.intents[run_id] = intent
@@ -605,7 +656,9 @@ class _Evidence:
             _hold("pending")
         _need(len(matches) == 1, "claim_binding")
         sha = matches[0]
-        _need(self.history.index(sha) < self.history.index(self.source), "claim_binding")
+        _need(
+            self.history.index(sha) < self.history.index(self.source), "claim_binding"
+        )
         return sha
 
     def selected(self, run_id: str | None) -> tuple[FleetPublishRecord, str]:
@@ -623,7 +676,8 @@ class _Evidence:
         run = self.run(chosen, intent["workflow_sha"])
         _need(
             chosen in self.intents
-            and run.get("display_title") == f"fleet-publish-v1:{self.repo}:{self.source}",
+            and run.get("display_title")
+            == f"fleet-publish-v1:{self.repo}:{self.source}",
             "workflow_binding",
         )
         _need(intent["origin_run_id"] == original_id, "ambiguous")
@@ -637,7 +691,11 @@ class _Evidence:
             run = self.run(intent["run_id"], intent["workflow_sha"])
             _hold("pending" if run.get("status") != "completed" else "unavailable")
         _need(
-            all(receipt[key] == intent[key] for key in intent if key not in MUTABLE_RECEIPT),
+            all(
+                receipt[key] == intent[key]
+                for key in intent
+                if key not in MUTABLE_RECEIPT
+            ),
             "receipt_binding",
         )
         _need(
@@ -651,7 +709,8 @@ class _Evidence:
         self.run(receipt["run_id"], receipt["workflow_sha"], successful=confirmed)
         if confirmed:
             _need(
-                receipt["state"] == "confirmed" and receipt["moderation"] == "pass", "unconfirmed"
+                receipt["state"] == "confirmed" and receipt["moderation"] == "pass",
+                "unconfirmed",
             )
         else:
             _need(receipt["state"] in ("published", "confirmed"), "receipt_binding")
@@ -663,7 +722,10 @@ class _Evidence:
             )
         retained = self.file(self.repo, claim_sha, STAMP)
         try:
-            _need(retained is not None and decode_record(retained) == intent, "claim_binding")
+            _need(
+                retained is not None and decode_record(retained) == intent,
+                "claim_binding",
+            )
         except FleetRecordError:
             _hold("claim_binding")
         return receipt
@@ -685,7 +747,14 @@ class _Evidence:
         _need(sorted(snapshot) == self.run_snapshot, "unavailable")
 
 
-def _execute(github: Any, repository: str, source_sha: str, run_id: str | None, *, confirmed: bool):
+def _execute(
+    github: Any,
+    repository: str,
+    source_sha: str,
+    run_id: str | None,
+    *,
+    confirmed: bool,
+):
     try:
         _need(run_id is None or valid_run_id(run_id), "invalid_selection")
         evidence = _Evidence(github, repository, source_sha)
@@ -742,14 +811,17 @@ def select(
     github: Any, consumer_repository: str, source_sha: str, *, run_id: str | None = None
 ) -> dict[str, Any]:
     return _object(
-        _execute(github, consumer_repository, source_sha, run_id, confirmed=False), "source_binding"
+        _execute(github, consumer_repository, source_sha, run_id, confirmed=False),
+        "source_binding",
     )
 
 
 def resolve(
     github: Any, consumer_repository: str, source_sha: str, *, run_id: str | None = None
 ) -> FleetPublishRecord:
-    return parse_record(_execute(github, consumer_repository, source_sha, run_id, confirmed=True))
+    return parse_record(
+        _execute(github, consumer_repository, source_sha, run_id, confirmed=True)
+    )
 
 
 confirm = resolve
