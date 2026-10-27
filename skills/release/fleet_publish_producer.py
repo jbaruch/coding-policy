@@ -18,9 +18,18 @@ PRODUCER_PATHS = (
     "scripts/fleet_publish_workflow.py",
     "scripts/fleet_publish_validate.py",
 )
-# Populated only from the final reviewed writer freeze. Empty means HOLD, not a
-# permissive bootstrap. Renewal belongs to the same reviewed producer change.
-TRUSTED_PRODUCERS: tuple[dict[str, str], ...] = ()
+# Reviewed together at writer freeze 6c10a9c81700650e964bbe1129cee7bce0b16635.
+# This binds the fixed dispatch locator/input protocol, not its transitive
+# execution dependencies. Renew only after reviewing all four source files;
+# retain older coherent pinsets only while their protocols remain supported.
+TRUSTED_PRODUCERS: tuple[dict[str, str], ...] = (
+    {
+        ".github/workflows/fleet-publish.yml": "65901aceb2df5cfbda830fec53877ff71f4926b5",
+        "scripts/fleet_publish.py": "4fbd373795f5170373461b9fa7a3e236850fe1c2",
+        "scripts/fleet_publish_workflow.py": "d7f7cc97389737c6b50c3c180b4a409802e4268f",
+        "scripts/fleet_publish_validate.py": "7d450d115f6a661f3a0e1d3d8ab1a85451bb7a47",
+    },
+)
 
 
 class GitHubRead(Protocol):
