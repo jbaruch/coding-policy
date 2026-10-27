@@ -1,0 +1,118 @@
+name: Central fleet publish
+
+# Central credentials only. This workflow never checks out a consumer or runs
+# its scripts. App Contents WRITE remains an actual deployment prerequisite;
+# requesting that scoped permission fails closed if installation lacks it.
+on:
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
+    inputs:
+      repository:
+        description: 'Exact enrolled jbaruch/consumer repository'
+        required: true
+        type: string
+      source_sha:
+        description: 'Exact earliest pending merged source commit (40 hex)'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: write # own central child dispatch + immutable intent/receipt readback
+
+concurrency:
+  group: fleet-publish-${{ github.event.inputs.repository || 'marker-poll' }}
+  cancel-in-progress: false
+
+jobs:
+  poll:
+    if: github.event_name == 'schedule' && vars.FLEET_PUBLISHER_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/create-github-app-token@v3
+        id: app
+        with:
+          app-id: ${{ secrets.FLEET_APP_ID }}
+          private-key: ${{ secrets.FLEET_APP_PRIVATE_KEY }}
+          owner: jbaruch
+          permission-contents: read
+      - name: Poll markers and dispatch bounded selected runs
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          FLEET_CENTRAL_TOKEN: ${{ github.token }}
+        run: python3 scripts/fleet_publish_targets.py --dispatch
+
+  publish:
+    if: github.event_name == 'workflow_dispatch' && vars.FLEET_PUBLISHER_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Validate selected coordinates before minting a write credential
+        id: coordinates
+        env:
+          FLEET_CONSUMER_REPOSITORY: ${{ inputs.repository }}
+          FLEET_SOURCE_SHA: ${{ inputs.source_sha }}
+        run: python3 scripts/fleet_publish_validate.py
+      - uses: actions/create-github-app-token@v3
+        id: app
+        with:
+          app-id: ${{ secrets.FLEET_APP_ID }}
+          private-key: ${{ secrets.FLEET_APP_PRIVATE_KEY }}
+          owner: jbaruch
+          repositories: ${{ steps.coordinates.outputs.repository_name }}
+          permission-contents: write
+          permission-pull-requests: read
+          permission-checks: read
+          permission-statuses: read
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+      - uses: tesslio/setup-tessl@v2
+        with:
+          token: ${{ secrets.TESSL_TOKEN }}
+      - name: Prepare verified data-only package and intent
+        id: prepare
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          FLEET_CENTRAL_TOKEN: ${{ github.token }}
+          FLEET_CONSUMER_REPOSITORY: ${{ inputs.repository }}
+          FLEET_SOURCE_SHA: ${{ inputs.source_sha }}
+        run: python3 scripts/fleet_publish_workflow.py prepare
+      - name: Claim source atomically before publication
+        if: steps.prepare.outputs.selected == 'true'
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          FLEET_CENTRAL_TOKEN: ${{ github.token }}
+        run: python3 scripts/fleet_publish_workflow.py claim
+      - name: Persist immutable pre-effect intent
+        if: steps.prepare.outputs.selected == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: fleet-publish-intent-v1
+          path: ${{ runner.temp }}/fleet-publish/intent.json
+          if-no-files-found: error
+          overwrite: false
+          retention-days: 90
+      - name: Publish once or perform moderation readback only
+        if: steps.prepare.outputs.selected == 'true'
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          FLEET_CENTRAL_TOKEN: ${{ github.token }}
+        run: python3 scripts/fleet_publish_workflow.py execute
+      - name: Persist terminal evidence even after failed/uncertain publication
+        if: always() && steps.prepare.outputs.selected == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: fleet-publish-receipt-v1
+          path: ${{ runner.temp }}/fleet-publish/receipt.json
+          if-no-files-found: error
+          overwrite: false
+          retention-days: 90
