@@ -11,6 +11,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 from unittest.mock import patch
@@ -154,6 +155,7 @@ class WorkflowTests(unittest.TestCase):
             patch.dict(os.environ, self.env, clear=True),
             patch.object(sys, "argv", [str(SOURCE), "prepare"]),
             patch.object(module, "GitHub"),
+            patch.object(module, "datetime") as clock,
             patch.object(module, "prepare") as prepare,
         ):
 
@@ -163,11 +165,10 @@ class WorkflowTests(unittest.TestCase):
                     (ENV["FLEET_CONSUMER_REPOSITORY"], ENV["FLEET_SOURCE_SHA"]),
                 )
                 self.assertEqual(work, self.work)
-                self.assertRegex(
-                    environment["FLEET_PUBLISH_DATE"], r"^\d{4}-\d{2}-\d{2}$"
-                )
+                self.assertEqual(environment["FLEET_PUBLISH_DATE"], "2024-01-02")
                 (work / "selection.json").write_text('{"mode":"already_confirmed"}')
 
+            clock.now.return_value = datetime(2024, 1, 2, 23, 4, 5, tzinfo=UTC)
             prepare.side_effect = output
             self.assertEqual(module.main(), 0)
             self.assertEqual(module.main(), 0)

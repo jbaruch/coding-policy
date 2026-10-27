@@ -6,7 +6,12 @@ claiming/claimed/executing/finished. Snapshot hashes bind all owned phase output
 Started/unknown phases HOLD; only completed, unchanged phases can be reused.
 The durable executing marker precedes execute(), including its publish helper.
 A finished failed result is reusable evidence, never permission to retry effects.
-No migration/reset or caller-selected work directory is supported.
+The .phase.json artifact uses the Stateful Artifacts gate-store exception:
+unsupported schema versions HOLD, never becoming "no usable prior state".
+Schema 1 is the only accepted version; no older version is accepted for migration.
+Preserve unsupported state and immutable evidence, then update this owner with an
+explicit owner-only migration before resuming the same native attempt. No reset
+or caller-selected work directory is supported.
 """
 
 from __future__ import annotations
