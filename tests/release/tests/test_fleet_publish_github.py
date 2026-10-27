@@ -97,7 +97,7 @@ def artifact(
     }
 
 
-FAKE_GH = """import base64,json,os,sys,time
+FAKE_GH = """import base64,json,os,signal,sys
 from pathlib import Path
 args=sys.argv[1:]
 with open(os.environ['FAKE_GH_LOG'],'a') as log:log.write(json.dumps(args)+'\\n')
@@ -113,7 +113,9 @@ if include and 'wire' in case:
 if include:
     if case.get('bad_header'):sys.stdout.buffer.write(b'PRIVATE invalid HTTP\\r\\n\\r\\n')
     else:sys.stdout.buffer.write(('HTTP/2.0 '+str(case.get('http_status',200))+(' Not Found' if case.get('http_status')==404 else ' OK')+'\\r\\nContent-Type: application/json; charset=utf-8\\r\\nX-GitHub-Media-Type: github.v3; format=json\\r\\n\\r\\n').encode())
-if case.get('sleep'):time.sleep(30)
+if case.get('hang'):
+    sys.stdout.buffer.write(b'PRIVATE owned registry read is waiting');sys.stdout.flush()
+    signal.pause()
 if 'stderr_repeat' in case:sys.stderr.buffer.write(b'PRIVATE '*case['stderr_repeat']);sys.stderr.flush()
 if 'stdout_repeat' in case:sys.stdout.buffer.write(b'x'*case['stdout_repeat']);sys.stdout.flush()
 if 'raw' in case:sys.stdout.buffer.write(base64.b64decode(case['raw']));sys.stdout.flush()
@@ -626,12 +628,36 @@ class GitHubClientTests(unittest.TestCase):
             self.refuse(lambda: client.GitHubClient().artifact(RUN, "intent"))
 
     def test_hung_command_timeout_is_not_absence(self):
-        self.replies({ROUTE: {"sleep": True}})
-        with patch.object(client, "COMMAND_TIMEOUT_SECONDS", 0.05):
-            error = self.refuse(
-                lambda: client.GitHubClient().json(ROUTE), "command_timeout"
-            )
+        self.hung_read_timeout(snapshot_deadline=None, expires_at=30.0)
+
+    def hung_read_timeout(self, *, snapshot_deadline, expires_at):
+        self.replies({ROUTE: {"hang": True}})
+        clock = [0.0]
+        api = client.GitHubClient(deadline=snapshot_deadline, clock=lambda: clock[0])
+        selector = client.selectors.DefaultSelector()
+        self.addCleanup(selector.close)
+        native_select = selector.select
+        observed_ready = []
+
+        def ready(_timeout=None):
+            self.assertFalse(observed_ready, "Expired lookup polled native pipes again")
+            # The actual owned child flushes before pausing. Its pipe readiness
+            # is the handshake; no sleep or elapsed wall clock decides expiry.
+            events = native_select()
+            self.assertTrue(events)
+            observed_ready.append(True)
+            clock[0] = expires_at
+            return events
+
+        with (
+            patch.object(client.selectors, "DefaultSelector", return_value=selector),
+            patch.object(selector, "select", side_effect=ready),
+        ):
+            error = self.refuse(lambda: api.json(ROUTE), "command_timeout")
+        self.assertEqual(observed_ready, [True])
         self.assertIsNotNone(error.returncode)
+        self.assertLess(error.returncode, 0)
+        self.assertEqual([call[-1] for call in self.calls()], [ROUTE])
 
     def test_cleanup_failure_remains_fixed_lookup_error_without_child_data(self):
         fake = SimpleNamespace(pid=123, poll=lambda: None)
@@ -659,10 +685,7 @@ class GitHubClientTests(unittest.TestCase):
             )
 
     def test_snapshot_deadline_clips_hung_command_without_global_timeout_change(self):
-        self.replies({ROUTE: {"sleep": True}})
-        api = client.GitHubClient(deadline=client.time.monotonic() + 0.05)
-        error = self.refuse(lambda: api.json(ROUTE), "command_timeout")
-        self.assertIsNotNone(error.returncode)
+        self.hung_read_timeout(snapshot_deadline=5.0, expires_at=5.0)
         self.assertEqual(client.COMMAND_TIMEOUT_SECONDS, 30)
 
     def test_successful_child_exit_after_snapshot_deadline_is_not_evidence(self):
