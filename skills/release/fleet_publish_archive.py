@@ -495,3 +495,299 @@ def decode_archive(raw: bytes) -> dict[str, Any]:
         return parsed
     except (ValueError, TypeError, KeyError, RecursionError, UnicodeError):
         raise ArchiveError() from None
+
+
+class ArchiveReader:
+    """Read-only central authority. Missing evidence never clears a source gate."""
+
+    def __init__(self, client: Any):
+        self.client = client
+        self._protocols: set[str] = set()
+        self._objects: dict[str, object] = {}
+        self._loaded: dict[str, tuple[str, dict[str, Any]]] = {}
+        self._central = False
+
+    def _protocol(self, sha: str) -> None:
+        if sha not in self._protocols:
+            from fleet_publish_producer import verify_workflow_protocol
+
+            verify_workflow_protocol(self.client, sha)
+            self._protocols.add(sha)
+
+    def _optional(self, route: str) -> object | None:
+        try:
+            return self.client.native_json(route)
+        except FleetPublishLookupError as error:
+            if error.kind not in (
+                "native_missing",
+                "native_expired",
+            ) or error.http_status not in (404, 410):
+                raise
+            return None
+
+    def _immutable(self, route: str) -> object:
+        if route not in self._objects:
+            self._objects[route] = self.client.native_json(route)
+        return self._objects[route]
+
+    def _load(self, ref: str) -> dict[str, Any] | None:
+        import base64
+        import binascii
+        import copy
+
+        if not self._central:
+            central = obj(self.client.native_json(f"repos/{CENTRAL_REPOSITORY}"))
+            need(
+                central.get("full_name") == CENTRAL_REPOSITORY
+                and central.get("default_branch") == "main"
+                and central.get("archived") is False
+                and central.get("disabled") is False
+            )
+            self._central = True
+        need(ref.startswith(PREFIX))
+        route = f"repos/{CENTRAL_REPOSITORY}/git/ref/{ref.removeprefix('refs/')}"
+        raw = self._optional(route)
+        if raw is None:
+            need(ref not in self._loaded)  # deletion is not fresh absence
+            return None
+        native = obj(raw)
+        target = obj(native.get("object"))
+        sha = target.get("sha")
+        need(
+            native.get("ref") == ref
+            and target.get("type") == "commit"
+            and valid_sha(sha)
+        )
+        if ref in self._loaded:
+            old_sha, value = self._loaded[ref]
+            need(sha == old_sha)
+            return copy.deepcopy(value)
+        commit = obj(self._immutable(f"repos/{CENTRAL_REPOSITORY}/git/commits/{sha}"))
+        tree_sha = obj(commit.get("tree")).get("sha")
+        need(
+            commit.get("sha") == sha
+            and commit.get("parents") == []
+            and valid_sha(tree_sha)
+        )
+        tree = obj(self._immutable(f"repos/{CENTRAL_REPOSITORY}/git/trees/{tree_sha}"))
+        entries = tree.get("tree")
+        need(
+            tree.get("sha") == tree_sha
+            and tree.get("truncated") is False
+            and isinstance(entries, list)
+            and len(entries) == 1
+        )
+        if not isinstance(entries, list):
+            raise ArchiveError()
+        entry = obj(entries[0])
+        blob_sha = entry.get("sha")
+        need(
+            entry.get("path") == "record.json"
+            and entry.get("type") == "blob"
+            and entry.get("mode") == "100644"
+            and valid_sha(blob_sha)
+        )
+        blob = obj(self._immutable(f"repos/{CENTRAL_REPOSITORY}/git/blobs/{blob_sha}"))
+        content = blob.get("content")
+        size = blob.get("size")
+        need(
+            blob.get("sha") == blob_sha
+            and blob.get("encoding") == "base64"
+            and isinstance(content, str)
+            and type(size) is int
+            and 0 < size <= MAX_ARCHIVE_BYTES
+        )
+        try:
+            data = base64.b64decode(str(content).replace("\n", ""), validate=True)
+        except (ValueError, binascii.Error):
+            raise ArchiveError() from None
+        need(
+            len(data) == size
+            and hashlib.sha1(f"blob {len(data)}\0".encode() + data).hexdigest()
+            == blob_sha
+        )
+        value = decode_archive(data)
+        again = obj(self.client.native_json(route))
+        need(
+            again.get("ref") == ref
+            and obj(again.get("object")).get("sha") == sha
+            and obj(again.get("object")).get("type") == "commit"
+        )
+        self._loaded[ref] = (str(sha), value)
+        return copy.deepcopy(value)
+
+    def source_claim(self, repository: str, source_sha: str) -> dict[str, Any] | None:
+        value = self._load(
+            ref_name("source", repository=repository, source_sha=source_sha)
+        )
+        if value is None:
+            return None
+        value = parse_intent(value)
+        intent = value["intent"]
+        need(
+            intent["consumer_repository"] == repository
+            and intent["source_sha"] == source_sha
+            and intent["origin_run_id"] == intent["run_id"]
+        )
+        self._protocol(intent["workflow_sha"])
+        return value
+
+    def run_intent(self, run_id: str, attempt: int = 1) -> dict[str, Any] | None:
+        value = self._load(ref_name("intent", run_id=run_id, attempt=attempt))
+        if value is None:
+            return None
+        value = parse_intent(value)
+        intent = value["intent"]
+        need(intent["run_id"] == run_id and intent["run_attempt"] == attempt)
+        self._protocol(intent["workflow_sha"])
+        original = self.source_claim(
+            intent["consumer_repository"], intent["source_sha"]
+        )
+        need(original is not None)
+        if original is None:
+            raise ArchiveError()
+        if intent["origin_run_id"] == run_id:
+            need(original == value)
+        else:
+            need(
+                original["intent"]["run_id"] == intent["origin_run_id"]
+                and all(
+                    original["intent"][key] == intent[key]
+                    for key in (
+                        "consumer_repository",
+                        "source_sha",
+                        "source_ref",
+                        "source_tree_sha",
+                        "plugin_name",
+                        "version",
+                        "registry_baseline",
+                        "origin_run_id",
+                        "origin_run_attempt",
+                    )
+                )
+            )
+        return value
+
+    def run_hold(self, run_id: str) -> dict[str, Any] | None:
+        value = self._load(ref_name("hold", run_id=run_id))
+        if value is None:
+            return None
+        value = parse_hold(value)
+        need(value["run_id"] == run_id)
+        self._protocol(value["workflow_sha"])
+        self._protocol(value["finalizer"]["workflow_sha"])
+        return value
+
+    def terminal(self, run_id: str, attempt: int = 1) -> dict[str, Any] | None:
+        value = self._load(ref_name("terminal", run_id=run_id, attempt=attempt))
+        if value is None:
+            return None
+        value = parse_terminal(value)
+        need(value["intent"] == self.run_intent(run_id, attempt))
+        self._protocol(value["finalizer"]["workflow_sha"])
+        return value
+
+    def record(
+        self, run_id: str, kind: Literal["intent", "receipt"]
+    ) -> FleetPublishRecord | None:
+        need(kind in ("intent", "receipt") and self.run_hold(run_id) is None)
+        live: FleetPublishRecord | None
+        try:
+            live = self.client.artifact_evidence(run_id, kind)
+        except FleetPublishLookupError as error:
+            if error.kind != "expired_artifact" and not (
+                error.kind in ("native_missing", "native_expired")
+                and error.http_status in (404, 410)
+            ):
+                raise
+            live = None
+        if live is not None:
+            live = record(live)
+        intent = self.run_intent(run_id)
+        terminal = self.terminal(run_id) if kind == "receipt" else None
+        saved = (
+            (intent["intent"] if intent is not None else None)
+            if kind == "intent"
+            else (terminal["receipt"] if terminal is not None else None)
+        )
+        if live is not None and saved is not None:
+            need(live == saved)
+        if live is not None and kind == "intent":
+            need(intent is not None)
+        if live is not None and terminal is not None:
+            need(terminal["receipt"] == live)
+        if live is not None:
+            return live
+        return saved
+
+    def _jobs(self, run_id: str) -> list[dict[str, Any]] | None:
+        response = self._optional(
+            f"repos/{CENTRAL_REPOSITORY}/actions/runs/{run_id}/attempts/1/jobs?per_page=100&page=1"
+        )
+        if response is None:
+            return None
+        data = obj(response)
+        total, rows = data.get("total_count"), data.get("jobs")
+        need(
+            type(total) is int
+            and 0 < total <= MAX_JOBS
+            and isinstance(rows, list)
+            and len(rows) == total
+        )
+        return rows
+
+    def verify_record_attempt(
+        self, expected: object, *, successful: bool
+    ) -> dict[str, Any]:
+        value = record(expected)
+        need(value["run_attempt"] == 1 and self.run_hold(value["run_id"]) is None)
+        intent = self.run_intent(value["run_id"])
+        archived = self.terminal(value["run_id"])
+        if intent is not None:
+            need(
+                all(
+                    value[key] == intent["intent"][key]
+                    for key in value
+                    if key not in MUTABLE | {"version"}
+                )
+            )
+            if value["state"] == "claimed":
+                need(value == intent["intent"])
+            if archived is not None and value["state"] != "claimed":
+                need(value == archived["receipt"])
+        else:
+            need(archived is None)
+        prefix = f"repos/{CENTRAL_REPOSITORY}/actions/runs/{value['run_id']}"
+        run = self._optional(prefix)
+        attempt = self._optional(prefix + "/attempts/1")
+        native: dict[str, Any] = {}
+        for name, raw in (("run", run), ("attempt", attempt)):
+            if raw is None:
+                need(archived is not None)
+                native[name] = archived["native"][name] if archived else None
+            else:
+                native[name] = native_run(raw, terminal=False)
+                if archived is not None:
+                    need(native[name] == archived["native"][name])
+        need(
+            native["run"] == native["attempt"]
+            and native["run"]["id"] == value["run_id"]
+            and native["run"]["head_sha"] == value["workflow_sha"]
+            and native["run"]["display_title"]
+            == f"fleet-publish-v1:{value['consumer_repository']}:{value['source_sha']}"
+        )
+        self._protocol(value["workflow_sha"])
+        if archived is not None or successful:
+            jobs = self._jobs(value["run_id"])
+            if jobs is None:
+                need(archived is not None)
+                native["jobs"] = archived["native"]["jobs"] if archived else None
+            else:
+                native["jobs"] = native_jobs(jobs, native["run"])
+                if archived is not None:
+                    need(native["jobs"] == archived["native"]["jobs"])
+        else:
+            native["jobs"] = None
+        if successful:
+            need(value["state"] == "confirmed" and positive_native(native))
+        return {**native, "archived": run is None or attempt is None}

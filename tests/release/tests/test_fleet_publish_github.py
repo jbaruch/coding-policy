@@ -101,12 +101,16 @@ FAKE_GH = """import base64,json,os,sys,time
 from pathlib import Path
 args=sys.argv[1:]
 with open(os.environ['FAKE_GH_LOG'],'a') as log:log.write(json.dumps(args)+'\\n')
-if args[:5]!=['api','--hostname','github.com','--method','GET'] or len(args)!=6:
+include=len(args)==7 and args[5]=='--include'
+if args[:5]!=['api','--hostname','github.com','--method','GET'] or len(args)!=(7 if include else 6):
     print('PRIVATE unexpected command',file=sys.stderr);sys.exit(87)
 cases=json.loads(Path(os.environ['FAKE_GH_CASES']).read_text())
-case=cases.get(args[5])
+case=cases.get(args[6] if include else args[5])
 if case is None:
     print('PRIVATE route not supplied by fixture',file=sys.stderr);sys.exit(88)
+if include:
+    if case.get('bad_header'):sys.stdout.buffer.write(b'PRIVATE invalid HTTP\\r\\n\\r\\n')
+    else:sys.stdout.buffer.write(('HTTP/2 '+str(case.get('http_status',200))+'\\r\\ncontent-type: application/json\\r\\n\\r\\n').encode())
 if case.get('sleep'):time.sleep(30)
 if 'stderr_repeat' in case:sys.stderr.buffer.write(b'PRIVATE '*case['stderr_repeat']);sys.stderr.flush()
 if 'stdout_repeat' in case:sys.stdout.buffer.write(b'x'*case['stdout_repeat']);sys.stdout.flush()
@@ -424,6 +428,66 @@ class GitHubClientTests(unittest.TestCase):
                     "invalid_route",
                 )
         self.assertEqual(self.calls(), [])
+
+    def test_native_http_status_is_typed_without_stderr_or_payload_inference(self):
+        route = (
+            "repos/jbaruch/coding-policy/git/ref/tags/fleet-publish-v1/runs/101/hold"
+        )
+        for status, kind in (
+            (404, "native_missing"),
+            (410, "native_expired"),
+            (403, "native_http_error"),
+            (500, "native_http_error"),
+        ):
+            self.replies(
+                {
+                    route: {
+                        "http_status": status,
+                        "json": {"message": "PRIVATE diagnostic"},
+                        "stderr": "PRIVATE",
+                        "exit": 1,
+                    }
+                }
+            )
+            error = self.refuse(lambda: client.GitHubClient().native_json(route), kind)
+            self.assertEqual(error.http_status, status)
+        self.replies({route: {"json": {"ref": "fixed native"}}})
+        self.assertEqual(
+            client.GitHubClient().native_json(route), {"ref": "fixed native"}
+        )
+        self.assertTrue(
+            all(call[5] == "--include" and call[6] == route for call in self.calls())
+        )
+
+    def test_native_http_malformed_body_header_and_status_exit_conflict_are_not_absence(
+        self,
+    ):
+        for data in (
+            {
+                "http_status": 404,
+                "raw": base64.b64encode(b"PRIVATE").decode(),
+                "exit": 1,
+            },
+            {"http_status": 404, "json": {"message": "Not Found"}, "exit": 0},
+            {"bad_header": True, "json": {"message": "Not Found"}, "exit": 1},
+        ):
+            self.replies({ROUTE: data})
+            error = self.refuse(lambda: client.GitHubClient().native_json(ROUTE))
+            self.assertNotIn(error.kind, ("native_missing", "native_expired"))
+
+    def test_status_aware_artifact_preserves_expiry_as_typed_native_failure(self):
+        self.replies(
+            {LIST: {"http_status": 404, "json": {"message": "Not Found"}, "exit": 1}}
+        )
+        error = self.refuse(
+            lambda: client.GitHubClient().artifact_evidence(RUN, "intent"),
+            "native_missing",
+        )
+        self.assertEqual(error.http_status, 404)
+        self.evidence()
+        self.assertEqual(
+            client.GitHubClient().artifact_evidence(RUN, "intent"), record()
+        )
 
     def test_selection_rejects_invalid_run_kind_without_subprocess(self):
         for run, kind in (

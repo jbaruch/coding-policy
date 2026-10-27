@@ -36,6 +36,7 @@ from fleet_publish_record import (
     valid_run_id,
 )
 
+MAX_HTTP_HEADERS = 32 * 1024
 MAX_JSON_BYTES = 1024 * 1024
 MAX_ARCHIVE_BYTES = 256 * 1024
 MAX_STDERR_BYTES = 64 * 1024
@@ -57,6 +58,7 @@ class FleetPublishLookupError(RuntimeError):
         *,
         returncode: int | None = None,
         stderr_sha256: str | None = None,
+        http_status: int | None = None,
     ) -> None:
         super().__init__(
             "Restore bounded gh read access and complete central publication evidence; "
@@ -65,6 +67,7 @@ class FleetPublishLookupError(RuntimeError):
         self.kind = kind
         self.returncode = returncode
         self.stderr_sha256 = stderr_sha256
+        self.http_status = http_status
 
 
 def _refuse(kind: str) -> NoReturn:
@@ -211,14 +214,23 @@ class GitHubClient:
     def __init__(self) -> None:
         self._commands = 0
 
-    def _read(self, route: str, maximum: int) -> bytes:
+    def _read(self, route: str, maximum: int, *, native_status: bool = False) -> bytes:
         _route(route)
         if self._commands >= MAX_COMMANDS:
             _refuse("command_budget")
         self._commands += 1
         try:
             child = subprocess.Popen(
-                ["gh", "api", "--hostname", "github.com", "--method", "GET", route],
+                [
+                    "gh",
+                    "api",
+                    "--hostname",
+                    "github.com",
+                    "--method",
+                    "GET",
+                    *(["--include"] if native_status else []),
+                    route,
+                ],
                 stdin=subprocess.DEVNULL,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
@@ -246,7 +258,9 @@ class GitHubClient:
                     if not chunk:
                         selector.unregister(key.fileobj)
                     elif key.data == "stdout":
-                        if len(out) + len(chunk) > maximum:
+                        if len(out) + len(chunk) > maximum + (
+                            MAX_HTTP_HEADERS if native_status else 0
+                        ):
                             failure = "stdout_budget"
                             break
                         out.extend(chunk)
@@ -274,6 +288,52 @@ class GitHubClient:
                     returncode=child.returncode,
                     stderr_sha256=err_hash.hexdigest(),
                 )
+            if native_status:
+                if child.returncode != 0:
+                    _retire(child)
+                header, separator, body = bytes(out).partition(b"\r\n\r\n")
+                if (
+                    not separator
+                    or len(header) > MAX_HTTP_HEADERS
+                    or len(body) > maximum
+                ):
+                    _refuse("invalid_http_response")
+                try:
+                    lines = header.decode("ascii").split("\r\n")
+                except UnicodeError:
+                    _refuse("invalid_http_response")
+                match = re.fullmatch(
+                    r"HTTP/(?:1[.]0|1[.]1|2(?:[.]0)?) ([0-9]{3})(?: [\x20-\x7e]*)?",
+                    lines[0],
+                )
+                if match is None or any(
+                    not re.fullmatch(r"[A-Za-z0-9-]+:[\x20-\x7e]*", line)
+                    for line in lines[1:]
+                ):
+                    _refuse("invalid_http_response")
+                status = int(match[1])
+                if status in (404, 410):
+                    error_body = _decode(body)
+                    if (
+                        child.returncode == 0
+                        or not isinstance(error_body, dict)
+                        or not isinstance(error_body.get("message"), str)
+                    ):
+                        _refuse("invalid_http_response")
+                    raise FleetPublishLookupError(
+                        "native_missing" if status == 404 else "native_expired",
+                        returncode=child.returncode,
+                        stderr_sha256=err_hash.hexdigest(),
+                        http_status=status,
+                    )
+                if not 200 <= status < 300:
+                    raise FleetPublishLookupError(
+                        "native_http_error",
+                        returncode=child.returncode,
+                        stderr_sha256=err_hash.hexdigest(),
+                        http_status=status,
+                    )
+                out = bytearray(body)
             if child.returncode != 0:
                 _retire(child)
                 raise FleetPublishLookupError(
@@ -300,8 +360,29 @@ class GitHubClient:
     def json(self, route: str) -> object:
         return _decode(self._read(route, MAX_JSON_BYTES))
 
-    def artifact(
+    def native_json(self, route: str) -> object:
+        """Bounded GET with native HTTP status; no stderr-text inference."""
+        return _decode(self._read(route, MAX_JSON_BYTES, native_status=True))
+
+    def optional_json(self, route: str) -> object | None:
+        try:
+            return self.native_json(route)
+        except FleetPublishLookupError as error:
+            if error.kind not in ("native_missing", "native_expired"):
+                raise
+            return None
+
+    def artifact_evidence(
         self, run_id: str, kind: Literal["intent", "receipt"]
+    ) -> FleetPublishRecord | None:
+        return self.artifact(run_id, kind, native_status=True)
+
+    def artifact(
+        self,
+        run_id: str,
+        kind: Literal["intent", "receipt"],
+        *,
+        native_status: bool = False,
     ) -> FleetPublishRecord | None:
         if not valid_run_id(run_id) or kind not in ("intent", "receipt"):
             _refuse("invalid_selection")
@@ -315,7 +396,7 @@ class GitHubClient:
                 f"repos/{CENTRAL_REPOSITORY}/actions/runs/{run_id}/artifacts"
                 f"?per_page={PAGE_SIZE}&page={page_number}"
             )
-            page = self.json(route)
+            page = self.native_json(route) if native_status else self.json(route)
             if not isinstance(page, dict):
                 _refuse("invalid_artifact_listing")
             current = page.get("total_count")
@@ -374,6 +455,7 @@ class GitHubClient:
         archive = self._read(
             f"repos/{CENTRAL_REPOSITORY}/actions/artifacts/{found}/zip",
             MAX_ARCHIVE_BYTES,
+            native_status=native_status,
         )
         try:
             with zipfile.ZipFile(io.BytesIO(archive)) as zipped:
