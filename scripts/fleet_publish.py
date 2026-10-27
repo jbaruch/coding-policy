@@ -97,27 +97,64 @@ class GitHub:
         """Read-only facade for the shared fixed central protocol verifier."""
         return self.api(route)
 
-    def record(self, run_id: str, kind: str) -> FleetPublishRecord | None:
-        require(kind in ("intent", "receipt"), "Unsupported immutable record kind.")
+    def archive_operation(self, operation: Any) -> Any:
+        # Each logical proof has its own bounded client; queued historical
+        # bookkeeping cannot consume a later proof's lifetime allowance. The
+        # shared reader retains its immutable/ref cache within this operation.
+        from fleet_publish_archive import ArchiveReader
+
         central_token = os.environ.get("FLEET_CENTRAL_TOKEN")
-        require(central_token, "Central artifact read credential is unavailable.")
+        require(central_token, "Central evidence read credential is unavailable.")
         original = os.environ.get("GH_TOKEN")
         try:
-            # Fixed central-only auth scope, never a caller credential selector.
-            # Controller is synchronous; no consumer command runs in this scope.
             os.environ["GH_TOKEN"] = str(central_token)
-            return self._record_client.artifact(
-                run_id, "intent" if kind == "intent" else "receipt"
-            )
+            return operation(ArchiveReader(GitHubClient()))
         except FleetPublishLookupError as error:
             raise PublishRefused(
-                "Restore complete central artifact evidence; do not replay."
+                "Restore complete central durable/native evidence; preserve STOP without replay."
             ) from error
         finally:
             if original is None:
                 os.environ.pop("GH_TOKEN", None)
             else:
                 os.environ["GH_TOKEN"] = original
+
+    def record(self, run_id: str, kind: str) -> FleetPublishRecord | None:
+        require(kind in ("intent", "receipt"), "Unsupported immutable record kind.")
+        return self.archive_operation(lambda reader: reader.record(run_id, kind))
+
+    def live_record(self, run_id: str, kind: str) -> FleetPublishRecord | None:
+        require(kind in ("intent", "receipt"), "Unsupported immutable record kind.")
+        return self.archive_operation(
+            lambda reader: reader.client.artifact_evidence(run_id, kind)
+        )
+
+    def source_claim(self, repo: str, sha: str) -> dict[str, Any] | None:
+        return self.archive_operation(lambda reader: reader.source_claim(repo, sha))
+
+    def attempt_evidence(
+        self, record: FleetPublishRecord, *, successful: bool
+    ) -> dict[str, Any]:
+        return self.archive_operation(
+            lambda reader: reader.verify_record_attempt(record, successful=successful)
+        )
+
+    def verify_archive_claim(self, record: FleetPublishRecord, sha: str) -> None:
+        from fleet_publish_archive import make_intent
+
+        def check(reader: Any) -> None:
+            require(
+                reader.run_hold(record["run_id"]) is None
+                and reader.run_intent(record["run_id"]) == make_intent(record, sha),
+                "Durable source/run claim changed before effect; preserve STOP.",
+            )
+
+        self.archive_operation(check)
+
+    def persist_archive_claim(self, record: FleetPublishRecord, sha: str) -> None:
+        from fleet_publish_archive_write import persist_claim
+
+        self.archive_operation(lambda reader: persist_claim(self, reader, record, sha))
 
     def api(
         self,
@@ -706,11 +743,9 @@ def artifact(
 
 def verify_attempt(
     github: GitHub, record: FleetPublishRecord, *, successful: bool
-) -> None:
-    run = github.api(f"repos/{CENTRAL_REPOSITORY}/actions/runs/{record['run_id']}")
-    attempt = github.api(
-        f"repos/{CENTRAL_REPOSITORY}/actions/runs/{record['run_id']}/attempts/{record['run_attempt']}"
-    )
+) -> dict[str, Any]:
+    evidence = github.attempt_evidence(record, successful=successful)
+    run, attempt = evidence["run"], evidence["attempt"]
     require(
         str(run.get("id")) == record["run_id"]
         and run.get("run_attempt") == record["run_attempt"] == 1
@@ -718,7 +753,11 @@ def verify_attempt(
         and run.get("head_branch") == "main"
         and run.get("path") == CENTRAL_WORKFLOW
         and run.get("event") == "workflow_dispatch"
-        and run.get("head_repository", {}).get("full_name") == CENTRAL_REPOSITORY
+        and (
+            run.get("head_repository") == CENTRAL_REPOSITORY
+            or isinstance(run.get("head_repository"), dict)
+            and run["head_repository"].get("full_name") == CENTRAL_REPOSITORY
+        )
         and attempt.get("head_sha") == record["workflow_sha"]
         and str(attempt.get("id")) == record["run_id"]
         and attempt.get("head_branch") == "main"
@@ -741,6 +780,7 @@ def verify_attempt(
         and commit.get("tree", {}).get("sha") == record["source_tree_sha"],
         "Source tree binding changed.",
     )
+    return evidence
 
 
 def previous(
@@ -795,10 +835,10 @@ def previous(
         and not receipt["landed_after_error"],
         "Existing publication is uncertain or failed; preserve it without replay.",
     )
-    verify_attempt(github, receipt, successful=receipt["state"] == "confirmed")
-    terminal_attempt = github.api(
-        f"repos/{CENTRAL_REPOSITORY}/actions/runs/{receipt['run_id']}/attempts/{receipt['run_attempt']}"
+    terminal_evidence = verify_attempt(
+        github, receipt, successful=receipt["state"] == "confirmed"
     )
+    terminal_attempt = terminal_evidence["attempt"]
     require(
         terminal_attempt.get("status") == "completed",
         "Previous publication attempt is still in progress.",
@@ -1297,53 +1337,6 @@ def run_binding(github: GitHub, run: dict[str, Any], workflow_id: int) -> None:
         )
 
 
-def proved_no_claim(github: GitHub, run: dict[str, Any]) -> bool:
-    """Missing artifact is not evidence; only native skipped claim/effect is."""
-    require(
-        run.get("status") == "completed"
-        and type(run.get("run_attempt")) is int
-        and run["run_attempt"] == 1,
-        "A prior candidate is nonterminal or rerun; a skipped latest attempt cannot clear earlier effects.",
-    )
-    jobs = github.pages(
-        f"repos/{CENTRAL_REPOSITORY}/actions/runs/{run['id']}/attempts/{run['run_attempt']}/jobs",
-        "jobs",
-    )
-    require(
-        jobs and all(job.get("name") in ("poll", "publish") for job in jobs),
-        "Prior dispatch has incomplete or unsupported native jobs.",
-    )
-    selected = [job for job in jobs if job.get("name") == "publish"]
-    require(len(selected) == 1, "Prior dispatch has no unique native publication job.")
-    job = selected[0]
-    require(
-        str(job.get("run_id")) == str(run["id"])
-        and job.get("head_sha") == run["head_sha"]
-        and job.get("status") == "completed",
-        "Prior native job is incomplete or cross-run.",
-    )
-    steps = job.get("steps")
-    require(isinstance(steps, list), "Prior job steps are unavailable.")
-    if job.get("conclusion") == "skipped" and not steps:
-        return True
-    for name in (
-        "Claim source atomically before publication",
-        "Publish once or perform moderation readback only",
-    ):
-        matches = [
-            step
-            for step in steps
-            if isinstance(step, dict) and step.get("name") == name
-        ]
-        if not (
-            len(matches) == 1
-            and matches[0].get("status") == "completed"
-            and matches[0].get("conclusion") == "skipped"
-        ):
-            return False
-    return True
-
-
 def independent_source_claims(
     github: GitHub,
     source: FleetPublishRecord,
@@ -1351,11 +1344,11 @@ def independent_source_claims(
     prior: FleetPublishRecord | None,
     merged_at: str,
 ) -> None:
-    """Consumer force-reset cannot erase a prior immutable CENTRAL intent.
+    """The create-only central SOURCE key survives consumer and Actions expiry.
 
-    A verified source-owned run-name is a locator only. Positive claim identity
-    still requires its immutable record plus actual native run/attempt binding.
-    Unknown protocol, pagination, expired evidence and attempted claims HOLD.
+    Absence is eligible only under the reviewed mandatory durable protocol and
+    current native run/source binding. Existing originals permit only their
+    proven moderation lineage; source-controlled stamps never reset identity.
     """
     workflow = github.api(
         f"repos/{CENTRAL_REPOSITORY}/actions/workflows/fleet-publish.yml"
@@ -1387,111 +1380,44 @@ def independent_source_claims(
         utc_time(current.get("created_at")) >= cutoff,
         "A dispatch queued before the native source merge cannot publish this source.",
     )
-    verified_protocols: set[str] = set()
-
-    def protocol(sha: str) -> None:
-        if sha not in verified_protocols:
-            try:
-                verify_workflow_protocol(github, sha)
-            except FleetPublishLookupError as error:
-                raise PublishRefused(
-                    "Central producer protocol is unknown; preserve source claims."
-                ) from error
-            verified_protocols.add(sha)
-
-    protocol(current["head_sha"])
-    runs = github.pages(dispatch_catalog_route(merged_at), "workflow_runs")
-    found_current = False
-    locator = f"fleet-publish-v1:{source['consumer_repository']}:{source['source_sha']}"
+    try:
+        verify_workflow_protocol(github, current["head_sha"])
+    except FleetPublishLookupError as error:
+        raise PublishRefused(
+            "Central durable producer protocol is unknown; preserve source claims."
+        ) from error
     require(
-        current.get("display_title") == locator,
-        "Actual current dispatch input locator disagrees with prepared source.",
+        current.get("display_title")
+        == f"fleet-publish-v1:{source['consumer_repository']}:{source['source_sha']}",
+        "Actual current dispatch locator does not bind this source.",
     )
-    for run in runs:
+    original = github.source_claim(source["consumer_repository"], source["source_sha"])
+    if original is None:
         require(
-            isinstance(run, dict) and valid_sha(run.get("head_sha")),
-            "Native dispatch listing is malformed.",
+            source["origin_run_id"] == source["run_id"],
+            "Recovery requires the original durable source claim.",
         )
-        require(
-            utc_time(run.get("created_at")) >= cutoff,
-            "Native dispatch search returned an out-of-window run.",
-        )
-        # Verify reviewed template+input binding before trusting ANY locator to
-        # exclude a different target. An unknown old version is never absence.
-        protocol(run["head_sha"])
-        require(
-            run.get("workflow_id") == workflow["id"]
-            and run.get("path") == CENTRAL_WORKFLOW
-            and run.get("event") == "workflow_dispatch"
-            and run.get("head_branch") == "main"
-            and run.get("head_repository", {}).get("full_name") == CENTRAL_REPOSITORY,
-            "Native dispatch was not bound to the trusted central main producer.",
-        )
-        if str(run.get("id")) == current_id:
-            require(
-                run.get("head_sha") == current["head_sha"]
-                and run.get("run_attempt") == 1,
-                "Current listing and native context disagree.",
-            )
-            found_current = True
-            continue
-        title = run.get("display_title")
-        if title != locator:
-            # Exact template is verified above; malformed names are not a
-            # trustworthy different-input locator and fail closed.
-            parts = title.split(":") if isinstance(title, str) else []
-            if (
-                len(parts) == 3
-                and parts[0] == "fleet-publish-v1"
-                and valid_repository(parts[1])
-                and valid_sha(parts[2])
-            ):
-                continue
-            run_binding(github, run, workflow["id"])
-            require(
-                github.record(str(run["id"]), "intent") is None
-                and proved_no_claim(github, run),
-                "Unsupported locator has no independently proven zero-claim outcome.",
-            )
-            continue
-        run_binding(github, run, workflow["id"])
-        intent = github.record(str(run["id"]), "intent")
-        if intent is None:
-            require(
-                proved_no_claim(github, run),
-                "Absent intent does not prove that prior claim/effect never executed.",
-            )
-            continue
-        require(
-            intent["consumer_repository"] == source["consumer_repository"]
-            and intent["source_sha"] == source["source_sha"]
-            and intent["source_tree_sha"] == source["source_tree_sha"],
-            "Native locator and immutable intent binding disagree.",
-        )
-        verify_attempt(github, intent, successful=False)
-        # Only explicit moderation recovery may reference this ALREADY proven
-        # publication lineage. A new original never clears an earlier intent.
-        recovering = source["origin_run_id"] != source["run_id"]
-        require(
-            recovering
-            and prior is not None
-            and all(
-                intent[key] == prior[key]
-                for key in (
-                    "consumer_repository",
-                    "source_sha",
-                    "source_tree_sha",
-                    "plugin_name",
-                    "version",
-                    "origin_run_id",
-                    "origin_run_attempt",
-                )
-            ),
-            "An independent central intent already claims this source; never publish it again.",
-        )
+        return
+    intent = original["intent"]
     require(
-        found_current,
-        "Complete native dispatch listing omitted the actual current run.",
+        source["origin_run_id"] != source["run_id"]
+        and prior is not None
+        and intent["run_id"] == source["origin_run_id"]
+        and all(
+            intent[key] == prior[key] == source[key]
+            for key in (
+                "consumer_repository",
+                "source_sha",
+                "source_ref",
+                "source_tree_sha",
+                "plugin_name",
+                "version",
+                "registry_baseline",
+                "origin_run_id",
+                "origin_run_attempt",
+            )
+        ),
+        "An independent durable original already claims this source; never publish it again.",
     )
 
 
@@ -1663,6 +1589,15 @@ def claim(github: GitHub, work: Path) -> None:
         }
     )
     claimed_sha = push_claim(github, record, selection["expected_sha"], files)
+    _, claimed_entries = tree(github, record["consumer_repository"], claimed_sha)
+    require(
+        decode_record(
+            file(github, record["consumer_repository"], claimed_entries, STAMP)
+        )
+        == record,
+        "Actual claimed commit does not retain its exact intent; preserve STOP.",
+    )
+    github.persist_archive_claim(record, claimed_sha)
     save(work / "claim.json", {"bookkeeping_sha": claimed_sha})
 
 
@@ -1704,8 +1639,7 @@ def execute(github: GitHub, work: Path) -> bool:
     claim_data = decode((work / "claim.json").read_bytes())
     claim_sha = claim_data.get("bookkeeping_sha")
     require(
-        artifact(github, record["run_id"], "fleet-publish-intent-v1", "intent.json")
-        == intent,
+        github.live_record(record["run_id"], "intent") == intent,
         "Immutable intent upload is unavailable; retain durable STOP without publication.",
     )
     require(valid_sha(claim_sha), "Claimed native commit is missing.")
@@ -1732,6 +1666,7 @@ def execute(github: GitHub, work: Path) -> bool:
     wait_claim_ci(
         github, record["consumer_repository"], claim_sha, record["source_ref"]
     )
+    github.verify_archive_claim(intent, claim_sha)
     record["bookkeeping_sha"] = claim_sha
     # Persist conservative local terminal evidence BEFORE the effect. Workflow
     # failure/cancellation still leaves the durable claimed source STOP record.

@@ -28,6 +28,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import fleet_publish as publisher  # noqa: E402
 import fleet_publish_targets as poller  # noqa: E402
 from fleet_publish_validate import validate  # noqa: E402
+from fleet_publish_archive import make_intent  # noqa: E402 - actual schema owner.
 
 REPO = "jbaruch/nanoclaw-fixture"
 SOURCE, TREE, HEAD, WORKFLOW, CLAIM = (character * 40 for character in "abcde")
@@ -108,6 +109,8 @@ class NativeGitHub(publisher.GitHub):
         self.dispatch_sources: dict[str, str] = {"101": SOURCE}
         self.other_runs: dict[str, dict[str, Any]] = {}
         self.other_records: dict[str, dict[str, bytes]] = {}
+        self.source_indexes: dict[tuple[str, str], dict[str, Any]] = {}
+        self.durable_intents: dict[str, dict[str, Any]] = {}
         self.native_jobs: dict[str, list[dict[str, Any]]] = {}
         self.source_merged_at = "2026-10-27T01:02:00Z"
         self.current_pull_source = SOURCE
@@ -338,6 +341,59 @@ class NativeGitHub(publisher.GitHub):
     def optional_marker(self, repo: str) -> object:
         return {"sha": SOURCE}
 
+    def source_claim(self, repo: str, sha: str) -> dict[str, Any] | None:
+        return deepcopy(self.source_indexes.get((repo, sha)))
+
+    def persist_archive_claim(
+        self, record: publisher.FleetPublishRecord, sha: str
+    ) -> None:
+        envelope = make_intent(record, sha)
+        key = (record["consumer_repository"], record["source_sha"])
+        if record["origin_run_id"] == record["run_id"]:
+            publisher.require(
+                key not in self.source_indexes or self.source_indexes[key] == envelope,
+                "Original source is already claimed.",
+            )
+            self.source_indexes[key] = deepcopy(envelope)
+        else:
+            publisher.require(
+                key in self.source_indexes
+                and self.source_indexes[key]["intent"]["run_id"]
+                == record["origin_run_id"],
+                "Recovery origin missing.",
+            )
+        publisher.require(
+            record["run_id"] not in self.durable_intents
+            or self.durable_intents[record["run_id"]] == envelope,
+            "Run intent differs.",
+        )
+        self.durable_intents[record["run_id"]] = deepcopy(envelope)
+
+    def verify_archive_claim(
+        self, record: publisher.FleetPublishRecord, sha: str
+    ) -> None:
+        expected = make_intent(record, sha)
+        publisher.require(
+            self.durable_intents.get(record["run_id"]) == expected
+            and (record["consumer_repository"], record["source_sha"])
+            in self.source_indexes,
+            "Durable claim is missing or changed.",
+        )
+
+    def attempt_evidence(
+        self, record: publisher.FleetPublishRecord, *, successful: bool
+    ) -> dict[str, Any]:
+        route = f"repos/{publisher.CENTRAL_REPOSITORY}/actions/runs/{record['run_id']}"
+        return {
+            "run": self.api(route),
+            "attempt": self.api(route + f"/attempts/{record['run_attempt']}"),
+        }
+
+    def live_record(
+        self, run_id: str, kind: str
+    ) -> publisher.FleetPublishRecord | None:
+        return self.record(run_id, kind)
+
     def record(self, run_id: str, kind: str) -> publisher.FleetPublishRecord | None:
         raw = (
             self.records if run_id == "101" else self.other_records.get(run_id, {})
@@ -440,6 +496,31 @@ class PublisherTests(PublisherFixture):
         self.assertNotIn(
             "FLEET_CENTRAL_TOKEN", self.cli.call_args_list[1].kwargs["env"]
         )
+
+    def test_missing_durable_source_index_after_claim_never_dispatches_publish(self):
+        self.claimed()
+        self.github.source_indexes.clear()
+        with self.assertRaises(publisher.PublishRefused):
+            publisher.execute(self.github, self.work)
+        self.assertNotIn("smart-publish.sh", self.helpers)
+        self.assertIn(publisher.STAMP, self.github.entries)
+
+    def test_failed_central_claim_persistence_retains_consumer_stop_without_effect(
+        self,
+    ):
+        self.prepare()
+        with (
+            patch.object(
+                self.github,
+                "persist_archive_claim",
+                side_effect=publisher.PublishRefused("central persistence unavailable"),
+            ),
+            self.assertRaises(publisher.PublishRefused),
+        ):
+            publisher.claim(self.github, self.work)
+        self.assertIn(publisher.STAMP, self.github.entries)
+        self.assertFalse((self.work / "claim.json").exists())
+        self.assertNotIn("smart-publish.sh", self.helpers)
 
     def test_failed_intent_upload_retains_durable_stop_and_never_publishes(
         self,
@@ -695,12 +776,11 @@ class PublisherTests(PublisherFixture):
                 "FLEET_CENTRAL_TOKEN": "fake-central-only",
             },
         ):
-            with patch.object(native._record_client, "artifact", side_effect=fetch):
+            with patch("fleet_publish_archive.ArchiveReader.record", side_effect=fetch):
                 self.assertIsNone(native.record("101", "intent"))
             self.assertEqual(os.environ["GH_TOKEN"], "fake-selected-app")
-            with patch.object(
-                native._record_client,
-                "artifact",
+            with patch(
+                "fleet_publish_archive.ArchiveReader.record",
                 side_effect=publisher.FleetPublishLookupError("synthetic"),
             ):
                 with self.assertRaises(publisher.PublishRefused):
@@ -1452,36 +1532,6 @@ class QueueTests(PublisherFixture):
 
 
 class IndependentClaimsTests(PublisherFixture):
-    def add_prior(self, *, claim: str = "skipped", effect: str = "skipped") -> None:
-        self.github.other_runs["100"] = {"status": "completed"}
-        self.github.native_jobs["100"] = [
-            {
-                "id": 400,
-                "name": "publish",
-                "run_id": 100,
-                "head_sha": WORKFLOW,
-                "status": "completed",
-                "conclusion": "failure",
-                "steps": [
-                    {
-                        "name": "Prepare verified data-only package and intent",
-                        "status": "completed",
-                        "conclusion": "failure",
-                    },
-                    {
-                        "name": "Claim source atomically before publication",
-                        "status": "completed",
-                        "conclusion": claim,
-                    },
-                    {
-                        "name": "Publish once or perform moderation readback only",
-                        "status": "completed",
-                        "conclusion": effect,
-                    },
-                ],
-            }
-        ]
-
     def old_intent(self) -> publisher.FleetPublishRecord:
         return publisher.initial_record(
             REPO,
@@ -1494,127 +1544,144 @@ class IndependentClaimsTests(PublisherFixture):
             {**ENV, "GITHUB_RUN_ID": "100"},
         )
 
-    def test_erased_consumer_history_cannot_hide_prior_central_original(self) -> None:
-        self.add_prior()
-        self.github.other_records["100"] = {
-            "intent": publisher.encoded(self.old_intent())
-        }
+    def old_source_index(self):
+        self.github.source_indexes[(REPO, SOURCE)] = make_intent(
+            self.old_intent(), "f" * 40
+        )
+
+    def test_erased_consumer_and_actions_history_cannot_hide_original_source_index(
+        self,
+    ):
+        self.old_source_index()
+        self.github.other_runs.clear()
+        self.github.other_records.clear()
         self.assertEqual(self.github.history, [])
         self.assertNotIn(publisher.STAMP, self.github.entries)
         with self.assertRaises(publisher.PublishRefused):
             self.prepare()
-        self.assertFalse((self.work / "intent.json").exists())
         self.assertFalse(self.cli.called)
 
-    def test_absent_intent_can_only_be_excluded_with_skipped_native_claim_and_effect(
+    def test_exact_missing_source_key_under_new_protocol_can_prepare_after_catalog_expiry(
         self,
-    ) -> None:
-        self.add_prior()
-        self.prepare()
-        self.assertTrue((self.work / "intent.json").is_file())
-        self.assertNotIn("smart-publish.sh", self.helpers)
-
-    def test_claim_failure_or_effect_attempt_is_not_no_effect_evidence(self) -> None:
-        for claim, effect in (
-            ("failure", "skipped"),
-            ("success", "skipped"),
-            ("skipped", "failure"),
-            ("skipped", "success"),
-            ("cancelled", "skipped"),
-        ):
-            self.add_prior(claim=claim, effect=effect)
-            with (
-                self.subTest(claim=claim, effect=effect),
-                self.assertRaises(publisher.PublishRefused),
-            ):
-                publisher.prepare(self.github, REPO, SOURCE, self.work, ENV)
-        self.assertNotIn("smart-publish.sh", self.helpers)
-
-    def test_expired_artifact_never_uses_skipped_job_as_absence_fallback(self) -> None:
-        self.add_prior()
-        original = self.github.record
-        with patch.object(
-            self.github,
-            "record",
-            side_effect=lambda run, kind: (_ for _ in ()).throw(
-                publisher.PublishRefused("expired")
-            )
-            if run == "100"
-            else original(run, kind),
-        ):
-            with self.assertRaises(publisher.PublishRefused):
-                self.prepare()
-        self.assertFalse((self.work / "intent.json").exists())
-
-    def test_current_context_native_binding_cannot_exclude_some_other_run(self) -> None:
-        self.github.other_runs["101"] = {"head_sha": "f" * 40}
-        with self.assertRaises(publisher.PublishRefused):
-            self.prepare()
-
-    def test_other_locator_is_ignored_only_after_reviewed_protocol_verification(
-        self,
-    ) -> None:
-        self.add_prior()
-        self.github.other_runs["100"].update(
-            display_title=f"fleet-publish-v1:jbaruch/other:{SOURCE}", head_sha="f" * 40
-        )
-        with patch.object(
-            publisher,
-            "verify_workflow_protocol",
-            side_effect=lambda _client, sha: (_ for _ in ()).throw(
-                publisher.FleetPublishLookupError("unknown_producer")
-            )
-            if sha == "f" * 40
-            else None,
-        ):
-            with self.assertRaises(publisher.PublishRefused):
-                self.prepare()
-
-    def test_matching_locator_cannot_relabel_a_different_actual_intent(self) -> None:
-        self.add_prior()
-        intent = self.old_intent()
-        intent["consumer_repository"] = "jbaruch/other"
-        self.github.other_records["100"] = {"intent": publisher.encoded(intent)}
-        with self.assertRaises(publisher.PublishRefused):
-            self.prepare()
-
-    def test_dispatch_list_must_be_complete_and_include_actual_current_run(
-        self,
-    ) -> None:
+    ):
         original = self.github.pages
         with patch.object(
             self.github,
             "pages",
-            side_effect=lambda route, key=None: []
+            side_effect=lambda route, key=None: (_ for _ in ()).throw(
+                AssertionError("Historical catalog is no longer permanent authority")
+            )
             if "/workflows/fleet-publish.yml/runs" in route
             else original(route, key),
         ):
-            with self.assertRaises(publisher.PublishRefused):
-                self.prepare()
+            self.prepare()
+        self.assertNotIn("smart-publish.sh", self.helpers)
 
-    def test_skipped_rerun_cannot_clear_unknown_previous_attempt(self) -> None:
-        self.add_prior()
-        self.github.other_runs["100"]["run_attempt"] = 2
+    def test_unavailable_source_index_never_means_absence(self):
+        for reason in ("HTTP403", "network", "malformed", "changedref"):
+            with (
+                patch.object(
+                    self.github,
+                    "source_claim",
+                    side_effect=publisher.PublishRefused(reason),
+                ),
+                self.subTest(reason=reason),
+                self.assertRaises(publisher.PublishRefused),
+            ):
+                publisher.prepare(self.github, REPO, SOURCE, self.work, ENV)
+        self.assertFalse(self.cli.called)
+
+    def test_nonterminal_original_source_index_is_still_a_stop(self):
+        self.old_source_index()
+        self.github.other_runs["100"] = {"status": "in_progress", "conclusion": None}
+        with self.assertRaises(publisher.PublishRefused):
+            self.prepare()
+        self.assertNotIn("smart-publish.sh", self.helpers)
+
+    def test_original_index_survives_latest_rerun_or_absent_artifacts(self):
+        self.old_source_index()
+        self.github.other_runs["100"] = {"run_attempt": 2, "status": "completed"}
         with self.assertRaises(publisher.PublishRefused):
             self.prepare()
 
-    def test_malformed_locator_requires_actual_skipped_claim_proof(self) -> None:
-        self.add_prior()
-        self.github.other_runs["100"]["display_title"] = (
-            "fleet-publish-v1:invalid-input"
+    def test_current_context_native_binding_cannot_exclude_some_other_run(self):
+        self.github.other_runs["101"] = {"head_sha": "f" * 40}
+        with self.assertRaises(publisher.PublishRefused):
+            self.prepare()
+
+    def test_missing_key_is_not_authority_for_unknown_or_old_nondurable_producer(self):
+        with (
+            patch.object(
+                publisher,
+                "verify_workflow_protocol",
+                side_effect=publisher.FleetPublishLookupError("unknown_producer"),
+            ),
+            self.assertRaises(publisher.PublishRefused),
+        ):
+            self.prepare()
+        self.assertFalse(self.cli.called)
+
+    def test_foreign_source_index_does_not_authorize_publication(self):
+        intent = self.old_intent()
+        intent["consumer_repository"] = "jbaruch/other"
+        self.github.source_indexes[(REPO, SOURCE)] = make_intent(intent, "f" * 40)
+        with self.assertRaises(publisher.PublishRefused):
+            self.prepare()
+
+    def test_recovery_requires_positive_original_index_not_catalog_absence(self):
+        record = publisher.initial_record(
+            REPO,
+            SOURCE,
+            "refs/heads/main",
+            TREE,
+            "jbaruch/nanoclaw-fixture",
+            "0.1.0",
+            "0.1.1",
+            ENV,
         )
-        self.prepare()
-        self.assertTrue((self.work / "intent.json").is_file())
+        record["origin_run_id"] = "100"
+        with self.assertRaises(publisher.PublishRefused):
+            publisher.independent_source_claims(
+                self.github,
+                record,
+                ENV,
+                self.old_intent(),
+                self.github.source_merged_at,
+            )
 
-    def test_native_run_template_cannot_claim_an_unexecuted_foreign_workflow(
-        self,
-    ) -> None:
-        self.add_prior()
-        self.github.other_runs["100"]["head_branch"] = "unreviewed-feature"
+    def test_recovery_cannot_rebind_original_plugin_or_version(self):
+        self.old_source_index()
+        record = publisher.initial_record(
+            REPO,
+            SOURCE,
+            "refs/heads/main",
+            TREE,
+            "jbaruch/nanoclaw-fixture",
+            "0.1.0",
+            "0.1.2",
+            ENV,
+        )
+        record["origin_run_id"] = "100"
+        with self.assertRaises(publisher.PublishRefused):
+            publisher.independent_source_claims(
+                self.github,
+                record,
+                ENV,
+                self.old_intent(),
+                self.github.source_merged_at,
+            )
+
+    def test_current_rerun_never_uses_missing_key_to_reopen_an_effect(self):
+        self.github.other_runs["101"] = {"run_attempt": 2}
         with self.assertRaises(publisher.PublishRefused):
             self.prepare()
 
-    def test_current_locator_must_bind_actual_prepared_input(self) -> None:
+    def test_current_run_template_must_be_actual_central_main(self):
+        self.github.other_runs["101"] = {"head_branch": "unreviewed-feature"}
+        with self.assertRaises(publisher.PublishRefused):
+            self.prepare()
+
+    def test_current_locator_must_bind_actual_prepared_input(self):
         self.github.other_runs["101"] = {
             "display_title": "fleet-publish-v1:jbaruch/other:" + SOURCE
         }
@@ -2015,7 +2082,7 @@ class PollDispatchTests(PublisherFixture):
                 self.calls = 0
                 clients.append(self)
 
-            def artifact(self, _run: str, _kind: str) -> None:
+            def artifact_evidence(self, _run: str, _kind: str) -> None:
                 self.calls += 2  # Native artifact list + bounded ZIP read.
                 if self.calls > 128:
                     raise publisher.FleetPublishLookupError("command_budget")
@@ -2024,7 +2091,7 @@ class PollDispatchTests(PublisherFixture):
             # Exercise the genuine facade/auth scope, with a synthetic native
             # command counter. Source authority is covered by the other suites.
             for _ in range(4):
-                client.record("101", "intent")
+                client.live_record("101", "intent")
 
         with (
             patch.object(publisher, "GitHubClient", BudgetClient),
@@ -2057,8 +2124,10 @@ class PollDispatchTests(PublisherFixture):
                 selected, held = poller.targets(root)
         self.assertEqual(len(selected), 24)
         self.assertEqual(held, [])
-        self.assertEqual(len(clients), 25)
-        self.assertEqual([client.calls for client in clients], [0] + [8] * 24)
+        self.assertEqual(len(clients), 121)  # root +24 consumers +96 bounded proofs
+        self.assertEqual(sum(client.calls for client in clients), 192)
+        self.assertEqual(sum(client.calls == 0 for client in clients), 25)
+        self.assertEqual(max(client.calls for client in clients), 2)
 
     def test_poll_checks_cheap_source_gates_before_dispatching(self) -> None:
         self.github.native_reviews[0]["state"] = "CHANGES_REQUESTED"

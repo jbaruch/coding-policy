@@ -55,6 +55,9 @@ jobs:
     if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.run_attempt == 1 && vars.FLEET_PUBLISHER_ENABLED == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 40
+    permissions:
+      contents: write # central create-only evidence refs; never central main
+      actions: write # immutable artifacts for this selected run
     steps:
       - uses: actions/checkout@v7
         with:
