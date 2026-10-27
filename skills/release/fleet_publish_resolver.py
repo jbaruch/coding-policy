@@ -18,10 +18,9 @@ import re
 import sys
 from datetime import datetime
 from typing import Any, NoReturn
-from urllib.parse import quote
 
+from fleet_publish_archive import ArchiveReader
 from fleet_publish_github import FleetPublishLookupError, GitHubClient
-from fleet_publish_producer import verify_workflow_protocol
 from fleet_publish_record import (
     CENTRAL_REPOSITORY,
     CENTRAL_WORKFLOW,
@@ -131,13 +130,15 @@ class _Evidence:
             "invalid_selection",
         )
         self.github = github
+        self.archive = ArchiveReader(github)
+        self.source_index = None
+        self.selected_id: str | None = None
         self.repo = repository
         self.source = source_sha
         self.commits: dict[tuple[str, str], dict[str, Any]] = {}
         self.trees: dict[tuple[str, str], dict[str, dict[str, Any]]] = {}
         self.blobs: dict[tuple[str, str], bytes] = {}
         self.artifacts: dict[tuple[str, str], FleetPublishRecord | None] = {}
-        self.protocols: set[str] = set()
         self.attempts: dict[str, dict[str, Any]] = {}
         self.intents: dict[str, FleetPublishRecord] = {}
         self.ref, self.tip = self.default()
@@ -194,7 +195,6 @@ class _Evidence:
             "workflow_binding",
         )
         self.workflow_id = workflow["id"]
-        self.run_snapshot: list[tuple[Any, ...]] | None = None
 
     def obj(self, route: str, kind: str) -> dict[str, Any]:
         return _object(self.github.json(route), kind)
@@ -400,15 +400,11 @@ class _Evidence:
         key = run_id, kind
         if key not in self.artifacts:
             _need(kind in ("intent", "receipt"), "invalid_selection")
-            actual = self.github.artifact(run_id, kind)
+            actual = self.archive.record(
+                run_id, "intent" if kind == "intent" else "receipt"
+            )
             self.artifacts[key] = None if actual is None else parse_record(actual)
         return self.artifacts[key]
-
-    def catalog_route(self) -> str:
-        return (
-            f"repos/{CENTRAL_REPOSITORY}/actions/workflows/{self.workflow_id}/runs"
-            f"?event=workflow_dispatch&created={quote('>=' + self.merged_at, safe='')}"
-        )
 
     def native_row(self, row: dict[str, Any], run_id: str) -> None:
         created = _text(row.get("created_at"), "workflow_binding")
@@ -466,157 +462,43 @@ class _Evidence:
             _need(conclusion is None, "workflow_binding")
         _need(isinstance(row.get("display_title"), str), "workflow_binding")
 
-    def protocol(self, workflow_sha: str) -> None:
-        if workflow_sha not in self.protocols:
-            verify_workflow_protocol(self.github, workflow_sha)
-            self.protocols.add(workflow_sha)
-
-    def fingerprint(self, row: dict[str, Any]) -> tuple[Any, ...]:
-        return (
-            str(row["id"]),
-            row.get("head_sha"),
-            row.get("created_at"),
-            row.get("run_attempt"),
-            row.get("display_title"),
-            row.get("workflow_id"),
-            row.get("path"),
-            row.get("event"),
-            row.get("head_branch"),
-            _object(row.get("repository"), "workflow_binding").get("full_name"),
-            _object(row.get("head_repository"), "workflow_binding").get("full_name"),
-        )
-
     def run(
         self, run_id: str, expected_sha: str | None = None, *, successful: bool = False
     ) -> dict[str, Any]:
-        raw = self.obj(
-            f"repos/{CENTRAL_REPOSITORY}/actions/runs/{run_id}", "workflow_binding"
-        )
-        attempt = self.obj(
-            f"repos/{CENTRAL_REPOSITORY}/actions/runs/{run_id}/attempts/1",
-            "workflow_binding",
-        )
+        evidence = self.artifact(run_id, "receipt" if successful else "intent")
+        _need(evidence is not None, "unavailable")
+        if evidence is None:
+            _hold("unavailable")
+        proof = self.archive.verify_record_attempt(evidence, successful=successful)
+
+        def native(row):
+            return {
+                **row,
+                "id": int(row["id"]),
+                "repository": {"full_name": row["repository"]},
+                "head_repository": {"full_name": row["head_repository"]},
+            }
+
+        raw, attempt = native(proof["run"]), native(proof["attempt"])
         self.native_row(raw, run_id)
         self.native_row(attempt, run_id)
-        _need(raw["run_attempt"] == attempt["run_attempt"] == 1, "workflow_binding")
         _need(
-            self.fingerprint(raw) == self.fingerprint(attempt)
-            and (expected_sha is None or raw["head_sha"] == expected_sha),
-            "workflow_binding",
+            expected_sha is None or raw["head_sha"] == expected_sha, "workflow_binding"
         )
-        self.protocol(raw["head_sha"])
         self.attempts[run_id] = attempt
-        if successful:
-            _need(
-                all(
-                    row.get("status") == "completed"
-                    and row.get("conclusion") == "success"
-                    for row in (raw, attempt)
-                ),
-                "unconfirmed",
-            )
         return raw
 
-    def no_effect(self, run_id: str, run: dict[str, Any]) -> bool:
-        if run.get("status") != "completed":
-            _hold("pending")
-        jobs = self.pages(
-            f"repos/{CENTRAL_REPOSITORY}/actions/runs/{run_id}/attempts/1/jobs", "jobs"
-        )
-        _need(
-            jobs
-            and all(
-                isinstance(job, dict)
-                and job.get("name") in ("poll", "publish")
-                and _positive(job.get("id"))
-                for job in jobs
-            ),
-            "unavailable",
-        )
-        _need(len({job["id"] for job in jobs}) == len(jobs), "unavailable")
-        publish = [
-            row
-            for row in jobs
-            if isinstance(row, dict) and row.get("name") == "publish"
-        ]
-        _need(len(publish) == 1, "unavailable")
-        job = publish[0]
-        _need(
-            type(job.get("run_id")) is int
-            and str(job["run_id"]) == run_id
-            and type(job.get("run_attempt")) is int
-            and job.get("run_attempt") == 1
-            and job.get("head_sha") == run["head_sha"]
-            and job.get("status") == "completed",
-            "unavailable",
-        )
-        steps = _list(job.get("steps"), "unavailable")
-        _need(isinstance(steps, list) and len(steps) <= 100, "unavailable")
-        if job.get("conclusion") == "skipped" and not steps:
-            return True
-        for name in (CLAIM_STEP, EFFECT_STEP):
-            matches = [
-                row
-                for row in steps
-                if isinstance(row, dict) and row.get("name") == name
-            ]
-            if (
-                len(matches) != 1
-                or matches[0].get("status") != "completed"
-                or matches[0].get("conclusion") != "skipped"
-            ):
-                return False
-        return True
-
     def originals(self) -> dict[str, FleetPublishRecord]:
-        rows = self.pages(
-            self.catalog_route(),
-            "workflow_runs",
-        )
-        seen = set()
-        result = {}
-        snapshot = []
-        locator = f"fleet-publish-v1:{self.repo}:{self.source}"
-        for item in rows:
-            row = _object(item, "unavailable")
-            _need(_positive(row.get("id")) and row["id"] not in seen, "unavailable")
-            seen.add(row["id"])
-            run_id = str(row["id"])
-            self.native_row(row, run_id)
-            self.protocol(row["head_sha"])
-            title = row.get("display_title")
-            _need(
-                isinstance(title, str)
-                and re.fullmatch(
-                    r"fleet-publish-v1:jbaruch/[A-Za-z0-9][A-Za-z0-9_.-]{0,99}:[a-f0-9]{40}",
-                    title,
-                ),
-                "workflow_binding",
-            )
-            snapshot.append(self.fingerprint(row))
-            if title != locator:
-                continue
-            run = self.run(run_id, row["head_sha"])
-            _need(self.fingerprint(run) == self.fingerprint(row), "workflow_binding")
-            intent = self.artifact(run_id, "intent")
-            if intent is None:
-                _need(self.no_effect(run_id, run), "claim_binding")
-                continue
-            self.identity(intent)
-            _need(
-                intent["run_id"] == run_id
-                and intent["workflow_sha"] == run["head_sha"],
-                "workflow_binding",
-            )
-            self.intents[run_id] = intent
-            if intent["origin_run_id"] == run_id:
-                result[run_id] = intent
-        self.run_snapshot = sorted(snapshot)
-        _need(
-            all(intent["origin_run_id"] in result for intent in self.intents.values()),
-            "unavailable",
-        )
-        return result
+        # The prospective central SOURCE index is created before effects.
+        # Native Actions history is expiring backpressure, not durable absence.
+        indexed = self.archive.source_claim(self.repo, self.source)
+        self.source_index = indexed
+        if indexed is None:
+            return {}
+        intent = indexed["intent"]
+        self.identity(intent)
+        self.intents[intent["run_id"]] = intent
+        return {intent["run_id"]: intent}
 
     def identity(self, intent: FleetPublishRecord) -> None:
         _need(
@@ -656,6 +538,10 @@ class _Evidence:
             _hold("pending")
         _need(len(matches) == 1, "claim_binding")
         sha = matches[0]
+        durable = self.archive.run_intent(intent["run_id"])
+        _need(
+            durable is not None and durable["bookkeeping_sha"] == sha, "claim_binding"
+        )
         _need(
             self.history.index(sha) < self.history.index(self.source), "claim_binding"
         )
@@ -673,6 +559,7 @@ class _Evidence:
         if intent is None:
             _hold("unavailable")
         self.identity(intent)
+        self.intents[chosen] = intent
         run = self.run(chosen, intent["workflow_sha"])
         _need(
             chosen in self.intents
@@ -681,6 +568,7 @@ class _Evidence:
             "workflow_binding",
         )
         _need(intent["origin_run_id"] == original_id, "ambiguous")
+        self.selected_id = chosen
         return intent, self.claim(intent)
 
     def receipt(
@@ -732,19 +620,12 @@ class _Evidence:
 
     def stable(self) -> None:
         _need(self.default() == (self.ref, self.tip), "source_binding")
-        rows = self.pages(
-            self.catalog_route(),
-            "workflow_runs",
+        _need(
+            self.archive.source_claim(self.repo, self.source) == self.source_index,
+            "claim_binding",
         )
-        snapshot = []
-        seen = set()
-        for raw in rows:
-            row = _object(raw, "unavailable")
-            _need(_positive(row.get("id")) and row["id"] not in seen, "unavailable")
-            seen.add(row["id"])
-            self.native_row(row, str(row["id"]))
-            snapshot.append(self.fingerprint(row))
-        _need(sorted(snapshot) == self.run_snapshot, "unavailable")
+        if self.selected_id is not None:
+            self.run(self.selected_id)
 
 
 def _execute(

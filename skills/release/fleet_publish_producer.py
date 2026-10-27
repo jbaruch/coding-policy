@@ -1,7 +1,7 @@
 """Reviewed central producer protocol identity; no generic YAML interpretation.
 
-Each coherent pinset covers exactly four co-shipped source files. Renew by
-reviewing all four and retaining older supported pinsets when the producer
+Each coherent pinset covers the co-shipped protocol owner files. Renew by
+reviewing every listed file and retaining older supported pinsets when the producer
 changes; unknown versions hold. Native central-main ancestry is also required.
 """
 
@@ -17,20 +17,14 @@ PRODUCER_PATHS = (
     "scripts/fleet_publish.py",
     "scripts/fleet_publish_workflow.py",
     "scripts/fleet_publish_validate.py",
+    ".github/workflows/fleet-publish-finalize.yml",
+    "scripts/fleet_publish_archive_write.py",
+    "skills/release/fleet_publish_archive.py",
 )
-# Reviewed coherent combined freeze bc4d6605 (controller + phase adapter).
-# This protocol rejects native runs created before the source PR merged, so
-# temporal catalog completeness is safe. The earlier unactivated 6c10 protocol
-# is deliberately NOT supported. This pins dispatch semantics, not transitive
-# execution dependencies; renew by reviewing all four source files together.
-TRUSTED_PRODUCERS: tuple[dict[str, str], ...] = (
-    {
-        ".github/workflows/fleet-publish.yml": "f5fbfd0ab44015c1afd96aef87b481ce0584083e",
-        "scripts/fleet_publish.py": "c4f4567a7e2ef278b8b5cf65f99245568ab928e2",
-        "scripts/fleet_publish_workflow.py": "afaa6d4814ab4d7836d26c14ce9a1d7e0e8478f6",
-        "scripts/fleet_publish_validate.py": "7d450d115f6a661f3a0e1d3d8ab1a85451bb7a47",
-    },
-)
+# Prospective durable protocol only. Populate from the combined reviewed
+# writer/finalizer/archive-owner freeze. Older unactivated protocols cannot
+# prove durable absence or historical terminal success.
+TRUSTED_PRODUCERS: tuple[dict[str, str], ...] = ()
 
 
 class GitHubRead(Protocol):

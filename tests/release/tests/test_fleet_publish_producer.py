@@ -41,7 +41,10 @@ def entry(name, sha, *, directory=False):
 
 class Fixture:
     def __init__(self):
-        self.pins = {name: str(index) * 40 for index, name in enumerate(producer.PRODUCER_PATHS, 1)}
+        self.pins = {
+            name: str(index) * 40
+            for index, name in enumerate(producer.PRODUCER_PATHS, 1)
+        }
         self.routes = {
             f"repos/{CENTRAL}": {
                 "full_name": CENTRAL,
@@ -58,13 +61,17 @@ class Fixture:
                 "base_commit": {"sha": WORKFLOW},
                 "merge_base_commit": {"sha": WORKFLOW},
             },
-            f"repos/{CENTRAL}/git/commits/{WORKFLOW}": {"sha": WORKFLOW, "tree": {"sha": ROOT}},
+            f"repos/{CENTRAL}/git/commits/{WORKFLOW}": {
+                "sha": WORKFLOW,
+                "tree": {"sha": ROOT},
+            },
             f"repos/{CENTRAL}/git/trees/{ROOT}": {
                 "sha": ROOT,
                 "truncated": False,
                 "tree": [
                     entry(".github", GITHUB, directory=True),
                     entry("scripts", SCRIPTS, directory=True),
+                    entry("skills", "8" * 40, directory=True),
                 ],
             },
             f"repos/{CENTRAL}/git/trees/{GITHUB}": {
@@ -75,16 +82,36 @@ class Fixture:
             f"repos/{CENTRAL}/git/trees/{WORKFLOWS}": {
                 "sha": WORKFLOWS,
                 "truncated": False,
-                "tree": [entry("fleet-publish.yml", self.pins[producer.PRODUCER_PATHS[0]])],
+                "tree": [
+                    entry(name.split("/")[-1], self.pins[name])
+                    for name in producer.PRODUCER_PATHS
+                    if name.startswith(".github/workflows/")
+                ],
             },
             f"repos/{CENTRAL}/git/trees/{SCRIPTS}": {
                 "sha": SCRIPTS,
                 "truncated": False,
                 "tree": [
                     entry(name.split("/")[-1], self.pins[name])
-                    for name in producer.PRODUCER_PATHS[1:]
+                    for name in producer.PRODUCER_PATHS
+                    if name.startswith("scripts/")
                 ],
             },
+        }
+        self.routes[f"repos/{CENTRAL}/git/trees/{'8' * 40}"] = {
+            "sha": "8" * 40,
+            "truncated": False,
+            "tree": [entry("release", "9" * 40, directory=True)],
+        }
+        self.routes[f"repos/{CENTRAL}/git/trees/{'9' * 40}"] = {
+            "sha": "9" * 40,
+            "truncated": False,
+            "tree": [
+                entry(
+                    "fleet_publish_archive.py",
+                    self.pins["skills/release/fleet_publish_archive.py"],
+                )
+            ],
         }
         self.calls = []
 
@@ -100,10 +127,10 @@ class ProducerTests(unittest.TestCase):
         pins.start()
         self.addCleanup(pins.stop)
 
-    def test_exact_four_reviewed_blobs_allow_central_ancestor_not_tip(self):
+    def test_exact_seven_reviewed_blobs_allow_central_ancestor_not_tip(self):
         producer.verify_workflow_protocol(self.fixture, WORKFLOW)
         self.assertNotEqual(WORKFLOW, TIP)
-        self.assertEqual(sum("/git/trees/" in route for route in self.fixture.calls), 4)
+        self.assertEqual(sum("/git/trees/" in route for route in self.fixture.calls), 6)
 
     def test_wrong_blob_and_mixed_pinsets_cannot_form_supported_protocol(self):
         f = self.fixture

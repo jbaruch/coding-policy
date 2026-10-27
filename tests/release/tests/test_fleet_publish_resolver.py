@@ -23,7 +23,9 @@ assert SPEC is not None and SPEC.loader is not None
 resolver: Any = importlib.util.module_from_spec(SPEC)
 with patch.object(sys, "path", [str(SOURCE), *sys.path]):
     SPEC.loader.exec_module(resolver)
+    importlib.import_module("fleet_publish_producer")
 producer: Any = sys.modules["fleet_publish_producer"]
+archive_owner: Any = sys.modules["fleet_publish_archive"]
 github_owner: Any = sys.modules["fleet_publish_github"]
 FleetPublishLookupError = github_owner.FleetPublishLookupError
 
@@ -78,6 +80,13 @@ class Fixture:
             "base_commit": {"sha": self.workflow},
             "merge_base_commit": {"sha": self.workflow},
         }
+        self.routes[
+            f"repos/{CENTRAL}/compare/{self.central_tip}...{self.central_tip}"
+        ] = {
+            "status": "identical",
+            "base_commit": {"sha": self.central_tip},
+            "merge_base_commit": {"sha": self.central_tip},
+        }
         workflow_metadata = {
             "id": 77,
             "path": ".github/workflows/fleet-publish.yml",
@@ -122,6 +131,102 @@ class Fixture:
         }
         self.add_run(RUN, self.intent)
         self.records[RUN, "receipt"] = self.receipt(self.intent, self.claim)
+        self.archive_run(RUN, self.claim, source=True)
+
+    def archive_run(self, run, bookkeeping, *, source=False, completed=True):
+        intent = self.records[run, "intent"]
+        envelope = archive_owner.make_intent(intent, bookkeeping)
+        if source:
+            self.put_archive(
+                archive_owner.ref_name(
+                    "source", repository=REPO, source_sha=self.source
+                ),
+                envelope,
+            )
+        self.put_archive(archive_owner.ref_name("intent", run_id=run), envelope)
+        if completed:
+            raw = self.routes[f"repos/{CENTRAL}/actions/runs/{run}"]
+            jobs = [
+                {
+                    "id": 9001 + int(run),
+                    "name": "publish",
+                    "run_id": int(run),
+                    "run_attempt": 1,
+                    "head_sha": self.workflow,
+                    "status": "completed",
+                    "conclusion": raw["conclusion"],
+                    "steps": [
+                        {
+                            "number": n,
+                            "name": name,
+                            "status": "completed",
+                            "conclusion": "success"
+                            if raw["conclusion"] == "success" or n == 1
+                            else "failure",
+                        }
+                        for n, name in enumerate(
+                            (archive_owner.CLAIM_STEP, archive_owner.EFFECT_STEP), 1
+                        )
+                    ],
+                }
+            ]
+            self.routes[
+                f"repos/{CENTRAL}/actions/runs/{run}/attempts/1/jobs?per_page=100&page=1"
+            ] = {"total_count": 1, "jobs": jobs}
+            value = archive_owner.make_terminal(
+                envelope,
+                self.records.get((run, "receipt")),
+                raw,
+                self.routes[f"repos/{CENTRAL}/actions/runs/{run}/attempts/1"],
+                jobs,
+                finalizer={
+                    "workflow_path": archive_owner.FINALIZER_WORKFLOW,
+                    "workflow_sha": self.workflow,
+                    "run_id": "999999999",
+                    "run_attempt": 1,
+                },
+            )
+            self.put_archive(archive_owner.ref_name("terminal", run_id=run), value)
+
+    def put_archive(self, ref, value):
+        sha = self.commit(
+            CENTRAL, [], {"record.json": archive_owner.encode_archive(value)}
+        )
+        self.routes[f"repos/{CENTRAL}/git/ref/{ref.removeprefix('refs/')}"] = {
+            "ref": ref,
+            "object": {"type": "commit", "sha": sha},
+        }
+
+    def remove_archive(self, kind, run=RUN):
+        ref = (
+            archive_owner.ref_name(kind, repository=REPO, source_sha=self.source)
+            if kind == "source"
+            else archive_owner.ref_name(kind, run_id=run)
+        )
+        self.routes.pop(f"repos/{CENTRAL}/git/ref/{ref.removeprefix('refs/')}", None)
+
+    def native_json(self, route):
+        self.calls.append(("native", route))
+        if route not in self.routes:
+            raise FleetPublishLookupError("native_missing", http_status=404)
+        value = self.routes[route]
+        if callable(value):
+            value = value()
+        if isinstance(value, Exception):
+            raise value
+        return copy.deepcopy(value)
+
+    def artifact_evidence(self, run, kind):
+        return self.artifact(run, kind)
+
+    def expire_actions(self):
+        for route in list(self.routes):
+            if "/actions/runs/" in route or "/workflows/77/runs?" in route:
+                del self.routes[route]
+        for key in self.records:
+            self.records[key] = FleetPublishLookupError(
+                "native_expired", http_status=410
+            )
 
     def tree(self, repo, entries):
         rows = []
@@ -291,6 +396,9 @@ class Fixture:
 
 class ResolverTests(unittest.TestCase):
     def setUp(self):
+        paths = patch.object(sys, "path", [str(SOURCE), *sys.path])
+        paths.start()
+        self.addCleanup(paths.stop)
         self.fixture = Fixture()
         pins = patch.object(producer, "TRUSTED_PRODUCERS", (self.fixture.pinset,))
         pins.start()
@@ -312,6 +420,7 @@ class ResolverTests(unittest.TestCase):
             )
         f.catalog()
         f.records[RUN, "receipt"] = None
+        f.remove_archive("terminal")
         selected = resolver.select(f, REPO, f.source)
         self.assertEqual(
             selected,
@@ -342,12 +451,18 @@ class ResolverTests(unittest.TestCase):
         f.default(claim)
         f.add_run(RECOVERY, recovery)
         f.records[RECOVERY, "receipt"] = f.receipt(recovery, claim)
-        self.hold(lambda: resolver.resolve(f, REPO, f.source), "unconfirmed")
+        f.archive_run(RUN, f.claim, source=True)
+        f.archive_run(RECOVERY, claim)
+        self.hold(lambda: resolver.resolve(f, REPO, f.source))
         self.assertEqual(
             resolver.resolve(f, REPO, f.source, run_id=RECOVERY),
             f.records[RECOVERY, "receipt"],
         )
-        f.records[RUN, "receipt"]["publish_exit_code"] = 1
+        expected = copy.deepcopy(f.records[RECOVERY, "receipt"])
+        original = copy.deepcopy(f.records[RUN, "receipt"])
+        f.expire_actions()
+        self.assertEqual(resolver.resolve(f, REPO, f.source, run_id=RECOVERY), expected)
+        f.records[RUN, "receipt"] = {**original, "publish_exit_code": 1}
         self.hold(lambda: resolver.resolve(f, REPO, f.source, run_id=RECOVERY))
 
     def test_default_never_selects_recovery_as_the_original(self):
@@ -359,11 +474,14 @@ class ResolverTests(unittest.TestCase):
         selected = resolver.select(f, REPO, f.source)
         self.assertEqual(selected["database_id"], int(RUN))
 
-    def test_independent_central_original_detects_erased_claim(self):
+    def test_durable_original_detects_consumer_erased_claim_even_after_actions_expiry(
+        self,
+    ):
         f = self.fixture
-        duplicate = f.new_intent(OTHER)
-        f.add_run(OTHER, duplicate)
-        self.hold(lambda: resolver.select(f, REPO, f.source), "ambiguous")
+        f.default(f.source)
+        f.expire_actions()
+        error = self.hold(lambda: resolver.select(f, REPO, f.source))
+        self.assertNotEqual(error.kind, "not_found")
 
     def test_duplicate_reintroduced_claim_birth_is_not_a_winner(self):
         f = self.fixture
@@ -412,17 +530,18 @@ class ResolverTests(unittest.TestCase):
         ]:
             with self.subTest(key=key):
                 f.routes[route] = {**original, key: value}
-                self.hold(
-                    lambda: resolver.select(f, REPO, f.source), "workflow_binding"
-                )
+                self.hold(lambda: resolver.select(f, REPO, f.source), "unavailable")
         f.routes[route] = original
 
-    def test_receipt_missing_expired_unknown_and_native_failure_never_confirm(self):
+    def test_durable_receipt_replaces_expired_or_missing_native_but_not_conflicting_records(
+        self,
+    ):
         f = self.fixture
         original = copy.deepcopy(f.records[RUN, "receipt"])
+        for value in (None, FleetPublishLookupError("expired_artifact")):
+            f.records[RUN, "receipt"] = value
+            self.assertEqual(resolver.resolve(f, REPO, f.source), original)
         for value in (
-            None,
-            FleetPublishLookupError("expired_artifact"),
             {**original, "schema_version": 2},
             {**original, "state": "uncertain"},
             {**original, "moderation": "fail"},
@@ -433,66 +552,37 @@ class ResolverTests(unittest.TestCase):
         f.routes[f"repos/{CENTRAL}/actions/runs/{RUN}/attempts/1"]["conclusion"] = (
             "failure"
         )
-        self.hold(lambda: resolver.resolve(f, REPO, f.source), "unconfirmed")
+        self.hold(lambda: resolver.resolve(f, REPO, f.source))
 
-    def test_missing_intent_only_positive_skipped_claim_and_effect_excludes(self):
-        f = self.fixture
-        f.add_run(OTHER, None)
-        jobsroute = (
-            f"repos/{CENTRAL}/actions/runs/{OTHER}/attempts/1/jobs?per_page=100&page=1"
-        )
-        job = {
-            "id": 9001,
-            "name": "publish",
-            "run_id": int(OTHER),
-            "run_attempt": 1,
-            "head_sha": f.workflow,
-            "status": "completed",
-            "conclusion": "failure",
-            "steps": [
-                {
-                    "name": resolver.CLAIM_STEP,
-                    "status": "completed",
-                    "conclusion": "skipped",
-                },
-                {
-                    "name": resolver.EFFECT_STEP,
-                    "status": "completed",
-                    "conclusion": "skipped",
-                },
-            ],
-        }
-        f.routes[jobsroute] = {"total_count": 1, "jobs": [job]}
-        self.assertEqual(resolver.resolve(f, REPO, f.source), f.records[RUN, "receipt"])
-        job["steps"][0]["conclusion"] = "failure"
-        self.hold(lambda: resolver.resolve(f, REPO, f.source), "claim_binding")
-
-    def test_other_locator_requires_actual_trusted_protocol_before_exclusion(self):
-        f = self.fixture
-        f.add_run(OTHER, None, title="fleet-publish-v1:jbaruch/other:" + "e" * 40)
-        self.assertEqual(resolver.resolve(f, REPO, f.source), f.records[RUN, "receipt"])
-        self.assertNotIn(("artifact", OTHER, "intent"), f.calls)
-        f.routes[f"repos/{CENTRAL}/actions/runs/{OTHER}"]["display_title"] = (
-            "PRIVATE missing locator"
-        )
-        f.catalog()
-        self.hold(lambda: resolver.resolve(f, REPO, f.source), "workflow_binding")
-
-    def test_changed_duplicate_or_truncated_native_catalog_never_proves_uniqueness(
+    def test_native_intent_without_required_source_index_never_means_safe_original(
         self,
     ):
         f = self.fixture
-        route = f"repos/{CENTRAL}/actions/workflows/77/runs?event=workflow_dispatch&created=%3E%3D2024-10-20T10%3A00%3A00Z&per_page=100&page=1"
-        page = copy.deepcopy(f.routes[route])
-        f.routes[route] = {"total_count": 2, "workflow_runs": page["workflow_runs"]}
+        f.remove_archive("source")
         self.hold(lambda: resolver.select(f, REPO, f.source), "unavailable")
-        f.routes[route] = {"total_count": 2, "workflow_runs": page["workflow_runs"] * 2}
-        self.hold(lambda: resolver.select(f, REPO, f.source), "unavailable")
+
+    def test_unrelated_live_run_names_do_not_supply_durable_source_authority(self):
+        f = self.fixture
+        f.add_run(OTHER, None, title="PRIVATE missing locator")
+        self.assertEqual(resolver.resolve(f, REPO, f.source), f.records[RUN, "receipt"])
+        self.assertNotIn(("artifact", OTHER, "intent"), f.calls)
+
+    def test_changed_or_deleted_durable_source_index_never_proves_stable_selection(
+        self,
+    ):
+        f = self.fixture
+        ref = archive_owner.ref_name("source", repository=REPO, source_sha=f.source)
+        route = f"repos/{CENTRAL}/git/ref/{ref.removeprefix('refs/')}"
+        original = copy.deepcopy(f.routes[route])
         count = [0]
 
         def changing():
             count[0] += 1
-            return page if count[0] == 1 else {"total_count": 0, "workflow_runs": []}
+            return (
+                original
+                if count[0] <= 2
+                else {**original, "object": {"type": "commit", "sha": "f" * 40}}
+            )
 
         f.routes[route] = changing
         self.hold(lambda: resolver.select(f, REPO, f.source), "unavailable")
@@ -507,6 +597,7 @@ class ResolverTests(unittest.TestCase):
     def test_stable_empty_verified_catalog_can_return_not_found_no_runid(self):
         f = self.fixture
         f.default(f.source)
+        f.remove_archive("source")
         route = f"repos/{CENTRAL}/actions/workflows/77/runs?event=workflow_dispatch&created=%3E%3D2024-10-20T10%3A00%3A00Z&per_page=100&page=1"
         f.routes[route] = {"total_count": 0, "workflow_runs": []}
         self.hold(lambda: resolver.select(f, REPO, f.source), "not_found")
@@ -542,7 +633,7 @@ class ResolverTests(unittest.TestCase):
                     "created_at": created,
                 }
             f.catalog()
-            self.hold(lambda: resolver.select(f, REPO, f.source), "workflow_binding")
+            self.hold(lambda: resolver.select(f, REPO, f.source), "unavailable")
         for suffix in ("", "/attempts/1"):
             f.routes[f"repos/{CENTRAL}/actions/runs/{RUN}{suffix}"] = copy.deepcopy(
                 original
@@ -561,8 +652,9 @@ class ResolverTests(unittest.TestCase):
             )
         f.catalog()
         f.routes[newer_route] = f.routes.pop(old_route)
+        f.archive_run(RUN, f.claim, source=True)
         self.assertEqual(resolver.resolve(f, REPO, f.source), f.records[RUN, "receipt"])
-        self.assertTrue(any(call == ("json", newer_route) for call in f.calls))
+        self.assertFalse(any(call == ("json", newer_route) for call in f.calls))
         self.assertFalse(any(call == ("json", old_route) for call in f.calls))
 
     def test_unrelated_historical_fleet_volume_cannot_force_global_catalog(self):
@@ -583,7 +675,7 @@ class ResolverTests(unittest.TestCase):
             for call in f.calls
             if call[0] == "json" and "/workflows/77/runs?" in call[1]
         ]
-        self.assertEqual(len(catalog_calls), 2)
+        self.assertEqual(len(catalog_calls), 0)
         self.assertTrue(
             all(
                 "created=%3E%3D2024-10-20T10%3A00%3A00Z" in route
@@ -617,9 +709,40 @@ class ResolverTests(unittest.TestCase):
 
     def test_empty_catalog_with_retained_claim_is_unknown_not_fresh_absence(self):
         f = self.fixture
+        f.remove_archive("source")
         route = f"repos/{CENTRAL}/actions/workflows/77/runs?event=workflow_dispatch&created=%3E%3D2024-10-20T10%3A00%3A00Z&per_page=100&page=1"
         f.routes[route] = {"total_count": 0, "workflow_runs": []}
         self.hold(lambda: resolver.select(f, REPO, f.source), "unavailable")
+
+    def test_entire_actions_history_expiry_keeps_exact_indexed_confirmation(self):
+        f = self.fixture
+        receipt = copy.deepcopy(f.records[RUN, "receipt"])
+        f.expire_actions()
+        self.assertEqual(resolver.resolve(f, REPO, f.source), receipt)
+        self.assertFalse(
+            any(
+                "/workflows/77/runs?" in call[1]
+                for call in f.calls
+                if call[0] in ("json", "native")
+            )
+        )
+
+    def test_durable_rerun_hold_survives_eviction_and_cannot_resurrect_success(self):
+        f = self.fixture
+        held = archive_owner.make_hold(
+            RUN,
+            2,
+            f.workflow,
+            finalizer={
+                "workflow_path": archive_owner.FINALIZER_WORKFLOW,
+                "workflow_sha": f.workflow,
+                "run_id": "999999999",
+                "run_attempt": 2,
+            },
+        )
+        f.put_archive(archive_owner.ref_name("hold", run_id=RUN), held)
+        f.expire_actions()
+        self.hold(lambda: resolver.resolve(f, REPO, f.source), "unavailable")
 
     def test_cli_confirmed_wrapper_contains_exact_trusted_record(self):
         f = self.fixture
