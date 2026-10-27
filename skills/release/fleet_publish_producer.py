@@ -29,7 +29,7 @@ PRODUCER_PATHS = (
 TRUSTED_PRODUCERS: tuple[dict[str, str], ...] = (
     {
         ".github/workflows/fleet-publish.yml": "b3b7e66f4fb65481872b71cb0f2959ec7af343d8",
-        "scripts/fleet_publish.py": "313011c28d701cd3ddb35b0e12bf9b28e6a7de57",
+        "scripts/fleet_publish.py": "2bf891ee1ab4a401c28128ea73a347db1b421091",
         "scripts/fleet_publish_workflow.py": "4dec9f39e32d15c5700503286f0c660ff14078ca",
         "scripts/fleet_publish_validate.py": "7d450d115f6a661f3a0e1d3d8ab1a85451bb7a47",
         ".github/workflows/fleet-publish-finalize.yml": "a6dbeea9400979c59a7608d7f16eb8156e30e4e1",
