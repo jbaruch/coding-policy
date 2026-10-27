@@ -243,6 +243,7 @@ def native_jobs(
     need(isinstance(values, list) and 1 <= len(values) <= MAX_JOBS)
     if not isinstance(values, list):
         raise ArchiveError()
+    need(type(run.get("run_attempt")) is int and run["run_attempt"] == 1)
     jobs = []
     for value in values:
         raw = obj(value)
@@ -263,8 +264,14 @@ def native_jobs(
         need(
             raw.get("name") in ("poll", "publish")
             and identifier(raw.get("run_id")) == run["id"]
-            and type(raw.get("run_attempt")) is int
-            and raw["run_attempt"] == 1
+            # The fixed /attempts/1/jobs endpoint binds rows that omit the
+            # optional job.run_attempt field in GitHub's published schema.
+            and (
+                "run_attempt" not in raw
+                and not projected
+                or type(raw.get("run_attempt")) is int
+                and raw["run_attempt"] == 1
+            )
             and raw.get("head_sha") == run["head_sha"]
             and raw.get("status") == "completed"
             and raw.get("conclusion") in CONCLUSIONS

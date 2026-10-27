@@ -250,6 +250,16 @@ class ArchiveSchemaTests(unittest.TestCase):
             with self.assertRaises(archive.ArchiveError):
                 archive.decode_archive(data)
 
+    def test_documented_attempt_endpoint_jobs_may_omit_optional_row_attempt(self):
+        parts = fixture()
+        del parts[4][0]["run_attempt"]
+        value = terminal(parts)
+        self.assertEqual(value["native"]["jobs"][0]["run_attempt"], 1)
+        self.assertEqual(archive.decode_archive(archive.encode_archive(value)), value)
+        parts[4][0]["run_attempt"] = 2
+        with self.assertRaises(archive.ArchiveError):
+            terminal(parts)
+
     def test_bounded_unique_jobs_steps_and_exact_identity(self):
         for fault in (
             "duplicates",
