@@ -21,7 +21,7 @@ PRODUCER_PATHS = (
     "scripts/fleet_publish_archive_write.py",
     "skills/release/fleet_publish_archive.py",
 )
-# Coherent prospective durable protocol reviewed at root freeze a1d08673.
+# Coherent prospective durable protocol reviewed at root freeze 02fee436.
 # This covers the listed protocol owners, not their full dependency closure.
 # Renew by reviewing every listed source together. Earlier unactivated artifact-
 # only versions are deliberately unsupported; retain activated historical sets
@@ -34,7 +34,7 @@ TRUSTED_PRODUCERS: tuple[dict[str, str], ...] = (
         "scripts/fleet_publish_validate.py": "7d450d115f6a661f3a0e1d3d8ab1a85451bb7a47",
         ".github/workflows/fleet-publish-finalize.yml": "a6dbeea9400979c59a7608d7f16eb8156e30e4e1",
         "scripts/fleet_publish_archive_write.py": "06a1fbad49b7f95b26e407e6040f48f373f69cd5",
-        "skills/release/fleet_publish_archive.py": "d91b19daddc7dc4a81e1f3340e4367a8dec13bbf",
+        "skills/release/fleet_publish_archive.py": "2a0e8973ab596919f8753de2f4194688bd448cb4",
     },
 )
 
