@@ -299,7 +299,16 @@ class GitHubClient:
                 ):
                     _refuse("invalid_http_response")
                 try:
-                    lines = header.decode("ascii").split("\r\n")
+                    status_line, newline, fields = header.partition(b"\n")
+                    if not newline:
+                        _refuse("invalid_http_response")
+                    # gh writes the status with LF on some versions, followed
+                    # by net/http headers with CRLF. Only that first boundary
+                    # may differ; embedded LF/control bytes in fields refuse.
+                    lines = [
+                        status_line.removesuffix(b"\r").decode("ascii"),
+                        *fields.decode("ascii").split("\r\n"),
+                    ]
                 except UnicodeError:
                     _refuse("invalid_http_response")
                 match = re.fullmatch(

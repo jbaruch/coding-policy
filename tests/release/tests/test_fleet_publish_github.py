@@ -108,9 +108,11 @@ cases=json.loads(Path(os.environ['FAKE_GH_CASES']).read_text())
 case=cases.get(args[6] if include else args[5])
 if case is None:
     print('PRIVATE route not supplied by fixture',file=sys.stderr);sys.exit(88)
+if include and 'wire' in case:
+    sys.stdout.buffer.write(base64.b64decode(case['wire']));sys.stdout.flush();sys.exit(case.get('exit',0))
 if include:
     if case.get('bad_header'):sys.stdout.buffer.write(b'PRIVATE invalid HTTP\\r\\n\\r\\n')
-    else:sys.stdout.buffer.write(('HTTP/2 '+str(case.get('http_status',200))+'\\r\\ncontent-type: application/json\\r\\n\\r\\n').encode())
+    else:sys.stdout.buffer.write(('HTTP/2.0 '+str(case.get('http_status',200))+(' Not Found' if case.get('http_status')==404 else ' OK')+'\\r\\nContent-Type: application/json; charset=utf-8\\r\\nX-GitHub-Media-Type: github.v3; format=json\\r\\n\\r\\n').encode())
 if case.get('sleep'):time.sleep(30)
 if 'stderr_repeat' in case:sys.stderr.buffer.write(b'PRIVATE '*case['stderr_repeat']);sys.stderr.flush()
 if 'stdout_repeat' in case:sys.stdout.buffer.write(b'x'*case['stdout_repeat']);sys.stdout.flush()
@@ -458,6 +460,43 @@ class GitHubClientTests(unittest.TestCase):
         self.assertTrue(
             all(call[5] == "--include" and call[6] == route for call in self.calls())
         )
+
+    def test_independent_literal_gh_wire_accepts_mixed_status_lf_and_crlf_only(self):
+        for status, ending, exit_code in (
+            (200, b"\n", 0),
+            (200, b"\r\n", 0),
+            (404, b"\n", 1),
+            (404, b"\r\n", 1),
+        ):
+            body = b'{"message":"Not Found"}' if status == 404 else b'{"ok":true}'
+            reason = b"Not Found" if status == 404 else b"OK"
+            wire = (
+                b"HTTP/2.0 "
+                + str(status).encode()
+                + b" "
+                + reason
+                + ending
+                + b"Content-Type: application/json; charset=utf-8\r\nX-GitHub-Api-Version-Selected: 2026-03-10\r\n\r\n"
+                + body
+            )
+            self.replies(
+                {ROUTE: {"wire": base64.b64encode(wire).decode(), "exit": exit_code}}
+            )
+            if status == 200:
+                self.assertEqual(client.GitHubClient().native_json(ROUTE), {"ok": True})
+            else:
+                self.refuse(
+                    lambda: client.GitHubClient().native_json(ROUTE), "native_missing"
+                )
+        for bad in (
+            b"HTTP/2.0 200 OK\nContent-Type: application/json\nX-Bad: two\r\n\r\n{}",
+            b"HTTP/2.0 200 OK\nHTTP/2.0 200 OK\r\n\r\n{}",
+        ):
+            self.replies({ROUTE: {"wire": base64.b64encode(bad).decode()}})
+            self.refuse(
+                lambda: client.GitHubClient().native_json(ROUTE),
+                "invalid_http_response",
+            )
 
     def test_native_http_malformed_body_header_and_status_exit_conflict_are_not_absence(
         self,
