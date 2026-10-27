@@ -24,6 +24,16 @@ central Actions variable. Source and workflows may be reviewed while it remains
 false. Activation requires the real App installation to permit the workflow's
 requested scopes; installation on all repositories alone does not prove those
 permissions. Permission minting refuses when a requested grant is unavailable.
+Run the reviewed `fleet-publish-grant-probe.yml` manual workflow on the central
+default branch before activation. Its fixed repository and metadata-only
+contract live in `scripts/fleet_publish_grant_probe.py`. Require the native mint
+and whole probe run to succeed, including the action's token-revocation step;
+its diagnostic output alone proves no protected write or publication.
+
+Central workflow credentials also own the durable publication ledger. Grant
+central Contents write only to the jobs that create its fixed data refs; keep
+consumer access in the selected App credential. This grants no central default
+branch, workflow, source, permission or consumer-path mutation authority.
 
 The central workflow never checks out or executes consumer code. The projection
 owner, `scripts/fleet_publish.py`, copies bounded regular declared package data
@@ -50,7 +60,12 @@ Every condition is required:
 5. A native Git ref compare-and-swap must succeed before the immutable intent is
    uploaded and read back, and before publication. A competing write or failed
    upload retains the claim as a stop record; never retry the effect implicitly.
-6. The claim carries no source, test or workflow changes. It bypasses no required
+   Persist and read back the central source claim before an effect. The original
+   source claim remains fixed across moderation recoveries.
+6. Wait for the claimed bookkeeping commit's required CI before publication.
+   Missing, pending or failing requirements retain the claim and refuse the
+   effect. The controller owns the bounded wait and its refusal contract.
+7. The claim carries no source, test or workflow changes. It bypasses no required
    review, skill score, CI, registry or moderation gate. It supplies no authority
    to edit other paths or change repository/App permissions.
 
@@ -62,20 +77,44 @@ separately. It does not coalesce rapid merges into the latest tip.
 ## Record owner and retention
 
 `skills/release/fleet_publish_record.py` owns schema 1 and its complete field
-validation. The central publisher is the sole writer. The central resolver and
-confirmation helper are readers; they never migrate records. Both native
-artifacts use the schema: `fleet-publish-intent-v1` contains only `intent.json`,
-and `fleet-publish-receipt-v1` contains only `receipt.json`. Uploads are immutable
-within the original run, with overwrite disabled. The consumer's source claim
-uses the original claimed intent shape; its bookkeeping commit is independently
-bound through the terminal receipt and native history.
+validation. The central publisher writes the publication records; the central
+resolver and confirmation helper read them without migration. The native
+artifacts remain `fleet-publish-intent-v1` with only `intent.json`, and
+`fleet-publish-receipt-v1` with only `receipt.json`. Uploads are immutable within
+the original run. The consumer's claim contains the intent shape; its native
+bookkeeping commit remains independently bound.
 
-These artifacts are gate stores under `rules/stateful-artifacts.md`. Unsupported,
-expired, ambiguous, missing or unreadable evidence refuses publication and
-confirmation; it never means no previous effect. Never remove a claim to resume
-a queue. A claim remains a stop record even when artifact retention has expired.
-Preserve the native original run/source/version and repair the evidence through
-the owning controller before any further effect.
+`skills/release/fleet_publish_archive.py` owns the separate versioned archive
+schema, canonical representation and read contract. The source-owned writer,
+`scripts/fleet_publish_archive_writer.py`, creates central Git records only in
+`refs/tags/fleet-publish-v1/`. This namespace is a durable authority of record,
+owned by the central publisher and its fixed completion finalizer. Never update,
+replace or delete a record to resume a queue. Existing identical records permit
+verified reuse; conflicts refuse. Consumer stamps and Git author or timestamp
+fields cannot supply this authority.
+
+Before publication, the writer records the original source claim and run intent.
+After the publisher run finishes, `fleet-publish-finalize.yml` verifies its native
+run, attempt, protocol and available records, then archives the actual outcome.
+It never executes consumer or triggering-run code, invokes publication, or
+converts a failed or uncertain outcome into success. A moderation recovery gets
+its own run record and retains the original source claim.
+
+These stores use the gate-store exception in `rules/stateful-artifacts.md`.
+Unsupported, ambiguous, malformed, conflicting or unreadable evidence refuses
+publication and confirmation. Verify current central Git evidence through the
+archive owner; compare available native evidence. A supported durable record may
+retain verified historical facts after Actions retention removes artifacts or
+run metadata. Missing completion evidence remains a hold, never permission to
+repeat an effect. A missing native run alone proves no absence or success.
+The archive owner defines accepted historical responses and refusal conditions.
+
+Only producer versions that write the durable source claim before effects may
+supply the corresponding absence proof. Verify the coherent protocol sources
+named by `skills/release/fleet_publish_producer.py`; older unactivated protocols
+remain unsupported. Readers never repair records or infer a new baseline from
+registry agreement and a consumer stamp. Preserve native source/run/version and
+repair evidence through the owning controller.
 
 A moderation recovery is a new central run bound to its original successful
 publication. It writes its own claim/bookkeeping and performs registry and
