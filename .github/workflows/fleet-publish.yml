@@ -1,4 +1,5 @@
 name: Central fleet publish
+run-name: fleet-publish-v1:${{ inputs.repository }}:${{ inputs.source_sha }}
 
 # Central credentials only. This workflow never checks out a consumer or runs
 # its scripts. App Contents WRITE remains an actual deployment prerequisite;

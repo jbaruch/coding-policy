@@ -31,8 +31,10 @@ from fleet_publish_record import (  # noqa: E402 - trusted sibling schema owner.
     parse_record,
     valid_repository,
     valid_sha,
+    valid_run_id,
 )
 from fleet_publish_github import FleetPublishLookupError, GitHubClient  # noqa: E402 - same trusted sibling owner.
+from fleet_publish_producer import verify_workflow_protocol  # noqa: E402 - same trusted producer identity owner.
 
 STAMP = ".github/fleet-publish-source.json"
 MARKER = ".github/fleet-publish-enabled"
@@ -82,6 +84,10 @@ class GitHub:
 
     def __init__(self) -> None:
         self._record_client = GitHubClient()
+
+    def json(self, route: str) -> object:
+        """Read-only facade for the shared fixed central protocol verifier."""
+        return self.api(route)
 
     def record(self, run_id: str, kind: str) -> FleetPublishRecord | None:
         require(kind in ("intent", "receipt"), "Unsupported immutable record kind.")
@@ -861,7 +867,7 @@ def push_claim(
     commit = github.api(
         f"repos/{repo}/git/commits",
         {
-            "message": f"Claim central publication {record['run_id']} [skip ci]",
+            "message": f"Claim central publication {record['run_id']}",
             "tree": new_tree["sha"],
             "parents": [expected],
             "author": {
@@ -871,11 +877,45 @@ def push_claim(
         },
     )
     require(valid_sha(commit.get("sha")), "Bookkeeping commit creation failed.")
-    # PATCH, not POST: a non-force compare-and-swap; concurrently moved refs refuse.
-    github.api(
-        f"repos/{repo}/git/refs/{quote(ref.removeprefix('refs/'), safe='/')}",
-        {"sha": commit["sha"], "force": False},
-        method="PATCH",
+    # REST force:false only forbids non-fast-forward updates. GraphQL beforeOid
+    # also rejects concurrent ancestor resets, so the expected tip is atomic.
+    metadata = github.api(f"repos/{repo}")
+    node_id = metadata.get("node_id")
+    require(
+        metadata.get("full_name") == repo
+        and isinstance(node_id, str)
+        and 0 < len(node_id) <= 256
+        and node_id.isascii(),
+        "Native selected repository identity is unavailable.",
+    )
+    mutation_id = f"fleet-publish:{record['run_id']}:{record['run_attempt']}"
+    changed = github.api(
+        "graphql",
+        {
+            "query": "mutation FleetPublishClaim($input: UpdateRefsInput!) { updateRefs(input: $input) { clientMutationId } }",
+            "variables": {
+                "input": {
+                    "repositoryId": node_id,
+                    "clientMutationId": mutation_id,
+                    "refUpdates": [
+                        {
+                            "name": ref,
+                            "beforeOid": expected,
+                            "afterOid": commit["sha"],
+                            "force": False,
+                        }
+                    ],
+                }
+            },
+        },
+    )
+    require(
+        isinstance(changed, dict)
+        and changed.get("errors") in (None, [])
+        and isinstance(changed.get("data"), dict)
+        and isinstance(changed["data"].get("updateRefs"), dict)
+        and changed["data"]["updateRefs"].get("clientMutationId") == mutation_id,
+        "Atomic source claim failed or is uncertain; do not publish or retry.",
     )
     require(
         default_tip(github, repo) == (ref, commit["sha"]),
@@ -931,6 +971,229 @@ def initial_record(
             "origin_run_attempt": 1,
             "bookkeeping_sha": None,
         }
+    )
+
+
+def run_binding(github: GitHub, run: dict[str, Any], workflow_id: int) -> None:
+    require(
+        valid_run_id(str(run.get("id")))
+        and run.get("workflow_id") == workflow_id
+        and run.get("path") == CENTRAL_WORKFLOW
+        and run.get("event") == "workflow_dispatch"
+        and run.get("head_branch") == "main"
+        and valid_sha(run.get("head_sha"))
+        and run.get("head_repository", {}).get("full_name") == CENTRAL_REPOSITORY
+        and type(run.get("run_attempt")) is int
+        and run["run_attempt"] >= 1,
+        "Native central dispatch identity is incomplete or unsupported.",
+    )
+    actual = github.api(f"repos/{CENTRAL_REPOSITORY}/actions/runs/{run['id']}")
+    attempt = github.api(
+        f"repos/{CENTRAL_REPOSITORY}/actions/runs/{run['id']}/attempts/{run['run_attempt']}"
+    )
+    for key in (
+        "id",
+        "workflow_id",
+        "path",
+        "event",
+        "head_branch",
+        "head_sha",
+        "run_attempt",
+    ):
+        require(
+            actual.get(key) == run.get(key) == attempt.get(key),
+            "Native dispatch listing/run/attempt identity changed.",
+        )
+
+
+def proved_no_claim(github: GitHub, run: dict[str, Any]) -> bool:
+    """Missing artifact is not evidence; only native skipped claim/effect is."""
+    require(
+        run.get("status") == "completed"
+        and type(run.get("run_attempt")) is int
+        and run["run_attempt"] == 1,
+        "A prior candidate is nonterminal or rerun; a skipped latest attempt cannot clear earlier effects.",
+    )
+    jobs = github.pages(
+        f"repos/{CENTRAL_REPOSITORY}/actions/runs/{run['id']}/attempts/{run['run_attempt']}/jobs",
+        "jobs",
+    )
+    require(
+        jobs and all(job.get("name") in ("poll", "publish") for job in jobs),
+        "Prior dispatch has incomplete or unsupported native jobs.",
+    )
+    selected = [job for job in jobs if job.get("name") == "publish"]
+    require(len(selected) == 1, "Prior dispatch has no unique native publication job.")
+    job = selected[0]
+    require(
+        str(job.get("run_id")) == str(run["id"])
+        and job.get("head_sha") == run["head_sha"]
+        and job.get("status") == "completed",
+        "Prior native job is incomplete or cross-run.",
+    )
+    steps = job.get("steps")
+    require(isinstance(steps, list), "Prior job steps are unavailable.")
+    if job.get("conclusion") == "skipped" and not steps:
+        return True
+    for name in (
+        "Claim source atomically before publication",
+        "Publish once or perform moderation readback only",
+    ):
+        matches = [
+            step
+            for step in steps
+            if isinstance(step, dict) and step.get("name") == name
+        ]
+        if not (
+            len(matches) == 1
+            and matches[0].get("status") == "completed"
+            and matches[0].get("conclusion") == "skipped"
+        ):
+            return False
+    return True
+
+
+def independent_source_claims(
+    github: GitHub,
+    source: FleetPublishRecord,
+    environment: dict[str, str],
+    prior: FleetPublishRecord | None,
+) -> None:
+    """Consumer force-reset cannot erase a prior immutable CENTRAL intent.
+
+    A verified source-owned run-name is a locator only. Positive claim identity
+    still requires its immutable record plus actual native run/attempt binding.
+    Unknown protocol, pagination, expired evidence and attempted claims HOLD.
+    """
+    workflow = github.api(
+        f"repos/{CENTRAL_REPOSITORY}/actions/workflows/fleet-publish.yml"
+    )
+    require(
+        workflow.get("path") == CENTRAL_WORKFLOW
+        and type(workflow.get("id")) is int
+        and workflow["id"] > 0,
+        "Fixed central workflow identity is unavailable.",
+    )
+    current_id = environment.get("GITHUB_RUN_ID", "")
+    require(
+        valid_run_id(current_id)
+        and environment.get("GITHUB_SHA") == source["workflow_sha"]
+        and current_id == source["run_id"]
+        and environment.get("GITHUB_RUN_ATTEMPT") == "1",
+        "Actual current workflow context is missing.",
+    )
+    current = github.api(f"repos/{CENTRAL_REPOSITORY}/actions/runs/{current_id}")
+    run_binding(github, current, workflow["id"])
+    require(
+        str(current.get("id")) == current_id
+        and current.get("head_sha") == source["workflow_sha"]
+        and current.get("run_attempt") == 1,
+        "Current run cannot be excluded from uniqueness checks.",
+    )
+    verified_protocols: set[str] = set()
+
+    def protocol(sha: str) -> None:
+        if sha not in verified_protocols:
+            try:
+                verify_workflow_protocol(github, sha)
+            except FleetPublishLookupError as error:
+                raise PublishRefused(
+                    "Central producer protocol is unknown; preserve source claims."
+                ) from error
+            verified_protocols.add(sha)
+
+    protocol(current["head_sha"])
+    runs = github.pages(
+        f"repos/{CENTRAL_REPOSITORY}/actions/workflows/fleet-publish.yml/runs?event=workflow_dispatch",
+        "workflow_runs",
+    )
+    found_current = False
+    locator = f"fleet-publish-v1:{source['consumer_repository']}:{source['source_sha']}"
+    require(
+        current.get("display_title") == locator,
+        "Actual current dispatch input locator disagrees with prepared source.",
+    )
+    for run in runs:
+        require(
+            isinstance(run, dict) and valid_sha(run.get("head_sha")),
+            "Native dispatch listing is malformed.",
+        )
+        # Verify reviewed template+input binding before trusting ANY locator to
+        # exclude a different target. An unknown old version is never absence.
+        protocol(run["head_sha"])
+        require(
+            run.get("workflow_id") == workflow["id"]
+            and run.get("path") == CENTRAL_WORKFLOW
+            and run.get("event") == "workflow_dispatch"
+            and run.get("head_branch") == "main"
+            and run.get("head_repository", {}).get("full_name") == CENTRAL_REPOSITORY,
+            "Native dispatch was not bound to the trusted central main producer.",
+        )
+        if str(run.get("id")) == current_id:
+            require(
+                run.get("head_sha") == current["head_sha"]
+                and run.get("run_attempt") == 1,
+                "Current listing and native context disagree.",
+            )
+            found_current = True
+            continue
+        title = run.get("display_title")
+        if title != locator:
+            # Exact template is verified above; malformed names are not a
+            # trustworthy different-input locator and fail closed.
+            parts = title.split(":") if isinstance(title, str) else []
+            if (
+                len(parts) == 3
+                and parts[0] == "fleet-publish-v1"
+                and valid_repository(parts[1])
+                and valid_sha(parts[2])
+            ):
+                continue
+            run_binding(github, run, workflow["id"])
+            require(
+                github.record(str(run["id"]), "intent") is None
+                and proved_no_claim(github, run),
+                "Unsupported locator has no independently proven zero-claim outcome.",
+            )
+            continue
+        run_binding(github, run, workflow["id"])
+        intent = github.record(str(run["id"]), "intent")
+        if intent is None:
+            require(
+                proved_no_claim(github, run),
+                "Absent intent does not prove that prior claim/effect never executed.",
+            )
+            continue
+        require(
+            intent["consumer_repository"] == source["consumer_repository"]
+            and intent["source_sha"] == source["source_sha"]
+            and intent["source_tree_sha"] == source["source_tree_sha"],
+            "Native locator and immutable intent binding disagree.",
+        )
+        verify_attempt(github, intent, successful=False)
+        # Only explicit moderation recovery may reference this ALREADY proven
+        # publication lineage. A new original never clears an earlier intent.
+        recovering = source["origin_run_id"] != source["run_id"]
+        require(
+            recovering
+            and prior is not None
+            and all(
+                intent[key] == prior[key]
+                for key in (
+                    "consumer_repository",
+                    "source_sha",
+                    "source_tree_sha",
+                    "plugin_name",
+                    "version",
+                    "origin_run_id",
+                    "origin_run_attempt",
+                )
+            ),
+            "An independent central intent already claims this source; never publish it again.",
+        )
+    require(
+        found_current,
+        "Complete native dispatch listing omitted the actual current run.",
     )
 
 
@@ -998,6 +1261,7 @@ def prepare(
             origin_run_attempt=prior["origin_run_attempt"],
         )
         mode = "moderation_only"
+        independent_source_claims(github, record, environment, prior)
     else:
         require(
             pending and pending[0] == expected_sha,
@@ -1025,6 +1289,7 @@ def prepare(
         record = initial_record(
             repo, source_sha, ref, tree_sha, plugin, baseline, version, environment
         )
+        independent_source_claims(github, record, environment, prior)
         bookkeeping_dir = work / "bookkeeping"
         bookkeeping_dir.mkdir(mode=0o700)
         main_changelog = file(github, repo, entries, "CHANGELOG.md").decode("utf-8")

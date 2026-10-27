@@ -6,7 +6,9 @@
     "fleet_publish_workflow.py",
     "tests/test_fleet_publish.py",
     "../skills/release/fleet_publish_github.py",
-    "../tests/release/tests/test_fleet_publish_github.py"
+    "../tests/release/tests/test_fleet_publish_github.py",
+    "../skills/release/fleet_publish_producer.py",
+    "../tests/release/tests/test_fleet_publish_producer.py"
   ],
   "extraPaths": ["../skills/release"],
   "pythonVersion": "3.11",

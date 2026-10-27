@@ -97,10 +97,16 @@ class NativeGitHub(publisher.GitHub):
         self.run_conclusion = "success"
         self.run_status = "completed"
         self.current_attempt = 1
+        self.dispatch_sources: dict[str, str] = {"101": SOURCE}
+        self.other_runs: dict[str, dict[str, Any]] = {}
+        self.other_records: dict[str, dict[str, bytes]] = {}
+        self.native_jobs: dict[str, list[dict[str, Any]]] = {}
         self.refuse_push = False
+        self.reset_before_graphql: str | None = None
         self.created_tree: list[dict[str, str]] = []
         self.metadata = {
             "full_name": REPO,
+            "node_id": "R_fixture_selected_repository",
             "archived": False,
             "disabled": False,
             "default_branch": "main",
@@ -116,6 +122,23 @@ class NativeGitHub(publisher.GitHub):
             "sha": sha,
         }
 
+    def native_run(self, run_id: str) -> dict[str, Any]:
+        value = {
+            "id": int(run_id),
+            "workflow_id": 71,
+            "run_attempt": self.current_attempt,
+            "head_sha": WORKFLOW,
+            "head_branch": "main",
+            "path": publisher.CENTRAL_WORKFLOW,
+            "event": "workflow_dispatch",
+            "head_repository": {"full_name": publisher.CENTRAL_REPOSITORY},
+            "status": self.run_status,
+            "conclusion": self.run_conclusion,
+            "display_title": f"fleet-publish-v1:{REPO}:{self.dispatch_sources.get(run_id, SOURCE)}",
+        }
+        value.update(self.other_runs.get(run_id, {}))
+        return value
+
     def api(
         self,
         path: str,
@@ -125,6 +148,26 @@ class NativeGitHub(publisher.GitHub):
         method: str = "POST",
     ) -> object:
         self.calls.append((path, payload))
+        if path == "graphql" and isinstance(payload, dict):
+            update = payload["variables"]["input"]
+            ref = update["refUpdates"][0]
+            assert update["repositoryId"] == self.metadata["node_id"]
+            assert ref["name"] == "refs/heads/main" and ref["force"] is False
+            if self.reset_before_graphql is not None:
+                self.tip = self.reset_before_graphql
+                self.reset_before_graphql = None
+            if self.refuse_push or self.tip != ref["beforeOid"]:
+                return {
+                    "errors": [{"message": "Expected OID differs"}],
+                    "data": {"updateRefs": None},
+                }
+            for item in self.created_tree:
+                self.entries[item["path"]] = dict(item)
+            self.tip = ref["afterOid"]
+            self.history = [{"sha": self.tip}]
+            return {
+                "data": {"updateRefs": {"clientMutationId": update["clientMutationId"]}}
+            }
         if path == f"repos/{REPO}":
             return deepcopy(self.metadata)
         if path == f"repos/{REPO}/git/ref/heads/main":
@@ -172,18 +215,11 @@ class NativeGitHub(publisher.GitHub):
         if path.startswith(f"repos/{REPO}/compare/"):
             return {"status": "identical" if self.tip == CLAIM else "ahead"}
         central = "repos/jbaruch/coding-policy/actions/"
-        if path.startswith(central + "runs/101"):
-            return {
-                "id": 101,
-                "run_attempt": self.current_attempt,
-                "head_sha": WORKFLOW,
-                "head_branch": "main",
-                "path": publisher.CENTRAL_WORKFLOW,
-                "event": "workflow_dispatch",
-                "head_repository": {"full_name": publisher.CENTRAL_REPOSITORY},
-                "status": self.run_status,
-                "conclusion": self.run_conclusion,
-            }
+        if path == central + "workflows/fleet-publish.yml":
+            return {"id": 71, "path": publisher.CENTRAL_WORKFLOW}
+        match = re.fullmatch(central + r"runs/(\d+)(?:/attempts/\d+)?", path)
+        if match:
+            return self.native_run(match[1])
         if path.startswith(central + "artifacts/"):
             basename = path.split("/")[-2]
             stream = io.BytesIO()
@@ -194,6 +230,21 @@ class NativeGitHub(publisher.GitHub):
 
     def pages(self, route: str, key: str | None = None) -> list[Any]:
         path = route
+        if (
+            path
+            == "repos/jbaruch/coding-policy/actions/workflows/fleet-publish.yml/runs?event=workflow_dispatch"
+        ):
+            ids = (
+                set(self.dispatch_sources)
+                | set(self.other_runs)
+                | {getattr(self, "current_run", "101")}
+            )
+            return [self.native_run(run_id) for run_id in sorted(ids)]
+        match = re.fullmatch(
+            r"repos/jbaruch/coding-policy/actions/runs/(\d+)/attempts/\d+/jobs", path
+        )
+        if match:
+            return self.native_jobs.get(match[1], [])
         if path == f"repos/{REPO}/commits/{SOURCE}/pulls":
             return [
                 {
@@ -227,7 +278,9 @@ class NativeGitHub(publisher.GitHub):
         return {"sha": SOURCE}
 
     def record(self, run_id: str, kind: str) -> publisher.FleetPublishRecord | None:
-        raw = self.records.get(kind)
+        raw = (
+            self.records if run_id == "101" else self.other_records.get(run_id, {})
+        ).get(kind)
         return publisher.decode_record(raw) if raw else None
 
 
@@ -251,6 +304,11 @@ class PublisherFixture(unittest.TestCase):
         )
         self.cli = self.cli_patch.start()
         self.addCleanup(self.cli_patch.stop)
+        self.protocol_patch = patch.object(
+            publisher, "verify_workflow_protocol", return_value=None
+        )
+        self.protocol = self.protocol_patch.start()
+        self.addCleanup(self.protocol_patch.stop)
 
     def helper(
         self, name: str, *args: str, **kwargs: Any
@@ -734,6 +792,79 @@ class PublisherTests(PublisherFixture):
             with self.assertRaises(publisher.PublishRefused):
                 native.pages(f"repos/{REPO}/commits/{HEAD}/status", "statuses")
 
+    def test_graphql_claim_uses_selected_app_token_and_structured_stdin(self) -> None:
+        native = publisher.GitHub()
+        body = {
+            "query": "mutation Fixture($input: UpdateRefsInput!) { updateRefs(input: $input) { clientMutationId } }",
+            "variables": {
+                "input": {
+                    "repositoryId": "R_fixture",
+                    "clientMutationId": "fixture",
+                    "refUpdates": [
+                        {
+                            "name": "refs/heads/main",
+                            "beforeOid": SOURCE,
+                            "afterOid": CLAIM,
+                            "force": False,
+                        }
+                    ],
+                }
+            },
+        }
+        with patch.dict(
+            os.environ,
+            {
+                "GH_TOKEN": "fake-selected-app",
+                "FLEET_CENTRAL_TOKEN": "fake-central-read-only",
+            },
+        ):
+            with patch.object(
+                publisher.subprocess,
+                "run",
+                return_value=subprocess.CompletedProcess([], 0, b'{"data":{}}'),
+            ) as command:
+                native.api("graphql", body)
+        self.assertEqual(
+            command.call_args.kwargs["env"]["GH_TOKEN"], "fake-selected-app"
+        )
+        self.assertEqual(json.loads(command.call_args.kwargs["input"]), body)
+        self.assertEqual(
+            command.call_args.args[0],
+            [
+                "gh",
+                "api",
+                "--hostname",
+                "github.com",
+                "graphql",
+                "--method",
+                "POST",
+                "--input",
+                "-",
+            ],
+        )
+
+    def test_graphql_response_error_or_wrong_mutation_identity_never_dispatches_publish(
+        self,
+    ) -> None:
+        publisher.prepare(self.github, REPO, SOURCE, self.work, ENV)
+        original = self.github.api
+
+        def api(route: str, *args: Any, **kwargs: Any) -> Any:
+            result = original(route, *args, **kwargs)
+            if route == "graphql":
+                return {
+                    "data": {"updateRefs": {"clientMutationId": "some-other-operation"}}
+                }
+            return result
+
+        with patch.object(self.github, "api", side_effect=api):
+            with self.assertRaises(publisher.PublishRefused):
+                publisher.claim(self.github, self.work)
+        self.assertIn(publisher.STAMP, self.github.entries)
+        self.assertFalse((self.work / "claim.json").exists())
+        self.assertFalse(self.github.records)
+        self.assertNotIn("smart-publish.sh", self.helpers)
+
 
 class HistoryGitHub(NativeGitHub):
     """Actual immutable native commit/tree graph, including rapid merge backlog."""
@@ -795,6 +926,26 @@ class HistoryGitHub(NativeGitHub):
         binary: bool = False,
         method: str = "POST",
     ) -> Any:
+        if path == "graphql" and isinstance(payload, dict):
+            self.calls.append((path, payload))
+            update = payload["variables"]["input"]
+            ref = update["refUpdates"][0]
+            assert update["repositoryId"] == self.metadata["node_id"]
+            assert ref["name"] == "refs/heads/main" and ref["force"] is False
+            if self.reset_before_graphql is not None:
+                self.tip = self.reset_before_graphql
+                self.reset_before_graphql = None
+            if self.refuse_push or self.tip != ref["beforeOid"]:
+                return {
+                    "errors": [{"message": "Expected OID differs"}],
+                    "data": {"updateRefs": None},
+                }
+            self.tip = ref["afterOid"]
+            self.entries = deepcopy(self.trees[self.commits[self.tip]["tree"]["sha"]])
+            self.history.append({"sha": self.tip})
+            return {
+                "data": {"updateRefs": {"clientMutationId": update["clientMutationId"]}}
+            }
         if path.startswith(f"repos/{REPO}/git/commits/"):
             return deepcopy(self.commits[path.rsplit("/", 1)[1]])
         match = re.fullmatch(
@@ -832,17 +983,7 @@ class HistoryGitHub(NativeGitHub):
             return {"object": {"sha": self.tip}}
         if path.startswith("repos/jbaruch/coding-policy/actions/runs/"):
             run = path.split("/")[5]
-            return {
-                "id": int(run),
-                "run_attempt": 1,
-                "head_sha": WORKFLOW,
-                "head_branch": "main",
-                "path": publisher.CENTRAL_WORKFLOW,
-                "event": "workflow_dispatch",
-                "head_repository": {"full_name": publisher.CENTRAL_REPOSITORY},
-                "status": "completed",
-                "conclusion": "success",
-            }
+            return self.native_run(run)
         if path.startswith("repos/jbaruch/coding-policy/actions/artifacts/"):
             run, name = path.split("/")[-2].split("-")
             stream = io.BytesIO()
@@ -905,6 +1046,7 @@ class QueueTests(PublisherFixture):
                 github.archived_records[github.current_run] = dict(github.records)
                 github.records = {}
                 github.current_run = run
+            github.dispatch_sources[run] = sha
             publisher.prepare(github, REPO, sha, work, {**ENV, "GITHUB_RUN_ID": run})
             intent = json.loads((work / "intent.json").read_bytes())
             self.assertEqual(intent["source_sha"], sha)
@@ -956,6 +1098,32 @@ class QueueTests(PublisherFixture):
         self.assertFalse((self.work / "claim.json").exists())
         self.assertFalse(github.records)
         self.assertNotIn("smart-publish.sh", self.helpers)
+
+    def test_atomic_before_oid_rejects_concurrent_ancestor_reset(self) -> None:
+        github = HistoryGitHub()
+        publisher.prepare(github, REPO, SOURCE, self.work, ENV)
+        prepared_tip = github.tip
+        github.reset_before_graphql = github.BEFORE
+        with self.assertRaises(publisher.PublishRefused):
+            publisher.claim(github, self.work)
+        self.assertEqual(github.tip, github.BEFORE)
+        self.assertFalse(github.records)
+        self.assertFalse((self.work / "claim.json").exists())
+        self.assertNotIn("smart-publish.sh", self.helpers)
+        mutation = (
+            next(payload for route, payload in github.calls if route == "graphql")
+            if any(route == "graphql" for route, _ in github.calls)
+            else None
+        )
+        # The immutable prepared parent cannot silently turn into the reset OID.
+        self.assertNotEqual(prepared_tip, github.BEFORE)
+        if not isinstance(mutation, dict):
+            raise AssertionError(
+                "Expected the actual structured GraphQL claim mutation."
+            )
+        self.assertEqual(
+            mutation["variables"]["input"]["refUpdates"][0]["beforeOid"], prepared_tip
+        )
 
     def test_non_suffix_changelog_refuses_without_claim(self) -> None:
         github = HistoryGitHub()
@@ -1168,6 +1336,177 @@ class QueueTests(PublisherFixture):
         selected, held = poller.targets(github)
         self.assertEqual(held, [])
         self.assertEqual(selected[0]["source_sha"], github.SECOND)
+
+
+class IndependentClaimsTests(PublisherFixture):
+    def add_prior(self, *, claim: str = "skipped", effect: str = "skipped") -> None:
+        self.github.other_runs["100"] = {"status": "completed"}
+        self.github.native_jobs["100"] = [
+            {
+                "id": 400,
+                "name": "publish",
+                "run_id": 100,
+                "head_sha": WORKFLOW,
+                "status": "completed",
+                "conclusion": "failure",
+                "steps": [
+                    {
+                        "name": "Prepare verified data-only package and intent",
+                        "status": "completed",
+                        "conclusion": "failure",
+                    },
+                    {
+                        "name": "Claim source atomically before publication",
+                        "status": "completed",
+                        "conclusion": claim,
+                    },
+                    {
+                        "name": "Publish once or perform moderation readback only",
+                        "status": "completed",
+                        "conclusion": effect,
+                    },
+                ],
+            }
+        ]
+
+    def old_intent(self) -> publisher.FleetPublishRecord:
+        return publisher.initial_record(
+            REPO,
+            SOURCE,
+            "refs/heads/main",
+            TREE,
+            "jbaruch/nanoclaw-fixture",
+            "0.1.0",
+            "0.1.1",
+            {**ENV, "GITHUB_RUN_ID": "100"},
+        )
+
+    def test_erased_consumer_history_cannot_hide_prior_central_original(self) -> None:
+        self.add_prior()
+        self.github.other_records["100"] = {
+            "intent": publisher.encoded(self.old_intent())
+        }
+        self.assertEqual(self.github.history, [])
+        self.assertNotIn(publisher.STAMP, self.github.entries)
+        with self.assertRaises(publisher.PublishRefused):
+            self.prepare()
+        self.assertFalse((self.work / "intent.json").exists())
+        self.assertFalse(self.cli.called)
+
+    def test_absent_intent_can_only_be_excluded_with_skipped_native_claim_and_effect(
+        self,
+    ) -> None:
+        self.add_prior()
+        self.prepare()
+        self.assertTrue((self.work / "intent.json").is_file())
+        self.assertNotIn("smart-publish.sh", self.helpers)
+
+    def test_claim_failure_or_effect_attempt_is_not_no_effect_evidence(self) -> None:
+        for claim, effect in (
+            ("failure", "skipped"),
+            ("success", "skipped"),
+            ("skipped", "failure"),
+            ("skipped", "success"),
+            ("cancelled", "skipped"),
+        ):
+            self.add_prior(claim=claim, effect=effect)
+            with (
+                self.subTest(claim=claim, effect=effect),
+                self.assertRaises(publisher.PublishRefused),
+            ):
+                publisher.prepare(self.github, REPO, SOURCE, self.work, ENV)
+        self.assertNotIn("smart-publish.sh", self.helpers)
+
+    def test_expired_artifact_never_uses_skipped_job_as_absence_fallback(self) -> None:
+        self.add_prior()
+        original = self.github.record
+        with patch.object(
+            self.github,
+            "record",
+            side_effect=lambda run, kind: (_ for _ in ()).throw(
+                publisher.PublishRefused("expired")
+            )
+            if run == "100"
+            else original(run, kind),
+        ):
+            with self.assertRaises(publisher.PublishRefused):
+                self.prepare()
+        self.assertFalse((self.work / "intent.json").exists())
+
+    def test_current_context_native_binding_cannot_exclude_some_other_run(self) -> None:
+        self.github.other_runs["101"] = {"head_sha": "f" * 40}
+        with self.assertRaises(publisher.PublishRefused):
+            self.prepare()
+
+    def test_other_locator_is_ignored_only_after_reviewed_protocol_verification(
+        self,
+    ) -> None:
+        self.add_prior()
+        self.github.other_runs["100"].update(
+            display_title=f"fleet-publish-v1:jbaruch/other:{SOURCE}", head_sha="f" * 40
+        )
+        with patch.object(
+            publisher,
+            "verify_workflow_protocol",
+            side_effect=lambda _client, sha: (_ for _ in ()).throw(
+                publisher.FleetPublishLookupError("unknown_producer")
+            )
+            if sha == "f" * 40
+            else None,
+        ):
+            with self.assertRaises(publisher.PublishRefused):
+                self.prepare()
+
+    def test_matching_locator_cannot_relabel_a_different_actual_intent(self) -> None:
+        self.add_prior()
+        intent = self.old_intent()
+        intent["consumer_repository"] = "jbaruch/other"
+        self.github.other_records["100"] = {"intent": publisher.encoded(intent)}
+        with self.assertRaises(publisher.PublishRefused):
+            self.prepare()
+
+    def test_dispatch_list_must_be_complete_and_include_actual_current_run(
+        self,
+    ) -> None:
+        original = self.github.pages
+        with patch.object(
+            self.github,
+            "pages",
+            side_effect=lambda route, key=None: []
+            if "/workflows/fleet-publish.yml/runs" in route
+            else original(route, key),
+        ):
+            with self.assertRaises(publisher.PublishRefused):
+                self.prepare()
+
+    def test_skipped_rerun_cannot_clear_unknown_previous_attempt(self) -> None:
+        self.add_prior()
+        self.github.other_runs["100"]["run_attempt"] = 2
+        with self.assertRaises(publisher.PublishRefused):
+            self.prepare()
+
+    def test_malformed_locator_requires_actual_skipped_claim_proof(self) -> None:
+        self.add_prior()
+        self.github.other_runs["100"]["display_title"] = (
+            "fleet-publish-v1:invalid-input"
+        )
+        self.prepare()
+        self.assertTrue((self.work / "intent.json").is_file())
+
+    def test_native_run_template_cannot_claim_an_unexecuted_foreign_workflow(
+        self,
+    ) -> None:
+        self.add_prior()
+        self.github.other_runs["100"]["head_branch"] = "unreviewed-feature"
+        with self.assertRaises(publisher.PublishRefused):
+            self.prepare()
+
+    def test_current_locator_must_bind_actual_prepared_input(self) -> None:
+        self.github.other_runs["101"] = {
+            "display_title": "fleet-publish-v1:jbaruch/other:" + SOURCE
+        }
+        with self.assertRaises(publisher.PublishRefused):
+            self.prepare()
 
 
 if __name__ == "__main__":
