@@ -543,6 +543,18 @@ class ArchiveReader:
                 and central.get("archived") is False
                 and central.get("disabled") is False
             )
+            main = obj(
+                self.client.native_json(
+                    f"repos/{CENTRAL_REPOSITORY}/git/ref/heads/main"
+                )
+            )
+            target = obj(main.get("object"))
+            need(
+                main.get("ref") == "refs/heads/main"
+                and target.get("type") == "commit"
+                and valid_sha(target.get("sha"))
+            )
+            self._protocol(target["sha"])
             self._central = True
         need(ref.startswith(PREFIX))
         route = f"repos/{CENTRAL_REPOSITORY}/git/ref/{ref.removeprefix('refs/')}"
@@ -717,6 +729,7 @@ class ArchiveReader:
         if live is not None and terminal is not None:
             need(terminal["receipt"] == live)
         if live is not None:
+            need(intent is not None)
             return live
         return saved
 
@@ -741,6 +754,8 @@ class ArchiveReader:
     ) -> dict[str, Any]:
         value = record(expected)
         need(value["run_attempt"] == 1 and self.run_hold(value["run_id"]) is None)
+        if value["state"] != "claimed":
+            need(self.record(value["run_id"], "receipt") == value)
         intent = self.run_intent(value["run_id"])
         archived = self.terminal(value["run_id"])
         if intent is not None:

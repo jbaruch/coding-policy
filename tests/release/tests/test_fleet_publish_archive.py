@@ -292,6 +292,10 @@ class GitFixture:
                 "jobs": self.parts[4],
             },
         }
+        self.routes["repos/jbaruch/coding-policy/git/ref/heads/main"] = {
+            "ref": "refs/heads/main",
+            "object": {"type": "commit", "sha": "e" * 40},
+        }
         self.records = {
             ("101", "intent"): self.intent["intent"],
             ("101", "receipt"): self.terminal["receipt"],
@@ -401,6 +405,30 @@ class ArchiveReaderTests(unittest.TestCase):
         self.assertTrue(proof["archived"])
         self.assertTrue(archive.positive_native(proof))
         self.assertLess(len(self.github.calls), 70)
+
+    def test_index_absence_requires_current_native_git_access_and_supported_protocol(
+        self,
+    ):
+        route = "repos/jbaruch/coding-policy/git/ref/heads/main"
+        self.github.routes[route] = archive.FleetPublishLookupError(
+            "native_http_error", http_status=403
+        )
+        with self.assertRaises(archive.FleetPublishLookupError):
+            self.reader.source_claim("jbaruch/nanoclaw-fixture", "f" * 40)
+        self.assertFalse(
+            any(
+                "/sources/" in call[1]
+                for call in self.github.calls
+                if call[0] == "native"
+            )
+        )
+
+    def test_caller_record_cannot_substitute_another_receipt_with_genuine_native_success(
+        self,
+    ):
+        forged = {**self.github.terminal["receipt"], "version": "0.2.0"}
+        with self.assertRaises(archive.ArchiveError):
+            self.reader.verify_record_attempt(forged, successful=True)
 
     def test_source_index_survives_empty_actions_catalog_and_no_consumer_stamp(self):
         self.github.expire()
