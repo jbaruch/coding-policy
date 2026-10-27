@@ -319,7 +319,7 @@ def finalizer_identity(value: object) -> dict[str, Any]:
         and valid_sha(raw.get("workflow_sha"))
         and valid_run_id(raw.get("run_id"))
         and type(raw.get("run_attempt")) is int
-        and raw["run_attempt"] == 1
+        and 0 < raw["run_attempt"] < 2**31
     )
     return dict(raw)
 

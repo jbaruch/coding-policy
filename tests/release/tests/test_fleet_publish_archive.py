@@ -181,6 +181,14 @@ class ArchiveSchemaTests(unittest.TestCase):
         parts[1] = None
         self.assertIsNone(terminal(parts)["receipt"])
 
+    def test_finalizer_rerun_can_attest_but_publisher_rerun_cannot(self):
+        parts = fixture()
+        parts[5]["run_attempt"] = 2
+        self.assertEqual(terminal(parts)["finalizer"]["run_attempt"], 2)
+        parts[2]["run_attempt"] = parts[3]["run_attempt"] = 2
+        with self.assertRaises(archive.ArchiveError):
+            terminal(parts)
+
     def test_confirmed_bytes_with_later_native_failure_remain_honest_but_not_positive(
         self,
     ):
@@ -211,7 +219,7 @@ class ArchiveSchemaTests(unittest.TestCase):
             (1, "bookkeeping_sha", "f" * 40),
             (1, "version", "0.2.0"),
             (5, "workflow_path", "wrong"),
-            (5, "run_attempt", 2),
+            (5, "run_attempt", 0),
         ):
             parts = fixture()
             parts[index][key] = value
