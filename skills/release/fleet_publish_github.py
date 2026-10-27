@@ -41,6 +41,7 @@ MAX_JSON_BYTES = 1024 * 1024
 MAX_ARCHIVE_BYTES = 256 * 1024
 MAX_STDERR_BYTES = 64 * 1024
 MAX_COMMANDS = 128
+RESOLUTION_MAX_COMMANDS = 512
 COMMAND_TIMEOUT_SECONDS = 30.0
 TERMINATE_GRACE_SECONDS = 1.0
 PAGE_SIZE = 100
@@ -225,6 +226,9 @@ class GitHubClient:
         self._deadline = deadline
         self._clock = clock if clock is not None else time.monotonic
 
+    def _command_budget(self) -> int:
+        return MAX_COMMANDS
+
     def _read(self, route: str, maximum: int, *, native_status: bool = False) -> bytes:
         _route(route)
         started = self._clock()
@@ -233,7 +237,7 @@ class GitHubClient:
             deadline = min(deadline, self._deadline)
         if started >= deadline:
             _refuse("command_timeout")
-        if self._commands >= MAX_COMMANDS:
+        if self._commands >= self._command_budget():
             _refuse("command_budget")
         self._commands += 1
         try:
@@ -528,3 +532,17 @@ class GitHubClient:
         if record["run_id"] != run_id:
             _refuse("record_run_mismatch")
         return record
+
+
+class ResolutionGitHubClient(GitHubClient):
+    """Fixed read-only reader allowance; publisher/poll defaults stay 128.
+
+    Actual transport: 121 commands at the claim, 129/137 after 4/8 commits,
+    369 near the 128-history bound, and 432 for near-bound recovery across five
+    distinct publisher/finalizer/default epochs. The finite 512 ceiling covers
+    these supported proof paths without caching or
+    weakening any mutable native read. No task/env/CLI budget selector exists.
+    """
+
+    def _command_budget(self) -> int:
+        return RESOLUTION_MAX_COMMANDS

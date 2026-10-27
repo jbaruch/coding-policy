@@ -16,7 +16,7 @@ import sys
 import time
 from typing import Callable, Any, NoReturn
 
-from fleet_publish_github import GitHubClient
+from fleet_publish_github import ResolutionGitHubClient as GitHubClient
 from fleet_publish_resolver import CentralPublishHold, select
 
 INTERVAL_SECONDS = 5.0

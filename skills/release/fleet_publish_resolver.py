@@ -20,7 +20,10 @@ from datetime import datetime
 from typing import Any, NoReturn
 
 from fleet_publish_archive import ArchiveReader
-from fleet_publish_github import FleetPublishLookupError, GitHubClient
+from fleet_publish_github import (
+    FleetPublishLookupError,
+    ResolutionGitHubClient as GitHubClient,
+)
 from fleet_publish_record import (
     CENTRAL_REPOSITORY,
     CENTRAL_WORKFLOW,

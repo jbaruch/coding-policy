@@ -390,6 +390,16 @@ class WorkflowTests(unittest.TestCase):
             if line.strip().startswith("run: ")
         ]
         self.assertEqual(lines, ['bash "$GITHUB_ACTION_PATH/review-skills.sh"'])
+        for mapping in (
+            "EVENT_NAME: ${{ github.event_name }}",
+            "RUNNER_TEMP: ${{ runner.temp }}",
+            "BASE_OVERRIDE: ${{ inputs.base-ref }}",
+            "THRESHOLD: ${{ inputs.threshold }}",
+            "SKILLS_DIR: ${{ inputs.skills-dir }}",
+            "WORKSPACE: ${{ inputs.workspace }}",
+            "CREDIT_OUTAGE: ${{ inputs.credit-outage }}",
+        ):
+            self.assertIn(mapping, action)
         bin_dir = self.root / "bin"
         bin_dir.mkdir()
         log = self.root / "review-args"
@@ -401,7 +411,8 @@ class WorkflowTests(unittest.TestCase):
             'sys.exit(int(os.environ["FIXTURE_REVIEW_EXIT"]))\n'
         )
         cli.chmod(0o700)
-        projected = self.root / "projected package/skills"
+        native_temp = self.root / "native temp"
+        projected = native_temp / "fleet-publish/package/skills"
         projected.mkdir(parents=True)
         (projected / "one").mkdir()
         (projected / "one/SKILL.md").write_text("# Projected fixture\n")
@@ -410,6 +421,7 @@ class WorkflowTests(unittest.TestCase):
         env = {
             "PATH": f"{bin_dir}:{os.environ['PATH']}",
             "GITHUB_ACTION_PATH": str(action_dir),
+            "RUNNER_TEMP": str(native_temp),
             "EVENT_NAME": "workflow_dispatch",
             "WORKSPACE": "jbaruch",
             "THRESHOLD": "85",
@@ -463,6 +475,52 @@ class WorkflowTests(unittest.TestCase):
             timeout=10,
         )
         self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse(log.exists())
+
+        for changes in (
+            {"EVENT_NAME": "push"},
+            {"BASE_OVERRIDE": "a" * 40},
+            {"RUNNER_TEMP": "relative"},
+            {"RUNNER_TEMP": "/"},
+            {"RUNNER_TEMP": str(native_temp) + "/../elsewhere"},
+            {"SKILLS_DIR": str(self.root)},
+        ):
+            with self.subTest(rejected_mode=changes):
+                result = subprocess.run(
+                    ["bash", "-c", lines[0]],
+                    cwd=self.root,
+                    env={**env, **changes},
+                    capture_output=True,
+                    timeout=10,
+                )
+                self.assertEqual(result.returncode, 2)
+                self.assertFalse(log.exists())
+        actual = projected.with_name("actual-skills")
+        projected.rename(actual)
+        projected.symlink_to(actual, target_is_directory=True)
+        result = subprocess.run(
+            ["bash", "-c", lines[0]],
+            cwd=self.root,
+            env=env,
+            capture_output=True,
+            timeout=10,
+        )
+        self.assertEqual(result.returncode, 2)
+        self.assertFalse(log.exists())
+        projected.unlink()
+        actual.rename(projected)
+        package = projected.parent
+        actual_package = package.with_name("actual-package")
+        package.rename(actual_package)
+        package.symlink_to(actual_package, target_is_directory=True)
+        result = subprocess.run(
+            ["bash", "-c", lines[0]],
+            cwd=self.root,
+            env=env,
+            capture_output=True,
+            timeout=10,
+        )
+        self.assertEqual(result.returncode, 2)
         self.assertFalse(log.exists())
 
 

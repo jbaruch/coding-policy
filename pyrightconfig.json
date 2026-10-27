@@ -58,7 +58,8 @@
     "tests/release/tests/test_fleet_publish_archive.py",
     "scripts/fleet_publish_archive_write.py",
     "scripts/tests/test_fleet_publish_archive_write.py",
-    "scripts/tests/test_fleet_publish_poll_cache.py"
+    "scripts/tests/test_fleet_publish_poll_cache.py",
+    "tests/release/tests/test_fleet_publish_transport_budget.py"
   ],
   "executionEnvironments": [
     {

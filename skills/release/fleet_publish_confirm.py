@@ -18,7 +18,7 @@ import subprocess
 import sys
 from typing import Any, Callable
 
-from fleet_publish_github import GitHubClient
+from fleet_publish_github import ResolutionGitHubClient as GitHubClient
 from fleet_publish_record import CENTRAL_REPOSITORY, FleetPublishRecord, valid_run_id
 from fleet_publish_resolver import CentralPublishHold, resolve
 
