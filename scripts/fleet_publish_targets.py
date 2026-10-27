@@ -24,6 +24,7 @@ from fleet_publish import (
     tree,
     gate_source,
     utc_time,
+    native_object,
 )
 from fleet_publish_record import CENTRAL_REPOSITORY, CENTRAL_WORKFLOW, valid_repository
 
@@ -49,7 +50,8 @@ def dispatch_deferred(github: GitHub, repo: str, source: str, merged_at: str) ->
         require(
             run.get("path") == CENTRAL_WORKFLOW
             and run.get("event") == "workflow_dispatch"
-            and run.get("head_repository", {}).get("full_name") == CENTRAL_REPOSITORY,
+            and native_object(run.get("head_repository")).get("full_name")
+            == CENTRAL_REPOSITORY,
             "Matching dispatch has unsupported native identity.",
         )
         status = run.get("status")

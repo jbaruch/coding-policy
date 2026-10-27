@@ -2219,5 +2219,418 @@ class PollDispatchTests(PublisherFixture):
         self.assertTrue((self.work / "intent.json").is_file())
 
 
+class NullableNativeMetadataTests(PublisherFixture):
+    def test_unattributed_deleted_review_never_counts_but_does_not_hide_valid_bots(
+        self,
+    ):
+        self.github.native_reviews.append(
+            {
+                "user": None,
+                "state": "CHANGES_REQUESTED",
+                "body": None,
+                "submitted_at": None,
+            }
+        )
+        self.assertEqual(
+            publisher.gate_source(self.github, REPO, SOURCE, "refs/heads/main"),
+            self.github.source_merged_at,
+        )
+        for lane in (0, 1):
+            reviews = deepcopy(NativeGitHub().native_reviews)
+            reviews[lane]["user"] = None
+            self.github.native_reviews = reviews
+            with self.assertRaises(publisher.PublishRefused):
+                publisher.gate_source(self.github, REPO, SOURCE, "refs/heads/main")
+        self.assertNotIn("smart-publish.sh", self.helpers)
+
+    def test_malformed_review_attribution_and_trusted_time_hold_without_attribute_error(
+        self,
+    ):
+        original = deepcopy(self.github.native_reviews)
+        malformed = [
+            None,
+            {"user": []},
+            {"user": "PRIVATE"},
+            {"user": False},
+            {"user": {}},
+            {"user": {"login": None}},
+            {"user": {"login": []}},
+            {},
+        ]
+        for value in malformed:
+            self.github.native_reviews = [*original, value]
+            with self.subTest(value=value), self.assertRaises(publisher.PublishRefused):
+                publisher.gate_source(self.github, REPO, SOURCE, "refs/heads/main")
+        self.github.native_reviews = deepcopy(original)
+        self.github.native_reviews[0]["submitted_at"] = None
+        with self.assertRaises(publisher.PublishRefused):
+            publisher.gate_source(self.github, REPO, SOURCE, "refs/heads/main")
+
+    def test_deleted_fork_and_malformed_summary_or_full_pr_are_consumer_holds(self):
+        original_api, original_pages = self.github.api, self.github.pages
+        for full in (False, True):
+            for branch, key in (("head", None), ("head", "repo"), ("base", None)):
+                for bad in (None, [], "PRIVATE"):
+
+                    def alter(value):
+                        value = deepcopy(value)
+                        if key is None:
+                            value[branch] = bad
+                        else:
+                            value[branch][key] = bad
+                        return value
+
+                    def api(route, *args, **kwargs):
+                        value = original_api(route, *args, **kwargs)
+                        return (
+                            alter(value)
+                            if full and route == f"repos/{REPO}/pulls/7"
+                            else value
+                        )
+
+                    def pages(route, *args, **kwargs):
+                        value = original_pages(route, *args, **kwargs)
+                        return (
+                            [alter(value[0])]
+                            if not full
+                            and route == f"repos/{REPO}/commits/{SOURCE}/pulls"
+                            else value
+                        )
+
+                    with (
+                        self.subTest(full=full, branch=branch, key=key, bad=bad),
+                        patch.object(self.github, "api", side_effect=api),
+                        patch.object(self.github, "pages", side_effect=pages),
+                        self.assertRaises(publisher.PublishRefused),
+                    ):
+                        publisher.gate_source(
+                            self.github, REPO, SOURCE, "refs/heads/main"
+                        )
+
+    def test_nullable_native_ref_commit_branch_and_dispatch_do_not_escape_hold_boundary(
+        self,
+    ):
+        original = self.github.api
+        for route, field in (
+            (f"repos/{REPO}/git/ref/heads/main", "object"),
+            (f"repos/{REPO}/git/commits/{SOURCE}", "tree"),
+            (f"repos/{REPO}/branches/main", "commit"),
+        ):
+
+            def api(path, *args, **kwargs):
+                value = original(path, *args, **kwargs)
+                if path == route:
+                    assert isinstance(value, dict)
+                    value[field] = None
+                return value
+
+            with (
+                patch.object(self.github, "api", side_effect=api),
+                self.assertRaises(publisher.PublishRefused),
+            ):
+                if field == "commit":
+                    publisher.gate_source(self.github, REPO, SOURCE, "refs/heads/main")
+                elif field == "object":
+                    publisher.default_tip(self.github, REPO)
+                else:
+                    publisher.tree(self.github, REPO, SOURCE)
+        self.github.other_runs["101"] = {"head_repository": None}
+        self.assertEqual(poller.targets(self.github), ([], [REPO]))
+
+    def test_one_deleted_fork_consumer_cannot_starve_eligible_consumer_dispatch(self):
+        class Aliased(NativeGitHub):
+            def __init__(self, name, bad=False):
+                super().__init__()
+                self.name = name
+                self.bad = bad
+
+            def mapped(self, value: Any) -> Any:
+                if isinstance(value, dict):
+                    return {key: self.mapped(item) for key, item in value.items()}
+                if isinstance(value, list):
+                    return [self.mapped(item) for item in value]
+                if isinstance(value, str):
+                    return value.replace(REPO, self.name)
+                return value
+
+            def api(self, path, *args, **kwargs) -> Any:
+                return self.mapped(
+                    super().api(path.replace(self.name, REPO), *args, **kwargs)
+                )
+
+            def pages(self, path, *args, **kwargs) -> list[Any]:
+                value = self.mapped(
+                    super().pages(path.replace(self.name, REPO), *args, **kwargs)
+                )
+                if self.bad and path == f"repos/{self.name}/commits/{SOURCE}/pulls":
+                    value[0]["head"]["repo"] = None
+                return value
+
+        bad, good = (
+            Aliased("jbaruch/bad-fixture", True),
+            Aliased("jbaruch/good-fixture"),
+        )
+        root = publisher.GitHub()
+        with (
+            patch.object(
+                root,
+                "pages",
+                return_value=[
+                    {**bad.metadata, "full_name": bad.name},
+                    {**good.metadata, "full_name": good.name},
+                ],
+            ),
+            patch.object(root, "fresh_consumer", side_effect=[bad, good]),
+        ):
+            selected, held = poller.targets(root)
+        self.assertEqual(held, [bad.name])
+        self.assertEqual(
+            selected,
+            [
+                {
+                    "repository": good.name,
+                    "source_sha": SOURCE,
+                    "source_ref": "refs/heads/main",
+                }
+            ],
+        )
+        with (
+            patch.dict(os.environ, {**ENV, "GITHUB_EVENT_NAME": "schedule"}),
+            patch.object(root, "api") as dispatch,
+        ):
+            poller.dispatch(root, selected)
+        dispatch.assert_called_once_with(
+            "repos/jbaruch/coding-policy/actions/workflows/fleet-publish.yml/dispatches",
+            {"ref": "main", "inputs": {"repository": good.name, "source_sha": SOURCE}},
+        )
+        self.assertNotIn("smart-publish.sh", self.helpers)
+
+
+class GitHubDeadlineTests(unittest.TestCase):
+    def test_api_reads_writes_and_marker_have_owned_timeouts(self):
+        client = publisher.GitHub()
+        with patch.object(
+            publisher.subprocess,
+            "run",
+            return_value=subprocess.CompletedProcess([], 0, b"{}", b""),
+        ) as run:
+            client.api(f"repos/{REPO}")
+            client.api(f"repos/{REPO}/git/refs", {"ref": "fixture"})
+            client.optional_marker(REPO)
+        self.assertEqual(run.call_count, 3)
+        for call in run.call_args_list:
+            self.assertEqual(
+                call.kwargs["timeout"], publisher.GITHUB_COMMAND_TIMEOUT_SECONDS
+            )
+
+    def test_timeout_is_fixed_refusal_without_retained_output(self):
+        client = publisher.GitHub()
+        failure = subprocess.TimeoutExpired(
+            ["gh", "PRIVATE-ARG"], 30, output=b"PRIVATE-OUTPUT", stderr=b"PRIVATE-ERROR"
+        )
+        with patch.object(publisher.subprocess, "run", side_effect=failure):
+            for operation in (
+                lambda: client.api(f"repos/{REPO}"),
+                lambda: client.optional_marker(REPO),
+            ):
+                with self.assertRaises(publisher.PublishRefused) as refused:
+                    operation()
+                self.assertNotIn("PRIVATE", str(refused.exception))
+                self.assertIs(refused.exception.__cause__, failure)
+
+    def test_remaining_budget_clips_each_pagination_command_and_restores_scope(self):
+        client = publisher.GitHub()
+        clock = [100.0]
+        batch = [{"id": value} for value in range(100)]
+
+        def read(*args, **kwargs):
+            self.assertEqual(kwargs["timeout"], 2 if clock[0] == 100 else 1)
+            clock[0] += 1
+            return subprocess.CompletedProcess([], 0, publisher.encoded(batch), b"")
+
+        with patch.object(publisher.time, "monotonic", side_effect=lambda: clock[0]):
+            with (
+                client.read_deadline(102),
+                patch.object(publisher.subprocess, "run", side_effect=read) as run,
+            ):
+                # The second page deliberately repeats IDs, but its owned deadline
+                # is checked before the next command even for an otherwise valid read.
+                client.api(f"repos/{REPO}")
+                client.api(f"repos/{REPO}")
+                with self.assertRaises(publisher.PublishRefused):
+                    client.api(f"repos/{REPO}")
+                self.assertEqual(run.call_count, 2)
+            self.assertEqual(
+                client.command_timeout(), publisher.GITHUB_COMMAND_TIMEOUT_SECONDS
+            )
+
+    def test_pagination_timeout_does_not_reset_deadline_for_later_pages(self):
+        client = publisher.GitHub()
+        clock = [100.0]
+        calls = []
+
+        def read(*args, **kwargs):
+            calls.append(kwargs["timeout"])
+            if len(calls) == 1:
+                clock[0] = 101
+                return subprocess.CompletedProcess(
+                    [],
+                    0,
+                    publisher.encoded([{"id": value} for value in range(1, 101)]),
+                    b"",
+                )
+            raise subprocess.TimeoutExpired(args[0], kwargs["timeout"])
+
+        with (
+            patch.object(publisher.time, "monotonic", side_effect=lambda: clock[0]),
+            client.read_deadline(102),
+            patch.object(publisher.subprocess, "run", side_effect=read),
+            self.assertRaises(publisher.PublishRefused),
+        ):
+            client.pages(f"repos/{REPO}/fixture")
+        self.assertEqual(calls, [2, 1])
+
+
+class ClaimedCiDeadlineAndRaceTests(PublisherFixture):
+    def test_green_response_after_wall_clock_deadline_is_not_permission(self):
+        self.claimed()
+        clock = [100.0]
+        original = self.github.pages
+
+        def slow(route, key=None):
+            result = original(route, key)
+            if route.endswith("/check-runs"):
+                clock[0] += publisher.CLAIM_CI_WAIT_SECONDS
+            return result
+
+        with (
+            patch.object(publisher.time, "monotonic", side_effect=lambda: clock[0]),
+            patch.object(self.github, "pages", side_effect=slow),
+            self.assertRaises(publisher.PublishRefused),
+        ):
+            publisher.execute(self.github, self.work)
+        self.assertNotIn("smart-publish.sh", self.helpers)
+        self.assertFalse((self.work / "receipt.json").exists())
+        self.assertIsNone(getattr(self.github, "_read_deadline", None))
+
+    def test_pending_sleep_uses_only_remaining_budget_then_holds(self):
+        self.claimed()
+        self.github.checks = [{"status": "in_progress", "conclusion": None}]
+        clock = [100.0]
+        original = self.github.pages
+
+        def slow(route, key=None):
+            result = original(route, key)
+            if route.endswith("/check-runs"):
+                clock[0] = 399.5
+            return result
+
+        def sleep(seconds):
+            self.assertEqual(seconds, 0.5)
+            clock[0] += seconds
+
+        with (
+            patch.object(publisher.time, "monotonic", side_effect=lambda: clock[0]),
+            patch.object(self.github, "pages", side_effect=slow),
+            patch.object(publisher.time, "sleep", side_effect=sleep) as sleeping,
+            self.assertRaises(publisher.PublishRefused),
+        ):
+            publisher.execute(self.github, self.work)
+        sleeping.assert_called_once_with(0.5)
+        self.assertNotIn("smart-publish.sh", self.helpers)
+
+    def test_frozen_clock_still_has_fixed_read_count(self):
+        self.claimed()
+        self.github.checks = [{"status": "in_progress", "conclusion": None}]
+        with (
+            patch.object(publisher.time, "monotonic", return_value=100),
+            patch.object(publisher.time, "sleep") as sleeping,
+            self.assertRaises(publisher.PublishRefused),
+        ):
+            publisher.execute(self.github, self.work)
+        self.assertEqual(sleeping.call_count, publisher.CLAIM_CI_MAX_READS - 1)
+        self.assertNotIn("smart-publish.sh", self.helpers)
+
+    def test_authority_changed_during_ci_never_reaches_effect(self):
+        for mutation in (
+            "marker_removed",
+            "marker_changed",
+            "stamp_removed",
+            "stamp_changed",
+            "diverged",
+            "default_changed",
+        ):
+            with self.subTest(mutation=mutation):
+                github = HistoryGitHub()
+                work = self.work / mutation
+                work.mkdir()
+                publisher.prepare(github, REPO, SOURCE, work, ENV)
+                publisher.claim(github, work)
+                github.records["intent"] = (work / "intent.json").read_bytes()
+                claim_sha = github.tip
+
+                def change(*_args):
+                    if mutation == "marker_removed":
+                        del github.entries[publisher.MARKER]
+                    elif mutation == "marker_changed":
+                        github.put(
+                            publisher.MARKER,
+                            publisher.encoded(
+                                {"schema_version": 1, "plugin_name": "jbaruch/other"}
+                            ),
+                        )
+                    elif mutation == "stamp_removed":
+                        del github.entries[publisher.STAMP]
+                    elif mutation == "stamp_changed":
+                        stamp = publisher.decode_record(github.records["intent"])
+                        stamp["registry_baseline"] = "0.0.0"
+                        github.put(publisher.STAMP, publisher.encoded(stamp))
+                    elif mutation == "default_changed":
+                        github.metadata["default_branch"] = "other"
+                        return
+                    github.snapshot(
+                        "8" * 40,
+                        [] if mutation == "diverged" else [claim_sha],
+                        github.entries,
+                    )
+                    github.tip = "8" * 40
+
+                original_api = github.api
+
+                def native(path, *args, **kwargs):
+                    if path == f"repos/{REPO}/git/ref/heads/other":
+                        return {"object": {"sha": github.tip, "type": "commit"}}
+                    return original_api(path, *args, **kwargs)
+
+                with (
+                    patch.object(github, "api", side_effect=native),
+                    patch.object(publisher, "wait_claim_ci", side_effect=change),
+                    self.assertRaises(publisher.PublishRefused),
+                ):
+                    publisher.execute(github, work)
+                self.assertFalse((work / "receipt.json").exists())
+                self.assertNotIn("smart-publish.sh", self.helpers)
+
+    def test_safe_descendant_during_ci_keeps_frozen_source_and_publishes_once(self):
+        github = HistoryGitHub()
+        publisher.prepare(github, REPO, SOURCE, self.work, ENV)
+        publisher.claim(github, self.work)
+        github.records["intent"] = (self.work / "intent.json").read_bytes()
+        claim_sha = github.tip
+
+        def change(*_args):
+            github.put("README.md", b"# Later reviewed source\n")
+            github.snapshot("8" * 40, [claim_sha], github.entries)
+            github.tip = "8" * 40
+
+        with patch.object(publisher, "wait_claim_ci", side_effect=change):
+            self.assertTrue(publisher.execute(github, self.work))
+        self.assertEqual(self.helpers.count("smart-publish.sh"), 1)
+        self.assertEqual(self.receipt()["source_sha"], SOURCE)
+        self.assertNotIn(
+            "Later reviewed source", (self.work / "package/README.md").read_text()
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

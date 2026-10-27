@@ -10,6 +10,7 @@ failures, incomplete history and unavailable artifacts remain unknown/blocked.
 from __future__ import annotations
 
 import base64
+from contextlib import contextmanager
 import importlib.util
 import json
 import os
@@ -18,7 +19,7 @@ import re
 import subprocess
 import sys
 import time
-from typing import Any
+from typing import Any, Iterator
 from datetime import datetime, timezone
 from urllib.parse import quote
 
@@ -45,6 +46,8 @@ MAX_FILES = 4096
 MAX_IGNORE_BYTES = 64 * 1024
 CLAIM_CI_INTERVAL_SECONDS = 10
 CLAIM_CI_MAX_READS = 31  # Initial snapshot plus five minutes of bounded waiting.
+CLAIM_CI_WAIT_SECONDS = 300
+GITHUB_COMMAND_TIMEOUT_SECONDS = 30
 
 
 class PublishRefused(ValueError):
@@ -54,6 +57,15 @@ class PublishRefused(ValueError):
 def require(condition: object, reason: str) -> None:
     if not condition:
         raise PublishRefused(reason)
+
+
+def native_object(value: object) -> dict[str, Any]:
+    """Malformed native objects hold one consumer; never become authority."""
+    if not isinstance(value, dict):
+        raise PublishRefused(
+            "Native GitHub metadata is incomplete; preserve this consumer's claim and repair its exact prerequisite."
+        )
+    return value
 
 
 def unique(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
@@ -156,6 +168,29 @@ class GitHub:
 
         self.archive_operation(lambda reader: persist_claim(self, reader, record, sha))
 
+    @contextmanager
+    def read_deadline(self, deadline: float) -> Iterator[None]:
+        """The CI watcher owns one wall-clock budget across all paginated reads."""
+        previous = getattr(self, "_read_deadline", None)
+        self._read_deadline = (
+            min(previous, deadline) if previous is not None else deadline
+        )
+        try:
+            yield
+        finally:
+            self._read_deadline = previous
+
+    def command_timeout(self) -> float:
+        remaining: float = GITHUB_COMMAND_TIMEOUT_SECONDS
+        deadline = getattr(self, "_read_deadline", None)
+        if deadline is not None:
+            remaining = min(remaining, deadline - time.monotonic())
+        require(
+            remaining > 0,
+            "GitHub read deadline expired; preserve the source claim without publication.",
+        )
+        return remaining
+
     def api(
         self,
         path: str,
@@ -174,14 +209,20 @@ class GitHub:
                 "Central artifact read credential is unavailable.",
             )
             environment["GH_TOKEN"] = environment["FLEET_CENTRAL_TOKEN"]
-        result = subprocess.run(
-            args,
-            input=encoded(payload) if payload is not None else None,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            check=False,
-            env=environment,
-        )
+        try:
+            result = subprocess.run(
+                args,
+                input=encoded(payload) if payload is not None else None,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+                env=environment,
+                timeout=self.command_timeout(),
+            )
+        except subprocess.TimeoutExpired as error:
+            raise PublishRefused(
+                "GitHub command timed out; preserve STOP and verify its native outcome before any retry."
+            ) from error
         require(
             result.returncode == 0,
             "GitHub API failed; preserve the source claim and inspect this run.",
@@ -195,18 +236,24 @@ class GitHub:
         return result.stdout if binary else decode(result.stdout)
 
     def optional_marker(self, repo: str) -> Any | None:
-        result = subprocess.run(
-            [
-                "gh",
-                "api",
-                "--hostname",
-                "github.com",
-                f"repos/{repo}/contents/{MARKER}",
-            ],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            check=False,
-        )
+        try:
+            result = subprocess.run(
+                [
+                    "gh",
+                    "api",
+                    "--hostname",
+                    "github.com",
+                    f"repos/{repo}/contents/{MARKER}",
+                ],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+                timeout=self.command_timeout(),
+            )
+        except subprocess.TimeoutExpired as error:
+            raise PublishRefused(
+                "Marker read timed out; enrollment remains unknown."
+            ) from error
         if result.returncode != 0:
             require(
                 b"HTTP 404" in result.stderr,
@@ -294,7 +341,7 @@ class GitHub:
 
     def blob(self, repo: str, sha: str) -> bytes:
         require(valid_sha(sha), "Invalid native blob identity.")
-        response = self.api(f"repos/{repo}/git/blobs/{sha}")
+        response = native_object(self.api(f"repos/{repo}/git/blobs/{sha}"))
         require(
             response.get("encoding") == "base64", "Git blob encoding is unsupported."
         )
@@ -314,13 +361,14 @@ def tree(github: GitHub, repo: str, sha: str) -> tuple[str, dict[str, dict[str, 
         valid_repository(repo) and valid_sha(sha),
         "Select a same-owner native source SHA.",
     )
-    commit = github.api(f"repos/{repo}/git/commits/{sha}")
+    commit = native_object(github.api(f"repos/{repo}/git/commits/{sha}"))
     require(
-        commit.get("sha") == sha and valid_sha(commit.get("tree", {}).get("sha")),
+        commit.get("sha") == sha
+        and valid_sha(native_object(commit.get("tree")).get("sha")),
         "Source commit is malformed.",
     )
     tree_sha = commit["tree"]["sha"]
-    data = github.api(f"repos/{repo}/git/trees/{tree_sha}?recursive=1")
+    data = native_object(github.api(f"repos/{repo}/git/trees/{tree_sha}?recursive=1"))
     require(
         data.get("sha") == tree_sha and data.get("truncated") is False,
         "Source tree is incomplete.",
@@ -330,8 +378,11 @@ def tree(github: GitHub, repo: str, sha: str) -> tuple[str, dict[str, dict[str, 
         isinstance(entries, list) and len(entries) <= MAX_FILES,
         "Source tree exceeds its bound.",
     )
+    if not isinstance(entries, list):
+        raise PublishRefused("Native source tree entries are malformed.")
     result: dict[str, dict[str, Any]] = {}
-    for entry in entries:
+    for value in entries:
+        entry = native_object(value)
         path = entry.get("path")
         require(
             isinstance(path, str)
@@ -342,6 +393,8 @@ def tree(github: GitHub, repo: str, sha: str) -> tuple[str, dict[str, dict[str, 
             ),
             "Invalid source path.",
         )
+        if not isinstance(path, str):
+            raise PublishRefused("Native source path is malformed.")
         require(
             str(PurePosixPath(path)) == path
             and not path.startswith("/")
@@ -383,7 +436,7 @@ def default_tip(github: GitHub, repo: str) -> tuple[str, str]:
         valid_repository(repo) and repo != CENTRAL_REPOSITORY,
         "Select an enrolled consumer repository.",
     )
-    metadata = github.api(f"repos/{repo}")
+    metadata = native_object(github.api(f"repos/{repo}"))
     require(
         metadata.get("full_name") == repo
         and metadata.get("archived") is False
@@ -397,12 +450,18 @@ def default_tip(github: GitHub, repo: str) -> tuple[str, str]:
         and not any(ord(c) < 32 for c in branch),
         "Default branch is unavailable.",
     )
-    ref = github.api(f"repos/{repo}/git/ref/heads/{quote(branch, safe='')}")
-    sha = ref.get("object", {}).get("sha")
+    if not isinstance(branch, str):
+        raise PublishRefused("Native default branch is malformed.")
+    ref = native_object(
+        github.api(f"repos/{repo}/git/ref/heads/{quote(branch, safe='')}")
+    )
+    sha = native_object(ref.get("object")).get("sha")
     require(
-        valid_sha(sha) and ref.get("object", {}).get("type") == "commit",
+        valid_sha(sha) and native_object(ref.get("object")).get("type") == "commit",
         "Default tip is not a native commit.",
     )
+    if not isinstance(sha, str):
+        raise PublishRefused("Native default commit is malformed.")
     return "refs/heads/" + branch, sha
 
 
@@ -425,14 +484,18 @@ def utc_time(value: object) -> datetime:
 def merged_source(github: GitHub, repo: str, sha: str, ref: str) -> dict[str, Any]:
     """Read the actual merged PR, including its host-assigned merge timestamp."""
     pulls = github.pages(f"repos/{repo}/commits/{sha}/pulls")
-    matches = [
-        p
-        for p in pulls
-        if p.get("merge_commit_sha") == sha
-        and p.get("merged_at")
-        and p.get("base", {}).get("ref") == ref.removeprefix("refs/heads/")
-        and p.get("head", {}).get("repo", {}).get("full_name") == repo
-    ]
+    matches = []
+    for value in pulls:
+        candidate = native_object(value)
+        if candidate.get("merge_commit_sha") != sha or not candidate.get("merged_at"):
+            continue
+        base = native_object(candidate.get("base"))
+        if base.get("ref") != ref.removeprefix("refs/heads/"):
+            continue
+        head = native_object(candidate.get("head"))
+        head_repo = native_object(head.get("repo"))
+        if head_repo.get("full_name") == repo:
+            matches.append(candidate)
     require(
         len(matches) == 1, "Source tip requires one verified merged same-repository PR."
     )
@@ -441,15 +504,19 @@ def merged_source(github: GitHub, repo: str, sha: str, ref: str) -> dict[str, An
         type(summary.get("number")) is int and summary["number"] > 0,
         "Native source PR number is invalid.",
     )
-    pull = github.api(f"repos/{repo}/pulls/{summary['number']}")
+    pull = native_object(github.api(f"repos/{repo}/pulls/{summary['number']}"))
+    base = native_object(pull.get("base"))
+    head = native_object(pull.get("head"))
+    base_repo = native_object(base.get("repo"))
+    head_repo = native_object(head.get("repo"))
     require(
         pull.get("number") == summary["number"]
         and pull.get("merged") is True
         and pull.get("state") == "closed"
         and pull.get("merge_commit_sha") == sha
-        and pull.get("base", {}).get("ref") == ref.removeprefix("refs/heads/")
-        and pull.get("base", {}).get("repo", {}).get("full_name") == repo
-        and pull.get("head", {}).get("repo", {}).get("full_name") == repo,
+        and base.get("ref") == ref.removeprefix("refs/heads/")
+        and base_repo.get("full_name") == repo
+        and head_repo.get("full_name") == repo,
         "Actual native PR does not bind this merged source and default branch.",
     )
     utc_time(pull.get("merged_at"))
@@ -462,11 +529,11 @@ def required_contexts(
     """Union explicit legacy and active ruleset requirements; never infer 403/absence."""
     branch = ref.removeprefix("refs/heads/")
     route_branch = quote(branch, safe="")
-    native = github.api(f"repos/{repo}/branches/{route_branch}")
+    native = native_object(github.api(f"repos/{repo}/branches/{route_branch}"))
     require(
         native.get("name") == branch
         and type(native.get("protected")) is bool
-        and valid_sha(native.get("commit", {}).get("sha")),
+        and valid_sha(native_object(native.get("commit")).get("sha")),
         "Native default-branch protection metadata is unavailable.",
     )
     requirements: set[tuple[str, int | None]] = set()
@@ -489,7 +556,7 @@ def required_contexts(
         )
         return value if type(value) is int else None
 
-    protection = native.get("protection")
+    protection = native_object(native.get("protection"))
     require(
         isinstance(protection, dict) and type(protection.get("enabled")) is bool,
         "Legacy branch requirements are incomplete.",
@@ -587,23 +654,43 @@ def gate_source(github: GitHub, repo: str, sha: str, ref: str) -> str:
         "policy": {"coding-policy-fleet-reviewer[bot]", "github-actions[bot]"},
         "quality": {"jbaruch-claude-reviewer[bot]"},
     }
+    attributed = []
+    for value in reviews:
+        review = native_object(value)
+        require("user" in review, "Native review attribution is missing.")
+        if review["user"] is None:
+            # GitHub retains a deleted account's review with no actor. It can
+            # never count for either trusted bot lane, including an old bot.
+            continue
+        actor = native_object(review["user"])
+        login = actor.get("login")
+        require(
+            isinstance(login, str)
+            and 0 < len(login) <= 100
+            and not any(ord(c) < 32 or ord(c) == 127 for c in login),
+            "Native review attribution is malformed.",
+        )
+        attributed.append((login, review))
     for lane, logins in identities.items():
         latest: dict[str, Any] = {}
-        for review in reviews:
-            login = review.get("user", {}).get("login")
-            quality = str(review.get("body", "")).startswith(
+        for login, review in attributed:
+            if login not in logins or review.get("commit_id") != head:
+                continue
+            body = review.get("body")
+            require(
+                body is None or isinstance(body, str),
+                "Native bot review body is malformed.",
+            )
+            quality = isinstance(body, str) and body.startswith(
                 "<!-- coding-policy:claude-quality-review:v1 -->"
             )
-            if (
-                login in logins
-                and review.get("commit_id") == head
-                and quality == (lane == "quality")
+            if quality != (lane == "quality"):
+                continue
+            submitted = utc_time(review.get("submitted_at"))
+            if login not in latest or submitted > utc_time(
+                latest[login]["submitted_at"]
             ):
-                if (
-                    login not in latest
-                    or review["submitted_at"] > latest[login]["submitted_at"]
-                ):
-                    latest[login] = review
+                latest[login] = review
         require(
             latest and all(r.get("state") == "APPROVED" for r in latest.values()),
             "Both current-head independent review lanes must approve the merged PR.",
@@ -650,64 +737,80 @@ def gate_source(github: GitHub, repo: str, sha: str, ref: str) -> str:
 
 def wait_claim_ci(github: GitHub, repo: str, sha: str, ref: str) -> None:
     """Read only the exact claimed commit; a timeout preserves its STOP record."""
-    for attempt in range(CLAIM_CI_MAX_READS):
-        required = required_contexts(github, repo, ref)
-        checks = github.pages(f"repos/{repo}/commits/{sha}/check-runs", "check_runs")
-        statuses = github.pages(f"repos/{repo}/commits/{sha}/status", "statuses")
-        pending = False
-        for check in checks:
-            status, conclusion = check.get("status"), check.get("conclusion")
+    deadline = time.monotonic() + CLAIM_CI_WAIT_SECONDS
+    with github.read_deadline(deadline):
+        for attempt in range(CLAIM_CI_MAX_READS):
             require(
-                status
-                in (
-                    "queued",
-                    "in_progress",
-                    "completed",
-                    "waiting",
-                    "requested",
-                    "pending",
-                ),
-                "Claimed commit CI status is unsupported; preserve the claim.",
+                time.monotonic() < deadline,
+                "Claimed commit CI deadline expired; preserve STOP.",
             )
-            if status != "completed":
+            required = required_contexts(github, repo, ref)
+            checks = github.pages(
+                f"repos/{repo}/commits/{sha}/check-runs", "check_runs"
+            )
+            statuses = github.pages(f"repos/{repo}/commits/{sha}/status", "statuses")
+            pending = False
+            for check in checks:
+                status, conclusion = check.get("status"), check.get("conclusion")
                 require(
-                    conclusion is None,
-                    "Claimed commit CI metadata contradicts its pending state.",
+                    status
+                    in (
+                        "queued",
+                        "in_progress",
+                        "completed",
+                        "waiting",
+                        "requested",
+                        "pending",
+                    ),
+                    "Claimed commit CI status is unsupported; preserve the claim.",
                 )
-                pending = True
-            else:
+                if status != "completed":
+                    require(
+                        conclusion is None,
+                        "Claimed commit CI metadata contradicts its pending state.",
+                    )
+                    pending = True
+                else:
+                    require(
+                        conclusion in ("success", "neutral", "skipped"),
+                        "Claimed commit CI failed; preserve the claim without publication.",
+                    )
+            for status in statuses:
                 require(
-                    conclusion in ("success", "neutral", "skipped"),
-                    "Claimed commit CI failed; preserve the claim without publication.",
+                    status.get("state") in ("pending", "success"),
+                    "Claimed commit status failed or is unsupported; preserve the claim.",
                 )
-        for status in statuses:
+                pending |= status["state"] == "pending"
+            for name, app_id in required:
+                check_green = any(
+                    check.get("name") == name
+                    and check.get("status") == "completed"
+                    and check.get("conclusion") == "success"
+                    and (
+                        app_id is None
+                        or isinstance(check.get("app"), dict)
+                        and type(check["app"].get("id")) is int
+                        and check["app"]["id"] == app_id
+                    )
+                    for check in checks
+                )
+                status_green = app_id is None and any(
+                    status.get("context") == name and status.get("state") == "success"
+                    for status in statuses
+                )
+                pending |= not (check_green or status_green)
             require(
-                status.get("state") in ("pending", "success"),
-                "Claimed commit status failed or is unsupported; preserve the claim.",
+                time.monotonic() < deadline,
+                "Claimed commit CI exceeded its wall-clock deadline; preserve STOP.",
             )
-            pending |= status["state"] == "pending"
-        for name, app_id in required:
-            check_green = any(
-                check.get("name") == name
-                and check.get("status") == "completed"
-                and check.get("conclusion") == "success"
-                and (
-                    app_id is None
-                    or isinstance(check.get("app"), dict)
-                    and type(check["app"].get("id")) is int
-                    and check["app"]["id"] == app_id
+            if not pending:
+                return
+            if attempt + 1 < CLAIM_CI_MAX_READS:
+                remaining = deadline - time.monotonic()
+                require(
+                    remaining > 0, "Claimed commit CI deadline expired; preserve STOP."
                 )
-                for check in checks
-            )
-            status_green = app_id is None and any(
-                status.get("context") == name and status.get("state") == "success"
-                for status in statuses
-            )
-            pending |= not (check_green or status_green)
-        if not pending:
-            return
-        if attempt + 1 < CLAIM_CI_MAX_READS:
-            time.sleep(CLAIM_CI_INTERVAL_SECONDS)
+                time.sleep(min(CLAIM_CI_INTERVAL_SECONDS, remaining))
     raise PublishRefused(
         "Claimed commit CI remains missing or pending after the fixed wait; preserve the claim and do not replay publication."
     )
@@ -775,9 +878,10 @@ def verify_attempt(
     commit = github.api(
         f"repos/{record['consumer_repository']}/git/commits/{record['source_sha']}"
     )
+    commit = native_object(commit)
     require(
         commit.get("sha") == record["source_sha"]
-        and commit.get("tree", {}).get("sha") == record["source_tree_sha"],
+        and native_object(commit.get("tree")).get("sha") == record["source_tree_sha"],
         "Source tree binding changed.",
     )
     return evidence
@@ -1210,7 +1314,7 @@ def push_claim(
     require(valid_sha(commit.get("sha")), "Bookkeeping commit creation failed.")
     # REST force:false only forbids non-fast-forward updates. GraphQL beforeOid
     # also rejects concurrent ancestor resets, so the expected tip is atomic.
-    metadata = github.api(f"repos/{repo}")
+    metadata = native_object(github.api(f"repos/{repo}"))
     node_id = metadata.get("node_id")
     require(
         metadata.get("full_name") == repo
@@ -1306,6 +1410,7 @@ def initial_record(
 
 
 def run_binding(github: GitHub, run: dict[str, Any], workflow_id: int) -> None:
+    run = native_object(run)
     require(
         valid_run_id(str(run.get("id")))
         and run.get("workflow_id") == workflow_id
@@ -1313,7 +1418,8 @@ def run_binding(github: GitHub, run: dict[str, Any], workflow_id: int) -> None:
         and run.get("event") == "workflow_dispatch"
         and run.get("head_branch") == "main"
         and valid_sha(run.get("head_sha"))
-        and run.get("head_repository", {}).get("full_name") == CENTRAL_REPOSITORY
+        and native_object(run.get("head_repository")).get("full_name")
+        == CENTRAL_REPOSITORY
         and type(run.get("run_attempt")) is int
         and run["run_attempt"] >= 1,
         "Native central dispatch identity is incomplete or unsupported.",
@@ -1322,6 +1428,7 @@ def run_binding(github: GitHub, run: dict[str, Any], workflow_id: int) -> None:
     attempt = github.api(
         f"repos/{CENTRAL_REPOSITORY}/actions/runs/{run['id']}/attempts/{run['run_attempt']}"
     )
+    actual, attempt = native_object(actual), native_object(attempt)
     for key in (
         "id",
         "workflow_id",
@@ -1620,15 +1727,39 @@ def retained_claim(
         commit = github.api(
             f"repos/{intent['consumer_repository']}/git/commits/{cursor}"
         )
-        parents = commit.get("parents")
+        parents = native_object(commit).get("parents")
         require(
-            isinstance(parents, list) and parents and valid_sha(parents[0].get("sha")),
+            isinstance(parents, list)
+            and parents
+            and valid_sha(native_object(parents[0]).get("sha")),
             "Claimed first-parent history is incomplete or divergent.",
         )
+        if not isinstance(parents, list):
+            raise PublishRefused("Native first-parent history is malformed.")
         cursor = parents[0]["sha"]
     raise PublishRefused(
         "Post-claim main history exceeds its bound; preserve STOP without publication."
     )
+
+
+def verify_current_claim(
+    github: GitHub, intent: FleetPublishRecord, claim_sha: str
+) -> None:
+    """Re-read current authority; CI waiting does not lease branch enrollment."""
+    current_ref, current_tip = default_tip(github, intent["consumer_repository"])
+    require(
+        current_ref == intent["source_ref"],
+        "Default source branch changed after claim.",
+    )
+    if current_tip != claim_sha:
+        comparison = github.api(
+            f"repos/{intent['consumer_repository']}/compare/{claim_sha}...{current_tip}"
+        )
+        require(
+            native_object(comparison).get("status") == "ahead",
+            "Claimed history diverged; preserve STOP without publication.",
+        )
+        retained_claim(github, intent, claim_sha, current_tip)
 
 
 def execute(github: GitHub, work: Path) -> bool:
@@ -1643,20 +1774,7 @@ def execute(github: GitHub, work: Path) -> bool:
         "Immutable intent upload is unavailable; retain durable STOP without publication.",
     )
     require(valid_sha(claim_sha), "Claimed native commit is missing.")
-    current_ref, current_tip = default_tip(github, record["consumer_repository"])
-    require(
-        current_ref == record["source_ref"],
-        "Default source branch changed after claim.",
-    )
-    if current_tip != claim_sha:
-        comparison = github.api(
-            f"repos/{record['consumer_repository']}/compare/{claim_sha}...{current_tip}"
-        )
-        require(
-            comparison.get("status") == "ahead",
-            "Claimed history diverged; preserve STOP without publication.",
-        )
-        retained_claim(github, intent, claim_sha, current_tip)
+    verify_current_claim(github, intent, claim_sha)
     _, claimed_tree = tree(github, record["consumer_repository"], claim_sha)
     require(
         decode_record(file(github, record["consumer_repository"], claimed_tree, STAMP))
@@ -1667,6 +1785,7 @@ def execute(github: GitHub, work: Path) -> bool:
         github, record["consumer_repository"], claim_sha, record["source_ref"]
     )
     github.verify_archive_claim(intent, claim_sha)
+    verify_current_claim(github, intent, claim_sha)
     record["bookkeeping_sha"] = claim_sha
     # Persist conservative local terminal evidence BEFORE the effect. Workflow
     # failure/cancellation still leaves the durable claimed source STOP record.
