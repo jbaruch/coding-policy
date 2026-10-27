@@ -35,6 +35,11 @@ git tag <tag> && git push origin <tag>
 
 ## After the merge — every publication: resolve and watch its run
 
+An enrolled central fleet consumer follows
+`skills/release/references/fleet-publication.md` in full for selection, watching
+and confirmation. Keep the captured baseline and actual consumer merge SHA.
+The commands below retain the ordinary consumer-push and tag publication modes.
+
 Bind the resolution to the workflow, the exact commit, the `push` event and the ref that fired it, never to "latest on main". The lookup polls until the run is listed, past the publish workflow's enqueue latency.
 
 Each channel uses its actual publisher run. Separate workflows have separate ids. A merge-triggered workflow containing both publication jobs uses one id for both independent confirmation helpers; it still owes both sets of artifact evidence.

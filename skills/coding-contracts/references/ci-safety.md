@@ -85,9 +85,19 @@
 | `resolve-publish-run.sh` | owner, repository, source commit, workflow and optional ref → JSON `database_id` |
 | `confirm-tessl-landed.sh` | workspace, plugin, captured baseline and run id → landed version plus newline |
 | `verify-moderation-cleared.sh` | workspace, plugin and published version → JSON moderation verdict |
+| `fleet_publish_wait.py` | consumer repository, merged source SHA and optional central run id → JSON source-bound run selection after bounded enqueue waiting |
+| `fleet_publish_resolver.py` | consumer repository, merged source SHA and optional central run id → JSON source-bound central run selection |
+| `fleet_publish_confirm.py` | consumer repository, merged source SHA, baseline and central run id → JSON exact-version publication confirmation |
 
 - Lookup, refusal, exit-code and regression contracts are binding: read `skills/release/references/script-output-contracts.md` Release Readback Consumers before invoking these targets from another plugin.
 - Lookup supplies no merge, publication, installation or operator authority.
+
+## Central Publication Bookkeeping
+
+- Narrow exception for source-claim and version bookkeeping on an enrolled consumer's default branch by the central publisher.
+- Applies only to `.github/workflows/fleet-publish.yml` executing in `jbaruch/coding-policy`.
+- Preconditions are binding: read `skills/release/references/fleet-publication.md` Bookkeeping Authority before relying on it.
+- Every other protected-branch write follows Protected Branches unchanged.
 
 ## Publish Outcomes
 

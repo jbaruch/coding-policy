@@ -83,7 +83,11 @@ Tessl imports. Combined native-session acceptance lives in
 | [adopt-fork-pr](skills/adopt-fork-pr/SKILL.md) | Classify a PR by number. Same-repo PRs pass through to the reviewer; fork PRs get adopted into the base repo as a same-repo PR, preserving the contributor's commits. |
 | [migrate-to-plugin](skills/migrate-to-plugin/SKILL.md) | Migrate a legacy `tile.json` plugin to the `.tessl-plugin/plugin.json` form: runs `tessl plugin migrate`, renames `.tileignore`, removes the obsolete `tile.json`, re-lints, then reconciles residual "tile" wording to "plugin" while preserving contract surfaces. |
 
-### Hooks
+### Central fleet publication
+
+The opt-in [central publisher contract](skills/release/references/fleet-publication.md) keeps Tessl and App credentials in `coding-policy`. Reviewed consumer enrollment selects a data-only package; source-bound intent, claim and receipt readers retain each publication and its moderation result. Activation stays disabled until the App permissions and consumer publication handoff are verified.
+
+## Hooks
 
 The release skill owns the hooks and their packaged [throttle-stamp schema](skills/release/state-schema.md).
 

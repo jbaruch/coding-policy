@@ -31,12 +31,13 @@ Moved from `rules/ci-safety.md` (#642) to keep the always-loaded rules under the
 - A GitHub tag/asset publication reads that evidence through `skills/release/verify-github-release.sh`
 - A Tessl publish confirmed on the registry says nothing about another channel's release, which needs its own evidence
 - Channel-independent, whatever publishes the package:
-  - Resolve the run for that publication, bound to its workflow, its exact commit, the `push` event and the ref that fired it
+  - Resolve the run for that publication, bound to its workflow, its exact commit, the `push` event and the ref that fired it, except the central mode below
   - Watch that resolved run to a terminal state
   - Require its `conclusion` to be `success`
   - Verify the version actually published on the channel that carried it
   - Never report a release confirmed while its publish is unconfirmed
 - Two runs matching all four binding facts are an ambiguity to resolve, never a winner to pick — see `skills/release/resolve-publish-run.sh` header
+- Central fleet publication is the scoped consumer mode in `skills/release/references/fleet-publication.md`; read it in full before selecting or confirming that mode. It binds the consumer's merged source separately from the central workflow commit and native dispatch attempt. Legacy push selection remains unchanged. Every registry and moderation conjunct below still binds; central confirmation additionally requires the exact source-bound receipt version and its original successful publish evidence.
 - Release contract:
   1. Before merge: capture the registry's `Latest Version` as baseline
   2. After merge: resolve the publish run by merge-commit `headSha` + `push` event filter
