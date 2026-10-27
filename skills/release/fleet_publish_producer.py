@@ -21,10 +21,22 @@ PRODUCER_PATHS = (
     "scripts/fleet_publish_archive_write.py",
     "skills/release/fleet_publish_archive.py",
 )
-# Prospective durable protocol only. Populate from the combined reviewed
-# writer/finalizer/archive-owner freeze. Older unactivated protocols cannot
-# prove durable absence or historical terminal success.
-TRUSTED_PRODUCERS: tuple[dict[str, str], ...] = ()
+# Coherent prospective durable protocol reviewed at root freeze a1d08673.
+# This covers the listed protocol owners, not their full dependency closure.
+# Renew by reviewing every listed source together. Earlier unactivated artifact-
+# only versions are deliberately unsupported; retain activated historical sets
+# only while their authority remains supported.
+TRUSTED_PRODUCERS: tuple[dict[str, str], ...] = (
+    {
+        ".github/workflows/fleet-publish.yml": "b3b7e66f4fb65481872b71cb0f2959ec7af343d8",
+        "scripts/fleet_publish.py": "58188bd94b1e20e34f06b9e83ee16c99d7b113a2",
+        "scripts/fleet_publish_workflow.py": "afaa6d4814ab4d7836d26c14ce9a1d7e0e8478f6",
+        "scripts/fleet_publish_validate.py": "7d450d115f6a661f3a0e1d3d8ab1a85451bb7a47",
+        ".github/workflows/fleet-publish-finalize.yml": "a6dbeea9400979c59a7608d7f16eb8156e30e4e1",
+        "scripts/fleet_publish_archive_write.py": "06a1fbad49b7f95b26e407e6040f48f373f69cd5",
+        "skills/release/fleet_publish_archive.py": "d91b19daddc7dc4a81e1f3340e4367a8dec13bbf",
+    },
+)
 
 
 class GitHubRead(Protocol):
