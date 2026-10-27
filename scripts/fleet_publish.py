@@ -1789,6 +1789,14 @@ def execute(github: GitHub, work: Path) -> bool:
         github, record["consumer_repository"], claim_sha, record["source_ref"]
     )
     github.verify_archive_claim(intent, claim_sha)
+    # Reviews and source CI are live gates, not leased by prepare() or the
+    # bookkeeping wait. Bind the immutable selected source again before effects.
+    gate_source(
+        github,
+        record["consumer_repository"],
+        record["source_sha"],
+        record["source_ref"],
+    )
     verify_current_claim(github, intent, claim_sha)
     record["bookkeeping_sha"] = claim_sha
     # Persist conservative local terminal evidence BEFORE the effect. Workflow

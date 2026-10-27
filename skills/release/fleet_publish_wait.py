@@ -40,10 +40,20 @@ def wait(
 ) -> dict[str, Any]:
     deadline = clock() + BUDGET_SECONDS
     while True:
+        if clock() >= deadline:
+            raise CentralPublishHold("pending")
         try:
             # A new bounded client per snapshot; no cross-snapshot API results
             # or command allowance are carried forward as current authority.
-            return lookup(GitHubClient(), repository, source_sha, run_id=run_id)
+            selected = lookup(
+                GitHubClient(deadline=deadline, clock=clock),
+                repository,
+                source_sha,
+                run_id=run_id,
+            )
+            if clock() >= deadline:
+                raise CentralPublishHold("pending")
+            return selected
         except CentralPublishHold as error:
             if error.kind not in ("pending", "not_found"):
                 raise

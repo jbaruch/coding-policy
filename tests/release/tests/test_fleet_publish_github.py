@@ -649,6 +649,99 @@ class GitHubClientTests(unittest.TestCase):
                 lambda: client.GitHubClient().json(ROUTE), "command_unavailable"
             )
 
+    def test_expired_snapshot_never_starts_a_command(self):
+        api = client.GitHubClient(deadline=10, clock=lambda: 10)
+        self.refuse(lambda: api.json(ROUTE), "command_timeout")
+        self.assertEqual(self.calls(), [])
+        for invalid in (float("inf"), float("nan"), True):
+            self.refuse(
+                lambda: client.GitHubClient(deadline=invalid), "command_timeout"
+            )
+
+    def test_snapshot_deadline_clips_hung_command_without_global_timeout_change(self):
+        self.replies({ROUTE: {"sleep": True}})
+        api = client.GitHubClient(deadline=client.time.monotonic() + 0.05)
+        error = self.refuse(lambda: api.json(ROUTE), "command_timeout")
+        self.assertIsNotNone(error.returncode)
+        self.assertEqual(client.COMMAND_TIMEOUT_SECONDS, 30)
+
+    def test_successful_child_exit_after_snapshot_deadline_is_not_evidence(self):
+        self.replies({ROUTE: {"json": {"ok": True}}})
+        clock = [0.0]
+        api = client.GitHubClient(deadline=5, clock=lambda: clock[0])
+        original = client.subprocess.Popen
+
+        def spawn(*args, **kwargs):
+            child = original(*args, **kwargs)
+            wait = child.wait
+
+            def completed(*arguments, **keywords):
+                result = wait(*arguments, **keywords)
+                clock[0] = 5
+                return result
+
+            child.wait = completed
+            return child
+
+        with patch.object(client.subprocess, "Popen", side_effect=spawn):
+            self.refuse(lambda: api.json(ROUTE), "command_timeout")
+        self.assertEqual([call[-1] for call in self.calls()], [ROUTE])
+
+    def test_artifact_pages_and_download_keep_one_fixed_snapshot_deadline(self):
+        for boundary in ("page", "download"):
+            with self.subTest(boundary=boundary):
+                self.log.write_text("")
+                if boundary == "page":
+                    rows = [
+                        artifact(identifier=1000 + i, name=f"other-{i}")
+                        for i in range(100)
+                    ]
+                    self.replies(
+                        {LIST: {"json": {"total_count": 101, "artifacts": rows}}}
+                    )
+                else:
+                    self.evidence()
+                clock = [0.0]
+                api = client.GitHubClient(deadline=5, clock=lambda: clock[0])
+                original = api._read
+
+                def read(*args, **kwargs):
+                    value = original(*args, **kwargs)
+                    clock[0] = 5
+                    return value
+
+                with patch.object(api, "_read", side_effect=read):
+                    self.refuse(lambda: api.artifact(RUN, "intent"), "command_timeout")
+                self.assertEqual([call[-1] for call in self.calls()], [LIST])
+
+    def test_archive_native_reads_cannot_turn_deadline_into_verified_absence(self):
+        with patch.object(sys, "path", [str(SOURCE), *sys.path]):
+            from fleet_publish_archive import ArchiveReader
+        self.replies(
+            {
+                CENTRAL: {
+                    "json": {
+                        "full_name": "jbaruch/coding-policy",
+                        "default_branch": "main",
+                        "archived": False,
+                        "disabled": False,
+                    }
+                }
+            }
+        )
+        clock = [0.0]
+        api = client.GitHubClient(deadline=5, clock=lambda: clock[0])
+        original = api._read
+
+        def read(*args, **kwargs):
+            value = original(*args, **kwargs)
+            clock[0] = 5
+            return value
+
+        with patch.object(api, "_read", side_effect=read):
+            self.refuse(lambda: ArchiveReader(api).run_hold(RUN), "command_timeout")
+        self.assertEqual([call[-1] for call in self.calls()], [CENTRAL])
+
 
 if __name__ == "__main__":
     unittest.main()

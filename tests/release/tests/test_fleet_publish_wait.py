@@ -95,6 +95,76 @@ class WaitTests(unittest.TestCase):
         waiting.wait("jbaruch/fixture", "a" * 40, run_id="456", lookup=lookup)
         self.assertEqual(calls, [{"run_id": "456"}])
 
+    def test_slow_positive_lookup_cannot_return_an_id_after_deadline(self):
+        for elapsed in (waiting.BUDGET_SECONDS, waiting.BUDGET_SECONDS + 1):
+            clock = Clock()
+            calls = []
+
+            def lookup(api, *_args, **_kwargs):
+                calls.append(api)
+                self.assertEqual(api._deadline, waiting.BUDGET_SECONDS)
+                self.assertEqual(api._clock(), 0)
+                clock.elapsed = elapsed
+                return {"database_id": 123, "confirmed": False}
+
+            with (
+                self.subTest(elapsed=elapsed),
+                self.assertRaises(waiting.CentralPublishHold) as refused,
+            ):
+                waiting.wait(
+                    "jbaruch/fixture",
+                    "a" * 40,
+                    lookup=lookup,
+                    clock=clock.now,
+                    sleep=clock.sleep,
+                )
+            self.assertEqual(refused.exception.kind, "pending")
+            self.assertEqual(len(calls), 1)
+            self.assertEqual(clock.sleeps, [])
+
+    def test_each_snapshot_shares_deadline_and_cannot_start_at_expiry(self):
+        clock = Clock()
+        clients = []
+
+        def lookup(api, *_args, **_kwargs):
+            clients.append(api)
+            self.assertEqual(api._deadline, waiting.BUDGET_SECONDS)
+            clock.elapsed = waiting.BUDGET_SECONDS - 2
+            raise waiting.CentralPublishHold("pending")
+
+        with self.assertRaises(waiting.CentralPublishHold):
+            waiting.wait(
+                "jbaruch/fixture",
+                "a" * 40,
+                lookup=lookup,
+                clock=clock.now,
+                sleep=clock.sleep,
+            )
+        self.assertEqual(len(clients), 1)
+        self.assertEqual(clock.sleeps, [2])
+        self.assertEqual(clock.elapsed, waiting.BUDGET_SECONDS)
+
+    def test_positive_selection_inside_fixed_deadline_remains_usable(self):
+        clock = Clock()
+        selected = {"database_id": 123, "confirmed": False}
+
+        def lookup(api, *_args, **_kwargs):
+            self.assertEqual(api._deadline, waiting.BUDGET_SECONDS)
+            clock.elapsed = waiting.BUDGET_SECONDS - 0.001
+            return selected
+
+        self.assertIs(
+            waiting.wait(
+                "jbaruch/fixture",
+                "a" * 40,
+                lookup=lookup,
+                clock=clock.now,
+                sleep=clock.sleep,
+            ),
+            selected,
+        )
+        self.assertEqual(clock.sleeps, [])
+
 
 if __name__ == "__main__":
     unittest.main()

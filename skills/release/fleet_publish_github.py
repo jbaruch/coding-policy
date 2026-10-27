@@ -22,7 +22,7 @@ import time
 import zipfile
 import zlib
 from datetime import datetime
-from typing import Literal, NoReturn
+from typing import Callable, Literal, NoReturn
 from urllib.parse import parse_qsl, urlsplit
 
 from fleet_publish_record import (
@@ -211,11 +211,28 @@ def _retire(child: subprocess.Popen[bytes]) -> None:
 
 
 class GitHubClient:
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        *,
+        deadline: float | None = None,
+        clock: Callable[[], float] | None = None,
+    ) -> None:
+        if deadline is not None and (
+            type(deadline) not in (int, float) or not math.isfinite(deadline)
+        ):
+            _refuse("command_timeout")
         self._commands = 0
+        self._deadline = deadline
+        self._clock = clock if clock is not None else time.monotonic
 
     def _read(self, route: str, maximum: int, *, native_status: bool = False) -> bytes:
         _route(route)
+        started = self._clock()
+        deadline = started + COMMAND_TIMEOUT_SECONDS
+        if self._deadline is not None:
+            deadline = min(deadline, self._deadline)
+        if started >= deadline:
+            _refuse("command_timeout")
         if self._commands >= MAX_COMMANDS:
             _refuse("command_budget")
         self._commands += 1
@@ -242,14 +259,13 @@ class GitHubClient:
         err_count = 0
         err_hash = hashlib.sha256()
         failure = None
-        deadline = time.monotonic() + COMMAND_TIMEOUT_SECONDS
         selector = selectors.DefaultSelector()
         try:
             assert child.stdout is not None and child.stderr is not None
             selector.register(child.stdout, selectors.EVENT_READ, "stdout")
             selector.register(child.stderr, selectors.EVENT_READ, "stderr")
             while selector.get_map():
-                remaining = deadline - time.monotonic()
+                remaining = deadline - self._clock()
                 if remaining <= 0:
                     failure = "command_timeout"
                     break
@@ -273,7 +289,7 @@ class GitHubClient:
                 if failure is not None:
                     break
             if failure is None:
-                remaining = deadline - time.monotonic()
+                remaining = deadline - self._clock()
                 if remaining <= 0:
                     failure = "command_timeout"
                 else:
@@ -281,6 +297,8 @@ class GitHubClient:
                         child.wait(timeout=remaining)
                     except subprocess.TimeoutExpired:
                         failure = "command_timeout"
+            if failure is None and self._clock() >= deadline:
+                failure = "command_timeout"
             if failure is not None:
                 _retire(child)
                 raise FleetPublishLookupError(

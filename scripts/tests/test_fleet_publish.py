@@ -2068,9 +2068,15 @@ class ClaimedCiTests(PublisherFixture):
                     for call in calls.call_args_list
                 )
             )
-        self.assertFalse(
-            any("/reviews" in call.args[0] for call in calls.call_args_list)
-        )
+        routes = [call.args[0] for call in calls.call_args_list]
+        review = routes.index(f"repos/{REPO}/pulls/7/reviews")
+        for suffix in ("check-runs", "status"):
+            self.assertLess(
+                routes.index(f"repos/{REPO}/commits/{CLAIM}/{suffix}"), review
+            )
+            self.assertGreater(
+                routes.index(f"repos/{REPO}/commits/{HEAD}/{suffix}"), review
+            )
 
 
 class PollDispatchTests(PublisherFixture):
@@ -2690,6 +2696,103 @@ class ClaimedCiDeadlineAndRaceTests(PublisherFixture):
         self.assertNotIn(
             "Later reviewed source", (self.work / "package/README.md").read_text()
         )
+
+
+class SourceGateRevalidationTests(PublisherFixture):
+    def test_source_review_or_ci_changed_during_claim_wait_never_reaches_effect(self):
+        original_wait = publisher.wait_claim_ci
+        for defect in ("policy_review", "quality_review", "check", "status"):
+            with self.subTest(defect=defect):
+                github = NativeGitHub()
+                work = self.work / defect
+                work.mkdir()
+                publisher.prepare(github, REPO, SOURCE, work, ENV)
+                publisher.claim(github, work)
+                github.records["intent"] = (work / "intent.json").read_bytes()
+
+                def wait(*args):
+                    original_wait(*args)
+                    if defect.endswith("review"):
+                        github.native_reviews[0 if defect == "policy_review" else 1][
+                            "state"
+                        ] = "CHANGES_REQUESTED"
+                    elif defect == "check":
+                        github.checks = [
+                            {"status": "completed", "conclusion": "failure"}
+                        ]
+                    else:
+                        github.status["statuses"] = [{"state": "failure"}]
+
+                with (
+                    patch.object(publisher, "wait_claim_ci", side_effect=wait),
+                    self.assertRaises(publisher.PublishRefused),
+                ):
+                    publisher.execute(github, work)
+                self.assertNotIn("smart-publish.sh", self.helpers)
+                self.assertFalse((work / "receipt.json").exists())
+                self.assertIn(publisher.STAMP, github.entries)
+
+    def test_changes_during_source_gate_are_checked_by_final_retained_branch_read(self):
+        original_gate = publisher.gate_source
+        for defect in (
+            "marker_removed",
+            "marker_changed",
+            "stamp_removed",
+            "stamp_changed",
+        ):
+            with self.subTest(defect=defect):
+                github = HistoryGitHub()
+                work = self.work / defect
+                work.mkdir()
+                publisher.prepare(github, REPO, SOURCE, work, ENV)
+                publisher.claim(github, work)
+                github.records["intent"] = (work / "intent.json").read_bytes()
+                claim_sha = github.tip
+
+                def gate(*args):
+                    result = original_gate(*args)
+                    if defect == "marker_removed":
+                        del github.entries[publisher.MARKER]
+                    elif defect == "marker_changed":
+                        github.put(
+                            publisher.MARKER,
+                            publisher.encoded(
+                                {"schema_version": 1, "plugin_name": "jbaruch/other"}
+                            ),
+                        )
+                    elif defect == "stamp_removed":
+                        del github.entries[publisher.STAMP]
+                    else:
+                        changed = publisher.decode_record(github.records["intent"])
+                        changed["registry_baseline"] = "0.0.0"
+                        github.put(publisher.STAMP, publisher.encoded(changed))
+                    github.snapshot("8" * 40, [claim_sha], github.entries)
+                    github.tip = "8" * 40
+                    return result
+
+                with (
+                    patch.object(publisher, "gate_source", side_effect=gate),
+                    self.assertRaises(publisher.PublishRefused),
+                ):
+                    publisher.execute(github, work)
+                self.assertFalse((work / "receipt.json").exists())
+                self.assertNotIn("smart-publish.sh", self.helpers)
+
+    def test_fresh_source_gate_is_exact_immutable_source_before_publication(self):
+        self.claimed()
+        original = publisher.gate_source
+
+        def gate(github, repository, sha, ref):
+            self.assertNotIn("smart-publish.sh", self.helpers)
+            self.assertFalse((self.work / "receipt.json").exists())
+            return original(github, repository, sha, ref)
+
+        with patch.object(publisher, "gate_source", side_effect=gate) as source_gate:
+            self.assertTrue(publisher.execute(self.github, self.work))
+        source_gate.assert_called_once_with(
+            self.github, REPO, SOURCE, "refs/heads/main"
+        )
+        self.assertEqual(self.helpers.count("smart-publish.sh"), 1)
 
 
 if __name__ == "__main__":
