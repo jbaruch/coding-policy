@@ -41,6 +41,7 @@ MARKER = ".github/fleet-publish-enabled"
 MANIFEST = ".tessl-plugin/plugin.json"
 MAX_BYTES = 16 * 1024 * 1024
 MAX_FILES = 4096
+MAX_IGNORE_BYTES = 64 * 1024
 
 
 class PublishRefused(ValueError):
@@ -591,6 +592,17 @@ def projection(
     plugin_name: str,
 ) -> dict[str, Any]:
     """Copy declared data only. Never consumer config, git, workflow or hooks files."""
+    ignore = file(github, repo, entries, ".tesslignore")
+    require(
+        len(ignore) <= MAX_IGNORE_BYTES and b"\x00" not in ignore,
+        "Restore a bounded regular UTF-8 .tesslignore before publication.",
+    )
+    try:
+        ignore.decode("utf-8")
+    except UnicodeError as error:
+        raise PublishRefused(
+            "Restore valid UTF-8 package exclusion patterns."
+        ) from error
     manifest = decode(file(github, repo, entries, MANIFEST))
     require(
         isinstance(manifest, dict)
@@ -635,7 +647,7 @@ def projection(
             require(path in entries, "Declared plugin surface is missing.")
             roots.append(path)
     require(len(set(roots)) == len(roots), "Duplicate declared plugin roots.")
-    selected = {MANIFEST, "README.md", "CHANGELOG.md"}
+    selected = {MANIFEST, "README.md", "CHANGELOG.md", ".tesslignore"}
     selected.update(p for p in ("LICENSE", "LICENSE.md", "LICENSE.txt") if p in entries)
     for path, entry in entries.items():
         if entry.get("type") == "tree":
@@ -674,8 +686,9 @@ def projection(
         output.parent.mkdir(parents=True, exist_ok=True)
         output.write_bytes(raw)
         output.chmod(0o644)
-    # A fixed ignore file, never consumer CLI configuration or arbitrary hooks.
-    (destination / ".tesslignore").write_text(".git/\n.github/\n")
+    # Preserve the exact inert source patterns; CLI packaging owns their grammar.
+    # .git/.github are absent from this projection, even if source patterns negate
+    # an ignore for them. No consumer CLI config, hooks or commands are loaded.
     # The canonical review helper discovers an empty skill set with find().
     # A rule-only bootstrap has no physical skills directory in Git.
     (destination / "skills").mkdir(exist_ok=True)

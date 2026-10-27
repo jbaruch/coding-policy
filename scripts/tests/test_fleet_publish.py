@@ -10,11 +10,13 @@ import io
 import json
 import os
 import re
+import shutil
 from pathlib import Path
 from typing import Any
 import subprocess
 import sys
 import tempfile
+import tarfile
 import unittest
 from unittest.mock import patch
 import zipfile
@@ -55,11 +57,13 @@ class NativeGitHub(publisher.GitHub):
                 {
                     "name": "jbaruch/nanoclaw-fixture",
                     "version": "0.1.0",
+                    "description": "Synthetic central packaging fixture.",
                     "skills": ["skills/fixture"],
                     "rules": ["rules/fixture.md"],
                 }
             ),
             "README.md": b"# Fixture\n",
+            ".tesslignore": b".github/\n**/tests/\nskills/fixture/dormant/\n",
             "CHANGELOG.md": b"# Changelog\n\n### Added\n\n- Fixture.\n",
             "skills/fixture/SKILL.md": b"# Fixture skill\n",
             "rules/fixture.md": b"# Fixture rule\n",
@@ -669,6 +673,52 @@ class PublisherTests(PublisherFixture):
             publisher.prepare(self.github, REPO, SOURCE, self.work, ENV)
         self.assertFalse(self.cli.called)
         self.assertNotIn("smart-publish.sh", self.helpers)
+
+    def test_ignore_file_is_exact_inert_data_and_not_rewritten(self) -> None:
+        raw = b"# Preserve source-owned package exclusions\r\n**/tests/\r\nskills/fixture/dormant/\r\n!.github/\r\n"
+        self.github.put(".tesslignore", raw)
+        publisher.projection(
+            self.github,
+            REPO,
+            self.github.entries,
+            self.work / "inert-package",
+            "jbaruch/nanoclaw-fixture",
+        )
+        self.assertEqual((self.work / "inert-package/.tesslignore").read_bytes(), raw)
+        self.assertFalse((self.work / "inert-package/.github").exists())
+        self.assertFalse((self.work / "inert-package/.git").exists())
+
+    def test_missing_linked_malformed_or_oversized_ignore_refuses(self) -> None:
+        for raw, mode in (
+            (b"rules/", "120000"),
+            (b"\xff", "100644"),
+            (b"a\x00b", "100644"),
+            (b"a" * (publisher.MAX_IGNORE_BYTES + 1), "100644"),
+        ):
+            github = NativeGitHub()
+            github.put(".tesslignore", raw)
+            github.entries[".tesslignore"]["mode"] = mode
+            with (
+                self.subTest(mode=mode, size=len(raw)),
+                self.assertRaises(publisher.PublishRefused),
+            ):
+                publisher.projection(
+                    github,
+                    REPO,
+                    github.entries,
+                    self.work / "bad-ignore",
+                    "jbaruch/nanoclaw-fixture",
+                )
+        github = NativeGitHub()
+        del github.entries[".tesslignore"]
+        with self.assertRaises(publisher.PublishRefused):
+            publisher.projection(
+                github,
+                REPO,
+                github.entries,
+                self.work / "missing-ignore",
+                "jbaruch/nanoclaw-fixture",
+            )
 
     def test_publish_helper_cannot_confirm_different_source_version(self) -> None:
         self.claimed()
@@ -1507,6 +1557,101 @@ class IndependentClaimsTests(PublisherFixture):
         }
         with self.assertRaises(publisher.PublishRefused):
             self.prepare()
+
+
+class PackagingCliTests(unittest.TestCase):
+    def test_actual_cli_archive_preserves_source_test_and_dormant_exclusions(
+        self,
+    ) -> None:
+        cli = shutil.which("tessl")
+        if cli is None:
+            self.fail(
+                "Install the canonical Tessl CLI before running the mandatory local packaging regression."
+            )
+        github = NativeGitHub()
+        github.put(
+            "skills/fixture/SKILL.md",
+            b"---\nname: fixture\ndescription: Inspect fixed synthetic fixture data.\n---\n# Fixture\n\nRead the synthetic fixture.\n",
+        )
+        github.put(
+            "skills/fixture/tests/test_private.py",
+            b"This synthetic test payload must never publish.\n",
+        )
+        github.put(
+            "skills/fixture/dormant/held.py",
+            b"This synthetic held payload must never publish.\n",
+        )
+        with tempfile.TemporaryDirectory(prefix="fleet-pack-proof-") as directory:
+            package = Path(directory) / "package"
+            publisher.projection(
+                github, REPO, github.entries, package, "jbaruch/nanoclaw-fixture"
+            )
+            self.assertTrue(
+                (package / "skills/fixture/tests/test_private.py").is_file()
+            )
+            self.assertTrue((package / "skills/fixture/dormant/held.py").is_file())
+            archive = Path(directory) / "artifact.tgz"
+            environment = {
+                key: value
+                for key, value in os.environ.items()
+                if key
+                not in (
+                    "GH_TOKEN",
+                    "GITHUB_TOKEN",
+                    "FLEET_CENTRAL_TOKEN",
+                    "TESSL_TOKEN",
+                )
+            }
+            result = subprocess.run(
+                [cli, "plugin", "pack", "--output", str(archive), str(package)],
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                env=environment,
+                timeout=30,
+                check=False,
+            )
+            self.assertEqual(
+                result.returncode,
+                0,
+                (result.stdout + result.stderr).decode("utf-8", "replace"),
+            )
+            self.assertTrue(archive.is_file())
+            with tarfile.open(archive, "r:gz") as packed:
+                names = packed.getnames()
+                self.assertIn("skills/fixture/scripts/data.py", names)
+                self.assertIn("skills/fixture/SKILL.md", names)
+                self.assertNotIn("skills/fixture/tests/test_private.py", names)
+                self.assertNotIn("skills/fixture/dormant/held.py", names)
+                self.assertFalse(
+                    any(name.startswith((".git/", ".github/")) for name in names)
+                )
+                active = packed.extractfile("skills/fixture/scripts/data.py")
+                if active is None:
+                    self.fail("The built artifact lost its active declared helper.")
+                self.assertEqual(
+                    active.read(), github.files["skills/fixture/scripts/data.py"]
+                )
+            # RED control: the former synthesized ignore really would ship the
+            # dormant bytes with this SAME native CLI and source projection.
+            (package / ".tesslignore").write_bytes(b".git/\n.github/\n")
+            old_archive = Path(directory) / "old-fixed-ignore.tgz"
+            old_result = subprocess.run(
+                [cli, "plugin", "pack", "--output", str(old_archive), str(package)],
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                env=environment,
+                timeout=30,
+                check=False,
+            )
+            self.assertEqual(
+                old_result.returncode,
+                0,
+                (old_result.stdout + old_result.stderr).decode("utf-8", "replace"),
+            )
+            with tarfile.open(old_archive, "r:gz") as old_packed:
+                self.assertIn("skills/fixture/dormant/held.py", old_packed.getnames())
 
 
 if __name__ == "__main__":
