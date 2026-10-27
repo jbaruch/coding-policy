@@ -129,12 +129,12 @@ def main() -> int:
 
 
 def entrypoint() -> int:
-    # outer-boundary-process-contract: any failed probe must have no positive
-    # stdout; fixed stderr/nonzero avoids leaking native metadata or credentials
-    # through a raw traceback at this diagnostic process boundary.
     try:
         return main()
-    except Exception:  # noqa: BLE001 - fixed outer boundary described above.
+    # outer-boundary-process-contract: the workflow treats nonzero or missing
+    # proof as failure. Emit fixed stderr, empty stdout and nonzero; propagating
+    # a traceback bypasses the caller's redacted diagnostic boundary.
+    except Exception:  # noqa: BLE001 - outer-boundary-process-contract above.
         print(
             "Grant probe refused. Inspect this run's mint/access steps; leave publication disabled and repair the existing prerequisite.",
             file=sys.stderr,
