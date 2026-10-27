@@ -57,9 +57,11 @@ class Fixture:
             name: ("fixed reviewed fixture " + name).encode()
             for name in producer.PRODUCER_PATHS
         }
+        definitions[producer.PRODUCER_OWNER_PATH] = Path(producer.__file__).read_bytes()
         self.workflow = self.commit(CENTRAL, [], definitions)
         for name, raw in definitions.items():
-            self.pinset[name] = git_hash("blob", raw)
+            if name != producer.PRODUCER_OWNER_PATH:
+                self.pinset[name] = git_hash("blob", raw)
         self.central_tip = self.commit(
             CENTRAL,
             [self.workflow],
@@ -685,6 +687,11 @@ class ResolverTests(unittest.TestCase):
 
     def test_many_unrelated_runs_use_trusted_list_rows_not_per_run_downloads(self):
         f = self.fixture
+        baseline = Fixture()
+        self.assertEqual(
+            resolver.resolve(baseline, REPO, baseline.source),
+            baseline.records[RUN, "receipt"],
+        )
         for identifier in range(70):
             f.add_run(
                 str(400000000 + identifier),
@@ -692,7 +699,9 @@ class ResolverTests(unittest.TestCase):
                 title="fleet-publish-v1:jbaruch/other:" + "e" * 40,
             )
         self.assertEqual(resolver.resolve(f, REPO, f.source), f.records[RUN, "receipt"])
-        self.assertLess(len(f.calls), 100)
+        # Complete producer closure adds required reads. Unrelated runs must
+        # add exactly zero reads, rather than fit under an old seven-file cap.
+        self.assertEqual(len(f.calls), len(baseline.calls))
         self.assertFalse(
             any(call[0] == "artifact" and call[1] != RUN for call in f.calls)
         )

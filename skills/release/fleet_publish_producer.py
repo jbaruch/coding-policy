@@ -1,40 +1,72 @@
 """Reviewed central producer protocol identity; no generic YAML interpretation.
 
-Each coherent pinset covers the co-shipped protocol owner files. Renew by
-reviewing every listed file and retaining older supported pinsets when the producer
-changes; unknown versions hold. Native central-main ancestry is also required.
+Each coherent pinset covers the complete repository-owned executable closure.
+The trust root is this actual locally installed, published reader owner, not a
+target checkout or a caller's receipt. An arbitrary source checkout confers no
+publication authority. Unknown versions hold; native main ancestry is required.
 """
 
 from __future__ import annotations
 
+import hashlib
+import os
+from pathlib import Path
+import stat
 from typing import Protocol
 
 from fleet_publish_github import FleetPublishLookupError
 from fleet_publish_record import CENTRAL_REPOSITORY, valid_sha
 
+# Closed repository-owned executable graph reached by the publisher, poller and
+# terminal archive verifier. Embedded shell/Python programs are covered by their
+# containing blob. Runner tools and Actions are selected by the pinned workflow;
+# consumer package bytes remain inert data, never additions to this inventory.
+PRODUCER_OWNER_PATH = "skills/release/fleet_publish_producer.py"
 PRODUCER_PATHS = (
     ".github/workflows/fleet-publish.yml",
+    ".github/workflows/fleet-publish-finalize.yml",
     "scripts/fleet_publish.py",
     "scripts/fleet_publish_workflow.py",
     "scripts/fleet_publish_validate.py",
-    ".github/workflows/fleet-publish-finalize.yml",
+    "scripts/fleet_publish_targets.py",
     "scripts/fleet_publish_archive_write.py",
     "skills/release/fleet_publish_archive.py",
+    "skills/release/fleet_publish_record.py",
+    "skills/release/fleet_publish_github.py",
+    "skills/release/stamp-changelog.py",
+    ".github/actions/skill-review/review-skills.sh",
+    "skills/release/smart-publish.sh",
+    "skills/release/registry-baseline.sh",
+    "skills/release/registry-version.sh",
+    "skills/release/registry-has-version.sh",
+    "skills/release/verify-moderation-cleared.sh",
+    "skills/release/lib/bounded-run.sh",
+    PRODUCER_OWNER_PATH,
 )
-# Coherent prospective durable protocol reviewed at root freeze a7df6f44.
-# This covers the listed protocol owners, not their full dependency closure.
-# Renew by reviewing every listed source together. Earlier unactivated artifact-
-# only versions are deliberately unsupported; retain activated historical sets
-# only while their authority remains supported.
+# One coherent prospective protocol; the earlier seven-file sets were never
+# activated and are unsupported. Review every closure member before renewal.
+# The producer owner is separately anchored to the installed reader below,
+# avoiding a circular literal hash or a remote source's self-attestation.
 TRUSTED_PRODUCERS: tuple[dict[str, str], ...] = (
     {
-        ".github/workflows/fleet-publish.yml": "b3b7e66f4fb65481872b71cb0f2959ec7af343d8",
-        "scripts/fleet_publish.py": "2bf891ee1ab4a401c28128ea73a347db1b421091",
+        ".github/workflows/fleet-publish.yml": "fef641a524d4e946c8561fa588e1f0de9fd129c5",
+        ".github/workflows/fleet-publish-finalize.yml": "a6dbeea9400979c59a7608d7f16eb8156e30e4e1",
+        "scripts/fleet_publish.py": "ab5adf4f4223ae3262d5340c09bf701df2ffaf2f",
         "scripts/fleet_publish_workflow.py": "4dec9f39e32d15c5700503286f0c660ff14078ca",
         "scripts/fleet_publish_validate.py": "7d450d115f6a661f3a0e1d3d8ab1a85451bb7a47",
-        ".github/workflows/fleet-publish-finalize.yml": "a6dbeea9400979c59a7608d7f16eb8156e30e4e1",
+        "scripts/fleet_publish_targets.py": "a93c6f5ae462e5b12a5c212e415763778c9827e6",
         "scripts/fleet_publish_archive_write.py": "06a1fbad49b7f95b26e407e6040f48f373f69cd5",
         "skills/release/fleet_publish_archive.py": "2a0e8973ab596919f8753de2f4194688bd448cb4",
+        "skills/release/fleet_publish_record.py": "2068ec2bd83b6095e31e34e967ad39574e021b89",
+        "skills/release/fleet_publish_github.py": "ca1897cf394723a30adc6f8a49c3a8fbbb06912e",
+        "skills/release/stamp-changelog.py": "9bc1ef64bc6473fcbbf14ad0873f6a64614dd0dc",
+        ".github/actions/skill-review/review-skills.sh": "9be33fad87c9b52183d22ff847197cf4852232b9",
+        "skills/release/smart-publish.sh": "145178416aceea117b0997b61c1f04ccf28eeafb",
+        "skills/release/registry-baseline.sh": "e6c55b47d6dd199fa5697f6cfe2531e8d5dd43b3",
+        "skills/release/registry-version.sh": "a2109fc98dec02bd4c42218e6e4826596145f75e",
+        "skills/release/registry-has-version.sh": "6266e89adb0c0bb40cec3bb1f0df9a8780931557",
+        "skills/release/verify-moderation-cleared.sh": "36b4463cc2fb5b857e08ec15a36b05f4c218ef71",
+        "skills/release/lib/bounded-run.sh": "b07e25df9c65f6ede8b39404c4ae7ecb0dc95ba0",
     },
 )
 
@@ -48,9 +80,58 @@ def _require(value: object, kind: str = "unknown_producer") -> None:
         raise FleetPublishLookupError(kind) from None
 
 
+def local_owner_blob() -> str:
+    """Bind remote code to the safe, stable installed reader, never remote input."""
+    _require(Path(__file__).is_absolute())
+    try:
+        fd = os.open(__file__, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        try:
+            before = os.fstat(fd)
+            _require(
+                stat.S_ISREG(before.st_mode)
+                and before.st_nlink == 1
+                and before.st_uid in (0, os.geteuid())
+                and not before.st_mode & 0o022
+                and 0 < before.st_size <= 128 * 1024
+            )
+            chunks: list[bytes] = []
+            remaining = before.st_size
+            while remaining:
+                chunk = os.read(fd, remaining)
+                _require(chunk)
+                chunks.append(chunk)
+                remaining -= len(chunk)
+
+            def fingerprint(info: os.stat_result) -> tuple[int, ...]:
+                return (
+                    info.st_dev,
+                    info.st_ino,
+                    info.st_mode,
+                    info.st_uid,
+                    info.st_gid,
+                    info.st_nlink,
+                    info.st_size,
+                    info.st_mtime_ns,
+                    info.st_ctime_ns,
+                )
+
+            _require(
+                fingerprint(before)
+                == fingerprint(os.fstat(fd))
+                == fingerprint(os.stat(__file__, follow_symlinks=False))
+            )
+            raw = b"".join(chunks)
+            return hashlib.sha1(f"blob {len(raw)}\0".encode() + raw).hexdigest()
+        finally:
+            os.close(fd)
+    except OSError:
+        raise FleetPublishLookupError("unknown_producer") from None
+
+
 def verify_workflow_protocol(client: GitHubRead, workflow_sha: str) -> None:
     """Verify immutable source plus actual own-main ancestry; grants no effect."""
     _require(valid_sha(workflow_sha))
+    owner_blob = local_owner_blob()
     metadata = client.json(f"repos/{CENTRAL_REPOSITORY}")
     _require(isinstance(metadata, dict), "workflow_metadata")
     if not isinstance(metadata, dict):
@@ -156,9 +237,11 @@ def verify_workflow_protocol(client: GitHubRead, workflow_sha: str) -> None:
             else:
                 _require(entry.get("type") == "tree" and entry.get("mode") == "040000")
                 sha = entry["sha"]
+    _require(actual.pop(PRODUCER_OWNER_PATH) == owner_blob)
     _require(
         any(
-            set(pinset) == set(PRODUCER_PATHS) and actual == pinset
+            set(pinset) == set(PRODUCER_PATHS) - {PRODUCER_OWNER_PATH}
+            and actual == pinset
             for pinset in TRUSTED_PRODUCERS
         )
     )

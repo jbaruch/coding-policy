@@ -31,6 +31,7 @@ class NativeCentral(fixture.Git):
             name: f"{index + 1000:040x}"
             for index, name in enumerate(producer.PRODUCER_PATHS, 1)
         }
+        self.pins[producer.PRODUCER_OWNER_PATH] = producer.local_owner_blob()
         self.protocol = {}
         parents = {""}
         for path in producer.PRODUCER_PATHS:
@@ -213,7 +214,17 @@ class PollCacheTests(unittest.TestCase):
                 "PollGitHubClient",
                 side_effect=lambda cache: CountedClient(native, cache),
             ),
-            patch.object(producer, "TRUSTED_PRODUCERS", (native.pins,)),
+            patch.object(
+                producer,
+                "TRUSTED_PRODUCERS",
+                (
+                    {
+                        name: sha
+                        for name, sha in native.pins.items()
+                        if name != producer.PRODUCER_OWNER_PATH
+                    },
+                ),
+            ),
             patch.dict(
                 os.environ,
                 {
