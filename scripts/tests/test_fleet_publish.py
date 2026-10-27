@@ -2345,7 +2345,7 @@ class NullableNativeMetadataTests(PublisherFixture):
         self.github.other_runs["101"] = {"head_repository": None}
         self.assertEqual(poller.targets(self.github), ([], [REPO]))
 
-    def test_one_nullable_consumer_cannot_starve_eligible_consumer_dispatch(self):
+    def test_one_invalid_consumer_cannot_starve_eligible_consumer_dispatch(self):
         class Aliased(NativeGitHub):
             def __init__(self, name, bad=False):
                 super().__init__()
@@ -2374,7 +2374,12 @@ class NullableNativeMetadataTests(PublisherFixture):
                     value[0]["head"]["repo"] = None
                 return value
 
-        for defect in ("deleted_fork", "null_review_time"):
+        for defect in (
+            "deleted_fork",
+            "null_review_time",
+            "malformed_stamp",
+            "unsupported_stamp",
+        ):
             with self.subTest(defect=defect):
                 self.check_eligible_consumer_dispatch(Aliased, defect)
 
@@ -2387,6 +2392,18 @@ class NullableNativeMetadataTests(PublisherFixture):
             pending = deepcopy(bad.native_reviews[0])
             pending.update(id=13, submitted_at=None)
             bad.native_reviews.append(pending)
+        if defect in ("malformed_stamp", "unsupported_stamp"):
+            from fleet_publish_record import FleetRecordError
+
+            bad.put(
+                publisher.STAMP,
+                b"{" if defect == "malformed_stamp" else b'{"schema_version":2}',
+            )
+            bad.history = [{"sha": CLAIM}]
+            # Exercise the actual persisted-stamp reader and schema decoder;
+            # this failure is distinct from PublishRefused.
+            with self.assertRaises(FleetRecordError):
+                publisher.previous(bad, bad.name, bad.entries)
         root = publisher.GitHub()
         with (
             patch.object(

@@ -26,7 +26,12 @@ from fleet_publish import (
     utc_time,
     native_object,
 )
-from fleet_publish_record import CENTRAL_REPOSITORY, CENTRAL_WORKFLOW, valid_repository
+from fleet_publish_record import (
+    CENTRAL_REPOSITORY,
+    CENTRAL_WORKFLOW,
+    FleetRecordError,
+    valid_repository,
+)
 
 FAILED_DISPATCH_BACKOFF_SECONDS = 6 * 60 * 60
 
@@ -131,7 +136,7 @@ def targets(github: GitHub) -> tuple[list[dict[str, str]], list[str]]:
             selected.append(
                 {"repository": repo, "source_sha": pending[0], "source_ref": ref}
             )
-        except PublishRefused:
+        except (PublishRefused, FleetRecordError):
             # aggregate-reporting: one held consumer must not starve independent
             # eligible ones. Return every fixed repo identity; main exits nonzero.
             blocked.append(repo)
