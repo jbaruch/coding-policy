@@ -168,7 +168,9 @@ def parse_intent(value: object) -> dict[str, Any]:
     return make_intent(raw["intent"], raw["bookkeeping_sha"])
 
 
-def native_run(value: object, *, projected: bool = False) -> dict[str, Any]:
+def native_run(
+    value: object, *, projected: bool = False, terminal: bool = True
+) -> dict[str, Any]:
     raw = obj(value)
     names = {
         "id",
@@ -207,8 +209,17 @@ def native_run(value: object, *, projected: bool = False) -> dict[str, Any]:
         and raw.get("event") == "workflow_dispatch"
         and raw.get("head_branch") == "main"
         and valid_sha(raw.get("head_sha"))
-        and raw.get("status") == "completed"
-        and raw.get("conclusion") in CONCLUSIONS
+        and (
+            raw.get("status") == "completed"
+            if terminal
+            else raw.get("status")
+            in ("queued", "in_progress", "waiting", "requested", "pending", "completed")
+        )
+        and (
+            raw.get("conclusion") in CONCLUSIONS
+            if raw.get("status") == "completed"
+            else raw.get("conclusion") is None
+        )
         and isinstance(raw.get("display_title"), str)
     )
     return {
@@ -362,8 +373,6 @@ def make_terminal(
                 and result["landed_after_error"] is False
                 and result["version"] is not None
             )
-        if result["state"] == "confirmed":
-            need(positive_native(native))
     return {
         "schema_version": 1,
         "kind": "fleet-publish-terminal",

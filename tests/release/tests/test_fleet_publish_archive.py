@@ -164,7 +164,9 @@ class ArchiveSchemaTests(unittest.TestCase):
         parts[1] = None
         self.assertIsNone(terminal(parts)["receipt"])
 
-    def test_confirmed_receipt_never_survives_native_failure_or_skipped_effect(self):
+    def test_confirmed_bytes_with_later_native_failure_remain_honest_but_not_positive(
+        self,
+    ):
         for fault in ("run_failure", "job_failure", "effect_skipped", "effect_missing"):
             parts = fixture()
             if fault == "run_failure":
@@ -175,8 +177,12 @@ class ArchiveSchemaTests(unittest.TestCase):
                 parts[4][0]["steps"][1]["conclusion"] = "skipped"
             if fault == "effect_missing":
                 parts[4][0]["steps"].pop()
-            with self.assertRaises(archive.ArchiveError):
-                terminal(parts)
+            value = terminal(parts)
+            self.assertEqual(value["receipt"], parts[1])
+            self.assertFalse(archive.positive_native(value["native"]))
+            self.assertEqual(
+                archive.decode_archive(archive.encode_archive(value)), value
+            )
 
     def test_cross_run_source_workflow_receipt_and_bookkeeping_refuse(self):
         for index, key, value in (
