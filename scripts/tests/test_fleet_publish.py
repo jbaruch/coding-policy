@@ -405,6 +405,9 @@ class NativeGitHub(publisher.GitHub):
 
 class PublisherFixture(unittest.TestCase):
     def setUp(self) -> None:
+        schedule = patch.object(poller, "scheduled_slot", return_value=0)
+        schedule.start()
+        self.addCleanup(schedule.stop)
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.work = Path(self.temp.name)
@@ -717,7 +720,7 @@ class PublisherTests(PublisherFixture):
 
     def test_poll_holds_claimed_repo_without_dispatch_or_false_absence(self) -> None:
         self.claimed()
-        selected, blocked = poller.targets(self.github)
+        selected, blocked, deferred = poller.targets(self.github)
         self.assertEqual(selected, [])
         self.assertEqual(blocked, [REPO])
 
@@ -726,7 +729,7 @@ class PublisherTests(PublisherFixture):
         self.moderation = "pending"
         publisher.execute(self.github, self.work)
         self.github.records["receipt"] = (self.work / "receipt.json").read_bytes()
-        self.assertEqual(poller.targets(self.github), ([], []))
+        self.assertEqual(poller.targets(self.github), ([], [], []))
         self.assertEqual(self.helpers.count("smart-publish.sh"), 1)
 
     def test_workflow_scopes_selected_repo_and_keeps_artifacts_immutable(self) -> None:
@@ -1274,7 +1277,7 @@ class QueueTests(PublisherFixture):
             )["version"],
             "0.1.3",
         )
-        self.assertEqual(poller.targets(github), ([], []))
+        self.assertEqual(poller.targets(github), ([], [], []))
 
     def test_later_tip_cannot_skip_earliest_pending_merge(self) -> None:
         github = HistoryGitHub()
@@ -1403,7 +1406,7 @@ class QueueTests(PublisherFixture):
         self.assertEqual(result["origin_run_id"], "101")
         self.assertEqual(result["run_id"], "102")
         self.assertEqual(self.helpers.count("smart-publish.sh"), 1)
-        selected, held = poller.targets(github)
+        selected, held, deferred = poller.targets(github)
         self.assertEqual(held, [])
         self.assertEqual(selected[0]["source_sha"], github.SECOND)
 
@@ -1415,7 +1418,7 @@ class QueueTests(PublisherFixture):
             publisher.prepare(
                 github, REPO, github.SECOND, later, {**ENV, "GITHUB_RUN_ID": "102"}
             )
-        self.assertEqual(poller.targets(github), ([], []))
+        self.assertEqual(poller.targets(github), ([], [], []))
         self.assertEqual(self.helpers.count("smart-publish.sh"), 1)
 
     def test_direct_commit_without_native_merged_pr_cannot_be_published(self) -> None:
@@ -1528,7 +1531,7 @@ class QueueTests(PublisherFixture):
             before_changelog,
         )
         self.assertEqual(self.helpers.count("smart-publish.sh"), 1)
-        selected, held = poller.targets(github)
+        selected, held, deferred = poller.targets(github)
         self.assertEqual(held, [])
         self.assertEqual(selected[0]["source_sha"], github.SECOND)
 
@@ -2086,7 +2089,7 @@ class PollDispatchTests(PublisherFixture):
         clients = []
 
         class BudgetClient:
-            def __init__(self) -> None:
+            def __init__(self, *args) -> None:
                 self.calls = 0
                 clients.append(self)
 
@@ -2103,6 +2106,7 @@ class PollDispatchTests(PublisherFixture):
 
         with (
             patch.object(publisher, "GitHubClient", BudgetClient),
+            patch.object(publisher, "PollGitHubClient", BudgetClient),
             patch.dict(os.environ, {"FLEET_CENTRAL_TOKEN": "fake-central"}),
         ):
             root = publisher.GitHub()
@@ -2129,17 +2133,18 @@ class PollDispatchTests(PublisherFixture):
                 ),
                 patch.object(poller, "dispatch_deferred", return_value=False),
             ):
-                selected, held = poller.targets(root)
-        self.assertEqual(len(selected), 24)
+                selected, held, deferred = poller.targets(root)
+        self.assertEqual(len(selected), 2)
+        self.assertEqual(len(deferred), 22)
         self.assertEqual(held, [])
-        self.assertEqual(len(clients), 121)  # root +24 consumers +96 bounded proofs
-        self.assertEqual(sum(client.calls for client in clients), 192)
+        self.assertEqual(len(clients), 33)  # root +24 consumers +8 bounded proofs
+        self.assertEqual(sum(client.calls for client in clients), 16)
         self.assertEqual(sum(client.calls == 0 for client in clients), 25)
         self.assertEqual(max(client.calls for client in clients), 2)
 
     def test_poll_checks_cheap_source_gates_before_dispatching(self) -> None:
         self.github.native_reviews[0]["state"] = "CHANGES_REQUESTED"
-        selected, held = poller.targets(self.github)
+        selected, held, deferred = poller.targets(self.github)
         self.assertEqual(selected, [])
         self.assertEqual(held, [REPO])
         self.assertNotIn("smart-publish.sh", self.helpers)
@@ -2155,7 +2160,7 @@ class PollDispatchTests(PublisherFixture):
             return value
 
         with patch.object(self.github, "api", side_effect=native):
-            selected, held = poller.targets(self.github)
+            selected, held, deferred = poller.targets(self.github)
         self.assertEqual(selected, [])
         self.assertEqual(held, [REPO])
         self.assertFalse(self.cli.called)
@@ -2165,7 +2170,7 @@ class PollDispatchTests(PublisherFixture):
         for status in ("queued", "in_progress", "waiting", "requested", "pending"):
             self.github.other_runs["101"] = {"status": status, "conclusion": None}
             with self.subTest(status=status):
-                self.assertEqual(poller.targets(self.github), ([], []))
+                self.assertEqual(poller.targets(self.github), ([], [], []))
 
     def test_recent_failed_source_is_backed_off_then_only_reconsidered(self) -> None:
         self.github.other_runs["101"] = {"conclusion": "failure"}
@@ -2174,13 +2179,13 @@ class PollDispatchTests(PublisherFixture):
             "current_time",
             return_value=datetime(2026, 10, 27, 2, 0, tzinfo=timezone.utc),
         ):
-            self.assertEqual(poller.targets(self.github), ([], []))
+            self.assertEqual(poller.targets(self.github), ([], [], []))
         with patch.object(
             poller,
             "current_time",
             return_value=datetime(2026, 10, 27, 8, 0, tzinfo=timezone.utc),
         ):
-            selected, held = poller.targets(self.github)
+            selected, held, deferred = poller.targets(self.github)
             self.assertEqual(held, [])
             self.assertEqual(selected[0]["source_sha"], SOURCE)
         self.assertNotIn("smart-publish.sh", self.helpers)
@@ -2197,7 +2202,7 @@ class PollDispatchTests(PublisherFixture):
     def test_dispatch_lookup_uses_native_merge_time_window(self) -> None:
         original = self.github.pages
         with patch.object(self.github, "pages", side_effect=original) as pages:
-            selected, held = poller.targets(self.github)
+            selected, held, deferred = poller.targets(self.github)
         self.assertEqual(held, [])
         self.assertEqual(selected[0]["source_sha"], SOURCE)
         catalogs = [
@@ -2343,7 +2348,7 @@ class NullableNativeMetadataTests(PublisherFixture):
                 else:
                     publisher.tree(self.github, REPO, SOURCE)
         self.github.other_runs["101"] = {"head_repository": None}
-        self.assertEqual(poller.targets(self.github), ([], [REPO]))
+        self.assertEqual(poller.targets(self.github), ([], [REPO], []))
 
     def test_one_invalid_consumer_cannot_starve_eligible_consumer_dispatch(self):
         class Aliased(NativeGitHub):
@@ -2416,7 +2421,7 @@ class NullableNativeMetadataTests(PublisherFixture):
             ),
             patch.object(root, "fresh_consumer", side_effect=[bad, good]),
         ):
-            selected, held = poller.targets(root)
+            selected, held, deferred = poller.targets(root)
         self.assertEqual(held, [bad.name])
         self.assertEqual(
             selected,

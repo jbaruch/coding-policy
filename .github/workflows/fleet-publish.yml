@@ -6,7 +6,7 @@ run-name: fleet-publish-v1:${{ inputs.repository }}:${{ inputs.source_sha }}
 # requesting that scoped permission fails closed if installation lacks it.
 on:
   schedule:
-    - cron: '*/5 * * * *'
+    - cron: '*/15 * * * *'
   workflow_dispatch:
     inputs:
       repository:

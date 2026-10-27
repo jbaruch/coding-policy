@@ -15,6 +15,7 @@ from datetime import datetime, timezone
 from fleet_publish import (
     GitHub,
     PublishRefused,
+    PollBudgetExhausted,
     default_tip,
     dispatch_catalog_route,
     enrollment,
@@ -99,10 +100,56 @@ def dispatch_deferred(github: GitHub, repo: str, source: str, merged_at: str) ->
     return False
 
 
-def targets(github: GitHub) -> tuple[list[dict[str, str]], list[str]]:
+def scheduled_slot(github: GitHub) -> int:
+    """Native created_at supplies the quarter-hour slot; child runs cannot skew it."""
+    require(
+        os.environ.get("GITHUB_REPOSITORY") == CENTRAL_REPOSITORY
+        and os.environ.get("GITHUB_EVENT_NAME") == "schedule"
+        and os.environ.get("GITHUB_REF") == "refs/heads/main"
+        and os.environ.get("GITHUB_RUN_ATTEMPT") == "1"
+        and os.environ.get("GITHUB_WORKFLOW_REF")
+        == CENTRAL_REPOSITORY + "/" + CENTRAL_WORKFLOW + "@refs/heads/main",
+        "Only the fixed central main schedule can select poll slots.",
+    )
+    from fleet_publish_record import valid_run_id, valid_sha
+
+    run_id, sha = os.environ.get("GITHUB_RUN_ID"), os.environ.get("GITHUB_SHA")
+    require(
+        valid_run_id(run_id) and valid_sha(sha),
+        "Native scheduled identity is incomplete.",
+    )
+    run = native_object(github.api(f"repos/{CENTRAL_REPOSITORY}/actions/runs/{run_id}"))
+    require(
+        str(run.get("id")) == run_id
+        and run.get("head_sha") == sha
+        and run.get("path") == CENTRAL_WORKFLOW
+        and run.get("event") == "schedule"
+        and run.get("head_branch") == "main"
+        and type(run.get("run_attempt")) is int
+        and run["run_attempt"] == 1
+        and native_object(run.get("repository")).get("full_name") == CENTRAL_REPOSITORY
+        and native_object(run.get("head_repository")).get("full_name")
+        == CENTRAL_REPOSITORY
+        and type(run.get("run_number")) is int
+        and run["run_number"] > 0,
+        "Native scheduled run identity is unavailable; no work or absence inferred.",
+    )
+    return int(utc_time(run.get("created_at")).timestamp()) // (15 * 60)
+
+
+def targets(github: GitHub) -> tuple[list[dict[str, str]], list[str], list[str]]:
+    with github.poll_immutable_reads():
+        return _targets(github, scheduled_slot(github))
+
+
+def _targets(
+    github: GitHub, slot: int
+) -> tuple[list[dict[str, str]], list[str], list[str]]:
     repositories = github.pages("installation/repositories", "repositories")
     selected: list[dict[str, str]] = []
     blocked: list[str] = []
+    deferred: list[str] = []
+    enrolled: list[tuple[str, GitHub]] = []
     for metadata in repositories:
         repo = metadata.get("full_name")
         if not valid_repository(repo) or repo == CENTRAL_REPOSITORY:
@@ -111,8 +158,17 @@ def targets(github: GitHub) -> tuple[list[dict[str, str]], list[str]]:
             continue
         consumer = github.fresh_consumer()
         try:
-            if consumer.optional_marker(repo) is None:
-                continue
+            if consumer.optional_marker(repo) is not None:
+                enrolled.append((repo, consumer))
+        except (PublishRefused, FleetRecordError):
+            blocked.append(repo)
+    enrolled.sort(key=lambda row: row[0])
+    if enrolled:
+        start = slot % len(enrolled)
+        enrolled = enrolled[start:] + enrolled[:start]
+    deferred.extend(repo for repo, _ in enrolled[2:])
+    for repo, consumer in enrolled[:2]:
+        try:
             ref, sha = default_tip(consumer, repo)
             _, entries = tree(consumer, repo, sha)
             enrollment(consumer, repo, entries)
@@ -121,6 +177,23 @@ def targets(github: GitHub) -> tuple[list[dict[str, str]], list[str]]:
                 # Moderation holds require explicit new selected recovery runs;
                 # scheduled polling never repeats a publication or billing call.
                 continue
+            # Full previous() verifies the receipt and exact bookkeeping tree.
+            # A recovery/late-claim tip may still contain queued sources: skip
+            # only a native single-parent claim directly on its published source.
+            if (
+                prior
+                and prior["state"] == "confirmed"
+                and sha == prior["bookkeeping_sha"]
+            ):
+                tip = native_object(consumer.api(f"repos/{repo}/git/commits/{sha}"))
+                require(tip.get("sha") == sha, "Native bookkeeping tip is incomplete.")
+                parents = tip.get("parents")
+                if (
+                    isinstance(parents, list)
+                    and len(parents) == 1
+                    and native_object(parents[0]).get("sha") == prior["source_sha"]
+                ):
+                    continue
             pending = pending_sources(
                 consumer, repo, sha, prior, enrollment(consumer, repo, entries)
             )
@@ -136,11 +209,13 @@ def targets(github: GitHub) -> tuple[list[dict[str, str]], list[str]]:
             selected.append(
                 {"repository": repo, "source_sha": pending[0], "source_ref": ref}
             )
+        except PollBudgetExhausted:
+            deferred.append(repo)
         except (PublishRefused, FleetRecordError):
             # aggregate-reporting: one held consumer must not starve independent
             # eligible ones. Return every fixed repo identity; main exits nonzero.
             blocked.append(repo)
-    return selected, blocked
+    return selected, blocked, deferred
 
 
 def dispatch(github: GitHub, items: list[dict[str, str]]) -> None:
@@ -170,9 +245,12 @@ def main() -> int:
         sys.argv[1:] in ([], ["--dispatch"]), "Use the fixed poll or dispatch mode."
     )
     github = GitHub()
-    items, blocked = targets(github)
-    if sys.argv[1:]:
-        dispatch(github, items)
+    with github.poll_immutable_reads():
+        items, blocked, deferred = targets(github)
+        if sys.argv[1:]:
+            dispatch(github, items)
+        assert github._poll_cache is not None
+        requests = github._poll_cache.requests
     print(
         json.dumps(
             {
@@ -180,6 +258,8 @@ def main() -> int:
                 "kind": "poll_only",
                 "selected": items,
                 "blocked": blocked,
+                "deferred": deferred,
+                "central_requests": requests,
             }
         )
     )

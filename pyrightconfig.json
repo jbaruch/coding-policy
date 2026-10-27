@@ -57,7 +57,8 @@
     "skills/release/fleet_publish_archive.py",
     "tests/release/tests/test_fleet_publish_archive.py",
     "scripts/fleet_publish_archive_write.py",
-    "scripts/tests/test_fleet_publish_archive_write.py"
+    "scripts/tests/test_fleet_publish_archive_write.py",
+    "scripts/tests/test_fleet_publish_poll_cache.py"
   ],
   "executionEnvironments": [
     {

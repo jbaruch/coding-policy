@@ -10,6 +10,8 @@ failures, incomplete history and unavailable artifacts remain unknown/blocked.
 from __future__ import annotations
 
 import base64
+from collections import OrderedDict
+from copy import deepcopy
 from contextlib import contextmanager
 import importlib.util
 import json
@@ -95,6 +97,75 @@ def encoded(value: Any) -> bytes:
     ).encode()
 
 
+class PollBudgetExhausted(PublishRefused):
+    """This backstop defers work; an exhausted budget is never evidence absence."""
+
+
+class PollGitHubClient(GitHubClient):
+    def __init__(self, cache: "PollImmutableCache") -> None:
+        super().__init__()
+        self.cache = cache
+
+    def _read(self, route: str, maximum: int, *, native_status: bool = False) -> bytes:
+        self.cache.request()
+        return super()._read(route, maximum, native_status=native_status)
+
+
+class PollImmutableCache:
+    """One poll's bounded immutable central Git objects; never refs/native state."""
+
+    def __init__(self) -> None:
+        self.values: OrderedDict[str, tuple[object, int]] = OrderedDict()
+        self.bytes = 0
+        self.requests = 0
+
+    def request(self, *, dispatch: bool = False) -> None:
+        # Reserve two slots for the at-most-two selected dispatches. Every native
+        # command, including pagination/ZIP and failed reads, consumes one slot.
+        if self.requests >= (200 if dispatch else 198):
+            raise PollBudgetExhausted(
+                "Central poll budget reached; defer without dispatch or inferred absence."
+            )
+        self.requests += 1
+
+    def read(self, client: Any, method: str, route: str) -> object:
+        immutable = re.fullmatch(
+            rf"repos/{CENTRAL_REPOSITORY}/(?:git/(?:commits|trees|blobs)/[a-f0-9]{{40}}|compare/[a-f0-9]{{40}}\.\.\.[a-f0-9]{{40}})",
+            route,
+        )
+        if immutable and route in self.values:
+            self.values.move_to_end(route)
+            return deepcopy(self.values[route][0])
+        value = getattr(client, method)(route)
+        if immutable:
+            size = len(encoded(value))
+            if size <= 1024 * 1024:
+                while self.values and (
+                    len(self.values) >= 256 or self.bytes + size > 8 * 1024 * 1024
+                ):
+                    _, (_, removed) = self.values.popitem(last=False)
+                    self.bytes -= removed
+                self.values[route] = (deepcopy(value), size)
+                self.bytes += size
+        return value
+
+
+class PollEvidenceClient:
+    """Fresh bounded transport with only positive immutable-address deduplication."""
+
+    def __init__(self, client: Any, cache: PollImmutableCache):
+        self.client, self.cache = client, cache
+
+    def json(self, route: str) -> object:
+        return self.cache.read(self.client, "json", route)
+
+    def native_json(self, route: str) -> object:
+        return self.cache.read(self.client, "native_json", route)
+
+    def artifact_evidence(self, run_id: str, kind: Any) -> Any:
+        return self.client.artifact_evidence(run_id, kind)
+
+
 class GitHub:
     """Only fixed api.github.com routes; gh owns the installation credential."""
 
@@ -103,7 +174,22 @@ class GitHub:
 
     def fresh_consumer(self) -> GitHub:
         """A consumer gets its own bounded evidence-client command allowance."""
-        return GitHub()
+        consumer = GitHub()
+        consumer._poll_cache = getattr(self, "_poll_cache", None)
+        return consumer
+
+    @contextmanager
+    def poll_immutable_reads(self) -> Iterator[None]:
+        """Discard all cached objects at this poll's exit; no publisher reuse."""
+        previous = getattr(self, "_poll_cache", None)
+        if previous is not None:
+            yield
+            return
+        self._poll_cache = PollImmutableCache()
+        try:
+            yield
+        finally:
+            self._poll_cache = previous
 
     def json(self, route: str) -> object:
         """Read-only facade for the shared fixed central protocol verifier."""
@@ -120,7 +206,11 @@ class GitHub:
         original = os.environ.get("GH_TOKEN")
         try:
             os.environ["GH_TOKEN"] = str(central_token)
-            return operation(ArchiveReader(GitHubClient()))
+            cache = getattr(self, "_poll_cache", None)
+            client: Any = GitHubClient() if cache is None else PollGitHubClient(cache)
+            if cache is not None:
+                client = PollEvidenceClient(client, cache)
+            return operation(ArchiveReader(client))
         except FleetPublishLookupError as error:
             raise PublishRefused(
                 "Restore complete central durable/native evidence; preserve STOP without replay."
@@ -203,6 +293,12 @@ class GitHub:
         if payload is not None:
             args += ["--method", method, "--input", "-"]
         environment = dict(os.environ)
+        cache = getattr(self, "_poll_cache", None)
+        if cache is not None and (
+            path == f"repos/{CENTRAL_REPOSITORY}"
+            or path.startswith(f"repos/{CENTRAL_REPOSITORY}/")
+        ):
+            cache.request(dispatch=payload is not None)
         if path.startswith(f"repos/{CENTRAL_REPOSITORY}/"):
             require(
                 environment.get("FLEET_CENTRAL_TOKEN"),
