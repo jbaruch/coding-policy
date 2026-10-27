@@ -124,6 +124,23 @@ class ArchiveSchemaTests(unittest.TestCase):
             with self.assertRaises(archive.ArchiveError):
                 archive.ref_name("terminal", **args)
 
+    def test_per_run_hold_is_exact_nonresettable_gate_metadata(self):
+        finalizer = fixture()[5]
+        held = archive.make_hold("101", 2, "c" * 40, finalizer=finalizer)
+        self.assertEqual(
+            archive.ref_name("hold", run_id="101"),
+            "refs/tags/fleet-publish-v1/runs/101/hold",
+        )
+        self.assertEqual(archive.decode_archive(archive.encode_archive(held)), held)
+        for changes in (
+            {"observed_attempt": 1},
+            {"reason": "clear"},
+            {"schema_version": 2},
+            {"extra": True},
+        ):
+            with self.assertRaises(archive.ArchiveError):
+                archive.parse_hold({**held, **changes})
+
     def test_canonical_roundtrip_preserves_exact_intent_receipt_and_projects_only_native_facts(
         self,
     ):

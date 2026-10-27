@@ -98,7 +98,7 @@ def utc(value: object) -> str:
 
 
 def ref_name(
-    kind: Literal["source", "intent", "terminal"],
+    kind: Literal["source", "intent", "terminal", "hold"],
     *,
     repository: str | None = None,
     source_sha: str | None = None,
@@ -120,6 +120,9 @@ def ref_name(
             + "/"
             + str(source_sha)
         )
+    if kind == "hold":
+        need(valid_run_id(run_id) and repository is None and source_sha is None)
+        return PREFIX + f"runs/{run_id}/hold"
     need(
         kind in ("intent", "terminal")
         and valid_run_id(run_id)
@@ -414,6 +417,52 @@ def parse_terminal(value: object) -> dict[str, Any]:
     )
 
 
+def make_hold(
+    run_id: str, observed_attempt: int, workflow_sha: str, *, finalizer: object
+) -> dict[str, Any]:
+    need(
+        valid_run_id(run_id)
+        and type(observed_attempt) is int
+        and 1 < observed_attempt < 2**31
+        and valid_sha(workflow_sha)
+    )
+    return {
+        "schema_version": 1,
+        "kind": "fleet-publish-hold",
+        "run_id": run_id,
+        "observed_attempt": observed_attempt,
+        "workflow_sha": workflow_sha,
+        "reason": "unsupported_rerun",
+        "finalizer": finalizer_identity(finalizer),
+    }
+
+
+def parse_hold(value: object) -> dict[str, Any]:
+    raw = obj(value)
+    need(
+        set(raw)
+        == {
+            "schema_version",
+            "kind",
+            "run_id",
+            "observed_attempt",
+            "workflow_sha",
+            "reason",
+            "finalizer",
+        }
+        and type(raw.get("schema_version")) is int
+        and raw["schema_version"] == 1
+        and raw["kind"] == "fleet-publish-hold"
+        and raw["reason"] == "unsupported_rerun"
+    )
+    return make_hold(
+        raw["run_id"],
+        raw["observed_attempt"],
+        raw["workflow_sha"],
+        finalizer=raw["finalizer"],
+    )
+
+
 def encode_archive(value: object) -> bytes:
     parsed = parse_archive(value)
     raw = (
@@ -428,6 +477,8 @@ def encode_archive(value: object) -> bytes:
 
 def parse_archive(value: object) -> dict[str, Any]:
     raw = obj(value)
+    if raw.get("kind") == "fleet-publish-hold":
+        return parse_hold(raw)
     if raw.get("kind") == "fleet-publish-intent":
         return parse_intent(raw)
     return parse_terminal(raw)
