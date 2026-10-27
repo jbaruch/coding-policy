@@ -100,6 +100,12 @@ It never executes consumer or triggering-run code, invokes publication, or
 converts a failed or uncertain outcome into success. A moderation recovery gets
 its own run record and retains the original source claim.
 
+The completion finalizer may be retried to repair interrupted archival while
+native evidence remains available. This retries archival only. It validates and
+reuses existing matching evidence without replacing its original provenance.
+Unsupported reruns of the publisher itself create a durable per-run hold; expiry
+of the later native run cannot remove that hold or revive a positive result.
+
 These stores use the gate-store exception in `rules/stateful-artifacts.md`.
 Unsupported, ambiguous, malformed, conflicting or unreadable evidence refuses
 publication and confirmation. Verify current central Git evidence through the
