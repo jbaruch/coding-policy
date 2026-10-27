@@ -90,7 +90,9 @@ def valid_version(value: object) -> bool:
 
 def parse_record(value: object) -> FleetPublishRecord:
     """Validate fixed version-1 data; no transport or persistent writes occur."""
-    if not isinstance(value, dict) or set(value) != set(FleetPublishRecord.__annotations__):
+    if not isinstance(value, dict) or set(value) != set(
+        FleetPublishRecord.__annotations__
+    ):
         refuse()
     raw = cast(dict[str, object], value)
     try:
@@ -104,19 +106,36 @@ def parse_record(value: object) -> FleetPublishRecord:
         or raw["schema_version"] != 1
         or not valid_repository(raw["consumer_repository"])
         or raw["workflow_repository"] != CENTRAL_REPOSITORY
-        or not all(valid_sha(raw[key]) for key in ("source_sha", "source_tree_sha", "workflow_sha"))
+        or not all(
+            valid_sha(raw[key])
+            for key in ("source_sha", "source_tree_sha", "workflow_sha")
+        )
         or not all(valid_run_id(raw[key]) for key in ("run_id", "origin_run_id"))
-        or not all(type(raw[key]) is int and cast(int, raw[key]) > 0 for key in ("run_attempt", "origin_run_attempt"))
+        or not all(
+            type(raw[key]) is int and cast(int, raw[key]) > 0
+            for key in ("run_attempt", "origin_run_attempt")
+        )
         or not isinstance(raw["plugin_name"], str)
         or not re.fullmatch(r"jbaruch/[a-z0-9][a-z0-9_-]{0,99}", raw["plugin_name"])
-        or raw["state"] not in ("claimed", "published", "confirmed", "blocked", "uncertain")
-        or raw["publish_outcome"] not in ("not_started", "success", "failure", "unknown")
-        or raw["moderation"] not in ("not_checked", "pass", "pending", "fail", "unknown")
+        or raw["state"]
+        not in ("claimed", "published", "confirmed", "blocked", "uncertain")
+        or raw["publish_outcome"]
+        not in ("not_started", "success", "failure", "unknown")
+        or raw["moderation"]
+        not in ("not_checked", "pass", "pending", "fail", "unknown")
         or type(raw["landed_after_error"]) is not bool
-        or (raw["registry_baseline"] != "unpublished" and not valid_version(raw["registry_baseline"]))
+        or (
+            raw["registry_baseline"] != "unpublished"
+            and not valid_version(raw["registry_baseline"])
+        )
         or (raw["version"] is not None and not valid_version(raw["version"]))
-        or (raw["bookkeeping_sha"] is not None and not valid_sha(raw["bookkeeping_sha"]))
-        or (raw["publish_exit_code"] is not None and type(raw["publish_exit_code"]) is not int)
+        or (
+            raw["bookkeeping_sha"] is not None and not valid_sha(raw["bookkeeping_sha"])
+        )
+        or (
+            raw["publish_exit_code"] is not None
+            and type(raw["publish_exit_code"]) is not int
+        )
     ):
         refuse()
     ref = raw["source_ref"]
@@ -158,7 +177,9 @@ def decode_record(raw: bytes) -> FleetPublishRecord:
     if len(raw) > MAX_RECORD_BYTES:
         refuse()
     try:
-        value = json.loads(raw.decode("utf-8"), object_pairs_hook=_unique, parse_constant=_nonfinite)
+        value = json.loads(
+            raw.decode("utf-8"), object_pairs_hook=_unique, parse_constant=_nonfinite
+        )
     except (ValueError, UnicodeError, RecursionError):
         refuse()
     return parse_record(value)

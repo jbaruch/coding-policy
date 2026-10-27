@@ -407,13 +407,16 @@ def parse_terminal(value: object) -> dict[str, Any]:
     run = native_run(native["run"], projected=True)
     attempt = native_run(native["attempt"], projected=True)
     jobs = native_jobs(native["jobs"], run, projected=True)
+
     # Reuse the same proof predicates, converting only the two repository fields
     # expected from actual native REST. No raw input is persisted or executed.
-    actual = lambda row: {
-        **row,
-        "repository": {"full_name": row["repository"]},
-        "head_repository": {"full_name": row["head_repository"]},
-    }
+    def actual(row: dict[str, Any]) -> dict[str, Any]:
+        return {
+            **row,
+            "repository": {"full_name": row["repository"]},
+            "head_repository": {"full_name": row["head_repository"]},
+        }
+
     return make_terminal(
         raw["intent"],
         raw["receipt"],

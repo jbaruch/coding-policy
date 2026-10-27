@@ -63,7 +63,9 @@ class FleetRecordTests(unittest.TestCase):
         original = confirmed()
         self.assertEqual(owner.parse_record(original), original)
 
-    def test_recovery_origin_is_retained_without_claiming_it_is_current_run(self) -> None:
+    def test_recovery_origin_is_retained_without_claiming_it_is_current_run(
+        self,
+    ) -> None:
         original = {**confirmed(), "run_id": "234567890"}
         self.assertNotEqual(original["run_id"], original["origin_run_id"])
         self.assertEqual(owner.parse_record(original), original)
@@ -75,17 +77,30 @@ class FleetRecordTests(unittest.TestCase):
                 del value[key]
                 with self.assertRaises(owner.FleetRecordError):
                     owner.parse_record(value)
-        for value in ({**claimed(), "schema_version": 2}, {**claimed(), "approved": True}):
+        for value in (
+            {**claimed(), "schema_version": 2},
+            {**claimed(), "approved": True},
+        ):
             with self.assertRaises(owner.FleetRecordError):
                 owner.parse_record(value)
 
     def test_invalid_identity_and_scalar_types_refuse_without_echo(self) -> None:
         cases = {
             "schema_version": [True, "1"],
-            "consumer_repository": ["other/consumer", "jbaruch/../PRIVATE", "https://example.test/PRIVATE"],
+            "consumer_repository": [
+                "other/consumer",
+                "jbaruch/../PRIVATE",
+                "https://example.test/PRIVATE",
+            ],
             "source_sha": ["PRIVATE", "a" * 39],
             "source_tree_sha": [None, "PRIVATE"],
-            "source_ref": ["main", "refs/tags/v0.1.0", "refs/heads/", "refs/heads/PRIVATE\n", "refs/heads/\ud800"],
+            "source_ref": [
+                "main",
+                "refs/tags/v0.1.0",
+                "refs/heads/",
+                "refs/heads/PRIVATE\n",
+                "refs/heads/\ud800",
+            ],
             "workflow_repository": ["jbaruch/PRIVATE", "other/coding-policy"],
             "workflow_sha": [None, "PRIVATE"],
             "run_id": [123456789, "0", "-1", "1.0", "PRIVATE"],
@@ -126,7 +141,14 @@ class FleetRecordTests(unittest.TestCase):
 
     def test_uncertain_blocked_and_published_facts_do_not_turn_confirmed(self) -> None:
         for state in ("uncertain", "blocked", "published"):
-            value = {**confirmed(), "state": state, "publish_outcome": "unknown", "publish_exit_code": None, "landed_after_error": True, "moderation": "unknown"}
+            value = {
+                **confirmed(),
+                "state": state,
+                "publish_outcome": "unknown",
+                "publish_exit_code": None,
+                "landed_after_error": True,
+                "moderation": "unknown",
+            }
             self.assertEqual(owner.parse_record(value)["state"], state)
 
     def test_accepts_semver_without_loosening_numeric_components(self) -> None:
@@ -138,7 +160,16 @@ class FleetRecordTests(unittest.TestCase):
     def test_decoder_refuses_duplicates_nonfinite_invalid_utf8_and_bounds(self) -> None:
         good = json.dumps(claimed()).encode()
         self.assertEqual(owner.decode_record(good), claimed())
-        for raw in (good.replace(b'"schema_version": 1', b'"schema_version": 1, "schema_version": 1'), b"NaN", b"[" * 5000, b"9" * 5000, b"\xff", b"x" * (owner.MAX_RECORD_BYTES + 1)):
+        for raw in (
+            good.replace(
+                b'"schema_version": 1', b'"schema_version": 1, "schema_version": 1'
+            ),
+            b"NaN",
+            b"[" * 5000,
+            b"9" * 5000,
+            b"\xff",
+            b"x" * (owner.MAX_RECORD_BYTES + 1),
+        ):
             with self.subTest(prefix=raw[:1]):
                 with self.assertRaises(owner.FleetRecordError):
                     owner.decode_record(raw)
