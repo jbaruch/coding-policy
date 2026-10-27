@@ -1,0 +1,37 @@
+name: Fleet publisher grant probe
+
+# Metadata-only, manually selected before publisher activation. No publication
+# credential, consumer checkout, claim, write API or publisher invocation.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    if: github.repository == 'jbaruch/coding-policy' && github.ref == 'refs/heads/main' && github.run_attempt == 1
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Validate fixed central runtime before minting
+        run: python3 scripts/fleet_publish_grant_probe.py validate
+      - name: Mint exact selected publisher scopes
+        id: app
+        uses: actions/create-github-app-token@v3
+        with:
+          app-id: ${{ secrets.FLEET_APP_ID }}
+          private-key: ${{ secrets.FLEET_APP_PRIVATE_KEY }}
+          owner: jbaruch
+          repositories: nanoclaw-construction
+          permission-contents: write
+          permission-pull-requests: read
+          permission-checks: read
+          permission-statuses: read
+      - name: Verify native metadata access without writes
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+        run: python3 scripts/fleet_publish_grant_probe.py verify
