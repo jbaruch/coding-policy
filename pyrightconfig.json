@@ -90,6 +90,7 @@
   "pythonVersion": "3.11",
   "typeCheckingMode": "standard",
   "extraPaths": [
-    "skills/release"
+    "skills/release",
+    "scripts"
   ]
 }

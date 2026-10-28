@@ -17,6 +17,7 @@ CENTRAL_WORKFLOW = ".github/workflows/fleet-publish.yml"
 INTENT_ARTIFACT = "fleet-publish-intent-v1"
 RECEIPT_ARTIFACT = "fleet-publish-receipt-v1"
 MAX_RECORD_BYTES = 64 * 1024
+MAX_BRANCH_CHARS = 1000
 
 State = Literal["claimed", "published", "confirmed", "blocked", "uncertain"]
 PublishOutcome = Literal["not_started", "success", "failure", "unknown"]
@@ -60,6 +61,34 @@ def refuse() -> NoReturn:
 def valid_repository(value: object) -> bool:
     return isinstance(value, str) and bool(
         re.fullmatch(r"jbaruch/[A-Za-z0-9][A-Za-z0-9_.-]{0,99}", value)
+    )
+
+
+def valid_branch(value: object) -> bool:
+    """Bound native refs/heads names using Git's ref-format rules, no rewriting."""
+    if not isinstance(value, str) or not 0 < len(value) <= MAX_BRANCH_CHARS:
+        return False
+    try:
+        value.encode("utf-8")
+    except UnicodeError:
+        return False
+    return (
+        not value.endswith(".")
+        and ".." not in value
+        and "@{" not in value
+        and not any(ord(c) <= 32 or ord(c) == 127 or c in "~^:?*[\\" for c in value)
+        and all(
+            part and not part.startswith(".") and not part.endswith(".lock")
+            for part in value.split("/")
+        )
+    )
+
+
+def valid_source_ref(value: object) -> bool:
+    return (
+        isinstance(value, str)
+        and value.startswith("refs/heads/")
+        and valid_branch(value.removeprefix("refs/heads/"))
     )
 
 
@@ -138,14 +167,7 @@ def parse_record(value: object) -> FleetPublishRecord:
         )
     ):
         refuse()
-    ref = raw["source_ref"]
-    if (
-        not isinstance(ref, str)
-        or not ref.startswith("refs/heads/")
-        or len(ref) <= len("refs/heads/")
-        or len(ref) > 1024
-        or any(ord(character) < 32 or ord(character) == 127 for character in ref)
-    ):
+    if not valid_source_ref(raw["source_ref"]):
         refuse()
     if raw["state"] == "confirmed" and (
         raw["publish_outcome"] != "success"

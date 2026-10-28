@@ -23,20 +23,26 @@ import zipfile
 import zlib
 from datetime import datetime
 from typing import Callable, Literal, NoReturn
-from urllib.parse import parse_qsl, urlsplit
+from urllib.parse import parse_qsl, quote, unquote_to_bytes, urlsplit
 
 from fleet_publish_record import (
     CENTRAL_REPOSITORY,
     INTENT_ARTIFACT,
     MAX_RECORD_BYTES,
+    MAX_BRANCH_CHARS,
     RECEIPT_ARTIFACT,
     FleetPublishRecord,
     FleetRecordError,
     decode_record,
     valid_run_id,
+    valid_branch,
 )
 
 MAX_HTTP_HEADERS = 32 * 1024
+MAX_ROUTE_BYTES = 2048
+# One Unicode scalar uses at most four UTF-8 bytes, each percent-encoded as3.
+# Only the three fixed native branch endpoints may use this derived allowance.
+MAX_BRANCH_ROUTE_BYTES = MAX_ROUTE_BYTES + 12 * MAX_BRANCH_CHARS
 MAX_JSON_BYTES = 1024 * 1024
 MAX_ARCHIVE_BYTES = 256 * 1024
 MAX_STDERR_BYTES = 64 * 1024
@@ -78,7 +84,7 @@ def _refuse(kind: str) -> NoReturn:
 def _route(route: str) -> None:
     if (
         not isinstance(route, str)
-        or not 1 <= len(route) <= 2048
+        or not 1 <= len(route) <= MAX_BRANCH_ROUTE_BYTES
         or not route.isascii()
         or re.search(r"[\x00-\x20\x7f]", route)
         or "://" in route
@@ -90,6 +96,21 @@ def _route(route: str) -> None:
     except ValueError:
         _refuse("invalid_route")
     segments = parts.path.split("/")
+    branch_route = False
+    suffix = segments[3:]
+    for prefix in (["git", "ref", "heads"], ["branches"], ["rules", "branches"]):
+        if suffix[: len(prefix)] == prefix and len(suffix) == len(prefix) + 1:
+            encoded_branch = suffix[-1]
+            try:
+                branch = unquote_to_bytes(encoded_branch).decode(
+                    "utf-8", errors="strict"
+                )
+            except (UnicodeError, ValueError):
+                _refuse("invalid_route")
+            if not valid_branch(branch) or quote(branch, safe="") != encoded_branch:
+                _refuse("invalid_route")
+            branch_route = True
+            break
     if (
         parts.scheme
         or parts.netloc
@@ -97,10 +118,11 @@ def _route(route: str) -> None:
         or len(segments) < 3
         or segments[:2] != ["repos", "jbaruch"]
         or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,99}", segments[2])
+        or (not branch_route and len(route) > MAX_ROUTE_BYTES)
         or any(
             segment in (".", "..")
             or not re.fullmatch(r"[A-Za-z0-9_.~-]{1,256}", segment)
-            for segment in segments[3:]
+            for segment in (segments[3:-1] if branch_route else segments[3:])
         )
         or not re.fullmatch(r"[A-Za-z0-9_.~%:/@+,&=*-]*", parts.query)
         or re.search(r"%(?![a-fA-F0-9]{2})", parts.query)

@@ -21,7 +21,7 @@ import unittest
 from unittest.mock import patch
 import zipfile
 from datetime import datetime, timezone
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import parse_qs, quote, urlsplit
 
 # Standalone runner discovers this file outside a package; load trusted scripts.
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -47,7 +47,8 @@ ENV = {
 
 
 class NativeGitHub(publisher.GitHub):
-    def __init__(self) -> None:
+    def __init__(self, branch: str = "main") -> None:
+        self.branch = branch
         self.tip = SOURCE
         self.calls: list[tuple[str, object]] = []
         self.blobs: dict[str, bytes] = {}
@@ -81,6 +82,8 @@ class NativeGitHub(publisher.GitHub):
             "mode": "040000",
             "sha": "f" * 40,
         }
+        self.timeline_reads = 0
+        self.timeline: list[dict[str, Any]] = []
         self.native_reviews = [
             {
                 "id": 11,
@@ -117,7 +120,7 @@ class NativeGitHub(publisher.GitHub):
         self.source_merged_at = "2026-10-27T01:02:00Z"
         self.current_pull_source = SOURCE
         self.required_branch: dict[str, Any] = {
-            "name": "main",
+            "name": branch,
             "protected": False,
             "commit": {"sha": SOURCE},
             "protection": {
@@ -138,7 +141,7 @@ class NativeGitHub(publisher.GitHub):
             "node_id": "R_fixture_selected_repository",
             "archived": False,
             "disabled": False,
-            "default_branch": "main",
+            "default_branch": branch,
         }
 
     def put(self, path: str, raw: bytes) -> None:
@@ -186,7 +189,7 @@ class NativeGitHub(publisher.GitHub):
             update = payload["variables"]["input"]
             ref = update["refUpdates"][0]
             assert update["repositoryId"] == self.metadata["node_id"]
-            assert ref["name"] == "refs/heads/main" and ref["force"] is False
+            assert ref["name"] == "refs/heads/" + self.branch and ref["force"] is False
             if self.reset_before_graphql is not None:
                 self.tip = self.reset_before_graphql
                 self.reset_before_graphql = None
@@ -212,12 +215,15 @@ class NativeGitHub(publisher.GitHub):
                 "merge_commit_sha": self.current_pull_source,
                 "merged_at": self.source_merged_at,
                 "head": {"sha": HEAD, "repo": {"full_name": REPO}},
-                "base": {"ref": "main", "repo": {"full_name": REPO}},
+                "base": {"ref": self.branch, "repo": {"full_name": REPO}},
             }
-        if path == f"repos/{REPO}/branches/main":
+        if path == f"repos/{REPO}/branches/{quote(self.branch, safe='')}":
             return deepcopy(self.required_branch)
-        if path == f"repos/{REPO}/git/ref/heads/main":
-            return {"object": {"sha": self.tip, "type": "commit"}}
+        if path == f"repos/{REPO}/git/ref/heads/{quote(self.branch, safe='')}":
+            return {
+                "ref": "refs/heads/" + self.branch,
+                "object": {"sha": self.tip, "type": "commit"},
+            }
         if path.startswith(f"repos/{REPO}/git/commits/"):
             sha = path.rsplit("/", 1)[1]
             return {
@@ -253,7 +259,10 @@ class NativeGitHub(publisher.GitHub):
             return {"sha": TREE}
         if path == f"repos/{REPO}/git/commits" and isinstance(payload, dict):
             return {"sha": CLAIM}
-        if path == f"repos/{REPO}/git/refs/heads/main" and isinstance(payload, dict):
+        if (
+            path == f"repos/{REPO}/git/refs/heads/{quote(self.branch, safe='')}"
+            and isinstance(payload, dict)
+        ):
             publisher.require(not self.refuse_push, "Protected ref refused.")
             assert method == "PATCH" and payload["force"] is False
             for item in self.created_tree:
@@ -309,12 +318,15 @@ class NativeGitHub(publisher.GitHub):
                     "merge_commit_sha": SOURCE,
                     "merged_at": "2026-10-27T01:02:00Z",
                     "number": 7,
-                    "base": {"ref": "main"},
+                    "base": {"ref": self.branch},
                     "head": {"sha": HEAD, "repo": {"full_name": REPO}},
                 }
             ]
         if path == f"repos/{REPO}/pulls/7/reviews":
             return self.native_reviews
+        if path == f"repos/{REPO}/issues/7/timeline":
+            self.timeline_reads += 1
+            return self.timeline
         if path in (
             f"repos/{REPO}/commits/{HEAD}/check-runs",
             f"repos/{REPO}/commits/{CLAIM}/check-runs",
@@ -325,7 +337,7 @@ class NativeGitHub(publisher.GitHub):
             f"repos/{REPO}/commits/{CLAIM}/status",
         ):
             return self.status["statuses"]
-        if path == f"repos/{REPO}/rules/branches/main":
+        if path == f"repos/{REPO}/rules/branches/{quote(self.branch, safe='')}":
             return self.rules
         if path.startswith(f"repos/{REPO}/commits?path="):
             if "fleet-publish-enabled" in path:
@@ -662,6 +674,141 @@ class PublisherTests(PublisherFixture):
                 mutate(self.github.native_reviews)
                 with self.assertRaises(publisher.PublishRefused):
                     publisher.gate_source(self.github, REPO, SOURCE, "refs/heads/main")
+
+    def test_canonical_review_lane_comment_dismissal_and_live_blocking_semantics(self):
+        cases = (
+            ("commented", True),
+            ("quality_commented", True),
+            ("old_dismissed_new_approval", True),
+            ("live_other_identity_block", False),
+            ("same_login_superseded_block", True),
+            ("ruled", True),
+            ("wrong_rule_identity", False),
+            ("bool_rule_identity", False),
+            ("ordinary_dismissal", False),
+            ("quality_dismissal", False),
+            ("pending", False),
+        )
+        for mode, accepted in cases:
+            with self.subTest(mode=mode):
+                native = NativeGitHub()
+                policy = native.native_reviews[0]
+                if mode == "commented":
+                    policy["state"] = "COMMENTED"
+                elif mode == "quality_commented":
+                    native.native_reviews[1]["state"] = "COMMENTED"
+                elif mode in (
+                    "old_dismissed_new_approval",
+                    "live_other_identity_block",
+                ):
+                    old = deepcopy(policy)
+                    old.update(
+                        id=10,
+                        state="DISMISSED"
+                        if mode.startswith("old")
+                        else "CHANGES_REQUESTED",
+                        submitted_at="2026-10-27T00:59:00Z",
+                        user={"login": "github-actions[bot]"},
+                    )
+                    native.native_reviews.append(old)
+                elif mode == "same_login_superseded_block":
+                    old = deepcopy(policy)
+                    old.update(
+                        id=10,
+                        state="CHANGES_REQUESTED",
+                        submitted_at="2026-10-27T00:59:00Z",
+                    )
+                    native.native_reviews.insert(0, old)
+                elif mode in (
+                    "ruled",
+                    "wrong_rule_identity",
+                    "bool_rule_identity",
+                    "ordinary_dismissal",
+                ):
+                    policy["state"] = "DISMISSED"
+                    if mode == "bool_rule_identity":
+                        policy["id"] = 1
+                    native.timeline = [
+                        {
+                            "id": 900,
+                            "event": "review_dismissed",
+                            "dismissed_review": {
+                                "review_id": 99
+                                if mode == "wrong_rule_identity"
+                                else True
+                                if mode == "bool_rule_identity"
+                                else policy["id"],
+                                "dismissal_message": "ordinary"
+                                if mode == "ordinary_dismissal"
+                                else "JUDGE-RULED: fixed fixture decision",
+                            },
+                        }
+                    ]
+                elif mode == "quality_dismissal":
+                    native.native_reviews[1]["state"] = "DISMISSED"
+                else:
+                    policy["state"] = "PENDING"
+                if accepted:
+                    publisher.gate_source(native, REPO, SOURCE, "refs/heads/main")
+                else:
+                    with self.assertRaises(publisher.PublishRefused):
+                        publisher.gate_source(native, REPO, SOURCE, "refs/heads/main")
+                self.assertEqual(
+                    native.timeline_reads,
+                    1
+                    if mode
+                    in (
+                        "ruled",
+                        "wrong_rule_identity",
+                        "bool_rule_identity",
+                        "ordinary_dismissal",
+                    )
+                    else 0,
+                )
+
+    def test_native_nontrivial_default_branches_prepare_claim_and_confirm(self):
+        for branch in ("release+stable", "releases/stable_1.0", "préprod/%literal"):
+            with self.subTest(branch=branch):
+                self.github = NativeGitHub(branch)
+                publisher.prepare(self.github, REPO, SOURCE, self.work, ENV)
+                self.assertEqual(
+                    json.loads((self.work / "intent.json").read_bytes())["source_ref"],
+                    "refs/heads/" + branch,
+                )
+                publisher.claim(self.github, self.work)
+                self.github.records["intent"] = (self.work / "intent.json").read_bytes()
+                self.assertTrue(publisher.execute(self.github, self.work))
+                self.assertEqual(self.receipt()["source_ref"], "refs/heads/" + branch)
+                shutil.rmtree(self.work)
+                self.work.mkdir(mode=0o700)
+
+    def test_native_branch_and_exact_returned_ref_refuse_before_claim(self):
+        for branch in (
+            "../main",
+            "release/../main",
+            "bad name",
+            "bad\nname",
+            "bad.lock",
+            "a" * 1001,
+        ):
+            native = NativeGitHub(branch)
+            with self.assertRaises(publisher.PublishRefused):
+                publisher.default_tip(native, REPO)
+            self.assertEqual([call[0] for call in native.calls], [f"repos/{REPO}"])
+        native = NativeGitHub("release+stable")
+        actual = native.api
+
+        def mismatched(route, *args, **kwargs):
+            value = actual(route, *args, **kwargs)
+            if "/git/ref/heads/" in route:
+                value = publisher.native_object(value)
+                value["ref"] = "refs/heads/unrelated"
+            return value
+
+        with patch.object(native, "api", side_effect=mismatched):
+            with self.assertRaises(publisher.PublishRefused):
+                publisher.default_tip(native, REPO)
+        self.assertFalse(any(route == "graphql" for route, _payload in native.calls))
 
     def test_failed_or_pending_ci_is_held(self) -> None:
         for status, conclusion in (

@@ -11,6 +11,7 @@ import io
 import json
 import sys
 import unittest
+from urllib.parse import quote
 from pathlib import Path
 from typing import Any
 from unittest.mock import patch
@@ -47,7 +48,8 @@ def git_hash(kind, raw):
 class Fixture:
     """Construct true immutable blob/tree/commit hashes from fixed source bytes."""
 
-    def __init__(self):
+    def __init__(self, branch="main"):
+        self.branch = branch
         self.routes: dict[str, Any] = {}
         self.records = {}
         self.calls = []
@@ -128,7 +130,7 @@ class Fixture:
             "merged_at": "2024-10-20T10:00:00Z",
             "state": "closed",
             "merge_commit_sha": self.source,
-            "base": {"ref": "main", "repo": {"full_name": REPO}},
+            "base": {"ref": self.branch, "repo": {"full_name": REPO}},
             "head": {"sha": "f" * 40, "repo": {"full_name": REPO}},
         }
         self.add_run(RUN, self.intent)
@@ -293,7 +295,7 @@ class Fixture:
             "schema_version": 1,
             "consumer_repository": REPO,
             "source_sha": self.source,
-            "source_ref": "refs/heads/main",
+            "source_ref": "refs/heads/" + self.branch,
             "source_tree_sha": tree,
             "workflow_repository": CENTRAL,
             "workflow_sha": self.workflow,
@@ -323,12 +325,12 @@ class Fixture:
         self.tip = tip
         self.routes[f"repos/{REPO}"] = {
             "full_name": REPO,
-            "default_branch": "main",
+            "default_branch": self.branch,
             "archived": False,
             "disabled": False,
         }
-        self.routes[f"repos/{REPO}/git/ref/heads/main"] = {
-            "ref": "refs/heads/main",
+        self.routes[f"repos/{REPO}/git/ref/heads/{quote(self.branch, safe='')}"] = {
+            "ref": "refs/heads/" + self.branch,
             "object": {"type": "commit", "sha": tip},
         }
 

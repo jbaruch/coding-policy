@@ -19,6 +19,8 @@ import sys
 from datetime import datetime
 from typing import Any, NoReturn
 
+from urllib.parse import quote
+
 from fleet_publish_archive import ArchiveReader
 from fleet_publish_github import (
     FleetPublishLookupError,
@@ -33,6 +35,7 @@ from fleet_publish_record import (
     decode_record,
     parse_record,
     valid_repository,
+    valid_branch,
     valid_run_id,
     valid_sha,
 )
@@ -209,12 +212,13 @@ class _Evidence:
             meta.get("full_name") == self.repo
             and meta.get("archived") is False
             and meta.get("disabled") is False
-            and isinstance(branch, str)
-            and re.fullmatch(r"[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)*", branch)
-            and all(part not in (".", "..") for part in branch.split("/")),
+            and valid_branch(branch),
             "source_binding",
         )
-        ref = self.obj(f"repos/{self.repo}/git/ref/heads/{branch}", "source_binding")
+        ref = self.obj(
+            f"repos/{self.repo}/git/ref/heads/{quote(branch, safe='')}",
+            "source_binding",
+        )
         obj = _object(ref.get("object"), "source_binding")
         _need(
             ref.get("ref") == "refs/heads/" + branch

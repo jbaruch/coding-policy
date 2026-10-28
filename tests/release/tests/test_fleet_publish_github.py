@@ -158,6 +158,51 @@ class GitHubClientTests(unittest.TestCase):
             else []
         )
 
+    def test_only_canonical_native_branch_endpoints_admit_encoded_names(self):
+        from urllib.parse import quote
+
+        for branch in (
+            "release+stable",
+            "releases/stable_1.0",
+            "préprod/%literal",
+            "%2e%2e",
+            "🛠" * 1000,
+        ):
+            for prefix in ("git/ref/heads", "branches", "rules/branches"):
+                route = f"repos/jbaruch/nanoclaw-construction/{prefix}/{quote(branch, safe='')}"
+                value = {"ref": "refs/heads/" + branch}
+                self.replies({route: {"json": value}})
+                self.assertEqual(client.GitHubClient().json(route), value)
+        for suffix in (
+            "%2e%2e",
+            "%2E%2E",
+            "foo%2F..%2Fbar",
+            "%2Froot",
+            "bad%",
+            "bad%GG",
+            "bad%FF",
+            "release%2bstable",
+            "release+stable",
+        ):
+            before = len(self.calls())
+            self.refuse(
+                lambda suffix=suffix: client.GitHubClient().json(
+                    "repos/jbaruch/nanoclaw-construction/git/ref/heads/" + suffix
+                ),
+                "invalid_route",
+            )
+            self.assertEqual(len(self.calls()), before)
+        for route in (
+            "repos/jbaruch/nanoclaw-construction/git/blobs/release%2Bstable",
+            "repos/jbaruch/nanoclaw-construction/issues/%2e%2e",
+            "repos/jbaruch/nanoclaw-construction/commits/" + "a" * 2100,
+        ):
+            before = len(self.calls())
+            self.refuse(
+                lambda route=route: client.GitHubClient().json(route), "invalid_route"
+            )
+            self.assertEqual(len(self.calls()), before)
+
     def evidence(self, raw=None, *, row=None, kind="intent"):
         binary = zipped(filename=f"{kind}.json") if raw is None else raw
         metadata = artifact(name=f"fleet-publish-{kind}-v1") if row is None else row

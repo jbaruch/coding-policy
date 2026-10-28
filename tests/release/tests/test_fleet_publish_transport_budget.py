@@ -35,8 +35,8 @@ sys.exit(0 if status==200 else 1)
 """
 
 
-def graph(commits):
-    native = fixture.Fixture()
+def graph(commits, branch="main"):
+    native = fixture.Fixture(branch)
     definitions = native.files[fixture.CENTRAL, native.workflow]
     finalizer = native.commit(
         fixture.CENTRAL,
@@ -258,6 +258,46 @@ class NativeTransport(unittest.TestCase):
                 )
                 self.assertEqual(outcome, "confirmed")
                 self.assertLessEqual(client._commands, 512)
+
+    def test_actual_producer_record_resolves_nontrivial_native_branches(self):
+        scripts = fixture.SOURCE.parents[1] / "scripts"
+        with patch.object(sys, "path", [str(scripts), str(fixture.SOURCE), *sys.path]):
+            import fleet_publish as publisher
+        for branch in ("release+stable", "releases/stable_1.0", "préprod/%literal"):
+            with self.subTest(branch=branch):
+                native = graph(0, branch)
+                source_tree = native.routes[
+                    f"repos/{fixture.REPO}/git/commits/{native.source}"
+                ]["tree"]["sha"]
+                record = publisher.initial_record(
+                    fixture.REPO,
+                    native.source,
+                    "refs/heads/" + branch,
+                    source_tree,
+                    fixture.REPO,
+                    "0.1.0",
+                    "0.1.1",
+                    {
+                        "GITHUB_REPOSITORY": fixture.CENTRAL,
+                        "GITHUB_EVENT_NAME": "workflow_dispatch",
+                        "GITHUB_REF": "refs/heads/main",
+                        "GITHUB_WORKFLOW_REF": fixture.CENTRAL
+                        + "/"
+                        + publisher.CENTRAL_WORKFLOW
+                        + "@refs/heads/main",
+                        "GITHUB_RUN_ATTEMPT": "1",
+                        "GITHUB_SHA": native.workflow,
+                        "GITHUB_RUN_ID": fixture.RUN,
+                    },
+                )
+                self.assertEqual(record, native.intent)
+                native.records[fixture.RUN, "intent"] = record
+                client = fixture.github_owner.ResolutionGitHubClient()
+                with self.bind(native):
+                    result = fixture.resolver.resolve(
+                        client, fixture.REPO, native.source
+                    )
+                self.assertEqual(result["source_ref"], "refs/heads/" + branch)
 
     def test_base_budget_stays128_and_reader_exhaustion_is_a_refusal(self):
         native = graph(4)

@@ -34,6 +34,7 @@ from fleet_publish_record import (  # noqa: E402 - trusted sibling schema owner.
     decode_record,
     parse_record,
     valid_repository,
+    valid_branch,
     valid_sha,
     valid_run_id,
 )
@@ -542,9 +543,7 @@ def default_tip(github: GitHub, repo: str) -> tuple[str, str]:
     )
     branch = metadata.get("default_branch")
     require(
-        isinstance(branch, str)
-        and 0 < len(branch) <= 1000
-        and not any(ord(c) < 32 for c in branch),
+        valid_branch(branch),
         "Default branch is unavailable.",
     )
     if not isinstance(branch, str):
@@ -554,7 +553,9 @@ def default_tip(github: GitHub, repo: str) -> tuple[str, str]:
     )
     sha = native_object(ref.get("object")).get("sha")
     require(
-        valid_sha(sha) and native_object(ref.get("object")).get("type") == "commit",
+        ref.get("ref") == "refs/heads/" + branch
+        and valid_sha(sha)
+        and native_object(ref.get("object")).get("type") == "commit",
         "Default tip is not a native commit.",
     )
     if not isinstance(sha, str):
@@ -793,8 +794,39 @@ def gate_source(github: GitHub, repo: str, sha: str, ref: str) -> str:
                 latest[login] = review
                 latest_order[login] = order
         require(
-            latest and all(r.get("state") == "APPROVED" for r in latest.values()),
-            "Both current-head independent review lanes must approve the merged PR.",
+            latest, "Both current-head independent review lanes must post a verdict."
+        )
+        # Canonical per-login aggregation: no other identity can hide a live
+        # change request. Otherwise the newest posted lane verdict wins.
+        require(
+            not any(r.get("state") == "CHANGES_REQUESTED" for r in latest.values()),
+            "A trusted current-head review still requests changes.",
+        )
+        chosen_login = max(latest_order, key=lambda login: latest_order[login])
+        chosen = latest[chosen_login]
+        state = chosen.get("state")
+        if lane == "policy" and state == "DISMISSED":
+            timeline = github.pages(f"repos/{repo}/issues/{pull['number']}/timeline")
+            if any(
+                event.get("event") == "review_dismissed"
+                and isinstance(event.get("dismissed_review"), dict)
+                and type(event["dismissed_review"].get("review_id")) is int
+                and event["dismissed_review"]["review_id"] == chosen["id"]
+                and isinstance(event["dismissed_review"].get("dismissal_message"), str)
+                and event["dismissed_review"]["dismissal_message"].startswith(
+                    "JUDGE-RULED:"
+                )
+                for event in timeline
+            ):
+                state = "RULED"
+        require(
+            state
+            in (
+                ("APPROVED", "COMMENTED", "RULED")
+                if lane == "policy"
+                else ("APPROVED", "COMMENTED")
+            ),
+            "Both current-head independent review lanes require a canonical nonblocking verdict.",
         )
     checks = github.pages(f"repos/{repo}/commits/{head}/check-runs", "check_runs")
     statuses = github.pages(f"repos/{repo}/commits/{head}/status", "statuses")

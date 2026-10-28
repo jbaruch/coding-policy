@@ -174,6 +174,58 @@ class FleetRecordTests(unittest.TestCase):
                 with self.assertRaises(owner.FleetRecordError):
                     owner.decode_record(raw)
 
+    def test_shared_native_branch_validator_matches_git_ref_rules(self):
+        import subprocess
+
+        branches = (
+            "main",
+            "release+stable",
+            "releases/stable_1.0",
+            "préprod/%literal",
+            "%2e%2e",
+            "release#tag",
+            "release,stable",
+            "-native-ref",
+            "@",
+            "",
+            "/root",
+            "tail/",
+            "a//b",
+            "a/../b",
+            ".hidden",
+            "a.lock",
+            "a/thing.lock",
+            "bad space",
+            "a..b",
+            "a@{b",
+            "a~b",
+            "a^b",
+            "a:b",
+            "a?b",
+            "a*b",
+            "a[b",
+            "a\\b",
+            "a.",
+            "a\n",
+            "a\x7f",
+        )
+        for branch in branches:
+            with self.subTest(branch=branch):
+                expected = (
+                    subprocess.run(
+                        ["git", "check-ref-format", "refs/heads/" + branch],
+                        capture_output=True,
+                        check=False,
+                    ).returncode
+                    == 0
+                )
+                self.assertEqual(owner.valid_branch(branch), expected)
+                self.assertEqual(
+                    owner.valid_source_ref("refs/heads/" + branch), expected
+                )
+        self.assertFalse(owner.valid_branch("a" * 1001))
+        self.assertFalse(owner.valid_branch("\ud800"))
+
 
 if __name__ == "__main__":
     unittest.main()
