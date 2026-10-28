@@ -688,6 +688,11 @@ class PublisherTests(PublisherFixture):
             ("ordinary_dismissal", False),
             ("quality_dismissal", False),
             ("pending", False),
+            ("raw_ruled", False),
+            ("newer_stale_policy", False),
+            ("newer_stale_quality", False),
+            ("older_stale_policy", True),
+            ("other_login_stale_block", False),
         )
         for mode, accepted in cases:
             with self.subTest(mode=mode):
@@ -710,6 +715,30 @@ class PublisherTests(PublisherFixture):
                         submitted_at="2026-10-27T00:59:00Z",
                         user={"login": "github-actions[bot]"},
                     )
+                    native.native_reviews.append(old)
+                elif mode in (
+                    "newer_stale_policy",
+                    "newer_stale_quality",
+                    "older_stale_policy",
+                    "other_login_stale_block",
+                ):
+                    old = deepcopy(
+                        native.native_reviews[1]
+                        if mode == "newer_stale_quality"
+                        else policy
+                    )
+                    old.update(
+                        id=21,
+                        commit_id="f" * 40,
+                        submitted_at="2026-10-27T00:59:00Z"
+                        if mode in ("older_stale_policy", "other_login_stale_block")
+                        else "2026-10-27T01:04:00Z",
+                    )
+                    if mode == "other_login_stale_block":
+                        old.update(
+                            state="CHANGES_REQUESTED",
+                            user={"login": "github-actions[bot]"},
+                        )
                     native.native_reviews.append(old)
                 elif mode == "same_login_superseded_block":
                     old = deepcopy(policy)
@@ -747,7 +776,7 @@ class PublisherTests(PublisherFixture):
                 elif mode == "quality_dismissal":
                     native.native_reviews[1]["state"] = "DISMISSED"
                 else:
-                    policy["state"] = "PENDING"
+                    policy["state"] = "RULED" if mode == "raw_ruled" else "PENDING"
                 if accepted:
                     publisher.gate_source(native, REPO, SOURCE, "refs/heads/main")
                 else:
@@ -765,6 +794,109 @@ class PublisherTests(PublisherFixture):
                     )
                     else 0,
                 )
+
+    def test_real_timeline_pages_allow_idless_events_before_ruled_dismissal(self):
+        timeline = f"repos/{REPO}/issues/7/timeline"
+        opaque = [
+            {
+                "event": "cross-referenced",
+                "actor": {"login": "fixture"},
+                "created_at": "2026-10-27T01:02:00Z",
+                "source": {"type": "issue", "issue": {"number": 9}},
+            },
+            {"event": "line-commented", "comments": []},
+            {"event": "commit-commented", "comments": []},
+        ]
+        first = [
+            {"id": number, "event": "commented"} for number in range(1, 98)
+        ] + opaque
+        final = [
+            {
+                "id": 900,
+                "event": "review_dismissed",
+                "dismissed_review": {
+                    "review_id": 11,
+                    "dismissal_message": "JUDGE-RULED: actual fixture decision",
+                },
+            }
+        ]
+
+        class NativeTimeline(NativeGitHub):
+            def pages(self, route, key=None):
+                if route == timeline:
+                    return publisher.GitHub.pages(self, route, key)
+                return super().pages(route, key)
+
+            def api(self, path, payload=None, **kwargs):
+                if path.startswith(timeline + "?"):
+                    self.calls.append((path, payload))
+                    return (
+                        first
+                        if parse_qs(urlsplit(path).query)["page"] == ["1"]
+                        else final
+                    )
+                return super().api(path, payload, **kwargs)
+
+        native = NativeTimeline()
+        native.native_reviews[0]["state"] = "DISMISSED"
+        publisher.gate_source(native, REPO, SOURCE, "refs/heads/main")
+        calls = [route for route, _ in native.calls if route.startswith(timeline)]
+        self.assertEqual(
+            calls,
+            [timeline + "?per_page=100&page=1", timeline + "?per_page=100&page=2"],
+        )
+        self.assertFalse(any(route == "graphql" for route, _ in native.calls))
+
+    def test_timeline_exception_is_exact_bounded_and_never_admits_missing_dismissal_identity(
+        self,
+    ):
+        route = f"repos/{REPO}/issues/7/timeline"
+        opaque = {
+            "event": "cross-referenced",
+            "created_at": "2026-10-27T01:02:00Z",
+            "source": {"type": "issue"},
+        }
+        for response in (
+            {},
+            [None],
+            [{}],
+            [{"event": 1}],
+            [{"event": "cross-referenced", "id": True}],
+            [
+                {
+                    "event": "review_dismissed",
+                    "dismissed_review": {
+                        "review_id": 11,
+                        "dismissal_message": "JUDGE-RULED: fixture",
+                    },
+                }
+            ],
+        ):
+            with self.subTest(response=response):
+                native = publisher.GitHub()
+                with patch.object(native, "api", return_value=response):
+                    with self.assertRaises(publisher.PublishRefused):
+                        native.pages(route)
+        native = publisher.GitHub()
+        with patch.object(native, "api", return_value=[opaque]) as get:
+            self.assertEqual(native.pages(route), [opaque])
+            self.assertEqual(get.call_count, 1)
+            for other in (
+                route + "-extra",
+                route + "?filter=all",
+                f"repos/{REPO}/pulls/7/reviews",
+            ):
+                with self.assertRaises(publisher.PublishRefused):
+                    native.pages(other)
+        with patch.object(native, "api", return_value=[opaque] * 100) as get:
+            with self.assertRaises(publisher.PublishRefused):
+                native.pages(route)
+            self.assertEqual(get.call_count, 10)
+        with patch.object(
+            native, "api", return_value=[{"id": 1, "event": "commented"}] * 2
+        ):
+            with self.assertRaises(publisher.PublishRefused):
+                native.pages(route)
 
     def test_native_nontrivial_default_branches_prepare_claim_and_confirm(self):
         for branch in ("release+stable", "releases/stable_1.0", "préprod/%literal"):

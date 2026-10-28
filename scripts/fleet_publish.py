@@ -364,6 +364,14 @@ class GitHub:
         values: list[Any] = []
         identities: set[str] = set()
         expected_total: int | None = None
+        timeline = (
+            key is None
+            and re.fullmatch(
+                r"repos/jbaruch/[A-Za-z0-9][A-Za-z0-9_.-]{0,99}/issues/[1-9][0-9]*/timeline",
+                route,
+            )
+            is not None
+        )
         for page in range(1, 11):
             joiner = "&" if "?" in route else "?"
             response = self.api(f"{route}{joiner}per_page=100&page={page}")
@@ -402,6 +410,24 @@ class GitHub:
                     if type(native_id) is int and native_id > 0
                     else (sha if valid_sha(sha) else None)
                 )
+                if timeline:
+                    event = item.get("event")
+                    require(
+                        isinstance(event, str)
+                        and 0 < len(event) <= 100
+                        and not any(ord(c) < 32 or ord(c) == 127 for c in event),
+                        "Native timeline event is malformed.",
+                    )
+                    if event == "review_dismissed":
+                        require(
+                            type(native_id) is int and native_id > 0,
+                            "Native dismissal event identity is missing.",
+                        )
+                    elif "id" not in item and "sha" not in item:
+                        # Timeline-only event shapes (e.g. cross-references) have
+                        # no top-level identity. They grant no dismissal proof;
+                        # retain them and the existing page/count bounds.
+                        continue
                 if "/rules/branches/" in route:
                     ruleset_id, kind = item.get("ruleset_id"), item.get("type")
                     source_type, source_name = (
@@ -773,7 +799,7 @@ def gate_source(github: GitHub, repo: str, sha: str, ref: str) -> str:
         latest: dict[str, Any] = {}
         latest_order: dict[str, tuple[datetime, int]] = {}
         for login, review in attributed:
-            if login not in logins or review.get("commit_id") != head:
+            if login not in logins:
                 continue
             body = review.get("body")
             require(
@@ -796,18 +822,29 @@ def gate_source(github: GitHub, repo: str, sha: str, ref: str) -> str:
         require(
             latest, "Both current-head independent review lanes must post a verdict."
         )
-        # Canonical per-login aggregation: no other identity can hide a live
-        # change request. Otherwise the newest posted lane verdict wins.
-        require(
-            not any(r.get("state") == "CHANGES_REQUESTED" for r in latest.values()),
-            "A trusted current-head review still requests changes.",
+        # Canonical ordering: latest per login across every commit, then any
+        # live change request wins across identities, then bind to the head.
+        # Filtering stale reviews earlier could resurrect an older approval.
+        blocking = [
+            login
+            for login, value in latest.items()
+            if value.get("state") == "CHANGES_REQUESTED"
+        ]
+        chosen_login = (
+            blocking[0]
+            if blocking
+            else max(latest_order, key=lambda login: latest_order[login])
         )
-        chosen_login = max(latest_order, key=lambda login: latest_order[login])
         chosen = latest[chosen_login]
+        require(
+            chosen.get("commit_id") == head,
+            "The selected canonical lane verdict does not review the merged PR head.",
+        )
         state = chosen.get("state")
+        verified_ruled = False
         if lane == "policy" and state == "DISMISSED":
             timeline = github.pages(f"repos/{repo}/issues/{pull['number']}/timeline")
-            if any(
+            verified_ruled = any(
                 event.get("event") == "review_dismissed"
                 and isinstance(event.get("dismissed_review"), dict)
                 and type(event["dismissed_review"].get("review_id")) is int
@@ -817,15 +854,9 @@ def gate_source(github: GitHub, repo: str, sha: str, ref: str) -> str:
                     "JUDGE-RULED:"
                 )
                 for event in timeline
-            ):
-                state = "RULED"
+            )
         require(
-            state
-            in (
-                ("APPROVED", "COMMENTED", "RULED")
-                if lane == "policy"
-                else ("APPROVED", "COMMENTED")
-            ),
+            state in ("APPROVED", "COMMENTED") or verified_ruled,
             "Both current-head independent review lanes require a canonical nonblocking verdict.",
         )
     checks = github.pages(f"repos/{repo}/commits/{head}/check-runs", "check_runs")

@@ -52,7 +52,7 @@ TRUSTED_PRODUCERS: tuple[dict[str, str], ...] = (
     {
         ".github/workflows/fleet-publish.yml": "12205f89e681d02f53f85d1ef55e450c579f6196",
         ".github/workflows/fleet-publish-finalize.yml": "a6dbeea9400979c59a7608d7f16eb8156e30e4e1",
-        "scripts/fleet_publish.py": "54d91cda81f041b4dcd0fefbb51e80d03cc99bd7",
+        "scripts/fleet_publish.py": "b654076a9cad81bd2181cd0998f6a835f572091b",
         "scripts/fleet_publish_workflow.py": "64792b8f218dfe3c012f01691f01fc7f938faf9e",
         "scripts/fleet_publish_validate.py": "7d450d115f6a661f3a0e1d3d8ab1a85451bb7a47",
         "scripts/fleet_publish_targets.py": "541634a66c1a86dfcb9b2667878eb108216b6728",
