@@ -22,7 +22,7 @@
 # The harness drops `set -e` to aggregate results (rules/error-handling.md
 # aggregate-reporting carve-out).
 #
-# Run: bash lib/tests/test_bounded_run.sh
+# Run: bash tests/release-lib/tests/test_bounded_run.sh
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -46,12 +46,12 @@ main() {
   command -v python3 >/dev/null || die "python3 is required"
   TMP="$(mktemp -d)" || die "mktemp failed"
   trap cleanup EXIT
-  local out rc
+  local out rc payload="fixed value with 'quote' and * glob"
 
   echo "1. stdin, stdout and the exit code pass through"
   rc=0
-  out="$(printf 'hello\n' | bash "$RUNNER" "$HOUR" bash -c 'cat; exit 7' 2>"$TMP/1.err")" || rc=$?
-  if [[ $rc -eq 7 && "$out" == hello && ! -s "$TMP/1.err" ]]; then pass
+  out="$(printf '%s\n' "$payload" | bash "$RUNNER" "$HOUR" bash -c 'cat; exit 7' 2>"$TMP/1.err")" || rc=$?
+  if [[ $rc -eq 7 && "$out" == "$payload" && ! -s "$TMP/1.err" ]]; then pass
   else fail "pass-through: rc=$rc out=$out err=$(cat "$TMP/1.err")"; fi
 
   echo "2. an ended budget is exit 124, and the command's children stop with it"

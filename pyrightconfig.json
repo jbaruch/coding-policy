@@ -23,6 +23,7 @@
     "skills/release/origin-repo.py",
     "skills/release/existing-pr.py",
     "skills/release/stamp-changelog.py",
+    "skills/release/fleet_publish_record.py",
     "tests/adopt-fork-pr/tests/test_skill_repo_binding.py",
     "tests/release-lib/tests/test_prune_result.py",
     "tests/release/tests/test_check_changelog_placement.py",
@@ -32,8 +33,33 @@
     "tests/release/tests/test_pr_create_repo_binding.py",
     "tests/release/tests/test_publish_acr.py",
     "tests/release/tests/test_stamp_changelog.py",
+    "tests/release/tests/test_fleet_publish_record.py",
     ".github/reviewer_failure.py",
-    ".github/tests/test_reviewer_failure.py"
+    ".github/tests/test_reviewer_failure.py",
+    "scripts/fleet_publish.py",
+    "scripts/fleet_publish_targets.py",
+    "scripts/fleet_publish_validate.py",
+    "scripts/fleet_publish_workflow.py",
+    "scripts/tests/test_fleet_publish.py",
+    "skills/release/fleet_publish_github.py",
+    "tests/release/tests/test_fleet_publish_github.py",
+    "skills/release/fleet_publish_confirm.py",
+    "skills/release/fleet_publish_wait.py",
+    "tests/release/tests/test_fleet_publish_confirm.py",
+    "tests/release/tests/test_fleet_publish_wait.py",
+    "skills/release/fleet_publish_producer.py",
+    "skills/release/fleet_publish_resolver.py",
+    "tests/release/tests/test_fleet_publish_producer.py",
+    "tests/release/tests/test_fleet_publish_resolver.py",
+    "scripts/tests/test_fleet_publish_workflow.py",
+    "scripts/fleet_publish_grant_probe.py",
+    "scripts/tests/test_fleet_publish_grant_probe.py",
+    "skills/release/fleet_publish_archive.py",
+    "tests/release/tests/test_fleet_publish_archive.py",
+    "scripts/fleet_publish_archive_write.py",
+    "scripts/tests/test_fleet_publish_archive_write.py",
+    "scripts/tests/test_fleet_publish_poll_cache.py",
+    "tests/release/tests/test_fleet_publish_transport_budget.py"
   ],
   "executionEnvironments": [
     {
@@ -62,5 +88,9 @@
     }
   ],
   "pythonVersion": "3.11",
-  "typeCheckingMode": "standard"
+  "typeCheckingMode": "standard",
+  "extraPaths": [
+    "skills/release",
+    "scripts"
+  ]
 }

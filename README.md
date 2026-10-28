@@ -83,7 +83,13 @@ Tessl imports. Combined native-session acceptance lives in
 | [adopt-fork-pr](skills/adopt-fork-pr/SKILL.md) | Classify a PR by number. Same-repo PRs pass through to the reviewer; fork PRs get adopted into the base repo as a same-repo PR, preserving the contributor's commits. |
 | [migrate-to-plugin](skills/migrate-to-plugin/SKILL.md) | Migrate a legacy `tile.json` plugin to the `.tessl-plugin/plugin.json` form: runs `tessl plugin migrate`, renames `.tileignore`, removes the obsolete `tile.json`, re-lints, then reconciles residual "tile" wording to "plugin" while preserving contract surfaces. |
 
-### Hooks
+### Central fleet publication
+
+The opt-in [central publisher contract](skills/release/references/fleet-publication.md) keeps Tessl and App credentials in `coding-policy`. Reviewed consumer enrollment selects a data-only package; source-bound intent, claim and receipt readers retain each publication and its moderation result. Activation stays disabled until the App permissions and consumer publication handoff are verified.
+
+The scheduled backstop runs every 15 minutes and examines at most two enrolled consumers per tick. One poll has a shared 200-request central API budget, including native context, paginated artifact reads and up to two dispatches. App-scoped repository discovery and consumer reads use the installation's separate quota and their existing pagination and per-command bounds; they are not charged to the central-token budget. Budget-deferred consumers remain explicit; they are never treated as absent or successfully published. The poll caches only immutable Git objects and comparisons for its own lifetime; native refs, runs, jobs, artifacts, reviews and publication gates stay fresh. The verified native scheduled run creation time selects a UTC quarter-hour slot; child dispatch counts do not change rotation. At 24 stable enrollments and an uninterrupted fifteen-minute schedule, every consumer receives a first proof slot within 24 ticks (six hours); a second slot can complete earlier. Missed or delayed cron runs can defer that coverage. This is backstop latency, not a fifteen-minute consumer delivery guarantee. Explicit selected dispatch remains independent and must pass the full current source, claim and publication checks.
+
+## Hooks
 
 The release skill owns the hooks and their packaged [throttle-stamp schema](skills/release/state-schema.md).
 

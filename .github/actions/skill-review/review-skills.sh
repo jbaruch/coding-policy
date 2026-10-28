@@ -302,6 +302,43 @@ resolve_publish_marker() {
   return 3
 }
 
+# Absolute paths are a single source-owned central projection mode, not a
+# general filesystem selector. Relative consumer behavior stays unchanged.
+validate_skills_directory() {
+  case "$SKILLS_DIR" in
+    /*)
+      if [ "$EVENT_NAME" != "workflow_dispatch" ] || [ -n "$BASE_OVERRIDE" ]; then
+        echo "::error::Absolute skill review requires the central review-all mode." >&2
+        return 2
+      fi
+      case "${RUNNER_TEMP:-}/" in
+        /*) ;;
+        *) echo "::error::Native runner temporary root is required." >&2; return 2 ;;
+      esac
+      case "${RUNNER_TEMP:-}/" in
+        /|*'//'*|*'/./'*|*'/../'*)
+          echo "::error::Native runner temporary root must be canonical." >&2
+          return 2 ;;
+      esac
+      if [ "$SKILLS_DIR" != "$RUNNER_TEMP/fleet-publish/package/skills" ]; then
+        echo "::error::Absolute skill review must select the fixed central projection." >&2
+        return 2
+      fi
+      local current="" part
+      local -a parts=()
+      IFS='/' read -r -a parts <<< "$SKILLS_DIR"
+      for part in "${parts[@]}"; do
+        [ -n "$part" ] || continue
+        current="$current/$part"
+        if [ -L "$current" ] || [ ! -d "$current" ]; then
+          echo "::error::Projected review directories must be existing directories without links." >&2
+          return 2
+        fi
+      done
+      ;;
+  esac
+}
+
 # Resolve the diff base and echo the changed skill names (one per line).
 # BASE_OVERRIDE wins; else "" (review every skill) for workflow_dispatch /
 # initial push; else the last successful-publish marker (#271). An
@@ -315,6 +352,7 @@ resolve_publish_marker() {
 # flow, or before the first bump exists) the fail-safe is to review EVERY skill,
 # never to narrow to event.before (context-artifacts Mandatory Review).
 identify_skills() {
+  validate_skills_directory || return 2
   local base
   if [ -n "$BASE_OVERRIDE" ]; then
     base="$BASE_OVERRIDE"

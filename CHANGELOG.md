@@ -1,3 +1,7 @@
+### Keep fleet publication credentials in coding-policy
+
+Add a centrally executing Tessl publisher for reviewed same-owner consumers. Each merged source receives its own durable claim, immutable intent and source-bound receipt; historical queued merges preserve newer code and changelog entries. A create-only central source ledger precedes effects; a separate completion finalizer archives native outcomes before Actions retention can remove the original run and artifacts. Available evidence must agree; missing or uncertain proof holds the queue instead of replaying a publication. Moderation recovery performs readback only. Consumer publication needs no copied Tessl credential or dispatch token. Both distribution manifests advance together to 0.5.11.
+
 ## 0.5.10 — 2026-10-26
 
 ### Update the Codex acceptance CI Python pin (#789)

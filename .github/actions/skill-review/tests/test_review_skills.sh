@@ -45,8 +45,15 @@ PASS_COUNT=0
 # Explicit setup checks under `set +e`: a failed mktemp/mkdir would otherwise
 # leave a bad fixture path and the assertions below would no longer mean what
 # they report (rules/error-handling.md setup-failure clause).
-FIXTURE=$(mktemp -d -t skill-review-test.XXXXXX) \
+FIXTURE_ROOT=$(mktemp -d -t skill-review-test.XXXXXX) \
   || { echo "fatal: could not create fixture dir" >&2; exit 2; }
+# Absolute review-all fixtures use the canonical native runner-temp projection.
+RUNNER_TEMP=$(cd "$FIXTURE_ROOT" && pwd -P) \
+  || { echo "fatal: could not resolve fixture root" >&2; exit 2; }
+export RUNNER_TEMP
+FIXTURE="$RUNNER_TEMP/fleet-publish/package/skills"
+mkdir -p "$FIXTURE" \
+  || { echo "fatal: could not create projection fixture" >&2; exit 2; }
 # Workspace-resolution fixtures live OUTSIDE $FIXTURE: that dir doubles as
 # SKILLS_DIR, so a subdirectory there is discovered as a skill and would show
 # up in identify_skills' listing.
@@ -54,7 +61,7 @@ WS_FIXTURE=$(mktemp -d -t skill-review-ws.XXXXXX) \
   || { echo "fatal: could not create workspace fixture dir" >&2; exit 2; }
 cleanup_tmp() {
   local dir
-  for dir in "${FIXTURE:-}" "${WS_FIXTURE:-}"; do
+  for dir in "${FIXTURE_ROOT:-}" "${WS_FIXTURE:-}"; do
     if [[ -n "$dir" ]] && ! rm -rf "$dir"; then
       echo "warning: could not remove temp dir $dir — remove it by hand" >&2
     fi

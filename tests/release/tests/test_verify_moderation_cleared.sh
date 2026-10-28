@@ -36,7 +36,7 @@
 # indexes into (file `N` = the Nth call's response; missing N falls back to
 # the highest-numbered file so "always pending" needs a single fixture).
 #
-# Run: bash skills/release/tests/test_verify_moderation_cleared.sh
+# Run: bash tests/release/tests/test_verify_moderation_cleared.sh
 # Exit 0 on all-pass; non-zero with a per-test diagnostic on failure.
 
 set -uo pipefail
@@ -53,6 +53,10 @@ export VERIFY_MODERATION_BUDGET_SEC=4
 # shellcheck disable=SC1090  # ShellCheck cannot resolve the dynamically constructed source path.
 source "$SCRIPT"
 set +e
+# Sourced outcome fixtures use a fixed command clock; their sleep stub and
+# owned backoff counters alone advance time. Subprocess cases below exercise
+# the actual implementation, with explicit clock/expiry controls where needed.
+update_elapsed() { return 0; }
 
 FAIL_COUNT=0
 PASS_COUNT=0
@@ -105,6 +109,19 @@ tessl() {
     done
   fi
   [[ -z "$resp" || ! -f "$resp" ]] && { echo "mock: no queued response for call $n" >&2; return 1; }
+  if [[ "$(head -1 "$resp")" == "__STALL__" ]]; then
+    # The actual bounded runner is this Bash command's parent. Deliver its
+    # documented expiry signal, then stall: no wall-clock assertion or wait
+    # decides the test. A partial pass must not become moderation success.
+    printf '{"data":{"attributes":{"moderationStatus":"pass"}}}'
+    if ! kill -ALRM "$PPID"; then
+      echo 'mock: cannot signal owned registry runner' >&2
+      return 2
+    fi
+    /bin/sleep 60
+    echo 'mock: stalled registry escaped retirement' >&2
+    return 0
+  fi
   if [[ "$(head -1 "$resp")" == "__FAIL__" ]]; then
     tail -n +2 "$resp" >&2
     return 1
@@ -394,6 +411,61 @@ if [[ $rc -eq 1 ]] && echo "$out" | jq -e '.ok == false and .attempts == 5 and .
   pass "subprocess run: polls the whole budget, emits the JSON envelope on rc 1"
 else
   fail "subprocess run (rc=$rc out=$out)"
+fi
+
+# --- 16. A late successful read is not a successful moderation wait. ---
+# Execute the actual shell helper with only its clock observation frozen:
+# entry is t=0; the completed read is t=5 under the fixed four-second budget.
+# The command itself returned valid pass JSON, so this exercises the helper's
+# post-read deadline check independently of the runner's timeout status.
+reset_mocks
+queue 1 "$(body_json pass true '')"
+out=$(SCRIPT="$SCRIPT" bash -c '
+  source "$SCRIPT"
+  tick=0
+  update_elapsed() {
+    tick=$(( tick + 1 ))
+    if (( tick == 1 )); then elapsed=0; else elapsed=5; fi
+  }
+  main acme widget 1.2.3
+' 2>"$TMPDIR_TEST/late-read.err"); rc=$?
+if [[ $rc -eq 2 && -z "$out" && "$(count_calls)" == "1" ]] && grep -q 'remaining registry read budget' "$TMPDIR_TEST/late-read.err"; then
+  pass "late successful registry read: exit 2, no verdict, no retry"
+else
+  fail "late successful read (rc=$rc out=$out calls=$(count_calls))"
+fi
+
+# --- 17. A genuinely stalled command is terminated at the runner boundary. ---
+reset_mocks
+queue 1 '__STALL__'
+out=$(bash "$SCRIPT" acme widget 1.2.3 2>"$TMPDIR_TEST/stalled-read.err"); rc=$?
+if [[ $rc -eq 2 && -z "$out" && "$(count_calls)" == "1" ]] && grep -q 'discard its partial response' "$TMPDIR_TEST/stalled-read.err" && ! grep -q 'escaped retirement' "$TMPDIR_TEST/stalled-read.err"; then
+  pass "stalled registry read: command retired, partial pass discarded, exit 2"
+else
+  fail "stalled read (rc=$rc out=$out calls=$(count_calls))"
+fi
+
+# --- 18. Each actual runner receives the remaining budget, never a fresh one. ---
+reset_mocks
+queue 1 "$(body_json pending '' '')"
+queue 2 "$(body_json pending '' '')"
+queue 3 "$(body_json pass true '')"
+out=$(SCRIPT="$SCRIPT" BUDGET_TRACE="$TMPDIR_TEST/budgets" bash -c '
+  source "$SCRIPT"
+  # Fixed command time: only the owned 1,2 backoff schedule consumes budget.
+  update_elapsed() { return 0; }
+  bash() {
+    if [[ "$1" == */lib/bounded-run.sh ]]; then
+      printf "%s\n" "$2" >> "$BUDGET_TRACE"
+    fi
+    "$BASH" "$@"
+  }
+  main acme widget 1.2.3
+' 2>"$TMPDIR_TEST/clipped-read.err"); rc=$?
+if [[ $rc -eq 0 ]] && echo "$out" | jq -e '.ok == true and .attempts == 3 and .elapsed_seconds == 3' >/dev/null 2>&1 && [[ "$(cat "$TMPDIR_TEST/budgets")" == $'4\n3\n1' ]]; then
+  pass "registry runner budgets shrink across backoff: 4,3,1"
+else
+  fail "remaining read budgets (rc=$rc out=$out error=$(cat "$TMPDIR_TEST/clipped-read.err") budgets=$(cat "$TMPDIR_TEST/budgets"))"
 fi
 
 echo

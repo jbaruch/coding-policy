@@ -1,0 +1,29 @@
+name: Finalize central fleet publication evidence
+
+# A differently named workflow avoids self-triggered completion chains.
+# Original artifacts/native facts are read while fresh. No publication effect.
+on:
+  workflow_run:
+    workflows: ['Central fleet publish']
+    types: [completed]
+
+permissions:
+  contents: read
+
+jobs:
+  archive:
+    if: github.repository == 'jbaruch/coding-policy' && github.ref == 'refs/heads/main' && github.event.workflow_run.event == 'workflow_dispatch' && github.event.workflow_run.head_branch == 'main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write # fixed create-only central evidence tags, never main
+      actions: read # actual completed publisher run/attempt/jobs/artifacts
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Archive actual completed publisher evidence
+        env:
+          GH_TOKEN: ${{ github.token }}
+          FLEET_CENTRAL_TOKEN: ${{ github.token }}
+        run: python3 scripts/fleet_publish_archive_write.py

@@ -52,7 +52,10 @@ main() {
   fi
   local program
   # The program is an argument, never stdin: stdin belongs to the command.
-  program="$(cat <<'PY'
+  # Assignment context preserves whitespace/globs without outer quotes. Bash
+  # 3.2 misparses apostrophes in this quoted heredoc when the substitution is
+  # itself double-quoted; keep the Python program unchanged across shells.
+  program=$(cat <<'PY'
 import os
 import signal
 import subprocess
@@ -146,7 +149,7 @@ except Expired:
 # A command killed by a signal exits 128 + that signal, as a shell reports it.
 sys.exit(code if code >= 0 else 128 - code)
 PY
-)"
+)
   exec python3 -c "$program" "$KILL_GRACE_SEC" "$@"
 }
 

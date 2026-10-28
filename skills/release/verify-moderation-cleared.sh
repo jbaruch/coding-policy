@@ -13,8 +13,10 @@
 #     .data.attributes.moderationError     (non-null => blocked)
 #
 # Backoff: the per-attempt delay starts at BASE_DELAY_SEC and doubles each
-# attempt, capped at MAX_DELAY_SEC; the loop stops once cumulative sleep
-# would exceed BUDGET_SEC. Constants below; override via the matching
+# attempt, capped at MAX_DELAY_SEC; the loop stops once elapsed time plus
+# the next sleep would exceed BUDGET_SEC. Each registry read is bounded by
+# the remaining budget, including time already spent in reads and backoff.
+# Constants below; override via the matching
 # env vars (used by the test harness to keep runs fast).
 #
 # Transient fetch retry: a non-zero `tessl api` exit is retried inside the
@@ -53,6 +55,7 @@ BUDGET_SEC="${VERIFY_MODERATION_BUDGET_SEC:-600}"
 # inside the backoff loop rather than aborting the whole moderation wait; a
 # genuinely persistent failure still exits 2 fast.
 FETCH_RETRY_MAX="${VERIFY_MODERATION_FETCH_RETRY_MAX:-3}"
+MODERATION_BOUNDED_RUN="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/bounded-run.sh"
 
 # Terminal "blocked" moderation states — fast-fail without waiting out the
 # budget. Anything not in here and not "pass" is treated as still-pending
@@ -138,6 +141,19 @@ advance_backoff() {
   fi
 }
 
+pending_at_budget() {
+  emit_and_exit "false" \
+    "moderation still pending for ${workspace}/${tile}@${version} (status=${status:-pending}) after ${attempts} check(s) and ${elapsed}s — budget ${BUDGET_SEC}s exhausted; the release is NOT confirmed. Re-run verify-moderation-cleared.sh ${workspace} ${tile} ${version} to keep waiting, or inspect the registry if it stays pending" \
+    "${status:-}" "$version" "$attempts" "$elapsed" 1
+}
+
+# Include real command/parse time without double-counting real sleep. The
+# existing elapsed schedule also remains meaningful when tests stub sleep.
+update_elapsed() {
+  local observed=$(( SECONDS - started_seconds ))
+  if (( observed > elapsed )); then elapsed="$observed"; fi
+}
+
 main() {
   if [[ $# -ne 3 ]]; then
     echo "usage: $0 <workspace> <plugin> <version>" >&2
@@ -164,6 +180,7 @@ main() {
 
   local endpoint="v1/tiles/${workspace}/${tile}/versions/${version}"
   local delay="$BASE_DELAY_SEC" elapsed=0 attempts=0 fetch_failures=0
+  local started_seconds="$SECONDS" remaining read_rc status=""
   err_file=$(mktemp) || { echo "error: mktemp failed — cannot run verify-moderation-cleared.sh without writable TMPDIR" >&2; exit 2; }
   # Named handler ending `return 0` — the EXIT trap's final command status
   # becomes the script's exit status, so a failing `rm` would rewrite the
@@ -171,6 +188,15 @@ main() {
   trap cleanup_err_file EXIT
 
   while :; do
+    update_elapsed
+    remaining=$(( BUDGET_SEC - elapsed ))
+    if (( remaining <= 0 )); then
+      if (( fetch_failures > 0 )); then
+        echo "error: registry read budget is exhausted — re-run once tessl is reachable; the release is NOT confirmed" >&2
+        exit 2
+      fi
+      pending_at_budget
+    fi
     attempts=$(( attempts + 1 ))
 
     # Separate stdout (the JSON body) from stderr so a tessl warning can't
@@ -182,7 +208,20 @@ main() {
     # only after FETCH_RETRY_MAX CONSECUTIVE failures, or if the budget runs
     # out first — a persistent tool/auth/network fault, not a missing version.
     local body
-    if ! body=$(tessl api "$endpoint" 2>"$err_file"); then
+    read_rc=0
+    # Bash preserves exported test functions; in production it resolves the
+    # same tessl CLI. The co-shipped runner retires the entire command group.
+    if body=$(bash "$MODERATION_BOUNDED_RUN" "$remaining" bash -c 'tessl api "$1"' -- "$endpoint" 2>"$err_file"); then
+      read_rc=0
+    else
+      read_rc=$?
+    fi
+    update_elapsed
+    if (( read_rc == 124 || elapsed >= BUDGET_SEC )); then
+      echo "error: 'tessl api ${endpoint}' exhausted the remaining registry read budget — discard its partial response; the release is NOT confirmed. Check tessl/registry connectivity before re-running." >&2
+      exit 2
+    fi
+    if (( read_rc != 0 )); then
       local err; err=$(cat "$err_file")
       fetch_failures=$(( fetch_failures + 1 ))
       if (( fetch_failures >= FETCH_RETRY_MAX )); then
@@ -229,10 +268,15 @@ main() {
     # shape yields empty for all three and falls through to that diagnostic.
     # Three separate calls, not a `@tsv` read — tab is IFS-whitespace, so a
     # leading empty field would shift the values.
-    local status passed mod_error
+    local passed mod_error
     status=$(printf '%s' "$body" | jq -r '(.data.attributes.moderationStatus)? // empty')
     passed=$(printf '%s' "$body" | jq -r '(.data.attributes.moderationPassed)? // empty')
     mod_error=$(printf '%s' "$body" | jq -r '(.data.attributes.moderationError)? // empty')
+    update_elapsed
+    if (( elapsed >= BUDGET_SEC )); then
+      echo "error: registry response arrived after the moderation budget — the release is NOT confirmed; re-run the helper once tessl is reachable" >&2
+      exit 2
+    fi
 
     # A moderationError alone is a valid (blocked) response, so it counts
     # as a parsed field — without it in the guard, a block-by-error result
@@ -260,9 +304,7 @@ main() {
 
     # Still pending. Stop if the next sleep would exceed the budget.
     if (( elapsed + delay > BUDGET_SEC )); then
-      emit_and_exit "false" \
-        "moderation still pending for ${workspace}/${tile}@${version} (status=${status:-pending}) after ${attempts} check(s) and ${elapsed}s — budget ${BUDGET_SEC}s exhausted; the release is NOT confirmed. Re-run verify-moderation-cleared.sh ${workspace} ${tile} ${version} to keep waiting, or inspect the registry if it stays pending" \
-        "$status" "$version" "$attempts" "$elapsed" 1
+      pending_at_budget
     fi
 
     advance_backoff

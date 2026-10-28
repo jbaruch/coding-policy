@@ -37,7 +37,12 @@ inputs:
     required: false
     default: '85'
   skills-dir:
-    description: 'Directory containing skill subdirectories (relative to workspace root)'
+    description: |
+      Directory containing skill subdirectories, relative to the workspace root.
+      The central fleet's workflow_dispatch review-all mode also accepts ONLY
+      the absolute native runner.temp/fleet-publish/package/skills directory,
+      with empty base-ref. Every directory component must exist without links.
+      Other absolute paths/events/base-ref combinations fail before discovery.
     required: false
     default: 'skills'
   base-ref:
@@ -94,6 +99,7 @@ runs:
       env:
         EVENT_BEFORE: ${{ github.event.before }}
         EVENT_NAME: ${{ github.event_name }}
+        RUNNER_TEMP: ${{ runner.temp }}
         BASE_OVERRIDE: ${{ inputs.base-ref }}
         THRESHOLD: ${{ inputs.threshold }}
         SKILLS_DIR: ${{ inputs.skills-dir }}
