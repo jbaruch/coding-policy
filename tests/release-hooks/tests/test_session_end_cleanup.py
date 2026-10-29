@@ -100,7 +100,7 @@ class SessionEndCleanupTest(unittest.TestCase):
         incoming = io.TextIOWrapper(io.BytesIO(json.dumps(self.payload).encode("utf-8")))
         with patch.dict(os.environ, self.env, clear=True), patch.object(sys, "stdin", incoming), \
                 contextlib.redirect_stdout(output), contextlib.redirect_stderr(errors):
-            self.assertEqual(module.main(), 0)
+            self.assertEqual(module.main(), 1)
         return self.result(json.loads(output.getvalue())), errors.getvalue()
 
     def assert_preserved(self) -> None:
@@ -412,7 +412,7 @@ class SessionEndCleanupTest(unittest.TestCase):
         self.assertTrue(self.note.exists())
         self.assertTrue(self.other_file.exists())
 
-    def test_initial_filesystem_failure_is_incomplete_and_warns_without_blocking_exit(self) -> None:
+    def test_initial_filesystem_failure_is_incomplete_and_warns_with_failure_status(self) -> None:
         module = load_hook()
         original = os.open
         denied = []
