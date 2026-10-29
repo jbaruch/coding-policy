@@ -6,7 +6,8 @@ the central driver's owned non-workspace policy directory. Preparation performs
 only registry metadata/report reads. Full mode installs Core alone in a fresh
 private workspace, verifies every installed byte, then relocates that genuine
 tree into the context after ordinary dependency installation. It executes no
-plugin script and changes no global installer policy. Stdout is schema-1 JSON;
+plugin script and changes no global installer policy. An exact existing tree is
+verified against fresh evidence and reused without another install. Stdout is schema-1 JSON;
 operational refusal exits2 with a fixed reason and actionable stderr.
 """
 
@@ -200,7 +201,16 @@ def materialize(directory, prepare_only=False):
     identity = private_directory(directory)
     destination = directory / ".tessl/plugins/jbaruch/nanoclaw-core"
     if os.path.lexists(destination):
-        raise MaterializationError("provider_destination_already_exists")
+        inventory = verify_tree(destination, directory)
+        proof = prepare(directory)
+        if (
+            private_directory(directory) != identity
+            or verify_tree(destination, directory) != inventory
+        ):
+            raise MaterializationError("context_directory_binding_changed")
+        if not prepare_only:
+            proof.update(status="materialized", files=len(inventory))
+        return proof
     proof = prepare(directory)
     if prepare_only:
         return proof

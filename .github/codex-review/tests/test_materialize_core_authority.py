@@ -217,6 +217,41 @@ sys.stdout.write("\\n" + os.environ.get("FAKE_CURL_STATUS", "200"))
         self.assertEqual(list(self.policy.glob("core157-*")), [])
         self.assertEqual(self.alias.read_text(), "Unchanged synthetic sibling")
 
+    def test_exact_repeat_reuses_tree_without_another_install(self):
+        first = OWNER.materialize(self.policy)
+        provider = self.policy / ".tessl/plugins/jbaruch/nanoclaw-core"
+        before = provider.stat()
+        self.assertEqual(OWNER.materialize(self.policy), first)
+        self.assertEqual(
+            OWNER.materialize(self.policy, prepare_only=True)["status"], "prepared"
+        )
+        after = provider.stat()
+        self.assertEqual((before.st_dev, before.st_ino), (after.st_dev, after.st_ino))
+        self.assertEqual(len(self.installs()), 1)
+        self.assertEqual(list(self.policy.glob("core157-*")), [])
+
+    def test_exact_repeat_still_requires_current_registry_and_report(self):
+        OWNER.materialize(self.policy)
+        provider = self.policy / ".tessl/plugins/jbaruch/nanoclaw-core"
+        before = OWNER.verify_tree(provider, self.policy)
+        self.metadata["tile"]["latestVersion"] = "0.1.158"
+        self.metadata_path.write_text(json.dumps(self.metadata))
+        with self.assertRaisesRegex(
+            OWNER.MaterializationError, "registry_identity_changed"
+        ):
+            OWNER.materialize(self.policy)
+        self.metadata["tile"]["latestVersion"] = OWNER.VERSION
+        self.metadata_path.write_text(json.dumps(self.metadata))
+        self.report["data"][0]["attributes"]["securityFindings"].append(
+            {"code": "W999"}
+        )
+        with self.assertRaisesRegex(
+            OWNER.MaterializationError, "reviewed_security_report_changed"
+        ):
+            OWNER.materialize(self.policy)
+        self.assertEqual(OWNER.verify_tree(provider, self.policy), before)
+        self.assertEqual(len(self.installs()), 1)
+
     def test_surrounding_context_dependencies_are_not_part_of_warning_acceptance(self):
         manifest = self.policy / "tessl.json"
         manifest.write_text(
