@@ -1,6 +1,6 @@
 schemaVersion: 1
 name: jbaruch/coding-policy
-version: 0.5.12
+version: 0.5.13
 description: General-purpose coding policy for AI agents
 source:
   repository: https://github.com/jbaruch/coding-policy
@@ -159,3 +159,7 @@ artifacts:
       event: stop
       path: skills/release/native-hook.sh
       args: [stop-handoff]
+    - id: coding-session-end
+      event: session-end
+      path: skills/release/native-hook.sh
+      args: [session-end]

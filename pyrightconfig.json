@@ -61,7 +61,9 @@
     "scripts/fleet_publish_archive_write.py",
     "scripts/tests/test_fleet_publish_archive_write.py",
     "scripts/tests/test_fleet_publish_poll_cache.py",
-    "tests/release/tests/test_fleet_publish_transport_budget.py"
+    "tests/release/tests/test_fleet_publish_transport_budget.py",
+    "skills/release/hooks/session-end-cleanup.py",
+    "tests/release-hooks/tests/test_session_end_cleanup.py"
   ],
   "executionEnvironments": [
     {

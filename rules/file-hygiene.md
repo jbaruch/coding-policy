@@ -20,7 +20,6 @@ alwaysApply: true
 ## Standalone Scripts
 
 - Scripts must have entry-point guards (e.g., `if __name__ == "__main__"` in Python, `if (require.main === module)` in Node)
-- This makes scripts both executable and importable for testing
 
 ## I/O Conventions
 
@@ -32,3 +31,9 @@ alwaysApply: true
 
 - Scripts should be safe to run multiple times
 - Don't fail if a directory already exists, a file was already processed, or a resource was already created
+
+## Session Scratchpads
+
+- Use `.coding-policy-disposable/` inside an available native scratchpad for reproducible files and temporary environments.
+- Keep deliverables, continuation material, shared files and background-task inputs outside it.
+- SessionEnd cleanup follows `skills/release/hooks/session-end-cleanup.py`'s contract.
