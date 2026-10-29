@@ -28,14 +28,29 @@ class NativeHooksTest(unittest.TestCase):
                 hook.parent.mkdir(parents=True, exist_ok=True)
                 (skill / "hooks").mkdir(parents=True)
                 hook.write_text(SOURCE.read_text())
-                for event, owner in (("session-start", "session-start.sh"), ("stop-handoff", "stop-handoff-hygiene.sh")):
+                for event, owner, content in (
+                    ("session-start", "session-start.sh", "#!/bin/bash\ncat\n"),
+                    ("stop-handoff", "stop-handoff-hygiene.sh", "#!/bin/bash\ncat\n"),
+                    ("session-end", "session-end-cleanup.py", "import sys\nsys.stdout.write(sys.stdin.read())\n"),
+                ):
                     target = skill / "hooks" / owner
-                    target.write_text("#!/bin/bash\ncat\n")
+                    target.write_text(content)
                     target.chmod(0o644)
                     result = subprocess.run(["bash", str(hook), event], cwd=foreign,
                                             env={**os.environ, "CDPATH": str(foreign)}, input='{"fixture":true}\n',
                                             capture_output=True, text=True)
                     self.assertEqual((result.returncode, result.stdout, result.stderr), (0, '{"fixture":true}\n', ""))
+
+    def test_python_owner_preserves_error_status_and_diagnostic(self):
+        with tempfile.TemporaryDirectory() as scratch:
+            skill = Path(scratch) / "release"
+            (skill / "hooks").mkdir(parents=True)
+            hook = skill / "native-hook.sh"
+            hook.write_text(SOURCE.read_text())
+            owner = skill / "hooks/session-end-cleanup.py"
+            owner.write_text('import sys\nprint("fixture diagnostic", file=sys.stderr)\nsys.exit(7)\n')
+            result = subprocess.run(["bash", str(hook), "session-end"], capture_output=True, text=True)
+            self.assertEqual((result.returncode, result.stdout, result.stderr), (7, "", "fixture diagnostic\n"))
 
     def test_missing_owner_is_reported_and_unknown_event_is_usage(self):
         with tempfile.TemporaryDirectory() as scratch:

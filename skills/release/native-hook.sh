@@ -1,15 +1,16 @@
 #!/usr/bin/env bash
 # Run a generic policy hook from a Tessl skill or an ACR native hook copy.
-# argv: session-start|stop-handoff. stdin/stdout and status belong to the owner.
+# argv: session-start|stop-handoff|session-end. stdin/stdout and status belong to the owner.
 # Exit 2 on invalid event, 1 with a stderr diagnostic on installation failure.
 set -euo pipefail
 
 main() {
-  local event="${1:-}" owner src here skill hooks host
+  local event="${1:-}" owner src here skill hooks host interpreter=bash
   case "$event" in
     session-start) owner=session-start.sh ;;
     stop-handoff) owner=stop-handoff-hygiene.sh ;;
-    *) echo 'usage: native-hook.sh session-start|stop-handoff' >&2; return 2 ;;
+    session-end) owner=session-end-cleanup.py; interpreter=python3 ;;
+    *) echo 'usage: native-hook.sh session-start|stop-handoff|session-end' >&2; return 2 ;;
   esac
   case "${BASH_SOURCE[0]}" in
     */*) src="${BASH_SOURCE[0]%/*}" ;;
@@ -40,7 +41,7 @@ main() {
     echo 'coding-policy hook: repair the complete release skill before retrying' >&2
     return 1
   fi
-  bash "$skill/hooks/$owner"
+  "$interpreter" "$skill/hooks/$owner"
 }
 
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then

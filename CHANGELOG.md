@@ -1,3 +1,7 @@
+### Clean opt-in scratchpad files when a native session ends
+
+Add SessionEnd cleanup for Claude Code, Codex and Cursor through both Tessl native hooks and ACR's generic session-end event. The shared Python owner removes only the ending session's `.coding-policy-disposable` folder inside its native scratchpad; existing scratchpad content stays outside that opt-in folder. Clear, resume, unknown and native background sessions skip cleanup. A normal foreground Herdr session can clean only its own opted-in files. SessionStart and Stop behavior stays unchanged. Both distribution manifests advance to 0.5.13.
+
 ## 0.5.12 — 2026-10-29
 
 ### Materialize the reviewed Core current-zone authority
