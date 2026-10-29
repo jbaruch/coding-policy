@@ -85,6 +85,9 @@ Optional fields:
 - `repository`, `homepage`, `license` — provenance and discovery metadata
 - `author` — object with `name`, `email`, `url`
 - `hooks` — cross-agent hook declarations keyed by event (`PreToolUse`, `PostToolUse`, `UserPromptSubmit`, `SessionStart`, `Stop`), each mapping to hook groups (`matcher` optional, `hooks` array of `{type:"command", command, args?}`); Tessl translates the consensus payload to each agent's native form
-- `nativeHooks` — per-agent hook declarations keyed by agent id (`claude-code`), same group shape, written straight to that agent's native config
+- `nativeHooks` — per-agent declarations keyed by agent id, written straight to that agent's native config without consensus translation
+- Claude Code and Codex `nativeHooks` map native event names to groups with optional `matcher` and a nested `hooks` array of `{type:"command", command, args?}`
+- Cursor `nativeHooks` map native event names such as `sessionEnd` to flat command entries `{command}` without a nested `hooks` array
+- Validate each declared agent's native shape with `tessl plugin lint` and an isolated materialization of its generated native configuration
 
 `alwaysApply` and `applyTo:` are not manifest fields — rule scope lives in the rule file frontmatter per `rules/rule-frontmatter.md`.

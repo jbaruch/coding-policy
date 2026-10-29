@@ -41,6 +41,10 @@ main() {
     echo 'coding-policy hook: repair the complete release skill before retrying' >&2
     return 1
   fi
+  if ! command -v "$interpreter" >/dev/null 2>&1; then
+    echo "coding-policy hook: install ${interpreter} and make it available on PATH before retrying" >&2
+    return 1
+  fi
   "$interpreter" "$skill/hooks/$owner"
 }
 
