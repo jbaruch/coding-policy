@@ -1,3 +1,7 @@
+### Materialize the reviewed Core current-zone authority
+
+Keep authority dependencies selected only from each consumer's trusted base. For the enrolled Core provider, verify the exact reviewed 0.1.157 package and attributed security report before a one-plugin isolated install. Accept only its audited history-reading warnings for that invocation; verify the complete installed tree before exposing its genuine rules to review. Changed versions, findings, bytes or installer results stop before reviewer execution. No global policy, head-selected authority, plugin execution or native activation changes. Both distribution manifests advance together to 0.5.12.
+
 ## 0.5.11 — 2026-10-28
 
 ### Keep fleet publication credentials in coding-policy

@@ -53,12 +53,13 @@ main() {
   local prompt="${CENTRAL_DIR}/.github/codex-review/fleet-prompt.md"
   local authoring="${CENTRAL_DIR}/.github/codex-review/policy-authoring-context.py"
   local history="${CENTRAL_DIR}/.github/codex-review/prior-feedback.py"
+  local core_materializer="${CENTRAL_DIR}/.github/codex-review/materialize-core-authority.py"
   # Mechanical drivers (policy-path-agnostic) are shared with the self-review.
   local assert="${CENTRAL_DIR}/.github/codex-review/assert-no-secret-leak.sh"
   local runner="${CENTRAL_DIR}/.github/reviewer_failure.py"
   local poster="${CENTRAL_DIR}/.github/codex-review/post-review.sh"
   local f
-  for f in "$schema" "$prompt" "$authoring" "$history" "$assert" "$poster" "$runner"; do
+  for f in "$schema" "$prompt" "$authoring" "$history" "$assert" "$poster" "$runner" "$core_materializer"; do
     [[ -f "$f" ]] || { echo "error: central driver file missing: $f" >&2; exit 1; }
   done
 
@@ -139,11 +140,15 @@ main() {
       echo "error: could not parse dependencies from ${full}:${base}/tessl.json — refusing to review with an unknown plugin set" >&2
       exit 1
     fi
-    local dep
+    local dep need_core=false
     while IFS= read -r dep; do
       [ -n "$dep" ] || continue
       # coding-policy is already installed above at its own latest.
       [ "$dep" = "jbaruch/coding-policy" ] && continue
+      if [ "$dep" = "jbaruch/nanoclaw-core" ]; then
+        need_core=true
+        continue
+      fi
       if ! ( cd "$POLICY" && tessl install "$dep" >/dev/null 2>&1 ); then
         # Best-effort per `rules/error-handling.md` Graceful Fallback: a
         # private or unpublished plugin must not fail the whole review,
@@ -152,6 +157,15 @@ main() {
         echo "::warning::could not install ${dep} for ${full}#${pr} — carve-outs citing its rules cannot be verified this run" >&2
       fi
     done <<< "$deps"
+    if [[ "$need_core" == true ]]; then
+      # Exact reviewed package/report only. The helper installs Core ALONE in
+      # a fresh private workspace, never accepting warnings on other deps.
+      # Run last so ordinary Tessl reconciliation cannot remove the authority.
+      if ! ( cd "$POLICY" && python3 -I "$core_materializer" "$POLICY" >/dev/null ); then
+        echo "error: reviewed Core authority could not be materialized for ${full}#${pr} — restore its exact reviewed package/report before reviewing" >&2
+        exit 1
+      fi
+    fi
   else
     echo "note: ${full} has no tessl.json on ${base} — reviewing against coding-policy alone" >&2
   fi
