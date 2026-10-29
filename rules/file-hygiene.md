@@ -32,3 +32,9 @@ alwaysApply: true
 
 - Scripts should be safe to run multiple times
 - Don't fail if a directory already exists, a file was already processed, or a resource was already created
+
+## Session Scratchpads
+
+- Put reproducible intermediates and temporary environments in the native scratchpad's `.coding-policy-disposable/` directory.
+- Keep deliverables, required continuation material, shared files and live background-task inputs outside that directory.
+- Treat this directory as disposable on normal session exit; native SessionEnd cleanup follows `skills/release/hooks/session-end-cleanup.py`'s contract.
