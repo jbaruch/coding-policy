@@ -35,6 +35,6 @@ alwaysApply: true
 
 ## Session Scratchpads
 
-- Put reproducible intermediates and temporary environments in the native scratchpad's `.coding-policy-disposable/` directory.
+- When the host provides a native scratchpad, put reproducible intermediates and temporary environments in its `.coding-policy-disposable/` directory.
 - Keep deliverables, required continuation material, shared files and live background-task inputs outside that directory.
 - Treat this directory as disposable on normal session exit; native SessionEnd cleanup follows `skills/release/hooks/session-end-cleanup.py`'s contract.
