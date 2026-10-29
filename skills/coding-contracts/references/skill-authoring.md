@@ -88,6 +88,6 @@ Optional fields:
 - `nativeHooks` — per-agent declarations keyed by agent id, written straight to that agent's native config without consensus translation
 - Claude Code and Codex `nativeHooks` map native event names to groups with optional `matcher` and a nested `hooks` array of `{type:"command", command, args?}`
 - Cursor `nativeHooks` map native event names such as `sessionEnd` to flat command entries `{command}` without a nested `hooks` array
-- Validate each declared agent's native shape with `tessl plugin lint` and an isolated materialization of its generated native configuration
+- Validate changed native hook declarations with `tessl plugin lint` and isolated materialization of the affected agents' native configurations
 
 `alwaysApply` and `applyTo:` are not manifest fields — rule scope lives in the rule file frontmatter per `rules/rule-frontmatter.md`.
