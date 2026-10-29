@@ -2,9 +2,9 @@
 """Clean opted-in disposable scratch files at native SessionEnd.
 
 Native input is JSON on stdin, bounded by MAX_INPUT_CHARS. stdout is one JSON
-result {status, reason, removed}; no result asks the model to continue. Expected
-refusals and partial cleanup exit 0. Diagnostics go to stderr, never include
-input contents, and never block a session ending.
+result {status, reason, removed}; no result asks the model to continue. Completed
+cleanup and expected refusals exit 0; incomplete cleanup exits 1. Diagnostics go
+to stderr, never include input contents, and never block native SessionEnd.
 
 Only .coding-policy-disposable beneath the native scratchpad_dir is disposable.
 Legacy scratch files, outputs, handoff material and other sessions stay put.
@@ -229,12 +229,14 @@ def main():
             result = _result("skipped", "oversized_payload")
         else:
             result = cleanup(json.loads(raw))
-    except (ValueError, UnicodeError, OSError, RecursionError):
+    except (ValueError, UnicodeError, RecursionError):
         result = _result("skipped", "invalid_payload")
+    except OSError:
+        result = _result("incomplete", "filesystem_error")
     if result["status"] == "incomplete":
         print("session-end-cleanup: disposable files may remain; check scratchpad permissions and finish cleanup in this session's disposable folder when safe.", file=sys.stderr)
     print(json.dumps(result))
-    return 0
+    return 1 if result["status"] == "incomplete" else 0
 
 
 if __name__ == "__main__":
