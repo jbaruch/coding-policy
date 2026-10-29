@@ -4,6 +4,8 @@
     ".github/claude-review/check-isolation.py",
     ".github/claude-review/tests/test_review.py",
     ".github/codex-review/policy-authoring-context.py",
+    ".github/codex-review/materialize-core-authority.py",
+    ".github/codex-review/tests/test_materialize_core_authority.py",
     ".github/codex-review/prior-feedback.py",
     ".github/codex-review/tests/test_prior_feedback.py",
     ".github/codex-review/tests/test_policy_authoring_context.py",

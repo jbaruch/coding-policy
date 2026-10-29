@@ -37,6 +37,9 @@ make_env() (
 set -euo pipefail
 # clone <flags..> <url> <dest>: create an empty checkout at dest; everything else is a no-op.
 if [ "${1:-}" = "clone" ]; then dest="${!#}"; mkdir -p "$dest/.git"; fi
+if [ "${1:-}" = show ] && [ "${2:-}" = origin/main:tessl.json ] && [ -n "${FAKE_BASE_MANIFEST:-}" ]; then
+  cat "$FAKE_BASE_MANIFEST"; exit 0
+fi
 if [ "${1:-}" = diff ] && [ "${2:-}" = --check ]; then exit "${FAKE_DIFF_CHECK_RC:-0}"; fi
 if [ "${1:-}" = "rev-parse" ]; then
   if [ -n "${FAKE_HEAD_FILE:-}" ]; then cat "$FAKE_HEAD_FILE";
@@ -78,6 +81,15 @@ set -euo pipefail
 # args: <owner> <repo> <pr> <result-json> <reviewed-sha>.
 printf '{"state":"posted","owner":"%s","repo":"%s","pr":"%s","head_sha":"%s"}\n' "$1" "$2" "$3" "$5"
 EOF
+
+  cat > "$central/.github/codex-review/materialize-core-authority.py" <<'PYTEST'
+import os
+from pathlib import Path
+import sys
+if os.environ.get("CORE_CONTEXT_LOG"):
+    Path(os.environ["CORE_CONTEXT_LOG"]).write_text(str(Path.cwd()) + "\n" + str(Path(sys.argv[1]).resolve()))
+raise SystemExit(int(os.environ.get("CORE_CONTEXT_RC", "0")))
+PYTEST
 
   echo '{"tokens":{"access_token":"x"}}' > "$codexh/auth.json"
   printf '%s %s %s' "$bin" "$central" "$codexh"
@@ -209,6 +221,50 @@ t_missing_token() {
   if [[ $rc -ne 0 ]]; then ok "missing GH_TOKEN -> non-zero"; else bad "missing_token: expected non-zero"; fi
 }
 
+t_core_context_from_trusted_base() {
+  local env_line; env_line=$(make_env) || exit 2
+  read -r BIN CENTRAL CODEXH <<< "$env_line"
+  printf '{"dependencies":{"jbaruch/nanoclaw-core":{"version":"latest"}}}' > "$CODEXH/base.json" || exit 2
+  local rc=0
+  PATH="$BIN:$PATH" GH_TOKEN=tok CENTRAL_DIR="$CENTRAL" CODEX_HOME="$CODEXH" \
+    FAKE_BASE_MANIFEST="$CODEXH/base.json" CORE_CONTEXT_LOG="$CODEXH/core.log" \
+    CODEX_ARGV_LOG="$CODEXH/codex.log" bash "$SCRIPT" jbaruch repo-a 7 main >/dev/null 2>&1 || rc=$?
+  if [[ $rc -eq 0 && -s "$CODEXH/core.log" && -s "$CODEXH/codex.log" ]]; then
+    local context_cwd context_arg
+    context_cwd=$(sed -n '1p' "$CODEXH/core.log")
+    context_arg=$(sed -n '2p' "$CODEXH/core.log")
+    if [[ "$context_cwd" == "$context_arg" ]]; then ok "trusted-base Core uses the isolated materializer before review";
+    else bad "Core materializer used a different workspace"; fi
+  else bad "trusted Core missing or review failed (rc=$rc)"; fi
+  rmwarn "$BIN" "$CENTRAL" "$CODEXH"
+}
+
+t_core_context_refusal_stops_review() {
+  local env_line; env_line=$(make_env) || exit 2
+  read -r BIN CENTRAL CODEXH <<< "$env_line"
+  printf '{"dependencies":{"jbaruch/nanoclaw-core":{"version":"latest"}}}' > "$CODEXH/base.json" || exit 2
+  local rc=0
+  PATH="$BIN:$PATH" GH_TOKEN=tok CENTRAL_DIR="$CENTRAL" CODEX_HOME="$CODEXH" \
+    FAKE_BASE_MANIFEST="$CODEXH/base.json" CORE_CONTEXT_RC=2 CODEX_ARGV_LOG="$CODEXH/codex.log" \
+    bash "$SCRIPT" jbaruch repo-a 7 main >/dev/null 2>&1 || rc=$?
+  if [[ $rc -ne 0 && ! -e "$CODEXH/codex.log" ]]; then ok "Core context refusal stops before reviewer execution";
+  else bad "missing Core authority reached review (rc=$rc)"; fi
+  rmwarn "$BIN" "$CENTRAL" "$CODEXH"
+}
+
+t_no_core_without_base_enrollment() {
+  local env_line; env_line=$(make_env) || exit 2
+  read -r BIN CENTRAL CODEXH <<< "$env_line"
+  printf '{"dependencies":{}}' > "$CODEXH/base.json" || exit 2
+  local rc=0
+  PATH="$BIN:$PATH" GH_TOKEN=tok CENTRAL_DIR="$CENTRAL" CODEX_HOME="$CODEXH" \
+    FAKE_BASE_MANIFEST="$CODEXH/base.json" CORE_CONTEXT_LOG="$CODEXH/core.log" \
+    CODEX_ARGV_LOG="$CODEXH/codex.log" bash "$SCRIPT" jbaruch repo-a 7 main >/dev/null 2>&1 || rc=$?
+  if [[ $rc -eq 0 && ! -e "$CODEXH/core.log" && -s "$CODEXH/codex.log" ]]; then ok "no Core exception without trusted-base enrollment";
+  else bad "Core exception selected outside trusted base (rc=$rc)"; fi
+  rmwarn "$BIN" "$CENTRAL" "$CODEXH"
+}
+
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
   echo "== fleet-review-one.sh tests =="
   t_happy
@@ -219,6 +275,9 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
   t_invalid_authoring_context
   t_invalid_source_sha
   t_missing_token
+  t_core_context_from_trusted_base
+  t_core_context_refusal_stops_review
+  t_no_core_without_base_enrollment
   echo "== summary: ${pass} passed, ${fail} failed =="
   [[ "$fail" -eq 0 ]]
 fi
