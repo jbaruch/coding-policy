@@ -20,7 +20,6 @@ alwaysApply: true
 ## Standalone Scripts
 
 - Scripts must have entry-point guards (e.g., `if __name__ == "__main__"` in Python, `if (require.main === module)` in Node)
-- This makes scripts both executable and importable for testing
 
 ## I/O Conventions
 
@@ -35,6 +34,6 @@ alwaysApply: true
 
 ## Session Scratchpads
 
-- When the host provides a native scratchpad, put reproducible intermediates and temporary environments in its `.coding-policy-disposable/` directory.
-- Keep deliverables, required continuation material, shared files and live background-task inputs outside that directory.
-- Treat this directory as disposable on normal session exit; native SessionEnd cleanup follows `skills/release/hooks/session-end-cleanup.py`'s contract.
+- Use `.coding-policy-disposable/` inside an available native scratchpad for reproducible files and temporary environments.
+- Keep deliverables, continuation material, shared files and background-task inputs outside it.
+- SessionEnd cleanup follows `skills/release/hooks/session-end-cleanup.py`'s contract.
