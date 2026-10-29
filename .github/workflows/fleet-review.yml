@@ -90,7 +90,7 @@ jobs:
       # renovate: datasource=npm depName=@openai/codex
       - name: Install Codex CLI
         if: matrix.lane == 'policy'
-        run: npm install -g @openai/codex@0.164.0
+        run: npm install -g @openai/codex@0.166.0
 
       # renovate: datasource=npm depName=@anthropic-ai/claude-code
       - name: Install Claude CLI
