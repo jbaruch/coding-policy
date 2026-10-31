@@ -95,7 +95,7 @@ jobs:
       # renovate: datasource=npm depName=@anthropic-ai/claude-code
       - name: Install Claude CLI
         if: matrix.lane == 'quality'
-        run: npm install -g @anthropic-ai/claude-code@2.1.310
+        run: npm install -g @anthropic-ai/claude-code@2.1.316
 
       - name: Verify real CLI context isolation
         if: matrix.lane == 'quality'
