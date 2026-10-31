@@ -380,7 +380,8 @@ fi
 # moderation finding. Spawn the script so its own `-e` is live and assert the
 # full schedule ran: base 1, cap 8 => sleeps 1,2,4,8 with the 5th check
 # stopping because another 8 would pass the 20s budget => attempts 5,
-# elapsed 15, and a parseable envelope on stdout.
+# elapsed 15, and a parseable envelope on stdout. Freeze command overhead;
+# the owned backoff still advances elapsed time and the child keeps live -e.
 STUB_BIN="$TMPDIR_TEST/bin"
 if ! mkdir -p "$STUB_BIN"; then
   echo "fatal: cannot create stub bin dir $STUB_BIN" >&2; exit 2
@@ -402,11 +403,16 @@ if ! chmod +x "$STUB_BIN/tessl" "$STUB_BIN/sleep"; then
 fi
 reset_mocks
 queue 1 "$(body_json pending '' '')"
-out=$( PATH="$STUB_BIN:$PATH" \
+out=$( SCRIPT="$SCRIPT" PATH="$STUB_BIN:$PATH" \
        VERIFY_MODERATION_BASE_DELAY_SEC=1 \
        VERIFY_MODERATION_MAX_DELAY_SEC=8 \
        VERIFY_MODERATION_BUDGET_SEC=20 \
-       bash "$SCRIPT" acme widget 1.2.3 2>/dev/null ); rc=$?
+       bash -c '
+         source "$SCRIPT"
+         update_elapsed() { return 0; }
+         [[ $- == *e* ]] || exit 99
+         main acme widget 1.2.3
+       ' 2>/dev/null ); rc=$?
 if [[ $rc -eq 1 ]] && echo "$out" | jq -e '.ok == false and .attempts == 5 and .elapsed_seconds == 15' >/dev/null 2>&1; then
   pass "subprocess run: polls the whole budget, emits the JSON envelope on rc 1"
 else
