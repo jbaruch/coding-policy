@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Snapshot CI, mergeability, exact-head Codex/Claude verdicts and all feedback.
 # Usage: poll-pr-reviews.sh OWNER REPO PR
-# stdout: {pr_number, head_sha, ci:{status,checks}, reviews:{codex,claude,copilot},
+# stdout: {pr_number, head_sha, ci:{status,checks,actions:{status,runs}}, reviews:{codex,claude,copilot},
 #          review_bodies, inline_comments, inline_comment_bodies, merge_state}.
 # Review fields: state, submitted_at, body, commit_id, stale, requested:false.
 # Codex may be RULED after its sanctioned policy dismissal; stale reviews become
@@ -9,6 +9,11 @@
 # none plus historical comment counts, with no Copilot service lookup. All bodies
 # and inline comments are still read from GitHub, from every author and page.
 # Exit 0: snapshot; nonzero: stderr diagnostic, never an inferred clean review.
+# Existing gh authentication needs Actions: read for private-repository coverage.
+# Association refusal: an empty native PR-association array on a same-head run
+# stops the snapshot, including fork runs. Repository/branch names never replace
+# that binding. Use the authorized adopt-fork-pr workflow when appropriate, then
+# recheck actual native association; adoption alone supplies no coverage proof.
 
 set -euo pipefail
 
@@ -177,6 +182,64 @@ fetch_merge_state() {
     | jq -c '{status: .mergeStateStatus, mergeable: .mergeable, head_sha: .headRefOid}'
 }
 
+# Actions listing reports each run's current attempt even while its checks are
+# temporarily absent from the PR rollup. This is a veto, not discovery of every
+# workflow that ought to exist. Private repositories require Actions read access.
+fetch_actions_ci() {
+  local owner="$1" repo="$2" pr="$3" head="$4" pages
+  pages=$(gh api --paginate "repos/${owner}/${repo}/actions/runs?event=pull_request&head_sha=${head}&per_page=100") \
+    || { echo "error: cannot read associated Actions runs — authenticate gh with existing Actions: read access to ${owner}/${repo}, then retry; unavailable coverage is not no CI" >&2; return 1; }
+  printf '%s' "$pages" | jq -se \
+    --arg repository "${owner}/${repo}" --argjson pr "$pr" --arg head "$head" '
+    def integer: type == "number" and . >= 0 and . == floor;
+    def positive: integer and . > 0;
+    def require($condition; $message):
+      if $condition then . else error($message) end;
+    require(length > 0; "missing Actions page")
+    | require(all(.[]; type == "object" and (.total_count | integer)
+        and .total_count < 1000 and (.workflow_runs | type == "array")
+        and (.workflow_runs | length) <= 100); "invalid or truncated Actions inventory")
+    | . as $pages
+    | require(all(.[]; .total_count == $pages[0].total_count); "Actions inventory changed across pages")
+    | [.[].workflow_runs[]] as $all
+    | require(($all | length) == $pages[0].total_count; "incomplete Actions inventory")
+    | require(all($all[]; type == "object" and (.id | positive)
+        and (.event | type == "string") and (.head_sha | type == "string")
+        and (.repository.full_name | type == "string")
+        and (.pull_requests | type == "array")); "invalid Actions association metadata")
+    | require(($all | map(.id) | unique | length) == ($all | length); "duplicate Actions run")
+    | [$all[] | select(.event == "pull_request" and .head_sha == $head
+        and (.repository.full_name | ascii_downcase) == ($repository | ascii_downcase))] as $same_head
+    | require(all($same_head[]; (.pull_requests | length) > 0);
+        "unresolved native PR association, including fork runs: use authorized adopt-fork-pr when appropriate, then verify native association; adoption alone is not proof")
+    | require(all($same_head[].pull_requests[] | select(.number == $pr);
+        .head.sha == $head
+        and (.url | ascii_downcase) == ("https://api.github.com/repos/" + ($repository | ascii_downcase) + "/pulls/" + ($pr | tostring))
+        and (.base.repo.url | ascii_downcase) == ("https://api.github.com/repos/" + ($repository | ascii_downcase)));
+        "conflicting Actions PR association")
+    | [$same_head[] | select(any(.pull_requests[];
+        .number == $pr and .head.sha == $head
+        and (.url | ascii_downcase) == ("https://api.github.com/repos/" + ($repository | ascii_downcase) + "/pulls/" + ($pr | tostring))
+        and (.base.repo.url | ascii_downcase) == ("https://api.github.com/repos/" + ($repository | ascii_downcase))))] as $associated
+    | require(all($associated[];
+        (.workflow_id | positive) and (.run_number | positive) and (.run_attempt | positive)
+        and (.path | type == "string" and test("^\\.github/workflows/[^/]+\\.ya?ml$"))
+        and (.status | IN("queued", "in_progress", "waiting", "pending", "requested", "completed"))
+        and (if .status == "completed" then
+          (.conclusion | IN("success", "neutral", "skipped", "failure", "timed_out", "action_required", "stale", "startup_failure", "cancelled"))
+          else .conclusion == null end)); "unsupported associated Actions run")
+    | ($associated | group_by(.workflow_id)) as $workflows
+    | require(all($workflows[]; (map(.path) | unique | length) == 1
+        and (map(.run_number) | unique | length) == length); "ambiguous Actions workflow sequence")
+    | ($workflows | map(max_by(.run_number))
+        | map({id, workflow_id, path, run_number, run_attempt, status, conclusion})) as $latest
+    | {status: (if any($latest[]; .status == "completed" and
+          (.conclusion | IN("failure", "timed_out", "action_required", "stale", "startup_failure"))) then "failure"
+        elif any($latest[]; .status != "completed" or .conclusion == "cancelled") then "pending"
+        elif ($latest | length) == 0 then "none" else "success" end), runs: $latest}' \
+    || { echo "error: associated Actions coverage is incomplete or ambiguous — inspect the current PR/head workflow runs and retry; do not infer no CI" >&2; return 1; }
+}
+
 main() {
   if [[ $# -ne 3 ]]; then
     echo "usage: $0 <owner> <repo> <pr-number>" >&2
@@ -237,6 +300,13 @@ main() {
     exit 1
   fi
 
+  local actions_ci
+  actions_ci=$(fetch_actions_ci "$owner" "$repo" "$pr_number" "$head_sha") || exit 1
+  case "$(printf '%s' "$actions_ci" | jq -r '.status')" in
+    failure) ci_status=failure ;;
+    pending) [[ "$ci_status" == failure ]] || ci_status=pending ;;
+  esac
+
   local codex_review claude_review copilot_review codex_comments copilot_comments comment_bodies review_bodies
   codex_review=$(REVIEW_LANE=policy latest_review_by   "$owner" "$repo" "$pr_number" "${CODEX_REVIEW_LOGINS[@]}") \
     || { echo "error: failed to fetch Codex review state" >&2; exit 1; }
@@ -270,7 +340,7 @@ main() {
   # Review text can exceed a platform's per-argument limit. Stream every
   # potentially large JSON payload instead of passing it through --argjson.
   printf '%s\n' "$checks_json" "$codex_review" "$copilot_review" \
-    "$comment_bodies" "$review_bodies" "$merge_state" "$claude_review" | jq -s \
+    "$comment_bodies" "$review_bodies" "$merge_state" "$claude_review" "$actions_ci" | jq -s \
     --argjson pr_number "$pr_number" \
     --arg head_sha "$head_sha" \
     --arg ci_status "$ci_status" \
@@ -279,7 +349,7 @@ main() {
     '{
       pr_number: $pr_number,
       head_sha: $head_sha,
-      ci: {status: $ci_status, checks: .[0]},
+      ci: {status: $ci_status, checks: .[0], actions: .[7]},
       reviews: {codex: .[1], claude: .[6], copilot: .[2]},
       review_bodies: .[4],
       inline_comments: {codex: $codex_comments, copilot: $copilot_comments},
