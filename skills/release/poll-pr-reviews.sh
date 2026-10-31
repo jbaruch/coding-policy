@@ -10,6 +10,10 @@
 # and inline comments are still read from GitHub, from every author and page.
 # Exit 0: snapshot; nonzero: stderr diagnostic, never an inferred clean review.
 # Existing gh authentication needs Actions: read for private-repository coverage.
+# Association refusal: an empty native PR-association array on a same-head run
+# stops the snapshot, including fork runs. Repository/branch names never replace
+# that binding. Use the authorized adopt-fork-pr workflow when appropriate, then
+# recheck actual native association; adoption alone supplies no coverage proof.
 
 set -euo pipefail
 
@@ -206,7 +210,8 @@ fetch_actions_ci() {
     | require(($all | map(.id) | unique | length) == ($all | length); "duplicate Actions run")
     | [$all[] | select(.event == "pull_request" and .head_sha == $head
         and (.repository.full_name | ascii_downcase) == ($repository | ascii_downcase))] as $same_head
-    | require(all($same_head[]; (.pull_requests | length) > 0); "unresolved Actions PR association")
+    | require(all($same_head[]; (.pull_requests | length) > 0);
+        "unresolved native PR association, including fork runs: use authorized adopt-fork-pr when appropriate, then verify native association; adoption alone is not proof")
     | require(all($same_head[].pull_requests[] | select(.number == $pr);
         .head.sha == $head
         and (.url | ascii_downcase) == ("https://api.github.com/repos/" + ($repository | ascii_downcase) + "/pulls/" + ($pr | tostring))

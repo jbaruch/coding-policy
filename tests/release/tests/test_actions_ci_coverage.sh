@@ -156,6 +156,19 @@ complete_pages_preserve_later_pending_workflow() {
   RUNS=$(printf '%s\n%s' "$a" "$b" | jq -cs '.[] | {total_count:2,workflow_runs:[.]}') || return 1
   expect_watch pending_at_budget 1
 }
+fork_association_is_an_intentional_actionable_refusal() {
+  local RUNS repository out rc
+  # GitHub can omit native PR association for fork runs. Even successful CI,
+  # a matching branch or a later same-repo adoption cannot replace that proof.
+  for repository in example/fork demo/repo; do
+    RUNS=$(record completed success | jq --arg r "$repository" '
+      .pull_requests=[] | .head_repository={full_name:$r} | .head_branch="topic"' | inventory) || return 1
+    rc=0
+    out=$(watch_result 2>&1) || rc=$?
+    [[ "$rc" == 2 && "$out" == *"native PR association"* \
+      && "$out" == *"adopt-fork-pr"* && "$out" != *'"watch":'* ]] || return 1
+  done
+}
 run_case() {
   if "$1"; then PASS_COUNT=$((PASS_COUNT+1)); echo "pass: $1" >&2
   else FAIL_COUNT=$((FAIL_COUNT+1)); echo "FAIL: $1" >&2; fi
@@ -166,7 +179,7 @@ run_suite() {
     failed_attempt_vetoes_visible_success unrelated_runs_do_not_gate api_failure_never_means_no_ci \
     genuine_no_ci_retains_none new_workflow_run_supersedes_cancelled_run \
     visible_failure_and_cancel_are_preserved ambiguous_and_incomplete_metadata_refuse \
-    complete_pages_preserve_later_pending_workflow; do
+    complete_pages_preserve_later_pending_workflow fork_association_is_an_intentional_actionable_refusal; do
     run_case "$test_case"
   done
   printf '{"suite":"actions_ci_coverage","passed":%d,"failed":%d}\n' "$PASS_COUNT" "$FAIL_COUNT"
