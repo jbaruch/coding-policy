@@ -756,6 +756,7 @@ case "$1" in
     if [[ "$2" == "graphql" ]]; then echo '[]'; exit 0; fi
     if [[ "$args" == *"-X PUT"* ]]; then echo "$args" >> "$STUB_LOG"; echo '{}'; exit 0; fi
     case "$args" in
+      *'/actions/runs?'*) echo '{"total_count":0,"workflow_runs":[]}' ;;
       *timeline*) cat "$STUB_TIMELINE" ;;
       *reviews*)  cat "$STUB_REVIEWS" ;;
       *comments*) echo '[]' ;;

@@ -16,6 +16,9 @@ Moved from `rules/ci-safety.md` (#642) to keep the always-loaded rules under the
 - The gating signal is not always a PR status check
 - A run started out of band (a `workflow_dispatch` reseed, a manual job) may not surface in the PR's `statusCheckRollup`
 - Identify the run that gates the outcome and bind the watch to its `conclusion`
+- The canonical snapshot also reads Actions runs for the current PR head and `pull_request` event. It requires complete paginated inventory and exact repository, PR URL, head, workflow ID/path and event association. For each associated workflow, the highest native `run_number` supplies its current `run_attempt` and outcome. Pending or cancelled outcomes hold; failed outcomes veto readiness. This never overrides a failed or pending visible check.
+- Private-repository callers need existing authenticated Actions: read access in addition to the snapshot's PR/check permissions. The helper mints no token and changes no grants. A permission, API, truncation or association failure stops the snapshot; it never becomes `none`. Genuine no-CI remains supported after authoritative discovery succeeds.
+- This is a coverage veto for observed associated runs, not proof that every expected workflow has started. Unrelated same-head runs, manual dispatches and unresolved PR associations supply no success proof. Keep the explicit gating-run conclusion obligation above, including an explicitly selected older-run retry.
 - A failed PR check that no event re-triggers stays red until an explicit `gh run rerun --failed` once its cause is fixed
 
 ## Publication Confirmation

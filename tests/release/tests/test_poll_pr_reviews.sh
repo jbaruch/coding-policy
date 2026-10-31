@@ -119,6 +119,7 @@ gh() {
       done
       [[ $saw_paginate -eq 1 ]] || { echo "mock gh api: missing --paginate (required so the script never silently misses page 2+)" >&2; return 99; }
       case "$path" in
+        */actions/runs\?*) echo '{"total_count":0,"workflow_runs":[]}' ;;
         *reviews*) echo "${MOCK_REVIEWS_BODY:-[]}" ;;
         *comments*) echo "${MOCK_COMMENTS_BODY:-[]}" ;;
         *timeline*) echo "${MOCK_TIMELINE_BODY:-[]}" ;;
