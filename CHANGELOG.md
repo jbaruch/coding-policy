@@ -1,3 +1,5 @@
+## 0.5.16 — 2026-10-31
+
 ### Keep associated Actions attempts in the PR readiness gate
 
 Prevent a label/trigger-only PR rollup from reporting readiness while an associated current-head workflow attempt is still running or has failed. Preserve visible checks and exact-head review gates; bind the additional veto to native repository/PR/workflow/event metadata and the latest workflow run's current attempt. Require existing Actions-read access for private-repository callers and fail closed on unavailable or ambiguous coverage. Missing native PR association, including fork runs, intentionally refuses the snapshot; same-repository adoption alone is not coverage proof. The separate obligation to watch a known gating run remains; this helper does not discover missing expected workflows or grant credentials. Both distribution manifests advance together to 0.5.16.
