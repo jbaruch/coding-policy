@@ -1,3 +1,5 @@
+## 0.5.15 — 2026-10-31
+
 ### Freeze the moderation backoff fixture clock
 
 Keep the subprocess backoff regression independent of command startup overhead. Freeze only its existing clock-observation seam and explicitly require live shell `-e`; retain the exact five-attempt, 15-second backoff and refusal envelope assertions. Production timers, deadlines and moderation gates are unchanged. Both distribution manifests advance together to 0.5.15.
