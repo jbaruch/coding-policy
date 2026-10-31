@@ -1,3 +1,7 @@
+### Renew the finite Core review authority to 0.1.159
+
+Refresh the exact package fingerprint, attributed security report and complete 21-file inventory after Core dependency-only releases made the reviewed 0.1.157 latest-version predicate refuse consumer policy reviews. All 18 runtime/documentation files and every security-review attribute remain byte-identical; only three package-version metadata files and report record IDs/URL change. Keep the original 157 report, fresh private installation, exact latest-version/report/tree checks and fail-closed handling. Both distribution manifests advance together to 0.5.14.
+
 ## 0.5.13 — 2026-10-29
 
 ### Clean opt-in scratchpad files when a native session ends

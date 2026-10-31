@@ -21,7 +21,7 @@ SPEC = importlib.util.spec_from_file_location(
 assert SPEC is not None and SPEC.loader is not None
 OWNER = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(OWNER)
-REPORT = json.loads((ROOT / "tests/fixtures/core157-security-report.json").read_text())
+REPORT = json.loads((ROOT / "tests/fixtures/core159-security-report.json").read_text())
 REAL_FETCH_REPORT = OWNER.fetch_report
 
 
@@ -85,7 +85,7 @@ elif args[0] == "install":
     if mode == "failed":
         print("Synthetic private tool diagnostic must not escape", file=sys.stderr)
         raise SystemExit(1)
-    dependencies = {"jbaruch/nanoclaw-core": {"version": "0.1.157"}}
+    dependencies = {"jbaruch/nanoclaw-core": {"version": "0.1.159"}}
     if mode == "extra-dependency":
         dependencies["unexpected/plugin"] = {"version": "latest"}
     (cwd / "tessl.json").write_text(json.dumps({"dependencies": dependencies}))
@@ -193,7 +193,7 @@ sys.stdout.write("\\n" + os.environ.get("FAKE_CURL_STATUS", "200"))
             calls[0]["args"],
             [
                 "install",
-                "jbaruch/nanoclaw-core@0.1.157",
+                "jbaruch/nanoclaw-core@0.1.159",
                 "--yes",
                 "--accept-warnings",
                 "--strict",
@@ -214,7 +214,7 @@ sys.stdout.write("\\n" + os.environ.get("FAKE_CURL_STATUS", "200"))
                 ).read_text(),
                 body,
             )
-        self.assertEqual(list(self.policy.glob("core157-*")), [])
+        self.assertEqual(list(self.policy.glob("core159-*")), [])
         self.assertEqual(self.alias.read_text(), "Unchanged synthetic sibling")
 
     def test_exact_repeat_reuses_tree_without_another_install(self):
@@ -228,13 +228,13 @@ sys.stdout.write("\\n" + os.environ.get("FAKE_CURL_STATUS", "200"))
         after = provider.stat()
         self.assertEqual((before.st_dev, before.st_ino), (after.st_dev, after.st_ino))
         self.assertEqual(len(self.installs()), 1)
-        self.assertEqual(list(self.policy.glob("core157-*")), [])
+        self.assertEqual(list(self.policy.glob("core159-*")), [])
 
     def test_exact_repeat_still_requires_current_registry_and_report(self):
         OWNER.materialize(self.policy)
         provider = self.policy / ".tessl/plugins/jbaruch/nanoclaw-core"
         before = OWNER.verify_tree(provider, self.policy)
-        self.metadata["tile"]["latestVersion"] = "0.1.158"
+        self.metadata["tile"]["latestVersion"] = "0.1.160"
         self.metadata_path.write_text(json.dumps(self.metadata))
         with self.assertRaisesRegex(
             OWNER.MaterializationError, "registry_identity_changed"
@@ -269,8 +269,8 @@ sys.stdout.write("\\n" + os.environ.get("FAKE_CURL_STATUS", "200"))
     def test_registry_drift_never_accepts_warnings(self):
         mutations = [
             ("tile", "fullName", "unexpected/provider"),
-            ("tile", "latestVersion", "0.1.158"),
-            ("version", "version", "0.1.158"),
+            ("tile", "latestVersion", "0.1.160"),
+            ("version", "version", "0.1.160"),
             ("version", "fingerprint", "different"),
             ("version", "moderationPassed", False),
             ("version", "archived", True),
@@ -321,7 +321,7 @@ sys.stdout.write("\\n" + os.environ.get("FAKE_CURL_STATUS", "200"))
                 self.assertFalse(
                     (self.policy / ".tessl/plugins/jbaruch/nanoclaw-core").exists()
                 )
-                self.assertEqual(list(self.policy.glob("core157-*")), [])
+                self.assertEqual(list(self.policy.glob("core159-*")), [])
                 self.assertEqual(self.alias.read_text(), "Unchanged synthetic sibling")
 
     def test_unknown_existing_context_is_not_overwritten(self):
