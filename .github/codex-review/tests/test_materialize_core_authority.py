@@ -21,8 +21,302 @@ SPEC = importlib.util.spec_from_file_location(
 assert SPEC is not None and SPEC.loader is not None
 OWNER = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(OWNER)
-REPORT = json.loads((ROOT / "tests/fixtures/core159-security-report.json").read_text())
 REAL_FETCH_REPORT = OWNER.fetch_report
+
+
+def security_report_fixture():
+    """Build the fixed attributed report independently for each test setup."""
+    return {'data': [{'attributes': {'description': 'Search messages.db for past chat history by '
+                                             'keyword and/or sender username. Use when the '
+                                             'user references past messages, after context '
+                                             'compaction, after a session nuke, or '
+                                             'anywhere `rules/context-recovery.md` '
+                                             'requires checking the message history before '
+                                             'claiming lost context.',
+                              'name': 'query-history',
+                              'path': 'skills/query-history/SKILL.md',
+                              'securityFindings': [{'code': 'W007',
+                                                    'issueDescription': 'The skill handles '
+                                                                        'credentials '
+                                                                        'insecurely by '
+                                                                        'requiring the '
+                                                                        'agent to include '
+                                                                        'secret values '
+                                                                        'verbatim in its '
+                                                                        'generated output. '
+                                                                        'This exposes '
+                                                                        'credentials in '
+                                                                        'the agent’s '
+                                                                        'context and '
+                                                                        'conversation '
+                                                                        'history, creating '
+                                                                        'a risk of data '
+                                                                        'exfiltration.',
+                                                    'located': {'items': [{'kind': 'secret',
+                                                                           'locations': [{'line': 331,
+                                                                                          'path': 'scripts/query-message-history.py',
+                                                                                          'snippet': 'print(json.dumps(payload))'},
+                                                                                         {'line': 22,
+                                                                                          'path': 'SKILL.md',
+                                                                                          'snippet': 'The '
+                                                                                                     'script '
+                                                                                                     'prints '
+                                                                                                     'a '
+                                                                                                     'single-line '
+                                                                                                     'JSON '
+                                                                                                     'payload '
+                                                                                                     'to '
+                                                                                                     'stdout: '
+                                                                                                     '`{rows, '
+                                                                                                     'chat_jid, '
+                                                                                                     'query, '
+                                                                                                     'truncated, '
+                                                                                                     'rows_dropped, '
+                                                                                                     'error}`. '
+                                                                                                     'Each '
+                                                                                                     'entry '
+                                                                                                     'in '
+                                                                                                     '`rows` '
+                                                                                                     'carries '
+                                                                                                     '`id`, '
+                                                                                                     '`timestamp`, '
+                                                                                                     '`sender_name`, '
+                                                                                                     '`content`'}],
+                                                                           'rationale': 'The '
+                                                                                        'script '
+                                                                                        'reads '
+                                                                                        'message '
+                                                                                        'rows '
+                                                                                        'from '
+                                                                                        'the '
+                                                                                        'database '
+                                                                                        '(which '
+                                                                                        'may '
+                                                                                        'contain '
+                                                                                        'secrets '
+                                                                                        'pasted '
+                                                                                        'in '
+                                                                                        'chat) '
+                                                                                        'and '
+                                                                                        'prints '
+                                                                                        'them '
+                                                                                        'as '
+                                                                                        'JSON '
+                                                                                        'to '
+                                                                                        'stdout; '
+                                                                                        'the '
+                                                                                        'SKILL.md '
+                                                                                        'instructs '
+                                                                                        'the '
+                                                                                        'agent '
+                                                                                        'to '
+                                                                                        'read '
+                                                                                        'and '
+                                                                                        'act '
+                                                                                        'on '
+                                                                                        'this '
+                                                                                        'output, '
+                                                                                        'causing '
+                                                                                        'any '
+                                                                                        'secrets '
+                                                                                        'in '
+                                                                                        'message '
+                                                                                        'content '
+                                                                                        'to '
+                                                                                        'be '
+                                                                                        'emitted '
+                                                                                        'verbatim '
+                                                                                        'into '
+                                                                                        'the '
+                                                                                        "agent's "
+                                                                                        'visible '
+                                                                                        'context.',
+                                                                           'value': '[REDACTED]'}],
+                                                                'sourcePath': 'skills/query-history',
+                                                                'sourceRef': None,
+                                                                'sourceUrl': None},
+                                                    'reasoning': 'The skill runs a helper '
+                                                                 'that reads message rows '
+                                                                 'from a database and '
+                                                                 'explicitly instructs the '
+                                                                 'agent to "return the '
+                                                                 'matched rows" (including '
+                                                                 'message content) to the '
+                                                                 'caller, which requires '
+                                                                 'emitting original '
+                                                                 'message contents '
+                                                                 'verbatim and therefore '
+                                                                 'can exfiltrate secrets.',
+                                                    'severity': 'HIGH',
+                                                    'severityLevel': 'HIGH',
+                                                    'title': 'Insecure credential handling '
+                                                             'detected in skill '
+                                                             'instructions.'},
+                                                   {'code': 'W011',
+                                                    'issueDescription': 'The skill exposes '
+                                                                        'the agent to '
+                                                                        'untrusted, '
+                                                                        'user-generated '
+                                                                        'content from '
+                                                                        'public '
+                                                                        'third-party '
+                                                                        'sources, creating '
+                                                                        'a risk of '
+                                                                        'indirect prompt '
+                                                                        'injection. This '
+                                                                        'includes browsing '
+                                                                        'arbitrary URLs, '
+                                                                        'reading social '
+                                                                        'media posts or '
+                                                                        'forum comments, '
+                                                                        'and analyzing '
+                                                                        'content from '
+                                                                        'unknown websites.',
+                                                    'located': {'items': [{'kind': 'content-type',
+                                                                           'locations': [{'line': 309,
+                                                                                          'path': 'scripts/query-message-history.py',
+                                                                                          'snippet': 'for '
+                                                                                                     'r '
+                                                                                                     'in '
+                                                                                                     'cursor.fetchall()'},
+                                                                                         {'line': 331,
+                                                                                          'path': 'scripts/query-message-history.py',
+                                                                                          'snippet': 'print(json.dumps(payload))'},
+                                                                                         {'line': 298,
+                                                                                          'path': 'scripts/query-message-history.py',
+                                                                                          'snippet': 'conn '
+                                                                                                     '= '
+                                                                                                     'sqlite3.connect(db_uri, '
+                                                                                                     'timeout=5, '
+                                                                                                     'uri=True)'},
+                                                                                         {'line': 67,
+                                                                                          'path': 'scripts/query-message-history.py',
+                                                                                          'snippet': 'DEFAULT_DB '
+                                                                                                     '= '
+                                                                                                     '"/workspace/store/messages.db"'}],
+                                                                           'rationale': 'The '
+                                                                                        'script '
+                                                                                        'reads '
+                                                                                        'outsider-authored '
+                                                                                        'chat '
+                                                                                        'messages '
+                                                                                        '(content '
+                                                                                        'and '
+                                                                                        'sender_name '
+                                                                                        'fields) '
+                                                                                        'from '
+                                                                                        'a '
+                                                                                        'runtime '
+                                                                                        'SQLite '
+                                                                                        'database '
+                                                                                        'via '
+                                                                                        'cursor.fetchall() '
+                                                                                        'and '
+                                                                                        'emits '
+                                                                                        'them '
+                                                                                        'as '
+                                                                                        'JSON '
+                                                                                        'to '
+                                                                                        'stdout, '
+                                                                                        'injecting '
+                                                                                        'third-party '
+                                                                                        'free '
+                                                                                        'text '
+                                                                                        'into '
+                                                                                        'the '
+                                                                                        'LLM '
+                                                                                        'context '
+                                                                                        'and '
+                                                                                        'creating '
+                                                                                        'an '
+                                                                                        'indirect '
+                                                                                        'prompt-injection '
+                                                                                        'surface.',
+                                                                           'value': 'messages.db '
+                                                                                    '(SQLite '
+                                                                                    'database '
+                                                                                    'of '
+                                                                                    'outsider-authored '
+                                                                                    'chat '
+                                                                                    'messages)'}],
+                                                                'sourcePath': 'skills/query-history',
+                                                                'sourceRef': None,
+                                                                'sourceUrl': None},
+                                                    'reasoning': 'Outsider-authored free '
+                                                                 'text is pulled from the '
+                                                                 'runtime SQLite database '
+                                                                 '(`messages.db`) via '
+                                                                 '`cursor.fetchall()` and '
+                                                                 'then emitted into the '
+                                                                 'LLM context as JSON on '
+                                                                 'stdout '
+                                                                 '(`rows[].content`, '
+                                                                 '`sender_name`)—these '
+                                                                 'message contents are not '
+                                                                 'authored by the '
+                                                                 'operating user.',
+                                                    'severity': 'MEDIUM',
+                                                    'severityLevel': 'LOW',
+                                                    'title': 'Third-party content exposure '
+                                                             'detected (indirect prompt '
+                                                             'injection risk).'}],
+                              'securityLevel': 'HIGH',
+                              'securityOverrideMessage': None,
+                              'securityRiskLevel': 'HIGH',
+                              'securityStatus': 'completed',
+                              'securitySummary': '[HIGH] W007: Insecure credential '
+                                                 'handling detected in skill '
+                                                 'instructions.\n'
+                                                 '[MEDIUM] W011: Third-party content '
+                                                 'exposure detected (indirect prompt '
+                                                 'injection risk).',
+                              'securityUpdatedAt': '2026-07-08T09:24:40.147Z',
+                              'skillFingerprint': '6c394d01e8b533142af192eee2dbcff96868228413af44f419a5e40c4ce8e305'},
+               'id': '01a18f72-1f69-7743-ac4c-4d7753671214',
+               'type': 'tile-version-skill-security-review'},
+              {'attributes': {'description': 'Deterministically decide whether a '
+                                             'deadline/event is past or future relative to '
+                                             'the real current instant. The mandated '
+                                             'computation path for '
+                                             '`rules/temporal-awareness.md` — call it '
+                                             'before any "already passed", "still time to '
+                                             'act", or upcoming/just-happened framing '
+                                             'instead of eyeballing the clock.',
+                              'name': 'now-vs-deadline',
+                              'path': 'skills/now-vs-deadline/SKILL.md',
+                              'securityFindings': [],
+                              'securityLevel': 'NONE',
+                              'securityOverrideMessage': None,
+                              'securityRiskLevel': 'LOW',
+                              'securityStatus': 'completed',
+                              'securitySummary': 'No issues detected.',
+                              'securityUpdatedAt': '2026-08-18T01:40:25.748Z',
+                              'skillFingerprint': 'a32f9255fbaa388c209685168d27e3c893b156e58e07b689d22310abe16ff25b'},
+               'id': '01a18f72-1f69-7743-ac4c-5154c1611722',
+               'type': 'tile-version-skill-security-review'},
+              {'attributes': {'description': "Read the operator's current IANA timezone "
+                                             'from the host-owned `tz_state` singleton. '
+                                             'Use when a skill needs the zone the operator '
+                                             'is in right now — phrasing "today" / '
+                                             '"tomorrow", picking the parse zone for a '
+                                             '"remind me at 8am" reminder, deciding '
+                                             'whether a local time has passed — instead of '
+                                             'the container clock, `home_tz`, or a '
+                                             'hand-written SQL read.',
+                              'name': 'current-tz',
+                              'path': 'skills/current-tz/SKILL.md',
+                              'securityFindings': [],
+                              'securityLevel': 'NONE',
+                              'securityOverrideMessage': None,
+                              'securityRiskLevel': 'LOW',
+                              'securityStatus': 'completed',
+                              'securitySummary': 'No issues detected.',
+                              'securityUpdatedAt': '2026-09-23T06:02:08.021Z',
+                              'skillFingerprint': '46fb03ef599bd92d2365b901487dc1aeccd7064b84b0a1fc123634a94946c3ee'},
+               'id': '01a18f72-1f69-7743-ac4c-56def847c128',
+               'type': 'tile-version-skill-security-review'}],
+     'links': {'self': 'https://api.tessl.io/v1/tiles/jbaruch/nanoclaw-core/versions/0.1.159/skill-security-reviews'},
+     'meta': {'count': 3}}
 
 
 class CoreAuthorityTests(unittest.TestCase):
@@ -51,8 +345,9 @@ class CoreAuthorityTests(unittest.TestCase):
             },
         }
         self.metadata_path.write_text(json.dumps(self.metadata))
+        self.baseline_report = security_report_fixture()
         self.report_path = self.root / "report.json"
-        self.report_path.write_text(json.dumps(REPORT))
+        self.report_path.write_text(json.dumps(self.baseline_report))
         self.files = {
             ".tessl-plugin/plugin.json": json.dumps(
                 {"name": OWNER.PLUGIN, "version": OWNER.VERSION}
@@ -141,7 +436,7 @@ sys.stdout.write("\\n" + os.environ.get("FAKE_CURL_STATUS", "200"))
         hashes = patch.object(OWNER, "EXPECTED_FILES", self.hashes)
         hashes.start()
         self.addCleanup(hashes.stop)
-        self.report = copy.deepcopy(REPORT)
+        self.report = copy.deepcopy(self.baseline_report)
         reports = patch.object(
             OWNER, "fetch_report", side_effect=lambda: copy.deepcopy(self.report)
         )
@@ -287,7 +582,7 @@ sys.stdout.write("\\n" + os.environ.get("FAKE_CURL_STATUS", "200"))
     def test_changed_or_additional_security_finding_never_accepts_warnings(self):
         for change in ("new-code", "new-scope", "additional"):
             with self.subTest(change=change):
-                self.report = copy.deepcopy(REPORT)
+                self.report = copy.deepcopy(self.baseline_report)
                 attributes = self.report["data"][0]["attributes"]
                 if change == "new-code":
                     attributes["securityFindings"][0]["code"] = "W999"
@@ -334,9 +629,9 @@ sys.stdout.write("\\n" + os.environ.get("FAKE_CURL_STATUS", "200"))
         self.assertEqual(self.commands(), [])
 
     def test_report_change_after_install_stops_the_context(self):
-        changed = copy.deepcopy(REPORT)
+        changed = copy.deepcopy(self.baseline_report)
         changed["data"][0]["attributes"]["securityFindings"].append({"code": "W999"})
-        self.report_mock.side_effect = [REPORT, changed]
+        self.report_mock.side_effect = [self.baseline_report, changed]
         with self.assertRaises(OWNER.MaterializationError):
             OWNER.materialize(self.policy)
         self.assertEqual(len(self.installs()), 1)
