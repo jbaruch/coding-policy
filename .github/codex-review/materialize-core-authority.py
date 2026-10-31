@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Materialize only the reviewed Core157 authority in a private review context.
+"""Materialize only the reviewed Core159 authority in a private review context.
 
 Usage: materialize-core-authority.py DIRECTORY [--prepare-only]. DIRECTORY is
 the central driver's owned non-workspace policy directory. Preparation performs
@@ -24,10 +24,10 @@ import tempfile
 
 PLUGIN = "jbaruch/nanoclaw-core"
 # Renew only through source review, monthly or on Core/CLI publication changes.
-# This finite exception covers the audited157 package/report, never latest risk.
-VERSION = "0.1.157"
-FINGERPRINT = "57516bf5160c8fd04d5bcac9329f7ebfc07ba9c4d393d8c6ed2a5b0f245dab63"
-REPORT_SHA256 = "9b5ddf8f67a93880dfdffe43212fc4345c80a7928ed58b80ca2f74a96c104e21"
+# This finite exception covers the audited159 package/report, never latest risk.
+VERSION = "0.1.159"
+FINGERPRINT = "d94cda4518df36994403a355fbd2a97505192be0f442d48a170bfa076b20c66a"
+REPORT_SHA256 = "6b85deda7f7aaa7b491cba3a6c58ffb7248cda7316ed15d4ee858c56139655b5"
 REPORT_URL = (
     "https://api.tessl.io/v1/tiles/jbaruch/nanoclaw-core/versions/"
     + VERSION
@@ -35,7 +35,7 @@ REPORT_URL = (
 )
 MAX_RESPONSE = 256 * 1024
 EXPECTED_FILES = {
-    ".tessl-plugin/plugin.json": "e0e884b1e6cde6cef730b1ae5c02559bc2698b4dbabe5c966d153435108b018e",
+    ".tessl-plugin/plugin.json": "bbd9f391e4685a9976828e4f49b167ec4a7460e7b337409c38dfae1ccecdb999",
     "README.md": "77a3947018f2ee412aa1c31e1fb50f36a0c810fbee56421c469412a169c0db21",
     "rules/context-recovery.md": "e1bae936e642355bd473ddd05ee1ad00d44dcb42af9512eb72a5e8ec58e409e8",
     "rules/core-behavior.md": "bb549c0057de8f8308c3ad0ed0706c121ab49f3ffcf5fa78a928c764211df2d4",
@@ -54,8 +54,8 @@ EXPECTED_FILES = {
     "skills/now-vs-deadline/scripts/now-vs-deadline.py": "6ad002a3359fb37b5d861625225d1652df56c01e6ff1f10263412631970119c6",
     "skills/query-history/SKILL.md": "beac12474c491a37d5ad0a909a33c75d1047ad1d8fecda4e319d41def40e4397",
     "skills/query-history/scripts/query-message-history.py": "1a05c34579783e8cd4605ddd2749ae508c45e46d8a8526fe2ac201049a4e122e",
-    "tessl-package.json": "8cad899bf0ddc6c0ff3ef4bb62d26f1bd763863634691f7af7393954983f81b0",
-    "tile.json": "b62cad5197bcc02e4e022898446e34e266facae3e104e881ca8a59f7104dae22",
+    "tessl-package.json": "1cdf2ac7a84b5340abdec82ae86d6b65a9da1482adea5cf5dd79e2e655151c2b",
+    "tile.json": "027ed36a117a7d5c9cbb9abb9052417fbd6a64cb7ec1b156e21bf83790b98464",
 }
 
 
@@ -216,7 +216,7 @@ def materialize(directory, prepare_only=False):
         return proof
     # No other dependency manifest exists in this fresh workspace. Acceptance
     # cannot apply to an existing policy dependency or a plugin selected by PR data.
-    with tempfile.TemporaryDirectory(prefix="core157-", dir=directory) as temporary:
+    with tempfile.TemporaryDirectory(prefix="core159-", dir=directory) as temporary:
         install = Path(temporary)
         # Anchor the install to this project even when the surrounding review
         # context has its own Tessl manifest and unrelated dependencies.
