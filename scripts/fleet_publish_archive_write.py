@@ -40,8 +40,8 @@ from fleet_publish_record import (  # noqa: E402
     valid_repository,
 )
 from fleet_publish_github import (  # noqa: E402 - trusted bounded transport.
-    GitHubClient,
     ResolutionGitHubClient,
+    FleetPublishLookupError,
 )
 from fleet_publish import GitHub  # noqa: E402 - same trusted API/pagination owner.
 
@@ -77,7 +77,9 @@ def credential_environment(name: str) -> dict[str, str]:
     return environment
 
 
-class CentralHistoricalClient(GitHubClient):
+class CentralHistoricalClient(ResolutionGitHubClient):
+    """The existing bounded proof-resolution profile, with central-only access."""
+
     def _command_environment(self) -> dict[str, str]:
         return credential_environment("FLEET_CENTRAL_TOKEN")
 
@@ -807,15 +809,38 @@ def main() -> int:
     return 0
 
 
+def refusal_category(error: Exception) -> str:
+    """Fixed process-boundary metadata, never raw provider text or kinds."""
+    if isinstance(error, FleetPublishLookupError):
+        categories = {
+            "command_budget": "lookup_budget",
+            "command_timeout": "lookup_timeout",
+            "command_retirement_failed": "lookup_cleanup",
+            "command_unavailable": "lookup_unavailable",
+            "command_failed": "lookup_failed",
+            "command_io_failed": "lookup_io",
+            "stdout_budget": "lookup_output",
+            "stderr_budget": "lookup_output",
+            "native_http_error": "lookup_http",
+            "invalid_http_response": "lookup_http",
+            "native_missing": "lookup_missing",
+            "native_expired": "lookup_expired",
+        }
+        if isinstance(error.kind, str):
+            return categories.get(error.kind, "lookup_refused")
+        return "lookup_refused"
+    return "archive_guard" if isinstance(error, ArchiveWriteRefused) else "unexpected"
+
+
 if __name__ == "__main__":
     try:
         raise SystemExit(main())
     # outer-boundary-process-contract: callers treat nonzero/no positive JSON
     # as HOLD; fixed stderr preserves that signal without raw API/tool data.
     # Propagation would leak private child output and disable this boundary.
-    except Exception:  # noqa: BLE001 - outer-boundary-process-contract
+    except Exception as error:  # noqa: BLE001 - outer-boundary-process-contract
         print(
-            "Central evidence archival refused. Preserve the original claim/run and repair its exact missing evidence; never replay publication.",
+            f"Central evidence archival refused [{refusal_category(error)}]. Preserve the original claim/run and repair its exact missing evidence; never replay publication.",
             file=sys.stderr,
         )
         raise SystemExit(1)
