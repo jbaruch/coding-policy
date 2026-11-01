@@ -69,6 +69,7 @@
     "skills/release/fleet_publish_evidence.py",
     "tests/release/tests/test_fleet_publish_historical.py",
     "scripts/tests/test_fleet_publish_historical_write.py",
+    "scripts/tests/test_fleet_publish_historical_budget.py",
     "scripts/tests/test_fleet_publish_historical_package.py"
   ],
   "executionEnvironments": [

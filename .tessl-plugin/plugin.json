@@ -1,6 +1,6 @@
 {
   "name": "jbaruch/coding-policy",
-  "version": "0.5.17",
+  "version": "0.5.18",
   "description": "General-purpose coding policy for Baruch's AI agents",
   "private": false,
   "skills": [
