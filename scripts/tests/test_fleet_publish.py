@@ -1505,13 +1505,36 @@ class QueueTests(PublisherFixture):
         github.records["receipt"] = (self.work / "receipt.json").read_bytes()
         return github
 
+    def test_historical_fixture_import_failure_restores_path_before_propagating(self):
+        before = sys.path[:]
+        ordinary_import = __import__
+        failure = ImportError("synthetic unavailable historical fixture")
+
+        def import_fixture(name, *args, **kwargs):
+            if name == "test_fleet_publish_historical":
+                raise failure
+            return ordinary_import(name, *args, **kwargs)
+
+        with patch("builtins.__import__", side_effect=import_fixture):
+            with self.assertRaises(ImportError) as caught:
+                self.test_verified_historical_prior_reaches_normal_earliest_next_source_without_receipt_or_effect()
+        self.assertIs(caught.exception, failure)
+        self.assertEqual(sys.path, before)
+        self.assertEqual(self.helpers, [])
+
     def test_verified_historical_prior_reaches_normal_earliest_next_source_without_receipt_or_effect(
         self,
     ):
-        sys.path.insert(
-            0, str(Path(__file__).resolve().parents[2] / "tests/release/tests")
-        )
-        from test_fleet_publish_historical import proof
+        import_path_before = sys.path[:]
+        try:
+            sys.path.insert(
+                0, str(Path(__file__).resolve().parents[2] / "tests/release/tests")
+            )
+            from test_fleet_publish_historical import proof
+        finally:
+            sys.path[:] = import_path_before
+
+        self.assertEqual(sys.path, import_path_before)
 
         self.baseline = "unpublished"
         github = self.finish_first()

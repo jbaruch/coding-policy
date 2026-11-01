@@ -17,6 +17,7 @@ from typing import Any, Literal, TypedDict
 from fleet_publish_archive import (
     ArchiveError,
     FINALIZER_WORKFLOW,
+    _encoded_archive,
     finalizer_identity,
     native_jobs,
     native_run,
@@ -206,7 +207,7 @@ def parse_historical(value: object) -> dict[str, Any]:
         and attester["run_id"] != original["run_id"]
         and attester["run_attempt"] == 1
     )
-    return {
+    result = {
         "schema_version": 1,
         "kind": KIND,
         "derivation": DERIVATION,
@@ -216,6 +217,10 @@ def parse_historical(value: object) -> dict[str, Any]:
         "registry": registry,
         "attester": attester,
     }
+    # A schema-admitted proof must fit the same complete canonical record the
+    # archive writer/readback accepts. This does not truncate any inventory.
+    _encoded_archive(result)
+    return result
 
 
 def prior_facts(value: object) -> HistoricalPrior:

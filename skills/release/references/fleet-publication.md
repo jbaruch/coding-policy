@@ -147,6 +147,9 @@ jobs, the reviewed historical executable pinset, complete official source-pack
 and exact-version installed inventories, registry observation and actual later
 attester workflow/run/attempt/source. It carries no reconstructed original
 receipt, artifact digest, publication timestamp or original finalizer identity.
+Its schema validator admits only complete normalized proofs that fit the existing
+canonical archive encoding budget; see `skills/release/fleet_publish_archive.py`
+— `_encoded_archive`. Inventories are never truncated to fit.
 
 Historical proof creation supports public and private enrolled consumers through
 an App read token scoped to the one repository derived from the original durable

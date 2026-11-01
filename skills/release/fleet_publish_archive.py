@@ -473,8 +473,8 @@ def parse_hold(value: object) -> dict[str, Any]:
     )
 
 
-def encode_archive(value: object) -> bytes:
-    parsed = parse_archive(value)
+def _encoded_archive(parsed: object) -> bytes:
+    """Canonical bytes/budget only; the caller validates the record schema."""
     raw = (
         json.dumps(
             parsed, sort_keys=True, separators=(",", ":"), allow_nan=False
@@ -483,6 +483,10 @@ def encode_archive(value: object) -> bytes:
     )
     need(len(raw) <= MAX_ARCHIVE_BYTES)
     return raw
+
+
+def encode_archive(value: object) -> bytes:
+    return _encoded_archive(parse_archive(value))
 
 
 def parse_archive(value: object) -> dict[str, Any]:

@@ -6,6 +6,8 @@ Use a discriminated prior-publication union in the controller and poller, retain
 
 Require complete unchanged native publisher/finalizer run catalogs around historical proof creation and exact readback, including existing-proof no-ops. Exclude only the exact current manual attester; in-flight, ambiguous or incomplete catalogs preserve the hold without new credentials or publication replay.
 
+Admit a historical proof only when its complete canonical encoding fits the existing archive budget, preserving full inventories and the original wire format. Restore the historical-prior test's temporary import path on both successful and failed fixture imports.
+
 ## 0.5.16 — 2026-10-31
 
 ### Keep associated Actions attempts in the PR readiness gate

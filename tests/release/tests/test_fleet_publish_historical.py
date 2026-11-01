@@ -79,7 +79,54 @@ def proof(envelope=None):
     )
 
 
+def maximum_inventory_proof(path_characters=1000):
+    value = proof()
+    rows = [
+        copy.deepcopy(row)
+        for row in value["registry"]["source"]
+        if row["path"] in historical.JSON_MEMBERS
+    ]
+    rows.extend(
+        {
+            "path": f"z/{index:04d}" + "x" * (path_characters - 6),
+            "bytes": 1,
+            "sha256": "a" * 64,
+            "json_sha256": None,
+        }
+        for index in range(510)
+    )
+    value["registry"]["source"] = sorted(rows, key=lambda row: row["path"])
+    value["registry"]["installed"] = copy.deepcopy(value["registry"]["source"])
+    return value
+
+
 class HistoricalTests(unittest.TestCase):
+    def test_complete_maximum_inventory_exceeding_archive_budget_is_not_schema_valid(
+        self,
+    ):
+        for unicode_paths in (False, True):
+            value = maximum_inventory_proof()
+            if unicode_paths:
+                for rows in (
+                    value["registry"]["source"],
+                    value["registry"]["installed"],
+                ):
+                    for row in rows:
+                        if row["path"].startswith("z/"):
+                            row["path"] = row["path"].replace("x", "\u2603")
+            expected = (
+                json.dumps(
+                    value, sort_keys=True, separators=(",", ":"), allow_nan=False
+                ).encode()
+                + b"\n"
+            )
+            self.assertGreater(len(expected), archive.MAX_ARCHIVE_BYTES)
+            with (
+                self.subTest(unicode_paths=unicode_paths),
+                self.assertRaises(archive.ArchiveError),
+            ):
+                historical.parse_historical(value)
+
     def test_separate_family_roundtrips_without_native_receipt_fields(self):
         value = proof()
         self.assertEqual(archive.decode_archive(archive.encode_archive(value)), value)

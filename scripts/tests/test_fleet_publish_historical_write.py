@@ -20,10 +20,10 @@ sys.path.insert(0, str(ROOT / "tests/release/tests"))
 import fleet_publish_archive_write as writer  # noqa: E402
 import fleet_publish_producer as producer  # noqa: E402
 import fleet_publish_historical_package as packages  # noqa: E402
-from fleet_publish_archive import ArchiveReader, ref_name, native_run  # noqa: E402
+from fleet_publish_archive import ArchiveError, ArchiveReader, ref_name, native_run  # noqa: E402
 from test_fleet_publish_archive_write import Git  # noqa: E402
 from test_fleet_publish_resolver import Fixture, RUN, REPO, CENTRAL  # noqa: E402
-from test_fleet_publish_historical import proof  # noqa: E402
+from test_fleet_publish_historical import proof, maximum_inventory_proof  # noqa: E402
 import test_fleet_publish_historical_package as package_tests  # noqa: E402
 
 
@@ -201,6 +201,71 @@ class HistoricalWriterTests(unittest.TestCase):
             self.github.identity,
             {"inputs": inputs or {"original_run_id": RUN}},
         )
+
+    def test_maximum_inventory_exact_encoded_budget_roundtrips_through_create_readback(
+        self,
+    ):
+        value = maximum_inventory_proof(6)
+
+        def expected_bytes():
+            return (
+                json.dumps(
+                    value, sort_keys=True, separators=(",", ":"), allow_nan=False
+                ).encode()
+                + b"\n"
+            )
+
+        from fleet_publish_archive import (
+            MAX_ARCHIVE_BYTES,
+            decode_archive,
+            encode_archive,
+        )
+
+        remaining = MAX_ARCHIVE_BYTES - len(expected_bytes())
+        if remaining % 2:
+            value["attester"]["run_id"] = "1002"
+            remaining -= 1
+        for index, row in enumerate(value["registry"]["source"]):
+            if row["path"].startswith("z/"):
+                addition = min(remaining // 2, 1000 - len(row["path"]))
+                row["path"] += "x" * addition
+                value["registry"]["installed"][index]["path"] = row["path"]
+                remaining -= addition * 2
+        self.assertEqual(remaining, 0)
+        raw = expected_bytes()
+        self.assertEqual(len(value["registry"]["source"]), 512)
+        self.assertEqual(len(raw), MAX_ARCHIVE_BYTES)
+        self.assertEqual(decode_archive(encode_archive(value)), value)
+        github = Git()
+        ref = ref_name("historical-source-proof", run_id="101")
+        writer.create_only(github, ref, value, lambda: github.lookup(ref))
+        self.assertEqual(github.lookup(ref), value)
+        self.assertEqual(len(github.refs), 1)
+        count = len(github.calls)
+        writer.create_only(github, ref, value, lambda: github.lookup(ref))
+        self.assertEqual(len(github.calls), count)
+        # One extra encoded byte must be refused before any new effect, even
+        # though every individual inventory/path field remains accepted.
+        over = copy.deepcopy(value)
+        over["attester"]["run_id"] += "0"
+        self.assertEqual(
+            len(
+                json.dumps(
+                    over, sort_keys=True, separators=(",", ":"), allow_nan=False
+                ).encode()
+            )
+            + 1,
+            MAX_ARCHIVE_BYTES + 1,
+        )
+        with self.assertRaises(ArchiveError):
+            writer.create_only(
+                github,
+                ref_name("historical-source-proof", run_id="102"),
+                over,
+                lambda: None,
+            )
+        self.assertEqual(len(github.calls), count)
+        self.assertEqual(github.lookup(ref), value)
 
     def test_creates_only_the_fixed_later_ref_and_preserves_missing_native_receipt(
         self,
