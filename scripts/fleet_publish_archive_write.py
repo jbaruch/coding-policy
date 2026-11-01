@@ -17,6 +17,7 @@ from typing import Any, Callable, Iterator
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "skills/release"))
 from fleet_publish_archive import (  # noqa: E402 - trusted co-shipped owner.
+    CONCLUSIONS,
     FINALIZER_WORKFLOW,
     PREFIX,
     encode_archive,
@@ -26,6 +27,9 @@ from fleet_publish_archive import (  # noqa: E402 - trusted co-shipped owner.
     make_terminal,
     parse_intent,
     ref_name,
+    identifier,
+    obj,
+    utc,
 )
 from fleet_publish_producer import verify_workflow_protocol  # noqa: E402
 from fleet_publish_record import (  # noqa: E402
@@ -484,6 +488,113 @@ def historical_selection(
     return identity, envelope
 
 
+def historical_quiescence(
+    github: Any, identity: dict[str, Any], original_run_id: str
+) -> list[dict[str, Any]]:
+    """Read complete fixed-owner catalogs, never a status/time-filtered subset."""
+    snapshot: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    workflows: set[str] = set()
+    attesters = 0
+
+    def quiet(value: object) -> None:
+        if not value:
+            raise ArchiveWriteRefused(
+                "Keep FLEET_PUBLISHER_ENABLED disabled; wait for every other "
+                "central poll/publication/finalizer run to finish and restore "
+                "complete unchanged native workflow catalogs before attesting."
+            )
+
+    for path, events in (
+        (CENTRAL_WORKFLOW, {"schedule", "workflow_dispatch"}),
+        (FINALIZER_WORKFLOW, {"workflow_run", "workflow_dispatch"}),
+    ):
+        route = f"repos/{CENTRAL_REPOSITORY}/actions/workflows"
+        workflow = obj(github.api(f"{route}/{path.rsplit('/', 1)[1]}"))
+        quiet(type(workflow.get("id")) is int)
+        workflow_id = identifier(workflow.get("id"))
+        quiet(
+            workflow_id not in workflows
+            and workflow.get("path") == path
+            and workflow.get("state") == "active"
+        )
+        workflows.add(workflow_id)
+        rows = github.pages(f"{route}/{workflow_id}/runs", "workflow_runs")
+        for value in rows:
+            run = obj(value)
+            quiet(type(run.get("id")) is int)
+            run_id = identifier(run.get("id"))
+            attempt, status, conclusion = (
+                run.get("run_attempt"),
+                run.get("status"),
+                run.get("conclusion"),
+            )
+            branch = run.get("head_branch")
+            quiet(
+                run_id not in seen
+                and type(run.get("workflow_id")) is int
+                and str(run["workflow_id"]) == workflow_id
+                and run.get("path") == path
+                and obj(run.get("repository")).get("full_name") == CENTRAL_REPOSITORY
+                and obj(run.get("head_repository")).get("full_name")
+                == CENTRAL_REPOSITORY
+                and type(attempt) is int
+                and 1 <= attempt < 2**31
+                and valid_sha(run.get("head_sha"))
+                and isinstance(branch, str)
+                and 0 < len(branch) <= 255
+                and not any(ord(char) < 32 or ord(char) == 127 for char in branch)
+                and isinstance(run.get("event"), str)
+                and run["event"] in events
+                and isinstance(status, str)
+                and status
+                in {
+                    "queued",
+                    "in_progress",
+                    "waiting",
+                    "requested",
+                    "pending",
+                    "completed",
+                }
+                and (
+                    isinstance(conclusion, str) and conclusion in CONCLUSIONS
+                    if status == "completed"
+                    else conclusion is None
+                )
+            )
+            seen.add(run_id)
+            if run_id == identity["run_id"]:
+                quiet(
+                    path == FINALIZER_WORKFLOW
+                    and attempt == identity["run_attempt"]
+                    and run.get("head_sha") == identity["workflow_sha"]
+                    and branch == "main"
+                    and run.get("event") == "workflow_dispatch"
+                    and status == "in_progress"
+                )
+                attesters += 1
+            else:
+                quiet(status == "completed")
+            snapshot.append(
+                {
+                    "workflow_id": workflow_id,
+                    "path": path,
+                    "id": run_id,
+                    "run_attempt": attempt,
+                    "head_sha": run["head_sha"],
+                    "head_branch": branch,
+                    "event": run["event"],
+                    "status": status,
+                    "conclusion": conclusion,
+                    "created_at": utc(run.get("created_at")),
+                }
+            )
+        if path == CENTRAL_WORKFLOW:
+            quiet(original_run_id in seen)
+    quiet(attesters == 1)
+    return sorted(snapshot, key=lambda run: int(run["id"]))
+
+
 def attest_historical(
     github: Any, reader: Any, environment: Any, event: object
 ) -> bool:
@@ -563,6 +674,7 @@ def attest_historical(
     )
     evidence.stable()
     require(reader.run_intent(run_id) == envelope and reader.run_hold(run_id) is None)
+    quiescence = historical_quiescence(github, identity, run_id)
     existing = reader.historical_source_proof(run_id)
     if existing is not None:
         # Retain first attester/observation. All original/source/native facts and
@@ -581,6 +693,7 @@ def attest_historical(
                 if key != "observed_at"
             )
         )
+        require(historical_quiescence(github, identity, run_id) == quiescence)
         return True
     create_only(
         github,
@@ -588,6 +701,7 @@ def attest_historical(
         proof,
         lambda: reader.historical_source_proof(run_id),
     )
+    require(historical_quiescence(github, identity, run_id) == quiescence)
     return True
 
 

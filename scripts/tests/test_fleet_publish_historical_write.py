@@ -69,10 +69,37 @@ class HistoricalGit(writer.HistoricalGitHub):
                 "path": writer.FINALIZER_WORKFLOW,
                 "head_sha": self.original.central_tip,
                 "event": "workflow_dispatch",
+                "workflow_id": 78,
                 "status": "in_progress",
                 "conclusion": None,
             }
+        for path, workflow_id, rows in (
+            (writer.CENTRAL_WORKFLOW, 77, [self.original.routes[original_run]]),
+            (
+                writer.FINALIZER_WORKFLOW,
+                78,
+                [self.original.routes[f"repos/{CENTRAL}/actions/runs/201"]],
+            ),
+        ):
+            self.original.routes[
+                f"repos/{CENTRAL}/actions/workflows/{path.rsplit('/', 1)[1]}"
+            ] = {
+                "id": workflow_id,
+                "path": path,
+                "state": "active",
+            }
+            self.original.routes[
+                f"repos/{CENTRAL}/actions/workflows/{workflow_id}/runs?per_page=100&page=1"
+            ] = {
+                "total_count": len(rows),
+                "workflow_runs": copy.deepcopy(rows),
+            }
         self.writes = []
+
+    def catalog(self, workflow_id):
+        return self.original.routes[
+            f"repos/{CENTRAL}/actions/workflows/{workflow_id}/runs?per_page=100&page=1"
+        ]
 
     def json(self, route):
         return self.native_json(route)
@@ -106,6 +133,8 @@ class HistoricalGit(writer.HistoricalGitHub):
         return self.native_json(path)
 
     def pages(self, route, key=None):
+        if key == "workflow_runs":
+            return super().pages(route, key)
         assert route.endswith(f"/{RUN}/attempts/1/jobs") and key == "jobs"
         page = self.original.native_json(route + "?per_page=100&page=1")
         assert isinstance(page, dict) and isinstance(page.get("jobs"), list)
@@ -353,6 +382,241 @@ class HistoricalWriterTests(unittest.TestCase):
                     else:
                         self.attest()
                 self.assertEqual(self.github.writes, [])
+
+    def test_inflight_poll_publish_or_other_finalizer_never_creates_proof(self):
+        for workflow_id, event in (
+            (77, "schedule"),
+            (77, "workflow_dispatch"),
+            (78, "workflow_run"),
+            (78, "workflow_dispatch"),
+        ):
+            with self.subTest(workflow_id=workflow_id, event=event):
+                self.github = HistoricalGit()
+                self.reader = ArchiveReader(self.github)
+                page = self.github.catalog(workflow_id)
+                page["workflow_runs"].append(
+                    {
+                        **page["workflow_runs"][0],
+                        "id": 301,
+                        "event": event,
+                        "status": "in_progress",
+                        "conclusion": None,
+                    }
+                )
+                page["total_count"] += 1
+                with self.assertRaises(ValueError):
+                    self.attest()
+                self.assertEqual(self.github.writes, [])
+                self.assertEqual(self.github.effects.refs, {})
+
+    def test_completed_failed_skipped_otherbranch_and_rerun_are_quiescent(self):
+        for run_id, (workflow_id, event, conclusion, branch, attempt) in enumerate(
+            (
+                (77, "schedule", "success", "main", 1),
+                (77, "workflow_dispatch", "failure", "feature/old", 2),
+                (78, "workflow_run", "skipped", "feature/old", 3),
+            ),
+            start=301,
+        ):
+            page = self.github.catalog(workflow_id)
+            page["workflow_runs"].append(
+                {
+                    **page["workflow_runs"][0],
+                    "id": run_id,
+                    "event": event,
+                    "conclusion": conclusion,
+                    "status": "completed",
+                    "head_branch": branch,
+                    "run_attempt": attempt,
+                }
+            )
+            page["total_count"] += 1
+        self.assertTrue(self.attest())
+        self.assertIsNotNone(self.reader.historical_source_proof(RUN))
+
+    def test_complete_catalog_uses_all_pages_and_holds_for_later_inflight_row(self):
+        for terminal in (False, True):
+            with self.subTest(terminal=terminal):
+                self.github = HistoricalGit()
+                self.reader = ArchiveReader(self.github)
+                page = self.github.catalog(77)
+                original = copy.deepcopy(page["workflow_runs"][0])
+                page["workflow_runs"].extend(
+                    {**original, "id": run_id, "event": "schedule"}
+                    for run_id in range(400, 499)
+                )
+                page["total_count"] = 101
+                self.github.original.routes[
+                    f"repos/{CENTRAL}/actions/workflows/77/runs?per_page=100&page=2"
+                ] = {
+                    "total_count": 101,
+                    "workflow_runs": [
+                        {
+                            **original,
+                            "id": 499,
+                            "event": "schedule",
+                            "status": "completed" if terminal else "queued",
+                            "conclusion": "skipped" if terminal else None,
+                        }
+                    ],
+                }
+                if terminal:
+                    self.assertTrue(self.attest())
+                    self.assertIsNotNone(self.reader.historical_source_proof(RUN))
+                else:
+                    with self.assertRaises(ValueError):
+                        self.attest()
+                    self.assertEqual(self.github.writes, [])
+
+    def test_unavailable_catalog_preserves_no_effect_and_exception(self):
+        actual = self.github.api
+        unavailable = OSError("synthetic unavailable native catalog")
+
+        def failed_catalog(route, payload=None, *, binary=False, method="POST"):
+            if "/actions/workflows/" in route:
+                raise unavailable
+            return actual(route, payload, binary=binary, method=method)
+
+        with patch.object(self.github, "api", side_effect=failed_catalog):
+            with self.assertRaises(OSError) as caught:
+                self.attest()
+        self.assertIs(caught.exception, unavailable)
+        self.assertEqual(self.github.writes, [])
+
+    def test_unknown_catalog_and_attester_identity_never_write(self):
+        changes = (
+            ("missing-attester", None),
+            ("empty-publisher", None),
+            ("workflow-path", None),
+            ("workflow-id", None),
+            ("missing-total", None),
+            ("oversize", None),
+            ("status", "mystery"),
+            ("conclusion", None),
+            ("status", []),
+            ("conclusion", {}),
+            ("event", []),
+            ("run_attempt", True),
+            ("run_attempt", 0),
+            ("repository", {"full_name": "fixture/other"}),
+            ("head_sha", None),
+            ("created_at", "not-a-date"),
+            ("head_branch", None),
+            ("event", "push"),
+            ("attester-head", None),
+            ("attester-attempt", None),
+            ("attester-main", None),
+            ("attester-event", None),
+            ("duplicate-id", None),
+        )
+        for change, value in changes:
+            with self.subTest(change=change, value=value):
+                self.github = HistoricalGit()
+                self.reader = ArchiveReader(self.github)
+                page = self.github.catalog(77)
+                current = self.github.catalog(78)["workflow_runs"][0]
+                metadata = self.github.original.routes[
+                    f"repos/{CENTRAL}/actions/workflows/fleet-publish.yml"
+                ]
+                if change in ("missing-attester", "empty-publisher"):
+                    page = self.github.catalog(
+                        78 if change == "missing-attester" else 77
+                    )
+                    page.update(total_count=0, workflow_runs=[])
+                elif change == "workflow-path":
+                    metadata["path"] = writer.FINALIZER_WORKFLOW
+                elif change == "workflow-id":
+                    metadata["id"] = 78
+                elif change == "missing-total":
+                    page.pop("total_count")
+                elif change == "oversize":
+                    page["total_count"] = 1001
+                elif change.startswith("attester-"):
+                    key, replacement = {
+                        "attester-head": ("head_sha", "a" * 40),
+                        "attester-attempt": ("run_attempt", 2),
+                        "attester-main": ("head_branch", "feature/other"),
+                        "attester-event": ("event", "workflow_run"),
+                    }[change]
+                    current[key] = replacement
+                elif change == "duplicate-id":
+                    page["workflow_runs"].append(
+                        copy.deepcopy(page["workflow_runs"][0])
+                    )
+                    page["total_count"] += 1
+                else:
+                    page["workflow_runs"][0][change] = value
+                with self.assertRaises((ValueError, RuntimeError)):
+                    self.attest()
+                self.assertEqual(self.github.writes, [])
+
+    def test_catalog_changes_after_write_hold_without_repeating_or_deleting_ref(self):
+        for change in ("attempt", "new-run", "removed-run", "inflight", "workflow-id"):
+            with self.subTest(change=change):
+                self.github = HistoricalGit()
+                self.reader = ArchiveReader(self.github)
+                actual = self.github.effects.api
+
+                def changed_after_ref(route, payload=None):
+                    result = actual(route, payload)
+                    if route.endswith("/refs"):
+                        page = self.github.catalog(77)
+                        if change == "attempt":
+                            page["workflow_runs"][0]["run_attempt"] = 2
+                        elif change == "new-run":
+                            page["workflow_runs"].append(
+                                {**page["workflow_runs"][0], "id": 301}
+                            )
+                            page["total_count"] += 1
+                        elif change == "removed-run":
+                            page.update(total_count=0, workflow_runs=[])
+                        elif change == "inflight":
+                            page["workflow_runs"][0].update(
+                                status="queued", conclusion=None
+                            )
+                        else:
+                            self.github.original.routes[
+                                f"repos/{CENTRAL}/actions/workflows/fleet-publish.yml"
+                            ]["id"] = 78
+                    return result
+
+                with patch.object(
+                    self.github.effects, "api", side_effect=changed_after_ref
+                ):
+                    with self.assertRaises((ValueError, RuntimeError)):
+                        self.attest()
+                self.assertEqual(
+                    len(
+                        [
+                            route
+                            for route, _ in self.github.writes
+                            if route.endswith("/refs")
+                        ]
+                    ),
+                    1,
+                )
+                self.assertIsNotNone(self.reader.historical_source_proof(RUN))
+
+    def test_existing_proof_also_requires_fresh_stable_quiescence(self):
+        self.assertTrue(self.attest())
+        saved = copy.deepcopy(self.github.effects.refs)
+        count = len(self.github.writes)
+        actual = self.github.pages
+        calls = 0
+
+        def changed_second_catalog(route, key=None):
+            nonlocal calls
+            if key == "workflow_runs" and "/77/" in route:
+                calls += 1
+                if calls == 2:
+                    self.github.catalog(77)["workflow_runs"][0]["run_attempt"] = 2
+            return actual(route, key)
+
+        with patch.object(self.github, "pages", side_effect=changed_second_catalog):
+            with self.assertRaises(ValueError):
+                self.attest()
+        self.assertEqual(self.github.effects.refs, saved)
+        self.assertEqual(len(self.github.writes), count)
 
 
 class HistoricalCredentialTransportTests(unittest.TestCase):

@@ -4,6 +4,8 @@ Add a distinct later-attestation family for an original successful publication w
 
 Use a discriminated prior-publication union in the controller and poller, retaining normal source-history, review/CI, baseline/version and effect-CAS gates. Keep native receipt-only resolution and ordinary confirmation schema 1 unchanged. Historical creation supports public and private enrolled consumers through an original-intent preflight and a repository-scoped read token from the existing Fleet App. Every historical Git/API child, including package reconstruction and create-only proof writes, receives only its fixed-route credential; archive reads leave the process environment unchanged. No grant, installation or user permission flow is added. Rebuild the actual publisher projection/version/changelog transform from source and exact native bookkeeping, observing a stamp date only as artifact content and retaining whole-package drift refusal. Historical confirmation uses durable validated native facts plus fresh registry reads after the original Actions metadata is unavailable. Explicit historical confirmation opts into schema 2 and still requires fresh registry/moderation gates. Reader-first installation and a separately authorized actual attestation precede any queued-source progress. Both distribution manifests advance together to 0.5.17.
 
+Require complete unchanged native publisher/finalizer run catalogs around historical proof creation and exact readback, including existing-proof no-ops. Exclude only the exact current manual attester; in-flight, ambiguous or incomplete catalogs preserve the hold without new credentials or publication replay.
+
 ## 0.5.16 — 2026-10-31
 
 ### Keep associated Actions attempts in the PR readiness gate
