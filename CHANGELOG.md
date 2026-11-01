@@ -1,3 +1,5 @@
+## 0.5.18 — 2026-11-01
+
 ### Complete bounded historical proof readback (#801)
 
 Use the existing fixed proof-resolution reader for the full central historical operation, retaining every quiescence, package, source, credential and create-only readback check. Keep publisher and poll defaults unchanged, preserve the activated producer graph, and report fixed private-safe refusal categories without provider output. Existing proofs remain immutable and original publications are never replayed.
