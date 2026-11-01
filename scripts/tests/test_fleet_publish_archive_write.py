@@ -595,7 +595,6 @@ class ArchiveWriterTests(unittest.TestCase):
         self.assertIn("workflows: ['Central fleet publish']", text)
         self.assertNotIn("name: Central fleet publish\n", text)
         for forbidden in (
-            "FLEET_APP",
             "workflow_run.head_sha",
             "workflow_run.head_repository",
             "fleet_publish_workflow.py",
@@ -613,7 +612,17 @@ class ArchiveWriterTests(unittest.TestCase):
             "github.run_attempt == 1 && vars.FLEET_PUBLISHER_ENABLED != 'true'", text
         )
         self.assertIn("github.event_name == 'workflow_run'", text)
-        self.assertNotIn("permission-contents:", text)
+        self.assertIn("permission-contents: read", text)
+        self.assertIn("permission-pull-requests: read", text)
+        self.assertNotIn("permission-contents: write", text)
+        self.assertIn("repositories: ${{ steps.consumer.outputs.repository_name }}", text)
+        self.assertIn("scripts/fleet_publish_archive_write.py select-consumer", text)
+        self.assertLess(text.index(" select-consumer"), text.index("actions/create-github-app-token"))
+        self.assertEqual(text.count("secrets.FLEET_APP_ID"), 1)
+        self.assertEqual(text.count("secrets.FLEET_APP_PRIVATE_KEY"), 1)
+        manual = text.split("- name: Attest original public or private", 1)[1]
+        self.assertIn("GH_TOKEN: ${{ steps.app.outputs.token }}", manual)
+        self.assertNotIn("|| github.token", manual)
         self.assertIn("actions: read", text)
         self.assertIn("contents: write", text)
         self.assertNotIn("conclusion == 'success'", text)

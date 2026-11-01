@@ -251,6 +251,10 @@ class GitHubClient:
     def _command_budget(self) -> int:
         return MAX_COMMANDS
 
+    def _command_environment(self) -> dict[str, str] | None:
+        """Default readers retain their inherited gh credential contract."""
+        return None
+
     def _read(self, route: str, maximum: int, *, native_status: bool = False) -> bytes:
         _route(route)
         started = self._clock()
@@ -278,6 +282,7 @@ class GitHubClient:
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 start_new_session=True,
+                env=self._command_environment(),
             )
         except OSError:
             raise FleetPublishLookupError("command_unavailable") from None

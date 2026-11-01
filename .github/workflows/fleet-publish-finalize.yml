@@ -28,6 +28,23 @@ jobs:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
+      - name: Derive historical consumer from original central intent
+        if: github.event_name == 'workflow_dispatch'
+        id: consumer
+        env:
+          GH_TOKEN: ${{ github.token }}
+          FLEET_CENTRAL_TOKEN: ${{ github.token }}
+        run: python3 scripts/fleet_publish_archive_write.py select-consumer
+      - uses: actions/create-github-app-token@v3
+        if: github.event_name == 'workflow_dispatch' && steps.consumer.outputs.repository_name != ''
+        id: app
+        with:
+          app-id: ${{ secrets.FLEET_APP_ID }}
+          private-key: ${{ secrets.FLEET_APP_PRIVATE_KEY }}
+          owner: jbaruch
+          repositories: ${{ steps.consumer.outputs.repository_name }}
+          permission-contents: read
+          permission-pull-requests: read
       - uses: tesslio/setup-tessl@v2
         if: github.event_name == 'workflow_dispatch'
         with:
@@ -35,7 +52,14 @@ jobs:
           version: '0.119.0'
           token: ${{ secrets.TESSL_TOKEN }} # existing central secret; read/install/pack only
       - name: Archive actual completed publisher evidence
+        if: github.event_name == 'workflow_run'
         env:
           GH_TOKEN: ${{ github.token }}
+          FLEET_CENTRAL_TOKEN: ${{ github.token }}
+        run: python3 scripts/fleet_publish_archive_write.py
+      - name: Attest original public or private historical publication
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
           FLEET_CENTRAL_TOKEN: ${{ github.token }}
         run: python3 scripts/fleet_publish_archive_write.py

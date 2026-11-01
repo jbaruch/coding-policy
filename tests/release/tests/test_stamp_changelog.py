@@ -184,6 +184,17 @@ class RegistryLag(unittest.TestCase):
 
 
 class StampChangelog(unittest.TestCase):
+    def test_missing_observed_date_never_fabricates_a_needed_stamp(self):
+        with self.assertRaises(ValueError):
+            stamp_changelog.stamp_changelog(_UNHEADED, "0.1.1", None)
+
+    def test_missing_date_is_unused_for_an_already_stamped_artifact(self):
+        observed = "# Changelog\n\n## 0.1.0 — 2020-01-01\n\n### Entry\n"
+        self.assertEqual(
+            stamp_changelog.stamp_changelog(observed, "0.1.1", None),
+            (observed, False),
+        )
+
     """stamp_changelog inserts a version heading above un-headed entries."""
 
     def test_inserts_heading_above_unheaded_entries(self):

@@ -3,8 +3,13 @@
 from __future__ import annotations
 
 import copy
+import contextlib
+import io
+import json
+import os
 from pathlib import Path
 import sys
+import tempfile
 import unittest
 from unittest.mock import patch
 
@@ -103,6 +108,26 @@ class HistoricalGit:
         return page["jobs"]
 
 
+class ScopedReads:
+    """A private consumer and central ledger refuse each other's credential."""
+
+    def __init__(self, owner, repository):
+        self.owner, self.repository = owner, repository
+        self.calls = []
+
+    def native_json(self, route):
+        assert writer.owned_route(route, self.repository), route
+        self.calls.append(route)
+        return self.owner.native_json(route)
+
+    def json(self, route):
+        return self.native_json(route)
+
+    def artifact_evidence(self, run, kind):
+        assert self.repository == CENTRAL
+        return self.owner.artifact_evidence(run, kind)
+
+
 class HistoricalWriterTests(unittest.TestCase):
     def setUp(self):
         # Only the graph owner is synthetic; native/source/claim/ref paths and
@@ -126,8 +151,15 @@ class HistoricalWriterTests(unittest.TestCase):
         self.observation = patch.object(
             packages, "observe_package", return_value=self.github.proof["registry"]
         )
-        self.observation.start()
+        self.package_observer = self.observation.start()
         self.addCleanup(self.observation.stop)
+        self.consumer_reader = patch.object(
+            writer,
+            "ConsumerHistoricalClient",
+            side_effect=lambda repository: ScopedReads(self.github, repository),
+        )
+        self.consumer_factory = self.consumer_reader.start()
+        self.addCleanup(self.consumer_reader.stop)
 
     def attest(self, **inputs):
         return writer.attest_historical(
@@ -175,17 +207,25 @@ class HistoricalWriterTests(unittest.TestCase):
             posts[0]["ref"], ref_name("historical-source-proof", run_id=RUN)
         )
 
-    def test_private_or_unverified_consumer_never_reads_history_or_creates_proof(self):
-        from fleet_publish_resolver import _Evidence
+    def test_private_consumer_is_supported_by_historical_derivation(self):
+        self.github.original.routes[f"repos/{REPO}"].update(
+            private=True, visibility="private"
+        )
+        central = ScopedReads(self.github, CENTRAL)
+        self.reader = ArchiveReader(central)
+        self.assertTrue(self.attest())
+        self.assertTrue(central.calls)
+        self.assertEqual(
+            set(self.github.effects.refs),
+            {ref_name("historical-source-proof", run_id=RUN)},
+        )
 
+    def test_unverified_consumer_identity_never_observes_package_or_creates_proof(self):
         variants = [
-            {"private": True, "visibility": "private"},
-            {"private": False, "visibility": "internal"},
-            {"private": 0},
             {"full_name": "fixture/wrong-consumer"},
             {"archived": True},
             {"disabled": True},
-            {"visibility": None},
+            {"default_branch": None},
         ]
         for fields in variants:
             with self.subTest(fields=fields):
@@ -193,20 +233,17 @@ class HistoricalWriterTests(unittest.TestCase):
                 self.reader = ArchiveReader(self.github)
                 self.github.original.routes[f"repos/{REPO}"].update(fields)
                 before = copy.deepcopy(self.github.original.routes)
-                with patch(
-                    "fleet_publish_resolver._Evidence", wraps=_Evidence
-                ) as consumer_history, patch.object(
+                with patch.object(
                     packages, "observe_package", return_value=self.github.proof["registry"]
                 ) as package_observer:
-                    with self.assertRaises(writer.ArchiveWriteRefused):
+                    with self.assertRaises((ValueError, RuntimeError)):
                         self.attest()
-                    consumer_history.assert_not_called()
                     package_observer.assert_not_called()
                 self.assertEqual(self.github.writes, [])
                 self.assertEqual(self.github.effects.refs, {})
                 self.assertEqual(self.github.original.routes, before)
 
-    def test_visibility_change_after_package_read_preserves_claim_without_proof(self):
+    def test_selected_app_read_accepts_visibility_change_without_scope_change(self):
         def changed_visibility(*_arguments):
             self.github.original.routes[f"repos/{REPO}"].update(
                 private=True, visibility="private"
@@ -214,10 +251,46 @@ class HistoricalWriterTests(unittest.TestCase):
             return self.github.proof["registry"]
 
         with patch.object(packages, "observe_package", side_effect=changed_visibility):
-            with self.assertRaises(writer.ArchiveWriteRefused):
-                self.attest()
+            self.assertTrue(self.attest())
+        self.assertEqual(
+            set(self.github.effects.refs),
+            {ref_name("historical-source-proof", run_id=RUN)},
+        )
+
+    def test_preflight_derives_only_durable_consumer_without_consumer_reads_or_writes(self):
+        central = ScopedReads(self.github, CENTRAL)
+        identity, envelope = writer.historical_selection(
+            self.github,
+            ArchiveReader(central),
+            self.github.identity,
+            {"inputs": {"original_run_id": RUN}},
+        )
+        self.assertEqual(envelope["intent"]["consumer_repository"], REPO)
+        self.assertEqual(identity["run_id"], "201")
+        self.package_observer.assert_not_called()
         self.assertEqual(self.github.writes, [])
-        self.assertEqual(self.github.effects.refs, {})
+        self.assertTrue(central.calls)
+
+    def test_native_output_preflight_emits_only_the_derived_repository_name(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            event = Path(temporary) / "event.json"
+            event.write_text(json.dumps({"inputs": {"original_run_id": RUN}}))
+            output = Path(temporary) / "output"
+            stdout = io.StringIO()
+            with (
+                patch.dict(os.environ, {**self.github.identity, "GITHUB_EVENT_PATH": str(event), "GITHUB_OUTPUT": str(output)}),
+                patch.object(sys, "argv", ["fleet_publish_archive_write.py", "select-consumer"]),
+                patch("fleet_publish.GitHub", return_value=self.github),
+                patch.object(writer, "CentralHistoricalClient", return_value=ScopedReads(self.github, CENTRAL)),
+                contextlib.redirect_stdout(stdout),
+            ):
+                self.assertEqual(writer.main(), 0)
+            name = REPO.split("/", 1)[1]
+            self.assertEqual(output.read_text(), "repository_name=" + name + "\n")
+            self.assertEqual(json.loads(stdout.getvalue()), {"schema_version": 1, "repository_name": name})
+            self.consumer_factory.assert_not_called()
+            self.package_observer.assert_not_called()
+            self.assertEqual(self.github.writes, [])
 
     def test_unknown_uncommitted_ref_post_holds_without_a_second_post(self):
         actual = self.github.effects.api
@@ -276,6 +349,69 @@ class HistoricalWriterTests(unittest.TestCase):
                     else:
                         self.attest()
                 self.assertEqual(self.github.writes, [])
+
+
+class HistoricalCredentialTransportTests(unittest.TestCase):
+    def test_real_gh_children_keep_private_consumer_and_central_credentials_separate(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            log = root / "calls"
+            gh = root / "gh"
+            gh.write_text(
+                f"#!{sys.executable}\n"
+                "import json,os,sys\n"
+                "from pathlib import Path\n"
+                "a=sys.argv[1:]\n"
+                "assert a[:5]==['api','--hostname','github.com','--method','GET']\n"
+                "route=a[-1]\n"
+                "central=route.startswith('repos/jbaruch/coding-policy/') or route=='repos/jbaruch/coding-policy'\n"
+                "expected=os.environ['FIXTURE_CENTRAL'] if central else os.environ['FIXTURE_CONSUMER']\n"
+                "assert os.environ.get('GH_TOKEN')==expected\n"
+                "assert 'GITHUB_TOKEN' not in os.environ and 'FLEET_CENTRAL_TOKEN' not in os.environ\n"
+                "with Path(os.environ['FIXTURE_CALLS']).open('a') as out:out.write(json.dumps([route,central])+'\\n')\n"
+                "if '--include' in a:sys.stdout.write('HTTP/2.0 200 OK\\r\\nContent-Type: application/json\\r\\n\\r\\n')\n"
+                "print(json.dumps({'total_count':0,'artifacts':[]} if '/artifacts?' in route else {'private':True}))\n"
+            )
+            gh.chmod(0o700)
+            with patch.dict(
+                os.environ,
+                {
+                    "PATH": str(root) + os.pathsep + os.environ.get("PATH", ""),
+                    "GH_TOKEN": "consumer-read-sentinel",
+                    "FLEET_CENTRAL_TOKEN": "central-read-sentinel",
+                    "GITHUB_TOKEN": "must-not-fallback",
+                    "FIXTURE_CENTRAL": "central-read-sentinel",
+                    "FIXTURE_CONSUMER": "consumer-read-sentinel",
+                    "FIXTURE_CALLS": str(log),
+                },
+            ):
+                central = writer.CentralHistoricalClient()
+                consumer = writer.ConsumerHistoricalClient(REPO)
+                transport = writer.HistoricalEvidenceTransport(central, consumer, REPO)
+                self.assertEqual(transport.json(f"repos/{REPO}"), {"private": True})
+                self.assertEqual(transport.native_json(f"repos/{CENTRAL}"), {"private": True})
+                self.assertIsNone(transport.artifact_evidence(RUN, "intent"))
+                before = log.read_bytes()
+                for route in (
+                    "repos/jbaruch/unselected",
+                    f"repos/{CENTRAL}-suffix/git/commits/" + "a" * 40,
+                    f"repos/{REPO}-suffix",
+                ):
+                    with self.assertRaises(writer.ArchiveWriteRefused):
+                        transport.json(route)
+                with self.assertRaises(writer.ArchiveWriteRefused):
+                    consumer.json(f"repos/{CENTRAL}")
+                with self.assertRaises(writer.ArchiveWriteRefused):
+                    central.json(f"repos/{REPO}")
+                with patch.dict(os.environ, {"GH_TOKEN": ""}):
+                    with self.assertRaises(writer.ArchiveWriteRefused):
+                        consumer.json(f"repos/{REPO}")
+                self.assertEqual(log.read_bytes(), before)
+                self.assertEqual(os.environ["GH_TOKEN"], "consumer-read-sentinel")
+                self.assertEqual(os.environ["FLEET_CENTRAL_TOKEN"], "central-read-sentinel")
+            rows = [json.loads(line) for line in log.read_text().splitlines()]
+            self.assertEqual(len(rows), 3)
+            self.assertEqual([row[1] for row in rows], [False, True, True])
 
 
 if __name__ == "__main__":

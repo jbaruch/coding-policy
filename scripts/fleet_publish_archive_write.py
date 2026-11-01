@@ -32,6 +32,11 @@ from fleet_publish_record import (  # noqa: E402
     CENTRAL_WORKFLOW,
     valid_run_id,
     valid_sha,
+    valid_repository,
+)
+from fleet_publish_github import (  # noqa: E402 - trusted bounded transport.
+    GitHubClient,
+    ResolutionGitHubClient,
 )
 
 
@@ -44,6 +49,72 @@ def require(value: object) -> None:
         raise ArchiveWriteRefused(
             "Preserve central evidence and inspect the original run without replaying publication."
         )
+
+
+def owned_route(route: str, repository: str) -> bool:
+    pathname = route.split("?", 1)[0]
+    root = f"repos/{repository}"
+    return pathname == root or pathname.startswith(root + "/")
+
+
+def credential_environment(name: str) -> dict[str, str]:
+    """Only the two existing workflow bindings; no gh fallback credential."""
+    require(name in ("GH_TOKEN", "FLEET_CENTRAL_TOKEN"))
+    credential = os.environ.get(name)
+    require(isinstance(credential, str) and bool(credential))
+    environment = {
+        key: value
+        for key, value in os.environ.items()
+        if key not in ("GH_TOKEN", "GITHUB_TOKEN", "FLEET_CENTRAL_TOKEN")
+    }
+    environment["GH_TOKEN"] = str(credential)
+    return environment
+
+
+class CentralHistoricalClient(GitHubClient):
+    def _command_environment(self) -> dict[str, str]:
+        return credential_environment("FLEET_CENTRAL_TOKEN")
+
+    def _read(self, route: str, maximum: int, *, native_status: bool = False) -> bytes:
+        require(owned_route(route, CENTRAL_REPOSITORY))
+        return super()._read(route, maximum, native_status=native_status)
+
+
+class ConsumerHistoricalClient(ResolutionGitHubClient):
+    def __init__(self, repository: str) -> None:
+        require(valid_repository(repository) and repository != CENTRAL_REPOSITORY)
+        super().__init__()
+        self.repository = repository
+
+    def _command_environment(self) -> dict[str, str]:
+        return credential_environment("GH_TOKEN")
+
+    def _read(self, route: str, maximum: int, *, native_status: bool = False) -> bytes:
+        require(owned_route(route, self.repository))
+        return super()._read(route, maximum, native_status=native_status)
+
+
+class HistoricalEvidenceTransport:
+    """Exact selected consumer GETs and central evidence use separate clients."""
+
+    def __init__(self, central: Any, consumer: Any, repository: str) -> None:
+        require(valid_repository(repository) and repository != CENTRAL_REPOSITORY)
+        self.central, self.consumer, self.repository = central, consumer, repository
+
+    def selected(self, route: str) -> Any:
+        if owned_route(route, CENTRAL_REPOSITORY):
+            return self.central
+        require(owned_route(route, self.repository))
+        return self.consumer
+
+    def json(self, route: str) -> object:
+        return self.selected(route).json(route)
+
+    def native_json(self, route: str) -> object:
+        return self.selected(route).native_json(route)
+
+    def artifact_evidence(self, run_id: str, kind: Any) -> Any:
+        return self.central.artifact_evidence(run_id, kind)
 
 
 def create_only(
@@ -324,16 +395,10 @@ def finalize(github: Any, reader: Any, environment: Any, event: object) -> bool:
     return True
 
 
-def attest_historical(
+def historical_selection(
     github: Any, reader: Any, environment: Any, event: object
-) -> bool:
-    """Explicit later attestation, derived entirely from the existing owner."""
-    from fleet_publish_archive import native_run, native_jobs
-    from fleet_publish_historical import KIND, DERIVATION, parse_historical
-    from fleet_publish_historical_package import observe_package
-    from fleet_publish_producer import HISTORICAL_PRODUCERS
-    from fleet_publish_resolver import _Evidence
-
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Derive the selected App repository solely from original central records."""
     require(environment.get("GITHUB_EVENT_NAME") == "workflow_dispatch")
     identity = finalizer_context(environment, event_name="workflow_dispatch")
     require(identity["run_attempt"] == 1)
@@ -370,25 +435,35 @@ def attest_historical(
         == envelope
     )
 
-    def require_public_consumer() -> None:
-        metadata = github.api(f"repos/{original['consumer_repository']}")
-        if not (
-            isinstance(metadata, dict)
-            and metadata.get("full_name") == original["consumer_repository"]
-            and metadata.get("private") is False
-            and metadata.get("visibility") == "public"
-            and metadata.get("archived") is False
-            and metadata.get("disabled") is False
-        ):
-            raise ArchiveWriteRefused(
-                "Historical source attestation supports verified public consumers only; preserve private or unknown claims without replay."
-            )
+    require(
+        valid_repository(original["consumer_repository"])
+        and original["consumer_repository"] != CENTRAL_REPOSITORY
+    )
+    return identity, envelope
 
-    require_public_consumer()
+
+def attest_historical(
+    github: Any, reader: Any, environment: Any, event: object
+) -> bool:
+    """Explicit later attestation, derived entirely from the existing owner."""
+    from fleet_publish_archive import native_run, native_jobs
+    from fleet_publish_historical import KIND, DERIVATION, parse_historical
+    from fleet_publish_historical_package import observe_package
+    from fleet_publish_producer import HISTORICAL_PRODUCERS
+    from fleet_publish_resolver import _Evidence
+
+    identity, envelope = historical_selection(github, reader, environment, event)
+    original = envelope["intent"]
+    run_id = original["run_id"]
+    transport = HistoricalEvidenceTransport(
+        reader.client,
+        ConsumerHistoricalClient(original["consumer_repository"]),
+        original["consumer_repository"],
+    )
     # Reuse complete native source, merge, ancestry and exact bookkeeping proof.
     # The existing receipt-only resolver remains unchanged for old callers.
     evidence = _Evidence(
-        reader.client, original["consumer_repository"], original["source_sha"]
+        transport, original["consumer_repository"], original["source_sha"]
     )
     selected, claim = evidence.selected(run_id)
     require(selected == original and claim == envelope["bookkeeping_sha"])
@@ -444,7 +519,6 @@ def attest_historical(
         }
     )
     evidence.stable()
-    require_public_consumer()
     require(reader.run_intent(run_id) == envelope and reader.run_hold(run_id) is None)
     existing = reader.historical_source_proof(run_id)
     if existing is not None:
@@ -478,7 +552,7 @@ def main() -> int:
     from fleet_publish import GitHub
     from fleet_publish_archive import ArchiveReader
 
-    require(not sys.argv[1:])
+    require(sys.argv[1:] in ([], ["select-consumer"]))
     if os.environ.get("GITHUB_EVENT_NAME") != "workflow_dispatch":
         finalizer_context(os.environ)  # Refuse before reading native event/API.
     with Path(os.environ["GITHUB_EVENT_PATH"]).open("rb") as stream:
@@ -491,7 +565,17 @@ def main() -> int:
     github = GitHub()
     historical = os.environ.get("GITHUB_EVENT_NAME") == "workflow_dispatch"
     operation = attest_historical if historical else finalize
-    reader = ArchiveReader(github._record_client)
+    reader = ArchiveReader(
+        CentralHistoricalClient() if historical else github._record_client
+    )
+    if sys.argv[1:] == ["select-consumer"]:
+        require(historical)
+        _, envelope = historical_selection(github, reader, os.environ, event)
+        name = envelope["intent"]["consumer_repository"].split("/", 1)[1]
+        with Path(os.environ["GITHUB_OUTPUT"]).open("a", encoding="utf-8") as output:
+            output.write("repository_name=" + name + "\n")
+        print(json.dumps({"schema_version": 1, "repository_name": name}))
+        return 0
     archived = operation(github, reader, os.environ, event)
     result: dict[str, Any] = {
         "schema_version": 1,

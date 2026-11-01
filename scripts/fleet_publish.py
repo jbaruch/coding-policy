@@ -1329,7 +1329,7 @@ def helper(
 
 
 def stamp_package(
-    package: Path, manifest: dict[str, Any], baseline: str, date: str
+    package: Path, manifest: dict[str, Any], baseline: str, date: str | None
 ) -> str:
     spec = importlib.util.spec_from_file_location(
         "fleet_stamp", POLICY / "skills/release/stamp-changelog.py"

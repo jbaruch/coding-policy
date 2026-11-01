@@ -148,23 +148,30 @@ and exact-version installed inventories, registry observation and actual later
 attester workflow/run/attempt/source. It carries no reconstructed original
 receipt, artifact digest, publication timestamp or original finalizer identity.
 
-Historical proof creation supports verified public consumers only. The fixed
-owner checks fresh exact repository identity, public visibility and active state
-before consumer-history/package reads and again before proof creation. Private,
-internal, unavailable or unverified visibility holds the original claim without
-a proof. This manual branch mints no App token; its central repository token
-reads public consumer history. Ordinary private publication and native receipt
-resolution retain their existing credential routes. Private historical creation
-requires a reviewed selected-consumer credential route before it is supported.
+Historical proof creation supports public and private enrolled consumers through
+an App read token scoped to the one repository derived from the original durable
+intent. The existing finalizer's `select-consumer` phase validates that original
+run and emits only its repository name to the native workflow output. It reads
+central records only and grants no publication or ref-write authority. See
+`scripts/fleet_publish_archive_write.py` — `historical_selection` and its CLI.
 
 The authorized recovery uses an explicit manual dispatch of the EXISTING
-`fleet-publish-finalize.yml`, with only `original_run_id` as input. The fixed
-writer derives all coordinates from the original owner records and native Git
-history. Its maintained pack/install observer lives in
-`scripts/fleet_publish_historical_package.py`; its commands use the existing
-central registry credential only for read/install/pack. App minting, consumer
-checkout/code execution, publication, source stamping and prior-record mutation
-are outside this branch. Normal completion archival remains unchanged.
+`fleet-publish-finalize.yml`, with only `original_run_id` as input. The workflow
+reuses `FLEET_APP_ID` and `FLEET_APP_PRIVATE_KEY`, requesting Contents and Pull
+requests read on the derived consumer. It adds no installation permission or
+operator-managed credential. Empty selection or failed mint holds; a central
+repository token never substitutes for the App token on consumer reads. Central
+ledger/run reads keep their separate central credential. Both transports admit
+only their fixed repository routes. Normal completion archival remains unchanged.
+
+The maintained pack/install observer lives in
+`scripts/fleet_publish_historical_package.py`. It rebuilds the publisher's inert
+projection, prior changelog overlay and version/stamp transform, bound to the
+original native bookkeeping bytes. Any stamp date is observed artifact content,
+not an inferred publication time. Missing or conflicting transform evidence holds.
+Its commands use the existing central registry credential only for read/install/
+pack; GitHub credentials are excluded. Consumer checkout/code execution,
+publication, source stamping and prior-record mutation remain outside this branch.
 
 A later proof cannot override a durable run hold, rerun, failed/uncertain native
 receipt, conflicting terminal/native data or unsupported producer graph. The

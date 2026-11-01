@@ -6,16 +6,32 @@ commands and installation configuration are fixed here, not consumer supplied.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 import os
 from pathlib import Path
 import stat
+import re
 import subprocess
 import tarfile
 import tempfile
 from typing import Any
 
-from fleet_publish import decode, encoded, file, require, tree
+from fleet_publish import (
+    MANIFEST,
+    STAMP,
+    decode,
+    encoded,
+    file,
+    require,
+    tree,
+    projection,
+    previous,
+    publication_facts,
+    overlay_previous_changelog,
+    stamp_package,
+    replace_suffix,
+)
+from fleet_publish_record import valid_sha
 from fleet_publish_historical import (
     MAX_PACKAGE_BYTES,
     MAX_PACKAGE_FILES,
@@ -112,38 +128,88 @@ def installed_files(root: Path) -> dict[str, bytes]:
     return result
 
 
+def historical_projection(github: Any, envelope: dict[str, Any], destination: Path) -> None:
+    """Reproduce publisher bytes from native source/claim, never installed output.
+
+    A date is observed only in the original native bookkeeping changelog. It
+    is transformed artifact content, not an inferred publication timestamp.
+    An absent date is usable only when the maintained stamp is a no-op.
+    """
+    original = envelope["intent"]
+    repo = original["consumer_repository"]
+    source_tree, source_entries = tree(github, repo, original["source_sha"])
+    require(source_tree == original["source_tree_sha"], "Original source tree changed.")
+    claim = github.api(f"repos/{repo}/git/commits/{envelope['bookkeeping_sha']}")
+    require(
+        isinstance(claim, dict)
+        and claim.get("sha") == envelope["bookkeeping_sha"]
+        and isinstance(claim.get("parents"), list)
+        and len(claim["parents"]) == 1
+        and isinstance(claim["parents"][0], dict)
+        and valid_sha(claim["parents"][0].get("sha")),
+        "Restore the exact single-parent native bookkeeping commit.",
+    )
+    _, parent_entries = tree(github, repo, claim["parents"][0]["sha"])
+    _, claimed_entries = tree(github, repo, envelope["bookkeeping_sha"])
+    require(
+        decode(file(github, repo, claimed_entries, STAMP)) == original,
+        "Native bookkeeping no longer contains the original intent.",
+    )
+    def unchanged(entries: dict[str, dict[str, Any]]) -> dict[str, dict[str, Any]]:
+        return {
+            name: row
+            for name, row in entries.items()
+            if row.get("type") != "tree" and name not in (MANIFEST, STAMP, "CHANGELOG.md")
+        }
+    require(
+        unchanged(parent_entries) == unchanged(claimed_entries),
+        "Native bookkeeping changed source outside its three owned paths.",
+    )
+    manifest = projection(github, repo, source_entries, destination, original["plugin_name"])
+    source_manifest = dict(manifest)
+    # The original successful closed publisher already proved its initial
+    # no-prior boundary. Never query today's default history as old absence.
+    prior_evidence = previous(github, repo, parent_entries) if STAMP in parent_entries else None
+    prior = publication_facts(prior_evidence) if prior_evidence is not None else None
+    require(prior is None or prior["state"] == "confirmed", "Restore confirmed prior publication continuity.")
+    changelog = destination / "CHANGELOG.md"
+    selected_text = overlay_previous_changelog(github, repo, changelog.read_text(), prior)
+    changelog.write_text(selected_text)
+    retained = file(github, repo, claimed_entries, "CHANGELOG.md").decode("utf-8")
+    dates = re.findall(r"^## " + re.escape(original["version"]) + r" — ([0-9]{4}-[0-9]{2}-[0-9]{2})$", retained, re.MULTILINE)
+    require(len(dates) <= 1, "Restore one unambiguous observed version stamp.")
+    observed_date = dates[0] if dates else None
+    if observed_date is not None:
+        date.fromisoformat(observed_date)
+    version = stamp_package(destination, manifest, original["registry_baseline"], observed_date)
+    require(version == original["version"], "Original source and baseline do not derive the recorded version.")
+    before = file(github, repo, parent_entries, "CHANGELOG.md").decode("utf-8")
+    require(
+        replace_suffix(before, selected_text, changelog.read_text()) == retained,
+        "The maintained projection/stamp does not reproduce native bookkeeping.",
+    )
+    before_manifest = file(github, repo, parent_entries, MANIFEST)
+    current = decode(before_manifest)
+    require(isinstance(current, dict), "Restore native parent manifest metadata.")
+    if (
+        {key: value for key, value in current.items() if key != "version"}
+        == {key: value for key, value in source_manifest.items() if key != "version"}
+        and current.get("version") in {source_manifest["version"], prior["version"] if prior else None}
+    ):
+        before_manifest = (destination / MANIFEST).read_bytes()
+    require(
+        file(github, repo, claimed_entries, MANIFEST) == before_manifest,
+        "Native bookkeeping manifest is not the exact owned transform.",
+    )
+
+
 def observe_package(github: Any, envelope: dict[str, Any]) -> dict[str, Any]:
     original = envelope["intent"]
     plugin, version = original["plugin_name"], original["version"]
     with tempfile.TemporaryDirectory(prefix="fleet-historical-") as temporary:
         root = Path(temporary)
         source = root / "source"
-        source.mkdir(mode=0o700)
-        source_tree, entries = tree(
-            github, original["consumer_repository"], original["source_sha"]
-        )
-        require(
-            source_tree == original["source_tree_sha"], "Original source tree changed."
-        )
-        total = 0
-        count = 0
-        for name, entry in entries.items():
-            _member(name)
-            if entry.get("type") == "tree":
-                require(
-                    entry.get("mode") == "040000", "Refuse special source directories."
-                )
-                continue
-            data = file(github, original["consumer_repository"], entries, name)
-            total += len(data)
-            count += 1
-            require(
-                total <= MAX_PACKAGE_BYTES and count <= MAX_PACKAGE_FILES,
-                "Original source exceeds its package bounds.",
-            )
-            target = source / name
-            target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_bytes(data)
+        historical_projection(github, envelope, source)
         require(
             command(["--version"], root).decode().strip() == TESSL_VERSION,
             "Install the reviewed Tessl CLI version before attesting.",
