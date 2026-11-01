@@ -25,9 +25,13 @@ import fleet_publish_archive_write as writer
 import fleet_publish_historical_package as packages
 import fleet_publish_producer as producer
 import test_fleet_publish_historical_write as historical_tests
-from fleet_publish_github import FleetPublishLookupError, GitHubClient
+from fleet_publish_github import (
+    FleetPublishLookupError,
+    GitHubClient,
+    ResolutionGitHubClient,
+)
 from test_fleet_publish_historical_write import HistoricalGit
-from test_fleet_publish_resolver import REPO, RUN, Fixture
+from test_fleet_publish_resolver import CENTRAL, REPO, RUN, Fixture
 
 
 class HistoricalBudgetTests(unittest.TestCase):
@@ -110,24 +114,11 @@ class HistoricalBudgetTests(unittest.TestCase):
                 owner.snapshot(route, "consumer-read-sentinel")
                 return super()._read(route, maximum, native_status=native_status)
 
-        self.central = []
-        self.consumer = []
-
-        def central():
-            client = Central()
-            self.central.append(client)
-            return client
-
-        def consumer(repository):
-            client = Consumer(repository)
-            self.consumer.append(client)
-            return client
-
         self.stack.enter_context(
-            patch.object(writer, "CentralHistoricalClient", side_effect=central)
+            patch.object(writer, "CentralHistoricalClient", Central)
         )
         self.stack.enter_context(
-            patch.object(writer, "ConsumerHistoricalClient", side_effect=consumer)
+            patch.object(writer, "ConsumerHistoricalClient", Consumer)
         )
 
     def snapshot(self, route, credential):
@@ -178,17 +169,38 @@ class HistoricalBudgetTests(unittest.TestCase):
                 },
             },
         )
-        self.assertGreater(self.central[0]._commands, 128)
-        self.assertLessEqual(self.central[0]._commands, 512)
-        self.assertEqual(GitHubClient()._command_budget(), 128)
+        central_calls = [
+            row
+            for row in self.calls.read_text().splitlines()
+            if json.loads(row)[0].startswith(f"repos/{CENTRAL}/")
+        ]
+        self.assertGreater(len(central_calls), 128)
+        self.assertLessEqual(len(central_calls), 512)
         self.assertTrue(self.github.effects.refs)
         self.assertEqual(
             sum(path.endswith("/refs") for path, _ in self.github.writes), 1
         )
-        self.assertEqual(
-            len(self.calls.read_text().splitlines()),
-            self.central[0]._commands + self.consumer[0]._commands,
-        )
+
+    def test_public_transport_preserves_both_fixed_command_boundaries(self):
+        route = f"repos/{REPO}"
+        self.snapshot(route, "consumer-read-sentinel")
+        # Exercise the public read operation against actual finite gh children.
+        # A refused next call must not launch another child or reuse a result.
+        for transport, limit in ((GitHubClient, 128), (ResolutionGitHubClient, 512)):
+            with self.subTest(transport=transport.__name__):
+                self.calls.write_text("")
+                with patch.dict(
+                    os.environ, writer.credential_environment("GH_TOKEN"), clear=True
+                ):
+                    client = transport()
+                    expected = self.github.native_json(route)
+                    for _ in range(limit):
+                        self.assertEqual(client.native_json(route), expected)
+                    with self.assertRaises(FleetPublishLookupError) as stopped:
+                        client.native_json(route)
+                    self.assertEqual(stopped.exception.kind, "command_budget")
+                calls = [json.loads(row) for row in self.calls.read_text().splitlines()]
+                self.assertEqual(calls, [[route, 200]] * limit)
 
     def test_existing_exact_proof_keeps_original_attester_and_never_writes_again(self):
         first = self.main_result()
@@ -204,7 +216,13 @@ class HistoricalBudgetTests(unittest.TestCase):
             private=True, visibility="private"
         )
         self.assertTrue(self.main_result()["archived"])
-        self.assertGreater(self.central[0]._commands, 128)
+        self.assertGreater(
+            sum(
+                json.loads(row)[0].startswith(f"repos/{CENTRAL}/")
+                for row in self.calls.read_text().splitlines()
+            ),
+            128,
+        )
 
     def test_unknown_ref_post_with_exact_readback_never_repeats_the_write(self):
         self.github.effects.after_create_error = True
