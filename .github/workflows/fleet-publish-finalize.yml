@@ -3,6 +3,12 @@ name: Finalize central fleet publication evidence
 # A differently named workflow avoids self-triggered completion chains.
 # Original artifacts/native facts are read while fresh. No publication effect.
 on:
+  workflow_dispatch:
+    inputs:
+      original_run_id:
+        description: 'Original native publisher run ID for later source proof; never a publish retry'
+        required: true
+        type: string
   workflow_run:
     workflows: ['Central fleet publish']
     types: [completed]
@@ -12,7 +18,7 @@ permissions:
 
 jobs:
   archive:
-    if: github.repository == 'jbaruch/coding-policy' && github.ref == 'refs/heads/main' && github.event.workflow_run.event == 'workflow_dispatch' && github.event.workflow_run.head_branch == 'main'
+    if: github.repository == 'jbaruch/coding-policy' && github.ref == 'refs/heads/main' && ((github.event_name == 'workflow_dispatch' && github.run_attempt == 1 && vars.FLEET_PUBLISHER_ENABLED != 'true') || (github.event_name == 'workflow_run' && github.event.workflow_run.event == 'workflow_dispatch' && github.event.workflow_run.head_branch == 'main'))
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -22,6 +28,12 @@ jobs:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
+      - uses: tesslio/setup-tessl@v2
+        if: github.event_name == 'workflow_dispatch'
+        with:
+          # Renew monthly with the co-shipped package verifier, separately.
+          version: '0.119.0'
+          token: ${{ secrets.TESSL_TOKEN }} # existing central secret; read/install/pack only
       - name: Archive actual completed publisher evidence
         env:
           GH_TOKEN: ${{ github.token }}

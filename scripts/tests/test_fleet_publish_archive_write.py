@@ -595,7 +595,6 @@ class ArchiveWriterTests(unittest.TestCase):
         self.assertIn("workflows: ['Central fleet publish']", text)
         self.assertNotIn("name: Central fleet publish\n", text)
         for forbidden in (
-            "TESSL_TOKEN",
             "FLEET_APP",
             "workflow_run.head_sha",
             "workflow_run.head_repository",
@@ -603,6 +602,18 @@ class ArchiveWriterTests(unittest.TestCase):
             "upload-artifact",
         ):
             self.assertNotIn(forbidden, text)
+        setup = text.split("- uses: tesslio/setup-tessl@v2", 1)[1].split("- name:", 1)[
+            0
+        ]
+        self.assertIn("if: github.event_name == 'workflow_dispatch'", setup)
+        self.assertIn("version: '0.119.0'", setup)
+        self.assertEqual(text.count("secrets.TESSL_TOKEN"), 1)
+        self.assertIn("original_run_id:", text)
+        self.assertIn(
+            "github.run_attempt == 1 && vars.FLEET_PUBLISHER_ENABLED != 'true'", text
+        )
+        self.assertIn("github.event_name == 'workflow_run'", text)
+        self.assertNotIn("permission-contents:", text)
         self.assertIn("actions: read", text)
         self.assertIn("contents: write", text)
         self.assertNotIn("conclusion == 'success'", text)

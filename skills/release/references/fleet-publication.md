@@ -135,6 +135,69 @@ publication. It writes its own claim/bookkeeping and performs registry and
 moderation reads only. It must not publish again. A failed publish exit or
 `landed_after_error` remains unconfirmed even when the exact version exists.
 
+## Later historical source proof
+
+The existing archive/finalizer owner also accepts the separately discriminated
+`fleet-publish-historical-source-proof` schema-1 family. Its fixed create-only
+ref is `refs/tags/fleet-publish-v1/runs/<original-run>/1/historical-source-proof`.
+`skills/release/fleet_publish_historical.py` owns its full schema, supported
+derivation, package inventories and native critical-step contract. The record
+binds the original immutable intent/source claim, normalized native attempt and
+jobs, the reviewed historical executable pinset, complete official source-pack
+and exact-version installed inventories, registry observation and actual later
+attester workflow/run/attempt/source. It carries no reconstructed original
+receipt, artifact digest, publication timestamp or original finalizer identity.
+
+The authorized recovery uses an explicit manual dispatch of the EXISTING
+`fleet-publish-finalize.yml`, with only `original_run_id` as input. The fixed
+writer derives all coordinates from the original owner records and native Git
+history. Its maintained pack/install observer lives in
+`scripts/fleet_publish_historical_package.py`; its commands use the existing
+central registry credential only for read/install/pack. App minting, consumer
+checkout/code execution, publication, source stamping and prior-record mutation
+are outside this branch. Normal completion archival remains unchanged.
+
+A later proof cannot override a durable run hold, rerun, failed/uncertain native
+receipt, conflicting terminal/native data or unsupported producer graph. The
+writer revalidates fresh original native evidence before creating a proof.
+Readers compare available native facts and retain positive stored facts after
+retention removes native metadata. Unknown POST outcomes require exact readback;
+existing identical evidence is read-only reuse, and a conflict remains held.
+Never rerun publication to repair missing receipt bytes.
+
+`skills/release/fleet_publish_evidence.py` owns the explicit prior-publication
+union. Its native variant preserves the original receipt record; its historical
+variant exposes derived common facts and later provenance, without native exit
+or receipt fields. The controller and scheduled poll use that boundary only for
+confirmed prior-source continuity. Their ordinary next-source, ancestry,
+review/CI, registry baseline, version and effect-CAS gates remain required.
+Native moderation recovery still requires its actual original receipt.
+
+The existing `resolve()` and four-argument confirmation CLI remain receipt-only
+and schema 1. Maintained callers can explicitly select the typed
+`resolve_evidence()` path. Historical CLI confirmation requires the optional
+`--historical-source-proof` fifth argument; successful historical confirmation
+is schema 2 with `proof_kind: historical_source_proof`, original run identity
+and the actual later `attester`. It runs the same fresh exact-version registry
+and moderation gates. A caller must accept both native schema 1 and this explicit
+schema 2 before opting in. Unsupported older callers keep their original HOLD.
+`fleet_publish_wait.py` still selects the exact associated source run and grants
+no dispatch or retry from an unknown historical claim.
+
+Publish/install the compatible archive, controller and confirmation readers
+before any manual proof creation. Verify their exact installed source and both
+current reviews/full CI. Bind the original proof and selected next-source
+coordinates in the existing authorized recovery task before effects.
+
+The manual branch requires the existing `FLEET_PUBLISHER_ENABLED` flag to be
+disabled. That flag alone does not prove quiescence: the existing owner must
+observe all previously admitted central poll/publication runs reach their native
+terminal states before proof creation. Keep the controller disabled through one
+explicit attestation and exact immutable readback. Resume only the selected
+normal source flow under the existing owner and all ordinary gates. Prepare
+these steps together before execution; an unknown effect outcome authorizes no
+retry. This adds no credential, grant, approval store or user permission flow.
+
 ## Source-bound selection and confirmation
 
 Capture the pre-merge registry baseline through the existing canonical helper.

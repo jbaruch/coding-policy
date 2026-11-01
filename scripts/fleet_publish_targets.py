@@ -21,6 +21,7 @@ from fleet_publish import (
     enrollment,
     pending_sources,
     previous,
+    publication_facts,
     require,
     tree,
     gate_source,
@@ -173,7 +174,8 @@ def _targets(
             ref, sha = default_tip(consumer, repo)
             _, entries = tree(consumer, repo, sha)
             plugin = enrollment(consumer, repo, entries)
-            prior = previous(consumer, repo, entries)
+            prior_evidence = previous(consumer, repo, entries)
+            prior = publication_facts(prior_evidence) if prior_evidence else None
             if prior and prior["state"] == "published":
                 # Moderation holds require explicit new selected recovery runs;
                 # scheduled polling never repeats a publication or billing call.
@@ -227,7 +229,7 @@ def _targets(
                 "Enrollment or exact native claim changed during poll; preserve its gate.",
             )
             require(
-                previous(consumer, repo, fresh_entries) == prior,
+                previous(consumer, repo, fresh_entries) == prior_evidence,
                 "Fresh native publication authority changed; preserve STOP without dispatch.",
             )
             selected.append(

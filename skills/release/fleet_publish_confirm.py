@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """Confirm a central source publication against its receipt and live registry.
 
-Usage: fleet_publish_confirm.py REPOSITORY SOURCE_SHA PRE_BASELINE RUN_ID
+Usage: fleet_publish_confirm.py REPOSITORY SOURCE_SHA PRE_BASELINE RUN_ID [--historical-source-proof]
+Four arguments retain native receipt/schema1 only. Explicit historical opt-in
+accepts the later proof family and returns discriminated schema2 with attester.
 Success emits one JSON object containing confirmed/version/source/run identity.
 Exit 1 is a definitive failed publication or registry/moderation refusal; exit 2
 is unsupported input or unavailable/uncertain evidence. Neither emits stdout.
@@ -20,7 +22,8 @@ from typing import Any, Callable
 
 from fleet_publish_github import ResolutionGitHubClient as GitHubClient
 from fleet_publish_record import CENTRAL_REPOSITORY, FleetPublishRecord, valid_run_id
-from fleet_publish_resolver import CentralPublishHold, resolve
+from fleet_publish_resolver import CentralPublishHold, resolve, resolve_evidence
+from fleet_publish_evidence import PublicationFacts, PriorPublication
 
 ROOT = Path(__file__).resolve().parent
 MAX_HELPER_BYTES = 64 * 1024
@@ -83,6 +86,13 @@ def confirm_registry(
         or record["moderation"] != "pass"
     ):
         raise ConfirmationHold("Native publication receipt is unconfirmed.")
+    return confirm_facts(record, baseline, run_helper)
+
+
+def confirm_facts(
+    record: PublicationFacts, baseline: str, run_helper: Helper = helper
+) -> dict[str, Any]:
+    """Fresh common registry gates, after the evidence owner verifies provenance."""
     version = record["version"]
     if version is None:
         raise ConfirmationHold("Publication version is unknown; do not retry.")
@@ -135,7 +145,33 @@ def confirm_registry(
     }
 
 
+def confirm_evidence(
+    value: PriorPublication, baseline: str, run_helper: Helper = helper
+) -> dict[str, Any]:
+    if value["proof_kind"] == "native_receipt":
+        return confirm_registry(value["record"], baseline, run_helper)
+    from fleet_publish_historical import prior_facts
+
+    derived = prior_facts(value["proof"])
+    if derived != value["facts"]:
+        raise ConfirmationHold(
+            "Historical common facts changed; restore the verified proof owner."
+        )
+    result = confirm_facts(derived, baseline, run_helper)
+    return {
+        **result,
+        "schema_version": 2,
+        "proof_kind": "historical_source_proof",
+        "origin_run_id": value["facts"]["origin_run_id"],
+        "origin_run_attempt": 1,
+        "attester": value["proof"]["attester"],
+    }
+
+
 def main(arguments: list[str]) -> int:
+    historical = len(arguments) == 5 and arguments[-1] == "--historical-source-proof"
+    if historical:
+        arguments = arguments[:4]
     if len(arguments) != 4 or not valid_run_id(arguments[3]):
         raise ConfirmationHold(
             "Pass repository, source SHA, captured baseline and run ID."
@@ -143,8 +179,15 @@ def main(arguments: list[str]) -> int:
     repository, source, baseline, run_id = arguments
     if baseline != "unpublished":
         numeric(baseline)
-    record = resolve(GitHubClient(), repository, source, run_id=run_id)
-    print(json.dumps(confirm_registry(record, baseline)))
+    api = GitHubClient()
+    if historical:
+        evidence = resolve_evidence(api, repository, source, run_id=run_id)
+        result = confirm_evidence(evidence, baseline)
+    else:
+        result = confirm_registry(
+            resolve(api, repository, source, run_id=run_id), baseline
+        )
+    print(json.dumps(result))
     return 0
 
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import io
 from pathlib import Path
 import subprocess
 import sys
@@ -68,6 +69,62 @@ class Readers:
 
 
 class ConfirmationTests(unittest.TestCase):
+    def test_historical_opt_in_returns_schema2_and_new_attester_after_same_live_registry_gates(
+        self,
+    ):
+        from test_fleet_publish_historical import proof
+        from fleet_publish_historical import prior_facts
+        from fleet_publish_evidence import HistoricalPublication
+
+        historical = proof()
+        readers = Readers()
+        readers.outputs[0][1]["pre"] = "unpublished"
+        readers.outputs[1][1]["version"] = "0.1.0"
+        readers.outputs[2][1]["version"] = "0.1.0"
+        value: HistoricalPublication = {
+            "proof_kind": "historical_source_proof",
+            "proof": historical,
+            "facts": prior_facts(historical),
+        }
+        result = confirmation.confirm_evidence(value, "unpublished", readers)
+        self.assertEqual(result["schema_version"], 2)
+        self.assertEqual(result["proof_kind"], "historical_source_proof")
+        self.assertEqual(result["origin_run_id"], "101")
+        self.assertEqual(result["attester"]["run_id"], "102")
+        self.assertEqual(len(readers.calls), 3)
+        self.assertNotIn("record", result)
+        value["facts"]["source_sha"] = "f" * 40
+        with self.assertRaises(confirmation.ConfirmationHold):
+            confirmation.confirm_evidence(value, "unpublished", readers)
+        self.assertEqual(len(readers.calls), 3)
+
+    def test_existing_four_argument_callers_remain_native_receipt_schema1_only(self):
+        with (
+            patch.object(confirmation, "GitHubClient"),
+            patch.object(confirmation, "resolve", return_value=record()) as native,
+            patch.object(
+                confirmation,
+                "resolve_evidence",
+                side_effect=AssertionError(
+                    "Old caller cannot request derived evidence"
+                ),
+            ),
+            patch.object(
+                confirmation,
+                "confirm_registry",
+                return_value={"schema_version": 1, "confirmed": True},
+            ),
+            patch.object(sys, "stdout", io.StringIO()) as output,
+        ):
+            self.assertEqual(
+                confirmation.main(
+                    ["jbaruch/nanoclaw-construction", "a" * 40, "0.1.0", "123"]
+                ),
+                0,
+            )
+            self.assertEqual(json.loads(output.getvalue())["schema_version"], 1)
+            native.assert_called_once()
+
     def test_exact_version_confirmed_even_after_later_registry_publish(self):
         readers = Readers()
         result = confirmation.confirm_registry(record(), "0.1.0", readers)

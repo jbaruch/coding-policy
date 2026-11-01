@@ -1,3 +1,9 @@
+### Retain typed historical publication source evidence
+
+Add a distinct later-attestation family for an original successful publication whose receipt bytes are unavailable. Bind the closed historical executable graph, original native attempt/source/claim and the complete official pack to the exact installed registry package; retain actual new attester provenance without inventing receipt bytes, digests or publication timestamps. Extend the existing finalizer with a manual source-proof branch using its current central credentials and pinned read/install/pack tooling. Its fixed record is create-only and never republishes or rewrites an original source/terminal record.
+
+Use a discriminated prior-publication union in the controller and poller, retaining normal source-history, review/CI, baseline/version and effect-CAS gates. Keep native receipt-only resolution and ordinary confirmation schema 1 unchanged. Explicit historical confirmation opts into schema 2 and still requires fresh registry/moderation gates. Reader-first installation and a separately authorized actual attestation precede any queued-source progress. Both distribution manifests advance together to 0.5.17.
+
 ## 0.5.16 — 2026-10-31
 
 ### Keep associated Actions attempts in the PR readiness gate

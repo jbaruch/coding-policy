@@ -1505,6 +1505,54 @@ class QueueTests(PublisherFixture):
         github.records["receipt"] = (self.work / "receipt.json").read_bytes()
         return github
 
+    def test_verified_historical_prior_reaches_normal_earliest_next_source_without_receipt_or_effect(
+        self,
+    ):
+        sys.path.insert(
+            0, str(Path(__file__).resolve().parents[2] / "tests/release/tests")
+        )
+        from test_fleet_publish_historical import proof
+
+        self.baseline = "unpublished"
+        github = self.finish_first()
+        original_intent = deepcopy(github.durable_intents["101"])
+        del github.records["receipt"]
+        # Source claim + successful original attempt still HOLD without a
+        # distinct later proof. Never build native receipt-shaped facts.
+        with patch.object(github, "historical_source_proof", return_value=None):
+            with self.assertRaises(publisher.PublishRefused):
+                publisher.previous(github, REPO, github.entries)
+        historical = proof(original_intent)
+        github.archived_records["101"] = dict(github.records)
+        github.records = {}
+        github.current_run = "102"
+        github.dispatch_sources["102"] = github.SECOND
+        self.baseline = "0.1.0"
+        followup = self.work / "historical-next"
+        followup.mkdir()
+        calls_before = len(github.calls)
+        with patch.object(github, "historical_source_proof", return_value=historical):
+            prior = publisher.previous(github, REPO, github.entries)
+            self.assertIsNotNone(prior)
+            if prior is None:
+                self.fail("Verified source proof must support prior continuity.")
+            self.assertEqual(prior["proof_kind"], "historical_source_proof")
+            publisher.prepare(
+                github, REPO, github.SECOND, followup, {**ENV, "GITHUB_RUN_ID": "102"}
+            )
+        selected = json.loads((followup / "intent.json").read_bytes())
+        self.assertEqual(selected["source_sha"], github.SECOND)
+        self.assertEqual(selected["version"], "0.1.1")
+        self.assertNotIn("receipt", github.archived_records["101"])
+        self.assertEqual(
+            self.helpers.count("smart-publish.sh"), 1
+        )  # Only actual first fixture publication.
+        self.assertFalse(any(payload for _, payload in github.calls[calls_before:]))
+        text = (followup / "package/CHANGELOG.md").read_text()
+        self.assertIn("## 0.1.0", text)
+        self.assertIn("### Second", text)
+        self.assertNotIn("### Third", text)
+
     def test_three_rapid_merges_publish_each_exact_source_and_preserve_future_entries(
         self,
     ) -> None:

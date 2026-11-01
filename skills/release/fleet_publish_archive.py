@@ -98,7 +98,7 @@ def utc(value: object) -> str:
 
 
 def ref_name(
-    kind: Literal["source", "intent", "terminal", "hold"],
+    kind: Literal["source", "intent", "terminal", "hold", "historical-source-proof"],
     *,
     repository: str | None = None,
     source_sha: str | None = None,
@@ -124,7 +124,7 @@ def ref_name(
         need(valid_run_id(run_id) and repository is None and source_sha is None)
         return PREFIX + f"runs/{run_id}/hold"
     need(
-        kind in ("intent", "terminal")
+        kind in ("intent", "terminal", "historical-source-proof")
         and valid_run_id(run_id)
         and repository is None
         and source_sha is None
@@ -487,6 +487,10 @@ def encode_archive(value: object) -> bytes:
 
 def parse_archive(value: object) -> dict[str, Any]:
     raw = obj(value)
+    if raw.get("kind") == "fleet-publish-historical-source-proof":
+        from fleet_publish_historical import parse_historical
+
+        return parse_historical(raw)
     if raw.get("kind") == "fleet-publish-hold":
         return parse_hold(raw)
     if raw.get("kind") == "fleet-publish-intent":
@@ -709,6 +713,59 @@ class ArchiveReader:
         self._protocol(value["finalizer"]["workflow_sha"])
         return value
 
+    def historical_source_proof(self, run_id: str) -> dict[str, Any] | None:
+        from fleet_publish_historical import parse_historical
+
+        need(self.run_hold(run_id) is None)
+        value = self._load(ref_name("historical-source-proof", run_id=run_id))
+        if value is None:
+            return None
+        value = parse_historical(value)
+        need(value["intent"] == self.run_intent(run_id))
+        self._protocol(value["attester"]["workflow_sha"])
+        from fleet_publish_producer import verify_workflow_protocol
+
+        need(
+            verify_workflow_protocol(
+                self.client, value["intent"]["intent"]["workflow_sha"]
+            )
+            == value["producer_pinset"]
+        )
+        # Never override actual contradictory terminal/receipt evidence.
+        terminal = self.terminal(run_id)
+        receipt = self.record(run_id, "receipt")
+        if receipt is not None:
+            need(
+                receipt is not None
+                and receipt["state"] == "confirmed"
+                and receipt["publish_outcome"] == "success"
+                and receipt["publish_exit_code"] == 0
+                and not receipt["landed_after_error"]
+                and receipt["moderation"] == "pass"
+                and receipt["version"] == value["intent"]["intent"]["version"]
+            )
+            need(receipt["bookkeeping_sha"] == value["intent"]["bookkeeping_sha"])
+        if terminal is not None:
+            need(receipt is not None and terminal["native"] == value["native"])
+        if receipt is not None:
+            original = value["intent"]["intent"]
+            need(
+                all(
+                    receipt[key] == original[key]
+                    for key in original
+                    if key not in MUTABLE
+                )
+            )
+        prefix = f"repos/{CENTRAL_REPOSITORY}/actions/runs/{run_id}"
+        for field, route in (("run", prefix), ("attempt", prefix + "/attempts/1")):
+            actual = self._optional(route)
+            if actual is not None:
+                need(native_run(actual) == value["native"][field])
+        jobs = self._jobs(run_id)
+        if jobs is not None:
+            need(native_jobs(jobs, value["native"]["run"]) == value["native"]["jobs"])
+        return value
+
     def record(
         self, run_id: str, kind: Literal["intent", "receipt"]
     ) -> FleetPublishRecord | None:
@@ -785,15 +842,25 @@ class ArchiveReader:
         prefix = f"repos/{CENTRAL_REPOSITORY}/actions/runs/{value['run_id']}"
         run = self._optional(prefix)
         attempt = self._optional(prefix + "/attempts/1")
+        native_archive = archived["native"] if archived is not None else None
+        if (
+            native_archive is None
+            and (run is None or attempt is None)
+            and value["state"] == "claimed"
+            and not successful
+        ):
+            historical = self.historical_source_proof(value["run_id"])
+            if historical is not None:
+                native_archive = historical["native"]
         native: dict[str, Any] = {}
         for name, raw in (("run", run), ("attempt", attempt)):
             if raw is None:
-                need(archived is not None)
-                native[name] = archived["native"][name] if archived else None
+                need(native_archive is not None)
+                native[name] = native_archive[name] if native_archive else None
             else:
                 native[name] = native_run(raw, terminal=False)
-                if archived is not None:
-                    need(native[name] == archived["native"][name])
+                if native_archive is not None:
+                    need(native[name] == native_archive[name])
         need(
             native["run"] == native["attempt"]
             and native["run"]["id"] == value["run_id"]
@@ -802,15 +869,15 @@ class ArchiveReader:
             == f"fleet-publish-v1:{value['consumer_repository']}:{value['source_sha']}"
         )
         self._protocol(value["workflow_sha"])
-        if archived is not None or successful:
+        if native_archive is not None or successful:
             jobs = self._jobs(value["run_id"])
             if jobs is None:
-                need(archived is not None)
-                native["jobs"] = archived["native"]["jobs"] if archived else None
+                need(native_archive is not None)
+                native["jobs"] = native_archive["jobs"] if native_archive else None
             else:
                 native["jobs"] = native_jobs(jobs, native["run"])
-                if archived is not None:
-                    need(native["jobs"] == archived["native"]["jobs"])
+                if native_archive is not None:
+                    need(native["jobs"] == native_archive["jobs"])
         else:
             native["jobs"] = None
         if successful:

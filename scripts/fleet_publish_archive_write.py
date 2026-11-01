@@ -26,7 +26,6 @@ from fleet_publish_archive import (  # noqa: E402 - trusted co-shipped owner.
     parse_intent,
     ref_name,
 )
-from fleet_publish_github import FleetPublishLookupError  # noqa: E402
 from fleet_publish_producer import verify_workflow_protocol  # noqa: E402
 from fleet_publish_record import (  # noqa: E402
     CENTRAL_REPOSITORY,
@@ -57,7 +56,7 @@ def create_only(
     require(
         ref.startswith(PREFIX)
         and re.fullmatch(
-            r"refs/tags/fleet-publish-v1/(?:sources/[a-f0-9]{64}/[a-f0-9]{40}|runs/[1-9][0-9]{0,19}/(?:1/(?:intent|terminal)|hold))",
+            r"refs/tags/fleet-publish-v1/(?:sources/[a-f0-9]{64}/[a-f0-9]{40}|runs/[1-9][0-9]{0,19}/(?:1/(?:intent|terminal|historical-source-proof)|hold))",
             ref,
         )
     )
@@ -158,10 +157,13 @@ def persist_claim(
     require(reader.run_intent(run) == envelope)
 
 
-def finalizer_context(environment: Any) -> dict[str, Any]:
+def finalizer_context(
+    environment: Any, *, event_name: str = "workflow_run"
+) -> dict[str, Any]:
     require(
-        environment.get("GITHUB_REPOSITORY") == CENTRAL_REPOSITORY
-        and environment.get("GITHUB_EVENT_NAME") == "workflow_run"
+        event_name in ("workflow_run", "workflow_dispatch")
+        and environment.get("GITHUB_REPOSITORY") == CENTRAL_REPOSITORY
+        and environment.get("GITHUB_EVENT_NAME") == event_name
         and environment.get("GITHUB_REF") == "refs/heads/main"
         and environment.get("GITHUB_WORKFLOW_REF")
         == f"{CENTRAL_REPOSITORY}/{FINALIZER_WORKFLOW}@refs/heads/main"
@@ -322,12 +324,146 @@ def finalize(github: Any, reader: Any, environment: Any, event: object) -> bool:
     return True
 
 
+def attest_historical(
+    github: Any, reader: Any, environment: Any, event: object
+) -> bool:
+    """Explicit later attestation, derived entirely from the existing owner."""
+    from fleet_publish_archive import native_run, native_jobs
+    from fleet_publish_historical import KIND, DERIVATION, parse_historical
+    from fleet_publish_historical_package import observe_package
+    from fleet_publish_producer import HISTORICAL_PRODUCERS
+    from fleet_publish_resolver import _Evidence
+
+    require(environment.get("GITHUB_EVENT_NAME") == "workflow_dispatch")
+    identity = finalizer_context(environment, event_name="workflow_dispatch")
+    require(identity["run_attempt"] == 1)
+    current_route = f"repos/{CENTRAL_REPOSITORY}/actions/runs/{identity['run_id']}"
+    for route in (current_route, current_route + "/attempts/1"):
+        actual = github.api(route)
+        require(
+            isinstance(actual, dict)
+            and str(actual.get("id")) == identity["run_id"]
+            and actual.get("run_attempt") == 1
+            and actual.get("path") == FINALIZER_WORKFLOW
+            and actual.get("head_sha") == identity["workflow_sha"]
+            and actual.get("head_branch") == "main"
+            and actual.get("event") == "workflow_dispatch"
+            and actual.get("repository", {}).get("full_name") == CENTRAL_REPOSITORY
+            and actual.get("head_repository", {}).get("full_name") == CENTRAL_REPOSITORY
+        )
+    verify_workflow_protocol(github, identity["workflow_sha"])
+    if not isinstance(event, dict) or not isinstance(event.get("inputs"), dict):
+        raise ArchiveWriteRefused("Pass only the original native publisher run ID.")
+    inputs = event["inputs"]
+    require(
+        set(inputs) == {"original_run_id"} and valid_run_id(inputs["original_run_id"])
+    )
+    run_id = inputs["original_run_id"]
+    require(run_id != identity["run_id"] and reader.run_hold(run_id) is None)
+    envelope = reader.run_intent(run_id)
+    require(envelope is not None)
+    envelope = parse_intent(envelope)
+    original = envelope["intent"]
+    require(original["run_id"] == original["origin_run_id"] == run_id)
+    require(
+        reader.source_claim(original["consumer_repository"], original["source_sha"])
+        == envelope
+    )
+    # Reuse complete native source, merge, ancestry and exact bookkeeping proof.
+    # The existing receipt-only resolver remains unchanged for old callers.
+    evidence = _Evidence(
+        reader.client, original["consumer_repository"], original["source_sha"]
+    )
+    selected, claim = evidence.selected(run_id)
+    require(selected == original and claim == envelope["bookkeeping_sha"])
+    route = f"repos/{CENTRAL_REPOSITORY}/actions/runs/{run_id}"
+    run = native_run(github.api(route))
+    attempt = native_run(github.api(route + "/attempts/1"))
+    jobs = native_jobs(github.pages(route + "/attempts/1/jobs", "jobs"), run)
+    pins = verify_workflow_protocol(github, original["workflow_sha"])
+    require(any(pins == known for known in HISTORICAL_PRODUCERS))
+    # Existing native receipt access supplies contradictions, never synthesized
+    # terminal bytes. Refuse any negative/uncertain original outcome.
+    receipt = reader.record(run_id, "receipt")
+    terminal = reader.terminal(run_id)
+    if terminal is not None:
+        require(
+            receipt is not None
+            and terminal["native"] == {"run": run, "attempt": attempt, "jobs": jobs}
+        )
+    if receipt is not None:
+        require(
+            all(
+                receipt[key] == original[key]
+                for key in original
+                if key
+                not in {
+                    "state",
+                    "publish_outcome",
+                    "publish_exit_code",
+                    "landed_after_error",
+                    "moderation",
+                    "bookkeeping_sha",
+                }
+            )
+        )
+        require(
+            receipt["state"] == "confirmed"
+            and receipt["moderation"] == "pass"
+            and receipt["publish_outcome"] == "success"
+            and receipt["publish_exit_code"] == 0
+            and not receipt["landed_after_error"]
+            and receipt["bookkeeping_sha"] == claim
+        )
+    proof = parse_historical(
+        {
+            "schema_version": 1,
+            "kind": KIND,
+            "derivation": DERIVATION,
+            "intent": envelope,
+            "native": {"run": run, "attempt": attempt, "jobs": jobs},
+            "producer_pinset": pins,
+            "registry": observe_package(github, envelope),
+            "attester": identity,
+        }
+    )
+    evidence.stable()
+    require(reader.run_intent(run_id) == envelope and reader.run_hold(run_id) is None)
+    existing = reader.historical_source_proof(run_id)
+    if existing is not None:
+        # Retain first attester/observation. All original/source/native facts and
+        # exact package content must still agree after fresh verification.
+        require(
+            all(
+                existing[key] == proof[key]
+                for key in proof
+                if key not in ("attester", "registry")
+            )
+        )
+        require(
+            all(
+                existing["registry"][key] == proof["registry"][key]
+                for key in proof["registry"]
+                if key != "observed_at"
+            )
+        )
+        return True
+    create_only(
+        github,
+        ref_name("historical-source-proof", run_id=run_id),
+        proof,
+        lambda: reader.historical_source_proof(run_id),
+    )
+    return True
+
+
 def main() -> int:
     from fleet_publish import GitHub
     from fleet_publish_archive import ArchiveReader
 
     require(not sys.argv[1:])
-    finalizer_context(os.environ)  # Refuse before reading the native event/API.
+    if os.environ.get("GITHUB_EVENT_NAME") != "workflow_dispatch":
+        finalizer_context(os.environ)  # Refuse before reading native event/API.
     with Path(os.environ["GITHUB_EVENT_PATH"]).open("rb") as stream:
         raw = stream.read(1024 * 1024 + 1)
     require(len(raw) <= 1024 * 1024)
@@ -336,23 +472,40 @@ def main() -> int:
 
     event = decode(raw)
     github = GitHub()
-    archived = finalize(github, ArchiveReader(github._record_client), os.environ, event)
-    print(
-        json.dumps(
-            {"schema_version": 1, "archived": archived, "publication_performed": False},
-            separators=(",", ":"),
+    historical = os.environ.get("GITHUB_EVENT_NAME") == "workflow_dispatch"
+    operation = attest_historical if historical else finalize
+    reader = ArchiveReader(github._record_client)
+    archived = operation(github, reader, os.environ, event)
+    result: dict[str, Any] = {
+        "schema_version": 1,
+        "archived": archived,
+        "publication_performed": False,
+    }
+    if historical:
+        if not isinstance(event, dict):
+            raise ArchiveWriteRefused("Restore the exact original run selection.")
+        run_id = event["inputs"]["original_run_id"]
+        saved = reader.historical_source_proof(run_id)
+        require(saved is not None)
+        if saved is None:
+            raise ArchiveWriteRefused("Restore exact immutable proof readback.")
+        result.update(
+            schema_version=2,
+            proof_kind="historical_source_proof",
+            original_run_id=run_id,
+            attester=saved["attester"],
         )
-    )
+    print(json.dumps(result, separators=(",", ":")))
     return 0
 
 
 if __name__ == "__main__":
     try:
         raise SystemExit(main())
-    except (ValueError, OSError, KeyError, TypeError, FleetPublishLookupError):
-        # outer-boundary-process-contract: nonzero/no positive result is HOLD;
-        # fixed stderr retains private native data rather than leaking a raw
-        # traceback or turning absent evidence into publication success.
+    # outer-boundary-process-contract: callers treat nonzero/no positive JSON
+    # as HOLD; fixed stderr preserves that signal without raw API/tool data.
+    # Propagation would leak private child output and disable this boundary.
+    except Exception:  # noqa: BLE001 - outer-boundary-process-contract
         print(
             "Central evidence archival refused. Preserve the original claim/run and repair its exact missing evidence; never replay publication.",
             file=sys.stderr,
