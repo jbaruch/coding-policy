@@ -203,12 +203,11 @@ class GitHub:
         """Read-only facade for the shared fixed central protocol verifier."""
         return self.api(route)
 
-    def archive_operation(self, operation: Any) -> Any:
+    @contextmanager
+    def _archive_client(self) -> Iterator[Any]:
         # Each logical proof has its own bounded client; queued historical
         # bookkeeping cannot consume a later proof's lifetime allowance. The
         # shared reader retains its immutable/ref cache within this operation.
-        from fleet_publish_archive import ArchiveReader
-
         central_token = os.environ.get("FLEET_CENTRAL_TOKEN")
         require(central_token, "Central evidence read credential is unavailable.")
         original = os.environ.get("GH_TOKEN")
@@ -218,16 +217,23 @@ class GitHub:
             client: Any = GitHubClient() if cache is None else PollGitHubClient(cache)
             if cache is not None:
                 client = PollEvidenceClient(client, cache)
-            return operation(ArchiveReader(client))
-        except FleetPublishLookupError as error:
-            raise PublishRefused(
-                "Restore complete central durable/native evidence; preserve STOP without replay."
-            ) from error
+            yield client
         finally:
             if original is None:
                 os.environ.pop("GH_TOKEN", None)
             else:
                 os.environ["GH_TOKEN"] = original
+
+    def archive_operation(self, operation: Any) -> Any:
+        from fleet_publish_archive import ArchiveReader
+
+        try:
+            with self._archive_client() as client:
+                return operation(ArchiveReader(client))
+        except FleetPublishLookupError as error:
+            raise PublishRefused(
+                "Restore complete central durable/native evidence; preserve STOP without replay."
+            ) from error
 
     def record(self, run_id: str, kind: str) -> FleetPublishRecord | None:
         require(kind in ("intent", "receipt"), "Unsupported immutable record kind.")
@@ -294,6 +300,20 @@ class GitHub:
         )
         return remaining
 
+    def _command_environment(
+        self, path: str, payload: Any, method: str
+    ) -> dict[str, str]:
+        environment = dict(os.environ)
+        if path == f"repos/{CENTRAL_REPOSITORY}" or path.startswith(
+            f"repos/{CENTRAL_REPOSITORY}/"
+        ):
+            require(
+                environment.get("FLEET_CENTRAL_TOKEN"),
+                "Central artifact read credential is unavailable.",
+            )
+            environment["GH_TOKEN"] = environment["FLEET_CENTRAL_TOKEN"]
+        return environment
+
     def api(
         self,
         path: str,
@@ -305,19 +325,13 @@ class GitHub:
         args = ["gh", "api", "--hostname", "github.com", path]
         if payload is not None:
             args += ["--method", method, "--input", "-"]
-        environment = dict(os.environ)
+        environment = self._command_environment(path, payload, method)
         cache = getattr(self, "_poll_cache", None)
         is_central_route = path == f"repos/{CENTRAL_REPOSITORY}" or path.startswith(
             f"repos/{CENTRAL_REPOSITORY}/"
         )
         if cache is not None and is_central_route:
             cache.request(dispatch=payload is not None)
-        if is_central_route:
-            require(
-                environment.get("FLEET_CENTRAL_TOKEN"),
-                "Central artifact read credential is unavailable.",
-            )
-            environment["GH_TOKEN"] = environment["FLEET_CENTRAL_TOKEN"]
         try:
             result = subprocess.run(
                 args,

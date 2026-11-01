@@ -56,11 +56,11 @@ TRUSTED_PRODUCERS: tuple[dict[str, str], ...] = (
     {
         ".github/workflows/fleet-publish.yml": "12205f89e681d02f53f85d1ef55e450c579f6196",
         ".github/workflows/fleet-publish-finalize.yml": "9c2c60bf62730cc224792df21610c2bb3c27bba6",
-        "scripts/fleet_publish.py": "21693e9776d84a76fc1641f40ba177b6d19ad35d",
+        "scripts/fleet_publish.py": "c1a6e7ab7645fa7aad6752459d41e9cab25aa52a",
         "scripts/fleet_publish_workflow.py": "64792b8f218dfe3c012f01691f01fc7f938faf9e",
         "scripts/fleet_publish_validate.py": "7d450d115f6a661f3a0e1d3d8ab1a85451bb7a47",
         "scripts/fleet_publish_targets.py": "82e38c5c042f5f6ff09824b2c48e00c001b650db",
-        "scripts/fleet_publish_archive_write.py": "2264aa2ca90088f89046e4c888ea0953e54c2be5",
+        "scripts/fleet_publish_archive_write.py": "6143d4128b9140d7a229c6e63dcf6c8cbeac5fd6",
         "skills/release/fleet_publish_archive.py": "591cee7ee83653cb4f1722c57f9bdb3b2381768c",
         "skills/release/fleet_publish_historical.py": "183f479e61f83f0772829c78cd41777b34246c94",
         "skills/release/fleet_publish_evidence.py": "97e44101819dfc6153b2fefd8031472821c32f96",

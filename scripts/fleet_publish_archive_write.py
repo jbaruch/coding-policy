@@ -7,12 +7,13 @@ Pure record/ref parsing and all read trust belong to fleet_publish_archive.
 from __future__ import annotations
 
 import base64
+from contextlib import contextmanager
 import json
 import os
 from pathlib import Path
 import re
 import sys
-from typing import Any, Callable
+from typing import Any, Callable, Iterator
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "skills/release"))
 from fleet_publish_archive import (  # noqa: E402 - trusted co-shipped owner.
@@ -38,6 +39,7 @@ from fleet_publish_github import (  # noqa: E402 - trusted bounded transport.
     GitHubClient,
     ResolutionGitHubClient,
 )
+from fleet_publish import GitHub  # noqa: E402 - same trusted API/pagination owner.
 
 
 class ArchiveWriteRefused(ValueError):
@@ -92,6 +94,46 @@ class ConsumerHistoricalClient(ResolutionGitHubClient):
     def _read(self, route: str, maximum: int, *, native_status: bool = False) -> bytes:
         require(owned_route(route, self.repository))
         return super()._read(route, maximum, native_status=native_status)
+
+
+class HistoricalGitHub(GitHub):
+    """Reuse the publisher's Git/package owner with fixed historical credentials."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.consumer_repository: str | None = None
+
+    def bind_consumer(self, repository: str) -> None:
+        require(valid_repository(repository) and repository != CENTRAL_REPOSITORY)
+        require(self.consumer_repository in (None, repository))
+        self.consumer_repository = repository
+
+    def _command_environment(
+        self, path: str, payload: Any, method: str
+    ) -> dict[str, str]:
+        if owned_route(path, CENTRAL_REPOSITORY):
+            if payload is not None:
+                require(
+                    method == "POST"
+                    and path
+                    in {
+                        f"repos/{CENTRAL_REPOSITORY}/git/{kind}"
+                        for kind in ("blobs", "trees", "commits", "refs")
+                    }
+                )
+            return credential_environment("FLEET_CENTRAL_TOKEN")
+        require(
+            self.consumer_repository is not None
+            and owned_route(path, self.consumer_repository)
+            and payload is None
+        )
+        return credential_environment("GH_TOKEN")
+
+    @contextmanager
+    def _archive_client(self) -> Iterator[Any]:
+        # Each operation retains the existing reader's bounds without changing
+        # the process environment or exposing the central token to consumer gh.
+        yield CentralHistoricalClient()
 
 
 class HistoricalEvidenceTransport:
@@ -455,6 +497,7 @@ def attest_historical(
     identity, envelope = historical_selection(github, reader, environment, event)
     original = envelope["intent"]
     run_id = original["run_id"]
+    github.bind_consumer(original["consumer_repository"])
     transport = HistoricalEvidenceTransport(
         reader.client,
         ConsumerHistoricalClient(original["consumer_repository"]),
@@ -562,8 +605,8 @@ def main() -> int:
     from fleet_publish import decode
 
     event = decode(raw)
-    github = GitHub()
     historical = os.environ.get("GITHUB_EVENT_NAME") == "workflow_dispatch"
+    github = HistoricalGitHub() if historical else GitHub()
     operation = attest_historical if historical else finalize
     reader = ArchiveReader(
         CentralHistoricalClient() if historical else github._record_client

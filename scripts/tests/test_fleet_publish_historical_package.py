@@ -116,6 +116,7 @@ class PackageTests(unittest.TestCase):
             "CHANGELOG.md": b"# Changelog\n\n### Added\n\n- Fixed source entry.\n",
             "ignored.py": b"raise RuntimeError('NEVER EXECUTE CONSUMER DATA')\n",
             "extra-not-selected.txt": b"No consumer projection grant\n",
+            "tessl.json": b'{"dependencies":{"untrusted/consumer-config":{"version":"*"}}}\n',
             ".tesslignore": b"ignored.py\n",
         }
 

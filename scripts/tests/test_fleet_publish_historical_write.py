@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import copy
 import contextlib
+import base64
 import io
 import json
 import os
@@ -23,10 +24,12 @@ from fleet_publish_archive import ArchiveReader, ref_name, native_run  # noqa: E
 from test_fleet_publish_archive_write import Git  # noqa: E402
 from test_fleet_publish_resolver import Fixture, RUN, REPO, CENTRAL  # noqa: E402
 from test_fleet_publish_historical import proof  # noqa: E402
+import test_fleet_publish_historical_package as package_tests  # noqa: E402
 
 
-class HistoricalGit:
+class HistoricalGit(writer.HistoricalGitHub):
     def __init__(self):
+        super().__init__()
         self.original = Fixture()
         self.original.routes[f"repos/{REPO}"].update(
             private=False, visibility="public"
@@ -95,13 +98,14 @@ class HistoricalGit:
     def artifact_evidence(self, run, kind):
         return self.original.artifact_evidence(run, kind)
 
-    def api(self, route, payload=None):
+    def api(self, path, payload=None, *, binary=False, method="POST"):
+        assert binary is False and method == "POST"
         if payload is not None:
-            self.writes.append((route, copy.deepcopy(payload)))
-            return self.effects.api(route, payload)
-        return self.native_json(route)
+            self.writes.append((path, copy.deepcopy(payload)))
+            return self.effects.api(path, payload)
+        return self.native_json(path)
 
-    def pages(self, route, key):
+    def pages(self, route, key=None):
         assert route.endswith(f"/{RUN}/attempts/1/jobs") and key == "jobs"
         page = self.original.native_json(route + "?per_page=100&page=1")
         assert isinstance(page, dict) and isinstance(page.get("jobs"), list)
@@ -280,7 +284,7 @@ class HistoricalWriterTests(unittest.TestCase):
             with (
                 patch.dict(os.environ, {**self.github.identity, "GITHUB_EVENT_PATH": str(event), "GITHUB_OUTPUT": str(output)}),
                 patch.object(sys, "argv", ["fleet_publish_archive_write.py", "select-consumer"]),
-                patch("fleet_publish.GitHub", return_value=self.github),
+                patch.object(writer, "HistoricalGitHub", return_value=self.github),
                 patch.object(writer, "CentralHistoricalClient", return_value=ScopedReads(self.github, CENTRAL)),
                 contextlib.redirect_stdout(stdout),
             ):
@@ -352,6 +356,92 @@ class HistoricalWriterTests(unittest.TestCase):
 
 
 class HistoricalCredentialTransportTests(unittest.TestCase):
+    def test_real_package_and_archive_api_children_keep_only_their_own_credential(self):
+        fixture = package_tests.PackageTests()
+        fixture.setUp()
+        original = fixture.envelope["intent"]
+        repo = original["consumer_repository"]
+        source = package_tests.PackageGit(fixture)
+        routes = {
+            **{f"repos/{repo}/git/commits/{sha}": value for sha, value in source.commits.items()},
+            **{f"repos/{repo}/git/trees/{sha}?recursive=1": value for sha, value in source.trees.items()},
+            **{
+                f"repos/{repo}/git/blobs/{sha}": {
+                    "encoding": "base64", "size": len(raw),
+                    "content": base64.b64encode(raw).decode(),
+                }
+                for sha, raw in source.blobs.items()
+            },
+            f"repos/{CENTRAL}": {"private": True},
+            f"repos/{CENTRAL}/actions/runs/{RUN}/jobs?per_page=100&page=1": {
+                "total_count": 0, "jobs": [],
+            },
+        }
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            route_file, log, gh = root / "routes.json", root / "calls", root / "gh"
+            route_file.write_text(json.dumps(routes))
+            gh.write_text(
+                f"#!{sys.executable}\n"
+                "import json,os,sys\n"
+                "from pathlib import Path\n"
+                "a=sys.argv[1:];assert a[:3]==['api','--hostname','github.com']\n"
+                "route=a[3] if a[3]!='--method' else a[-1]\n"
+                "central=route=='repos/jbaruch/coding-policy' or route.startswith('repos/jbaruch/coding-policy/')\n"
+                "expected=os.environ['FIXTURE_CENTRAL'] if central else os.environ['FIXTURE_CONSUMER']\n"
+                "assert os.environ.get('GH_TOKEN')==expected\n"
+                "assert 'GITHUB_TOKEN' not in os.environ and 'FLEET_CENTRAL_TOKEN' not in os.environ\n"
+                "write='--input' in a\n"
+                "if write:assert central and a[-4:]==['--method','POST','--input','-'];json.load(sys.stdin)\n"
+                "with Path(os.environ['FIXTURE_CALLS']).open('a') as out:out.write(json.dumps([route,central,write])+'\\n')\n"
+                "print(json.dumps({'sha':'fixture-write'} if write else json.loads(Path(os.environ['FIXTURE_ROUTES']).read_text())[route]))\n"
+            )
+            gh.chmod(0o700)
+            environment = {
+                "PATH": str(root) + os.pathsep + os.environ.get("PATH", ""),
+                "GH_TOKEN": "consumer-read-sentinel",
+                "FLEET_CENTRAL_TOKEN": "central-write-sentinel",
+                "GITHUB_TOKEN": "must-not-fallback",
+                "FIXTURE_CENTRAL": "central-write-sentinel",
+                "FIXTURE_CONSUMER": "consumer-read-sentinel",
+                "FIXTURE_CALLS": str(log), "FIXTURE_ROUTES": str(route_file),
+            }
+            with patch.dict(os.environ, environment):
+                github = writer.HistoricalGitHub()
+                github.bind_consumer(repo)
+                destination = root / "projection"
+                packages.historical_projection(github, fixture.envelope, destination)
+                self.assertEqual((destination / "CHANGELOG.md").read_bytes(), fixture.stamped_changelog)
+                self.assertEqual(
+                    github.pages(f"repos/{CENTRAL}/actions/runs/{RUN}/jobs", "jobs"), []
+                )
+                before = dict(os.environ)
+                def archive_read(reader):
+                    self.assertEqual(dict(os.environ), before)
+                    return reader.client.json(f"repos/{CENTRAL}")
+                self.assertEqual(github.archive_operation(archive_read), {"private": True})
+                self.assertEqual(dict(os.environ), before)
+                with self.assertRaises(writer.ArchiveWriteRefused):
+                    writer.HistoricalGitHub().api(f"repos/{repo}")
+                for kind in ("blobs", "trees", "commits", "refs"):
+                    self.assertEqual(github.api(f"repos/{CENTRAL}/git/{kind}", {"fixture": True}), {"sha": "fixture-write"})
+                recorded = log.read_bytes()
+                for route, payload, method in (
+                    (f"repos/{repo}/git/refs", {"fixture": True}, "POST"),
+                    (f"repos/{CENTRAL}/releases", {"fixture": True}, "POST"),
+                    (f"repos/{CENTRAL}/git/refs", {"fixture": True}, "PATCH"),
+                    (f"repos/{repo}-suffix/git/refs", None, "POST"),
+                    ("repos/jbaruch/unselected/git/refs", None, "POST"),
+                ):
+                    with self.assertRaises(writer.ArchiveWriteRefused):
+                        github.api(route, payload, method=method)
+                with self.assertRaises(writer.ArchiveWriteRefused):
+                    github.bind_consumer("jbaruch/unselected")
+                self.assertEqual(log.read_bytes(), recorded)
+            rows = [json.loads(line) for line in log.read_text().splitlines()]
+            self.assertTrue(any(not central for _, central, _ in rows))
+            self.assertEqual(sum(write for _, _, write in rows), 4)
+
     def test_real_gh_children_keep_private_consumer_and_central_credentials_separate(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
