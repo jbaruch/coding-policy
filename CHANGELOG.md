@@ -1,3 +1,5 @@
+## 0.5.17 — 2026-11-01
+
 ### Retain typed historical publication source evidence
 
 Add a distinct later-attestation family for an original successful publication whose receipt bytes are unavailable. Bind the closed historical executable graph, original native attempt/source/claim and the complete official pack to the exact installed registry package; retain actual new attester provenance without inventing receipt bytes, digests or publication timestamps. Extend the existing finalizer with a manual source-proof branch using its current central credentials and pinned read/install/pack tooling. Its fixed record is create-only and never republishes or rewrites an original source/terminal record.
