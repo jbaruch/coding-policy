@@ -148,6 +148,15 @@ and exact-version installed inventories, registry observation and actual later
 attester workflow/run/attempt/source. It carries no reconstructed original
 receipt, artifact digest, publication timestamp or original finalizer identity.
 
+Historical proof creation supports verified public consumers only. The fixed
+owner checks fresh exact repository identity, public visibility and active state
+before consumer-history/package reads and again before proof creation. Private,
+internal, unavailable or unverified visibility holds the original claim without
+a proof. This manual branch mints no App token; its central repository token
+reads public consumer history. Ordinary private publication and native receipt
+resolution retain their existing credential routes. Private historical creation
+requires a reviewed selected-consumer credential route before it is supported.
+
 The authorized recovery uses an explicit manual dispatch of the EXISTING
 `fleet-publish-finalize.yml`, with only `original_run_id` as input. The fixed
 writer derives all coordinates from the original owner records and native Git
@@ -181,6 +190,10 @@ is schema 2 with `proof_kind: historical_source_proof`, original run identity
 and the actual later `attester`. It runs the same fresh exact-version registry
 and moderation gates. A caller must accept both native schema 1 and this explicit
 schema 2 before opting in. Unsupported older callers keep their original HOLD.
+Historical confirmation uses its validated durable native-success fact and fresh
+canonical latest-version, exact-version and moderation reads. It does not require
+an expired original Actions run to become readable again. Native confirmation
+keeps its live-run gate.
 `fleet_publish_wait.py` still selects the exact associated source run and grants
 no dispatch or retry from an unknown historical claim.
 

@@ -23,6 +23,9 @@ from test_fleet_publish_historical import proof  # noqa: E402
 class HistoricalGit:
     def __init__(self):
         self.original = Fixture()
+        self.original.routes[f"repos/{REPO}"].update(
+            private=False, visibility="public"
+        )
         self.original.records[RUN, "receipt"] = None
         self.original.remove_archive("terminal")
         self.effects = Git()
@@ -171,6 +174,50 @@ class HistoricalWriterTests(unittest.TestCase):
         self.assertEqual(
             posts[0]["ref"], ref_name("historical-source-proof", run_id=RUN)
         )
+
+    def test_private_or_unverified_consumer_never_reads_history_or_creates_proof(self):
+        from fleet_publish_resolver import _Evidence
+
+        variants = [
+            {"private": True, "visibility": "private"},
+            {"private": False, "visibility": "internal"},
+            {"private": 0},
+            {"full_name": "fixture/wrong-consumer"},
+            {"archived": True},
+            {"disabled": True},
+            {"visibility": None},
+        ]
+        for fields in variants:
+            with self.subTest(fields=fields):
+                self.github = HistoricalGit()
+                self.reader = ArchiveReader(self.github)
+                self.github.original.routes[f"repos/{REPO}"].update(fields)
+                before = copy.deepcopy(self.github.original.routes)
+                with patch(
+                    "fleet_publish_resolver._Evidence", wraps=_Evidence
+                ) as consumer_history, patch.object(
+                    packages, "observe_package", return_value=self.github.proof["registry"]
+                ) as package_observer:
+                    with self.assertRaises(writer.ArchiveWriteRefused):
+                        self.attest()
+                    consumer_history.assert_not_called()
+                    package_observer.assert_not_called()
+                self.assertEqual(self.github.writes, [])
+                self.assertEqual(self.github.effects.refs, {})
+                self.assertEqual(self.github.original.routes, before)
+
+    def test_visibility_change_after_package_read_preserves_claim_without_proof(self):
+        def changed_visibility(*_arguments):
+            self.github.original.routes[f"repos/{REPO}"].update(
+                private=True, visibility="private"
+            )
+            return self.github.proof["registry"]
+
+        with patch.object(packages, "observe_package", side_effect=changed_visibility):
+            with self.assertRaises(writer.ArchiveWriteRefused):
+                self.attest()
+        self.assertEqual(self.github.writes, [])
+        self.assertEqual(self.github.effects.refs, {})
 
     def test_unknown_uncommitted_ref_post_holds_without_a_second_post(self):
         actual = self.github.effects.api

@@ -78,7 +78,7 @@ class ConfirmationTests(unittest.TestCase):
 
         historical = proof()
         readers = Readers()
-        readers.outputs[0][1]["pre"] = "unpublished"
+        readers.outputs[0] = (0, {"version": "0.1.2"})
         readers.outputs[1][1]["version"] = "0.1.0"
         readers.outputs[2][1]["version"] = "0.1.0"
         value: HistoricalPublication = {
@@ -92,11 +92,52 @@ class ConfirmationTests(unittest.TestCase):
         self.assertEqual(result["origin_run_id"], "101")
         self.assertEqual(result["attester"]["run_id"], "102")
         self.assertEqual(len(readers.calls), 3)
+        self.assertEqual(readers.calls[0][0], "registry-version.sh")
         self.assertNotIn("record", result)
         value["facts"]["source_sha"] = "f" * 40
         with self.assertRaises(confirmation.ConfirmationHold):
             confirmation.confirm_evidence(value, "unpublished", readers)
         self.assertEqual(len(readers.calls), 3)
+
+    def test_historical_confirmation_survives_expired_original_run(self):
+        from test_fleet_publish_historical import proof
+        from fleet_publish_historical import prior_facts
+        from fleet_publish_evidence import HistoricalPublication
+
+        historical = proof()
+        value: HistoricalPublication = {
+            "proof_kind": "historical_source_proof",
+            "proof": historical,
+            "facts": prior_facts(historical),
+        }
+        calls = []
+
+        def registry_only(*arguments):
+            calls.append(arguments)
+            name = arguments[0]
+            if name == "verify-publish-landed.sh":
+                # This original native run is gone; it cannot supply a new
+                # positive conclusion after the durable owner verified proof.
+                return subprocess.CompletedProcess(arguments, 2, b"", b"run 404")
+            outputs = {
+                "registry-version.sh": {"version": "0.1.2"},
+                "registry-has-version.sh": {"exists": True, "version": "0.1.0"},
+                "verify-moderation-cleared.sh": {
+                    "ok": True, "version": "0.1.0", "moderation_status": "pass"
+                },
+            }
+            return subprocess.CompletedProcess(
+                arguments, 0, json.dumps(outputs[name]).encode(), b""
+            )
+
+        result = confirmation.confirm_evidence(value, "unpublished", registry_only)
+        self.assertTrue(result["confirmed"])
+        self.assertEqual(result["schema_version"], 2)
+        self.assertEqual(result["registry_latest"], "0.1.2")
+        self.assertEqual([call[0] for call in calls], [
+            "registry-version.sh", "registry-has-version.sh",
+            "verify-moderation-cleared.sh",
+        ])
 
     def test_existing_four_argument_callers_remain_native_receipt_schema1_only(self):
         with (

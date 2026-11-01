@@ -369,6 +369,22 @@ def attest_historical(
         reader.source_claim(original["consumer_repository"], original["source_sha"])
         == envelope
     )
+
+    def require_public_consumer() -> None:
+        metadata = github.api(f"repos/{original['consumer_repository']}")
+        if not (
+            isinstance(metadata, dict)
+            and metadata.get("full_name") == original["consumer_repository"]
+            and metadata.get("private") is False
+            and metadata.get("visibility") == "public"
+            and metadata.get("archived") is False
+            and metadata.get("disabled") is False
+        ):
+            raise ArchiveWriteRefused(
+                "Historical source attestation supports verified public consumers only; preserve private or unknown claims without replay."
+            )
+
+    require_public_consumer()
     # Reuse complete native source, merge, ancestry and exact bookkeeping proof.
     # The existing receipt-only resolver remains unchanged for old callers.
     evidence = _Evidence(
@@ -428,6 +444,7 @@ def attest_historical(
         }
     )
     evidence.stable()
+    require_public_consumer()
     require(reader.run_intent(run_id) == envelope and reader.run_hold(run_id) is None)
     existing = reader.historical_source_proof(run_id)
     if existing is not None:

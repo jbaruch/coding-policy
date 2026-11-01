@@ -111,18 +111,25 @@ def confirm_facts(
                 "Captured baseline does not precede this publication."
             )
     workspace, plugin = record["plugin_name"].split("/")
-    landing = response(
-        run_helper(
-            "verify-publish-landed.sh", workspace, plugin, baseline, record["run_id"]
+    if record.get("proof_kind") == "historical_source_proof":
+        # The durable owner has verified the original native success. Its run
+        # may no longer exist; only the registry observation must be fresh.
+        latest = response(run_helper("registry-version.sh", workspace, plugin))
+        current = latest.get("version")
+    else:
+        landing = response(
+            run_helper(
+                "verify-publish-landed.sh", workspace, plugin, baseline, record["run_id"]
+            )
         )
-    )
-    current = landing.get("current")
-    if (
-        landing.get("ok") is not True
-        or landing.get("run_conclusion") != "success"
-        or landing.get("pre") != baseline
-        or numeric(current) < attempted
-    ):
+        current = landing.get("current")
+        if (
+            landing.get("ok") is not True
+            or landing.get("run_conclusion") != "success"
+            or landing.get("pre") != baseline
+        ):
+            raise ConfirmationHold("Registry advance is unconfirmed; do not replay.")
+    if numeric(current) < attempted:
         raise ConfirmationHold("Registry advance is unconfirmed; do not replay.")
     exact = response(run_helper("registry-has-version.sh", workspace, plugin, version))
     if exact.get("exists") is not True or exact.get("version") != version:
