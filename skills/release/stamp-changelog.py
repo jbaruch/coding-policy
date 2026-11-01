@@ -61,7 +61,7 @@ def compute_version(local: str, latest: str | None) -> str:
     return f"{rp[0]}.{rp[1]}.{rp[2] + 1}"
 
 
-def stamp_changelog(text: str, version: str, date: str) -> tuple[str, bool]:
+def stamp_changelog(text: str, version: str, date: str | None) -> tuple[str, bool]:
     """Insert `## <version> — <date>` above the topmost un-headed `### ` entries.
 
     Un-headed entries are `### ` blocks that appear before the first `## ` heading.
@@ -76,6 +76,9 @@ def stamp_changelog(text: str, version: str, date: str) -> tuple[str, bool]:
         return text, False
     if first_h2 is not None and first_h2 < first_entry:
         return text, False  # newest entries already sit under a version heading
+
+    if date is None:
+        raise ValueError("Restore the observed changelog stamp date before reconstructing it.")
 
     heading = f"## {version} — {date}"
     new_lines = lines[:first_entry] + [heading, ""] + lines[first_entry:]

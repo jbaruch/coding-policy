@@ -31,6 +31,10 @@ PRODUCER_PATHS = (
     "scripts/fleet_publish_targets.py",
     "scripts/fleet_publish_archive_write.py",
     "skills/release/fleet_publish_archive.py",
+    "skills/release/fleet_publish_historical.py",
+    "skills/release/fleet_publish_evidence.py",
+    "skills/release/fleet_publish_resolver.py",
+    "scripts/fleet_publish_historical_package.py",
     "skills/release/fleet_publish_record.py",
     "skills/release/fleet_publish_github.py",
     "skills/release/stamp-changelog.py",
@@ -51,6 +55,37 @@ PRODUCER_PATHS = (
 TRUSTED_PRODUCERS: tuple[dict[str, str], ...] = (
     {
         ".github/workflows/fleet-publish.yml": "12205f89e681d02f53f85d1ef55e450c579f6196",
+        ".github/workflows/fleet-publish-finalize.yml": "9c2c60bf62730cc224792df21610c2bb3c27bba6",
+        "scripts/fleet_publish.py": "c1a6e7ab7645fa7aad6752459d41e9cab25aa52a",
+        "scripts/fleet_publish_workflow.py": "64792b8f218dfe3c012f01691f01fc7f938faf9e",
+        "scripts/fleet_publish_validate.py": "7d450d115f6a661f3a0e1d3d8ab1a85451bb7a47",
+        "scripts/fleet_publish_targets.py": "82e38c5c042f5f6ff09824b2c48e00c001b650db",
+        "scripts/fleet_publish_archive_write.py": "711b57e318bf3f23d3d32bca60ef708d3a255a39",
+        "skills/release/fleet_publish_archive.py": "f8e7083a225dec26c91bcbce624a0fbfbe795556",
+        "skills/release/fleet_publish_historical.py": "02de6085aac707cff012302136f8e5be59aca7ca",
+        "skills/release/fleet_publish_evidence.py": "97e44101819dfc6153b2fefd8031472821c32f96",
+        "skills/release/fleet_publish_resolver.py": "83378bb646f0de4a3d8acad3a644e76cf85ecccd",
+        "scripts/fleet_publish_historical_package.py": "4877ee6df9b496fd04b0a94978d9a6fab374fff0",
+        "skills/release/fleet_publish_record.py": "54c706f73092833ec395e8486dafeb6bcd376e48",
+        "skills/release/fleet_publish_github.py": "9639bdafb12db516f4cfcd20da4f2ed154964eb1",
+        "skills/release/stamp-changelog.py": "582db93a14c067d55fb3f5a0b7ec0f14a99d645a",
+        ".github/actions/skill-review/action.yml": "799534fc0e7cf057db37e20611e161c94c9d6433",
+        ".github/actions/skill-review/review-skills.sh": "42f635be4c5e377914266caf2be10107d1bb2f98",
+        "skills/release/smart-publish.sh": "145178416aceea117b0997b61c1f04ccf28eeafb",
+        "skills/release/registry-baseline.sh": "e6c55b47d6dd199fa5697f6cfe2531e8d5dd43b3",
+        "skills/release/registry-version.sh": "a2109fc98dec02bd4c42218e6e4826596145f75e",
+        "skills/release/registry-has-version.sh": "6266e89adb0c0bb40cec3bb1f0df9a8780931557",
+        "skills/release/verify-moderation-cleared.sh": "36b4463cc2fb5b857e08ec15a36b05f4c218ef71",
+        "skills/release/lib/bounded-run.sh": "b07e25df9c65f6ede8b39404c4ae7ecb0dc95ba0",
+    },
+)
+
+
+# Review the entire original graph before adding a historical set. Never renew
+# from a remote record or latest checkout. This set retains activated history.
+HISTORICAL_PRODUCERS: tuple[dict[str, str], ...] = (
+    {
+        ".github/workflows/fleet-publish.yml": "12205f89e681d02f53f85d1ef55e450c579f6196",
         ".github/workflows/fleet-publish-finalize.yml": "a6dbeea9400979c59a7608d7f16eb8156e30e4e1",
         "scripts/fleet_publish.py": "b654076a9cad81bd2181cd0998f6a835f572091b",
         "scripts/fleet_publish_workflow.py": "64792b8f218dfe3c012f01691f01fc7f938faf9e",
@@ -69,6 +104,7 @@ TRUSTED_PRODUCERS: tuple[dict[str, str], ...] = (
         "skills/release/registry-has-version.sh": "6266e89adb0c0bb40cec3bb1f0df9a8780931557",
         "skills/release/verify-moderation-cleared.sh": "36b4463cc2fb5b857e08ec15a36b05f4c218ef71",
         "skills/release/lib/bounded-run.sh": "b07e25df9c65f6ede8b39404c4ae7ecb0dc95ba0",
+        "skills/release/fleet_publish_producer.py": "29f1df98fecccfdee93ed0b588c5fe57d03ac1c4",
     },
 )
 
@@ -130,7 +166,7 @@ def local_owner_blob() -> str:
         raise FleetPublishLookupError("unknown_producer") from None
 
 
-def verify_workflow_protocol(client: GitHubRead, workflow_sha: str) -> None:
+def verify_workflow_protocol(client: GitHubRead, workflow_sha: str) -> dict[str, str]:
     """Verify immutable source plus actual own-main ancestry; grants no effect."""
     _require(valid_sha(workflow_sha))
     owner_blob = local_owner_blob()
@@ -221,8 +257,7 @@ def verify_workflow_protocol(client: GitHubRead, workflow_sha: str) -> None:
         tree_cache[sha] = result
         return result
 
-    actual = {}
-    for path in PRODUCER_PATHS:
+    def lookup(path: str) -> str:
         sha = root.get("sha")
         parts = path.split("/")
         for index, component in enumerate(parts):
@@ -235,15 +270,31 @@ def verify_workflow_protocol(client: GitHubRead, workflow_sha: str) -> None:
                     entry.get("type") == "blob"
                     and entry.get("mode") in ("100644", "100755")
                 )
-                actual[path] = entry["sha"]
+                return str(entry["sha"])
             else:
                 _require(entry.get("type") == "tree" and entry.get("mode") == "040000")
                 sha = entry["sha"]
-    _require(actual.pop(PRODUCER_OWNER_PATH) == owner_blob)
+        raise FleetPublishLookupError("unknown_producer")
+
+    remote_owner = lookup(PRODUCER_OWNER_PATH)
+    if remote_owner != owner_blob:
+        candidates = [
+            pins
+            for pins in HISTORICAL_PRODUCERS
+            if pins.get(PRODUCER_OWNER_PATH) == remote_owner
+        ]
+        _require(bool(candidates))
+        for pins in candidates:
+            if all(lookup(path) == expected for path, expected in pins.items()):
+                return dict(pins)
+        raise FleetPublishLookupError("unknown_producer")
+    actual = {
+        path: lookup(path) for path in PRODUCER_PATHS if path != PRODUCER_OWNER_PATH
+    }
     _require(
         any(
-            set(pinset) == set(PRODUCER_PATHS) - {PRODUCER_OWNER_PATH}
-            and actual == pinset
-            for pinset in TRUSTED_PRODUCERS
+            set(pins) == set(PRODUCER_PATHS) - {PRODUCER_OWNER_PATH} and actual == pins
+            for pins in TRUSTED_PRODUCERS
         )
     )
+    return {**actual, PRODUCER_OWNER_PATH: owner_blob}

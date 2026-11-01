@@ -107,5 +107,9 @@ jobs:
       - uses: actions/checkout@v7
       - name: Install Tessl CLI for actual package exclusion regressions
         uses: tesslio/setup-tessl@v2
+        with:
+          # Renew monthly, atomically with TESSL_VERSION in the package verifier
+          # and fleet-publish-finalize.yml, in a dedicated dependency change.
+          version: '0.119.0'
       - name: Run unit test suites
         run: bash scripts/run-tests.sh

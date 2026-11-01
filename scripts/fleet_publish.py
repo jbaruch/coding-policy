@@ -40,6 +40,12 @@ from fleet_publish_record import (  # noqa: E402 - trusted sibling schema owner.
 )
 from fleet_publish_github import FleetPublishLookupError, GitHubClient  # noqa: E402 - same trusted sibling owner.
 from fleet_publish_producer import verify_workflow_protocol  # noqa: E402 - same trusted producer identity owner.
+from fleet_publish_evidence import (  # noqa: E402 - explicit evidence owner.
+    PriorPublication,
+    PublicationFacts,
+    facts as publication_facts,
+    native_publication,
+)
 
 STAMP = ".github/fleet-publish-source.json"
 MARKER = ".github/fleet-publish-enabled"
@@ -197,12 +203,11 @@ class GitHub:
         """Read-only facade for the shared fixed central protocol verifier."""
         return self.api(route)
 
-    def archive_operation(self, operation: Any) -> Any:
+    @contextmanager
+    def _archive_client(self) -> Iterator[Any]:
         # Each logical proof has its own bounded client; queued historical
         # bookkeeping cannot consume a later proof's lifetime allowance. The
         # shared reader retains its immutable/ref cache within this operation.
-        from fleet_publish_archive import ArchiveReader
-
         central_token = os.environ.get("FLEET_CENTRAL_TOKEN")
         require(central_token, "Central evidence read credential is unavailable.")
         original = os.environ.get("GH_TOKEN")
@@ -212,20 +217,32 @@ class GitHub:
             client: Any = GitHubClient() if cache is None else PollGitHubClient(cache)
             if cache is not None:
                 client = PollEvidenceClient(client, cache)
-            return operation(ArchiveReader(client))
-        except FleetPublishLookupError as error:
-            raise PublishRefused(
-                "Restore complete central durable/native evidence; preserve STOP without replay."
-            ) from error
+            yield client
         finally:
             if original is None:
                 os.environ.pop("GH_TOKEN", None)
             else:
                 os.environ["GH_TOKEN"] = original
 
+    def archive_operation(self, operation: Any) -> Any:
+        from fleet_publish_archive import ArchiveReader
+
+        try:
+            with self._archive_client() as client:
+                return operation(ArchiveReader(client))
+        except FleetPublishLookupError as error:
+            raise PublishRefused(
+                "Restore complete central durable/native evidence; preserve STOP without replay."
+            ) from error
+
     def record(self, run_id: str, kind: str) -> FleetPublishRecord | None:
         require(kind in ("intent", "receipt"), "Unsupported immutable record kind.")
         return self.archive_operation(lambda reader: reader.record(run_id, kind))
+
+    def historical_source_proof(self, run_id: str) -> dict[str, Any] | None:
+        return self.archive_operation(
+            lambda reader: reader.historical_source_proof(run_id)
+        )
 
     def live_record(self, run_id: str, kind: str) -> FleetPublishRecord | None:
         require(kind in ("intent", "receipt"), "Unsupported immutable record kind.")
@@ -283,6 +300,20 @@ class GitHub:
         )
         return remaining
 
+    def _command_environment(
+        self, path: str, payload: Any, method: str
+    ) -> dict[str, str]:
+        environment = dict(os.environ)
+        if path == f"repos/{CENTRAL_REPOSITORY}" or path.startswith(
+            f"repos/{CENTRAL_REPOSITORY}/"
+        ):
+            require(
+                environment.get("FLEET_CENTRAL_TOKEN"),
+                "Central artifact read credential is unavailable.",
+            )
+            environment["GH_TOKEN"] = environment["FLEET_CENTRAL_TOKEN"]
+        return environment
+
     def api(
         self,
         path: str,
@@ -294,19 +325,13 @@ class GitHub:
         args = ["gh", "api", "--hostname", "github.com", path]
         if payload is not None:
             args += ["--method", method, "--input", "-"]
-        environment = dict(os.environ)
+        environment = self._command_environment(path, payload, method)
         cache = getattr(self, "_poll_cache", None)
         is_central_route = path == f"repos/{CENTRAL_REPOSITORY}" or path.startswith(
             f"repos/{CENTRAL_REPOSITORY}/"
         )
         if cache is not None and is_central_route:
             cache.request(dispatch=payload is not None)
-        if is_central_route:
-            require(
-                environment.get("FLEET_CENTRAL_TOKEN"),
-                "Central artifact read credential is unavailable.",
-            )
-            environment["GH_TOKEN"] = environment["FLEET_CENTRAL_TOKEN"]
         try:
             result = subprocess.run(
                 args,
@@ -1053,7 +1078,7 @@ def verify_attempt(
 
 def previous(
     github: GitHub, repo: str, entries: dict[str, dict[str, Any]]
-) -> FleetPublishRecord | None:
+) -> PriorPublication | None:
     history = github.pages(f"repos/{repo}/commits?path={quote(STAMP, safe='')}")
     if STAMP not in entries:
         require(
@@ -1075,9 +1100,31 @@ def previous(
         claim == intent, "Source claim does not match its immutable central intent."
     )
     verify_attempt(github, intent, successful=False)
-    receipt = artifact(
-        github, claim["run_id"], "fleet-publish-receipt-v1", "receipt.json"
-    )
+    receipt = github.record(claim["run_id"], "receipt")
+    if receipt is None:
+        from fleet_publish_historical import prior_facts
+
+        proof = github.historical_source_proof(claim["run_id"])
+        require(
+            proof is not None,
+            "Original receipt and historical proof are unavailable; preserve STOP.",
+        )
+        if proof is None:
+            raise PublishRefused("Restore verified original publication evidence.")
+        require(
+            proof["intent"]["intent"] == intent, "Historical source intent changed."
+        )
+        derived = prior_facts(proof)
+        _, stamped_tree = tree(github, repo, derived["bookkeeping_sha"])
+        require(
+            decode_record(file(github, repo, stamped_tree, STAMP)) == intent,
+            "Historical bookkeeping no longer contains its exact original intent.",
+        )
+        return {
+            "proof_kind": "historical_source_proof",
+            "proof": proof,
+            "facts": derived,
+        }
     for key in (
         "consumer_repository",
         "source_sha",
@@ -1167,7 +1214,7 @@ def previous(
             decode_record(file(github, repo, origin_tree, STAMP)) == origin_intent,
             "Original native bookkeeping does not contain its immutable intent.",
         )
-    return receipt
+    return native_publication(receipt)
 
 
 def projection(
@@ -1296,7 +1343,7 @@ def helper(
 
 
 def stamp_package(
-    package: Path, manifest: dict[str, Any], baseline: str, date: str
+    package: Path, manifest: dict[str, Any], baseline: str, date: str | None
 ) -> str:
     spec = importlib.util.spec_from_file_location(
         "fleet_stamp", POLICY / "skills/release/stamp-changelog.py"
@@ -1320,7 +1367,7 @@ def pending_sources(
     github: GitHub,
     repo: str,
     tip: str,
-    prior: FleetPublishRecord | None,
+    prior: PublicationFacts | None,
     plugin: str,
     *,
     verified_tip_stamp_sha: str | None = None,
@@ -1374,7 +1421,12 @@ def pending_sources(
                 prior if prior and cursor == prior["bookkeeping_sha"] else None
             )
         else:
-            bookkeeping = previous(github, repo, entries) if STAMP in entries else None
+            previous_evidence = (
+                previous(github, repo, entries) if STAMP in entries else None
+            )
+            bookkeeping = (
+                publication_facts(previous_evidence) if previous_evidence else None
+            )
         if bookkeeping is None or bookkeeping["bookkeeping_sha"] != cursor:
             pending.append(cursor)
         else:
@@ -1440,7 +1492,7 @@ def replace_suffix(current: str, old: str, new: str) -> str:
 
 
 def overlay_previous_changelog(
-    github: GitHub, repo: str, source_text: str, prior: FleetPublishRecord | None
+    github: GitHub, repo: str, source_text: str, prior: PublicationFacts | None
 ) -> str:
     if prior is None:
         return source_text
@@ -1639,7 +1691,7 @@ def independent_source_claims(
     github: GitHub,
     source: FleetPublishRecord,
     environment: dict[str, str],
-    prior: FleetPublishRecord | None,
+    prior: PublicationFacts | None,
     merged_at: str,
 ) -> None:
     """The create-only central SOURCE key survives consumer and Actions expiry.
@@ -1730,7 +1782,8 @@ def prepare(
     ref, tip = default_tip(github, repo)
     tree_sha, entries = tree(github, repo, tip)
     plugin = enrollment(github, repo, entries)
-    prior = previous(github, repo, entries)
+    prior_evidence = previous(github, repo, entries)
+    prior = publication_facts(prior_evidence) if prior_evidence else None
     pending = (
         []
         if prior and prior["state"] == "published"
@@ -1758,6 +1811,11 @@ def prepare(
             "Source history diverged from the proven publication.",
         )
     if prior and prior["state"] == "published":
+        require(
+            prior_evidence is not None
+            and prior_evidence["proof_kind"] == "native_receipt",
+            "Moderation recovery requires original native receipt bytes.",
+        )
         if tip != prior["bookkeeping_sha"]:
             old_claim = decode_record(file(github, repo, entries, STAMP))
             prior_bookkeeping = prior["bookkeeping_sha"]

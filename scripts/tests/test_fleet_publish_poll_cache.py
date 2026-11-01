@@ -187,7 +187,7 @@ class PollCacheTests(unittest.TestCase):
             consumer.attempt_evidence(intent, successful=False)
             receipt = consumer.record(run, "receipt")
             consumer.attempt_evidence(receipt, successful=True)
-            return receipt
+            return publisher.native_publication(receipt)
 
         def native_api(github, route, *args, **kwargs):
             if route == f"{CENTRAL}/actions/runs/777":

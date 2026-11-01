@@ -22,6 +22,7 @@ from typing import Any, NoReturn
 from urllib.parse import quote
 
 from fleet_publish_archive import ArchiveReader
+from fleet_publish_evidence import PriorPublication
 from fleet_publish_github import (
     FleetPublishLookupError,
     ResolutionGitHubClient as GitHubClient,
@@ -713,6 +714,39 @@ def resolve(
 
 
 confirm = resolve
+
+
+def resolve_evidence(
+    github: Any, consumer_repository: str, source_sha: str, *, run_id: str | None = None
+) -> PriorPublication:
+    """Explicit union for maintained callers; resolve() stays receipt-only."""
+    from fleet_publish_evidence import native_publication
+    from fleet_publish_historical import prior_facts
+
+    try:
+        evidence = _Evidence(github, consumer_repository, source_sha)
+        intent, claim_sha = evidence.selected(run_id)
+        if evidence.artifact(intent["run_id"], "receipt") is not None:
+            return native_publication(
+                resolve(github, consumer_repository, source_sha, run_id=run_id)
+            )
+        proof = evidence.archive.historical_source_proof(intent["run_id"])
+        _need(proof is not None, "unavailable")
+        if proof is None:
+            _hold("unavailable")
+        _need(
+            proof["intent"]["intent"] == intent
+            and proof["intent"]["bookkeeping_sha"] == claim_sha,
+            "claim_binding",
+        )
+        evidence.stable()
+        return {
+            "proof_kind": "historical_source_proof",
+            "proof": proof,
+            "facts": prior_facts(proof),
+        }
+    except FleetPublishLookupError:
+        _hold("unavailable")
 
 
 class _Parser(argparse.ArgumentParser):
