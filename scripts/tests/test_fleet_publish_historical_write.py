@@ -11,8 +11,10 @@ import os
 from pathlib import Path
 import sys
 import tempfile
+from typing import Any
 import unittest
 from unittest.mock import patch
+from urllib.parse import parse_qs
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts"))
@@ -95,16 +97,58 @@ class HistoricalGit(writer.HistoricalGitHub):
                 "workflow_runs": copy.deepcopy(rows),
             }
         self.writes = []
+        self.catalog_reads = []
 
     def catalog(self, workflow_id):
         return self.original.routes[
             f"repos/{CENTRAL}/actions/workflows/{workflow_id}/runs?per_page=100&page=1"
         ]
 
+    def set_catalog(self, workflow_id, rows):
+        prefix = f"repos/{CENTRAL}/actions/workflows/{workflow_id}/runs?per_page=100&page="
+        for route in list(self.original.routes):
+            if route.startswith(prefix):
+                del self.original.routes[route]
+        for page, start in enumerate(range(0, max(1, len(rows)), 100), start=1):
+            self.original.routes[prefix + str(page)] = {
+                "total_count": len(rows),
+                "workflow_runs": copy.deepcopy(rows[start : start + 100]),
+            }
+
     def json(self, route):
         return self.native_json(route)
 
-    def native_json(self, route):
+    def native_json(self, route) -> Any:
+        root, _, query = route.partition("?")
+        prefix = f"repos/{CENTRAL}/actions/workflows/"
+        if root.startswith(prefix) and root.endswith("/runs"):
+            workflow_id = int(root.removeprefix(prefix).removesuffix("/runs"))
+            parameters = parse_qs(query, strict_parsing=True)
+            assert set(parameters) in (
+                {"per_page", "page"},
+                {"status", "per_page", "page"},
+            )
+            limit, page = int(parameters["per_page"][0]), int(parameters["page"][0])
+            assert limit in (1, 100) and page > 0
+            self.catalog_reads.append(route)
+            first = self.catalog(workflow_id)
+            pages = sorted(
+                (
+                    (int(key.rsplit("=", 1)[1]), value)
+                    for key, value in self.original.routes.items()
+                    if key.startswith(f"{root}?per_page=100&page=")
+                ),
+            )
+            rows = [row for _, value in pages for row in value["workflow_runs"]]
+            status = parameters.get("status", [None])[0]
+            if status is not None:
+                rows = [row for row in rows if row.get("status") == status]
+            result: dict[str, Any] = {
+                "workflow_runs": copy.deepcopy(rows[(page - 1) * limit : page * limit])
+            }
+            if "total_count" in first:
+                result["total_count"] = len(rows) if status else first["total_count"]
+            return result
         prefix = f"repos/{CENTRAL}/git/"
         if route.startswith(prefix + "ref/tags/"):
             ref = "refs/" + route.removeprefix(prefix + "ref/")
@@ -125,7 +169,7 @@ class HistoricalGit(writer.HistoricalGitHub):
     def artifact_evidence(self, run, kind):
         return self.original.artifact_evidence(run, kind)
 
-    def api(self, path, payload=None, *, binary=False, method="POST"):
+    def api(self, path, payload=None, *, binary=False, method="POST") -> Any:
         assert binary is False and method == "POST"
         if payload is not None:
             self.writes.append((path, copy.deepcopy(payload)))
@@ -455,24 +499,25 @@ class HistoricalWriterTests(unittest.TestCase):
             (78, "workflow_run"),
             (78, "workflow_dispatch"),
         ):
-            with self.subTest(workflow_id=workflow_id, event=event):
-                self.github = HistoricalGit()
-                self.reader = ArchiveReader(self.github)
-                page = self.github.catalog(workflow_id)
-                page["workflow_runs"].append(
-                    {
-                        **page["workflow_runs"][0],
-                        "id": 301,
-                        "event": event,
-                        "status": "in_progress",
-                        "conclusion": None,
-                    }
-                )
-                page["total_count"] += 1
-                with self.assertRaises(ValueError):
-                    self.attest()
-                self.assertEqual(self.github.writes, [])
-                self.assertEqual(self.github.effects.refs, {})
+            for status in ("queued", "in_progress", "waiting", "requested", "pending"):
+                with self.subTest(workflow_id=workflow_id, event=event, status=status):
+                    self.github = HistoricalGit()
+                    self.reader = ArchiveReader(self.github)
+                    page = self.github.catalog(workflow_id)
+                    page["workflow_runs"].append(
+                        {
+                            **page["workflow_runs"][0],
+                            "id": 301,
+                            "event": event,
+                            "status": status,
+                            "conclusion": None,
+                        }
+                    )
+                    page["total_count"] += 1
+                    with self.assertRaises(ValueError):
+                        self.attest()
+                    self.assertEqual(self.github.writes, [])
+                    self.assertEqual(self.github.effects.refs, {})
 
     def test_completed_failed_skipped_otherbranch_and_rerun_are_quiescent(self):
         for run_id, (workflow_id, event, conclusion, branch, attempt) in enumerate(
@@ -498,6 +543,219 @@ class HistoricalWriterTests(unittest.TestCase):
             page["total_count"] += 1
         self.assertTrue(self.attest())
         self.assertIsNotNone(self.reader.historical_source_proof(RUN))
+
+    def test_large_completed_history_supports_public_private_creation_and_noop(self):
+        for private in (False, True):
+            with self.subTest(private=private):
+                self.github = HistoricalGit()
+                self.github.original.routes[f"repos/{REPO}"].update(
+                    private=private, visibility="private" if private else "public"
+                )
+                self.reader = ArchiveReader(self.github)
+                for workflow_id, start in ((77, 1000), (78, 10000)):
+                    first = copy.deepcopy(
+                        self.github.catalog(workflow_id)["workflow_runs"][0]
+                    )
+                    rows = [first] + [
+                        {
+                            **first,
+                            "id": run_id,
+                            "status": "completed",
+                            "conclusion": "skipped",
+                            "event": "schedule"
+                            if workflow_id == 77
+                            else "workflow_run",
+                        }
+                        for run_id in range(start, start + 1100)
+                    ]
+                    self.github.set_catalog(workflow_id, rows)
+                self.assertTrue(self.attest())
+                saved = self.reader.historical_source_proof(RUN)
+                self.assertIsNotNone(saved)
+                count = len(self.github.writes)
+                self.assertTrue(self.attest())
+                self.assertEqual(self.github.writes[count:], [])
+                self.assertEqual(self.reader.historical_source_proof(RUN), saved)
+                # The resource contract must not regress to a completed-history
+                # crawl, regardless of the observed completed total.
+                self.assertFalse(
+                    any(
+                        "/runs?per_page=100" in route
+                        for route in self.github.catalog_reads
+                    )
+                )
+
+    def test_complement_holds_when_a_status_query_omits_or_misses_an_active_run(self):
+        for change in ("omitted", "transition", "unknown-status"):
+            with self.subTest(change=change):
+                self.github = HistoricalGit()
+                self.reader = ArchiveReader(self.github)
+                first = copy.deepcopy(self.github.catalog(77)["workflow_runs"][0])
+                self.github.set_catalog(
+                    77,
+                    [
+                        first,
+                        {
+                            **first,
+                            "id": 301,
+                            "status": "mystery"
+                            if change == "unknown-status"
+                            else "waiting",
+                            "conclusion": None,
+                        },
+                    ],
+                )
+                actual = self.github.api
+                reached = False
+
+                def missed(route, payload=None, *, binary=False, method="POST"):
+                    nonlocal reached
+                    if "/77/runs?status=waiting&per_page=100" in route:
+                        reached = True
+                        if change == "omitted":
+                            return {"total_count": 0, "workflow_runs": []}
+                        if change == "transition":
+                            # A native waiting -> queued transition occurs
+                            # after queued was queried. No ordering assumption
+                            # may turn that missed row into quiescence.
+                            self.github.catalog(77)["workflow_runs"][1]["status"] = (
+                                "queued"
+                            )
+                    return actual(route, payload, binary=binary, method=method)
+
+                with patch.object(self.github, "api", side_effect=missed):
+                    with self.assertRaises(writer.ArchiveWriteRefused):
+                        self.attest()
+                self.assertTrue(reached)
+                self.assertEqual(self.github.writes, [])
+
+    def test_summary_damage_or_changes_hold_without_effect(self):
+        for change in (
+            "missing-total",
+            "boolean-total",
+            "negative-total",
+            "completed-exceeds-all",
+            "missing-sample",
+            "extra-sample",
+            "wrong-workflow",
+            "completed-not-terminal",
+            "changed-total",
+            "changed-sample",
+        ):
+            with self.subTest(change=change):
+                self.github = HistoricalGit()
+                self.reader = ArchiveReader(self.github)
+                actual = self.github.api
+                calls = 0
+
+                def damaged(route, payload=None, *, binary=False, method="POST"):
+                    nonlocal calls
+                    result = actual(route, payload, binary=binary, method=method)
+                    if "/77/runs?" in route and "per_page=1&" in route:
+                        calls += 1
+                        if change == "missing-total":
+                            result.pop("total_count")
+                        elif change == "boolean-total":
+                            result["total_count"] = True
+                        elif change == "negative-total":
+                            result["total_count"] = -1
+                        elif (
+                            change == "completed-exceeds-all"
+                            and "status=completed" in route
+                        ):
+                            result["total_count"] = 2
+                        elif change == "missing-sample":
+                            result["workflow_runs"] = []
+                        elif change == "extra-sample":
+                            result["workflow_runs"] *= 2
+                        elif change == "wrong-workflow":
+                            result["workflow_runs"][0]["workflow_id"] = 78
+                        elif (
+                            change == "completed-not-terminal"
+                            and "status=completed" in route
+                        ):
+                            result["workflow_runs"][0].update(
+                                status="queued", conclusion=None
+                            )
+                        elif change == "changed-total" and calls == 4:
+                            result["total_count"] = 2
+                        elif change == "changed-sample" and calls == 4:
+                            result["workflow_runs"][0]["run_attempt"] = 2
+                    return result
+
+                with patch.object(self.github, "api", side_effect=damaged):
+                    with self.assertRaises((ValueError, RuntimeError)):
+                        self.attest()
+                self.assertEqual(self.github.writes, [])
+
+    def test_same_native_identity_cannot_be_both_completed_and_active(self):
+        current = copy.deepcopy(self.github.catalog(78)["workflow_runs"][0])
+        self.github.set_catalog(
+            78,
+            [
+                current,
+                {**current, "id": 301, "status": "completed", "conclusion": "success"},
+            ],
+        )
+        actual = self.github.api
+
+        def contradictory(route, payload=None, *, binary=False, method="POST"):
+            result = actual(route, payload, binary=binary, method=method)
+            if "/78/runs?status=completed&per_page=1" in route:
+                result["workflow_runs"] = [
+                    {**current, "status": "completed", "conclusion": "success"}
+                ]
+            return result
+
+        with patch.object(self.github, "api", side_effect=contradictory):
+            with self.assertRaises(writer.ArchiveWriteRefused):
+                self.attest()
+        self.assertEqual(self.github.writes, [])
+
+    def test_excess_active_catalog_never_becomes_absence(self):
+        first = copy.deepcopy(self.github.catalog(77)["workflow_runs"][0])
+        self.github.set_catalog(
+            77,
+            [first]
+            + [
+                {**first, "id": run_id, "status": "queued", "conclusion": None}
+                for run_id in range(1000, 2001)
+            ],
+        )
+        with self.assertRaises(ValueError):
+            self.attest()
+        self.assertEqual(self.github.writes, [])
+
+    def test_fixed_original_and_attester_native_fences_hold_identity_changes(self):
+        for target in ("original", "attester"):
+            for after_write in (False, True):
+                with self.subTest(target=target, after_write=after_write):
+                    self.github = HistoricalGit()
+                    self.reader = ArchiveReader(self.github)
+                    actual = self.github.api
+                    run_id = RUN if target == "original" else "201"
+                    route = f"repos/{CENTRAL}/actions/runs/{run_id}"
+                    calls = 0
+
+                    def changed(path, payload=None, *, binary=False, method="POST"):
+                        nonlocal calls
+                        result = actual(path, payload, binary=binary, method=method)
+                        if path == route:
+                            calls += 1
+                            if calls == (3 if after_write else 2):
+                                result["run_attempt"] = 2
+                        return result
+
+                    with patch.object(self.github, "api", side_effect=changed):
+                        with self.assertRaises((ValueError, RuntimeError)):
+                            self.attest()
+                    posts = [
+                        route
+                        for route, _ in self.github.writes
+                        if route.endswith("/refs")
+                    ]
+                    self.assertEqual(len(posts), 1 if after_write else 0)
+                    self.assertEqual(len(self.github.effects.refs), len(posts))
 
     def test_complete_catalog_uses_all_pages_and_holds_for_later_inflight_row(self):
         for terminal in (False, True):
@@ -605,6 +863,7 @@ class HistoricalWriterTests(unittest.TestCase):
                     }[change]
                     current[key] = replacement
                 elif change == "duplicate-id":
+                    page = self.github.catalog(78)
                     page["workflow_runs"].append(
                         copy.deepcopy(page["workflow_runs"][0])
                     )
@@ -671,7 +930,7 @@ class HistoricalWriterTests(unittest.TestCase):
 
         def changed_second_catalog(route, key=None):
             nonlocal calls
-            if key == "workflow_runs" and "/77/" in route:
+            if key == "workflow_runs" and route.endswith("/77/runs?status=queued"):
                 calls += 1
                 if calls == 2:
                     self.github.catalog(77)["workflow_runs"][0]["run_attempt"] = 2

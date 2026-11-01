@@ -60,7 +60,7 @@ TRUSTED_PRODUCERS: tuple[dict[str, str], ...] = (
         "scripts/fleet_publish_workflow.py": "64792b8f218dfe3c012f01691f01fc7f938faf9e",
         "scripts/fleet_publish_validate.py": "7d450d115f6a661f3a0e1d3d8ab1a85451bb7a47",
         "scripts/fleet_publish_targets.py": "82e38c5c042f5f6ff09824b2c48e00c001b650db",
-        "scripts/fleet_publish_archive_write.py": "2c99e1315f3c8515ba338109a08b32162763cb5e",
+        "scripts/fleet_publish_archive_write.py": "711b57e318bf3f23d3d32bca60ef708d3a255a39",
         "skills/release/fleet_publish_archive.py": "f8e7083a225dec26c91bcbce624a0fbfbe795556",
         "skills/release/fleet_publish_historical.py": "02de6085aac707cff012302136f8e5be59aca7ca",
         "skills/release/fleet_publish_evidence.py": "97e44101819dfc6153b2fefd8031472821c32f96",

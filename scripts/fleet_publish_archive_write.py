@@ -489,26 +489,88 @@ def historical_selection(
 
 
 def historical_quiescence(
-    github: Any, identity: dict[str, Any], original_run_id: str
-) -> list[dict[str, Any]]:
-    """Read complete fixed-owner catalogs, never a status/time-filtered subset."""
+    github: Any, identity: dict[str, Any], expected_run: dict[str, Any]
+) -> dict[str, Any]:
+    """Stable native count/active-set observations, not an atomic API snapshot.
+
+    The owner keeps mutation admission disabled and does not delete run metadata
+    through readback. Completed history never drives pagination; the native
+    total/completed complement must account for every observed active identity.
+    """
+    from fleet_publish_archive import native_run
+
+    statuses = ("queued", "in_progress", "waiting", "requested", "pending")
     snapshot: list[dict[str, Any]] = []
-    seen: set[str] = set()
     workflows: set[str] = set()
-    attesters = 0
+    seen: set[str] = set()
+    attesters: list[dict[str, Any]] = []
+    observations: dict[str, dict[str, Any]] = {}
+    finalizer_id = ""
 
     def quiet(value: object) -> None:
         if not value:
             raise ArchiveWriteRefused(
-                "Keep FLEET_PUBLISHER_ENABLED disabled; wait for every other "
-                "central poll/publication/finalizer run to finish and restore "
-                "complete unchanged native workflow catalogs before attesting."
+                "Keep FLEET_PUBLISHER_ENABLED disabled and preserve run metadata; "
+                "wait for every other central poll/publication/finalizer run to "
+                "finish and restore complete stable native totals and active "
+                "catalogs before attesting."
             )
 
-    for path, events in (
-        (CENTRAL_WORKFLOW, {"schedule", "workflow_dispatch"}),
-        (FINALIZER_WORKFLOW, {"workflow_run", "workflow_dispatch"}),
-    ):
+    def observed(value: object, path: str, workflow_id: str) -> dict[str, Any]:
+        run = obj(value)
+        quiet(type(run.get("id")) is int)
+        run_id = identifier(run.get("id"))
+        attempt, status, conclusion = (
+            run.get("run_attempt"),
+            run.get("status"),
+            run.get("conclusion"),
+        )
+        branch = run.get("head_branch")
+        events = (
+            {"schedule", "workflow_dispatch"}
+            if path == CENTRAL_WORKFLOW
+            else {"workflow_run", "workflow_dispatch"}
+        )
+        quiet(
+            type(run.get("workflow_id")) is int
+            and str(run["workflow_id"]) == workflow_id
+            and run.get("path") == path
+            and obj(run.get("repository")).get("full_name") == CENTRAL_REPOSITORY
+            and obj(run.get("head_repository")).get("full_name") == CENTRAL_REPOSITORY
+            and type(attempt) is int
+            and 1 <= attempt < 2**31
+            and valid_sha(run.get("head_sha"))
+            and isinstance(branch, str)
+            and 0 < len(branch) <= 255
+            and not any(ord(char) < 32 or ord(char) == 127 for char in branch)
+            and isinstance(run.get("event"), str)
+            and run["event"] in events
+            and isinstance(status, str)
+            and status in (*statuses, "completed")
+            and (
+                isinstance(conclusion, str) and conclusion in CONCLUSIONS
+                if status == "completed"
+                else conclusion is None
+            )
+        )
+        result = {
+            "workflow_id": workflow_id,
+            "path": path,
+            "id": run_id,
+            "run_attempt": attempt,
+            "head_sha": run["head_sha"],
+            "head_branch": branch,
+            "event": run["event"],
+            "status": status,
+            "conclusion": conclusion,
+            "created_at": utc(run.get("created_at")),
+        }
+        previous = observations.get(run_id)
+        quiet(previous is None or previous == result)
+        observations[run_id] = result
+        return result
+
+    for path in (CENTRAL_WORKFLOW, FINALIZER_WORKFLOW):
         route = f"repos/{CENTRAL_REPOSITORY}/actions/workflows"
         workflow = obj(github.api(f"{route}/{path.rsplit('/', 1)[1]}"))
         quiet(type(workflow.get("id")) is int)
@@ -519,80 +581,68 @@ def historical_quiescence(
             and workflow.get("state") == "active"
         )
         workflows.add(workflow_id)
-        rows = github.pages(f"{route}/{workflow_id}/runs", "workflow_runs")
-        for value in rows:
-            run = obj(value)
-            quiet(type(run.get("id")) is int)
-            run_id = identifier(run.get("id"))
-            attempt, status, conclusion = (
-                run.get("run_attempt"),
-                run.get("status"),
-                run.get("conclusion"),
-            )
-            branch = run.get("head_branch")
-            quiet(
-                run_id not in seen
-                and type(run.get("workflow_id")) is int
-                and str(run["workflow_id"]) == workflow_id
-                and run.get("path") == path
-                and obj(run.get("repository")).get("full_name") == CENTRAL_REPOSITORY
-                and obj(run.get("head_repository")).get("full_name")
-                == CENTRAL_REPOSITORY
-                and type(attempt) is int
-                and 1 <= attempt < 2**31
-                and valid_sha(run.get("head_sha"))
-                and isinstance(branch, str)
-                and 0 < len(branch) <= 255
-                and not any(ord(char) < 32 or ord(char) == 127 for char in branch)
-                and isinstance(run.get("event"), str)
-                and run["event"] in events
-                and isinstance(status, str)
-                and status
-                in {
-                    "queued",
-                    "in_progress",
-                    "waiting",
-                    "requested",
-                    "pending",
-                    "completed",
-                }
-                and (
-                    isinstance(conclusion, str) and conclusion in CONCLUSIONS
-                    if status == "completed"
-                    else conclusion is None
+        if path == FINALIZER_WORKFLOW:
+            finalizer_id = workflow_id
+        runs = f"{route}/{workflow_id}/runs"
+
+        def summary(*, completed: bool = False) -> dict[str, Any]:
+            query = "status=completed&" if completed else ""
+            raw = obj(github.api(f"{runs}?{query}per_page=1&page=1"))
+            total, rows = raw.get("total_count"), raw.get("workflow_runs")
+            if type(total) is not int or total < 0:
+                raise ArchiveWriteRefused(
+                    "Keep FLEET_PUBLISHER_ENABLED disabled; restore a nonnegative "
+                    "native workflow total before attesting."
                 )
-            )
-            seen.add(run_id)
-            if run_id == identity["run_id"]:
+            quiet(isinstance(rows, list) and len(rows) == min(1, total))
+            sample = observed(rows[0], path, workflow_id) if rows else None
+            quiet(not completed or sample is None or sample["status"] == "completed")
+            return {"total": total, "sample": sample}
+
+        before, completed_before = summary(), summary(completed=True)
+        active = []
+        for status in statuses:
+            for value in github.pages(f"{runs}?status={status}", "workflow_runs"):
+                run = observed(value, path, workflow_id)
+                quiet(run["status"] == status and run["id"] not in seen)
+                seen.add(run["id"])
                 quiet(
                     path == FINALIZER_WORKFLOW
-                    and attempt == identity["run_attempt"]
-                    and run.get("head_sha") == identity["workflow_sha"]
-                    and branch == "main"
-                    and run.get("event") == "workflow_dispatch"
-                    and status == "in_progress"
+                    and run["id"] == identity["run_id"]
+                    and run["run_attempt"] == identity["run_attempt"]
+                    and run["head_sha"] == identity["workflow_sha"]
+                    and run["head_branch"] == "main"
+                    and run["event"] == "workflow_dispatch"
+                    and run["status"] == "in_progress"
                 )
-                attesters += 1
-            else:
-                quiet(status == "completed")
-            snapshot.append(
-                {
-                    "workflow_id": workflow_id,
-                    "path": path,
-                    "id": run_id,
-                    "run_attempt": attempt,
-                    "head_sha": run["head_sha"],
-                    "head_branch": branch,
-                    "event": run["event"],
-                    "status": status,
-                    "conclusion": conclusion,
-                    "created_at": utc(run.get("created_at")),
-                }
-            )
-        if path == CENTRAL_WORKFLOW:
-            quiet(original_run_id in seen)
-    quiet(attesters == 1)
-    return sorted(snapshot, key=lambda run: int(run["id"]))
+                active.append(run)
+                attesters.append(run)
+        completed_after, after = summary(completed=True), summary()
+        quiet(before == after and completed_before == completed_after)
+        quiet(before["total"] == completed_before["total"] + len(active))
+        quiet(path != CENTRAL_WORKFLOW or before["total"] > 0)
+        snapshot.append(
+            {
+                "workflow_id": workflow_id,
+                "path": path,
+                "all": before,
+                "completed": completed_before,
+                "active": active,
+            }
+        )
+
+    quiet(len(attesters) == 1)
+    current = observed(
+        github.api(f"repos/{CENTRAL_REPOSITORY}/actions/runs/{identity['run_id']}"),
+        FINALIZER_WORKFLOW,
+        finalizer_id,
+    )
+    quiet(current == attesters[0])
+    original = native_run(
+        github.api(f"repos/{CENTRAL_REPOSITORY}/actions/runs/{expected_run['id']}")
+    )
+    quiet(original == expected_run)
+    return {"workflows": snapshot, "original": original, "attester": current}
 
 
 def attest_historical(
@@ -674,7 +724,7 @@ def attest_historical(
     )
     evidence.stable()
     require(reader.run_intent(run_id) == envelope and reader.run_hold(run_id) is None)
-    quiescence = historical_quiescence(github, identity, run_id)
+    quiescence = historical_quiescence(github, identity, run)
     existing = reader.historical_source_proof(run_id)
     if existing is not None:
         # Retain first attester/observation. All original/source/native facts and
@@ -693,7 +743,7 @@ def attest_historical(
                 if key != "observed_at"
             )
         )
-        require(historical_quiescence(github, identity, run_id) == quiescence)
+        require(historical_quiescence(github, identity, run) == quiescence)
         return True
     create_only(
         github,
@@ -701,7 +751,7 @@ def attest_historical(
         proof,
         lambda: reader.historical_source_proof(run_id),
     )
-    require(historical_quiescence(github, identity, run_id) == quiescence)
+    require(historical_quiescence(github, identity, run) == quiescence)
     return True
 
 

@@ -215,18 +215,25 @@ coordinates in the existing authorized recovery task before effects.
 The manual branch requires the existing `FLEET_PUBLISHER_ENABLED` flag to be
 disabled. That flag alone does not prove quiescence: the existing owner must
 observe all previously admitted central poll/publication runs reach their native
-terminal states before proof creation. The fixed finalizer reads complete native
-run catalogs for both central publisher and finalizer workflow IDs/paths, before
-proof creation or existing-proof readback and again after exact immutable
-readback. Only its exact current native manual attester is excluded. Every other
-current run attempt must be terminal; a failed or skipped run proves quiescence,
-not publication success. Missing, ambiguous, changed or over-bound coverage
-refuses attestation, including an existing-proof no-op; the existing pagination
-owner permits at most 1,000 runs per workflow. There is no timestamp cutoff,
-status-filter approximation, new variable-read grant or per-attempt crawl. The
-existing provider admission gates the disabled flag in the pinned workflow;
-the operator must keep it disabled through one explicit attestation and exact
-immutable readback. Resume only the selected
+terminal states before proof creation. The fixed finalizer reconciles native
+total/completed observations with complete bounded active-run catalogs for both
+fixed workflow IDs/paths, before proof creation or existing-proof lookup and
+again after exact immutable readback. Only the exact current native manual
+attester may be active. Direct native original-run and current-attester fences
+retain their exact identities and attempts; initial creation still requires
+available original native evidence. Missing, ambiguous, changed or over-bound
+observations refuse attestation, including an existing-proof no-op.
+
+This is a stable-observation completeness check, not atomic metadata across
+requests. The operator keeps mutation admission disabled and preserves run
+metadata through readback. Completed-history growth does not drive pagination,
+and status-filter lists alone never prove completeness. See
+`scripts/fleet_publish_archive_write.py` — `historical_quiescence` for the native
+observation contract, and `scripts/fleet_publish.py` — `GitHub.pages` for active
+catalog bounds. There is no timestamp cutoff, new variable-read grant or
+per-attempt crawl. Existing provider admission gates the disabled flag in the
+pinned workflow; the operator must keep it disabled through one explicit
+attestation and exact immutable readback. Resume only the selected
 normal source flow under the existing owner and all ordinary gates. Prepare
 these steps together before execution; an unknown effect outcome authorizes no
 retry. This adds no credential, grant, approval store or user permission flow.
