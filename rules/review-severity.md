@@ -1,48 +1,41 @@
 ---
 alwaysApply: true
-description: Review findings carry a severity — blocking gates the merge, advisory never does; read every finding, act by severity.
 ---
 
 # Review Severity
 
-## Two Tiers
+## Categories and Evidence
 
-- Every review finding is **blocking** or **advisory**
-- The test is behavioral — does fixing the finding change what an agent or the pipeline does?
-- Blocking: the fix changes behavior or closes a contract gap
-- Advisory: the fix changes only presentation
+- Prefix messages with `[defect]`, `[policy mismatch]` or `[optional hardening]`.
+- Defects require a concrete trigger, reachable path and material consequence.
+- Policy mismatches cite binding clauses and source.
+- Identify unproven harm as unproven.
+- Optional hardening adds safeguards without a demonstrated defect or obligation.
 
-## Blocking — Gates the Merge
+## Severity and Remedy
 
-- Correctness and security defects
-- Policy-contract violations: a carve-out's unmet preconditions, `no-secrets`, `ci-safety` gate-evasion, surface-sync that breaks publish
-- A rule directive whose violation changes agent behavior
-- A style finding whose fix changes meaning — an atomic-bullet split that alters what the bullet directs
+- Blocking: substantiated material defects, tests concealing them, or binding obligations affecting meaning or behavior.
+- Advisory: optional hardening and presentation-only suggestions.
+- A behavior-changing suggestion alone never establishes a blocker.
+- Resolve mismatches through compliant code or authorized policy amendment and re-review.
+- Reviewers cannot waive policy.
+- Apply `rules/simplicity.md` to remedy cost and scope.
 
-## Advisory — Never Gates
+## Merge Gate
 
-- Pure prose and style: `context-writing-style` connective or em-dash placement, a presentation-only atomic-bullet split
-- CHANGELOG wording, naming taste, synonym preference
-- Anything whose fix changes only presentation, not behavior
-
-## Gating Predicate
-
-- Any blocking finding present → the reviewer posts `CHANGES_REQUESTED` and the merge gates
-- Only advisory findings → the reviewer posts `APPROVED` or `COMMENTED` and the merge is allowed
-- Each reviewer's posted state already encodes this — the event is derived from per-finding severity (see `.github/codex-review/post-review.sh` and `.github/claude-review/review.py`)
-- The merge watcher gates on either Codex policy or Claude quality `CHANGES_REQUESTED` (see `skills/release/watch-pr-reviews.sh` header)
+- Any blocker → `CHANGES_REQUESTED`; otherwise `APPROVED` or `COMMENTED`.
+- Retain both independent review gates.
 
 ## Judge-Weighed Finding Carve-Out
 
-- Narrow exception for merging with a blocking policy finding a weighing ruled `defer` or `decline`
-- Applies only to policy findings when fixing costs more than the failure it prevents
-- Preconditions are binding: read `skills/release/references/review-severity-carve-outs.md` Judge-Weighed Finding Carve-Out before relying on it
-- Every other blocking finding is fixed before merge, including Claude code-quality findings
+- Narrow exception for merging with a blocking policy finding a weighing ruled `defer` or `decline`.
+- Applies only when fixing costs more than the failure it prevents.
+- Preconditions are binding: read `skills/release/references/review-severity-carve-outs.md` Judge-Weighed Finding Carve-Out before relying on it.
+- Every other blocker is resolved before merge.
 
 ## Split Reading From Acting
 
-- Read every finding in full first — severity never licenses skipping a body (see `rules/reviewer-feedback-reading.md`)
-- Blocking → fix before merge
-- Advisory → note it directly in the existing review conversation or the authorized task record without simulating team artifacts
-- Fold an advisory only when an already-required blocking correction touches the same surface and it adds no push or verification round
-- Never make an advisory a task prerequisite or spend a push, review round, issue, or pull request solely on it
+- Read all feedback under `rules/reviewer-feedback-reading.md`.
+- Advisory → note it directly in the existing review conversation or authorized task record.
+- Fold advisories into required same-surface fixes only without another push or check round.
+- Advisories require no push, review round, issue, PR or delivery prerequisite.

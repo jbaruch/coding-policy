@@ -1,3 +1,11 @@
+### Make implementation and review proportional to demonstrated needs
+
+Require the running agent to identify the current problem and smallest sufficient solution before implementation. Custom persistence, recovery, coordination and abstractions need a concrete requirement, a gap in existing platform behavior, and an assessment of maintenance cost. Use the existing task conversation or PR description; no new planning artifact or approval gate is introduced.
+
+Separate demonstrated defects, binding policy mismatches and optional hardening in both policy-review prompts and the running agent's feedback workflow. A behavior-changing suggestion alone no longer establishes a blocking defect. Keep binding obligations effective while allowing an authorized rule amendment as a remedy alongside code correction. Preserve the existing verdict schema and independent merge gates.
+
+Ship an on-demand reviewer-calibration procedure and shared prompt for a small, fixed PR sample under matching roles, instructions and context. Evaluate useful defects, unsupported blockers, unnecessary work and observed review rounds; disclose confounded comparisons and unavailable measurements. This adds policy and a procedure, not a model runner or recurring gate. Both distribution manifests advance together to 0.5.19.
+
 ## 0.5.18 — 2026-11-01
 
 ### Complete bounded historical proof readback (#801)

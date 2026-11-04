@@ -5,7 +5,8 @@ description: >
   and identify required exception checks before the requested work. Use for
   "review this code", "write tests", "add a dependency", "change CI", "migrate
   state", "write a skill", "edit a rule" or "publish a plugin" when coding-policy
-  governs the task. Read only the contracts named by applicable rule routers;
+  governs the task. Also covers "calibrate reviews" and "compare reviewers"
+  under the simplicity rule. Read only the contracts named by applicable rule routers;
   this skill supplies policy context and grants no action authority.
 user-invocable: false
 ---

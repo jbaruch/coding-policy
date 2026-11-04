@@ -8,20 +8,20 @@
     },
     "findings": {
       "type": "array",
-      "description": "One entry per concrete rule violation on a changed line. Empty when nothing violates a rule.",
+      "description": "One entry per substantiated finding or useful advisory suggestion on a changed line; optional hardening claims no binding violation. Empty when there are no findings.",
       "items": {
         "type": "object",
         "additionalProperties": false,
         "properties": {
           "path": {"type": "string", "description": "Repo-relative path of the changed file."},
           "line": {"type": "integer", "description": "1-indexed line in the file the finding anchors to."},
-          "rule": {"type": "string", "description": "The rules/*.md file whose clause is violated, e.g. 'ci-safety'."},
+          "rule": {"type": "string", "description": "The governing rule file, e.g. 'ci-safety'; for optional hardening, the classification rule rather than a claim of violation."},
           "severity": {
             "type": "string",
             "enum": ["blocking", "advisory"],
-            "description": "blocking if fixing the finding changes behavior or closes a contract gap (correctness, security, carve-out preconditions, no-secrets, ci-safety gate-evasion, surface-sync that breaks publish, a directive whose violation changes agent behavior, a style split that alters meaning); advisory if the fix changes only presentation (prose/style placement, CHANGELOG wording, naming taste, synonym preference). See rules/review-severity.md."
+            "description": "blocking for a substantiated material defect or an unmet binding obligation affecting meaning or behavior; advisory for optional hardening and presentation changes. A proposed fix changing behavior alone never establishes a blocker. See review-severity."
           },
-          "message": {"type": "string", "description": "What is wrong, the clause violated, and the fix."}
+          "message": {"type": "string", "description": "Category prefix ([defect], [policy mismatch] or [optional hardening]), evidence, binding clause when applicable, and smallest sufficient remedy."}
         },
         "required": ["path", "line", "rule", "severity", "message"]
       }
