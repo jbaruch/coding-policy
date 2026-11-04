@@ -111,8 +111,8 @@ t_advisory_only() {
   local dir; dir=$(mktemp -d)
   GH_CAPTURE="$dir/payload.json"; MOCK_422_ON_APPROVE=0
   cat > "$dir/final.json" <<'JSON'
-{"summary":"Policy loaded: 23 rule files from rules/. Style nit only.",
- "findings":[{"path":"rules/foo.md","line":8,"rule":"context-writing-style","severity":"advisory","message":"em-dash clause attaches a rationale; drop it"}]}
+{"summary":"Policy loaded: 23 rule files from rules/. Optional hardening only.",
+ "findings":[{"path":"rules/foo.md","line":8,"rule":"simplicity","severity":"advisory","message":"[optional hardening] Add a versioned recovery journal for hypothetical future consumers; no demonstrated defect or binding obligation."}]}
 JSON
   local out; out=$(run_main owner repo 9 "$dir/final.json")
   local rc=$?

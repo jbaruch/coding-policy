@@ -17,7 +17,11 @@ authoritative policy for the review.
   non-negotiable, because this repo is the policy.
 - Flag secrets, missing error handling, dependency hygiene, and violations of `rules/ci-safety.md`,
   `rules/no-secrets.md`, `rules/code-formatting.md`, and the rest.
-- Cite each finding as `rule: <name>` (e.g. `rule: ci-safety`) with the file, the line, the clause
-  violated, and the fix. Rules are ground truth — never propose a change that contradicts them.
+- Apply `rules/simplicity.md` and `rules/review-severity.md` to each finding.
+- Cite each finding as `rule: <name>` with its category, evidence, binding clause and
+  smallest sufficient remedy. Distinguish demonstrated defects from policy mismatches
+  and optional hardening; changing behavior alone does not justify a blocker.
+- Keep binding rules effective; recommend an authorized amendment when narrowing or
+  retiring a rule is preferable to restoring unnecessary machinery.
 - General code quality (correctness, bugs, security, tests) is Claude's lane
   (`.github/claude-review/system-prompt.md`). Focus these guidelines on policy compliance.

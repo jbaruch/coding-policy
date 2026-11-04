@@ -98,6 +98,7 @@ class ReviewTest(unittest.TestCase):
     def test_advisory_approval_clears_old_blocks_and_mixed_findings_request_changes(self):
         finding = self.output["structured_output"]["findings"][0]
         finding["severity"] = "advisory"
+        finding["message"] = "[optional hardening] Add a recovery journal for hypothetical future consumers; no demonstrated defect."
         self.assertEqual(self.review()["blocking"], 0)
         self.assertEqual(self.posts[-1]["event"], "APPROVE")
         self.assertIn("## Advisory findings", self.posts[-1]["body"])
