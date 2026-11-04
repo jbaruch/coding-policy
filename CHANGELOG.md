@@ -1,3 +1,5 @@
+## 0.5.19 — 2026-11-04
+
 ### Make implementation and review proportional to demonstrated needs
 
 Require the running agent to identify the current problem and smallest sufficient solution before implementation. Custom persistence, recovery, coordination and abstractions need a concrete requirement, a gap in existing platform behavior, and an assessment of maintenance cost. Use the existing task conversation or PR description; no new planning artifact or approval gate is introduced.
