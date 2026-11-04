@@ -8,15 +8,17 @@ alwaysApply: true
 
 - Prefix messages with `[defect]`, `[policy mismatch]` or `[optional hardening]`.
 - Defects require a concrete trigger, reachable path and material consequence.
-- Policy mismatches cite violated binding clauses and source; identify unproven harm as unproven.
+- Policy mismatches cite binding clauses and source.
+- Identify unproven harm as unproven.
 - Optional hardening adds safeguards without a demonstrated defect or obligation.
 
 ## Severity and Remedy
 
 - Blocking: substantiated material defects, tests concealing them, or binding obligations affecting meaning or behavior.
-- Advisory: optional hardening, prose, naming and presentation.
+- Advisory: optional hardening and presentation-only suggestions.
 - A behavior-changing suggestion alone never establishes a blocker.
-- Resolve mismatches through compliant code or authorized policy amendment and re-review; reviewers cannot waive policy.
+- Resolve mismatches through compliant code or authorized policy amendment and re-review.
+- Reviewers cannot waive policy.
 - Apply `rules/simplicity.md` to remedy cost and scope.
 
 ## Merge Gate
@@ -31,7 +33,7 @@ alwaysApply: true
 - Preconditions are binding: read `skills/release/references/review-severity-carve-outs.md` Judge-Weighed Finding Carve-Out before relying on it.
 - Every other blocker is resolved before merge.
 
-## Reading and Acting
+## Split Reading From Acting
 
 - Read all feedback under `rules/reviewer-feedback-reading.md`.
 - Advisory → note it directly in the existing review conversation or authorized task record.
