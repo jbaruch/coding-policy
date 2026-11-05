@@ -19,6 +19,14 @@
 - Branching decisions that require situational context the question's input does not carry
 - Open-ended answers that depend on understanding intent
 
+## Existing Tools and Presentation
+
+- Invoke existing authorized tools directly without an added wrapper, preserving their access checks and workflows.
+- Narrow exception to the deterministic-logic principle for presentation in an existing model-rendered flow: headings, grouping existing rows for display, suppressing repeated labels or links, and wording may stay with the model.
+- In that presentation, keep the underlying returned data and its order unchanged; introduce no stored shape, state, authority or side effect.
+- Data parsing, calculations, provider operations and reusable machine-readable transformations still belong in scripts.
+- Add a rendering helper for demonstrated rendering errors or sufficient repeat cost, under `rules/simplicity.md`.
+
 ## Bounded Classification
 
 - The answer is one of a fixed list, and picking the right one takes reading meaning rather than computing a value
