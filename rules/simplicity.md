@@ -7,12 +7,13 @@ alwaysApply: true
 ## Before Implementation
 
 - State problem and smallest sufficient solution in conversation or PR.
-- Try scoped instructions, existing agent actions, platform behavior or deletion before automation.
-- Treat issue proposals as suggestions; explain why simpler options are insufficient.
+- Try scoped instructions, agent actions, platform behavior or deletion before automation.
+- Treat issue proposals as suggestions; explain simpler options' gaps before adopting machinery.
 - Justify custom state, recovery, coordination and abstractions with requirements and platform gaps.
 - Weigh maintenance, rollout and failures against likelihood and impact.
 - Future consumers justify no machinery.
-- Explain briefly; add no approval gate.
+- Explain briefly.
+- Add no approval gate.
 
 ## During Review
 

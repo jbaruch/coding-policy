@@ -1,6 +1,6 @@
 ### Consider an instruction before adding automation
 
-Clarify the existing simplicity rule: check whether a scoped instruction and existing agent actions solve the problem before adding automation. Treat an issue’s proposed mechanism as a suggestion and explain why the simpler option is insufficient. This applies to implementation and policy review through the same rule, without a new checklist or approval gate. Both distribution manifests advance to 0.5.20.
+Clarify the existing simplicity rule: check whether a scoped instruction and existing agent actions solve the problem before adding automation. Treat an issue’s proposed mechanism as a suggestion; before adopting machinery, explain why simpler options are insufficient. This applies to implementation and policy review through the same rule, without a new checklist or approval gate. Both distribution manifests advance to 0.5.20.
 
 ## 0.5.19 — 2026-11-04
 
