@@ -1,3 +1,7 @@
+### Keep historical telemetry append-only
+
+The subscription-usage work in nanoclaw-admin#777 exposed a policy gap: adding quota observations to an existing runtime log triggered demands to rewrite historical token records. Allow a finite owner-declared append-only telemetry contract to retain legacy version-0 history while stamping every new record, documenting accepted kinds/versions, and exposing unsupported observations as gaps. Keep continuity state, authorization, payment and other action gates under the ordinary migration contract. This avoids a historical-log migration system without weakening the new-record schema or reader obligations.
+
 ## 0.5.22 — 2026-11-05
 
 ### Document read-only consumers of legacy runtime tables

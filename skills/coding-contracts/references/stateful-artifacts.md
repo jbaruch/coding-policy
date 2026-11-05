@@ -26,6 +26,18 @@
   4. This exception adds no store or writer and authorizes no schema change. New tables, new persistent artifacts and owner schema changes retain the ordinary versioning requirements.
 - Every other artifact follows Required Attributes and Migration Policy unchanged.
 
+## Append-Only Runtime Telemetry
+
+- Narrow exception for an existing append-only runtime telemetry log.
+- Applies to historical observations, never continuity state or action gates.
+- Preconditions (all required):
+  1. An installed reader contract names the finite artifact inventory, real runtime owner, owner's schema-of-record source, record kinds, schemas, writers and readers. Cite the actual owner source; invent no provider, schema or version guarantee.
+  2. Every new record carries `schema_version`. The owner declares existing unversioned records as legacy version 0 and documents accepted versions, required fields and defaults.
+  3. Readers preserve the meaning of accepted historical records and accept only documented kinds and versions. Unsupported versions produce actionable unavailable evidence, never invented zeros, health or permission.
+  4. Historical records remain unchanged. Readers neither migrate, rewrite nor backfill the log; the owner emits the current version on new appends.
+  5. The log supplies no authorization, payment, deduplication, recovery or other action gate. A change that repurposes historical field meaning does not qualify.
+- Every other artifact follows Required Attributes and Migration Policy unchanged.
+
 ## Hints, Not Authority
 
 - Artifacts are last-seen snapshots, not ground truth — before acting on a recalled value, verify against the live source (API, DB, filesystem)
