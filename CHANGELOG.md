@@ -1,3 +1,5 @@
+## 0.5.22 — 2026-11-05
+
 ### Document read-only consumers of legacy runtime tables
 
 Allow an installed reader contract to name the actual owner-maintained initializer and inline upgrades for a finite inventory of pre-existing runtime tables. Requiring invented versioned migrations or a second store for an ordinary read does not improve compatibility. Keep native identity/scope checks, read-only access and visible schema/query failures; the exception adds no writer and waives no versioning requirement for new state or owner schema changes.
