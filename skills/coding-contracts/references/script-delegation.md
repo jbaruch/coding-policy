@@ -21,10 +21,10 @@
 
 ## Existing Tools and Presentation
 
-- Invoke existing authorized tools directly without an added wrapper, preserving their access checks and workflows.
-- Narrow exception to the deterministic-logic principle for presentation in an existing model-rendered flow: headings, grouping existing rows for display, suppressing repeated labels or links, and wording may stay with the model.
+- Narrow exception for one-off use of an existing authorized tool: no additional wrapper is required; its access checks and workflow remain binding.
+- Narrow exception to the deterministic-logic principle for presentation in an existing model-rendered flow: headings, grouping adjacent rows for display, suppressing repeated labels or links, and wording may stay with the model.
 - In that presentation, keep the underlying returned data and its order unchanged; introduce no stored shape, state, authority or side effect.
-- Data parsing, calculations, provider operations and reusable machine-readable transformations still belong in scripts.
+- New provider integration code, deterministic multi-step orchestration, data parsing, calculations and reusable machine-readable transformations belong in scripts.
 - Add a rendering helper for demonstrated rendering errors or sufficient repeat cost, under `rules/simplicity.md`.
 
 ## Bounded Classification
