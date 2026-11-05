@@ -81,7 +81,7 @@ jobs:
           permission-statuses: read
       - uses: actions/setup-node@v7
         with:
-          node-version: '24'
+          node-version: '26'
       - uses: tesslio/setup-tessl@v2
         with:
           token: ${{ secrets.TESSL_TOKEN }}

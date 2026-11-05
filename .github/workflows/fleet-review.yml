@@ -80,7 +80,7 @@ jobs:
 
       - uses: actions/setup-node@v7
         with:
-          node-version: "24"
+          node-version: "26"
 
       - uses: tesslio/setup-tessl@v2
         if: matrix.lane == 'policy'
