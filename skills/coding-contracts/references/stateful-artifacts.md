@@ -15,6 +15,17 @@
 - A `schema_version` field on every record so migrations are auditable
 - A **writer / reader contract** — which components write, which read, what each promises about field presence, defaults, and format
 
+## Read-Only Legacy Runtime Tables
+
+- Narrow exception for an existing runtime table whose owner initializes and upgrades its schema inline, outside versioned migrations.
+- Applies only to read-only consumers of tables that already exist before the consuming change. It permits the existing inline schema in place of versioned migrations and per-record `schema_version`.
+- Preconditions (all required):
+  1. An installed contract names the finite table inventory, runtime owner, actual initializer and inline upgrades, and fields the reader requires. Cite the real schema of record; invent no migration or version guarantee.
+  2. The reader uses the authorized native source and its declared identity/scope checks. It never initializes, migrates, backfills or substitutes a database.
+  3. Missing required schema or a query failure produces an actionable unavailable result. It never means an empty successful read.
+  4. This exception adds no store or writer and authorizes no schema change. New tables, new persistent artifacts and owner schema changes retain the ordinary versioning requirements.
+- Every other artifact follows Required Attributes and Migration Policy unchanged.
+
 ## Hints, Not Authority
 
 - Artifacts are last-seen snapshots, not ground truth — before acting on a recalled value, verify against the live source (API, DB, filesystem)
