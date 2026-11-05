@@ -1,3 +1,7 @@
+### Keep ordinary tool use and simple presentation in their existing flow
+
+Clarify Script Delegation for implementation and policy review: one-off use of an existing authorized tool needs no extra wrapper, and simple headings, adjacent-row display grouping, repeated-link suppression and wording can stay in a flow the model already renders. The exception leaves returned data and order unchanged and grants no state, output schema, authority or side effect. New provider integration, deterministic orchestration, parsing, calculations and reusable machine-readable transformations retain their script owners. A rendering helper needs demonstrated errors or sufficient repeat cost under the simplicity rule. Both distribution manifests advance to 0.5.21.
+
 ## 0.5.20 — 2026-11-05
 
 ### Consider an instruction before adding automation
