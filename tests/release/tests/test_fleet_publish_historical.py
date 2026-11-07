@@ -20,7 +20,7 @@ from fleet_publish_evidence import prior_publication, facts  # noqa: E402
 from fleet_publish_record import FleetRecordError, parse_record  # noqa: E402
 
 
-def proof(envelope=None):
+def proof(envelope=None, pinset=None):
     parts = fixture()
     if envelope is not None:
         parts[0] = copy.deepcopy(envelope)
@@ -60,7 +60,7 @@ def proof(envelope=None):
                 "attempt": run,
                 "jobs": archive.native_jobs(parts[4], run),
             },
-            "producer_pinset": producer.HISTORICAL_PRODUCERS[0],
+            "producer_pinset": pinset if pinset is not None else producer.HISTORICAL_PRODUCERS[0],
             "registry": {
                 "source": historical.describe_files(files),
                 "installed": historical.describe_files(installed),
@@ -225,8 +225,13 @@ class HistoricalTests(unittest.TestCase):
                 historical.describe_files({"tile.json": data})
 
     def test_durable_proof_unlocks_only_typed_prior_and_leaves_receipt_missing(self):
+        for pinset in producer.HISTORICAL_PRODUCERS:
+            with self.subTest(owner=pinset[producer.PRODUCER_OWNER_PATH]):
+                self._check_retained_prior(pinset)
+
+    def _check_retained_prior(self, pinset):
         github = GitFixture()
-        value = proof()
+        value = proof(pinset=pinset)
         github.records[("101", "receipt")] = None
         terminal_ref = archive.ref_name("terminal", run_id="101")
         del github.routes[
@@ -242,7 +247,7 @@ class HistoricalTests(unittest.TestCase):
         with patch.object(
             producer,
             "verify_workflow_protocol",
-            return_value=copy.deepcopy(producer.HISTORICAL_PRODUCERS[0]),
+            return_value=copy.deepcopy(pinset),
         ):
             reader = archive.ArchiveReader(github)
             self.assertIsNone(prior_publication(reader, "101"))

@@ -45,12 +45,13 @@ def entry(name, sha, *, directory=False):
 
 
 class Fixture:
-    def __init__(self):
-        self.pins = {
+    def __init__(self, pins: dict[str, str] | None = None):
+        self.pins = pins.copy() if pins is not None else {
             name: f"{index + 1000:040x}"
             for index, name in enumerate(producer.PRODUCER_PATHS, 1)
         }
-        self.pins[producer.PRODUCER_OWNER_PATH] = producer.local_owner_blob()
+        if pins is None:
+            self.pins[producer.PRODUCER_OWNER_PATH] = producer.local_owner_blob()
         self.trusted = {
             name: sha
             for name, sha in self.pins.items()
@@ -158,6 +159,23 @@ class ProducerTests(unittest.TestCase):
             raw = (root / name).read_bytes()
             actual[name] = hashlib.sha1(f"blob {len(raw)}\0".encode() + raw).hexdigest()
         self.assertEqual(actual, REVIEWED_PRODUCERS[0])
+
+    def test_retains_published_0_5_23_graph_without_accepting_mixed_code(self):
+        # Immutable fixture from the installed 0.5.23 reader, not a renewal pin.
+        original_owner = "ccbaeff9b2c8a5df3b09882861105adcf7d01d54"
+        previous = next(
+            pins for pins in producer.HISTORICAL_PRODUCERS
+            if pins[producer.PRODUCER_OWNER_PATH] == original_owner
+        )
+        self.assertEqual(
+            producer.verify_workflow_protocol(Fixture(previous), WORKFLOW), previous
+        )
+        mixed = previous.copy()
+        mixed["skills/release/smart-publish.sh"] = REVIEWED_PRODUCERS[0][
+            "skills/release/smart-publish.sh"
+        ]
+        with self.assertRaises(FleetPublishLookupError):
+            producer.verify_workflow_protocol(Fixture(mixed), WORKFLOW)
 
     def test_local_reader_owner_uses_its_actual_git_blob_identity(self):
         expected = subprocess.check_output(

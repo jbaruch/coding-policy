@@ -92,6 +92,17 @@ if [[ "${1:-}" == "api" ]]; then
           printf '{"data":{"attributes":{"version":"%s"}}}\n' "$want"; exit 0
         fi
         echo '{"error":{"title":"Not Found","status":404,"message":"Not Found"}}'; exit 1 ;;
+      delayed|post_error)
+        if [[ -f "${MOCK_STATE_DIR}/published" ]]; then
+          if [[ "$MOCK_VERSION_EXISTS" == "post_error" ]]; then
+            echo '{"error":{"title":"Unauthorized","status":401,"message":"Unauthorized"}}'; exit 1
+          fi
+          if [[ -f "${MOCK_STATE_DIR}/first-post-read" ]]; then
+            printf '{"data":{"attributes":{"version":"%s"}}}\n' "$want"; exit 0
+          fi
+          : > "${MOCK_STATE_DIR}/first-post-read"
+        fi
+        echo '{"error":{"title":"Not Found","status":404,"message":"Not Found"}}'; exit 1 ;;
       error) echo '{"error":{"title":"Unauthorized","status":401,"message":"Unauthorized"}}'; exit 1 ;;
       *)     echo '{"error":{"title":"Not Found","status":404,"message":"Not Found"}}'; exit 1 ;;
     esac
@@ -106,6 +117,7 @@ fi
 if [[ "${1:-}" == "plugin" && "${2:-}" == "publish" ]]; then
   if [[ -n "${MOCK_STATE_DIR:-}" ]]; then
     printf '%s\n' "$*" > "${MOCK_STATE_DIR}/publish-invocation"
+    printf 'publish\n' >> "${MOCK_STATE_DIR}/publish-calls"
   fi
   # Modes whose SERVER side completes (a clean publish, and the two exits that
   # happen after the artifact is already stored) record the landing.
@@ -174,6 +186,14 @@ echo "stub tessl: unsupported invocation: $*" >&2
 exit 2
 STUB
 chmod +x "$STUBDIR/tessl"
+
+# Keep readback timing deterministic; inspect calls instead of waiting on a clock.
+cat > "$STUBDIR/sleep" <<'STUB'
+#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$*" >> "$MOCK_STATE_DIR/sleep-calls"
+STUB
+chmod +x "$STUBDIR/sleep"
 
 export PATH="$STUBDIR:$PATH"
 
@@ -427,6 +447,41 @@ assert d["publish_exit_code"] == 1, d' \
   [[ "$(_remote_msg "$root")" == *"[skip ci]"* ]] || { echo "    FAIL: bump commit missing [skip ci]" >&2; return 1; }
 }
 
+# Regression: the server finishes after the first post-timeout read, without
+# another upload. The exact same version earns the existing tolerance.
+t_timeout_landing_after_first_read() {
+  local root; root="$(_sandbox 0.1.0)"
+  local out rc=0
+  out="$(MOCK_VERSION_EXISTS=delayed _run "$root" 0.1.0 timeout_fail auto-bump . main branch)" || rc=$?
+  [[ $rc -eq 0 ]] || return 1
+  echo "$out" | python3 -c 'import json,sys;d=json.load(sys.stdin);assert d["outcome"]=="success" and d["landed_after_error"] is True and d["version"]=="0.1.1",d' || return 1
+  [[ "$(_remote_version "$root")" == "0.1.1" ]] || return 1
+  [[ "$(wc -l < "$root/publish-calls" | tr -d ' ')" == "1" ]] || return 1
+  [[ "$(wc -l < "$root/sleep-calls" | tr -d ' ')" == "1" ]]
+}
+
+t_timeout_still_absent_does_not_upload_again() {
+  local root; root="$(_sandbox 0.1.0)"
+  local out rc=0
+  out="$(MOCK_VERSION_EXISTS=no _run "$root" 0.1.0 timeout_fail auto-bump . main branch)" || rc=$?
+  [[ $rc -eq 1 ]] || return 1
+  echo "$out" | python3 -c 'import json,sys;d=json.load(sys.stdin);assert d["outcome"]=="failure" and d["landed_after_error"] is False,d' || return 1
+  [[ "$(_remote_count "$root")" == "1" ]] || return 1
+  [[ "$(wc -l < "$root/publish-calls" | tr -d ' ')" == "1" ]] || return 1
+  [[ "$(wc -l < "$root/sleep-calls" | tr -d ' ')" == "1" ]]
+}
+
+t_timeout_unknown_post_read_is_not_retried() {
+  local root; root="$(_sandbox 0.1.0)"
+  local out rc=0
+  out="$(MOCK_VERSION_EXISTS=post_error _run "$root" 0.1.0 timeout_fail auto-bump . main branch)" || rc=$?
+  [[ $rc -eq 1 ]] || return 1
+  echo "$out" | python3 -c 'import json,sys;d=json.load(sys.stdin);assert d["outcome"]=="failure" and d["landed_after_error"] is False,d' || return 1
+  [[ "$(_remote_count "$root")" == "1" ]] || return 1
+  [[ "$(wc -l < "$root/publish-calls" | tr -d ' ')" == "1" ]] || return 1
+  [[ ! -e "$root/sleep-calls" ]]
+}
+
 # The real out-of-credits case lands the artifact too, so it greens on the same
 # evidence — the signature is now descriptive, not the deciding factor.
 t_credit_fail_that_landed_greens() {
@@ -577,6 +632,9 @@ main() {
   run "a blocked bump-push reds the run (no PR fallback)"        t_push_blocked_reds_the_run
   run "wrong arity is a usage error (exit 2)"                    t_wrong_arity_is_usage_error
   run "publish timeout that LANDED greens + commits back (#310)" t_timeout_but_landed_greens_and_commits_back
+  run "timeout landing after first read commits without another upload" t_timeout_landing_after_first_read
+  run "timeout still absent stays red without another upload" t_timeout_still_absent_does_not_upload_again
+  run "timeout with unknown post-read stays red without a retry" t_timeout_unknown_post_read_is_not_retried
   run "out-of-credits exit that landed greens on the same test"  t_credit_fail_that_landed_greens
   run "failed publish whose version is absent stays red"         t_failed_publish_absent_version_stays_red
   run "indeterminate existence read stays red (fail closed)"     t_indeterminate_existence_read_stays_red
