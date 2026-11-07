@@ -158,11 +158,11 @@ main() {
       fi
     done <<< "$deps"
     if [[ "$need_core" == true ]]; then
-      # Exact reviewed package/report only. The helper installs Core ALONE in
-      # a fresh private workspace, never accepting warnings on other deps.
+      # The helper installs reviewed Core ALONE in a fresh private workspace;
+      # its warning flag never applies to other dependencies.
       # Run last so ordinary Tessl reconciliation cannot remove the authority.
       if ! ( cd "$POLICY" && python3 -I "$core_materializer" "$POLICY" >/dev/null ); then
-        echo "error: reviewed Core authority could not be materialized for ${full}#${pr} — restore its exact reviewed package/report before reviewing" >&2
+        echo "error: Core authority unavailable for ${full}#${pr} — restore its isolated installation before reviewing" >&2
         exit 1
       fi
     fi

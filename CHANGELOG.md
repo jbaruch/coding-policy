@@ -1,3 +1,7 @@
+### Keep Core authority installs usable across package releases
+
+Remove the registry-latest equality check, copied package fingerprint, security-report digest and 21-file checksum inventory from fleet review setup. A pytest-only Core release had stopped consumer reviews before Codex ran, repeating the dependency-release failure recorded in 0.5.14. Install reviewed Core 0.1.160 in the existing one-plugin private workspace and expose that genuine tree for authority reading; accept its installation warnings only in that workspace. Renew the single version pin monthly and when Core authority rules change; later package releases no longer invalidate it. Other dependencies, native installer failures and provider-identity checks retain their own boundaries. The helper activates no Core workflow and introduces no production capability. Both distribution manifests advance together to 0.5.25.
+
 ## 0.5.24 — 2026-11-07
 
 ### Observe server completion after a publish timeout
