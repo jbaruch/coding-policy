@@ -142,6 +142,10 @@ readonly CREDIT_SIGNATURE_REGEX='out of credits'
 # constants rather than restating them (rules/script-as-black-box.md).
 readonly TIMEOUT_SIGNATURE_REGEX='publish timed out'
 
+# Admin publish 42337547437: the exact version was absent immediately after
+# the CLI timeout and visible two seconds later. Reread once; never republish.
+readonly TIMEOUT_LANDING_RECHECK_DELAY_SECONDS=2
+
 # Temp file for the captured publish output; script-global so the EXIT trap can
 # clean it up after main() returns (a main-local would be out of scope and
 # `set -u` would turn cleanup into an unbound-variable failure).
@@ -531,7 +535,14 @@ sys.stdout.write(lines[-1] if lines else "")
       # so the reconciliation is not attempted at all.
       echo "smart-publish: publish exited ${rc} on an unrecognized failure — the landed-after-error tolerance covers only the signature constants at the top of this script, so the run stays RED. Failing line: ${terminal_line:-<none captured>}" >&2
     elif [[ "$pre_existed" == "false" ]]; then
-      if [[ "$(version_exists "$workspace" "$plugin_slug" "$intended_version" "landed check")" == "true" ]]; then
+      local observed
+      observed="$(version_exists "$workspace" "$plugin_slug" "$intended_version" "landed check")"
+      if [[ "$terminal_class" == "timeout" && "$observed" == "false" ]]; then
+        echo "smart-publish: timeout readback has not found ${name}@${intended_version}; waiting briefly for server completion before one exact-version reread." >&2
+        sleep "$TIMEOUT_LANDING_RECHECK_DELAY_SECONDS"
+        observed="$(version_exists "$workspace" "$plugin_slug" "$intended_version" "timeout reread")"
+      fi
+      if [[ "$observed" == "true" ]]; then
         landed=true
       fi
     else
@@ -555,7 +566,7 @@ sys.stdout.write(lines[-1] if lines else "")
       exit 0
     fi
 
-    echo "smart-publish: publish exited ${rc} and ${name}@${intended_version} is not on the registry (credit_signature=${credit_signature}) — nothing landed. The confirm gate reds this." >&2
+    echo "smart-publish: publish exited ${rc} and ${name}@${intended_version} has no confirmed landing (credit_signature=${credit_signature}). The confirm gate stays red; inspect the exact version before another publish." >&2
     emit_json failure "$rc" "" "$credit_signature" "$first_publish" false "$terminal_line" "$rc"
     exit "$rc"
   fi
