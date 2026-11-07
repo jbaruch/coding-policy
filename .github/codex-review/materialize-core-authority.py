@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Install the current Core authority alone in a private review context.
+"""Install the reviewed Core authority alone in a private review context.
 
 Usage: materialize-core-authority.py DIRECTORY. The central driver owns this
 private directory and calls before starting the reviewer. Core's installation
@@ -22,6 +22,9 @@ import sys
 import tempfile
 
 PLUGIN = "jbaruch/nanoclaw-core"
+# Review this pin monthly and when Core authority rules change. New package
+# releases do not invalidate it; renewal changes this version alone.
+VERSION = "0.1.160"
 
 
 class MaterializationError(RuntimeError):
@@ -47,8 +50,7 @@ def provider_version(provider):
     if not (
         isinstance(manifest, dict)
         and manifest.get("name") == PLUGIN
-        and isinstance(manifest.get("version"), str)
-        and manifest["version"]
+        and manifest.get("version") == VERSION
     ):
         raise MaterializationError("core_provider_identity_unavailable")
     return manifest["version"]
@@ -61,11 +63,11 @@ def materialize(directory):
         with tempfile.TemporaryDirectory(prefix="core-authority-", dir=directory) as temporary:
             install = Path(temporary)
             (install / "tessl.json").write_text(
-                json.dumps({"mode": "managed", "dependencies": {}})
+                json.dumps({"mode": "managed", "dependencies": {PLUGIN: {"version": VERSION}}})
             )
             result = subprocess.run(
                 [
-                    "tessl", "install", PLUGIN, "--yes", "--accept-warnings",
+                    "tessl", "install", f"{PLUGIN}@{VERSION}", "--yes", "--accept-warnings",
                     "--strict", "--agent", "codex",
                 ],
                 cwd=install,

@@ -158,7 +158,7 @@ main() {
       fi
     done <<< "$deps"
     if [[ "$need_core" == true ]]; then
-      # The helper installs current Core ALONE in a fresh private workspace;
+      # The helper installs reviewed Core ALONE in a fresh private workspace;
       # its warning flag never applies to other dependencies.
       # Run last so ordinary Tessl reconciliation cannot remove the authority.
       if ! ( cd "$POLICY" && python3 -I "$core_materializer" "$POLICY" >/dev/null ); then

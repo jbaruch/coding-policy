@@ -23,10 +23,10 @@ root=Path.cwd()
 project=json.loads((root/'tessl.json').read_text())
 with Path(os.environ['CORE_TEST_LOG']).open('a') as log:
  log.write(json.dumps({'args':sys.argv[1:],'cwd':str(root),'project':project})+'\n')
-assert project=={'mode':'managed','dependencies':{}},'Warning flag escaped its isolated workspace'
+plugin,version=sys.argv[2].rsplit('@',1)
+assert project=={'mode':'managed','dependencies':{plugin:{'version':version}}},'Warning flag escaped its isolated workspace'
 if os.environ.get('CORE_TEST_MODE')=='fail': raise SystemExit(1)
-plugin='jbaruch/nanoclaw-core'
-version=os.environ['CORE_TEST_VERSION']
+if os.environ.get('CORE_TEST_MODE')=='wrong-version': version='0.0.1'
 project['dependencies']={plugin:{'version':version}}
 if os.environ.get('CORE_TEST_MODE')=='extra-dependency':
  project['dependencies']['another/provider']={'version':'1.0.0'}
@@ -58,7 +58,6 @@ class MaterializationTests(unittest.TestCase):
         self.environment = patch.dict(os.environ, {
             "PATH": str(binaries) + os.pathsep + os.environ["PATH"],
             "CORE_TEST_LOG": str(self.log),
-            "CORE_TEST_VERSION": "0.1.160",
             "CORE_TEST_MODE": "ok",
         })
         self.environment.start()
@@ -67,7 +66,7 @@ class MaterializationTests(unittest.TestCase):
     def calls(self):
         return [json.loads(line) for line in self.log.read_text().splitlines()] if self.log.exists() else []
 
-    def test_installs_only_current_core_and_preserves_surrounding_dependencies(self):
+    def test_installs_only_reviewed_core_and_preserves_surrounding_dependencies(self):
         project = self.policy / "tessl.json"
         project.write_text(json.dumps({"dependencies": {"another/retained": {"version": "latest"}}}))
         before = project.read_bytes()
@@ -83,7 +82,7 @@ class MaterializationTests(unittest.TestCase):
         self.assertEqual(sibling.read_text(), "Retained authority")
         call, = self.calls()
         self.assertEqual(call["args"], [
-            "install", "jbaruch/nanoclaw-core", "--yes", "--accept-warnings",
+            "install", "jbaruch/nanoclaw-core@0.1.160", "--yes", "--accept-warnings",
             "--strict", "--agent", "codex",
         ])
         self.assertNotEqual(Path(call["cwd"]), self.policy)
@@ -92,12 +91,12 @@ class MaterializationTests(unittest.TestCase):
         self.assertEqual(authority.read_text(), "Current provider authority\n")
         self.assertEqual(list(self.policy.glob("core-authority-*")), [])
 
-    def test_new_provider_release_needs_no_copied_metadata_or_security_report(self):
+    def test_pin_renewal_needs_no_copied_metadata_or_security_report(self):
         first = OWNER.materialize(self.policy)
         next_context = self.root / "next context"
         next_context.mkdir(mode=0o700)
-        os.environ["CORE_TEST_VERSION"] = "0.1.161"
-        second = OWNER.materialize(next_context)
+        with patch.object(OWNER, "VERSION", "0.1.161"):
+            second = OWNER.materialize(next_context)
         self.assertEqual((first["version"], second["version"]), ("0.1.160", "0.1.161"))
         self.assertEqual(len(self.calls()), 2)
 
@@ -126,7 +125,7 @@ class MaterializationTests(unittest.TestCase):
         self.assertEqual(self.calls(), [])
 
     def test_install_failures_and_wrong_provider_do_not_expose_authority(self):
-        for mode in ["fail", "extra-dependency", "wrong-provider", "symlink-file"]:
+        for mode in ["fail", "extra-dependency", "wrong-provider", "wrong-version", "symlink-file"]:
             with self.subTest(mode=mode):
                 os.environ["CORE_TEST_MODE"] = mode
                 with self.assertRaises(OWNER.MaterializationError):
