@@ -1,3 +1,5 @@
+## 0.5.24 — 2026-11-07
+
 ### Observe server completion after a publish timeout
 
 jbaruch/nanoclaw-admin#804 published its artifact after the CLI timed out, just after the first exact-version read. On that known timeout path, wait briefly and reread the same version once before declaring its landing unconfirmed. Keep pre-publish absence, terminal-error classification and commit-back checks; never repeat the upload.
