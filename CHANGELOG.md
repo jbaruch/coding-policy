@@ -1,3 +1,5 @@
+## 0.8.1 — 2026-11-09
+
 ### Require pull requests and green checks on main
 
 0.8.0 trusts publisher runs by their place on `main`'s history and made that history append-only. This closes the remaining gap: nothing reaches `main` except through a pull request whose `lint`, `diagnostics`, `unit-tests`, `changelog-placement` and `acr-manifest` checks passed. The policy reviews stay outside the required set, so a reviewer outage (the Codex subscription quota of 2026-11-09) cannot freeze merges; the release skill keeps gating on them.
