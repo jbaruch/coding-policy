@@ -13,7 +13,7 @@
   - Accepted: `Fixed in <sha>` (literal phrase; `Done` / `Accepted and fixed` do not satisfy)
   - Declined: `Declining — <reason with cited evidence>` (em dash `—`, not hyphen or period)
   - Advisory: `Acknowledged — advisory noted`. Never create a new follow-up obligation
-  - Judge-weighed deferral keeps `Acknowledged — deferred to #<follow-up issue> (judge ruling <digest>)` under `skills/release/references/REVIEW_DETAILS.md`; its ruling and issue obligations are unchanged
+  - Judge-weighed deferral keeps `Acknowledged — deferred to #<follow-up issue> (judge ruling <digest>)` under `skills/release/references/REVIEW_DETAILS.md`
 - **Marginal blocking policy finding:** a nominated policy finding may go to a weighing instead of a fix (`rules/review-severity.md` Judge-Weighed Finding Carve-Out)
   - The operator is the judge
   - Nominate a finding only when it sits on lines the previous fix push added, or with a cited reachability claim marking it marginal
