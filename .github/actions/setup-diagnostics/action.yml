@@ -13,7 +13,8 @@ runs:
         set -euo pipefail
         # renovate: datasource=github-releases depName=koalaman/shellcheck
         version=v0.11.0
-        curl -fsSL "https://github.com/koalaman/shellcheck/releases/download/${version}/shellcheck-${version}.linux.x86_64.tar.xz" | tar -xJ
+        # Release downloads intermittently return 504; retry before failing.
+        curl -fsSL --retry 4 --retry-all-errors --retry-delay 5 "https://github.com/koalaman/shellcheck/releases/download/${version}/shellcheck-${version}.linux.x86_64.tar.xz" | tar -xJ
         sudo mv "shellcheck-${version}/shellcheck" /usr/local/bin/shellcheck
         rm -rf "shellcheck-${version}"
         shellcheck --version
