@@ -55,13 +55,9 @@ Renovate updates the CLI and at the weekly capability refresh.
 
 Reference for Step 6 — how a marginal blocking finding reaches a weighing and how the ruling clears the gating policy review (`rules/review-severity.md` Judge-Weighed Finding Carve-Out; `rules/ci-safety.md` Judge-Ruled-Review Dismissal Carve-Out).
 
-### Optional team ruling
+### The question
 
-When a verified team policy applies, follow its nomination, report and correction contract. The optional integration and fail-closed verification protocol are in `skills/release/references/team-ruling-interface.md`. A standalone release requires only the operator ruling below.
-
-### The question (standalone)
-
-Standalone, the operator is the judge and the agent nominates.
+The operator is the judge and the agent nominates.
 
 Nominate only a finding on lines the previous fix push added, or one you can support with a cited reachability claim — a path from input to the flagged line, with file and line citations. The claim travels in the question itself; no separate report is needed. Ask one question per gate, carrying every nomination:
 
@@ -71,11 +67,11 @@ Weighing request at <head sha>. For each finding answer fix, defer or decline:
 Floors are always fix. I keep fixing meanwhile; no answer means fix.
 ```
 
-Standalone, the question never blocks. Keep working the fix loop; a finding the operator has not answered stays blocking.
+The question never blocks. Keep working the fix loop; a finding the operator has not answered stays blocking.
 
 ### The ruling file
 
-Write the operator's answer into a ruling file with `AUTHORITY: operator`. Its format, `schema_version`, required `ANSWER:` line and writer/reader contract are in the `skills/release/dismiss-ruled-review.sh` header. A selected team policy may instead supply its independently enrolled ruling through the optional interface. Keep the file for the life of the PR; the dismissal message pins its sha256 digest.
+Write the operator's answer into a ruling file with `AUTHORITY: operator`. Its format, `schema_version`, required `ANSWER:` line and writer/reader contract are in the `skills/release/dismiss-ruled-review.sh` header. Keep the file for the life of the PR; the dismissal message pins its sha256 digest.
 
 ### Order of work
 

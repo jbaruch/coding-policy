@@ -20,7 +20,6 @@ class ReleaseAdvisoryTest(unittest.TestCase):
         assert "task report" not in advisory_directive and "round log" not in advisory_directive
         assert "Advisory → note it directly in the existing review conversation" in severity
         assert "Acknowledged — advisory noted" in release
-        assert "never simulate a team report" in release
         assert "outside merge prerequisites" in release
         assert "outside the merge predicate" in release and "outside the merge predicate" in mechanics
         assert "Every inline comment must also be read" in release

@@ -4,57 +4,39 @@
 # `decline` (rules/review-severity.md Judge-Weighed Finding Carve-Out;
 # rules/ci-safety.md Judge-Ruled-Review Dismissal Carve-Out). This script is the
 # only sanctioned path for that dismissal; a hand dismissal is not.
-# Who ruled follows the mode: standalone (HERDR_ENV unset) the operator, in a
-# Herdr team round (HERDR_ENV set, any value) the pinned judge
-# (jbaruch/herdr-policy team-operation contract Judge Seat). The ruling's AUTHORITY line must
-# name the authority the mode requires, and a team-round ruling must be the
-# report the foreman's owner records enrolled for the pinned judge's weighing.
+# The operator rules: the ruling's AUTHORITY line must be `operator`, with the
+# operator's answer quoted verbatim.
 #
-# Usage: dismiss-ruled-review.sh <owner> <repo> <pr-number> [--ruling <file> --followup-issue <number> [--task <id>]]
+# Usage: dismiss-ruled-review.sh <owner> <repo> <pr-number> [--ruling <file> --followup-issue <number>]
 #   Without --ruling: list mode. Emits the blocking findings of the latest
 #   policy review on the head, for composing the weighing question. Dismisses
 #   nothing.
 #   With --ruling: dismissal mode, under the predicate below. --followup-issue
-#   is required with it: the task's follow-up issue in <owner>/<repo>. In a
-#   team round --task is required with it too: the foreman's task identifier.
+#   is required with it: the task's follow-up issue in <owner>/<repo>.
 #
 # Ruling file — a state artifact reused across pushes of one PR.
 #   Owner: the release skill (skills/release/SKILL.md Step 6), which alone
 #     changes its shape.
-#   Writers: standalone, the release skill's agent, from the operator's answer;
-#     in a team round, the pinned judge, whose weighing report
-#     (herdr-policy weighing report) is the ruling
-#     file. One file per gate.
-#   Readers, two:
-#     - This script reads every line. It accepts only RULING_SCHEMA; a missing
-#       schema_version line or any other version is refused (exit 1), after
-#       the owner migration below. It promises nothing is posted or dismissed
-#       unless the whole predicate holds.
-#       A version newer than RULING_SCHEMA, in either mode, is refused (exit 1)
-#       as a lagging reader, the file untouched: update the plugin, then rerun.
-#     - `foreman verify-ruling` (the optional herdr-policy owner
-#       `cmd_verify_ruling`), called by this script for `AUTHORITY: judge`,
-#       reads the file's bytes and nothing inside them. It accepts the file
-#       only when its absolute path is the report of exactly one supervision
-#       enrollment, whose dispatch is the pinned judge's, applied, on --task,
-#       with a frozen brief carrying the judge-weighing template's marker line.
-#       It promises the file's sha256 on success and a refusal message
-#       otherwise; it never parses or migrates the ruling.
-#   Migration (owner): schema 1 was written only by standalone operator
-#     rulings; the owner migrates those. Standalone, a version-1 file is
-#     upgraded in place before it is read: its `schema_version: 1` line
-#     becomes `schema_version: 2` plus `AUTHORITY: operator`, every other line
-#     kept. The rewrite changes the file's digest, so a follow-up entry posted
-#     under the version-1 digest is not reused. A team-round ruling below the
-#     current schema was never written by any version and is refused as
-#     malformed (exit 1), never modified.
+#   Writer: the release skill's agent, from the operator's answer. One file
+#     per gate.
+#   Reader: this script reads every line. It accepts only RULING_SCHEMA; a
+#     missing schema_version line or any other version is refused (exit 1),
+#     after the owner migration below. It promises nothing is posted or
+#     dismissed unless the whole predicate holds. A version newer than
+#     RULING_SCHEMA is refused (exit 1) as a lagging reader, the file
+#     untouched: update the plugin, then rerun.
+#   Migration (owner): a version-1 file is upgraded in place before it is
+#     read: its `schema_version: 1` line becomes `schema_version: 2` plus
+#     `AUTHORITY: operator`, every other line kept. The rewrite changes the
+#     file's digest, so a follow-up entry posted under the version-1 digest is
+#     not reused.
 #   Format, schema_version 2 (lines in any order after the first; unknown lines ignored):
 #     RULING: weighed                       (first line, required)
 #     schema_version: 2                     (required)
-#     AUTHORITY: operator | judge           (required, exactly one)
+#     AUTHORITY: operator                   (required, exactly one)
 #     HEAD: <40-hex sha>                    (required, exactly one, full sha)
-#     ANSWER: <operator's answer, verbatim> (required for `operator`, non-empty;
-#                                            continuation lines indented two spaces)
+#     ANSWER: <operator's answer, verbatim> (required, non-empty; continuation
+#                                            lines indented two spaces)
 #     FINDING: <source> <path>:<line> <rule|-> — fix | defer — <follow-up entry> | decline — <reason>
 #                                           (one per nominated finding)
 #     ACTION: <fix list or "none">          (optional)
@@ -66,11 +48,8 @@
 #      `schema_version: <RULING_SCHEMA>`, exactly one `HEAD:` line and at least
 #      one FINDING line; every FINDING line parses; every defer/decline line
 #      carries its text.
-#   1a. It carries exactly one AUTHORITY line, and that authority matches the
-#      mode: `operator` standalone, with a non-empty `ANSWER:` line; `judge` in
-#      a team round, where `foreman verify-ruling --task <id>` (the herdr-foreman
-#      owner records) confirms the --ruling file is the report supervision
-#      enrolled for the pinned judge's applied adjudication on that task.
+#   1a. It carries exactly one AUTHORITY line, `operator`, and one non-empty
+#      `ANSWER:` line.
 #   2. The latest policy review (POLICY_REVIEW_LOGINS; per-login latest by
 #      submitted_at, CHANGES_REQUESTED wins across logins — the same resolution
 #      as poll-pr-reviews.sh) is CHANGES_REQUESTED and bound to the live head.
@@ -133,20 +112,6 @@ POLICY_REVIEW_LOGINS=("github-actions[bot]" "coding-policy-fleet-reviewer[bot]")
 
 WORK_DIR=""
 
-# This script's directory, resolved once while BASH_SOURCE still names this
-# file, so a caller that sources it resolves the selected optional team owner.
-# Parameter expansion and a sentinel keep a trailing newline in the name (#592).
-case "${BASH_SOURCE[0]}" in
-  */*) _dismiss_src="${BASH_SOURCE[0]%/*}" ;;
-  *) _dismiss_src=. ;;
-esac
-if ! DISMISS_DIR="$(CDPATH='' cd -- "${_dismiss_src:-/}" && pwd && printf x)"; then
-  echo "error: cannot enter the script directory ${_dismiss_src:-/} — restore read and search access to the plugin directory, then re-run" >&2
-  exit 2
-fi
-DISMISS_DIR="${DISMISS_DIR%x}"
-DISMISS_DIR="${DISMISS_DIR%$'\n'}"
-
 cleanup() {
   if [[ -n "$WORK_DIR" ]]; then
     rm -rf "$WORK_DIR"
@@ -155,7 +120,7 @@ cleanup() {
 }
 
 usage() {
-  echo "usage: $0 <owner> <repo> <pr-number> [--ruling <file> --followup-issue <number> [--task <id>]]" >&2
+  echo "usage: $0 <owner> <repo> <pr-number> [--ruling <file> --followup-issue <number>]" >&2
   exit 2
 }
 
@@ -164,11 +129,8 @@ usage() {
 # SHA on stdout), 4 act (decision JSON on stdout; review id, message, digest
 # and follow-up comment body written under <tmp>).
 decide() {
-  local tmp="$1" pr="$2" head="$3" ruling="$4" issue="$5" repo_slug="$6" mode="standalone"
-  if [[ -n "${HERDR_ENV+x}" ]]; then
-    mode="team"
-  fi
-  python3 - "$tmp" "$pr" "$head" "$ruling" "$issue" "$repo_slug" "$RULED_MARKER" "$RULING_SCHEMA" "$mode" \
+  local tmp="$1" pr="$2" head="$3" ruling="$4" issue="$5" repo_slug="$6"
+  python3 - "$tmp" "$pr" "$head" "$ruling" "$issue" "$repo_slug" "$RULED_MARKER" "$RULING_SCHEMA" \
     "${#POLICY_REVIEW_LOGINS[@]}" "${POLICY_REVIEW_LOGINS[@]}" "${FLOOR_RULES[@]}" <<'PY'
 import hashlib
 import json
@@ -177,9 +139,9 @@ import re
 import sys
 from collections import Counter, defaultdict
 
-tmp, pr, head, ruling_path, issue, repo_slug, marker, schema, mode, n_logins = sys.argv[1:11]
-logins = sys.argv[11:11 + int(n_logins)]
-floors = set(sys.argv[11 + int(n_logins):])
+tmp, pr, head, ruling_path, issue, repo_slug, marker, schema, n_logins = sys.argv[1:10]
+logins = sys.argv[10:10 + int(n_logins)]
+floors = set(sys.argv[10 + int(n_logins):])
 
 FINDING_RE = re.compile(r"^- `(?P<path>.+):(?P<line>\d+)` — \*\*(?P<rule>[^*]+)\*\* — (?P<message>.*)$")
 RULING_LINE_RE = re.compile(
@@ -298,29 +260,16 @@ if not ruling_lines or ruling_lines[0].strip() != "RULING: weighed":
 if len(schemas) == 1 and schemas[0].isdecimal() and int(schemas[0]) > int(schema):
     # A lagging reader: never read as malformed, never migrated downward.
     out["unmet"].append(f"the ruling is schema {schemas[0]}, newer than this script accepts ({schema}) — update the coding-policy plugin (`tessl update`), then rerun")
-elif schemas != [schema] and mode == "team":
-    out["unmet"].append(f"the ruling carries no single 'schema_version: {schema}' line, so this team-round ruling is malformed — re-dispatch the pinned judge's weighing for a current-format report; never edit the delivered one")
 elif schemas != [schema]:
     out["unmet"].append(f"the ruling carries no single 'schema_version: {schema}' line — rewrite it in the current format")
 if len(heads) != 1:
     out["unmet"].append("the ruling carries no single 'HEAD: <40-hex sha>' line — write the full commit sha the findings were raised on")
 if len(authorities) != 1:
-    out["unmet"].append("the ruling carries no single 'AUTHORITY: operator | judge' line")
-elif mode == "standalone":
-    if authorities[0] != "operator":
-        out["unmet"].append(f"standalone (HERDR_ENV unset) the operator is the judge, so the ruling's authority must be 'operator', not '{authorities[0]}'")
-    elif len(answers) != 1 or not answers[0]:
-        out["unmet"].append("the ruling carries no single non-empty 'ANSWER:' line quoting the operator verbatim")
-else:
-    with open(os.path.join(tmp, "judge_binding"), encoding="utf-8") as fh:
-        binding = fh.read().strip()
-    if authorities[0] != "judge":
-        out["unmet"].append(f"in a Herdr team round (HERDR_ENV set) the pinned judge weighs, so the ruling's authority must be 'judge', not '{authorities[0]}'")
-    elif not binding.startswith("ok "):
-        out["unmet"].append(f"the ruling is not the pinned judge's enrolled weighing report: {binding}")
-    elif binding[len("ok "):] != hashlib.sha256(ruling_bytes).hexdigest():
-        # The bytes parsed here are not the bytes the foreman verified.
-        out["unmet"].append("ruling changed since verification — re-run")
+    out["unmet"].append("the ruling carries no single 'AUTHORITY: operator' line")
+elif authorities[0] != "operator":
+    out["unmet"].append(f"the operator rules, so the ruling's authority must be 'operator', not '{authorities[0]}' — record the operator's answer as an operator ruling")
+elif len(answers) != 1 or not answers[0]:
+    out["unmet"].append("the ruling carries no single non-empty 'ANSWER:' line quoting the operator verbatim")
 if malformed:
     out["unmet"].append(f"unparseable FINDING line(s): {malformed}")
 if not entries and not malformed:
@@ -441,77 +390,6 @@ print(f"dismiss-ruled-review: upgraded the version-1 ruling at {path} to schema_
 PY
 }
 
-# Whether the ruling file is the pinned judge's enrolled weighing report for
-# <task>, from the foreman's owner records (`foreman verify-ruling`). Writes
-# "ok <sha256 of the verified bytes>", or the refusal's message, to <out>.
-# Returns non-zero only when the check could not run.
-# decide() hashes the bytes it parses and refuses a digest that differs.
-verify_judge_ruling() { # <task> <ruling> <out>
-  local owner_root foreman
-  case "${DISMISS_DIR##*/}" in
-    acr__jbaruch__coding-policy__release)
-      owner_root="${DISMISS_DIR}/../acr__jbaruch__herdr-policy__herdr-foreman" ;;
-    *) owner_root="${DISMISS_DIR}/../../../herdr-policy/skills/herdr-foreman" ;;
-  esac
-  foreman="${owner_root}/foreman.sh"
-  if [[ ! ( -f "$foreman" && -r "$foreman" ) ]]; then
-    echo "error: ${foreman} is not readable — install or repair the compatible herdr-policy plugin, then re-run" >&2
-    return 2
-  fi
-  local rc=0
-  bash "$foreman" verify-ruling --task "$1" --ruling "$2" > "${3}.json" 2> "${3}.err" || rc=$?
-  if (( rc == 0 )); then
-    python3 - "${3}.json" "$3" <<'PY'
-import json
-import re
-import sys
-
-try:
-    with open(sys.argv[1], encoding="utf-8") as fh:
-        digest = json.load(fh).get("sha256")
-except (OSError, ValueError, AttributeError) as exc:
-    print(f"error: foreman verify-ruling succeeded without a readable JSON result ({exc}) — install or repair the compatible herdr-policy plugin, then re-run", file=sys.stderr)
-    sys.exit(2)
-if not isinstance(digest, str) or re.fullmatch(r"[0-9a-f]{64}", digest) is None:
-    print("error: foreman verify-ruling succeeded without the verified sha256 — install or repair the compatible herdr-policy plugin, then re-run", file=sys.stderr)
-    sys.exit(2)
-with open(sys.argv[2], "w", encoding="utf-8") as fh:
-    fh.write("ok " + digest)
-PY
-    return
-  fi
-  # The foreman CLI contract (the optional herdr-policy owner `main`): a
-  # refusal exits 1 with a JSON object {"error", "message", "details"} on
-  # stderr, after any `foreman:` diagnostic lines. Only that is a binding
-  # refusal; every other exit or diagnostic is a tool error.
-  if (( rc != 1 )); then
-    echo "error: foreman verify-ruling exited ${rc} instead of answering: $(cat "${3}.err") — repair or install or repair the compatible herdr-policy plugin, then re-run" >&2
-    return 2
-  fi
-  python3 - "${3}.err" "$3" <<'PY'
-import json
-import sys
-
-try:
-    with open(sys.argv[1], encoding="utf-8") as fh:
-        lines = fh.read().splitlines()
-except (OSError, UnicodeError) as exc:
-    print(f"error: cannot read foreman verify-ruling's diagnostic ({exc}) — repair or install or repair the compatible herdr-policy plugin, then re-run", file=sys.stderr)
-    sys.exit(2)
-start = next((i for i, ln in enumerate(lines) if ln.startswith("{")), None)
-try:
-    refusal = json.loads("\n".join(lines[start:])) if start is not None else None
-except ValueError:
-    refusal = None
-if (not isinstance(refusal, dict) or not isinstance(refusal.get("error"), str)
-        or not isinstance(refusal.get("message"), str) or not refusal["message"].strip()):
-    print("error: foreman verify-ruling exited 1 without its refusal diagnostic — repair or install or repair the compatible herdr-policy plugin, then re-run", file=sys.stderr)
-    sys.exit(2)
-with open(sys.argv[2], "w", encoding="utf-8") as fh:
-    fh.write(refusal["message"])
-PY
-}
-
 fetch_checks() {
   local owner="$1" repo="$2" pr="$3" dest="$4" out rc=0
   out=$(gh pr checks "$pr" --repo "${owner}/${repo}" --json name,bucket 2>"${dest}.err") || rc=$?
@@ -567,13 +445,12 @@ PY
 
 main() {
   [[ $# -ge 3 ]] || usage
-  local owner="$1" repo="$2" pr="$3" ruling="" issue="" task=""
+  local owner="$1" repo="$2" pr="$3" ruling="" issue=""
   shift 3
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --ruling)         [[ $# -ge 2 ]] || usage; ruling="$2"; shift 2 ;;
       --followup-issue) [[ $# -ge 2 ]] || usage; issue="$2"; shift 2 ;;
-      --task)           [[ $# -ge 2 ]] || usage; task="$2"; shift 2 ;;
       *) usage ;;
     esac
   done
@@ -585,23 +462,19 @@ main() {
     echo "error: --ruling needs --followup-issue <number> — the task's follow-up issue in ${owner}/${repo}, where the ruled findings are entered" >&2
     exit 2
   fi
-  if [[ -n "$ruling" && -n "${HERDR_ENV+x}" && -z "$task" ]]; then
-    echo "error: in a Herdr team round --ruling needs --task <id> — the foreman task the judge's weighing was dispatched under" >&2
-    exit 2
-  fi
-  if [[ -z "$ruling" && ( -n "$issue" || -n "$task" ) ]]; then
-    echo "error: --followup-issue and --task are only meaningful with --ruling" >&2
+  if [[ -z "$ruling" && -n "$issue" ]]; then
+    echo "error: --followup-issue is only meaningful with --ruling" >&2
     exit 2
   fi
   if [[ -n "$ruling" && ! ( -f "$ruling" && -r "$ruling" ) ]]; then
-    echo "error: ruling file not readable at '${ruling}' — pass the recorded ruling (the operator's, or the pinned judge's weighing report)" >&2
+    echo "error: ruling file not readable at '${ruling}' — pass the recorded operator ruling" >&2
     exit 2
   fi
   local tool
   for tool in gh python3 jq; do
     command -v "$tool" >/dev/null || { echo "error: ${tool} is not on PATH — install it and re-run" >&2; exit 2; }
   done
-  if [[ -n "$ruling" && -z "${HERDR_ENV+x}" ]]; then
+  if [[ -n "$ruling" ]]; then
     migrate_ruling "$ruling" || exit 2
   fi
 
@@ -618,9 +491,6 @@ main() {
     || { echo "error: failed to fetch reviews for ${owner}/${repo}#${pr} — run 'gh auth status', then retry" >&2; exit 2; }
   if [[ -n "$ruling" ]]; then
     fetch_checks "$owner" "$repo" "$pr" "${tmp}/checks.json" || exit 2
-    if [[ -n "${HERDR_ENV+x}" ]]; then
-      verify_judge_ruling "$task" "$ruling" "${tmp}/judge_binding" || exit 2
-    fi
   fi
 
   local decision rc=0

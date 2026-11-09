@@ -9,7 +9,7 @@ bash "$KS/check-leftovers.sh" --release
 
 Exit 0 clears this readiness gate. Read `others` and `attention` even on exit 0.
 Preserve unrelated work and record its path, evidence, consequence and required
-owner decision in the existing task report or standalone conversation. Continue
+owner decision in the existing task report or current conversation. Continue
 this release without committing, stashing, ignoring or deleting that work.
 Exit 1 blocks on `blocking`; resolve only the selected checkout's authorized work
 and re-run. Exit 2 is a usage or tool-state error, never a verdict.
