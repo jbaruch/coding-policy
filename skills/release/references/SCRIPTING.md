@@ -1,65 +1,11 @@
 # Release-Skill Scripting Reference
 
-When the agent's interactive Step-2 (PR create) and Step-7 (merge + cleanup) instructions get encoded into a reusable script that other devs run unattended (`release.sh`, `merge-and-cleanup.sh`, etc.), the script has to carry the SAME gates the interactive agent does — otherwise the script bypasses the conventions this skill exists to hold. Pulled out of SKILL.md to keep the main workflow scannable.
+A script that runs Step 2 or Step 7 unattended (`release.sh`, `merge-and-cleanup.sh`) keeps every gate the interactive flow keeps. It calls the same scripts in the same order, gates on their exit codes, and fails loudly on any unmet gate.
 
-## Wrapping Step 2 (PR create) in a script
-
-The script MUST enforce all of:
-
-- **Step-1 readiness gate** — run the project's tests AND linter before pushing. Fail loudly if either fails. Never push from a script that doesn't gate on green tests + clean lint.
-- **Conventional-commits PR title** — construct or validate the title against `<type>(<scope>): <imperative summary>`. Taking the title as a raw argument and passing it straight to `gh pr create` defeats the convention; either build the title from `<type>`, `<scope>`, `<summary>` inputs, or regex-validate the supplied title before push.
-
-## Wrapping Step 7 (merge + cleanup) in a script
-
-The script MUST enforce all of:
-
-- **Pre-merge wait + gates** — execute Step 5's watch contract and continue only when its result is `ready`. Read all surfaced review bodies and inline comments, and address blocking findings through Step 6. Ordinary advisory replies and thread resolution stay outside the merge predicate. Fail loudly on any unmet gate. The watcher owns readiness conditions; wrappers consume its result rather than duplicating those conditions.
-
-  ```text
-  skills/release/references/step-5-watch.md
-  ```
-- **Non-empty review body halts unattended merge** — stop before the merge command and hand every `review_bodies[].body` to an agent or human reader, from every author and page, including historical and dismissed reviews. Resume after full reading and resolution of blocking findings through the existing correction route. The bot-specific `reviews` fields route verdicts and never bound reading. The release agent may be the reader; no separate human approval is required. A wrapper cannot judge substance from state or displayed text (`rules/script-delegation.md`, `rules/reviewer-feedback-reading.md`).
-- **Non-empty inline comment body halts unattended merge** — stop the wrapper before its merge command and hand every non-empty `inline_comment_bodies[].body` to an agent or human reader, including replies and advisory comments. Resume after every body has been read in full and every blocking finding addressed through the existing correction route. The agent running the release may be the reader; separate human approval is not required. Advisories never block delivery after reading. Comment counts, review states, and merely displaying the text cannot satisfy this gate.
-- **Safe local-branch delete** — `git branch -d <branch>` (refuses to drop unmerged work), never `git branch -D`. The whole point of the cleanup is "ship and tidy"; clobbering an unmerged branch with `-D` defeats the safety the merge gate just established.
-- **Worktree-aware teardown** — if the wrapper may be invoked from inside an additional worktree (per `rules/agent-worktree-isolation.md`), it must detect that case and run the worktree variant of cleanup: `cd` to the base checkout, fast-forward `main`, `git worktree remove <worktree-root>`, then `git branch -d <branch>`. Three derivations the wrapper needs:
-  - **Detection** — `[ "$(git rev-parse --git-dir)" != "$(git rev-parse --git-common-dir)" ]`; true means you're in an additional worktree
-  - **Current worktree root** — `git rev-parse --show-toplevel` (required by `git worktree remove`, which refuses subdirectory paths with `not a working tree`)
-  - **Base checkout root** — `git worktree list --porcelain | awk '/^worktree / {print $2; exit}'` (the first `worktree` entry is always the main checkout)
-  Skipping this branch makes `git branch -d` fail with a confusing "checked out at `<path>`" error and leaves the worktree directory plus `.git/worktrees/` metadata stranded; the script must surface a coherent teardown, not that error.
-- **Channel selection** — resolve every channel from the manifests and publish workflows. Tessl includes `tessl plugin publish` / `tesslio/patch-version-publish`; GitHub tag/assets includes `acr publish` or release/asset creation from either a tag trigger or a merge push. Run each channel's gates. A dual publisher owes both sets of artifact evidence, regardless of whether its jobs share a workflow/run. See `rules/ci-safety.md` Always Watch CI.
-- **Pre-merge baseline (Tessl)** — BEFORE invoking `gh pr merge`, run `skills/release/registry-baseline.sh <workspace> <plugin>`. Preserve its version or verified `unpublished` sentinel for the conjunction check. Empty output and lookup failure stop the wrapper. A tag/asset-only publication skips it.
-- **Post-merge: main advanced** — confirm `main` actually advanced to the merge commit before any further verification step runs.
-- **Post-merge: resolve THIS publish run (every channel)** — for a merge-triggered publish, derive the merge commit SHA via `gh pr view <N> --json mergeCommit --jq '.mergeCommit.oid'`, then `skills/release/resolve-publish-run.sh <owner> <repo> <merge-sha> <workflow-name>`. Such a publisher creates its own immutable tag; never push a competing tag. For a tag-triggered publisher, push the tag and pass it as the fifth resolver argument alongside its commit: `skills/release/resolve-publish-run.sh <owner> <repo> <tag-sha> <workflow-name> <tag>`. The resolver contract is in `skills/release/references/PUBLICATION.md`. Separate publisher workflows have separate run ids. One dual workflow uses the same id for both confirmation helpers; each channel still requires its own artifact evidence. Never select by "latest on main" or any branch-only/limit-1 heuristic.
-- **Post-merge: watch to terminal state (every channel)** — extract the run ID with `jq -r '.database_id'` and `gh run watch <id>` on that exact run. Never reduce this to "check it triggered".
-- **Post-merge: conjunction check (Tessl, conjuncts 1 + 2)** — `skills/release/verify-publish-landed.sh <workspace> <plugin> <pre-baseline> <run-id>` requires the resolved run's `conclusion` to be `success` and a real published version beyond the baseline, including a verified first publication. Gate on its exit code; never substitute a version comparison alone.
-- **No expected-version derivation** — do NOT derive an expected version from the merge SHA's manifest and compare against it.
-- **Post-merge: moderation clear (Tessl, conjunct 3)** — moderation is a post-publish install gate; the wrapper must wait for the published version's moderation state to reach `pass` via `skills/release/verify-moderation-cleared.sh <workspace> <plugin> <version>` (exponential backoff, fail loud at budget — the script owns the backoff constants and the cleared/blocked decision). A still-pending or blocked state at budget exhaustion exits non-zero; the wrapper must NOT report the release confirmed. Query the real moderation state from the registry — never fabricate one as a hedge for a failed publish.
-- **Post-merge: published release (GitHub tag/asset)** — `skills/release/verify-github-release.sh <owner> <repo> <tag> <run-id>` exits 0 iff the resolved run's `conclusion` is `success` AND the release exists at that exact tag, is published, and every asset is retrievable. The wrapper must NOT bypass its exit code, and runs none of the three Tessl steps for this channel.
-
-## Publish-pipeline CHANGELOG stamping (not an agent step)
-
-`skills/release/stamp-changelog.py` runs in the publish workflow (`.github/workflows/publish.yml`), not from any SKILL.md step — the agent never invokes it. It stamps the publish-on-merge CHANGELOG so un-headed `### ` entries get a `## <version> — <date>` heading matching the version being published.
-
-Contract:
-
-- **Inputs** — `--changelog` (default `CHANGELOG.md`), `--manifest` (default `.tessl-plugin/plugin.json`, then `tile.json`), `--latest` (skip the registry query; CI omits it and reads the registry through `skills/release/registry-version.sh`, which needs `tessl` and `jq` on PATH — exit and output contract in that script's header), `--date` (default today, UTC)
-- **Side effect** — rewrites the CHANGELOG in place; the stamp-changelog action then commits and self-pushes it (via `commit-stamp.sh`) with the CI-skip marker, decoupled from the publish step's exit (#284)
-- **Idempotent** — no-op when the top section is already under a `## ` heading
-- **Exit** — non-zero on a malformed version, a missing manifest field, or any non-zero `registry-version.sh` exit
-- The version-computation and stamping logic is the source of truth in the script's module docstring and `compute_version` / `stamp_changelog` — do not restate it here
-
-The workflow step must run BEFORE the publish step (`smart-publish`) so the stamped heading and the assigned version stay in lockstep.
-
-Before stamping, the stamp-changelog action runs `skills/release/check-changelog-placement.py --since-last-publish` and fails the step on a non-zero exit, so a push that parks a new entry under a published heading stops before it publishes, and stays stopped until a follow-up moves the entry. The action forwards its `manifest:` input verbatim as `--manifest`. Rewording a published entry in place needs a `Changelog-Edit: <version>` commit trailer. The script writes one JSON verdict to stdout on every outcome and its diagnostics to stderr; the callers gate on the exit code. Its modes, decision contract and exit codes live in that script's module docstring; the PR-time form (`--base`) runs in `.github/workflows/tests.yml`.
-
-## Enrolling a repo in the publish pipeline (not an agent step)
-
-The publish workflow above is a thin caller of the canonical reusable pipeline (`.github/workflows/publish-plugin.yml`). Wiring a new plugin repo onto that pipeline — or migrating one off a bespoke `tesslio/patch-version-publish` workflow — is a documented maintainer step, not part of the release flow. The caller template, the input guide, the Dependabot pin renewal, and the migration procedure live in the reference doc (repo-internal; `docs/` is `.tesslignore`d, so read it from the repo, not an install):
-
-```text
-docs/fleet-publish-setup.md
-```
-
-## Why these gates have to be in the script, not just the skill prose
-
-A scripted run is unattended. Anything the interactive agent enforces by reading SKILL.md only protects the sessions where the SKILL.md is in the agent's context. A script that doesn't carry the same gates internally hands every consumer a sharper version of the bypass-by-automation problem.
+- **Readiness** — gate the push on green tests and clean lint (Step 1).
+- **PR title** — build or validate `<type>(<scope>): <imperative summary>`; never pass a raw title straight to `gh pr create`.
+- **Watch** — run Step 5's watcher and continue only on `ready`. The watcher owns readiness; the wrapper never duplicates its conditions.
+- **Reading halts the merge** — stop before the merge command while any `review_bodies[].body` or non-empty `inline_comment_bodies[].body` is unread, from every author, page and state. Resume after an agent or human reads every body and blocking findings are addressed through Step 6. The release agent may be the reader. Ordinary advisory replies and thread resolution stay outside the merge predicate. Counts, states and displayed text never satisfy this gate.
+- **Branch delete** — `git branch -d`, never `-D`.
+- **Worktree teardown** — from an additional worktree (`git rev-parse --git-dir` differs from `--git-common-dir`), follow Step 7 path (B) in order.
+- **Publication** — run every selected channel's sequence from `skills/release/references/PUBLICATION.md`. Report the release confirmed only when every channel confirms.
