@@ -402,22 +402,6 @@ class ArchiveReaderTests(unittest.TestCase):
         self.github = GitFixture()
         self.reader = archive.ArchiveReader(self.github)
 
-    def test_retained_producer_graphs_keep_archived_intent_and_terminal(self):
-        import fleet_publish_producer
-
-        for pinset in fleet_publish_producer.HISTORICAL_PRODUCERS:
-            with (
-                self.subTest(owner=pinset[fleet_publish_producer.PRODUCER_OWNER_PATH]),
-                patch.object(
-                    fleet_publish_producer, "verify_workflow_protocol", return_value=pinset
-                ),
-            ):
-                github = GitFixture()
-                github.expire()
-                reader = archive.ArchiveReader(github)
-                self.assertEqual(reader.record("101", "intent"), github.intent["intent"])
-                self.assertEqual(reader.terminal("101"), github.terminal)
-
     def test_expired_artifacts_and_native_metadata_keep_positive_central_completion(
         self,
     ):

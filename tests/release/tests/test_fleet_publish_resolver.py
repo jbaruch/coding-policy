@@ -54,16 +54,10 @@ class Fixture:
         self.records = {}
         self.calls = []
         self.files: dict[tuple[str, str], dict[str, bytes]] = {}
-        self.pinset = {}
         definitions = {
-            name: ("fixed reviewed fixture " + name).encode()
-            for name in producer.PRODUCER_PATHS
+            producer.PRODUCER_OWNER_PATH: Path(producer.__file__).read_bytes()
         }
-        definitions[producer.PRODUCER_OWNER_PATH] = Path(producer.__file__).read_bytes()
         self.workflow = self.commit(CENTRAL, [], definitions)
-        for name, raw in definitions.items():
-            if name != producer.PRODUCER_OWNER_PATH:
-                self.pinset[name] = git_hash("blob", raw)
         self.central_tip = self.commit(
             CENTRAL,
             [self.workflow],
@@ -404,9 +398,6 @@ class ResolverTests(unittest.TestCase):
         paths.start()
         self.addCleanup(paths.stop)
         self.fixture = Fixture()
-        pins = patch.object(producer, "TRUSTED_PRODUCERS", (self.fixture.pinset,))
-        pins.start()
-        self.addCleanup(pins.stop)
 
     def hold(self, fn, kind=None):
         with self.assertRaises(resolver.CentralPublishHold) as error:
@@ -591,10 +582,13 @@ class ResolverTests(unittest.TestCase):
         f.routes[route] = changing
         self.hold(lambda: resolver.select(f, REPO, f.source), "unavailable")
 
-    def test_unknown_producer_and_missing_claim_are_never_not_found(self):
+    def test_off_main_producer_and_missing_claim_are_never_not_found(self):
         f = self.fixture
-        with patch.object(producer, "TRUSTED_PRODUCERS", ()):
-            self.hold(lambda: resolver.select(f, REPO, f.source), "unknown_producer")
+        route = f"repos/{CENTRAL}/compare/{f.workflow}...{f.central_tip}"
+        original = f.routes[route]
+        f.routes[route] = {**original, "status": "diverged"}
+        self.hold(lambda: resolver.select(f, REPO, f.source), "unavailable")
+        f.routes[route] = original
         f.default(f.source)
         self.hold(lambda: resolver.select(f, REPO, f.source), "claim_binding")
 

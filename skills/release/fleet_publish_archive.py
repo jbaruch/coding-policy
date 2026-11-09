@@ -727,12 +727,10 @@ class ArchiveReader:
         value = parse_historical(value)
         need(value["intent"] == self.run_intent(run_id))
         self._protocol(value["attester"]["workflow_sha"])
-        from fleet_publish_producer import verify_workflow_protocol
+        from fleet_publish_producer import historical_pinset
 
         need(
-            verify_workflow_protocol(
-                self.client, value["intent"]["intent"]["workflow_sha"]
-            )
+            historical_pinset(self.client, value["intent"]["intent"]["workflow_sha"])
             == value["producer_pinset"]
         )
         # Never override actual contradictory terminal/receipt evidence.
