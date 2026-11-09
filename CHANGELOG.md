@@ -1,3 +1,5 @@
+## 0.6.0 — 2026-11-09
+
 ### Remove Herdr from the standalone policy
 
 Team coordination moves to jbaruch/software-factory, which runs its own native Claude, Codex and Grok workers through Rex and takes no dependency on this package. Every Herdr branch in coding-policy now gates nothing it can name, and the delegation rule actively forbade the native workers software-factory is built on, so the integration goes rather than staying dormant.
