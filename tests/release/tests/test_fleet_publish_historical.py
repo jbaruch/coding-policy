@@ -245,9 +245,9 @@ class HistoricalTests(unittest.TestCase):
             for job in value["native"]["jobs"]
         ]
         with patch.object(
-            producer,
-            "verify_workflow_protocol",
-            return_value=copy.deepcopy(pinset),
+            producer, "verify_workflow_protocol", return_value=None
+        ), patch.object(
+            producer, "historical_pinset", return_value=copy.deepcopy(pinset)
         ):
             reader = archive.ArchiveReader(github)
             self.assertIsNone(prior_publication(reader, "101"))

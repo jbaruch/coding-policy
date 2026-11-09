@@ -14,7 +14,6 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import fleet_publish as publisher  # noqa: E402
 import fleet_publish_targets as poller  # noqa: E402
-import fleet_publish_producer as producer  # noqa: E402
 from fleet_publish_archive import make_intent, make_terminal, ref_name  # noqa: E402
 import test_fleet_publish_archive_write as fixture  # noqa: E402
 import test_fleet_publish as history_fixture  # noqa: E402
@@ -28,45 +27,8 @@ class NativeCentral(fixture.Git):
         self.reads = Counter()
         self.artifacts = {}
         self.runs = {}
-        self.pins = {
-            name: f"{index + 1000:040x}"
-            for index, name in enumerate(producer.PRODUCER_PATHS, 1)
-        }
-        self.pins[producer.PRODUCER_OWNER_PATH] = producer.local_owner_blob()
         self.protocol = {}
-        parents = {""}
-        for path in producer.PRODUCER_PATHS:
-            parent = path.rpartition("/")[0]
-            while parent:
-                parents.add(parent)
-                parent = parent.rpartition("/")[0]
-        directories = {
-            name: f"{index + 2000:040x}" for index, name in enumerate(sorted(parents))
-        }
-        for directory, sha in directories.items():
-            entries = [
-                (path.rsplit("/", 1)[-1], child, "tree", "040000")
-                for path, child in directories.items()
-                if path and path.rpartition("/")[0] == directory
-            ]
-            entries += [
-                (path.rsplit("/", 1)[-1], blob, "blob", "100644")
-                for path, blob in self.pins.items()
-                if path.rpartition("/")[0] == directory
-            ]
-            self.protocol[f"{CENTRAL}/git/trees/{sha}"] = {
-                "sha": sha,
-                "truncated": False,
-                "tree": [
-                    {"path": name, "sha": child, "type": kind, "mode": mode}
-                    for name, child, kind, mode in entries
-                ],
-            }
         for sha in (fixture.FLOW, fixture.FINAL):
-            self.protocol[f"{CENTRAL}/git/commits/{sha}"] = {
-                "sha": sha,
-                "tree": {"sha": directories[""]},
-            }
             self.protocol[f"{CENTRAL}/compare/{sha}...{fixture.FINAL}"] = {
                 "status": "identical" if sha == fixture.FINAL else "ahead",
                 "base_commit": {"sha": sha},
@@ -215,17 +177,6 @@ class PollCacheTests(unittest.TestCase):
                 publisher,
                 "PollGitHubClient",
                 side_effect=lambda cache: CountedClient(native, cache),
-            ),
-            patch.object(
-                producer,
-                "TRUSTED_PRODUCERS",
-                (
-                    {
-                        name: sha
-                        for name, sha in native.pins.items()
-                        if name != producer.PRODUCER_OWNER_PATH
-                    },
-                ),
             ),
             patch.dict(
                 os.environ,
@@ -465,17 +416,6 @@ class PollCacheTests(unittest.TestCase):
                 publisher,
                 "PollGitHubClient",
                 side_effect=lambda cache: CountedClient(native, cache),
-            ),
-            patch.object(
-                producer,
-                "TRUSTED_PRODUCERS",
-                (
-                    {
-                        k: v
-                        for k, v in native.pins.items()
-                        if k != producer.PRODUCER_OWNER_PATH
-                    },
-                ),
             ),
             patch.dict(
                 os.environ,

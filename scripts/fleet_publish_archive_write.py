@@ -654,7 +654,7 @@ def attest_historical(
     from fleet_publish_archive import native_run, native_jobs
     from fleet_publish_historical import KIND, DERIVATION, parse_historical
     from fleet_publish_historical_package import observe_package
-    from fleet_publish_producer import HISTORICAL_PRODUCERS
+    from fleet_publish_producer import historical_pinset
     from fleet_publish_resolver import _Evidence
 
     identity, envelope = historical_selection(github, reader, environment, event)
@@ -677,8 +677,7 @@ def attest_historical(
     run = native_run(github.api(route))
     attempt = native_run(github.api(route + "/attempts/1"))
     jobs = native_jobs(github.pages(route + "/attempts/1/jobs", "jobs"), run)
-    pins = verify_workflow_protocol(github, original["workflow_sha"])
-    require(any(pins == known for known in HISTORICAL_PRODUCERS))
+    pins = historical_pinset(github, original["workflow_sha"])
     # Existing native receipt access supplies contradictions, never synthesized
     # terminal bytes. Refuse any negative/uncertain original outcome.
     receipt = reader.record(run_id, "receipt")

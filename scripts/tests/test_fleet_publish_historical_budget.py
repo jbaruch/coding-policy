@@ -7,6 +7,7 @@ declared gh read transports are replaced by a finite synthetic HTTP peer.
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import copy
 import io
 import json
@@ -40,16 +41,15 @@ class HistoricalBudgetTests(unittest.TestCase):
         self.addCleanup(self.stack.close)
         self.root = Path(self.stack.enter_context(tempfile.TemporaryDirectory()))
         fixture = Fixture()
+        raw = Path(producer.__file__).read_bytes()
         pins = {
-            **fixture.pinset,
-            producer.PRODUCER_OWNER_PATH: producer.local_owner_blob(),
+            producer.PRODUCER_OWNER_PATH: hashlib.sha1(
+                f"blob {len(raw)}\0".encode() + raw
+            ).hexdigest()
         }
         # The complete hashed native graph is independently built from fixed
-        # fixture files. Only its declared trust root is synthetic; the actual
-        # protocol verifier, ancestry/tree/claim readers and all owner gates run.
-        self.stack.enter_context(
-            patch.object(producer, "TRUSTED_PRODUCERS", (fixture.pinset,))
-        )
+        # fixture files. Only its historical pinset is synthetic; the actual
+        # ancestry/tree/claim readers and all owner gates run.
         self.stack.enter_context(
             patch.object(producer, "HISTORICAL_PRODUCERS", (pins,))
         )
@@ -174,7 +174,6 @@ class HistoricalBudgetTests(unittest.TestCase):
             for row in self.calls.read_text().splitlines()
             if json.loads(row)[0].startswith(f"repos/{CENTRAL}/")
         ]
-        self.assertGreater(len(central_calls), 128)
         self.assertLessEqual(len(central_calls), 512)
         self.assertTrue(self.github.effects.refs)
         self.assertEqual(
@@ -216,12 +215,12 @@ class HistoricalBudgetTests(unittest.TestCase):
             private=True, visibility="private"
         )
         self.assertTrue(self.main_result()["archived"])
-        self.assertGreater(
+        self.assertLessEqual(
             sum(
                 json.loads(row)[0].startswith(f"repos/{CENTRAL}/")
                 for row in self.calls.read_text().splitlines()
             ),
-            128,
+            512,
         )
 
     def test_unknown_ref_post_with_exact_readback_never_repeats_the_write(self):

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import contextlib
 from contextlib import redirect_stdout
 import io
 import json
@@ -237,7 +238,7 @@ class NativeTransport(unittest.TestCase):
                 }
             )
         )
-        return patch.object(fixture.producer, "TRUSTED_PRODUCERS", (native.pinset,))
+        return contextlib.nullcontext()
 
     def test_measure_real_resolve_transport_with_three_protocol_epochs(self):
         for commits in (0, 4, 8, 124):
@@ -300,7 +301,7 @@ class NativeTransport(unittest.TestCase):
                 self.assertEqual(result["source_ref"], "refs/heads/" + branch)
 
     def test_base_budget_stays128_and_reader_exhaustion_is_a_refusal(self):
-        native = graph(4)
+        native = graph(124)  # needs 339 commands, past the base 128
         client = fixture.github_owner.GitHubClient()
         with self.bind(native):
             with self.assertRaises(fixture.resolver.CentralPublishHold):

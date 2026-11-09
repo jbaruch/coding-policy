@@ -1,14 +1,10 @@
-"""Immutable producer blob identity; no live API or source execution."""
+"""Central producer identity: main ancestry, frozen historical graphs; no live API."""
 
 from __future__ import annotations
 
 import copy
 import importlib.util
-import hashlib
-import os
-import subprocess
 import sys
-import tempfile
 import unittest
 from pathlib import Path
 from typing import Any
@@ -24,7 +20,11 @@ with patch.object(sys, "path", [str(SOURCE), *sys.path]):
     SPEC.loader.exec_module(producer)
 github_owner: Any = sys.modules["fleet_publish_github"]
 FleetPublishLookupError = github_owner.FleetPublishLookupError
-REVIEWED_PRODUCERS = copy.deepcopy(producer.TRUSTED_PRODUCERS)
+# The installed 0.5.23 reader's graph, an immutable fixture.
+GRAPH_0_5_23 = next(
+    pins for pins in producer.HISTORICAL_PRODUCERS
+    if pins[producer.PRODUCER_OWNER_PATH] == "ccbaeff9b2c8a5df3b09882861105adcf7d01d54"
+)
 
 CENTRAL = "jbaruch/coding-policy"
 WORKFLOW = "e" * 40
@@ -46,17 +46,7 @@ def entry(name, sha, *, directory=False):
 
 class Fixture:
     def __init__(self, pins: dict[str, str] | None = None):
-        self.pins = pins.copy() if pins is not None else {
-            name: f"{index + 1000:040x}"
-            for index, name in enumerate(producer.PRODUCER_PATHS, 1)
-        }
-        if pins is None:
-            self.pins[producer.PRODUCER_OWNER_PATH] = producer.local_owner_blob()
-        self.trusted = {
-            name: sha
-            for name, sha in self.pins.items()
-            if name != producer.PRODUCER_OWNER_PATH
-        }
+        self.pins = (pins if pins is not None else GRAPH_0_5_23).copy()
         self.routes = {
             f"repos/{CENTRAL}": {
                 "full_name": CENTRAL,
@@ -113,133 +103,13 @@ class Fixture:
 class ProducerTests(unittest.TestCase):
     def setUp(self):
         self.fixture = Fixture()
-        pins = patch.object(producer, "TRUSTED_PRODUCERS", (self.fixture.trusted,))
-        pins.start()
-        self.addCleanup(pins.stop)
 
-    def test_complete_reviewed_closure_allows_central_ancestor_not_tip(self):
-        producer.verify_workflow_protocol(self.fixture, WORKFLOW)
+    def test_main_ancestor_is_accepted_without_reading_source(self):
+        self.assertIsNone(producer.verify_workflow_protocol(self.fixture, WORKFLOW))
         self.assertNotEqual(WORKFLOW, TIP)
-        self.assertEqual(sum("/git/trees/" in route for route in self.fixture.calls), 9)
-
-    def test_wrong_blob_and_mixed_pinsets_cannot_form_supported_protocol(self):
-        f = self.fixture
-        broken = copy.deepcopy(f.trusted)
-        broken[producer.PRODUCER_PATHS[0]] = "6" * 40
-        another = copy.deepcopy(f.trusted)
-        another[producer.PRODUCER_PATHS[1]] = "7" * 40
-        for pins in ((), (broken,), (broken, another)):
-            with (
-                patch.object(producer, "TRUSTED_PRODUCERS", pins),
-                self.assertRaises(FleetPublishLookupError),
-            ):
-                producer.verify_workflow_protocol(f, WORKFLOW)
-
-    def test_every_executable_dependency_mutation_is_unknown_producer(self):
-        for name, expected in self.fixture.pins.items():
-            with self.subTest(path=name):
-                fixture = Fixture()
-                for response in fixture.routes.values():
-                    if isinstance(response, dict) and isinstance(
-                        response.get("tree"), list
-                    ):
-                        for leaf in response["tree"]:
-                            if leaf["sha"] == expected:
-                                leaf["sha"] = "f" * 40
-                with self.assertRaises(FleetPublishLookupError) as error:
-                    producer.verify_workflow_protocol(fixture, WORKFLOW)
-                self.assertEqual(error.exception.kind, "unknown_producer")
-
-    def test_reviewed_literals_match_all_current_dependency_bytes(self):
-        root = SOURCE.parents[1]
-        actual = {}
-        for name in producer.PRODUCER_PATHS:
-            if name == producer.PRODUCER_OWNER_PATH:
-                continue
-            raw = (root / name).read_bytes()
-            actual[name] = hashlib.sha1(f"blob {len(raw)}\0".encode() + raw).hexdigest()
-        self.assertEqual(actual, REVIEWED_PRODUCERS[0])
-
-    def test_retains_published_0_5_23_graph_without_accepting_mixed_code(self):
-        # Immutable fixture from the installed 0.5.23 reader, not a renewal pin.
-        original_owner = "ccbaeff9b2c8a5df3b09882861105adcf7d01d54"
-        previous = next(
-            pins for pins in producer.HISTORICAL_PRODUCERS
-            if pins[producer.PRODUCER_OWNER_PATH] == original_owner
+        self.assertFalse(
+            any("/git/trees/" in r or "/git/commits/" in r for r in self.fixture.calls)
         )
-        self.assertEqual(
-            producer.verify_workflow_protocol(Fixture(previous), WORKFLOW), previous
-        )
-        mixed = previous.copy()
-        mixed["skills/release/smart-publish.sh"] = REVIEWED_PRODUCERS[0][
-            "skills/release/smart-publish.sh"
-        ]
-        with self.assertRaises(FleetPublishLookupError):
-            producer.verify_workflow_protocol(Fixture(mixed), WORKFLOW)
-
-    def test_local_reader_owner_uses_its_actual_git_blob_identity(self):
-        expected = subprocess.check_output(
-            ["git", "hash-object", str(SOURCE / "fleet_publish_producer.py")], text=True
-        ).strip()
-        self.assertEqual(producer.local_owner_blob(), expected)
-
-    def test_unsafe_or_unavailable_local_owner_refuses_before_native_reads(self):
-        with tempfile.TemporaryDirectory() as directory:
-            base = Path(directory)
-            for kind in (
-                "missing",
-                "directory",
-                "symlink",
-                "hardlink",
-                "writable",
-                "oversized",
-            ):
-                with self.subTest(kind=kind):
-                    local = base / kind
-                    if kind == "directory":
-                        local.mkdir()
-                    elif kind == "symlink":
-                        local.symlink_to(SOURCE / "fleet_publish_producer.py")
-                    elif kind != "missing":
-                        local.write_bytes(
-                            b"fixed trusted source\n"
-                            if kind != "oversized"
-                            else b"x" * (128 * 1024 + 1)
-                        )
-                        local.chmod(0o666 if kind == "writable" else 0o644)
-                        if kind == "hardlink":
-                            os.link(local, base / "other-name")
-                    fixture = Fixture()
-                    with (
-                        patch.object(producer, "__file__", str(local)),
-                        self.assertRaises(FleetPublishLookupError) as error,
-                    ):
-                        producer.verify_workflow_protocol(fixture, WORKFLOW)
-                    self.assertEqual(error.exception.kind, "unknown_producer")
-                    self.assertEqual(fixture.calls, [])
-
-    def test_replaced_local_owner_is_unknown_without_remote_reads(self):
-        with tempfile.TemporaryDirectory() as directory:
-            local = Path(directory) / "owner.py"
-            replacement = Path(directory) / "replacement.py"
-            local.write_bytes(b"fixed trusted source\n")
-            replacement.write_bytes(b"different source\n")
-            native_read = os.read
-
-            def replace_after_read(fd, count):
-                result = native_read(fd, count)
-                os.replace(replacement, local)
-                return result
-
-            fixture = Fixture()
-            with (
-                patch.object(producer, "__file__", str(local)),
-                patch.object(producer.os, "read", side_effect=replace_after_read),
-                self.assertRaises(FleetPublishLookupError) as error,
-            ):
-                producer.verify_workflow_protocol(fixture, WORKFLOW)
-            self.assertEqual(error.exception.kind, "unknown_producer")
-            self.assertEqual(fixture.calls, [])
 
     def test_non_main_foreign_or_diverged_native_producer_refuses(self):
         f = self.fixture
@@ -256,8 +126,31 @@ class ProducerTests(unittest.TestCase):
             self.assertNotIn("PRIVATE", str(error.exception))
         f.routes[route] = original
         f.routes[f"repos/{CENTRAL}/compare/{WORKFLOW}...{TIP}"]["status"] = "diverged"
-        with self.assertRaises(FleetPublishLookupError):
+        with self.assertRaises(FleetPublishLookupError) as error:
             producer.verify_workflow_protocol(f, WORKFLOW)
+        self.assertEqual(error.exception.kind, "workflow_ancestry")
+
+    def test_every_frozen_historical_graph_is_recognized(self):
+        for pins in producer.HISTORICAL_PRODUCERS:
+            with self.subTest(owner=pins[producer.PRODUCER_OWNER_PATH]):
+                self.assertEqual(producer.historical_pinset(Fixture(pins), WORKFLOW), pins)
+
+    def test_any_mutated_historical_blob_is_unknown_producer(self):
+        for name in GRAPH_0_5_23:
+            with self.subTest(path=name):
+                mutated = GRAPH_0_5_23.copy()
+                mutated[name] = "6" * 40
+                with self.assertRaises(FleetPublishLookupError) as error:
+                    producer.historical_pinset(Fixture(mutated), WORKFLOW)
+                self.assertEqual(error.exception.kind, "unknown_producer")
+
+    def test_historical_graph_requires_main_ancestry_before_source_reads(self):
+        f = self.fixture
+        f.routes[f"repos/{CENTRAL}/compare/{WORKFLOW}...{TIP}"]["status"] = "diverged"
+        with self.assertRaises(FleetPublishLookupError) as error:
+            producer.historical_pinset(f, WORKFLOW)
+        self.assertEqual(error.exception.kind, "workflow_ancestry")
+        self.assertFalse(any("/git/trees/" in r for r in f.calls))
 
     def test_symlinked_producer_directory_and_truncated_tree_refuse(self):
         f = self.fixture
@@ -265,10 +158,10 @@ class ProducerTests(unittest.TestCase):
         original = copy.deepcopy(f.routes[route])
         f.routes[route]["tree"][0].update(mode="120000", type="blob")
         with self.assertRaises(FleetPublishLookupError):
-            producer.verify_workflow_protocol(f, WORKFLOW)
+            producer.historical_pinset(f, WORKFLOW)
         f.routes[route] = {**original, "truncated": True}
         with self.assertRaises(FleetPublishLookupError):
-            producer.verify_workflow_protocol(f, WORKFLOW)
+            producer.historical_pinset(f, WORKFLOW)
 
 
 if __name__ == "__main__":

@@ -115,20 +115,16 @@ run metadata. Missing completion evidence remains a hold, never permission to
 repeat an effect. A missing native run alone proves no absence or success.
 The archive owner defines accepted historical responses and refusal conditions.
 
-Only producer versions that write the durable source claim before effects may
-supply the corresponding absence proof. Verify the coherent protocol sources
-named by `skills/release/fleet_publish_producer.py`; older unactivated protocols
-remain unsupported. Readers never repair records or infer a new baseline from
-registry agreement and a consumer stamp. Preserve native source/run/version and
-repair evidence through the owning controller.
-
-The current local-owner proof supports only the explicit protocol set named by
-`skills/release/fleet_publish_producer.py`.
-Before upgrading an owner or executable-pin renewal with activated history,
-require a reviewed historical-source proof strategy and regressions over the
-previously activated intents and terminal records. Unknown historical owners
-remain fail-closed; no automatic backward-compatibility fallback exists. This
-maintenance obligation adds no activation prerequisite for the current set.
+A publisher, poller or finalizer run is a supported producer when its workflow
+commit is on the central repository's main history
+(`skills/release/fleet_publish_producer.py` `verify_workflow_protocol`). The
+`main-append-only` repository ruleset keeps that history from being
+force-pushed or deleted; review happens before merge. A historical-source proof
+additionally requires the original run's executable graph to match one of the
+frozen activated pre-0.8 pinsets (`historical_pinset`). Those sets never change,
+and new producers add none. Readers never repair records or infer a new baseline
+from registry agreement and a consumer stamp. Preserve native source/run/version
+and repair evidence through the owning controller.
 
 A moderation recovery is a new central run bound to its original successful
 publication. It writes its own claim/bookkeeping and performs registry and
@@ -143,7 +139,7 @@ ref is `refs/tags/fleet-publish-v1/runs/<original-run>/1/historical-source-proof
 `skills/release/fleet_publish_historical.py` owns its full schema, supported
 derivation, package inventories and native critical-step contract. The record
 binds the original immutable intent/source claim, normalized native attempt and
-jobs, the reviewed historical executable pinset, complete official source-pack
+jobs, the frozen historical executable pinset, complete official source-pack
 and exact-version installed inventories, registry observation and actual later
 attester workflow/run/attempt/source. It carries no reconstructed original
 receipt, artifact digest, publication timestamp or original finalizer identity.

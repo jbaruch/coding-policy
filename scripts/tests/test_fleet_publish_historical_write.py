@@ -210,12 +210,17 @@ class HistoricalWriterTests(unittest.TestCase):
         # Only the graph owner is synthetic; native/source/claim/ref paths and
         # final create/readback use the actual composed implementation.
         self.protocol = patch.object(
-            producer,
-            "verify_workflow_protocol",
-            return_value=copy.deepcopy(producer.HISTORICAL_PRODUCERS[0]),
+            producer, "verify_workflow_protocol", return_value=None
         )
         self.protocol.start()
         self.addCleanup(self.protocol.stop)
+        self.pinset = patch.object(
+            producer,
+            "historical_pinset",
+            return_value=copy.deepcopy(producer.HISTORICAL_PRODUCERS[0]),
+        )
+        self.pinset.start()
+        self.addCleanup(self.pinset.stop)
         self.writer_protocol = patch.object(
             writer,
             "verify_workflow_protocol",
