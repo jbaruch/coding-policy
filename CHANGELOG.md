@@ -1,3 +1,15 @@
+### Make KISS and YAGNI binding, and apply them
+
+`rules/simplicity.md` preferred the smallest sufficient change but never said no to speculative machinery, and reviewers had nothing to cite against it. A pass over the skills found that machinery everywhere.
+
+- `rules/simplicity.md` gains a KISS and YAGNI section. Overengineering is forbidden. No option, flag, schema version, fallback, abstraction or extension point ships without a current caller or an observed failure; one caller gets no abstraction and one value no setting; code, options and files a change orphans go in that change. Reviewers flag unjustified machinery as a `[policy mismatch]`, which the author resolves by justifying it against requirements or deleting it.
+- `check-git-sync` loses its fetch throttle. `SYNC_THROTTLE_HOURS` had defaulted to 0 since a throttled run only told the agent to fetch by hand, yet it kept a versioned per-repo stamp file, `skills/release/state-schema.md`, future-version preservation, an injectable clock and three tests alive. The hook now always fetches and holds no state. `SYNC_THROTTLE_HOURS`, `SYNC_STATE_DIR` and `SYNC_NOW` are gone.
+- `dismiss-ruled-review.sh` drops its schema-1 upgrader. Ruling files live for one PR and every writer has produced schema 2 since 0.3.337, so a version-1 file is now refused unmodified like any other unsupported version.
+- `skills/release/references/SCRIPTING.md` shrinks from 10.8 KB to 1.5 KB. It restated every PUBLICATION.md gate for a wrapper script nobody has written, plus the stamp script's own docstring; it now lists only the wrapper obligations. The fleet-publish setup pointer moves to the README.
+- PUBLICATION.md pointed at `rules/ci-safety.md` for contract text that moved to `release-contract.md` and at SKILL.md for a bootstrap that now lives in the step references. Step 7 no longer retells REVIEW_DETAILS' APPROVE-limitation story, and step 6 loses a clause comparing a bullet with its own past revision.
+- `coding-contracts` Step 1 already reads every triggering rule's full reference, so the second, CI-only read block is gone.
+- `onboard-repo` printed each script's bootstrap block twice, once per mode, differing only by `--override`, and its Step 2 restated the install refusal `scaffold.sh` enforces. One block per step and a single upgrade-mode line replace them: 15.7 KB to 10.8 KB, 13 bootstrap blocks to 7, steps renumbered 1–7.
+
 ## 0.6.0 — 2026-11-09
 
 ### Remove Herdr from the standalone policy

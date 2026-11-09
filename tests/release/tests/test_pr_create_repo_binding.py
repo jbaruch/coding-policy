@@ -1,6 +1,6 @@
 """The skills that push a branch to origin open its PR in origin's repository.
 
-`release` Step 2 and `onboard-repo` Step 8 push with `git push ... origin` and
+`release` Step 2 and `onboard-repo` Step 7 push with `git push ... origin` and
 then run `gh pr create`. A bare `gh pr create` targets `gh repo set-default`,
 so a fork whose default is its upstream parent could open the PR in a
 repository the operator does not own (#666).
@@ -13,7 +13,7 @@ from pathlib import Path
 SKILLS = Path(__file__).resolve().parents[3] / "skills"
 
 #: (skill, step number) pairs whose step opens a PR for a branch pushed to origin.
-PR_STEPS = (("release", 2), ("onboard-repo", 8))
+PR_STEPS = (("release", 2), ("onboard-repo", 7))
 
 COMMAND = re.compile(r"`(gh pr create[^`]*)`")
 RESOLVE = 'python3 "$KS/origin-repo.py" .'
