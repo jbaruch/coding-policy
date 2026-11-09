@@ -19,17 +19,12 @@
 #     changes its shape.
 #   Writer: the release skill's agent, from the operator's answer. One file
 #     per gate.
-#   Reader: this script reads every line. It accepts only RULING_SCHEMA; a
-#     missing schema_version line or any other version is refused (exit 1),
-#     after the owner migration below. It promises nothing is posted or
-#     dismissed unless the whole predicate holds. A version newer than
-#     RULING_SCHEMA is refused (exit 1) as a lagging reader, the file
-#     untouched: update the plugin, then rerun.
-#   Migration (owner): a version-1 file is upgraded in place before it is
-#     read: its `schema_version: 1` line becomes `schema_version: 2` plus
-#     `AUTHORITY: operator`, every other line kept. The rewrite changes the
-#     file's digest, so a follow-up entry posted under the version-1 digest is
-#     not reused.
+#   Reader: this script reads every line and never modifies the file. It
+#     accepts only RULING_SCHEMA; a missing schema_version line or any other
+#     version is refused (exit 1). An older file is rewritten in the current
+#     format by its writer. A newer one means this reader lags: update the
+#     plugin, then rerun. It promises nothing is posted or dismissed unless
+#     the whole predicate holds.
 #   Format, schema_version 2 (lines in any order after the first; unknown lines ignored):
 #     RULING: weighed                       (first line, required)
 #     schema_version: 2                     (required)
@@ -357,39 +352,6 @@ finish("dismissed", "every blocking finding is covered by the ruling", 4)
 PY
 }
 
-# Owner migration of a version-1 ruling file to RULING_SCHEMA; see the header.
-# Exit 0 whether or not it rewrote the file, 2 when it could not.
-migrate_ruling() {
-  local ruling="$1"
-  python3 - "$ruling" <<'PY'
-import os
-import sys
-import tempfile
-
-path = sys.argv[1]
-try:
-    with open(path, encoding="utf-8") as fh:
-        lines = fh.read().splitlines()
-except (OSError, UnicodeError) as exc:
-    print(f"error: cannot read the ruling at {path} as UTF-8 text ({exc}) — repair the file, or rewrite the ruling in the current format, then re-run", file=sys.stderr)
-    sys.exit(2)
-old = [i for i, ln in enumerate(lines) if ln.strip() == "schema_version: 1"]
-if len(old) != 1 or any(ln.startswith("AUTHORITY:") for ln in lines):
-    sys.exit(0)
-lines[old[0]:old[0] + 1] = ["schema_version: 2", "AUTHORITY: operator"]
-try:
-    # An exclusive, randomly named sibling: never follows a planted symlink.
-    fd, tmp = tempfile.mkstemp(prefix=".ruling-", dir=os.path.dirname(os.path.abspath(path)))
-    with os.fdopen(fd, "w", encoding="utf-8") as fh:
-        fh.write("\n".join(lines) + "\n")
-    os.replace(tmp, path)
-except OSError as exc:
-    print(f"error: could not upgrade the version-1 ruling at {path} ({exc}) — make the file and its directory writable, then re-run", file=sys.stderr)
-    sys.exit(2)
-print(f"dismiss-ruled-review: upgraded the version-1 ruling at {path} to schema_version 2 (AUTHORITY: operator)", file=sys.stderr)
-PY
-}
-
 fetch_checks() {
   local owner="$1" repo="$2" pr="$3" dest="$4" out rc=0
   out=$(gh pr checks "$pr" --repo "${owner}/${repo}" --json name,bucket 2>"${dest}.err") || rc=$?
@@ -474,10 +436,6 @@ main() {
   for tool in gh python3 jq; do
     command -v "$tool" >/dev/null || { echo "error: ${tool} is not on PATH — install it and re-run" >&2; exit 2; }
   done
-  if [[ -n "$ruling" ]]; then
-    migrate_ruling "$ruling" || exit 2
-  fi
-
   WORK_DIR=$(mktemp -d) || { echo "error: mktemp -d failed — check TMPDIR is writable, then re-run" >&2; exit 2; }
   trap cleanup EXIT
   local tmp="$WORK_DIR"
