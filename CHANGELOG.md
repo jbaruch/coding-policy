@@ -4,6 +4,7 @@
 
 - The repository ruleset (renamed `main-protection`) adds the pull-request and required-checks rules to the existing no-force-push and no-deletion rules. Its only bypass is deploy keys.
 - The publish job's CHANGELOG stamp is the one direct push to `main`. GitHub refuses the GitHub Actions app as a ruleset bypass on a user-owned repository, so `publish.yml` now checks out with the read-write deploy key `publish-stamp-push` (secret `STAMP_DEPLOY_KEY`, documented with rotation steps in `.env.example`) and the stamp authenticates as that key.
+- `setup-diagnostics` retries the pinned shellcheck download. GitHub release downloads returned 504 twice on 2026-11-09 (#813, #814), failing a check that is now required before anything ran.
 - Not enabled: requiring branches to be up to date before merge. It would close the CHANGELOG branch-cut race `tests.yml` describes, at the cost of updating every open PR after each publish's stamp commit.
 
 ## 0.8.0 — 2026-11-09
