@@ -4,7 +4,6 @@ scripts/
 pyrightconfig.json
 *.bak
 *.tmp
-.herdr/
 **/tests/
 AGENTS.md
 .claude/
