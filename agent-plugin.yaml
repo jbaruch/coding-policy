@@ -139,10 +139,6 @@ artifacts:
       path: rules/hook-action-reporting.md
       activation:
         mode: always
-    - id: agent-delegation
-      path: rules/agent-delegation.md
-      activation:
-        mode: always
   skills:
     - id: release
       path: skills/release

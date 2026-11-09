@@ -14,7 +14,6 @@
 - Use the shared prompt below for both Codex and Claude, with the same packet and output instructions.
 - Select one role for the comparison. For policy calibration, provide the same binding rules to both models; for quality calibration, omit compliance duties from both.
 - Use fresh independent sessions with equivalent tool access, context visibility and effort budgets through an authorized review runner.
-- Preserve `rules/agent-delegation.md`; this procedure grants no new delegation route.
 - Record model versions, runner versions, role, settings, packet digest and any unavoidable differences.
 - Do not expose either model to the other's response before both results are retained.
 - If an authorized runner cannot provide equivalent isolation or inputs, report the comparison as unavailable or confounded; do not substitute the ordinary policy-versus-quality lanes.
