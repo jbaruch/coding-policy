@@ -18,9 +18,7 @@
 #           with "Session-start status — acr: " when ACR reported something or
 #           failed, or when `acr` is missing from a project that needs it.
 #           Nothing for a project without `agents.yaml`, or a throttled or
-#           no-change run with no carve-out finding. A Herdr session, and a
-#           portable (tessl) session, report findings but never update. In
-#           git, the update runs
+#           no-change run with no carve-out finding. In git, the update runs
 #           only on a checkout freshly fetched, containing origin's default
 #           branch, with a clean tree; otherwise the status says why it was
 #           skipped and nothing changes.
@@ -278,7 +276,7 @@ main() {
   esac
 
   # The Runtime-Managed Manifest Carve-Out check (rules/dependency-management.md,
-  # consumer `agents.yaml`) runs in every session, Herdr included: it only reads.
+  # consumer `agents.yaml`) runs in every session: it only reads.
   local listing notes="" pinned checked=1 prc=0
   if ! listing="$("$acr" list --json --project "$root" 2>&1)"; then
     notes="NOTE: \`acr list --json\` failed, so the latest-specifier check did not run; run \`$(printf '%q' "$acr") list --json --project $(printf '%q' "$root")\` to see why, and reinstall acr if it keeps failing."
@@ -292,24 +290,9 @@ main() {
     esac
   fi
 
-  # Every Herdr session reports only: a worker never writes on the hook's say-so,
-  # and the foreman never edits the shared checkout
-  # (jbaruch/herdr-policy team-operation contract Writers and Checkouts).
-  if [[ -n "${HERDR_ENV+x}" ]]; then
-    [[ -z "$notes" ]] || emit "Session-start status — acr: ${notes}"
-    return 0
-  fi
-
   # An update the carve-out check could not vouch for is not made.
   if (( ! checked )); then
     emit "Session-start status — acr: ACR dependencies were not updated. ${notes}"
-    return 0
-  fi
-
-  # Under `tessl hook run` the environment is stripped, so a Herdr session
-  # cannot be ruled out: report, never write.
-  if [[ "${SESSION_START_MODE:-}" == portable ]]; then
-    emit "Session-start status — acr: this agent runs SessionStart through tessl, which hides the session's environment, so ACR dependencies were not updated here; run \`$(printf '%q' "$acr") freshness run --project $(printf '%q' "$root") --policy install\` when it is safe.${notes:+$'\n'}${notes}"
     return 0
   fi
 

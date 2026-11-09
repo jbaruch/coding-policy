@@ -15,14 +15,6 @@
 # and stale branches on origin merged nowhere with no pull request. Nothing
 # else is listed: no removals, no counts, no other repository.
 #
-# Never acts in a Herdr worker session (HERDR_ENV set, even empty, in a
-# linked worktree): workers never delete (jbaruch/herdr-policy team-operation contract
-# Writers and Checkouts). In portable mode (SESSION_START_MODE=portable, set
-# by hooks/session-start.sh under `tessl hook run`, which strips HERDR_ENV) a
-# linked worktree may be a worker's, so neither script runs there at all, and
-# a proven main checkout runs both --dry-run: the list is the same, and
-# nothing is deleted.
-#
 # Contract:
 #   stdin : consensus SessionStart JSON — not read.
 #   stdout: at most one JSON object {"additionalContext": "<status>"}. The
@@ -33,8 +25,7 @@
 #           gh, with the command to rerun it. A missing git or python3 is
 #           that line too, a fixed JSON string printed without either tool.
 #           Silent when neither applies, outside a repository, in a
-#           repository without an origin remote, in a bare repository, in
-#           a Herdr worker session, and under tessl in a linked worktree.
+#           repository without an origin remote, and in a bare repository.
 #   stderr: the owner scripts' diagnostics, relayed, plus this hook's warnings.
 #   exit  : always 0 (a failure is the "could not check" line, never silence
 #           and never a failed session start).
@@ -106,26 +97,6 @@ main() {
       *"or any of the parent directories"*) ;;
       *) cannot_check "git cannot read it (${err:-git exited ${rc} silently}); run \`git status\` here to see why." ;;
     esac
-    return 0
-  fi
-
-  local git_dir common_dir
-  rc=0
-  git_dir="$(git rev-parse --path-format=absolute --git-dir 2>&1)" || rc=$?
-  if (( rc == 0 )); then common_dir="$(git rev-parse --path-format=absolute --git-common-dir 2>&1)" || rc=$?; fi
-  if (( rc != 0 )); then
-    cannot_check "\`git rev-parse --git-common-dir\` exited ${rc}; run it here to see why."
-    return 0
-  fi
-  # A worker session: acting here would break the rule the worker runs under.
-  if [[ -n "${HERDR_ENV+x}" && "$git_dir" != "$common_dir" ]]; then
-    return 0
-  fi
-  # Under tessl the environment is stripped, so an unset HERDR_ENV proves
-  # nothing: a linked worktree may be a worker's, and a worker neither fetches
-  # nor deletes. Only a proven main checkout runs the owner scripts there,
-  # and only --dry-run (the rule hooks/check-git-sync.sh applies).
-  if [[ "${SESSION_START_MODE:-native}" == portable && "$git_dir" != "$common_dir" ]]; then
     return 0
   fi
 
@@ -209,20 +180,18 @@ sys.stdout.buffer.write(first[0][len(b"worktree "):] + b"x")
   }
   trap discard RETURN
 
-  local -a mode_args=()
-  if [[ "${SESSION_START_MODE:-native}" == portable ]]; then mode_args=(--dry-run); fi
   # Nothing may stop to ask for a credential: an unattended prompt is a hang.
   export GIT_TERMINAL_PROMPT=0 GH_PROMPT_DISABLED=1
   # Appended, never a default: a user-set command keeps BatchMode too.
   export GIT_SSH_COMMAND="${GIT_SSH_COMMAND:-ssh} -o BatchMode=yes"
 
   local start=$SECONDS left prune_rc=0 remote_rc=0
-  bash "$runner" "$BUDGET_SEC" bash "$prune" "$shared" ${mode_args[@]+"${mode_args[@]}"} \
+  bash "$runner" "$BUDGET_SEC" bash "$prune" "$shared" \
     >"${SCRATCH}/prune.json" 2>"${SCRATCH}/prune.err" || prune_rc=$?
   relay "${SCRATCH}/prune.err"
   left=$(( BUDGET_SEC - (SECONDS - start) ))
   if (( left > 0 )); then
-    bash "$runner" "$left" bash "$remote" "$shared" ${mode_args[@]+"${mode_args[@]}"} \
+    bash "$runner" "$left" bash "$remote" "$shared" \
       >"${SCRATCH}/remote.json" 2>"${SCRATCH}/remote.err" || remote_rc=$?
     relay "${SCRATCH}/remote.err"
   else
@@ -231,13 +200,13 @@ sys.stdout.buffer.write(first[0][len(b"worktree "):] + b"x")
 
   rc=0
   python3 - "$shared" "$prune" "$prune_rc" "${SCRATCH}/prune.json" \
-      "$remote" "$remote_rc" "${SCRATCH}/remote.json" "${mode_args[*]-}" <<'PY' || rc=$?
+      "$remote" "$remote_rc" "${SCRATCH}/remote.json" <<'PY' || rc=$?
 import json
 import os
 import shlex
 import sys
 
-shared, prune, prune_rc, prune_out, remote, remote_rc, remote_out, flags = sys.argv[1:9]
+shared, prune, prune_rc, prune_out, remote, remote_rc, remote_out = sys.argv[1:8]
 items, failures = [], []
 
 
@@ -252,7 +221,7 @@ SCHEMA = {prune: prune_schema_error, remote: remote_schema_error}
 def load(path, rc, script):
     """The script's JSON when it answered (exit 0, or 2 with its JSON) in its
     documented shape; anything else is a failure, never a clean result."""
-    rerun = "`bash {} {}{}`".format(shlex.quote(script), shlex.quote(shared), " " + flags if flags else "")
+    rerun = "`bash {} {}`".format(shlex.quote(script), shlex.quote(shared))
     name = script.rsplit("/", 1)[-1]
     if rc == "124":
         failures.append("{} ran past its time budget (run {})".format(name, rerun))

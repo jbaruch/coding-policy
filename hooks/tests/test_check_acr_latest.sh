@@ -17,7 +17,6 @@
 #   3. Throttled / no change          -> silent.
 #   4. acr fails, path with a space   -> a status with a copyable, quoted command.
 #   5. acr missing                    -> a status naming the install command.
-#   6. Any Herdr session              -> silent, acr never called.
 #   7. Behind origin                  -> a "not updated" status, acr never called.
 #   8. Uncommitted changes            -> a "not updated" status, acr never called.
 #   9. Fetch fails (origin gone)      -> a "not updated" status, acr never called.
@@ -25,11 +24,9 @@
 #  11. acr older than ACR_MIN_VERSION -> an upgrade status, acr never run.
 #  12. Committed registry lock        -> refused, untrack guidance.
 #  13. Pinned jbaruch dependency      -> carve-out NOTE, update still runs.
-#  14. Portable mode (under tessl)    -> report, never run.
+#  14. Portable mode (under tessl)    -> updates as natively.
 #  15. Fetch fails with a secret URL  -> exit code only, no URL in the status.
 #  16. Unreadable acr version         -> reinstall guidance.
-#  6b. Herdr session, pinned dep      -> the carve-out NOTE, no update.
-#  6c. Empty HERDR_ENV                -> still Herdr: no update, the NOTE only.
 #  17. jq only, no timeout utility    -> check and update run (bounded-fetch fallback).
 #  18. Neither python3 nor jq         -> no update, warning on stderr.
 #  19. origin's default renamed       -> checked against origin's live HEAD.
@@ -90,7 +87,7 @@ mk_project() { # <name>
 run() {
   local dir="$1"; shift
   rm -f "$TMP/calls" || die "cannot reset calls"
-  OUT="$(cd "$dir" && env -u HERDR_ENV ACR_BIN="$TMP/acr" FAKE_CALLS="$TMP/calls" "$@" bash "$SCRIPT" </dev/null 2>"$TMP/err")"
+  OUT="$(cd "$dir" && env ACR_BIN="$TMP/acr" FAKE_CALLS="$TMP/calls" "$@" bash "$SCRIPT" </dev/null 2>"$TMP/err")"
   RC=$?
   read_calls
 }
@@ -150,32 +147,9 @@ main() {
 
   # 5. acr missing -> the install command.
   mk_project p5
-  OUT="$(cd "$PROJECT" && env -u HERDR_ENV ACR_BIN="$TMP/no-such-acr" bash "$SCRIPT" </dev/null 2>"$TMP/err")"; RC=$?; read_calls
+  OUT="$(cd "$PROJECT" && env ACR_BIN="$TMP/no-such-acr" bash "$SCRIPT" </dev/null 2>"$TMP/err")"; RC=$?; read_calls
   if [[ $RC -eq 0 ]] && context | grep -q "brew install jbaruch/agentic-context-registry/acr"; then
     pass; else fail "acr missing: expected the install command, got OUT=$OUT"; fi
-
-  # 6. any Herdr session, the foreman's own checkout included -> no update, and
-  #    silent when nothing is pinned.
-  mk_project p6
-  run "$PROJECT" HERDR_ENV=1 FAKE_OUT="Updated something"
-  if [[ $RC -eq 0 && -z "$OUT" && -z "$CALLS" ]]; then pass; else fail "herdr: expected silence and no acr call, got OUT=$OUT calls=$CALLS"; fi
-
-  # 6b. a Herdr session still runs the read-only carve-out check.
-  mk_project p6b
-  run "$PROJECT" HERDR_ENV=1 FAKE_OUT="Updated something" FAKE_LIST='{"ok":true,"result":{"dependencies":[{"declaration":{"source":"github:jbaruch/x","requested":"v1"}}]}}'
-  if [[ $RC -eq 0 && -z "$CALLS" ]] && context | grep -q "github:jbaruch/x@v1"; then
-    pass; else fail "herdr pin check: expected the NOTE and no update, got OUT=$OUT calls=$CALLS"; fi
-
-  # 6c. HERDR_ENV set but empty is still a Herdr session
-  #     (rules/agent-team-operation.md Two Modes): an update candidate is not
-  #     installed, and the read-only carve-out NOTE is still reported.
-  mk_project p6c
-  run "$PROJECT" HERDR_ENV= FAKE_OUT="Updated something"
-  if [[ $RC -eq 0 && -z "$OUT" && -z "$CALLS" ]]; then
-    pass; else fail "empty HERDR_ENV: expected silence and no acr call, got OUT=$OUT calls=$CALLS"; fi
-  run "$PROJECT" HERDR_ENV= FAKE_OUT="Updated something" FAKE_LIST='{"ok":true,"result":{"dependencies":[{"declaration":{"source":"github:jbaruch/x","requested":"v1"}}]}}'
-  if [[ $RC -eq 0 && -z "$CALLS" ]] && context | grep -q "github:jbaruch/x@v1"; then
-    pass; else fail "empty HERDR_ENV pin check: expected the NOTE and no update, got OUT=$OUT calls=$CALLS"; fi
 
   # 7. behind origin -> not updated, acr never called.
   mk_project p7
@@ -233,11 +207,12 @@ main() {
     && context | grep -q "github:jbaruch/coding-policy@v0.3.1" && ! context | grep -q "other/pkg"; then
     pass; else fail "pinned dep: expected a NOTE naming only the jbaruch pin, got OUT=$OUT calls=$CALLS"; fi
 
-  # 14. portable mode (under tessl) -> report, never run.
+  # 14. portable mode (under tessl) -> the update runs as natively.
   mk_project p14
   run "$PROJECT" SESSION_START_MODE=portable FAKE_OUT="Updated x"
-  if [[ $RC -eq 0 && -z "$CALLS" ]] && context | grep -q "through tessl"; then
-    pass; else fail "portable: expected a report and no run, got OUT=$OUT calls=$CALLS"; fi
+  if [[ $RC -eq 0 ]] && [[ "$CALLS" == "freshness run --project ${PROJECT} --policy install" ]] \
+    && context | grep -q "Updated x"; then
+    pass; else fail "portable: expected the update to run, got OUT=$OUT calls=$CALLS"; fi
 
   # 15. a failed fetch reports its exit code, never git's message (it can carry a URL).
   mk_project p15
@@ -260,7 +235,7 @@ main() {
     real="$(command -v "$t")" || die "$t required for these tests"
     ln -sf "$real" "$tools/$t" || die "cannot link $t"
   done
-  OUT="$(cd "$PROJECT" && env -u HERDR_ENV PATH="$tools" ACR_BIN="$TMP/acr" FAKE_CALLS="$TMP/calls" FAKE_OUT="Updated x" \
+  OUT="$(cd "$PROJECT" && env PATH="$tools" ACR_BIN="$TMP/acr" FAKE_CALLS="$TMP/calls" FAKE_OUT="Updated x" \
     FAKE_LIST='{"ok":true,"result":{"dependencies":[{"declaration":{"source":"github:jbaruch/y","requested":"v2"}}]}}' \
     "$tools/bash" "$SCRIPT" </dev/null 2>"$TMP/err")"; RC=$?; read_calls
   if [[ $RC -eq 0 ]] && [[ "$CALLS" == "freshness run --project ${PROJECT} --policy install" ]] \
@@ -276,7 +251,7 @@ main() {
     real="$(command -v "$t")" || die "$t required for these tests"
     ln -sf "$real" "$bare/$t" || die "cannot link $t"
   done
-  OUT="$(cd "$PROJECT" && env -u HERDR_ENV PATH="$bare" ACR_BIN="$TMP/acr" FAKE_CALLS="$TMP/calls" FAKE_OUT="Updated x" \
+  OUT="$(cd "$PROJECT" && env PATH="$bare" ACR_BIN="$TMP/acr" FAKE_CALLS="$TMP/calls" FAKE_OUT="Updated x" \
     "$bare/bash" "$SCRIPT" </dev/null 2>"$TMP/err")"; RC=$?; read_calls
   if [[ $RC -eq 0 && -z "$CALLS" ]] && grep -q "neither python3 nor jq" "$TMP/err"; then
     pass; else fail "no JSON tool: expected no update and a warning, got OUT=$OUT calls=$CALLS err=$(cat "$TMP/err")"; fi

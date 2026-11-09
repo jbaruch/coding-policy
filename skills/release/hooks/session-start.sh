@@ -4,8 +4,8 @@
 # The plugin declares this script as its only SessionStart hook: native for
 # Claude Code and Codex, and portable (through `tessl hook run`) for every other
 # agent. `tessl hook run` keeps only the LAST hook's output in a group, and hands
-# a hook only HOME, PATH, TMPDIR and TESSL_*, so HERDR_ENV never reaches it. The
-# native entry keeps the session's environment; the portable run exits at once
+# a hook only HOME, PATH, TMPDIR and TESSL_*. The native entry keeps the
+# session's environment; the portable run exits at once
 # for an agent in NATIVE_AGENTS, so each session runs this once. One entry that
 # merges the statuses itself delivers them all.
 #

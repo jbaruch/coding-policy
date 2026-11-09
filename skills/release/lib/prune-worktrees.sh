@@ -1,13 +1,11 @@
 #!/usr/bin/env bash
-# Remove the spent worker worktrees and local branches a round left behind;
-# report the ones holding work that exists nowhere else, never touch them.
+# Remove spent worktrees and local branches; report the ones holding work
+# that exists nowhere else, never touch them.
 #
-# Every Herdr round provisions worktrees under the worktree root
-# (`provision-worktree.sh`) and the foreman removes the task's own worktree after
-# its merge (`rules/agent-worktree-isolation.md` Cleanup). Review, test and
-# verify worktrees from earlier rounds, and the local branches a removed
-# worktree leaves behind, accumulate until someone notices `git worktree list`
-# scrolling. Which of them are safe to remove is one right answer per input,
+# An agent removes its own worktree after its merge
+# (`rules/agent-worktree-isolation.md` Cleanup). Abandoned worktrees, and the
+# local branches a removed worktree leaves behind, accumulate until someone
+# notices `git worktree list` scrolling. Which of them are safe to remove is one right answer per input,
 # so the decision lives here (`rules/script-delegation.md`).
 #
 # Decision predicate — a worktree under the worktree root, other than the

@@ -11,9 +11,9 @@
 # The owner scripts' decisions have their own suites
 # (lib/tests/test_prune_worktrees.sh,
 # test_prune_remote_branches.sh); these cases cover what the hook adds: it
-# runs them live for this repository, lists only what the operator must
-# decide, never acts in a worker session or in portable mode, and turns a
-# failure into one "could not check" line.
+# runs them live for this repository, from the shared checkout or a linked
+# worktree, natively or under tessl, lists only what the operator must decide,
+# and turns a failure into one "could not check" line.
 #
 # Covers:
 #   1. Removable            -> an idle clean worktree origin holds, a merged
@@ -29,13 +29,11 @@
 #                              unlisted.
 #   5. gh failing           -> nothing on origin is deleted; one could-not-check
 #                              line, never the URL gh printed.
-#   6. Worker session       -> HERDR_ENV in a linked worktree: nothing deleted,
-#                              nothing printed.
-#   7. Portable mode        -> nothing deleted; the questionable list still
-#                              printed.
+#   6. Linked worktree      -> a session in a linked worktree cleans the
+#                              shared repository as the shared checkout does.
+#   7. Portable mode        -> under tessl removable items go as natively, and
+#                              the questionable list is printed.
 #   8. No origin, no repo   -> silent.
-#  13. Portable, linked     -> under tessl a linked worktree runs neither owner
-#                              script and changes no ref.
 #  12. Malformed result     -> an owner result missing documented fields is a
 #                              could-not-check status.
 #  11. Newline path         -> a shared checkout whose name ends in a newline
@@ -302,7 +300,7 @@ main() {
   export GIT_AUTHOR_NAME=Ada GIT_AUTHOR_EMAIL=ada@example.invalid
   export GIT_COMMITTER_NAME=Ada GIT_COMMITTER_EMAIL=ada@example.invalid
   export GIT_AUTHOR_DATE="$FIXTURE_DATE" GIT_COMMITTER_DATE="$FIXTURE_DATE"
-  unset HERDR_ENV SESSION_START_MODE GIT_SSH_COMMAND
+  unset SESSION_START_MODE GIT_SSH_COMMAND
   local ctx
 
   echo "1. removable worktrees and branches go, and nothing is printed"
@@ -378,20 +376,17 @@ main() {
      && [[ "$ctx" != *$'\n'* && "$OUT$ERR" != *s3cr3t* ]]; then pass
   else fail "c5: RC=$RC OUT=$OUT ERR=$ERR"; fi
 
-  echo "6. a Herdr worker session deletes nothing and prints nothing"
+  echo "6. a session in a linked worktree cleans the shared repository"
   mk_case c6
-  quiet "wt worker" git -C "$SHARED" worktree add -q -b review/worker "$ROOT/worker" origin/main
+  quiet "wt session" git -C "$SHARED" worktree add -q -b review/session "$ROOT/session" origin/main
   quiet "wt spent" git -C "$SHARED" worktree add -q --detach "$ROOT/spent" origin/main
   age_wt "$ROOT/spent" "$AGED_MTIME"
   push_branch feat/remote-merged 1
-  run_hook "$ROOT/worker" HERDR_ENV=1
-  local rc_set=$RC out_set=$OUT
-  # Set but empty is still Herdr: the role is unknown, so it acts as a worker.
-  run_hook "$ROOT/worker" HERDR_ENV=
-  if [[ $rc_set -eq 0 && -z "$out_set" && $RC -eq 0 && -z "$OUT" && -e "$ROOT/spent" ]] && on_origin feat/remote-merged; then pass
-  else fail "c6: set RC=$rc_set OUT=$out_set; empty RC=$RC OUT=$OUT ERR=$ERR"; fi
+  run_hook "$ROOT/session"
+  if [[ $RC -eq 0 && -z "$OUT" && ! -e "$ROOT/spent" && -e "$ROOT/session" ]] && ! on_origin feat/remote-merged; then pass
+  else fail "c6: RC=$RC OUT=$OUT ERR=$ERR"; fi
 
-  echo "7. portable mode deletes nothing and still lists what awaits the operator"
+  echo "7. portable mode removes what natively goes and lists what awaits the operator"
   mk_case c7
   quiet "wt spent" git -C "$SHARED" worktree add -q --detach "$ROOT/spent" origin/main
   age_wt "$ROOT/spent" "$AGED_MTIME"
@@ -401,7 +396,7 @@ main() {
   push_branch feat/remote-merged 1
   run_hook "$SHARED" SESSION_START_MODE=portable
   ctx="$(context)"
-  if [[ $RC -eq 0 && -e "$ROOT/spent" ]] && on_origin feat/remote-merged \
+  if [[ $RC -eq 0 && ! -e "$ROOT/spent" ]] && ! on_origin feat/remote-merged \
      && [[ "$ctx" == "Session-start status — 1 item(s)"*"$ROOT/dirty"* ]]; then pass
   else fail "c7: RC=$RC OUT=$OUT ERR=$ERR"; fi
 
@@ -451,28 +446,6 @@ main() {
      && [[ "$ctx_git" == "Session-start status — could not check this repository"*"git is not on PATH"* ]] \
      && [[ "$ctx_py" == "Session-start status — could not check this repository"*"python3 is not on PATH"* ]]; then pass
   else fail "c10: git=$ctx_git python3=$ctx_py"; fi
-
-  echo "13. under tessl a linked worktree runs neither owner script and changes no ref"
-  mk_case c13
-  quiet "wt linked" git -C "$SHARED" worktree add -q -b review/linked13 "$ROOT/linked" origin/main
-  push_branch feat/remote-merged 1
-  local stage13="$CASE/stage13" calls13="$CASE/calls13"
-  stage_plugin "$stage13"
-  cp "${HERE}/../../skills/release/lib/bounded-run.sh" "$stage13/lib/" || die "stage the runner failed"
-  local owner
-  for owner in prune-worktrees.sh prune-remote-branches.sh; do
-    printf '#!/usr/bin/env bash\nset -euo pipefail\nprintf "%%s\\n" "%s" >> %q\nexit 1\n' "$owner" "$calls13" > "$stage13/lib/$owner" \
-      || die "write the recording $owner failed"
-  done
-  local refs_before refs_after
-  refs_before="$(git -C "$SHARED" for-each-ref)" || die "for-each-ref failed"
-  local real_hook13="$HOOK"
-  HOOK="$stage13/hooks/$(basename "$real_hook13")"
-  run_hook "$ROOT/linked" SESSION_START_MODE=portable
-  HOOK="$real_hook13"
-  refs_after="$(git -C "$SHARED" for-each-ref)" || die "for-each-ref failed"
-  if [[ $RC -eq 0 && -z "$OUT" && ! -e "$calls13" && "$refs_before" == "$refs_after" ]] && on_origin feat/remote-merged; then pass
-  else fail "c13: RC=$RC OUT=$OUT ERR=$ERR calls=$(cat "$calls13" 2>&1)"; fi
 
   echo "12. an owner result missing its documented fields is a could-not-check status, never a clean one"
   mk_case c12

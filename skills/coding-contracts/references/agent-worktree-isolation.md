@@ -10,20 +10,16 @@
 ## How to Isolate
 
 - "Worktree" here means an additional working tree created via `git worktree add` — distinct from the base checkout, on its own branch, sharing the same `.git` object store
-- Delegation follows `rules/agent-delegation.md` Delegation
-- For independent sessions outside a Herdr round, use `git worktree add -b <task-branch> ../<repo>-<task>` to create an isolated checkout on a new branch (or `git worktree add ../<repo>-<task> <existing-branch>` to attach to one that already exists), then `cd` in before any mutating operation
+- For an independent session, use `git worktree add -b <task-branch> ../<repo>-<task>` to create an isolated checkout on a new branch (or `git worktree add ../<repo>-<task> <existing-branch>` to attach to one that already exists), then `cd` in before any mutating operation
 
 ## Cleanup
 
 - A worktree's lifecycle ends when its branch merges or the worktree is abandoned
 - An idle clean worktree whose HEAD origin holds counts as abandoned
-- The agent removes its own worktree after the merge unless an explicitly applicable team contract assigns teardown to its coordinator
+- The agent removes its own worktree after the merge
 - When the worktree's branch lands via `skills/release/SKILL.md` Step 7, the post-merge order is mandatory: `cd` back to the base checkout → fast-forward base `main` → `git worktree remove <worktree-path>` → `git branch -d <branch>`. Teardown precedes branch delete
 - Use `git worktree remove <path>`; never `rm -rf` the directory
-- The session-start hook `skills/release/hooks/check-leftover-worktrees.sh` cleans the session's own repository in a native session
-- Under tessl (portable mode), it reports from a dry run in a main checkout and deletes nothing
-- Under tessl, it skips a linked worktree
-- In a Herdr worker session, it deletes nothing
+- The session-start hook `skills/release/hooks/check-leftover-worktrees.sh` cleans the session's own repository, natively and under tessl
 - It removes an idle clean worktree whose HEAD origin holds
 - It deletes a local branch whose tip origin holds or whose tip origin's default branch contains
 - It deletes an unprotected branch on origin merged into the default branch with no open pull request

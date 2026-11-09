@@ -33,8 +33,7 @@
 #     predicate of its own (rules/script-as-black-box.md). It runs only when the
 #     repository has a linked worktree or a local branch besides the checked-out
 #     one, so a plain checkout pays no fetch. A failed or timed-out run warns
-#     and blocks nothing. It never runs in a Herdr worker session, nor when
-#     HERDR_ENV is set and the role cannot be determined (see herdr_role).
+#     and blocks nothing.
 #   - Diagnostics findings in the CHANGED set only (uncommitted .sh/.py):
 #     lint the .sh with shellcheck, the .py with pyright. Skipped when nothing
 #     lintable changed, so a clean handoff costs nothing. An absent engine is
@@ -107,10 +106,7 @@ main() {
   fi
   [[ "$inside" == "true" ]] || return 0
 
-  # Team teardown belongs to its selected coordinator; no runtime or role probe.
-  if [[ -z "${HERDR_ENV+x}" ]]; then
-    read_owner_decisions
-  fi
+  read_owner_decisions
 
   run_changed_diagnostics
   check_dirty_tree
