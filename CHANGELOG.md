@@ -1,3 +1,5 @@
+## 0.7.0 — 2026-11-09
+
 ### Make KISS and YAGNI binding, and apply them
 
 `rules/simplicity.md` preferred the smallest sufficient change but never said no to speculative machinery, and reviewers had nothing to cite against it. A pass over the skills found that machinery everywhere.
