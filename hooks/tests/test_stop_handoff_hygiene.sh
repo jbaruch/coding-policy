@@ -20,15 +20,9 @@
 #      4a. Dirty, unpushed, locked, not yet idle -> never blocking; the idle
 #          dirty and unpushed ones are reported on stderr.
 #      4b. Owner script failure (no origin) -> warn, block nothing.
-#      4c. Herdr worker session -> no worktree finding; diagnostics still gate.
-#          An empty HERDR_ENV still marks the worker.
-#      4d. The foreman's session -> blocks, naming the round's sweep, never
-#          prune-worktrees.sh (case 4 names prune-worktrees.sh outside Herdr).
-#          An empty HERDR_ENV still marks the foreman.
+#      4c. A session inside a linked worktree -> the same worktree finding.
 #      4e. A shared checkout whose name ends in a newline -> still blocks.
 #      4f. A finding naming a newline-bearing path -> reported whole.
-#      4g. HERDR_ENV set, role probes fail (git shim) -> no worktree check,
-#          a skip report naming the diagnostic command; diagnostics still gate.
 #      4h. A hooks directory whose name ends in a newline -> still reaches
 #          the owner scripts and blocks (#487).
 #   5. Dirty tree only -> allow (report-only, not a block).
@@ -113,24 +107,6 @@ mk_python_probe() { # <path>
   chmod +x "$1" || die "could not enable interpreter fixture"
 }
 
-# write_role_shim <dir> <case-pattern> <real-git>: a git stand-in that fails
-# any invocation carrying an argument matching <case-pattern> and passes every
-# other one through to the real git.
-write_role_shim() {
-  mkdir -p "$1" || die "could not create $1"
-  cat > "$1/git" <<SH || die "could not write the git shim in $1"
-#!/usr/bin/env bash
-set -euo pipefail
-for a in "\$@"; do
-  case "\$a" in
-    $2) echo "shim: role probe refused" >&2; exit 1 ;;
-  esac
-done
-exec $(printf '%q' "$3") "\$@"
-SH
-  chmod +x "$1/git" || die "could not make the git shim in $1 executable"
-}
-
 #: The owner script judges idleness at this instant (2020-01-10T00:00:00Z);
 #: an aged fixture is touched to AGED_MTIME, nine days before it.
 PRUNE_NOW=1578614400
@@ -141,7 +117,7 @@ run_hook() {
   local repo="$1" json="$2" pathspec="${3:-$PATH}"
   shift 2
   (( $# )) && shift
-  OUT="$(cd "$repo" && printf '%s' "$json" | env -u HERDR_ENV PATH="$pathspec" WORKTREE_ROOT="$TMP/wt" \
+  OUT="$(cd "$repo" && printf '%s' "$json" | env PATH="$pathspec" WORKTREE_ROOT="$TMP/wt" \
     PRUNE_NOW="$PRUNE_NOW" PRUNE_IDLE_HOURS=24 STOP_PRUNE_BUDGET_SEC=3600 "$@" bash "$HOOK" 2>"$TMP/hook.err")"
   RC=$?
   ERRTEXT="$(cat "$TMP/hook.err")"
@@ -231,7 +207,7 @@ main() {
   g -C "$TMP/r4" worktree add -q "$TMP/wt/r4-wt" -b feat/wt || die "r4 worktree add failed"
   age_wt "$TMP/wt/r4-wt"
   run_hook "$TMP/r4" '{"stop_hook_active":false}'
-  if [[ $RC -eq 0 ]] && reason_has "worktree .*r4-wt \\(feat/wt\\)" && reason_has "prune-worktrees.sh" && ! reason_has "sweep-worktrees.sh" \
+  if [[ $RC -eq 0 ]] && reason_has "worktree .*r4-wt \\(feat/wt\\)" && reason_has "prune-worktrees.sh" \
      && [[ -d "$TMP/wt/r4-wt" ]]; then
     pass; else fail "spent worktree: expected a block naming r4-wt, got RC=$RC OUT=$OUT ERR=$ERRTEXT"; fi
 
@@ -267,26 +243,14 @@ main() {
   if [[ $RC -eq 0 && -z "$OUT" && "$ERRTEXT" == *"worktree check could not run"* ]]; then
     pass; else fail "owner failure: expected a warning and no block, got RC=$RC OUT=$OUT ERR=$ERRTEXT"; fi
 
-  # 4c. The spent worktree of case 4, seen from INSIDE a linked worktree with
-  # HERDR_ENV set: a worker session. Removal is the foreman's, so no worktree
-  # finding; the worker's own changed files still gate.
-  g -C "$TMP/r4" worktree add -q "$TMP/wt/r4-worker" -b review/worker || die "r4 worker add failed"
-  run_hook "$TMP/wt/r4-worker" '{"stop_hook_active":false}' "$PATH" HERDR_ENV=1
-  if [[ $RC -eq 0 && -z "$OUT" ]]; then
-    pass; else fail "worker session: expected silence, got RC=$RC OUT=$OUT"; fi
-  # shellcheck disable=SC2016  # The literal `$x` IS the fixture: the hook's
-  # own shellcheck run has to find something to report.
-  printf 'if [ $x = 1 ]; then :; fi\n' > "$TMP/wt/r4-worker/bad.sh" || die "r4-worker bad.sh failed"
-  run_hook "$TMP/wt/r4-worker" '{"stop_hook_active":false}' "$PATH" HERDR_ENV=1
-  if [[ $RC -eq 0 ]] && reason_has "shellcheck findings" && ! reason_has "prune-worktrees"; then
-    pass; else fail "worker diagnostics: expected a diagnostics block without the worktree finding, got RC=$RC OUT=$OUT"; fi
-  rm -f "$TMP/wt/r4-worker/bad.sh" || die "r4-worker cleanup failed"
-
-  # HERDR_ENV set but empty is still a Herdr session (rules/agent-delegation.md
-  # Two Modes): the worker's worktree finding stays suppressed.
-  run_hook "$TMP/wt/r4-worker" '{"stop_hook_active":false}' "$PATH" HERDR_ENV=
-  if [[ $RC -eq 0 && -z "$OUT" ]]; then
-    pass; else fail "empty HERDR_ENV worker session: expected silence, got RC=$RC OUT=$OUT ERR=$ERRTEXT"; fi
+  # 4c. The spent worktree of case 4, seen from INSIDE another linked
+  # worktree: the hook reads the shared checkout from the inventory and
+  # blocks the same way.
+  g -C "$TMP/r4" worktree add -q "$TMP/wt/r4-session" -b review/session || die "r4 session add failed"
+  run_hook "$TMP/wt/r4-session" '{"stop_hook_active":false}'
+  if [[ $RC -eq 0 ]] && reason_has "worktree .*r4-wt \\(feat/wt\\)" && reason_has "prune-worktrees.sh" \
+     && [[ -d "$TMP/wt/r4-wt" && -d "$TMP/wt/r4-session" ]]; then
+    pass; else fail "linked-worktree session: expected the r4-wt block, got RC=$RC OUT=$OUT ERR=$ERRTEXT"; fi
 
   # 4e. A shared checkout whose name ends in a newline still reaches the
   #     owner script whole: the inventory is read NUL-framed.
@@ -343,41 +307,6 @@ main() {
   else
     echo "4f. skipped: this filesystem refuses a name ending in a newline ($(cat "$TMP/nl.err"))" >&2
   fi
-
-  # 4d. The foreman's own session (main checkout) still blocks with HERDR_ENV
-  # set: the suppression keys on being in a linked worktree, not on Herdr alone.
-  run_hook "$TMP/r4" '{"stop_hook_active":false}' "$PATH" HERDR_ENV=1
-  if [[ $RC -eq 0 && -z "$OUT" && -z "$ERRTEXT" ]]; then
-    pass; else fail "team coordinator: expected general cleanup to defer silently, got RC=$RC OUT=$OUT ERR=$ERRTEXT"; fi
-  run_hook "$TMP/r4" '{"stop_hook_active":false}' "$PATH" HERDR_ENV=
-  if [[ $RC -eq 0 && -z "$OUT" && -z "$ERRTEXT" ]]; then
-    pass; else fail "empty HERDR_ENV team coordinator: expected general cleanup to defer silently, got RC=$RC OUT=$OUT ERR=$ERRTEXT"; fi
-
-  # 4g. HERDR_ENV set and the role probes fail (a git shim on PATH refuses
-  #     them): the role is unknown, so the foreman-only worktree check never
-  #     runs, even from a main checkout holding a spent worktree. The hook says
-  #     why and names the diagnostic command. Its own origin, checkout and
-  #     worktree keep it independent of every other case.
-  mk_origin o4g; clone_from "$BARE" "$TMP/r4g"
-  g -C "$TMP/r4g" worktree add -q "$TMP/wt/r4g-wt" -b feat/r4g || die "r4g worktree add failed"
-  age_wt "$TMP/wt/r4g-wt"
-  local realgit probe
-  realgit="$(command -v git)" || die "no git on PATH"
-  write_role_shim "$TMP/shim4g-both" '--absolute-git-dir|--git-common-dir' "$realgit"
-  write_role_shim "$TMP/shim4g-common" '--git-common-dir' "$realgit"
-  for probe in both common; do
-    run_hook "$TMP/r4g" '{"stop_hook_active":false}' "$TMP/shim4g-$probe:$PATH" HERDR_ENV=1
-    if [[ $RC -eq 0 && -z "$OUT" ]] \
-       && [[ -z "$ERRTEXT" ]]; then
-      pass; else fail "team mode ($probe probe denied): expected no role probe or cleanup, got RC=$RC OUT=$OUT ERR=$ERRTEXT"; fi
-  done
-  # The unknown role still gates the session's own changed files. A stubbed
-  # engine that reports a finding keeps the case host-independent.
-  printf '#!/usr/bin/env bash\necho hi\n' > "$TMP/r4g/new.sh" || die "r4g new.sh failed"
-  mk_stub_bin "$TMP/r4g-bin" 1 0
-  run_hook "$TMP/r4g" '{"stop_hook_active":false}' "$TMP/shim4g-both:$TMP/r4g-bin:$PATH" HERDR_ENV=1
-  if [[ $RC -eq 0 ]] && reason_has "shellcheck findings" && ! reason_has "Worktree and branch check skipped" && ! reason_has "r4g-wt"; then
-    pass; else fail "unknown role diagnostics: expected a diagnostics block without the worktree finding, got RC=$RC OUT=$OUT ERR=$ERRTEXT"; fi
 
   # 5. dirty tree only -> allow (report-only).
   mk_origin o5; clone_from "$BARE" "$TMP/r5"

@@ -27,8 +27,6 @@ command -v jq >/dev/null 2>&1 || { echo "fatal: jq is required to run these test
 source "$SCRIPT"
 set +e
 
-# Tests run standalone unless a case sets HERDR_ENV in its own subshell.
-unset HERDR_ENV
 TMPDIR_TEST=$(mktemp -d -t dismiss-ruled-test.XXXXXX) || { echo "fatal: mktemp -d failed" >&2; exit 2; }
 cleanup_tmp() {
   if ! rm -rf "$TMPDIR_TEST"; then
@@ -71,7 +69,6 @@ run() {
   MOCK_COMPARE='{"status":"ahead","files":[]}'
   MOCK_ISSUE_COMMENTS='[]'
   MOCK_COMMENT_RC=0
-  MOCK_BINDING=""
   if "$@"; then
     PASS_COUNT=$((PASS_COUNT + 1)); echo "  pass: $name" >&2
   else
@@ -179,8 +176,8 @@ gh() {
   esac
 }
 
-# The pinned judge's weighing report as a ruling file: judge authority, no
-# ANSWER. Args: <head> <finding-line>...
+# A ruling claiming a non-operator authority, with no ANSWER.
+# Args: <head> <finding-line>...
 write_judge_ruling() {
   local head="$1"; shift
   {
@@ -200,20 +197,6 @@ write_judge_ruling() {
 OUT=""; RC=0
 invoke() { RC=0; OUT=$( (main owner repo 5 "$@") 2>"${TMPDIR_TEST}/stderr") || RC=$?; }
 invoke_ruled() { invoke --ruling "$RULING" --followup-issue "$ISSUE"; }
-# The same runs inside a Herdr team round: HERDR_ENV set for main alone.
-main_team() { HERDR_ENV=1 main owner repo 5 "$@"; }
-invoke_team() { RC=0; OUT=$( (main_team "$@") 2>"${TMPDIR_TEST}/stderr") || RC=$?; }
-invoke_team_ruled() { invoke_team --ruling "$RULING" --followup-issue "$ISSUE" --task t-632; }
-
-# The real binding check, kept under another name before the stub replaces it.
-eval "real_$(declare -f verify_judge_ruling)"
-
-# The owner-records binding, stubbed: "ok" unless a case sets MOCK_BINDING to a
-# refusal. Records the task and ruling it was asked about.
-verify_judge_ruling() {
-  printf '%s %s\n' "$1" "$2" > "${TMPDIR_TEST}/binding-call"
-  printf '%s' "${MOCK_BINDING:-ok $(python3 -c 'import hashlib,sys; print(hashlib.sha256(open(sys.argv[1],"rb").read()).hexdigest())' "$2")}" > "$3"
-}
 dismissals() { grep -c '^dismiss ' "$EVENTS"; }
 comments() { grep -c '^comment$' "$EVENTS"; }
 digest_of_ruling() { python3 -c 'import hashlib,sys; print(hashlib.sha256(open(sys.argv[1],"rb").read()).hexdigest()[:16])' "$RULING"; }
@@ -500,8 +483,7 @@ check_newer_schema_refused_unmodified() {
   assert_eq "ruling bytes unchanged" "$before" "$after" || return 1
   assert_eq "nothing posted" "0" "$(wc -l < "$EVENTS" | tr -d ' ')"
 }
-t_standalone_newer_schema_refuses_unmodified() { check_newer_schema_refused_unmodified invoke_ruled write_ruling; }
-t_team_round_newer_schema_refuses_unmodified() { check_newer_schema_refused_unmodified invoke_team_ruled write_judge_ruling; }
+t_newer_schema_refuses_unmodified() { check_newer_schema_refused_unmodified invoke_ruled write_ruling; }
 
 t_version_1_ruling_is_upgraded_then_read() {
   set_review CHANGES_REQUESTED "$HEAD_SHA" "$BODY_TWO"
@@ -514,23 +496,6 @@ t_version_1_ruling_is_upgraded_then_read() {
   assert_eq "upgraded lines" "schema_version: 2|AUTHORITY: operator" \
     "$(grep -E '^(schema_version|AUTHORITY):' "$RULING" | paste -sd'|' -)" || return 1
   grep -qF "$DECLINE_ONE" "$RULING" || { echo "    FAIL: the upgrade kept the FINDING lines" >&2; return 1; }
-}
-
-t_team_round_version_1_ruling_refuses_unmodified() {
-  set_review CHANGES_REQUESTED "$HEAD_SHA" "$BODY_TWO"
-  write_judge_ruling "$HEAD_SHA" "$DECLINE_ONE" "$DECLINE_TWO"
-  grep -v '^AUTHORITY:' "$RULING" | sed 's/^schema_version: 2$/schema_version: 1/' > "${RULING}.tmp" \
-    && mv "${RULING}.tmp" "$RULING"
-  local before after
-  before=$(digest_of_ruling) || { echo "    FAIL: could not digest the ruling before the run" >&2; return 1; }
-  [[ -n "$before" ]] || { echo "    FAIL: empty digest of the ruling before the run" >&2; return 1; }
-  invoke_team_ruled
-  after=$(digest_of_ruling) || { echo "    FAIL: could not digest the ruling after the run" >&2; return 1; }
-  [[ -n "$after" ]] || { echo "    FAIL: empty digest of the ruling after the run" >&2; return 1; }
-  assert_eq "exit" "1" "$RC" || return 1
-  assert_unmet "is malformed — re-dispatch the pinned judge" "the team-round schema" || return 1
-  assert_eq "ruling bytes unchanged" "$before" "$after" || return 1
-  assert_eq "nothing posted" "0" "$(wc -l < "$EVENTS" | tr -d ' ')"
 }
 
 t_unreadable_ruling_bytes_exit_2_without_traceback() {
@@ -583,138 +548,12 @@ t_usage_errors_exit_2() {
   assert_eq "stdout empty" "" "$OUT"
 }
 
-t_team_round_judge_report_dismisses() {
-  set_review CHANGES_REQUESTED "$HEAD_SHA" "$BODY_TWO"
-  write_judge_ruling "$HEAD_SHA" "$DECLINE_ONE" "$DEFER_TWO"
-  invoke_team_ruled
-  assert_eq "exit" "0" "$RC" || return 1
-  assert_eq "binding asked about" "t-632 ${RULING}" "$(cat "${TMPDIR_TEST}/binding-call")" || return 1
-  assert_eq "result" "dismissed" "$(jq -r .result <<<"$OUT")" || return 1
-  assert_eq "comment then dismissal" "comment" "$(head -1 "$EVENTS")" || return 1
-  assert_eq "one dismissal" "1" "$(dismissals)"
-}
-
-t_team_round_operator_ruling_refuses() {
-  set_review CHANGES_REQUESTED "$HEAD_SHA" "$BODY_TWO"
-  write_ruling "$HEAD_SHA" "$DECLINE_ONE" "$DECLINE_TWO"
-  invoke_team_ruled
-  assert_eq "exit" "1" "$RC" || return 1
-  assert_unmet "pinned judge weighs" "the team-round authority" || return 1
-  assert_eq "nothing posted" "0" "$(wc -l < "$EVENTS" | tr -d ' ')"
-}
-
-t_unbound_judge_ruling_refuses() {
-  set_review CHANGES_REQUESTED "$HEAD_SHA" "$BODY_TWO"
-  write_judge_ruling "$HEAD_SHA" "$DECLINE_ONE" "$DECLINE_TWO"
-  MOCK_BINDING="not the report supervision enrolled for judge dispatch d1"
-  invoke_team_ruled
-  assert_eq "exit" "1" "$RC" || return 1
-  assert_unmet "not the pinned judge's enrolled weighing report" "the unbound ruling" || return 1
-  assert_eq "nothing posted" "0" "$(wc -l < "$EVENTS" | tr -d ' ')"
-}
-
-# Exercise a missing optional owner independently of sibling plugin installs.
-t_real_binding_reports_the_foreman_refusal() {
-  write_judge_ruling "$HEAD_SHA" "$DECLINE_ONE"
-  local out="${TMPDIR_TEST}/real-binding" rc=0 stage="${TMPDIR_TEST}/missing-owner/coding-policy/skills/release"
-  mkdir -p "$stage" || { echo "    FAIL: cannot create missing-owner fixture" >&2; return 1; }
-  DISMISS_DIR="$stage" XDG_CONFIG_HOME="${TMPDIR_TEST}/xdg-config" XDG_STATE_HOME="${TMPDIR_TEST}/xdg-state" \
-    real_verify_judge_ruling t-632 "$RULING" "$out" 2>"${TMPDIR_TEST}/stderr" || rc=$?
-  assert_eq "missing optional owner is a tool failure" "2" "$rc" || return 1
-  [[ ! -e "$out" ]] || { echo "    FAIL: missing owner must emit no binding" >&2; return 1; }
-  grep -q "herdr-policy" "${TMPDIR_TEST}/stderr"
-}
-
-# A hostile CDPATH must not redirect the script-dir resolver (#637): a
-# relative `cd` would land in the decoy and print its path, so the team-round
-# binding would look for a foreman that is not the sibling one.
-t_hostile_cdpath_keeps_the_sibling_foreman() {
-  local decoy="${TMPDIR_TEST}/decoy" stage="${TMPDIR_TEST}/stage" out
-  mkdir -p "${decoy}/release" "${stage}/coding-policy/skills/release" "${stage}/herdr-policy/skills/herdr-foreman" \
-    || { echo "    FAIL: cannot build the CDPATH fixture" >&2; return 1; }
-  cp "${SCRIPT%/*}/review-lanes.sh" "${stage}/coding-policy/skills/release/review-lanes.sh" || return 1
-  cp "$SCRIPT" "${stage}/coding-policy/skills/release/dismiss-ruled-review.sh" || { echo "    FAIL: cannot stage the script" >&2; return 1; }
-  printf '#!/usr/bin/env bash\necho "sibling $*" > "%s"\necho "{\\"sha256\\": \\"%s\\"}"\nexit 0\n' "${TMPDIR_TEST}/foreman-called" "$(printf 'a%.0s' {1..64})" \
-    > "${stage}/herdr-policy/skills/herdr-foreman/foreman.sh" || { echo "    FAIL: cannot stage the foreman stub" >&2; return 1; }
-  rm -f "${TMPDIR_TEST}/foreman-called"
-  out="${TMPDIR_TEST}/hostile-binding"
-  ( cd "$stage" && CDPATH="$decoy" bash -c 'source coding-policy/skills/release/dismiss-ruled-review.sh; set +e; verify_judge_ruling t-632 /r/x.md "$1"' _ "$out" ) \
-    2>"${TMPDIR_TEST}/stderr" || { echo "    FAIL: the staged binding check exited non-zero: $(cat "${TMPDIR_TEST}/stderr")" >&2; return 1; }
-  assert_eq "binding result" "ok $(printf 'a%.0s' {1..64})" "$(cat "$out")" || return 1
-  assert_eq "sibling foreman ran" "sibling verify-ruling --task t-632 --ruling /r/x.md" "$(cat "${TMPDIR_TEST}/foreman-called")"
-}
-
-t_ruling_changed_since_verification_refuses() {
-  set_review CHANGES_REQUESTED "$HEAD_SHA" "$BODY_TWO"
-  write_judge_ruling "$HEAD_SHA" "$DECLINE_ONE" "$DECLINE_TWO"
-  MOCK_BINDING="ok $(printf '0%.0s' {1..64})"
-  invoke_team_ruled
-  assert_eq "exit" "1" "$RC" || return 1
-  assert_unmet "ruling changed since verification — re-run" "the digest mismatch" || return 1
-  assert_eq "zero comments" "0" "$(comments)" || return 1
-  assert_eq "zero dismissals" "0" "$(dismissals)"
-}
-
-# The real binding against a staged foreman stub. Args: <stub-exit> <stub-stderr>.
-stage_foreman() {
-  local stage="${TMPDIR_TEST}/foreman-stage"
-  mkdir -p "${stage}/coding-policy/skills/release" "${stage}/herdr-policy/skills/herdr-foreman" || { echo "fatal: cannot stage the foreman" >&2; exit 2; }
-  printf '%s' "$2" > "${stage}/stderr" || { echo "fatal: cannot stage the foreman stderr" >&2; exit 2; }
-  printf '#!/usr/bin/env bash\ncat "%s" >&2\nexit %s\n' "${stage}/stderr" "$1" > "${stage}/herdr-policy/skills/herdr-foreman/foreman.sh" \
-    || { echo "fatal: cannot stage the foreman stub" >&2; exit 2; }
-  STAGED_DIR="${stage}/coding-policy/skills/release"
-}
-invoke_team_real_binding() {
-  RC=0
-  # shellcheck disable=SC2034,SC2317  # DISMISS_DIR is read by the sourced real_verify_judge_ruling; the override runs indirectly via main_team.
-  OUT=$( (DISMISS_DIR="$STAGED_DIR"; verify_judge_ruling() { real_verify_judge_ruling "$@"; }
-          main_team --ruling "$RULING" --followup-issue "$ISSUE" --task t-632) 2>"${TMPDIR_TEST}/stderr") || RC=$?
-}
-
-t_foreman_refusal_is_unmet() {
-  set_review CHANGES_REQUESTED "$HEAD_SHA" "$BODY_TWO"
-  write_judge_ruling "$HEAD_SHA" "$DECLINE_ONE" "$DECLINE_TWO"
-  stage_foreman 1 $'foreman: a warning line first\n{\n  "error": "usage_error",\n  "message": "not the weighing brief",\n  "details": {}\n}\n'
-  invoke_team_real_binding
-  assert_eq "exit" "1" "$RC" || return 1
-  assert_unmet "not the weighing brief" "the foreman refusal" || return 1
-  assert_eq "nothing posted" "0" "$(wc -l < "$EVENTS" | tr -d ' ')"
-}
-
-t_foreman_usage_exit_is_a_tool_error() {
-  set_review CHANGES_REQUESTED "$HEAD_SHA" "$BODY_TWO"
-  write_judge_ruling "$HEAD_SHA" "$DECLINE_ONE" "$DECLINE_TWO"
-  stage_foreman 2 $'usage: foreman [-h] COMMAND\nforeman: error: unrecognized arguments\n'
-  invoke_team_real_binding
-  assert_eq "exit" "2" "$RC" || return 1
-  assert_eq "stdout empty" "" "$OUT" || return 1
-  assert_eq "nothing posted" "0" "$(wc -l < "$EVENTS" | tr -d ' ')"
-}
-
-t_foreman_exit_1_with_garbage_is_a_tool_error() {
-  set_review CHANGES_REQUESTED "$HEAD_SHA" "$BODY_TWO"
-  write_judge_ruling "$HEAD_SHA" "$DECLINE_ONE" "$DECLINE_TWO"
-  stage_foreman 1 $'Traceback (most recent call last):\n  boom\n'
-  invoke_team_real_binding
-  assert_eq "exit" "2" "$RC" || return 1
-  assert_eq "stdout empty" "" "$OUT" || return 1
-  grep -q "herdr-policy plugin" "${TMPDIR_TEST}/stderr" || { echo "    FAIL: no actionable message" >&2; return 1; }
-  assert_eq "nothing posted" "0" "$(wc -l < "$EVENTS" | tr -d ' ')"
-}
-
-t_team_round_ruling_without_task_is_usage() {
-  write_judge_ruling "$HEAD_SHA" "$DECLINE_ONE" "$DECLINE_TWO"
-  invoke_team --ruling "$RULING" --followup-issue "$ISSUE"
-  assert_eq "exit" "2" "$RC" || return 1
-  assert_eq "stdout empty" "" "$OUT"
-}
-
-t_standalone_judge_ruling_refuses() {
+t_judge_authority_ruling_refuses() {
   set_review CHANGES_REQUESTED "$HEAD_SHA" "$BODY_TWO"
   write_judge_ruling "$HEAD_SHA" "$DECLINE_ONE" "$DECLINE_TWO"
   invoke_ruled
   assert_eq "exit" "1" "$RC" || return 1
-  assert_unmet "operator is the judge" "the standalone authority" || return 1
+  assert_unmet "authority must be 'operator', not 'judge'" "the authority" || return 1
   assert_eq "nothing posted" "0" "$(wc -l < "$EVENTS" | tr -d ' ')"
 }
 
@@ -726,13 +565,6 @@ t_missing_authority_refuses() {
   assert_eq "exit" "1" "$RC" || return 1
   assert_unmet "AUTHORITY:" "the missing authority" || return 1
   assert_eq "no dismissal" "0" "$(dismissals)"
-}
-
-t_team_round_list_mode_emits_findings() {
-  set_review CHANGES_REQUESTED "$HEAD_SHA" "$BODY_TWO"
-  invoke_team
-  assert_eq "exit" "0" "$RC" || return 1
-  assert_eq "result" "findings" "$(jq -r .result <<<"$OUT")"
 }
 
 # End to end on the marker: the dismissal message this script actually sends
@@ -823,27 +655,14 @@ run_suite() {
   run "carry-over across a diverged compare refuses"  t_carry_over_diverged_refuses
   run "a missing or empty ANSWER refuses"             t_missing_answer_refuses
   run "a missing or other schema_version refuses"             t_schema_missing_or_other_refuses
-  run "standalone: a newer schema refuses, unmodified" t_standalone_newer_schema_refuses_unmodified
-  run "team round: a newer schema refuses, unmodified" t_team_round_newer_schema_refuses_unmodified
+  run "a newer schema refuses, unmodified"            t_newer_schema_refuses_unmodified
   run "a version-1 ruling is upgraded, then read"     t_version_1_ruling_is_upgraded_then_read
-  run "team round: a version-1 ruling refuses, unmodified" t_team_round_version_1_ruling_refuses_unmodified
   run "non-UTF-8 ruling bytes exit 2, no traceback"   t_unreadable_ruling_bytes_exit_2_without_traceback
   run "a malformed ruling refuses"                    t_malformed_ruling_refuses
   run "list mode emits the blocking findings"         t_list_mode_emits_findings
   run "usage errors exit 2"                           t_usage_errors_exit_2
-  run "team round: the judge's report dismisses"      t_team_round_judge_report_dismisses
-  run "team round: an operator ruling refuses"        t_team_round_operator_ruling_refuses
-  run "team round: an unbound judge ruling refuses"   t_unbound_judge_ruling_refuses
-  run "team round: a ruling without --task is usage"  t_team_round_ruling_without_task_is_usage
-  run "a foreman refusal is unmet"                    t_foreman_refusal_is_unmet
-  run "a foreman usage exit is a tool error"          t_foreman_usage_exit_is_a_tool_error
-  run "foreman exit 1 with garbage is a tool error"   t_foreman_exit_1_with_garbage_is_a_tool_error
-  run "a ruling changed since verification refuses"   t_ruling_changed_since_verification_refuses
-  run "a hostile CDPATH keeps the sibling foreman"    t_hostile_cdpath_keeps_the_sibling_foreman
-  run "the real binding reports the foreman refusal"  t_real_binding_reports_the_foreman_refusal
-  run "standalone: a judge ruling refuses"            t_standalone_judge_ruling_refuses
+  run "a judge-authority ruling refuses"             t_judge_authority_ruling_refuses
   run "a missing AUTHORITY line refuses"              t_missing_authority_refuses
-  run "team round: list mode emits the findings"      t_team_round_list_mode_emits_findings
   run "the sent marker reads RULED and sweeps"        t_sent_marker_reads_ruled_and_sweeps
   printf '{"suite":"test_dismiss_ruled_review.sh","passed":%d,"failed":%d}\n' "$PASS_COUNT" "$FAIL_COUNT"
   [[ $FAIL_COUNT -eq 0 ]]

@@ -763,7 +763,7 @@ SHIM
   add_wt "$SHARED" feat/stale "$stale"; commit_in "$stale" s.txt
   printf 'untracked work\n' > "$stale/notes.txt" || die "untracked write failed"
   quiet "held worktree add failed" git -C "$SHARED" worktree add -q --detach "$held" origin/main
-  git -C "$SHARED" worktree lock --reason "Active Herdr reviewer" "$held" || die "worktree lock failed"
+  git -C "$SHARED" worktree lock --reason "Active reviewer" "$held" || die "worktree lock failed"
   local stale_tip
   stale_tip="$(git -C "$stale" rev-parse HEAD)" || die "rev-parse stale HEAD failed"
   start_sleeper "$busy"
@@ -783,7 +783,7 @@ SHIM
     && has_branch "$SHARED" feat/stale && [[ "$(git -C "$SHARED" rev-parse feat/stale)" == "$stale_tip" ]]; then
     pass; else fail "dirty kept: out=$OUT err=$ERRTEXT"; fi
   echo "38. a locked idle worktree is kept with its lock reason"
-  if [[ "$(kept_reason "$held")" == locked && "$(lock_reason_of "$held")" == "Active Herdr reviewer" ]] && listed "$SHARED" "$held"; then
+  if [[ "$(kept_reason "$held")" == locked && "$(lock_reason_of "$held")" == "Active reviewer" ]] && listed "$SHARED" "$held"; then
     pass; else fail "locked: out=$OUT"; fi
   git -C "$SHARED" worktree unlock "$held" || die "worktree unlock failed"
 

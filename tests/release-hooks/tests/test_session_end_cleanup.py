@@ -52,8 +52,7 @@ class SessionEndCleanupTest(unittest.TestCase):
         self.payload: dict[str, Any] = {"hook_event_name": "SessionEnd", "session_id": SESSION,
                                        "scratchpad_dir": str(self.pad), "reason": "prompt_input_exit"}
         self.env = dict(os.environ, CLAUDE_CODE_TMPDIR=str(self.native_root), TMPDIR=str(self.native_root))
-        for name in ("CLAUDE_JOB_DIR", "HERDR_ENV", "HERDR_PANE_ID"):
-            self.env.pop(name, None)
+        self.env.pop("CLAUDE_JOB_DIR", None)
 
     def private_directory(self, path: Path) -> Path:
         for parent in reversed((path, *path.parents)):
@@ -160,12 +159,6 @@ class SessionEndCleanupTest(unittest.TestCase):
         background = self.private_directory(self.root / "background-job")
         self.run_hook(env={**self.env, "CLAUDE_JOB_DIR": str(background)})
         self.assert_preserved()
-
-    def test_foreground_herdr_marker_may_cleanup_its_own_opt_in_namespace(self) -> None:
-        self.run_hook(env={**self.env, "HERDR_ENV": "owned-fixture"})
-        self.assertFalse(self.disposable.exists())
-        self.assertTrue(self.note.exists())
-        self.assertTrue(self.other_file.exists())
 
     def test_explicit_background_work_and_continuations_preserve_scratchpad(self) -> None:
         for field, value in (("background_tasks", [{"id": "owned-background-fixture"}]),

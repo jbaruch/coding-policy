@@ -7,22 +7,20 @@ The full preconditions of each `rules/review-severity.md` carve-out, moved out o
 
 - A weighing asks whether fixing a finding is worth its cost, never whether the finding is real
 - The ruling file follows the format the `skills/release/dismiss-ruled-review.sh` header names
-- An explicitly selected team policy may supply a verified ruling through `skills/release/references/team-ruling-interface.md`; its own nomination and report contract applies.
-- In standalone mode the operator is the judge
-- The standalone agent nominates a finding only when it sits on lines the previous fix push added, or with a cited reachability claim marking it marginal
-- The standalone agent asks the operator one decision question per gate, carrying every nomination and its claim
+- The operator is the judge
+- The agent nominates a finding only when it sits on lines the previous fix push added, or with a cited reachability claim marking it marginal
+- The agent asks the operator one decision question per gate, carrying every nomination and its claim
 - The question never blocks the round
 - The agent keeps fixing until the answer arrives
 - No answer means `fix`
 - The agent records the answer verbatim as the ruling file
 - Preconditions (all required):
   1. The ruling rules the finding `defer` or `decline`
-  2. In standalone mode, the ruling file carries `AUTHORITY: operator` and quotes the operator's answer verbatim
-  3. A team ruling carries `AUTHORITY: judge` and the optional owner interface verifies the report and returns the SHA256 of the exact enrolled bytes.
-  4. The ruling names the finding at its `HEAD:`, and the finding's file is unchanged from that commit to the head
-  5. The finding is under no floor
-  6. The finding is entered in the task's follow-up issue citing the ruling, a `decline` labelled won't-fix
-  7. Every other release gate holds
+  2. The ruling file carries `AUTHORITY: operator` and quotes the operator's answer verbatim
+  3. The ruling names the finding at its `HEAD:`, and the finding's file is unchanged from that commit to the head
+  4. The finding is under no floor
+  5. The finding is entered in the task's follow-up issue citing the ruling, a `decline` labelled won't-fix
+  6. Every other release gate holds
 - Floors:
   - a failing test, lint, diagnostic or required check
   - a security or data-loss defect reachable by normal inputs

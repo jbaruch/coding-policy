@@ -1,6 +1,6 @@
 {
   "name": "jbaruch/coding-policy",
-  "version": "0.5.25",
+  "version": "0.6.0",
   "description": "General-purpose coding policy for Baruch's AI agents",
   "private": false,
   "skills": [
@@ -36,8 +36,7 @@
     "rules/simplicity.md",
     "rules/response-clarity.md",
     "rules/ship-on-green.md",
-    "rules/hook-action-reporting.md",
-    "rules/agent-delegation.md"
+    "rules/hook-action-reporting.md"
   ],
   "hooks": {
     "SessionStart": [

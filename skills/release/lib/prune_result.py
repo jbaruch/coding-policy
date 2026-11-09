@@ -3,8 +3,8 @@
 `prune-worktrees.sh` and `prune-remote-branches.sh` own their result shapes
 (their top-of-file contracts). Every reader that renders a result checks it
 here first, so a malformed result becomes a reported error rather than a
-crash part-way through a report: `sweep-worktrees.sh` and the session-start
-hook `hooks/check-leftover-worktrees.sh`.
+crash part-way through a report: the session-start hook
+`hooks/check-leftover-worktrees.sh`.
 """
 
 
