@@ -1,3 +1,13 @@
+### Trust central main history, not a byte pin
+
+`skills/release/fleet_publish_producer.py` pinned the git blob hashes of 23 publisher files in `TRUSTED_PRODUCERS`, anchored to the installed reader's own blob, and a test failed CI whenever any of those bytes changed. A comment edit to `lib/bounded-run.sh` during the Herdr removal (0.6.0) tripped it. Renewal was a code edit by whoever changed the code, so the pin enforced no review; it made every typo fix a trust-protocol version. KISS and YAGNI (0.7.0) cut it.
+
+- A publisher, poller or finalizer run is now a supported producer when its workflow commit is on coding-policy's main history. `verify_workflow_protocol` keeps the repository, default-branch and ancestry checks and reads no source trees. `TRUSTED_PRODUCERS`, `PRODUCER_PATHS`, `local_owner_blob` and the renewal test are gone.
+- History integrity moves to the platform: a `main-append-only` repository ruleset (no force-push, no deletion, no bypass) went live with this change. Requiring PRs and checks through a ruleset was tried and refused. GitHub will not let the GitHub Actions app bypass rules on a user-owned repository, and the publish workflow's CHANGELOG stamp is a direct `GITHUB_TOKEN` push.
+- The three activated pre-0.8 graphs stay as frozen `HISTORICAL_PRODUCERS`. `historical_pinset` matches a run's tree against them to write and read historical-source-proof records; the one stored proof (run 40753100316) still verifies. The sets never change, and new producers add none.
+- Rollout: a consumer still on an older installed reader checks runs against its old pins, so it holds confirmations of runs produced after this merge (`unknown_producer`) until its session-start update brings it to 0.8.0. That is fail-closed and self-healing.
+- Tests follow the semantics. Producer tests cover ancestry and the frozen graphs. Resolver, poll-cache, transport and historical fixtures drop their synthetic 23-file trees and pin patches. Two budget tests used "more than 128 calls" as a proxy for needing the 512-command client; without the tree walk they make fewer reads, so one now uses an over-budget graph and the other keeps only the 512 ceiling.
+
 ## 0.7.0 — 2026-11-09
 
 ### Make KISS and YAGNI binding, and apply them
