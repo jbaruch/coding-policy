@@ -2,7 +2,7 @@
 # Sync the local default branch with origin at session start, or report why not.
 #
 # A SessionStart hook implementing rules/sync-before-work.md as a deterministic
-# check: it fetches origin (throttled), and if the local default branch trails
+# check: it fetches origin, and if the local default branch trails
 # origin/<default>, injects a short "sync before working" notice via
 # additionalContext. The rule says fetch + sync before reading/editing, but
 # relied on the agent remembering; we hit stale-checkout ("main is behind")
@@ -11,13 +11,10 @@
 # Design choices:
 #   - It DOES something (fetches + compares refs), it does not re-state a rule.
 #   - SessionStart fires once per session, not per turn — no per-turn tax.
-#   - Fetches every session by default: an unverified answer would only hand the
-#     agent the fetch this hook can run in seconds. SYNC_THROTTLE_HOURS (default 0)
-#     can still space fetches out: the fetch then runs at most once per window
-#     per repo, so rapid session churn doesn't hammer the network. Without a
-#     fresh fetch this session the remote-tracking ref may be stale, so a
-#     throttled (or failed) fetch reports "sync not verified" rather than a
-#     definitive conclusion (rules/sync-before-work.md).
+#   - Fetches every session: an unverified answer would only hand the agent the
+#     fetch this hook can run in seconds. A failed fetch reports "sync not
+#     verified" rather than a conclusion drawn from a possibly stale
+#     remote-tracking ref (rules/sync-before-work.md).
 #   - The fetch is time-bounded (timeout/gtimeout, else git's HTTP low-speed and ssh
 #     connect/keepalive limits) so a hung network can't
 #     stall session start.
@@ -33,17 +30,13 @@
 #           "Session-start status — " marker (rules/hook-action-reporting.md) —
 #           reporting in-sync, ahead, fast-forwarded, behind (fast-forward refused),
 #           or diverged after a fresh fetch, or "sync not verified" when the
-#           fetch was throttled or failed.
+#           fetch failed.
 #   exit  : always 0. Every best-effort failure emits an actionable stderr warning
 #           and continues/no-ops (rules/error-handling.md Shell Error Handling).
 #           Non-repo, no origin, and no local default branch are silent no-ops —
 #           the sync check does not apply, so those sessions stay quiet.
-#   state : $SYNC_STATE_DIR/sync-<repo-key> (default ${TMPDIR:-/tmp}/coding-policy-sync),
-#           a per-repo throttle stamp (keyed by toplevel path). Schema documented
-#           in skills/release/state-schema.md: one line "<schema_version> <checked_at>".
-#   env   : SYNC_THROTTLE_HOURS (default 0 = every session), SYNC_FETCH_TIMEOUT (default 10s),
-#           SYNC_STATE_DIR (tests), SYNC_NOW (test-only injected clock; defaults
-#           to `date +%s`).
+#   state : none.
+#   env   : SYNC_FETCH_TIMEOUT (default 10s).
 set -euo pipefail
 
 warn() { printf 'check-git-sync: %s\n' "$1" >&2; }
@@ -102,10 +95,8 @@ drift_counts() { # <default-branch>
 }
 
 main() {
-  local THROTTLE_HOURS="${SYNC_THROTTLE_HOURS:-0}"
   local FETCH_TIMEOUT="${SYNC_FETCH_TIMEOUT:-10}"
-  local STATE_DIR="${SYNC_STATE_DIR:-${TMPDIR:-/tmp}/coding-policy-sync}"
-  local rc db inside cand now top repo_key stamp sv ts should_fetch preserve_future fetch_failed ahead behind
+  local rc db inside cand ahead behind
   local -a fetch
 
   # git is required to produce a signal; its absence is an expected environment
@@ -133,11 +124,6 @@ main() {
     if (( rc == 2 )); then return 0; fi
     warn "git remote get-url origin failed (exit ${rc}) — run \`git remote -v\` to inspect; skipping sync check"
     return 0
-  fi
-
-  if ! [[ "$THROTTLE_HOURS" =~ ^[0-9]+$ ]]; then
-    warn "SYNC_THROTTLE_HOURS='${THROTTLE_HOURS}' is not an integer — using 0 (fetch every session)"
-    THROTTLE_HOURS=0
   fi
 
   # Resolve the remote default branch. Primary path: origin/HEAD's symbolic ref
@@ -172,99 +158,27 @@ main() {
   # git failure before returning "absent".
   ref_exists "refs/heads/$db" || return 0
 
-  # Resolve the clock. A test may inject SYNC_NOW; otherwise read the system clock
-  # and handle its failure. Validate as an integer before any arithmetic so a
-  # malformed value can't abort the hook under set -e.
-  if [[ -n "${SYNC_NOW:-}" ]]; then
-    now="$SYNC_NOW"
-  elif ! now="$(date +%s)"; then
-    warn "cannot read the system clock — skipping sync check"
-    return 0
+  # Repo hooks are off for the fetch: updating refs runs
+  # `reference-transaction`, and session start must never run repo code.
+  # Time-bound the fetch so a hung network can't stall session start:
+  # timeout/gtimeout when present, else git's own HTTP low-speed limit and ssh
+  # connect/keepalive timeouts.
+  # Zero or a non-number would switch the bound off; fall back to the default.
+  [[ "$FETCH_TIMEOUT" =~ ^[1-9][0-9]*$ ]] || FETCH_TIMEOUT=10
+  if command -v timeout >/dev/null 2>&1; then
+    fetch=(timeout "$FETCH_TIMEOUT" git -c core.hooksPath=/dev/null fetch --quiet origin)
+  elif command -v gtimeout >/dev/null 2>&1; then
+    fetch=(gtimeout "$FETCH_TIMEOUT" git -c core.hooksPath=/dev/null fetch --quiet origin)
+  else
+    fetch=(env "GIT_SSH_COMMAND=${GIT_SSH_COMMAND:-ssh} -o ConnectTimeout=${FETCH_TIMEOUT} -o ServerAliveInterval=5 -o ServerAliveCountMax=2"
+      git -c core.hooksPath=/dev/null -c http.lowSpeedLimit=1000 -c "http.lowSpeedTime=${FETCH_TIMEOUT}" fetch --quiet origin)
   fi
-  if ! [[ "$now" =~ ^[0-9]+$ ]]; then
-    warn "clock value '${now}' is not an integer — unset SYNC_NOW; skipping sync check"
-    return 0
-  fi
-
-  # Per-repo throttle stamp, keyed by the toplevel path so sibling clones throttle
-  # independently. cksum gives a stable filename-safe key for an arbitrary path.
-  if ! top="$(git rev-parse --show-toplevel 2>/dev/null)"; then
-    warn "git rev-parse --show-toplevel failed — keying the throttle stamp on \$PWD instead"
-    top="$PWD"
-  fi
-  # A cksum/cut failure would abort the assignment under set -e and break the
-  # always-exit-0 contract, so handle it: fall back to an un-throttled run.
-  if ! repo_key="$(printf '%s' "$top" | cksum | cut -d' ' -f1)"; then
-    warn "could not derive a throttle key for ${top} — sync check will not throttle this run"
-    repo_key=""
-  fi
-  stamp="${STATE_DIR}/sync-${repo_key}"
-
-  # Throttle stamp schema (see skills/release/state-schema.md): one line "<schema_version>
-  # <checked_at-epoch>". Per rules/stateful-artifacts.md Migration Policy:
-  #   - schema_version 1 within the window => throttle (skip the fetch).
-  #   - a future version (sv > 1) => this hook is lagging: no usable prior state
-  #     (fetch), and DO NOT downgrade the record — preserve it (preserve_future).
-  #   - anything else (old bare-integer, corrupt, absent) => no prior state
-  #     (fetch), safe to rewrite as version 1.
-  # With no throttle key the fallback fetches unconditionally (never throttles).
-  should_fetch=1
-  preserve_future=0
-  fetch_failed=0
-  if [[ -n "$repo_key" && -r "$stamp" ]]; then
-    sv=""; ts=""
-    read -r sv ts < "$stamp" || { sv=""; ts=""; }
-    if [[ "$sv" =~ ^[0-9]+$ ]] && (( sv > 1 )); then
-      preserve_future=1
-    elif [[ "$sv" == "1" && "$ts" =~ ^[0-9]+$ ]] && (( now - ts < THROTTLE_HOURS * 3600 )); then
-      should_fetch=0
-    fi
-  fi
-
-  if (( should_fetch )); then
-    # Record the fetch up front so a slow/failed fetch still throttles the next
-    # session rather than retrying the network on every start. Skipped when no
-    # throttle key was derived, and when a future-version record must be
-    # preserved rather than downgraded.
-    if [[ -n "$repo_key" ]] && (( preserve_future == 0 )); then
-      if mkdir -p "$STATE_DIR"; then
-        printf '1 %s\n' "$now" > "$stamp" ||
-          warn "cannot write throttle stamp ${stamp} — check permissions on ${STATE_DIR}; will re-fetch next session"
-      else
-        warn "cannot create state dir ${STATE_DIR} — check permissions or set SYNC_STATE_DIR; sync check will not throttle"
-      fi
-    fi
-
-    # Repo hooks are off for the fetch: updating refs runs
-    # `reference-transaction`, and session start must never run repo code.
-    # Time-bound the fetch so a hung network can't stall session start:
-    # timeout/gtimeout when present, else git's own HTTP low-speed limit and ssh
-    # connect/keepalive timeouts.
-    # Zero or a non-number would switch the bound off; fall back to the default.
-    [[ "$FETCH_TIMEOUT" =~ ^[1-9][0-9]*$ ]] || FETCH_TIMEOUT=10
-    if command -v timeout >/dev/null 2>&1; then
-      fetch=(timeout "$FETCH_TIMEOUT" git -c core.hooksPath=/dev/null fetch --quiet origin)
-    elif command -v gtimeout >/dev/null 2>&1; then
-      fetch=(gtimeout "$FETCH_TIMEOUT" git -c core.hooksPath=/dev/null fetch --quiet origin)
-    else
-      fetch=(env "GIT_SSH_COMMAND=${GIT_SSH_COMMAND:-ssh} -o ConnectTimeout=${FETCH_TIMEOUT} -o ServerAliveInterval=5 -o ServerAliveCountMax=2"
-        git -c core.hooksPath=/dev/null -c http.lowSpeedLimit=1000 -c "http.lowSpeedTime=${FETCH_TIMEOUT}" fetch --quiet origin)
-    fi
-    # A fetch failure (offline, auth, timeout) is a no-op, not a broken session —
-    # warn and let the unverified-sync branch below report it. Comparing against
-    # a remote-tracking ref no fetch refreshed would risk a false "in sync"
-    # (rules/sync-before-work.md Staleness Poisons Conclusions).
-    "${fetch[@]}" 2>/dev/null || {
-      warn "git fetch origin failed or timed out — check connectivity; cannot verify sync against a current origin/${db}"
-      fetch_failed=1
-    }
-  fi
-
-  # A definitive sync conclusion requires a fresh fetch this session. A throttled
-  # or failed fetch leaves the remote-tracking ref possibly stale, and stale
-  # state poisons conclusions (rules/sync-before-work.md). Report unverified
-  # rather than a false "in sync".
-  if (( should_fetch == 0 || fetch_failed )); then
+  # A fetch failure (offline, auth, timeout) is a no-op, not a broken session —
+  # warn and report unverified sync. Comparing against
+  # a remote-tracking ref no fetch refreshed would risk a false "in sync"
+  # (rules/sync-before-work.md Staleness Poisons Conclusions).
+  if ! "${fetch[@]}" 2>/dev/null; then
+    warn "git fetch origin failed or timed out — check connectivity; cannot verify sync against a current origin/${db}"
     emit_notice "Session-start status — git: \`${db}\` sync not verified against a current \`origin/${db}\` this session — run \`git fetch origin\`, then \`git status\` (rules/sync-before-work.md)."
     return 0
   fi

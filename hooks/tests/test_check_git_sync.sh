@@ -3,7 +3,7 @@
 #
 # The hook shells out to real git, so tests build real local repos (a bare
 # "origin" plus working clones) and drive git offline — no network, fully
-# deterministic. The injected clock (SYNC_NOW) drives the throttle assertions.
+# deterministic.
 #
 # Each scenario builds its OWN bare origin + seed (mk_origin) so scenarios share
 # no mutable state and run in any order (rules/testing-standards.md Independence).
@@ -15,21 +15,16 @@
 #   1. Behind        -> fast-forwards the default branch (on it or off it, and
 #                       under tessl portable mode); a refused fast-forward reports.
 #   2. Up to date    -> emits a marker "in sync" status, exit 0.
-#   3. Throttle      -> with a fixed injected clock: a call inside the window
-#                       skips the fetch and reports "not verified" (never a
-#                       definitive "in sync"/"behind" against the stale ref); a
-#                       call past the window fetches and fires "behind".
+#   3. Every session -> each run fetches, so origin moving between two runs
+#                       is seen and fast-forwarded.
 #   4. Not a repo    -> silent no-op, exit 0.
 #   5. No origin     -> silent no-op, exit 0.
 #   6. Fetch failure -> marker "not verified" (never a false "in sync" against a
 #                       stale ref), exit 0 (offline/broken remote tolerated).
-#   7. Bad clock     -> silent no-op, exit 0 (never aborts SessionStart).
 #   8. Diverged      -> marker notice names divergence and recommends rebase, not
 #                       a fast-forward (local both ahead and behind origin).
 #  10. Linked worktree -> a session in a linked worktree fetches the moved
 #                       origin into the shared remote-tracking refs.
-#   9. Future stamp  -> a schema_version > 1 record is not throttled on and is
-#                       preserved (not downgraded to version 1).
 #
 # Run: bash hooks/tests/test_check_git_sync.sh
 set -uo pipefail
@@ -71,10 +66,10 @@ clone_from() { # <bare> <dest>: a working clone, checked explicitly
   g clone -q "$1" "$2"                            || die "clone_from: git clone $1 -> $2 failed"
 }
 
-# run <repo-dir> <state-dir> [extra env...] -> OUT, RC
+# run <repo-dir> [extra env...] -> OUT, RC
 run() {
-  local repo="$1" state="$2"; shift 2
-  OUT="$(cd "$repo" && env SYNC_STATE_DIR="$state" "$@" bash "$SCRIPT" </dev/null 2>/dev/null)"
+  local repo="$1"; shift
+  OUT="$(cd "$repo" && env "$@" bash "$SCRIPT" </dev/null 2>/dev/null)"
   RC=$?
 }
 
@@ -108,7 +103,7 @@ main() {
   printf '#!/bin/sh\ntouch "%s"\n' "$TMP/post-merge-ran" > "$TMP/r1/.git/hooks/post-merge" \
     || die "could not write the post-merge hook"
   chmod +x "$TMP/r1/.git/hooks/post-merge" || die "could not make the post-merge hook executable"
-  run "$TMP/r1" "$TMP/s1c"
+  run "$TMP/r1"
   if [[ $RC -eq 0 ]] && printf '%s' "$OUT" | jq -e '.additionalContext | test("Session-start status") and test("fast-forwarded local `main` by 1")' >/dev/null 2>&1 \
     && same_commit "$TMP/r1" main origin/main \
     && [[ ! -e "$TMP/post-merge-ran" ]]; then
@@ -119,7 +114,7 @@ main() {
   mk_origin o1e
   clone_from "$BARE" "$TMP/r1e"
   commit_push "$SEED" "c2"
-  run "$TMP/r1e" "$TMP/s1f" SESSION_START_MODE=portable
+  run "$TMP/r1e" SESSION_START_MODE=portable
   if [[ $RC -eq 0 ]] && printf '%s' "$OUT" | jq -e '.additionalContext | test("fast-forwarded local `main` by 1")' >/dev/null 2>&1 \
     && same_commit "$TMP/r1e" main origin/main; then
     pass; else fail "portable: expected main fast-forwarded, got RC=$RC OUT=$OUT"; fi
@@ -132,7 +127,7 @@ main() {
   printf '#!/bin/sh\ntouch "%s"\n' "$TMP/sync-ref-hook-ran" > "$TMP/r1f/.git/hooks/reference-transaction" \
     || die "could not write the reference-transaction hook"
   chmod +x "$TMP/r1f/.git/hooks/reference-transaction" || die "could not make the hook executable"
-  run "$TMP/r1f" "$TMP/s1g"
+  run "$TMP/r1f"
   if [[ $RC -eq 0 && ! -e "$TMP/sync-ref-hook-ran" ]]; then
     pass; else fail "repo hooks: the reference-transaction hook ran during the sync fetch or fast-forward (OUT=$OUT)"; fi
 
@@ -142,7 +137,7 @@ main() {
   clone_from "$BARE" "$TMP/r1c"
   git -C "$TMP/r1c" checkout -q -b feat/x || die "r1c checkout failed"
   commit_push "$SEED" "c2"
-  run "$TMP/r1c" "$TMP/s1d"
+  run "$TMP/r1c"
   if [[ $RC -eq 0 ]] && printf '%s' "$OUT" | jq -e '.additionalContext | test("fast-forwarded")' >/dev/null 2>&1 \
     && same_commit "$TMP/r1c" main origin/main \
     && [[ "$(git -C "$TMP/r1c" symbolic-ref --short HEAD)" == "feat/x" ]]; then
@@ -154,7 +149,7 @@ main() {
   clone_from "$BARE" "$TMP/r1d"
   printf 'local edit\n' >> "$TMP/r1d/f" || die "r1d edit failed"
   commit_push "$SEED" "c2"
-  run "$TMP/r1d" "$TMP/s1e"
+  run "$TMP/r1d"
   if [[ $RC -eq 0 ]] && printf '%s' "$OUT" | jq -e '.additionalContext | test("fast-forward was refused")' >/dev/null 2>&1 \
     && grep -q "local edit" "$TMP/r1d/f" \
     && ! same_commit "$TMP/r1d" main origin/main; then
@@ -163,7 +158,7 @@ main() {
   # 2. up to date -> marker "in sync" status.
   mk_origin o2
   clone_from "$BARE" "$TMP/r2"
-  run "$TMP/r2" "$TMP/s2"
+  run "$TMP/r2"
   if [[ $RC -eq 0 ]] && printf '%s' "$OUT" | jq -e '.additionalContext | test("Session-start status") and test("in sync")' >/dev/null 2>&1; then
     pass; else fail "up-to-date: expected in-sync status, got RC=$RC OUT=$OUT"; fi
 
@@ -172,44 +167,23 @@ main() {
   mk_origin o2b
   clone_from "$BARE" "$TMP/r2b"
   g -C "$TMP/r2b" commit -q --allow-empty -m "local ahead"  || die "git commit in r2b failed"
-  run "$TMP/r2b" "$TMP/s2b"
+  run "$TMP/r2b"
   if [[ $RC -eq 0 ]] && printf '%s' "$OUT" | jq -e '.additionalContext | test("Session-start status") and test("ahead") and (test("in sync") | not)' >/dev/null 2>&1; then
     pass; else fail "ahead-only: expected \"ahead\" (not \"in sync\"), got RC=$RC OUT=$OUT"; fi
 
-  # 3. throttle. Clone up to date. First call fetches, stamps, and reports a
-  #    definitive "in sync". Move origin ahead WITHOUT the hook fetching: a call
-  #    +60s is throttled, so it does not fetch and reports "not verified" (never
-  #    a definitive "in sync"/"behind" against a stale ref). A call past the 1h
-  #    window fetches the new commit and fires "behind".
+  # 3. The hook fetches every session: origin moving between two runs is seen
+  #    and fast-forwarded, never "not verified".
   mk_origin o3
   clone_from "$BARE" "$TMP/r3"
-  run "$TMP/r3" "$TMP/s3" SYNC_THROTTLE_HOURS=1 SYNC_NOW=2000000               # fetch, stamp, up to date -> in sync
-  # This establishes the throttle stamp the next two assertions depend on, so a
-  # failure here must abort, not merely tally (aggregate-reporting carve-out:
-  # later checks may not depend on an earlier one merely having incremented FAIL).
-  { [[ $RC -eq 0 ]] && printf '%s' "$OUT" | jq -e '.additionalContext | test("in sync")' >/dev/null 2>&1; } \
-    || die "throttle setup: first call should report in sync, got RC=$RC OUT=$OUT"
-  commit_push "$SEED" "c3"                                # origin moves; r3's tracking ref still old
-  run "$TMP/r3" "$TMP/s3" SYNC_THROTTLE_HOURS=1 SYNC_NOW=2000060               # +60s: throttled -> no fetch -> not verified
-  if [[ $RC -eq 0 ]] && printf '%s' "$OUT" | jq -e '.additionalContext | test("Session-start status") and test("not verified") and (test("in sync") | not) and (test("behind") | not)' >/dev/null 2>&1; then
-    pass; else fail "throttle active: inside window should report 'not verified' (not 'in sync'/'behind'), got OUT=$OUT"; fi
-  run "$TMP/r3" "$TMP/s3" SYNC_THROTTLE_HOURS=1 SYNC_NOW=2003601               # +>1h: fetch -> behind -> fast-forwards
-  if [[ $RC -eq 0 ]] && printf '%s' "$OUT" | jq -e '.additionalContext | test("fast-forwarded")' >/dev/null 2>&1; then
-    pass; else fail "throttle expired: past window should fetch and fire, got OUT=$OUT"; fi
-
-  # 3b. By default the hook fetches every session: a recent stamp does not stop
-  #     it, so origin moving is seen and fast-forwarded, never "not verified".
-  mk_origin o3b
-  clone_from "$BARE" "$TMP/r3b"
-  run "$TMP/r3b" "$TMP/s3b" SYNC_NOW=2000000
+  run "$TMP/r3"
   commit_push "$SEED" "c2"
-  run "$TMP/r3b" "$TMP/s3b" SYNC_NOW=2000060
+  run "$TMP/r3"
   if [[ $RC -eq 0 ]] && printf '%s' "$OUT" | jq -e '.additionalContext | test("fast-forwarded")' >/dev/null 2>&1; then
     pass; else fail "default: expected a fetch every session, got OUT=$OUT"; fi
 
   # 4. not a repo -> silent no-op.
   mkdir -p "$TMP/notrepo" || die "could not create $TMP/notrepo"
-  run "$TMP/notrepo" "$TMP/s4"
+  run "$TMP/notrepo"
   if [[ $RC -eq 0 && -z "$OUT" ]]; then pass; else fail "not a repo: expected silent exit 0, got RC=$RC OUT=$OUT"; fi
 
   # 5. no origin remote -> silent no-op.
@@ -217,7 +191,7 @@ main() {
   printf 'x\n' > "$TMP/noorigin/f"  || die "write noorigin/f failed"
   g -C "$TMP/noorigin" add f        || die "git add in noorigin failed"
   g -C "$TMP/noorigin" commit -q -m x || die "git commit in noorigin failed"
-  run "$TMP/noorigin" "$TMP/s5"
+  run "$TMP/noorigin"
   if [[ $RC -eq 0 && -z "$OUT" ]]; then pass; else fail "no origin: expected silent exit 0, got RC=$RC OUT=$OUT"; fi
 
   # 6. fetch failure -> "not verified" (broken remote tolerated, no crash, and
@@ -227,15 +201,9 @@ main() {
   mk_origin o6
   clone_from "$BARE" "$TMP/r6"
   rm -rf "$BARE" || die "could not remove $BARE"
-  run "$TMP/r6" "$TMP/s6"
+  run "$TMP/r6"
   if [[ $RC -eq 0 ]] && printf '%s' "$OUT" | jq -e '.additionalContext | test("Session-start status") and test("not verified") and (test("in sync") | not)' >/dev/null 2>&1; then
     pass; else fail "fetch failure: expected 'not verified' (not 'in sync') exit 0, got RC=$RC OUT=$OUT"; fi
-
-  # 7. malformed clock -> no-op, exit 0.
-  mk_origin o7
-  clone_from "$BARE" "$TMP/r7"
-  run "$TMP/r7" "$TMP/s7" SYNC_NOW="not-a-number"
-  if [[ $RC -eq 0 && -z "$OUT" ]]; then pass; else fail "bad clock: expected silent exit 0, got RC=$RC OUT=$OUT"; fi
 
   # 8. diverged -> divergence notice (rebase, not fast-forward). Clone, add a
   #    local commit (ahead by 1), and push a different commit to origin (behind
@@ -246,29 +214,9 @@ main() {
   g -C "$TMP/r8" add f                    || die "git add in r8 failed"
   g -C "$TMP/r8" commit -q -m local       || die "git commit in r8 failed"   # ahead by 1
   commit_push "$SEED" "c2"                                                    # origin moves -> behind by 1
-  run "$TMP/r8" "$TMP/s8"
+  run "$TMP/r8"
   if [[ $RC -eq 0 ]] && printf '%s' "$OUT" | jq -e '.additionalContext | test("Session-start status") and test("diverged") and test("rebase")' >/dev/null 2>&1; then
     pass; else fail "diverged: expected marker divergence notice, got RC=$RC OUT=$OUT"; fi
-
-  # 9. future-version throttle stamp -> not throttled on, and preserved (never
-  #    downgraded). Pre-seed a "2 <recent>" record at the stamp path the hook
-  #    derives (cksum of the repo toplevel), move origin ahead, and run inside
-  #    the window: a v1 stamp would throttle to silence, but the future record
-  #    must be ignored (the hook fires) and left untouched.
-  mk_origin o9
-  clone_from "$BARE" "$TMP/r9"
-  commit_push "$SEED" "c2"                                # origin ahead -> a non-throttled run fires
-  local top9 key9 stampdir9 sv9
-  top9="$(cd "$TMP/r9" && git rev-parse --show-toplevel)" || die "r9 toplevel failed"
-  key9="$(printf '%s' "$top9" | cksum | cut -d' ' -f1)"   || die "r9 key derivation failed"
-  stampdir9="$TMP/s9"
-  mkdir -p "$stampdir9" || die "could not create $stampdir9"
-  printf '2 %s\n' 2000000 > "$stampdir9/sync-$key9" || die "could not seed future stamp"
-  run "$TMP/r9" "$stampdir9" SYNC_THROTTLE_HOURS=1 SYNC_NOW=2000060            # within window, but future schema
-  if [[ $RC -eq 0 ]] && printf '%s' "$OUT" | jq -e '.additionalContext | test("fast-forwarded")' >/dev/null 2>&1; then
-    pass; else fail "future stamp: expected fire (not throttled), got RC=$RC OUT=$OUT"; fi
-  sv9=""; read -r sv9 _ < "$stampdir9/sync-$key9" || sv9=""
-  if [[ "$sv9" == "2" ]]; then pass; else fail "future stamp: expected preserved version 2, got '$sv9'"; fi
 
   # 10. A session in a linked worktree fetches: origin moves, the hook runs
   #     from the worktree, and the shared refs/remotes/origin/* now hold the
@@ -280,7 +228,7 @@ main() {
   commit_push "$SEED" "c2"
   local seed10 tip10
   seed10="$(git -C "$SEED" rev-parse --verify --quiet 'main^{commit}')" || die "cannot resolve main in $SEED"
-  run "$TMP/r10-wt" "$TMP/s10"
+  run "$TMP/r10-wt"
   tip10="$(git -C "$TMP/r10" rev-parse --verify --quiet 'origin/main^{commit}')" || die "cannot resolve origin/main in r10"
   if [[ $RC -eq 0 && "$tip10" == "$seed10" ]]; then
     pass; else fail "linked worktree: expected the fetch to move origin/main to $seed10, got tip=$tip10 RC=$RC OUT=$OUT"; fi
