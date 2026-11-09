@@ -1,3 +1,5 @@
+## 0.8.0 — 2026-11-09
+
 ### Trust central main history, not a byte pin
 
 `skills/release/fleet_publish_producer.py` pinned the git blob hashes of 23 publisher files in `TRUSTED_PRODUCERS`, anchored to the installed reader's own blob, and a test failed CI whenever any of those bytes changed. A comment edit to `lib/bounded-run.sh` during the Herdr removal (0.6.0) tripped it. Renewal was a code edit by whoever changed the code, so the pin enforced no review; it made every typo fix a trust-protocol version. KISS and YAGNI (0.7.0) cut it.
