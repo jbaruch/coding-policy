@@ -30,12 +30,5 @@ only when their own rule triggers apply. A section cited through a router
 belongs to its full reference. Missing or unreadable content stops the
 affected action until the plugin is repaired.
 
-For a CI change, `rules/ci-safety.md` requires this full reference before
-the CI action:
-
-```text
-skills/coding-contracts/references/ci-safety.md
-```
-
 This read grants no authority or exemption. Resume the original task under
 the loaded contracts. Finish here.
