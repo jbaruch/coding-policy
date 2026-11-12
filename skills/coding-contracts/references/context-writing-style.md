@@ -6,25 +6,23 @@
 - Out of scope: every file the agent loads only after electing to open it — `skills/<name>/references/**`, lookup tables, worked examples, any file reached through a pointer
 - The test is load-time, not directory. A file the agent receives without choosing it is in scope. A file it opens after reading a reference is not, whatever directory holds it
 - `rules/skill-authoring.md` Keep Skills Compact names reference files as the destination for detail moved off the loaded surface
-- CHANGELOG entries load only on demand, not always-on
-- CHANGELOG entries are the archive — they carry the motivation and incident references stripped from rules, and follow looser discipline
-- `What to Cut` and `Structure` do not govern CHANGELOG. `What to Cut` names CHANGELOG as where the stripped explanation goes; a connective ban there would leave it nowhere to live. The rule reaches CHANGELOG only to say what belongs in it
-- A CHANGELOG entry runs as long as its archive role needs, carrying the motivation, incidents, and worked examples stripped from rules
-- The only length bounds are no duplication across entries and no verbatim restatement of the PR body
+- PR descriptions are the archive — they carry the motivation and incident references stripped from rules, and follow looser discipline
+- `What to Cut` and `Structure` do not govern PR descriptions. `What to Cut` names the PR description as where the stripped explanation goes; a connective ban there would leave it nowhere to live
+- A PR description runs as long as its archive role needs, carrying the motivation, incidents, and worked examples stripped from rules
 - Line-count and section-count budgets target single-concept rules; rules that cover one coherent policy area with several sub-aspects (e.g., `context-artifacts` covering structure/review/sync/audit; `skill-authoring` covering frontmatter/preamble/steps/calls) may run larger
 - Lists and quoted literals naming the forbidden terms themselves (e.g., this rule's own bullets enumerating the connectives and intensifiers) are not violations — the directive is the list, not prose use of the listed words
 
 ## What to Cut
 
 - Logical connectives are why-content detectors: therefore, however, because, since, thus, consequently, moreover, although, despite, as a result, in order to
-- When you write one of these, strip the entire clause it introduces and move the explanation to CHANGELOG
+- When you write one of these, strip the entire clause it introduces and move the explanation to the PR description
 - Em-dash, colon, and semicolon are not loopholes — using them to attach the same justifying clause is the same violation
 - Intensifiers used as noise modifiers: very, extremely, quite, really, fully, exactly, precisely, narrowly, completely. Keep when carrying a real constraint (`sum to exactly 100`, `fully enumerable`, `narrowly scoped`)
 - Reinforcement and hedging restatements of conclusions the preconditions already entail
-- Meta-justification prose explaining why the rule exists — belongs in CHANGELOG
-- Reference incidents, dated outages, worked examples tracing a case through the rule — belongs in CHANGELOG
+- Meta-justification prose explaining why the rule exists — belongs in the PR description
+- Reference incidents, dated outages, worked examples tracing a case through the rule — belongs in the PR description
 - Cross-rule rationale shoulder-taps; a bare reference suffices, the relationship stays out
-- CHANGELOG pointers like "see CHANGELOG entry: PR #X" left behind after cutting incidents — rules stand alone; CHANGELOG is archive, not ongoing reference
+- Pointers like "see PR #X" left behind after cutting incidents — rules stand alone; the archive is not ongoing reference
 - Anti-patterns buried in prose — bullet them instead ("X does NOT qualify" is rule content, not commentary)
 
 ## What to Keep
@@ -33,14 +31,15 @@
 - Constraint-bearing words: required, optional, mandatory, forbidden, deprecated
 - Carve-out preconditions in full, in the rule or in the skill reference its binding pointer names (preconditions are the rule for edge cases)
 
-## Reader-Side — Consult the CHANGELOGs
+## Reader-Side — Consult the Archive
 
-- The relevant plugin's `CHANGELOG.md` is the archive for motivation, incidents, and worked examples cut from rule bodies
+- The PRs that changed a rule are the archive for motivation, incidents, and worked examples cut from its body
+- Find them through `git log` on the rule file, or the `(#N)` on each `CHANGELOG.md` line
+- Older `CHANGELOG.md` entries carry the archive for changes made before PR titles replaced entries
 - Read each plugin's archive when a rule spans plugins
-- Do not stop after one plugin's CHANGELOG
-- Pull a CHANGELOG when judging an edge case
-- Pull a CHANGELOG when debugging an unexpected directive
-- Pull a CHANGELOG when auditing whether a rule still describes current reality
+- Pull the archive when judging an edge case
+- Pull the archive when debugging an unexpected directive
+- Pull the archive when auditing whether a rule still describes current reality
 - Never infer that missing rationale in a rule body means the rule is incomplete
 
 ## Structure

@@ -21,5 +21,6 @@ alwaysApply: true
 
 - CI must pass before merging — sole exception: `rules/ci-safety.md` Bootstrap-Red Carve-Out
 - PR title follows `<type>(<scope>): <imperative summary>` format
-- Add a changelog entry for user-visible changes
+- The PR title is the changelog line
+- Never add a CHANGELOG entry in a PR
 - Keep PRs focused — large PRs are hard to review and risky to merge

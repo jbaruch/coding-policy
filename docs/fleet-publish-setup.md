@@ -58,7 +58,7 @@ name. `Review & Publish Plugin` is the fleet default for new repos.
 | Input | Default | Use it when |
 |---|---|---|
 | `publish-mode` | `auto-bump` | `as-is` only for a human-bump model (the manifest version is authored by hand and published verbatim, e.g. `koog-tessl`). Leave default otherwise. |
-| `stamp-changelog` | `false` | The repo keeps a `CHANGELOG.md` with un-headed `### ` blocks a PR adds. Set `true` to stamp the `## <version> — <date>` heading before publish. |
+| `stamp-changelog` | `false` | The repo keeps a `CHANGELOG.md`. Set `true` to write the `## <version> — <date>` heading and the merged PR titles before publish. |
 | `pre-publish-script` | `''` | The repo has its own gates (typecheck, tests, carve-out checks). Point at one bash script — see below. |
 | `python-version` | `''` | The pre-publish gate needs a pinned Python interpreter. Sets up Python before the gate. |
 | `node-version` | `''` | The pre-publish gate needs a pinned Node runtime. Sets up Node before the gate. |
