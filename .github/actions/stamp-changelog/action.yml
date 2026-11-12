@@ -1,34 +1,30 @@
 name: 'Stamp CHANGELOG with the published version'
 description: |
-  Stamps the CHANGELOG's newest (un-headed) entries with the version the
-  publish step is about to assign, then commits the result with `[skip ci]`
-  and pushes that commit itself.
+  Stamps the CHANGELOG with the version the publish step is about to
+  assign, then commits the result with `[skip ci]` and pushes that commit
+  itself.
 
   It always self-pushes the stamp commit rather than delegating to a downstream
   bump commit. Delegating stranded the stamp whenever the publish step exited
   non-zero AFTER publishing — e.g. a post-publish credit check aborts
   `patch-version-publish` before its bump commit/push runs, so the artifact
-  ships while `CHANGELOG.md` on the branch keeps its un-headed `### ` entries
+  ships while `CHANGELOG.md` on the branch stays unstamped
   (`jbaruch/coding-policy#284`). Self-pushing decouples the stamp from the
   publish step's exit status. The `[skip ci]` on the commit stops the push
   re-triggering the publish workflow (ci-safety Publish-Pipeline
   Loop-Prevention Carve-Out).
 
   Per `jbaruch/coding-policy: context-artifacts` "CHANGELOG Hygiene"
-  (every merge publishes): PR authors add un-headed `### ` entry blocks at
-  the top of `CHANGELOG.md`; this step inserts the `## <version> — <date>`
-  heading above them before publish, so the published artifact and the
-  registry "what's new" show them under their real version rather than as
-  unversioned entries. Wire it immediately before the publish step.
+  (every merge publishes): PRs add no CHANGELOG entries, and the PR title
+  is the changelog line. This step writes `## <version> — <date>` and one
+  `- <PR title> (#N)` line per PR merged since the last publish, so the
+  published artifact and the registry "what's new" show them under their
+  real version. Un-headed `### ` blocks an older PR left at the top get the
+  heading instead. Wire it immediately before the publish step.
 
-  Idempotent: if the top section already carries a `## ` heading there is
-  nothing un-headed to stamp and the step is a no-op (no commit).
+  Idempotent: with nothing un-headed and no PR merged since the last
+  publish, the step is a no-op (no commit).
 
-  Before stamping, it fails the step when the push it is publishing parks a
-  new entry below the first `## ` heading: the stamp could not head it, and
-  the version would publish with no heading of its own (#581). The check is
-  `skills/release/check-changelog-placement.py --since-last-publish`,
-  measured against the last stamp or version-bump commit on the branch.
   Requirements (consumer must arrange):
     - `python3` on PATH (stdlib only — the script needs no packages).
     - `tessl` CLI (authenticated, typically via `tesslio/setup-tessl@v2`)
@@ -38,8 +34,8 @@ description: |
       `latest:` explicitly.
     - The consumer repo checked out (`actions/checkout@v4`) with a writable
       working tree; the step runs against `$GITHUB_WORKSPACE`.
-    - Full history (`fetch-depth: 0`), so the placement check can find the
-      last publish-bookkeeping commit; a shallow checkout fails the step.
+    - Full history (`fetch-depth: 0`), so the stamp can find the last
+      publish-bookkeeping commit; a shallow checkout fails the step.
 
 inputs:
   changelog:
@@ -94,25 +90,6 @@ runs:
           echo "::error::stamp-changelog.py not found at $script — verify the pinned jbaruch/coding-policy/.github/actions/stamp-changelog@<ref> in this workflow points at a ref that carries skills/release/stamp-changelog.py, and bump the ref if it is stale." >&2
           exit 1
         fi
-
-        # Refuse to publish a push that parks a new entry below the first
-        # `## ` heading. The stamp below heads only what sits ABOVE that
-        # heading, so such a push would publish a version with no heading of
-        # its own and its entry filed under an older one (#581). It measures
-        # from the last publish-bookkeeping commit, never from the push's
-        # before-commit, so a stopped publish stays stopped across later
-        # pushes and manual dispatches. The decision and the nothing-to-measure
-        # cases live in the script's header. Same three-levels-up resolution
-        # as the stamp script.
-        placement="$GITHUB_ACTION_PATH/../../../skills/release/check-changelog-placement.py"
-        if [ ! -f "$placement" ]; then
-          echo "::error::check-changelog-placement.py not found at $placement — verify the pinned jbaruch/coding-policy/.github/actions/stamp-changelog@<ref> in this workflow points at a ref that carries skills/release/check-changelog-placement.py, and bump the ref if it is stale." >&2
-          exit 1
-        fi
-        # The inputs go through verbatim; the script owns the empty-manifest
-        # case (#618).
-        python3 "$placement" --since-last-publish --changelog "$CHANGELOG" \
-          --manifest "$MANIFEST"
 
         # Append optional flags with explicit `if` blocks — clearer than
         # `&&` one-liners and unambiguous to read.
