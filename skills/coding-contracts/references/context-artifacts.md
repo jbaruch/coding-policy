@@ -72,22 +72,19 @@ When you add, remove, or rename a rule or skill, update **all** of these:
 - The plugin manifest, `.tessl-plugin/plugin.json` for a Tessl plugin — add/remove the rule path in `rules` or the skill path in `skills`
 - CI workflow — no edit needed when the canonical changed-skills loop is in use (it picks new/removed paths up automatically via `git diff`); for bespoke workflows, confirm the path glob covers the added skill or excludes the removed one
 - `README.md` — update the rules table and/or skills table
-- `CHANGELOG.md` — add an entry describing the change
 
 ## CHANGELOG Hygiene
 
 - Every merge publishes a version (publish-on-merge, e.g. via `tesslio/patch-version-publish`)
+- PRs never add `CHANGELOG.md` entries
+- The PR title (`rules/commit-conventions.md`) is the changelog line
+- The PR description carries motivation and detail, per `rules/context-writing-style.md`
 - No `Unreleased` section — the heading is forbidden
 - `tesslio/patch-version-publish` does NOT stamp `CHANGELOG.md` (it only bumps the manifest version and publishes)
-- Stamping a `## <version> — <date>` heading is a separate step the repo wires itself
-- Reusable stamp step: `.github/actions/stamp-changelog` (consumers `uses: jbaruch/coding-policy/.github/actions/stamp-changelog@<ref>`, wired before `tesslio/patch-version-publish`)
-- **With a wired stamp step:** authors add un-headed `### ` entry blocks at the top of `CHANGELOG.md`
-- The stamp step writes the `## <version> — <date>` heading above those blocks before publish
-- **Without a stamp step:** authors write the `## <version> — <date>` heading manually above their entries
-- Never leave un-headed `### ` blocks expecting auto-stamping when no stamp step is wired
-- Consolidation groups related entries, collapses redundant detail, retains load-bearing facts (what changed, references)
-- Entry length and archive discipline follow `rules/context-writing-style.md`, never a per-entry sentence cap
-- Audit the top section for duplication — multiple PRs reworking the same rule become one entry with the final outcome
+- Reusable stamp step: `.github/actions/stamp-changelog` (consumers set `stamp-changelog: true` on `publish-plugin.yml`, or `uses: jbaruch/coding-policy/.github/actions/stamp-changelog@<ref>` before the publish step)
+- The stamp step writes `## <version> — <date>` and one `- <PR title> (#N)` line per PR merged since the last publish
+- Un-headed `### ` blocks an older PR left at the top get the heading instead
+- Without a stamp step, the merged PR list is the changelog
 
 ## Consistency Check
 

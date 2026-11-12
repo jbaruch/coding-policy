@@ -1,22 +1,31 @@
 #!/usr/bin/env python3
-"""Stamp the CHANGELOG's newest (un-headed) entries with the version being published.
+"""Stamp the CHANGELOG with the version being published and the PRs it ships.
 
-Run by the publish pipeline (`.github/workflows/publish.yml`) immediately before
-the publish step (`smart-publish`). Every merge is published, so there is no
-"Unreleased" bucket: PR authors add `### ...` entry blocks at the TOP of
-`CHANGELOG.md` (below the `# Changelog` H1) with NO version heading. This script
-computes the version the publish step will assign and inserts a
-`## <version> — <date>` heading above those un-headed entries, so the published
-artifact (and the registry "what's new") shows them under their real version.
+Run by the publish pipeline (`.github/actions/stamp-changelog`) immediately
+before the publish step (`smart-publish`). Every merge is published, and PRs add
+no CHANGELOG entries: the PR title is the changelog line. This script computes
+the version the publish step will assign and inserts `## <version> — <date>`
+above the newest section, followed by one `- <PR title> (#N)` line per pull
+request merged since the last publish.
+
+The changes are the first-parent commits after the newest publish-bookkeeping
+commit: a first-parent ancestor of HEAD authored by `github-actions[bot]` that
+changes only the changelog and manifest files (the stamp commit and the
+version-bump commit). With no such commit in history (a repo's first pipeline
+publish), HEAD alone is the change. A GitHub merge commit (`Merge pull request
+#N from ...`) contributes its body's first line, the PR title, as `<title>
+(#N)`. Any other commit, a squash merge included, contributes its subject. A
+shallow checkout is an error.
+
+A `### ` block an older PR left un-headed at the top is headed instead, as
+before, with no title lines. With nothing un-headed and no changes, the script
+is a no-op.
 
 Version computation MIRRORS the publish step's `--bump patch` semantics
 (`smart-publish` / `tessl plugin publish --bump patch`): take the registry's
 latest published version and bump the patch, unless the local manifest is already
 ahead (a manual bump), in which case use the manifest version as-is. Keeping the
 two in lockstep is what makes the stamped heading match the published version.
-
-Idempotent: if the top section already carries a `## ` heading (nothing un-headed
-to stamp), it is a no-op.
 
 Usage:
     stamp-changelog.py [--changelog CHANGELOG.md] [--manifest PATH]
@@ -38,6 +47,9 @@ from pathlib import Path
 _VERSION_RE = re.compile(r"^\d+\.\d+\.\d+$")
 _H2_RE = re.compile(r"^## ")
 _ENTRY_RE = re.compile(r"^### ")
+_MERGE_RE = re.compile(r"^Merge pull request #(\d+) from \S+$")
+BOT = "github-actions[bot]"
+MANIFESTS = (".tessl-plugin/plugin.json", "tile.json")
 
 
 def compute_version(local: str, latest: str | None) -> str:
@@ -61,31 +73,103 @@ def compute_version(local: str, latest: str | None) -> str:
     return f"{rp[0]}.{rp[1]}.{rp[2] + 1}"
 
 
-def stamp_changelog(text: str, version: str, date: str | None) -> tuple[str, bool]:
-    """Insert `## <version> — <date>` above the topmost un-headed `### ` entries.
+def _first_unheaded(lines: list[str]) -> int | None:
+    """Index of the first `### ` line above every `## ` heading, else None."""
+    for i, line in enumerate(lines):
+        if _H2_RE.match(line):
+            return None
+        if _ENTRY_RE.match(line):
+            return i
+    return None
 
-    Un-headed entries are `### ` blocks that appear before the first `## ` heading.
-    Returns (new_text, changed). No-op (changed=False) when the top section is
-    already under a `## ` heading.
+
+def stamp_changelog(text: str, version: str, date: str | None,
+                    changes: list[str] | tuple[str, ...] = ()) -> tuple[str, bool]:
+    """Insert `## <version> — <date>` for the version being published.
+
+    Un-headed `### ` blocks above the first `## ` heading get the heading
+    directly above them, and `changes` is ignored. Otherwise the heading and
+    one `- <change>` line per item of `changes` go above the first `## `
+    heading, or at the end of a file that has none. Returns (new_text,
+    changed); a no-op when nothing is un-headed and `changes` is empty.
     """
     lines = text.splitlines()
-    first_h2 = next((i for i, ln in enumerate(lines) if _H2_RE.match(ln)), None)
-    first_entry = next((i for i, ln in enumerate(lines) if _ENTRY_RE.match(ln)), None)
-
-    if first_entry is None:
+    unheaded = _first_unheaded(lines)
+    if unheaded is None and not changes:
         return text, False
-    if first_h2 is not None and first_h2 < first_entry:
-        return text, False  # newest entries already sit under a version heading
-
     if date is None:
         raise ValueError("Restore the observed changelog stamp date before reconstructing it.")
 
     heading = f"## {version} — {date}"
-    new_lines = lines[:first_entry] + [heading, ""] + lines[first_entry:]
-    new_text = "\n".join(new_lines)
+    if unheaded is not None:
+        at, block = unheaded, [heading, ""]
+    else:
+        at = next((i for i, ln in enumerate(lines) if _H2_RE.match(ln)), len(lines))
+        block = [heading, ""] + [f"- {change}" for change in changes]
+        if at < len(lines):
+            block.append("")
+        if at > 0 and lines[at - 1].strip():
+            block.insert(0, "")
+    new_text = "\n".join(lines[:at] + block + lines[at:])
     if text.endswith("\n"):
         new_text += "\n"
     return new_text, True
+
+
+def git(repo: Path, *args: str) -> str:
+    """Stdout of a `git` call in `repo` that must succeed."""
+    proc = subprocess.run(["git", *args], cwd=repo, capture_output=True, text=True)
+    if proc.returncode != 0:
+        raise RuntimeError(
+            f"`git {' '.join(args)}` failed (exit {proc.returncode}): "
+            f"{proc.stderr.strip() or 'no diagnostic'}. Run the stamp inside a "
+            "full-history checkout of the repository.")
+    return proc.stdout
+
+
+def last_publish(repo: Path, bookkeeping: set[str]) -> str | None:
+    """The newest publish-bookkeeping commit on HEAD's first-parent line.
+
+    None when history holds none. The predicate is in the module docstring.
+    """
+    if git(repo, "rev-parse", "--is-shallow-repository").strip() == "true":
+        raise RuntimeError(
+            "this checkout is shallow, so the last publish commit may be "
+            "missing from it. Check out with full history (`actions/checkout` "
+            "with `fetch-depth: 0`).")
+    log = git(repo, "log", "--first-parent", "--format=%H%x09%an", "HEAD")
+    for line in log.splitlines():
+        sha, _, author = line.partition("\t")
+        if author != BOT:
+            continue
+        out = git(repo, "diff-tree", "-z", "--no-commit-id", "--name-only",
+                  "-r", "--root", sha)
+        paths = {path for path in out.split("\0") if path}
+        if paths and paths <= bookkeeping:
+            return sha
+    return None
+
+
+def merged_changes(changelog: Path, manifest: Path | None) -> list[str]:
+    """One line per first-parent commit since the last publish, oldest first."""
+    repo = changelog.resolve().parent
+    top = Path(git(repo, "rev-parse", "--show-toplevel").strip()).resolve()
+    paths = [changelog] + ([manifest] if manifest else [])
+    bookkeeping = set(MANIFESTS) | {p.resolve().relative_to(top).as_posix() for p in paths}
+    base = last_publish(repo, bookkeeping)
+    span = [f"{base}..HEAD"] if base else ["-1", "HEAD"]
+    out = git(repo, "log", "--first-parent", "--reverse",
+              "--format=%s%x00%b%x1e", *span)
+    changes = []
+    for record in out.split("\x1e"):
+        record = record.strip("\n")
+        if not record:
+            continue
+        subject, _, body = record.partition("\0")
+        merge = _MERGE_RE.match(subject)
+        title = next((ln.strip() for ln in body.splitlines() if ln.strip()), "")
+        changes.append(f"{title} (#{merge.group(1)})" if merge and title else subject)
+    return changes
 
 
 def query_latest_version(plugin_name: str) -> str | None:
@@ -142,12 +226,16 @@ def main() -> None:
     date = args.date or datetime.now(timezone.utc).date().isoformat()
 
     text = args.changelog.read_text()
-    new_text, changed = stamp_changelog(text, version, date)
+    changes: list[str] = []
+    if _first_unheaded(text.splitlines()) is None:
+        changes = merged_changes(args.changelog, args.manifest)
+    new_text, changed = stamp_changelog(text, version, date, changes)
     if changed:
         args.changelog.write_text(new_text)
-        print(f"Stamped {args.changelog} top entries as ## {version} — {date}")
+        lines = f" with {len(changes)} change line(s)" if changes else ""
+        print(f"Stamped {args.changelog} as ## {version} — {date}{lines}")
     else:
-        print(f"No un-headed entries to stamp in {args.changelog} (no-op)")
+        print(f"Nothing to stamp in {args.changelog} (no-op)")
 
 
 if __name__ == "__main__":

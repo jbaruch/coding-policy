@@ -152,10 +152,10 @@ jobs:
           skills-dir: ${{ inputs.skills-dir }}
           credit-outage: ${{ inputs.skill-review-credit-outage }}
 
-      # Stamps the top un-headed `### ` CHANGELOG blocks with the
-      # `## <version> — <date>` heading the publish step is about to assign,
+      # Writes the `## <version> — <date>` heading the publish step is about
+      # to assign, plus the titles of the PRs merged since the last publish,
       # per context-artifacts "CHANGELOG Hygiene". Must run immediately before
-      # publish. No-op when the top section is already headed.
+      # publish. No-op when nothing merged since the last publish.
       - name: Stamp CHANGELOG with the version being published
         if: inputs.stamp-changelog
         uses: jbaruch/coding-policy/.github/actions/stamp-changelog@main

@@ -14,7 +14,7 @@
 - Boolean predicates and condition expressions (`fires >= 1 AND gated_likely == 0`)
 - Enumerated allowlists, blocklists, source lists, per-source / per-tier classification rules
 - Formulas and computed values (proposed-cap arithmetic, regression-drop calculation)
-- Rationale paragraphs explaining why a constant is set at its current value — that belongs in the script's docstring or the CHANGELOG, not the skill
+- Rationale paragraphs explaining why a constant is set at its current value — that belongs in the script's docstring or the PR description, not the skill
 - A bounded classification's question text, its version and its answer space
 
 ## What Skills Do Carry

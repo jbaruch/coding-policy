@@ -2,7 +2,9 @@
 """Tests for skills/release/stamp-changelog.py — version computation and stamping."""
 
 import importlib.util
+import os
 import subprocess
+import tempfile
 import unittest
 from unittest import mock
 from pathlib import Path
@@ -103,12 +105,6 @@ class Main(unittest.TestCase):
             # Manifest matches registry → stamp the bumped patch.
             self.assertIn("## 0.18.8 — 2026-08-09", self._run(Path(d), "0.18.7", "0.18.7"))
 
-    def test_noop_leaves_headed_changelog_unchanged(self):
-        import tempfile
-        with tempfile.TemporaryDirectory() as d:
-            # Top already headed → no stamp, changelog untouched.
-            already = "# Changelog\n\n## 0.1.0 — 2026-08-09\n\n### feat — x\n"
-            self.assertEqual(self._run(Path(d), "0.1.0", None, body=already), already)
 
 
 class QueryLatestVersion(unittest.TestCase):
@@ -234,6 +230,135 @@ class StampChangelog(unittest.TestCase):
         # Second run sees the heading already on top — no double stamp.
         self.assertFalse(changed)
         self.assertEqual(twice, once)
+
+    def test_writes_change_lines_above_the_newest_heading(self):
+        headed = "# Changelog\n\n## 0.18.7 — 2026-06-03\n\n- feat: Old (#1)\n"
+        out, changed = stamp_changelog.stamp_changelog(
+            headed, "0.18.8", "2026-06-04", ["feat: New (#2)", "fix: Bug (#3)"])
+        self.assertTrue(changed)
+        self.assertEqual(out, (
+            "# Changelog\n\n## 0.18.8 — 2026-06-04\n\n- feat: New (#2)\n"
+            "- fix: Bug (#3)\n\n## 0.18.7 — 2026-06-03\n\n- feat: Old (#1)\n"))
+
+    def test_unheaded_entries_take_the_heading_without_change_lines(self):
+        out, changed = stamp_changelog.stamp_changelog(
+            _UNHEADED, "0.18.8", "2026-06-04", ["feat: New (#2)"])
+        self.assertTrue(changed)
+        self.assertNotIn("feat: New (#2)", out)
+        self.assertIn("## 0.18.8 — 2026-06-04\n\n### feat(x) — new thing", out)
+
+    def test_first_section_follows_the_title(self):
+        out, changed = stamp_changelog.stamp_changelog(
+            "# Changelog\n", "0.1.0", "2026-06-04", ["feat: Start (#1)"])
+        self.assertTrue(changed)
+        self.assertEqual(out, "# Changelog\n\n## 0.1.0 — 2026-06-04\n\n- feat: Start (#1)\n")
+
+    def test_missing_date_never_fabricates_a_change_stamp(self):
+        with self.assertRaises(ValueError):
+            stamp_changelog.stamp_changelog("# Changelog\n", "0.1.0", None, ["feat: x (#1)"])
+
+
+BOT = "github-actions[bot]"
+HEADED = "# Changelog\n\n## 0.1.0 — 2026-01-01\n\n- feat: Start (#1)\n"
+
+
+class MergedChanges(unittest.TestCase):
+    """merged_changes reads the PRs merged since the last publish from git."""
+
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.root = Path(temporary.name)
+        self.git("init", "-q", "-b", "main")
+        self.commit("CHANGELOG.md", HEADED, "feat: Start")
+
+    def git(self, *args, author="Dev"):
+        env = dict(os.environ, GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_NOSYSTEM="1",
+                   GIT_AUTHOR_NAME=author, GIT_AUTHOR_EMAIL="a@example.com",
+                   GIT_COMMITTER_NAME=author, GIT_COMMITTER_EMAIL="a@example.com")
+        return subprocess.run(["git", *args], cwd=self.root, check=True,
+                              capture_output=True, text=True, env=env).stdout
+
+    def commit(self, path, content, message, author="Dev"):
+        target = self.root / path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(content)
+        self.git("add", path)
+        self.git("commit", "-q", "-m", message, author=author)
+
+    def merge_pr(self, number, title):
+        self.git("checkout", "-q", "-b", f"pr{number}")
+        self.commit(f"src/{number}.txt", "work\n", f"Work for {number}")
+        self.git("checkout", "-q", "main")
+        self.git("merge", "-q", "--no-ff", f"pr{number}",
+                 "-m", f"Merge pull request #{number} from jbaruch/pr{number}", "-m", title)
+
+    def stamp(self):
+        text = (self.root / "CHANGELOG.md").read_text()
+        self.commit("CHANGELOG.md", text + "\n- stamped\n", "Stamp CHANGELOG [skip ci]", BOT)
+
+    def changes(self, root=None):
+        return stamp_changelog.merged_changes((root or self.root) / "CHANGELOG.md", None)
+
+    def test_lists_prs_merged_since_the_last_stamp(self):
+        self.merge_pr(2, "feat: Old")
+        self.stamp()
+        self.merge_pr(3, "feat(x): Add x")
+        self.commit("y.txt", "y\n", "fix(y): Repair y (#4)")  # a squash merge
+        self.assertEqual(self.changes(), ["feat(x): Add x (#3)", "fix(y): Repair y (#4)"])
+
+    def test_a_bot_version_bump_is_bookkeeping(self):
+        self.stamp()
+        self.commit(".tessl-plugin/plugin.json", "{}\n", "chore: bump [skip ci]", BOT)
+        self.merge_pr(5, "feat: Five")
+        self.assertEqual(self.changes(), ["feat: Five (#5)"])
+
+    def test_a_bot_commit_touching_source_is_a_change(self):
+        self.stamp()
+        self.commit("src/gen.txt", "gen\n", "chore: Regenerate", BOT)
+        self.merge_pr(6, "feat: Six")
+        self.assertEqual(self.changes(), ["chore: Regenerate", "feat: Six (#6)"])
+
+    def test_without_a_stamp_only_head_counts(self):
+        self.merge_pr(7, "feat: Seven")
+        self.merge_pr(8, "feat: Eight")
+        self.assertEqual(self.changes(), ["feat: Eight (#8)"])
+
+    def test_a_merge_without_a_title_keeps_its_subject(self):
+        self.stamp()
+        self.git("checkout", "-q", "-b", "bare")
+        self.commit("src/bare.txt", "bare\n", "Bare work")
+        self.git("checkout", "-q", "main")
+        self.git("merge", "-q", "--no-ff", "bare", "-m", "Merge pull request #9 from jbaruch/bare")
+        self.assertEqual(self.changes(), ["Merge pull request #9 from jbaruch/bare"])
+
+    def test_a_shallow_checkout_is_refused(self):
+        self.merge_pr(2, "feat: Two")
+        clone = self.root / "clone"
+        self.git("clone", "-q", "--depth", "1", f"file://{self.root}", str(clone))
+        with self.assertRaises(RuntimeError):
+            self.changes(clone)
+
+    def run_main(self):
+        (self.root / "plugin.json").write_text('{"name": "ws/p", "version": "0.1.0"}')
+        proc = subprocess.run(
+            ["python3", str(SCRIPT), "--changelog", "CHANGELOG.md", "--manifest",
+             "plugin.json", "--latest", "0.1.0", "--date", "2026-11-11"],
+            cwd=self.root, capture_output=True, text=True)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        return (self.root / "CHANGELOG.md").read_text()
+
+    def test_main_stamps_the_merged_pr_titles(self):
+        self.stamp()
+        self.merge_pr(10, "feat: Ten")
+        self.assertTrue(self.run_main().startswith(
+            "# Changelog\n\n## 0.1.1 — 2026-11-11\n\n- feat: Ten (#10)\n\n## 0.1.0"))
+
+    def test_main_is_a_noop_with_nothing_since_the_stamp(self):
+        self.merge_pr(11, "feat: Eleven")
+        self.stamp()
+        before = (self.root / "CHANGELOG.md").read_text()
+        self.assertEqual(self.run_main(), before)
 
 
 if __name__ == "__main__":

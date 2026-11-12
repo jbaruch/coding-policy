@@ -60,7 +60,7 @@
 
 ## Rename / Removal
 
-- Renaming or removing an artifact follows surface sync (see `rules/context-artifacts.md`): update the owner's schema doc, update every reader, add a CHANGELOG entry
+- Renaming or removing an artifact follows surface sync (see `rules/context-artifacts.md`): update the owner's schema doc, update every reader
 - Keep reader skills tolerant of missing artifacts — an artifact that was never written (first run) is indistinguishable from one that was removed; both mean "no prior state"
 
 ## Cross-Pipeline Schema Bumps

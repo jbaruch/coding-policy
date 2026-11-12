@@ -54,7 +54,7 @@ Tessl imports. Combined native-session acceptance lives in
 | Style | [code-formatting](rules/code-formatting.md) | Use project's formatter, don't mix style with logic |
 | Types | [language-diagnostics](rules/language-diagnostics.md) | Enable the project's language server; its findings are non-dismissible without cause; gate the headless checker in CI at zero findings |
 | Authoring | [context-artifacts](rules/context-artifacts.md) | Plugin structure, rule format, review iteration, surface sync, consistency checks |
-| Authoring | [context-writing-style](rules/context-writing-style.md) | Prose discipline for rules, skills, and READMEs — what to cut, what to keep, structural format. CHANGELOG entries follow looser archive discipline |
+| Authoring | [context-writing-style](rules/context-writing-style.md) | Prose discipline for rules, skills, and READMEs — what to cut, what to keep, structural format. PR descriptions carry the archive |
 | Authoring | [rule-frontmatter](rules/rule-frontmatter.md) | Frontmatter conventions for rule files — passthrough model, per-agent field map, when to path-scope |
 | Authoring | [skill-authoring](rules/skill-authoring.md) | SKILL.md structure, step numbering, typed calls, plugin.json reference |
 | Authoring | [script-delegation](rules/script-delegation.md) | Deterministic → script, fixed answers read by meaning → bounded classification, everything else → LLM. Standing operator approval permits direct routing within recorded question, model, score and action bounds. Script stdout carve-outs for paths, versions and wrapped commands |
