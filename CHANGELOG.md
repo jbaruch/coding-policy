@@ -1,3 +1,7 @@
+## 0.9.0 — 2026-11-12
+
+- feat(release): Make the PR title the changelog line (#816)
+
 ## 0.8.1 — 2026-11-09
 
 ### Require pull requests and green checks on main
