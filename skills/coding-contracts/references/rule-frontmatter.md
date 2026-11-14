@@ -15,11 +15,12 @@
   1. **Host script** — a deterministic predicate over the rule's frontmatter and run facts the host holds: agent tier, session kind, skills or capabilities present, paths the run touches
   2. **Bounded classification** — a question within approved bounds per `rules/script-delegation.md` Bounded Classification
   3. **Reasoning model** — the host loads the rule and the agent's model applies its declared scope
-- Each tier answers match, no match or undecided
-- The host loads a matching rule and leaves a non-matching rule unloaded
+- Tiers 1 and 2 each answer match, no match or undecided
+- The host loads a matching rule
+- A tier-1 or tier-2 no match leaves the rule unloaded
 - An undecided rule goes to the next tier
-- Tier 3 answers only what the cheaper tiers left undecided
-- A host that does not select loads every rule, and tier 3 answers for all of them
+- At tier 3 the rule stays loaded and the agent's model applies its declared scope
+- A host that does not select loads every rule, and the model applies scope for all of them
 
 ## Host Script Tier
 
