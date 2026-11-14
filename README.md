@@ -55,7 +55,7 @@ Tessl imports. Combined native-session acceptance lives in
 | Types | [language-diagnostics](rules/language-diagnostics.md) | Enable the project's language server; its findings are non-dismissible without cause; gate the headless checker in CI at zero findings |
 | Authoring | [context-artifacts](rules/context-artifacts.md) | Plugin structure, rule format, review iteration, surface sync, consistency checks |
 | Authoring | [context-writing-style](rules/context-writing-style.md) | Prose discipline for rules, skills, and READMEs — what to cut, what to keep, structural format. PR descriptions carry the archive |
-| Authoring | [rule-frontmatter](rules/rule-frontmatter.md) | Frontmatter conventions for rule files — passthrough model, per-agent field map, when to path-scope |
+| Authoring | [rule-frontmatter](rules/rule-frontmatter.md) | Frontmatter conventions for rule files — passthrough, tiered host filtering of conditional rules, when to path-scope |
 | Authoring | [skill-authoring](rules/skill-authoring.md) | SKILL.md structure, step numbering, typed calls, plugin.json reference |
 | Authoring | [script-delegation](rules/script-delegation.md) | Deterministic → script, fixed answers read by meaning → bounded classification, everything else → LLM. Standing operator approval permits direct routing within recorded question, model, score and action bounds. Script stdout carve-outs for paths, versions and wrapped commands |
 | Authoring | [script-as-black-box](rules/script-as-black-box.md) | Skills reference the script's contract (inputs/outputs/exit codes), not its internal logic — thresholds and predicates live in the script |
@@ -108,7 +108,7 @@ The release skill owns the hooks.
 - **Tessl-specific authoring rules.** The Authoring-category rules in the table above are specific to the Tessl plugin workflow. They codify how to build, test, and ship plugins.
 - **One concern per rule.** Each file covers one topic. Easy to read, easy to reference, easy to override if a project needs an exception.
 - **Opinionated but practical.** These rules reflect real patterns found across 17+ repositories and the Tessl plugin authoring workflow. They solve problems that actually come up when agents write and ship code.
-- **Loaded by default; scoped by intent.** Universal rules are `alwaysApply: true`. Rules whose prescriptions only fire in specific files are `alwaysApply: false` with `applyTo:` declaring the scope — the agent's model reads the frontmatter and narrows when to act. See `rules/rule-frontmatter.md`.
+- **Scoped by intent, filtered cheapest first.** Universal rules are `alwaysApply: true`. Rules whose prescriptions only fire in specific files or actions are `alwaysApply: false` with `applyTo:` declaring the scope. A host may omit them by script, then bounded classifier, and the agent's model narrows whatever reaches it. See `rules/rule-frontmatter.md`.
 
 ## ACR distribution
 

@@ -1,6 +1,6 @@
 ---
 alwaysApply: false
-applyTo: "skills/**, scripts/**, skills/**/*.sh, skills/**/*.py, skills/**/SKILL.md — when choosing between a script, a bounded classifier and the model, or authoring the scripts skills invoke"
+applyTo: "** — when choosing between a script, a bounded classifier and the model, or authoring the scripts skills invoke"
 description: Deterministic operations → script, a fixed answer set read by meaning → bounded classification, everything else → LLM, the regex trap, script structure conventions, precheck gating
 ---
 

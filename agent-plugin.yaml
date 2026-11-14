@@ -1,6 +1,6 @@
 schemaVersion: 1
 name: jbaruch/coding-policy
-version: 0.9.0
+version: 0.10.0
 description: General-purpose coding policy for AI agents
 source:
   repository: https://github.com/jbaruch/coding-policy
@@ -70,9 +70,7 @@ artifacts:
     - id: rule-frontmatter
       path: rules/rule-frontmatter.md
       activation:
-        mode: paths
-        paths:
-          - "rules/**/*.md"
+        mode: always
     - id: skill-authoring
       path: rules/skill-authoring.md
       activation:
@@ -85,13 +83,7 @@ artifacts:
     - id: script-delegation
       path: rules/script-delegation.md
       activation:
-        mode: paths
-        paths:
-          - "skills/**"
-          - "scripts/**"
-          - "skills/**/*.sh"
-          - "skills/**/*.py"
-          - "skills/**/SKILL.md"
+        mode: always
     - id: script-as-black-box
       path: rules/script-as-black-box.md
       activation:
