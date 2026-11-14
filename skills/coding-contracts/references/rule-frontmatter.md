@@ -3,41 +3,41 @@
 ## Passthrough
 
 - Tessl preserves rule file frontmatter byte-identical from publish to install — no per-agent translation, no field filtering
-- Every rule a host includes reaches the consuming agent's context with its bytes and frontmatter unchanged
-- A host never rewrites, trims, merges or translates an included rule
-- Omitting a whole rule is the only filtering a host performs
+- Every rule a host loads reaches the consuming agent's context with its bytes and frontmatter unchanged
+- A host loads whole rule files as published
 
-## Context Assembly Tiers
+## Rule Loading Tiers
 
-- A runtime host assembling an agent's context may omit a conditional rule
+- A runtime host assembling an agent's context loads the conditional rules that match the run
 - A conditional rule declares `alwaysApply: false` or a `requires:` list in its frontmatter
-- A rule declaring neither is always included
-- A host that filters decides each conditional rule at the cheapest tier able to decide it:
-  1. **Host script** — a deterministic predicate over the rule's frontmatter and run facts the host holds: agent tier, session kind, skills or capabilities present, paths the run may touch
+- A rule declaring neither is always loaded
+- A host that selects conditional rules answers whether each one matches the run at the cheapest tier able to answer:
+  1. **Host script** — a deterministic predicate over the rule's frontmatter and run facts the host holds: agent tier, session kind, skills or capabilities present, paths the run touches
   2. **Bounded classification** — a question within approved bounds per `rules/script-delegation.md` Bounded Classification
-  3. **Reasoning model** — the rule is included and the agent's model applies its declared scope
-- Each tier returns include, omit or undecided
-- An undecided rule passes to the next tier
-- Tier 3 decides only rules the cheaper tiers left undecided
-- A host that does not filter includes every rule, leaving every decision to tier 3
+  3. **Reasoning model** — the host loads the rule and the agent's model applies its declared scope
+- Each tier answers match, no match or undecided
+- The host loads a matching rule and leaves a non-matching rule unloaded
+- An undecided rule goes to the next tier
+- Tier 3 answers only what the cheaper tiers left undecided
+- A host that does not select loads every rule, and tier 3 answers for all of them
 
 ## Host Script Tier
 
-- A `requires:` list naming no skill or capability present in the session omits the rule
-- A host may declare an agent tier or session kind outside every conditional rule's scope
-- For a run of a declared tier or kind, the script omits every `alwaysApply: false` rule
-- A run touching no path the `applyTo:` globs match omits the rule
+- A rule whose `requires:` list names no skill or capability present in the session does not match
+- A host may declare an agent tier or session kind that no conditional rule's scope covers
+- In a run of a declared tier or kind, no `alwaysApply: false` rule matches
+- A run touching no path the `applyTo:` globs match does not match the rule
 - The natural-language half is not script-readable
 - A glob match alone leaves the rule undecided
-- Missing, malformed or unrecognized frontmatter keeps the rule included
+- Missing, malformed or unrecognized frontmatter loads the rule
 - The script owns its predicates per `rules/script-as-black-box.md`
 
 ## Bounded Classification Tier
 
-- The question asks whether the rule applies to this run, from the rule's frontmatter and the run facts the host holds
-- Omission on a tier-2 answer requires the standing approval `rules/script-delegation.md` Bounded Classification names
-- "Not enough evidence", an unavailable classifier and an answer outside the list each keep the rule included
-- An included rule's frontmatter reaches tier 3 unchanged
+- The question asks whether the rule matches this run, from the rule's frontmatter and the run facts the host holds
+- A tier-2 no-match answer takes effect only within the standing approval `rules/script-delegation.md` Bounded Classification names
+- "Not enough evidence", an unavailable classifier and an answer outside the list each load the rule
+- A loaded rule's frontmatter reaches tier 3 unchanged
 
 ## Reasoning Model Tier
 
