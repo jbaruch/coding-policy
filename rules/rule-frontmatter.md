@@ -1,6 +1,6 @@
 ---
 alwaysApply: false
-applyTo: "rules/**/*.md — when authoring rule files or assembling an agent's context from them"
+applyTo: "** — when authoring rule frontmatter or assembling an agent's context from rule files"
 description: Frontmatter conventions for rule files — always-on vs conditional rules, and how hosts filter conditional rules
 ---
 

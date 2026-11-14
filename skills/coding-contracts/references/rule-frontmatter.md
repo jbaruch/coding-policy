@@ -26,9 +26,9 @@
 - A `requires:` list naming no skill or capability present in the session omits the rule
 - A host may declare an agent tier or session kind outside every conditional rule's scope
 - For a run of a declared tier or kind, the script omits every `alwaysApply: false` rule
-- The glob half of `applyTo:` is script-readable
+- A run touching no path the `applyTo:` globs match omits the rule
 - The natural-language half is not script-readable
-- A glob non-match alone leaves the rule undecided
+- A glob match alone leaves the rule undecided
 - Missing, malformed or unrecognized frontmatter keeps the rule included
 - The script owns its predicates per `rules/script-as-black-box.md`
 
@@ -48,13 +48,17 @@
 
 - For rules that apply regardless of file or task context (commits, secrets, code formatting, error handling): set `alwaysApply: true` in the rule file frontmatter
 - Omit `applyTo:` — the rule has no narrowed scope
+- A `requires:` list still gates an always-on rule on the named skills or capabilities
+- Within that gate, `alwaysApply: true` applies regardless of file or task context
 - `description:` is optional for always-on rules; add it when the README rules-table row needs a complement, otherwise the rule body's H1 + sections speak for themselves
 
 ## Conditional Rules
 
 - For rules whose prescriptions only fire in specific files or contexts: set `alwaysApply: false` in the rule file frontmatter and add `applyTo:`
 - `applyTo:` syntax is `"<glob list> — <natural-language clause>"` — both halves required. Example: `applyTo: "skills/**/SKILL.md — when authoring or modifying skills"`
-- The em dash separates the file-level scope (globs) from the action-level scope (prose); a reader at tier 2 or 3 reads both halves and narrows on whichever signal is clearer
+- The em dash separates the file-level scope (globs) from the action-level scope (prose)
+- The globs cover every file the rule governs; the prose narrows them by action and never widens past them
+- A rule governing an action in any file uses the `**` glob with the action in the prose
 - `globs:` and `paths:` are accepted **field-name aliases** for `applyTo:` — the value still follows the em-dash glob+prose form; pick one field name per file
 - `description:` is a rule summary, not a scoping mechanism — never put scope prose only in `description:` as a substitute for `applyTo:` on a conditional rule
 

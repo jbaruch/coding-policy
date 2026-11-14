@@ -39,6 +39,7 @@ If any of the above doesn't match what you observe, push back before writing —
 2. Add a new H2 section, `Rule file frontmatter`, immediately after the `rules` description. This section covers:
    - Tessl preserves rule file frontmatter byte-identical at install — no per-agent translation, no field filtering.
    - The agent's model reads frontmatter as natural-language instruction and applies the rule according to its declared scope.
+   - A runtime host assembling the agent's context may omit a conditional rule after install, by script or bounded classifier, before the model reads it. Installed bytes never change.
    - The two patterns: **always-on rules** (`alwaysApply: true`, no `applyTo:`) and **conditional rules** (`alwaysApply: false` plus `applyTo:` with the required em-dash glob+prose pattern — `"<globs> — <natural-language clause>"`).
    - That scope lives only in the rule file frontmatter — `plugin.json` lists rule paths and carries no per-rule config.
    - That `applyTo:` accepts field-name aliases (`globs:`, `paths:`) with the same em-dash glob+prose value, and that `description:` is a rule summary, never a substitute for `applyTo:` as a scoping mechanism.
@@ -90,7 +91,7 @@ Note that the source rule file in `.tessl/plugins/.../rules/<rule>.md` is byte-i
 
 **Current gap:** The "Types of context" table shows rules as "Always (eager push)". Same issue as the glossary: the framing conflates loading with activation.
 
-**What to change:** Add a sentence directly after the table clarifying that eager push describes loading (every rule is loaded into the agent's context at install time) and that the rule's frontmatter controls whether it applies to a given task. Link to the new `Rule file frontmatter` section on `reference/configuration.md`.
+**What to change:** Add a sentence directly after the table clarifying that eager push describes loading (every rule is installed and pushed unless a runtime host omits a conditional rule while assembling context) and that the rule's frontmatter controls whether it applies to a given task. Link to the new `Rule file frontmatter` section on `reference/configuration.md`.
 
 **Why this page:** It's where the eager-vs-lazy framing originates. Fixing it at the source prevents the same misconception from propagating into every downstream page that references this model.
 
