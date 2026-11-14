@@ -1,3 +1,7 @@
+## 0.10.0 — 2026-11-14
+
+- docs(policy): Let hosts filter conditional rules in three tiers (#820)
+
 ## 0.9.0 — 2026-11-12
 
 - feat(release): Make the PR title the changelog line (#816)
