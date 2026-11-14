@@ -1,3 +1,7 @@
+## 0.10.1 — 2026-11-14
+
+- docs(policy): Word the rule tiers as rule loading (#821)
+
 ## 0.10.0 — 2026-11-14
 
 - docs(policy): Let hosts filter conditional rules in three tiers (#820)
