@@ -20,6 +20,8 @@ mkrepo() {
     exit 2
   fi
 }
+# A fixture that fails to write would make its case test nothing; stop the run instead.
+setup_fail() { echo "fatal: test setup failed: $1" >&2; exit 2; }
 
 # Tessl's per-folder .gitignore files; the block must list every one.
 FOLDER_IGNORES=(.claude/skills/.gitignore .codex/skills/.gitignore .cursor/rules/.gitignore
@@ -71,7 +73,7 @@ main() {
 
   # 1. pins jbaruch/* to latest, leaves third-party pins untouched.
   d="$TMP/1"; mkrepo "$d"
-  cat > "$d/tessl.json" <<'JSON'
+  cat > "$d/tessl.json" <<'JSON' || setup_fail "case 1 tessl.json"
 {
   "name": "jbaruch/x",
   "mode": "vendored",
@@ -90,13 +92,13 @@ JSON
 
   # 2. idempotent: already latest -> unchanged.
   d="$TMP/2"; mkrepo "$d"
-  printf '{"dependencies":{"jbaruch/coding-policy":{"version":"latest"}}}\n' > "$d/tessl.json"
+  printf '{"dependencies":{"jbaruch/coding-policy":{"version":"latest"}}}\n' > "$d/tessl.json" || setup_fail "case 2 tessl.json"
   out="$(cd "$d" && bash "$SCRIPT" 2>/dev/null)"; rc=$?
   if [[ $rc -eq 0 ]] && printf '%s' "$out" | jq -e '.tessl_json=="unchanged"' >/dev/null; then pass; else fail "idempotent pin: rc=$rc $out"; fi
 
   # 3. .gitignore created with the block when absent; AGENTS/CLAUDE/GEMINI NOT in it.
   d="$TMP/3"; mkrepo "$d"
-  printf '{"dependencies":{}}\n' > "$d/tessl.json"
+  printf '{"dependencies":{}}\n' > "$d/tessl.json" || setup_fail "case 3 tessl.json"
   out="$(cd "$d" && bash "$SCRIPT" 2>/dev/null)"; rc=$?
   if [[ $rc -eq 0 ]] && printf '%s' "$out" | jq -e '.gitignore=="created"' >/dev/null \
      && grep -qF '.tessl/' "$d/.gitignore" \
@@ -109,8 +111,8 @@ JSON
 
   # 4. appends to an existing .gitignore lacking the marker, preserving prior lines.
   d="$TMP/4"; mkrepo "$d"
-  printf '{"dependencies":{}}\n' > "$d/tessl.json"
-  printf 'node_modules/\n' > "$d/.gitignore"
+  printf '{"dependencies":{}}\n' > "$d/tessl.json" || setup_fail "case 4 tessl.json"
+  printf 'node_modules/\n' > "$d/.gitignore" || setup_fail "case 4 .gitignore"
   out="$(cd "$d" && bash "$SCRIPT" 2>/dev/null)"; rc=$?
   if [[ $rc -eq 0 ]] && printf '%s' "$out" | jq -e '.gitignore=="appended"' >/dev/null \
      && grep -qxF 'node_modules/' "$d/.gitignore" \
@@ -119,7 +121,7 @@ JSON
 
   # 5. unchanged when the marker is already present.
   d="$TMP/5"; mkrepo "$d"
-  printf '{"dependencies":{}}\n' > "$d/tessl.json"
+  printf '{"dependencies":{}}\n' > "$d/tessl.json" || setup_fail "case 5 tessl.json"
   if ! (cd "$d" && bash "$SCRIPT" >/dev/null 2>&1); then fail "case 5 setup: first run failed"; else
   out="$(cd "$d" && bash "$SCRIPT" 2>/dev/null)"; rc=$?  # second run
   if [[ $rc -eq 0 ]] && printf '%s' "$out" | jq -e '.gitignore=="unchanged"' >/dev/null; then pass; else fail "gitignore idempotent: rc=$rc $out"; fi
@@ -133,8 +135,8 @@ JSON
 
   # 7. an old block is rewritten in place to the current one; lines around it survive.
   d="$TMP/7"; mkrepo "$d"
-  printf '{"dependencies":{}}\n' > "$d/tessl.json"
-  { printf 'node_modules/\n'; old_block; printf 'dist/\n'; } > "$d/.gitignore"
+  printf '{"dependencies":{}}\n' > "$d/tessl.json" || setup_fail "case 7 tessl.json"
+  { printf 'node_modules/\n' && old_block && printf 'dist/\n'; } > "$d/.gitignore" || setup_fail "case 7 .gitignore"
   out="$(cd "$d" && bash "$SCRIPT" 2>/dev/null)"; rc=$?
   if [[ $rc -eq 0 ]] && printf '%s' "$out" | jq -e '.gitignore=="updated"' >/dev/null \
      && has_folder_ignores "$d/.gitignore" \
@@ -174,7 +176,7 @@ JSON
 
   # 11. a CRLF .gitignore carrying the old block refreshes, then settles to unchanged.
   d="$TMP/11"; mkrepo "$d"
-  { printf 'node_modules/\n'; old_block; } | sed 's/$/\r/' > "$d/.gitignore"
+  { printf 'node_modules/\n' && old_block; } | sed 's/$/\r/' > "$d/.gitignore" || setup_fail "case 11 .gitignore"
   out="$(cd "$d" && bash "$SCRIPT" 2>/dev/null)"; rc=$?
   if [[ $rc -eq 0 ]] && printf '%s' "$out" | jq -e '.gitignore=="updated"' >/dev/null && has_folder_ignores "$d/.gitignore"; then
     out="$(cd "$d" && bash "$SCRIPT" 2>/dev/null)"; rc=$?
