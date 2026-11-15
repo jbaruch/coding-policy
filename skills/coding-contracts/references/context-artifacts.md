@@ -54,7 +54,7 @@
 
 ## Credit-Outage Review Carve-Out
 
-- Narrow exception for skipping review during a tessl out-of-credits (403) billing outage
+- Narrow exception for an out-of-credits (403) `tessl review run` failure under the explicit `credit-outage: skip` opt-in
 - Applies when `tessl review run` fails with the out-of-credits signature; never a below-threshold score
 - Preconditions are binding: read `skills/release/references/skill-review-gate.md` Credit-Outage Review Carve-Out before relying on it
 - Every skill reviewed clean, and every non-credit failure, still blocks or passes exactly as Mandatory Review prescribes

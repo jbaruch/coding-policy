@@ -25,8 +25,6 @@
 ## Host Script Tier
 
 - A rule whose `requires:` list names no skill or capability present in the session does not match
-- A host may declare an agent tier or session kind that no conditional rule's scope covers
-- In a run of a declared tier or kind, no `alwaysApply: false` rule matches
 - A run touching no path the `applyTo:` globs match does not match the rule
 - The natural-language half is not script-readable
 - A glob match alone leaves the rule undecided
