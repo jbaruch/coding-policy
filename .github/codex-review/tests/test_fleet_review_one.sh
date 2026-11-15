@@ -62,6 +62,14 @@ EOF
 #!/usr/bin/env bash
 set -euo pipefail
 if [ -n "${TESSL_LOG:-}" ]; then printf '%s\n' "$*" >> "$TESSL_LOG"; fi
+if [ "${1:-}" = install ]; then
+  spec="${!#}"; name="${spec%@*}"
+  if [ -n "${TESSL_BLOCK:-}" ] && [ "$name" = "$TESSL_BLOCK" ]; then
+    printf '✘ Blocked by install policy (not added to tessl.json):\n   ✘  Security  Critical\n'
+    exit 0
+  fi
+  mkdir -p ".tessl/plugins/$name"
+fi
 exit 0
 EOF
   cat > "$bin/codex" <<'EOF'
@@ -281,16 +289,18 @@ t_no_core_without_base_enrollment() {
   rmwarn "$BIN" "$CENTRAL" "$CODEXH"
 }
 
-# --- #817: extra manifests named in the base ref's marker ---
-# Stage a base ref whose marker lists tessl-workspace/tessl.json, run a review,
-# and leave BIN CENTRAL CODEXH BASE set for the caller's assertions.
-# $1: marker body. $2: the extra manifest's body, or "" to leave it off the base.
+# --- #817: extra manifests named in the base ref's manifest list ---
+# Stage a base ref whose .github/fleet-review-manifests lists
+# tessl-workspace/tessl.json, run a review, and leave BIN CENTRAL CODEXH BASE
+# set for the caller's assertions.
+# $1: list body. $2: the extra manifest's body, or "" to leave it off the base.
+# Extra environment (TESSL_BLOCK) passes through to the fake tessl.
 run_with_marker() {
   local env_line; env_line=$(make_env) || exit 2
   read -r BIN CENTRAL CODEXH <<< "$env_line"
   BASE="$CODEXH/base"
   mkdir -p "$BASE/.github" || exit 2
-  printf '%s' "$1" > "$BASE/.github/fleet-review-enabled" || exit 2
+  printf '%s' "$1" > "$BASE/.github/fleet-review-manifests" || exit 2
   if [[ -n "$2" ]]; then
     mkdir -p "$BASE/tessl-workspace" || exit 2
     printf '%s' "$2" > "$BASE/tessl-workspace/tessl.json" || exit 2
@@ -303,8 +313,8 @@ run_with_marker() {
 
 t_extra_manifest_installs_its_plugins() {
   run_with_marker $'# Opts this repository in.\ntessl-workspace/tessl.json\n' '{"dependencies":{"acme/provider":{"version":"1.0.0"}}}'
-  if [[ $RC -eq 0 ]] && grep -qxF 'install acme/provider' "$CODEXH/tessl.log"; then ok "a marker-listed base manifest installs its plugins"
-  else bad "extra manifest plugins not installed (rc=$RC)"; fi
+  if [[ $RC -eq 0 ]] && grep -qxF 'install --strict acme/provider@1.0.0' "$CODEXH/tessl.log"; then ok "a listed base manifest installs its plugins at the pinned version"
+  else bad "extra manifest plugins not installed at the pinned version (rc=$RC, log: $(cat "$CODEXH/tessl.log"))"; fi
   rmwarn "$BIN" "$CENTRAL" "$CODEXH"
 }
 
@@ -317,9 +327,9 @@ t_extra_manifest_absent_on_base_installs_nothing() {
 }
 
 t_comment_only_marker_installs_only_policy() {
-  run_with_marker $'# Opts this repository in.\n#\n' ''
-  if [[ $RC -eq 0 ]] && [[ "$(cat "$CODEXH/tessl.log")" == "install jbaruch/coding-policy" ]]; then ok "a comment-only marker behaves as before"
-  else bad "comment-only marker changed the plugin set (rc=$RC)"; fi
+  run_with_marker $'# Provider manifests for the fleet reviewer.\n#\n' ''
+  if [[ $RC -eq 0 ]] && [[ "$(cat "$CODEXH/tessl.log")" == "install jbaruch/coding-policy" ]]; then ok "a comment-only manifest list behaves as before"
+  else bad "comment-only manifest list changed the plugin set (rc=$RC)"; fi
   rmwarn "$BIN" "$CENTRAL" "$CODEXH"
 }
 
@@ -327,6 +337,22 @@ t_escaping_marker_line_is_ignored() {
   run_with_marker $'../other/tessl.json\n' ''
   if [[ $RC -eq 0 ]] && grep -qF "ignoring '../other/tessl.json'" "$CODEXH/err"; then ok "a marker line that is not a plain relative path is ignored with a warning"
   else bad "escaping marker line not ignored (rc=$RC)"; fi
+  rmwarn "$BIN" "$CENTRAL" "$CODEXH"
+}
+
+t_policy_blocked_install_warns() {
+  TESSL_BLOCK=acme/provider run_with_marker $'tessl-workspace/tessl.json\n' '{"dependencies":{"acme/provider":{"version":"latest"}}}'
+  if [[ $RC -eq 0 ]] && grep -qF 'tessl did not install acme/provider' "$CODEXH/err" && grep -qF 'Blocked by install policy' "$CODEXH/err"; then
+    ok "a plugin tessl refuses while exiting 0 is reported with its reason"
+  else bad "silently refused install not reported (rc=$RC)"; fi
+  rmwarn "$BIN" "$CENTRAL" "$CODEXH"
+}
+
+t_source_pinned_dependency_warns() {
+  run_with_marker $'tessl-workspace/tessl.json\n' '{"dependencies":{"acme/local":{"source":"file:../local"}}}'
+  if [[ $RC -eq 0 ]] && ! grep -qF 'acme/local' "$CODEXH/tessl.log" && grep -qF 'declares no installable registry version' "$CODEXH/err"; then
+    ok "a source-pinned dependency is skipped with a warning"
+  else bad "source-pinned dependency handled wrongly (rc=$RC)"; fi
   rmwarn "$BIN" "$CENTRAL" "$CODEXH"
 }
 
@@ -354,6 +380,8 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
   t_extra_manifest_absent_on_base_installs_nothing
   t_comment_only_marker_installs_only_policy
   t_escaping_marker_line_is_ignored
+  t_policy_blocked_install_warns
+  t_source_pinned_dependency_warns
   t_malformed_extra_manifest_stops_review
   echo "== summary: ${pass} passed, ${fail} failed =="
   [[ "$fail" -eq 0 ]]

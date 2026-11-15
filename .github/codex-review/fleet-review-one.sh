@@ -40,34 +40,51 @@ cleanup() {
   return 0
 }
 
-# Install every dependency one trusted manifest declares into $POLICY. Skips
-# coding-policy (already installed at its latest) and records nanoclaw-core in
-# NEED_CORE for the isolated materializer. A plugin that fails to install is a
-# warning, not a failure; a manifest that does not parse refuses the review.
+# Install every dependency one trusted manifest declares into $POLICY, at the
+# version it declares. Skips coding-policy (already installed at its latest)
+# and records nanoclaw-core in NEED_CORE for the isolated materializer. A
+# pinned version installs exactly, with --strict so tessl cannot fall back to
+# an older one; "latest" installs the newest. A plugin that does not land is a
+# warning, not a failure: tessl can refuse a plugin and still exit 0 (an
+# install-policy block), so success is the plugin directory existing, not the
+# exit code. A manifest that does not parse refuses the review.
 install_manifest_deps() { # <manifest-json> <label> <full> <pr>
-  local manifest="$1" label="$2" full="$3" pr="$4" deps dep
+  local manifest="$1" label="$2" full="$3" pr="$4" deps name version source spec
+  local -a args
   # Capture the dependency list in an explicitly checked assignment, NOT via
   # process substitution: `while read < <(jq ...)` discards jq's exit status,
   # so a malformed manifest would yield an empty list and the review would
   # proceed with no authority plugins installed (rules/error-handling.md Shell
   # Error Handling).
-  if ! deps=$(printf '%s' "$manifest" | jq -r '.dependencies // {} | keys[]'); then
+  if ! deps=$(printf '%s' "$manifest" | jq -r '.dependencies // {} | to_entries[] | [.key, (.value.version // ""), (.value.source // "")] | @tsv'); then
     echo "error: could not parse dependencies from ${label} — refusing to review with an unknown plugin set" >&2
     exit 1
   fi
-  while IFS= read -r dep; do
-    [ -n "$dep" ] || continue
-    [ "$dep" = "jbaruch/coding-policy" ] && continue
-    if [ "$dep" = "jbaruch/nanoclaw-core" ]; then
+  while IFS=$'\t' read -r name version source; do
+    [ -n "$name" ] || continue
+    [ "$name" = "jbaruch/coding-policy" ] && continue
+    if [ "$name" = "jbaruch/nanoclaw-core" ]; then
       NEED_CORE=true
       continue
     fi
-    if ! ( cd "$POLICY" && tessl install "$dep" >/dev/null 2>&1 ); then
+    if [[ "$version" == "latest" ]]; then
+      spec="$name"; args=(install "$spec")
+    elif [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?$ ]]; then
+      spec="${name}@${version}"; args=(install --strict "$spec")
+    else
+      echo "::warning::${name} in ${label} declares no installable registry version (version '${version}', source '${source}') — carve-outs citing its rules cannot be verified this run" >&2
+      continue
+    fi
+    local out rc=0
+    out=$(cd "$POLICY" && tessl "${args[@]}" 2>&1) || rc=$?
+    if (( rc != 0 )) || [[ ! -d "${POLICY}/.tessl/plugins/${name}" ]]; then
       # Best-effort per `rules/error-handling.md` Graceful Fallback: a
-      # private or unpublished plugin must not fail the whole review,
-      # but it MUST be visible — a silently missing authority rule is
+      # private, unpublished or policy-blocked plugin must not fail the whole
+      # review, but it MUST be visible — a silently missing authority rule is
       # how a reviewer blocks a compliant PR without saying why.
-      echo "::warning::could not install ${dep} (from ${label}) for ${full}#${pr} — carve-outs citing its rules cannot be verified this run" >&2
+      local why
+      why=$(printf '%s\n' "$out" | grep -m1 -E '✘|[Ee]rror|[Bb]locked' | tr -s ' ')
+      echo "::warning::tessl did not install ${spec} (from ${label}) for ${full}#${pr} (exit ${rc}${why:+: ${why}}) — carve-outs citing its rules cannot be verified this run" >&2
     fi
   done <<< "$deps"
 }
@@ -171,18 +188,20 @@ main() {
 
   # A repo can keep runtime provider plugins out of its root tessl.json, which
   # is also the developer agent's context manifest, by listing further
-  # manifests in its marker, one relative path per line. Both the marker and
-  # each manifest come from the BASE ref for the same reason as above, so a PR
-  # that adds a path cannot authorize itself. `git ls-tree` prints nothing for
-  # an absent path, which keeps absence apart from a failed read.
-  local marker_path=".github/fleet-review-enabled" listed marker extra extra_manifest
-  if ! listed=$(cd "$work" && git ls-tree --name-only "origin/${base}" -- "$marker_path"); then
-    echo "error: could not list ${marker_path} on ${full}:${base} — restore the fetched base before reviewing" >&2
+  # manifests in .github/fleet-review-manifests, one relative path per line.
+  # A file of its own, so onboard-repo's marker refresh never overwrites it.
+  # Both the list and each manifest come from the BASE ref for the same reason
+  # as above, so a PR that adds a path cannot authorize itself. `git ls-tree`
+  # prints nothing for an absent path, which keeps absence apart from a failed
+  # read.
+  local list_path=".github/fleet-review-manifests" listed list_text extra extra_manifest
+  if ! listed=$(cd "$work" && git ls-tree --name-only "origin/${base}" -- "$list_path"); then
+    echo "error: could not list ${list_path} on ${full}:${base} — restore the fetched base before reviewing" >&2
     exit 1
   fi
   if [[ -n "$listed" ]]; then
-    if ! marker=$(cd "$work" && git show "origin/${base}:${marker_path}"); then
-      echo "error: could not read ${marker_path} on ${full}:${base} — restore the fetched base before reviewing" >&2
+    if ! list_text=$(cd "$work" && git show "origin/${base}:${list_path}"); then
+      echo "error: could not read ${list_path} on ${full}:${base} — restore the fetched base before reviewing" >&2
       exit 1
     fi
     while IFS= read -r extra; do
@@ -190,7 +209,7 @@ main() {
       extra="${extra%"${extra##*[![:space:]]}"}"
       [[ -z "$extra" || "$extra" == \#* ]] && continue
       if [[ "$extra" == /* || "$extra" == *..* || ! "$extra" =~ ^[A-Za-z0-9._/-]+$ ]]; then
-        echo "::warning::ignoring '${extra}' in ${full}:${base}/${marker_path} — list a relative manifest path such as tessl-workspace/tessl.json" >&2
+        echo "::warning::ignoring '${extra}' in ${full}:${base}/${list_path} — list a relative manifest path such as tessl-workspace/tessl.json" >&2
         continue
       fi
       if ! listed=$(cd "$work" && git ls-tree --name-only "origin/${base}" -- "$extra"); then
@@ -198,7 +217,7 @@ main() {
         exit 1
       fi
       if [[ -z "$listed" ]]; then
-        echo "::warning::${full}:${base} has no ${extra}, which ${marker_path} lists — only the base ref is trusted, so its plugins are not installed this run" >&2
+        echo "::warning::${full}:${base} has no ${extra}, which ${list_path} lists — only the base ref is trusted, so its plugins are not installed this run" >&2
         continue
       fi
       if ! extra_manifest=$(cd "$work" && git show "origin/${base}:${extra}"); then
@@ -206,7 +225,7 @@ main() {
         exit 1
       fi
       install_manifest_deps "$extra_manifest" "${full}:${base}/${extra}" "$full" "$pr"
-    done <<< "$marker"
+    done <<< "$list_text"
   fi
 
   if [[ "$NEED_CORE" == true ]]; then
