@@ -31,6 +31,9 @@ POLICY=""
 # Set by install_manifest_deps when any trusted manifest names nanoclaw-core,
 # which is materialized last in its own isolated workspace.
 NEED_CORE=false
+# Declared plugins that did not install, one "<spec> (from <manifest>): <why>"
+# entry each. Any entry stops the review before Codex runs.
+MISSING=()
 cleanup() {
   local d
   for d in "${WORK:-}" "${POLICY:-}"; do
@@ -44,10 +47,10 @@ cleanup() {
 # version it declares. Skips coding-policy (already installed at its latest)
 # and records nanoclaw-core in NEED_CORE for the isolated materializer. A
 # pinned version installs exactly, with --strict so tessl cannot fall back to
-# an older one; "latest" installs the newest. A plugin that does not land is a
-# warning, not a failure: tessl can refuse a plugin and still exit 0 (an
-# install-policy block), so success is the plugin directory existing, not the
-# exit code. A manifest that does not parse refuses the review.
+# an older one; "latest" installs the newest. tessl can refuse a plugin and
+# still exit 0 (an install-policy block), so success is the plugin directory
+# existing, not the exit code. A plugin that does not land is recorded in
+# MISSING, and a manifest that does not parse refuses the review.
 install_manifest_deps() { # <manifest-json> <label> <full> <pr>
   local manifest="$1" label="$2" full="$3" pr="$4" deps name version source spec
   local -a args
@@ -72,22 +75,18 @@ install_manifest_deps() { # <manifest-json> <label> <full> <pr>
     elif [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?$ ]]; then
       spec="${name}@${version}"; args=(install --strict "$spec")
     else
-      echo "::warning::${name} in ${label} declares no installable registry version (version '${version}', source '${source}') — carve-outs citing its rules cannot be verified this run" >&2
+      MISSING+=("${name} (from ${label}): no installable registry version (version '${version}', source '${source}')")
       continue
     fi
     local out rc=0
     out=$(cd "$POLICY" && tessl "${args[@]}" 2>&1) || rc=$?
     if (( rc != 0 )) || [[ ! -d "${POLICY}/.tessl/plugins/${name}" ]]; then
-      # Best-effort per `rules/error-handling.md` Graceful Fallback: a
-      # private, unpublished or policy-blocked plugin must not fail the whole
-      # review, but it MUST be visible — a silently missing authority rule is
-      # how a reviewer blocks a compliant PR without saying why.
       # grep exit 1 means tessl printed no reason line, an expected
       # non-result; only exit >1 is a grep failure (rules/error-handling.md).
       local why="" grc=0
       why=$(printf '%s\n' "$out" | grep -m1 -E '✘|[Ee]rror|[Bb]locked') || grc=$?
       if (( grc > 1 )); then why="(tessl output unreadable)"; fi
-      echo "::warning::tessl did not install ${spec} (from ${label}) for ${full}#${pr} (exit ${rc}${why:+: ${why}}) — carve-outs citing its rules cannot be verified this run" >&2
+      MISSING+=("${spec} (from ${label}): tessl exit ${rc}${why:+, ${why}}")
     fi
   done <<< "$deps"
 }
@@ -229,6 +228,16 @@ main() {
       fi
       install_manifest_deps "$extra_manifest" "${full}:${base}/${extra}" "$full" "$pr"
     done <<< "$list_text"
+  fi
+
+  # A verdict reached without a declared authority plugin can reject a valid
+  # carve-out, so a missing plugin stops the review instead of degrading it.
+  if (( ${#MISSING[@]} > 0 )); then
+    local missing
+    echo "error: cannot review ${full}#${pr} without these declared plugins:" >&2
+    for missing in "${MISSING[@]}"; do echo "  - ${missing}" >&2; done
+    echo "make each installable (for a 'Blocked by install policy' refusal, clear the plugin's registry security finding) or remove it from the manifest, then rerun this review" >&2
+    exit 1
   fi
 
   if [[ "$NEED_CORE" == true ]]; then

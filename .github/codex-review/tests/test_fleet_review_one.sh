@@ -344,27 +344,27 @@ t_escaping_marker_line_is_ignored() {
   rmwarn "$BIN" "$CENTRAL" "$CODEXH"
 }
 
-t_policy_blocked_install_warns() {
+t_policy_blocked_install_stops_review() {
   TESSL_BLOCK=acme/provider run_with_marker $'tessl-workspace/tessl.json\n' '{"dependencies":{"acme/provider":{"version":"latest"}}}'
-  if [[ $RC -eq 0 ]] && grep -qF 'tessl did not install acme/provider' "$CODEXH/err" && grep -qF 'Blocked by install policy' "$CODEXH/err"; then
-    ok "a plugin tessl refuses while exiting 0 is reported with its reason"
-  else bad "silently refused install not reported (rc=$RC)"; fi
+  if [[ $RC -ne 0 && ! -e "$CODEXH/codex.log" ]] && grep -qF 'acme/provider' "$CODEXH/err" && grep -qF 'Blocked by install policy' "$CODEXH/err"; then
+    ok "a plugin tessl refuses while exiting 0 stops the review with its reason"
+  else bad "silently refused install reached review or hid its reason (rc=$RC)"; fi
   rmwarn "$BIN" "$CENTRAL" "$CODEXH"
 }
 
-t_failed_install_without_reason_line_still_reviews() {
+t_failed_install_without_reason_line_stops_review() {
   TESSL_FAIL=acme/provider run_with_marker $'tessl-workspace/tessl.json\n' '{"dependencies":{"acme/provider":{"version":"latest"}}}'
-  if [[ $RC -eq 0 ]] && grep -qF 'tessl did not install acme/provider' "$CODEXH/err" && grep -qF '(exit 3)' "$CODEXH/err" && [[ -s "$CODEXH/codex.log" ]]; then
-    ok "a failed install with no reason line warns and the review continues"
-  else bad "unmatched failure output aborted or hid the review (rc=$RC)"; fi
+  if [[ $RC -ne 0 && ! -e "$CODEXH/codex.log" ]] && grep -qF 'acme/provider (from' "$CODEXH/err" && grep -qF 'tessl exit 3' "$CODEXH/err"; then
+    ok "a failed install with no reason line stops the review naming the plugin"
+  else bad "unmatched failure output reached review or hid the plugin (rc=$RC)"; fi
   rmwarn "$BIN" "$CENTRAL" "$CODEXH"
 }
 
-t_source_pinned_dependency_warns() {
+t_source_pinned_dependency_stops_review() {
   run_with_marker $'tessl-workspace/tessl.json\n' '{"dependencies":{"acme/local":{"source":"file:../local"}}}'
-  if [[ $RC -eq 0 ]] && ! grep -qF 'acme/local' "$CODEXH/tessl.log" && grep -qF 'declares no installable registry version' "$CODEXH/err"; then
-    ok "a source-pinned dependency is skipped with a warning"
-  else bad "source-pinned dependency handled wrongly (rc=$RC)"; fi
+  if [[ $RC -ne 0 && ! -e "$CODEXH/codex.log" ]] && ! grep -qF 'acme/local' "$CODEXH/tessl.log" && grep -qF 'no installable registry version' "$CODEXH/err"; then
+    ok "a source-pinned dependency stops the review before Codex"
+  else bad "source-pinned dependency reached review (rc=$RC)"; fi
   rmwarn "$BIN" "$CENTRAL" "$CODEXH"
 }
 
@@ -392,9 +392,9 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
   t_extra_manifest_absent_on_base_installs_nothing
   t_comment_only_marker_installs_only_policy
   t_escaping_marker_line_is_ignored
-  t_policy_blocked_install_warns
-  t_failed_install_without_reason_line_still_reviews
-  t_source_pinned_dependency_warns
+  t_policy_blocked_install_stops_review
+  t_failed_install_without_reason_line_stops_review
+  t_source_pinned_dependency_stops_review
   t_malformed_extra_manifest_stops_review
   echo "== summary: ${pass} passed, ${fail} failed =="
   [[ "$fail" -eq 0 ]]
