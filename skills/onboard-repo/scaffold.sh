@@ -135,7 +135,7 @@ main() {
   # Snapshot existing targets for rollback. snap_existed[i] tracks each; env_existed
   # tracks .env.example. Both are set before the ERR trap is armed.
   local SNAP_DIR i=0
-  SNAP_DIR=$(mktemp -d) || { echo "error: mktemp -d failed — check TMPDIR is writable" >&2; exit 1; }
+  SNAP_DIR=$(mktemp -d "${TMPDIR:-/tmp}/scaffold.XXXXXX") || { echo "error: mktemp -d failed — check TMPDIR is writable" >&2; exit 1; }
   local -a snap_existed=()
   for pair in "${MANIFEST[@]}"; do
     tgt="${pair#*:}"
@@ -211,7 +211,7 @@ main() {
     if (( rc_assign == 0 && rc_link == 0 )); then
       env_action="unchanged"
     else
-      local env_tmp; env_tmp=$(mktemp) || { echo "error: mktemp failed while updating ${ENV_FILE}" >&2; false; }
+      local env_tmp; env_tmp=$(mktemp "${TMPDIR:-/tmp}/scaffold.XXXXXX") || { echo "error: mktemp failed while updating ${ENV_FILE}" >&2; false; }
       # Prepend the block (deep link in header); keep every existing line except a
       # bare placeholder, which the block now supplies. grep -v exit 1 (all lines
       # stripped) is a valid empty remainder; only exit >=2 is a real error.

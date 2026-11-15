@@ -436,7 +436,7 @@ main() {
   for tool in gh python3 jq; do
     command -v "$tool" >/dev/null || { echo "error: ${tool} is not on PATH — install it and re-run" >&2; exit 2; }
   done
-  WORK_DIR=$(mktemp -d) || { echo "error: mktemp -d failed — check TMPDIR is writable, then re-run" >&2; exit 2; }
+  WORK_DIR=$(mktemp -d "${TMPDIR:-/tmp}/dismiss-ruled-review.XXXXXX") || { echo "error: mktemp -d failed — check TMPDIR is writable, then re-run" >&2; exit 2; }
   trap cleanup EXIT
   local tmp="$WORK_DIR"
 

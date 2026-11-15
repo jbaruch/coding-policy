@@ -81,7 +81,7 @@ main() {
   command -v tessl >/dev/null \
     || { echo "error: tessl CLI not found on PATH — install it ('npm i -g @tessl/cli') or add it to PATH, then re-run" >&2; exit 2; }
 
-  ERR_FILE=$(mktemp) \
+  ERR_FILE=$(mktemp "${TMPDIR:-/tmp}/capture-registry-baseline.XXXXXX") \
     || { echo "error: mktemp failed — cannot run capture-registry-baseline.sh without a writable TMPDIR" >&2; exit 2; }
 
   # Capture stdout and stderr separately, then parse stdout on its own.

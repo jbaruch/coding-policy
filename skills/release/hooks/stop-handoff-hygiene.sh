@@ -132,7 +132,7 @@ WT_SHARED=""
 # git or the parse fails.
 read_inventory() {
   local dir rc=0 parsed rest
-  dir="$(mktemp -d)" || { warn "mktemp failed — skipping the worktree check; make ${TMPDIR:-/tmp} writable"; return 1; }
+  dir="$(mktemp -d "${TMPDIR:-/tmp}/stop-handoff-hygiene.XXXXXX")" || { warn "mktemp failed — skipping the worktree check; make ${TMPDIR:-/tmp} writable"; return 1; }
   git worktree list --porcelain -z >"${dir}/list" 2>"${dir}/err" || rc=$?
   if (( rc != 0 )); then
     warn "\`git worktree list --porcelain -z\` failed (exit ${rc}): $(tr '\n' ' ' < "${dir}/err") — skipping the worktree check; run it here to see why"
@@ -199,7 +199,7 @@ read_owner_decisions() {
     return 0
   fi
   shared="$WT_SHARED"
-  err="$(mktemp)" || { warn "mktemp failed — skipping the worktree check; make ${TMPDIR:-/tmp} writable"; return 0; }
+  err="$(mktemp "${TMPDIR:-/tmp}/stop-handoff-hygiene.XXXXXX")" || { warn "mktemp failed — skipping the worktree check; make ${TMPDIR:-/tmp} writable"; return 0; }
   out="$(GIT_TERMINAL_PROMPT=0 GIT_SSH_COMMAND="${GIT_SSH_COMMAND:-ssh} -o BatchMode=yes" \
     bash "$runner" "$PRUNE_BUDGET_SEC" bash "$prune" "$shared" --dry-run 2>"$err")" || rc=$?
   if (( rc != 0 && rc != 2 )) || [[ -z "$out" ]]; then
@@ -238,7 +238,7 @@ with open(out, "wb") as handle:
         handle.write(kind.encode() + b"\0" + text.encode("utf-8", "surrogateescape") + b"\0")
 PY
 )"
-  if ! records="$(mktemp)"; then
+  if ! records="$(mktemp "${TMPDIR:-/tmp}/stop-handoff-hygiene.XXXXXX")"; then
     warn "mktemp failed — skipping the worktree check; make ${TMPDIR:-/tmp} writable"
     return 0
   fi
@@ -336,7 +336,7 @@ collect_changed_lintable() {
   # observable (a process substitution would hide it); warn on failure and fall
   # open to whatever was collected (rules/error-handling.md).
   local f tmp rc=0
-  tmp="$(mktemp)" || { warn "mktemp failed — skipping changed-set diagnostics; make ${TMPDIR:-/tmp} writable"; return 0; }
+  tmp="$(mktemp "${TMPDIR:-/tmp}/stop-handoff-hygiene.XXXXXX")" || { warn "mktemp failed — skipping changed-set diagnostics; make ${TMPDIR:-/tmp} writable"; return 0; }
 
   rc=0
   if git rev-parse --verify -q HEAD >/dev/null; then

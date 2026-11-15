@@ -94,7 +94,7 @@ refresh_block() {
   fi
 
   local tmp
-  tmp=$(mktemp) || { echo "error: mktemp failed while updating .gitignore" >&2; exit 1; }
+  tmp=$(mktemp "${TMPDIR:-/tmp}/tessl-hygiene.XXXXXX") || { echo "error: mktemp failed while updating .gitignore" >&2; exit 1; }
   if ! { awk -v s="$start" 'NR < s' .gitignore && gitignore_block && awk -v e="$end" 'NR > e' .gitignore; } > "$tmp"; then
     rm -f "$tmp" || echo "warning: could not remove temp file ${tmp} — remove it by hand" >&2
     echo "error: failed to rebuild .gitignore" >&2
@@ -139,7 +139,7 @@ main() {
     if [[ "$pinned" == "0" ]]; then
       tj_state="unchanged"
     else
-      local tmp; tmp=$(mktemp) || { echo "error: mktemp failed while updating tessl.json" >&2; exit 1; }
+      local tmp; tmp=$(mktemp "${TMPDIR:-/tmp}/tessl-hygiene.XXXXXX") || { echo "error: mktemp failed while updating tessl.json" >&2; exit 1; }
       if ! jq --indent 2 '.dependencies |= with_entries(if (.key | startswith("jbaruch/")) then .value.version = "latest" else . end)' tessl.json > "$tmp"; then
         rm -f "$tmp" || echo "warning: could not remove temp file ${tmp} — remove it by hand" >&2
         echo "error: failed to rewrite tessl.json" >&2

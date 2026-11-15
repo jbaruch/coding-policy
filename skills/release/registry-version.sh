@@ -75,7 +75,7 @@ registry_version() {
   local workspace="$1" tile="$2"
   local endpoint="v1/tiles/${workspace}/${tile}/versions"
 
-  RV_ERR_FILE=$(mktemp) \
+  RV_ERR_FILE=$(mktemp "${TMPDIR:-/tmp}/registry-version.XXXXXX") \
     || { echo "error: mktemp failed — cannot run registry-version.sh without a writable TMPDIR" >&2; return 2; }
 
   # Capture stdout (the JSON body) and stderr (a tessl warning) SEPARATELY so a

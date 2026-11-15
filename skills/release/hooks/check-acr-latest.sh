@@ -228,7 +228,7 @@ main() {
   # Outside git is the one expected rev-parse failure; any other is a broken
   # repository, reported and never updated as if it were a plain directory.
   local errf
-  if ! errf="$(mktemp)"; then
+  if ! errf="$(mktemp "${TMPDIR:-/tmp}/check-acr-latest.XXXXXX")"; then
     warn "mktemp failed — cannot check this project for ACR updates; check TMPDIR"
     return 0
   fi
