@@ -34,6 +34,10 @@ NEED_CORE=false
 # Declared plugins that did not install, one "<spec> (from <manifest>): <why>"
 # entry each. Any entry stops the review before Codex runs.
 MISSING=()
+# "<name> <spec> <manifest>" for every plugin already requested, across all
+# manifests, so a repeat with a different pin is caught before it overwrites
+# the first one's .tessl/plugins/<name> directory.
+SEEN=""
 cleanup() {
   local d
   for d in "${WORK:-}" "${POLICY:-}"; do
@@ -78,6 +82,15 @@ install_manifest_deps() { # <manifest-json> <label> <full> <pr>
       MISSING+=("${name} (from ${label}): no installable registry version (version '${version}', source '${source}')")
       continue
     fi
+    local prior
+    prior=$(printf '%s\n' "$SEEN" | awk -v n="$name" '$1 == n { print $2 " (from " $3 ")"; exit }')
+    if [[ -n "$prior" ]]; then
+      if [[ "${prior%% *}" != "$spec" ]]; then
+        MISSING+=("${name}: ${label} asks for ${spec} but ${prior} was already requested — one review cannot hold two pins of the same plugin")
+      fi
+      continue
+    fi
+    SEEN+="${name} ${spec} ${label}"$'\n'
     local out rc=0
     out=$(cd "$POLICY" && tessl "${args[@]}" 2>&1) || rc=$?
     if (( rc != 0 )) || [[ ! -d "${POLICY}/.tessl/plugins/${name}" ]]; then

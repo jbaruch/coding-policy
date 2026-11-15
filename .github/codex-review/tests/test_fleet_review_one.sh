@@ -368,6 +368,30 @@ t_source_pinned_dependency_stops_review() {
   rmwarn "$BIN" "$CENTRAL" "$CODEXH"
 }
 
+t_list_without_final_newline_still_installs() {
+  run_with_marker 'tessl-workspace/tessl.json' '{"dependencies":{"acme/provider":{"version":"1.0.0"}}}'
+  if [[ $RC -eq 0 ]] && grep -qxF 'install --strict acme/provider@1.0.0' "$CODEXH/tessl.log"; then ok "a final list entry without a newline is still installed"
+  else bad "unterminated final list entry skipped (rc=$RC)"; fi
+  rmwarn "$BIN" "$CENTRAL" "$CODEXH"
+}
+
+t_conflicting_pins_stop_review() {
+  local env_line; env_line=$(make_env) || exit 2
+  read -r BIN CENTRAL CODEXH <<< "$env_line"
+  local base="$CODEXH/base" rc=0
+  mkdir -p "$base/.github" "$base/tessl-workspace" || exit 2
+  printf '{"dependencies":{"acme/provider":{"version":"1.0.0"}}}' > "$base/tessl.json" || exit 2
+  printf 'tessl-workspace/tessl.json\n' > "$base/.github/fleet-review-manifests" || exit 2
+  printf '{"dependencies":{"acme/provider":{"version":"2.0.0"}}}' > "$base/tessl-workspace/tessl.json" || exit 2
+  PATH="$BIN:$PATH" GH_TOKEN=tok CENTRAL_DIR="$CENTRAL" CODEX_HOME="$CODEXH" FAKE_BASE_DIR="$base" \
+    FAKE_BASE_MANIFEST="$base/tessl.json" TESSL_LOG="$CODEXH/tessl.log" CODEX_ARGV_LOG="$CODEXH/codex.log" \
+    bash "$SCRIPT" jbaruch repo-a 7 main >/dev/null 2>"$CODEXH/err" || rc=$?
+  if [[ $rc -ne 0 && ! -e "$CODEXH/codex.log" ]] && grep -qF 'acme/provider@2.0.0' "$CODEXH/err" && grep -qF 'acme/provider@1.0.0' "$CODEXH/err" \
+     && ! grep -qF 'acme/provider@2.0.0' "$CODEXH/tessl.log"; then ok "two manifests pinning one plugin differently stop the review before the second install"
+  else bad "conflicting pins reached review or reinstalled (rc=$rc)"; fi
+  rmwarn "$BIN" "$CENTRAL" "$CODEXH"
+}
+
 t_malformed_extra_manifest_stops_review() {
   run_with_marker $'tessl-workspace/tessl.json\n' '{not json'
   if [[ $RC -ne 0 && ! -e "$CODEXH/codex.log" ]]; then ok "a malformed extra manifest stops before review"
@@ -395,6 +419,8 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
   t_policy_blocked_install_stops_review
   t_failed_install_without_reason_line_stops_review
   t_source_pinned_dependency_stops_review
+  t_list_without_final_newline_still_installs
+  t_conflicting_pins_stop_review
   t_malformed_extra_manifest_stops_review
   echo "== summary: ${pass} passed, ${fail} failed =="
   [[ "$fail" -eq 0 ]]
