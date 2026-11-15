@@ -416,18 +416,20 @@ def main() -> int:
 
 
 def failure_site(error: BaseException) -> str:
-    """Name where a refusal was raised: `file:line in function` of the deepest
-    publisher frame (a fleet_publish* module), else the deepest frame.
+    """Name where a refusal was raised: the three deepest publisher frames
+    (fleet_publish* modules), innermost first, as `file:line in function`
+    joined by ` <- `, else the deepest frames of any module.
 
-    Built only from code identity, never the exception's text, which can carry
-    input.
+    A shared check such as `require` raises for many steps, so its callers
+    name the step. Built only from code identity, never the exception's text,
+    which can carry input.
     """
     frames = traceback.extract_tb(error.__traceback__)
     if not frames:
         return "an unknown site"
     own = [f for f in frames if os.path.basename(f.filename).startswith("fleet_publish")]
-    frame = (own or frames)[-1]
-    return f"{os.path.basename(frame.filename)}:{frame.lineno} in {frame.name}"
+    chain = reversed((own or frames)[-3:])
+    return " <- ".join(f"{os.path.basename(f.filename)}:{f.lineno} in {f.name}" for f in chain)
 
 
 def entrypoint() -> int:
@@ -435,7 +437,7 @@ def entrypoint() -> int:
         return main()
     except (PublishRefused, OSError, ValueError, KeyError, TypeError, UnicodeError) as error:
         # outer-boundary-process-contract: the workflow treats nonzero as HOLD;
-        # fixed guidance plus the refusal's type and raising frame (code
+        # fixed guidance plus the refusal's type and raising frames (code
         # identity, never its message) preserves uncertain state and names the
         # failing step without exposing raw inputs.
         print(

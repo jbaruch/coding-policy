@@ -327,8 +327,19 @@ class WorkflowTests(unittest.TestCase):
         result = self.run_phase("prepare", FIXTURE_FAULT="prepare")
         self.assertEqual(result.returncode, 1)
         self.assertNotIn(b"PRIVATE", result.stderr)
-        self.assertIn(b"fleet_publish.py:", result.stderr)
-        self.assertIn(b" in record (PublishRefused)", result.stderr)
+        self.assertRegex(
+            result.stderr,
+            rb"failed closed at fleet_publish\.py:\d+ in record <- fleet_publish\.py:\d+ in prepare"
+            rb" <- fleet_publish_workflow\.py:\d+ in main \(PublishRefused\)",
+        )
+
+    def test_shared_check_refusal_names_the_step_that_called_it(self):
+        result = self.run_phase("prepare", GITHUB_RUN_ATTEMPT="2")
+        self.assertEqual(result.returncode, 1)
+        self.assertRegex(
+            result.stderr,
+            rb"failed closed at fleet_publish\.py:\d+ in require <- fleet_publish_workflow\.py:\d+ in context <- ",
+        )
 
     def test_review_output_is_selection_bound_for_all_prepare_reentries(self):
         for mode, selected, review in (
