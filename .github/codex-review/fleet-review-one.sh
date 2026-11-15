@@ -63,11 +63,13 @@ install_manifest_deps() { # <manifest-json> <label> <full> <pr>
   # so a malformed manifest would yield an empty list and the review would
   # proceed with no authority plugins installed (rules/error-handling.md Shell
   # Error Handling).
-  if ! deps=$(printf '%s' "$manifest" | jq -r '.dependencies // {} | to_entries[] | [.key, (.value.version // ""), (.value.source // "")] | @tsv'); then
+  # Fields are joined with the ASCII unit separator, a non-whitespace IFS, so an
+  # empty version or source stays an empty field instead of collapsing.
+  if ! deps=$(printf '%s' "$manifest" | jq -r '.dependencies // {} | to_entries[] | [.key, (.value.version // ""), (.value.source // "")] | join("\u001f")'); then
     echo "error: could not parse dependencies from ${label} — refusing to review with an unknown plugin set" >&2
     exit 1
   fi
-  while IFS=$'\t' read -r name version source; do
+  while IFS=$'\x1f' read -r name version source; do
     [ -n "$name" ] || continue
     [ "$name" = "jbaruch/coding-policy" ] && continue
     if [ "$name" = "jbaruch/nanoclaw-core" ]; then
@@ -223,8 +225,8 @@ main() {
       extra="${extra#"${extra%%[![:space:]]*}"}"
       extra="${extra%"${extra##*[![:space:]]}"}"
       [[ -z "$extra" || "$extra" == \#* ]] && continue
-      if [[ "$extra" == /* || "$extra" == *..* || ! "$extra" =~ ^[A-Za-z0-9._/-]+$ ]]; then
-        echo "::warning::ignoring '${extra}' in ${full}:${base}/${list_path} — list a relative manifest path such as tessl-workspace/tessl.json" >&2
+      if [[ "$extra" == /* || "/${extra}/" == */../* || ! "$extra" =~ ^[A-Za-z0-9._/-]+$ ]]; then
+        MISSING+=("'${extra}' (in ${list_path}): not a relative manifest path such as tessl-workspace/tessl.json")
         continue
       fi
       if ! listed=$(cd "$work" && git ls-tree --name-only "origin/${base}" -- "$extra"); then

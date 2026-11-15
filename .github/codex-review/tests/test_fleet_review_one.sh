@@ -337,10 +337,10 @@ t_comment_only_marker_installs_only_policy() {
   rmwarn "$BIN" "$CENTRAL" "$CODEXH"
 }
 
-t_escaping_marker_line_is_ignored() {
+t_escaping_marker_line_stops_review() {
   run_with_marker $'../other/tessl.json\n' ''
-  if [[ $RC -eq 0 ]] && grep -qF "ignoring '../other/tessl.json'" "$CODEXH/err"; then ok "a marker line that is not a plain relative path is ignored with a warning"
-  else bad "escaping marker line not ignored (rc=$RC)"; fi
+  if [[ $RC -ne 0 && ! -e "$CODEXH/codex.log" ]] && grep -qF "'../other/tessl.json' (in" "$CODEXH/err"; then ok "a list entry that is not a plain relative path stops the review"
+  else bad "escaping list entry reached review (rc=$RC)"; fi
   rmwarn "$BIN" "$CENTRAL" "$CODEXH"
 }
 
@@ -362,9 +362,23 @@ t_failed_install_without_reason_line_stops_review() {
 
 t_source_pinned_dependency_stops_review() {
   run_with_marker $'tessl-workspace/tessl.json\n' '{"dependencies":{"acme/local":{"source":"file:../local"}}}'
-  if [[ $RC -ne 0 && ! -e "$CODEXH/codex.log" ]] && ! grep -qF 'acme/local' "$CODEXH/tessl.log" && grep -qF 'no installable registry version' "$CODEXH/err"; then
+  if [[ $RC -ne 0 && ! -e "$CODEXH/codex.log" ]] && ! grep -qF 'acme/local' "$CODEXH/tessl.log" && grep -qF "version '', source 'file:../local'" "$CODEXH/err"; then
     ok "a source-pinned dependency stops the review before Codex"
   else bad "source-pinned dependency reached review (rc=$RC)"; fi
+  rmwarn "$BIN" "$CENTRAL" "$CODEXH"
+}
+
+t_double_dot_in_a_name_is_a_valid_path() {
+  local env_line; env_line=$(make_env) || exit 2
+  read -r BIN CENTRAL CODEXH <<< "$env_line"
+  local base="$CODEXH/base" rc=0
+  mkdir -p "$base/.github" "$base/policy..v2" || exit 2
+  printf 'policy..v2/tessl.json\n' > "$base/.github/fleet-review-manifests" || exit 2
+  printf '{"dependencies":{"acme/provider":{"version":"1.0.0"}}}' > "$base/policy..v2/tessl.json" || exit 2
+  PATH="$BIN:$PATH" GH_TOKEN=tok CENTRAL_DIR="$CENTRAL" CODEX_HOME="$CODEXH" FAKE_BASE_DIR="$base" \
+    TESSL_LOG="$CODEXH/tessl.log" bash "$SCRIPT" jbaruch repo-a 7 main >/dev/null 2>"$CODEXH/err" || rc=$?
+  if [[ $rc -eq 0 ]] && grep -qxF 'install --strict acme/provider@1.0.0' "$CODEXH/tessl.log"; then ok "a '..' inside a file name is a valid list entry"
+  else bad "'..' inside a name rejected (rc=$rc)"; fi
   rmwarn "$BIN" "$CENTRAL" "$CODEXH"
 }
 
@@ -423,7 +437,8 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
   t_extra_manifest_absent_on_base_stops_review
   t_latest_installs_strictly
   t_comment_only_marker_installs_only_policy
-  t_escaping_marker_line_is_ignored
+  t_escaping_marker_line_stops_review
+  t_double_dot_in_a_name_is_a_valid_path
   t_policy_blocked_install_stops_review
   t_failed_install_without_reason_line_stops_review
   t_source_pinned_dependency_stops_review
