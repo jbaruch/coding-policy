@@ -22,6 +22,7 @@ import json
 import os
 import stat
 import sys
+import traceback
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
@@ -414,14 +415,32 @@ def main() -> int:
         owner.close()
 
 
+def failure_site(error: BaseException) -> str:
+    """Name where a refusal was raised: `file:line in function` of the deepest
+    publisher frame (a fleet_publish* module), else the deepest frame.
+
+    Built only from code identity, never the exception's text, which can carry
+    input.
+    """
+    frames = traceback.extract_tb(error.__traceback__)
+    if not frames:
+        return "an unknown site"
+    own = [f for f in frames if os.path.basename(f.filename).startswith("fleet_publish")]
+    frame = (own or frames)[-1]
+    return f"{os.path.basename(frame.filename)}:{frame.lineno} in {frame.name}"
+
+
 def entrypoint() -> int:
     try:
         return main()
-    except (PublishRefused, OSError, ValueError, KeyError, TypeError, UnicodeError):
+    except (PublishRefused, OSError, ValueError, KeyError, TypeError, UnicodeError) as error:
         # outer-boundary-process-contract: the workflow treats nonzero as HOLD;
-        # fixed guidance preserves uncertain state without exposing raw inputs.
+        # fixed guidance plus the refusal's type and raising frame (code
+        # identity, never its message) preserves uncertain state and names the
+        # failing step without exposing raw inputs.
         print(
-            "Central publisher failed closed; preserve phase state and immutable intent/receipt. Do not replay an uncertain publication.",
+            f"Central publisher failed closed at {failure_site(error)} ({type(error).__name__}); "
+            "preserve phase state and immutable intent/receipt. Do not replay an uncertain publication.",
             file=sys.stderr,
         )
         return 1

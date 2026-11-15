@@ -323,6 +323,13 @@ class WorkflowTests(unittest.TestCase):
             self.run_phase("prepare", RUNNER_TEMP="relative-PRIVATE").returncode, 1
         )
 
+    def test_refusal_names_its_raising_step_but_never_its_message(self):
+        result = self.run_phase("prepare", FIXTURE_FAULT="prepare")
+        self.assertEqual(result.returncode, 1)
+        self.assertNotIn(b"PRIVATE", result.stderr)
+        self.assertIn(b"fleet_publish.py:", result.stderr)
+        self.assertIn(b" in record (PublishRefused)", result.stderr)
+
     def test_review_output_is_selection_bound_for_all_prepare_reentries(self):
         for mode, selected, review in (
             ("publish", True, True),
