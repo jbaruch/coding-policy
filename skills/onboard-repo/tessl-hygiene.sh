@@ -91,15 +91,22 @@ refresh_block() {
 
   local tmp
   tmp=$(mktemp) || { echo "error: mktemp failed while updating .gitignore" >&2; exit 1; }
-  if ! { head -n $((start - 1)) .gitignore; gitignore_block; tail -n +$((end + 1)) .gitignore; } > "$tmp"; then
+  if ! { awk -v s="$start" 'NR < s' .gitignore && gitignore_block && awk -v e="$end" 'NR > e' .gitignore; } > "$tmp"; then
     rm -f "$tmp" || echo "warning: could not remove temp file ${tmp} — remove it by hand" >&2
     echo "error: failed to rebuild .gitignore" >&2
     exit 1
   fi
-  if cmp -s "$tmp" .gitignore; then
+  local crc=0
+  cmp -s "$tmp" .gitignore || crc=$?
+  if (( crc == 0 )); then
     rm -f "$tmp" || echo "warning: could not remove temp file ${tmp} — remove it by hand" >&2
     echo "unchanged"
     return 0
+  fi
+  if (( crc > 1 )); then
+    rm -f "$tmp" || echo "warning: could not remove temp file ${tmp} — remove it by hand" >&2
+    echo "error: comparing the rebuilt .gitignore failed (cmp exit ${crc}) — check .gitignore is readable and re-run" >&2
+    exit 1
   fi
   if ! cat "$tmp" > .gitignore; then
     rm -f "$tmp" || echo "warning: could not remove temp file ${tmp} — remove it by hand" >&2

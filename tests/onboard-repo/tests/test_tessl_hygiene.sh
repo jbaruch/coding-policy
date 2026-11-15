@@ -138,6 +138,9 @@ JSON
   else fail "old block refresh: $out"; fi
 
   # 8. a second run after the refresh reports unchanged and leaves the bytes alone.
+  d="$TMP/8"; mkrepo "$d"
+  { printf 'node_modules/\n'; old_block; } > "$d/.gitignore"
+  (cd "$d" && bash "$SCRIPT" >/dev/null 2>&1)   # first run refreshes the old block
   local before; before=$(cat "$d/.gitignore")
   out="$(cd "$d" && bash "$SCRIPT" 2>/dev/null)"
   if printf '%s' "$out" | jq -e '.gitignore=="unchanged"' >/dev/null && [[ "$(cat "$d/.gitignore")" == "$before" ]]; then pass
