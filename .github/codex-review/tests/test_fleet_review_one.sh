@@ -68,6 +68,10 @@ if [ "${1:-}" = install ]; then
     printf '✘ Blocked by install policy (not added to tessl.json):\n   ✘  Security  Critical\n'
     exit 0
   fi
+  if [ -n "${TESSL_FAIL:-}" ] && [ "$name" = "$TESSL_FAIL" ]; then
+    printf 'plugin not found\n'
+    exit 3
+  fi
   mkdir -p ".tessl/plugins/$name"
 fi
 exit 0
@@ -348,6 +352,14 @@ t_policy_blocked_install_warns() {
   rmwarn "$BIN" "$CENTRAL" "$CODEXH"
 }
 
+t_failed_install_without_reason_line_still_reviews() {
+  TESSL_FAIL=acme/provider run_with_marker $'tessl-workspace/tessl.json\n' '{"dependencies":{"acme/provider":{"version":"latest"}}}'
+  if [[ $RC -eq 0 ]] && grep -qF 'tessl did not install acme/provider' "$CODEXH/err" && grep -qF '(exit 3)' "$CODEXH/err" && [[ -s "$CODEXH/codex.log" ]]; then
+    ok "a failed install with no reason line warns and the review continues"
+  else bad "unmatched failure output aborted or hid the review (rc=$RC)"; fi
+  rmwarn "$BIN" "$CENTRAL" "$CODEXH"
+}
+
 t_source_pinned_dependency_warns() {
   run_with_marker $'tessl-workspace/tessl.json\n' '{"dependencies":{"acme/local":{"source":"file:../local"}}}'
   if [[ $RC -eq 0 ]] && ! grep -qF 'acme/local' "$CODEXH/tessl.log" && grep -qF 'declares no installable registry version' "$CODEXH/err"; then
@@ -381,6 +393,7 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
   t_comment_only_marker_installs_only_policy
   t_escaping_marker_line_is_ignored
   t_policy_blocked_install_warns
+  t_failed_install_without_reason_line_still_reviews
   t_source_pinned_dependency_warns
   t_malformed_extra_manifest_stops_review
   echo "== summary: ${pass} passed, ${fail} failed =="

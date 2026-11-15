@@ -82,8 +82,11 @@ install_manifest_deps() { # <manifest-json> <label> <full> <pr>
       # private, unpublished or policy-blocked plugin must not fail the whole
       # review, but it MUST be visible — a silently missing authority rule is
       # how a reviewer blocks a compliant PR without saying why.
-      local why
-      why=$(printf '%s\n' "$out" | grep -m1 -E '✘|[Ee]rror|[Bb]locked' | tr -s ' ')
+      # grep exit 1 means tessl printed no reason line, an expected
+      # non-result; only exit >1 is a grep failure (rules/error-handling.md).
+      local why="" grc=0
+      why=$(printf '%s\n' "$out" | grep -m1 -E '✘|[Ee]rror|[Bb]locked') || grc=$?
+      if (( grc > 1 )); then why="(tessl output unreadable)"; fi
       echo "::warning::tessl did not install ${spec} (from ${label}) for ${full}#${pr} (exit ${rc}${why:+: ${why}}) — carve-outs citing its rules cannot be verified this run" >&2
     fi
   done <<< "$deps"
