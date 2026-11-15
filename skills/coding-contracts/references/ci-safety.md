@@ -14,14 +14,14 @@
 
 ## Superseded-Bot-Review Dismissal Carve-Out
 
-- A gating bot's `CHANGES_REQUESTED` stops gating once the same bot posts an all-clear re-review that supersedes it
+- A gating bot's `CHANGES_REQUESTED` stops gating once dismissed after the same bot's all-clear re-review supersedes it
 - Applies when the bot cannot `APPROVE` and its stale request keeps the merge `BLOCKED`
 - Preconditions are binding: read `skills/release/references/ci-safety-carve-outs.md` Superseded-Bot-Review Dismissal Carve-Out before relying on it
 - Every other `CHANGES_REQUESTED` keeps gating
 
 ## Judge-Ruled-Review Dismissal Carve-Out
 
-- The policy reviewer's latest `CHANGES_REQUESTED` on the PR head stops gating under a weighing ruling
+- The policy reviewer's latest `CHANGES_REQUESTED` on the PR head stops gating once dismissed under a weighing ruling
 - Applies when that ruling rules every blocking finding in that review `defer` or `decline` under `rules/review-severity.md` Judge-Weighed Finding Carve-Out
 - Preconditions are binding: read `skills/release/references/ci-safety-carve-outs.md` Judge-Ruled-Review Dismissal Carve-Out before relying on it
 - Every other policy-review `CHANGES_REQUESTED` blocks the merge until resolved through review
@@ -95,7 +95,7 @@
 
 ## Central Publication Bookkeeping
 
-- The central publisher records source claims and version bookkeeping on an enrolled consumer's default branch.
+- The fleet publish workflow updates an enrolled consumer's version and source-claim records on the consumer's default branch.
 - Applies only to `.github/workflows/fleet-publish.yml` executing in `jbaruch/coding-policy`.
 - Preconditions are binding: read `skills/release/references/fleet-publication.md` Bookkeeping Authority before relying on it.
 - Every other protected-branch write follows Protected Branches unchanged.
@@ -121,7 +121,7 @@
 
 ## Content-Only Direct-Push Carve-Out
 
-- A content-only edit within an explicit, narrowly scoped path-glob set lands on the default branch directly
+- A content-only edit within an explicit, narrowly scoped path-glob set may land on the default branch directly
 - Applies when the edited paths are prose or data artifacts a human audience reads directly, not code and not context artifacts an agent loads
 - Preconditions are binding: read `skills/release/references/ci-safety-carve-outs.md` Content-Only Direct-Push Carve-Out before relying on it
 - Every other branch / path in the repo still goes through pull requests
