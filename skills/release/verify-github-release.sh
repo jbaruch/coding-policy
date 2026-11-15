@@ -170,7 +170,10 @@ main() {
     exit 2
   fi
 
-  VGR_ERR_FILE=$(mktemp "${TMPDIR:-/tmp}/verify-github-release.XXXXXX")
+  VGR_ERR_FILE=$(mktemp "${TMPDIR:-/tmp}/verify-github-release.XXXXXX") || {
+    echo "error: cannot create a temporary file under ${TMPDIR:-/tmp} — point TMPDIR at a writable directory and re-run" >&2
+    exit 2
+  }
 
   # Conjunct 1 — the resolved run's own conclusion.
   local conclusion rc=0

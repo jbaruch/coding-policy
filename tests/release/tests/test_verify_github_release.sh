@@ -26,6 +26,7 @@
 #  13. Argument validation — wrong count, empty arguments and a
 #      non-positive-integer run id exit 2.
 #  14. Missing gh — exit 2 with an install hint.
+#  15. Unwritable TMPDIR — exit 2, empty stdout, stderr names TMPDIR.
 #
 # Approach: source the script (the main() guard prevents auto-run when
 # sourced) and override `gh` as a transport mock covering both calls the
@@ -531,6 +532,18 @@ test_missing_gh() {
   [[ "$stderr" == *"cli.github.com"* ]] || { echo "    FAIL: stderr should carry an install hint, got: ${stderr}" >&2; return 1; }
 }
 run "missing gh exits 2 with an install hint" test_missing_gh
+
+# --- Test 15: unwritable TMPDIR -------------------------------------------------
+# A temp file the helper cannot create is a tool-state error, never evidence
+# that the release did not land.
+test_unwritable_tmpdir() {
+  local out rc=0
+  out=$(TMPDIR="$TMPDIR_TEST/no-such-dir" invoke_main "$OWNER" "$REPO" "$TAG" "$RUN_ID" 2>"$TMPDIR_TEST/err") || rc=$?
+  assert_eq "exit code" "2" "$rc" || return 1
+  assert_eq "stdout must stay empty" "" "$out" || return 1
+  grep -qF "TMPDIR" "$TMPDIR_TEST/err" || { echo "    FAIL: stderr should name TMPDIR, got: $(cat "$TMPDIR_TEST/err")" >&2; return 1; }
+}
+run "unwritable TMPDIR exits 2 naming TMPDIR" test_unwritable_tmpdir
 
 echo
 echo "results: ${PASS_COUNT} pass, ${FAIL_COUNT} fail"
