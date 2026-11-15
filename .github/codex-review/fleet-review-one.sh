@@ -91,7 +91,8 @@ install_manifest_deps() { # <manifest-json> <label> <full> <pr>
   while IFS=$'\x1f' read -r name version source; do
     [ -n "$name" ] || continue
     if [[ -n "$source" ]]; then
-      MISSING+=("${name} (from ${label}): declares source '${source}', which the reviewer cannot install from the registry")
+      # The source value itself stays out of the log: a URL can carry a token.
+      MISSING+=("${name} (from ${label}): declares a source, which the reviewer cannot install from the registry")
       continue
     fi
     [ "$name" = "jbaruch/coding-policy" ] && continue
@@ -100,11 +101,11 @@ install_manifest_deps() { # <manifest-json> <label> <full> <pr>
       continue
     fi
     if [[ "$version" == "latest" ]]; then
-      spec="$name"; args=(install --strict "$spec")
+      spec="$name"; args=(install --strict --yes "$spec")
     elif [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]]; then
-      spec="${name}@${version}"; args=(install --strict "$spec")
+      spec="${name}@${version}"; args=(install --strict --yes "$spec")
     else
-      MISSING+=("${name} (from ${label}): no installable registry version (version '${version}', source '${source}')")
+      MISSING+=("${name} (from ${label}): no installable registry version (version '${version}')")
       continue
     fi
     local prior
@@ -135,6 +136,19 @@ main() {
   local full="${owner}/${repo}"
   : "${GH_TOKEN:?GH_TOKEN (App installation token) required}"
   : "${CENTRAL_DIR:?CENTRAL_DIR (coding-policy checkout path) required}"
+
+  # The base ref decides which manifests are trusted, and a PR can change the
+  # trigger that dispatched this review, so the base must be the pull
+  # request's own.
+  local pr_base
+  if ! pr_base=$(gh api "repos/${full}/pulls/${pr}" --jq .base.ref); then
+    echo "error: could not read ${full}#${pr} from the GitHub API — check the App token's access and rerun this review" >&2
+    exit 1
+  fi
+  if [[ "$pr_base" != "$base" ]]; then
+    echo "error: dispatched base '${base}' is not ${full}#${pr}'s base '${pr_base}' — refusing to read trusted manifests from it" >&2
+    exit 1
+  fi
   local codex_home="${CODEX_HOME:-$HOME/.codex}"
 
   # fleet-prompt.md / fleet-schema.json instruct Codex to read the tessl-installed

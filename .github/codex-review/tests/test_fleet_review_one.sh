@@ -78,6 +78,16 @@ if [ "${1:-}" = install ]; then
 fi
 exit 0
 EOF
+  cat > "$bin/gh" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+# Only the pull request's base ref is ever read: FAKE_PR_BASE, default main.
+if [ "${1:-}" = api ] && [ "${3:-}" = --jq ] && [ "${4:-}" = .base.ref ]; then
+  printf '%s\n' "${FAKE_PR_BASE:-main}"; exit 0
+fi
+echo "fake gh: unexpected call: $*" >&2
+exit 1
+EOF
   cat > "$bin/codex" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -319,7 +329,7 @@ run_with_marker() {
 
 t_extra_manifest_installs_its_plugins() {
   run_with_marker $'# Opts this repository in.\ntessl-workspace/tessl.json\n' '{"dependencies":{"acme/provider":{"version":"1.0.0"}}}'
-  if [[ $RC -eq 0 ]] && grep -qxF 'install --strict acme/provider@1.0.0' "$CODEXH/tessl.log"; then ok "a listed base manifest installs its plugins at the pinned version"
+  if [[ $RC -eq 0 ]] && grep -qxF 'install --strict --yes acme/provider@1.0.0' "$CODEXH/tessl.log"; then ok "a listed base manifest installs its plugins at the pinned version"
   else bad "extra manifest plugins not installed at the pinned version (rc=$RC, log: $(cat "$CODEXH/tessl.log"))"; fi
   rmwarn "$BIN" "$CENTRAL" "$CODEXH"
 }
@@ -364,7 +374,7 @@ t_failed_install_without_reason_line_stops_review() {
 
 t_source_pinned_dependency_stops_review() {
   run_with_marker $'tessl-workspace/tessl.json\n' '{"dependencies":{"acme/local":{"source":"file:../local"}}}'
-  if [[ $RC -ne 0 && ! -e "$CODEXH/codex.log" ]] && ! grep -qF 'acme/local' "$CODEXH/tessl.log" && grep -qF "declares source 'file:../local'" "$CODEXH/err"; then
+  if [[ $RC -ne 0 && ! -e "$CODEXH/codex.log" ]] && ! grep -qF 'acme/local' "$CODEXH/tessl.log" && grep -qF "declares a source" "$CODEXH/err" && ! grep -qF 'file:../local' "$CODEXH/err"; then
     ok "a source-pinned dependency stops the review before Codex"
   else bad "source-pinned dependency reached review (rc=$RC)"; fi
   rmwarn "$BIN" "$CENTRAL" "$CODEXH"
@@ -374,7 +384,7 @@ t_source_on_a_reviewer_owned_plugin_stops_review() {
   local name all_stopped=1
   for name in jbaruch/coding-policy jbaruch/nanoclaw-core; do
     run_with_marker $'tessl-workspace/tessl.json\n' "{\"dependencies\":{\"${name}\":{\"source\":\"file:../local\"}}}"
-    if [[ $RC -eq 0 || -e "$CODEXH/codex.log" ]] || ! grep -qF "${name} (from jbaruch/repo-a:main/tessl-workspace/tessl.json): declares source 'file:../local'" "$CODEXH/err"; then
+    if [[ $RC -eq 0 || -e "$CODEXH/codex.log" ]] || ! grep -qF "${name} (from jbaruch/repo-a:main/tessl-workspace/tessl.json): declares a source" "$CODEXH/err" || grep -qF 'file:../local' "$CODEXH/err"; then
       all_stopped=0; echo "    not stopped: ${name}" >&2
     fi
     rmwarn "$BIN" "$CENTRAL" "$CODEXH"
@@ -392,21 +402,21 @@ t_double_dot_in_a_name_is_a_valid_path() {
   printf '{"dependencies":{"acme/provider":{"version":"1.0.0"}}}' > "$base/policy..v2/tessl.json" || exit 2
   PATH="$BIN:$PATH" GH_TOKEN=tok CENTRAL_DIR="$CENTRAL" CODEX_HOME="$CODEXH" FAKE_BASE_DIR="$base" \
     TESSL_LOG="$CODEXH/tessl.log" bash "$SCRIPT" jbaruch repo-a 7 main >/dev/null 2>"$CODEXH/err" || rc=$?
-  if [[ $rc -eq 0 ]] && grep -qxF 'install --strict acme/provider@1.0.0' "$CODEXH/tessl.log"; then ok "a '..' inside a file name is a valid list entry"
+  if [[ $rc -eq 0 ]] && grep -qxF 'install --strict --yes acme/provider@1.0.0' "$CODEXH/tessl.log"; then ok "a '..' inside a file name is a valid list entry"
   else bad "'..' inside a name rejected (rc=$rc)"; fi
   rmwarn "$BIN" "$CENTRAL" "$CODEXH"
 }
 
 t_latest_installs_strictly() {
   run_with_marker $'tessl-workspace/tessl.json\n' '{"dependencies":{"acme/provider":{"version":"latest"}}}'
-  if [[ $RC -eq 0 ]] && grep -qxF 'install --strict acme/provider' "$CODEXH/tessl.log"; then ok "a latest dependency installs with --strict"
+  if [[ $RC -eq 0 ]] && grep -qxF 'install --strict --yes acme/provider' "$CODEXH/tessl.log"; then ok "a latest dependency installs with --strict"
   else bad "latest dependency installed without --strict (rc=$RC, log: $(cat "$CODEXH/tessl.log"))"; fi
   rmwarn "$BIN" "$CENTRAL" "$CODEXH"
 }
 
 t_version_with_source_stops_review() {
   run_with_marker $'tessl-workspace/tessl.json\n' '{"dependencies":{"acme/local":{"version":"1.0.0","source":"file:../local"}}}'
-  if [[ $RC -ne 0 && ! -e "$CODEXH/codex.log" ]] && ! grep -qF 'acme/local' "$CODEXH/tessl.log" && grep -qF "declares source 'file:../local'" "$CODEXH/err"; then
+  if [[ $RC -ne 0 && ! -e "$CODEXH/codex.log" ]] && ! grep -qF 'acme/local' "$CODEXH/tessl.log" && grep -qF "declares a source" "$CODEXH/err" && ! grep -qF 'file:../local' "$CODEXH/err"; then
     ok "a dependency declaring both a version and a source stops before any registry install"
   else bad "version+source dependency installed from the registry or reached review (rc=$RC)"; fi
   rmwarn "$BIN" "$CENTRAL" "$CODEXH"
@@ -414,7 +424,7 @@ t_version_with_source_stops_review() {
 
 t_list_without_final_newline_still_installs() {
   run_with_marker 'tessl-workspace/tessl.json' '{"dependencies":{"acme/provider":{"version":"1.0.0"}}}'
-  if [[ $RC -eq 0 ]] && grep -qxF 'install --strict acme/provider@1.0.0' "$CODEXH/tessl.log"; then ok "a final list entry without a newline is still installed"
+  if [[ $RC -eq 0 ]] && grep -qxF 'install --strict --yes acme/provider@1.0.0' "$CODEXH/tessl.log"; then ok "a final list entry without a newline is still installed"
   else bad "unterminated final list entry skipped (rc=$RC)"; fi
   rmwarn "$BIN" "$CENTRAL" "$CODEXH"
 }
@@ -468,8 +478,21 @@ t_empty_extra_manifest_stops_review() {
 
 t_semver_with_prerelease_and_build_installs_exactly() {
   run_with_marker $'tessl-workspace/tessl.json\n' '{"dependencies":{"acme/provider":{"version":"1.2.3-rc.1+build.7"}}}'
-  if [[ $RC -eq 0 ]] && grep -qxF 'install --strict acme/provider@1.2.3-rc.1+build.7' "$CODEXH/tessl.log"; then ok "a pin with both prerelease and build installs exactly"
+  if [[ $RC -eq 0 ]] && grep -qxF 'install --strict --yes acme/provider@1.2.3-rc.1+build.7' "$CODEXH/tessl.log"; then ok "a pin with both prerelease and build installs exactly"
   else bad "prerelease+build pin not installed exactly (rc=$RC)"; fi
+  rmwarn "$BIN" "$CENTRAL" "$CODEXH"
+}
+
+t_dispatched_base_not_the_pr_base_stops_review() {
+  local env_line rc=0; env_line=$(make_env) || exit 2
+  read -r BIN CENTRAL CODEXH <<< "$env_line"
+  PATH="$BIN:$PATH" GH_TOKEN=tok CENTRAL_DIR="$CENTRAL" CODEX_HOME="$CODEXH" FAKE_PR_BASE=release \
+    TESSL_LOG="$CODEXH/tessl.log" CODEX_ARGV_LOG="$CODEXH/codex.log" \
+    bash "$SCRIPT" jbaruch repo-a 7 main >/dev/null 2>"$CODEXH/err" || rc=$?
+  if [[ $rc -ne 0 && ! -e "$CODEXH/codex.log" && ! -e "$CODEXH/tessl.log" ]] \
+     && grep -qF "dispatched base 'main' is not jbaruch/repo-a#7's base 'release'" "$CODEXH/err"; then
+    ok "a dispatched base that is not the PR's base stops the review before any install"
+  else bad "a mismatched dispatched base reached review (rc=$rc)"; fi
   rmwarn "$BIN" "$CENTRAL" "$CODEXH"
 }
 
@@ -519,6 +542,7 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
   t_conflicting_pins_stop_review
   t_empty_extra_manifest_stops_review
   t_refused_coding_policy_install_stops_review
+  t_dispatched_base_not_the_pr_base_stops_review
   t_semver_with_prerelease_and_build_installs_exactly
   t_malformed_extra_manifest_stops_review
   echo "== summary: ${pass} passed, ${fail} failed =="
