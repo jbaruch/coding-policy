@@ -289,7 +289,7 @@ check_no_dirty_target_edits() {
   fi
 }
 
-# The tessl-hygiene step (Step 5) rewrites tessl.json and appends to .gitignore,
+# The tessl-hygiene step (Step 4) rewrites tessl.json and appends to .gitignore,
 # and commit.sh stages them. If either carries uncommitted edits BEFORE onboard
 # runs, the onboard commit would sweep that unrelated work in — refuse so the
 # commit stays focused (rules/commit-conventions.md). Untracked files are fine

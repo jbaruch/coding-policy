@@ -1,6 +1,6 @@
 # Install-Reviewer PR Body Template
 
-Reference for Step 7 of the `onboard-repo` skill. Pulled out of SKILL.md so the main flow stays scannable.
+Reference for Step 8 of the `onboard-repo` skill. Pulled out of SKILL.md so the main flow stays scannable.
 
 ## Required content
 
