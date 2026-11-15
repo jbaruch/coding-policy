@@ -142,9 +142,14 @@ readonly CREDIT_SIGNATURE_REGEX='out of credits'
 # constants rather than restating them (rules/script-as-black-box.md).
 readonly TIMEOUT_SIGNATURE_REGEX='publish timed out'
 
-# Admin publish 42337547437: the exact version was absent immediately after
-# the CLI timeout and visible two seconds later. Reread once; never republish.
-readonly TIMEOUT_LANDING_RECHECK_DELAY_SECONDS=2
+# After a client timeout the server can finish the upload, or the exact-version
+# endpoint can catch up, many seconds later: nanoclaw-admin runs saw the version
+# 3.5 s, about 15 s and 16 s after the timeout, and one created 17 s before it
+# still read absent (#815). So a definite "absent" is reread on a doubling delay
+# until the version appears or the budget runs out. Never republish.
+readonly TIMEOUT_LANDING_FIRST_DELAY_SECONDS=2
+readonly TIMEOUT_LANDING_MAX_DELAY_SECONDS=16
+readonly TIMEOUT_LANDING_BUDGET_SECONDS=60
 
 # Temp file for the captured publish output; script-global so the EXIT trap can
 # clean it up after main() returns (a main-local would be out of scope and
@@ -538,9 +543,19 @@ sys.stdout.write(lines[-1] if lines else "")
       local observed
       observed="$(version_exists "$workspace" "$plugin_slug" "$intended_version" "landed check")"
       if [[ "$terminal_class" == "timeout" && "$observed" == "false" ]]; then
-        echo "smart-publish: timeout readback has not found ${name}@${intended_version}; waiting briefly for server completion before one exact-version reread." >&2
-        sleep "$TIMEOUT_LANDING_RECHECK_DELAY_SECONDS"
-        observed="$(version_exists "$workspace" "$plugin_slug" "$intended_version" "timeout reread")"
+        echo "smart-publish: timeout readback has not found ${name}@${intended_version}; rereading the exact version for up to ${TIMEOUT_LANDING_BUDGET_SECONDS}s while the server completes." >&2
+        local waited=0 delay="$TIMEOUT_LANDING_FIRST_DELAY_SECONDS"
+        # Only a definite "false" keeps polling: an "unknown" read fails closed
+        # at once, the same as before the poll existed.
+        while [[ "$observed" == "false" ]] && (( waited < TIMEOUT_LANDING_BUDGET_SECONDS )); do
+          sleep "$delay"
+          waited=$(( waited + delay ))
+          observed="$(version_exists "$workspace" "$plugin_slug" "$intended_version" "timeout reread")"
+          delay=$(( delay * 2 ))
+          if (( delay > TIMEOUT_LANDING_MAX_DELAY_SECONDS )); then
+            delay="$TIMEOUT_LANDING_MAX_DELAY_SECONDS"
+          fi
+        done
       fi
       if [[ "$observed" == "true" ]]; then
         landed=true

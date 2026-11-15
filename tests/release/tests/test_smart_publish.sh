@@ -92,6 +92,19 @@ if [[ "${1:-}" == "api" ]]; then
           printf '{"data":{"attributes":{"version":"%s"}}}\n' "$want"; exit 0
         fi
         echo '{"error":{"title":"Not Found","status":404,"message":"Not Found"}}'; exit 1 ;;
+      late)
+        # Absent for the first post-publish read and the first two rereads,
+        # present from the third reread on (#815).
+        if [[ -f "${MOCK_STATE_DIR}/published" ]]; then
+          reads=0
+          if [[ -f "${MOCK_STATE_DIR}/post-reads" ]]; then reads="$(< "${MOCK_STATE_DIR}/post-reads")"; fi
+          reads=$(( reads + 1 ))
+          printf '%s' "$reads" > "${MOCK_STATE_DIR}/post-reads"
+          if (( reads >= 4 )); then
+            printf '{"data":{"attributes":{"version":"%s"}}}\n' "$want"; exit 0
+          fi
+        fi
+        echo '{"error":{"title":"Not Found","status":404,"message":"Not Found"}}'; exit 1 ;;
       delayed|post_error)
         if [[ -f "${MOCK_STATE_DIR}/published" ]]; then
           if [[ "$MOCK_VERSION_EXISTS" == "post_error" ]]; then
@@ -460,6 +473,8 @@ t_timeout_landing_after_first_read() {
   [[ "$(wc -l < "$root/sleep-calls" | tr -d ' ')" == "1" ]]
 }
 
+# A version that never appears is polled to the budget, then stays red with a
+# single upload: the delays double from 2 s and cap at 16 s (2 4 8 16 16 16).
 t_timeout_still_absent_does_not_upload_again() {
   local root; root="$(_sandbox 0.1.0)"
   local out rc=0
@@ -468,7 +483,20 @@ t_timeout_still_absent_does_not_upload_again() {
   echo "$out" | python3 -c 'import json,sys;d=json.load(sys.stdin);assert d["outcome"]=="failure" and d["landed_after_error"] is False,d' || return 1
   [[ "$(_remote_count "$root")" == "1" ]] || return 1
   [[ "$(wc -l < "$root/publish-calls" | tr -d ' ')" == "1" ]] || return 1
-  [[ "$(wc -l < "$root/sleep-calls" | tr -d ' ')" == "1" ]]
+  [[ "$(tr '\n' ' ' < "$root/sleep-calls")" == "2 4 8 16 16 16 " ]]
+}
+
+# #815: the version appears only after the first two rereads. The bounded poll
+# finds it on the third and greens without another upload.
+t_timeout_landing_after_two_rereads() {
+  local root; root="$(_sandbox 0.1.0)"
+  local out rc=0
+  out="$(MOCK_VERSION_EXISTS=late _run "$root" 0.1.0 timeout_fail auto-bump . main branch)" || rc=$?
+  [[ $rc -eq 0 ]] || { echo "    FAIL: expected exit 0 for a late landing, got ${rc}" >&2; return 1; }
+  echo "$out" | python3 -c 'import json,sys;d=json.load(sys.stdin);assert d["outcome"]=="success" and d["landed_after_error"] is True and d["version"]=="0.1.1",d' || return 1
+  [[ "$(_remote_version "$root")" == "0.1.1" ]] || return 1
+  [[ "$(wc -l < "$root/publish-calls" | tr -d ' ')" == "1" ]] || return 1
+  [[ "$(tr '\n' ' ' < "$root/sleep-calls")" == "2 4 8 " ]]
 }
 
 t_timeout_unknown_post_read_is_not_retried() {
@@ -634,6 +662,7 @@ main() {
   run "publish timeout that LANDED greens + commits back (#310)" t_timeout_but_landed_greens_and_commits_back
   run "timeout landing after first read commits without another upload" t_timeout_landing_after_first_read
   run "timeout still absent stays red without another upload" t_timeout_still_absent_does_not_upload_again
+  run "timeout landing after two rereads greens without another upload (#815)" t_timeout_landing_after_two_rereads
   run "timeout with unknown post-read stays red without a retry" t_timeout_unknown_post_read_is_not_retried
   run "out-of-credits exit that landed greens on the same test"  t_credit_fail_that_landed_greens
   run "failed publish whose version is absent stays red"         t_failed_publish_absent_version_stays_red
