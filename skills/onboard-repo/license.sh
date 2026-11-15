@@ -1,12 +1,14 @@
 #!/usr/bin/env bash
 # Report a consumer repo's license state, and with --write add an MIT LICENSE.
 #
-# A repo already licensed by a LICENSE/COPYING file (suffixed names such as
-# LICENSE-APACHE, LICENSE.txt or COPYING.LESSER included), or declaring a
-# license in a manifest (package.json, pyproject.toml's [project] or
-# [tool.poetry] table, Cargo.toml's [package] table, .tessl-plugin/plugin.json,
-# agent-plugin.yaml), keeps that choice. A README "License" heading is reported
-# as "readme" for the caller to read, since only its text says whether it names
+# A repo already licensed by a tracked LICENSE/COPYING/UNLICENSE file (suffixed
+# names such as LICENSE-APACHE, LICENSE.txt or COPYING.LESSER included), or
+# declaring a license in a manifest (package.json, pyproject.toml's [project]
+# or [tool.poetry] table, Cargo.toml's [package] or [workspace.package] table,
+# .tessl-plugin/plugin.json, agent-plugin.yaml), keeps that choice. A license
+# file git does not track is reported as "untracked", since the onboarding
+# commit would leave it out. A README "License" heading is reported as
+# "readme" for the caller to read, since only its text says whether it names
 # a license. The report also lists commit authors other than the operator (git
 # config user.name/user.email) and known bot and agent identities, so the
 # caller can judge whether the history is the operator's own work before
@@ -15,9 +17,11 @@
 # Usage: license.sh [--write]
 #   --write   Write LICENSE as MIT for the current git user.name and the year
 #             of the first commit, and stage it. Refuses (exit 1) when a
-#             license file or manifest declaration already exists.
+#             license file (tracked or not) or manifest declaration already
+#             exists, and stops (exit 2) in a shallow clone, whose first
+#             visible commit would misdate the license.
 # Out:   one JSON object on stdout:
-#          {"license":"file|declared|readme|none","source":"<path>"|null,
+#          {"license":"file|untracked|declared|readme|none","source":"<path>"|null,
 #           "outside_authors":["Name <email>",...],"written":true|false}
 # Exit:  0 on success; 1 when --write is refused; 2 on a usage or environment
 #        error. Diagnostics go to stderr.
@@ -76,10 +80,16 @@ import json, re, subprocess, sys, tomllib
 from pathlib import Path
 
 license, source = "none", None
-for entry in sorted(Path(".").iterdir()):
-    if entry.is_file() and re.fullmatch(r"(?i)(licen[cs]e|copying)([-._].+)?", entry.name):
-        license, source = "file", entry.name
-        break
+names = [entry.name for entry in sorted(Path(".").iterdir())
+         if entry.is_file() and re.fullmatch(r"(?i)((un)?licen[cs]e|copying)([-._].+)?", entry.name)]
+if names:
+    # A license file git does not track would be left out of the onboarding commit.
+    listed = subprocess.run(["git", "ls-files", "-z", "--", *names], capture_output=True, text=True)
+    if listed.returncode != 0:
+        sys.stderr.write(listed.stderr)
+        sys.exit(2)
+    tracked = [name for name in names if name in listed.stdout.split("\0")]
+    license, source = ("file", tracked[0]) if tracked else ("untracked", names[0])
 
 def toml(name):
     path = Path(name)
@@ -100,13 +110,17 @@ def declared():
         except ValueError:
             sys.stderr.write("warning: package.json is not valid JSON; reading no license from it\n")
     pyproject = toml("pyproject.toml")
-    if pyproject.get("project", {}).get("license") or pyproject.get("tool", {}).get("poetry", {}).get("license"):
+    project = pyproject.get("project", {})
+    if project.get("license") or project.get("license-files") or pyproject.get("tool", {}).get("poetry", {}).get("license"):
         return "pyproject.toml"
-    package = toml("Cargo.toml").get("package", {})
-    if package.get("license") or package.get("license-file"):
-        return "Cargo.toml"
+    cargo = toml("Cargo.toml")
+    for package in (cargo.get("package", {}), cargo.get("workspace", {}).get("package", {})):
+        if package.get("license") or package.get("license-file"):
+            return "Cargo.toml"
     plugin_yaml = Path("agent-plugin.yaml")
-    if plugin_yaml.is_file() and re.search(r"(?m)^license:\s*\S", plugin_yaml.read_text()):
+    # A bare or quoted license key whose value is neither empty nor a comment.
+    if plugin_yaml.is_file() and re.search(r"""(?m)^(["']?)license\1[ \t]*:[ \t]*([^\s#"']|"[^"]|'[^'])""",
+                                           plugin_yaml.read_text()):
         return "agent-plugin.yaml"
     plugin = Path(".tessl-plugin/plugin.json")
     if plugin.is_file():
@@ -118,9 +132,9 @@ def declared():
     return None
 
 def readme_heading():
-    for readme in sorted(Path(".").glob("README*")):
+    for readme in sorted(Path(".").iterdir()):
         # An ATX heading (## License) or a Setext one (License over === or ---).
-        if readme.is_file() and re.search(r"(?mi)^#{1,6}\s*licen[cs]e\b|^ {0,3}licen[cs]e\b[^\n]*\n {0,3}(=+|-+)[ \t]*$",
+        if readme.is_file() and re.match(r"(?i)readme", readme.name) and re.search(r"(?mi)^#{1,6}\s*licen[cs]e\b|^ {0,3}licen[cs]e\b[^\n]*\n {0,3}(=+|-+)[ \t]*$",
                                           readme.read_text(errors="replace")):
             return readme.name
     return None
@@ -163,19 +177,33 @@ PY
     printf '%s' "$report" | python3 -I -c 'import json,sys; d=json.load(sys.stdin); d["written"]=False; print(json.dumps(d))'
     return 0
   fi
+  if [[ "$state" == "untracked" ]]; then
+    echo "error: refusing --write — license file $(printf '%s' "$report" | python3 -I -c 'import json,sys; print(json.load(sys.stdin)["source"])') is not tracked by git; commit it or remove it and re-run" >&2
+    printf '%s' "$report" | python3 -I -c 'import json,sys; d=json.load(sys.stdin); d["written"]=False; print(json.dumps(d))'
+    exit 1
+  fi
   if [[ "$state" == "file" || "$state" == "declared" ]]; then
     echo "error: refusing --write — the repo already has a license (${state}); keep it or change it by hand" >&2
     printf '%s' "$report" | python3 -I -c 'import json,sys; d=json.load(sys.stdin); d["written"]=False; print(json.dumps(d))'
     exit 1
   fi
 
-  local holder year roots root_year root_commit
+  local holder year roots root_year root_commit shallow
   holder=$(git config user.name) || { echo "error: git user.name is unset — set it with 'git config user.name \"Your Name\"' and re-run" >&2; exit 2; }
   [[ -n "$holder" ]] || { echo "error: git user.name is empty — set it with 'git config user.name \"Your Name\"' and re-run" >&2; exit 2; }
   # An unborn HEAD (no commits yet) dates the license this year; any other
   # failure to read the history stops, since it would misdate the license.
   year=""
   if git rev-parse --verify --quiet HEAD >/dev/null; then
+    # A shallow clone shows a later commit as the first one.
+    if ! shallow=$(git rev-parse --is-shallow-repository); then
+      echo "error: could not tell whether the clone is shallow — repair the repository and re-run" >&2
+      exit 2
+    fi
+    if [[ "$shallow" == "true" ]]; then
+      echo "error: this is a shallow clone, so its first commit would misdate the license — run 'git fetch --unshallow' and re-run" >&2
+      exit 2
+    fi
     if ! roots=$(git rev-list --max-parents=0 HEAD); then
       echo "error: could not list the repository's first commits — run 'git fsck', repair the history and re-run" >&2
       exit 2

@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
-# Outcome tests for license.sh: it keeps an existing license file (suffixed
-# names included) or a license declared in a manifest's own table, reports a
-# README License heading (ATX or Setext) for the caller to read, lists
-# outside commit authors, and with --write adds and stages MIT only when no
-# license file or declaration exists. Each case builds a throwaway repo;
-# order-independent.
+# Outcome tests for license.sh: it keeps an existing tracked license file
+# (suffixed and UNLICENSE names included) or a license declared in a
+# manifest's own table, reports an untracked license file distinctly, reports
+# a README License heading (ATX or Setext, any README case) for the caller to
+# read, lists outside commit authors, and with --write adds and stages MIT
+# only when no license file or declaration exists and the clone is not
+# shallow. Each case builds a throwaway repo; order-independent.
 #
 # Run: bash tests/onboard-repo/tests/test_license.sh
 set -uo pipefail
@@ -42,7 +43,7 @@ main() {
 
   # 1. an existing LICENSE file is kept, and --write refuses without touching it.
   d="$TMP/1"; mkrepo "$d"
-  printf 'Apache License\n' > "$d/LICENSE" || setup_fail "case 1 LICENSE"
+  { printf 'Apache License\n' > "$d/LICENSE" && git -C "$d" add LICENSE; } || setup_fail "case 1 LICENSE"
   out="$(cd "$d" && bash "$SCRIPT" 2>>"$TMP/stderr.log")"; rc=$?
   if [[ $rc -eq 0 && "$(field license <<<"$out")" == "file" && "$(field source <<<"$out")" == "LICENSE" ]]; then pass
   else fail "existing file: rc=$rc out=$out"; fi
@@ -50,14 +51,26 @@ main() {
   if [[ $rc -eq 1 ]] && after=$(cat "$d/LICENSE") && [[ "$after" == "Apache License" ]]; then pass
   else fail "write over existing file: rc=$rc"; fi
 
-  # 1b. a suffixed license file (LICENSE-APACHE, COPYING.LESSER) is kept too.
-  for name in LICENSE-APACHE LICENSE-MIT COPYING.LESSER; do
+  # 1b. a suffixed license file (LICENSE-APACHE, COPYING.LESSER) is kept too,
+  #     and so is a public-domain UNLICENSE or UNLICENCE, suffixed or not.
+  for name in LICENSE-APACHE LICENSE-MIT COPYING.LESSER UNLICENSE UNLICENCE UNLICENSE.txt; do
     d="$TMP/1b-$name"; mkrepo "$d"
-    printf 'license text\n' > "$d/$name" || setup_fail "case 1b $name"
+    { printf 'license text\n' > "$d/$name" && git -C "$d" add "$name"; } || setup_fail "case 1b $name"
     out="$(cd "$d" && bash "$SCRIPT" --write 2>>"$TMP/stderr.log")"; rc=$?
     if [[ $rc -eq 1 && "$(field license <<<"$out")" == "file" && "$(field source <<<"$out")" == "$name" && ! -e "$d/LICENSE" ]]; then pass
     else fail "suffixed license file $name: rc=$rc out=$out"; fi
   done
+
+  # 1c. a license file git does not track is reported as untracked, and
+  #     --write refuses without touching it.
+  d="$TMP/1c"; mkrepo "$d"
+  printf 'Unapproved draft\n' > "$d/LICENSE" || setup_fail "case 1c LICENSE"
+  out="$(cd "$d" && bash "$SCRIPT" 2>>"$TMP/stderr.log")"; rc=$?
+  if [[ $rc -eq 0 && "$(field license <<<"$out")" == "untracked" && "$(field source <<<"$out")" == "LICENSE" ]]; then pass
+  else fail "untracked license file: rc=$rc out=$out"; fi
+  out="$(cd "$d" && bash "$SCRIPT" --write 2>>"$TMP/stderr.log")"; rc=$?
+  if [[ $rc -eq 1 ]] && after=$(cat "$d/LICENSE") && [[ "$after" == "Unapproved draft" && -z "$(git -C "$d" ls-files -- LICENSE)" ]]; then pass
+  else fail "write over an untracked license file: rc=$rc out=$out"; fi
 
   # 2. a license declared in package.json counts as a license.
   d="$TMP/2"; mkrepo "$d"
@@ -75,14 +88,39 @@ main() {
   else fail "proprietary pyproject: rc=$rc out=$out"; fi
 
   # 2c. TOML manifests are parsed: a quoted "license" key under [project],
-  #     [tool.poetry] or Cargo's [package] counts, and --write refuses.
-  for name in pyproject.toml:project pyproject.toml:tool.poetry Cargo.toml:package; do
+  #     [tool.poetry], Cargo's [package] or [workspace.package] counts, and
+  #     --write refuses.
+  for name in pyproject.toml:project pyproject.toml:tool.poetry Cargo.toml:package Cargo.toml:workspace.package; do
     d="$TMP/2c-${name//[:.]/-}"; mkrepo "$d"
     printf '[%s]\nname = "x"\n"license" = "LicenseRef-Proprietary"\n' "${name#*:}" > "$d/${name%%:*}" || setup_fail "case 2c $name"
     out="$(cd "$d" && bash "$SCRIPT" --write 2>>"$TMP/stderr.log")"; rc=$?
     if [[ $rc -eq 1 && "$(field license <<<"$out")" == "declared" && "$(field source <<<"$out")" == "${name%%:*}" && ! -e "$d/LICENSE" ]]; then pass
     else fail "quoted license key in $name: rc=$rc out=$out"; fi
   done
+
+  # 2c2. pyproject's [project] license-files and Cargo's [workspace.package]
+  #      license-file declare a license too.
+  for name in 'pyproject.toml:[project]\nlicense-files = ["LICENSES/LicenseRef-Proprietary.txt"]' \
+              'Cargo.toml:[workspace.package]\nlicense-file = "LICENSES/LicenseRef-Proprietary.txt"'; do
+    d="$TMP/2c2-${name%%:*}"; mkrepo "$d"
+    printf '%b\n' "${name#*:}" > "$d/${name%%:*}" || setup_fail "case 2c2 ${name%%:*}"
+    out="$(cd "$d" && bash "$SCRIPT" --write 2>>"$TMP/stderr.log")"; rc=$?
+    if [[ $rc -eq 1 && "$(field license <<<"$out")" == "declared" && "$(field source <<<"$out")" == "${name%%:*}" && ! -e "$d/LICENSE" ]]; then pass
+    else fail "license file declared in ${name%%:*}: rc=$rc out=$out"; fi
+  done
+
+  # 2c3. agent-plugin.yaml: a quoted license key declares a license, and a key
+  #      whose value is only a comment declares nothing.
+  d="$TMP/2c3-quoted"; mkrepo "$d"
+  printf 'name: x\n"license": LicenseRef-Proprietary\n' > "$d/agent-plugin.yaml" || setup_fail "case 2c3 quoted"
+  out="$(cd "$d" && bash "$SCRIPT" --write 2>>"$TMP/stderr.log")"; rc=$?
+  if [[ $rc -eq 1 && "$(field license <<<"$out")" == "declared" && "$(field source <<<"$out")" == "agent-plugin.yaml" && ! -e "$d/LICENSE" ]]; then pass
+  else fail "quoted license key in agent-plugin.yaml: rc=$rc out=$out"; fi
+  d="$TMP/2c3-comment"; mkrepo "$d"
+  printf 'name: x\nlicense: # TBD\n' > "$d/agent-plugin.yaml" || setup_fail "case 2c3 comment"
+  out="$(cd "$d" && bash "$SCRIPT" 2>>"$TMP/stderr.log")"; rc=$?
+  if [[ $rc -eq 0 && "$(field license <<<"$out")" == "none" ]]; then pass
+  else fail "comment-only license value in agent-plugin.yaml: rc=$rc out=$out"; fi
 
   # 2d. a license key under an unrelated table declares nothing.
   d="$TMP/2d"; mkrepo "$d"
@@ -110,6 +148,17 @@ main() {
     out="$(cd "$d" && bash "$SCRIPT" 2>>"$TMP/stderr.log")"; rc=$?
     if [[ $rc -eq 0 && "$(field license <<<"$out")" == "readme" && "$(field source <<<"$out")" == "README.md" ]]; then pass
     else fail "Setext README heading ${readme: -1}: rc=$rc out=$out"; fi
+  done
+
+  # 3c. a README named in any case (readme.md, Readme.md) is read too.
+  #     The case directories are numbered, as names differing only in case
+  #     collide on a case-insensitive filesystem.
+  for readme in 1:readme.md 2:Readme.md; do
+    d="$TMP/3c-${readme%%:*}"; readme="${readme#*:}"; mkrepo "$d"
+    printf '# x\n\n## License\n\nLicenseRef-Proprietary. All rights reserved.\n' > "$d/$readme" || setup_fail "case 3c $readme"
+    out="$(cd "$d" && bash "$SCRIPT" 2>>"$TMP/stderr.log")"; rc=$?
+    if [[ $rc -eq 0 && "$(field license <<<"$out")" == "readme" && "$(field source <<<"$out")" == "$readme" ]]; then pass
+    else fail "README heading in $readme: rc=$rc out=$out"; fi
   done
 
   # 4. operator-only history with a bot commit: no outside authors, and --write
@@ -169,10 +218,27 @@ EOF
   out="$(cd "$d" && PATH="$TMP/fake-git:$PATH" bash "$SCRIPT" --write 2>>"$TMP/stderr.log")"; rc=$?
   if [[ $rc -eq 2 && ! -e "$d/LICENSE" ]]; then pass; else fail "rev-list failure: rc=$rc out=$out"; fi
 
-  # 5e. coding-policy itself carries a license.
+  # 5e. coding-policy itself carries the MIT license the operator approved.
   out="$(cd "$REPO_ROOT" && bash "$SCRIPT" 2>>"$TMP/stderr.log")"; rc=$?
   if [[ $rc -eq 0 && "$(field license <<<"$out")" =~ ^(file|declared)$ ]]; then pass
   else fail "coding-policy's own license: rc=$rc out=$out"; fi
+  # shellcheck source=skills/onboard-repo/license.sh
+  if grep -qxF 'Copyright (c) 2026 Baruch Sadogursky' "$REPO_ROOT/LICENSE" \
+     && ( source "$SCRIPT" && mit_text 2026 "Baruch Sadogursky" ) | cmp -s - "$REPO_ROOT/LICENSE"; then pass
+  else fail "coding-policy's LICENSE is not MIT, Copyright (c) 2026 Baruch Sadogursky"; fi
+
+  # 5f. a shallow clone stops before writing and asks for the full history,
+  #     since its first visible commit (2024) is not the first commit (2019).
+  d="$TMP/5f-full"; mkrepo "$d"
+  ( cd "$d" && printf 'y\n' > b.txt && git add b.txt \
+    && GIT_AUTHOR_DATE="2024-05-01T00:00:00Z" GIT_COMMITTER_DATE="2024-05-01T00:00:00Z" git commit -q -m later ) \
+    || setup_fail "case 5f later commit"
+  { git clone -q --depth 1 "file://$d" "$TMP/5f" && git -C "$TMP/5f" config user.name "Test Owner" \
+    && git -C "$TMP/5f" config user.email owner@example.com; } || setup_fail "case 5f shallow clone"
+  d="$TMP/5f"
+  out="$(cd "$d" && bash "$SCRIPT" --write 2>"$TMP/5f.err")"; rc=$?
+  if [[ $rc -eq 2 && ! -e "$d/LICENSE" ]] && grep -qF 'git fetch --unshallow' "$TMP/5f.err"; then pass
+  else fail "shallow clone: rc=$rc out=$out"; fi
 
   # 6. an unknown flag is a usage error.
   d="$TMP/6"; mkrepo "$d"

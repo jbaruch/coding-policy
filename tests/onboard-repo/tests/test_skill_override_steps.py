@@ -23,7 +23,8 @@ class OverrideStepsTest(unittest.TestCase):
     def test_listed_steps_are_the_steps_whose_script_accepts_override(self):
         text = (SKILL_DIR / "SKILL.md").read_text(encoding="utf-8")
         listed = LISTED.search(text)
-        self.assertIsNotNone(listed, "SKILL.md names no --override steps")
+        if listed is None:
+            self.fail("SKILL.md names no --override steps")
         named = {int(n) for n in re.findall(r"\d+", listed.group(1))}
         accepting = set()
         for number, body in STEP.findall(text):

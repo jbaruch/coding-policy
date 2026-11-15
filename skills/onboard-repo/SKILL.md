@@ -85,14 +85,14 @@ KS=.tessl/plugins/jbaruch/coding-policy/skills/onboard-repo/; [ -d "$KS" ] || KS
 bash "$KS/license.sh"
 ```
 
-Emits `{"license":"file|declared|readme|none","source":"<path>"|null,"outside_authors":[...],"written":false}`. A license file or a license declared in a manifest stays as it is: proceed to Step 6. For `readme`, read the License section of `source`: when it names a license, keep it and proceed to Step 6; when it is empty or a placeholder such as "TBD", treat it as `none`. When `license` is `none`, ask the operator which license to apply. Recommend MIT when `outside_authors` and the history show the operator's own work. A stray local identity (such as `Test <test@test.com>`) or an agent identity is not outside work; real outside contributors or one large import commit are, and leave the choice open. Only after the operator confirms MIT, write the `LICENSE` for the git user and the first commit's year:
+Emits `{"license":"file|untracked|declared|readme|none","source":"<path>"|null,"outside_authors":[...],"written":false}`. A license file or a license declared in a manifest stays as it is: proceed to Step 6. For `untracked`, the license file `source` is not in git, so Step 6 would commit without it: stop and ask the operator to commit or remove it, then re-run this step. For `readme`, read the License section of `source`: when it names a license, keep it and proceed to Step 6; when it is empty or a placeholder such as "TBD", treat it as `none`. When `license` is `none`, ask the operator which license to apply. Recommend MIT when `outside_authors` and the history show the operator's own work. A stray local identity (such as `Test <test@test.com>`) or an agent identity is not outside work; real outside contributors or one large import commit are, and leave the choice open. Only after the operator confirms MIT, write the `LICENSE` for the git user and the first commit's year:
 
 ```bash
 KS=.tessl/plugins/jbaruch/coding-policy/skills/onboard-repo/; [ -d "$KS" ] || KS="$HOME/$KS"; [ -d "$KS" ] || case "$(git config --get remote.origin.url)" in git@github.com:jbaruch/coding-policy|git@github.com:jbaruch/coding-policy.git|https://github.com/jbaruch/coding-policy|https://github.com/jbaruch/coding-policy.git|ssh://git@github.com/jbaruch/coding-policy|ssh://git@github.com/jbaruch/coding-policy.git) KS=skills/onboard-repo/ ;; *) echo "coding-policy skill not found: run tessl install jbaruch/coding-policy" >&2; exit 1 ;; esac
 bash "$KS/license.sh" --write
 ```
 
-It also stages `LICENSE`. For any other license, the operator adds the file by hand and stages it with `git add <file>` before Step 6, since Step 6 commits only what is staged. `--write` refuses (exit 1) when a license file or manifest declaration already exists. Then proceed to Step 6.
+It also stages `LICENSE`. For any other license, the operator adds the file by hand and stages it with `git add <file>` before Step 6, since Step 6 commits only what is staged. `--write` refuses (exit 1) when a license file, tracked or not, or a manifest declaration already exists, and stops (exit 2) in a shallow clone: run `git fetch --unshallow` and re-run. Then proceed to Step 6.
 
 ## Step 6 — Commit
 
