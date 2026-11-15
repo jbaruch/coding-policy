@@ -65,25 +65,27 @@ EOF
 # Prints "updated" when the bytes changed, "unchanged" otherwise. Writes back
 # through the existing file so its mode is kept.
 refresh_block() {
-  # One pass finds the start-marker count, the first start line and the first
-  # end line after it. Trailing whitespace and CR are ignored, so a CRLF or
-  # hand-edited .gitignore still matches.
+  # One pass counts standalone start-marker lines and every line containing the
+  # marker, and finds the first start line and the first end line after it.
+  # Trailing whitespace and CR are ignored, so a CRLF or hand-edited .gitignore
+  # still matches.
   local scan
-  scan=$(awk -v m="# ${MARKER}" -v e="$BLOCK_END" '
+  scan=$(awk -v m="# ${MARKER}" -v t="$MARKER" -v e="$BLOCK_END" '
     { line = $0; sub(/[ \t\r]+$/, "", line) }
+    index(line, t) { any++ }
     line == m { n++; if (n == 1) s = NR; next }
     s && !stop && line == e { stop = NR }
-    END { printf "%d %d %d\n", n, s, stop }' .gitignore) \
+    END { printf "%d %d %d %d\n", n, any, s, stop }' .gitignore) \
     || { echo "error: cannot read .gitignore — check its permissions and re-run" >&2; exit 1; }
-  local count start end
-  read -r count start end <<< "$scan" \
+  local count any start end
+  read -r count any start end <<< "$scan" \
     || { echo "error: could not parse the .gitignore scan (${scan}) — report this with the file attached" >&2; exit 1; }
-  if (( count == 0 )); then
-    echo "error: the Tessl marker in .gitignore is not on a line of its own — put '# ${MARKER}' on its own line and re-run" >&2
-    exit 1
-  fi
   if (( count > 1 )); then
     echo "error: .gitignore has ${count} '# ${MARKER}' lines, expected 1 — delete the duplicate Tessl block and re-run" >&2
+    exit 1
+  fi
+  if (( count == 0 || any != count )); then
+    echo "error: a Tessl marker in .gitignore is not on a line of its own — keep only the '# ${MARKER}' line that opens the block and re-run" >&2
     exit 1
   fi
   if (( end == 0 )); then

@@ -184,6 +184,15 @@ JSON
     else fail "CRLF second run: rc=$rc $out"; fi
   else fail "CRLF refresh: rc=$rc $out"; fi
 
+  # 12. a valid block plus another line carrying the marker fails and is left untouched.
+  d="$TMP/12"; mkrepo "$d"
+  if { old_block && printf 'see # === Tessl-generated artifacts (managed by jbaruch/coding-policy) === above\n'; } > "$d/.gitignore" \
+     && before=$(cat "$d/.gitignore") && [[ -n "$before" ]]; then
+    out="$(cd "$d" && bash "$SCRIPT" 2>/dev/null)"; rc=$?
+    if [[ $rc -ne 0 ]] && after=$(cat "$d/.gitignore") && [[ "$after" == "$before" ]]; then pass
+    else fail "embedded marker: rc=$rc out=$out"; fi
+  else fail "case 12 setup: fixture write or snapshot failed"; fi
+
   echo "─────────────────────────────────────────────" >&2
   if [[ $FAIL -gt 0 ]]; then echo "FAILED: ${FAIL} failed, ${PASS} passed" >&2; exit 1; fi
   echo "PASSED: all ${PASS} checks" >&2
