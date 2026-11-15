@@ -18,6 +18,15 @@
 - An idle clean worktree whose HEAD origin holds counts as abandoned
 - The agent removes its own worktree after the merge
 - When the worktree's branch lands via `skills/release/SKILL.md` Step 7, the post-merge order is mandatory: `cd` back to the base checkout → fast-forward base `main` → `git worktree remove <worktree-path>` → `git branch -d <branch>`. Teardown precedes branch delete
+- Narrow exception for a locked worktree in that post-merge order. Preconditions:
+  1. The worktree's branch landed via `skills/release/SKILL.md` Step 7.
+  2. `git worktree remove` refuses with `cannot remove a locked working tree`.
+- The locked worktree belongs to its lock holder
+- Never force its removal or unlock it
+- Skip `git branch -d` for its branch
+- Report the worktree path, its branch and git's lock reason as left to its lock holder
+- The merge counts as delivered
+- Every unlocked worktree follows the post-merge order
 - Use `git worktree remove <path>`; never `rm -rf` the directory
 - The session-start hook `skills/release/hooks/check-leftover-worktrees.sh` cleans the session's own repository, natively and under tessl
 - It removes an idle clean worktree whose HEAD origin holds

@@ -68,6 +68,15 @@ git remote prune origin
 
 Order in (B) is mandatory: `git branch -d` refuses to delete a branch that is checked out in any worktree, so the `git worktree remove` step must come before `git branch -d`. Reversing the order produces a "checked out at `<path>`" error and leaves a stranded branch.
 
+A locked worktree belongs to its lock holder. When `git worktree remove` refuses with `cannot remove a locked working tree`:
+
+- Never force the removal with `-f` and never run `git worktree unlock`
+- Skip `git branch -d` for its branch
+- Run `git remote prune origin`
+- Report the worktree path, its branch and git's lock reason as left to its lock holder
+- The merge counts as delivered
+- An unlocked worktree follows the order above
+
 After merge, verify the merge landed on main and complete the issue checks:
 
 - Confirm every closing issue closed:

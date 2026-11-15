@@ -499,6 +499,40 @@ assert "age_hours" not in d["others"][0]
   if [[ $RC -eq 0 ]] && [[ "$(verdict_for "$OUT" ahead-wt)" == "in_progress" ]]; then
     pass; else fail "concurrent committed work remains in progress"; fi
 
+  echo "▶ session-start hook: a locked worktree stays with its lock holder (#831)" >&2
+
+  # The hook removes an idle clean worktree origin holds; a locked one belongs
+  # to its lock holder. Two such worktrees, one locked: the unlocked twin's
+  # removal proves the hook's prune pass ran on a removable shape. The origin
+  # is a local bare repository, so the remote pass reports its own could-not-check
+  # line; nothing from the worktree pass may appear.
+  local hook="${HERE}/../../../skills/release/hooks/check-leftover-worktrees.sh"
+  local hk="$TMP/hook" hook_out hook_list
+  git init -q --bare -b main "$hk/origin.git" || die "git init --bare"
+  git clone -q "$hk/origin.git" "$hk/shared" 2>"$ERRFILE" || die "git clone: $(cat "$ERRFILE")"
+  echo base > "$hk/shared/file.txt" || die "write base"
+  git -C "$hk/shared" add file.txt || die "git add"
+  git -C "$hk/shared" -c user.name=Tester -c user.email=t@example.com commit -q -m base || die "git commit"
+  git -C "$hk/shared" push -q origin main 2>"$ERRFILE" || die "git push: $(cat "$ERRFILE")"
+  mkdir -p "$hk/root" "$hk/bin" || die "mkdir hook fixtures"
+  git -C "$hk/shared" worktree add -q -b held "$hk/root/held-wt" origin/main || die "worktree add held"
+  git -C "$hk/shared" worktree add -q -b loose "$hk/root/loose-wt" origin/main || die "worktree add loose"
+  git -C "$hk/shared" worktree lock --reason "factory task 831" "$hk/root/held-wt" || die "worktree lock"
+  # No process works inside either worktree: the probe answers with an empty listing.
+  printf '#!/bin/sh\nexit 0\n' > "$hk/bin/lsof" || die "write lsof stand-in"
+  chmod +x "$hk/bin/lsof" || die "chmod lsof stand-in"
+  hook_out="$(cd "$hk/shared" && WORKTREE_ROOT="$hk/root" PRUNE_NOW="$FROZEN_NOW" PRUNE_IDLE_HOURS=0 \
+    PRUNE_LSOF="$hk/bin/lsof" bash "$hook" </dev/null 2>"$ERRFILE")" || die "hook exited non-zero: $(cat "$ERRFILE")"
+  hook_list="$(git -C "$hk/shared" worktree list --porcelain)" || die "git worktree list"
+  if [[ -d "$hk/root/held-wt" ]] && grep -qF "held-wt" <<<"$hook_list" \
+     && grep -qxF "locked factory task 831" <<<"$hook_list" \
+     && git -C "$hk/shared" show-ref --verify --quiet refs/heads/held; then
+    pass; else fail "a locked worktree, its lock and its branch stay, got LIST=$hook_list ERR=$(cat "$ERRFILE")"; fi
+  if [[ ! -d "$hk/root/loose-wt" ]] && ! grep -qF "loose-wt" <<<"$hook_list"; then
+    pass; else fail "the unlocked twin is removed, got LIST=$hook_list OUT=$hook_out ERR=$(cat "$ERRFILE")"; fi
+  if [[ "$hook_out" != *held* && "$hook_out" != *prune-worktrees* ]]; then
+    pass; else fail "the hook reports nothing about the locked worktree, got OUT=$hook_out"; fi
+
   echo "─────────────────────────────────────────────" >&2
   if [[ $FAIL -gt 0 ]]; then echo "FAILED: ${FAIL} failed, ${PASS} passed" >&2; exit 1; fi
   echo "PASSED: all ${PASS} checks" >&2
