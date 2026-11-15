@@ -14,31 +14,32 @@
 
 ## Superseded-Bot-Review Dismissal Carve-Out
 
-- Narrow exception for dismissing a gating bot's `CHANGES_REQUESTED` that the same bot later superseded with an all-clear re-review
+- A gating bot's `CHANGES_REQUESTED` stops gating once the same bot posts an all-clear re-review that supersedes it
 - Applies when the bot cannot `APPROVE` and its stale request keeps the merge `BLOCKED`
 - Preconditions are binding: read `skills/release/references/ci-safety-carve-outs.md` Superseded-Bot-Review Dismissal Carve-Out before relying on it
-- Every other dismissal still gates
+- Every other `CHANGES_REQUESTED` keeps gating
 
 ## Judge-Ruled-Review Dismissal Carve-Out
 
-- Narrow exception for dismissing the policy reviewer's latest `CHANGES_REQUESTED` on the PR head
-- Applies when a weighing ruling rules every blocking finding in that review `defer` or `decline` under `rules/review-severity.md` Judge-Weighed Finding Carve-Out
+- The policy reviewer's latest `CHANGES_REQUESTED` on the PR head stops gating under a weighing ruling
+- Applies when that ruling rules every blocking finding in that review `defer` or `decline` under `rules/review-severity.md` Judge-Weighed Finding Carve-Out
 - Preconditions are binding: read `skills/release/references/ci-safety-carve-outs.md` Judge-Ruled-Review Dismissal Carve-Out before relying on it
 - Every other policy-review `CHANGES_REQUESTED` blocks the merge until resolved through review
 
 ## Publish-Pipeline Loop-Prevention Carve-Out
 
-- Narrow exception for `[skip ci]` on a commit the publish workflow pushes to the protected branch
+- The publish workflow's own commit to the protected branch carries `[skip ci]`
 - Applies when that commit would otherwise re-trigger the same publish workflow
 - Preconditions are binding: read `skills/release/references/ci-safety-carve-outs.md` Publish-Pipeline Loop-Prevention Carve-Out before relying on it
-- Every other commit still follows the rule: no `[skip ci]`, never to skip failing tests or unblock a merge
+- Every other commit omits `[skip ci]`
+- `[skip ci]` never skips failing tests or unblocks a merge
 
 ## Bootstrap-Red Carve-Out
 
-- Narrow exception for merging a PR with a failing required check whose failure is an explicit cache-binding or bootstrap guard, not a test assertion
+- A required check failing on an explicit cache-binding or bootstrap guard, not a test assertion, does not block the merge
 - Applies when the PR changes a key the CI cache is bound to AND the rebuilt cache can only be seeded from the default branch after merge
 - Preconditions are binding: read `skills/release/references/ci-safety-carve-outs.md` Bootstrap-Red Carve-Out before relying on it
-- Every other failing check still blocks the merge: fix the tests or fix the code
+- Every other failing check blocks the merge: fix the tests or fix the code
 
 ## Install, Don't Skip
 
@@ -94,7 +95,7 @@
 
 ## Central Publication Bookkeeping
 
-- Narrow exception for source-claim and version bookkeeping on an enrolled consumer's default branch by the central publisher.
+- The central publisher records source claims and version bookkeeping on an enrolled consumer's default branch.
 - Applies only to `.github/workflows/fleet-publish.yml` executing in `jbaruch/coding-policy`.
 - Preconditions are binding: read `skills/release/references/fleet-publication.md` Bookkeeping Authority before relying on it.
 - Every other protected-branch write follows Protected Branches unchanged.
@@ -120,7 +121,7 @@
 
 ## Content-Only Direct-Push Carve-Out
 
-- Narrow exception for content-only edits within an explicit, narrowly scoped path-glob set
+- A content-only edit within an explicit, narrowly scoped path-glob set lands on the default branch directly
 - Applies when the edited paths are prose or data artifacts a human audience reads directly, not code and not context artifacts an agent loads
 - Preconditions are binding: read `skills/release/references/ci-safety-carve-outs.md` Content-Only Direct-Push Carve-Out before relying on it
 - Every other branch / path in the repo still goes through pull requests
