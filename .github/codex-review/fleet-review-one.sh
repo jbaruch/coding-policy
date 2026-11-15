@@ -63,6 +63,12 @@ install_manifest_deps() { # <manifest-json> <label> <full> <pr>
   # so a malformed manifest would yield an empty list and the review would
   # proceed with no authority plugins installed (rules/error-handling.md Shell
   # Error Handling).
+  # An empty or non-object manifest yields no dependencies without a jq error,
+  # so the shape is checked first; `jq -e` fails when it produces no result.
+  if ! printf '%s' "$manifest" | jq -e 'type == "object" and ((.dependencies // {}) | type == "object")' >/dev/null; then
+    echo "error: ${label} is not a JSON object with an object of dependencies — refusing to review with an unknown plugin set" >&2
+    exit 1
+  fi
   # Fields are joined with the ASCII unit separator, a non-whitespace IFS, so an
   # empty version or source stays an empty field instead of collapsing.
   if ! deps=$(printf '%s' "$manifest" | jq -r '.dependencies // {} | to_entries[] | [.key, (.value.version // ""), (.value.source // "")] | join("\u001f")'); then
@@ -78,7 +84,7 @@ install_manifest_deps() { # <manifest-json> <label> <full> <pr>
     fi
     if [[ "$version" == "latest" ]]; then
       spec="$name"; args=(install --strict "$spec")
-    elif [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?$ ]]; then
+    elif [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]]; then
       spec="${name}@${version}"; args=(install --strict "$spec")
     else
       MISSING+=("${name} (from ${label}): no installable registry version (version '${version}', source '${source}')")

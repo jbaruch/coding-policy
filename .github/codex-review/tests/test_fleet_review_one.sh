@@ -51,6 +51,8 @@ if [ -n "${FAKE_BASE_DIR:-}" ]; then
     cat "$FAKE_BASE_DIR/${2#origin/main:}"; exit $?
   fi
 fi
+# Like real git, showing a base-ref path with no fixture behind it fails.
+if [ "${1:-}" = show ]; then echo "fatal: path '${2#*:}' does not exist" >&2; exit 128; fi
 if [ "${1:-}" = diff ] && [ "${2:-}" = --check ]; then exit "${FAKE_DIFF_CHECK_RC:-0}"; fi
 if [ "${1:-}" = "rev-parse" ]; then
   if [ -n "${FAKE_HEAD_FILE:-}" ]; then cat "$FAKE_HEAD_FILE";
@@ -413,6 +415,34 @@ t_conflicting_pins_stop_review() {
   rmwarn "$BIN" "$CENTRAL" "$CODEXH"
 }
 
+t_empty_extra_manifest_stops_review() {
+  local env_line body; env_line=$(make_env) || exit 2
+  read -r BIN CENTRAL CODEXH <<< "$env_line"
+  local base="$CODEXH/base"
+  mkdir -p "$base/.github" "$base/tessl-workspace" || exit 2
+  printf 'tessl-workspace/tessl.json\n' > "$base/.github/fleet-review-manifests" || exit 2
+  local all_stopped=1
+  for body in '' $'  \n\t\n'; do
+    printf '%s' "$body" > "$base/tessl-workspace/tessl.json" || exit 2
+    local rc=0
+    rm -f "$CODEXH/codex.log"
+    PATH="$BIN:$PATH" GH_TOKEN=tok CENTRAL_DIR="$CENTRAL" CODEX_HOME="$CODEXH" FAKE_BASE_DIR="$base" \
+      TESSL_LOG="$CODEXH/tessl.log" CODEX_ARGV_LOG="$CODEXH/codex.log" \
+      bash "$SCRIPT" jbaruch repo-a 7 main >/dev/null 2>"$CODEXH/err" || rc=$?
+    if [[ $rc -eq 0 || -e "$CODEXH/codex.log" ]] || ! grep -qF 'is not a JSON object' "$CODEXH/err"; then all_stopped=0; fi
+  done
+  if [[ $all_stopped -eq 1 ]]; then ok "an empty or whitespace-only listed manifest stops before review"
+  else bad "an empty listed manifest reached review"; fi
+  rmwarn "$BIN" "$CENTRAL" "$CODEXH"
+}
+
+t_semver_with_prerelease_and_build_installs_exactly() {
+  run_with_marker $'tessl-workspace/tessl.json\n' '{"dependencies":{"acme/provider":{"version":"1.2.3-rc.1+build.7"}}}'
+  if [[ $RC -eq 0 ]] && grep -qxF 'install --strict acme/provider@1.2.3-rc.1+build.7' "$CODEXH/tessl.log"; then ok "a pin with both prerelease and build installs exactly"
+  else bad "prerelease+build pin not installed exactly (rc=$RC)"; fi
+  rmwarn "$BIN" "$CENTRAL" "$CODEXH"
+}
+
 t_malformed_extra_manifest_stops_review() {
   run_with_marker $'tessl-workspace/tessl.json\n' '{not json'
   if [[ $RC -ne 0 && ! -e "$CODEXH/codex.log" ]]; then ok "a malformed extra manifest stops before review"
@@ -444,6 +474,8 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
   t_source_pinned_dependency_stops_review
   t_list_without_final_newline_still_installs
   t_conflicting_pins_stop_review
+  t_empty_extra_manifest_stops_review
+  t_semver_with_prerelease_and_build_installs_exactly
   t_malformed_extra_manifest_stops_review
   echo "== summary: ${pass} passed, ${fail} failed =="
   [[ "$fail" -eq 0 ]]
