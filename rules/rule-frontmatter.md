@@ -20,4 +20,5 @@ description: Frontmatter conventions for rule files — always-on vs conditional
 - A host may omit a conditional rule from an agent's context.
 - Tiers run cheapest first, host script, then bounded classifier, then reasoning model.
 - Each undecided case fails safe to inclusion.
+- An undecided rule may load on demand from its path and verbatim frontmatter.
 - Included rules keep their bytes and frontmatter unchanged.
