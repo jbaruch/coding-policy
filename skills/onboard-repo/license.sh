@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 # Report a consumer repo's license state, and with --write add an MIT LICENSE.
 #
-# A repo already licensed by a LICENSE/COPYING file, or declaring a license in
-# a manifest (package.json, pyproject.toml, Cargo.toml, .tessl-plugin/plugin.json,
+# A repo already licensed by a LICENSE/COPYING file (suffixed names such as
+# LICENSE-APACHE, LICENSE.txt or COPYING.LESSER included), or declaring a
+# license in a manifest (package.json, pyproject.toml's [project] or
+# [tool.poetry] table, Cargo.toml's [package] table, .tessl-plugin/plugin.json,
 # agent-plugin.yaml), keeps that choice. A README "License" heading is reported
 # as "readme" for the caller to read, since only its text says whether it names
 # a license. The report also lists commit authors other than the operator (git
@@ -57,7 +59,8 @@ main() {
     1) [[ "$1" == "--write" ]] || usage; write=1 ;;
     *) usage ;;
   esac
-  command -v python3 >/dev/null || { echo "error: python3 not found on PATH — install Python 3 and re-run" >&2; exit 2; }
+  # tomllib, which reads the TOML manifests, ships with Python 3.11 and later.
+  python3 -I -c 'import tomllib' 2>/dev/null || { echo "error: license.sh needs python3 3.11 or later on PATH (for tomllib) — install it and re-run" >&2; exit 2; }
   local root
   if ! root=$(git rev-parse --show-toplevel); then
     echo "error: not inside a git worktree — run from within the consumer repo" >&2
@@ -69,14 +72,24 @@ main() {
   # and the JSON (rules/script-delegation.md Script Requirements).
   local report
   if ! report=$(python3 -I - <<'PY'
-import json, re, subprocess, sys
+import json, re, subprocess, sys, tomllib
 from pathlib import Path
 
 license, source = "none", None
 for entry in sorted(Path(".").iterdir()):
-    if entry.is_file() and re.fullmatch(r"(?i)(licen[cs]e|copying)(\.(md|txt|rst))?", entry.name):
+    if entry.is_file() and re.fullmatch(r"(?i)(licen[cs]e|copying)([-._].+)?", entry.name):
         license, source = "file", entry.name
         break
+
+def toml(name):
+    path = Path(name)
+    if not path.is_file():
+        return {}
+    try:
+        return tomllib.loads(path.read_text())
+    except tomllib.TOMLDecodeError:
+        sys.stderr.write(f"warning: {name} is not valid TOML; reading no license from it\n")
+        return {}
 
 def declared():
     pkg = Path("package.json")
@@ -86,12 +99,15 @@ def declared():
                 return "package.json"
         except ValueError:
             sys.stderr.write("warning: package.json is not valid JSON; reading no license from it\n")
-    for name, pattern in (("pyproject.toml", r"(?m)^\s*license\s*="),
-                          ("Cargo.toml", r"(?m)^\s*license(-file)?\s*="),
-                          ("agent-plugin.yaml", r"(?m)^license:\s*\S")):
-        path = Path(name)
-        if path.is_file() and re.search(pattern, path.read_text()):
-            return name
+    pyproject = toml("pyproject.toml")
+    if pyproject.get("project", {}).get("license") or pyproject.get("tool", {}).get("poetry", {}).get("license"):
+        return "pyproject.toml"
+    package = toml("Cargo.toml").get("package", {})
+    if package.get("license") or package.get("license-file"):
+        return "Cargo.toml"
+    plugin_yaml = Path("agent-plugin.yaml")
+    if plugin_yaml.is_file() and re.search(r"(?m)^license:\s*\S", plugin_yaml.read_text()):
+        return "agent-plugin.yaml"
     plugin = Path(".tessl-plugin/plugin.json")
     if plugin.is_file():
         try:
@@ -103,7 +119,9 @@ def declared():
 
 def readme_heading():
     for readme in sorted(Path(".").glob("README*")):
-        if readme.is_file() and re.search(r"(?mi)^#{1,6}\s*licen[cs]e\b", readme.read_text(errors="replace")):
+        # An ATX heading (## License) or a Setext one (License over === or ---).
+        if readme.is_file() and re.search(r"(?mi)^#{1,6}\s*licen[cs]e\b|^ {0,3}licen[cs]e\b[^\n]*\n {0,3}(=+|-+)[ \t]*$",
+                                          readme.read_text(errors="replace")):
             return readme.name
     return None
 

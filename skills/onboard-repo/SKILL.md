@@ -39,7 +39,7 @@ KS=.tessl/plugins/jbaruch/coding-policy/skills/onboard-repo/; [ -d "$KS" ] || KS
 bash "$KS/preflight.sh"
 ```
 
-Runs every precondition (git worktree, GitHub CLI install + auth, packaged templates present, origin remote, plus mode-dependent branch/target state) and returns one JSON object: `{"ok": bool, "override": bool, "failures": [...], "warnings": [...]}`. Upgrade mode also refuses a rewritable target carrying uncommitted edits.
+Runs every precondition (git worktree, GitHub CLI install + auth, packaged templates present, origin remote, an index with nothing staged, plus mode-dependent branch/target state) and returns one JSON object: `{"ok": bool, "override": bool, "failures": [...], "warnings": [...]}`. Upgrade mode also refuses a rewritable target carrying uncommitted edits.
 
 - **Exit 0, empty `failures`** — every precondition passed; proceed to Step 2.
 - **Exit 1, populated `failures`** — report each failure's `reason` verbatim and stop. Every failure carries a concrete recovery command.
@@ -92,7 +92,7 @@ KS=.tessl/plugins/jbaruch/coding-policy/skills/onboard-repo/; [ -d "$KS" ] || KS
 bash "$KS/license.sh" --write
 ```
 
-It also stages `LICENSE`. For any other license, the operator adds it by hand. `--write` refuses (exit 1) when a license file or manifest declaration already exists. Then proceed to Step 6.
+It also stages `LICENSE`. For any other license, the operator adds the file by hand and stages it with `git add <file>` before Step 6, since Step 6 commits only what is staged. `--write` refuses (exit 1) when a license file or manifest declaration already exists. Then proceed to Step 6.
 
 ## Step 6 — Commit
 

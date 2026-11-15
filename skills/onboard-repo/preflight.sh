@@ -3,8 +3,9 @@
 # result. The skill invokes this before any mutation so every preflight
 # failure is surfaced together, not one-at-a-time. Checks cover: git
 # worktree, GitHub CLI installation + auth, packaged template presence,
-# origin remote, and (mode-dependent) branch state. In override mode it also
-# refuses to overwrite uncommitted local changes to any reviewer target.
+# origin remote, an index with nothing staged, and (mode-dependent) branch
+# state. In override mode it also refuses to overwrite uncommitted local
+# changes to any reviewer target.
 #
 # Usage: preflight.sh [--override]
 #   --override    Upgrade existing scaffolded reviewers in place (instead
@@ -307,6 +308,21 @@ check_no_dirty_hygiene_paths() {
   fi
 }
 
+# commit.sh commits the whole index, so anything staged before onboarding
+# starts (a LICENSE draft, unrelated work) would land in the onboarding commit
+# (rules/commit-conventions.md). `git diff --cached --quiet`: 0 nothing staged,
+# 1 staged changes, >1 a git fault surfaced as its own failure.
+check_nothing_staged() {
+  local rc=0 staged
+  git diff --cached --quiet || rc=$?
+  case "$rc" in
+    0) ;;
+    1) staged=$(git diff --cached --name-only | tr '\n' ' ')
+       push_failure "nothing-staged" "The index already has staged changes: ${staged% } — onboarding commits the whole index, so they would land in its commit; commit them first or unstage them with 'git restore --staged <path>', then re-run" ;;
+    *) push_failure "nothing-staged" "'git diff --cached' failed (rc=${rc}) — cannot verify the index is clean; check 'git status' and re-run" ;;
+  esac
+}
+
 main() {
   check_in_git_worktree
   check_gh_installed
@@ -320,6 +336,7 @@ main() {
   # so we don't leak confusing git-error diagnostics on top of the real failures.
   if git rev-parse --git-dir >/dev/null 2>&1; then
     check_origin_remote
+    check_nothing_staged
     # Both modes run the hygiene step, so both refuse pre-existing dirty
     # tessl.json / .gitignore.
     check_no_dirty_hygiene_paths

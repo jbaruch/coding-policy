@@ -213,6 +213,25 @@ t_uncommitted_edits_flagged() {
   echo "${failures[0]}" | grep -q "fleet-review-enabled (uncommitted edits)" || { echo "    FAIL: expected fleet-review-enabled (uncommitted edits); got: ${failures[0]}" >&2; return 1; }
 }
 
+# commit.sh commits the whole index, so a LICENSE draft staged before
+# onboarding would land in the onboarding commit: preflight refuses a
+# non-empty index and names the staged path, and passes a clean one. A fake
+# `gh` keeps the run off the network; only the nothing-staged entry is read.
+t_staged_changes_refused() {
+  local fake out
+  fake=$(mktemp -d "/tmp/test_preflight.fake-gh.XXXXXX") || return 1
+  { printf '#!/bin/sh\nexit 0\n' > "$fake/gh" && chmod +x "$fake/gh"; } || { rm -rf "$fake"; return 1; }
+  out=$(PATH="$fake:$PATH" "$SCRIPT" 2>/dev/null)
+  assert_eq "clean index" "0" "$(echo "$out" | jq '[.failures[] | select(.check == "nothing-staged")] | length')" || { rm -rf "$fake"; return 1; }
+  { printf 'Unapproved draft\n' > LICENSE && git add LICENSE; } || { rm -rf "$fake"; return 1; }
+  out=$(PATH="$fake:$PATH" "$SCRIPT" 2>/dev/null)
+  rm -rf "$fake"
+  assert_eq "ok" "false" "$(echo "$out" | jq -r .ok)" || return 1
+  local reason
+  reason=$(echo "$out" | jq -r '.failures[] | select(.check == "nothing-staged") | .reason')
+  [[ "$reason" == *"LICENSE"* && "$reason" == *"git restore --staged"* ]] || { echo "    FAIL: expected a nothing-staged failure naming LICENSE; got: $out" >&2; return 1; }
+}
+
 # --- driver ---
 
 echo "== preflight.sh tests =="
@@ -223,6 +242,7 @@ run "tracked deletion via git rm flagged (issue #79)"      with_sourced_sandbox 
 run "multiple tracked deletions all flagged"               with_sourced_sandbox t_multiple_tracked_deletions_all_flagged
 run "unmodified targets not flagged (sanity)"              with_sourced_sandbox t_unmodified_targets_not_flagged
 run "uncommitted edits on a target flagged (#103)"         with_sourced_sandbox t_uncommitted_edits_flagged
+run "staged changes refused before onboarding"            with_repo staged_changes t_staged_changes_refused
 
 echo "== summary: ${PASS_COUNT} passed, ${FAIL_COUNT} failed =="
 [[ "$FAIL_COUNT" -eq 0 ]]
