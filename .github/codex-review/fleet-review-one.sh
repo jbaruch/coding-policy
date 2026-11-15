@@ -48,8 +48,9 @@ cleanup() {
 }
 
 # Install every dependency one trusted manifest declares into $POLICY, at the
-# version it declares. Skips coding-policy (already installed at its latest)
-# and records nanoclaw-core in NEED_CORE for the isolated materializer. Every
+# version it declares. A dependency pinned to a source is recorded in MISSING,
+# whatever its name. Otherwise coding-policy is skipped (installed separately)
+# and nanoclaw-core is recorded in NEED_CORE for the isolated materializer. Every
 # install uses --strict so tessl cannot fall back to an older version: a pin
 # installs exactly, and "latest" installs the newest or fails. tessl can refuse a plugin and
 # still exit 0 (an install-policy block), so success is the plugin directory
@@ -63,37 +64,42 @@ install_manifest_deps() { # <manifest-json> <label> <full> <pr>
   # so a malformed manifest would yield an empty list and the review would
   # proceed with no authority plugins installed (rules/error-handling.md Shell
   # Error Handling).
-  # An empty or non-object manifest yields no dependencies without a jq error,
-  # so the shape is checked first; `jq -e` fails when it produces no result.
-  # Every key must be a workspace/name plugin id and every version or source a
-  # string without control characters, since the fields below are split on a
-  # newline and the unit separator.
+  # The manifest must match one exact shape, checked before anything reads it:
+  # an object whose optional dependencies object maps workspace/name ids to
+  # objects holding only `version` and/or `source`, each a non-empty string
+  # without control characters. Anything else, such as a null, false or extra
+  # field, refuses the review instead of being read as absent. That also keeps
+  # the newline and unit separator that split the fields below out of them.
+  # `jq -e` fails on an empty manifest, which produces no result.
   if ! printf '%s' "$manifest" | jq -e '
+      def field: type == "string" and length > 0 and (explode | all(. > 31));
       type == "object" and ((has("dependencies") | not) or (.dependencies | type == "object" and all(to_entries[];
         (.key | test("^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$"))
-        and (.value | type == "object")
-        and ((.value.version // "") | type == "string" and (explode | all(. > 31)))
-        and ((.value.source // "") | type == "string" and (explode | all(. > 31))))))' >/dev/null; then
-    echo "error: ${label} is not a JSON object whose dependencies map workspace/name ids to version or source strings — refusing to review with an unknown plugin set" >&2
+        and (.value | type == "object"
+          and (has("version") or has("source"))
+          and ((keys - ["version", "source"]) == [])
+          and all(.[]; field)))))' >/dev/null; then
+    echo "error: ${label} is not a JSON object whose dependencies map workspace/name ids to only a version and/or source string — refusing to review with an unknown plugin set" >&2
     exit 1
   fi
   # Fields are joined with the ASCII unit separator, a non-whitespace IFS, so an
-  # empty version or source stays an empty field instead of collapsing.
+  # absent version or source stays an empty field instead of collapsing.
   if ! deps=$(printf '%s' "$manifest" | jq -r '.dependencies // {} | to_entries[] | [.key, (.value.version // ""), (.value.source // "")] | join("\u001f")'); then
     echo "error: could not parse dependencies from ${label} — refusing to review with an unknown plugin set" >&2
     exit 1
   fi
   while IFS=$'\x1f' read -r name version source; do
     [ -n "$name" ] || continue
+    if [[ -n "$source" ]]; then
+      MISSING+=("${name} (from ${label}): declares source '${source}', which the reviewer cannot install from the registry")
+      continue
+    fi
     [ "$name" = "jbaruch/coding-policy" ] && continue
     if [ "$name" = "jbaruch/nanoclaw-core" ]; then
       NEED_CORE=true
       continue
     fi
-    if [[ -n "$source" ]]; then
-      MISSING+=("${name} (from ${label}): declares source '${source}', which the reviewer cannot install from the registry")
-      continue
-    elif [[ "$version" == "latest" ]]; then
+    if [[ "$version" == "latest" ]]; then
       spec="$name"; args=(install --strict "$spec")
     elif [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]]; then
       spec="${name}@${version}"; args=(install --strict "$spec")

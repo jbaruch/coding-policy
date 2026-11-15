@@ -370,6 +370,19 @@ t_source_pinned_dependency_stops_review() {
   rmwarn "$BIN" "$CENTRAL" "$CODEXH"
 }
 
+t_source_on_a_reviewer_owned_plugin_stops_review() {
+  local name all_stopped=1
+  for name in jbaruch/coding-policy jbaruch/nanoclaw-core; do
+    run_with_marker $'tessl-workspace/tessl.json\n' "{\"dependencies\":{\"${name}\":{\"source\":\"file:../local\"}}}"
+    if [[ $RC -eq 0 || -e "$CODEXH/codex.log" ]] || ! grep -qF "${name} (from jbaruch/repo-a:main/tessl-workspace/tessl.json): declares source 'file:../local'" "$CODEXH/err"; then
+      all_stopped=0; echo "    not stopped: ${name}" >&2
+    fi
+    rmwarn "$BIN" "$CENTRAL" "$CODEXH"
+  done
+  if [[ $all_stopped -eq 1 ]]; then ok "a source on coding-policy or nanoclaw-core stops the review before Codex"
+  else bad "a source-pinned reviewer-owned plugin reached review"; fi
+}
+
 t_double_dot_in_a_name_is_a_valid_path() {
   local env_line; env_line=$(make_env) || exit 2
   read -r BIN CENTRAL CODEXH <<< "$env_line"
@@ -433,7 +446,13 @@ t_empty_extra_manifest_stops_review() {
   for body in '' $'  \n\t\n' '{"dependencies":false}' '{"dependencies":null}' 'null' \
               '{"dependencies":{"":{"version":"1.0.0"}}}' \
               '{"dependencies":{"jbaruch/coding-policy\njbaruch/nanoclaw-core":{"version":"1.0.0"}}}' \
-              '{"dependencies":{"acme/provider":{"version":"1.0.0\nother/plugin"}}}'; do
+              '{"dependencies":{"acme/provider":{"version":"1.0.0\nother/plugin"}}}' \
+              '{"dependencies":{"acme/provider":{"version":"1.0.0","source":false}}}' \
+              '{"dependencies":{"acme/provider":{"version":null}}}' \
+              '{"dependencies":{"acme/provider":{"version":""}}}' \
+              '{"dependencies":{"acme/provider":{}}}' \
+              '{"dependencies":{"acme/provider":{"version":"1.0.0","pin":"other"}}}' \
+              '{"dependencies":{"acme/provider":"1.0.0"}}'; do
     printf '%s' "$body" > "$base/tessl-workspace/tessl.json" || exit 2
     local rc=0
     rm -f "$CODEXH/codex.log"
@@ -494,6 +513,7 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
   t_policy_blocked_install_stops_review
   t_failed_install_without_reason_line_stops_review
   t_source_pinned_dependency_stops_review
+  t_source_on_a_reviewer_owned_plugin_stops_review
   t_version_with_source_stops_review
   t_list_without_final_newline_still_installs
   t_conflicting_pins_stop_review
