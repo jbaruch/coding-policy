@@ -548,6 +548,9 @@ sys.stdout.write(lines[-1] if lines else "")
         # Only a definite "false" keeps polling: an "unknown" read fails closed
         # at once, the same as before the poll existed.
         while [[ "$observed" == "false" ]] && (( waited < TIMEOUT_LANDING_BUDGET_SECONDS )); do
+          if (( delay > TIMEOUT_LANDING_BUDGET_SECONDS - waited )); then
+            delay=$(( TIMEOUT_LANDING_BUDGET_SECONDS - waited ))
+          fi
           sleep "$delay"
           waited=$(( waited + delay ))
           observed="$(version_exists "$workspace" "$plugin_slug" "$intended_version" "timeout reread")"

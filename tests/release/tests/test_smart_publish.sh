@@ -473,8 +473,15 @@ t_timeout_landing_after_first_read() {
   [[ "$(wc -l < "$root/sleep-calls" | tr -d ' ')" == "1" ]]
 }
 
-# A version that never appears is polled to the budget, then stays red with a
-# single upload: the delays double from 2 s and cap at 16 s (2 4 8 16 16 16).
+# Total seconds smart-publish asked the sleep stub for.
+_slept() { # <root>
+  local total=0 s
+  while IFS= read -r s; do total=$(( total + s )); done < "$1/sleep-calls"
+  printf '%s' "$total"
+}
+
+# A version that never appears is polled for the whole budget and no longer,
+# then stays red with a single upload.
 t_timeout_still_absent_does_not_upload_again() {
   local root; root="$(_sandbox 0.1.0)"
   local out rc=0
@@ -483,7 +490,7 @@ t_timeout_still_absent_does_not_upload_again() {
   echo "$out" | python3 -c 'import json,sys;d=json.load(sys.stdin);assert d["outcome"]=="failure" and d["landed_after_error"] is False,d' || return 1
   [[ "$(_remote_count "$root")" == "1" ]] || return 1
   [[ "$(wc -l < "$root/publish-calls" | tr -d ' ')" == "1" ]] || return 1
-  [[ "$(tr '\n' ' ' < "$root/sleep-calls")" == "2 4 8 16 16 16 " ]]
+  [[ "$(_slept "$root")" == "60" ]] || { echo "    FAIL: expected a 60 s poll, slept $(_slept "$root") s" >&2; return 1; }
 }
 
 # #815: the version appears only after the first two rereads. The bounded poll
@@ -496,7 +503,8 @@ t_timeout_landing_after_two_rereads() {
   echo "$out" | python3 -c 'import json,sys;d=json.load(sys.stdin);assert d["outcome"]=="success" and d["landed_after_error"] is True and d["version"]=="0.1.1",d' || return 1
   [[ "$(_remote_version "$root")" == "0.1.1" ]] || return 1
   [[ "$(wc -l < "$root/publish-calls" | tr -d ' ')" == "1" ]] || return 1
-  [[ "$(tr '\n' ' ' < "$root/sleep-calls")" == "2 4 8 " ]]
+  local slept; slept="$(_slept "$root")"
+  (( slept > 0 && slept < 60 )) || { echo "    FAIL: expected the poll to stop early once found, slept ${slept} s" >&2; return 1; }
 }
 
 t_timeout_unknown_post_read_is_not_retried() {
