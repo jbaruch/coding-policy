@@ -145,17 +145,18 @@ JSON
 
   # 8. a second run after the refresh reports unchanged and leaves the bytes alone.
   d="$TMP/8"; mkrepo "$d"
-  { printf 'node_modules/\n'; old_block; } > "$d/.gitignore"
-  local before=""
-  if ! (cd "$d" && bash "$SCRIPT" >/dev/null 2>&1); then fail "case 8 setup: first refresh failed"; else
-  before=$(cat "$d/.gitignore")
-  out="$(cd "$d" && bash "$SCRIPT" 2>/dev/null)"; rc=$?
-  if [[ $rc -eq 0 ]] && printf '%s' "$out" | jq -e '.gitignore=="unchanged"' >/dev/null && [[ "$(cat "$d/.gitignore")" == "$before" ]]; then pass
-  else fail "current block unchanged: rc=$rc $out"; fi
+  local before="" after=""
+  if ! { printf 'node_modules/\n' && old_block; } > "$d/.gitignore"; then fail "case 8 setup: fixture write failed"
+  elif ! (cd "$d" && bash "$SCRIPT" >/dev/null 2>&1); then fail "case 8 setup: first refresh failed"
+  elif ! before=$(cat "$d/.gitignore") || [[ -z "$before" ]]; then fail "case 8 setup: snapshot read failed"
+  else
+    out="$(cd "$d" && bash "$SCRIPT" 2>/dev/null)"; rc=$?
+    if [[ $rc -eq 0 ]] && printf '%s' "$out" | jq -e '.gitignore=="unchanged"' >/dev/null \
+       && after=$(cat "$d/.gitignore") && [[ "$after" == "$before" ]]; then pass
+    else fail "current block unchanged: rc=$rc $out"; fi
   fi
 
   # 9. a block missing its end marker fails and is left untouched.
-  local after
   d="$TMP/9"; mkrepo "$d"
   if old_block | sed '$d' > "$d/.gitignore" && before=$(cat "$d/.gitignore") && [[ -n "$before" ]]; then
     out="$(cd "$d" && bash "$SCRIPT" 2>/dev/null)"; rc=$?
