@@ -28,6 +28,9 @@ set -euo pipefail
 # (rules/error-handling.md Shell Error Handling).
 WORK=""
 POLICY=""
+# Set by install_manifest_deps when any trusted manifest names nanoclaw-core,
+# which is materialized last in its own isolated workspace.
+NEED_CORE=false
 cleanup() {
   local d
   for d in "${WORK:-}" "${POLICY:-}"; do
@@ -35,6 +38,38 @@ cleanup() {
     rm -rf "$d" || echo "fleet-review-one.sh: warning: could not remove temp dir ${d} — remove it by hand" >&2
   done
   return 0
+}
+
+# Install every dependency one trusted manifest declares into $POLICY. Skips
+# coding-policy (already installed at its latest) and records nanoclaw-core in
+# NEED_CORE for the isolated materializer. A plugin that fails to install is a
+# warning, not a failure; a manifest that does not parse refuses the review.
+install_manifest_deps() { # <manifest-json> <label> <full> <pr>
+  local manifest="$1" label="$2" full="$3" pr="$4" deps dep
+  # Capture the dependency list in an explicitly checked assignment, NOT via
+  # process substitution: `while read < <(jq ...)` discards jq's exit status,
+  # so a malformed manifest would yield an empty list and the review would
+  # proceed with no authority plugins installed (rules/error-handling.md Shell
+  # Error Handling).
+  if ! deps=$(printf '%s' "$manifest" | jq -r '.dependencies // {} | keys[]'); then
+    echo "error: could not parse dependencies from ${label} — refusing to review with an unknown plugin set" >&2
+    exit 1
+  fi
+  while IFS= read -r dep; do
+    [ -n "$dep" ] || continue
+    [ "$dep" = "jbaruch/coding-policy" ] && continue
+    if [ "$dep" = "jbaruch/nanoclaw-core" ]; then
+      NEED_CORE=true
+      continue
+    fi
+    if ! ( cd "$POLICY" && tessl install "$dep" >/dev/null 2>&1 ); then
+      # Best-effort per `rules/error-handling.md` Graceful Fallback: a
+      # private or unpublished plugin must not fail the whole review,
+      # but it MUST be visible — a silently missing authority rule is
+      # how a reviewer blocks a compliant PR without saying why.
+      echo "::warning::could not install ${dep} (from ${label}) for ${full}#${pr} — carve-outs citing its rules cannot be verified this run" >&2
+    fi
+  done <<< "$deps"
 }
 
 main() {
@@ -129,45 +164,59 @@ main() {
   # tip.
   local base_manifest
   if base_manifest=$(cd "$work" && git show "origin/${base}:tessl.json" 2>/dev/null); then
-    # Capture the dependency list in an explicitly checked assignment, NOT via
-    # process substitution: `while read < <(jq ...)` discards jq's exit status,
-    # so a malformed tessl.json would yield an empty list and the review would
-    # proceed with no authority plugins installed — silently reproducing the
-    # exact wrong-verdict bug this step exists to fix
-    # (rules/error-handling.md Shell Error Handling).
-    local deps
-    if ! deps=$(printf '%s' "$base_manifest" | jq -r '.dependencies // {} | keys[]'); then
-      echo "error: could not parse dependencies from ${full}:${base}/tessl.json — refusing to review with an unknown plugin set" >&2
-      exit 1
-    fi
-    local dep need_core=false
-    while IFS= read -r dep; do
-      [ -n "$dep" ] || continue
-      # coding-policy is already installed above at its own latest.
-      [ "$dep" = "jbaruch/coding-policy" ] && continue
-      if [ "$dep" = "jbaruch/nanoclaw-core" ]; then
-        need_core=true
-        continue
-      fi
-      if ! ( cd "$POLICY" && tessl install "$dep" >/dev/null 2>&1 ); then
-        # Best-effort per `rules/error-handling.md` Graceful Fallback: a
-        # private or unpublished plugin must not fail the whole review,
-        # but it MUST be visible — a silently missing authority rule is
-        # how a reviewer blocks a compliant PR without saying why.
-        echo "::warning::could not install ${dep} for ${full}#${pr} — carve-outs citing its rules cannot be verified this run" >&2
-      fi
-    done <<< "$deps"
-    if [[ "$need_core" == true ]]; then
-      # The helper installs reviewed Core ALONE in a fresh private workspace;
-      # its warning flag never applies to other dependencies.
-      # Run last so ordinary Tessl reconciliation cannot remove the authority.
-      if ! ( cd "$POLICY" && python3 -I "$core_materializer" "$POLICY" >/dev/null ); then
-        echo "error: Core authority unavailable for ${full}#${pr} — restore its isolated installation before reviewing" >&2
-        exit 1
-      fi
-    fi
+    install_manifest_deps "$base_manifest" "${full}:${base}/tessl.json" "$full" "$pr"
   else
     echo "note: ${full} has no tessl.json on ${base} — reviewing against coding-policy alone" >&2
+  fi
+
+  # A repo can keep runtime provider plugins out of its root tessl.json, which
+  # is also the developer agent's context manifest, by listing further
+  # manifests in its marker, one relative path per line. Both the marker and
+  # each manifest come from the BASE ref for the same reason as above, so a PR
+  # that adds a path cannot authorize itself. `git ls-tree` prints nothing for
+  # an absent path, which keeps absence apart from a failed read.
+  local marker_path=".github/fleet-review-enabled" listed marker extra extra_manifest
+  if ! listed=$(cd "$work" && git ls-tree --name-only "origin/${base}" -- "$marker_path"); then
+    echo "error: could not list ${marker_path} on ${full}:${base} — restore the fetched base before reviewing" >&2
+    exit 1
+  fi
+  if [[ -n "$listed" ]]; then
+    if ! marker=$(cd "$work" && git show "origin/${base}:${marker_path}"); then
+      echo "error: could not read ${marker_path} on ${full}:${base} — restore the fetched base before reviewing" >&2
+      exit 1
+    fi
+    while IFS= read -r extra; do
+      extra="${extra#"${extra%%[![:space:]]*}"}"
+      extra="${extra%"${extra##*[![:space:]]}"}"
+      [[ -z "$extra" || "$extra" == \#* ]] && continue
+      if [[ "$extra" == /* || "$extra" == *..* || ! "$extra" =~ ^[A-Za-z0-9._/-]+$ ]]; then
+        echo "::warning::ignoring '${extra}' in ${full}:${base}/${marker_path} — list a relative manifest path such as tessl-workspace/tessl.json" >&2
+        continue
+      fi
+      if ! listed=$(cd "$work" && git ls-tree --name-only "origin/${base}" -- "$extra"); then
+        echo "error: could not list ${extra} on ${full}:${base} — restore the fetched base before reviewing" >&2
+        exit 1
+      fi
+      if [[ -z "$listed" ]]; then
+        echo "::warning::${full}:${base} has no ${extra}, which ${marker_path} lists — only the base ref is trusted, so its plugins are not installed this run" >&2
+        continue
+      fi
+      if ! extra_manifest=$(cd "$work" && git show "origin/${base}:${extra}"); then
+        echo "error: could not read ${extra} on ${full}:${base} — restore the fetched base before reviewing" >&2
+        exit 1
+      fi
+      install_manifest_deps "$extra_manifest" "${full}:${base}/${extra}" "$full" "$pr"
+    done <<< "$marker"
+  fi
+
+  if [[ "$NEED_CORE" == true ]]; then
+    # The helper installs reviewed Core ALONE in a fresh private workspace;
+    # its warning flag never applies to other dependencies.
+    # Run last so ordinary Tessl reconciliation cannot remove the authority.
+    if ! ( cd "$POLICY" && python3 -I "$core_materializer" "$POLICY" >/dev/null ); then
+      echo "error: Core authority unavailable for ${full}#${pr} — restore its isolated installation before reviewing" >&2
+      exit 1
+    fi
   fi
   ln -s "${POLICY}/.tessl" "${work}/.tessl" \
     || { echo "error: could not link the installed policy into the workspace for ${full}#${pr}" >&2; exit 1; }

@@ -40,6 +40,17 @@ if [ "${1:-}" = "clone" ]; then dest="${!#}"; mkdir -p "$dest/.git"; fi
 if [ "${1:-}" = show ] && [ "${2:-}" = origin/main:tessl.json ] && [ -n "${FAKE_BASE_MANIFEST:-}" ]; then
   cat "$FAKE_BASE_MANIFEST"; exit 0
 fi
+# FAKE_BASE_DIR holds base-ref files: `ls-tree --name-only origin/main -- <p>`
+# prints <p> when present, and `show origin/main:<p>` prints its content.
+if [ -n "${FAKE_BASE_DIR:-}" ]; then
+  if [ "${1:-}" = ls-tree ] && [ "${3:-}" = origin/main ]; then
+    if [ -f "$FAKE_BASE_DIR/${5:-}" ]; then printf '%s\n' "$5"; fi
+    exit 0
+  fi
+  if [ "${1:-}" = show ] && [ "${2#origin/main:}" != "${2:-}" ]; then
+    cat "$FAKE_BASE_DIR/${2#origin/main:}"; exit $?
+  fi
+fi
 if [ "${1:-}" = diff ] && [ "${2:-}" = --check ]; then exit "${FAKE_DIFF_CHECK_RC:-0}"; fi
 if [ "${1:-}" = "rev-parse" ]; then
   if [ -n "${FAKE_HEAD_FILE:-}" ]; then cat "$FAKE_HEAD_FILE";
@@ -47,7 +58,12 @@ if [ "${1:-}" = "rev-parse" ]; then
 fi
 exit 0
 EOF
-  printf '#!/usr/bin/env bash\nset -euo pipefail\nexit 0\n' > "$bin/tessl"
+  cat > "$bin/tessl" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+if [ -n "${TESSL_LOG:-}" ]; then printf '%s\n' "$*" >> "$TESSL_LOG"; fi
+exit 0
+EOF
   cat > "$bin/codex" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -265,6 +281,62 @@ t_no_core_without_base_enrollment() {
   rmwarn "$BIN" "$CENTRAL" "$CODEXH"
 }
 
+# --- #817: extra manifests named in the base ref's marker ---
+# Stage a base ref whose marker lists tessl-workspace/tessl.json, run a review,
+# and leave BIN CENTRAL CODEXH BASE set for the caller's assertions.
+# $1: marker body. $2: the extra manifest's body, or "" to leave it off the base.
+run_with_marker() {
+  local env_line; env_line=$(make_env) || exit 2
+  read -r BIN CENTRAL CODEXH <<< "$env_line"
+  BASE="$CODEXH/base"
+  mkdir -p "$BASE/.github" || exit 2
+  printf '%s' "$1" > "$BASE/.github/fleet-review-enabled" || exit 2
+  if [[ -n "$2" ]]; then
+    mkdir -p "$BASE/tessl-workspace" || exit 2
+    printf '%s' "$2" > "$BASE/tessl-workspace/tessl.json" || exit 2
+  fi
+  RC=0
+  PATH="$BIN:$PATH" GH_TOKEN=tok CENTRAL_DIR="$CENTRAL" CODEX_HOME="$CODEXH" FAKE_BASE_DIR="$BASE" \
+    TESSL_LOG="$CODEXH/tessl.log" CODEX_ARGV_LOG="$CODEXH/codex.log" \
+    bash "$SCRIPT" jbaruch repo-a 7 main >/dev/null 2>"$CODEXH/err" || RC=$?
+}
+
+t_extra_manifest_installs_its_plugins() {
+  run_with_marker $'# Opts this repository in.\ntessl-workspace/tessl.json\n' '{"dependencies":{"acme/provider":{"version":"1.0.0"}}}'
+  if [[ $RC -eq 0 ]] && grep -qxF 'install acme/provider' "$CODEXH/tessl.log"; then ok "a marker-listed base manifest installs its plugins"
+  else bad "extra manifest plugins not installed (rc=$RC)"; fi
+  rmwarn "$BIN" "$CENTRAL" "$CODEXH"
+}
+
+t_extra_manifest_absent_on_base_installs_nothing() {
+  run_with_marker $'tessl-workspace/tessl.json\n' ''
+  if [[ $RC -eq 0 ]] && ! grep -qF 'acme/provider' "$CODEXH/tessl.log" && grep -qF 'only the base ref is trusted' "$CODEXH/err"; then
+    ok "a listed manifest missing from the base installs nothing and warns"
+  else bad "head-only manifest handled wrongly (rc=$RC)"; fi
+  rmwarn "$BIN" "$CENTRAL" "$CODEXH"
+}
+
+t_comment_only_marker_installs_only_policy() {
+  run_with_marker $'# Opts this repository in.\n#\n' ''
+  if [[ $RC -eq 0 ]] && [[ "$(cat "$CODEXH/tessl.log")" == "install jbaruch/coding-policy" ]]; then ok "a comment-only marker behaves as before"
+  else bad "comment-only marker changed the plugin set (rc=$RC)"; fi
+  rmwarn "$BIN" "$CENTRAL" "$CODEXH"
+}
+
+t_escaping_marker_line_is_ignored() {
+  run_with_marker $'../other/tessl.json\n' ''
+  if [[ $RC -eq 0 ]] && grep -qF "ignoring '../other/tessl.json'" "$CODEXH/err"; then ok "a marker line that is not a plain relative path is ignored with a warning"
+  else bad "escaping marker line not ignored (rc=$RC)"; fi
+  rmwarn "$BIN" "$CENTRAL" "$CODEXH"
+}
+
+t_malformed_extra_manifest_stops_review() {
+  run_with_marker $'tessl-workspace/tessl.json\n' '{not json'
+  if [[ $RC -ne 0 && ! -e "$CODEXH/codex.log" ]]; then ok "a malformed extra manifest stops before review"
+  else bad "malformed extra manifest reached review (rc=$RC)"; fi
+  rmwarn "$BIN" "$CENTRAL" "$CODEXH"
+}
+
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
   echo "== fleet-review-one.sh tests =="
   t_happy
@@ -278,6 +350,11 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
   t_core_context_from_trusted_base
   t_core_context_refusal_stops_review
   t_no_core_without_base_enrollment
+  t_extra_manifest_installs_its_plugins
+  t_extra_manifest_absent_on_base_installs_nothing
+  t_comment_only_marker_installs_only_policy
+  t_escaping_marker_line_is_ignored
+  t_malformed_extra_manifest_stops_review
   echo "== summary: ${pass} passed, ${fail} failed =="
   [[ "$fail" -eq 0 ]]
 fi
