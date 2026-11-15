@@ -543,7 +543,7 @@ branch_checked_out() { # <shared> <branch>
   # The caller builds its failure row from ERRFILE, so a bare `return 1` here
   # would report the occupancy read as failing for whatever the previous
   # command left there (#426).
-  listing="$(mktemp 2>"$ERRFILE")" || rc=$?
+  listing="$(mktemp "${TMPDIR:-/tmp}/prune-worktrees.XXXXXX" 2>"$ERRFILE")" || rc=$?
   if (( rc != 0 )) || [[ -z "$listing" ]]; then
     printf 'mktemp failed (exit %s): %s\n' "${rc:-0}" "$(tr '\n' ' ' < "$ERRFILE")" > "$ERRFILE"
     return 1
@@ -697,7 +697,7 @@ in_use() { # <real-path>
       warn "${lsof_bin} not found on PATH — cannot tell whether a worktree is in use, so none is judged idle; install lsof"
     elif ! uid="$(id -u)"; then
       warn "id -u failed — cannot scope the process probe, so no worktree is judged idle; run \`id -u\` to see why, then re-run"
-    elif [[ -z "$CWD_FILE" ]] && ! CWD_FILE="$(mktemp)"; then
+    elif [[ -z "$CWD_FILE" ]] && ! CWD_FILE="$(mktemp "${TMPDIR:-/tmp}/prune-worktrees.XXXXXX")"; then
       CWD_FILE=""
       warn "mktemp failed — cannot hold the process probe, so no worktree is judged idle; make ${TMPDIR:-/tmp} writable, then re-run"
     elif ! "$lsof_bin" -a -u "$uid" -d cwd -F pn0 >"$CWD_FILE" 2>"$ERRFILE"; then
@@ -875,8 +875,8 @@ ORIGIN_TIPS=""
 # Record origin's current branch tips in ORIGIN_TIPS. Returns 1 on failure.
 read_origin_tips() { # <shared>
   local listing
-  if [[ -z "$ORIGIN_TIPS" ]] && ! ORIGIN_TIPS="$(mktemp 2>"$ERRFILE")"; then ORIGIN_TIPS=""; return 1; fi
-  if ! listing="$(mktemp 2>"$ERRFILE")"; then return 1; fi
+  if [[ -z "$ORIGIN_TIPS" ]] && ! ORIGIN_TIPS="$(mktemp "${TMPDIR:-/tmp}/prune-worktrees.XXXXXX" 2>"$ERRFILE")"; then ORIGIN_TIPS=""; return 1; fi
+  if ! listing="$(mktemp "${TMPDIR:-/tmp}/prune-worktrees.XXXXXX" 2>"$ERRFILE")"; then return 1; fi
   local rc=0
   git -C "$1" ls-remote --heads origin >"$listing" 2>"$ERRFILE" || rc=$?
   if (( rc != 0 )); then

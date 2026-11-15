@@ -181,7 +181,7 @@ main() {
   local endpoint="v1/tiles/${workspace}/${tile}/versions/${version}"
   local delay="$BASE_DELAY_SEC" elapsed=0 attempts=0 fetch_failures=0
   local started_seconds="$SECONDS" remaining read_rc status=""
-  err_file=$(mktemp) || { echo "error: mktemp failed — cannot run verify-moderation-cleared.sh without writable TMPDIR" >&2; exit 2; }
+  err_file=$(mktemp "${TMPDIR:-/tmp}/verify-moderation-cleared.XXXXXX") || { echo "error: mktemp failed — cannot run verify-moderation-cleared.sh without writable TMPDIR" >&2; exit 2; }
   # Named handler ending `return 0` — the EXIT trap's final command status
   # becomes the script's exit status, so a failing `rm` would rewrite the
   # moderation verdict into a bare 1 (rules/error-handling.md).

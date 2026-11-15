@@ -17,6 +17,7 @@
     "scripts/tests/test_release_advisory.py",
     "scripts/tests/test_rules_budget.py",
     "scripts/tests/test_shipped_invocations.py",
+    "scripts/tests/test_shipped_mktemp.py",
     "scripts/tests/test_skill_bootstrap.py",
     "scripts/tests/test_source_index.py",
     "skills/release/check-closing-issues.py",

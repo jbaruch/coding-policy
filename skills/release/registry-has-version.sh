@@ -88,7 +88,7 @@ main() {
 
   local endpoint="v1/tiles/${workspace}/${plugin}/versions/${version}"
 
-  RHV_ERR_FILE=$(mktemp) \
+  RHV_ERR_FILE=$(mktemp "${TMPDIR:-/tmp}/registry-has-version.XXXXXX") \
     || { echo "error: mktemp failed — cannot run registry-has-version.sh without a writable TMPDIR" >&2; exit 2; }
   trap cleanup_rhv_err_file EXIT
 

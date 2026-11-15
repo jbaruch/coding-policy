@@ -72,7 +72,7 @@ fi
 repo_root=""
 git_rc=0
 git_err=""
-git_err_file=$(mktemp) || {
+git_err_file=$(mktemp "${TMPDIR:-/tmp}/preflight.XXXXXX") || {
   # Emit the JSON envelope + exit 1, not a stderr-only exit 2: a bare exit
   # here breaks the documented "single JSON object on stdout" contract for
   # wrappers that parse it (jq is guaranteed by the early guard).

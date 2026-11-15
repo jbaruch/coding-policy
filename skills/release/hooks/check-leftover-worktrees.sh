@@ -114,7 +114,7 @@ main() {
   # worktree this session sits in; a bare repository has no checkout to clean.
   local shared list list_err
   rc=0
-  list="$(mktemp -d)" || { cannot_check "mktemp failed; make ${TMPDIR:-/tmp} writable."; return 0; }
+  list="$(mktemp -d "${TMPDIR:-/tmp}/check-leftover-worktrees.XXXXXX")" || { cannot_check "mktemp failed; make ${TMPDIR:-/tmp} writable."; return 0; }
   # Captured to a file and git's own exit checked before anything is parsed,
   # as hooks/stop-handoff-hygiene.sh reads it: a git failure is named as one,
   # never folded into the parser's verdict.

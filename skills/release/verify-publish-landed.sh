@@ -173,7 +173,7 @@ main() {
   # `2>&1` capture would otherwise let a single warning misclassify the
   # run on the happy path.
   local conclusion
-  err_file=$(mktemp) || { echo "error: mktemp failed — cannot run verify-publish-landed.sh without writable TMPDIR" >&2; exit 2; }
+  err_file=$(mktemp "${TMPDIR:-/tmp}/verify-publish-landed.XXXXXX") || { echo "error: mktemp failed — cannot run verify-publish-landed.sh without writable TMPDIR" >&2; exit 2; }
   # Named handler ending `return 0`, not an inline `rm -f`: the EXIT trap's
   # final command status becomes the script's exit status, so an `rm` that
   # fails (unwritable TMPDIR) would rewrite this script's verdict into a

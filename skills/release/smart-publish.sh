@@ -434,7 +434,7 @@ main() {
   pub_args+=("$path")
 
   trap cleanup_sp_log EXIT
-  SP_LOG_FILE="$(mktemp)" \
+  SP_LOG_FILE="$(mktemp "${TMPDIR:-/tmp}/smart-publish.XXXXXX")" \
     || { echo "error: mktemp failed — cannot capture the publish output without a writable TMPDIR" >&2; exit 2; }
 
   # Run the publish, CAPTURING combined stdout+stderr while still streaming it

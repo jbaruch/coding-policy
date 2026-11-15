@@ -71,10 +71,10 @@ export MOCK_BODY_FILE="$TMPDIR_TEST/body.json"
 export MOCK_MODE_FILE="$TMPDIR_TEST/mode"
 export MOCK_RUN_FILE="$TMPDIR_TEST/run-mode"
 
-# Own every file the helper creates, including on a failed assertion.
-# Explicit -p also works on macOS versions whose mktemp -t ignores TMPDIR.
+# Own every file the helper creates, including on a failed assertion. The
+# helper's mktemp template names ${TMPDIR:-/tmp}, which every platform honors.
 mkdir "$TMPDIR_TEST/script-tmp" || exit 2
-mktemp() { command mktemp -p "$TMPDIR_TEST/script-tmp" "$@"; }
+export TMPDIR="$TMPDIR_TEST/script-tmp"
 
 # The harness owns its EXIT trap; each invocation must install the
 # helper's trap in the subshell that owns VGR_ERR_FILE. Preserve main's

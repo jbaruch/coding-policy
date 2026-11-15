@@ -170,7 +170,7 @@ main() {
     exit 2
   fi
 
-  VGR_ERR_FILE=$(mktemp -t verify-github-release.XXXXXX)
+  VGR_ERR_FILE=$(mktemp "${TMPDIR:-/tmp}/verify-github-release.XXXXXX")
 
   # Conjunct 1 — the resolved run's own conclusion.
   local conclusion rc=0
