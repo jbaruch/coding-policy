@@ -1,3 +1,7 @@
+## 0.10.4 — 2026-11-15
+
+- docs(onboard-repo): Disclose onboarding's Tessl changes (#824)
+
 ## 0.10.3 — 2026-11-15
 
 - fix(onboard-repo): Refresh the Tessl ignore block (#823)
