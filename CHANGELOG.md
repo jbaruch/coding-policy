@@ -1,3 +1,7 @@
+## 0.10.2 — 2026-11-15
+
+- docs(policy): Describe gate exceptions as gate conditions (#822)
+
 ## 0.10.1 — 2026-11-14
 
 - docs(policy): Word the rule tiers as rule loading (#821)
