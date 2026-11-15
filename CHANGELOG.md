@@ -1,3 +1,7 @@
+## 0.10.9 — 2026-11-15
+
+- fix(fleet-publish): Name where the central publisher failed closed (#829)
+
 ## 0.10.7 — 2026-11-15
 
 - fix(release): Poll the exact version after a publish timeout (#827)
