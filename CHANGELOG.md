@@ -1,3 +1,7 @@
+## 0.10.7 — 2026-11-15
+
+- fix(release): Poll the exact version after a publish timeout (#827)
+
 ## 0.10.6 — 2026-11-15
 
 - docs(policy): Let undecided conditional rules load on demand (#826)
