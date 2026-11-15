@@ -430,16 +430,19 @@ t_empty_extra_manifest_stops_review() {
   mkdir -p "$base/.github" "$base/tessl-workspace" || exit 2
   printf 'tessl-workspace/tessl.json\n' > "$base/.github/fleet-review-manifests" || exit 2
   local all_stopped=1
-  for body in '' $'  \n\t\n' '{"dependencies":false}' '{"dependencies":null}' 'null'; do
+  for body in '' $'  \n\t\n' '{"dependencies":false}' '{"dependencies":null}' 'null' \
+              '{"dependencies":{"":{"version":"1.0.0"}}}' \
+              '{"dependencies":{"jbaruch/coding-policy\njbaruch/nanoclaw-core":{"version":"1.0.0"}}}' \
+              '{"dependencies":{"acme/provider":{"version":"1.0.0\nother/plugin"}}}'; do
     printf '%s' "$body" > "$base/tessl-workspace/tessl.json" || exit 2
     local rc=0
     rm -f "$CODEXH/codex.log"
     PATH="$BIN:$PATH" GH_TOKEN=tok CENTRAL_DIR="$CENTRAL" CODEX_HOME="$CODEXH" FAKE_BASE_DIR="$base" \
       TESSL_LOG="$CODEXH/tessl.log" CODEX_ARGV_LOG="$CODEXH/codex.log" \
       bash "$SCRIPT" jbaruch repo-a 7 main >/dev/null 2>"$CODEXH/err" || rc=$?
-    if [[ $rc -eq 0 || -e "$CODEXH/codex.log" ]] || ! grep -qF 'is not a JSON object' "$CODEXH/err"; then all_stopped=0; fi
+    if [[ $rc -eq 0 || -e "$CODEXH/codex.log" ]] || ! grep -qF 'is not a JSON object' "$CODEXH/err"; then all_stopped=0; echo "    not stopped: $body" >&2; fi
   done
-  if [[ $all_stopped -eq 1 ]]; then ok "an empty, null or non-object-dependencies manifest stops before review"
+  if [[ $all_stopped -eq 1 ]]; then ok "an empty, null, non-object or malformed-record manifest stops before review"
   else bad "a malformed-shape listed manifest reached review"; fi
   rmwarn "$BIN" "$CENTRAL" "$CODEXH"
 }
@@ -448,6 +451,17 @@ t_semver_with_prerelease_and_build_installs_exactly() {
   run_with_marker $'tessl-workspace/tessl.json\n' '{"dependencies":{"acme/provider":{"version":"1.2.3-rc.1+build.7"}}}'
   if [[ $RC -eq 0 ]] && grep -qxF 'install --strict acme/provider@1.2.3-rc.1+build.7' "$CODEXH/tessl.log"; then ok "a pin with both prerelease and build installs exactly"
   else bad "prerelease+build pin not installed exactly (rc=$RC)"; fi
+  rmwarn "$BIN" "$CENTRAL" "$CODEXH"
+}
+
+t_refused_coding_policy_install_stops_review() {
+  local env_line rc=0; env_line=$(make_env) || exit 2
+  read -r BIN CENTRAL CODEXH <<< "$env_line"
+  PATH="$BIN:$PATH" GH_TOKEN=tok CENTRAL_DIR="$CENTRAL" CODEX_HOME="$CODEXH" TESSL_BLOCK=jbaruch/coding-policy \
+    CODEX_ARGV_LOG="$CODEXH/codex.log" bash "$SCRIPT" jbaruch repo-a 7 main >/dev/null 2>"$CODEXH/err" || rc=$?
+  if [[ $rc -ne 0 && ! -e "$CODEXH/codex.log" ]] && grep -qF 'tessl did not install jbaruch/coding-policy' "$CODEXH/err"; then
+    ok "a refused coding-policy install stops the review before Codex"
+  else bad "refused coding-policy install reached review (rc=$rc)"; fi
   rmwarn "$BIN" "$CENTRAL" "$CODEXH"
 }
 
@@ -484,6 +498,7 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
   t_list_without_final_newline_still_installs
   t_conflicting_pins_stop_review
   t_empty_extra_manifest_stops_review
+  t_refused_coding_policy_install_stops_review
   t_semver_with_prerelease_and_build_installs_exactly
   t_malformed_extra_manifest_stops_review
   echo "== summary: ${pass} passed, ${fail} failed =="

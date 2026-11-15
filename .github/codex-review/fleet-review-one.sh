@@ -65,8 +65,16 @@ install_manifest_deps() { # <manifest-json> <label> <full> <pr>
   # Error Handling).
   # An empty or non-object manifest yields no dependencies without a jq error,
   # so the shape is checked first; `jq -e` fails when it produces no result.
-  if ! printf '%s' "$manifest" | jq -e 'type == "object" and ((has("dependencies") | not) or (.dependencies | type == "object"))' >/dev/null; then
-    echo "error: ${label} is not a JSON object with an object of dependencies — refusing to review with an unknown plugin set" >&2
+  # Every key must be a workspace/name plugin id and every version or source a
+  # string without control characters, since the fields below are split on a
+  # newline and the unit separator.
+  if ! printf '%s' "$manifest" | jq -e '
+      type == "object" and ((has("dependencies") | not) or (.dependencies | type == "object" and all(to_entries[];
+        (.key | test("^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$"))
+        and (.value | type == "object")
+        and ((.value.version // "") | type == "string" and (explode | all(. > 31)))
+        and ((.value.source // "") | type == "string" and (explode | all(. > 31))))))' >/dev/null; then
+    echo "error: ${label} is not a JSON object whose dependencies map workspace/name ids to version or source strings — refusing to review with an unknown plugin set" >&2
     exit 1
   fi
   # Fields are joined with the ASCII unit separator, a non-whitespace IFS, so an
@@ -191,6 +199,14 @@ main() {
   POLICY=$(mktemp -d) || { echo "error: mktemp -d failed (policy)" >&2; exit 1; }
   ( cd "$POLICY" && tessl install jbaruch/coding-policy >/dev/null ) \
     || { echo "error: tessl install jbaruch/coding-policy failed for ${full}#${pr}" >&2; exit 1; }
+  # tessl can refuse a plugin and still exit 0; without coding-policy on disk
+  # the review would run with no policy at all. Not --strict: if Tessl declines
+  # coding-policy's newest version, reviewing against the previous policy
+  # beats failing every fleet review until that clears.
+  if [[ ! -d "${POLICY}/.tessl/plugins/jbaruch/coding-policy" ]]; then
+    echo "error: tessl did not install jbaruch/coding-policy for ${full}#${pr} — run 'tessl install jbaruch/coding-policy' by hand to see why, fix it, then rerun this review" >&2
+    exit 1
+  fi
 
   # Also install the reviewed repo's OWN plugins, because several
   # coding-policy carve-outs (dependency-management's Runtime-Managed
