@@ -69,7 +69,7 @@ main() {
   trap cleanup EXIT
   FAIL=0; PASS=0
 
-  local d out rc cp_ver react_ver
+  local d out rc cp_ver react_ver first last blocks
 
   # 1. pins jbaruch/* to latest, leaves third-party pins untouched.
   d="$TMP/1"; mkrepo "$d"
@@ -84,9 +84,11 @@ main() {
 }
 JSON
   out="$(cd "$d" && bash "$SCRIPT" 2>/dev/null)"; rc=$?
-  cp_ver=$(jq -r '.dependencies["jbaruch/coding-policy"].version' "$d/tessl.json")
-  react_ver=$(jq -r '.dependencies["tessl/npm-react"].version' "$d/tessl.json")
-  if [[ $rc -eq 0 && "$cp_ver" == "latest" && "$react_ver" == "19.2.0" ]] \
+  cp_ver=""; react_ver=""
+  if [[ $rc -eq 0 ]] \
+     && cp_ver=$(jq -r '.dependencies["jbaruch/coding-policy"].version' "$d/tessl.json") \
+     && react_ver=$(jq -r '.dependencies["tessl/npm-react"].version' "$d/tessl.json") \
+     && [[ "$cp_ver" == "latest" && "$react_ver" == "19.2.0" ]] \
      && printf '%s' "$out" | jq -e '.tessl_json=="pinned-latest"' >/dev/null; then pass
   else fail "pin: cp=$cp_ver react=$react_ver out=$out"; fi
 
@@ -140,9 +142,9 @@ JSON
   out="$(cd "$d" && bash "$SCRIPT" 2>/dev/null)"; rc=$?
   if [[ $rc -eq 0 ]] && printf '%s' "$out" | jq -e '.gitignore=="updated"' >/dev/null \
      && has_folder_ignores "$d/.gitignore" \
-     && [[ "$(head -n 1 "$d/.gitignore")" == "node_modules/" ]] \
-     && [[ "$(tail -n 1 "$d/.gitignore")" == "dist/" ]] \
-     && [[ "$(grep -cF '=== Tessl-generated artifacts' "$d/.gitignore")" == "1" ]]; then pass
+     && first=$(head -n 1 "$d/.gitignore") && [[ "$first" == "node_modules/" ]] \
+     && last=$(tail -n 1 "$d/.gitignore") && [[ "$last" == "dist/" ]] \
+     && blocks=$(grep -cF '=== Tessl-generated artifacts' "$d/.gitignore") && [[ "$blocks" == "1" ]]; then pass
   else fail "old block refresh: $out"; fi
 
   # 8. a second run after the refresh reports unchanged and leaves the bytes alone.
