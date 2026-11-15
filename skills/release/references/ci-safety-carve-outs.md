@@ -5,13 +5,13 @@ The full preconditions of each `rules/ci-safety.md` carve-out, moved out of the 
 ## Superseded-Bot-Review Dismissal Carve-Out
 
 - Narrow exception for dismissing a review gate.
-- Not a bypass when the gate is a bot's `CHANGES_REQUESTED` that the same bot later superseded with an all-clear re-review
+- Covers a bot's `CHANGES_REQUESTED` that the same bot later superseded with an all-clear re-review
 - Applies when a gating bot that cannot `APPROVE` (`github-actions[bot]` — GitHub returns HTTP 422) re-reviews clean but cannot post the `APPROVED` verdict that would supersede its earlier `CHANGES_REQUESTED` — the stale request keeps the merge `BLOCKED` until dismissed
 - Preconditions (all required):
   1. The dismissed review is a `CHANGES_REQUESTED` from a gating bot on the allowlist (`GATING_BOTS` in `skills/release/dismiss-stale-reviews.sh`), never a human reviewer — a human can `APPROVE`, so a human's supersession goes through re-request-and-approve, never dismissal
   2. The same bot posted a later all-clear on the PR — the accepting verdict states are the script's decision predicate (`dismiss-stale-reviews.sh` header), not restated here; a `DISMISSED` or `PENDING` latest state is not an all-clear
 - Deterministic form is `skills/release/dismiss-stale-reviews.sh` — it enforces both preconditions and is the recommended path; decision predicate and allowlisted bot logins live in the script header, not restated here (`rules/script-as-black-box.md`)
-- A hand dismissal meeting both preconditions is equally sanctioned — merging after it is not a `Never Skip Tests` violation; the gate was satisfied and cleaned up, not skipped
+- A hand dismissal meeting both preconditions satisfies the same gate, and the merge that follows complies with `Never Skip Tests`
 - Every other dismissal still gates: a bot `CHANGES_REQUESTED` no all-clear superseded, or any human reviewer's change request, blocks the merge until resolved through review
 
 ## Judge-Ruled-Review Dismissal Carve-Out
@@ -25,7 +25,7 @@ The full preconditions of each `rules/ci-safety.md` carve-out, moved out of the 
 - A hand dismissal carrying the marker violates this carve-out
 - The release scripts trust the marker and never detect a hand-written one
 - After a ruled dismissal, `skills/release/dismiss-stale-reviews.sh` sweeps the same policy identity's earlier `CHANGES_REQUESTED` reviews, the fleet reviewer included
-- Merging after a ruled dismissal is not a `Never Skip Tests` violation
+- The merge after a ruled dismissal complies with `Never Skip Tests`
 
 ## Publish-Pipeline Loop-Prevention Carve-Out
 
@@ -45,7 +45,7 @@ The full preconditions of each `rules/ci-safety.md` carve-out, moved out of the 
 - Post-merge obligations (both required):
   4. The re-seed runs immediately after merge
   5. The green re-seed result is verified and recorded on the PR or its tracking issue
-- Reviewers treat a PR as mergeable when it matches both Applies-when criteria and meets all three pre-merge gates — do not request changes on the red check alone
+- A PR matching both Applies-when criteria and all three pre-merge gates is mergeable, and reviewers judge it on those gates rather than on the red check alone
 - Open post-merge obligations block the next use of this carve-out — complete and record them first
 
 ## Content-Only Direct-Push Carve-Out

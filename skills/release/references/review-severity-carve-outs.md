@@ -13,10 +13,10 @@ The full preconditions of each `rules/review-severity.md` carve-out, moved out o
 - The question never blocks the round
 - The agent keeps fixing until the answer arrives
 - No answer means `fix`
-- The agent records the answer verbatim as the ruling file
+- The ruling file is the operator's reply to that question, copied verbatim
 - Preconditions (all required):
   1. The ruling rules the finding `defer` or `decline`
-  2. The ruling file carries `AUTHORITY: operator` and quotes the operator's answer verbatim
+  2. The ruling file quotes the operator's reply verbatim under `AUTHORITY: operator`
   3. The ruling names the finding at its `HEAD:`, and the finding's file is unchanged from that commit to the head
   4. The finding is under no floor
   5. The finding is entered in the task's follow-up issue citing the ruling, a `decline` labelled won't-fix
