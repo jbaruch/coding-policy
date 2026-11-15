@@ -7,7 +7,9 @@ description: >
   coding-policy rules plus an independent Claude code-quality review), and a
   `.env.example` entry, then open a PR. While the marker is present
   the same review also runs on a schedule as a backstop; both post as a review. The consumer
-  sets one `FLEET_DISPATCH_TOKEN` secret that `review-trigger.yml` reads.
+  sets one `FLEET_DISPATCH_TOKEN` secret that `review-trigger.yml` reads. Onboarding also
+  sets the repo's `jbaruch/*` dependencies in `tessl.json` to `latest` and writes the
+  Tessl-generated-artifacts block to `.gitignore`.
   Use when the user wants to add, install, enable, scaffold, set up, wire up, or enroll an
   automated policy review / PR reviewer / coding-policy reviewer in a consumer repo. Also use
   to upgrade or refresh the reviewer files in a repo that already has them (override mode).
