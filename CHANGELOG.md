@@ -1,3 +1,7 @@
+## 0.10.3 — 2026-11-15
+
+- fix(onboard-repo): Refresh the Tessl ignore block (#823)
+
 ## 0.10.2 — 2026-11-15
 
 - docs(policy): Describe gate exceptions as gate conditions (#822)
