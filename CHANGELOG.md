@@ -1,3 +1,7 @@
+## 0.10.6 — 2026-11-15
+
+- docs(policy): Let undecided conditional rules load on demand (#826)
+
 ## 0.10.5 — 2026-11-15
 
 - fix(release): Honor TMPDIR in shipped mktemp calls (#825)
