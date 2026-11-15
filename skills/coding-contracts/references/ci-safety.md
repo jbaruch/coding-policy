@@ -17,7 +17,7 @@
 - Narrow exception for dismissing a gating bot's superseded `CHANGES_REQUESTED`
 - Applies when the same bot's all-clear re-review supersedes it, the bot cannot `APPROVE`, and the stale request keeps the merge `BLOCKED`
 - Preconditions are binding: read `skills/release/references/ci-safety-carve-outs.md` Superseded-Bot-Review Dismissal Carve-Out before relying on it
-- Every other `CHANGES_REQUESTED` keeps gating
+- Every other dismissal still gates
 
 ## Judge-Ruled-Review Dismissal Carve-Out
 
