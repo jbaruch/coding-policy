@@ -322,11 +322,11 @@ t_extra_manifest_installs_its_plugins() {
   rmwarn "$BIN" "$CENTRAL" "$CODEXH"
 }
 
-t_extra_manifest_absent_on_base_installs_nothing() {
+t_extra_manifest_absent_on_base_stops_review() {
   run_with_marker $'tessl-workspace/tessl.json\n' ''
-  if [[ $RC -eq 0 ]] && ! grep -qF 'acme/provider' "$CODEXH/tessl.log" && grep -qF 'only the base ref is trusted' "$CODEXH/err"; then
-    ok "a listed manifest missing from the base installs nothing and warns"
-  else bad "head-only manifest handled wrongly (rc=$RC)"; fi
+  if [[ $RC -ne 0 && ! -e "$CODEXH/codex.log" ]] && grep -qF 'tessl-workspace/tessl.json (listed in' "$CODEXH/err" && grep -qF 'only the base ref is trusted' "$CODEXH/err"; then
+    ok "a listed manifest missing from the base stops the review before Codex"
+  else bad "head-only manifest reached review (rc=$RC)"; fi
   rmwarn "$BIN" "$CENTRAL" "$CODEXH"
 }
 
@@ -365,6 +365,13 @@ t_source_pinned_dependency_stops_review() {
   if [[ $RC -ne 0 && ! -e "$CODEXH/codex.log" ]] && ! grep -qF 'acme/local' "$CODEXH/tessl.log" && grep -qF 'no installable registry version' "$CODEXH/err"; then
     ok "a source-pinned dependency stops the review before Codex"
   else bad "source-pinned dependency reached review (rc=$RC)"; fi
+  rmwarn "$BIN" "$CENTRAL" "$CODEXH"
+}
+
+t_latest_installs_strictly() {
+  run_with_marker $'tessl-workspace/tessl.json\n' '{"dependencies":{"acme/provider":{"version":"latest"}}}'
+  if [[ $RC -eq 0 ]] && grep -qxF 'install --strict acme/provider' "$CODEXH/tessl.log"; then ok "a latest dependency installs with --strict"
+  else bad "latest dependency installed without --strict (rc=$RC, log: $(cat "$CODEXH/tessl.log"))"; fi
   rmwarn "$BIN" "$CENTRAL" "$CODEXH"
 }
 
@@ -413,7 +420,8 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
   t_core_context_refusal_stops_review
   t_no_core_without_base_enrollment
   t_extra_manifest_installs_its_plugins
-  t_extra_manifest_absent_on_base_installs_nothing
+  t_extra_manifest_absent_on_base_stops_review
+  t_latest_installs_strictly
   t_comment_only_marker_installs_only_policy
   t_escaping_marker_line_is_ignored
   t_policy_blocked_install_stops_review

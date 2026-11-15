@@ -49,9 +49,9 @@ cleanup() {
 
 # Install every dependency one trusted manifest declares into $POLICY, at the
 # version it declares. Skips coding-policy (already installed at its latest)
-# and records nanoclaw-core in NEED_CORE for the isolated materializer. A
-# pinned version installs exactly, with --strict so tessl cannot fall back to
-# an older one; "latest" installs the newest. tessl can refuse a plugin and
+# and records nanoclaw-core in NEED_CORE for the isolated materializer. Every
+# install uses --strict so tessl cannot fall back to an older version: a pin
+# installs exactly, and "latest" installs the newest or fails. tessl can refuse a plugin and
 # still exit 0 (an install-policy block), so success is the plugin directory
 # existing, not the exit code. A plugin that does not land is recorded in
 # MISSING, and a manifest that does not parse refuses the review.
@@ -75,7 +75,7 @@ install_manifest_deps() { # <manifest-json> <label> <full> <pr>
       continue
     fi
     if [[ "$version" == "latest" ]]; then
-      spec="$name"; args=(install "$spec")
+      spec="$name"; args=(install --strict "$spec")
     elif [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?$ ]]; then
       spec="${name}@${version}"; args=(install --strict "$spec")
     else
@@ -232,7 +232,7 @@ main() {
         exit 1
       fi
       if [[ -z "$listed" ]]; then
-        echo "::warning::${full}:${base} has no ${extra}, which ${list_path} lists — only the base ref is trusted, so its plugins are not installed this run" >&2
+        MISSING+=("${extra} (listed in ${list_path}): absent from ${full}:${base}, and only the base ref is trusted")
         continue
       fi
       if ! extra_manifest=$(cd "$work" && git show "origin/${base}:${extra}"); then
