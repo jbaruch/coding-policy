@@ -14,7 +14,12 @@ SCRIPT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../skills/onboard-repo" && pw
 cleanup() { [[ -n "${TMP:-}" ]] && ! rm -rf "$TMP" && echo "warn: could not remove $TMP" >&2; return 0; }
 pass() { PASS=$((PASS+1)); }
 fail() { FAIL=$((FAIL+1)); echo "  ✗ FAIL: $1" >&2; }
-mkrepo() { git init -q "$1"; ( cd "$1" && git config user.email t@t && git config user.name t ); }
+mkrepo() {
+  if ! { git init -q "$1" && ( cd "$1" && git config user.email t@t && git config user.name t ); }; then
+    echo "fatal: cannot create test repo $1" >&2
+    exit 2
+  fi
+}
 
 # Tessl's per-folder .gitignore files; the block must list every one.
 FOLDER_IGNORES=(.claude/skills/.gitignore .codex/skills/.gitignore .cursor/rules/.gitignore
@@ -150,20 +155,21 @@ JSON
   fi
 
   # 9. a block missing its end marker fails and is left untouched.
+  local after
   d="$TMP/9"; mkrepo "$d"
-  old_block | sed '$d' > "$d/.gitignore"
-  before=$(cat "$d/.gitignore")
-  out="$(cd "$d" && bash "$SCRIPT" 2>/dev/null)"; rc=$?
-  if [[ $rc -ne 0 && "$(cat "$d/.gitignore")" == "$before" ]]; then pass
-  else fail "missing end marker: rc=$rc out=$out"; fi
+  if old_block | sed '$d' > "$d/.gitignore" && before=$(cat "$d/.gitignore") && [[ -n "$before" ]]; then
+    out="$(cd "$d" && bash "$SCRIPT" 2>/dev/null)"; rc=$?
+    if [[ $rc -ne 0 ]] && after=$(cat "$d/.gitignore") && [[ "$after" == "$before" ]]; then pass
+    else fail "missing end marker: rc=$rc out=$out"; fi
+  else fail "case 9 setup: fixture write or snapshot failed"; fi
 
   # 10. two start markers fail and are left untouched.
   d="$TMP/10"; mkrepo "$d"
-  { old_block; old_block; } > "$d/.gitignore"
-  before=$(cat "$d/.gitignore")
-  out="$(cd "$d" && bash "$SCRIPT" 2>/dev/null)"; rc=$?
-  if [[ $rc -ne 0 && "$(cat "$d/.gitignore")" == "$before" ]]; then pass
-  else fail "duplicate start marker: rc=$rc out=$out"; fi
+  if { old_block && old_block; } > "$d/.gitignore" && before=$(cat "$d/.gitignore") && [[ -n "$before" ]]; then
+    out="$(cd "$d" && bash "$SCRIPT" 2>/dev/null)"; rc=$?
+    if [[ $rc -ne 0 ]] && after=$(cat "$d/.gitignore") && [[ "$after" == "$before" ]]; then pass
+    else fail "duplicate start marker: rc=$rc out=$out"; fi
+  else fail "case 10 setup: fixture write or snapshot failed"; fi
 
   # 11. a CRLF .gitignore carrying the old block refreshes, then settles to unchanged.
   d="$TMP/11"; mkrepo "$d"

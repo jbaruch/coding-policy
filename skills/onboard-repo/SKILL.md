@@ -73,7 +73,7 @@ KS=.tessl/plugins/jbaruch/coding-policy/skills/onboard-repo/; [ -d "$KS" ] || KS
 bash "$KS/tessl-hygiene.sh"
 ```
 
-Sets every `jbaruch/*` dependency in `tessl.json` to `"version": "latest"` (third-party pins unchanged) and keeps the tessl-generated-artifacts block in `.gitignore` current, appending it when its marker is absent. `AGENTS.md` / `CLAUDE.md` / `GEMINI.md` are not ignored. Emits `{"tessl_json":"pinned-latest|unchanged|absent","gitignore":"created|appended|updated|unchanged"}`. Idempotent; takes no `--override` flag. Proceed immediately to Step 5.
+Sets every `jbaruch/*` dependency in `tessl.json` to `"version": "latest"` (third-party pins unchanged) and keeps the tessl-generated-artifacts block in `.gitignore` current, appending it when its marker is absent. `AGENTS.md` / `CLAUDE.md` / `GEMINI.md` are not ignored. Emits `{"tessl_json":"pinned-latest|unchanged|absent","gitignore":"created|appended|updated|unchanged"}`. On a malformed block (duplicate start marker, missing end marker, or marker not on its own line) it exits non-zero and leaves `.gitignore` as it was; `tessl.json` may already be updated. Stop and fix `.gitignore` before Step 5. Idempotent; takes no `--override` flag. Proceed immediately to Step 5.
 
 ## Step 5 — Commit
 
