@@ -364,7 +364,7 @@ t_failed_install_without_reason_line_stops_review() {
 
 t_source_pinned_dependency_stops_review() {
   run_with_marker $'tessl-workspace/tessl.json\n' '{"dependencies":{"acme/local":{"source":"file:../local"}}}'
-  if [[ $RC -ne 0 && ! -e "$CODEXH/codex.log" ]] && ! grep -qF 'acme/local' "$CODEXH/tessl.log" && grep -qF "version '', source 'file:../local'" "$CODEXH/err"; then
+  if [[ $RC -ne 0 && ! -e "$CODEXH/codex.log" ]] && ! grep -qF 'acme/local' "$CODEXH/tessl.log" && grep -qF "declares source 'file:../local'" "$CODEXH/err"; then
     ok "a source-pinned dependency stops the review before Codex"
   else bad "source-pinned dependency reached review (rc=$RC)"; fi
   rmwarn "$BIN" "$CENTRAL" "$CODEXH"
@@ -388,6 +388,14 @@ t_latest_installs_strictly() {
   run_with_marker $'tessl-workspace/tessl.json\n' '{"dependencies":{"acme/provider":{"version":"latest"}}}'
   if [[ $RC -eq 0 ]] && grep -qxF 'install --strict acme/provider' "$CODEXH/tessl.log"; then ok "a latest dependency installs with --strict"
   else bad "latest dependency installed without --strict (rc=$RC, log: $(cat "$CODEXH/tessl.log"))"; fi
+  rmwarn "$BIN" "$CENTRAL" "$CODEXH"
+}
+
+t_version_with_source_stops_review() {
+  run_with_marker $'tessl-workspace/tessl.json\n' '{"dependencies":{"acme/local":{"version":"1.0.0","source":"file:../local"}}}'
+  if [[ $RC -ne 0 && ! -e "$CODEXH/codex.log" ]] && ! grep -qF 'acme/local' "$CODEXH/tessl.log" && grep -qF "declares source 'file:../local'" "$CODEXH/err"; then
+    ok "a dependency declaring both a version and a source stops before any registry install"
+  else bad "version+source dependency installed from the registry or reached review (rc=$RC)"; fi
   rmwarn "$BIN" "$CENTRAL" "$CODEXH"
 }
 
@@ -422,7 +430,7 @@ t_empty_extra_manifest_stops_review() {
   mkdir -p "$base/.github" "$base/tessl-workspace" || exit 2
   printf 'tessl-workspace/tessl.json\n' > "$base/.github/fleet-review-manifests" || exit 2
   local all_stopped=1
-  for body in '' $'  \n\t\n'; do
+  for body in '' $'  \n\t\n' '{"dependencies":false}' '{"dependencies":null}' 'null'; do
     printf '%s' "$body" > "$base/tessl-workspace/tessl.json" || exit 2
     local rc=0
     rm -f "$CODEXH/codex.log"
@@ -431,8 +439,8 @@ t_empty_extra_manifest_stops_review() {
       bash "$SCRIPT" jbaruch repo-a 7 main >/dev/null 2>"$CODEXH/err" || rc=$?
     if [[ $rc -eq 0 || -e "$CODEXH/codex.log" ]] || ! grep -qF 'is not a JSON object' "$CODEXH/err"; then all_stopped=0; fi
   done
-  if [[ $all_stopped -eq 1 ]]; then ok "an empty or whitespace-only listed manifest stops before review"
-  else bad "an empty listed manifest reached review"; fi
+  if [[ $all_stopped -eq 1 ]]; then ok "an empty, null or non-object-dependencies manifest stops before review"
+  else bad "a malformed-shape listed manifest reached review"; fi
   rmwarn "$BIN" "$CENTRAL" "$CODEXH"
 }
 
@@ -472,6 +480,7 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
   t_policy_blocked_install_stops_review
   t_failed_install_without_reason_line_stops_review
   t_source_pinned_dependency_stops_review
+  t_version_with_source_stops_review
   t_list_without_final_newline_still_installs
   t_conflicting_pins_stop_review
   t_empty_extra_manifest_stops_review
