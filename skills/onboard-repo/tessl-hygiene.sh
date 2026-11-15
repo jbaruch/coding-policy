@@ -8,17 +8,21 @@
 #      GEMINI.md are intentionally NOT ignored — tessl appends to them and they
 #      don't churn, so they stay committed.
 #
-# Idempotent: a jbaruch/* dep already at "latest" is left untouched; the block is
-# added only when its marker is absent.
+# Idempotent: a jbaruch/* dep already at "latest" is left untouched; an absent
+# block is appended, and a present block is rewritten between its start and end
+# markers to the current list, so repos onboarded earlier pick up new entries.
 #
 # Usage: tessl-hygiene.sh
 # Out:   one JSON object on stdout:
 #          {"tessl_json":"pinned-latest|unchanged|absent",
-#           "gitignore":"created|appended|unchanged"}
-# Exit:  0 on success; non-zero with a stderr diagnostic on failure.
+#           "gitignore":"created|appended|updated|unchanged"}
+# Exit:  0 on success; non-zero with a stderr diagnostic on failure, including a
+#        malformed block (duplicate start marker or missing end marker), which
+#        is left untouched.
 set -euo pipefail
 
 MARKER="=== Tessl-generated artifacts (managed by jbaruch/coding-policy) ==="
+BLOCK_END="# === end Tessl-generated artifacts ==="
 
 gitignore_block() {
   cat <<'EOF'
@@ -33,22 +37,88 @@ gitignore_block() {
 .mcp.json
 .claude/settings.json
 .claude/skills/tessl__*
+.claude/skills/.gitignore
 .codex/config.toml
 .codex/skills/tessl__*
+.codex/skills/.gitignore
 .gemini/settings.json
 .cursor/mcp.json
 .cursor/hooks.json
 .cursor/rules/tessl__*
+.cursor/rules/.gitignore
 .cursor/skills/tessl__*
+.cursor/skills/.gitignore
 .openhands/hooks.json
 .openhands/skills/tessl-*
 .github/mcp.json
 .github/hooks/tessl.json
 .github/skills/tessl__*
+.github/skills/.gitignore
 .vscode/mcp.json
 .vscode/skills/tessl__*
+.vscode/skills/.gitignore
 # === end Tessl-generated artifacts ===
 EOF
+}
+
+# Rewrite the managed block in .gitignore between its start and end markers.
+# Prints "updated" when the bytes changed, "unchanged" otherwise. Writes back
+# through the existing file so its mode is kept.
+refresh_block() {
+  # One pass counts standalone start-marker lines and every line containing the
+  # marker, and finds the first start line and the first end line after it.
+  # Trailing whitespace and CR are ignored, so a CRLF or hand-edited .gitignore
+  # still matches.
+  local scan
+  scan=$(awk -v m="# ${MARKER}" -v t="$MARKER" -v e="$BLOCK_END" '
+    { line = $0; sub(/[ \t\r]+$/, "", line) }
+    index(line, t) { any++ }
+    line == m { n++; if (n == 1) s = NR; next }
+    s && !stop && line == e { stop = NR }
+    END { printf "%d %d %d %d\n", n, any, s, stop }' .gitignore) \
+    || { echo "error: cannot read .gitignore — check its permissions and re-run" >&2; exit 1; }
+  local count any start end
+  read -r count any start end <<< "$scan" \
+    || { echo "error: could not parse the .gitignore scan (${scan}) — report this with the file attached" >&2; exit 1; }
+  if (( count > 1 )); then
+    echo "error: .gitignore has ${count} '# ${MARKER}' lines, expected 1 — delete the duplicate Tessl block and re-run" >&2
+    exit 1
+  fi
+  if (( count == 0 || any != count )); then
+    echo "error: a Tessl marker in .gitignore is not on a line of its own — keep only the '# ${MARKER}' line that opens the block and re-run" >&2
+    exit 1
+  fi
+  if (( end == 0 )); then
+    echo "error: the Tessl block at .gitignore line ${start} has no '${BLOCK_END}' line — restore the end marker or delete the block, then re-run" >&2
+    exit 1
+  fi
+
+  local tmp
+  tmp=$(mktemp) || { echo "error: mktemp failed while updating .gitignore" >&2; exit 1; }
+  if ! { awk -v s="$start" 'NR < s' .gitignore && gitignore_block && awk -v e="$end" 'NR > e' .gitignore; } > "$tmp"; then
+    rm -f "$tmp" || echo "warning: could not remove temp file ${tmp} — remove it by hand" >&2
+    echo "error: failed to rebuild .gitignore" >&2
+    exit 1
+  fi
+  local crc=0
+  cmp -s "$tmp" .gitignore || crc=$?
+  if (( crc == 0 )); then
+    rm -f "$tmp" || echo "warning: could not remove temp file ${tmp} — remove it by hand" >&2
+    echo "unchanged"
+    return 0
+  fi
+  if (( crc > 1 )); then
+    rm -f "$tmp" || echo "warning: could not remove temp file ${tmp} — remove it by hand" >&2
+    echo "error: comparing the rebuilt .gitignore failed (cmp exit ${crc}) — check .gitignore is readable and re-run" >&2
+    exit 1
+  fi
+  if ! cat "$tmp" > .gitignore; then
+    rm -f "$tmp" || echo "warning: could not remove temp file ${tmp} — remove it by hand" >&2
+    echo "error: failed to write .gitignore" >&2
+    exit 1
+  fi
+  rm -f "$tmp" || echo "warning: could not remove temp file ${tmp} — remove it by hand" >&2
+  echo "updated"
 }
 
 main() {
@@ -80,15 +150,15 @@ main() {
     fi
   fi
 
-  # 2. Ensure the gitignore block is present. grep exit is classified explicitly
-  # (0 present / 1 absent / >1 read error) per rules/error-handling.md — never
-  # collapsed to "absent".
+  # 2. Ensure the gitignore block is present and current. grep exit is
+  # classified explicitly (0 present / 1 absent / >1 read error) per
+  # rules/error-handling.md — never collapsed to "absent".
   local gi_state
   if [[ -f .gitignore ]]; then
     local grc=0
     grep -qF "$MARKER" .gitignore || grc=$?
     if (( grc == 0 )); then
-      gi_state="unchanged"
+      gi_state=$(refresh_block) || exit $?
     elif (( grc == 1 )); then
       # Absent: append. Separate from prior content with a blank line when the
       # file lacks a trailing newline; a tail failure is a real read error.
