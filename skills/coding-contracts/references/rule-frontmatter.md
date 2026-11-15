@@ -14,7 +14,7 @@
 - A host that selects conditional rules answers whether each one matches the run at the cheapest tier able to answer:
   1. **Host script** — a deterministic predicate over the rule's frontmatter and run facts the host holds: agent tier, session kind, skills or capabilities present, paths the run touches
   2. **Bounded classification** — a question within approved bounds per `rules/script-delegation.md` Bounded Classification
-  3. **Reasoning model** — the host loads the rule and the agent's model applies its declared scope
+  3. **Reasoning model** — the host loads the rule, in full or on demand, and the agent's model applies its declared scope
 - Tiers 1 and 2 each answer match, no match or undecided
 - The host loads a matching rule
 - A tier-1 or tier-2 no match leaves the rule unloaded
@@ -37,6 +37,15 @@
 - A tier-2 no-match answer takes effect only within the standing approval `rules/script-delegation.md` Bounded Classification names
 - "Not enough evidence", an unavailable classifier and an answer outside the list each load the rule
 - A loaded rule's frontmatter reaches tier 3 unchanged
+
+## On-Demand Loading
+
+- A host may load a tier-3 conditional rule on demand instead of in full
+- An on-demand listing names the rule's path and carries its frontmatter verbatim
+- The listing tells the agent to read the whole rule before acting in its declared scope
+- The listing never paraphrases, excerpts or summarizes the rule body
+- The agent reads the rule file whole, so the rule reaches it byte-identical
+- Always-on rules load in full
 
 ## Reasoning Model Tier
 
