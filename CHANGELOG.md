@@ -1,3 +1,7 @@
+## 0.10.5 — 2026-11-15
+
+- fix(release): Honor TMPDIR in shipped mktemp calls (#825)
+
 ## 0.10.4 — 2026-11-15
 
 - docs(onboard-repo): Disclose onboarding's Tessl changes (#824)
