@@ -62,7 +62,7 @@ main() {
   trap cleanup EXIT
   FAIL=0; PASS=0
 
-  local d out cp_ver react_ver
+  local d out rc cp_ver react_ver
 
   # 1. pins jbaruch/* to latest, leaves third-party pins untouched.
   d="$TMP/1"; mkrepo "$d"
@@ -76,24 +76,24 @@ main() {
   }
 }
 JSON
-  out="$(cd "$d" && bash "$SCRIPT" 2>/dev/null)"
+  out="$(cd "$d" && bash "$SCRIPT" 2>/dev/null)"; rc=$?
   cp_ver=$(jq -r '.dependencies["jbaruch/coding-policy"].version' "$d/tessl.json")
   react_ver=$(jq -r '.dependencies["tessl/npm-react"].version' "$d/tessl.json")
-  if [[ "$cp_ver" == "latest" && "$react_ver" == "19.2.0" ]] \
+  if [[ $rc -eq 0 && "$cp_ver" == "latest" && "$react_ver" == "19.2.0" ]] \
      && printf '%s' "$out" | jq -e '.tessl_json=="pinned-latest"' >/dev/null; then pass
   else fail "pin: cp=$cp_ver react=$react_ver out=$out"; fi
 
   # 2. idempotent: already latest -> unchanged.
   d="$TMP/2"; mkrepo "$d"
   printf '{"dependencies":{"jbaruch/coding-policy":{"version":"latest"}}}\n' > "$d/tessl.json"
-  out="$(cd "$d" && bash "$SCRIPT" 2>/dev/null)"
-  if printf '%s' "$out" | jq -e '.tessl_json=="unchanged"' >/dev/null; then pass; else fail "idempotent pin: $out"; fi
+  out="$(cd "$d" && bash "$SCRIPT" 2>/dev/null)"; rc=$?
+  if [[ $rc -eq 0 ]] && printf '%s' "$out" | jq -e '.tessl_json=="unchanged"' >/dev/null; then pass; else fail "idempotent pin: rc=$rc $out"; fi
 
   # 3. .gitignore created with the block when absent; AGENTS/CLAUDE/GEMINI NOT in it.
   d="$TMP/3"; mkrepo "$d"
   printf '{"dependencies":{}}\n' > "$d/tessl.json"
-  out="$(cd "$d" && bash "$SCRIPT" 2>/dev/null)"
-  if printf '%s' "$out" | jq -e '.gitignore=="created"' >/dev/null \
+  out="$(cd "$d" && bash "$SCRIPT" 2>/dev/null)"; rc=$?
+  if [[ $rc -eq 0 ]] && printf '%s' "$out" | jq -e '.gitignore=="created"' >/dev/null \
      && grep -qF '.tessl/' "$d/.gitignore" \
      && grep -qF '.gemini/settings.json' "$d/.gitignore" \
      && has_folder_ignores "$d/.gitignore" \
@@ -106,8 +106,8 @@ JSON
   d="$TMP/4"; mkrepo "$d"
   printf '{"dependencies":{}}\n' > "$d/tessl.json"
   printf 'node_modules/\n' > "$d/.gitignore"
-  out="$(cd "$d" && bash "$SCRIPT" 2>/dev/null)"
-  if printf '%s' "$out" | jq -e '.gitignore=="appended"' >/dev/null \
+  out="$(cd "$d" && bash "$SCRIPT" 2>/dev/null)"; rc=$?
+  if [[ $rc -eq 0 ]] && printf '%s' "$out" | jq -e '.gitignore=="appended"' >/dev/null \
      && grep -qxF 'node_modules/' "$d/.gitignore" \
      && grep -qF '.tessl/' "$d/.gitignore"; then pass
   else fail "gitignore append: $out"; fi
@@ -115,13 +115,14 @@ JSON
   # 5. unchanged when the marker is already present.
   d="$TMP/5"; mkrepo "$d"
   printf '{"dependencies":{}}\n' > "$d/tessl.json"
-  (cd "$d" && bash "$SCRIPT" >/dev/null 2>&1)   # first run adds the block
-  out="$(cd "$d" && bash "$SCRIPT" 2>/dev/null)"  # second run
-  if printf '%s' "$out" | jq -e '.gitignore=="unchanged"' >/dev/null; then pass; else fail "gitignore idempotent: $out"; fi
+  if ! (cd "$d" && bash "$SCRIPT" >/dev/null 2>&1); then fail "case 5 setup: first run failed"; else
+  out="$(cd "$d" && bash "$SCRIPT" 2>/dev/null)"; rc=$?  # second run
+  if [[ $rc -eq 0 ]] && printf '%s' "$out" | jq -e '.gitignore=="unchanged"' >/dev/null; then pass; else fail "gitignore idempotent: rc=$rc $out"; fi
+  fi
 
   # 6. missing tessl.json -> tessl_json:absent, gitignore still written.
   d="$TMP/6"; mkrepo "$d"
-  out="$(cd "$d" && bash "$SCRIPT" 2>/dev/null)"; local rc=$?
+  out="$(cd "$d" && bash "$SCRIPT" 2>/dev/null)"; rc=$?
   if [[ $rc -eq 0 ]] && printf '%s' "$out" | jq -e '.tessl_json=="absent" and .gitignore=="created"' >/dev/null; then pass
   else fail "absent tessl.json: rc=$rc out=$out"; fi
 
@@ -129,8 +130,8 @@ JSON
   d="$TMP/7"; mkrepo "$d"
   printf '{"dependencies":{}}\n' > "$d/tessl.json"
   { printf 'node_modules/\n'; old_block; printf 'dist/\n'; } > "$d/.gitignore"
-  out="$(cd "$d" && bash "$SCRIPT" 2>/dev/null)"
-  if printf '%s' "$out" | jq -e '.gitignore=="updated"' >/dev/null \
+  out="$(cd "$d" && bash "$SCRIPT" 2>/dev/null)"; rc=$?
+  if [[ $rc -eq 0 ]] && printf '%s' "$out" | jq -e '.gitignore=="updated"' >/dev/null \
      && has_folder_ignores "$d/.gitignore" \
      && [[ "$(head -n 1 "$d/.gitignore")" == "node_modules/" ]] \
      && [[ "$(tail -n 1 "$d/.gitignore")" == "dist/" ]] \
@@ -140,11 +141,13 @@ JSON
   # 8. a second run after the refresh reports unchanged and leaves the bytes alone.
   d="$TMP/8"; mkrepo "$d"
   { printf 'node_modules/\n'; old_block; } > "$d/.gitignore"
-  (cd "$d" && bash "$SCRIPT" >/dev/null 2>&1)   # first run refreshes the old block
-  local before; before=$(cat "$d/.gitignore")
-  out="$(cd "$d" && bash "$SCRIPT" 2>/dev/null)"
-  if printf '%s' "$out" | jq -e '.gitignore=="unchanged"' >/dev/null && [[ "$(cat "$d/.gitignore")" == "$before" ]]; then pass
-  else fail "current block unchanged: $out"; fi
+  local before=""
+  if ! (cd "$d" && bash "$SCRIPT" >/dev/null 2>&1); then fail "case 8 setup: first refresh failed"; else
+  before=$(cat "$d/.gitignore")
+  out="$(cd "$d" && bash "$SCRIPT" 2>/dev/null)"; rc=$?
+  if [[ $rc -eq 0 ]] && printf '%s' "$out" | jq -e '.gitignore=="unchanged"' >/dev/null && [[ "$(cat "$d/.gitignore")" == "$before" ]]; then pass
+  else fail "current block unchanged: rc=$rc $out"; fi
+  fi
 
   # 9. a block missing its end marker fails and is left untouched.
   d="$TMP/9"; mkrepo "$d"
@@ -161,6 +164,16 @@ JSON
   out="$(cd "$d" && bash "$SCRIPT" 2>/dev/null)"; rc=$?
   if [[ $rc -ne 0 && "$(cat "$d/.gitignore")" == "$before" ]]; then pass
   else fail "duplicate start marker: rc=$rc out=$out"; fi
+
+  # 11. a CRLF .gitignore carrying the old block refreshes, then settles to unchanged.
+  d="$TMP/11"; mkrepo "$d"
+  { printf 'node_modules/\n'; old_block; } | sed 's/$/\r/' > "$d/.gitignore"
+  out="$(cd "$d" && bash "$SCRIPT" 2>/dev/null)"; rc=$?
+  if [[ $rc -eq 0 ]] && printf '%s' "$out" | jq -e '.gitignore=="updated"' >/dev/null && has_folder_ignores "$d/.gitignore"; then
+    out="$(cd "$d" && bash "$SCRIPT" 2>/dev/null)"; rc=$?
+    if [[ $rc -eq 0 ]] && printf '%s' "$out" | jq -e '.gitignore=="unchanged"' >/dev/null; then pass
+    else fail "CRLF second run: rc=$rc $out"; fi
+  else fail "CRLF refresh: rc=$rc $out"; fi
 
   echo "─────────────────────────────────────────────" >&2
   if [[ $FAIL -gt 0 ]]; then echo "FAILED: ${FAIL} failed, ${PASS} passed" >&2; exit 1; fi

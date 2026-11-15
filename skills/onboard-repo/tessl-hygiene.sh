@@ -65,26 +65,28 @@ EOF
 # Prints "updated" when the bytes changed, "unchanged" otherwise. Writes back
 # through the existing file so its mode is kept.
 refresh_block() {
-  local starts grc=0
-  starts=$(grep -nxF "# ${MARKER}" .gitignore) || grc=$?
-  if (( grc > 1 )); then
-    echo "error: reading .gitignore failed (grep exit ${grc}) — check it is a readable text file and re-run" >&2
-    exit 1
-  fi
-  local count=0 start=""
-  if [[ -n "$starts" ]]; then
-    count=$(printf '%s\n' "$starts" | wc -l | tr -d ' ')
-    start=${starts%%:*}
-  fi
-  if [[ "$count" != "1" ]]; then
-    echo "error: .gitignore has ${count} '# ${MARKER}' lines, expected 1 — delete the stale Tessl block(s) and re-run" >&2
-    exit 1
-  fi
-
-  local end
-  end=$(awk -v s="$start" -v m="$BLOCK_END" 'NR > s && $0 == m { print NR; exit }' .gitignore) \
+  # One pass finds the start-marker count, the first start line and the first
+  # end line after it. Trailing whitespace and CR are ignored, so a CRLF or
+  # hand-edited .gitignore still matches.
+  local scan
+  scan=$(awk -v m="# ${MARKER}" -v e="$BLOCK_END" '
+    { line = $0; sub(/[ \t\r]+$/, "", line) }
+    line == m { n++; if (n == 1) s = NR; next }
+    s && !stop && line == e { stop = NR }
+    END { printf "%d %d %d\n", n, s, stop }' .gitignore) \
     || { echo "error: cannot read .gitignore — check its permissions and re-run" >&2; exit 1; }
-  if [[ -z "$end" ]]; then
+  local count start end
+  read -r count start end <<< "$scan" \
+    || { echo "error: could not parse the .gitignore scan (${scan}) — report this with the file attached" >&2; exit 1; }
+  if (( count == 0 )); then
+    echo "error: the Tessl marker in .gitignore is not on a line of its own — put '# ${MARKER}' on its own line and re-run" >&2
+    exit 1
+  fi
+  if (( count > 1 )); then
+    echo "error: .gitignore has ${count} '# ${MARKER}' lines, expected 1 — delete the duplicate Tessl block and re-run" >&2
+    exit 1
+  fi
+  if (( end == 0 )); then
     echo "error: the Tessl block at .gitignore line ${start} has no '${BLOCK_END}' line — restore the end marker or delete the block, then re-run" >&2
     exit 1
   fi
