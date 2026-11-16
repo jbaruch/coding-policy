@@ -1,6 +1,6 @@
 {
   "name": "jbaruch/coding-policy",
-  "version": "0.10.9",
+  "version": "0.10.14",
   "description": "General-purpose coding policy for Baruch's AI agents",
   "private": false,
   "skills": [
@@ -13,6 +13,7 @@
   "rules": [
     "rules/commit-conventions.md",
     "rules/sync-before-work.md",
+    "rules/required-read.md",
     "rules/testing-standards.md",
     "rules/error-handling.md",
     "rules/dependency-management.md",
