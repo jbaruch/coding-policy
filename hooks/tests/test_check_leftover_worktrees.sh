@@ -49,6 +49,10 @@
 #                              git's own exit, and runs neither owner script.
 #  15. SSH BatchMode        -> appended to a user-set GIT_SSH_COMMAND, and the
 #                              default when none is set.
+#  16. Newline hooks dir    -> a hooks directory whose name ends in a newline
+#                              still reaches its owner scripts.
+#  17. Locked               -> a worktree locked with or without a reason stays,
+#                              with its lock and branch, and is not listed.
 #
 # The harness drops `set -e` to aggregate results; every fixture command is
 # checked explicitly (rules/error-handling.md aggregate-reporting carve-out).
@@ -545,6 +549,25 @@ main() {
   else
     echo "16. skipped: this filesystem refuses a name ending in a newline ($(cat "$TMP/nl16.err"))"
   fi
+
+  echo "17. a locked worktree stays with its lock holder, with or without a reason, and is not listed"
+  # The unlocked twin's removal proves the prune ran on a removable shape (#831).
+  mk_case c17
+  quiet "wt held" git -C "$SHARED" worktree add -q -b held "$ROOT/held" origin/main
+  quiet "wt bare" git -C "$SHARED" worktree add -q -b bare "$ROOT/bare" origin/main
+  quiet "wt loose" git -C "$SHARED" worktree add -q --detach "$ROOT/loose" origin/main
+  quiet "lock held" git -C "$SHARED" worktree lock --reason "factory task 831" "$ROOT/held"
+  quiet "lock bare" git -C "$SHARED" worktree lock "$ROOT/bare"
+  age_wt "$ROOT/held" "$AGED_MTIME"
+  age_wt "$ROOT/bare" "$AGED_MTIME"
+  age_wt "$ROOT/loose" "$AGED_MTIME"
+  run_hook "$SHARED"
+  local list17
+  list17="$(git -C "$SHARED" worktree list --porcelain)" || die "git worktree list failed"
+  if [[ $RC -eq 0 && -z "$OUT" && -d "$ROOT/held" && -d "$ROOT/bare" && ! -e "$ROOT/loose" ]] \
+     && grep -qxF "locked factory task 831" <<<"$list17" && grep -qxF "locked" <<<"$list17" \
+     && has_branch held && has_branch bare; then pass
+  else fail "c17: RC=$RC OUT=$OUT LIST=$list17 ERR=$ERR"; fi
 
   echo
   echo "passed=${PASS} failed=${FAIL}"

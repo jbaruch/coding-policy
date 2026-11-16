@@ -56,7 +56,9 @@ gh pr merge <N> --merge
 cd <path-to-base-checkout>
 git checkout main && git pull --ff-only
 
-# Check for a lock before teardown: a `locked` line in the worktree's stanza
+# Check for a lock before teardown: a `locked` line in the stanza whose
+# `worktree` line names the resolved path
+(cd <path-to-worktree> && pwd -P)
 git worktree list --porcelain
 
 # Tear down the worktree — directory + `.git/worktrees/` metadata
@@ -71,12 +73,12 @@ git remote prune origin
 
 Order in (B) is mandatory: `git branch -d` refuses to delete a branch that is checked out in any worktree, so the `git worktree remove` step must come before `git branch -d`. Reversing the order produces a "checked out at `<path>`" error and leaves a stranded branch.
 
-A locked worktree belongs to its lock holder. Before `git worktree remove`, read the stanza of `git worktree list --porcelain` whose `worktree` line names the worktree. A `locked` line in that stanza marks it locked; text after `locked` is the lock reason. For a locked worktree:
+A locked worktree belongs to its lock holder. Before `git worktree remove`, resolve the worktree's path with `(cd <path-to-worktree> && pwd -P)`: git prints resolved paths, so a worktree under a symlinked directory such as `/tmp` matches only by its resolved path. Read the stanza of `git worktree list --porcelain` whose `worktree` line names that resolved path. A `locked` line in that stanza marks it locked. Text after `locked ` is the lock reason; a bare `locked` line is a lock with no reason supplied. For a locked worktree:
 
 - Skip `git worktree remove` and `git branch -d` for it
 - Never force the removal with `-f` and never run `git worktree unlock`
 - Run `git remote prune origin`
-- Report the worktree path, its branch and the lock reason as left to its lock holder
+- Report the worktree path, its branch and the lock reason as left to its lock holder, with `no reason supplied` for a bare `locked` line
 - The merge counts as delivered
 - An unlocked worktree follows the order above
 

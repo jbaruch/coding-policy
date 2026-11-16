@@ -18,7 +18,8 @@
 - An idle clean worktree whose HEAD origin holds counts as abandoned
 - The agent removes its own worktree after the merge
 - When the worktree's branch lands via `skills/release/SKILL.md` Step 7, the post-merge order is mandatory: `cd` back to the base checkout → fast-forward base `main` → check the worktree for a lock → `git worktree remove <worktree-path>` → `git branch -d <branch>`. Teardown precedes branch delete
-- The lock check reads the stanza of `git worktree list --porcelain` whose `worktree` line names the worktree
+- The lock check reads the stanza of `git worktree list --porcelain` whose `worktree` line names the worktree's resolved path
+- Resolve the path with `(cd <worktree-path> && pwd -P)`
 - Narrow exception for a locked worktree in that post-merge order. Preconditions:
   1. The worktree's branch landed via `skills/release/SKILL.md` Step 7.
   2. The lock check finds a `locked` line in the worktree's stanza.
@@ -26,7 +27,9 @@
 - Skip `git worktree remove` and `git branch -d` for it
 - Never force its removal or unlock it
 - Report the worktree path, its branch and the lock reason as left to its lock holder
-- The lock reason is the text after `locked`
+- The lock reason is the text after `locked `
+- A bare `locked` line is a lock with no reason supplied
+- Report a bare `locked` line's reason as `no reason supplied`
 - The merge counts as delivered
 - Every unlocked worktree follows the post-merge order
 - Use `git worktree remove <path>`; never `rm -rf` the directory
