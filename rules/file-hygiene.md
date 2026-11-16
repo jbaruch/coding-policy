@@ -17,6 +17,13 @@ alwaysApply: true
 - **Exception — platform-required compiled artifacts:** when the hosting platform must read a compiled file directly and cannot invoke the compiler itself (e.g., gh-aw `.lock.yml` workflow files compiled from `.md` sources by `gh aw compile`; dependency lock files like `package-lock.json`, `Cargo.lock`, `go.sum`), commit both source and compiled form. Mark the compiled file as generated via `.gitattributes` (`linguist-generated=true`, `merge=ours`) so diffs stay readable and merges don't conflict
 - Per-machine installer state is not a dependency lock file (see `rules/dependency-management.md` Pinning)
 
+## License
+
+- Every operator-owned repository carries a license, MIT unless it declares another.
+- A license declared in a manifest or the README counts as a declaration.
+- Outside contributors or imported code leave the choice to the operator.
+- A license change takes the normal release path.
+
 ## Standalone Scripts
 
 - Scripts must have entry-point guards (e.g., `if __name__ == "__main__"` in Python, `if (require.main === module)` in Node)

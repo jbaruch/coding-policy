@@ -1,6 +1,6 @@
 # Install-Reviewer PR Body Template
 
-Reference for Step 7 of the `onboard-repo` skill. Pulled out of SKILL.md so the main flow stays scannable.
+Reference for Step 8 of the `onboard-repo` skill. Pulled out of SKILL.md so the main flow stays scannable.
 
 ## Required content
 
@@ -13,6 +13,7 @@ List the files this PR adds to run the `jbaruch/coding-policy` coding-rule revie
 - `.github/workflows/review-trigger.yml` — on each pull request, starts a review of that PR against the `jbaruch/coding-policy` rules so the result is available before merge.
 - `.github/fleet-review-enabled` — an opt-in marker; while it is present, the same review also runs on a schedule as a backstop. The result posts as a `<app-slug>[bot]` review.
 - `.env.example` — records the `FLEET_DISPATCH_TOKEN` name and where to set it, per the `no-secrets` rule.
+- `LICENSE` — only when Step 5 added it: the MIT license, with the holder and year the operator confirmed.
 
 Codex checks policy compliance; Claude independently reviews code quality and bugs without loaded policy or agent context. They post as separate GitHub Apps; both Apps need access to this repository. Each reviewer classifies findings as blocking or advisory. Blocking findings hold the merge; advisory findings do not. Read both complete review bodies.
 

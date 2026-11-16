@@ -12,6 +12,9 @@
 #   .github/fleet-review-enabled
 #   .github/workflows/review-trigger.yml
 #   .env.example                          (FLEET_DISPATCH_TOKEN documentation)
+#   tessl.json, .gitignore                (Step 4 hygiene, when present)
+# A LICENSE that Step 5's license.sh --write already staged is committed with
+# them.
 #
 # Usage: commit.sh [--override]
 #   --override    Upgrade-mode commit. Uses the upgrade branch name and

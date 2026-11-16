@@ -69,7 +69,8 @@
     "tests/release/tests/test_fleet_publish_historical.py",
     "scripts/tests/test_fleet_publish_historical_write.py",
     "scripts/tests/test_fleet_publish_historical_budget.py",
-    "scripts/tests/test_fleet_publish_historical_package.py"
+    "scripts/tests/test_fleet_publish_historical_package.py",
+    "tests/onboard-repo/tests/test_skill_override_steps.py"
   ],
   "executionEnvironments": [
     {

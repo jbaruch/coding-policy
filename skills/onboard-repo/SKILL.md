@@ -1,15 +1,16 @@
 ---
 name: onboard-repo
 description: >
-  Add the files that run the `jbaruch/coding-policy` coding-rule review on a repo's pull
+  Add the files that run the `jbaruch/coding-policy` review on a repo's pull
   requests: scaffold a `.github/fleet-review-enabled` marker, a
-  `.github/workflows/review-trigger.yml` (on each PR, starts a review of that PR against the
+  `.github/workflows/review-trigger.yml` (on each PR, reviews that PR against the
   coding-policy rules plus an independent Claude code-quality review), and a
   `.env.example` entry, then open a PR. While the marker is present
   the same review also runs on a schedule as a backstop; both post as a review. The consumer
   sets one `FLEET_DISPATCH_TOKEN` secret that `review-trigger.yml` reads. Onboarding also
-  sets the repo's `jbaruch/*` dependencies in `tessl.json` to `latest` and writes the
-  Tessl-generated-artifacts block to `.gitignore`.
+  sets the repo's `jbaruch/*` dependencies in `tessl.json` to `latest`, writes the
+  Tessl-generated-artifacts block to `.gitignore`, and adds an MIT `LICENSE` when the
+  repo has none and the operator confirms it.
   Use when the user wants to add, install, enable, scaffold, set up, wire up, or enroll an
   automated policy review / PR reviewer / coding-policy reviewer in a consumer repo. Also use
   to upgrade or refresh the reviewer files in a repo that already has them (override mode).
@@ -28,7 +29,7 @@ The user's request picks the mode:
 - **install** (default) — no reviewer artifacts exist yet
 - **upgrade** — refresh previously installed reviewer artifacts to the current plugin version
   - Trigger phrases: "upgrade", "update", "refresh", "pull latest reviewer setup", "override"
-  - Append `--override` to the script command in Steps 1, 2, 3, 5 and 6
+  - Append `--override` to the script command in Steps 1, 2, 3, 6 and 7
   - Branch `feat/upgrade-coding-policy-review`, commit and PR title `ci(review): upgrade ...`
 
 ## Step 1 — Run Preflight Checks
@@ -38,11 +39,11 @@ KS=.tessl/plugins/jbaruch/coding-policy/skills/onboard-repo/; [ -d "$KS" ] || KS
 bash "$KS/preflight.sh"
 ```
 
-Runs every precondition (git worktree, GitHub CLI install + auth, packaged templates present, origin remote, plus mode-dependent branch/target state) and returns one JSON object: `{"ok": bool, "override": bool, "failures": [...], "warnings": [...]}`. Upgrade mode also refuses a rewritable target carrying uncommitted edits.
+Runs every precondition (git worktree, GitHub CLI install + auth, packaged templates present, origin remote, an index with nothing staged, plus mode-dependent branch/target state) and returns one JSON object: `{"ok": bool, "override": bool, "failures": [...], "warnings": [...]}`. Upgrade mode also refuses a rewritable target carrying uncommitted edits.
 
 - **Exit 0, empty `failures`** — every precondition passed; proceed to Step 2.
 - **Exit 1, populated `failures`** — report each failure's `reason` verbatim and stop. Every failure carries a concrete recovery command.
-- **Non-empty `warnings`** — informational only; never affects `ok` or the exit code. Report each `reason` verbatim alongside the Step 1 outcome and remember them for Step 7's PR body. Do not stop; proceed to Step 2.
+- **Non-empty `warnings`** — informational only; never affects `ok` or the exit code. Report each `reason` verbatim alongside the Step 1 outcome and remember them for Step 8's PR body. Do not stop; proceed to Step 2.
 
 ## Step 2 — Establish Feature Branch
 
@@ -77,27 +78,51 @@ bash "$KS/tessl-hygiene.sh"
 
 Sets every `jbaruch/*` dependency in `tessl.json` to `"version": "latest"` (third-party pins unchanged) and keeps the tessl-generated-artifacts block in `.gitignore` current, appending it when its marker is absent. `AGENTS.md` / `CLAUDE.md` / `GEMINI.md` are not ignored. Emits `{"tessl_json":"pinned-latest|unchanged|absent","gitignore":"created|appended|updated|unchanged"}`. On a malformed block (duplicate start marker, missing end marker, or marker not on its own line) it exits non-zero and leaves `.gitignore` as it was; `tessl.json` may already be updated. Stop and fix `.gitignore` before Step 5. Idempotent; takes no `--override` flag. Proceed immediately to Step 5.
 
-## Step 5 — Commit
+## Step 5 — Apply the license
+
+Decide the license by reading the repository yourself. `license.sh` only writes the MIT text.
+
+- Establish that the operator owns the repository. When the operator does not, write nothing and proceed to Step 6.
+- In a shallow clone, run `git fetch --unshallow` before the assessment below. Repeat the whole assessment after recovering the history.
+- Read every license file, tracked or not, every project manifest present (`pyproject.toml`, `package.json`, `Cargo.toml`, `.tessl-plugin/plugin.json`, `agent-plugin.yaml` and the like), the README's licensing text and any licensing material these reference. Do not limit discovery to known headings or keys.
+- An existing license file or a declared license, proprietary included, stays as it is: proceed to Step 6.
+- An untracked license file stays out of Step 6's commit. Ask the operator to commit or remove it before Step 6. Never replace it with MIT.
+- Unreadable, malformed, conflicting or ambiguous evidence is unresolved. Report it to the operator and write nothing. It never authorizes MIT.
+- Read what the commits change, not only their author identities. Real outside contributions or an import of code the operator did not write leave the choice to the operator. A stray local identity (such as `Test <test@test.com>`) or an agent identity is not outside work by itself.
+- When no license exists or is declared and the history is the operator's own work, recommend MIT. Present the exact holder and creation year for the operator to confirm. An approval given earlier in the session for the same repository, holder and year stands.
+
+Only after the operator confirms MIT, write it with the confirmed year and holder:
+
+```bash
+KS=.tessl/plugins/jbaruch/coding-policy/skills/onboard-repo/; [ -d "$KS" ] || KS="$HOME/$KS"; [ -d "$KS" ] || case "$(git config --get remote.origin.url)" in git@github.com:jbaruch/coding-policy|git@github.com:jbaruch/coding-policy.git|https://github.com/jbaruch/coding-policy|https://github.com/jbaruch/coding-policy.git|ssh://git@github.com/jbaruch/coding-policy|ssh://git@github.com/jbaruch/coding-policy.git) KS=skills/onboard-repo/ ;; *) echo "coding-policy skill not found: run tessl install jbaruch/coding-policy" >&2; exit 1 ;; esac
+bash "$KS/license.sh" --write "<year>" "<holder>"
+```
+
+`<year>` is four digits; `<holder>` is one non-empty line. Creates `LICENSE` at the repository root with the MIT text and stages only it. Emits `{"source":"LICENSE","written":true}`. Exit 1 with `"written":false` when `LICENSE` exists or is tracked; nothing changes, so reassess. Exit 2 on a usage, environment or I/O error with a stderr diagnostic; a failed write leaves no `LICENSE`, and a staging failure names the `git add` to run. The script checks no ownership, declaration or consent; those stay with this step.
+
+For another license the operator selects, the operator adds the file and stages it with `git add <file>` before Step 6. Step 6 commits only staged files. Then proceed to Step 6.
+
+## Step 6 — Commit
 
 ```bash
 KS=.tessl/plugins/jbaruch/coding-policy/skills/onboard-repo/; [ -d "$KS" ] || KS="$HOME/$KS"; [ -d "$KS" ] || case "$(git config --get remote.origin.url)" in git@github.com:jbaruch/coding-policy|git@github.com:jbaruch/coding-policy.git|https://github.com/jbaruch/coding-policy|https://github.com/jbaruch/coding-policy.git|ssh://git@github.com/jbaruch/coding-policy|ssh://git@github.com/jbaruch/coding-policy.git) KS=skills/onboard-repo/ ;; *) echo "coding-policy skill not found: run tessl install jbaruch/coding-policy" >&2; exit 1 ;; esac
 bash "$KS/commit.sh"
 ```
 
-Stages the reviewer files plus the Step 4 hygiene changes (`tessl.json`, `.gitignore`) when present, and commits with the canonical message — `ci(review): add jbaruch/coding-policy PR review setup`, or `ci(review): upgrade jbaruch/coding-policy PR review setup` in upgrade mode. Idempotent: emits `{"state": "no-op", …}` when the working tree already matches a prior successful run. If a pre-commit hook rejects the commit, the script exits non-zero — fix the hook's finding and re-run; do not `--no-verify`. Proceed immediately to Step 6.
+Stages the reviewer files plus the Step 4 hygiene changes (`tessl.json`, `.gitignore`) when present, and commits them, along with any `LICENSE` Step 5 staged, under the canonical message — `ci(review): add jbaruch/coding-policy PR review setup`, or `ci(review): upgrade jbaruch/coding-policy PR review setup` in upgrade mode. Idempotent: emits `{"state": "no-op", …}` when the working tree already matches a prior successful run. If a pre-commit hook rejects the commit, the script exits non-zero — fix the hook's finding and re-run; do not `--no-verify`. Proceed immediately to Step 7.
 
-## Step 6 — Push
+## Step 7 — Push
 
 ```bash
 KS=.tessl/plugins/jbaruch/coding-policy/skills/onboard-repo/; [ -d "$KS" ] || KS="$HOME/$KS"; [ -d "$KS" ] || case "$(git config --get remote.origin.url)" in git@github.com:jbaruch/coding-policy|git@github.com:jbaruch/coding-policy.git|https://github.com/jbaruch/coding-policy|https://github.com/jbaruch/coding-policy.git|ssh://git@github.com/jbaruch/coding-policy|ssh://git@github.com/jbaruch/coding-policy.git) KS=skills/onboard-repo/ ;; *) echo "coding-policy skill not found: run tessl install jbaruch/coding-policy" >&2; exit 1 ;; esac
 bash "$KS/push.sh"
 ```
 
-Pushes the mode's branch to origin with upstream tracking. Idempotent: emits `{"state": "up-to-date", …}` if origin already matches local HEAD. Proceed immediately to Step 7.
+Pushes the mode's branch to origin with upstream tracking. Idempotent: emits `{"state": "up-to-date", …}` if origin already matches local HEAD. Proceed immediately to Step 8.
 
-## Step 7 — Open PR
+## Step 8 — Open PR
 
-Resolve origin's repository, so the PR opens in the repo Step 6 pushed to and never in `gh`'s own default (`gh repo set-default`):
+Resolve origin's repository, so the PR opens in the repo Step 7 pushed to and never in `gh`'s own default (`gh repo set-default`):
 
 ```bash
 KS=.tessl/plugins/jbaruch/coding-policy/skills/release/; [ -d "$KS" ] || KS="$HOME/$KS"; [ -d "$KS" ] || case "$(git config --get remote.origin.url)" in git@github.com:jbaruch/coding-policy|git@github.com:jbaruch/coding-policy.git|https://github.com/jbaruch/coding-policy|https://github.com/jbaruch/coding-policy.git|ssh://git@github.com/jbaruch/coding-policy|ssh://git@github.com/jbaruch/coding-policy.git) KS=skills/release/ ;; *) echo "coding-policy skill not found: run tessl install jbaruch/coding-policy" >&2; exit 1 ;; esac
