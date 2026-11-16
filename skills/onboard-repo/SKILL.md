@@ -98,7 +98,7 @@ KS=.tessl/plugins/jbaruch/coding-policy/skills/onboard-repo/; [ -d "$KS" ] || KS
 bash "$KS/license.sh" --write "<year>" "<holder>"
 ```
 
-`<year>` is four digits; `<holder>` is one non-empty line. Creates `LICENSE` at the repository root with the MIT text and stages only it. Emits `{"source":"LICENSE","written":true}`. Exit 1 with `"written":false` when `LICENSE` exists or is tracked; nothing changes, so reassess. Exit 2 on a usage, environment or I/O error with a stderr diagnostic; a staging failure names the `git add` to run. The script checks no ownership, declaration or consent; those stay with this step.
+`<year>` is four digits; `<holder>` is one non-empty line. Creates `LICENSE` at the repository root with the MIT text and stages only it. Emits `{"source":"LICENSE","written":true}`. Exit 1 with `"written":false` when `LICENSE` exists or is tracked; nothing changes, so reassess. Exit 2 on a usage, environment or I/O error with a stderr diagnostic; a failed write leaves no `LICENSE`, and a staging failure names the `git add` to run. The script checks no ownership, declaration or consent; those stay with this step.
 
 For another license the operator selects, the operator adds the file and stages it with `git add <file>` before Step 6. Step 6 commits only staged files. Then proceed to Step 6.
 

@@ -2,9 +2,10 @@
 # Outcome tests for license.sh --write <year> <holder>: it creates the exact
 # MIT text for the supplied year and holder and stages only LICENSE, never
 # touches a tracked, untracked or locally deleted LICENSE, rejects invalid
-# arguments without writing, and reports a staging failure. Also checks that
-# coding-policy carries the MIT license the operator approved. Each case
-# builds a throwaway repo; order-independent.
+# arguments without writing, tells a broken repository from no repository,
+# leaves no LICENSE after a failed write, and reports a staging failure. Also
+# checks that coding-policy carries the MIT license the operator approved.
+# Each case builds a throwaway repo; order-independent.
 #
 # Run: bash tests/onboard-repo/tests/test_license.sh
 set -uo pipefail
@@ -117,8 +118,9 @@ main() {
 
   # 6. outside a git worktree it stops and writes nothing.
   d="$TMP/6"; mkdir "$d" || setup_fail "case 6 dir"
-  out="$(cd "$d" && GIT_CEILING_DIRECTORIES="$TMP" bash "$SCRIPT" --write 2019 "Test Owner" 2>>"$TMP/stderr.log")"; rc=$?
-  if [[ $rc -eq 2 && -z "$out" && ! -e "$d/LICENSE" ]]; then pass; else fail "outside a worktree: rc=$rc out=$out"; fi
+  out="$(cd "$d" && GIT_CEILING_DIRECTORIES="$TMP" bash "$SCRIPT" --write 2019 "Test Owner" 2>"$TMP/6.err")"; rc=$?
+  if [[ $rc -eq 2 && -z "$out" && ! -e "$d/LICENSE" ]] && grep -qF "not inside a git worktree" "$TMP/6.err"; then pass
+  else fail "outside a worktree: rc=$rc out=$out"; fi
 
   # 7. a staging failure (a held index lock) exits 2 and says how to recover.
   d="$TMP/7"; mkrepo "$d"
@@ -126,6 +128,47 @@ main() {
   out="$(cd "$d" && bash "$SCRIPT" --write 2019 "Test Owner" 2>"$TMP/7.err")"; rc=$?
   if [[ $rc -eq 2 && -z "$out" ]] && grep -qF "run 'git add LICENSE'" "$TMP/7.err"; then pass
   else fail "staging failure: rc=$rc out=$out"; fi
+
+  # 6b. corrupt metadata is a git failure, not "outside a worktree": --write
+  #     reports git's own diagnostic and writes nothing. A bad config line
+  #     and a gitfile pointing nowhere both fail rev-parse like a plain
+  #     directory does.
+  d="$TMP/6b"; mkrepo "$d"
+  printf '[core\nbroken\n' > "$d/.git/config" || setup_fail "case 6b config"
+  out="$(cd "$d" && bash "$SCRIPT" --write 2019 "Test Owner" 2>"$TMP/6b.err")"; rc=$?
+  if [[ $rc -eq 2 && -z "$out" && ! -e "$d/LICENSE" ]] && grep -qF "bad config line" "$TMP/6b.err" \
+     && ! grep -qF "not inside a git worktree" "$TMP/6b.err"; then pass
+  else fail "corrupt git config: rc=$rc out=$out err=$(cat "$TMP/6b.err")"; fi
+  d="$TMP/6c"; mkdir "$d" || setup_fail "case 6c dir"
+  printf 'gitdir: %s\n' "$TMP/6c-missing" > "$d/.git" || setup_fail "case 6c gitfile"
+  out="$(cd "$d" && GIT_CEILING_DIRECTORIES="$TMP" bash "$SCRIPT" --write 2019 "Test Owner" 2>"$TMP/6c.err")"; rc=$?
+  if [[ $rc -eq 2 && -z "$out" && ! -e "$d/LICENSE" ]] && grep -qF "fatal: " "$TMP/6c.err" \
+     && ! grep -qF "not inside a git worktree" "$TMP/6c.err"; then pass
+  else fail "dangling gitfile: rc=$rc out=$out err=$(cat "$TMP/6c.err")"; fi
+
+  # 7b. a write failing after LICENSE is created (quota, I/O) exits 2 and
+  #     leaves no LICENSE, so a rerun succeeds. A `cat` on PATH that writes
+  #     part of the text and fails stands in for the failing write.
+  d="$TMP/7b"; mkrepo "$d"
+  { mkdir "$TMP/fault" && printf '#!/bin/sh\nprintf "MIT Lic"\nexit 1\n' > "$TMP/fault/cat" && chmod +x "$TMP/fault/cat"; } \
+    || setup_fail "case 7b fault cat"
+  out="$(cd "$d" && PATH="$TMP/fault:$PATH" bash "$SCRIPT" --write 2019 "Test Owner" 2>"$TMP/7b.err")"; rc=$?
+  if [[ $rc -eq 2 && -z "$out" && ! -e "$d/LICENSE" && -z "$(git -C "$d" diff --cached --name-only)" ]]; then pass
+  else fail "failed write: rc=$rc out=$out err=$(cat "$TMP/7b.err")"; fi
+  out="$(cd "$d" && bash "$SCRIPT" --write 2019 "Test Owner" 2>>"$TMP/stderr.log")"; rc=$?
+  if [[ $rc -eq 0 && "$out" == "$WRITTEN" ]] && expected_mit 2019 "Test Owner" | cmp -s - "$d/LICENSE"; then pass
+  else fail "rerun after a failed write: rc=$rc out=$out"; fi
+
+  # 7c. when the partial LICENSE cannot be removed either, it exits 2 and
+  #     says to delete LICENSE by hand. An `rm` on PATH that fails on LICENSE
+  #     stands in for the failing removal.
+  d="$TMP/7c"; mkrepo "$d"
+  { mkdir "$TMP/fault-rm" && cp "$TMP/fault/cat" "$TMP/fault-rm/cat" \
+    && printf '#!/bin/sh\ncase "$*" in *LICENSE*) exit 1 ;; esac\nexec /bin/rm "$@"\n' > "$TMP/fault-rm/rm" \
+    && chmod +x "$TMP/fault-rm/rm"; } || setup_fail "case 7c fault rm"
+  out="$(cd "$d" && PATH="$TMP/fault-rm:$PATH" bash "$SCRIPT" --write 2019 "Test Owner" 2>"$TMP/7c.err")"; rc=$?
+  if [[ $rc -eq 2 && -z "$out" ]] && grep -qF "delete LICENSE by hand" "$TMP/7c.err"; then pass
+  else fail "failed cleanup: rc=$rc out=$out err=$(cat "$TMP/7c.err")"; fi
 
   # 8. coding-policy itself carries the MIT license the operator approved.
   if expected_mit 2026 "Baruch Sadogursky" | cmp -s - "$REPO_ROOT/LICENSE"; then pass
