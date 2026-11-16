@@ -1,6 +1,6 @@
 schemaVersion: 1
 name: jbaruch/coding-policy
-version: 0.10.9
+version: 0.10.14
 description: General-purpose coding policy for AI agents
 source:
   repository: https://github.com/jbaruch/coding-policy
@@ -12,6 +12,10 @@ artifacts:
         mode: always
     - id: sync-before-work
       path: rules/sync-before-work.md
+      activation:
+        mode: always
+    - id: required-read
+      path: rules/required-read.md
       activation:
         mode: always
     - id: testing-standards
