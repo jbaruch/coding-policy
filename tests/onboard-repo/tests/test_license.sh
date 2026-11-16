@@ -2,8 +2,9 @@
 # Outcome tests for license.sh --write <year> <holder>: it creates the exact
 # MIT text for the supplied year and holder and stages only LICENSE, never
 # touches a tracked, untracked or locally deleted LICENSE, rejects invalid
-# arguments without writing, tells a broken repository from no repository,
-# leaves no LICENSE after a failed write, and reports a staging failure. Also
+# arguments without writing, tells a broken repository from no repository in
+# any caller locale, leaves no LICENSE after a failed write, and reports a
+# staging failure with a recovery that also works for an ignored LICENSE. Also
 # checks that coding-policy carries the MIT license the operator approved.
 # Each case builds a throwaway repo; order-independent.
 #
@@ -122,12 +123,29 @@ main() {
   if [[ $rc -eq 2 && -z "$out" && ! -e "$d/LICENSE" ]] && grep -qF "not inside a git worktree" "$TMP/6.err"; then pass
   else fail "outside a worktree: rc=$rc out=$out"; fi
 
+  # 6a. a caller asking for French messages still gets "not inside a git
+  #     worktree", not a repair instruction: git translates its diagnostic
+  #     under this locale.
+  out="$(cd "$d" && GIT_CEILING_DIRECTORIES="$TMP" LC_ALL=en_US.UTF-8 LANGUAGE=fr \
+         bash "$SCRIPT" --write 2019 "Test Owner" 2>"$TMP/6a.err")"; rc=$?
+  if [[ $rc -eq 2 && -z "$out" && ! -e "$d/LICENSE" ]] && grep -qF "not inside a git worktree" "$TMP/6a.err"; then pass
+  else fail "outside a worktree, French locale: rc=$rc out=$out err=$(cat "$TMP/6a.err")"; fi
+
   # 7. a staging failure (a held index lock) exits 2 and says how to recover.
   d="$TMP/7"; mkrepo "$d"
   : > "$d/.git/index.lock" || setup_fail "case 7 lock"
   out="$(cd "$d" && bash "$SCRIPT" --write 2019 "Test Owner" 2>"$TMP/7.err")"; rc=$?
-  if [[ $rc -eq 2 && -z "$out" ]] && grep -qF "run 'git add LICENSE'" "$TMP/7.err"; then pass
+  if [[ $rc -eq 2 && -z "$out" ]] && grep -qF "run 'git add -f LICENSE'" "$TMP/7.err"; then pass
   else fail "staging failure: rc=$rc out=$out"; fi
+
+  # 7d. when .gitignore matches LICENSE, staging fails, and the recovery the
+  #     message gives stages it.
+  d="$TMP/7d"; mkrepo "$d"
+  printf 'LICENSE\n' > "$d/.gitignore" || setup_fail "case 7d gitignore"
+  out="$(cd "$d" && bash "$SCRIPT" --write 2019 "Test Owner" 2>"$TMP/7d.err")"; rc=$?
+  if [[ $rc -eq 2 && -z "$out" ]] && grep -qF "run 'git add -f LICENSE'" "$TMP/7d.err" \
+     && git -C "$d" add -f LICENSE && [[ "$(git -C "$d" diff --cached --name-only)" == "LICENSE" ]]; then pass
+  else fail "ignored LICENSE: rc=$rc out=$out err=$(cat "$TMP/7d.err")"; fi
 
   # 6b. corrupt metadata is a git failure, not "outside a worktree": --write
   #     reports git's own diagnostic and writes nothing. A bad config line

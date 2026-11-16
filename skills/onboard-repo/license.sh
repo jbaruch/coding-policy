@@ -58,10 +58,11 @@ main() {
   (( $# == 3 )) && [[ "$1" == "--write" && "$2" =~ ^[0-9]{4}$ && -n "$3" && "$3" != *[$'\n\r']* ]] || usage
   local year="$2" holder="$3" err root tracked
   # Corrupt or unreadable metadata and unsafe ownership fail like "outside a
-  # repo", so only git's not-a-repository message means no worktree. Bash
+  # repo", so only git's not-a-repository message means no worktree. The C
+  # locale keeps that message in English whatever the caller's locale. Bash
   # captures one stream per substitution: the first call takes git's
   # diagnostic, the second the root, with any warning on stderr.
-  if ! err=$(git rev-parse --show-toplevel 2>&1 >/dev/null); then
+  if ! err=$(LC_ALL=C LANGUAGE=C git rev-parse --show-toplevel 2>&1 >/dev/null); then
     case "$err" in
       *"fatal: not a git repository (or any "*) echo "error: not inside a git worktree — run from within the consumer repo" >&2 ;;
       *) echo "error: git cannot read this repository: ${err:-git rev-parse failed silently} — fix it ('git status' shows the same error), then re-run" >&2 ;;
@@ -98,7 +99,7 @@ main() {
   fi
   # Staged here, so the onboarding commit takes this LICENSE.
   if ! git add -- LICENSE; then
-    echo "error: wrote LICENSE but could not stage it — run 'git add LICENSE' and re-run the commit step" >&2
+    echo "error: wrote LICENSE but could not stage it — fix the cause git printed above, then run 'git add -f LICENSE' (-f stages it even when a .gitignore pattern matches LICENSE) and re-run the commit step" >&2
     exit 2
   fi
   printf '{"source":"LICENSE","written":true}\n'
