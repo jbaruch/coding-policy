@@ -7,23 +7,18 @@ alwaysApply: true
 ## The Principle
 
 - Leave the authorized task surface in better shape than you found it
-- An observation grants no authority to expand the task, write another repository, or create external follow-up work
-- Fix a defect when it is coherent with the task's accepted behavior and authorized scope
+- An observation authorizes nothing beyond How to Apply
+- Maintenance due in another repository and unrelated checkout hygiene stay observations, never task prerequisites
 
 ## How to Apply
 
-- **In-scope defect** — fix it in the current change and test the outcome
+- **In-scope defect** — fix a defect coherent with the task's accepted behavior and authorized scope in the current change and test the outcome
+- **Out-of-scope finding** — open one issue in an operator-owned repo for a defect or binding policy mismatch under `rules/review-severity.md` Categories and Evidence when no open issue covers its root cause
+- Record optional hardening, presentation, unproven harm or a tracked root cause once in the task record or PR body, never an issue
 - **Unrelated blocking risk** — record it once with evidence, consequence, owner if known, and required next decision: in the existing authorized task record or current conversation
 - **Advisory** — use `rules/review-severity.md` Split Reading From Acting
-- Open an issue, pull request, or other external record only when the task or operator separately authorizes that action
-
-## Fold Into a Round Already in Flight
-
-- Advisory folding follows `rules/review-severity.md` Split Reading From Acting
-- Maintenance due in another repository and unrelated checkout hygiene stay observations
-- These observations never become prerequisites for the selected task
+- `rules/external-repo-contributions.md` governs every other repository
 
 ## Reconciliation With `commit-conventions`
 
-- `rules/commit-conventions.md` keeps each commit and pull request focused
-- Record an unrelated risk instead of bundling its repair into the current change
+- Keep changes focused under `rules/commit-conventions.md`, never bundling an unrelated repair
