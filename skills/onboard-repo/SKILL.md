@@ -80,19 +80,27 @@ Sets every `jbaruch/*` dependency in `tessl.json` to `"version": "latest"` (thir
 
 ## Step 5 — Apply the license
 
+Decide the license by reading the repository yourself. `license.sh` only writes the MIT text.
+
+- Establish that the operator owns the repository. When the operator does not, write nothing and proceed to Step 6.
+- In a shallow clone, run `git fetch --unshallow` before the assessment below. Repeat the whole assessment after recovering the history.
+- Read every license file, tracked or not, every project manifest present (`pyproject.toml`, `package.json`, `Cargo.toml`, `.tessl-plugin/plugin.json`, `agent-plugin.yaml` and the like), the README's licensing text and any licensing material these reference. Do not limit discovery to known headings or keys.
+- An existing license file or a declared license, proprietary included, stays as it is: proceed to Step 6.
+- An untracked license file stays out of Step 6's commit. Ask the operator to commit or remove it before Step 6. Never replace it with MIT.
+- Unreadable, malformed, conflicting or ambiguous evidence is unresolved. Report it to the operator and write nothing. It never authorizes MIT.
+- Read what the commits change, not only their author identities. Real outside contributions or an import of code the operator did not write leave the choice to the operator. A stray local identity (such as `Test <test@test.com>`) or an agent identity is not outside work by itself.
+- When no license exists or is declared and the history is the operator's own work, recommend MIT. Present the exact holder and creation year for the operator to confirm. An approval given earlier in the session for the same repository, holder and year stands.
+
+Only after the operator confirms MIT, write it with the confirmed year and holder:
+
 ```bash
 KS=.tessl/plugins/jbaruch/coding-policy/skills/onboard-repo/; [ -d "$KS" ] || KS="$HOME/$KS"; [ -d "$KS" ] || case "$(git config --get remote.origin.url)" in git@github.com:jbaruch/coding-policy|git@github.com:jbaruch/coding-policy.git|https://github.com/jbaruch/coding-policy|https://github.com/jbaruch/coding-policy.git|ssh://git@github.com/jbaruch/coding-policy|ssh://git@github.com/jbaruch/coding-policy.git) KS=skills/onboard-repo/ ;; *) echo "coding-policy skill not found: run tessl install jbaruch/coding-policy" >&2; exit 1 ;; esac
-bash "$KS/license.sh"
+bash "$KS/license.sh" --write "<year>" "<holder>"
 ```
 
-Emits `{"license":"file|untracked|declared|readme|none","source":"<path>"|null,"outside_authors":[...],"written":false}`. A license file or a license declared in a manifest stays as it is: proceed to Step 6. For `untracked`, the license file `source` is not in git, so Step 6 would commit without it: stop and ask the operator to commit or remove it, then re-run this step. For `readme`, read the License section of `source`: when it names a license, keep it and proceed to Step 6; when it is empty or a placeholder such as "TBD", treat it as `none`. When `license` is `none`, ask the operator which license to apply. Recommend MIT when `outside_authors` and the history show the operator's own work. A stray local identity (such as `Test <test@test.com>`) or an agent identity is not outside work; real outside contributors or one large import commit are, and leave the choice open. Only after the operator confirms MIT, write the `LICENSE` for the git user and the first commit's year:
+`<year>` is four digits; `<holder>` is one non-empty line. Creates `LICENSE` at the repository root with the MIT text and stages only it. Emits `{"source":"LICENSE","written":true}`. Exit 1 with `"written":false` when `LICENSE` exists or is tracked; nothing changes, so reassess. Exit 2 on a usage, environment or I/O error with a stderr diagnostic; a staging failure names the `git add` to run. The script checks no ownership, declaration or consent; those stay with this step.
 
-```bash
-KS=.tessl/plugins/jbaruch/coding-policy/skills/onboard-repo/; [ -d "$KS" ] || KS="$HOME/$KS"; [ -d "$KS" ] || case "$(git config --get remote.origin.url)" in git@github.com:jbaruch/coding-policy|git@github.com:jbaruch/coding-policy.git|https://github.com/jbaruch/coding-policy|https://github.com/jbaruch/coding-policy.git|ssh://git@github.com/jbaruch/coding-policy|ssh://git@github.com/jbaruch/coding-policy.git) KS=skills/onboard-repo/ ;; *) echo "coding-policy skill not found: run tessl install jbaruch/coding-policy" >&2; exit 1 ;; esac
-bash "$KS/license.sh" --write
-```
-
-It also stages `LICENSE`. For any other license, the operator adds the file by hand and stages it with `git add <file>` before Step 6, since Step 6 commits only what is staged. `--write` refuses (exit 1) when a license file, tracked or not, or a manifest declaration already exists, and stops (exit 2) in a shallow clone: run `git fetch --unshallow` and re-run. Then proceed to Step 6.
+For another license the operator selects, the operator adds the file and stages it with `git add <file>` before Step 6. Step 6 commits only staged files. Then proceed to Step 6.
 
 ## Step 6 — Commit
 

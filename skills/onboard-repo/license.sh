@@ -1,33 +1,24 @@
 #!/usr/bin/env bash
-# Report a consumer repo's license state, and with --write add an MIT LICENSE.
+# Write an MIT LICENSE at the repository root for a confirmed year and holder,
+# and stage it.
 #
-# A repo already licensed by a tracked LICENSE/COPYING/UNLICENSE file (suffixed
-# names such as LICENSE-APACHE, LICENSE.txt or COPYING.LESSER included), or
-# declaring a license in a manifest (package.json, pyproject.toml's [project]
-# or [tool.poetry] table, Cargo.toml's [package] or [workspace.package] table,
-# .tessl-plugin/plugin.json, agent-plugin.yaml), keeps that choice. A license
-# file git does not track is reported as "untracked", since the onboarding
-# commit would leave it out. A README "License" heading is reported as
-# "readme" for the caller to read, since only its text says whether it names
-# a license. The report also lists commit authors other than the operator (git
-# config user.name/user.email) and known bot and agent identities, so the
-# caller can judge whether the history is the operator's own work before
-# adding MIT.
+# The caller (onboard-repo Step 5) owns every licensing judgment: that the
+# operator owns the repository, that it declares no license, and that the
+# operator confirmed MIT with this year and holder. This script checks none of
+# that. It only refuses to touch a LICENSE that already exists in the working
+# tree or the index.
 #
-# Usage: license.sh [--write]
-#   --write   Write LICENSE as MIT for the current git user.name and the year
-#             of the first commit, and stage it. Refuses (exit 1) when a
-#             license file (tracked or not) or manifest declaration already
-#             exists, and stops (exit 2) in a shallow clone, whose first
-#             visible commit would misdate the license.
+# Usage: license.sh --write <year> <holder>
+#   <year>     four-digit copyright year
+#   <holder>   copyright holder, one non-empty line
 # Out:   one JSON object on stdout:
-#          {"license":"file|untracked|declared|readme|none","source":"<path>"|null,
-#           "outside_authors":["Name <email>",...],"written":true|false}
-# Exit:  0 on success; 1 when --write is refused; 2 on a usage or environment
+#          {"source":"LICENSE","written":true|false}
+# Exit:  0 when LICENSE was created and staged; 1 when LICENSE already exists
+#        or is tracked (nothing changes); 2 on a usage, environment or I/O
 #        error. Diagnostics go to stderr.
 set -euo pipefail
 
-usage() { echo "usage: license.sh [--write]" >&2; exit 2; }
+usage() { echo "usage: license.sh --write <year> <holder> — year is four digits, holder one non-empty line" >&2; exit 2; }
 
 # Fixed MIT text. Two placeholders: the year and the holder.
 mit_text() { # <year> <holder>
@@ -56,181 +47,39 @@ SOFTWARE.
 EOF
 }
 
+refuse() { # <reason>
+  echo "error: refusing --write — $1; keep it, or change it by hand and stage it before the commit step" >&2
+  printf '{"source":"LICENSE","written":false}\n'
+  exit 1
+}
+
 main() {
-  local write=0
-  case "$#" in
-    0) ;;
-    1) [[ "$1" == "--write" ]] || usage; write=1 ;;
-    *) usage ;;
-  esac
-  # tomllib, which reads the TOML manifests, ships with Python 3.11 and later.
-  python3 -I -c 'import tomllib' 2>/dev/null || { echo "error: license.sh needs python3 3.11 or later on PATH (for tomllib) — install it and re-run" >&2; exit 2; }
-  local root
+  (( $# == 3 )) && [[ "$1" == "--write" && "$2" =~ ^[0-9]{4}$ && -n "$3" && "$3" != *[$'\n\r']* ]] || usage
+  local year="$2" holder="$3" root tracked
   if ! root=$(git rev-parse --show-toplevel); then
     echo "error: not inside a git worktree — run from within the consumer repo" >&2
     exit 2
   fi
   cd "$root"
-
-  # The detection reads files and git history only; python3 owns the parsing
-  # and the JSON (rules/script-delegation.md Script Requirements).
-  local report
-  if ! report=$(python3 -I - <<'PY'
-import json, re, subprocess, sys, tomllib
-from pathlib import Path
-
-license, source = "none", None
-names = [entry.name for entry in sorted(Path(".").iterdir())
-         if entry.is_file() and re.fullmatch(r"(?i)((un)?licen[cs]e|copying)([-._].+)?", entry.name)]
-if names:
-    # A license file git does not track would be left out of the onboarding commit.
-    listed = subprocess.run(["git", "ls-files", "-z", "--", *names], capture_output=True, text=True)
-    if listed.returncode != 0:
-        sys.stderr.write(listed.stderr)
-        sys.exit(2)
-    tracked = [name for name in names if name in listed.stdout.split("\0")]
-    license, source = ("file", tracked[0]) if tracked else ("untracked", names[0])
-
-def toml(name):
-    path = Path(name)
-    if not path.is_file():
-        return {}
-    try:
-        return tomllib.loads(path.read_text())
-    except tomllib.TOMLDecodeError:
-        sys.stderr.write(f"warning: {name} is not valid TOML; reading no license from it\n")
-        return {}
-
-def declared():
-    pkg = Path("package.json")
-    if pkg.is_file():
-        try:
-            if json.loads(pkg.read_text()).get("license"):
-                return "package.json"
-        except ValueError:
-            sys.stderr.write("warning: package.json is not valid JSON; reading no license from it\n")
-    pyproject = toml("pyproject.toml")
-    project = pyproject.get("project", {})
-    if project.get("license") or project.get("license-files") or pyproject.get("tool", {}).get("poetry", {}).get("license"):
-        return "pyproject.toml"
-    cargo = toml("Cargo.toml")
-    for package in (cargo.get("package", {}), cargo.get("workspace", {}).get("package", {})):
-        if package.get("license") or package.get("license-file"):
-            return "Cargo.toml"
-    plugin_yaml = Path("agent-plugin.yaml")
-    # A bare or quoted license key whose value is neither empty nor a comment.
-    if plugin_yaml.is_file() and re.search(r"""(?m)^(["']?)license\1[ \t]*:[ \t]*([^\s#"']|"[^"]|'[^'])""",
-                                           plugin_yaml.read_text()):
-        return "agent-plugin.yaml"
-    plugin = Path(".tessl-plugin/plugin.json")
-    if plugin.is_file():
-        try:
-            if json.loads(plugin.read_text()).get("license"):
-                return ".tessl-plugin/plugin.json"
-        except ValueError:
-            sys.stderr.write("warning: .tessl-plugin/plugin.json is not valid JSON; reading no license from it\n")
-    return None
-
-def readme_heading():
-    for readme in sorted(Path(".").iterdir()):
-        # An ATX heading (## License) or a Setext one (License over === or ---).
-        if readme.is_file() and re.match(r"(?i)readme", readme.name) and re.search(r"(?mi)^#{1,6}\s*licen[cs]e\b|^ {0,3}licen[cs]e\b[^\n]*\n {0,3}(=+|-+)[ \t]*$",
-                                          readme.read_text(errors="replace")):
-            return readme.name
-    return None
-
-if license == "none":
-    found = declared()
-    if found:
-        license, source = "declared", found
-    else:
-        found = readme_heading()
-        if found:
-            license, source = "readme", found
-
-operator_name = subprocess.run(["git", "config", "user.name"], capture_output=True, text=True).stdout.strip()
-operator_email = subprocess.run(["git", "config", "user.email"], capture_output=True, text=True).stdout.strip().lower()
-bot = re.compile(r"(?i)\[bot\]|dependabot|renovate|github-actions|noreply@anthropic\.com|noreply@openai\.com")
-outside = set()
-log = subprocess.run(["git", "log", "--format=%aN <%aE>"], capture_output=True, text=True)
-if log.returncode == 0:
-    for line in log.stdout.splitlines():
-        name, _, email = line.rpartition(" <")
-        email = email.rstrip(">").lower()
-        if bot.search(line) or email == operator_email or (operator_name and name == operator_name):
-            continue
-        outside.add(line)
-elif "does not have any commits" not in log.stderr:
-    sys.stderr.write(log.stderr)
-    sys.exit(2)
-
-print(json.dumps({"license": license, "source": source, "outside_authors": sorted(outside)}))
-PY
-  ); then
-    echo "error: could not inspect the repository's license state — check that the files above are readable and re-run" >&2
+  if [[ -e LICENSE || -L LICENSE ]]; then refuse "LICENSE already exists"; fi
+  if ! tracked=$(git ls-files -- LICENSE); then
+    echo "error: could not read the git index — check 'git status' and re-run" >&2
     exit 2
   fi
-
-  local state
-  state=$(printf '%s' "$report" | python3 -I -c 'import json,sys; print(json.load(sys.stdin)["license"])')
-  if (( write == 0 )); then
-    printf '%s' "$report" | python3 -I -c 'import json,sys; d=json.load(sys.stdin); d["written"]=False; print(json.dumps(d))'
-    return 0
-  fi
-  if [[ "$state" == "untracked" ]]; then
-    echo "error: refusing --write — license file $(printf '%s' "$report" | python3 -I -c 'import json,sys; print(json.load(sys.stdin)["source"])') is not tracked by git; commit it or remove it and re-run" >&2
-    printf '%s' "$report" | python3 -I -c 'import json,sys; d=json.load(sys.stdin); d["written"]=False; print(json.dumps(d))'
-    exit 1
-  fi
-  if [[ "$state" == "file" || "$state" == "declared" ]]; then
-    echo "error: refusing --write — the repo already has a license (${state}); keep it or change it by hand" >&2
-    printf '%s' "$report" | python3 -I -c 'import json,sys; d=json.load(sys.stdin); d["written"]=False; print(json.dumps(d))'
-    exit 1
-  fi
-
-  local holder year roots root_year root_commit shallow
-  holder=$(git config user.name) || { echo "error: git user.name is unset — set it with 'git config user.name \"Your Name\"' and re-run" >&2; exit 2; }
-  [[ -n "$holder" ]] || { echo "error: git user.name is empty — set it with 'git config user.name \"Your Name\"' and re-run" >&2; exit 2; }
-  # An unborn HEAD (no commits yet) dates the license this year; any other
-  # failure to read the history stops, since it would misdate the license.
-  year=""
-  if git rev-parse --verify --quiet HEAD >/dev/null; then
-    # A shallow clone shows a later commit as the first one.
-    if ! shallow=$(git rev-parse --is-shallow-repository); then
-      echo "error: could not tell whether the clone is shallow — repair the repository and re-run" >&2
-      exit 2
-    fi
-    if [[ "$shallow" == "true" ]]; then
-      echo "error: this is a shallow clone, so its first commit would misdate the license — run 'git fetch --unshallow' and re-run" >&2
-      exit 2
-    fi
-    if ! roots=$(git rev-list --max-parents=0 HEAD); then
-      echo "error: could not list the repository's first commits — run 'git fsck', repair the history and re-run" >&2
-      exit 2
-    fi
-    while IFS= read -r root_commit; do
-      [[ -n "$root_commit" ]] || continue
-      if ! root_year=$(git log -1 --format=%ad --date=format:%Y "$root_commit"); then
-        echo "error: could not read the date of first commit ${root_commit} — repair the history and re-run" >&2
-        exit 2
-      fi
-      if [[ -z "$year" || "$root_year" < "$year" ]]; then year="$root_year"; fi
-    done <<< "$roots"
-  elif ! year=$(date +%Y); then
-    echo "error: cannot read the current year" >&2
+  # A tracked LICENSE deleted from the working tree is still the repo's license.
+  if [[ -n "$tracked" ]]; then refuse "LICENSE is tracked by git but missing from the working tree; restore it with 'git restore LICENSE'"; fi
+  # noclobber creates LICENSE exclusively, so a file appearing since the check
+  # above is never overwritten.
+  if ! ( set -o noclobber; mit_text "$year" "$holder" > LICENSE ); then
+    echo "error: could not create LICENSE — check the repo root is writable and LICENSE is absent, then re-run" >&2
     exit 2
   fi
-  if ! mit_text "$year" "$holder" > LICENSE; then
-    echo "error: could not write LICENSE — check the repo root is writable and re-run" >&2
-    exit 2
-  fi
-  # Staged here, so the onboarding commit takes this LICENSE and never an
-  # untracked draft that was already in the tree.
+  # Staged here, so the onboarding commit takes this LICENSE.
   if ! git add -- LICENSE; then
     echo "error: wrote LICENSE but could not stage it — run 'git add LICENSE' and re-run the commit step" >&2
     exit 2
   fi
-  printf '%s' "$report" | python3 -I -c 'import json,sys; d=json.load(sys.stdin); d.update(license="file", source="LICENSE", written=True); print(json.dumps(d))'
+  printf '{"source":"LICENSE","written":true}\n'
 }
 
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
