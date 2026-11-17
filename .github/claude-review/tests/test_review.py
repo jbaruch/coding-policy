@@ -31,6 +31,8 @@ class ReviewTest(unittest.TestCase):
         self.changed = False
         self.fork = False
         self.fetched = HEAD
+        self.review_pages = [[]]
+        self.lookup_fails = False
         self.output = {"type": "result", "subtype": "success", "is_error": False,
                        "structured_output": {"summary": "One concrete defect.", "findings": [
                            {"path": "app.py", "line": 2, "severity": "blocking", "message": "Empty input divides by zero."}]}}
@@ -61,6 +63,11 @@ class ReviewTest(unittest.TestCase):
             self.claude_calls.append((args, env, data))
             self.assertEqual(sorted(Path(cwd).iterdir()), [])
             return json.dumps(self.output)
+        elif args[:2] == ["gh", "api"]:
+            self.assertEqual(args[2:5], ["--paginate", "--slurp", "repos/o/r/pulls/1/reviews?per_page=100"])
+            if self.lookup_fails:
+                raise reviewer.ReviewError("gh failed (exit 1); check CI authentication, permissions and CLI availability")
+            return json.dumps(self.review_pages)
         elif args[0] == "bash":
             return subprocess.run(args, text=True, check=True, capture_output=True).stdout
         return ""
@@ -107,6 +114,51 @@ class ReviewTest(unittest.TestCase):
         self.assertEqual(self.review()["blocking"], 1)
         self.assertEqual(self.posts[-1]["event"], "REQUEST_CHANGES")
         self.assertIn("## Blocking findings", self.posts[-1]["body"])
+
+    def earlier_review(self, state, commit=HEAD, login="jbaruch-claude-reviewer[bot]"):
+        return {"id": 1, "user": {"login": login}, "state": state, "commit_id": commit, "body": "earlier"}
+
+    def test_first_verdict_on_a_head_stands(self):
+        for state in ("APPROVED", "CHANGES_REQUESTED"):
+            with self.subTest(state=state):
+                # The matching review sits on the second page, so pagination is read whole.
+                self.review_pages = [[self.earlier_review("COMMENTED", "c" * 40)], [self.earlier_review(state)]]
+                with patch("sys.stderr") as stderr:
+                    result = self.review()
+                self.assertEqual(result, {"state": "already_reviewed", "reviewer": "claude", "head_sha": HEAD})
+                self.assertEqual(self.posts, [])
+                logged = "".join(call.args[0] for call in stderr.write.call_args_list)
+                self.assertIn(f"already reviewed o/r#1 at {HEAD}", logged)
+
+    def test_older_head_other_reviewer_or_dismissed_review_does_not_suppress_the_post(self):
+        # A quality review is never ruled-dismissed, so any dismissal, GitHub's
+        # automatic stale-review dismissal included, lets a new review run.
+        for review in (self.earlier_review("APPROVED", "c" * 40),
+                       self.earlier_review("APPROVED", login="coding-policy-fleet-reviewer[bot]"),
+                       self.earlier_review("DISMISSED")):
+            with self.subTest(review=review):
+                self.posts.clear()
+                self.review_pages = [[review]]
+                self.assertEqual(self.review()["state"], "posted")
+                self.assertEqual(len(self.posts), 1)
+                self.assertEqual(self.posts[0]["commit_id"], HEAD)
+
+    def test_failed_review_lookup_fails_without_posting(self):
+        self.lookup_fails = True
+        with self.assertRaisesRegex(reviewer.ReviewError, "gh failed"):
+            self.review()
+        self.assertEqual(self.posts, [])
+        with patch("sys.argv", ["review.py", "o", "r", "1", "main"]), patch("sys.stderr"), patch("sys.stdout"):
+            self.assertEqual(reviewer.main(), 1)
+        self.assertEqual(self.posts, [])
+
+    def test_unreadable_review_list_fails_without_posting(self):
+        for pages in ({"message": "Not Found"}, [{"id": 1}], [["not a review"]]):
+            with self.subTest(pages=pages):
+                self.review_pages = pages
+                with self.assertRaisesRegex(reviewer.ReviewError, "unreadable review list"):
+                    self.review()
+        self.assertEqual(self.posts, [])
 
     def test_wrong_app_identity_is_refused_before_any_model_or_post(self):
         with patch.dict(os.environ, {"REVIEWER_LOGIN": "coding-policy-fleet-reviewer[bot]"}):

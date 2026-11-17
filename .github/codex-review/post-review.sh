@@ -18,10 +18,20 @@
 # from approving (`github-actions[bot]` — HTTP 422) falls back to COMMENT on a
 # nonblocking result, so the verdict is never lost.
 #
+# The first posted verdict on a head stands (issue #841): when REVIEWER_LOGIN
+# already posted a review whose commit_id is the reviewed head, nothing is
+# posted. A dismissed review counts only when it was a ruled dismissal.
+# fleet-review.yml runs one review of a PR's lane at a time, and a dispatch
+# queued behind it can still reach the same head; its verdict could disagree.
+# A new commit is what earns a new verdict.
+#
 # Usage: post-review.sh <owner> <repo> <pr-number> <result-json-file> <reviewed-sha>
+# Env:   GH_TOKEN, and REVIEWER_LOGIN, the login that token posts as
 # Out:   one JSON object on stdout:
 #          {"state":"posted","event":"...","head_sha":"...","findings":N,"blocking":N,"advisory":N}
-# Exit:  0 on success; non-zero with a stderr diagnostic on failure.
+#          {"state":"already_reviewed","head_sha":"..."}  (nothing posted)
+# Exit:  0 on success or an already-reviewed head; non-zero with a stderr
+#        diagnostic on failure, a failed review lookup included.
 
 set -euo pipefail
 
@@ -30,16 +40,57 @@ if ! command -v jq >/dev/null 2>&1; then
   exit 2
 fi
 
+# Whether REVIEWER_LOGIN already posted a verdict on the head: return 0 when it
+# did, 1 when it did not. A failed lookup exits 1: "unknown" must never read as
+# "not reviewed". A dismissed review keeps its verdict only when
+# dismiss-ruled-review.sh dismissed it; after GitHub's stale-review dismissal,
+# or any other, a new review runs. poll-pr-reviews.sh's resolve_ruled_dismissal
+# owns that test.
+# Args: <owner> <repo> <pr> <reviewed-sha>
+head_reviewed() {
+  local owner="$1" repo="$2" pr="$3" reviewed_sha="$4"
+  local reviews verdicts state id ruled
+  local poll_reviews; poll_reviews="$(dirname -- "${BASH_SOURCE[0]}")/../../skills/release/poll-pr-reviews.sh"
+  if ! reviews=$(gh api --paginate "repos/${owner}/${repo}/pulls/${pr}/reviews?per_page=100"); then
+    echo "error: could not list the reviews on ${owner}/${repo}#${pr}, so whether ${reviewed_sha} already has a verdict is unknown; nothing was posted — retry once the GitHub API answers" >&2
+    exit 1
+  fi
+  if ! verdicts=$(jq -s -r --arg who "$REVIEWER_LOGIN" --arg sha "$reviewed_sha" \
+      '(add // [])[] | select(.user.login == $who and .commit_id == $sha
+         and (.state | IN("APPROVED", "COMMENTED", "CHANGES_REQUESTED", "DISMISSED"))) | "\(.state) \(.id)"' <<<"$reviews"); then
+    echo "error: the review list for ${owner}/${repo}#${pr} is not the expected JSON; nothing was posted — retry, and inspect the GitHub API response if it persists" >&2
+    exit 1
+  fi
+  while read -r state id; do
+    [[ -n "$state" ]] || continue
+    if [[ "$state" == DISMISSED ]]; then
+      # shellcheck source=/dev/null
+      if ! ruled=$(source "$poll_reviews" && resolve_ruled_dismissal "$owner" "$repo" "$pr" "{\"_dismissed_review_id\": ${id}}" | jq -r .state); then
+        echo "error: could not read how review ${id} on ${owner}/${repo}#${pr} was dismissed, so whether ${reviewed_sha} already has a verdict is unknown; nothing was posted — retry once the GitHub API answers" >&2
+        exit 1
+      fi
+      [[ "$ruled" == RULED ]] || continue
+    fi
+    return 0
+  done <<<"$verdicts"
+  return 1
+}
+
 # Submit ONE review event to the PR, retrying transient failures with backoff.
+# Every attempt first checks head_reviewed, so a run that finished reviewing
+# first wins, and a POST that GitHub kept but whose response was lost is not
+# posted again.
 # Args: <owner> <repo> <pr> <event> <body> <reviewed-sha>
-# Return: 0 posted; 22 the event was rejected as unprocessable (HTTP 422 — e.g.
-#   an APPROVE from a token that cannot approve); 1 other failure after retries.
+# Return: 0 posted; 3 the head already has a verdict, nothing posted; 22 the
+#   event was rejected as unprocessable (HTTP 422 — e.g. an APPROVE from a token
+#   that cannot approve); 1 other failure after retries.
 submit_review() {
   local owner="$1" repo="$2" pr="$3" event="$4" body="$5" reviewed_sha="$6"
   local payload attempt=0 max=3 err
   payload=$(jq -n --arg event "$event" --arg body "$body" --arg commit "$reviewed_sha" '{event: $event, body: $body, commit_id: $commit}')
   while :; do
     attempt=$((attempt + 1))
+    head_reviewed "$owner" "$repo" "$pr" "$reviewed_sha" && return 3
     # Capture stderr (stdout discarded) so a non-retryable 422 can be told apart
     # from any other failure (which is retried).
     if err=$(printf '%s' "$payload" | gh api "repos/${owner}/${repo}/pulls/${pr}/reviews" --method POST --input - 2>&1 1>/dev/null); then
@@ -68,6 +119,10 @@ main() {
   local owner="$1" repo="$2" pr="$3" result="$4" reviewed_sha="$5"
   if [[ ! "$reviewed_sha" =~ ^[a-f0-9]{40}$ ]]; then
     echo 'error: reviewed-sha must be the complete lowercase source commit captured before review — rerun the driver against a verified checkout' >&2
+    exit 2
+  fi
+  if [[ -z "${REVIEWER_LOGIN:-}" ]]; then
+    echo 'error: set REVIEWER_LOGIN to the login GH_TOKEN posts as (the App bot login, or github-actions[bot]) so an already-reviewed head can be recognized' >&2
     exit 2
   fi
 
@@ -115,11 +170,15 @@ main() {
   submit_review "$owner" "$repo" "$pr" "$event" "$body" "$reviewed_sha" || rc=$?
   if (( rc == 22 )) && [[ "$event" == "APPROVE" ]]; then
     echo "post-review: APPROVE rejected as unprocessable (HTTP 422) — this token cannot approve; posting COMMENT instead" >&2
-    posted="COMMENT"
-    submit_review "$owner" "$repo" "$pr" "COMMENT" "$body" "$reviewed_sha" || exit 1
-  elif (( rc != 0 )); then
-    exit 1
+    posted="COMMENT"; rc=0
+    submit_review "$owner" "$repo" "$pr" "COMMENT" "$body" "$reviewed_sha" || rc=$?
   fi
+  if (( rc == 3 )); then
+    echo "post-review: ${REVIEWER_LOGIN} already reviewed ${owner}/${repo}#${pr} at ${reviewed_sha}; the first verdict on a head stands, so this run posts nothing more" >&2
+    jq -n --arg head_sha "$reviewed_sha" '{state: "already_reviewed", head_sha: $head_sha}'
+    return 0
+  fi
+  (( rc == 0 )) || exit 1
 
   jq -n --arg event "$posted" \
     --arg head_sha "$reviewed_sha" \

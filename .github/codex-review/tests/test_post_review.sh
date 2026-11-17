@@ -21,14 +21,45 @@ bad() { printf 'FAIL - %s\n' "$1"; fail=$((fail+1)); }
 
 # Mock gh: capture the /reviews POST payload (arrives on stdin via --input -).
 # With MOCK_422_ON_APPROVE=1, an APPROVE submit fails HTTP 422 (as github-actions[bot]
-# would), so the fallback-to-COMMENT path can be exercised.
+# would), so the fallback-to-COMMENT path can be exercised. The review lookup
+# (a GET) prints MOCK_REVIEWS, or fails like an API outage with MOCK_LOOKUP_FAIL=1;
+# the timeline lookup prints MOCK_TIMELINE, or fails with MOCK_LOOKUP_FAIL=timeline.
+# With MOCK_PERSISTED set to a file, GitHub keeps each POST as a review appended
+# to that file, which the lookup also lists, but the response is lost (HTTP 502).
 GH_CAPTURE=""
+MOCK_PERSISTED=""
 MOCK_422_ON_APPROVE=0
+MOCK_REVIEWS='[]'
+MOCK_TIMELINE='[]'
+MOCK_LOOKUP_FAIL=0
 REVIEWED_SHA=1111111111111111111111111111111111111111
 LATER_HEAD_SHA=2222222222222222222222222222222222222222
+OLDER_HEAD_SHA=3333333333333333333333333333333333333333
+export REVIEWER_LOGIN="coding-policy-fleet-reviewer[bot]"
 gh() {
+  if [[ "${1:-}" == "api" && "$*" == */timeline* ]]; then
+    [[ "$MOCK_LOOKUP_FAIL" != "timeline" ]] || { echo "gh: Server Error (HTTP 502)" >&2; return 1; }
+    printf '%s\n' "$MOCK_TIMELINE"
+    return 0
+  fi
+  if [[ "${1:-}" == "api" && "$*" == */reviews* && "$*" != *"--method POST"* ]]; then
+    if [[ "$MOCK_LOOKUP_FAIL" == "1" ]]; then
+      echo "gh: Server Error (HTTP 502)" >&2
+      return 1
+    fi
+    printf '%s\n' "$MOCK_REVIEWS"
+    [[ -z "$MOCK_PERSISTED" || ! -f "$MOCK_PERSISTED" ]] || cat "$MOCK_PERSISTED"
+    return 0
+  fi
   if [[ "${1:-}" == "api" && "$*" == */reviews* ]]; then
     local payload; payload=$(cat)
+    if [[ -n "$MOCK_PERSISTED" ]]; then
+      jq -c --arg login "$REVIEWER_LOGIN" '[{id: 2, user: {login: $login}, commit_id,
+        state: {APPROVE: "APPROVED", REQUEST_CHANGES: "CHANGES_REQUESTED", COMMENT: "COMMENTED"}[.event]}]' \
+        <<<"$payload" >> "$MOCK_PERSISTED"
+      echo "gh: Bad Gateway (HTTP 502)" >&2
+      return 1
+    fi
     # GitHub defaults an omitted commit_id to the newer post-time head.
     jq --arg latest "$LATER_HEAD_SHA" '.commit_id //= $latest' <<<"$payload" > "$GH_CAPTURE"
     local ev; ev=$(jq -r '.event' <<<"$payload")
@@ -197,6 +228,123 @@ t_missing_or_invalid_source() {
   rm -rf "$dir"
 }
 
+# One review by <login> in <state> on <commit>, as the lookup's only page.
+review_page() {
+  jq -cn --arg login "$1" --arg state "$2" --arg commit "$3" \
+    '[{"id":1,"user":{"login":$login},"state":$state,"commit_id":$commit,"body":"earlier verdict"}]'
+}
+
+# How GitHub's timeline records review 1's dismissal: by dismiss-ruled-review.sh,
+# and by GitHub's automatic stale-review dismissal.
+RULED_TIMELINE='[{"event":"review_dismissed","dismissed_review":{"review_id":1,"dismissal_message":"JUDGE-RULED: 0123456789abcdef covers 1 blocking findings at head; tracked in #9"}}]'
+STALE_TIMELINE='[{"event":"review_dismissed","dismissed_review":{"review_id":1,"dismissal_message":null}}]'
+
+# --- the first verdict on a head stands: a later run on that head posts nothing ---
+t_head_already_reviewed() {
+  local state dir out rc
+  for state in APPROVED CHANGES_REQUESTED DISMISSED; do
+    dir=$(mktemp -d) || { bad "already reviewed: mktemp -d failed"; return; }
+    GH_CAPTURE="$dir/payload.json"; MOCK_TIMELINE="$RULED_TIMELINE"
+    # The matching review sits on the second page, so pagination is read whole.
+    MOCK_REVIEWS="$(review_page "$REVIEWER_LOGIN" COMMENTED "$OLDER_HEAD_SHA")"$'\n'"$(review_page "$REVIEWER_LOGIN" "$state" "$REVIEWED_SHA")"
+    printf '{"summary":"Policy loaded: 23 rule files. One violation.","findings":[{"path":"a.sh","line":1,"rule":"error-handling","severity":"blocking","message":"m"}]}' > "$dir/final.json"
+    rc=0; out=$(run_main owner repo 5 "$dir/final.json" 2>"$dir/err") || rc=$?
+    MOCK_REVIEWS='[]'; MOCK_TIMELINE='[]'
+    if [[ $rc -eq 0 && ! -f "$GH_CAPTURE" && "$(jq -r .state <<<"$out")" == "already_reviewed" ]] \
+       && grep -q "already reviewed owner/repo#5 at ${REVIEWED_SHA}" "$dir/err"; then
+      ok "existing ${state} review on the head -> posts nothing, exit 0, logged"
+    else
+      bad "existing ${state} review on the head must suppress the post (rc=$rc, out=$out)"
+    fi
+    rm -rf "$dir"
+  done
+}
+
+# --- an older head's review, another reviewer's on this head, or a stale-
+# dismissed one on this head does not count ---
+t_other_reviews_do_not_suppress() {
+  local dir out rc label
+  for label in older-head other-reviewer stale-dismissed; do
+    dir=$(mktemp -d) || { bad "other reviews: mktemp -d failed"; return; }
+    GH_CAPTURE="$dir/payload.json"
+    case "$label" in
+      older-head) MOCK_REVIEWS=$(review_page "$REVIEWER_LOGIN" APPROVED "$OLDER_HEAD_SHA") ;;
+      other-reviewer) MOCK_REVIEWS=$(review_page "jbaruch-claude-reviewer[bot]" APPROVED "$REVIEWED_SHA") ;;
+      stale-dismissed) MOCK_REVIEWS=$(review_page "$REVIEWER_LOGIN" DISMISSED "$REVIEWED_SHA"); MOCK_TIMELINE="$STALE_TIMELINE" ;;
+    esac
+    printf '{"summary":"Policy loaded: 23 rule files. Clean.","findings":[]}' > "$dir/final.json"
+    rc=0; out=$(run_main owner repo 5 "$dir/final.json") || rc=$?
+    MOCK_REVIEWS='[]'; MOCK_TIMELINE='[]'
+    if [[ $rc -eq 0 && "$(jq -r .state <<<"$out")" == "posted" && "$(jq -r .commit_id "$GH_CAPTURE" 2>/dev/null)" == "$REVIEWED_SHA" ]]; then
+      ok "${label} review -> the verdict is posted"
+    else
+      bad "${label} review must not suppress the post (rc=$rc, out=$out)"
+    fi
+    rm -rf "$dir"
+  done
+}
+
+# --- a failed review or dismissal lookup fails visibly and posts nothing ---
+t_lookup_failure_refuses_to_post() {
+  local dir rc mode expect
+  for mode in 1 timeline; do
+    dir=$(mktemp -d) || { bad "lookup failure: mktemp -d failed"; return; }
+    GH_CAPTURE="$dir/payload.json"; MOCK_LOOKUP_FAIL=$mode; rc=0
+    MOCK_REVIEWS=$(review_page "$REVIEWER_LOGIN" DISMISSED "$REVIEWED_SHA")
+    if [[ "$mode" == 1 ]]; then expect="could not list the reviews"; else expect="could not read how review 1"; fi
+    printf '{"summary":"Policy loaded: 23 rule files. Clean.","findings":[]}' > "$dir/final.json"
+    run_main owner repo 5 "$dir/final.json" >/dev/null 2>"$dir/err" || rc=$?
+    MOCK_LOOKUP_FAIL=0; MOCK_REVIEWS='[]'
+    if [[ $rc -ne 0 && ! -f "$GH_CAPTURE" ]] && grep -q "$expect" "$dir/err"; then
+      ok "failed ${mode/1/review} lookup -> non-zero exit, nothing posted"
+    else
+      bad "failed ${mode/1/review} lookup must fail without posting (rc=$rc)"
+    fi
+    rm -rf "$dir"
+  done
+}
+
+# --- an unparseable lookup response fails visibly and posts nothing ---
+t_lookup_garbage_refuses_to_post() {
+  local dir rc=0
+  dir=$(mktemp -d) || { bad "lookup garbage: mktemp -d failed"; return; }
+  GH_CAPTURE="$dir/payload.json"; MOCK_REVIEWS='<html>not json</html>'
+  printf '{"summary":"Policy loaded: 23 rule files. Clean.","findings":[]}' > "$dir/final.json"
+  run_main owner repo 5 "$dir/final.json" >/dev/null 2>&1 || rc=$?
+  MOCK_REVIEWS='[]'
+  if [[ $rc -ne 0 && ! -f "$GH_CAPTURE" ]]; then ok "unparseable review list -> non-zero exit, nothing posted";
+  else bad "unparseable review list must fail without posting (rc=$rc)"; fi
+  rm -rf "$dir"
+}
+
+# --- a POST GitHub kept but whose response was lost is not posted again ---
+t_lost_response_posts_once() {
+  local dir out rc=0
+  dir=$(mktemp -d) || { bad "lost response: mktemp -d failed"; return; }
+  GH_CAPTURE="$dir/payload.json"; MOCK_PERSISTED="$dir/persisted"
+  printf '{"summary":"Policy loaded: 23 rule files. Clean.","findings":[]}' > "$dir/final.json"
+  out=$(run_main owner repo 5 "$dir/final.json" 2>/dev/null) || rc=$?
+  MOCK_PERSISTED=""
+  if [[ $rc -eq 0 && "$(jq -r .state <<<"$out")" == "already_reviewed" && "$(wc -l < "$dir/persisted")" -eq 1 ]]; then
+    ok "lost POST response -> the retry finds the kept review, exactly one persisted"
+  else
+    bad "lost POST response must persist exactly one review (rc=$rc, out=$out, persisted=$(wc -l < "$dir/persisted"))"
+  fi
+  rm -rf "$dir"
+}
+
+# --- without REVIEWER_LOGIN the identity is unknown: refuse before any API call ---
+t_missing_reviewer_login() {
+  local dir rc=0
+  dir=$(mktemp -d) || { bad "missing login: mktemp -d failed"; return; }
+  GH_CAPTURE="$dir/payload.json"
+  printf '{"summary":"Clean","findings":[]}' > "$dir/final.json"
+  (unset REVIEWER_LOGIN; run_main owner repo 5 "$dir/final.json") >/dev/null 2>&1 || rc=$?
+  if [[ $rc -eq 2 && ! -f "$GH_CAPTURE" ]]; then ok "missing REVIEWER_LOGIN -> exit 2, nothing posted";
+  else bad "missing REVIEWER_LOGIN must refuse (rc=$rc)"; fi
+  rm -rf "$dir"
+}
+
 echo "== post-review.sh tests =="
 t_pass
 t_pass_422_fallback
@@ -207,5 +355,11 @@ t_missing_severity_blocks
 t_missing_file
 t_invalid_json
 t_missing_or_invalid_source
+t_head_already_reviewed
+t_other_reviews_do_not_suppress
+t_lookup_failure_refuses_to_post
+t_lookup_garbage_refuses_to_post
+t_lost_response_posts_once
+t_missing_reviewer_login
 echo "== summary: ${pass} passed, ${fail} failed =="
 [[ "$fail" -eq 0 ]]

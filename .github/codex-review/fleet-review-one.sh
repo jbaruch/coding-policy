@@ -14,11 +14,12 @@
 # Args: <owner> <repo> <pr-number> <base-ref>
 # Env:
 #   GH_TOKEN     App installation token (used to fetch + to post)
+#   REVIEWER_LOGIN  the App's bot login (post-review.sh skips a head it already reviewed)
 #   CENTRAL_DIR  path to this coding-policy checkout (holds .github/codex-review/*)
 #   CODEX_HOME   Codex home with a written+masked auth.json (default: $HOME/.codex)
 #   codex, tessl, gh, jq on PATH
 # Out:  the post-review.sh JSON object on stdout on success
-# Exit: 0 on a posted review; non-zero with a stderr diagnostic.
+# Exit: 0 on a posted review or an already-reviewed head; non-zero with a stderr diagnostic.
 set -euo pipefail
 
 # `WORK` (throwaway PR checkout) and `POLICY` (non-workspace tessl install) are

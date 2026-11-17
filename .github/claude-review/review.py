@@ -7,6 +7,9 @@ only its subscription token, a replacement system prompt and a throwaway source
 checkout. No policy installation, GitHub token, settings, history or execution
 tools enter its session. Findings are blocking or advisory; the verdict is bound
 to the exact analyzed commit. A failed/invalid/stale review fails visibly without posting.
+The first verdict posted on a head stands: when this App already reviewed the
+head, nothing is posted (issue #841). A dismissed review does not count: only
+policy reviews are ever ruled-dismissed (skills/release/dismiss-ruled-review.sh).
 """
 
 import base64
@@ -159,6 +162,18 @@ def review_pr(owner: str, repo: str, pr: str, base: str) -> dict:
             body += f"\n## {severity} findings\n"
             for finding in findings:
                 body += f"\n- {finding['path']}:{finding['line']} — {finding['message']}\n"
+    # A dispatch queued behind a finished review can reach the same head; the
+    # first posted verdict stands. A failed lookup raises, so "unknown" never reads as "not reviewed".
+    pages = json.loads(run(["gh", "api", "--paginate", "--slurp", endpoint + "/reviews?per_page=100"]))
+    if (not isinstance(pages, list) or not all(isinstance(page, list) for page in pages)
+            or not all(isinstance(item, dict) for page in pages for item in page)):
+        raise ReviewError("GitHub returned an unreadable review list; nothing was posted; retry the review")
+    if any(item.get("commit_id") == head and (item.get("user") or {}).get("login") == lane["quality_login"]
+           and item.get("state") in ("APPROVED", "COMMENTED", "CHANGES_REQUESTED")
+           for page in pages for item in page):
+        print(f"{lane['quality_login']} already reviewed {owner}/{repo}#{pr} at {head}; "
+              "the first verdict on a head stands, so nothing was posted", file=sys.stderr)
+        return {"state": "already_reviewed", "reviewer": "claude", "head_sha": head}
     # An App's COMMENT does not supersede its earlier REQUEST_CHANGES. Approve
     # every nonblocking result, with advisory notes in the body. The dedicated
     # App is distinct from PR authors and the policy reviewer.
