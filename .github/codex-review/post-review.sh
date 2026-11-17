@@ -19,10 +19,11 @@
 # nonblocking result, so the verdict is never lost.
 #
 # The first posted verdict on a head stands (issue #841): when REVIEWER_LOGIN
-# already posted a review whose commit_id is the reviewed head, a dismissed one
-# included, nothing is posted. fleet-review.yml runs one review of a PR's lane
-# at a time, and a dispatch queued behind it can still reach the same head; its
-# verdict could disagree. A new commit is what earns a new verdict.
+# already posted a review whose commit_id is the reviewed head, nothing is
+# posted. A dismissed review counts only when it was a ruled dismissal.
+# fleet-review.yml runs one review of a PR's lane at a time, and a dispatch
+# queued behind it can still reach the same head; its verdict could disagree.
+# A new commit is what earns a new verdict.
 #
 # Usage: post-review.sh <owner> <repo> <pr-number> <result-json-file> <reviewed-sha>
 # Env:   GH_TOKEN, and REVIEWER_LOGIN, the login that token posts as
@@ -123,17 +124,33 @@ main() {
 
   # Checked just before posting, so a run that finished reviewing first wins.
   # A failed lookup refuses to post: "unknown" must never read as "not reviewed".
-  local reviews already
+  local reviews verdicts state id ruled already=false
+  local poll_reviews; poll_reviews="$(dirname -- "${BASH_SOURCE[0]}")/../../skills/release/poll-pr-reviews.sh"
   if ! reviews=$(gh api --paginate "repos/${owner}/${repo}/pulls/${pr}/reviews?per_page=100"); then
     echo "error: could not list the reviews on ${owner}/${repo}#${pr}, so whether ${reviewed_sha} already has a verdict is unknown; nothing was posted — retry once the GitHub API answers" >&2
     exit 1
   fi
-  if ! already=$(jq -s -r --arg who "$REVIEWER_LOGIN" --arg sha "$reviewed_sha" \
-      '(add // []) | any(.[]; .user.login == $who and .commit_id == $sha
-         and (.state | IN("APPROVED", "COMMENTED", "CHANGES_REQUESTED", "DISMISSED")))' <<<"$reviews"); then
+  if ! verdicts=$(jq -s -r --arg who "$REVIEWER_LOGIN" --arg sha "$reviewed_sha" \
+      '(add // [])[] | select(.user.login == $who and .commit_id == $sha
+         and (.state | IN("APPROVED", "COMMENTED", "CHANGES_REQUESTED", "DISMISSED"))) | "\(.state) \(.id)"' <<<"$reviews"); then
     echo "error: the review list for ${owner}/${repo}#${pr} is not the expected JSON; nothing was posted — retry, and inspect the GitHub API response if it persists" >&2
     exit 1
   fi
+  # A dismissed review keeps its verdict only when dismiss-ruled-review.sh
+  # dismissed it; after GitHub's stale-review dismissal, or any other, a new
+  # review runs. poll-pr-reviews.sh's resolve_ruled_dismissal owns that test.
+  while read -r state id; do
+    [[ -n "$state" ]] || continue
+    if [[ "$state" == DISMISSED ]]; then
+      # shellcheck source=/dev/null
+      if ! ruled=$(source "$poll_reviews" && resolve_ruled_dismissal "$owner" "$repo" "$pr" "{\"_dismissed_review_id\": ${id}}" | jq -r .state); then
+        echo "error: could not read how review ${id} on ${owner}/${repo}#${pr} was dismissed, so whether ${reviewed_sha} already has a verdict is unknown; nothing was posted — retry once the GitHub API answers" >&2
+        exit 1
+      fi
+      [[ "$ruled" == RULED ]] || continue
+    fi
+    already=true
+  done <<<"$verdicts"
   if [[ "$already" == "true" ]]; then
     echo "post-review: ${REVIEWER_LOGIN} already reviewed ${owner}/${repo}#${pr} at ${reviewed_sha}; the first verdict on a head stands, so nothing was posted" >&2
     jq -n --arg head_sha "$reviewed_sha" '{state: "already_reviewed", head_sha: $head_sha}'

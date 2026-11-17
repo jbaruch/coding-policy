@@ -70,7 +70,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        lane: [policy, quality]
+        lane: ${{ fromJSON(github.event.inputs.reviewer == 'quality' && '["quality"]' || github.event.inputs.reviewer == 'policy' && '["policy"]' || '["policy","quality"]') }}
     # One poll per lane at a time; a new poll queues behind a running one.
     concurrency:
       group: fleet-review-poll-${{ matrix.lane }}

@@ -22,16 +22,23 @@ bad() { printf 'FAIL - %s\n' "$1"; fail=$((fail+1)); }
 # Mock gh: capture the /reviews POST payload (arrives on stdin via --input -).
 # With MOCK_422_ON_APPROVE=1, an APPROVE submit fails HTTP 422 (as github-actions[bot]
 # would), so the fallback-to-COMMENT path can be exercised. The review lookup
-# (a GET) prints MOCK_REVIEWS, or fails like an API outage with MOCK_LOOKUP_FAIL=1.
+# (a GET) prints MOCK_REVIEWS, or fails like an API outage with MOCK_LOOKUP_FAIL=1;
+# the timeline lookup prints MOCK_TIMELINE, or fails with MOCK_LOOKUP_FAIL=timeline.
 GH_CAPTURE=""
 MOCK_422_ON_APPROVE=0
 MOCK_REVIEWS='[]'
+MOCK_TIMELINE='[]'
 MOCK_LOOKUP_FAIL=0
 REVIEWED_SHA=1111111111111111111111111111111111111111
 LATER_HEAD_SHA=2222222222222222222222222222222222222222
 OLDER_HEAD_SHA=3333333333333333333333333333333333333333
 export REVIEWER_LOGIN="coding-policy-fleet-reviewer[bot]"
 gh() {
+  if [[ "${1:-}" == "api" && "$*" == */timeline* ]]; then
+    [[ "$MOCK_LOOKUP_FAIL" != "timeline" ]] || { echo "gh: Server Error (HTTP 502)" >&2; return 1; }
+    printf '%s\n' "$MOCK_TIMELINE"
+    return 0
+  fi
   if [[ "${1:-}" == "api" && "$*" == */reviews* && "$*" != *"--method POST"* ]]; then
     if [[ "$MOCK_LOOKUP_FAIL" == "1" ]]; then
       echo "gh: Server Error (HTTP 502)" >&2
@@ -216,17 +223,22 @@ review_page() {
     '[{"id":1,"user":{"login":$login},"state":$state,"commit_id":$commit,"body":"earlier verdict"}]'
 }
 
+# How GitHub's timeline records review 1's dismissal: by dismiss-ruled-review.sh,
+# and by GitHub's automatic stale-review dismissal.
+RULED_TIMELINE='[{"event":"review_dismissed","dismissed_review":{"review_id":1,"dismissal_message":"JUDGE-RULED: 0123456789abcdef covers 1 blocking findings at head; tracked in #9"}}]'
+STALE_TIMELINE='[{"event":"review_dismissed","dismissed_review":{"review_id":1,"dismissal_message":null}}]'
+
 # --- the first verdict on a head stands: a later run on that head posts nothing ---
 t_head_already_reviewed() {
   local state dir out rc
   for state in APPROVED CHANGES_REQUESTED DISMISSED; do
     dir=$(mktemp -d) || { bad "already reviewed: mktemp -d failed"; return; }
-    GH_CAPTURE="$dir/payload.json"
+    GH_CAPTURE="$dir/payload.json"; MOCK_TIMELINE="$RULED_TIMELINE"
     # The matching review sits on the second page, so pagination is read whole.
     MOCK_REVIEWS="$(review_page "$REVIEWER_LOGIN" COMMENTED "$OLDER_HEAD_SHA")"$'\n'"$(review_page "$REVIEWER_LOGIN" "$state" "$REVIEWED_SHA")"
     printf '{"summary":"Policy loaded: 23 rule files. One violation.","findings":[{"path":"a.sh","line":1,"rule":"error-handling","severity":"blocking","message":"m"}]}' > "$dir/final.json"
     rc=0; out=$(run_main owner repo 5 "$dir/final.json" 2>"$dir/err") || rc=$?
-    MOCK_REVIEWS='[]'
+    MOCK_REVIEWS='[]'; MOCK_TIMELINE='[]'
     if [[ $rc -eq 0 && ! -f "$GH_CAPTURE" && "$(jq -r .state <<<"$out")" == "already_reviewed" ]] \
        && grep -q "already reviewed owner/repo#5 at ${REVIEWED_SHA}" "$dir/err"; then
       ok "existing ${state} review on the head -> posts nothing, exit 0, logged"
@@ -237,20 +249,21 @@ t_head_already_reviewed() {
   done
 }
 
-# --- an older head's review, or another reviewer's on this head, does not count ---
+# --- an older head's review, another reviewer's on this head, or a stale-
+# dismissed one on this head does not count ---
 t_other_reviews_do_not_suppress() {
   local dir out rc label
-  for label in older-head other-reviewer; do
+  for label in older-head other-reviewer stale-dismissed; do
     dir=$(mktemp -d) || { bad "other reviews: mktemp -d failed"; return; }
     GH_CAPTURE="$dir/payload.json"
-    if [[ "$label" == older-head ]]; then
-      MOCK_REVIEWS=$(review_page "$REVIEWER_LOGIN" APPROVED "$OLDER_HEAD_SHA")
-    else
-      MOCK_REVIEWS=$(review_page "jbaruch-claude-reviewer[bot]" APPROVED "$REVIEWED_SHA")
-    fi
+    case "$label" in
+      older-head) MOCK_REVIEWS=$(review_page "$REVIEWER_LOGIN" APPROVED "$OLDER_HEAD_SHA") ;;
+      other-reviewer) MOCK_REVIEWS=$(review_page "jbaruch-claude-reviewer[bot]" APPROVED "$REVIEWED_SHA") ;;
+      stale-dismissed) MOCK_REVIEWS=$(review_page "$REVIEWER_LOGIN" DISMISSED "$REVIEWED_SHA"); MOCK_TIMELINE="$STALE_TIMELINE" ;;
+    esac
     printf '{"summary":"Policy loaded: 23 rule files. Clean.","findings":[]}' > "$dir/final.json"
     rc=0; out=$(run_main owner repo 5 "$dir/final.json") || rc=$?
-    MOCK_REVIEWS='[]'
+    MOCK_REVIEWS='[]'; MOCK_TIMELINE='[]'
     if [[ $rc -eq 0 && "$(jq -r .state <<<"$out")" == "posted" && "$(jq -r .commit_id "$GH_CAPTURE" 2>/dev/null)" == "$REVIEWED_SHA" ]]; then
       ok "${label} review -> the verdict is posted"
     else
@@ -260,20 +273,24 @@ t_other_reviews_do_not_suppress() {
   done
 }
 
-# --- a failed lookup fails visibly and posts nothing ---
+# --- a failed review or dismissal lookup fails visibly and posts nothing ---
 t_lookup_failure_refuses_to_post() {
-  local dir rc=0
-  dir=$(mktemp -d) || { bad "lookup failure: mktemp -d failed"; return; }
-  GH_CAPTURE="$dir/payload.json"; MOCK_LOOKUP_FAIL=1
-  printf '{"summary":"Policy loaded: 23 rule files. Clean.","findings":[]}' > "$dir/final.json"
-  run_main owner repo 5 "$dir/final.json" >/dev/null 2>"$dir/err" || rc=$?
-  MOCK_LOOKUP_FAIL=0
-  if [[ $rc -ne 0 && ! -f "$GH_CAPTURE" ]] && grep -q "could not list the reviews" "$dir/err"; then
-    ok "failed review lookup -> non-zero exit, nothing posted"
-  else
-    bad "failed review lookup must fail without posting (rc=$rc)"
-  fi
-  rm -rf "$dir"
+  local dir rc mode expect
+  for mode in 1 timeline; do
+    dir=$(mktemp -d) || { bad "lookup failure: mktemp -d failed"; return; }
+    GH_CAPTURE="$dir/payload.json"; MOCK_LOOKUP_FAIL=$mode; rc=0
+    MOCK_REVIEWS=$(review_page "$REVIEWER_LOGIN" DISMISSED "$REVIEWED_SHA")
+    if [[ "$mode" == 1 ]]; then expect="could not list the reviews"; else expect="could not read how review 1"; fi
+    printf '{"summary":"Policy loaded: 23 rule files. Clean.","findings":[]}' > "$dir/final.json"
+    run_main owner repo 5 "$dir/final.json" >/dev/null 2>"$dir/err" || rc=$?
+    MOCK_LOOKUP_FAIL=0; MOCK_REVIEWS='[]'
+    if [[ $rc -ne 0 && ! -f "$GH_CAPTURE" ]] && grep -q "$expect" "$dir/err"; then
+      ok "failed ${mode/1/review} lookup -> non-zero exit, nothing posted"
+    else
+      bad "failed ${mode/1/review} lookup must fail without posting (rc=$rc)"
+    fi
+    rm -rf "$dir"
+  done
 }
 
 # --- an unparseable lookup response fails visibly and posts nothing ---

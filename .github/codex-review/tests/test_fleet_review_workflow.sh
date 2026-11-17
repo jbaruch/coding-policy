@@ -78,6 +78,21 @@ render() {
   printf '%s\n' "$out"
 }
 
+# matrix_lanes <job> <reviewer>: the job's matrix lanes for a manual run with
+# that `reviewer` input ("" for a scheduled run, which has no inputs), printed
+# as a JSON array. Evaluates the GitHub expression with Python's and/or, which
+# return an operand the way the expression's && and || do.
+matrix_lanes() {
+  local expr
+  expr=$(job_block "$1" | sed -n 's/^        lane: //p')
+  python3 -I - "$expr" "$2" <<'PY'
+import json, sys
+expr, reviewer = sys.argv[1:]
+expr = expr.removeprefix("${{").removesuffix("}}").replace("github.event.inputs.reviewer", repr(reviewer)).replace("&&", " and ").replace("||", " or ")
+print(json.dumps(eval(expr, {"__builtins__": {}, "fromJSON": json.loads}), separators=(",", ":")))
+PY
+}
+
 # run_poll <worklist> <gh-fail-repo>: run the poll step in a fixture tree.
 # Sets RC, OUT, GH_LINES and DRIVER_CALLS.
 run_poll() {
@@ -197,9 +212,21 @@ t_polls_never_overlap() {
   ok "polls of one lane share one concurrency group and never overlap"
 }
 
+t_manual_run_starts_only_the_selected_lane() {
+  local job reviewer want got
+  for job in poll review; do
+    for reviewer in policy quality all ""; do
+      case "$reviewer" in policy|quality) want="[\"$reviewer\"]" ;; *) want='["policy","quality"]' ;; esac
+      got=$(matrix_lanes "$job" "$reviewer")
+      [[ "$got" == "$want" ]] || { bad "selected_lane: ${job} job with reviewer '${reviewer}' runs ${want}, got '${got}'"; return; }
+    done
+  done
+  ok "a manual run starts only the selected lane's poll and review; all and the schedule start both"
+}
+
 for t in t_poll_dispatches_instead_of_reviewing t_poll_failed_dispatch_fails_after_the_rest \
   t_poll_empty_worklist_dispatches_nothing t_poll_malformed_worklist_fails \
-  t_push_and_poll_share_the_per_pr_group t_polls_never_overlap; do
+  t_push_and_poll_share_the_per_pr_group t_polls_never_overlap t_manual_run_starts_only_the_selected_lane; do
   "$t"
 done
 

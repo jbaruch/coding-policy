@@ -8,7 +8,7 @@ The policy reviewer reviews the PR diff against the in-tree `rules/*.md` and pos
 
 Both derive the review event from per-finding severity (`rules/review-severity.md`; `.github/codex-review/post-review.sh` header) — any blocking finding posts `REQUEST_CHANGES`; nonblocking results approve with any advisory notes included, falling back to `COMMENT` only when GitHub forbids approval.
 
-The first verdict posted on a head stands. When the posting identity already reviewed the head, a dismissed review included, a later run posts nothing and exits 0; a new commit earns a new verdict. A failed review lookup fails the run without posting (`.github/codex-review/post-review.sh` header).
+The first verdict posted on a head stands. When the posting identity already reviewed the head, a later run posts nothing and exits 0. A dismissed review counts only when `dismiss-ruled-review.sh` dismissed it, so a run after GitHub's stale-review dismissal posts again; a new commit earns a new verdict. A failed review lookup fails the run without posting (`.github/codex-review/post-review.sh` header).
 
 ### A. coding-policy's own PRs — in-repo `review-codex.yml`
 

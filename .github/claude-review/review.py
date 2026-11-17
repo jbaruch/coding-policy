@@ -8,7 +8,8 @@ checkout. No policy installation, GitHub token, settings, history or execution
 tools enter its session. Findings are blocking or advisory; the verdict is bound
 to the exact analyzed commit. A failed/invalid/stale review fails visibly without posting.
 The first verdict posted on a head stands: when this App already reviewed the
-head, a dismissed review included, nothing is posted (issue #841).
+head, nothing is posted (issue #841). A dismissed review does not count: only
+policy reviews are ever ruled-dismissed (skills/release/dismiss-ruled-review.sh).
 """
 
 import base64
@@ -168,7 +169,7 @@ def review_pr(owner: str, repo: str, pr: str, base: str) -> dict:
             or not all(isinstance(item, dict) for page in pages for item in page)):
         raise ReviewError("GitHub returned an unreadable review list; nothing was posted; retry the review")
     if any(item.get("commit_id") == head and (item.get("user") or {}).get("login") == lane["quality_login"]
-           and item.get("state") in ("APPROVED", "COMMENTED", "CHANGES_REQUESTED", "DISMISSED")
+           and item.get("state") in ("APPROVED", "COMMENTED", "CHANGES_REQUESTED")
            for page in pages for item in page):
         print(f"{lane['quality_login']} already reviewed {owner}/{repo}#{pr} at {head}; "
               "the first verdict on a head stands, so nothing was posted", file=sys.stderr)

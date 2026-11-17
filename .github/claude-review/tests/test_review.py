@@ -119,7 +119,7 @@ class ReviewTest(unittest.TestCase):
         return {"id": 1, "user": {"login": login}, "state": state, "commit_id": commit, "body": "earlier"}
 
     def test_first_verdict_on_a_head_stands(self):
-        for state in ("APPROVED", "CHANGES_REQUESTED", "DISMISSED"):
+        for state in ("APPROVED", "CHANGES_REQUESTED"):
             with self.subTest(state=state):
                 # The matching review sits on the second page, so pagination is read whole.
                 self.review_pages = [[self.earlier_review("COMMENTED", "c" * 40)], [self.earlier_review(state)]]
@@ -130,9 +130,12 @@ class ReviewTest(unittest.TestCase):
                 logged = "".join(call.args[0] for call in stderr.write.call_args_list)
                 self.assertIn(f"already reviewed o/r#1 at {HEAD}", logged)
 
-    def test_older_head_or_other_reviewer_does_not_suppress_the_post(self):
+    def test_older_head_other_reviewer_or_dismissed_review_does_not_suppress_the_post(self):
+        # A quality review is never ruled-dismissed, so any dismissal, GitHub's
+        # automatic stale-review dismissal included, lets a new review run.
         for review in (self.earlier_review("APPROVED", "c" * 40),
-                       self.earlier_review("APPROVED", login="coding-policy-fleet-reviewer[bot]")):
+                       self.earlier_review("APPROVED", login="coding-policy-fleet-reviewer[bot]"),
+                       self.earlier_review("DISMISSED")):
             with self.subTest(review=review):
                 self.posts.clear()
                 self.review_pages = [[review]]
