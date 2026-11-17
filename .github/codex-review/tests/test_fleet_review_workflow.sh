@@ -212,6 +212,15 @@ t_polls_never_overlap() {
   ok "polls of one lane share one concurrency group and never overlap"
 }
 
+# The poll's App token only discovers PRs; a write permission would let it post.
+t_poll_app_token_is_read_only() {
+  local perms
+  perms=$(job_block poll | sed -n 's/^ *\(permission-[a-z-]*: .*\)$/\1/p' | sort | tr '\n' ' ')
+  [[ "$perms" == "permission-contents: read permission-pull-requests: read " ]] \
+    || { bad "poll_token_read_only: the poll mints its App token with contents and pull-requests read only, got '$perms'"; return; }
+  ok "the poll's App token is read-only"
+}
+
 t_manual_run_starts_only_the_selected_lane() {
   local job reviewer want got
   for job in poll review; do
@@ -226,7 +235,8 @@ t_manual_run_starts_only_the_selected_lane() {
 
 for t in t_poll_dispatches_instead_of_reviewing t_poll_failed_dispatch_fails_after_the_rest \
   t_poll_empty_worklist_dispatches_nothing t_poll_malformed_worklist_fails \
-  t_push_and_poll_share_the_per_pr_group t_polls_never_overlap t_manual_run_starts_only_the_selected_lane; do
+  t_push_and_poll_share_the_per_pr_group t_polls_never_overlap t_poll_app_token_is_read_only \
+  t_manual_run_starts_only_the_selected_lane; do
   "$t"
 done
 

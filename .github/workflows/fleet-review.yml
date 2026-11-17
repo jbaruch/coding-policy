@@ -84,13 +84,16 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - name: Mint the reviewer App installation token
+      # Discovery only reads, so this token cannot post a review.
+      - name: Mint a read-only reviewer App installation token
         id: apptoken
         uses: actions/create-github-app-token@v3
         with:
           app-id: ${{ secrets[matrix.lane == 'quality' && 'CLAUDE_REVIEW_APP_ID' || 'FLEET_APP_ID'] }}
           private-key: ${{ secrets[matrix.lane == 'quality' && 'CLAUDE_REVIEW_APP_PRIVATE_KEY' || 'FLEET_APP_PRIVATE_KEY'] }}
           owner: ${{ github.repository_owner }}
+          permission-contents: read
+          permission-pull-requests: read
 
       - name: Dispatch a review of each PR that needs one
         env:

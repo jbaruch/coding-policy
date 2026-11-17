@@ -24,7 +24,10 @@ bad() { printf 'FAIL - %s\n' "$1"; fail=$((fail+1)); }
 # would), so the fallback-to-COMMENT path can be exercised. The review lookup
 # (a GET) prints MOCK_REVIEWS, or fails like an API outage with MOCK_LOOKUP_FAIL=1;
 # the timeline lookup prints MOCK_TIMELINE, or fails with MOCK_LOOKUP_FAIL=timeline.
+# With MOCK_PERSISTED set to a file, GitHub keeps each POST as a review appended
+# to that file, which the lookup also lists, but the response is lost (HTTP 502).
 GH_CAPTURE=""
+MOCK_PERSISTED=""
 MOCK_422_ON_APPROVE=0
 MOCK_REVIEWS='[]'
 MOCK_TIMELINE='[]'
@@ -45,10 +48,18 @@ gh() {
       return 1
     fi
     printf '%s\n' "$MOCK_REVIEWS"
+    [[ -z "$MOCK_PERSISTED" || ! -f "$MOCK_PERSISTED" ]] || cat "$MOCK_PERSISTED"
     return 0
   fi
   if [[ "${1:-}" == "api" && "$*" == */reviews* ]]; then
     local payload; payload=$(cat)
+    if [[ -n "$MOCK_PERSISTED" ]]; then
+      jq -c --arg login "$REVIEWER_LOGIN" '[{id: 2, user: {login: $login}, commit_id,
+        state: {APPROVE: "APPROVED", REQUEST_CHANGES: "CHANGES_REQUESTED", COMMENT: "COMMENTED"}[.event]}]' \
+        <<<"$payload" >> "$MOCK_PERSISTED"
+      echo "gh: Bad Gateway (HTTP 502)" >&2
+      return 1
+    fi
     # GitHub defaults an omitted commit_id to the newer post-time head.
     jq --arg latest "$LATER_HEAD_SHA" '.commit_id //= $latest' <<<"$payload" > "$GH_CAPTURE"
     local ev; ev=$(jq -r '.event' <<<"$payload")
@@ -306,6 +317,22 @@ t_lookup_garbage_refuses_to_post() {
   rm -rf "$dir"
 }
 
+# --- a POST GitHub kept but whose response was lost is not posted again ---
+t_lost_response_posts_once() {
+  local dir out rc=0
+  dir=$(mktemp -d) || { bad "lost response: mktemp -d failed"; return; }
+  GH_CAPTURE="$dir/payload.json"; MOCK_PERSISTED="$dir/persisted"
+  printf '{"summary":"Policy loaded: 23 rule files. Clean.","findings":[]}' > "$dir/final.json"
+  out=$(run_main owner repo 5 "$dir/final.json" 2>/dev/null) || rc=$?
+  MOCK_PERSISTED=""
+  if [[ $rc -eq 0 && "$(jq -r .state <<<"$out")" == "already_reviewed" && "$(wc -l < "$dir/persisted")" -eq 1 ]]; then
+    ok "lost POST response -> the retry finds the kept review, exactly one persisted"
+  else
+    bad "lost POST response must persist exactly one review (rc=$rc, out=$out, persisted=$(wc -l < "$dir/persisted"))"
+  fi
+  rm -rf "$dir"
+}
+
 # --- without REVIEWER_LOGIN the identity is unknown: refuse before any API call ---
 t_missing_reviewer_login() {
   local dir rc=0
@@ -332,6 +359,7 @@ t_head_already_reviewed
 t_other_reviews_do_not_suppress
 t_lookup_failure_refuses_to_post
 t_lookup_garbage_refuses_to_post
+t_lost_response_posts_once
 t_missing_reviewer_login
 echo "== summary: ${pass} passed, ${fail} failed =="
 [[ "$fail" -eq 0 ]]
