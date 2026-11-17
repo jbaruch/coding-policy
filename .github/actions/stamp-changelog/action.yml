@@ -15,12 +15,12 @@ description: |
   Loop-Prevention Carve-Out).
 
   Per `jbaruch/coding-policy: context-artifacts` "CHANGELOG Hygiene"
-  (every merge publishes): PRs add no CHANGELOG entries, and the PR title
-  is the changelog line. This step writes `## <version> — <date>` and one
-  `- <PR title> (#N)` line per PR merged since the last publish, so the
-  published artifact and the registry "what's new" show them under their
-  real version. Un-headed `### ` blocks an older PR left at the top get the
-  heading instead. Wire it immediately before the publish step.
+  (every merge publishes): the PR title is the changelog line. This step
+  writes `## <version> — <date>` and one `- <PR title> (#N)` line per PR
+  merged since the last publish, so the published artifact and the registry
+  "what's new" show them under their real version. Un-headed `### ` blocks
+  an older PR left at the top get the heading instead. Wire it immediately
+  before the publish step.
 
   Idempotent: with nothing un-headed and no PR merged since the last
   publish, the step is a no-op (no commit).
