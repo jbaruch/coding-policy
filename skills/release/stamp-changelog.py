@@ -2,11 +2,11 @@
 """Stamp the CHANGELOG with the version being published and the PRs it ships.
 
 Run by the publish pipeline (`.github/actions/stamp-changelog`) immediately
-before the publish step (`smart-publish`). Every merge is published, and PRs add
-no CHANGELOG entries: the PR title is the changelog line. This script computes
-the version the publish step will assign and inserts `## <version> — <date>`
-above the newest section, followed by one `- <PR title> (#N)` line per pull
-request merged since the last publish.
+before the publish step (`smart-publish`). Every merge is published, and the PR
+title is the changelog line. This script computes the version the publish step
+will assign and inserts `## <version> — <date>` above the newest section,
+followed by one `- <PR title> (#N)` line per pull request merged since the last
+publish.
 
 The changes are the first-parent commits after the newest publish-bookkeeping
 commit: a first-parent ancestor of HEAD authored by `github-actions[bot]` that
