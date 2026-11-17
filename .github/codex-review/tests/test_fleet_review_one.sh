@@ -19,6 +19,10 @@ bad() { printf 'FAIL - %s\n' "$1"; fail=$((fail+1)); }
 # (rules/error-handling.md — warn to stderr, never nothing).
 rmwarn() { rm -rf "$@" || echo "test_fleet_review_one: warning: could not remove ${*}" >&2; }
 
+# The posting identity fleet-review.yml supplies; the stub history reader
+# below refuses any other login.
+export REVIEWER_LOGIN="coding-policy-fleet-reviewer[bot]"
+
 # Build a fake toolchain (git/tessl/codex) + stubbed CENTRAL_DIR driver scripts.
 # Echoes: BIN CENTRAL CODEXH (space-separated) for the caller to consume.
 # The function body is a `set -e` subshell so ANY failed mktemp/cat/chmod/mkdir
@@ -69,7 +73,9 @@ EOF
   echo '{}'     > "$central/.github/codex-review/fleet-schema.json"
   echo 'prompt' > "$central/.github/codex-review/fleet-prompt.md"
   cat > "$central/.github/codex-review/prior-feedback.py" <<'PY'
-print('{"status":"available","items":[]}')
+import sys
+assert sys.argv[5:] == ["coding-policy-fleet-reviewer[bot]"], sys.argv
+print('{"last_review":null,"items":[]}')
 PY
   cat > "$central/.github/codex-review/policy-authoring-context.py" <<'PY'
 print('{"schema_version":1,"eligible":false,"rules":[]}')
@@ -164,6 +170,48 @@ t_nonzero_whitespace_still_posts_review() {
       || { bad "whitespace exit $check_rc must reach review with an explicit inspection result"; return; }
   done
   ok "nonzero whitespace and tool errors cannot strand the policy review"
+}
+
+# --- a failed history read or a malformed marker on the last review by the
+# login stops the review before any verdict is posted ---
+t_failed_history_posts_nothing() {
+  local failing='exit 1' malformed
+  malformed=$(cat <<'SH'
+case "$*" in
+  *graphql*) cat <<'JSON' ;;
+{"data":{"node":{"body":"x\n\n<!-- coding-policy-blockers [1] -->","author":{"login":"coding-policy-fleet-reviewer"},"commit":{"oid":"1111111111111111111111111111111111111111"},"lastEditedAt":null,"editor":null}}}
+JSON
+  */reviews*) cat <<'JSON' ;;
+[[{"user":{"login":"coding-policy-fleet-reviewer[bot]"},"body":"x\n\n<!-- coding-policy-blockers [1] -->",
+   "created_at":"2026-11-17T00:00:00Z","commit_id":"1111111111111111111111111111111111111111","node_id":"PRR_1",
+   "html_url":"https://github.com/jbaruch/repo-a/pull/7#pullrequestreview-1"}]]
+JSON
+  *) echo '[[]]' ;;
+esac
+SH
+)
+  local stub expect
+  for stub in "$failing" "$malformed"; do
+    local env_line; env_line=$(make_env) || exit 2
+    read -r BIN CENTRAL CODEXH <<< "$env_line"
+    cp "$(dirname "$SCRIPT")/prior-feedback.py" "$CENTRAL/.github/codex-review/prior-feedback.py" || exit 2
+    printf '#!/usr/bin/env bash\n%s\n' "$stub" > "$BIN/gh" || exit 2
+    chmod +x "$BIN/gh" || exit 2
+    expect="history unavailable"
+    [[ "$stub" == "$malformed" ]] && expect="pullrequestreview-1 ends with a malformed blocker marker"
+    local out err rc=0
+    err="$CODEXH/err.log"
+    out=$(PATH="$BIN:$PATH" GH_TOKEN=tok CENTRAL_DIR="$CENTRAL" CODEX_HOME="$CODEXH" \
+      bash "$SCRIPT" jbaruch repo-a 7 main 2>"$err") || rc=$?
+    local diagnosed=1
+    grep -qF "$expect" "$err" && diagnosed=0
+    rmwarn "$BIN" "$CENTRAL" "$CODEXH"
+    if [[ $rc -ne 0 && "$out" != *posted* && $diagnosed -eq 0 ]]; then
+      ok "history failure ($expect) exits non-zero with a diagnostic and posts nothing"
+    else
+      bad "history failure ($expect) must not post (rc=$rc, out=$out)"
+    fi
+  done
 }
 
 # --- wrong arg count -> exit 2 ---
@@ -270,6 +318,7 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
   t_happy
   t_model_pin
   t_nonzero_whitespace_still_posts_review
+  t_failed_history_posts_nothing
   t_bad_args
   t_missing_driver
   t_invalid_authoring_context

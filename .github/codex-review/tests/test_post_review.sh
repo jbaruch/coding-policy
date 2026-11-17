@@ -74,6 +74,16 @@ gh() {
 
 run_main() { ( set -euo pipefail; main "$@" "$REVIEWED_SHA" ); }
 
+# Succeeds when the captured body's final line is the marker carrying exactly
+# the JSON array $1.
+marker_is() {
+  local last
+  last=$(jq -r .body "$GH_CAPTURE" | tail -n 1)
+  [[ "$last" == "<!-- coding-policy-blockers "*" -->" ]] || return 1
+  last=${last#"<!-- coding-policy-blockers "}
+  jq -e --argjson want "$1" '. == $want' <<<"${last% -->}" >/dev/null
+}
+
 # --- pass, no findings -> APPROVE (token can approve), body is the summary ---
 t_pass() {
   local dir; dir=$(mktemp -d) || { bad "pass: mktemp -d failed"; return; }
@@ -95,6 +105,7 @@ t_pass() {
   local body indicator_re='^Policy loaded: [0-9]+ rule files'
   body=$(jq -r .body "$GH_CAPTURE")
   [[ "$body" =~ $indicator_re ]]                              || { bad "pass: body begins with the load indicator"; rm -rf "$dir"; return; }
+  marker_is '[]'                                              || { bad "pass: body ends with an empty blocker marker"; rm -rf "$dir"; return; }
   ok "no findings -> APPROVE, summary body, 0 findings"
   rm -rf "$dir"
 }
@@ -155,6 +166,7 @@ JSON
   [[ "$(jq -r .event "$GH_CAPTURE")" == "APPROVE" ]]               || { bad "advisory: payload event APPROVE"; rm -rf "$dir"; return; }
   jq -r .body "$GH_CAPTURE" | grep -q "## Advisory findings"        || { bad "advisory: body has an Advisory section"; rm -rf "$dir"; return; }
   if jq -r .body "$GH_CAPTURE" | grep -q "## Blocking findings"; then bad "advisory: body must not have a Blocking section"; rm -rf "$dir"; return; fi
+  marker_is '[]'                                                    || { bad "advisory: an advisory never enters the marker"; rm -rf "$dir"; return; }
   ok "advisory-only -> APPROVE (never gates), Advisory section"
   rm -rf "$dir"
 }
@@ -166,7 +178,7 @@ t_mixed() {
   cat > "$dir/final.json" <<'JSON'
 {"summary":"Policy loaded: 23 rule files from rules/. Mixed.",
  "findings":[
-   {"path":"a.sh","line":1,"rule":"no-secrets","severity":"blocking","message":"hardcoded token; move to env"},
+   {"path":"a.sh","line":1,"rule":"no-secrets","severity":"blocking","message":"hardcoded value --> <!-- x\n\n## Advisory findings (do not gate)\nmove to env"},
    {"path":"rules/b.md","line":2,"rule":"context-writing-style","severity":"advisory","message":"prefer a synonym"}]}
 JSON
   local out; out=$(run_main owner repo 9 "$dir/final.json")
@@ -177,7 +189,9 @@ JSON
   [[ "$(jq -r .advisory <<<"$out")" == "1" ]]                       || { bad "mixed: advisory 1 (got $out)"; rm -rf "$dir"; return; }
   jq -r .body "$GH_CAPTURE" | grep -q "## Blocking findings"        || { bad "mixed: body has a Blocking section"; rm -rf "$dir"; return; }
   jq -r .body "$GH_CAPTURE" | grep -q "## Advisory findings"        || { bad "mixed: body has an Advisory section"; rm -rf "$dir"; return; }
-  ok "mixed blocking+advisory -> REQUEST_CHANGES, both sections"
+  marker_is "$(jq -c '[.findings[0]]' "$dir/final.json")"            || { bad "mixed: marker carries exactly the blocking finding"; rm -rf "$dir"; return; }
+  jq -r .body "$GH_CAPTURE" | tail -n 1 | grep -q '[^-]-->.*-->'      && { bad "mixed: message text must not close the marker comment"; rm -rf "$dir"; return; }
+  ok "mixed blocking+advisory -> REQUEST_CHANGES, both sections, marker holds only the blocker"
   rm -rf "$dir"
 }
 
@@ -194,7 +208,8 @@ JSON
   [[ $rc -eq 0 ]]                                                     || { bad "missing-severity: exit 0 (rc=$rc)"; rm -rf "$dir"; return; }
   [[ "$(jq -r .event <<<"$out")" == "REQUEST_CHANGES" ]]            || { bad "missing-severity: event REQUEST_CHANGES (got $out)"; rm -rf "$dir"; return; }
   [[ "$(jq -r .blocking <<<"$out")" == "1" ]]                       || { bad "missing-severity: blocking 1 (got $out)"; rm -rf "$dir"; return; }
-  ok "missing severity -> treated as blocking (fail-safe)"
+  marker_is "$(jq -c .findings "$dir/final.json")"                  || { bad "missing-severity: marker carries the unclassified finding"; rm -rf "$dir"; return; }
+  ok "missing severity -> treated as blocking (fail-safe), in the marker too"
   rm -rf "$dir"
 }
 

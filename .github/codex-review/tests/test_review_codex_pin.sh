@@ -5,6 +5,9 @@
 # executed with git and codex faked on PATH, so the assertion is on the argv
 # codex actually receives — no network, no real Codex. Deterministic, hermetic
 # (rules/testing-standards.md).
+# The "Read bounded prior feedback" step must fail the job when GitHub history
+# cannot be read or the last github-actions[bot] review ends with a malformed
+# blocker marker, so the review posts no verdict.
 #
 # Run: bash .github/codex-review/tests/test_review_codex_pin.sh
 # Exit 0 on all-pass; non-zero with a per-test diagnostic on failure.
@@ -84,7 +87,7 @@ EOF
     mkdir -p "$work/.github/codex-review"
     cp "$(dirname "$WORKFLOW")/../reviewer_failure.py" "$work/.github/reviewer_failure.py"
     echo 'prompt' > "$work/.github/codex-review/prompt.md"
-    printf '{"status":"available","items":[]}\n' > "$work/codex-prior-feedback.json"
+    printf '{"last_review":null,"items":[]}\n' > "$work/codex-prior-feedback.json"
     printf 'clean\n' > "$work/codex-whitespace-status.txt"
     # GitHub expressions are substituted before the shell sees the block. sed,
     # not ${script//...}: a glob `*` is greedy and would swallow the text
@@ -108,6 +111,54 @@ EOF
   ok "self-review runs codex with --model $PIN_MODEL and -c $PIN_EFFORT"
 }
 
+# --- a failed history read or a malformed marker fails its step; no later step
+# runs after a failure ---
+t_failed_history_fails_job() {
+  local script
+  script=$(extract_run "$WORKFLOW" "Read bounded prior feedback")
+  [[ "$script" == *prior-feedback.py* ]] || { bad "failed_history: history step found in $WORKFLOW"; return; }
+  local failing='exit 1' malformed
+  malformed=$(cat <<'SH'
+case "$*" in
+  *graphql*) cat <<'JSON' ;;
+{"data":{"node":{"body":"x\n\n<!-- coding-policy-blockers {} -->","author":{"login":"github-actions"},"commit":{"oid":"1111111111111111111111111111111111111111"},"lastEditedAt":null,"editor":null}}}
+JSON
+  */reviews*) cat <<'JSON' ;;
+[[{"user":{"login":"github-actions[bot]"},"body":"x\n\n<!-- coding-policy-blockers {} -->",
+   "created_at":"2026-11-17T00:00:00Z","commit_id":"1111111111111111111111111111111111111111","node_id":"PRR_1",
+   "html_url":"https://github.com/owner/repo/pull/1#pullrequestreview-1"}]]
+JSON
+  *) echo '[[]]' ;;
+esac
+SH
+)
+  local stub expect bin work
+  for stub in "$failing" "$malformed"; do
+    bin=$(mktemp -d) || { echo "fatal: mktemp -d failed" >&2; exit 2; }
+    work=$(mktemp -d) || { echo "fatal: mktemp -d failed" >&2; rmwarn "$bin"; exit 2; }
+    if ! (
+      set -e
+      printf '#!/usr/bin/env bash\necho 1111111111111111111111111111111111111111\n' > "$bin/git"
+      printf '#!/usr/bin/env bash\n%s\n' "$stub" > "$bin/gh"
+      chmod +x "$bin/git" "$bin/gh"
+      mkdir -p "$work/.github/codex-review"
+      cp "$(dirname "$WORKFLOW")/../codex-review/prior-feedback.py" "$work/.github/codex-review/"
+      printf '%s\n' "$script" > "$work/step.sh"
+    ); then
+      echo "fatal: fixture setup failed" >&2; rmwarn "$bin" "$work"; exit 2
+    fi
+    expect="history unavailable"
+    [[ "$stub" == "$malformed" ]] && expect="pullrequestreview-1 ends with a malformed blocker marker"
+    local rc=0 out
+    out=$(cd "$work" && PATH="$bin:$PATH" RUNNER_TEMP="$work" GITHUB_REPOSITORY=owner/repo PR_NUMBER=1 bash step.sh 2>&1) || rc=$?
+    rmwarn "$bin" "$work"
+    [[ $rc -ne 0 && "$out" == *"$expect"* ]] || { bad "failed_history: step fails with '$expect' (rc=$rc, out=$out)"; return; }
+  done
+  ! grep -qE 'always\(\)|failure\(\)|continue-on-error' "$WORKFLOW" \
+    || { bad "failed_history: a step in $WORKFLOW can run after a failure, so the review could still post"; return; }
+  ok "failed history read or malformed marker fails the job before the review posts"
+}
+
 # --- a missing step fails loudly rather than passing vacuously ---
 t_missing_step() {
   local script
@@ -120,6 +171,7 @@ t_missing_step() {
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
   echo "== review-codex.yml model pin tests =="
   t_self_review_pin
+  t_failed_history_fails_job
   t_missing_step
   echo "== summary: ${pass} passed, ${fail} failed =="
   [[ "$fail" -eq 0 ]]

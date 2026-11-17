@@ -5,7 +5,10 @@
 # shaped by .github/codex-review/schema.json) and submits ONE pull-request
 # review whose body carries the summary and every finding. Findings ride in
 # the review body rather than as inline comments so an off-diff line can never
-# trigger the HTTP 422 that would cascade-fail the whole review.
+# trigger the HTTP 422 that would cascade-fail the whole review. The body's
+# final line is `<!-- coding-policy-blockers [...] -->`, the blocking finding
+# objects as compact JSON with `<` and `>` escaped, on every verdict;
+# prior-feedback.py reads it back.
 #
 # The review event is DERIVED from per-finding severity, not read from a model
 # verdict (rules/review-severity.md — the gate is a deterministic function of
@@ -135,13 +138,15 @@ main() {
     exit 1
   fi
 
-  local summary findings_count blocking_count advisory_count
+  local summary findings_count blocking blocking_count advisory_count
   summary=$(jq -r '.summary // ""' "$result")
   findings_count=$(jq '(.findings // []) | length' "$result")
   # A finding with no severity (older reviewer that predates the severity field,
   # or a malformed entry) is treated as blocking — fail safe: never let an
-  # unclassified finding slip through as non-gating.
-  blocking_count=$(jq '[(.findings // [])[] | select((.severity // "blocking") != "advisory")] | length' "$result")
+  # unclassified finding slip through as non-gating. The count, the displayed
+  # blocking section and the marker all derive from this one array.
+  blocking=$(jq -c '[(.findings // [])[] | select((.severity // "blocking") != "advisory")]' "$result")
+  blocking_count=$(jq length <<<"$blocking")
   advisory_count=$(( findings_count - blocking_count ))
 
   # Derive the event from severity (rules/review-severity.md), never a model verdict.
@@ -151,17 +156,20 @@ main() {
   fi
 
   # Build the review body: summary, then blocking and advisory findings in
-  # labeled sections (each omitted when its tier is empty).
-  local body blocking_md advisory_md
+  # labeled sections (each omitted when its tier is empty), then the marker.
+  local body blocking_md advisory_md marker
   body="$summary"
   if (( blocking_count > 0 )); then
-    blocking_md=$(jq -r '.findings[] | select((.severity // "blocking") != "advisory") | "- `\(.path):\(.line)` — **\(.rule)** — \(.message)"' "$result")
+    blocking_md=$(jq -r '.[] | "- `\(.path):\(.line)` — **\(.rule)** — \(.message)"' <<<"$blocking")
     body="${body}"$'\n\n'"## Blocking findings (gate the merge)"$'\n'"${blocking_md}"
   fi
   if (( advisory_count > 0 )); then
     advisory_md=$(jq -r '.findings[] | select((.severity // "blocking") == "advisory") | "- `\(.path):\(.line)` — **\(.rule)** — \(.message)"' "$result")
     body="${body}"$'\n\n'"## Advisory findings (do not gate)"$'\n'"${advisory_md}"
   fi
+  # Escaped `<` and `>` keep message text from closing the comment early.
+  marker=$(jq -r 'tojson | gsub("<"; "\\u003c") | gsub(">"; "\\u003e") | "<!-- coding-policy-blockers \(.) -->"' <<<"$blocking")
+  body="${body}"$'\n\n'"${marker}"
 
   # A pass is APPROVE when the token can approve (a GitHub App); a token that
   # cannot approve (github-actions[bot] — HTTP 422) falls back to COMMENT so the

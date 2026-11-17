@@ -17,6 +17,8 @@ alwaysApply: true
 - Blocking: substantiated material defects, tests concealing them, or binding obligations affecting meaning or behavior.
 - Advisory: optional hardening and presentation-only suggestions.
 - A behavior-changing suggestion alone never establishes a blocker.
+- On a re-review, only unresolved blockers of the last review and defects in lines changed since it, with their regressions, block.
+- On a re-review, anything else already present at the last reviewed head is advisory.
 - Resolve mismatches through compliant code or authorized policy amendment and re-review.
 - Reviewers cannot waive policy.
 - Apply `rules/simplicity.md` to remedy cost and scope.
