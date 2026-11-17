@@ -1,3 +1,7 @@
+## 0.10.14 — 2026-11-17
+
+- fix(fleet-review): Keep the first verdict posted on a head (#848)
+
 ## 0.10.13 — 2026-11-17
 
 - fix(commit-conventions): Leave CHANGELOG entries to the agent (#844)
