@@ -21,12 +21,25 @@ bad() { printf 'FAIL - %s\n' "$1"; fail=$((fail+1)); }
 
 # Mock gh: capture the /reviews POST payload (arrives on stdin via --input -).
 # With MOCK_422_ON_APPROVE=1, an APPROVE submit fails HTTP 422 (as github-actions[bot]
-# would), so the fallback-to-COMMENT path can be exercised.
+# would), so the fallback-to-COMMENT path can be exercised. The review lookup
+# (a GET) prints MOCK_REVIEWS, or fails like an API outage with MOCK_LOOKUP_FAIL=1.
 GH_CAPTURE=""
 MOCK_422_ON_APPROVE=0
+MOCK_REVIEWS='[]'
+MOCK_LOOKUP_FAIL=0
 REVIEWED_SHA=1111111111111111111111111111111111111111
 LATER_HEAD_SHA=2222222222222222222222222222222222222222
+OLDER_HEAD_SHA=3333333333333333333333333333333333333333
+export REVIEWER_LOGIN="coding-policy-fleet-reviewer[bot]"
 gh() {
+  if [[ "${1:-}" == "api" && "$*" == */reviews* && "$*" != *"--method POST"* ]]; then
+    if [[ "$MOCK_LOOKUP_FAIL" == "1" ]]; then
+      echo "gh: Server Error (HTTP 502)" >&2
+      return 1
+    fi
+    printf '%s\n' "$MOCK_REVIEWS"
+    return 0
+  fi
   if [[ "${1:-}" == "api" && "$*" == */reviews* ]]; then
     local payload; payload=$(cat)
     # GitHub defaults an omitted commit_id to the newer post-time head.
@@ -197,6 +210,97 @@ t_missing_or_invalid_source() {
   rm -rf "$dir"
 }
 
+# One review by <login> in <state> on <commit>, as the lookup's only page.
+review_page() {
+  jq -cn --arg login "$1" --arg state "$2" --arg commit "$3" \
+    '[{"id":1,"user":{"login":$login},"state":$state,"commit_id":$commit,"body":"earlier verdict"}]'
+}
+
+# --- the first verdict on a head stands: a later run on that head posts nothing ---
+t_head_already_reviewed() {
+  local state dir out rc
+  for state in APPROVED CHANGES_REQUESTED DISMISSED; do
+    dir=$(mktemp -d) || { bad "already reviewed: mktemp -d failed"; return; }
+    GH_CAPTURE="$dir/payload.json"
+    # The matching review sits on the second page, so pagination is read whole.
+    MOCK_REVIEWS="$(review_page "$REVIEWER_LOGIN" COMMENTED "$OLDER_HEAD_SHA")"$'\n'"$(review_page "$REVIEWER_LOGIN" "$state" "$REVIEWED_SHA")"
+    printf '{"summary":"Policy loaded: 23 rule files. One violation.","findings":[{"path":"a.sh","line":1,"rule":"error-handling","severity":"blocking","message":"m"}]}' > "$dir/final.json"
+    rc=0; out=$(run_main owner repo 5 "$dir/final.json" 2>"$dir/err") || rc=$?
+    MOCK_REVIEWS='[]'
+    if [[ $rc -eq 0 && ! -f "$GH_CAPTURE" && "$(jq -r .state <<<"$out")" == "already_reviewed" ]] \
+       && grep -q "already reviewed owner/repo#5 at ${REVIEWED_SHA}" "$dir/err"; then
+      ok "existing ${state} review on the head -> posts nothing, exit 0, logged"
+    else
+      bad "existing ${state} review on the head must suppress the post (rc=$rc, out=$out)"
+    fi
+    rm -rf "$dir"
+  done
+}
+
+# --- an older head's review, or another reviewer's on this head, does not count ---
+t_other_reviews_do_not_suppress() {
+  local dir out rc label
+  for label in older-head other-reviewer; do
+    dir=$(mktemp -d) || { bad "other reviews: mktemp -d failed"; return; }
+    GH_CAPTURE="$dir/payload.json"
+    if [[ "$label" == older-head ]]; then
+      MOCK_REVIEWS=$(review_page "$REVIEWER_LOGIN" APPROVED "$OLDER_HEAD_SHA")
+    else
+      MOCK_REVIEWS=$(review_page "jbaruch-claude-reviewer[bot]" APPROVED "$REVIEWED_SHA")
+    fi
+    printf '{"summary":"Policy loaded: 23 rule files. Clean.","findings":[]}' > "$dir/final.json"
+    rc=0; out=$(run_main owner repo 5 "$dir/final.json") || rc=$?
+    MOCK_REVIEWS='[]'
+    if [[ $rc -eq 0 && "$(jq -r .state <<<"$out")" == "posted" && "$(jq -r .commit_id "$GH_CAPTURE" 2>/dev/null)" == "$REVIEWED_SHA" ]]; then
+      ok "${label} review -> the verdict is posted"
+    else
+      bad "${label} review must not suppress the post (rc=$rc, out=$out)"
+    fi
+    rm -rf "$dir"
+  done
+}
+
+# --- a failed lookup fails visibly and posts nothing ---
+t_lookup_failure_refuses_to_post() {
+  local dir rc=0
+  dir=$(mktemp -d) || { bad "lookup failure: mktemp -d failed"; return; }
+  GH_CAPTURE="$dir/payload.json"; MOCK_LOOKUP_FAIL=1
+  printf '{"summary":"Policy loaded: 23 rule files. Clean.","findings":[]}' > "$dir/final.json"
+  run_main owner repo 5 "$dir/final.json" >/dev/null 2>"$dir/err" || rc=$?
+  MOCK_LOOKUP_FAIL=0
+  if [[ $rc -ne 0 && ! -f "$GH_CAPTURE" ]] && grep -q "could not list the reviews" "$dir/err"; then
+    ok "failed review lookup -> non-zero exit, nothing posted"
+  else
+    bad "failed review lookup must fail without posting (rc=$rc)"
+  fi
+  rm -rf "$dir"
+}
+
+# --- an unparseable lookup response fails visibly and posts nothing ---
+t_lookup_garbage_refuses_to_post() {
+  local dir rc=0
+  dir=$(mktemp -d) || { bad "lookup garbage: mktemp -d failed"; return; }
+  GH_CAPTURE="$dir/payload.json"; MOCK_REVIEWS='<html>not json</html>'
+  printf '{"summary":"Policy loaded: 23 rule files. Clean.","findings":[]}' > "$dir/final.json"
+  run_main owner repo 5 "$dir/final.json" >/dev/null 2>&1 || rc=$?
+  MOCK_REVIEWS='[]'
+  if [[ $rc -ne 0 && ! -f "$GH_CAPTURE" ]]; then ok "unparseable review list -> non-zero exit, nothing posted";
+  else bad "unparseable review list must fail without posting (rc=$rc)"; fi
+  rm -rf "$dir"
+}
+
+# --- without REVIEWER_LOGIN the identity is unknown: refuse before any API call ---
+t_missing_reviewer_login() {
+  local dir rc=0
+  dir=$(mktemp -d) || { bad "missing login: mktemp -d failed"; return; }
+  GH_CAPTURE="$dir/payload.json"
+  printf '{"summary":"Clean","findings":[]}' > "$dir/final.json"
+  (unset REVIEWER_LOGIN; run_main owner repo 5 "$dir/final.json") >/dev/null 2>&1 || rc=$?
+  if [[ $rc -eq 2 && ! -f "$GH_CAPTURE" ]]; then ok "missing REVIEWER_LOGIN -> exit 2, nothing posted";
+  else bad "missing REVIEWER_LOGIN must refuse (rc=$rc)"; fi
+  rm -rf "$dir"
+}
+
 echo "== post-review.sh tests =="
 t_pass
 t_pass_422_fallback
@@ -207,5 +311,10 @@ t_missing_severity_blocks
 t_missing_file
 t_invalid_json
 t_missing_or_invalid_source
+t_head_already_reviewed
+t_other_reviews_do_not_suppress
+t_lookup_failure_refuses_to_post
+t_lookup_garbage_refuses_to_post
+t_missing_reviewer_login
 echo "== summary: ${pass} passed, ${fail} failed =="
 [[ "$fail" -eq 0 ]]

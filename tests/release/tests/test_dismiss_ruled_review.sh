@@ -77,12 +77,14 @@ run() {
 }
 
 # Golden body: post the Codex result JSON through the real post-review.sh with
-# a gh stub on PATH that captures the review payload, then read its body.
+# a gh stub on PATH that captures the review payload, then read its body. The
+# stub answers the poster's already-reviewed lookup with no reviews.
 STUB_DIR="${TMPDIR_TEST}/stub"
 mkdir -p "$STUB_DIR" || { echo "fatal: cannot create $STUB_DIR" >&2; exit 2; }
 cat > "${STUB_DIR}/gh" <<'SH'
 #!/usr/bin/env bash
 set -euo pipefail
+if [[ "$*" != *"--method POST"* ]]; then echo '[]'; exit 0; fi
 cat > "$GH_CAPTURE"
 SH
 chmod +x "${STUB_DIR}/gh"
@@ -90,7 +92,7 @@ chmod +x "${STUB_DIR}/gh"
 golden_body() { # <codex-result-json>
   local result="${TMPDIR_TEST}/final.json" capture="${TMPDIR_TEST}/payload.json"
   printf '%s' "$1" > "$result"
-  if ! GH_CAPTURE="$capture" PATH="${STUB_DIR}:${PATH}" bash "$POSTER" owner repo 9 "$result" "$HEAD_SHA" >/dev/null; then
+  if ! GH_CAPTURE="$capture" REVIEWER_LOGIN="github-actions[bot]" PATH="${STUB_DIR}:${PATH}" bash "$POSTER" owner repo 9 "$result" "$HEAD_SHA" >/dev/null; then
     echo "fatal: post-review.sh failed to build the golden body" >&2
     return 1
   fi

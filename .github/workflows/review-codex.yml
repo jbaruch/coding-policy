@@ -141,6 +141,7 @@ jobs:
       - name: Post the review
         env:
           GH_TOKEN: ${{ github.token }}
+          REVIEWER_LOGIN: github-actions[bot]
           REVIEWED_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           bash .github/codex-review/post-review.sh \

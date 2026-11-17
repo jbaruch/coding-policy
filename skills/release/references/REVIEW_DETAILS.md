@@ -8,6 +8,8 @@ The policy reviewer reviews the PR diff against the in-tree `rules/*.md` and pos
 
 Both derive the review event from per-finding severity (`rules/review-severity.md`; `.github/codex-review/post-review.sh` header) — any blocking finding posts `REQUEST_CHANGES`; nonblocking results approve with any advisory notes included, falling back to `COMMENT` only when GitHub forbids approval.
 
+The first verdict posted on a head stands. When the posting identity already reviewed the head, a dismissed review included, a later run posts nothing and exits 0; a new commit earns a new verdict. A failed review lookup fails the run without posting (`.github/codex-review/post-review.sh` header).
+
 ### A. coding-policy's own PRs — in-repo `review-codex.yml`
 
 The `.github/workflows/review-codex.yml` GitHub Actions workflow runs the OpenAI Codex CLI authenticated by a **ChatGPT subscription** (the `CODEX_AUTH_JSON` secret — no API key), via `codex exec` with `.github/codex-review/prompt.md` and `schema.json`.
@@ -37,7 +39,7 @@ from claude setup-token; the token is held only in coding-policy. Its dedicated 
 Both reviews run on PR events. The central fleet workflow runs them as separate
 jobs using distinct reviewer Apps; existing consumer dispatches start both. The quality result posts as a
 severity-derived verdict with the exact analyzed commit and the marker owned by
-`skills/release/review-lanes.sh` — `CLAUDE_REVIEW_LOGIN` and `review_lanes_jq`. Snapshot and dedup use that classifier and the separate logins. Claude posts as jbaruch-claude-reviewer[bot], independently of the Codex policy identity.
+`skills/release/review-lanes.sh` — `CLAUDE_REVIEW_LOGIN` and `review_lanes_jq`. Snapshot and dedup use that classifier and the separate logins. Claude posts as jbaruch-claude-reviewer[bot], independently of the Codex policy identity. Its first verdict on a head stands the same way (`.github/claude-review/review.py` docstring).
 
 Claude approves nonblocking results, including advisory notes. An App's approval
 supersedes its earlier change request; a plain comment would leave that request

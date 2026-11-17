@@ -18,10 +18,19 @@
 # from approving (`github-actions[bot]` — HTTP 422) falls back to COMMENT on a
 # nonblocking result, so the verdict is never lost.
 #
+# The first posted verdict on a head stands (issue #841): when REVIEWER_LOGIN
+# already posted a review whose commit_id is the reviewed head, a dismissed one
+# included, nothing is posted. Two runs on one head (the cron poll and a push
+# dispatch overlap) otherwise post verdicts that can disagree. A new commit is
+# what earns a new verdict.
+#
 # Usage: post-review.sh <owner> <repo> <pr-number> <result-json-file> <reviewed-sha>
+# Env:   GH_TOKEN, and REVIEWER_LOGIN, the login that token posts as
 # Out:   one JSON object on stdout:
 #          {"state":"posted","event":"...","head_sha":"...","findings":N,"blocking":N,"advisory":N}
-# Exit:  0 on success; non-zero with a stderr diagnostic on failure.
+#          {"state":"already_reviewed","head_sha":"..."}  (nothing posted)
+# Exit:  0 on success or an already-reviewed head; non-zero with a stderr
+#        diagnostic on failure, a failed review lookup included.
 
 set -euo pipefail
 
@@ -70,6 +79,10 @@ main() {
     echo 'error: reviewed-sha must be the complete lowercase source commit captured before review — rerun the driver against a verified checkout' >&2
     exit 2
   fi
+  if [[ -z "${REVIEWER_LOGIN:-}" ]]; then
+    echo 'error: set REVIEWER_LOGIN to the login GH_TOKEN posts as (the App bot login, or github-actions[bot]) so an already-reviewed head can be recognized' >&2
+    exit 2
+  fi
 
   if [[ ! -f "$result" ]]; then
     echo "error: result file not found: ${result} — codex exec did not write its --output-last-message file; check the review step logs" >&2
@@ -106,6 +119,25 @@ main() {
   if (( advisory_count > 0 )); then
     advisory_md=$(jq -r '.findings[] | select((.severity // "blocking") == "advisory") | "- `\(.path):\(.line)` — **\(.rule)** — \(.message)"' "$result")
     body="${body}"$'\n\n'"## Advisory findings (do not gate)"$'\n'"${advisory_md}"
+  fi
+
+  # Checked just before posting, so a run that finished reviewing first wins.
+  # A failed lookup refuses to post: "unknown" must never read as "not reviewed".
+  local reviews already
+  if ! reviews=$(gh api --paginate "repos/${owner}/${repo}/pulls/${pr}/reviews?per_page=100"); then
+    echo "error: could not list the reviews on ${owner}/${repo}#${pr}, so whether ${reviewed_sha} already has a verdict is unknown; nothing was posted — retry once the GitHub API answers" >&2
+    exit 1
+  fi
+  if ! already=$(jq -s -r --arg who "$REVIEWER_LOGIN" --arg sha "$reviewed_sha" \
+      '(add // []) | any(.[]; .user.login == $who and .commit_id == $sha
+         and (.state | IN("APPROVED", "COMMENTED", "CHANGES_REQUESTED", "DISMISSED")))' <<<"$reviews"); then
+    echo "error: the review list for ${owner}/${repo}#${pr} is not the expected JSON; nothing was posted — retry, and inspect the GitHub API response if it persists" >&2
+    exit 1
+  fi
+  if [[ "$already" == "true" ]]; then
+    echo "post-review: ${REVIEWER_LOGIN} already reviewed ${owner}/${repo}#${pr} at ${reviewed_sha}; the first verdict on a head stands, so nothing was posted" >&2
+    jq -n --arg head_sha "$reviewed_sha" '{state: "already_reviewed", head_sha: $head_sha}'
+    return 0
   fi
 
   # A pass is APPROVE when the token can approve (a GitHub App); a token that
