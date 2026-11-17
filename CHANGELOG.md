@@ -1,3 +1,7 @@
+## 0.10.13 — 2026-11-17
+
+- fix(commit-conventions): Leave CHANGELOG entries to the agent (#844)
+
 ## 0.10.12 — 2026-11-17
 
 - fix(release): Leave a locked worktree to its lock holder (#835)
