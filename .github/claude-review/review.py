@@ -161,8 +161,8 @@ def review_pr(owner: str, repo: str, pr: str, base: str) -> dict:
             body += f"\n## {severity} findings\n"
             for finding in findings:
                 body += f"\n- {finding['path']}:{finding['line']} — {finding['message']}\n"
-    # The cron poll and a push dispatch can review one head at once; the run that
-    # posts first wins. A failed lookup raises, so "unknown" never reads as "not reviewed".
+    # A dispatch queued behind a finished review can reach the same head; the
+    # first posted verdict stands. A failed lookup raises, so "unknown" never reads as "not reviewed".
     pages = json.loads(run(["gh", "api", "--paginate", "--slurp", endpoint + "/reviews?per_page=100"]))
     if (not isinstance(pages, list) or not all(isinstance(page, list) for page in pages)
             or not all(isinstance(item, dict) for page in pages for item in page)):

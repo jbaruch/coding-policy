@@ -20,9 +20,9 @@
 #
 # The first posted verdict on a head stands (issue #841): when REVIEWER_LOGIN
 # already posted a review whose commit_id is the reviewed head, a dismissed one
-# included, nothing is posted. Two runs on one head (the cron poll and a push
-# dispatch overlap) otherwise post verdicts that can disagree. A new commit is
-# what earns a new verdict.
+# included, nothing is posted. fleet-review.yml runs one review of a PR's lane
+# at a time, and a dispatch queued behind it can still reach the same head; its
+# verdict could disagree. A new commit is what earns a new verdict.
 #
 # Usage: post-review.sh <owner> <repo> <pr-number> <result-json-file> <reviewed-sha>
 # Env:   GH_TOKEN, and REVIEWER_LOGIN, the login that token posts as

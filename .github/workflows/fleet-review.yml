@@ -1,8 +1,8 @@
 name: Fleet Reviews (Codex policy, Claude quality)
 
-# Central cron poller: reviews every open same-repo PR across the reviewer App's
-# installation in independent policy and code-quality lanes. Both subscription
-# credentials are held only in this repo. Replaces the per-repo
+# Central fleet reviewer: reviews every open same-repo PR across the reviewer
+# App's installation in independent policy and code-quality lanes. Both
+# subscription credentials are held only in this repo. Replaces the per-repo
 # review-codex.yml fleet (blast radius for CODEX_AUTH_JSON drops from 22 to 1).
 #
 # Secrets required in THIS repo only:
@@ -18,10 +18,13 @@ name: Fleet Reviews (Codex policy, Claude quality)
 # APPROVE and a violation as REQUEST_CHANGES (post-review.sh). The App identity
 # can APPROVE (unlike github-actions[bot], which gets HTTP 422 and falls back to
 # COMMENT), so a clean review of a new head supersedes an earlier
-# REQUEST_CHANGES — no stale-review dismissal needed in the reviewed repo. The
-# first verdict posted on a head stands: the cron poll and a push dispatch can
-# review one head at once, and the later run posts nothing (post-review.sh,
-# review.py).
+# REQUEST_CHANGES — no stale-review dismissal needed in the reviewed repo.
+#
+# One verdict per head (issue #841): every review runs in the `review` job,
+# started only by a single-PR workflow_dispatch, whether a consumer's push or
+# the cron `poll` job sent it. Its per-PR, per-lane concurrency group runs one
+# review of a PR's lane at a time. A queued run on an already-reviewed head
+# posts nothing (post-review.sh, review.py).
 #
 # Token isolation: fleet-review-one.sh scrubs the App token from the workdir and
 # the environment before the sandbox-bypassed Codex step runs; the Codex auth.json
@@ -29,13 +32,13 @@ name: Fleet Reviews (Codex policy, Claude quality)
 
 on:
   schedule:
-    # Every 15 min: steady-state polls are near-instant no-ops (the stateless
-    # dedup reviews only new/updated heads), and a 15-min interval comfortably
-    # exceeds a typical full-batch run, so runs do not pile up under the
-    # cancel-in-progress:false concurrency guard below.
+    # Every 15 min: the poll only lists PRs whose current head a lane has not
+    # reviewed and dispatches a single-PR review for each, so it finishes in
+    # seconds and polls do not pile up under its concurrency guard below.
     - cron: "*/15 * * * *"
   # PR-time path: a consumer's thin review-trigger.yml calls this with the PR
-  # coords for an immediate single-PR review; the cron above is the backstop.
+  # coords for an immediate single-PR review; the cron poll dispatches the same
+  # way for any PR the trigger missed. Without `repo`, a manual run polls.
   workflow_dispatch:
     inputs:
       repo:
@@ -57,24 +60,76 @@ on:
 permissions:
   contents: read
 
-concurrency:
-  # Single-PR dispatches get a per-PR group so they run immediately instead of
-  # queuing behind a running cron poll; a new push to that PR cancels its prior
-  # review. The cron poll keeps its own group and never cancels in-progress.
-  group: fleet-review-${{ github.event.inputs.repo || 'poll' }}-${{ github.event.inputs.pr || 'all' }}-${{ github.event.inputs.reviewer || 'all' }}
-  cancel-in-progress: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.pr != '' }}
-
 jobs:
-  review:
-    strategy:
-      fail-fast: false
-      matrix:
-        lane: ${{ fromJSON(github.event.inputs.reviewer == 'quality' && '["quality"]' || github.event.inputs.reviewer == 'policy' && '["policy"]' || '["policy","quality"]') }}
+  poll:
     # Dormant until activated: set repo variable FLEET_REVIEWER_ENABLED=true once
     # the GitHub App is installed and FLEET_APP_ID / FLEET_APP_PRIVATE_KEY /
     # CODEX_AUTH_JSON / CLAUDE_CODE_OAUTH_TOKEN / TESSL_TOKEN secrets are set. Until then scheduled runs
     # are skipped (neutral, no failure noise) and workflow_dispatch is a no-op.
-    if: vars.FLEET_REVIEWER_ENABLED == 'true'
+    if: vars.FLEET_REVIEWER_ENABLED == 'true' && !github.event.inputs.repo
+    strategy:
+      fail-fast: false
+      matrix:
+        lane: [policy, quality]
+    # One poll per lane at a time; a new poll queues behind a running one.
+    concurrency:
+      group: fleet-review-poll-${{ matrix.lane }}
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      # gh workflow run: a workflow_dispatch sent with GITHUB_TOKEN creates a run.
+      actions: write
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Mint the reviewer App installation token
+        id: apptoken
+        uses: actions/create-github-app-token@v3
+        with:
+          app-id: ${{ secrets[matrix.lane == 'quality' && 'CLAUDE_REVIEW_APP_ID' || 'FLEET_APP_ID'] }}
+          private-key: ${{ secrets[matrix.lane == 'quality' && 'CLAUDE_REVIEW_APP_PRIVATE_KEY' || 'FLEET_APP_PRIVATE_KEY'] }}
+          owner: ${{ github.repository_owner }}
+
+      - name: Dispatch a review of each PR that needs one
+        env:
+          GH_TOKEN: ${{ steps.apptoken.outputs.token }}
+          DISPATCH_TOKEN: ${{ github.token }}
+          REVIEWER_LOGIN: ${{ steps.apptoken.outputs.app-slug }}[bot]
+          REVIEW_LANE: ${{ matrix.lane }}
+        run: |
+          set -euo pipefail
+          worklist=$(bash .github/codex-review/fleet-poll.sh)
+          if ! items=$(jq -r '.[] | [.repo, .number, .base_ref] | @tsv' <<<"$worklist"); then
+            echo "error: fleet-poll.sh printed no JSON array of {repo,number,base_ref} items; inspect its output above" >&2
+            exit 1
+          fi
+          fail=0
+          while IFS=$'\t' read -r repo pr base; do
+            [ -n "$repo" ] || continue
+            if GH_TOKEN="$DISPATCH_TOKEN" gh workflow run fleet-review.yml --repo "$GITHUB_REPOSITORY" \
+                -f repo="$repo" -f pr="$pr" -f base="$base" -f reviewer="$REVIEW_LANE"; then
+              echo "dispatched a ${REVIEW_LANE} review of ${repo}#${pr}"
+            else
+              echo "::warning::could not dispatch a ${REVIEW_LANE} review of ${repo}#${pr}; the next poll retries it"
+              fail=1
+            fi
+          done <<<"$items"
+          exit "$fail"
+
+  review:
+    if: vars.FLEET_REVIEWER_ENABLED == 'true' && github.event.inputs.repo
+    strategy:
+      fail-fast: false
+      matrix:
+        lane: ${{ fromJSON(github.event.inputs.reviewer == 'quality' && '["quality"]' || github.event.inputs.reviewer == 'policy' && '["policy"]' || '["policy","quality"]') }}
+    # Push and poll dispatches of one PR's lane share this group, so they run
+    # one at a time. A queued run never cancels a running one; a newer queued
+    # run replaces an older queued one.
+    concurrency:
+      group: fleet-review-${{ github.event.inputs.repo }}-${{ github.event.inputs.pr }}-${{ matrix.lane }}
+      cancel-in-progress: false
     runs-on: ubuntu-latest
     # Backstop so a stuck run cannot hold the concurrency slot and block the queue.
     timeout-minutes: 20
@@ -131,82 +186,36 @@ jobs:
         if: matrix.lane == 'policy'
         run: bash .github/codex-review/mask-secrets.sh "$HOME/.codex/auth.json"
 
-      - name: Build the review worklist
-        env:
-          GH_TOKEN: ${{ steps.apptoken.outputs.token }}
-          REVIEWER_LOGIN: ${{ steps.apptoken.outputs.app-slug }}[bot]
-          REVIEW_LANE: ${{ matrix.lane }}
-          DISPATCH_REPO: ${{ github.event.inputs.repo }}
-          DISPATCH_PR: ${{ github.event.inputs.pr }}
-          DISPATCH_BASE: ${{ github.event.inputs.base }}
-        run: |
-          set -euo pipefail
-          if [ -n "${DISPATCH_REPO:-}" ]; then
-            # PR-time single-PR path: review exactly the dispatched PR. No dedup —
-            # the trigger fires on each push, and fleet-review-one reviews the live head.
-            # Validate inputs up front so a bad dispatch fails here, not deep in a git fetch.
-            if ! [[ "${DISPATCH_REPO}" =~ ^[A-Za-z0-9._-]+$ ]]; then
-              echo "error: dispatch input 'repo' must be a bare repo name under jbaruch/ (no owner/slash), got '${DISPATCH_REPO}'" >&2
-              exit 1
-            fi
-            if ! [[ "${DISPATCH_PR:-}" =~ ^[0-9]+$ ]]; then
-              echo "error: dispatch input 'pr' must be a number, got '${DISPATCH_PR:-}'" >&2
-              exit 1
-            fi
-            if [ -z "${DISPATCH_BASE:-}" ]; then
-              echo "error: dispatch input 'base' is required when 'repo' is set" >&2
-              exit 1
-            fi
-            jq -nc --arg r "$DISPATCH_REPO" --argjson n "$DISPATCH_PR" --arg b "$DISPATCH_BASE" \
-              '[{owner:"jbaruch", repo:$r, number:$n, base_ref:$b, head_sha:"(dispatch)"}]' > worklist.json
-          else
-            # Cron backstop: poll all marked repos for PRs needing review.
-            bash .github/codex-review/fleet-poll.sh > worklist.json
-          fi
-
-      - name: Review each PR that needs it
+      - name: Review the dispatched PR
         env:
           GH_TOKEN: ${{ steps.apptoken.outputs.token }}
           CENTRAL_DIR: ${{ github.workspace }}
           REVIEWER_LOGIN: ${{ steps.apptoken.outputs.app-slug }}[bot]
           REVIEW_LANE: ${{ matrix.lane }}
           CLAUDE_CODE_OAUTH_TOKEN: ${{ matrix.lane == 'quality' && secrets.CLAUDE_CODE_OAUTH_TOKEN || '' }}
+          DISPATCH_REPO: ${{ github.event.inputs.repo }}
+          DISPATCH_PR: ${{ github.event.inputs.pr }}
+          DISPATCH_BASE: ${{ github.event.inputs.base }}
         run: |
-          set -uo pipefail
-          # Explicitly validate the worklist shape: a malformed worklist.json must
-          # abort loudly, never pass silently with zero (or null-field) reviews
-          # (rules/error-handling.md aggregate-reporting carve-out — the setup step
-          # carries its own check). Require a top-level array whose every item has
-          # all fields fleet-review-one.sh consumes.
-          if ! jq -e 'type=="array" and all(.[]; has("owner") and has("repo") and has("number") and has("base_ref") and has("head_sha"))' worklist.json >/dev/null 2>&1; then
-            echo "error: worklist.json is not an array of well-formed work items {owner,repo,number,base_ref,head_sha} — inspect the poll step output" >&2
+          set -euo pipefail
+          # Validate inputs up front so a bad dispatch fails here, not deep in a git fetch.
+          if ! [[ "${DISPATCH_REPO}" =~ ^[A-Za-z0-9._-]+$ ]]; then
+            echo "error: dispatch input 'repo' must be a bare repo name under jbaruch/ (no owner/slash), got '${DISPATCH_REPO}'" >&2
             exit 1
           fi
-          items=$(jq -c '.[]' worklist.json)
-          count=$(jq 'length' worklist.json)  # worklist.json validated as an array above
-          echo "PRs needing review: ${count}"
-          fail=0
-          while IFS= read -r item; do
-            [ -n "$item" ] || continue
-            o=$(jq -r .owner     <<<"$item")
-            r=$(jq -r .repo      <<<"$item")
-            n=$(jq -r .number    <<<"$item")
-            b=$(jq -r .base_ref  <<<"$item")
-            echo "::group::review ${o}/${r}#${n} (head $(jq -r .head_sha <<<"$item"))"
-            if [ "$REVIEW_LANE" = quality ]; then
-              driver=(python3 .github/claude-review/review.py)
-            else
-              driver=(bash .github/codex-review/fleet-review-one.sh)
-            fi
-            if "${driver[@]}" "$o" "$r" "$n" "$b"; then
-              echo "reviewed ${o}/${r}#${n}"
-            else
-              echo "::warning::fleet review failed for ${o}/${r}#${n}"
-              fail=1
-            fi
-            echo "::endgroup::"
-          done <<< "$items"
-          exit "$fail"
+          if ! [[ "${DISPATCH_PR:-}" =~ ^[0-9]+$ ]]; then
+            echo "error: dispatch input 'pr' must be a number, got '${DISPATCH_PR:-}'" >&2
+            exit 1
+          fi
+          if [ -z "${DISPATCH_BASE:-}" ]; then
+            echo "error: dispatch input 'base' is required when 'repo' is set" >&2
+            exit 1
+          fi
+          if [ "$REVIEW_LANE" = quality ]; then
+            python3 .github/claude-review/review.py jbaruch "$DISPATCH_REPO" "$DISPATCH_PR" "$DISPATCH_BASE"
+          else
+            bash .github/codex-review/fleet-review-one.sh jbaruch "$DISPATCH_REPO" "$DISPATCH_PR" "$DISPATCH_BASE"
+          fi
 
       - name: Drop the Codex credential
         if: always() && matrix.lane == 'policy'
