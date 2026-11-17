@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
 # Outcome tests for license.sh --write <year> <holder>: it creates the exact
-# MIT text for the supplied year and holder and stages only LICENSE, never
-# touches a tracked, untracked or locally deleted LICENSE, rejects invalid
-# arguments without writing, tells a broken repository from no repository in
-# any caller locale, leaves no LICENSE after a failed write, and reports a
-# staging failure with a recovery that also works for an ignored LICENSE. Also
-# checks that coding-policy carries the MIT license the operator approved.
+# MIT text for the supplied year and holder and stages only LICENSE, reuses a
+# LICENSE holding those exact bytes so an identical rerun succeeds, never
+# touches any other tracked, untracked, linked or locally deleted LICENSE,
+# rejects invalid arguments without writing, keeps git's own diagnostic when
+# it cannot find the worktree root in any caller locale, leaves no LICENSE
+# after a failed write, and reports a staging failure with recoveries that
+# work: a rerun, or a forced add for an ignored LICENSE. Also checks that
+# coding-policy carries the MIT license the operator approved.
 # Each case builds a throwaway repo; order-independent.
 #
 # Run: bash tests/onboard-repo/tests/test_license.sh
@@ -15,6 +17,8 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 SCRIPT="$REPO_ROOT/skills/onboard-repo/license.sh"
 WRITTEN='{"source":"LICENSE","written":true}'
 REFUSED='{"source":"LICENSE","written":false}'
+REUSED="$REFUSED"   # same object; the exit status tells reuse (0) from refusal (1)
+NO_ROOT="error: cannot determine the Git worktree root"
 
 cleanup() { [[ -n "${TMP:-}" ]] && ! rm -rf "$TMP" && echo "warn: could not remove $TMP" >&2; return 0; }
 pass() { PASS=$((PASS+1)); }
@@ -61,7 +65,7 @@ main() {
   TMP="$(mktemp -d "${TMPDIR:-/tmp}/test-license.XXXXXX")" || { echo "fatal: mktemp" >&2; exit 2; }
   trap cleanup EXIT
   FAIL=0; PASS=0
-  local d out rc before after args
+  local d out rc before after args variant
 
   # 1. a tracked LICENSE is kept: --write refuses without touching it.
   d="$TMP/1"; mkrepo "$d"
@@ -97,12 +101,71 @@ main() {
      && [[ "$(git -C "$d" diff --cached --name-only)" == "LICENSE" ]]; then pass
   else fail "write and stage MIT: rc=$rc out=$out"; fi
 
-  # 4b. a second --write refuses and keeps the first LICENSE.
+  # 4b. a --write with different arguments refuses and keeps the first LICENSE.
   if before=$(cat "$d/LICENSE"); then
     out="$(cd "$d" && bash "$SCRIPT" --write 2024 "Someone Else" 2>>"$TMP/stderr.log")"; rc=$?
     if [[ $rc -eq 1 && "$out" == "$REFUSED" ]] && after=$(cat "$d/LICENSE") && [[ "$after" == "$before" ]]; then pass
     else fail "second write: rc=$rc out=$out"; fi
   else fail "case 4b snapshot"; fi
+
+  # 4c. an identical rerun while LICENSE is staged reuses it: exit 0,
+  #     written false, same bytes, and still only LICENSE staged.
+  out="$(cd "$d" && bash "$SCRIPT" --write 2019 "Jane Q. Holder" 2>>"$TMP/stderr.log")"; rc=$?
+  if [[ $rc -eq 0 && "$out" == "$REUSED" ]] && expected_mit 2019 "Jane Q. Holder" | cmp -s - "$d/LICENSE" \
+     && [[ "$(git -C "$d" diff --cached --name-only)" == "LICENSE" ]]; then pass
+  else fail "identical rerun, LICENSE staged: rc=$rc out=$out"; fi
+
+  # 4d. an identical rerun after LICENSE is committed reuses it and stages nothing.
+  git -C "$d" commit -q -m license || setup_fail "case 4d commit"
+  out="$(cd "$d" && bash "$SCRIPT" --write 2019 "Jane Q. Holder" 2>>"$TMP/stderr.log")"; rc=$?
+  if [[ $rc -eq 0 && "$out" == "$REUSED" ]] && expected_mit 2019 "Jane Q. Holder" | cmp -s - "$d/LICENSE" \
+     && [[ -z "$(git -C "$d" diff --cached --name-only)" ]]; then pass
+  else fail "identical rerun, LICENSE committed: rc=$rc out=$out"; fi
+
+  # 4e. a LICENSE one final newline short of, or past, the MIT text differs:
+  #     --write refuses, says so, and leaves it unchanged and unstaged.
+  for variant in short long; do
+    d="$TMP/4e-$variant"; mkrepo "$d"
+    if [[ $variant == short ]]; then printf '%s' "$(expected_mit 2019 "Test Owner")" > "$d/LICENSE"
+    else { expected_mit 2019 "Test Owner"; printf '\n'; } > "$d/LICENSE"; fi || setup_fail "case 4e $variant"
+    cp "$d/LICENSE" "$TMP/4e-$variant.orig" || setup_fail "case 4e $variant copy"
+    out="$(cd "$d" && bash "$SCRIPT" --write 2019 "Test Owner" 2>"$TMP/4e-$variant.err")"; rc=$?
+    if [[ $rc -eq 1 && "$out" == "$REFUSED" ]] && cmp -s "$TMP/4e-$variant.orig" "$d/LICENSE" \
+       && [[ -z "$(git -C "$d" ls-files -- LICENSE)" ]] && grep -qF "differs from the MIT text" "$TMP/4e-$variant.err"; then pass
+    else fail "final-newline difference ($variant): rc=$rc out=$out err=$(cat "$TMP/4e-$variant.err")"; fi
+  done
+
+  # 4f. a LICENSE symlink is refused even when its target holds the exact text.
+  d="$TMP/4f"; mkrepo "$d"
+  { expected_mit 2019 "Test Owner" > "$d/MIT.txt" && ln -s MIT.txt "$d/LICENSE"; } || setup_fail "case 4f symlink"
+  out="$(cd "$d" && bash "$SCRIPT" --write 2019 "Test Owner" 2>"$TMP/4f.err")"; rc=$?
+  if [[ $rc -eq 1 && "$out" == "$REFUSED" && -L "$d/LICENSE" && "$(readlink "$d/LICENSE")" == "MIT.txt" ]] \
+     && [[ -z "$(git -C "$d" diff --cached --name-only)" ]] && grep -qF "symlink" "$TMP/4f.err"; then pass
+  else fail "exact-content symlink: rc=$rc out=$out err=$(cat "$TMP/4f.err")"; fi
+
+  # 4g. when the comparison itself fails, --write exits 2 and leaves LICENSE
+  #     and the index as they were. A `cmp` on PATH exiting 2 stands in for
+  #     the failing comparison.
+  d="$TMP/4g"; mkrepo "$d"
+  { expected_mit 2019 "Test Owner" > "$d/LICENSE" && mkdir "$TMP/fault-cmp" \
+    && printf '#!/bin/sh\necho "cmp: read error" >&2\nexit 2\n' > "$TMP/fault-cmp/cmp" && chmod +x "$TMP/fault-cmp/cmp"; } \
+    || setup_fail "case 4g fault cmp"
+  out="$(cd "$d" && PATH="$TMP/fault-cmp:$PATH" bash "$SCRIPT" --write 2019 "Test Owner" 2>"$TMP/4g.err")"; rc=$?
+  if [[ $rc -eq 2 && -z "$out" ]] && expected_mit 2019 "Test Owner" | cmp -s - "$d/LICENSE" \
+     && [[ -z "$(git -C "$d" ls-files -- LICENSE)" ]] && grep -qF "could not compare LICENSE" "$TMP/4g.err"; then pass
+  else fail "comparison failure: rc=$rc out=$out err=$(cat "$TMP/4g.err")"; fi
+
+  # 4h. when rendering the text to compare fails, --write exits 2 and leaves
+  #     LICENSE and the index as they were. A `cat` on PATH that fails stands
+  #     in for the failing render.
+  d="$TMP/4h"; mkrepo "$d"
+  { expected_mit 2019 "Test Owner" > "$d/LICENSE" && mkdir "$TMP/fault-render" \
+    && printf '#!/bin/sh\nexit 1\n' > "$TMP/fault-render/cat" && chmod +x "$TMP/fault-render/cat"; } \
+    || setup_fail "case 4h fault cat"
+  out="$(cd "$d" && PATH="$TMP/fault-render:$PATH" bash "$SCRIPT" --write 2019 "Test Owner" 2>"$TMP/4h.err")"; rc=$?
+  if [[ $rc -eq 2 && -z "$out" ]] && expected_mit 2019 "Test Owner" | cmp -s - "$d/LICENSE" \
+     && [[ -z "$(git -C "$d" ls-files -- LICENSE)" ]] && grep -qF "could not render" "$TMP/4h.err"; then pass
+  else fail "render failure: rc=$rc out=$out err=$(cat "$TMP/4h.err")"; fi
 
   # 5. invalid arguments are a usage error and write nothing.
   d="$TMP/5"; mkrepo "$d"
@@ -117,51 +180,61 @@ main() {
   out="$(cd "$d" && bash "$SCRIPT" --write 2019 $'Owner\nInjected line' 2>>"$TMP/stderr.log")"; rc=$?
   if [[ $rc -eq 2 && -z "$out" && ! -e "$d/LICENSE" ]]; then pass; else fail "multi-line holder: rc=$rc out=$out"; fi
 
-  # 6. outside a git worktree it stops and writes nothing.
+  # 6. outside a git worktree it stops, writes nothing, and keeps git's own
+  #    diagnostic above its own.
   d="$TMP/6"; mkdir "$d" || setup_fail "case 6 dir"
-  out="$(cd "$d" && GIT_CEILING_DIRECTORIES="$TMP" bash "$SCRIPT" --write 2019 "Test Owner" 2>"$TMP/6.err")"; rc=$?
-  if [[ $rc -eq 2 && -z "$out" && ! -e "$d/LICENSE" ]] && grep -qF "not inside a git worktree" "$TMP/6.err"; then pass
-  else fail "outside a worktree: rc=$rc out=$out"; fi
+  out="$(cd "$d" && GIT_CEILING_DIRECTORIES="$TMP" LC_ALL=C bash "$SCRIPT" --write 2019 "Test Owner" 2>"$TMP/6.err")"; rc=$?
+  if [[ $rc -eq 2 && -z "$out" && ! -e "$d/LICENSE" ]] && grep -qF "$NO_ROOT" "$TMP/6.err" \
+     && grep -qF "not a git repository" "$TMP/6.err"; then pass
+  else fail "outside a worktree: rc=$rc out=$out err=$(cat "$TMP/6.err")"; fi
 
-  # 6a. a caller asking for French messages still gets "not inside a git
-  #     worktree", not a repair instruction: git translates its diagnostic
-  #     under this locale.
+  # 6a. a caller asking for French messages gets the same outcome, with git's
+  #     diagnostic, translated or not, kept beside the script's own.
   out="$(cd "$d" && GIT_CEILING_DIRECTORIES="$TMP" LC_ALL=en_US.UTF-8 LANGUAGE=fr \
          bash "$SCRIPT" --write 2019 "Test Owner" 2>"$TMP/6a.err")"; rc=$?
-  if [[ $rc -eq 2 && -z "$out" && ! -e "$d/LICENSE" ]] && grep -qF "not inside a git worktree" "$TMP/6a.err"; then pass
+  if [[ $rc -eq 2 && -z "$out" && ! -e "$d/LICENSE" ]] && grep -qF "$NO_ROOT" "$TMP/6a.err" \
+     && grep -vF "$NO_ROOT" "$TMP/6a.err" | grep -q .; then pass
   else fail "outside a worktree, French locale: rc=$rc out=$out err=$(cat "$TMP/6a.err")"; fi
 
-  # 7. a staging failure (a held index lock) exits 2 and says how to recover.
+  # 7. a staging failure (a held index lock) exits 2, says how to recover,
+  #    and leaves the complete text unstaged.
   d="$TMP/7"; mkrepo "$d"
   : > "$d/.git/index.lock" || setup_fail "case 7 lock"
   out="$(cd "$d" && bash "$SCRIPT" --write 2019 "Test Owner" 2>"$TMP/7.err")"; rc=$?
-  if [[ $rc -eq 2 && -z "$out" ]] && grep -qF "run 'git add -f LICENSE'" "$TMP/7.err"; then pass
-  else fail "staging failure: rc=$rc out=$out"; fi
+  if [[ $rc -eq 2 && -z "$out" ]] && grep -qF "rerun this same license.sh command" "$TMP/7.err" \
+     && expected_mit 2019 "Test Owner" | cmp -s - "$d/LICENSE" && [[ -z "$(git -C "$d" ls-files -- LICENSE)" ]]; then pass
+  else fail "staging failure: rc=$rc out=$out err=$(cat "$TMP/7.err")"; fi
+
+  # 7a. once the lock is gone, the identical rerun stages LICENSE alone.
+  rm -f "$d/.git/index.lock" || setup_fail "case 7a unlock"
+  out="$(cd "$d" && bash "$SCRIPT" --write 2019 "Test Owner" 2>>"$TMP/stderr.log")"; rc=$?
+  if [[ $rc -eq 0 && "$out" == "$REUSED" ]] && expected_mit 2019 "Test Owner" | cmp -s - "$d/LICENSE" \
+     && [[ "$(git -C "$d" diff --cached --name-only)" == "LICENSE" ]]; then pass
+  else fail "rerun after a staging failure: rc=$rc out=$out"; fi
 
   # 7d. when .gitignore matches LICENSE, staging fails, and the recovery the
   #     message gives stages it.
   d="$TMP/7d"; mkrepo "$d"
   printf 'LICENSE\n' > "$d/.gitignore" || setup_fail "case 7d gitignore"
   out="$(cd "$d" && bash "$SCRIPT" --write 2019 "Test Owner" 2>"$TMP/7d.err")"; rc=$?
-  if [[ $rc -eq 2 && -z "$out" ]] && grep -qF "run 'git add -f LICENSE'" "$TMP/7d.err" \
+  if [[ $rc -eq 2 && -z "$out" ]] && grep -qF "run 'git add -f LICENSE' instead" "$TMP/7d.err" \
      && git -C "$d" add -f LICENSE && [[ "$(git -C "$d" diff --cached --name-only)" == "LICENSE" ]]; then pass
   else fail "ignored LICENSE: rc=$rc out=$out err=$(cat "$TMP/7d.err")"; fi
 
-  # 6b. corrupt metadata is a git failure, not "outside a worktree": --write
-  #     reports git's own diagnostic and writes nothing. A bad config line
-  #     and a gitfile pointing nowhere both fail rev-parse like a plain
-  #     directory does.
+  # 6b. corrupt metadata stops --write the same way, with git's own
+  #     diagnostic kept, and writes nothing. A bad config line and a gitfile
+  #     pointing nowhere both fail rev-parse like a plain directory does.
   d="$TMP/6b"; mkrepo "$d"
   printf '[core\nbroken\n' > "$d/.git/config" || setup_fail "case 6b config"
-  out="$(cd "$d" && bash "$SCRIPT" --write 2019 "Test Owner" 2>"$TMP/6b.err")"; rc=$?
+  out="$(cd "$d" && LC_ALL=C bash "$SCRIPT" --write 2019 "Test Owner" 2>"$TMP/6b.err")"; rc=$?
   if [[ $rc -eq 2 && -z "$out" && ! -e "$d/LICENSE" ]] && grep -qF "bad config line" "$TMP/6b.err" \
-     && ! grep -qF "not inside a git worktree" "$TMP/6b.err"; then pass
+     && grep -qF "$NO_ROOT" "$TMP/6b.err"; then pass
   else fail "corrupt git config: rc=$rc out=$out err=$(cat "$TMP/6b.err")"; fi
   d="$TMP/6c"; mkdir "$d" || setup_fail "case 6c dir"
   printf 'gitdir: %s\n' "$TMP/6c-missing" > "$d/.git" || setup_fail "case 6c gitfile"
-  out="$(cd "$d" && GIT_CEILING_DIRECTORIES="$TMP" bash "$SCRIPT" --write 2019 "Test Owner" 2>"$TMP/6c.err")"; rc=$?
+  out="$(cd "$d" && GIT_CEILING_DIRECTORIES="$TMP" LC_ALL=C bash "$SCRIPT" --write 2019 "Test Owner" 2>"$TMP/6c.err")"; rc=$?
   if [[ $rc -eq 2 && -z "$out" && ! -e "$d/LICENSE" ]] && grep -qF "fatal: " "$TMP/6c.err" \
-     && ! grep -qF "not inside a git worktree" "$TMP/6c.err"; then pass
+     && grep -qF "$NO_ROOT" "$TMP/6c.err"; then pass
   else fail "dangling gitfile: rc=$rc out=$out err=$(cat "$TMP/6c.err")"; fi
 
   # 7b. a write failing after LICENSE is created (quota, I/O) exits 2 and

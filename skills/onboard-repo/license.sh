@@ -5,18 +5,21 @@
 # The caller (onboard-repo Step 5) owns every licensing judgment: that the
 # operator owns the repository, that it declares no license, and that the
 # operator confirmed MIT with this year and holder. This script checks none of
-# that. It only refuses to touch a LICENSE that already exists in the working
-# tree or the index.
+# that. It never rewrites or removes an existing LICENSE: one whose bytes match
+# the requested MIT text is reused and staged, so rerunning the same command
+# converges; any other LICENSE in the working tree or the index is refused.
 #
 # Usage: license.sh --write <year> <holder>
 #   <year>     four-digit copyright year
 #   <holder>   copyright holder, one non-empty line
 # Out:   one JSON object on stdout:
 #          {"source":"LICENSE","written":true|false}
-# Exit:  0 when LICENSE was created and staged; 1 when LICENSE already exists
-#        or is tracked (nothing changes); 2 on a usage, environment or I/O
-#        error, where a failed write leaves no LICENSE. Diagnostics go to
-#        stderr.
+# Exit:  0 when LICENSE holds the requested MIT text and is staged: written
+#        true when this run created it, false when it was already there;
+#        1 when LICENSE exists with other content, is not a regular file, or
+#        is tracked but deleted (nothing changes, written false); 2 on a
+#        usage, environment or I/O error, where a failed write leaves no
+#        LICENSE. Diagnostics go to stderr.
 set -euo pipefail
 
 usage() { echo "usage: license.sh --write <year> <holder> — year is four digits, holder one non-empty line" >&2; exit 2; }
@@ -56,53 +59,59 @@ refuse() { # <reason>
 
 main() {
   (( $# == 3 )) && [[ "$1" == "--write" && "$2" =~ ^[0-9]{4}$ && -n "$3" && "$3" != *[$'\n\r']* ]] || usage
-  local year="$2" holder="$3" err root tracked
-  # Corrupt or unreadable metadata and unsafe ownership fail like "outside a
-  # repo", so only git's not-a-repository message means no worktree. The C
-  # locale keeps that message in English whatever the caller's locale. Bash
-  # captures one stream per substitution: the first call takes git's
-  # diagnostic, the second the root, with any warning on stderr.
-  if ! err=$(LC_ALL=C LANGUAGE=C git rev-parse --show-toplevel 2>&1 >/dev/null); then
-    case "$err" in
-      *"fatal: not a git repository (or any "*) echo "error: not inside a git worktree — run from within the consumer repo" >&2 ;;
-      *) echo "error: git cannot read this repository: ${err:-git rev-parse failed silently} — fix it ('git status' shows the same error), then re-run" >&2 ;;
-    esac
-    exit 2
-  fi
+  local year="$2" holder="$3" root tracked expected compared=0 written=false
+  # git prints its own diagnostic to stderr above this one.
   if ! root=$(git rev-parse --show-toplevel); then
-    echo "error: git rev-parse failed after succeeding once — run 'git status', fix the repository, then re-run" >&2
+    echo "error: cannot determine the Git worktree root — inspect the Git error above with 'git status', then rerun from the consumer worktree" >&2
     exit 2
   fi
   cd "$root"
-  if [[ -e LICENSE || -L LICENSE ]]; then refuse "LICENSE already exists"; fi
-  if ! tracked=$(git ls-files -- LICENSE); then
-    echo "error: could not read the git index — check 'git status' and re-run" >&2
-    exit 2
-  fi
-  # A tracked LICENSE deleted from the working tree is still the repo's license.
-  if [[ -n "$tracked" ]]; then refuse "LICENSE is tracked by git but missing from the working tree; restore it with 'git restore LICENSE'"; fi
-  # noclobber creates LICENSE exclusively, so a file appearing since the check
-  # above is never overwritten.
-  if ! ( set -o noclobber; : > LICENSE ); then
-    echo "error: could not create LICENSE — check the repo root is writable and LICENSE is absent, then re-run" >&2
-    exit 2
-  fi
-  # This run created LICENSE, so a failed write (quota, I/O) removes it rather
-  # than leave a partial file the next run would refuse.
-  if ! mit_text "$year" "$holder" >> LICENSE; then
-    if ! rm -f -- LICENSE; then
-      echo "error: could not write LICENSE, nor remove the partial file — delete LICENSE by hand, check free space and quota, then re-run" >&2
+  if [[ -L LICENSE ]]; then refuse "LICENSE is a symlink"; fi
+  if [[ -e LICENSE ]]; then
+    if [[ ! -f LICENSE ]]; then refuse "LICENSE exists and is not a regular file"; fi
+    if ! expected=$(mit_text "$year" "$holder"); then
+      echo "error: could not render the MIT text — check the system 'cat' works, then rerun" >&2
       exit 2
     fi
-    echo "error: could not write LICENSE; removed the partial file — check free space and quota, then re-run" >&2
-    exit 2
+    # The substitution strips the text's final newline; the here-string
+    # restores it, so only identical bytes compare equal.
+    cmp -s - LICENSE <<< "$expected" || compared=$?
+    case $compared in
+      0) ;;
+      1) refuse "LICENSE differs from the MIT text for $year $holder" ;;
+      *) echo "error: could not compare LICENSE with the MIT text — check LICENSE is readable, then rerun" >&2; exit 2 ;;
+    esac
+  else
+    if ! tracked=$(git ls-files -- LICENSE); then
+      echo "error: could not read the git index — check 'git status' and re-run" >&2
+      exit 2
+    fi
+    # A tracked LICENSE deleted from the working tree is still the repo's license.
+    if [[ -n "$tracked" ]]; then refuse "LICENSE is tracked by git but missing from the working tree; restore it with 'git restore LICENSE'"; fi
+    # noclobber creates LICENSE exclusively, so a file appearing since the check
+    # above is never overwritten.
+    if ! ( set -o noclobber; : > LICENSE ); then
+      echo "error: could not create LICENSE — check the repo root is writable and LICENSE is absent, then re-run" >&2
+      exit 2
+    fi
+    # This run created LICENSE, so a failed write (quota, I/O) removes it rather
+    # than leave a partial file the next run would refuse.
+    if ! mit_text "$year" "$holder" >> LICENSE; then
+      if ! rm -f -- LICENSE; then
+        echo "error: could not write LICENSE, nor remove the partial file — delete LICENSE by hand, check free space and quota, then re-run" >&2
+        exit 2
+      fi
+      echo "error: could not write LICENSE; removed the partial file — check free space and quota, then re-run" >&2
+      exit 2
+    fi
+    written=true
   fi
   # Staged here, so the onboarding commit takes this LICENSE.
   if ! git add -- LICENSE; then
-    echo "error: wrote LICENSE but could not stage it — fix the cause git printed above, then run 'git add -f LICENSE' (-f stages it even when a .gitignore pattern matches LICENSE) and re-run the commit step" >&2
+    echo "error: LICENSE holds the MIT text but could not be staged — fix the cause git printed above, then rerun this same license.sh command; when a .gitignore pattern matches LICENSE, run 'git add -f LICENSE' instead, then run the commit step" >&2
     exit 2
   fi
-  printf '{"source":"LICENSE","written":true}\n'
+  printf '{"source":"LICENSE","written":%s}\n' "$written"
 }
 
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
