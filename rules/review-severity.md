@@ -19,6 +19,7 @@ alwaysApply: true
 - A behavior-changing suggestion alone never establishes a blocker.
 - On a re-review, only unresolved blockers of the last review, plus defects and binding policy mismatches in lines changed since it, with their regressions, block.
 - On a re-review, anything else already present at the last reviewed head is advisory.
+- A re-review whose last reviewed head is unreadable counts as a first review.
 - Resolve mismatches through compliant code or authorized policy amendment and re-review.
 - Reviewers cannot waive policy.
 - Apply `rules/simplicity.md` to remedy cost and scope.
