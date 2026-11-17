@@ -55,7 +55,20 @@ gh pr merge <N> --merge
 # Return to the base checkout, fast-forward main
 cd <path-to-base-checkout>
 git checkout main && git pull --ff-only
+```
 
+Check the worktree for a lock before teardown, from the base checkout:
+
+```bash
+KS=.tessl/plugins/jbaruch/coding-policy/skills/release/; [ -d "$KS" ] || KS="$HOME/$KS"; [ -d "$KS" ] || case "$(git config --get remote.origin.url)" in git@github.com:jbaruch/coding-policy|git@github.com:jbaruch/coding-policy.git|https://github.com/jbaruch/coding-policy|https://github.com/jbaruch/coding-policy.git|ssh://git@github.com/jbaruch/coding-policy|ssh://git@github.com/jbaruch/coding-policy.git) KS=skills/release/ ;; *) echo "coding-policy skill not found: run tessl install jbaruch/coding-policy" >&2; exit 1 ;; esac
+python3 "$KS/worktree-lock.py" <path-to-worktree>
+```
+
+It prints one JSON object `{"path", "locked", "reason"}`: `locked` is `true` for a locked worktree, and `reason` is its lock reason or `null` when the lock supplies none. It exits 1 with a stderr diagnostic on usage error, git failure or a path no listed worktree resolves to; fix the cause and re-run it before teardown. How it matches the worktree and reads its lock is the script's contract — see `skills/release/worktree-lock.py` docstring.
+
+For an unlocked worktree:
+
+```bash
 # Tear down the worktree — directory + `.git/worktrees/` metadata
 git worktree remove <path-to-worktree>
 
@@ -67,6 +80,14 @@ git remote prune origin
 ```
 
 Order in (B) is mandatory: `git branch -d` refuses to delete a branch that is checked out in any worktree, so the `git worktree remove` step must come before `git branch -d`. Reversing the order produces a "checked out at `<path>`" error and leaves a stranded branch.
+
+A locked worktree belongs to its lock holder. For a locked worktree:
+
+- Skip `git worktree remove` and `git branch -d` for it
+- Never force the removal with `-f` and never run `git worktree unlock`
+- Run `git remote prune origin`
+- Report the worktree path, its branch and the lock reason as left to its lock holder, with `no reason supplied` for a `null` reason
+- The merge counts as delivered
 
 After merge, verify the merge landed on main and complete the issue checks:
 
