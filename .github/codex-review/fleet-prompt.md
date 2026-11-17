@@ -58,8 +58,8 @@ Complete the pass before returning findings:
   mismatches in lines changed since the last reviewed head (`git diff <commit_id> HEAD` within
   this PR's diff) and regressions those changes cause can block. Anything else already present
   at that head is advisory.
-- An unreadable `last_review.commit_id` is a review limitation to name in `summary`. It never
-  widens blocking scope beyond unresolved `last_review.blocking` findings.
+- An unreadable `last_review.commit_id` is a review limitation to name in `summary`. Review the
+  current head as a first review.
 - Do not return after the first blocking finding. Collect independent violations in this pass.
 - Check every candidate against the actual binding clause and inspected current-head source;
   consolidate duplicate manifestations that have one cause and one fix. Do not speculate.

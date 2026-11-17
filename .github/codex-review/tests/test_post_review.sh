@@ -74,14 +74,16 @@ gh() {
 
 run_main() { ( set -euo pipefail; main "$@" "$REVIEWED_SHA" ); }
 
-# Succeeds when the captured body's final line is the marker carrying exactly
-# the JSON array $1.
+# Succeeds when the captured body ends with the '## Review metadata' heading and
+# the marker carrying exactly {schema_version: 1, blocking: $1}.
 marker_is() {
-  local last
+  local heading last
+  heading=$(jq -r .body "$GH_CAPTURE" | tail -n 2 | head -n 1)
+  [[ "$heading" == "## Review metadata" ]] || return 1
   last=$(jq -r .body "$GH_CAPTURE" | tail -n 1)
   [[ "$last" == "<!-- coding-policy-blockers "*" -->" ]] || return 1
   last=${last#"<!-- coding-policy-blockers "}
-  jq -e --argjson want "$1" '. == $want' <<<"${last% -->}" >/dev/null
+  jq -e --argjson want "$1" '. == {schema_version: 1, blocking: $want}' <<<"${last% -->}" >/dev/null
 }
 
 # --- pass, no findings -> APPROVE (token can approve), body is the summary ---

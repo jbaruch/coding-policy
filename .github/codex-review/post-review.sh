@@ -6,9 +6,11 @@
 # review whose body carries the summary and every finding. Findings ride in
 # the review body rather than as inline comments so an off-diff line can never
 # trigger the HTTP 422 that would cascade-fail the whole review. The body's
-# final line is `<!-- coding-policy-blockers [...] -->`, the blocking finding
-# objects as compact JSON with `<` and `>` escaped, on every verdict;
-# prior-feedback.py reads it back.
+# last two lines, on every verdict, are a `## Review metadata` heading and
+# `<!-- coding-policy-blockers {"schema_version":1,"blocking":[...]} -->`, the
+# blocking finding objects as compact JSON with `<` and `>` escaped. The heading
+# ends the blocking list for its parsers. This script writes the marker;
+# prior-feedback.py reads it.
 #
 # The review event is DERIVED from per-finding severity, not read from a model
 # verdict (rules/review-severity.md — the gate is a deterministic function of
@@ -156,7 +158,8 @@ main() {
   fi
 
   # Build the review body: summary, then blocking and advisory findings in
-  # labeled sections (each omitted when its tier is empty), then the marker.
+  # labeled sections (each omitted when its tier is empty), then the metadata
+  # heading and the marker.
   local body blocking_md advisory_md marker
   body="$summary"
   if (( blocking_count > 0 )); then
@@ -168,8 +171,8 @@ main() {
     body="${body}"$'\n\n'"## Advisory findings (do not gate)"$'\n'"${advisory_md}"
   fi
   # Escaped `<` and `>` keep message text from closing the comment early.
-  marker=$(jq -r 'tojson | gsub("<"; "\\u003c") | gsub(">"; "\\u003e") | "<!-- coding-policy-blockers \(.) -->"' <<<"$blocking")
-  body="${body}"$'\n\n'"${marker}"
+  marker=$(jq -r '{schema_version: 1, blocking: .} | tojson | gsub("<"; "\\u003c") | gsub(">"; "\\u003e") | "<!-- coding-policy-blockers \(.) -->"' <<<"$blocking")
+  body="${body}"$'\n\n'"## Review metadata"$'\n'"${marker}"
 
   # A pass is APPROVE when the token can approve (a GitHub App); a token that
   # cannot approve (github-actions[bot] — HTTP 422) falls back to COMMENT so the

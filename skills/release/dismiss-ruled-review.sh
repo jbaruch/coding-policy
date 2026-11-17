@@ -50,8 +50,7 @@
 #      as poll-pr-reviews.sh) is CHANGES_REQUESTED and bound to the live head.
 #      Otherwise there is nothing to dismiss: exit 0, result "noop".
 #   3. Its `## Blocking findings` section parses in post-review.sh format, one
-#      "- `<path>:<line>` — **<rule>** — <message>" line per finding, up to the
-#      next `## ` heading or the final `<!-- coding-policy-blockers` marker.
+#      "- `<path>:<line>` — **<rule>** — <message>" line per finding.
 #   4. FINDING lines and blocking findings pair one-to-one on path, line and
 #      rule. Repeated review identities require the same number of FINDING
 #      lines, all with the same verdict; surplus or unmatched lines refuse.
@@ -217,7 +216,7 @@ findings = []
 parse_ok = start is not None
 if parse_ok:
     for ln in lines[start + 1:]:
-        if ln.startswith(("## ", "<!-- coding-policy-blockers ")):
+        if ln.startswith("## "):
             break
         if not ln.strip():
             continue

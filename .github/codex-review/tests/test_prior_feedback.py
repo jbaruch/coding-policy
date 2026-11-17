@@ -167,6 +167,16 @@ class FeedbackTests(unittest.TestCase):
             self.assertEqual((rc, out), (1, ""))
             self.assertIn(URL, err)
 
+    def test_unaccepted_marker_schema_version_means_a_first_review(self):
+        rc, out, err = run([row(marked("newer", {"schema_version": 2, "blocking": [finding("a.py", 1, "open")]}))])
+        self.assertEqual((rc, json.loads(out)["last_review"]), (0, None))
+        self.assertIn(URL, err)
+
+    def test_boolean_marker_schema_version_fails_without_output(self):
+        rc, out, err = run([row(marked("fleet", {"schema_version": True, "blocking": []}))])
+        self.assertEqual((rc, out), (1, ""))
+        self.assertIn(URL, err)
+
     def test_unavailable_or_malformed_history_fails_without_output(self):
         for failure in (ValueError("bad page"), OSError("gh absent")):
             out, err = io.StringIO(), io.StringIO()

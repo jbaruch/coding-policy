@@ -4,9 +4,11 @@
 Usage: prior-feedback.py OWNER REPO PR HEAD_SHA REVIEWER_LOGIN
 Requires authenticated gh. Stdout is one JSON object; items are capped at OUTPUT_BYTES.
 `last_review` is {commit_id, blocking} from the final-line marker post-review.sh writes on the
-latest review by REVIEWER_LOGIN, never truncated. That review's body is re-read with its edit
-provenance over GraphQL. It is null with no such review, when that review has no marker (posted
-before markers) or when it was ever edited (the poster never edits), so the head gets a first review.
+latest review by REVIEWER_LOGIN, never truncated. The marker is {"schema_version": 1, "blocking": [...]};
+a bare array is read as version 0, and any other integer schema_version gives a first review.
+That review's body is re-read with its edit provenance over GraphQL. It is null with no such review,
+when that review has no marker (posted before markers) or when it was ever edited (the poster never
+edits), so the head gets a first review.
 Rows by deleted accounts (null user) are skipped.
 API/format failures and a malformed marker exit 1 with a stderr diagnostic, so the review posts no verdict.
 No state or credentials are written. Invalid CLI arguments exit 2.
@@ -78,12 +80,23 @@ def last_review(review, login):
         return None
     payload = line[len(MARKER):]
     try:
-        blocking = json.loads(payload[:-len(" -->")]) if payload.endswith(" -->") else None
+        record = json.loads(payload[:-len(" -->")]) if payload.endswith(" -->") else None
     except ValueError:
+        record = None
+    version = record.get("schema_version") if isinstance(record, dict) else None
+    if isinstance(record, list):
+        blocking = record  # version 0: the unversioned array PR #849's earlier heads posted
+    elif type(version) is int and version == 1:
+        blocking = record.get("blocking")
+    elif type(version) is int:
+        print(f"prior-feedback: {url} has blocker marker schema_version {version}, which this reader "
+              "does not accept; this head gets a first review", file=sys.stderr)
+        return None
+    else:
         blocking = None
     if not isinstance(blocking, list) or any(not isinstance(finding, dict) for finding in blocking):
-        raise ValueError(f"{url} ends with a malformed blocker marker; edit its final line to "
-                         f"'{MARKER}<JSON array of blocking finding objects> -->'")
+        raise ValueError(f"{url} ends with a malformed blocker marker; its final line must be "
+                         f"'{MARKER}{{\"schema_version\":1,\"blocking\":[<blocking finding objects>]}} -->'")
     return {"commit_id": (commit or {}).get("oid"), "blocking": blocking}
 
 
