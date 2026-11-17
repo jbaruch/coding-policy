@@ -1,3 +1,7 @@
+## 0.10.12 — 2026-11-17
+
+- fix(release): Leave a locked worktree to its lock holder (#835)
+
 ## 0.10.9 — 2026-11-15
 
 - fix(fleet-publish): Name where the central publisher failed closed (#829)
