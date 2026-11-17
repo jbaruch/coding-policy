@@ -54,9 +54,10 @@ Complete the pass before returning findings:
   first review.
 - First review: cover the entire changed diff and every applicable shared contract, including
   documented invariants, producer/consumer pairs, error paths and persisted-format readers/writers.
-- Later head: only unresolved `last_review.blocking` findings, defects in lines changed since
-  the last reviewed head (`git diff <commit_id> HEAD` within this PR's diff) and regressions
-  those changes cause can block. Anything else already present at that head is advisory.
+- Later head: only unresolved `last_review.blocking` findings, defects and binding policy
+  mismatches in lines changed since the last reviewed head (`git diff <commit_id> HEAD` within
+  this PR's diff) and regressions those changes cause can block. Anything else already present
+  at that head is advisory.
 - An unreadable `last_review.commit_id` is a review limitation to name in `summary`. It never
   widens blocking scope beyond unresolved `last_review.blocking` findings.
 - Do not return after the first blocking finding. Collect independent violations in this pass.
