@@ -6,12 +6,7 @@ The full preconditions and authority-of-record detail of each `rules/dependency-
 
 - The manifest may use a floating-but-explicit specifier (e.g., `"version": "latest"`) and skip the lock file
 - Preconditions (each covered manifest, all required):
-  1. An authority-of-record rule names the carve-out and lists every covered manifest, in the project's own plugin or in a shared plugin the project installs (whose rules load as the project's policy)
-  2. A deterministic check surfaces any disallowed specifier (literal pin, range, tag, or anything other than the permitted floating specifier), in either form:
-     - a deploy-time gate that fails the deployment
-     - a plugin-shipped `SessionStart` hook that reads the manifest and flags a disallowed specifier each session
-  3. Each covered manifest is named explicitly in the authority-of-record rule
-- Multiple covered manifests permitted iff each independently meets all three preconditions
+  1. Project policy or dependency documentation names the carve-out and every covered manifest
 
 ### Authority of Record — consumer `tessl.json`
 
@@ -39,10 +34,7 @@ The full preconditions and authority-of-record detail of each `rules/dependency-
 - The covered reference MAY use a floating specifier (e.g., a `:latest` container tag)
 - The exemption reaches that reference alone — never the project's lock file, and never a sibling dependency in the same manifest
 - Preconditions (each covered reference, all required):
-  1. The project documents an authority-of-record rule in its own plugin naming every covered reference, the adversary being tracked, and why a pin degrades rather than stabilizes
-  2. A deploy-time check fails the deployment when the committed reference is anything other than the permitted floating form, and fails when it can no longer locate the reference (a moved or renamed target fails loudly, never passes vacuously)
-  3. The check runs as a deterministic script per `rules/script-delegation.md`, never agent judgment and never a bounded classification
-  4. A per-install override lets an operator pin for reproducibility, documented in the authority-of-record rule and explicitly outside the deploy check's scope — environment configuration is not a committed dependency
+  1. The project documents every covered reference, the adversary being tracked, and why a pin degrades rather than stabilizes
 - "The upstream releases often" does NOT qualify. See Freshness
 - "Pinning is inconvenient" does NOT qualify
 - A dependency whose consumed surface is a versioned API does NOT qualify in an adversarial domain
@@ -52,12 +44,10 @@ The full preconditions and authority-of-record detail of each `rules/dependency-
 - The covered reference MUST carry no specifier at all — a bare `owner/repo` install. A branch ref, a tag, and a commit SHA are all specifiers and all stay forbidden under this carve-out
 - The exemption reaches that reference alone — never the project's lock file, and never a sibling dependency in the same manifest
 - Preconditions (each covered reference, all required):
-  1. The project documents an authority-of-record rule in its own plugin naming every covered reference, who owns both sides, and what stands in for the version-bump review
-  2. The dependency's own default branch is CI-gated: its test suite runs on every merge
-  3. The consumer's build refetches on every rebuild — any build-cache layer that would freeze the floating reference carries an explicit upstream-change trigger, bound to the covered reference
-  4. A deploy-time check fails the deployment when the committed reference carries any specifier, when the refetch trigger is absent or not bound to that reference, and when it can no longer locate the reference (a moved or renamed target fails loudly, never passes vacuously)
-  5. The check runs as a deterministic script per `rules/script-delegation.md`, never agent judgment and never a bounded classification
-- "We wrote it" alone does NOT qualify — a dependency with its own release train, or with consumers outside the owner, still pins
+  1. Project documentation names every covered reference, who owns both sides, and what stands in for the version-bump review
+  2. The dependency's default branch is CI-gated: CI runs its test suite on every merge to the default branch
+  3. Consumer rebuilds refetch the reference on every deploy
+- "We wrote it" alone does NOT qualify — a dependency with its own release train still pins
 - "The bump PRs are noise" does NOT qualify. See Freshness
 - A consumed surface the owner does not control end-to-end does NOT qualify
 
@@ -67,11 +57,9 @@ The full preconditions and authority-of-record detail of each `rules/dependency-
 - The covered install MAY omit the version specifier
 - The exemption reaches the named packages alone — never a language package manager in the same image (`pip`, `npm`, `gem`), which pins normally
 - Preconditions (each covered image, all required):
-  1. The project documents an authority-of-record rule in its own plugin naming every covered image, the exact package set, and the rebuild cadence that stands in for a pin
+  1. Project documentation names every covered image, the exact package set, and the rebuild cadence that stands in for a pin
   2. The image's base is pinned to a specific tag or digest and scanner-tracked
   3. The image is rebuilt on a stated recurring cadence
-  4. A deploy-time check fails the deployment when a covered image's base is unpinned, and when a package the image EXPLICITLY installs (an operand of its package-manager install command) falls outside the recorded set. Packages already present in the base image, and transitive dependencies the package manager resolves, are out of scope
-  5. The check runs as a deterministic script per `rules/script-delegation.md`, never agent judgment and never a bounded classification
 - "Pinning apt is annoying" does NOT qualify — the archive-retention failure mode is the test, and a distro that serves historical versions does not meet it
 - A language-ecosystem dependency does NOT qualify, whatever installs it
 
@@ -80,5 +68,5 @@ The full preconditions and authority-of-record detail of each `rules/dependency-
 - The self-reference MAY track the hosting repo's default branch (`@main`) instead of a pin
 - Preconditions (all required):
   1. The referenced action lives in the same repository as the reusable workflow
-  2. No dependency scanner updates the reference — Dependabot and Renovate skip same-repo self-references, so a pin has no renewal path and a SHA pin of one's own repo is circular
-  3. Workflow and action move together on the default branch; the external caller pins the WORKFLOW ref (`@<sha>`) for reproducible caller logic
+  2. Workflow and action move together on the default branch
+  3. The external caller's WORKFLOW ref follows the Pinning contract in `skills/coding-contracts/references/dependency-management.md`
