@@ -14,7 +14,8 @@
 # Args: <owner> <repo> <pr-number> <base-ref>
 # Env:
 #   GH_TOKEN     App installation token (used to fetch + to post)
-#   REVIEWER_LOGIN  the App's bot login (post-review.sh skips a head it already reviewed)
+#   REVIEWER_LOGIN  the App's bot login that posts, e.g. "coding-policy-fleet-reviewer[bot]"
+#                (prior-feedback.py reads its reviews; post-review.sh skips a head it already reviewed)
 #   CENTRAL_DIR  path to this coding-policy checkout (holds .github/codex-review/*)
 #   CODEX_HOME   Codex home with a written+masked auth.json (default: $HOME/.codex)
 #   codex, tessl, gh, jq on PATH
@@ -44,6 +45,7 @@ main() {
   local full="${owner}/${repo}"
   : "${GH_TOKEN:?GH_TOKEN (App installation token) required}"
   : "${CENTRAL_DIR:?CENTRAL_DIR (coding-policy checkout path) required}"
+  : "${REVIEWER_LOGIN:?REVIEWER_LOGIN (the App bot login that posts) required}"
   local codex_home="${CODEX_HOME:-$HOME/.codex}"
 
   # fleet-prompt.md / fleet-schema.json instruct Codex to read the tessl-installed
@@ -99,7 +101,7 @@ main() {
   fi
 
   local prior_feedback
-  prior_feedback=$(python3 -I "$history" "$owner" "$repo" "$pr" "$reviewed_sha") || exit 1
+  prior_feedback=$(python3 -I "$history" "$owner" "$repo" "$pr" "$reviewed_sha" "$REVIEWER_LOGIN") || exit 1
 
   local authoring_context
   if ! authoring_context=$(cd "$work" && python3 -I "$authoring" --repo "$full" --base "origin/${base}"); then
