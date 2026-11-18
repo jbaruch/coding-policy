@@ -1,3 +1,7 @@
+## 0.10.15 — 2026-11-18
+
+- feat(policy-review): Bound re-review to what changed since the last verdict (#849)
+
 ## 0.10.14 — 2026-11-17
 
 - fix(fleet-review): Keep the first verdict posted on a head (#848)
