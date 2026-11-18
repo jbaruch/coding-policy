@@ -223,7 +223,8 @@ _sandbox() {
   mkdir -p "$root/work/.tessl-plugin"
   printf '{\n  "name": "testws/testplugin",\n  "version": "%s",\n  "description": "x"\n}\n' "$version" \
     > "$root/work/.tessl-plugin/plugin.json"
-  git -C "$root/work" add .tessl-plugin/plugin.json
+  printf 'name: testws/testplugin\nversion: "%s" # preserve formatting\n' "$version" > "$root/work/agent-plugin.yaml"
+  git -C "$root/work" add .tessl-plugin/plugin.json agent-plugin.yaml
   git -C "$root/work" commit -q -m "seed"
   git -C "$root/work" push -q -u origin main
   echo "$root"
@@ -269,6 +270,56 @@ t_autobump_success_commits_and_pushes_bump() {
   [[ "$(_remote_msg "$root")" == *"Bump testws/testplugin to 0.1.1"* ]] || { echo "    FAIL: bump commit message wrong: $(_remote_msg "$root")" >&2; return 1; }
   [[ "$(_remote_msg "$root")" == *"[skip ci]"* ]] || { echo "    FAIL: bump commit missing [skip ci]" >&2; return 1; }
   [[ "$(_remote_version "$root")" == "0.1.1" ]] || { echo "    FAIL: remote manifest not bumped to 0.1.1" >&2; return 1; }
+  [[ "$(git -C "$root/remote.git" show main:agent-plugin.yaml)" == $'name: testws/testplugin\nversion: "0.1.1" # preserve formatting' ]] || return 1
+  [[ "$(echo "$out" | python3 -c 'import json,sys;print(json.load(sys.stdin)["source_commit"])')" == "$(git -C "$root/remote.git" rev-parse main)" ]] || return 1
+}
+
+t_combined_stamp_pushes_only_bookkeeping_once() {
+  local publication="${1:-ok}"
+  local root; root="$(_sandbox 0.1.0)"
+  printf '# Changelog\n\n### A merged change\n' > "$root/work/CHANGELOG.md"
+  git -C "$root/work" add CHANGELOG.md
+  git -C "$root/work" commit -q -m 'fixture changelog'
+  git -C "$root/work" push -q origin main
+  printf '#!/bin/sh\nprintf "push\\n" >> "%s/pushes"\n' "$root" > "$root/remote.git/hooks/post-receive"
+  chmod +x "$root/remote.git/hooks/post-receive"
+  printf 'unrelated\n' > "$root/work/unrelated.txt"
+  git -C "$root/work" add unrelated.txt
+  local out; out="$(MOCK_VERSION_EXISTS=after _run "$root" 0.1.0 "$publication" auto-bump . main branch false true)" || return 1
+  [[ "$(cat "$root/pushes")" == push ]] || return 1
+  [[ "$(git -C "$root/work" diff --cached --name-only)" == unrelated.txt ]] || return 1
+  [[ "$(git -C "$root/remote.git" diff-tree --no-commit-id --name-only -r main)" == $'.tessl-plugin/plugin.json\nCHANGELOG.md\nagent-plugin.yaml' ]] || return 1
+  git -C "$root/remote.git" show main:CHANGELOG.md | grep -q '^## 0.1.1 — ' || return 1
+  [[ "$(_remote_msg "$root")" == *'[skip ci]'* ]] || return 1
+}
+
+t_autobump_without_acr_manifest_still_publishes() {
+  local root; root="$(_sandbox 0.1.0)"
+  git -C "$root/work" rm -q agent-plugin.yaml
+  git -C "$root/work" commit -q -m 'Tessl-only fixture'
+  git -C "$root/work" push -q origin main
+  local out; out="$(_run "$root" 0.1.0 ok auto-bump . main branch)" || return 1
+  [[ "$(_remote_version "$root")" == 0.1.1 ]] || return 1
+  [[ ! -e "$root/work/agent-plugin.yaml" ]] || return 1
+}
+
+t_invalid_acr_version_stops_before_publish() {
+  local root; root="$(_sandbox 0.1.0)"
+  printf 'version: unsupported\n' > "$root/work/agent-plugin.yaml"
+  local out rc=0
+  out="$(_run "$root" 0.1.0 ok auto-bump . main branch)" || rc=$?
+  [[ $rc -eq 1 && ! -f "$root/publish-invocation" ]] || return 1
+  [[ "$(_remote_version "$root")" == 0.1.0 && "$(_remote_count "$root")" == 1 ]] || return 1
+}
+
+t_commit_failure_stays_red_without_publishing_old_source() {
+  local root; root="$(_sandbox 0.1.0)"
+  printf '#!/bin/sh\nexit 1\n' > "$root/work/.git/hooks/pre-commit"
+  chmod +x "$root/work/.git/hooks/pre-commit"
+  local out rc=0
+  out="$(_run "$root" 0.1.0 ok auto-bump . main branch)" || rc=$?
+  [[ $rc -eq 1 && "$(_remote_version "$root")" == 0.1.0 ]] || return 1
+  echo "$out" | python3 -c 'import json,sys;d=json.load(sys.stdin);assert d["outcome"]=="failure" and d["source_commit"] is None and d["credit_signature"] is False' || return 1
 }
 
 t_stale_manifest_bumps_from_registry_no_collision() {
@@ -352,6 +403,7 @@ t_asis_success_does_not_commit_back() {
   echo "$out" | python3 -c 'import json,sys;d=json.load(sys.stdin);assert d["outcome"]=="success" and d["version"]=="0.2.0"' \
     || { echo "    FAIL: unexpected JSON: $out" >&2; return 1; }
   [[ "$(_remote_count "$root")" == "$before" ]] || { echo "    FAIL: as-is mode must not commit back" >&2; return 1; }
+  git -C "$root/work" diff --exit-code -- .tessl-plugin/plugin.json agent-plugin.yaml || return 1
 }
 
 t_first_publish_sets_flag_no_bump() {
@@ -635,6 +687,16 @@ assert d["outcome"]=="failure" and d["landed_after_error"] is True and d["versio
     || { echo "    FAIL: unexpected JSON: $out" >&2; return 1; }
 }
 
+t_credit_landed_but_blocked_push_cannot_pass_confirm_gate() {
+  local root; root="$(_sandbox 0.1.0)"
+  _advance_remote_main "$root"
+  local out rc=0
+  out="$(MOCK_VERSION_EXISTS=after _run "$root" 0.1.0 credit_fail auto-bump . main branch)" || rc=$?
+  [[ $rc -eq 1 ]] || return 1
+  echo "$out" | python3 -c 'import json,sys;d=json.load(sys.stdin);assert d["outcome"]=="failure" and d["credit_signature"] is False and d["source_commit"] is None' || return 1
+  [[ "$(_remote_version "$root")" == 0.1.0 ]] || return 1
+}
+
 # as-is mode has no commit-back, so a landed-after-error publish greens without
 # touching the remote.
 t_asis_landed_after_error_greens_without_commit() {
@@ -652,6 +714,13 @@ assert d["outcome"]=="success" and d["landed_after_error"] is True and d["versio
 
 main() {
   echo "== smart-publish.sh tests =="
+  run "stamp and both manifests share one guarded push" t_combined_stamp_pushes_only_bookkeeping_once
+  run "credit landing pushes stamp and both manifests once" t_combined_stamp_pushes_only_bookkeeping_once credit_fail
+  run "timeout landing pushes stamp and both manifests once" t_combined_stamp_pushes_only_bookkeeping_once timeout_fail
+  run "Tessl-only auto-bump needs no ACR manifest" t_autobump_without_acr_manifest_still_publishes
+  run "invalid ACR version stops before publishing" t_invalid_acr_version_stops_before_publish
+  run "failed commit cannot report the old source as published" t_commit_failure_stays_red_without_publishing_old_source
+  run "credit landing plus rejected push cannot pass confirm" t_credit_landed_but_blocked_push_cannot_pass_confirm_gate
   run "auto-bump success commits + pushes the bump [skip ci]"    t_autobump_success_commits_and_pushes_bump
   run "stale manifest bumps from the registry (no collision)"    t_stale_manifest_bumps_from_registry_no_collision
   run "manifest ahead of registry publishes the manifest"        t_manifest_ahead_publishes_manifest

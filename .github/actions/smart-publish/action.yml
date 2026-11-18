@@ -41,12 +41,19 @@ inputs:
     description: "Pass '--skip-evals' to 'tessl plugin publish', leaving local eval scenarios unpublished."
     required: false
     default: 'false'
+  stamp-changelog:
+    description: 'Stamp CHANGELOG.md before auto-bump publication and include it in the manifest commit-back (one push). Requires full Git history.'
+    required: false
+    default: 'false'
 
 outputs:
+  source-commit:
+    description: 'Pushed bookkeeping commit containing the published version; empty unless auto-bump commit-back succeeded.'
+    value: ${{ steps.publish.outputs.source-commit }}
   credit-signature:
     description: |
       'true' when the publish exited non-zero AND its output carried the
-      out-of-credits signature; 'false' otherwise. The confirm phase tolerates a
+      out-of-credits signature, unless commit-back failed; 'false' otherwise. The confirm phase tolerates a
       non-zero exit only when this is 'true' AND the registry advanced.
     value: ${{ steps.publish.outputs.credit-signature }}
   version:
@@ -73,6 +80,7 @@ runs:
       env:
         MODE: ${{ inputs.mode }}
         PLUGIN_PATH: ${{ inputs.path }}
+        STAMP_CHANGELOG: ${{ inputs.stamp-changelog }}
       run: |
         set -uo pipefail
 
@@ -92,16 +100,18 @@ runs:
         # the publish's real exit code; even on failure the JSON is emitted, so
         # the credit-signature output is always set.
         rc=0
-        result_json="$(bash "$script" "$MODE" "$PLUGIN_PATH" "$GITHUB_REF_NAME" "$GITHUB_REF_TYPE" "${{ inputs.skip-evals }}")" || rc=$?
+        result_json="$(bash "$script" "$MODE" "$PLUGIN_PATH" "$GITHUB_REF_NAME" "$GITHUB_REF_TYPE" "${{ inputs.skip-evals }}" "$STAMP_CHANGELOG")" || rc=$?
 
         credit_signature=false
         version=""
+        source_commit=""
         landed_after_error=false
         terminal_line=""
         publish_exit_code=""
         if [ -n "$result_json" ] && printf '%s' "$result_json" | jq empty >/dev/null 2>&1; then
           credit_signature="$(printf '%s' "$result_json" | jq -r '.credit_signature // false')"
           version="$(printf '%s' "$result_json" | jq -r '.version // empty')"
+          source_commit="$(printf '%s' "$result_json" | jq -r '.source_commit // empty')"
           landed_after_error="$(printf '%s' "$result_json" | jq -r '.landed_after_error // false')"
           terminal_line="$(printf '%s' "$result_json" | jq -r '.terminal_line // empty')"
           publish_exit_code="$(printf '%s' "$result_json" | jq -r '.publish_exit_code // empty')"
@@ -111,6 +121,7 @@ runs:
 
         echo "credit-signature=$credit_signature" >> "$GITHUB_OUTPUT"
         echo "version=$version" >> "$GITHUB_OUTPUT"
+        echo "source-commit=$source_commit" >> "$GITHUB_OUTPUT"
         echo "landed-after-error=$landed_after_error" >> "$GITHUB_OUTPUT"
 
         # A landed-after-error publish is a REAL release with a failing step in

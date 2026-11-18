@@ -313,6 +313,17 @@ class MergedChanges(unittest.TestCase):
         self.merge_pr(5, "feat: Five")
         self.assertEqual(self.changes(), ["feat: Five (#5)"])
 
+    def test_a_dual_manifest_stamp_is_bookkeeping(self):
+        self.stamp()
+        for path in (".tessl-plugin/plugin.json", "agent-plugin.yaml", "CHANGELOG.md"):
+            target = self.root / path
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text("release bookkeeping\n")
+        self.git("add", ".")
+        self.git("commit", "-qm", "Bump both manifests [skip ci]", author=BOT)
+        self.merge_pr(5, "feat: Five")
+        self.assertEqual(self.changes(), ["feat: Five (#5)"])
+
     def test_a_bot_commit_touching_source_is_a_change(self):
         self.stamp()
         self.commit("src/gen.txt", "gen\n", "chore: Regenerate", BOT)
