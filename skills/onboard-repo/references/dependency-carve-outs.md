@@ -41,11 +41,12 @@ The full preconditions and authority-of-record detail of each `rules/dependency-
 
 ## First-Party Co-Shipped Dependency Carve-Out
 
+- The covered reference MUST carry no specifier at all — a bare `owner/repo` install. A branch ref, a tag, and a commit SHA are all specifiers and all stay forbidden under this carve-out
 - The exemption reaches that reference alone — never the project's lock file, and never a sibling dependency in the same manifest
 - Preconditions (each covered reference, all required):
   1. Project documentation names every covered reference, who owns both sides, and what stands in for the version-bump review
-  2. Dependency changes pass the dependency's existing CI
-  3. The consumer deploy resolves the intended co-shipped dependency revision
+  2. The dependency's default branch is CI-gated: CI runs its test suite on every merge to the default branch
+  3. Consumer rebuilds refetch the reference on every deploy
 - "We wrote it" alone does NOT qualify — a dependency with its own release train still pins
 - "The bump PRs are noise" does NOT qualify. See Freshness
 - A consumed surface the owner does not control end-to-end does NOT qualify
@@ -56,7 +57,7 @@ The full preconditions and authority-of-record detail of each `rules/dependency-
 - The covered install MAY omit the version specifier
 - The exemption reaches the named packages alone — never a language package manager in the same image (`pip`, `npm`, `gem`), which pins normally
 - Preconditions (each covered image, all required):
-  1. The project documents an authority-of-record rule in its own plugin naming every covered image and the rebuild cadence that stands in for a pin
+  1. Project documentation names every covered image, the exact package set, and the rebuild cadence that stands in for a pin
   2. The image's base is pinned to a specific tag or digest and scanner-tracked
   3. The image is rebuilt on a stated recurring cadence
 - "Pinning apt is annoying" does NOT qualify — the archive-retention failure mode is the test, and a distro that serves historical versions does not meet it
@@ -67,4 +68,5 @@ The full preconditions and authority-of-record detail of each `rules/dependency-
 - The self-reference MAY track the hosting repo's default branch (`@main`) instead of a pin
 - Preconditions (all required):
   1. The referenced action lives in the same repository as the reusable workflow
-  2. Workflow and action move together on the default branch; the external caller's WORKFLOW ref follows the Pinning contract in `skills/coding-contracts/references/dependency-management.md`
+  2. Workflow and action move together on the default branch
+  3. The external caller's WORKFLOW ref follows the Pinning contract in `skills/coding-contracts/references/dependency-management.md`
