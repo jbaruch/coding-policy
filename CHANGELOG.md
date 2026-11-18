@@ -1,3 +1,7 @@
+## 0.10.21 — 2026-11-18
+
+- refactor(testing-standards): Narrow testing exceptions to real failures (#862)
+
 ## 0.10.20 — 2026-11-18
 
 - refactor(dependency-management): Trim dependency carve-outs to the harm they prevent (#861)
