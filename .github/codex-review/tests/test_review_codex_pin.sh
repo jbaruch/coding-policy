@@ -150,13 +150,55 @@ SH
     expect="history unavailable"
     [[ "$stub" == "$malformed" ]] && expect="pullrequestreview-1 ends with a malformed blocker marker"
     local rc=0 out
-    out=$(cd "$work" && PATH="$bin:$PATH" RUNNER_TEMP="$work" GITHUB_REPOSITORY=owner/repo PR_NUMBER=1 bash step.sh 2>&1) || rc=$?
+    out=$(cd "$work" && PATH="$bin:$PATH" RUNNER_TEMP="$work" GITHUB_REPOSITORY=owner/repo PR_NUMBER=1 REVIEWER_LOGIN='github-actions[bot]' bash step.sh 2>&1) || rc=$?
     rmwarn "$bin" "$work"
     [[ $rc -ne 0 && "$out" == *"$expect"* ]] || { bad "failed_history: step fails with '$expect' (rc=$rc, out=$out)"; return; }
   done
   ! grep -qE 'always\(\)|failure\(\)|continue-on-error' "$WORKFLOW" \
     || { bad "failed_history: a step in $WORKFLOW can run after a failure, so the review could still post"; return; }
   ok "failed history read or malformed marker fails the job before the review posts"
+}
+
+# Execute the workflow's literal command against both PR-head reader contracts.
+t_history_reader_compatibility() {
+  local script login work revision rc out
+  script=$(extract_run "$WORKFLOW" "Read bounded prior feedback")
+  [[ "$script" == *prior-feedback.py* ]] || { bad "compatibility: history step missing"; return; }
+  login=$(awk '
+    /- name: Read bounded prior feedback/ { step = 1; next }
+    step && /REVIEWER_LOGIN:/ { print $2; exit }
+    step && /run:/ { exit }
+  ' "$WORKFLOW")
+  [[ "$login" == 'github-actions[bot]' ]] || { bad "compatibility: workflow must set REVIEWER_LOGIN"; return; }
+  work=$(mktemp -d) || { echo "fatal: mktemp -d failed" >&2; exit 2; }
+  if ! (
+    set -e
+    mkdir -p "$work/bin" "$work/.github/codex-review"
+    printf '#!/usr/bin/env bash\nset -euo pipefail\necho 1111111111111111111111111111111111111111\n' > "$work/bin/git"
+    printf '#!/usr/bin/env bash\nset -euo pipefail\necho "[[]]"\n' > "$work/bin/gh"
+    chmod +x "$work/bin/git" "$work/bin/gh"
+    printf '%s\n' "$script" > "$work/step.sh"
+    git -C "$(dirname "$WORKFLOW")/../.." show \
+      9d0ecd6a50ecb55fb2863a5cfa87e2156a10b42a:.github/codex-review/prior-feedback.py > "$work/old.py"
+    cp "$(dirname "$WORKFLOW")/../codex-review/prior-feedback.py" "$work/current.py"
+  ); then
+    echo "fatal: compatibility fixture setup failed" >&2; rmwarn "$work"; exit 2
+  fi
+  for revision in old current; do
+    if ! cp "$work/$revision.py" "$work/.github/codex-review/prior-feedback.py"; then
+      echo "fatal: could not install $revision reader fixture" >&2; rmwarn "$work"; exit 2
+    fi
+    rc=0
+    out=$(cd "$work" && PATH="$work/bin:$PATH" RUNNER_TEMP="$work" GITHUB_REPOSITORY=owner/repo PR_NUMBER=1 REVIEWER_LOGIN="$login" bash step.sh 2>&1) || rc=$?
+    if [[ $rc -ne 0 || -n "$out" ]] || ! jq -e '
+      .head_sha == "1111111111111111111111111111111111111111"
+      and .authority == "historical_feedback_only" and .items == [] and .omitted == 0
+    ' "$work/codex-prior-feedback.json" >/dev/null; then
+      bad "compatibility: workflow with $revision reader (rc=$rc, out=$out)"; rmwarn "$work"; return
+    fi
+    ok "workflow history command succeeds with $revision reader"
+  done
+  rmwarn "$work"
 }
 
 # --- a missing step fails loudly rather than passing vacuously ---
@@ -172,6 +214,7 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
   echo "== review-codex.yml model pin tests =="
   t_self_review_pin
   t_failed_history_fails_job
+  t_history_reader_compatibility
   t_missing_step
   echo "== summary: ${pass} passed, ${fail} failed =="
   [[ "$fail" -eq 0 ]]

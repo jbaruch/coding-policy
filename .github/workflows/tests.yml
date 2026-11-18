@@ -66,6 +66,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          # The prior-feedback compatibility regression reads the pre-#849 reader with git show.
+          fetch-depth: 0
       - name: Install Tessl CLI for actual package exclusion regressions
         uses: tesslio/setup-tessl@v2
         with:

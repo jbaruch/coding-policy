@@ -250,11 +250,38 @@ class FeedbackTests(unittest.TestCase):
             self.assertIn("provenance", err)
 
     def test_invalid_identifiers_do_not_call_github(self):
-        for argv in (["owner", "repo", "1;echo token", HEAD, FLEET], ["owner", "repo", "1", HEAD],
+        for argv in (["owner", "repo", "1;echo token", HEAD, FLEET], ["owner", "repo", "1"],
                      ["owner", "repo", "1", HEAD, "bot; rm"]):
             with patch.object(feedback, "read") as api, contextlib.redirect_stderr(io.StringIO()):
                 self.assertEqual(feedback.main(argv), 2)
             api.assert_not_called()
+
+    def test_environment_login_and_explicit_argument_precedence(self):
+        reviews = [row(marked("self", []), "github-actions[bot]", commit="c" * 40), row(marked("fleet", []))]
+        for extra, expected in (([], "c" * 40), ([FLEET], "b" * 40)):
+            out = io.StringIO()
+            with (patch.dict(os.environ, {"REVIEWER_LOGIN": "github-actions[bot]"}),
+                  patch.object(feedback, "read", side_effect=lambda url: reviews if "/reviews" in url else []),
+                  patch.object(feedback, "graphql", side_effect=github(reviews)),
+                  contextlib.redirect_stdout(out)):
+                self.assertEqual(feedback.main(["owner", "repo", "1", HEAD, *extra]), 0)
+            self.assertEqual(json.loads(out.getvalue())["last_review"], {"commit_id": expected, "blocking": []})
+
+    def test_missing_or_empty_environment_login_fails_without_github_or_output(self):
+        for env in ({}, {"REVIEWER_LOGIN": ""}):
+            out, err = io.StringIO(), io.StringIO()
+            with (patch.dict(os.environ, env, clear=True), patch.object(feedback, "read") as api,
+                  contextlib.redirect_stdout(out), contextlib.redirect_stderr(err)):
+                self.assertEqual(feedback.main(["owner", "repo", "1", HEAD]), 1)
+            api.assert_not_called()
+            self.assertEqual(out.getvalue(), "")
+            self.assertIn("set REVIEWER_LOGIN or supply it as the fifth argument", err.getvalue())
+
+    def test_invalid_environment_login_does_not_call_github(self):
+        with (patch.dict(os.environ, {"REVIEWER_LOGIN": "bot; rm"}), patch.object(feedback, "read") as api,
+              contextlib.redirect_stderr(io.StringIO())):
+            self.assertEqual(feedback.main(["owner", "repo", "1", HEAD]), 2)
+        api.assert_not_called()
 
 
 if __name__ == "__main__":

@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Read bounded prior PR feedback for review continuity, never merge authority.
 
-Usage: prior-feedback.py OWNER REPO PR HEAD_SHA REVIEWER_LOGIN
+Usage: prior-feedback.py OWNER REPO PR HEAD_SHA [REVIEWER_LOGIN]
+REVIEWER_LOGIN defaults to the environment variable of the same name; missing login exits 1.
 Requires authenticated gh. Stdout is one JSON object; items are capped at OUTPUT_BYTES.
 `last_review` is {commit_id, blocking} from the final-line marker post-review.sh writes on the
 latest review by REVIEWER_LOGIN, never truncated. The marker is {"schema_version": 1, "blocking": [...]};
@@ -15,6 +16,7 @@ No state or credentials are written. Invalid CLI arguments exit 2.
 """
 
 import json
+import os
 import re
 import subprocess
 import sys
@@ -150,6 +152,12 @@ def build(head, login, groups):
 
 
 def main(argv):
+    if len(argv) == 4:
+        login = os.environ.get("REVIEWER_LOGIN")
+        if not login:
+            print("prior-feedback: reviewer login missing; set REVIEWER_LOGIN or supply it as the fifth argument", file=sys.stderr)
+            return 1
+        argv = [*argv, login]
     if (len(argv) != 5 or any(not re.fullmatch(r"[A-Za-z0-9_.-]+", value) for value in argv[:2])
             or not re.fullmatch(r"[1-9][0-9]*", argv[2]) or not re.fullmatch(r"[a-f0-9]{40}", argv[3])
             or not re.fullmatch(r"[A-Za-z0-9-]+(\[bot\])?", argv[4])):
