@@ -29,7 +29,8 @@
 
 - One concept per rule file — don't combine unrelated concerns
 - Compose by reference (`see rules/foo.md`), don't duplicate content across rules — if you want to state the same point in two rules, one states it and the other references it
-- Text governing one skill's workflow lives in that skill's `references/`, with a binding pointer from the rule
+- Text governing only one skill's workflow lives in that skill's `references/` and is reached from that skill
+- A rule that retains a governing obligation keeps a binding pointer to its moved detail
 - A moved carve-out follows `rules/context-writing-style.md` Structure
 - The coding-policy plugin's own `rules/` total stays within the byte budget `scripts/check-rules-budget.sh` owns (top-of-file constant)
 

@@ -46,7 +46,7 @@
 
 - Atomic bullets — one directive per bullet
 - Carve-outs: lead with "Narrow exception for X.", then numbered preconditions, then a one-line reset stating every other case follows the rule
-- A carve-out whose preconditions live in a skill reference keeps in the rule its trigger ("Narrow exception for X." plus one applies-when line), the pointer `Preconditions are binding: read <path> <Section> before relying on it`, and its reset
+- A retained rule whose carve-out preconditions move to a skill reference keeps its trigger ("Narrow exception for X." plus one applies-when line), the pointer `Preconditions are binding: read <path> <Section> before relying on it`, and its reset
 - Never comma-splice preconditions with "; AND ...; AND ..."
 - 3–6 H2 sections per rule, ~25–40 lines total
 - At most one parenthetical clause per sentence — break out a second clause into its own bullet. Function-call notation (`Skill()`, `print()`, etc.), label tags inside lists, and other literal-syntax parens do not count as parenthetical clauses
