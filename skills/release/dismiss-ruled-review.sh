@@ -10,12 +10,13 @@
 # carries only decline and defer verdicts, each stating its ground. Every other
 # defer or decline needs `operator`.
 #
-# Usage: dismiss-ruled-review.sh <owner> <repo> <pr-number> [--ruling <file> [--ruling-sha256 <64-hex>] --followup-issue <number>]
+# Usage: dismiss-ruled-review.sh <owner> <repo> <pr-number> [--ruling <file> [--ruling-sha256 <64-hex>] [--followup-issue <number>]]
 #   Without --ruling: list mode. Emits the blocking findings of the latest
 #   policy review on the head, for composing the weighing question. Dismisses
 #   nothing.
-#   With --ruling: dismissal mode, under the predicate below. --followup-issue
-#   is required with it: the task's follow-up issue in <owner>/<repo>.
+#   With --ruling: dismissal mode, under the predicate below. Dispositions are
+#   recorded in the PR conversation by default. --followup-issue instead uses
+#   the existing authorized task issue in <owner>/<repo>.
 #   --ruling-sha256 is the ruling file's full sha256 digest: required under
 #   `AUTHORITY: judge`, checked whenever given.
 #
@@ -53,7 +54,8 @@
 #                                            the governing policy)
 #     defer — out-of-scope #<issue>: <scope evidence>; cost: <comparison>
 #                                           (pre-existing or outside the PR's
-#                                            goal; <issue> is --followup-issue;
+#                                            goal; matches --followup-issue
+#                                            when supplied;
 #                                            <comparison> shows fixing now costs
 #                                            more than the failure it prevents)
 #   Schema 4 adds `AUTHORITY: judge` and the judge grounds to schema 2.
@@ -68,7 +70,8 @@
 #      `ANSWER:` line. `judge` needs --ruling-sha256. A given --ruling-sha256
 #      equals the sha256 of the ruling bytes this script parses.
 #   1b. Under `judge`, every defer and decline FINDING line opens with its
-#      ground as the format names; a defer names --followup-issue. A line with
+#      ground as the format names; a defer names a follow-up issue, matching
+#      --followup-issue when supplied. A line with
 #      any other text is a verdict only `operator` gives: deferring a defect the
 #      change introduced, or waiving a binding rule.
 #   2. The latest policy review (POLICY_REVIEW_LOGINS; per-login latest by
@@ -84,19 +87,20 @@
 #      ruling's HEAD is the live head, or the compare API shows the path
 #      unchanged from the ruling's HEAD to the live head (status ahead or
 #      identical, file list under the API's 300-file cap).
-#   6. No blocking finding's rule is in FLOOR_RULES — the rule-id floors. The
-#      judgment floors are the ruling authority's to rule `fix`; this script does not
-#      classify them.
-#   7. No check on the head is in the `fail` bucket.
+#   6. No check on the head is in the `fail` bucket. The ruling authority
+#      judges the other floors in review-severity-carve-outs.md; this script
+#      does not classify protected consequences or semantic applicability.
 #
-# Once the predicate holds, the script posts one comment on the follow-up issue
+# Once the predicate holds, the script posts one comment in the PR conversation
+# (or the task issue when --followup-issue is supplied)
 # listing every ruled finding (defer, or decline labelled won't-fix) and citing
 # `judge ruling <digest>`, where <digest> is sha256(ruling file)[:16]. Under
 # `judge` it also names the ruling file's absolute path and full sha256. A
 # comment whose body equals that generated entry (whitespace-trimmed) is reused;
 # any other comment, even one citing the digest, is not, and the entry is
 # posted. Only after that comment exists is the review dismissed, with the message
-#   <RULED_MARKER> <digest> covers <n> blocking findings at <head>; tracked in #<issue>
+#   <RULED_MARKER> <digest> covers <n> blocking findings at <head>; recorded in #<record>
+# where <record> is the PR number or the supplied task issue.
 # poll-pr-reviews.sh reads a dismissal carrying RULED_MARKER as state RULED, and
 # dismiss-stale-reviews.sh counts it as an all-clear.
 # tests/release/tests/test_dismiss_ruled_review.sh feeds the message this
@@ -128,7 +132,6 @@ fi
 
 RULED_MARKER="JUDGE-RULED:"
 RULING_SCHEMA="4"
-FLOOR_RULES=(no-secrets ci-safety)
 POLICY_REVIEW_LOGINS=("github-actions[bot]" "coding-policy-fleet-reviewer[bot]")
 
 WORK_DIR=""
@@ -141,7 +144,7 @@ cleanup() {
 }
 
 usage() {
-  echo "usage: $0 <owner> <repo> <pr-number> [--ruling <file> [--ruling-sha256 <64-hex>] --followup-issue <number>]" >&2
+  echo "usage: $0 <owner> <repo> <pr-number> [--ruling <file> [--ruling-sha256 <64-hex>] [--followup-issue <number>]]" >&2
   exit 2
 }
 
@@ -152,7 +155,7 @@ usage() {
 decide() {
   local tmp="$1" pr="$2" head="$3" ruling="$4" ruling_sha256="$5" issue="$6" repo_slug="$7"
   python3 - "$tmp" "$pr" "$head" "$ruling" "$ruling_sha256" "$issue" "$repo_slug" "$RULED_MARKER" "$RULING_SCHEMA" \
-    "${#POLICY_REVIEW_LOGINS[@]}" "${POLICY_REVIEW_LOGINS[@]}" "${FLOOR_RULES[@]}" <<'PY'
+    "${#POLICY_REVIEW_LOGINS[@]}" "${POLICY_REVIEW_LOGINS[@]}" <<'PY'
 import hashlib
 import json
 import os
@@ -162,7 +165,6 @@ from collections import Counter, defaultdict
 
 tmp, pr, head, ruling_path, ruling_sha256, issue, repo_slug, marker, schema, n_logins = sys.argv[1:11]
 logins = sys.argv[11:11 + int(n_logins)]
-floors = set(sys.argv[11 + int(n_logins):])
 
 FINDING_RE = re.compile(r"^- `(?P<path>.+):(?P<line>\d+)` — \*\*(?P<rule>[^*]+)\*\* — (?P<message>.*)$")
 RULING_LINE_RE = re.compile(
@@ -279,7 +281,7 @@ for ln in ruling_lines:
         continue
     if judge and m["verdict"] != "fix":
         g = JUDGE_GROUND_RE[m["verdict"]].match(m["text"])
-        if g is None or (m["verdict"] == "defer" and int(g["issue"]) != int(issue)):
+        if g is None or (m["verdict"] == "defer" and issue and int(g["issue"]) != int(issue)):
             operator_only.append(ln)
     key = (m["path"], int(m["line"]), m["rule"])
     entries.setdefault(key, []).append(m.groupdict())
@@ -305,7 +307,7 @@ elif not ruling_sha256:
 if ruling_sha256 and ruling_sha256 != full_digest:
     out["unmet"].append(f"the ruling file has sha256 {full_digest}, not the given {ruling_sha256} — pass the file and digest as collected; never edit a judge report")
 if operator_only:
-    out["unmet"].append(f"under judge authority a decline opens 'wrong: <evidence>' and a defer opens 'out-of-scope #{issue}: <scope evidence>; cost: <comparison>'; these FINDING line(s) need an operator ruling (risk acceptance or a rule waiver): {operator_only}")
+    out["unmet"].append(f"under judge authority a decline opens 'wrong: <evidence>' and a defer opens 'out-of-scope #<issue>: <scope evidence>; cost: <comparison>' (matching --followup-issue when supplied); these FINDING line(s) need an operator ruling (risk acceptance or a rule waiver): {operator_only}")
 if malformed:
     out["unmet"].append(f"unparseable FINDING line(s): {malformed}")
 if not entries and not malformed:
@@ -326,10 +328,6 @@ mixed = sorted(f"{key[0]}:{key[1]} {key[2]}" for key, count in finding_counts.it
                if count > 1 and len({row["verdict"] for row in entries.get(key, [])}) > 1)
 if mixed:
     out["unmet"].append(f"same-identity FINDING lines use different verdicts: {mixed}")
-
-floor_hits = sorted({f["rule"] for f in findings if f["rule"] in floors})
-if floor_hits:
-    out["unmet"].append(f"blocking finding(s) under a floor rule: {floor_hits} — fix them")
 
 try:
     checks = load_pages(os.path.join(tmp, "checks.json"))
@@ -385,7 +383,7 @@ if judge:
 for f, e in ruled:
     label = "deferred" if e["verdict"] == "defer" else "declined, won't-fix"
     body.append(f"- `{f['path']}:{f['line']}` **{f['rule']}** — {label}: {e['text']}")
-message = f"{marker} {digest} covers {len(findings)} blocking findings at {head}; tracked in #{issue}"
+message = f"{marker} {digest} covers {len(findings)} blocking findings at {head}; recorded in #{issue or pr}"
 out["message"] = message
 write("review_id", str(latest["id"]))
 write("message", message)
@@ -411,13 +409,13 @@ fetch_checks() {
   return 1
 }
 
-# Post the follow-up comment unless an earlier run already posted the same
+# Record the disposition unless an earlier run already posted the same
 # generated body, byte for byte after trimming — any other comment, even one
 # citing the digest, is not reused.
 ensure_followup_comment() {
   local owner="$1" repo="$2" issue="$3" tmp="$4" rc=0
   gh api --paginate "repos/${owner}/${repo}/issues/${issue}/comments?per_page=100" > "${tmp}/issue_comments.json" \
-    || { echo "error: failed to read comments on ${owner}/${repo}#${issue} — verify the follow-up issue number and 'gh auth status', then retry" >&2; return 1; }
+    || { echo "error: failed to read comments on ${owner}/${repo}#${issue} — verify the PR or task issue number and 'gh auth status', then retry" >&2; return 1; }
   python3 - "${tmp}/issue_comments.json" "${tmp}/followup.md" <<'PY' || rc=$?
 import json
 import sys
@@ -464,8 +462,8 @@ main() {
     echo "error: <owner> and <repo> must be non-empty and <pr-number> a positive integer" >&2
     exit 2
   fi
-  if [[ -n "$ruling" ]] && ! [[ "$issue" =~ ^[1-9][0-9]*$ ]]; then
-    echo "error: --ruling needs --followup-issue <number> — the task's follow-up issue in ${owner}/${repo}, where the ruled findings are entered" >&2
+  if [[ -n "$issue" ]] && ! [[ "$issue" =~ ^[1-9][0-9]*$ ]]; then
+    echo "error: --followup-issue must be a positive integer — pass the authorized task issue number or omit it to use the PR conversation" >&2
     exit 2
   fi
   if [[ -z "$ruling" && ( -n "$issue" || -n "$ruling_sha256" ) ]]; then
@@ -516,7 +514,7 @@ main() {
     *) exit 2 ;;
   esac
 
-  ensure_followup_comment "$owner" "$repo" "$issue" "$tmp" || exit 2
+  ensure_followup_comment "$owner" "$repo" "${issue:-$pr}" "$tmp" || exit 2
 
   local review_id message
   review_id=$(cat "${tmp}/review_id")

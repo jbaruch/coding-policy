@@ -6,21 +6,23 @@ alwaysApply: true
 
 ## Categories and Evidence
 
-- Prefix messages with `[defect]`, `[policy mismatch]` or `[optional hardening]`.
+- Prefix with `[defect]`, `[policy mismatch]` or `[optional hardening]`.
 - Defects require a concrete trigger, reachable path and material consequence.
 - Policy mismatches cite binding clauses and source.
-- Identify unproven harm as unproven.
-- Optional hardening adds safeguards without a demonstrated defect or obligation.
+- Label unproven harm.
+- Optional hardening lacks a demonstrated defect or obligation.
+- Time-scoped obligations bind within their stated window only.
+- An expired exception restores its ordinary rule.
 
 ## Severity and Remedy
 
 - Blocking: substantiated material defects, tests concealing them, or binding obligations affecting meaning or behavior.
 - Advisory: optional hardening and presentation-only suggestions.
-- A behavior-changing suggestion alone never establishes a blocker.
-- On a re-review, only unresolved blockers of the last review, plus defects and binding policy mismatches in lines changed since it, with their regressions, block.
-- On a re-review, anything else already present at the last reviewed head is advisory.
-- A re-review whose last reviewed head is unreadable counts as a first review.
-- Resolve mismatches through compliant code or authorized policy amendment and re-review.
+- Behavior change alone proves no blocker.
+- Re-review blocks only the last review's unresolved blockers, plus defects and binding policy mismatches in subsequently changed lines, with their regressions.
+- Other findings present at the last reviewed head are advisory on re-review.
+- An unreadable last reviewed head requires a first review.
+- Resolve mismatches through compliance or authorized amendment and re-review.
 - Reviewers cannot waive policy.
 - Apply `rules/simplicity.md` to remedy cost and scope.
 
@@ -31,8 +33,8 @@ alwaysApply: true
 
 ## Judge-Weighed Finding Carve-Out
 
-- Narrow exception for merging with a blocking policy finding a weighing ruled `defer` or `decline`.
-- Applies when the finding is wrong, or when fixing costs more than the failure it prevents.
+- Narrow exception for merging with a blocking policy finding ruled `defer` or `decline`.
+- Applies to wrong findings or fixes costing more than the failure prevented.
 - Preconditions are binding: read `skills/release/references/review-severity-carve-outs.md` Judge-Weighed Finding Carve-Out before relying on it.
 - Every other blocker is resolved before merge.
 
