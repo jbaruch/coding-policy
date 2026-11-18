@@ -49,7 +49,8 @@
 #            parse stdout only when exit code is 0 or 1.
 # Exit:  0 if both conjuncts hold; 1 if either conjunct fails (publish did
 #        not land); 2 on argument-validation or external-tool failures
-#        (run still in flight, jq missing, gh/tessl unreachable)
+#        (run still in flight, jq missing, gh/tessl unreachable, or a logged-out
+#        registry 404 mapped from registry_version exit 3)
 
 set -euo pipefail
 
@@ -191,7 +192,7 @@ main() {
   # above). It performs the versions-API fetch + JSON validation + numeric
   # max-version parse this block used to inline, with the same stderr-
   # separation and jq-empty discipline. A non-zero return is a tool/parse
-  # failure (tessl unreachable, non-JSON body) — registry_version already
+  # failure (including logged-out 404 / exit 3) — registry_version already
   # wrote the actionable diagnostic to stderr, so map it straight to this
   # script's rc-2 tool-state path. An empty result means the versions API
   # carried no published version — this script requires one for the

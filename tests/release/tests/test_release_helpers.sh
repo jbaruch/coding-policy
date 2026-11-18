@@ -68,6 +68,11 @@ main() {
   if [[ $RC -eq 2 && -z "$OUT" ]] && printf '%s' "$ERRTEXT" | grep -q "could not read the registry baseline"; then
     pass; else fail "a failing capture exits 2, got RC=$RC OUT=$OUT"; fi
 
+  install_wrapper registry-baseline.sh registry-version.sh 3 '' 'log in with tessl login, then re-run'
+  run_baseline
+  if [[ $RC -eq 3 && -z "$OUT" && "$ERRTEXT" == *"tessl login"* ]]; then
+    pass; else fail "logged-out 404 stays exit 3 with no baseline, got RC=$RC OUT=$OUT ERR=$ERRTEXT"; fi
+
   install_wrapper registry-baseline.sh registry-version.sh 0 '{"other":"field"}'
   run_baseline
   if [[ $RC -eq 2 && -z "$OUT" ]] && printf '%s' "$ERRTEXT" | grep -qF "carries no .version"; then

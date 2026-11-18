@@ -135,8 +135,8 @@ runs:
               exit 1
             fi
             # registry-version.sh emits {"version":"x.y.z"} or {"version":null}.
-            # A registry read error exits 2 and set -e fails the step (we must
-            # not publish without an established baseline to later confirm).
+            # A registry read error exits 2/3 (3 = logged-out 404) and set -e
+            # fails the step; no publish without a baseline to later confirm.
             # Parse .version; null -> empty baseline (never published), a valid
             # first-publish baseline.
             registry_json="$(bash "$registry_script" "$workspace" "$plugin")"

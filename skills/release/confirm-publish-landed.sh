@@ -150,8 +150,8 @@ main() {
   # success.
   #
   # A subprocess call (not sourced): registry-version.sh emits {"version":...}
-  # JSON and exits non-zero on a tool/parse failure — that is "cannot confirm",
-  # which fails the gate.
+  # JSON and exits non-zero on a tool/parse failure (2) or logged-out 404 (3).
+  # Both mean "cannot confirm" and map to this gate's failure exit 1.
   local rv_json rc=0
   rv_json=$(bash "$registry_script" "$workspace" "$plugin") || rc=$?
   if [[ $rc -ne 0 ]]; then

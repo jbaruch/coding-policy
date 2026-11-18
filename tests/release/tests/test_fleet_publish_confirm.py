@@ -69,6 +69,12 @@ class Readers:
 
 
 class ConfirmationTests(unittest.TestCase):
+    def test_logged_out_404_is_unconfirmed(self):
+        result = subprocess.CompletedProcess([], 3, b"", b"run tessl login")
+        with self.assertRaises(confirmation.ConfirmationHold) as caught:
+            confirmation.response(result)
+        self.assertNotIsInstance(caught.exception, confirmation.ConfirmationFailed)
+
     def test_historical_opt_in_returns_schema2_and_new_attester_after_same_live_registry_gates(
         self,
     ):

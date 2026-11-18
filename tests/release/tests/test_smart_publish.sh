@@ -81,6 +81,9 @@ mkdir -p "$STUBDIR"
 cat > "$STUBDIR/tessl" <<'STUB'
 #!/usr/bin/env bash
 set -uo pipefail
+if [[ "${1:-}" == "whoami" ]]; then
+  printf '{"authenticated":false}\n'; exit 1
+fi
 if [[ "${1:-}" == "api" ]]; then
   # A path with a segment AFTER `versions/` is the single-version probe.
   if [[ "${2:-}" == */versions/* ]]; then
@@ -123,6 +126,7 @@ if [[ "${1:-}" == "api" ]]; then
   case "${MOCK_REGISTRY:-}" in
     empty) echo '{"data":[]}' ;;
     error) echo "error: registry unreachable" >&2; exit 1 ;;
+    logged_out_404) printf '{"error":{"title":"Not Found","status":404}}\n'; exit 1 ;;
     *)     printf '{"data":[{"attributes":{"version":"%s"}}]}\n' "${MOCK_REGISTRY:-}" ;;
   esac
   exit 0
@@ -404,6 +408,19 @@ t_registry_read_failure_publishes_nothing() {
   [[ "$(_remote_count "$root")" == "$before" ]] || { echo "    FAIL: nothing should be committed on a pre-publish failure" >&2; return 1; }
 }
 
+t_logged_out_404_publishes_nothing() {
+  local root; root="$(_sandbox 0.1.0)"
+  local out rc=0
+  out="$(_run "$root" logged_out_404 ok auto-bump . main branch 2>"$root/err")" || rc=$?
+  [[ $rc -eq 1 ]] || { echo "    FAIL: logged-out 404 must fail, got $rc" >&2; return 1; }
+  echo "$out" | jq -e '.outcome == "failure" and .first_publish == false and .version == null' >/dev/null \
+    || { echo "    FAIL: logged-out 404 emitted unexpected JSON: $out" >&2; return 1; }
+  [[ ! -e "$root/publish-invocation" && "$(_remote_count "$root")" == 1 ]] \
+    || { echo "    FAIL: logged-out 404 must not publish or commit" >&2; return 1; }
+  [[ "$(cat "$root/err")" == *"tessl login"* ]] \
+    || { echo "    FAIL: missing login diagnostic" >&2; return 1; }
+}
+
 t_push_blocked_reds_the_run() {
   # manifest 0.1.0, registry 0.1.0 -> target 0.1.1; publish ok; commit-back push
   # blocked (non-ff) -> red, no PR fallback.
@@ -666,6 +683,7 @@ main() {
   run "skip-evals forwards Tessl's supported flag"              t_skip_evals_forwards_flag
   run "invalid skip-evals is rejected before publish"           t_invalid_skip_evals_is_usage_error
   run "registry read failure publishes nothing"                  t_registry_read_failure_publishes_nothing
+  run "logged-out 404 publishes nothing"                         t_logged_out_404_publishes_nothing
   run "a blocked bump-push reds the run (no PR fallback)"        t_push_blocked_reds_the_run
   run "wrong arity is a usage error (exit 2)"                    t_wrong_arity_is_usage_error
   run "publish timeout that LANDED greens + commits back (#310)" t_timeout_but_landed_greens_and_commits_back
