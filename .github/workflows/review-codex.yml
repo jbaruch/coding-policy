@@ -70,11 +70,12 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
+          REVIEWER_LOGIN: github-actions[bot]
         run: |
           set -euo pipefail
           reviewed_head=$(git rev-parse HEAD)
           python3 .github/codex-review/prior-feedback.py \
-            "${GITHUB_REPOSITORY%/*}" "${GITHUB_REPOSITORY#*/}" "$PR_NUMBER" "$reviewed_head" 'github-actions[bot]' \
+            "${GITHUB_REPOSITORY%/*}" "${GITHUB_REPOSITORY#*/}" "$PR_NUMBER" "$reviewed_head" \
             > "$RUNNER_TEMP/codex-prior-feedback.json"
 
       - uses: actions/setup-node@v7
