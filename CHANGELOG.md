@@ -1,3 +1,7 @@
+## 0.10.18 — 2026-11-18
+
+- fix(policy-review): Keep the self-review working on older PR branches (#858)
+
 ## 0.10.17 — 2026-11-18
 
 - ci(publish): Bump the version at publish, not in every PR (#859)
