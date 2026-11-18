@@ -653,6 +653,25 @@ t_judge_records_in_pr_without_issue_argument() {
   assert_eq "comment then dismissal" "comment|dismiss" "$(cut -d' ' -f1 "$EVENTS" | paste -sd'|' -)"
 }
 
+t_judge_nonpositive_issue_refuses() {
+  local issue_number
+  set_review CHANGES_REQUESTED "$HEAD_SHA" "$BODY_TWO"
+  for issue_number in 0 00 -1 -0; do
+    write_judge_report "$HEAD_SHA" "$JUDGE_DECLINE_ONE" \
+      "FINDING: policy rules/b.md:7 context-writing-style — defer — out-of-scope #${issue_number}: pre-existing on main; cost: a reword touches every rule file"
+    for RECORD_NUMBER in 5 "$ISSUE"; do
+      if [[ "$RECORD_NUMBER" == 5 ]]; then
+        invoke --ruling "$REPORT" --ruling-sha256 "$REPORT_SHA256"
+      else
+        invoke_report
+      fi
+      assert_eq "#${issue_number}, recording in #${RECORD_NUMBER}: exit" "1" "$RC" || return 1
+      assert_unmet "out-of-scope #${issue_number}:" "the invalid issue number" || return 1
+      assert_eq "#${issue_number}, recording in #${RECORD_NUMBER}: zero writes" "0" "$(wc -l < "$EVENTS" | tr -d ' ')" || return 1
+    done
+  done
+}
+
 # Args: <label> <unmet substring>. Runs the REPORT ruling and expects refusal
 # with nothing posted or dismissed.
 refuses_report() {
@@ -947,6 +966,7 @@ run_suite() {
   run "PR record read/post errors dismiss nothing"    t_pr_record_errors_dismiss_nothing
   run "PR record reused after dismissal error"        t_pr_record_reused_after_dismissal_error
   run "judge records in PR without issue argument"    t_judge_records_in_pr_without_issue_argument
+  run "non-positive judge issues refuse, zero writes" t_judge_nonpositive_issue_refuses
   run "one uncovered finding refuses"                 t_one_uncovered_refuses
   run "a fix ruling leaves the finding uncovered"     t_fix_ruling_leaves_finding_uncovered
   run "a different line does not cover"               t_different_line_does_not_cover

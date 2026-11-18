@@ -70,7 +70,7 @@
 #      `ANSWER:` line. `judge` needs --ruling-sha256. A given --ruling-sha256
 #      equals the sha256 of the ruling bytes this script parses.
 #   1b. Under `judge`, every defer and decline FINDING line opens with its
-#      ground as the format names; a defer names a follow-up issue, matching
+#      ground as the format names; a defer names a positive follow-up issue, matching
 #      --followup-issue when supplied. A line with
 #      any other text is a verdict only `operator` gives: deferring a defect the
 #      change introduced, or waiving a binding rule.
@@ -281,7 +281,8 @@ for ln in ruling_lines:
         continue
     if judge and m["verdict"] != "fix":
         g = JUDGE_GROUND_RE[m["verdict"]].match(m["text"])
-        if g is None or (m["verdict"] == "defer" and issue and int(g["issue"]) != int(issue)):
+        if g is None or (m["verdict"] == "defer" and
+                         (int(g["issue"]) <= 0 or (issue and int(g["issue"]) != int(issue)))):
             operator_only.append(ln)
     key = (m["path"], int(m["line"]), m["rule"])
     entries.setdefault(key, []).append(m.groupdict())
@@ -307,7 +308,7 @@ elif not ruling_sha256:
 if ruling_sha256 and ruling_sha256 != full_digest:
     out["unmet"].append(f"the ruling file has sha256 {full_digest}, not the given {ruling_sha256} — pass the file and digest as collected; never edit a judge report")
 if operator_only:
-    out["unmet"].append(f"under judge authority a decline opens 'wrong: <evidence>' and a defer opens 'out-of-scope #<issue>: <scope evidence>; cost: <comparison>' (matching --followup-issue when supplied); these FINDING line(s) need an operator ruling (risk acceptance or a rule waiver): {operator_only}")
+    out["unmet"].append(f"under judge authority a decline opens 'wrong: <evidence>' and a defer opens 'out-of-scope #<issue>: <scope evidence>; cost: <comparison>' (with a positive issue number, matching --followup-issue when supplied); these FINDING line(s) need an operator ruling (risk acceptance or a rule waiver): {operator_only}")
 if malformed:
     out["unmet"].append(f"unparseable FINDING line(s): {malformed}")
 if not entries and not malformed:
