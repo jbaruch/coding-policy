@@ -15,11 +15,20 @@ concurrency:
 
 jobs:
   publish:
-    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     outputs:
       source-commit: ${{ steps.publish_autobump.outputs.source-commit }}
     steps:
+      - name: Require exact main ref
+        shell: bash
+        run: |
+          set -euo pipefail
+          # GitHub expression string equality ignores case.
+          if [ "$GITHUB_REF" != 'refs/heads/main' ]; then
+            echo '::error::Publication requires exact ref refs/heads/main; select main and dispatch again.' >&2
+            exit 1
+          fi
+
       - uses: actions/checkout@v7
         with:
           # Need history reachable from `github.event.before` so the

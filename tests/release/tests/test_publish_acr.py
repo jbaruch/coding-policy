@@ -60,11 +60,31 @@ class PublishAcrTest(unittest.TestCase):
         self.assertEqual(second.returncode, 0, second.stderr)
         self.assertEqual(self.git("rev-parse", "v0.4.0").strip(), self.head)
 
+    def test_publish_workflow_rejects_non_exact_main_before_credentialed_checkout(self):
+        workflow = (SOURCE.parents[2] / ".github/workflows/publish.yml").read_text()
+        tessl_job = workflow.split("  publish:\n", 1)[1].split("  acr:\n", 1)[0]
+        guard, following = tessl_job.split("    steps:\n", 1)[1].split("\n      - ", 1)
+        header, run = guard.split("        run: |\n", 1)
+        self.assertEqual(header, "      - name: Require exact main ref\n        shell: bash\n")
+        self.assertTrue(following.startswith("uses: actions/checkout@"))
+        self.assertIn("ssh-key: ${{ secrets.STAMP_DEPLOY_KEY }}", following)
+        self.assertIn("uses: ./.github/actions/smart-publish", following)
+        for ref in ("refs/heads/main", "refs/heads/Main", "refs/heads/MAIN", "refs/heads/mAiN",
+                    "refs/heads/feature", "refs/tags/main", "refs/heads/main-other", ""):
+            with self.subTest(ref=ref):
+                result = subprocess.run(["bash", "-c", textwrap.dedent(run)], cwd=self.root,
+                                        env=dict(self.env, GITHUB_REF=ref), capture_output=True, text=True)
+                if ref == "refs/heads/main":
+                    self.assertEqual((result.returncode, result.stdout, result.stderr), (0, "", ""))
+                else:
+                    self.assertEqual((result.returncode, result.stdout), (1, ""))
+                    self.assertIn("::error::Publication requires exact ref refs/heads/main", result.stderr)
+                    self.assertIn("select main and dispatch again", result.stderr)
+
     def test_publish_workflow_tags_the_commit_back_version_even_after_main_advances(self):
         root = SOURCE.parents[2]
         workflow = (root / ".github/workflows/publish.yml").read_text()
         tessl_job, acr_job = workflow.split("  acr:\n", 1)
-        self.assertIn("  publish:\n    if: github.ref == 'refs/heads/main'\n", tessl_job)
         self.assertIn("source-commit: ${{ steps.publish_autobump.outputs.source-commit }}", tessl_job)
         self.assertIn("ssh-key: ${{ secrets.STAMP_DEPLOY_KEY }}", tessl_job)
         self.assertIn("mode: auto-bump\n          stamp-changelog: 'true'", tessl_job)
