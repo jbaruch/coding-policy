@@ -1,3 +1,7 @@
+## 0.10.17 — 2026-11-18
+
+- ci(publish): Bump the version at publish, not in every PR (#859)
+
 ## 0.10.16 — 2026-11-18
 
 - feat(release): Let a judge ruling authorize decline and defer (#852)
