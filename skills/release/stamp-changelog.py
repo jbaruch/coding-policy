@@ -181,7 +181,7 @@ def query_latest_version(plugin_name: str) -> str | None:
 
     `{"version": null}` is the only never-published answer; exit and output
     contract in the header of `registry-version.sh`. Any non-zero exit is a
-    tool failure and raises.
+    tool failure and raises, including exit 3 for a logged-out registry 404.
     """
     workspace, _, slug = plugin_name.partition("/")
     script = Path(__file__).resolve().parent / "registry-version.sh"

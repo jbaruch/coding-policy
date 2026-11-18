@@ -58,12 +58,14 @@ export PATH="$STUBDIR:$PATH"
 cat > "$STUBDIR/tessl" <<'STUB'
 #!/usr/bin/env bash
 case "$1" in
+  whoami) printf '{"authenticated":false}\n'; exit 1 ;;
   api)
     case "${MOCK_MODE:-}" in
       current_0332) printf '{"data":[{"attributes":{"version":"0.3.32"}}]}\n' ;;
       current_0331) printf '{"data":[{"attributes":{"version":"0.3.31"}}]}\n' ;;
       empty)        printf '{"data":[]}\n' ;;
       error)        echo "error: registry unreachable" >&2; exit 1 ;;
+      logged_out_404) printf '{"error":{"title":"Not Found","status":404}}\n'; exit 1 ;;
       *) echo "stub tessl: unknown MOCK_MODE='${MOCK_MODE:-}'" >&2; exit 99 ;;
     esac
     ;;
@@ -190,6 +192,13 @@ if [[ "$CODE" == 1 ]] && [[ "$OUT" == *'"gate":"fail"'* ]] && [[ "$OUT" == *"not
   pass "failure + registry still empty -> gate fail (nothing landed, fail-safe)"
 else
   fail "failure+empty-registry: code=$CODE out='$OUT' err='$ERR'"
+fi
+
+invoke logged_out_404 "" "success" "false"
+if [[ "$CODE" == 1 && "$OUT" == *'"gate":"fail"'* && "$OUT" == *"registry-version.sh exit 3"* && "$ERR" == *"tessl login"* ]]; then
+  pass "logged-out 404 fails confirmation, never counts as first publication"
+else
+  fail "logged-out 404: code=$CODE out='$OUT' err='$ERR'"
 fi
 
 # --- wrong arity is a usage error (exit 2, empty stdout), not a silent verdict ---

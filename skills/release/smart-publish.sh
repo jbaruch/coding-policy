@@ -428,7 +428,8 @@ main() {
   #                registry-version.sh reads the authoritative versions API
   #                (immediate) and doubles as the first-publish / tool-failure
   #                discriminator: {"version":null} = never published (first
-  #                publish, target = manifest); exit != 0 = auth/network failure.
+  #                publish, target = manifest); exit 2/3 (including logged-out
+  #                404) = pre-publish failure, mapped to failure JSON / exit 1.
   local -a pub_args
   local -a bookkeeping=()
   local first_publish=false

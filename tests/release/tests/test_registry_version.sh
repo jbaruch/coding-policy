@@ -2,9 +2,10 @@
 # Outcome-based tests for registry-version.sh.
 #
 # The contract: read the tile's latest published version from the versions API
-# and emit it as JSON, distinguishing three outcomes — a published version
+# and emit it as JSON, distinguishing four outcomes — a published version
 # ({"version":"x.y.z"}), a never-published tile ({"version":null}, exit 0), and
-# a tool/parse failure (exit 2, empty stdout, diagnostic on stderr). The
+# a tool/parse failure (exit 2), or a logged-out 404 (exit 3). Failures leave
+# stdout empty and write a diagnostic on stderr. The
 # load-bearing properties are (a) NUMERIC max selection (0.3.119 outranks
 # 0.3.20), (b) a tessl stderr warning must not poison the parse, and (c) a
 # non-JSON body / tessl failure must exit 2, never emit a bogus version.
@@ -14,7 +15,7 @@
 # and the exit codes are exercised end-to-end. The fake selects its fixture
 # via MOCK_MODE, exported through the invocation so it reaches the fake.
 #
-# Run: bash skills/release/tests/test_registry_version.sh
+# Run: bash tests/release/tests/test_registry_version.sh
 # Exit 0 on all-pass; 1 with a per-test diagnostic on failure.
 
 set -uo pipefail
@@ -49,7 +50,22 @@ export PATH="$STUBDIR:$PATH"
 # exercised (a lexical sort would pick 0.3.20).
 cat > "$STUBDIR/tessl" <<'STUB'
 #!/usr/bin/env bash
+set -euo pipefail
 case "$1" in
+  whoami)
+    case "${MOCK_AUTH:-logged_in}" in
+      logged_in) printf '{"authenticated":true}\n' ;;
+      logged_out)
+        printf '{"authenticated":false}\n'
+        echo 'Please authenticate with Tessl. Run tessl login.' >&2
+        exit 1 ;;
+      fails) echo 'authentication service unavailable' >&2; exit 1 ;;
+      malformed) printf 'not JSON\n' ;;
+      missing) printf '{}\n' ;;
+      true_but_failed) printf '{"authenticated":true}\n'; exit 1 ;;
+      *) echo "stub tessl: unsupported auth fixture" >&2; exit 99 ;;
+    esac
+    ;;
   api)
     case "${MOCK_MODE:-}" in
       ok)
@@ -112,7 +128,7 @@ else
   fail "empty data: code=$CODE out='$OUT' err='$ERR'"
 fi
 
-# --- a tessl warning on stderr must not poison the parsed version ---
+# --- a structured 404 proves absence only when authenticated ---
 for mode in absent_zero absent_nonzero; do
   invoke "$mode"
   if [[ "$CODE" == 0 && "$OUT" == '{"version":null}' ]]; then
@@ -121,6 +137,31 @@ for mode in absent_zero absent_nonzero; do
     fail "$mode: code=$CODE out='$OUT' err='$ERR'"
   fi
 done
+for mode in absent_zero absent_nonzero; do
+  MOCK_AUTH=logged_out invoke "$mode"
+  if [[ "$CODE" == 3 && -z "$OUT" && "$ERR" == *"tessl login"* && "$ERR" == *"re-run"* ]]; then
+    pass "$mode while logged out -> exit 3, empty stdout, login diagnostic"
+  else
+    fail "$mode logged out: code=$CODE out='$OUT' err='$ERR'"
+  fi
+done
+
+MOCK_AUTH=logged_out invoke ok
+if [[ "$CODE" == 0 && "$OUT" == '{"version":"0.3.119"}' ]]; then
+  pass "public plugin read succeeds while logged out"
+else
+  fail "public logged-out read: code=$CODE out='$OUT' err='$ERR'"
+fi
+
+for auth in fails malformed missing true_but_failed; do
+  MOCK_AUTH="$auth" invoke absent_nonzero
+  if [[ "$CODE" == 2 && -z "$OUT" && "$ERR" == *"tessl whoami --json"* && "$ERR" == *"re-run"* ]]; then
+    pass "authentication check $auth -> tool failure, never unpublished"
+  else
+    fail "auth $auth: code=$CODE out='$OUT' err='$ERR'"
+  fi
+done
+
 for mode in unauthorized server_error unstructured_absent; do
   invoke "$mode"
   if [[ "$CODE" == 2 && -z "$OUT" && -n "$ERR" ]]; then

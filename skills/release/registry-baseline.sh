@@ -16,6 +16,7 @@
 # Exit 2: a usage error, or a baseline this cannot vouch for; diagnostic on
 #         stderr. There is no exit 1: the script has no verdict to return, only
 #         a value or the inability to produce one.
+# Exit 3: a logged-out registry 404; run 'tessl login', then re-run. No stdout.
 set -euo pipefail
 
 # Command substitution strips every trailing newline, so the script directory
@@ -37,13 +38,15 @@ main() {
     echo "usage: registry-baseline.sh <workspace> <plugin>" >&2
     return 2
   fi
-  local workspace="$1" plugin="$2" payload version
+  local workspace="$1" plugin="$2" payload version rc=0
   if ! command -v jq >/dev/null 2>&1; then
     echo "registry-baseline: jq is not installed; install it before capturing a baseline" >&2
     return 2
   fi
-  if ! payload="$(bash "${here}/registry-version.sh" "$workspace" "$plugin")"; then
+  payload="$(bash "${here}/registry-version.sh" "$workspace" "$plugin")" || rc=$?
+  if (( rc != 0 )); then
     echo "registry-baseline: could not read the registry baseline for ${workspace}/${plugin} — see the diagnostic above" >&2
+    if (( rc == 3 )); then return 3; fi
     return 2
   fi
   if ! version="$(printf '%s' "$payload" | jq -er 'if type == "object" and has("version") and .version == null then "unpublished" else .version | select(type == "string" and test("^[0-9]+\\.[0-9]+\\.[0-9]+$")) end')"; then

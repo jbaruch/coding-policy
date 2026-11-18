@@ -409,9 +409,28 @@ t_output_is_valid_json_with_documented_shape() {
   assert_eq "keys" "current,ok,pre,reason,run_conclusion" "$keys"
 }
 
+t_logged_out_404_is_tool_failure() (
+  tessl() {
+    case "$1" in
+      api) printf '{"error":{"title":"Not Found","status":404}}\n'; return 1 ;;
+      whoami) printf '{"authenticated":false}\n'; return 1 ;;
+      *) echo "mock tessl: unsupported invocation: $*" >&2; return 2 ;;
+    esac
+  }
+  local out rc=0 err_file err
+  err_file=$(mktemp) || return 1
+  out=$(main jbaruch coding-policy unpublished 12345 2>"$err_file") || rc=$?
+  err=$(cat "$err_file")
+  rm -f "$err_file"
+  assert_eq "logged-out registry exit" 2 "$rc" || return 1
+  assert_eq "tool failure stdout" "" "$out" || return 1
+  [[ "$err" == *"tessl login"* ]] || { echo "FAIL: missing login diagnostic: $err" >&2; return 1; }
+)
+
 # --- driver ---
 
 echo "== verify-publish-landed.sh tests =="
+run "logged-out 404 maps to tool failure"                          t_logged_out_404_is_tool_failure
 run "success + advance -> ok=true"                                 t_success_and_advance_returns_ok
 run "issue #80 race: failure + interleaved advance -> ok=false"    t_race_failure_with_advance_returns_not_ok
 run "success + no advance -> ok=false (skipped publish)"           t_success_but_no_advance_returns_not_ok

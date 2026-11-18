@@ -66,6 +66,8 @@ def helper(name: str, *arguments: str) -> subprocess.CompletedProcess[bytes]:
 def response(result: subprocess.CompletedProcess[bytes]) -> dict[str, Any]:
     if result.returncode == 1:
         raise ConfirmationFailed("Canonical publication evidence is negative.")
+    # Includes registry-version.sh exit 3 (logged-out 404): uncertain evidence,
+    # never an unpublished baseline or a confirmed publication.
     if result.returncode != 0 or len(result.stdout) > MAX_HELPER_BYTES:
         raise ConfirmationHold("Registry read is unconfirmed; inspect without replay.")
     value = json.loads(result.stdout)

@@ -31,13 +31,15 @@
 # Usage: registry-version.sh <workspace> <plugin>
 # Out:   one JSON object on stdout — {"version": "<major.minor.patch>"} for a
 #        published tile, or {"version": null} when the tile has never published
-#        (an empty registry or a structured Not Found/404 is a first-publish
-#        baseline; authentication, transport and other errors remain failures).
+#        (an empty registry or an authenticated structured Not Found/404 is a
+#        first-publish baseline; other errors remain failures).
 #        Callers parse `.version`: the gate's capture phase reads null as "no
 #        baseline yet". Diagnostics go to stderr.
 # Exit:  0 on a successful read (published version OR never-published null);
 #        2 on tool/parse failure (tessl or jq absent, tessl unreachable,
-#        non-JSON body). On exit 2 stdout is empty — no JSON is emitted.
+#        non-JSON body, authentication check failed or unreadable);
+#        3 when a structured 404 cannot prove absence because tessl is logged
+#        out — run 'tessl login', then re-run. On any failure stdout is empty.
 
 set -euo pipefail
 
@@ -67,7 +69,8 @@ cleanup_rv_err_file() {
 
 # registry_version <workspace> <plugin>
 # Prints the numeric latest version (empty when never published) to stdout;
-# returns 0 on a successful read, 2 on tool/parse failure. Assumes tessl and
+# returns 0 on a successful read, 2 on tool/parse failure, 3 on a logged-out
+# structured 404. All failures leave stdout empty. Assumes tessl and
 # jq are present — main() checks that once up front; the sourcing caller
 # (verify-publish-landed.sh) guards jq itself and surfaces a tessl outage
 # through this function's runtime failure branch.
@@ -85,11 +88,24 @@ registry_version() {
   # new highest version, so the maximum is always on page 1.
   local versions_json call_rc=0
   versions_json=$(tessl api "$endpoint" 2>"$RV_ERR_FILE") || call_rc=$?
-  # The versions endpoint returns this structured 404 for a new plugin. The
-  # CLI can exit nonzero for it; classify the body before the transport status.
+  # A new plugin AND a private plugin hidden from a logged-out CLI return this
+  # structured 404. Classify the body before the transport status, but require
+  # authentication before treating it as absence. Public reads need no login.
   if printf '%s' "$versions_json" | jq -e 'type == "object" and .error.status == 404 and .error.title == "Not Found" and (has("data") | not)' >/dev/null 2>&1; then
+    # Tessl 0.120.0: logged-out `whoami --json` emits {"authenticated":false}
+    # and exits 1; exit status alone cannot distinguish other tool failures.
+    local auth_json auth_rc=0
+    auth_json=$(tessl whoami --json 2>"$RV_ERR_FILE") || auth_rc=$?
     cleanup_rv_err_file
-    return 0
+    if printf '%s' "$auth_json" | jq -e 'type == "object" and .authenticated == false' >/dev/null 2>&1; then
+      echo "error: registry absence for ${workspace}/${tile} cannot be verified while logged out — log in to tessl with 'tessl login', then re-run this command" >&2
+      return 3
+    fi
+    if (( auth_rc == 0 )) && printf '%s' "$auth_json" | jq -e 'type == "object" and .authenticated == true' >/dev/null 2>&1; then
+      return 0
+    fi
+    echo "error: 'tessl whoami --json' failed or returned an unreadable authentication result — cannot trust the 404 for ${workspace}/${tile}; run 'tessl whoami --json' directly, resolve its error (run 'tessl login' if logged out), then re-run" >&2
+    return 2
   fi
   if (( call_rc != 0 )); then
     local err; err=$(cat "$RV_ERR_FILE")
@@ -163,7 +179,7 @@ main() {
   trap cleanup_rv_err_file EXIT
 
   # Capture the BARE version through the function, then wrap it in the script's
-  # JSON contract. A tool/parse failure returns 2 with the actionable
+  # JSON contract. A tool/parse or authentication failure returns 2 or 3 with the
   # diagnostic already on stderr; propagate that exit code and emit NO JSON
   # (stdout stays empty on failure, per the header contract).
   local version rc=0

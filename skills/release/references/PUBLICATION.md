@@ -23,7 +23,7 @@ KS=.tessl/plugins/jbaruch/coding-policy/skills/release/; [ -d "$KS" ] || KS="$HO
 bash "$KS/registry-baseline.sh" <workspace> <plugin>
 ```
 
-Exit 0 prints the version or the verified `unpublished` sentinel; record it as `<pre>`. Any other exit stops the release before merge. Empty or guessed baselines are invalid. The output and refusal contract belongs to `skills/release/registry-baseline.sh`.
+Exit 0 prints the version or the verified `unpublished` sentinel; record it as `<pre>`. Exit 3 requires `tessl login`, then re-running the baseline capture. Any other exit also stops the release before merge. Empty or guessed baselines are invalid. The output and refusal contract belongs to `skills/release/registry-baseline.sh`.
 
 ## After the merge — GitHub tag/asset: push the tag
 
@@ -134,7 +134,7 @@ Exit 0 = both conjuncts hold. Exit 1 = a definitive no — an unconfirmed releas
 
 ## Partial publication recovery
 
-For a first Tessl publication, `registry-baseline.sh` prints `unpublished` only after a verified absent-plugin response or an empty versions array. Preserve that literal as `<pre>`; `confirm-tessl-landed.sh` requires a successful bound run and a real published version. Empty output, authentication failures and unreadable responses remain errors. Never substitute a guessed `0.0.0` baseline.
+For a first Tessl publication, `registry-baseline.sh` prints `unpublished` only after an authenticated absent-plugin response or an empty versions array. Preserve that literal as `<pre>`; `confirm-tessl-landed.sh` requires a successful bound run and a real published version. Empty output, authentication failures and unreadable responses remain errors. Never substitute a guessed `0.0.0` baseline.
 
 When Tessl succeeds and the downstream ACR job fails, preserve the original baseline and source commit, including the publisher's bookkeeping SHA for this repository. Use `gh run rerun <run-id> --failed` to retry only the failed job; its successful Tessl prerequisite remains completed. Do not dispatch a new full publish or rerun the successful Tessl job against an already-published version. Watch the same run to a terminal result, then recheck each channel's artifacts independently. Existing matching tags are reused; another commit at that version is a refusal, never a force-push. An unknown external effect remains unconfirmed until readback proves it.
 

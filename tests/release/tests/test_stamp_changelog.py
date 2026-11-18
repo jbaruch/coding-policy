@@ -135,6 +135,10 @@ class QueryLatestVersion(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             self._run(2, stderr="connection reset by peer")
 
+    def test_logged_out_404_requires_login(self):
+        with self.assertRaisesRegex(RuntimeError, "exit 3.*tessl login"):
+            self._run(3, stderr="run tessl login, then re-run")
+
 
 _LAGGING_TESSL = """#!/usr/bin/env bash
 set -euo pipefail
