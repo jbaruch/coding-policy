@@ -6,6 +6,7 @@ import re
 import shutil
 import subprocess
 import tempfile
+import textwrap
 import unittest
 from pathlib import Path
 
@@ -58,6 +59,107 @@ class PublishAcrTest(unittest.TestCase):
         second = self.publish()
         self.assertEqual(second.returncode, 0, second.stderr)
         self.assertEqual(self.git("rev-parse", "v0.4.0").strip(), self.head)
+
+    def test_publish_workflow_rejects_non_exact_main_before_credentialed_checkout(self):
+        workflow = (SOURCE.parents[2] / ".github/workflows/publish.yml").read_text()
+        tessl_job = workflow.split("  publish:\n", 1)[1].split("  acr:\n", 1)[0]
+        guard, following = tessl_job.split("    steps:\n", 1)[1].split("\n      - ", 1)
+        header, run = guard.split("        run: |\n", 1)
+        self.assertEqual(header, "      - name: Require exact main ref\n        shell: bash\n")
+        self.assertTrue(following.startswith("uses: actions/checkout@"))
+        self.assertIn("ssh-key: ${{ secrets.STAMP_DEPLOY_KEY }}", following)
+        self.assertIn("uses: ./.github/actions/smart-publish", following)
+        for ref in ("refs/heads/main", "refs/heads/Main", "refs/heads/MAIN", "refs/heads/mAiN",
+                    "refs/heads/feature", "refs/tags/main", "refs/heads/main-other", ""):
+            with self.subTest(ref=ref):
+                result = subprocess.run(["bash", "-c", textwrap.dedent(run)], cwd=self.root,
+                                        env=dict(self.env, GITHUB_REF=ref), capture_output=True, text=True)
+                if ref == "refs/heads/main":
+                    self.assertEqual((result.returncode, result.stdout, result.stderr), (0, "", ""))
+                else:
+                    self.assertEqual((result.returncode, result.stdout), (1, ""))
+                    self.assertIn("::error::Publication requires exact ref refs/heads/main", result.stderr)
+                    self.assertIn("select main and dispatch again", result.stderr)
+
+    def test_publish_workflow_tags_the_commit_back_version_even_after_main_advances(self):
+        root = SOURCE.parents[2]
+        workflow = (root / ".github/workflows/publish.yml").read_text()
+        tessl_job, acr_job = workflow.split("  acr:\n", 1)
+        self.assertIn("source-commit: ${{ steps.publish_autobump.outputs.source-commit }}", tessl_job)
+        self.assertIn("ssh-key: ${{ secrets.STAMP_DEPLOY_KEY }}", tessl_job)
+        self.assertIn("mode: auto-bump\n          stamp-changelog: 'true'", tessl_job)
+        self.assertIn("uses: ./.github/actions/publish-landed-gate", tessl_job)
+        self.assertIn("publish-outcome: ${{ steps.publish_autobump.outputs.source-commit != '' && steps.publish_autobump.outcome || 'failure' }}", tessl_job)
+        self.assertIn("credit-signature: ${{ steps.publish_autobump.outputs.source-commit != '' && steps.publish_autobump.outputs.credit-signature || 'false' }}", tessl_job)
+        self.assertIn("    needs: publish\n", acr_job)
+        self.assertIn("ref: ${{ needs.publish.outputs.source-commit }}", acr_job)
+        self.assertIn("source-commit: ${{ needs.publish.outputs.source-commit }}", acr_job)
+        self.assertNotIn("${{ github.sha }}", acr_job)
+
+        (self.repo / "agent-plugin.yaml").write_text("name: fixture/package\nversion: 0.4.0\n")
+        (self.repo / ".tessl-plugin").mkdir()
+        (self.repo / ".tessl-plugin/plugin.json").write_text(json.dumps({"name": "fixture/package", "version": "0.4.0"}))
+        (self.repo / "CHANGELOG.md").write_text("# Changelog\n\n### A merged change\n")
+        self.git("add", ".")
+        self.git("commit", "-qm", "merged source")
+        self.git("push", "-q", "origin", "main")
+        merged = self.git("rev-parse", "HEAD").strip()
+        tessl = self.bin / "tessl"
+        tessl.write_text(textwrap.dedent('''\
+            #!/usr/bin/env python3
+            import json, sys
+            if sys.argv[1] == 'api':
+                if '/versions/' in sys.argv[2]:
+                    print(json.dumps({'error': {'status': 404, 'title': 'Not Found', 'message': 'Not Found'}}))
+                    sys.exit(1)
+                print(json.dumps({'data': [{'attributes': {'version': '0.4.0'}}]}))
+            else:
+                print('Published')
+            '''))
+        tessl.chmod(0o755)
+        action = root / ".github/actions/smart-publish/action.yml"
+        action_text = action.read_text()
+        self.assertIn("value: ${{ steps.publish.outputs.source-commit }}", action_text)
+        run = textwrap.dedent(action_text.split("      run: |\n", 1)[1])
+        run = run.replace("${{ inputs.skip-evals }}", "false")
+        output = self.root / "outputs"
+        environment = dict(self.env, MODE="auto-bump", PLUGIN_PATH=".", STAMP_CHANGELOG="true",
+                           GITHUB_ACTION_PATH=str(action.parent), GITHUB_REF_NAME="main",
+                           GITHUB_REF_TYPE="branch", GITHUB_OUTPUT=str(output))
+        result = subprocess.run(["bash", "-c", run], cwd=self.repo, env=environment, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        outputs = dict(line.split("=", 1) for line in output.read_text().splitlines())
+        source = outputs["source-commit"]
+        self.assertNotEqual(source, merged)
+        self.assertEqual(outputs["version"], "0.4.1")
+        self.assertEqual(self.git("rev-parse", "origin/main").strip(), source)
+        self.assertEqual(json.loads(self.git("show", source + ":.tessl-plugin/plugin.json"))["version"], "0.4.1")
+        self.assertIn("version: 0.4.1\n", self.git("show", source + ":agent-plugin.yaml"))
+
+        # A later merge must not change this run's ACR version or tag source.
+        (self.repo / "agent-plugin.yaml").write_text("name: fixture/package\nversion: 9.9.9\n")
+        self.git("add", ".")
+        self.git("commit", "-qm", "later merge")
+        self.git("push", "-q", "origin", "main")
+        self.git("checkout", "-q", source)
+        (self.bin / "acr").write_text(textwrap.dedent('''\
+            #!/usr/bin/env python3
+            import json, sys
+            from pathlib import Path
+            if sys.argv[1] == 'validate':
+                lines = (Path(sys.argv[2]) / 'agent-plugin.yaml').read_text().splitlines()
+                version = next(line.split(': ', 1)[1] for line in lines if line.startswith('version: '))
+                print(json.dumps({'result': {'valid': True, 'version': version}}))
+            else:
+                print(json.dumps({'ok': True}))
+            '''))
+        result = self.publish(source)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.git("rev-parse", "v0.4.1").strip(), source)
+        self.assertEqual(self.git("tag").strip(), "v0.4.1")
+        retry = self.publish(source)
+        self.assertEqual(retry.returncode, 0, retry.stderr)
+        self.assertEqual(self.git("rev-parse", "v0.4.1").strip(), source)
 
     def test_invalid_validation_result_has_an_actionable_diagnostic_and_no_tag(self):
         for result in ({"valid": False}, {"valid": True}, {"valid": True, "version": ""}):

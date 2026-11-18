@@ -53,7 +53,7 @@
 # stops matching and degrades to red, never to a wrongly-green release. The
 # credit text is the top-of-file constant below.
 #
-# Usage: smart-publish.sh <mode> <plugin-path> <ref-name> <ref-type> [<skip-evals>]
+# Usage: smart-publish.sh <mode> <plugin-path> <ref-name> <ref-type> [<skip-evals>] [<stamp-changelog>]
 #   <mode>        auto-bump = compute the next version REGISTRY-aware (registry
 #                 empty -> the manifest; manifest strictly ahead -> the manifest;
 #                 otherwise -> registry latest + one patch), write it into the
@@ -71,12 +71,16 @@
 #   <skip-evals>  true = pass `--skip-evals` to `tessl plugin publish`; false
 #                 (default) = publish scenarios from <plugin-path>/evals when
 #                 present.
+#   <stamp-changelog> true = stamp CHANGELOG.md before auto-bump publication,
+#                 then push it with both manifests in one bookkeeping commit.
+#                 Default false; as-is consumers retain their own stamp step.
+#       When present, agent-plugin.yaml is updated alongside the Tessl manifest.
 # Out:  ONE JSON object on stdout —
 #         {"outcome":"success"|"failure","exit_code":N,
 #          "version":"x.y.z"|null,"credit_signature":true|false,
 #          "first_publish":true|false,"landed_after_error":true|false,
 #          "terminal_line":"<last substantive line>"|null,
-#          "publish_exit_code":N}
+#          "publish_exit_code":N,"source_commit":"<pushed SHA>"|null}
 #       `landed_after_error` is true when the publish command exited non-zero
 #       and the registry proved the exact version landed anyway;
 #       `terminal_line` carries that exit's last substantive output line and
@@ -155,6 +159,7 @@ readonly TIMEOUT_LANDING_BUDGET_SECONDS=60
 # clean it up after main() returns (a main-local would be out of scope and
 # `set -u` would turn cleanup into an unbound-variable failure).
 SP_LOG_FILE=""
+SP_SOURCE_COMMIT=""
 
 # EXIT-trap cleanup. `return 0` is load-bearing: an EXIT trap's final command
 # status becomes the script's exit status, so a failing `rm` here would rewrite
@@ -193,7 +198,8 @@ print(json.dumps({
     "landed_after_error": landed == "true",
     "terminal_line": (None if terminal == "" else terminal),
     "publish_exit_code": int(pub_exit),
-}))' "$1" "$2" "$3" "$4" "$5" "$6" "${7:-}" "${8:-0}"
+    "source_commit": sys.argv[9] or None,
+}))' "$1" "$2" "$3" "$4" "$5" "$6" "${7:-}" "${8:-0}" "$SP_SOURCE_COMMIT"
 }
 
 # Read a top-level string field from the plugin manifest with python3 (no jq
@@ -242,19 +248,26 @@ else:
 
 # Write a version into the manifest, preserving all other formatting — a
 # targeted swap of the `"version": "<current>"` value, not a json.dump rewrite
-# (which would reflow the file and noise up the commit-back diff). Exits 4 if
-# the manifest has no version, 5 if the value could not be located to replace.
+# (which would reflow the file and noise up the commit-back diff). Also handles
+# agent-plugin.yaml's top-level numeric scalar without a YAML dependency.
+# Exits 4 if JSON has no version, 5 if the value cannot be uniquely located.
 write_manifest_version() {
   local manifest="$1" target="$2"
   python3 -c '
 import json, re, sys
 m, target = sys.argv[1], sys.argv[2]
 text = open(m).read()
-cur = json.loads(text).get("version")
-if cur is None:
-    sys.exit(4)
-pat = re.compile(r"(\"version\"\s*:\s*\")" + re.escape(cur) + r"(\")")
-new, n = pat.subn(lambda _m: _m.group(1) + target + _m.group(2), text, count=1)
+if m.endswith(".yaml"):
+    # ACR manifests use one top-level numeric version scalar. Preserve quotes,
+    # comments and every other byte; reject unsupported/ambiguous versions.
+    pat = re.compile(r"^(version:[ \t]*)([\"\x27]?)[0-9]+\.[0-9]+\.[0-9]+(\2[ \t]*(?:#.*)?)$", re.MULTILINE)
+    new, n = pat.subn(lambda match: match[1] + match[2] + target + match[3], text)
+else:
+    cur = json.loads(text).get("version")
+    if cur is None:
+        sys.exit(4)
+    pat = re.compile(r"(\"version\"\s*:\s*\")" + re.escape(cur) + r"(\")")
+    new, n = pat.subn(lambda match: match[1] + target + match[2], text, count=1)
 if n != 1:
     sys.exit(5)
 open(m, "w").write(new)
@@ -272,31 +285,42 @@ open(m, "w").write(new)
 # Carve-Out), and re-bumping through a PR would loop the publish on merge.
 commit_back() {
   local manifest="$1" name="$2" version="$3" ref_name="$4" ref_type="$5"
+  shift 5
+  local -a paths=("$manifest" "$@")
 
   if [[ "$ref_type" != "branch" ]]; then
     echo "smart-publish: ref-type='${ref_type}' is not a branch — skipping the manifest bump-push (the publish itself succeeded)." >&2
     return 0
   fi
 
-  git config user.name "github-actions[bot]"
-  git config user.email "github-actions[bot]@users.noreply.github.com"
-  git add -- "$manifest"
-  if git diff --cached --quiet -- "$manifest"; then
+  # Explicitly propagate failures: callers use `if ! commit_back`, which
+  # suspends errexit throughout this function.
+  git config user.name "github-actions[bot]" || return 1
+  git config user.email "github-actions[bot]@users.noreply.github.com" || return 1
+  git add -- "${paths[@]}" || return 1
+  local diff_rc=0
+  git diff --cached --quiet -- "${paths[@]}" || diff_rc=$?
+  if (( diff_rc == 0 )); then
     echo "smart-publish: manifest already at ${version}, nothing to commit back." >&2
+    SP_SOURCE_COMMIT="$(git rev-parse HEAD)" || return 1
     return 0
+  elif (( diff_rc != 1 )); then
+    echo 'error: cannot inspect release bookkeeping; repair the Git index before retrying.' >&2
+    return 1
   fi
 
   # [skip ci] is non-negotiable HERE and sanctioned ONLY here: the bump commit
   # lands on the PROTECTED branch and would otherwise re-trigger this publish
   # workflow (ci-safety Publish-Pipeline Loop-Prevention Carve-Out). Pathspec-
   # scoped so an unrelated staged file is never swept into the bump commit.
-  git commit -m "Bump ${name} to ${version} [skip ci]" -- "$manifest" >&2
+  git commit -m "Bump ${name} to ${version} [skip ci]" -- "${paths[@]}" >&2 || return 1
 
   if ! git push origin "HEAD:${ref_name}" >&2; then
     echo "error: published ${name}@${version} but the manifest bump-push to ${ref_name} was rejected — the protected branch likely blocks the github-actions bot. The artifact IS published (the registry advanced); land the manifest bump by hand, or set this repo to publish-mode: as-is. Surfacing a failed run per rules/ci-safety.md — a bump-push failure stays red, distinct from a tolerated out-of-credits exit." >&2
     return 1
   fi
   echo "smart-publish: pushed the manifest bump to ${version} on ${ref_name}." >&2
+  SP_SOURCE_COMMIT="$(git rev-parse HEAD)" || return 1
   return 0
 }
 
@@ -330,11 +354,12 @@ version_exists() { # <workspace> <plugin> <version> <context-for-diagnostics>
 }
 
 main() {
-  if [[ $# -lt 4 || $# -gt 5 ]]; then
-    echo "usage: $0 <mode> <plugin-path> <ref-name> <ref-type> [<skip-evals>]" >&2
+  if [[ $# -lt 4 || $# -gt 6 ]]; then
+    echo "usage: $0 <mode> <plugin-path> <ref-name> <ref-type> [<skip-evals>] [<stamp-changelog>]" >&2
     exit 2
   fi
   local mode="$1" path="$2" ref_name="$3" ref_type="$4" skip_evals="${5:-false}"
+  local stamp_changelog="${6:-false}"
 
   case "$mode" in
     auto-bump|as-is) ;;
@@ -344,6 +369,14 @@ main() {
     true|false) ;;
     *) echo "error: skip-evals must be 'true' or 'false', got '${skip_evals}'" >&2; exit 2 ;;
   esac
+  case "$stamp_changelog" in
+    true|false) ;;
+    *) echo "error: stamp-changelog must be 'true' or 'false', got '${stamp_changelog}'" >&2; exit 2 ;;
+  esac
+  if [[ "$stamp_changelog" == "true" && ( "$mode" != "auto-bump" || "$ref_type" != "branch" ) ]]; then
+    echo 'error: combined CHANGELOG stamp requires auto-bump on a branch ref; use the standalone stamp action otherwise.' >&2
+    exit 2
+  fi
 
   command -v tessl >/dev/null 2>&1 \
     || { echo "error: tessl CLI not found on PATH — install it ('npm i -g @tessl/cli') or add it to PATH, then re-run" >&2; exit 2; }
@@ -397,6 +430,7 @@ main() {
   #                discriminator: {"version":null} = never published (first
   #                publish, target = manifest); exit != 0 = auth/network failure.
   local -a pub_args
+  local -a bookkeeping=()
   local first_publish=false
   if [[ "$mode" == "auto-bump" ]]; then
     local reg_json reg="" rc_reg=0
@@ -430,6 +464,24 @@ main() {
       echo "error: could not write version ${target} into '${manifest}' — nothing was published." >&2
       emit_json failure 1 "" false false false "" 0
       exit 1
+    fi
+    if [[ -f "${path}/agent-plugin.yaml" ]]; then
+      if ! write_manifest_version "${path}/agent-plugin.yaml" "$target"; then
+        echo "error: cannot update '${path}/agent-plugin.yaml' to ${target}; repair its top-level numeric version before publishing. Nothing was published." >&2
+        emit_json failure 1 "" false false false "" 0
+        exit 1
+      fi
+      bookkeeping+=("${path}/agent-plugin.yaml")
+    fi
+    if [[ "$stamp_changelog" == "true" ]]; then
+      local -a stamp_args=(--manifest "${manifest#"$path"/}")
+      if [[ -n "$reg" ]]; then stamp_args+=(--latest "$reg"); fi
+      if ! (cd "$path" && python3 "${_sp_dir}/stamp-changelog.py" "${stamp_args[@]}") >&2; then
+        echo 'error: cannot stamp CHANGELOG.md; repair the stamp failure before publishing. Nothing was published.' >&2
+        emit_json failure 1 "" false false false "" 0
+        exit 1
+      fi
+      bookkeeping+=("${path}/CHANGELOG.md")
     fi
   fi
   pub_args=(plugin publish)
@@ -573,10 +625,12 @@ sys.stdout.write(lines[-1] if lines else "")
       # the manifest behind the registry after every tolerated failure, drift
       # that only a later successful publish cleaned up.
       if [[ "$mode" == "auto-bump" ]]; then
-        if ! commit_back "$manifest" "$name" "$intended_version" "$ref_name" "$ref_type"; then
+        if ! commit_back "$manifest" "$name" "$intended_version" "$ref_name" "$ref_type" "${bookkeeping[@]}"; then
           # Landed, but the bump-push was rejected — a post-publish failure that
-          # stays RED, deliberately outside this tolerance.
-          emit_json failure 1 "$intended_version" "$credit_signature" "$first_publish" true "$terminal_line" "$rc"
+          # stays RED, deliberately outside this tolerance. Clear the credit
+          # signature so the downstream confirm gate cannot tolerate this
+          # bookkeeping failure as the earlier billing exit.
+          emit_json failure 1 "$intended_version" false "$first_publish" true "$terminal_line" "$rc"
           exit 1
         fi
       fi
@@ -598,7 +652,7 @@ sys.stdout.write(lines[-1] if lines else "")
   echo "smart-publish: published ${name}@${published_version}." >&2
 
   if [[ "$mode" == "auto-bump" ]]; then
-    if ! commit_back "$manifest" "$name" "$published_version" "$ref_name" "$ref_type"; then
+    if ! commit_back "$manifest" "$name" "$published_version" "$ref_name" "$ref_type" "${bookkeeping[@]}"; then
       # The artifact published, but the manifest bump-push was rejected — a
       # post-publish failure that stays red (the confirm gate sees advanced +
       # failure + no credit signature -> non-credit post-publish failure).

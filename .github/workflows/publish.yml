@@ -16,13 +16,25 @@ concurrency:
 jobs:
   publish:
     runs-on: ubuntu-latest
+    outputs:
+      source-commit: ${{ steps.publish_autobump.outputs.source-commit }}
     steps:
+      - name: Require exact main ref
+        shell: bash
+        run: |
+          set -euo pipefail
+          # GitHub expression string equality ignores case.
+          if [ "$GITHUB_REF" != 'refs/heads/main' ]; then
+            echo '::error::Publication requires exact ref refs/heads/main; select main and dispatch again.' >&2
+            exit 1
+          fi
+
       - uses: actions/checkout@v7
         with:
           # Need history reachable from `github.event.before` so the
           # changed-skills detection below can run `git diff $BEFORE..HEAD`.
           fetch-depth: 0
-          # The CHANGELOG stamp pushes straight to main. The main ruleset
+          # The stamp and version commit-back push straight to main. The main ruleset
           # requires a PR and green checks from everyone except deploy keys,
           # and GitHub cannot exempt GITHUB_TOKEN on a user-owned repository.
           ssh-key: ${{ secrets.STAMP_DEPLOY_KEY }}
@@ -71,34 +83,30 @@ jobs:
           # Credit-Outage Review Carve-Out.
           credit-outage: 'skip'
 
-      # Dogfoods the reusable action consumers call as
-      # `uses: jbaruch/coding-policy/.github/actions/stamp-changelog@<ref>`.
-      # The action self-pushes its stamp commit ([skip ci] guards the
-      # re-trigger), decoupled from patch-version-publish's exit status (#284).
-      - name: Stamp CHANGELOG with the version being published
-        uses: ./.github/actions/stamp-changelog
-
-      # Both manifests carry one explicit version; the serialized workflow
-      # preserves it and confirms Tessl before publishing the immutable ACR tag.
-      - name: Publish manifest version
+      # The owned publisher stamps and commits both manifests in one guarded
+      # push, including when an exact-version read reconciles a CLI timeout.
+      - name: Stamp CHANGELOG and publish next patch
         id: publish_autobump
         continue-on-error: true
         uses: ./.github/actions/smart-publish
         with:
-          mode: as-is
+          mode: auto-bump
+          stamp-changelog: 'true'
 
       # Fail-SAFE gate. No continue-on-error — its exit code gates the job:
       # green only when the registry advanced (artifact landed) AND either the
       # publish succeeded or its output carried the out-of-credits signature;
-      # red on a genuine non-landing OR non-credit failure. This repo is
-      # explicit-version only, so the outcome is the single publish step's.
+      # red on a genuine non-landing OR non-credit failure, including a
+      # rejected bookkeeping push.
+      # Require the commit-back SHA as well: a credit exit without completed
+      # bookkeeping must not green the job and leave ACR on the merge commit.
       - name: Confirm publish landed
         uses: ./.github/actions/publish-landed-gate
         with:
           phase: confirm
           baseline: ${{ steps.baseline.outputs.baseline }}
-          publish-outcome: ${{ steps.publish_autobump.outcome }}
-          credit-signature: ${{ steps.publish_autobump.outputs.credit-signature }}
+          publish-outcome: ${{ steps.publish_autobump.outputs.source-commit != '' && steps.publish_autobump.outcome || 'failure' }}
+          credit-signature: ${{ steps.publish_autobump.outputs.source-commit != '' && steps.publish_autobump.outputs.credit-signature || 'false' }}
 
   # A failed downstream publication can rerun alone. Keep the successful
   # Tessl job and its original registry baseline; never republish its version
@@ -109,7 +117,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          ref: ${{ github.sha }}
+          ref: ${{ needs.publish.outputs.source-commit }}
           fetch-depth: 0
       - uses: actions/checkout@v7
         with:
@@ -131,4 +139,4 @@ jobs:
         uses: ./.github/actions/publish-acr
         with:
           bin-directory: ${{ runner.temp }}
-          source-commit: ${{ github.sha }}
+          source-commit: ${{ needs.publish.outputs.source-commit }}

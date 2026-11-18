@@ -49,7 +49,7 @@ _H2_RE = re.compile(r"^## ")
 _ENTRY_RE = re.compile(r"^### ")
 _MERGE_RE = re.compile(r"^Merge pull request #(\d+) from \S+$")
 BOT = "github-actions[bot]"
-MANIFESTS = (".tessl-plugin/plugin.json", "tile.json")
+MANIFESTS = (".tessl-plugin/plugin.json", "tile.json", "agent-plugin.yaml")
 
 
 def compute_version(local: str, latest: str | None) -> str:
