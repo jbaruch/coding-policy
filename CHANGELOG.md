@@ -1,3 +1,7 @@
+## 0.10.20 — 2026-11-18
+
+- refactor(dependency-management): Trim dependency carve-outs to the harm they prevent (#861)
+
 ## 0.10.19 — 2026-11-18
 
 - fix(release): Refuse a logged-out 404 as an unpublished baseline (#860)
