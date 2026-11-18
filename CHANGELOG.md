@@ -1,3 +1,7 @@
+## 0.10.24 — 2026-11-18
+
+- refactor(stateful-artifacts): Gate telemetry only on consequential actions (#855)
+
 ## 0.10.23 — 2026-11-18
 
 - refactor(context-artifacts): Let a skill-only router rule go (#863)
