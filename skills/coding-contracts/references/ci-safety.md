@@ -94,8 +94,8 @@
 
 ## Central Publication Bookkeeping
 
-- Narrow exception for the fleet publish workflow's version and source-claim records on an enrolled consumer's default branch.
-- Applies only to `.github/workflows/fleet-publish.yml` executing in `jbaruch/coding-policy`.
+- Narrow exception for the fleet publish workflow recording a published plugin's version in that plugin's repository.
+- Applies only to `.github/workflows/fleet-publish.yml` in `jbaruch/coding-policy`.
 - Preconditions are binding: read `skills/release/references/fleet-publication.md` Bookkeeping Authority before relying on it.
 - Every other protected-branch write follows Protected Branches unchanged.
 
