@@ -94,7 +94,7 @@
 
 ## Central Publication Bookkeeping
 
-- Narrow exception for the fleet publish workflow recording a published plugin's version, source claim and changelog stamp in that plugin's repository.
+- Narrow exception for the fleet publish workflow adding an enrolled plugin's published version, source claim and changelog stamp to that plugin's default-branch history.
 - Applies only to `.github/workflows/fleet-publish.yml` in `jbaruch/coding-policy`.
 - Preconditions are binding: read `skills/release/references/fleet-publication.md` Bookkeeping Authority before relying on it.
 - Every other protected-branch write follows Protected Branches unchanged.
