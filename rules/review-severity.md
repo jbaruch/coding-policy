@@ -32,7 +32,7 @@ alwaysApply: true
 ## Judge-Weighed Finding Carve-Out
 
 - Narrow exception for merging with a blocking policy finding a weighing ruled `defer` or `decline`.
-- Applies only when fixing costs more than the failure it prevents.
+- Applies when the finding is wrong, or when fixing costs more than the failure it prevents.
 - Preconditions are binding: read `skills/release/references/review-severity-carve-outs.md` Judge-Weighed Finding Carve-Out before relying on it.
 - Every other blocker is resolved before merge.
 

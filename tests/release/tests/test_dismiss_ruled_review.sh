@@ -119,12 +119,12 @@ set_review() {
       {"id":8,"user":{"login":"github-actions[bot]"},"state":$state,"commit_id":$commit,"submitted_at":"2026-01-02T00:00:00Z","body":$body}]')
 }
 
-# A complete schema_version 2 operator ruling. Args: <head> <finding-line>...
+# A complete schema_version 4 operator ruling. Args: <head> <finding-line>...
 write_ruling() {
   local head="$1"; shift
   {
     echo "RULING: weighed"
-    echo "schema_version: 2"
+    echo "schema_version: 4"
     echo "AUTHORITY: operator"
     echo "HEAD: ${head}"
     echo "ANSWER: decline the error-handling one, the harness sets it; b.md is presentation only"
@@ -178,21 +178,34 @@ gh() {
   esac
 }
 
-# A ruling claiming a non-operator authority, with no ANSWER.
+# A judge's collected report, written as native factory collection writes it
+# (factory.py save_report): its artifacts verbatim, joined by \n, plus a final
+# \n. It is the ruling file itself. Args: <file> <artifact>...
+collect_report() {
+  local file="$1"; shift
+  python3 -c 'import sys; open(sys.argv[1], "w", encoding="utf-8").write("\n".join(sys.argv[2:]) + "\n")' "$file" "$@" \
+    || { echo "fatal: cannot write ${file}" >&2; exit 2; }
+}
+
+# The fixed judge report: a decline and a cost-grounded defer at HEAD_SHA, and
+# an unknown judge line. Its sha256 was computed once outside the suite with
+# `shasum -a 256`.
+JUDGE_REPORT="${TMPDIR_TEST}/coding-policy-1.judge1.claude.report.txt"
+collect_report "$JUDGE_REPORT" "RULING: weighed" "schema_version: 4" "AUTHORITY: judge" "HEAD: ${HEAD_SHA}" \
+  "FINDING: policy skills/x/run.sh:3 error-handling — decline — wrong: the harness sets the flag" \
+  "FINDING: policy rules/b.md:7 context-writing-style — defer — out-of-scope #12: pre-existing on main; cost: a reword touches every rule file for a presentation gain" \
+  "ACTION: none" "UNVERIFIED: none" "operator_decision: none"
+JUDGE_REPORT_SHA256="54bb4d28b70130017f26094eb6ab3a928baff6dca2931679afae0730945c7aa1"
+
+# A judge report a test writes, in REPORT, with its sha256 in REPORT_SHA256.
 # Args: <head> <finding-line>...
-write_judge_ruling() {
+REPORT="${TMPDIR_TEST}/judge.report.txt"
+REPORT_SHA256=""
+write_judge_report() {
   local head="$1"; shift
-  {
-    echo "RULING: weighed"
-    echo "schema_version: 2"
-    echo "AUTHORITY: judge"
-    echo "HEAD: ${head}"
-    printf '%s\n' "$@"
-    echo "ACTION: none"
-    echo "UNVERIFIED: none"
-    echo ""
-    echo "1. Reachability cited at run.sh:3; the harness sets the flag."
-  } > "$RULING"
+  collect_report "$REPORT" "RULING: weighed" "schema_version: 4" "AUTHORITY: judge" "HEAD: ${head}" "$@" "ACTION: none"
+  REPORT_SHA256=$(sha256_of "$REPORT") \
+    || { echo "fatal: cannot hash ${REPORT}" >&2; exit 2; }
 }
 
 # Run main in a subshell (it exits); capture stdout and rc.
@@ -201,6 +214,7 @@ invoke() { RC=0; OUT=$( (main owner repo 5 "$@") 2>"${TMPDIR_TEST}/stderr") || R
 invoke_ruled() { invoke --ruling "$RULING" --followup-issue "$ISSUE"; }
 dismissals() { grep -c '^dismiss ' "$EVENTS"; }
 comments() { grep -c '^comment$' "$EVENTS"; }
+sha256_of() { python3 -c 'import hashlib,sys; print(hashlib.sha256(open(sys.argv[1],"rb").read()).hexdigest())' "$1"; }
 digest_of_ruling() { python3 -c 'import hashlib,sys; print(hashlib.sha256(open(sys.argv[1],"rb").read()).hexdigest()[:16])' "$RULING"; }
 
 DECLINE_ONE="FINDING: policy skills/x/run.sh:3 error-handling — decline — rule text misread; the harness sets it"
@@ -460,9 +474,9 @@ t_schema_missing_or_other_refuses() {
   grep -v '^schema_version:' "$RULING" > "${RULING}.tmp" && mv "${RULING}.tmp" "$RULING"
   invoke_ruled
   assert_eq "exit without schema_version" "1" "$RC" || return 1
-  assert_unmet "schema_version: 2" "the schema" || return 1
+  assert_unmet "schema_version: 4" "the schema" || return 1
   write_ruling "$HEAD_SHA" "$DECLINE_ONE" "$DECLINE_TWO"
-  sed 's/^schema_version: 2$/schema_version: 3/' "$RULING" > "${RULING}.tmp" && mv "${RULING}.tmp" "$RULING"
+  sed 's/^schema_version: 4$/schema_version: 3/' "$RULING" > "${RULING}.tmp" && mv "${RULING}.tmp" "$RULING"
   invoke_ruled
   assert_eq "exit with schema_version 3" "1" "$RC" || return 1
   assert_eq "no dismissal" "0" "$(dismissals)"
@@ -487,24 +501,24 @@ check_newer_schema_refused_unmodified() {
 }
 t_newer_schema_refuses_unmodified() { check_newer_schema_refused_unmodified invoke_ruled write_ruling; }
 
-t_version_1_ruling_refuses_unmodified() {
+t_version_2_ruling_refuses_unmodified() {
   set_review CHANGES_REQUESTED "$HEAD_SHA" "$BODY_TWO"
   write_ruling "$HEAD_SHA" "$DECLINE_ONE" "$DECLINE_TWO"
-  grep -v '^AUTHORITY:' "$RULING" | sed 's/^schema_version: 2$/schema_version: 1/' > "${RULING}.tmp" \
+  sed 's/^schema_version: 4$/schema_version: 2/' "$RULING" > "${RULING}.tmp" \
     && mv "${RULING}.tmp" "$RULING"
   local before after
   before=$(digest_of_ruling) || { echo "    FAIL: could not digest the ruling before the run" >&2; return 1; }
   invoke_ruled
   after=$(digest_of_ruling) || { echo "    FAIL: could not digest the ruling after the run" >&2; return 1; }
   assert_eq "exit" "1" "$RC" || return 1
-  assert_unmet "schema_version: 2" "the old schema" || return 1
+  assert_unmet "rewrite an operator ruling in the current format" "the old schema" || return 1
   assert_eq "ruling bytes unchanged" "$before" "$after" || return 1
   assert_eq "nothing posted" "0" "$(wc -l < "$EVENTS" | tr -d ' ')"
 }
 
 t_non_utf8_ruling_refuses_without_traceback() {
   set_review CHANGES_REQUESTED "$HEAD_SHA" "$BODY_TWO"
-  printf 'RULING: weighed\nschema_version: 2\nAUTHORITY: operator\nANSWER: \xff\xfe\n' > "$RULING"
+  printf 'RULING: weighed\nschema_version: 4\nAUTHORITY: operator\nANSWER: \xff\xfe\n' > "$RULING"
   invoke_ruled
   assert_eq "exit" "1" "$RC" || return 1
   assert_unmet "FINDING" "the missing findings" || return 1
@@ -548,15 +562,224 @@ t_usage_errors_exit_2() {
   assert_eq "ruling without --followup-issue" "2" "$RC" || return 1
   invoke --ruling "${TMPDIR_TEST}/does-not-exist" --followup-issue "$ISSUE"
   assert_eq "unreadable ruling" "2" "$RC" || return 1
+  invoke --ruling "$RULING" --ruling-sha256 "${JUDGE_REPORT_SHA256:0:16}" --followup-issue "$ISSUE"
+  assert_eq "short --ruling-sha256" "2" "$RC" || return 1
+  invoke --ruling-sha256 "$JUDGE_REPORT_SHA256"
+  assert_eq "--ruling-sha256 without --ruling" "2" "$RC" || return 1
   assert_eq "stdout empty" "" "$OUT"
 }
 
-t_judge_authority_ruling_refuses() {
+JUDGE_DECLINE_ONE="FINDING: policy skills/x/run.sh:3 error-handling — decline — wrong: the harness sets the flag"
+JUDGE_DECLINE_TWO="FINDING: policy rules/b.md:7 context-writing-style — decline — wrong: the clause names no rationale"
+JUDGE_DEFER_TWO="FINDING: policy rules/b.md:7 context-writing-style — defer — out-of-scope #${ISSUE}: pre-existing on main; cost: a reword touches every rule file"
+JUDGE_FIX_TWO="FINDING: policy rules/b.md:7 context-writing-style — fix"
+
+invoke_report() { invoke --ruling "$REPORT" --ruling-sha256 "$REPORT_SHA256" --followup-issue "$ISSUE"; }
+
+# Args: <label> <unmet substring>. Runs the REPORT ruling and expects refusal
+# with nothing posted or dismissed.
+refuses_report() {
+  invoke_report
+  assert_eq "$1 exit" "1" "$RC" || return 1
+  assert_unmet "$2" "the $1" || return 1
+  assert_eq "$1: nothing posted" "0" "$(wc -l < "$EVENTS" | tr -d ' ')"
+}
+
+t_judge_report_dismisses() {
   set_review CHANGES_REQUESTED "$HEAD_SHA" "$BODY_TWO"
-  write_judge_ruling "$HEAD_SHA" "$DECLINE_ONE" "$DECLINE_TWO"
+  invoke --ruling "$JUDGE_REPORT" --ruling-sha256 "$JUDGE_REPORT_SHA256" --followup-issue "$ISSUE"
+  assert_eq "exit" "0" "$RC" || return 1
+  assert_eq "result" "dismissed" "$(jq -r .result <<<"$OUT")" || return 1
+  assert_eq "report bytes as collected, unchanged" "$JUDGE_REPORT_SHA256" "$(sha256_of "$JUDGE_REPORT")" || return 1
+  assert_eq "comment then dismissal" \
+    "comment|dismiss JUDGE-RULED: ${JUDGE_REPORT_SHA256:0:16} covers 2 blocking findings at ${HEAD_SHA}; tracked in #${ISSUE}" \
+    "$(paste -sd'|' "$EVENTS")" || return 1
+  grep -qxF "Ruled by the judge's report ${JUDGE_REPORT} (sha256 ${JUDGE_REPORT_SHA256})." "$COMMENT_BODY" \
+    || { echo "    FAIL: comment cites the report's absolute path and full sha256" >&2; return 1; }
+  grep -qF "skills/x/run.sh:3\` **error-handling** — declined, won't-fix: wrong: the harness sets the flag" "$COMMENT_BODY" \
+    || { echo "    FAIL: decline entered with its ground" >&2; return 1; }
+  grep -qF "rules/b.md:7\` **context-writing-style** — deferred: out-of-scope #${ISSUE}: pre-existing on main; cost: a reword" "$COMMENT_BODY" \
+    || { echo "    FAIL: defer entered with its scope and cost grounds" >&2; return 1; }
+  assert_eq "no compare at the judge's head" "0" "$(wc -l < "$COMPARE_LOG" | tr -d ' ')"
+}
+
+t_judge_decline_dismisses() {
+  set_review CHANGES_REQUESTED "$HEAD_SHA" "$BODY_TWO"
+  write_judge_report "$HEAD_SHA" "$JUDGE_DECLINE_ONE" "$JUDGE_DECLINE_TWO"
+  invoke_report
+  assert_eq "exit" "0" "$RC" || return 1
+  assert_eq "one dismissal" "1" "$(dismissals)" || return 1
+  grep -qF "rules/b.md:7\` **context-writing-style** — declined, won't-fix: wrong: the clause names no rationale" "$COMMENT_BODY" \
+    || { echo "    FAIL: decline entered with its ground" >&2; return 1; }
+}
+
+t_judge_digest_missing_or_mismatched_refuses() {
+  set_review CHANGES_REQUESTED "$HEAD_SHA" "$BODY_TWO"
+  write_judge_report "$HEAD_SHA" "$JUDGE_DECLINE_ONE" "$JUDGE_DECLINE_TWO"
+  invoke --ruling "$REPORT" --followup-issue "$ISSUE"
+  assert_eq "missing digest exit" "1" "$RC" || return 1
+  assert_unmet "a judge ruling needs --ruling-sha256" "the missing digest" || return 1
+  local other="0000000000000000000000000000000000000000000000000000000000000000"
+  invoke --ruling "$REPORT" --ruling-sha256 "$other" --followup-issue "$ISSUE"
+  assert_eq "mismatched digest exit" "1" "$RC" || return 1
+  assert_unmet "has sha256 ${REPORT_SHA256}, not the given ${other}" "the mismatched digest" || return 1
+  write_ruling "$HEAD_SHA" "$DECLINE_ONE" "$DECLINE_TWO"
+  invoke --ruling "$RULING" --ruling-sha256 "$other" --followup-issue "$ISSUE"
+  assert_eq "operator mismatched digest exit" "1" "$RC" || return 1
+  assert_unmet "not the given ${other}" "the operator ruling's mismatched digest" || return 1
+  assert_eq "nothing posted" "0" "$(wc -l < "$EVENTS" | tr -d ' ')"
+}
+
+t_judge_report_edited_after_collection_refuses() {
+  set_review CHANGES_REQUESTED "$HEAD_SHA" "$BODY_TWO"
+  write_judge_report "$HEAD_SHA" "$JUDGE_DECLINE_ONE" "$JUDGE_DEFER_TWO"
+  sed 's/^FINDING: policy rules\/b.md:7 .*/'"${JUDGE_DECLINE_TWO//\//\\/}"'/' "$REPORT" > "${REPORT}.tmp" && mv "${REPORT}.tmp" "$REPORT"
+  refuses_report "edited report" "not the given ${REPORT_SHA256}"
+}
+
+t_judge_unsupported_schema_refuses_unmodified() {
+  set_review CHANGES_REQUESTED "$HEAD_SHA" "$BODY_TWO"
+  local v before
+  for v in 3 5; do
+    collect_report "$REPORT" "RULING: weighed" "schema_version: ${v}" "AUTHORITY: judge" "HEAD: ${HEAD_SHA}" \
+      "$JUDGE_DECLINE_ONE" "$JUDGE_DECLINE_TWO"
+    REPORT_SHA256=$(sha256_of "$REPORT")
+    before=$(sha256_of "$REPORT")
+    refuses_report "schema ${v}" "schema" || return 1
+    assert_eq "schema ${v}: report unchanged" "$before" "$(sha256_of "$REPORT")" || return 1
+  done
+  collect_report "$REPORT" "RULING: weighed" "schema_version: 3" "AUTHORITY: judge" "HEAD: ${HEAD_SHA}" \
+    "$JUDGE_DECLINE_ONE" "$JUDGE_DECLINE_TWO"
+  REPORT_SHA256=$(sha256_of "$REPORT")
+  refuses_report "older judge report" "obtain a new judge report"
+}
+
+t_judge_missing_head_refuses() {
+  set_review CHANGES_REQUESTED "$HEAD_SHA" "$BODY_TWO"
+  collect_report "$REPORT" "RULING: weighed" "schema_version: 4" "AUTHORITY: judge" "$JUDGE_DECLINE_ONE" "$JUDGE_DECLINE_TWO"
+  REPORT_SHA256=$(sha256_of "$REPORT")
+  refuses_report "missing HEAD" "HEAD: <40-hex sha>" || return 1
+  assert_eq "nothing compared" "0" "$(wc -l < "$COMPARE_LOG" | tr -d ' ')"
+}
+
+t_judge_incomplete_or_surplus_coverage_refuses() {
+  set_review CHANGES_REQUESTED "$HEAD_SHA" "$BODY_TWO"
+  write_judge_report "$HEAD_SHA" "$JUDGE_DECLINE_ONE"
+  refuses_report "incomplete coverage" "1 blocking finding(s) not covered" || return 1
+  write_judge_report "$HEAD_SHA" "$JUDGE_DECLINE_ONE" "$JUDGE_DECLINE_TWO" "$JUDGE_DECLINE_TWO"
+  refuses_report "surplus line" "duplicate FINDING line(s) exceed" || return 1
+  write_judge_report "$HEAD_SHA" "$JUDGE_DECLINE_ONE" "$JUDGE_DECLINE_TWO" \
+    "FINDING: policy rules/z.md:1 context-writing-style — decline — wrong: no such finding"
+  refuses_report "unmatched line" "naming no blocking finding"
+}
+
+t_judge_fix_records_refuse() {
+  set_review CHANGES_REQUESTED "$HEAD_SHA" "$BODY_TWO"
+  write_judge_report "$HEAD_SHA" "$JUDGE_DECLINE_ONE" "$JUDGE_FIX_TWO"
+  refuses_report "decline with fix" "1 blocking finding(s) not covered by a defer/decline ruling" || return 1
+  set_review CHANGES_REQUESTED "$HEAD_SHA" "$BODY_DUPLICATE"
+  write_judge_report "$HEAD_SHA" "$JUDGE_DECLINE_TWO" "$JUDGE_FIX_TWO"
+  refuses_report "same finding decline and fix" "different verdicts"
+}
+
+t_judge_repeated_findings_dismiss() {
+  set_review CHANGES_REQUESTED "$HEAD_SHA" "$BODY_DUPLICATE"
+  write_judge_report "$HEAD_SHA" "$JUDGE_DECLINE_TWO" "$JUDGE_DECLINE_TWO"
+  invoke_report
+  assert_eq "exit" "0" "$RC" || return 1
+  assert_eq "two follow-up entries" "2" "$(grep -c 'rules/b.md:7' "$COMMENT_BODY")" || return 1
+  assert_eq "one dismissal" "1" "$(dismissals)"
+}
+
+t_judge_carry_over() {
+  set_review CHANGES_REQUESTED "$HEAD_SHA" "$BODY_TWO"
+  write_judge_report "$OLD_SHA" "$JUDGE_DECLINE_ONE" "$JUDGE_DECLINE_TWO"
+  MOCK_COMPARE='{"status":"ahead","files":[{"filename":"rules/b.md"}]}'
+  invoke_report
+  assert_eq "changed path exit" "1" "$RC" || return 1
+  assert_eq "uncovered" "rules/b.md" "$(jq -r '.uncovered[].path' <<<"$OUT")" || return 1
+  assert_eq "compare judge head...head" "repos/owner/repo/compare/${OLD_SHA}...${HEAD_SHA}" "$(cat "$COMPARE_LOG")" || return 1
+  assert_eq "changed path: nothing posted" "0" "$(wc -l < "$EVENTS" | tr -d ' ')" || return 1
+  MOCK_COMPARE='{"status":"ahead","files":[{"filename":"README.md"}]}'
+  invoke_report
+  assert_eq "unchanged path exit" "0" "$RC" || return 1
+  assert_eq "comment then dismissal" "comment|dismiss" "$(cut -d' ' -f1 "$EVENTS" | paste -sd'|' -)"
+}
+
+t_judge_operator_only_grounds_refuse() {
+  set_review CHANGES_REQUESTED "$HEAD_SHA" "$BODY_TWO"
+  write_judge_report "$HEAD_SHA" "$JUDGE_DECLINE_ONE" \
+    "FINDING: policy rules/b.md:7 context-writing-style — defer — out-of-scope #99: pre-existing on main; cost: a reword touches every rule file"
+  refuses_report "wrong follow-up issue" "out-of-scope #99" || return 1
+  write_judge_report "$HEAD_SHA" "$JUDGE_DECLINE_ONE" \
+    "FINDING: policy rules/b.md:7 context-writing-style — defer — out-of-scope #${ISSUE}: pre-existing on main"
+  refuses_report "missing cost ground" "need an operator ruling" || return 1
+  write_judge_report "$HEAD_SHA" "$JUDGE_DECLINE_ONE" \
+    "FINDING: policy rules/b.md:7 context-writing-style — defer — accept the risk until the next release"
+  refuses_report "risk acceptance" "accept the risk" || return 1
+  write_judge_report "$HEAD_SHA" "$JUDGE_DECLINE_ONE" "$DECLINE_TWO"
+  refuses_report "groundless decline" "presentation only"
+}
+
+t_judge_floor_refuses() {
+  set_review CHANGES_REQUESTED "$HEAD_SHA" "$BODY_FLOOR"
+  write_judge_report "$HEAD_SHA" "FINDING: policy a.sh:1 no-secrets — decline — wrong: a test fixture"
+  refuses_report "floor" "floor rule"
+}
+
+t_judge_failing_check_refuses() {
+  set_review CHANGES_REQUESTED "$HEAD_SHA" "$BODY_TWO"
+  MOCK_CHECKS='[{"name":"tests","bucket":"fail"}]'
+  write_judge_report "$HEAD_SHA" "$JUDGE_DECLINE_ONE" "$JUDGE_DECLINE_TWO"
+  refuses_report "failing check" "failing check(s)"
+}
+
+t_judge_rerun_reuses_comment_then_noop() {
+  set_review CHANGES_REQUESTED "$HEAD_SHA" "$BODY_TWO"
+  write_judge_report "$HEAD_SHA" "$JUDGE_DECLINE_ONE" "$JUDGE_DEFER_TWO"
+  MOCK_COMMENT_RC=1
+  invoke_report
+  assert_eq "failed post exit" "2" "$RC" || return 1
+  assert_eq "failed post: no dismissal" "0" "$(dismissals)" || return 1
+  MOCK_COMMENT_RC=0
+  invoke_report
+  assert_eq "retry exit" "0" "$RC" || return 1
+  MOCK_ISSUE_COMMENTS=$(jq -cn --rawfile b "$COMMENT_BODY" '[{"id":1,"body":$b}]')
+  : > "$EVENTS"
+  invoke_report
+  assert_eq "re-run exit" "0" "$RC" || return 1
+  assert_eq "re-run reuses the comment" "0" "$(comments)" || return 1
+  assert_eq "re-run dismisses" "1" "$(dismissals)" || return 1
+  set_review DISMISSED "$HEAD_SHA" "$BODY_TWO"
+  : > "$EVENTS"
+  invoke_report
+  assert_eq "after dismissal" "noop" "$(jq -r .result <<<"$OUT")" || return 1
+  assert_eq "after dismissal: nothing posted" "0" "$(wc -l < "$EVENTS" | tr -d ' ')"
+}
+
+t_operator_ruling_unchanged() {
+  set_review CHANGES_REQUESTED "$HEAD_SHA" "$BODY_TWO"
+  write_ruling "$HEAD_SHA" "$DECLINE_ONE" \
+    "FINDING: policy rules/b.md:7 context-writing-style — defer — accept the risk until the next release"
+  invoke_ruled
+  assert_eq "exit" "0" "$RC" || return 1
+  local digest; digest=$(digest_of_ruling)
+  assert_eq "comment body" \
+"Follow-up entries for owner/repo#5 at ${HEAD_SHA}, judge ruling ${digest}:
+
+- \`skills/x/run.sh:3\` **error-handling** — declined, won't-fix: rule text misread; the harness sets it
+- \`rules/b.md:7\` **context-writing-style** — deferred: accept the risk until the next release" \
+    "$(cat "$COMMENT_BODY")" || return 1
+  assert_eq "one dismissal" "1" "$(dismissals)"
+}
+
+t_other_authority_refuses() {
+  set_review CHANGES_REQUESTED "$HEAD_SHA" "$BODY_TWO"
+  write_ruling "$HEAD_SHA" "$DECLINE_ONE" "$DECLINE_TWO"
+  sed 's/^AUTHORITY: operator$/AUTHORITY: agent/' "$RULING" > "${RULING}.tmp" && mv "${RULING}.tmp" "$RULING"
   invoke_ruled
   assert_eq "exit" "1" "$RC" || return 1
-  assert_unmet "authority must be 'operator', not 'judge'" "the authority" || return 1
+  assert_unmet "must be 'operator' or 'judge', not 'agent'" "the authority" || return 1
   assert_eq "nothing posted" "0" "$(wc -l < "$EVENTS" | tr -d ' ')"
 }
 
@@ -659,12 +882,27 @@ run_suite() {
   run "a missing or empty ANSWER refuses"             t_missing_answer_refuses
   run "a missing or other schema_version refuses"             t_schema_missing_or_other_refuses
   run "a newer schema refuses, unmodified"            t_newer_schema_refuses_unmodified
-  run "a version-1 ruling refuses, unmodified"        t_version_1_ruling_refuses_unmodified
+  run "a version-2 ruling refuses, unmodified"        t_version_2_ruling_refuses_unmodified
   run "non-UTF-8 ruling bytes refuse, no traceback"   t_non_utf8_ruling_refuses_without_traceback
   run "a malformed ruling refuses"                    t_malformed_ruling_refuses
   run "list mode emits the blocking findings"         t_list_mode_emits_findings
   run "usage errors exit 2"                           t_usage_errors_exit_2
-  run "a judge-authority ruling refuses"             t_judge_authority_ruling_refuses
+  run "a collected judge report dismisses"           t_judge_report_dismisses
+  run "a judge decline dismisses"                     t_judge_decline_dismisses
+  run "a missing or mismatched digest refuses"        t_judge_digest_missing_or_mismatched_refuses
+  run "a report edited after collection refuses"      t_judge_report_edited_after_collection_refuses
+  run "an unsupported judge schema refuses, unmodified" t_judge_unsupported_schema_refuses_unmodified
+  run "a judge report without HEAD refuses"           t_judge_missing_head_refuses
+  run "incomplete or surplus judge coverage refuses"  t_judge_incomplete_or_surplus_coverage_refuses
+  run "judge fix records leave findings uncovered"    t_judge_fix_records_refuse
+  run "repeated findings a judge rules each dismiss"  t_judge_repeated_findings_dismiss
+  run "judge carry-over needs the path unchanged"     t_judge_carry_over
+  run "operator-only grounds under judge refuse"      t_judge_operator_only_grounds_refuse
+  run "a judge decline on a floor refuses"            t_judge_floor_refuses
+  run "a failing check refuses a judge ruling"        t_judge_failing_check_refuses
+  run "a judge re-run reuses the comment, then noops" t_judge_rerun_reuses_comment_then_noop
+  run "an operator ruling dismisses as before"        t_operator_ruling_unchanged
+  run "another authority refuses"                     t_other_authority_refuses
   run "a missing AUTHORITY line refuses"              t_missing_authority_refuses
   run "the sent marker reads RULED and sweeps"        t_sent_marker_reads_ruled_and_sweeps
   printf '{"suite":"test_dismiss_ruled_review.sh","passed":%d,"failed":%d}\n' "$PASS_COUNT" "$FAIL_COUNT"

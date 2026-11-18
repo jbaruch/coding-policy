@@ -57,11 +57,20 @@ Renovate updates the CLI and at the weekly capability refresh.
 
 Reference for Step 6 — how a marginal blocking finding reaches a weighing and how the ruling clears the gating policy review (`rules/review-severity.md` Judge-Weighed Finding Carve-Out; `rules/ci-safety.md` Judge-Ruled-Review Dismissal Carve-Out).
 
+### Who rules
+
+The agent nominates. The judge is the operator or a software-factory judge.
+
+- A software-factory judge rules only:
+  - `decline`: the finding misreads the code or the governing policy
+  - `defer`: the finding is pre-existing or outside the PR's goal, tracked in the named follow-up issue, and fixing it now costs more than the failure it prevents
+- A correctly applied binding rule the judge considers defective goes to the operator. The judge cannot waive it.
+- A real defect the change introduced stays the operator's risk acceptance, even when described as outside scope.
+- Floors are `fix` whichever authority rules.
+
 ### The question
 
-The operator is the judge and the agent nominates.
-
-Nominate only a finding on lines the previous fix push added, or one you can support with a cited reachability claim — a path from input to the flagged line, with file and line citations. The claim travels in the question itself; no separate report is needed. Ask one question per gate, carrying every nomination:
+Nominate only a finding on lines the previous fix push added, or one you can support with a cited reachability claim — a path from input to the flagged line, with file and line citations. A gate a software-factory judge rules wholly `decline` or `defer` needs no question. The claim travels in the question itself; no separate report is needed. Otherwise ask the operator one question per gate, carrying every nomination:
 
 ```text
 Weighing request at <head sha>. For each finding answer fix, defer or decline:
@@ -73,11 +82,33 @@ The question never blocks. Keep working the fix loop; a finding the operator has
 
 ### The ruling file
 
-Write the operator's answer into a ruling file with `AUTHORITY: operator`. Its format, `schema_version`, required `ANSWER:` line and writer/reader contract are in the `skills/release/dismiss-ruled-review.sh` header. Keep the file for the life of the PR; the dismissal message pins its sha256 digest.
+The ruling file's format, `schema_version`, owner and writer/reader contract are in the `skills/release/dismiss-ruled-review.sh` header. Keep the file for the life of the PR; the dismissal message pins its sha256 digest.
+
+- **Operator:** write the operator's answer into a ruling file with `AUTHORITY: operator` and its `ANSWER:` line.
+- **Software-factory judge:** the judge's collected report is the ruling file. Brief the judge to emit the ruling format as its report artifacts, one line per artifact, in order:
+
+  ```text
+  Rule on each blocking finding of the policy review on <owner>/<repo>#<pr> at <head sha>.
+  Report these lines as your artifacts, one line per artifact, in this order, and no other artifact before them:
+  RULING: weighed
+  schema_version: 4
+  AUTHORITY: judge
+  HEAD: <head sha>
+  FINDING: policy <path>:<line> <rule> — <verdict>
+  One FINDING line per blocking finding below, each verdict one of:
+  decline — wrong: <evidence that the finding misreads the code or the governing policy>
+  defer — out-of-scope #<follow-up issue>: <evidence that it is pre-existing or outside the PR's goal>; cost: <why fixing now costs more than the failure it prevents>
+  fix
+  Rule fix on a floor, on a defect this change introduced, and on a correctly applied rule you consider defective; those are the operator's.
+  Blocking findings:
+  1. <path>:<line> <rule> — <message>
+  ```
+
+  Take the findings from the script's list mode. After collection, pass the report's absolute path, `<task>.<id>.<harness>.report.txt` beside the judge's receipt, as `--ruling` and its sha256 (`shasum -a 256 <path>`) as `--ruling-sha256`. Never edit or rewrite the report. A report the script refuses as malformed or outdated needs a new judge report; a finding it leaves uncovered goes back to the fix loop or to the operator.
 
 ### Order of work
 
-1. Run `dismiss-ruled-review.sh` with `--ruling` and `--followup-issue` (Step 6 command block). It posts the ruled findings to the follow-up issue — `defer`, or `decline` labelled won't-fix — then dismisses the review. Exit 1 names each unmet condition in `.unmet`; fix those findings instead.
+1. Run `dismiss-ruled-review.sh` with `--ruling` and `--followup-issue`, plus `--ruling-sha256` for a judge's report (Step 6 command block). It posts the ruled findings to the follow-up issue — `defer`, or `decline` labelled won't-fix — then dismisses the review. Exit 1 names each unmet condition in `.unmet`; fix those findings instead.
 2. Reply citing the ruling, with `<digest>` the 16-hex digest from the script's `.message`. Policy findings appear in the review body; reply in a PR comment citing the review and finding:
    - Declined: `Declining — judge ruling <digest>: <reason from the ruling>`
    - Deferred: `Acknowledged — deferred to #<follow-up issue> (judge ruling <digest>)`

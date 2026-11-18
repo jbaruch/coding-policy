@@ -17,10 +17,11 @@ The full preconditions of each `rules/ci-safety.md` carve-out, moved out of the 
 ## Judge-Ruled-Review Dismissal Carve-Out
 
 - Preconditions (all required):
-  1. The dismissal runs through `skills/release/dismiss-ruled-review.sh` — coverage predicate and rule-id floors in its header
-  2. No check on the head is failing
-  3. The script posted the ruled findings to the task's follow-up issue before dismissing
-  4. The dismissal message carries the script's `JUDGE-RULED:` marker
+  1. The dismissal runs through `skills/release/dismiss-ruled-review.sh` — coverage predicate, authority lines and rule-id floors in its header
+  2. The ruling is an operator ruling quoting the operator's answer verbatim, or a judge's collected report whose sha256 matches the cited digest, limited to `decline` and `defer` on their stated grounds
+  3. No check on the head is failing
+  4. The script posted the ruled findings to the task's follow-up issue before dismissing
+  5. The dismissal message carries the script's `JUDGE-RULED:` marker
 - A hand dismissal of a gating policy review is not sanctioned
 - A hand dismissal carrying the marker violates this carve-out
 - The release scripts trust the marker and never detect a hand-written one
