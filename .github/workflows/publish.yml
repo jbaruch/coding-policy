@@ -15,6 +15,7 @@ concurrency:
 
 jobs:
   publish:
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     outputs:
       source-commit: ${{ steps.publish_autobump.outputs.source-commit }}

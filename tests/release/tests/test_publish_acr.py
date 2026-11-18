@@ -64,6 +64,7 @@ class PublishAcrTest(unittest.TestCase):
         root = SOURCE.parents[2]
         workflow = (root / ".github/workflows/publish.yml").read_text()
         tessl_job, acr_job = workflow.split("  acr:\n", 1)
+        self.assertIn("  publish:\n    if: github.ref == 'refs/heads/main'\n", tessl_job)
         self.assertIn("source-commit: ${{ steps.publish_autobump.outputs.source-commit }}", tessl_job)
         self.assertIn("ssh-key: ${{ secrets.STAMP_DEPLOY_KEY }}", tessl_job)
         self.assertIn("mode: auto-bump\n          stamp-changelog: 'true'", tessl_job)

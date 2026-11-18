@@ -80,7 +80,7 @@ When you add, remove, or rename a rule or skill, update **all** of these:
 - The PR description carries motivation and detail, per `rules/context-writing-style.md`
 - No `Unreleased` section — the heading is forbidden
 - `tesslio/patch-version-publish` does NOT stamp `CHANGELOG.md` (it only bumps the manifest version and publishes)
-- Reusable stamp step: `.github/actions/stamp-changelog` (consumers set `stamp-changelog: true` on `publish-plugin.yml`, or `uses: jbaruch/coding-policy/.github/actions/stamp-changelog@<ref>` before the publish step)
+- This repository stamps through `.github/actions/smart-publish` with `mode: auto-bump` and `stamp-changelog: true`; consumers use reusable `.github/actions/stamp-changelog` (`stamp-changelog: true` on `publish-plugin.yml`, or `uses: jbaruch/coding-policy/.github/actions/stamp-changelog@<ref>` before publish)
 - The stamp step writes `## <version> — <date>` and one `- <PR title> (#N)` line per PR merged since the last publish
 - Un-headed `### ` blocks an older PR left at the top get the heading instead
 - Without a stamp step, the merged PR list is the changelog
