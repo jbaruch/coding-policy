@@ -1,3 +1,7 @@
+## 0.10.16 — 2026-11-18
+
+- feat(release): Let a judge ruling authorize decline and defer (#852)
+
 ## 0.10.15 — 2026-11-18
 
 - feat(policy-review): Bound re-review to what changed since the last verdict (#849)
