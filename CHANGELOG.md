@@ -1,3 +1,7 @@
+## 0.10.19 — 2026-11-18
+
+- fix(release): Refuse a logged-out 404 as an unpublished baseline (#860)
+
 ## 0.10.18 — 2026-11-18
 
 - fix(policy-review): Keep the self-review working on older PR branches (#858)
