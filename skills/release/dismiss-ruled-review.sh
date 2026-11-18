@@ -4,38 +4,59 @@
 # `decline` (rules/review-severity.md Judge-Weighed Finding Carve-Out;
 # rules/ci-safety.md Judge-Ruled-Review Dismissal Carve-Out). This script is the
 # only sanctioned path for that dismissal; a hand dismissal is not.
-# The operator rules: the ruling's AUTHORITY line must be `operator`, with the
-# operator's answer quoted verbatim.
+# The ruling's AUTHORITY line is `operator`, with the operator's answer quoted
+# verbatim, or `judge`: the ruling file is then a software-factory judge's
+# collected report, cited by its path and full sha256 digest. A judge ruling
+# carries only decline and defer verdicts, each stating its ground. Every other
+# defer or decline needs `operator`.
 #
-# Usage: dismiss-ruled-review.sh <owner> <repo> <pr-number> [--ruling <file> --followup-issue <number>]
+# Usage: dismiss-ruled-review.sh <owner> <repo> <pr-number> [--ruling <file> [--ruling-sha256 <64-hex>] --followup-issue <number>]
 #   Without --ruling: list mode. Emits the blocking findings of the latest
 #   policy review on the head, for composing the weighing question. Dismisses
 #   nothing.
 #   With --ruling: dismissal mode, under the predicate below. --followup-issue
 #   is required with it: the task's follow-up issue in <owner>/<repo>.
+#   --ruling-sha256 is the ruling file's full sha256 digest: required under
+#   `AUTHORITY: judge`, checked whenever given.
 #
 # Ruling file — a state artifact reused across pushes of one PR.
 #   Owner: the release skill (skills/release/SKILL.md Step 6), which alone
 #     changes its shape.
-#   Writer: the release skill's agent, from the operator's answer. One file
-#     per gate.
+#   Writer: under `operator`, the release skill's agent, from the operator's
+#     answer. Under `judge`, the software-factory judge, which emits each line
+#     below as one report artifact, in order; native factory collection writes
+#     them verbatim, joined by \n, to <task>.<id>.<harness>.report.txt beside
+#     the judge's receipt. That collected report is the ruling file: pass its
+#     absolute path and the digest observed after collection. Nothing rewrites
+#     it. One file per gate.
 #   Reader: this script reads every line and never modifies the file. It
 #     accepts only RULING_SCHEMA; a missing schema_version line or any other
-#     version is refused (exit 1). An older file is rewritten in the current
-#     format by its writer. A newer one means this reader lags: update the
-#     plugin, then rerun. It promises nothing is posted or dismissed unless
-#     the whole predicate holds.
-#   Format, schema_version 2 (lines in any order after the first; unknown lines ignored):
+#     version is refused (exit 1). An older operator ruling is rewritten in the
+#     current format by its writer; an older judge report is replaced by a new
+#     judge report in the current format, never rewritten. A newer one means
+#     this reader lags: update the plugin, then rerun. It promises nothing is
+#     posted or dismissed unless the whole predicate holds.
+#   Format, schema_version 4 (lines in any order after the first; unknown lines ignored):
 #     RULING: weighed                       (first line, required)
-#     schema_version: 2                     (required)
-#     AUTHORITY: operator                   (required, exactly one)
+#     schema_version: 4                     (required)
+#     AUTHORITY: operator | judge           (required, exactly one)
 #     HEAD: <40-hex sha>                    (required, exactly one, full sha)
-#     ANSWER: <operator's answer, verbatim> (required, non-empty; continuation
-#                                            lines indented two spaces)
+#     ANSWER: <operator's answer, verbatim> (operator: required, non-empty;
+#                                            continuation lines indented two
+#                                            spaces. judge: not read)
 #     FINDING: <source> <path>:<line> <rule|-> — fix | defer — <follow-up entry> | decline — <reason>
 #                                           (one per nominated finding)
 #     ACTION: <fix list or "none">          (optional)
 #     UNVERIFIED: <… or "none">             (optional)
+#   Under `AUTHORITY: judge` the verdict text opens with its ground:
+#     decline — wrong: <evidence>           (the finding misreads the code or
+#                                            the governing policy)
+#     defer — out-of-scope #<issue>: <scope evidence>; cost: <comparison>
+#                                           (pre-existing or outside the PR's
+#                                            goal; <issue> is --followup-issue;
+#                                            <comparison> shows fixing now costs
+#                                            more than the failure it prevents)
+#   Schema 4 adds `AUTHORITY: judge` and the judge grounds to schema 2.
 #
 # Predicate (dismissal mode) — every condition must hold, else nothing is
 # posted or dismissed and the script exits 1:
@@ -43,8 +64,13 @@
 #      `schema_version: <RULING_SCHEMA>`, exactly one `HEAD:` line and at least
 #      one FINDING line; every FINDING line parses; every defer/decline line
 #      carries its text.
-#   1a. It carries exactly one AUTHORITY line, `operator`, and one non-empty
-#      `ANSWER:` line.
+#   1a. It carries exactly one AUTHORITY line. `operator` needs one non-empty
+#      `ANSWER:` line. `judge` needs --ruling-sha256. A given --ruling-sha256
+#      equals the sha256 of the ruling bytes this script parses.
+#   1b. Under `judge`, every defer and decline FINDING line opens with its
+#      ground as the format names; a defer names --followup-issue. A line with
+#      any other text is a verdict only `operator` gives: deferring a defect the
+#      change introduced, or waiving a binding rule.
 #   2. The latest policy review (POLICY_REVIEW_LOGINS; per-login latest by
 #      submitted_at, CHANGES_REQUESTED wins across logins — the same resolution
 #      as poll-pr-reviews.sh) is CHANGES_REQUESTED and bound to the live head.
@@ -65,11 +91,11 @@
 #
 # Once the predicate holds, the script posts one comment on the follow-up issue
 # listing every ruled finding (defer, or decline labelled won't-fix) and citing
-# `judge ruling <digest>`, where <digest> is sha256(ruling file)[:16]. A comment
-# whose body equals that generated entry (whitespace-trimmed) is reused; any
-# other comment, even one citing the digest, is not, and the entry is posted.
-# Only after
-# that comment exists is the review dismissed, with the message
+# `judge ruling <digest>`, where <digest> is sha256(ruling file)[:16]. Under
+# `judge` it also names the ruling file's absolute path and full sha256. A
+# comment whose body equals that generated entry (whitespace-trimmed) is reused;
+# any other comment, even one citing the digest, is not, and the entry is
+# posted. Only after that comment exists is the review dismissed, with the message
 #   <RULED_MARKER> <digest> covers <n> blocking findings at <head>; tracked in #<issue>
 # poll-pr-reviews.sh reads a dismissal carrying RULED_MARKER as state RULED, and
 # dismiss-stale-reviews.sh counts it as an all-clear.
@@ -101,7 +127,7 @@ fi
 
 
 RULED_MARKER="JUDGE-RULED:"
-RULING_SCHEMA="2"
+RULING_SCHEMA="4"
 FLOOR_RULES=(no-secrets ci-safety)
 POLICY_REVIEW_LOGINS=("github-actions[bot]" "coding-policy-fleet-reviewer[bot]")
 
@@ -115,7 +141,7 @@ cleanup() {
 }
 
 usage() {
-  echo "usage: $0 <owner> <repo> <pr-number> [--ruling <file> --followup-issue <number>]" >&2
+  echo "usage: $0 <owner> <repo> <pr-number> [--ruling <file> [--ruling-sha256 <64-hex>] --followup-issue <number>]" >&2
   exit 2
 }
 
@@ -124,8 +150,8 @@ usage() {
 # SHA on stdout), 4 act (decision JSON on stdout; review id, message, digest
 # and follow-up comment body written under <tmp>).
 decide() {
-  local tmp="$1" pr="$2" head="$3" ruling="$4" issue="$5" repo_slug="$6"
-  python3 - "$tmp" "$pr" "$head" "$ruling" "$issue" "$repo_slug" "$RULED_MARKER" "$RULING_SCHEMA" \
+  local tmp="$1" pr="$2" head="$3" ruling="$4" ruling_sha256="$5" issue="$6" repo_slug="$7"
+  python3 - "$tmp" "$pr" "$head" "$ruling" "$ruling_sha256" "$issue" "$repo_slug" "$RULED_MARKER" "$RULING_SCHEMA" \
     "${#POLICY_REVIEW_LOGINS[@]}" "${POLICY_REVIEW_LOGINS[@]}" "${FLOOR_RULES[@]}" <<'PY'
 import hashlib
 import json
@@ -134,15 +160,17 @@ import re
 import sys
 from collections import Counter, defaultdict
 
-tmp, pr, head, ruling_path, issue, repo_slug, marker, schema, n_logins = sys.argv[1:10]
-logins = sys.argv[10:10 + int(n_logins)]
-floors = set(sys.argv[10 + int(n_logins):])
+tmp, pr, head, ruling_path, ruling_sha256, issue, repo_slug, marker, schema, n_logins = sys.argv[1:11]
+logins = sys.argv[11:11 + int(n_logins)]
+floors = set(sys.argv[11 + int(n_logins):])
 
 FINDING_RE = re.compile(r"^- `(?P<path>.+):(?P<line>\d+)` — \*\*(?P<rule>[^*]+)\*\* — (?P<message>.*)$")
 RULING_LINE_RE = re.compile(
     r"^FINDING: (?P<source>\S+) (?P<path>\S+):(?P<line>\d+) (?P<rule>\S+) — "
     r"(?P<verdict>fix|defer|decline)(?: — (?P<text>.+))?$")
 HEAD_RE = re.compile(r"^HEAD: (?P<sha>[0-9a-f]{40})$")
+JUDGE_GROUND_RE = {"decline": re.compile(r"^wrong: \S"),
+                   "defer": re.compile(r"^out-of-scope #(?P<issue>\d+): \S.*; cost: \S")}
 COMPARE_FILE_CAP = 300
 
 
@@ -240,7 +268,8 @@ heads = [m["sha"] for m in (HEAD_RE.match(ln.strip()) for ln in ruling_lines) if
 schemas = [ln[len("schema_version:"):].strip() for ln in ruling_lines if ln.startswith("schema_version:")]
 answers = [ln[len("ANSWER:"):].strip() for ln in ruling_lines if ln.startswith("ANSWER:")]
 authorities = [ln[len("AUTHORITY:"):].strip() for ln in ruling_lines if ln.startswith("AUTHORITY:")]
-entries, malformed = {}, []
+judge = authorities == ["judge"]
+entries, malformed, operator_only = {}, [], []
 for ln in ruling_lines:
     if not ln.startswith("FINDING:"):
         continue
@@ -248,6 +277,10 @@ for ln in ruling_lines:
     if m is None or (m["verdict"] != "fix" and not m["text"]):
         malformed.append(ln)
         continue
+    if judge and m["verdict"] != "fix":
+        g = JUDGE_GROUND_RE[m["verdict"]].match(m["text"])
+        if g is None or (m["verdict"] == "defer" and int(g["issue"]) != int(issue)):
+            operator_only.append(ln)
     key = (m["path"], int(m["line"]), m["rule"])
     entries.setdefault(key, []).append(m.groupdict())
 if not ruling_lines or ruling_lines[0].strip() != "RULING: weighed":
@@ -256,15 +289,23 @@ if len(schemas) == 1 and schemas[0].isdecimal() and int(schemas[0]) > int(schema
     # A lagging reader: never read as malformed, never migrated downward.
     out["unmet"].append(f"the ruling is schema {schemas[0]}, newer than this script accepts ({schema}) — update the coding-policy plugin (`tessl update`), then rerun")
 elif schemas != [schema]:
-    out["unmet"].append(f"the ruling carries no single 'schema_version: {schema}' line — rewrite it in the current format")
+    out["unmet"].append(f"the ruling carries no single 'schema_version: {schema}' line — rewrite an operator ruling in the current format; for a judge ruling, obtain a new judge report in it")
 if len(heads) != 1:
     out["unmet"].append("the ruling carries no single 'HEAD: <40-hex sha>' line — write the full commit sha the findings were raised on")
+full_digest = hashlib.sha256(ruling_bytes).hexdigest()
 if len(authorities) != 1:
-    out["unmet"].append("the ruling carries no single 'AUTHORITY: operator' line")
-elif authorities[0] != "operator":
-    out["unmet"].append(f"the operator rules, so the ruling's authority must be 'operator', not '{authorities[0]}' — record the operator's answer as an operator ruling")
-elif len(answers) != 1 or not answers[0]:
-    out["unmet"].append("the ruling carries no single non-empty 'ANSWER:' line quoting the operator verbatim")
+    out["unmet"].append("the ruling carries no single 'AUTHORITY: operator' or 'AUTHORITY: judge' line")
+elif authorities[0] == "operator":
+    if len(answers) != 1 or not answers[0]:
+        out["unmet"].append("the ruling carries no single non-empty 'ANSWER:' line quoting the operator verbatim")
+elif not judge:
+    out["unmet"].append(f"the ruling's authority must be 'operator' or 'judge', not '{authorities[0]}'")
+elif not ruling_sha256:
+    out["unmet"].append("a judge ruling needs --ruling-sha256 <64-hex> — pass the digest of the judge's collected report")
+if ruling_sha256 and ruling_sha256 != full_digest:
+    out["unmet"].append(f"the ruling file has sha256 {full_digest}, not the given {ruling_sha256} — pass the file and digest as collected; never edit a judge report")
+if operator_only:
+    out["unmet"].append(f"under judge authority a decline opens 'wrong: <evidence>' and a defer opens 'out-of-scope #{issue}: <scope evidence>; cost: <comparison>'; these FINDING line(s) need an operator ruling (risk acceptance or a rule waiver): {operator_only}")
 if malformed:
     out["unmet"].append(f"unparseable FINDING line(s): {malformed}")
 if not entries and not malformed:
@@ -337,8 +378,10 @@ if out["uncovered"]:
 if out["unmet"]:
     finish("unmet", "predicate unmet", 1)
 
-digest = hashlib.sha256(ruling_bytes).hexdigest()[:16]
+digest = full_digest[:16]
 body = [f"Follow-up entries for {repo_slug}#{pr} at {head}, judge ruling {digest}:", ""]
+if judge:
+    body += [f"Ruled by the judge's report {os.path.abspath(ruling_path)} (sha256 {full_digest}).", ""]
 for f, e in ruled:
     label = "deferred" if e["verdict"] == "defer" else "declined, won't-fix"
     body.append(f"- `{f['path']}:{f['line']}` **{f['rule']}** — {label}: {e['text']}")
@@ -407,11 +450,12 @@ PY
 
 main() {
   [[ $# -ge 3 ]] || usage
-  local owner="$1" repo="$2" pr="$3" ruling="" issue=""
+  local owner="$1" repo="$2" pr="$3" ruling="" ruling_sha256="" issue=""
   shift 3
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --ruling)         [[ $# -ge 2 ]] || usage; ruling="$2"; shift 2 ;;
+      --ruling-sha256)  [[ $# -ge 2 ]] || usage; ruling_sha256="$2"; shift 2 ;;
       --followup-issue) [[ $# -ge 2 ]] || usage; issue="$2"; shift 2 ;;
       *) usage ;;
     esac
@@ -424,12 +468,16 @@ main() {
     echo "error: --ruling needs --followup-issue <number> — the task's follow-up issue in ${owner}/${repo}, where the ruled findings are entered" >&2
     exit 2
   fi
-  if [[ -z "$ruling" && -n "$issue" ]]; then
-    echo "error: --followup-issue is only meaningful with --ruling" >&2
+  if [[ -z "$ruling" && ( -n "$issue" || -n "$ruling_sha256" ) ]]; then
+    echo "error: --followup-issue and --ruling-sha256 are only meaningful with --ruling" >&2
+    exit 2
+  fi
+  if [[ -n "$ruling_sha256" ]] && ! [[ "$ruling_sha256" =~ ^[0-9a-f]{64}$ ]]; then
+    echo "error: --ruling-sha256 must be the ruling file's full sha256, 64 lowercase hex digits — compute it with 'shasum -a 256 <file>'" >&2
     exit 2
   fi
   if [[ -n "$ruling" && ! ( -f "$ruling" && -r "$ruling" ) ]]; then
-    echo "error: ruling file not readable at '${ruling}' — pass the recorded operator ruling" >&2
+    echo "error: ruling file not readable at '${ruling}' — pass the recorded ruling file" >&2
     exit 2
   fi
   local tool
@@ -452,12 +500,12 @@ main() {
   fi
 
   local decision rc=0
-  decision=$(decide "$tmp" "$pr" "$head" "$ruling" "$issue" "${owner}/${repo}") || rc=$?
+  decision=$(decide "$tmp" "$pr" "$head" "$ruling" "$ruling_sha256" "$issue" "${owner}/${repo}") || rc=$?
   if (( rc == 3 )); then
     gh api "repos/${owner}/${repo}/compare/${decision}...${head}" > "${tmp}/compare.json" \
       || { echo "error: failed to compare ${decision}...${head} on ${owner}/${repo} — verify the ruling's HEAD exists in the repo, then retry" >&2; exit 2; }
     rc=0
-    decision=$(decide "$tmp" "$pr" "$head" "$ruling" "$issue" "${owner}/${repo}") || rc=$?
+    decision=$(decide "$tmp" "$pr" "$head" "$ruling" "$ruling_sha256" "$issue" "${owner}/${repo}") || rc=$?
   fi
   case "$rc" in
     0) printf '%s\n' "$decision"; exit 0 ;;

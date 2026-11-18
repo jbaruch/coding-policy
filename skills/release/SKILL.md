@@ -8,7 +8,7 @@ description: >
   reasoning, review polling, feedback handling, and post-merge verification.
   It merges without asking once the required checks and both reviews are green,
   clears a gating bot's superseded change request with `dismiss-stale-reviews.sh`,
-  and dismisses a policy review only under an operator ruling, through
+  and dismisses a policy review only under an operator or judge ruling, through
   `dismiss-ruled-review.sh`.
   Use when the user wants to open a pull request, resume an existing PR,
   ship code, merge a branch, or handle post-merge cleanup on GitHub.
