@@ -29,7 +29,7 @@
 ## Append-Only Runtime Telemetry
 
 - Narrow exception for an existing append-only runtime telemetry log.
-- Applies to historical observations that never gate authorization, payment, or an irreversible or consequential external action. The log may decide only whether to send or repeat an informational notification whose repetition or omission has no other effect.
+- Applies to historical observations only.
 - Preconditions (all required):
   1. An installed reader contract names the finite artifact inventory, real runtime owner, owner's schema-of-record source, record kinds, schemas, writers and readers. Cite the actual owner source; invent no provider, schema or version guarantee.
   2. Every new record carries `schema_version`. The owner declares existing unversioned records as legacy version 0 and documents accepted versions, required fields and defaults.
