@@ -1,3 +1,7 @@
+## 0.10.23 — 2026-11-18
+
+- refactor(context-artifacts): Let a skill-only router rule go (#863)
+
 ## 0.10.22 — 2026-11-18
 
 - fix(ci-safety): Reword the central bookkeeping carve-out (#865)
