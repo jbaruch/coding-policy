@@ -1,3 +1,7 @@
+## 0.10.25 — 2026-11-19
+
+- refactor(stateful-artifacts): State the telemetry limit once (#869)
+
 ## 0.10.24 — 2026-11-18
 
 - refactor(stateful-artifacts): Gate telemetry only on consequential actions (#855)
