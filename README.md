@@ -67,7 +67,7 @@ Tessl imports. Combined native-session acceptance lives in
 | Discipline | [boy-scout](rules/boy-scout.md) | Fix coherent in-scope defects; record unrelated blocking risks once; advisories and maintenance create no delivery obligation |
 | Scope | [external-repo-contributions](rules/external-repo-contributions.md) | Default deny on issues, PRs, comments, reactions, and discussions in repos the operator does not own; explicit permission required per repo and action type |
 | Communication | [response-clarity](rules/response-clarity.md) | Shape responses action-first: lead with the command, number steps, show progress, plain errors, one concrete next step, no preamble or closers (exceptions for explanations, destructive actions, debug, ambiguity) |
-| Discipline | [ship-on-green](rules/ship-on-green.md) | Green gate is the approval — merge, never ask; asking in a costume (flag/confirm/"say go") is deciding not to ship; stakes raise care not permission; three objective exits only — Red / No undo / Murky |
+| Discipline | [ship-on-green](rules/ship-on-green.md) | Green gate is the approval — merge, never ask; flag/confirm/"say go" count as asking; stakes raise care not permission; three objective exits only — Red / No undo / Murky |
 | Automation | [hook-action-reporting](rules/hook-action-reporting.md) | Relay any `Session-start status —` hook payloads to the user once at session start, then act on any action they name (a SessionStart hook's output reaches the model, not the transcript) |
 
 ## Skills
