@@ -33,13 +33,6 @@
 - Preconditions are binding: read `skills/release/references/ci-safety-carve-outs.md` Publish-Pipeline Loop-Prevention Carve-Out before relying on it
 - Every other commit omits `[skip ci]`, and `[skip ci]` never skips failing tests or unblocks a merge
 
-## Bootstrap-Red Carve-Out
-
-- Narrow exception for a required check failing on an explicit cache-binding or bootstrap guard, not a test assertion
-- Applies when the PR changes a key the CI cache is bound to AND the rebuilt cache can only be seeded from the default branch after merge
-- Preconditions are binding: read `skills/release/references/ci-safety-carve-outs.md` Bootstrap-Red Carve-Out before relying on it
-- Every other failing check blocks the merge: fix the tests or fix the code
-
 ## Install, Don't Skip
 
 - If a test needs an external tool or dependency, install it in CI

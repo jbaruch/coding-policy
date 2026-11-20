@@ -7,12 +7,10 @@ alwaysApply: true
 ## Surface the Status
 
 - A SessionStart hook emits an `additionalContext` payload beginning with `Session-start status — ` only when it has a status to report
-- Many outcomes emit nothing (non-repo, no matching dependency)
-- At session start, collect every such payload the context carries (there may be none) and relay each in full as one block, before the first substantive action
+- At session start, collect every such payload the context carries (there may be none) and relay them as one block, before the first substantive action
 - A payload may span several lines, a marker line plus continuation lines such as an update list or a `NOTE:`
-- Relay the whole payload, never only its marker line
-- Report the block once per session, at the start, never repeating it every turn
-- Relay the payloads verbatim, without padding or restating them as your own analysis
+- Relay each payload whole and verbatim, never only its marker line
+- Never pad a payload or restate it as your own analysis
 
 ## Act on What It Names
 
