@@ -9,8 +9,8 @@ description: >
   Also use for an authorized request to fix already-published or deployed
   behavior in an operator-owned repository with an established release path,
   even without an explicit request to ship.
-  Do not use this skill when the user explicitly requests a local patch,
-  draft, prototype or review; retain repository authority and existing gates.
+  Do not use this skill when the user explicitly limits the task to a local
+  patch, draft, prototype or review; retain repository authority and existing gates.
   Follow the existing completion and readback steps: report the fix complete
   only after verifying the published artifact or production deployment.
   If shipping is blocked, report the exact stage and blocker.
