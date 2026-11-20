@@ -1,17 +1,19 @@
 ---
 name: release
 description: >
-  Structured workflow for shipping code via GitHub pull requests: PR creation,
-  dual-lens automated review (the Codex code-review app for `rules/*.md`
-  compliance + Claude for correctness and risk), merge, and branch cleanup. Covers
-  readiness checks, version
-  reasoning, review polling, feedback handling, and post-merge verification.
-  It merges without asking once the required checks and both reviews are green,
-  clears a gating bot's superseded change request with `dismiss-stale-reviews.sh`,
-  and dismisses a policy review only under an operator or judge ruling, through
-  `dismiss-ruled-review.sh`.
+  Structured workflow for shipping code via GitHub pull requests: readiness,
+  versioning, PR selection, Codex policy and Claude quality reviews, feedback,
+  merge, publication/deployment verification, and cleanup.
   Use when the user wants to open a pull request, resume an existing PR,
   ship code, merge a branch, or handle post-merge cleanup on GitHub.
+  Also use for an authorized request to fix already-published or deployed
+  behavior in an operator-owned repository with an established release path,
+  even without an explicit request to ship.
+  Honor explicit local patch, draft, prototype or review scope and factory
+  coordination; retain repository authority and existing gates.
+  Follow the existing completion and readback steps: report the fix complete
+  only after verifying the published artifact or production deployment.
+  If shipping is blocked, report the exact stage and blocker.
 argument-hint: "[existing-pr <GitHub PR URL>]"
 ---
 
