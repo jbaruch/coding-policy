@@ -67,6 +67,9 @@ The agent nominates. The judge is the operator or a software-factory judge.
 - A correctly applied binding rule the judge considers defective goes to the operator. The judge cannot waive it.
 - A real defect the change introduced stays the operator's risk acceptance, even when described as outside scope.
 - Floors are `fix` whichever authority rules.
+- Apply time-scoped obligations only within their window; an expired exception restores its ordinary rule.
+- An unmet precondition is a floor only when its protected harm is reachable; cite the harm, triggering conditions and source evidence.
+- Changes affecting the finding or its governing contract require checking the ruling's continued applicability. Obtain a current-head ruling when that contract or the finding's path changed; an unrelated edit does not invalidate the judgment.
 
 ### The question
 
@@ -108,7 +111,7 @@ The ruling file's format, `schema_version`, owner and writer/reader contract are
 
 ### Order of work
 
-1. Run `dismiss-ruled-review.sh` with `--ruling` and `--followup-issue`, plus `--ruling-sha256` for a judge's report (Step 6 command block). It posts the ruled findings to the follow-up issue — `defer`, or `decline` labelled won't-fix — then dismisses the review. Exit 1 names each unmet condition in `.unmet`; fix those findings instead.
+1. Run `dismiss-ruled-review.sh` with `--ruling`, plus `--ruling-sha256` for a judge's report (Step 6 command block). It records the dispositions and ruling in the PR conversation before dismissing. Use the existing `--followup-issue` argument to record them in an authorized task issue instead. A judge's `defer` still names a follow-up issue in its ground; when the argument is supplied, it must match. Exit 1 names each unmet condition in `.unmet`; fix those findings or obtain a current-head ruling that covers them.
 2. Reply citing the ruling, with `<digest>` the 16-hex digest from the script's `.message`. Policy findings appear in the review body; reply in a PR comment citing the review and finding:
    - Declined: `Declining — judge ruling <digest>: <reason from the ruling>`
    - Deferred: `Acknowledged — deferred to #<follow-up issue> (judge ruling <digest>)`

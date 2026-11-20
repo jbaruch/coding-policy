@@ -34,18 +34,18 @@
   ```
 
 - **Ruled policy review:** list or dismiss with the script below
-  - The follow-up issue is in the PR's own repository; the script takes an issue number on that repository
+  - Record in the PR conversation by default; `--followup-issue` selects an authorized task issue in the PR's repository
   - Run the invocation below
   - In a repository the operator does not own, ask first per `rules/external-repo-contributions.md`
   - Without `--ruling` it lists the blocking findings to name in the question
   - Pass `--ruling-sha256` with a judge's report
-  - With `--ruling` it posts the ruled findings to the follow-up issue, then dismisses the review, only when its predicate holds
+  - With `--ruling` it records the dispositions and ruling before dismissing, only when its predicate holds
   - Exit 0 dismissed, noop or listed; 1 predicate unmet, `.unmet` naming each failed condition; 2 usage or API error
   - The predicate is the script's — see `skills/release/dismiss-ruled-review.sh` header, not restated here (`rules/script-as-black-box.md`)
 
   ```bash
   KS=.tessl/plugins/jbaruch/coding-policy/skills/release/; [ -d "$KS" ] || KS="$HOME/$KS"; [ -d "$KS" ] || case "$(git config --get remote.origin.url)" in git@github.com:jbaruch/coding-policy|git@github.com:jbaruch/coding-policy.git|https://github.com/jbaruch/coding-policy|https://github.com/jbaruch/coding-policy.git|ssh://git@github.com/jbaruch/coding-policy|ssh://git@github.com/jbaruch/coding-policy.git) KS=skills/release/ ;; *) echo "coding-policy skill not found: run tessl install jbaruch/coding-policy" >&2; exit 1 ;; esac
-  bash "$KS/dismiss-ruled-review.sh" <owner> <repo> <pr-number> --ruling <ruling-file> [--ruling-sha256 <sha256>] --followup-issue <issue-number>
+  bash "$KS/dismiss-ruled-review.sh" <owner> <repo> <pr-number> --ruling <ruling-file> [--ruling-sha256 <sha256>] [--followup-issue <issue-number>]
   ```
 
 - Push fixes to the same branch

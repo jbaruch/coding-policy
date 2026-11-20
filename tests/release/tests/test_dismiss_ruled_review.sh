@@ -69,6 +69,9 @@ run() {
   MOCK_COMPARE='{"status":"ahead","files":[]}'
   MOCK_ISSUE_COMMENTS='[]'
   MOCK_COMMENT_RC=0
+  MOCK_COMMENTS_RC=0
+  MOCK_DISMISS_RC=0
+  RECORD_NUMBER="$ISSUE"
   if "$@"; then
     PASS_COUNT=$((PASS_COUNT + 1)); echo "  pass: $name" >&2
   else
@@ -103,9 +106,6 @@ BODY_TWO=$(golden_body '{"summary":"Policy loaded: 26 rule files. Two violations
   {"path":"skills/x/run.sh","line":3,"rule":"error-handling","severity":"blocking","message":"missing set -euo pipefail; add it"},
   {"path":"rules/b.md","line":7,"rule":"context-writing-style","severity":"blocking","message":"colon attaches a rationale"},
   {"path":"rules/c.md","line":2,"rule":"context-writing-style","severity":"advisory","message":"prefer a synonym"}]}') \
-  || exit 2
-BODY_FLOOR=$(golden_body '{"summary":"Policy loaded: 26 rule files. Secret.","findings":[
-  {"path":"a.sh","line":1,"rule":"no-secrets","severity":"blocking","message":"hardcoded token"}]}') \
   || exit 2
 BODY_DUPLICATE=$(golden_body '{"summary":"Policy loaded: 26 rule files. Same anchor.","findings":[
   {"path":"rules/b.md","line":7,"rule":"context-writing-style","severity":"blocking","message":"colon attaches a rationale"},
@@ -157,15 +157,17 @@ gh() {
         esac
       done
       if [[ "$method" == "PUT" && "$path" == */reviews/8/dismissals ]]; then
+        [[ "$MOCK_DISMISS_RC" -eq 0 ]] || { echo "mock gh: dismissal PUT failed" >&2; return "$MOCK_DISMISS_RC"; }
         printf 'dismiss %s\n' "$message" >> "$EVENTS"; echo '{}'; return 0
       fi
-      if [[ "$method" == "POST" && "$path" == "repos/owner/repo/issues/${ISSUE}/comments" ]]; then
+      if [[ "$method" == "POST" && "$path" == "repos/owner/repo/issues/${RECORD_NUMBER}/comments" ]]; then
         [[ "$MOCK_COMMENT_RC" -eq 0 ]] || { echo "mock gh: comment POST failed" >&2; return "$MOCK_COMMENT_RC"; }
         cp "$body_file" "$COMMENT_BODY"; echo "comment" >> "$EVENTS"; echo '{}'; return 0
       fi
       case "$path" in
         */compare/*) echo "$path" >> "$COMPARE_LOG"; echo "$MOCK_COMPARE" ;;
-        */issues/"${ISSUE}"/comments*)
+        */issues/"${RECORD_NUMBER}"/comments*)
+          [[ "$MOCK_COMMENTS_RC" -eq 0 ]] || { echo "mock gh: comments GET failed" >&2; return "$MOCK_COMMENTS_RC"; }
           [[ $saw_paginate -eq 1 ]] || { echo "mock gh api: comments fetch missing --paginate" >&2; return 99; }
           echo "$MOCK_ISSUE_COMMENTS" ;;
         *reviews*)
@@ -229,7 +231,7 @@ t_all_covered_posts_followup_then_dismisses() {
   assert_eq "result" "dismissed" "$(jq -r .result <<<"$OUT")" || return 1
   local digest; digest=$(digest_of_ruling)
   assert_eq "comment then dismissal" \
-    "comment|dismiss JUDGE-RULED: ${digest} covers 2 blocking findings at ${HEAD_SHA}; tracked in #${ISSUE}" \
+    "comment|dismiss JUDGE-RULED: ${digest} covers 2 blocking findings at ${HEAD_SHA}; recorded in #${ISSUE}" \
     "$(paste -sd'|' "$EVENTS")" || return 1
   grep -qF "judge ruling ${digest}" "$COMMENT_BODY" || { echo "    FAIL: comment cites the digest" >&2; return 1; }
   grep -qF "skills/x/run.sh:3\` **error-handling** — declined, won't-fix: rule text misread" "$COMMENT_BODY" \
@@ -270,6 +272,54 @@ t_failed_followup_post_dismisses_nothing() {
   assert_eq "exit" "2" "$RC" || return 1
   assert_eq "stdout empty" "" "$OUT" || return 1
   assert_eq "no dismissal" "0" "$(dismissals)"
+}
+
+t_operator_records_in_pr_without_issue() {
+  RECORD_NUMBER=5
+  set_review CHANGES_REQUESTED "$HEAD_SHA" "$BODY_TWO"
+  write_ruling "$HEAD_SHA" "$DECLINE_ONE" "$DEFER_TWO"
+  invoke --ruling "$RULING"
+  assert_eq "exit" "0" "$RC" || return 1
+  assert_eq "no follow-up issue" "null" "$(jq -r .followup_issue <<<"$OUT")" || return 1
+  assert_eq "comment then dismissal" "comment|dismiss" "$(cut -d' ' -f1 "$EVENTS" | paste -sd'|' -)" || return 1
+  assert_eq "PR cited" "recorded in #5" "$(jq -r '.message | split("; ")[1]' <<<"$OUT")" || return 1
+  grep -qF 'deferred: reword the bullet' "$COMMENT_BODY" || return 1
+  grep -qF "declined, won't-fix: rule text misread" "$COMMENT_BODY"
+}
+
+t_pr_record_errors_dismiss_nothing() {
+  RECORD_NUMBER=5
+  set_review CHANGES_REQUESTED "$HEAD_SHA" "$BODY_TWO"
+  write_ruling "$HEAD_SHA" "$DECLINE_ONE" "$DECLINE_TWO"
+  MOCK_COMMENTS_RC=1
+  invoke --ruling "$RULING"
+  assert_eq "read error exit" "2" "$RC" || return 1
+  assert_eq "read error stdout" "" "$OUT" || return 1
+  assert_eq "read error: nothing posted" "0" "$(wc -l < "$EVENTS" | tr -d ' ')" || return 1
+  MOCK_COMMENTS_RC=0
+  MOCK_COMMENT_RC=1
+  invoke --ruling "$RULING"
+  assert_eq "post error exit" "2" "$RC" || return 1
+  assert_eq "post error stdout" "" "$OUT" || return 1
+  assert_eq "post error: nothing posted" "0" "$(wc -l < "$EVENTS" | tr -d ' ')"
+}
+
+t_pr_record_reused_after_dismissal_error() {
+  RECORD_NUMBER=5
+  set_review CHANGES_REQUESTED "$HEAD_SHA" "$BODY_TWO"
+  write_ruling "$HEAD_SHA" "$DECLINE_ONE" "$DECLINE_TWO"
+  MOCK_DISMISS_RC=1
+  invoke --ruling "$RULING"
+  assert_eq "dismissal error exit" "2" "$RC" || return 1
+  assert_eq "dismissal error stdout" "" "$OUT" || return 1
+  assert_eq "record posted" "1" "$(comments)" || return 1
+  MOCK_ISSUE_COMMENTS=$(jq -cn --rawfile b "$COMMENT_BODY" '[{"id":1,"body":$b}]')
+  MOCK_DISMISS_RC=0
+  : > "$EVENTS"
+  invoke --ruling "$RULING"
+  assert_eq "retry exit" "0" "$RC" || return 1
+  assert_eq "no duplicate record" "0" "$(comments)" || return 1
+  assert_eq "one dismissal" "1" "$(dismissals)"
 }
 
 t_one_uncovered_refuses() {
@@ -358,13 +408,16 @@ t_duplicate_review_findings_with_mixed_verdicts_refuse() {
   assert_eq "no dismissal" "0" "$(dismissals)"
 }
 
-t_floor_rule_refuses() {
-  set_review CHANGES_REQUESTED "$HEAD_SHA" "$BODY_FLOOR"
-  write_ruling "$HEAD_SHA" "FINDING: policy a.sh:1 no-secrets — decline — test token"
-  invoke_ruled
-  assert_eq "exit" "1" "$RC" || return 1
-  assert_unmet "floor rule" "the floor" || return 1
-  assert_eq "nothing posted" "0" "$(wc -l < "$EVENTS" | tr -d ' ')"
+t_rule_names_do_not_refuse_operator() {
+  local rule body
+  for rule in no-secrets ci-safety; do
+    body=$(golden_body "{\"summary\":\"Harmless finding\",\"findings\":[{\"path\":\"a.sh\",\"line\":1,\"rule\":\"$rule\",\"severity\":\"blocking\",\"message\":\"incorrectly applied rule\"}]}") || return 1
+    set_review CHANGES_REQUESTED "$HEAD_SHA" "$body"
+    write_ruling "$HEAD_SHA" "FINDING: policy a.sh:1 $rule — decline — incorrectly applied rule"
+    invoke_ruled
+    assert_eq "$rule exit" "0" "$RC" || return 1
+    assert_eq "$rule result" "dismissed" "$(jq -r .result <<<"$OUT")" || return 1
+  done
 }
 
 t_failing_check_refuses() {
@@ -441,7 +494,13 @@ t_carry_over_changed_path_refuses() {
   invoke_ruled
   assert_eq "exit" "1" "$RC" || return 1
   assert_eq "uncovered" "rules/b.md" "$(jq -r '.uncovered[].path' <<<"$OUT")" || return 1
-  assert_eq "no dismissal" "0" "$(dismissals)"
+  assert_eq "no dismissal" "0" "$(dismissals)" || return 1
+  # A new current-head ruling attests applicability after an unrelated edit
+  # in the finding's file; the script never classifies semantic applicability.
+  write_ruling "$HEAD_SHA" "$DECLINE_ONE" "$DECLINE_TWO"
+  invoke_ruled
+  assert_eq "current-head ruling exit" "0" "$RC" || return 1
+  assert_eq "current-head ruling dismisses" "1" "$(dismissals)"
 }
 
 t_carry_over_diverged_refuses() {
@@ -558,8 +617,10 @@ t_usage_errors_exit_2() {
   RC=0; ( main owner repo ) >/dev/null 2>&1 || RC=$?
   assert_eq "missing pr" "2" "$RC" || return 1
   write_ruling "$HEAD_SHA" "$DECLINE_ONE" "$DECLINE_TWO"
-  invoke --ruling "$RULING"
-  assert_eq "ruling without --followup-issue" "2" "$RC" || return 1
+  invoke --ruling "$RULING" --followup-issue invalid
+  assert_eq "invalid --followup-issue" "2" "$RC" || return 1
+  invoke --ruling "$RULING" --followup-issue 0
+  assert_eq "zero --followup-issue" "2" "$RC" || return 1
   invoke --ruling "${TMPDIR_TEST}/does-not-exist" --followup-issue "$ISSUE"
   assert_eq "unreadable ruling" "2" "$RC" || return 1
   invoke --ruling "$RULING" --ruling-sha256 "${JUDGE_REPORT_SHA256:0:16}" --followup-issue "$ISSUE"
@@ -575,6 +636,41 @@ JUDGE_DEFER_TWO="FINDING: policy rules/b.md:7 context-writing-style — defer �
 JUDGE_FIX_TWO="FINDING: policy rules/b.md:7 context-writing-style — fix"
 
 invoke_report() { invoke --ruling "$REPORT" --ruling-sha256 "$REPORT_SHA256" --followup-issue "$ISSUE"; }
+
+t_judge_records_in_pr_without_issue_argument() {
+  RECORD_NUMBER=5
+  set_review CHANGES_REQUESTED "$HEAD_SHA" "$BODY_TWO"
+  write_judge_report "$HEAD_SHA" "$JUDGE_DECLINE_ONE" "$JUDGE_DECLINE_TWO"
+  invoke --ruling "$REPORT" --ruling-sha256 "$REPORT_SHA256"
+  assert_eq "decline exit" "0" "$RC" || return 1
+  assert_eq "no issue required for decline" "null" "$(jq -r .followup_issue <<<"$OUT")" || return 1
+  grep -qF "sha256 ${REPORT_SHA256}" "$COMMENT_BODY" || return 1
+  : > "$EVENTS"
+  write_judge_report "$HEAD_SHA" "$JUDGE_DECLINE_ONE" "$JUDGE_DEFER_TWO"
+  invoke --ruling "$REPORT" --ruling-sha256 "$REPORT_SHA256"
+  assert_eq "defer exit" "0" "$RC" || return 1
+  grep -qF "deferred: out-of-scope #${ISSUE}:" "$COMMENT_BODY" || return 1
+  assert_eq "comment then dismissal" "comment|dismiss" "$(cut -d' ' -f1 "$EVENTS" | paste -sd'|' -)"
+}
+
+t_judge_nonpositive_issue_refuses() {
+  local issue_number
+  set_review CHANGES_REQUESTED "$HEAD_SHA" "$BODY_TWO"
+  for issue_number in 0 00 -1 -0; do
+    write_judge_report "$HEAD_SHA" "$JUDGE_DECLINE_ONE" \
+      "FINDING: policy rules/b.md:7 context-writing-style — defer — out-of-scope #${issue_number}: pre-existing on main; cost: a reword touches every rule file"
+    for RECORD_NUMBER in 5 "$ISSUE"; do
+      if [[ "$RECORD_NUMBER" == 5 ]]; then
+        invoke --ruling "$REPORT" --ruling-sha256 "$REPORT_SHA256"
+      else
+        invoke_report
+      fi
+      assert_eq "#${issue_number}, recording in #${RECORD_NUMBER}: exit" "1" "$RC" || return 1
+      assert_unmet "out-of-scope #${issue_number}:" "the invalid issue number" || return 1
+      assert_eq "#${issue_number}, recording in #${RECORD_NUMBER}: zero writes" "0" "$(wc -l < "$EVENTS" | tr -d ' ')" || return 1
+    done
+  done
+}
 
 # Args: <label> <unmet substring>. Runs the REPORT ruling and expects refusal
 # with nothing posted or dismissed.
@@ -592,7 +688,7 @@ t_judge_report_dismisses() {
   assert_eq "result" "dismissed" "$(jq -r .result <<<"$OUT")" || return 1
   assert_eq "report bytes as collected, unchanged" "$JUDGE_REPORT_SHA256" "$(sha256_of "$JUDGE_REPORT")" || return 1
   assert_eq "comment then dismissal" \
-    "comment|dismiss JUDGE-RULED: ${JUDGE_REPORT_SHA256:0:16} covers 2 blocking findings at ${HEAD_SHA}; tracked in #${ISSUE}" \
+    "comment|dismiss JUDGE-RULED: ${JUDGE_REPORT_SHA256:0:16} covers 2 blocking findings at ${HEAD_SHA}; recorded in #${ISSUE}" \
     "$(paste -sd'|' "$EVENTS")" || return 1
   grep -qxF "Ruled by the judge's report ${JUDGE_REPORT} (sha256 ${JUDGE_REPORT_SHA256})." "$COMMENT_BODY" \
     || { echo "    FAIL: comment cites the report's absolute path and full sha256" >&2; return 1; }
@@ -721,10 +817,16 @@ t_judge_operator_only_grounds_refuse() {
   refuses_report "groundless decline" "presentation only"
 }
 
-t_judge_floor_refuses() {
-  set_review CHANGES_REQUESTED "$HEAD_SHA" "$BODY_FLOOR"
-  write_judge_report "$HEAD_SHA" "FINDING: policy a.sh:1 no-secrets — decline — wrong: a test fixture"
-  refuses_report "floor" "floor rule"
+t_rule_names_do_not_refuse_judge() {
+  local rule body
+  for rule in no-secrets ci-safety; do
+    body=$(golden_body "{\"summary\":\"Harmless finding\",\"findings\":[{\"path\":\"a.sh\",\"line\":1,\"rule\":\"$rule\",\"severity\":\"blocking\",\"message\":\"incorrectly applied rule\"}]}") || return 1
+    set_review CHANGES_REQUESTED "$HEAD_SHA" "$body"
+    write_judge_report "$HEAD_SHA" "FINDING: policy a.sh:1 $rule — decline — wrong: the cited clause does not apply"
+    invoke_report
+    assert_eq "$rule exit" "0" "$RC" || return 1
+    assert_eq "$rule result" "dismissed" "$(jq -r .result <<<"$OUT")" || return 1
+  done
 }
 
 t_judge_failing_check_refuses() {
@@ -860,6 +962,11 @@ run_suite() {
   run "an existing follow-up comment is reused"       t_existing_followup_comment_is_reused
   run "a partial comment citing the digest is not reused" t_partial_comment_citing_digest_is_not_reused
   run "a failed follow-up post dismisses nothing"     t_failed_followup_post_dismisses_nothing
+  run "operator records in PR without issue"          t_operator_records_in_pr_without_issue
+  run "PR record read/post errors dismiss nothing"    t_pr_record_errors_dismiss_nothing
+  run "PR record reused after dismissal error"        t_pr_record_reused_after_dismissal_error
+  run "judge records in PR without issue argument"    t_judge_records_in_pr_without_issue_argument
+  run "non-positive judge issues refuse, zero writes" t_judge_nonpositive_issue_refuses
   run "one uncovered finding refuses"                 t_one_uncovered_refuses
   run "a fix ruling leaves the finding uncovered"     t_fix_ruling_leaves_finding_uncovered
   run "a different line does not cover"               t_different_line_does_not_cover
@@ -869,7 +976,7 @@ run_suite() {
   run "same-line findings need matching ruling count" t_duplicate_review_finding_needs_matching_count
   run "same-line findings with one verdict dismiss"   t_duplicate_review_findings_with_same_verdict_dismiss
   run "same-line findings with mixed verdicts refuse"  t_duplicate_review_findings_with_mixed_verdicts_refuse
-  run "a floor rule refuses"                          t_floor_rule_refuses
+  run "rule names allow an operator ruling"           t_rule_names_do_not_refuse_operator
   run "a failing check refuses"                       t_failing_check_refuses
   run "pending checks do not refuse"                  t_pending_checks_do_not_refuse
   run "a review not on the head is a noop"            t_not_on_head_is_noop
@@ -898,7 +1005,7 @@ run_suite() {
   run "repeated findings a judge rules each dismiss"  t_judge_repeated_findings_dismiss
   run "judge carry-over needs the path unchanged"     t_judge_carry_over
   run "operator-only grounds under judge refuse"      t_judge_operator_only_grounds_refuse
-  run "a judge decline on a floor refuses"            t_judge_floor_refuses
+  run "rule names allow a judge ruling"               t_rule_names_do_not_refuse_judge
   run "a failing check refuses a judge ruling"        t_judge_failing_check_refuses
   run "a judge re-run reuses the comment, then noops" t_judge_rerun_reuses_comment_then_noop
   run "an operator ruling dismisses as before"        t_operator_ruling_unchanged

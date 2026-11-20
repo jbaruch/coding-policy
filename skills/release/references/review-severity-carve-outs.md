@@ -32,17 +32,19 @@ The full preconditions of each `rules/review-severity.md` carve-out, moved out o
   2. The ruling's authority covers the verdict:
      - `AUTHORITY: operator` quotes the operator's reply verbatim
      - `AUTHORITY: judge` is a judge's report whose sha256 matches the cited digest, and the verdict is a judge `decline` or `defer` stating its ground
-  3. The ruling names the finding at its `HEAD:`, and the finding's file is unchanged from that commit to the head
+  3. The ruling names the finding at its `HEAD:` and remains applicable after changes affecting the finding or its governing contract
   4. The finding is under no floor
-  5. The finding is entered in the task's follow-up issue citing the ruling, a `decline` labelled won't-fix
+  5. Record the disposition and ruling in the existing review conversation or authorized task record
   6. Every other release gate holds
 - Floors:
   - a failing test, lint, diagnostic or required check
   - a security or data-loss defect reachable by normal inputs
-  - a `no-secrets` or `ci-safety` finding
-  - a carve-out's unmet precondition
+  - secret exposure or bypass of required tests, independent review or protected-branch controls
+  - an unmet, applicable carve-out precondition whose protected harm is reachable; the judge cites the protected harm, triggering conditions and source evidence
   - an unmet acceptance criterion the operator stated
 - Either authority rules `fix` on every floor
-- `skills/release/dismiss-ruled-review.sh` refuses the rule-id floors and a failing check
+- `skills/release/dismiss-ruled-review.sh` refuses a failing check; the ruling authority judges the other floors
+- The judge assesses continued applicability under precondition 3
+- The helper carries rulings only across unchanged finding paths; obtain a current-head ruling for a changed path or governing contract
 - A ruling never skips, disables or removes a test
 - A gating policy review the ruling covers is dismissed per `rules/ci-safety.md` Judge-Ruled-Review Dismissal Carve-Out
