@@ -1,3 +1,7 @@
+## 0.10.26 — 2026-11-21
+
+- docs(release): Require verified delivery for fixes to published behavior (#877)
+
 ## 0.10.25 — 2026-11-19
 
 - refactor(stateful-artifacts): State the telemetry limit once (#869)
