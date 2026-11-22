@@ -2,6 +2,9 @@
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "extends": ["config:recommended"],
   "dependencyDashboardAutoclose": true,
+  "pre-commit": {
+    "enabled": true
+  },
   "ignorePaths": [".github/workflows/*.lock.yml"],
   "customManagers": [
     {

@@ -33,6 +33,26 @@ See [CHANGELOG.md](CHANGELOG.md) for full version history.
 tessl install jbaruch/coding-policy
 ```
 
+## Contributor setup
+
+Install Python 3.11+ and Go 1.24.11+. In an isolated Python environment, install
+[pre-commit](https://pre-commit.com/) at the pinned revision below (v4.7.0), then
+run these commands from this repository's clone:
+
+```sh
+python3 -m pip install 'git+https://github.com/pre-commit/pre-commit@65bb884a567e8be6adc51e8bfbcf26f708eb35a2'
+pre-commit install --install-hooks
+pre-commit run gitleaks
+```
+
+The repository-local hook uses [Gitleaks](https://github.com/gitleaks/gitleaks)
+to scan staged changes, redact matches in its output and block matching commits.
+Run setup in each clone before committing. These commands change no global hooks
+or Git configuration. Renovate renews the frozen Gitleaks revision in
+`.pre-commit-config.yaml`; manual updates use `pre-commit autoupdate --freeze`.
+Maintainers review pre-commit's installation pin monthly and re-pin its release
+commit above in a dedicated dependency change.
+
 ## What's Included
 
 Compact rule routers retain startup boundaries and require their complete
