@@ -1,12 +1,13 @@
 ---
 name: release
 description: >
-  Structured workflow for shipping code via GitHub pull requests: PR creation,
-  automated policy and quality review, merge, and branch cleanup. Covers
-  readiness, version reasoning, review polling, feedback, and post-merge
-  verification. Merges without asking once required checks and both reviews are
-  green; dismisses a policy review only under an operator or judge ruling. Use
-  when the user wants to open a PR, resume an existing PR, ship code, merge a
+  Ship via GitHub PRs. Covers readiness, creation, versioning, automated policy
+  and quality review, polling, feedback, merge, cleanup, and verification.
+  Auto-merges when required checks and both reviews are green. Dismisses
+  superseded legacy bot reviews (same-bot all-clear or coding-policy reviewer
+  identity migration) and explicitly ruled policy reviews only under binding
+  CI-safety carve-outs.
+  Use when the user wants to open a PR, resume an existing PR, ship code, merge a
   branch, or handle post-merge cleanup on GitHub. Also use for an authorized
   request to fix already-published or deployed behavior in an operator-owned
   repository with an established release path, even without an explicit request
