@@ -143,6 +143,10 @@
 #           constants, PRUNE_NOW (epoch seconds) the clock, PRUNE_LSOF the probe.
 set -euo pipefail
 
+# Cleanup and fetch must not execute repository-configured hooks. Keep the
+# override command-scoped so the repository's configuration is unchanged.
+git() { command git -c core.hooksPath=/dev/null "$@"; }
+
 WORKDIR=""
 ERRFILE=""
 ROWS=""
@@ -807,7 +811,7 @@ import time
 path, gitdir, now, limit = sys.argv[1], sys.argv[2], sys.argv[3], int(sys.argv[4])
 now = float(now) if now else time.time()
 candidates = [path, os.path.join(gitdir, "HEAD"), os.path.join(gitdir, "index"), os.path.join(gitdir, "logs", "HEAD")]
-listed = subprocess.run(["git", "--no-optional-locks", "-C", path, "ls-files", "-z", "-m", "-o", "--exclude-standard"],
+listed = subprocess.run(["git", "-c", "core.hooksPath=/dev/null", "--no-optional-locks", "-C", path, "ls-files", "-z", "-m", "-o", "--exclude-standard"],
                         capture_output=True)
 if listed.returncode != 0:
     sys.stderr.write("git ls-files failed: {}".format(listed.stderr.decode("utf-8", "replace")))
@@ -892,7 +896,7 @@ import sys
 shared, listing, out = sys.argv[1:4]
 with open(listing, encoding="utf-8", errors="surrogateescape") as handle:
     shas = sorted({line.split("\t", 1)[0] for line in handle if line.strip()})
-check = subprocess.run(["git", "-C", shared, "cat-file", "--batch-check=%(objectname) %(objecttype)"],
+check = subprocess.run(["git", "-c", "core.hooksPath=/dev/null", "-C", shared, "cat-file", "--batch-check=%(objectname) %(objecttype)"],
                        input="".join(sha + "\n" for sha in shas).encode("ascii"), capture_output=True)
 if check.returncode != 0:
     sys.stderr.write(check.stderr.decode("utf-8", "surrogateescape"))
@@ -982,7 +986,7 @@ path = sys.argv[1]
 
 
 def git(*args):
-    run = subprocess.run(["git", "--no-optional-locks", "-C", path, *args], capture_output=True)
+    run = subprocess.run(["git", "-c", "core.hooksPath=/dev/null", "--no-optional-locks", "-C", path, *args], capture_output=True)
     if run.returncode != 0:
         sys.stderr.write(run.stderr.decode("utf-8", "replace"))
         sys.exit(1)
@@ -1259,7 +1263,7 @@ main() {
   fi
   local tool
   for tool in git python3; do
-    if ! command -v "$tool" >/dev/null; then
+    if ! type -P "$tool" >/dev/null; then
       warn "${tool} not found on PATH — install it"
       return 1
     fi

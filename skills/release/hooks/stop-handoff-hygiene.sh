@@ -7,9 +7,8 @@
 # exactly this mess in real sessions — stray merged-and-remote-deleted local
 # branches and an abandoned worktree. This mechanizes the pre-handoff cleanup
 # rules/language-diagnostics.md endorses ("a Stop or pre-handoff hook running the
-# gate mechanizes this") and complements the fleet-wide delete_branch_on_merge
-# (that auto-cleans REMOTE branches; this covers the LOCAL branches/worktrees it
-# never touches).
+# gate mechanizes this"). GitHub's delete-branch-on-merge setting handles merged
+# PR branches on origin; this hook covers local branches and worktrees.
 #
 # Why nativeHooks (not the portable `hooks` tier): blocking a stop is an
 # agent-specific contract with no portable consensus form — the `hooks` tier

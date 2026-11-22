@@ -2,33 +2,28 @@
 # Outcome-based tests for skills/release/hooks/check-leftover-worktrees.sh.
 #
 # Each case builds its own bare "origin", a shared clone, its own worktree
-# root and a fake `gh` first on PATH that answers from files in the case's
-# directory, so no case sees another's state and they run in any order
+# root, so no case sees another's state and they run in any order
 # (rules/testing-standards.md Independence). Every commit and reflog entry is
 # dated FIXTURE_DATE, every aged file is touched to a fixed mtime, and the
-# owner scripts judge at PRUNE_NOW, never the wall clock (Determinism).
+# owner script judges at PRUNE_NOW, never the wall clock (Determinism).
 #
-# The owner scripts' decisions have their own suites
-# (lib/tests/test_prune_worktrees.sh,
-# test_prune_remote_branches.sh); these cases cover what the hook adds: it
-# runs them live for this repository, from the shared checkout or a linked
+# The owner script's decisions have their own suite
+# (tests/release-lib/tests/test_prune_worktrees.sh); these cases cover what the hook adds: it
+# runs it live for this repository, from the shared checkout or a linked
 # worktree, natively or under tessl, lists only what the operator must decide,
 # and turns a failure into one "could not check" line.
 #
 # Covers:
 #   1. Removable            -> an idle clean worktree origin holds, a merged
-#                              local branch and a merged branch on origin are
-#                              removed; nothing is printed.
+#                              local branch and an origin-held local branch
+#                              are removed; origin is unchanged, nothing is printed.
 #   2. Questionable         -> an idle dirty worktree, an idle unpushed
-#                              worktree, an unpushed local branch and a stale
-#                              unmerged branch on origin are listed and left.
-#                              An open pull request's branch and another
-#                              repository's dirty worktree are not listed.
+#                              worktree and an unpushed local branch are listed
+#                              and left. A stale unmerged branch on origin and
+#                              another repository's dirty worktree are not listed.
 #   3. Not yet idle         -> a fresh dirty worktree is not listed.
 #   4. In use               -> a process inside keeps a removable worktree,
 #                              unlisted.
-#   5. gh failing           -> nothing on origin is deleted; one could-not-check
-#                              line, never the URL gh printed.
 #   6. Linked worktree      -> a session in a linked worktree cleans the
 #                              shared repository as the shared checkout does.
 #   7. Portable mode        -> under tessl removable items go as natively, and
@@ -46,13 +41,17 @@
 #                              hour).
 #  14. Inventory failure    -> a git worktree list that fails after printing a
 #                              valid prefix is a could-not-check status naming
-#                              git's own exit, and runs neither owner script.
+#                              git's own exit, and does not run the owner script.
 #  15. SSH BatchMode        -> appended to a user-set GIT_SSH_COMMAND, and the
 #                              default when none is set.
 #  16. Newline hooks dir    -> a hooks directory whose name ends in a newline
-#                              still reaches its owner scripts.
+#                              still reaches its owner script.
 #  17. Locked               -> a worktree locked with or without a reason stays,
 #                              with its lock and branch, and is not listed.
+#  18. Repository hooks     -> local cleanup runs without executing configured
+#                              Git hooks or changing their configuration.
+#  19. Stop fetch           -> dry-run cleanup fetches new refs without executing
+#                              configured Git hooks or deleting local branches.
 #
 # The harness drops `set -e` to aggregate results; every fixture command is
 # checked explicitly (rules/error-handling.md aggregate-reporting carve-out).
@@ -94,67 +93,7 @@ quiet() { # <what> <command...>
   fi
 }
 
-# A fake gh answering from $CASE: `prs` lists open pull-request heads; `fail`
-# makes every call exit 1 with a credential-bearing message.
-write_fake_gh() {
-  mkdir -p "$CASE/bin" || die "mkdir $CASE/bin failed"
-  cat > "$CASE/bin/gh" <<'SH' || die "cannot write the fake gh"
-#!/usr/bin/env bash
-set -euo pipefail
-d="${FAKE_GH_DIR:?}"
-if [[ -e "$d/fail" ]]; then echo "gh: HTTP 502 from https://s3cr3t@example.invalid" >&2; exit 1; fi
-case "$1" in
-  api)
-    if [[ "$2" == *'?protected'* ]]; then
-      if [[ -f "$d/protected" ]]; then cat "$d/protected"; fi
-    else
-      # GitHub routes a raw slash as another path segment: 404, as here.
-      seg="${2#*/branches/}"
-      if [[ "$seg" == */* ]]; then echo "gh: HTTP 404: Not Found (branches/${seg})" >&2; exit 1; fi
-      printf '%s\n' "$seg" >> "$d/api-branches"
-      b="$(python3 -c 'import sys, urllib.parse; print(urllib.parse.unquote(sys.argv[1]))' "$seg")"
-      if [[ -f "$d/protected" ]] && grep -qxF -- "$b" "$d/protected"; then echo true; else echo false; fi
-    fi
-    exit 0 ;;
-  pr)
-    head=""
-    while (( $# )); do
-      if [[ "$1" == --head ]]; then head="$2"; shift; fi
-      shift
-    done
-    [[ -f "$d/prs" ]] || exit 0
-    if [[ -n "$head" ]]; then grep -xF -- "$head" "$d/prs" || [[ $? -eq 1 ]]; else cat "$d/prs"; fi
-    exit 0 ;;
-esac
-echo "fake gh: unexpected call $*" >&2
-exit 3
-SH
-  chmod +x "$CASE/bin/gh" || die "chmod the fake gh failed"
-}
-
-# A git first on PATH that answers `remote get-url` with a GitHub URL, so the
-# bare origin can pose as a GitHub repository for prune-remote-branches.sh;
-# every other call is the real git's.
-write_fake_git() {
-  local real
-  real="$(command -v git)" || die "git is required"
-  printf '#!/usr/bin/env bash\nREAL_GIT=%q\n' "$real" > "$CASE/bin/git" || die "cannot write the fake git"
-  cat >> "$CASE/bin/git" <<'SH' || die "cannot write the fake git"
-set -euo pipefail
-args=("$@")
-i=0
-if [[ "${args[0]:-}" == -C ]]; then i=2; fi
-if [[ "${args[i]:-}" == remote && "${args[i+1]:-}" == get-url ]]; then
-  # A missing origin still fails as git's own does.
-  "$REAL_GIT" "$@" >/dev/null
-  echo https://github.com/acme/widgets.git; exit 0
-fi
-exec "$REAL_GIT" "$@"
-SH
-  chmod +x "$CASE/bin/git" || die "chmod the fake git failed"
-}
-
-# Per case: origin, a shared clone, a worktree root and the fake gh. Sets
+# Per case: origin, a shared clone and a worktree root. Sets
 # CASE, BARE, SHARED, ROOT.
 mk_case() { # <name>
   CASE="$TMP/$1"; BARE="$CASE/origin.git"; SHARED="$CASE/shared"; ROOT="$CASE/worktrees"
@@ -167,8 +106,6 @@ mk_case() { # <name>
   quiet "commit base" git -C "$SHARED" commit -q -m base
   quiet "push main" git -C "$SHARED" push -q -u origin main
   quiet "set-head" git -C "$SHARED" remote set-head origin --auto >/dev/null
-  write_fake_gh
-  write_fake_git
 }
 
 commit_file() { # <checkout> <file>
@@ -207,8 +144,8 @@ has_branch() { git -C "$SHARED" show-ref --verify --quiet "refs/heads/$1"; }
 run_hook() { # <dir> [VAR=value...]
   local dir="$1"; shift
   RC=0
-  OUT="$(cd "$dir" && env PATH="$CASE/bin:$PATH" FAKE_GH_DIR="$CASE" WORKTREE_ROOT="$ROOT" \
-    PRUNE_NOW="$PRUNE_NOW" PRUNE_IDLE_HOURS=24 PRUNE_REMOTE_IDLE_HOURS=24 LEFTOVER_BUDGET_SEC=3600 "$@" \
+  OUT="$(cd "$dir" && env WORKTREE_ROOT="$ROOT" \
+    PRUNE_NOW="$PRUNE_NOW" PRUNE_IDLE_HOURS=24 LEFTOVER_BUDGET_SEC=3600 "$@" \
     bash "$HOOK" </dev/null 2>"$CASE/hook.err")" || RC=$?
   ERR="$(cat "$CASE/hook.err")"
 }
@@ -270,7 +207,7 @@ SH
 }
 
 # A staged plugin: the hook and the result-check module it imports, laid out
-# as the plugin ships them. Each case adds its own owner scripts.
+# as the plugin ships them. Each case adds its own owner script.
 stage_plugin() { # <dir> [hooks-dir-name]
   local hooks="${2:-hooks}"
   mkdir -p "$1/$hooks" "$1/lib" || die "mkdir stage $1 failed"
@@ -279,17 +216,14 @@ stage_plugin() { # <dir> [hooks-dir-name]
     "$1/lib/" || die "stage the result checks failed"
 }
 
-# A staged plugin with the real runner and owner scripts that record their
-# name and GIT_SSH_COMMAND to <calls>, then fail.
+# A staged plugin with the real runner and an owner script that records its
+# name and GIT_SSH_COMMAND to <calls>, then fails.
 stage_recording_plugin() { # <dir> <calls>
   stage_plugin "$1"
   cp "${HERE}/../../skills/release/lib/bounded-run.sh" "$1/lib/" || die "stage the runner failed"
-  local owner
-  for owner in prune-worktrees.sh prune-remote-branches.sh; do
-    # shellcheck disable=SC2016  # GIT_SSH_COMMAND expands in the stand-in, not here.
-    printf '#!/usr/bin/env bash\nset -euo pipefail\nprintf "%%s %%s\\n" "%s" "${GIT_SSH_COMMAND:-}" >> %q\nexit 1\n' "$owner" "$2" \
-      > "$1/lib/$owner" || die "write the recording $owner failed"
-  done
+  # shellcheck disable=SC2016  # GIT_SSH_COMMAND expands in the stand-in, not here.
+  printf '#!/usr/bin/env bash\nset -euo pipefail\nprintf "%%s %%s\\n" "prune-worktrees.sh" "${GIT_SSH_COMMAND:-}" >> %q\nexit 1\n' "$2" \
+    > "$1/lib/prune-worktrees.sh" || die "write the recording owner script failed"
 }
 
 main() {
@@ -307,15 +241,21 @@ main() {
   unset SESSION_START_MODE GIT_SSH_COMMAND
   local ctx
 
-  echo "1. removable worktrees and branches go, and nothing is printed"
+  echo "1. removable local worktrees and branches go, origin is unchanged, and nothing is printed"
   mk_case c1
   quiet "wt add" git -C "$SHARED" worktree add -q --detach "$ROOT/spent" origin/main
   age_wt "$ROOT/spent" "$AGED_MTIME"
   quiet "local branch" git -C "$SHARED" branch -q --no-track feat/local-merged main
   push_branch feat/remote-merged 1
+  push_branch feat/remote-held 0
+  quiet "origin-held local branch" git -C "$SHARED" branch -q --no-track feat/local-held origin/feat/remote-held
+  local origin_before origin_after
+  origin_before="$(git -C "$BARE" for-each-ref --format='%(refname) %(objectname)' refs/heads)" || die "read origin refs failed"
   run_hook "$SHARED"
+  origin_after="$(git -C "$BARE" for-each-ref --format='%(refname) %(objectname)' refs/heads)" || die "read origin refs failed"
   if [[ $RC -eq 0 && -z "$OUT" && ! -e "$ROOT/spent" ]] && ! has_branch feat/local-merged \
-     && ! on_origin feat/remote-merged && on_origin main; then pass
+     && ! has_branch feat/local-held && [[ "$origin_before" == "$origin_after" ]] \
+     && on_origin feat/remote-merged && on_origin feat/remote-held && on_origin main; then pass
   else fail "c1: RC=$RC OUT=$OUT ERR=$ERR"; fi
 
   echo "2. only work the operator must decide on is listed, and none of it is touched"
@@ -330,8 +270,6 @@ main() {
   commit_file "$SHARED" l.txt
   quiet "switch main" git -C "$SHARED" switch -q main
   push_branch feat/stale 0
-  push_branch feat/open-pr 0
-  printf 'feat/open-pr\n' > "$CASE/prs" || die "write prs failed"
   local other="$CASE/other"
   quiet "clone other" git clone -q "$BARE" "$other"
   quiet "wt other" git -C "$other" worktree add -q -b review/other "$ROOT/other-dirty" origin/main
@@ -339,15 +277,14 @@ main() {
   age_wt "$ROOT/other-dirty" "$AGED_MTIME"
   run_hook "$SHARED"
   ctx="$(context)"
-  if [[ $RC -eq 0 ]] && [[ "$ctx" == "Session-start status — 4 item(s)"* ]] \
+  if [[ $RC -eq 0 ]] && [[ "$ctx" == "Session-start status — 3 item(s)"* ]] \
      && [[ "$ctx" == *"$ROOT/dirty (review/dirty): 1 uncommitted file(s)"* ]] \
      && [[ "$ctx" == *"$ROOT/unpushed (feat/unpushed): 1 commit(s) origin does not hold"* ]] \
      && [[ "$ctx" == *"local branch feat/local-only: 1 unpushed commit(s)"* ]] \
-     && [[ "$ctx" == *"origin branch feat/stale: 1 commit(s) not in main"*"by Ada"* ]] \
      && [[ "$ctx" == *"one at a time"* ]] \
-     && [[ "$ctx" != *feat/open-pr* && "$ctx" != *other-dirty* ]] \
+     && [[ "$ctx" != *feat/stale* && "$ctx" != *other-dirty* ]] \
      && [[ -e "$ROOT/dirty/notes.txt" && -e "$ROOT/unpushed" && -e "$ROOT/other-dirty" ]] \
-     && has_branch feat/local-only && on_origin feat/stale && on_origin feat/open-pr; then pass
+     && has_branch feat/local-only && on_origin feat/stale; then pass
   else fail "c2: RC=$RC OUT=$OUT ERR=$ERR"; fi
 
   echo "3. a dirty worktree inside the idle window is not listed"
@@ -369,25 +306,17 @@ main() {
   if [[ $RC -eq 0 && -z "$OUT" && -e "$ROOT/busy" ]]; then pass
   else fail "c4: RC=$RC OUT=$OUT ERR=$ERR"; fi
 
-  echo "5. a failing gh deletes nothing on origin and says so in one line"
-  mk_case c5
-  push_branch feat/remote-merged 1
-  : > "$CASE/fail" || die "write fail flag failed"
-  run_hook "$SHARED"
-  ctx="$(context)"
-  if [[ $RC -eq 0 ]] && on_origin feat/remote-merged \
-     && [[ "$ctx" == "Session-start status — could not check this repository"*"prune-remote-branches.sh"* ]] \
-     && [[ "$ctx" != *$'\n'* && "$OUT$ERR" != *s3cr3t* ]]; then pass
-  else fail "c5: RC=$RC OUT=$OUT ERR=$ERR"; fi
-
   echo "6. a session in a linked worktree cleans the shared repository"
   mk_case c6
   quiet "wt session" git -C "$SHARED" worktree add -q -b review/session "$ROOT/session" origin/main
   quiet "wt spent" git -C "$SHARED" worktree add -q --detach "$ROOT/spent" origin/main
   age_wt "$ROOT/spent" "$AGED_MTIME"
   push_branch feat/remote-merged 1
-  run_hook "$ROOT/session"
-  if [[ $RC -eq 0 && -z "$OUT" && ! -e "$ROOT/spent" && -e "$ROOT/session" ]] && ! on_origin feat/remote-merged; then pass
+  local real_hook6="$HOOK"
+  HOOK="${HERE}/../../skills/release/hooks/session-start.sh"
+  run_hook "$ROOT/session" SESSION_START_HOOKS=check-leftover-worktrees
+  HOOK="$real_hook6"
+  if [[ $RC -eq 0 && -z "$OUT" && ! -e "$ROOT/spent" && -e "$ROOT/session" ]] && on_origin feat/remote-merged; then pass
   else fail "c6: RC=$RC OUT=$OUT ERR=$ERR"; fi
 
   echo "7. portable mode removes what natively goes and lists what awaits the operator"
@@ -400,7 +329,7 @@ main() {
   push_branch feat/remote-merged 1
   run_hook "$SHARED" SESSION_START_MODE=portable
   ctx="$(context)"
-  if [[ $RC -eq 0 && ! -e "$ROOT/spent" ]] && ! on_origin feat/remote-merged \
+  if [[ $RC -eq 0 && ! -e "$ROOT/spent" ]] && on_origin feat/remote-merged \
      && [[ "$ctx" == "Session-start status — 1 item(s)"*"$ROOT/dirty"* ]]; then pass
   else fail "c7: RC=$RC OUT=$OUT ERR=$ERR"; fi
 
@@ -422,8 +351,8 @@ main() {
   # the budget ends by the runner's own verdict, never by waiting on a clock.
   local stage="$CASE/stage"
   stage_plugin "$stage"
-  cp "${HERE}/../../skills/release/lib/prune-worktrees.sh" "${HERE}/../../skills/release/lib/prune-remote-branches.sh" \
-    "$stage/lib/" || die "stage the owner scripts failed"
+  cp "${HERE}/../../skills/release/lib/prune-worktrees.sh" \
+    "$stage/lib/" || die "stage the owner script failed"
   printf '#!/usr/bin/env bash\nset -euo pipefail\necho "bounded-run: stand-in budget spent" >&2\nexit 124\n' > "$stage/lib/bounded-run.sh" \
     || die "write the stand-in runner failed"
   local real_hook="$HOOK"
@@ -457,16 +386,13 @@ main() {
   stage_plugin "$stage12"
   cp "${HERE}/../../skills/release/lib/bounded-run.sh" "$stage12/lib/" || die "stage the runner failed"
   printf '#!/usr/bin/env bash\nset -euo pipefail\nprintf "{}\\n"\n' > "$stage12/lib/prune-worktrees.sh" || die "write the stand-in prune failed"
-  printf '#!/usr/bin/env bash\nset -euo pipefail\nprintf "{\\"deleted\\": [], \\"questionable\\": [{\\"branch\\": 7}], \\"kept\\": [], \\"failed\\": [], \\"could_not_check\\": null, \\"default_branch\\": \\"main\\"}\\n"\n' \
-    > "$stage12/lib/prune-remote-branches.sh" || die "write the stand-in remote pass failed"
   local real_hook12="$HOOK"
   HOOK="$stage12/hooks/$(basename "$real_hook12")"
   run_hook "$SHARED"
   HOOK="$real_hook12"
   ctx="$(context)"
   if [[ $RC -eq 0 ]] && [[ "$ctx" == "Session-start status — could not check this repository"* ]] \
-     && [[ "$ctx" == *"prune-worktrees.sh exited 0 with a result holding no worktrees_removed list"* ]] \
-     && [[ "$ctx" == *"prune-remote-branches.sh exited 0 with a result holding a malformed questionable entry"* ]]; then pass
+     && [[ "$ctx" == *"prune-worktrees.sh exited 0 with a result holding no worktrees_removed list"* ]]; then pass
   else fail "c12: RC=$RC OUT=$OUT ERR=$ERR"; fi
 
   echo "11. a shared checkout whose name ends in a newline is cleaned, never truncated"
@@ -481,13 +407,13 @@ main() {
     age_wt "$ROOT/spent" "$AGED_MTIME"
     push_branch feat/remote-merged 1
     run_hook "$nl_shared"
-    if [[ $RC -eq 0 && -z "$OUT" && ! -e "$ROOT/spent" ]] && ! on_origin feat/remote-merged; then pass
+    if [[ $RC -eq 0 && -z "$OUT" && ! -e "$ROOT/spent" ]] && on_origin feat/remote-merged; then pass
     else fail "c11: RC=$RC OUT=$OUT ERR=$ERR"; fi
   else
     echo "11. skipped: this filesystem refuses a name ending in a newline ($(cat "$TMP/nl.err"))"
   fi
 
-  echo "14. a git worktree list that fails after a valid prefix runs neither owner script"
+  echo "14. a git worktree list that fails after a valid prefix does not run the owner script"
   mk_case c14
   local stage14="$CASE/stage14" calls14="$CASE/calls14" real_git
   stage_recording_plugin "$stage14" "$calls14"
@@ -501,7 +427,7 @@ main() {
   local real_hook14="$HOOK"
   HOOK="$stage14/hooks/$(basename "$real_hook14")"
   RC=0
-  OUT="$(cd "$SHARED" && env PATH="$CASE/failing-git:$CASE/bin:$PATH" FAKE_GH_DIR="$CASE" LEFTOVER_BUDGET_SEC=3600 \
+  OUT="$(cd "$SHARED" && env PATH="$CASE/failing-git:$PATH" LEFTOVER_BUDGET_SEC=3600 \
     bash "$HOOK" </dev/null 2>"$CASE/hook.err")" || RC=$?
   HOOK="$real_hook14"
   ctx="$(context)"
@@ -509,7 +435,7 @@ main() {
      && [[ "$ctx" == "Session-start status — could not check this repository"*"git worktree list --porcelain -z"*"exited 1"* ]]; then pass
   else fail "c14: RC=$RC OUT=$OUT ERR=$(cat "$CASE/hook.err") calls=$(if [[ -e "$calls14" ]]; then cat "$calls14"; fi)"; fi
 
-  echo "15. BatchMode reaches the owner scripts whether or not GIT_SSH_COMMAND is already set"
+  echo "15. BatchMode reaches the owner script whether or not GIT_SSH_COMMAND is already set"
   mk_case c15
   local stage15="$CASE/stage15" calls15="$CASE/calls15" set_line unset_line
   stage_recording_plugin "$stage15" "$calls15"
@@ -525,9 +451,9 @@ main() {
      && "$unset_line" == "prune-worktrees.sh ssh -o BatchMode=yes" ]]; then pass
   else fail "c15: set=$set_line unset=$unset_line ERR=$ERR"; fi
 
-  echo "16. a hooks directory whose name ends in a newline still reaches its owner scripts"
+  echo "16. a hooks directory whose name ends in a newline still reaches its owner script"
   # A `$(dirname ...)` capture drops the newline, and the hook then looks for
-  # its owner scripts beside a directory that does not exist (#487).
+  # its owner script beside a directory that does not exist (#487).
   if mkdir "$TMP/nl-probe16${nl}" 2>"$TMP/nl16.err"; then
     rmdir "$TMP/nl-probe16${nl}" || die "rmdir the newline probe failed"
     mk_case c16
@@ -536,10 +462,8 @@ main() {
     local stage16="$CASE/stage16"
     stage_plugin "$stage16" "hooks${nl}"
     cp "${HERE}/../../skills/release/lib/bounded-run.sh" "${HERE}/../../skills/release/lib/prune-worktrees.sh" \
-      "${HERE}/../../skills/release/lib/prune-remote-branches.sh" "$stage16/lib/" \
-      || die "stage the owner scripts failed"
-    mkdir -p "$stage16" || die "mkdir the staged release skill failed"
-    cp "${HERE}/../../skills/release/origin-repo.py" "$stage16/" || die "stage origin-repo.py failed"
+      "$stage16/lib/" \
+      || die "stage the owner script failed"
     local real_hook16="$HOOK"
     HOOK="$stage16/hooks${nl}/$(basename "$real_hook16")"
     run_hook "$SHARED"
@@ -568,6 +492,56 @@ main() {
      && grep -qxF "locked factory task 831" <<<"$list17" && grep -qxF "locked" <<<"$list17" \
      && has_branch held && has_branch bare; then pass
   else fail "c17: RC=$RC OUT=$OUT LIST=$list17 ERR=$ERR"; fi
+
+  # The hook is inert: its marker proves execution without any remote write.
+  # A control ref update proves each fixture's hook is executable and active.
+  local event hook_log configured_hooks native
+  native="${HERE}/../../skills/release/native-hook.sh"
+  for event in session-start stop-handoff; do
+    echo "configured Git hooks do not run during ${event} cleanup"
+    mk_case "git-hooks-${event}"
+    quiet "local spent branch" git -C "$SHARED" branch spent main
+    quiet "stage marker" git -C "$BARE" update-ref refs/heads/stage-marker main
+    if [[ "$event" == session-start ]]; then
+      quiet "spent worktree" git -C "$SHARED" worktree add -q --detach "$ROOT/spent" main
+      age_wt "$ROOT/spent" "$AGED_MTIME"
+    fi
+    configured_hooks="$CASE/repo-hooks"; hook_log="$CASE/hook-ran"
+    mkdir -p "$configured_hooks" || die "mkdir hooks failed"
+    cat > "$configured_hooks/reference-transaction" <<'SH' || die "write hook failed"
+#!/usr/bin/env bash
+set -euo pipefail
+cat >/dev/null
+if [[ "$1" == committed ]]; then
+  printf 'reference hook ran\n' >> "${FIXTURE_HOOK_LOG:?}"
+fi
+SH
+    chmod +x "$configured_hooks/reference-transaction" || die "chmod hook failed"
+    quiet "configure hooks" git -C "$SHARED" config core.hooksPath "$configured_hooks"
+    quiet "hook control" env FIXTURE_HOOK_LOG="$hook_log" git -C "$SHARED" update-ref refs/heads/probe main
+    [[ -s "$hook_log" ]] || die "control did not execute the configured hook"
+    quiet "remove probe" git -c core.hooksPath=/dev/null -C "$SHARED" update-ref -d refs/heads/probe
+    rm "$hook_log" || die "remove hook marker failed"
+    origin_before="$(git -C "$BARE" for-each-ref --format='%(refname) %(objectname)' refs/heads)" || die "read origin refs failed"
+    RC=0
+    OUT="$(cd "$SHARED" && env WORKTREE_ROOT="$ROOT" PRUNE_NOW="$PRUNE_NOW" \
+      PRUNE_IDLE_HOURS=24 LEFTOVER_BUDGET_SEC=3600 FIXTURE_HOOK_LOG="$hook_log" \
+      SESSION_START_HOOKS=check-leftover-worktrees \
+      bash "$native" "$event" <<<'{}' 2>"$CASE/hook.err")" || RC=$?
+    ERR="$(cat "$CASE/hook.err")"
+    origin_after="$(git -C "$BARE" for-each-ref --format='%(refname) %(objectname)' refs/heads)" || die "read origin refs failed"
+    if [[ $RC -ne 0 || -e "$hook_log" || "$origin_before" != "$origin_after" ]] \
+       || [[ "$(git -C "$SHARED" config --get core.hooksPath)" != "$configured_hooks" ]]; then
+      fail "${event}: RC=$RC OUT=$OUT ERR=$ERR"
+    elif [[ "$event" == session-start ]]; then
+      if [[ -z "$OUT" && ! -e "$ROOT/spent" ]] && ! has_branch spent; then pass
+      else fail "session-start did not clean local work: OUT=$OUT ERR=$ERR"; fi
+    else
+      if has_branch spent && git -C "$SHARED" show-ref --verify --quiet refs/remotes/origin/stage-marker \
+         && python3 -c 'import json,sys; d=json.load(sys.stdin); sys.exit(0 if d["decision"] == "block" and "branch spent" in d["reason"] else 1)' <<<"$OUT"; then pass
+      else fail "stop did not fetch and preview local cleanup: OUT=$OUT ERR=$ERR"; fi
+    fi
+  done
 
   echo
   echo "passed=${PASS} failed=${FAIL}"
