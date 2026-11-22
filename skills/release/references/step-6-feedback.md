@@ -48,6 +48,8 @@
   bash "$KS/dismiss-ruled-review.sh" <owner> <repo> <pr-number> --ruling <ruling-file> [--ruling-sha256 <sha256>] --followup-issue <issue-number>
   ```
 
+- **Legacy identity gate after App approval:** follow Step 7's migration cleanup, then return to Step 5. A legacy change-request state alone does not require another fix push after the current policy App approved; every body still requires reading.
+
 - Push fixes to the same branch
 - Both reviewers run automatically after each required push; return to Step 5.
 - The policy reviewer re-runs automatically on every push (coding-policy via `review-codex.yml` `pull_request: synchronize`; consumers via `review-trigger.yml` re-dispatching the fleet App). No manual re-request.

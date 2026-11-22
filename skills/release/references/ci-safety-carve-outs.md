@@ -4,15 +4,16 @@ The full preconditions of each `rules/ci-safety.md` carve-out, moved out of the 
 
 ## Superseded-Bot-Review Dismissal Carve-Out
 
-- Narrow exception for dismissing a review gate.
-- Covers a bot's `CHANGES_REQUESTED` that the same bot later superseded with an all-clear re-review
-- Applies when a gating bot that cannot `APPROVE` (`github-actions[bot]` — GitHub returns HTTP 422) re-reviews clean but cannot post the `APPROVED` verdict that would supersede its earlier `CHANGES_REQUESTED` — the stale request keeps the merge `BLOCKED` until dismissed
+- Narrow exception for dismissing superseded legacy bot review gates.
+- coding-policy and consumer policy Apps approve natively; their ordinary change requests are never dismissed by this carve-out.
 - Preconditions (all required):
-  1. The dismissed review is a `CHANGES_REQUESTED` from a gating bot on the allowlist (`GATING_BOTS` in `skills/release/dismiss-stale-reviews.sh`), never a human reviewer — a human can `APPROVE`, so a human's supersession goes through re-request-and-approve, never dismissal
-  2. The same bot posted a later all-clear on the PR — the accepting verdict states are the script's decision predicate (`dismiss-stale-reviews.sh` header), not restated here; a `DISMISSED` or `PENDING` latest state is not an all-clear
-- Deterministic form is `skills/release/dismiss-stale-reviews.sh` — it enforces both preconditions and is the recommended path; decision predicate and allowlisted bot logins live in the script header, not restated here (`rules/script-as-black-box.md`)
-- A hand dismissal meeting both preconditions satisfies the same gate, and the merge that follows complies with `Never Skip Tests`
-- Every other dismissal still gates: a bot `CHANGES_REQUESTED` no all-clear superseded, or any human reviewer's change request, blocks the merge until resolved through review
+  1. Run `skills/release/dismiss-stale-reviews.sh` with its existing owner, repository and PR arguments. No hand dismissal is authorized.
+  2. The request belongs to a legacy bot on the script's `GATING_BOTS` allowlist, never a human or an approving App. On `jbaruch/coding-policy`, only the legacy workflow identity is eligible for ordinary dismissal; external callers retain the existing same-bot contract.
+  3. The same bot posted a later all-clear under the script's decision contract, or the coding-policy identity migration below applies. An unmarked dismissal or pending review is never an all-clear.
+- Identity migration applies only to an OPEN PR in `jbaruch/coding-policy` whose latest `github-actions[bot]` review requests changes. The latest `coding-policy-fleet-reviewer[bot]` review must be APPROVED on the current PR head and submitted later than that legacy review. Only the legacy identity's requests may be dismissed; an App comment, ruled dismissal, older-head approval or quality approval cannot authorize migration.
+- The helper preserves its argument, JSON output, exit-code and API-failure contracts for declared external callers. Decision predicates and identity lists live in its header.
+- After migration, use native App approvals for ordinary re-reviews. Retain the helper for open legacy gates, external callers and the ruled sweep below.
+- Every other change request still gates until resolved through review or the ruled carve-out below.
 
 ## Judge-Ruled-Review Dismissal Carve-Out
 

@@ -1,17 +1,16 @@
 #!/usr/bin/env bash
-# Dismiss a gating bot's CHANGES_REQUESTED review once the SAME bot has
-# posted a later non-CHANGES_REQUESTED verdict on the PR.
+# Settle superseded legacy bot gates and earlier requests after ruled dismissal.
 #
-# Why this exists: on coding-policy's OWN PRs the policy reviewer runs as
-# `github-actions[bot]` (the Codex CLI review workflow, review-codex.yml,
-# submits with the workflow token), which GitHub rejects APPROVE from with HTTP
-# 422. A clean re-review is therefore a COMMENT, and a later COMMENT never
-# supersedes an earlier CHANGES_REQUESTED in GitHub's merge-gating model — the
-# stale CHANGES_REQUESTED keeps blocking the merge until it is dismissed. The
-# operator running the release skill dismisses it here. The decision is fully
-# deterministic, so it is a script, not agent judgment (rules/script-delegation.md).
+# Compatibility interface for external release callers and legacy review gates.
+# coding-policy's own workflow now posts through the fleet policy App, which
+# can APPROVE. Ordinary App approvals need no dismissal. Existing open PRs can
+# still carry github-actions[bot] requests that the new identity cannot replace.
+# Only on jbaruch/coding-policy, a latest legacy CHANGES_REQUESTED can also be
+# cleared by a later APPROVED from coding-policy-fleet-reviewer[bot] on the
+# current head of an OPEN PR. COMMENTED, ruled or old-head App reviews do not
+# authorize this migration. Other repositories keep the same-bot contract.
 #
-# On consumer repos the reviewer is the central fleet App
+# On this repo and consumer repos the reviewer is the central fleet App
 # `coding-policy-fleet-reviewer[bot]` (coding-policy#202), which CAN APPROVE, so
 # its re-approval supersedes its own earlier CHANGES_REQUESTED with no dismissal
 # needed. It is intentionally NOT in GATING_BOTS below — a bot that can approve
@@ -46,9 +45,9 @@
 
 set -euo pipefail
 
-# The bot logins whose CHANGES_REQUESTED reviews gate the merge — the same
-# two the release skill polls (skills/release/poll-pr-reviews.sh). An array
-# iterated with quoted expansion, NOT a space-string: the `[bot]` suffix is
+# Legacy identities retained for declared external release callers. On
+# coding-policy only github-actions[bot] has ordinary migration eligibility.
+# An array iterated with quoted expansion, NOT a space-string: the `[bot]` suffix is
 # a glob bracket, so an unquoted `for login in $GATING_BOTS` would rewrite
 # the token against a matching filename in the release checkout (e.g.
 # `github-actionsb`) and silently miss the review.
@@ -136,9 +135,15 @@ main() {
   fi
 
   local dismissed="[]" left_active="[]"
-  local login reviews latest_state stale
+  local login reviews latest_state stale migration_clear pr_info app_reviews
+  local default_message="$DISMISS_MESSAGE" DISMISS_MESSAGE="$DISMISS_MESSAGE"
 
   for login in "${GATING_BOTS[@]}" "${RULED_ONLY_BOTS[@]}"; do
+    if [[ "$owner/$repo" == jbaruch/coding-policy && "$login" == 'copilot-pull-request-reviewer[bot]' ]]; then
+      continue
+    fi
+    DISMISS_MESSAGE="$default_message"
+    migration_clear=false
     reviews=$(reviews_by "$owner" "$repo" "$pr" "$login") \
       || { echo "error: failed to fetch reviews for ${login} on ${owner}/${repo}#${pr} — run 'gh auth status' to verify auth, then retry" >&2; exit 1; }
 
@@ -152,8 +157,26 @@ main() {
       continue
     fi
 
+    # The identity cutover cannot natively supersede an old workflow-bot gate.
+    # Never infer policy approval from quality, a comment or workflow success.
+    if [[ "$owner/$repo" == jbaruch/coding-policy && "$login" == 'github-actions[bot]' && "$latest_state" == CHANGES_REQUESTED ]]; then
+      pr_info=$(gh api "repos/${owner}/${repo}/pulls/${pr}") \
+        || { echo "error: cannot read migration PR state/head — check 'gh auth status' and retry" >&2; exit 1; }
+      app_reviews=$(reviews_by "$owner" "$repo" "$pr" 'coding-policy-fleet-reviewer[bot]') \
+        || { echo "error: cannot read migration policy App reviews — restore GitHub API access and retry" >&2; exit 1; }
+      migration_clear=$(jq -nr --argjson pr "$pr_info" --argjson app "$app_reviews" --argjson legacy "$reviews" '
+        $app[-1] as $approval | $legacy[-1] as $old |
+        $pr.state == "open" and ($pr.head.sha | type == "string" and length > 0)
+        and $approval.state == "APPROVED" and $approval.commit_id == $pr.head.sha
+        and ($approval.submitted_at > $old.submitted_at)') \
+        || { echo "error: invalid migration review evidence — inspect the PR and review API responses, then retry" >&2; exit 1; }
+      if [[ "$migration_clear" == true ]]; then
+        DISMISS_MESSAGE="Superseded by a later current-head policy App approval during coding-policy's github-actions[bot] migration — dismissed by the release skill."
+      fi
+    fi
+
     # The bot's current verdict is still CHANGES_REQUESTED: leave it gating.
-    if [[ "$latest_state" == "CHANGES_REQUESTED" ]]; then
+    if [[ "$latest_state" == "CHANGES_REQUESTED" && "$migration_clear" != true ]]; then
       left_active=$(jq --arg login "$login" \
         '. + [{login: $login, review_id: '"$(jq '.[-1].id' <<<"$reviews")"'}]' <<<"$left_active")
       continue
@@ -164,7 +187,9 @@ main() {
     # counts. An unmarked DISMISSED or a PENDING latest state is NOT an
     # all-clear, so an earlier active CHANGES_REQUESTED that no all-clear
     # superseded must stay put.
-    if [[ "$latest_state" == "DISMISSED" ]]; then
+    if [[ "$migration_clear" == true ]]; then
+      : # Current-head App approval authorizes only the legacy identity's sweep.
+    elif [[ "$latest_state" == "DISMISSED" ]]; then
       local ruled
       ruled=$(is_ruled_dismissal "$owner" "$repo" "$pr" "$(jq '.[-1].id' <<<"$reviews")") \
         || { echo "error: failed to read the dismissal of the latest ${login} review on ${owner}/${repo}#${pr} — inspect 'gh api --paginate repos/${owner}/${repo}/issues/${pr}/timeline', then retry" >&2; exit 1; }
@@ -176,7 +201,11 @@ main() {
     # Latest is an all-clear — dismiss every EARLIER review still in
     # CHANGES_REQUESTED (already-DISMISSED ones are excluded, so re-runs
     # are no-ops).
-    stale=$(jq -c '.[:-1][] | select(.state == "CHANGES_REQUESTED")' <<<"$reviews")
+    if [[ "$migration_clear" == true ]]; then
+      stale=$(jq -c '.[] | select(.state == "CHANGES_REQUESTED")' <<<"$reviews")
+    else
+      stale=$(jq -c '.[:-1][] | select(.state == "CHANGES_REQUESTED")' <<<"$reviews")
+    fi
     [[ -z "$stale" ]] && continue
 
     local row rid cid

@@ -4,7 +4,7 @@ Reference for Step 4 of the `release` skill — how the two PR reviewers are wir
 
 ## Policy reviewer — two deployments
 
-The policy reviewer reviews the PR diff against the in-tree `rules/*.md` and posts the verdict as a PR review. It runs one of two ways depending on the repo. Normally exactly one deployment reviews a given PR; a repo mid fleet-migration can transiently carry both, which is why the release scripts resolve the verdict fail-safe across both logins (`skills/release/poll-pr-reviews.sh` login table).
+The policy reviewer reviews the PR diff against the in-tree `rules/*.md` and posts the verdict as a PR review. It runs one of two ways depending on the repo. Normally exactly one deployment reviews a given PR; a repo mid fleet-migration can transiently carry both, which is why the release scripts resolve the verdict fail-safe across legacy and App logins (`skills/release/poll-pr-reviews.sh` login table).
 
 Both derive the review event from per-finding severity (`rules/review-severity.md`; `.github/codex-review/post-review.sh` header) — any blocking finding posts `REQUEST_CHANGES`; nonblocking results approve with any advisory notes included, falling back to `COMMENT` only when GitHub forbids approval.
 
@@ -15,8 +15,9 @@ The first verdict posted on a head stands. When the posting identity already rev
 The `.github/workflows/review-codex.yml` GitHub Actions workflow runs the OpenAI Codex CLI authenticated by a **ChatGPT subscription** (the `CODEX_AUTH_JSON` secret — no API key), via `codex exec` with `.github/codex-review/prompt.md` and `schema.json`.
 
 - **Trigger:** fires on `pull_request` `opened` / `synchronize` / `reopened` — reviews on open and re-reviews each pushed commit. Fork PRs are skipped (no secret access) — adopt via `Skill(skill: "adopt-fork-pr")`.
-- **Authorship:** submitted with the workflow's `GITHUB_TOKEN`, so the author is `github-actions[bot]`.
-- **APPROVE limitation:** `github-actions[bot]` cannot `APPROVE` (GitHub returns HTTP 422), so a clean pass falls back to `COMMENT`. A clean or advisory-only re-review after an earlier `CHANGES_REQUESTED` lands as a `COMMENT` that does NOT supersede the stale request in GitHub's merge gate, so Step 7 dismisses it via `skills/release/dismiss-stale-reviews.sh`.
+- **Authorship:** submitted as `coding-policy-fleet-reviewer[bot]` using the same `FLEET_APP_ID` / `FLEET_APP_PRIVATE_KEY` as `fleet-review.yml`. The posting token selects this repository and requests Pull requests write. History reads use that App's login; posting and dedup use the minted App slug.
+- **APPROVE:** a clean or advisory-only re-review approves and supersedes this App's earlier change request natively. Open PRs with legacy `github-actions[bot]` requests retain the migration cleanup in Step 7; an approval from another identity does not clear them automatically.
+- **Recovery:** token creation fails if either existing App secret or this repository's installation grant is missing. Restore the existing App's installation with Pull requests write or re-seed its named secrets, then rerun the failed workflow. Verify the posted review's author, current `commit_id` and APPROVED state, not only the workflow conclusion. Never substitute the workflow token or Claude App. A new commit is required for re-review of a head that already has an App verdict.
 - **Auth / cost:** the subscription token is read only from `CODEX_AUTH_JSON` at runtime, never persisted to the runner (rules/no-secrets.md); Codex refreshes the access token in-memory. No per-token API billing. If the refresh token expires the review fails loudly and the operator re-seeds the secret. One-time setup — `codex login` plus `gh secret set CODEX_AUTH_JSON < ~/.codex/auth.json` — is in the `review-codex.yml` header.
 
 ### B. Consumer repos — central `coding-policy-fleet-reviewer[bot]` App
@@ -44,7 +45,7 @@ severity-derived verdict with the exact analyzed commit and the marker owned by
 Claude approves nonblocking results, including advisory notes. An App's approval
 supersedes its earlier change request; a plain comment would leave that request
 active. The dedicated App can approve on coding-policy and consumer repositories.
-The policy reviewer retains its existing self-review fallback and cleanup.
+The policy App follows the same native approval behavior in both deployments.
 
 Both reviewers emit findings in their review bodies. Reply in a PR comment citing the review and finding; use an inline thread only for an actual inline comment. Claude blocking findings are fixed before merge.
 

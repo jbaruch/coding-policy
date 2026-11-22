@@ -64,6 +64,12 @@ gh() {
     esac
   done
 
+  if [[ "$path" == repos/jbaruch/coding-policy/pulls/1 ]]; then
+    [[ "${MOCK_PR_FAIL:-0}" != 1 ]] || { echo "PR API unavailable" >&2; return 1; }
+    echo "${MOCK_PR_BODY}"
+    return 0
+  fi
+
   if [[ "$method" == "PUT" && "$path" == *"/dismissals" ]]; then
     local rid="${path%/dismissals}"; rid="${rid##*/}"
     if [[ "${MOCK_PUT_FAIL:-0}" == "1" ]]; then
@@ -322,7 +328,82 @@ t_quality_does_not_clear_policy_block() {
   assert_eq "no cross-lane dismissal" "0" "$(jq '.dismissed | length' <<<"$out")"
 }
 
+t_own_identity_migration() {
+  local out state sha submitted who
+  local legacy='{"id":903,"state":"CHANGES_REQUESTED","commit_id":"aaa","submitted_at":"2026-10-20T01:00:00Z","user":{"login":"github-actions[bot]"}}'
+  local MOCK_PR_BODY='{"state":"open","head":{"sha":"bbb"}}'
+  # Only a later, current-head APPROVED from the policy App may clear migration.
+  for state in APPROVED COMMENTED CHANGES_REQUESTED DISMISSED PENDING; do
+    for sha in aaa bbb; do
+      for submitted in 2026-10-19T02:00:00Z 2026-10-20T02:00:00Z; do
+        for who in 'coding-policy-fleet-reviewer[bot]' 'jbaruch-claude-reviewer[bot]'; do
+          : > "$DISMISS_LOG"
+          MOCK_REVIEWS_BODY=$(jq -nc --argjson legacy "$legacy" --arg state "$state" --arg sha "$sha" --arg submitted "$submitted" --arg who "$who" \
+            '[$legacy, {id:904,state:$state,commit_id:$sha,submitted_at:$submitted,user:{login:$who}}]') || return 1
+          out=$(main jbaruch coding-policy 1) || return 1
+          if [[ "$state/$sha/$submitted/$who" == 'APPROVED/bbb/2026-10-20T02:00:00Z/coding-policy-fleet-reviewer[bot]' ]]; then
+            assert_eq "migration dismissed only legacy" '903' "$(jq -r '.dismissed | map(.review_id) | join(",")' <<<"$out")" || return 1
+            assert_eq "migration PUT" '1' "$(dismiss_count)" || return 1
+            # The same evidence on an external repo retains its old contract.
+            : > "$DISMISS_LOG"
+            out=$(main owner repo 1) || return 1
+            assert_eq "no external cross-identity dismissal" '0' "$(dismiss_count)" || return 1
+            # Closed PRs never enter migration.
+            out=$(MOCK_PR_BODY='{"state":"closed","head":{"sha":"bbb"}}' main jbaruch coding-policy 1) || return 1
+            assert_eq "no closed-PR dismissal" '0' "$(dismiss_count)" || return 1
+          else
+            assert_eq "no dismissal for $state/$sha/$submitted/$who" '0' "$(dismiss_count)" || return 1
+            assert_eq "legacy remains active" '903' "$(jq -r '.left_active[0].review_id' <<<"$out")" || return 1
+          fi
+        done
+      done
+    done
+  done
+  # A failed native head read holds the gate and performs no PUT.
+  : > "$DISMISS_LOG"
+  if (MOCK_PR_FAIL=1 main jbaruch coding-policy 1 >/dev/null 2>&1); then
+    echo "    FAIL: unavailable migration evidence succeeded" >&2; return 1
+  fi
+  assert_eq "API failure cannot dismiss" '0' "$(dismiss_count)"
+}
+
+t_copilot_compatibility_is_external_only() {
+  MOCK_REVIEWS_BODY='[
+    {"id":905,"state":"CHANGES_REQUESTED","commit_id":"aaa","user":{"login":"copilot-pull-request-reviewer[bot]"}},
+    {"id":906,"state":"COMMENTED","commit_id":"bbb","user":{"login":"copilot-pull-request-reviewer[bot]"}}
+  ]'
+  local out
+  out=$(main jbaruch coding-policy 1) || return 1
+  assert_eq "own repo does not dismiss retired Copilot gate" '0' "$(dismiss_count)" || return 1
+  out=$(main owner repo 1) || return 1
+  assert_eq "external compatibility still dismisses" '905' "$(jq -r '.dismissed[0].review_id' <<<"$out")"
+}
+
+t_migration_sweeps_only_legacy_requests() {
+  local MOCK_PR_BODY='{"state":"open","head":{"sha":"bbb"}}'
+  MOCK_REVIEWS_BODY='[
+    {"id":911,"state":"CHANGES_REQUESTED","commit_id":"aaa","submitted_at":"2026-10-19T01:00:00Z","user":{"login":"github-actions[bot]"}},
+    {"id":912,"state":"CHANGES_REQUESTED","commit_id":"aaa","submitted_at":"2026-10-20T01:00:00Z","user":{"login":"github-actions[bot]"}},
+    {"id":913,"state":"CHANGES_REQUESTED","commit_id":"aaa","submitted_at":"2026-10-20T01:00:00Z","user":{"login":"coding-policy-fleet-reviewer[bot]"}},
+    {"id":914,"state":"CHANGES_REQUESTED","commit_id":"bbb","submitted_at":"2026-10-20T01:00:00Z","user":{"login":"human-reviewer"}},
+    {"id":915,"state":"CHANGES_REQUESTED","commit_id":"bbb","submitted_at":"2026-10-20T01:00:00Z","user":{"login":"jbaruch-claude-reviewer[bot]"}},
+    {"id":916,"state":"APPROVED","commit_id":"bbb","submitted_at":"2026-10-20T02:00:00Z","user":{"login":"coding-policy-fleet-reviewer[bot]"}}
+  ]'
+  local out
+  out=$(main jbaruch coding-policy 1) || return 1
+  assert_eq "only legacy requests dismissed" '911,912' "$(jq -r '.dismissed | map(.review_id) | join(",")' <<<"$out")" || return 1
+  assert_eq "only two PUTs" '2' "$(dismiss_count)" || return 1
+  # Replay GitHub's resulting states: migration is idempotent.
+  MOCK_REVIEWS_BODY=$(jq 'map(if .id == 911 or .id == 912 then .state = "DISMISSED" else . end)' <<<"$MOCK_REVIEWS_BODY") || return 1
+  : > "$DISMISS_LOG"
+  out=$(main jbaruch coding-policy 1) || return 1
+  assert_eq "rerun performs no PUT" '0' "$(dismiss_count)"
+}
+
 run_suite() {
+  run "migration sweeps only legacy requests and is idempotent" t_migration_sweeps_only_legacy_requests
+  run "Copilot compatibility remains external only" t_copilot_compatibility_is_external_only
+  run "own identity migration stays scoped and fails closed" t_own_identity_migration
   run "quality cannot dismiss policy findings" t_quality_does_not_clear_policy_block
   echo "test_dismiss_stale_reviews.sh" >&2
   run "stale CR then COMMENT is dismissed"        t_stale_cr_then_comment_is_dismissed

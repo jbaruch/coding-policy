@@ -301,6 +301,29 @@ t_other_reviews_do_not_suppress() {
   done
 }
 
+# A fix push earns a native approval by the same App, even while its previous
+# head still has a change request. No COMMENT fallback or dismissal is needed.
+t_app_request_then_approval() {
+  local dir out rc=0
+  dir=$(mktemp -d) || exit 2
+  GH_CAPTURE="$dir/payload.json"
+  printf '{"summary":"Blocking","findings":[{"path":"a.sh","line":1,"rule":"error-handling","severity":"blocking","message":"m"}]}' > "$dir/final.json"
+  out=$(REVIEWED_SHA="$OLDER_HEAD_SHA" run_main jbaruch coding-policy 5 "$dir/final.json") || rc=$?
+  if [[ $rc -ne 0 || "$(jq -r .event "$GH_CAPTURE")" != REQUEST_CHANGES ]]; then
+    bad "App blocking review must request changes"; rm -rf "$dir"; return
+  fi
+  MOCK_REVIEWS=$(review_page "$REVIEWER_LOGIN" CHANGES_REQUESTED "$OLDER_HEAD_SHA")
+  printf '{"summary":"Clean after fix","findings":[]}' > "$dir/final.json"
+  out=$(run_main jbaruch coding-policy 5 "$dir/final.json") || rc=$?
+  MOCK_REVIEWS='[]'
+  if [[ $rc -eq 0 && "$(jq -r .event <<<"$out")" == APPROVE && "$(jq -r .commit_id "$GH_CAPTURE")" == "$REVIEWED_SHA" ]]; then
+    ok "App request followed by clean new-head review posts native APPROVE"
+  else
+    bad "App re-review must approve the analyzed new head (rc=$rc, out=$out)"
+  fi
+  rm -rf "$dir"
+}
+
 # --- a failed review or dismissal lookup fails visibly and posts nothing ---
 t_lookup_failure_refuses_to_post() {
   local dir rc mode expect
@@ -374,6 +397,7 @@ t_invalid_json
 t_missing_or_invalid_source
 t_head_already_reviewed
 t_other_reviews_do_not_suppress
+t_app_request_then_approval
 t_lookup_failure_refuses_to_post
 t_lookup_garbage_refuses_to_post
 t_lost_response_posts_once

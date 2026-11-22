@@ -6,7 +6,7 @@
 # codex actually receives — no network, no real Codex. Deterministic, hermetic
 # (rules/testing-standards.md).
 # The "Read bounded prior feedback" step must fail the job when GitHub history
-# cannot be read or the last github-actions[bot] review ends with a malformed
+# cannot be read or the last policy App review ends with a malformed
 # blocker marker, so the review posts no verdict.
 #
 # Run: bash .github/codex-review/tests/test_review_codex_pin.sh
@@ -121,10 +121,10 @@ t_failed_history_fails_job() {
   malformed=$(cat <<'SH'
 case "$*" in
   *graphql*) cat <<'JSON' ;;
-{"data":{"node":{"body":"x\n\n<!-- coding-policy-blockers {} -->","author":{"login":"github-actions"},"commit":{"oid":"1111111111111111111111111111111111111111"},"lastEditedAt":null,"editor":null}}}
+{"data":{"node":{"body":"x\n\n<!-- coding-policy-blockers {} -->","author":{"login":"coding-policy-fleet-reviewer"},"commit":{"oid":"1111111111111111111111111111111111111111"},"lastEditedAt":null,"editor":null}}}
 JSON
   */reviews*) cat <<'JSON' ;;
-[[{"user":{"login":"github-actions[bot]"},"body":"x\n\n<!-- coding-policy-blockers {} -->",
+[[{"user":{"login":"coding-policy-fleet-reviewer[bot]"},"body":"x\n\n<!-- coding-policy-blockers {} -->",
    "created_at":"2026-11-17T00:00:00Z","commit_id":"1111111111111111111111111111111111111111","node_id":"PRR_1",
    "html_url":"https://github.com/owner/repo/pull/1#pullrequestreview-1"}]]
 JSON
@@ -150,7 +150,7 @@ SH
     expect="history unavailable"
     [[ "$stub" == "$malformed" ]] && expect="pullrequestreview-1 ends with a malformed blocker marker"
     local rc=0 out
-    out=$(cd "$work" && PATH="$bin:$PATH" RUNNER_TEMP="$work" GITHUB_REPOSITORY=owner/repo PR_NUMBER=1 REVIEWER_LOGIN='github-actions[bot]' bash step.sh 2>&1) || rc=$?
+    out=$(cd "$work" && PATH="$bin:$PATH" RUNNER_TEMP="$work" GITHUB_REPOSITORY=owner/repo PR_NUMBER=1 REVIEWER_LOGIN='coding-policy-fleet-reviewer[bot]' bash step.sh 2>&1) || rc=$?
     rmwarn "$bin" "$work"
     [[ $rc -ne 0 && "$out" == *"$expect"* ]] || { bad "failed_history: step fails with '$expect' (rc=$rc, out=$out)"; return; }
   done
@@ -169,7 +169,7 @@ t_history_reader_compatibility() {
     step && /REVIEWER_LOGIN:/ { print $2; exit }
     step && /run:/ { exit }
   ' "$WORKFLOW")
-  [[ "$login" == 'github-actions[bot]' ]] || { bad "compatibility: workflow must set REVIEWER_LOGIN"; return; }
+  [[ "$login" == 'coding-policy-fleet-reviewer[bot]' ]] || { bad "compatibility: workflow must set REVIEWER_LOGIN"; return; }
   work=$(mktemp -d) || { echo "fatal: mktemp -d failed" >&2; exit 2; }
   if ! (
     set -e
@@ -210,8 +210,43 @@ t_missing_step() {
   if [[ -z "$script" ]]; then ok "missing step extracts nothing"; else bad "missing_step: expected empty extraction"; fi
 }
 
+t_scoped_app_posting() {
+  if python3 - "$WORKFLOW" <<'PY'
+import sys
+from pathlib import Path
+
+workflow = Path(sys.argv[1]).read_text()
+mint = workflow.split("      - name: Mint the policy reviewer App installation token\n")[1].split("      - name:")[0]
+post = workflow.split("      - name: Post the review\n")[1]
+history = workflow.split("      - name: Read bounded prior feedback\n")[1].split("      - uses:")[0]
+assert "uses: actions/create-github-app-token@v3" in mint
+for setting in (
+    "app-id: ${{ secrets.FLEET_APP_ID }}",
+    "private-key: ${{ secrets.FLEET_APP_PRIVATE_KEY }}",
+    "owner: ${{ github.repository_owner }}",
+    "repositories: ${{ github.event.repository.name }}",
+    "permission-pull-requests: write",
+):
+    assert setting in mint, setting
+assert "GH_TOKEN: ${{ steps.apptoken.outputs.token }}" in post
+assert "REVIEWER_LOGIN: ${{ steps.apptoken.outputs.app-slug }}[bot]" in post
+assert "REVIEWER_LOGIN: coding-policy-fleet-reviewer[bot]" in history
+assert "GH_TOKEN: ${{ github.token }}" in history
+assert '"$REVIEWED_SHA"' in post
+assert "persist-credentials: false" in workflow
+assert "pull-requests: write" not in workflow.split("jobs:")[0]
+assert workflow.index("Guard against credential leakage") < workflow.index("Mint the policy reviewer App")
+PY
+  then
+    ok "self-review posts through the repo-scoped fleet App with matching history identity"
+  else
+    bad "self-review App credential, identity, scope or head binding is wrong"
+  fi
+}
+
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
   echo "== review-codex.yml model pin tests =="
+  t_scoped_app_posting
   t_self_review_pin
   t_failed_history_fails_job
   t_history_reader_compatibility
