@@ -38,15 +38,20 @@ run() {
 }
 
 # Canonical mock: `tessl plugin migrate` writes a minimal plugin.json into
-# cwd; `tessl plugin lint` returns MOCK_LINT_RC (default 0). Tests redefine
-# it per-scenario where they need divergent behavior.
+# cwd; `tessl plugin lint` records its call, emits on both streams, and
+# returns MOCK_LINT_RC (default 0).
 tessl() {
   case "$1 ${2:-}" in
     "plugin migrate")
       mkdir -p .tessl-plugin
       printf '{"name":"acme/widget","version":"0.1.0","description":"demo"}\n' > .tessl-plugin/plugin.json
       ;;
-    "plugin lint") return "${MOCK_LINT_RC:-0}" ;;
+    "plugin lint")
+      printf 'lint\n' >> .git/lint-calls || return 2
+      printf 'lint stdout diagnostic\n'
+      printf 'lint stderr diagnostic\n' >&2
+      return "${MOCK_LINT_RC:-0}"
+      ;;
     *) echo "mock tessl: unsupported invocation: $*" >&2; return 2 ;;
   esac
 }
@@ -105,8 +110,9 @@ t_not_a_plugin_is_noop() {
 t_legacy_happy_path() {
   local d; d=$(make_legacy_repo)
   local out rc=0
-  out=$(MOCK_LINT_RC=0 main "$d") || rc=$?
+  out=$(MOCK_LINT_RC=0 main "$d" 2>"$d/.git/migrate.stderr") || rc=$?
   assert_eq "exit" "0" "$rc" || { rm -rf "$d"; return 1; }
+  assert_eq "stderr" "" "$(<"$d/.git/migrate.stderr")" || { rm -rf "$d"; return 1; }
   assert_eq "status"             "migrated" "$(jq -r .status <<<"$out")"            || { rm -rf "$d"; return 1; }
   assert_eq "migrated"           "true"     "$(jq -r .migrated <<<"$out")"          || { rm -rf "$d"; return 1; }
   assert_eq "plugin_json"        "true"     "$(jq -r .plugin_json <<<"$out")"       || { rm -rf "$d"; return 1; }
@@ -124,30 +130,29 @@ t_legacy_happy_path() {
 }
 
 t_legacy_lint_failure_exits_one() {
-  local d; d=$(make_legacy_repo)
-  local out rc=0
-  out=$(MOCK_LINT_RC=1 main "$d" 2>/dev/null) || rc=$?
+  local d; d=$(make_legacy_repo) || return 1
+  local out err calls rc=0
+  out=$(MOCK_LINT_RC=1 main "$d" 2>"$d/.git/migrate.stderr") || rc=$?
+  err=$(<"$d/.git/migrate.stderr")
+  calls=$(<"$d/.git/lint-calls")
   rm -rf "$d"
   assert_eq "exit" "1" "$rc" || return 1
-  assert_eq "migrated" "true"  "$(jq -r .migrated <<<"$out")" || return 1
-  assert_eq "lint_ok"  "false" "$(jq -r .lint_ok <<<"$out")"
+  assert_eq "lint invocations" "lint" "$calls" || return 1
+  [[ "$err" == *"lint stdout diagnostic"* && "$err" == *"lint stderr diagnostic"* ]] \
+    || { echo "    FAIL: stderr missing lint diagnostics: $err" >&2; return 1; }
+  jq -es 'length == 1 and (.[0] | .status == "migrated" and .migrated == true and .lint_ok == false)' <<<"$out" >/dev/null \
+    || { echo "    FAIL: expected one failed migration report on stdout: $out" >&2; return 1; }
 }
 
 t_migrate_without_manifest_exits_two() {
   local d; d=$(make_legacy_repo)
-  # Override: migrate "succeeds" (rc 0) but writes no manifest.
-  tessl() { case "$1 ${2:-}" in "plugin migrate") return 0 ;; "plugin lint") return 0 ;; *) return 2 ;; esac; }
   local rc=0
-  ( main "$d" >/dev/null 2>&1 ) || rc=$?
+  (
+    # Override: migrate "succeeds" (rc 0) but writes no manifest.
+    tessl() { case "$1 ${2:-}" in "plugin migrate") return 0 ;; "plugin lint") return 0 ;; *) return 2 ;; esac; }
+    main "$d"
+  ) >/dev/null 2>&1 || rc=$?
   rm -rf "$d"
-  # Restore canonical mock for subsequent tests.
-  tessl() {
-    case "$1 ${2:-}" in
-      "plugin migrate") mkdir -p .tessl-plugin; printf '{"name":"acme/widget","version":"0.1.0","description":"demo"}\n' > .tessl-plugin/plugin.json ;;
-      "plugin lint") return "${MOCK_LINT_RC:-0}" ;;
-      *) echo "mock tessl: unsupported invocation: $*" >&2; return 2 ;;
-    esac
-  }
   assert_eq "exit" "2" "$rc"
 }
 
@@ -177,7 +182,7 @@ echo "== migrate.sh tests =="
 run "already-migrated is a no-op (exit 0)"                t_already_migrated_is_noop
 run "not-a-plugin is a no-op (exit 0)"                    t_not_a_plugin_is_noop
 run "legacy happy path migrates + sanitizes + scans"      t_legacy_happy_path
-run "lint failure after migrate exits 1"                  t_legacy_lint_failure_exits_one
+run "one failed lint emits diagnostics and a JSON report" t_legacy_lint_failure_exits_one
 run "migrate without manifest exits 2"                    t_migrate_without_manifest_exits_two
 run "pre-existing .tesslignore blocks rename"             t_existing_tesslignore_blocks_rename
 run "output is valid JSON with documented shape"          t_output_is_valid_json_with_documented_shape

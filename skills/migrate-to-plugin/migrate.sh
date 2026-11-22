@@ -21,6 +21,7 @@
 # Out:   STATUS outcomes (exit 0/1) emit one JSON object on stdout; tool/
 #        precondition errors (exit 2) emit only a stderr diagnostic and no
 #        stdout. Parse stdout only when the exit code is 0 or 1.
+#        If lint fails, its stdout and stderr are reported on stderr.
 #          {"status": "migrated"|"already-migrated"|"not-a-plugin",
 #           "migrated": bool,            # ran `tessl plugin migrate` now
 #           "plugin_json": bool,         # .tessl-plugin/plugin.json exists
@@ -155,8 +156,11 @@ main() {
     [[ ! -f tile.json ]] && tile_json_removed=true
   fi
 
-  local lint_ok=true rc=0
-  if ! tessl plugin lint >/dev/null 2>&1; then
+  local lint_ok=true rc=0 lint_output
+  if ! lint_output=$(tessl plugin lint 2>&1); then
+    if [[ -n "$lint_output" ]]; then
+      printf '%s\n' "$lint_output" >&2
+    fi
     lint_ok=false
     rc=1
   fi
