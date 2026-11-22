@@ -37,19 +37,6 @@ The full preconditions of each `rules/ci-safety.md` carve-out, moved out of the 
   2. Sole purpose is the workflow's own release bookkeeping — manifest version bump, CHANGELOG version stamp — carrying no source or test changes that need CI validation
   3. `[skip ci]` rides only on the commit pushed back to the protected branch, solely to stop self-retrigger
 
-## Bootstrap-Red Carve-Out
-
-- Applies when the PR changes a key the CI cache is bound to (an interaction hash, a schema fingerprint) AND the rebuilt cache can only be seeded from the default branch after merge
-- Pre-merge gates (all required):
-  1. The failing check's output names the guard explicitly (e.g., `InteractionMismatchError`) and shows zero test assertions executed
-  2. The consuming repo documents the merge-then-re-seed procedure in its own plugin or contributor docs
-  3. The repo owner approves the merge explicitly — review approval or a recorded dismissal of the blocking review — with a recorded commitment to the post-merge obligations
-- Post-merge obligations (both required):
-  4. The re-seed runs immediately after merge
-  5. The green re-seed result is verified and recorded on the PR or its tracking issue
-- A PR matching both Applies-when criteria and all three pre-merge gates is mergeable, and reviewers judge it on those gates rather than on the red check alone
-- Open post-merge obligations block the next use of this carve-out — complete and record them first
-
 ## Content-Only Direct-Push Carve-Out
 
 - Applies when the edited paths are prose / data artifacts a human audience reads directly — not code, not context artifacts an agent loads (rules, skills, scripts, manifests, workflow files, configuration)
