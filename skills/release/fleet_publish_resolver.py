@@ -191,17 +191,9 @@ class _Evidence:
                 )
                 self.claims.append((claim, sha))
             previous = claim
-        workflow = self.obj(
-            f"repos/{CENTRAL_REPOSITORY}/actions/workflows/fleet-publish.yml",
-            "workflow_binding",
-        )
-        _need(
-            _positive(workflow.get("id"))
-            and workflow.get("path") == CENTRAL_WORKFLOW
-            and workflow.get("state") == "active",
-            "workflow_binding",
-        )
-        self.workflow_id = workflow["id"]
+        # Archived/native attempt evidence binds the historical workflow ID.
+        # A deleted workflow need not remain addressable by filename.
+        self.workflow_id: int | None = None
 
     def obj(self, route: str, kind: str) -> dict[str, Any]:
         return _object(self.github.json(route), kind)
@@ -488,6 +480,8 @@ class _Evidence:
             }
 
         raw, attempt = native(proof["run"]), native(proof["attempt"])
+        if self.workflow_id is None:
+            self.workflow_id = raw["workflow_id"]
         self.native_row(raw, run_id)
         self.native_row(attempt, run_id)
         _need(

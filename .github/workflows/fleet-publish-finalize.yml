@@ -18,7 +18,7 @@ permissions:
 
 jobs:
   archive:
-    if: github.repository == 'jbaruch/coding-policy' && github.ref == 'refs/heads/main' && ((github.event_name == 'workflow_dispatch' && github.run_attempt == 1 && vars.FLEET_PUBLISHER_ENABLED != 'true') || (github.event_name == 'workflow_run' && github.event.workflow_run.event == 'workflow_dispatch' && github.event.workflow_run.head_branch == 'main'))
+    if: github.repository == 'jbaruch/coding-policy' && github.ref == 'refs/heads/main' && ((github.event_name == 'workflow_dispatch' && github.run_attempt == 1) || (github.event_name == 'workflow_run' && github.event.workflow_run.event == 'workflow_dispatch' && github.event.workflow_run.head_branch == 'main'))
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:

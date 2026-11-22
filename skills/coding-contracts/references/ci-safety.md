@@ -92,13 +92,6 @@
 - Lookup, refusal, exit-code and regression contracts are binding: read `skills/release/references/script-output-contracts.md` Release Readback Consumers before invoking these targets from another plugin.
 - Lookup supplies no merge, publication, installation or operator authority.
 
-## Central Publication Bookkeeping
-
-- Narrow exception for the fleet publish workflow adding an enrolled plugin's published version, source claim and changelog stamp to that plugin's default-branch history.
-- Applies only to `.github/workflows/fleet-publish.yml` in `jbaruch/coding-policy`.
-- Preconditions are binding: read `skills/release/references/fleet-publication.md` Bookkeeping Authority before relying on it.
-- Every other protected-branch write follows Protected Branches unchanged.
-
 ## Publish Outcomes
 
 - A red publish run is never proof that publishing was blocked

@@ -84,11 +84,11 @@ class HistoricalGit(writer.HistoricalGitHub):
             ),
         ):
             self.original.routes[
-                f"repos/{CENTRAL}/actions/workflows/{path.rsplit('/', 1)[1]}"
+                f"repos/{CENTRAL}/actions/workflows/{workflow_id if path == writer.CENTRAL_WORKFLOW else path.rsplit('/', 1)[1]}"
             ] = {
                 "id": workflow_id,
                 "path": path,
-                "state": "active",
+                "state": "deleted" if path == writer.CENTRAL_WORKFLOW else "active",
             }
             self.original.routes[
                 f"repos/{CENTRAL}/actions/workflows/{workflow_id}/runs?per_page=100&page=1"
@@ -169,8 +169,7 @@ class HistoricalGit(writer.HistoricalGitHub):
     def artifact_evidence(self, run, kind):
         return self.original.artifact_evidence(run, kind)
 
-    def api(self, path, payload=None, *, binary=False, method="POST") -> Any:
-        assert binary is False and method == "POST"
+    def api(self, path, payload=None) -> Any:
         if payload is not None:
             self.writes.append((path, copy.deepcopy(payload)))
             return self.effects.api(path, payload)
@@ -613,7 +612,7 @@ class HistoricalWriterTests(unittest.TestCase):
                 actual = self.github.api
                 reached = False
 
-                def missed(route, payload=None, *, binary=False, method="POST"):
+                def missed(route, payload=None):
                     nonlocal reached
                     if "/77/runs?status=waiting&per_page=100" in route:
                         reached = True
@@ -626,7 +625,7 @@ class HistoricalWriterTests(unittest.TestCase):
                             self.github.catalog(77)["workflow_runs"][1]["status"] = (
                                 "queued"
                             )
-                    return actual(route, payload, binary=binary, method=method)
+                    return actual(route, payload)
 
                 with patch.object(self.github, "api", side_effect=missed):
                     with self.assertRaises(writer.ArchiveWriteRefused):
@@ -653,9 +652,9 @@ class HistoricalWriterTests(unittest.TestCase):
                 actual = self.github.api
                 calls = 0
 
-                def damaged(route, payload=None, *, binary=False, method="POST"):
+                def damaged(route, payload=None):
                     nonlocal calls
-                    result = actual(route, payload, binary=binary, method=method)
+                    result = actual(route, payload)
                     if "/77/runs?" in route and "per_page=1&" in route:
                         calls += 1
                         if change == "missing-total":
@@ -704,8 +703,8 @@ class HistoricalWriterTests(unittest.TestCase):
         )
         actual = self.github.api
 
-        def contradictory(route, payload=None, *, binary=False, method="POST"):
-            result = actual(route, payload, binary=binary, method=method)
+        def contradictory(route, payload=None):
+            result = actual(route, payload)
             if "/78/runs?status=completed&per_page=1" in route:
                 result["workflow_runs"] = [
                     {**current, "status": "completed", "conclusion": "success"}
@@ -742,9 +741,9 @@ class HistoricalWriterTests(unittest.TestCase):
                     route = f"repos/{CENTRAL}/actions/runs/{run_id}"
                     calls = 0
 
-                    def changed(path, payload=None, *, binary=False, method="POST"):
+                    def changed(path, payload=None):
                         nonlocal calls
-                        result = actual(path, payload, binary=binary, method=method)
+                        result = actual(path, payload)
                         if path == route:
                             calls += 1
                             if calls == (3 if after_write else 2):
@@ -800,10 +799,10 @@ class HistoricalWriterTests(unittest.TestCase):
         actual = self.github.api
         unavailable = OSError("synthetic unavailable native catalog")
 
-        def failed_catalog(route, payload=None, *, binary=False, method="POST"):
+        def failed_catalog(route, payload=None):
             if "/actions/workflows/" in route:
                 raise unavailable
-            return actual(route, payload, binary=binary, method=method)
+            return actual(route, payload)
 
         with patch.object(self.github, "api", side_effect=failed_catalog):
             with self.assertRaises(OSError) as caught:
@@ -844,7 +843,7 @@ class HistoricalWriterTests(unittest.TestCase):
                 page = self.github.catalog(77)
                 current = self.github.catalog(78)["workflow_runs"][0]
                 metadata = self.github.original.routes[
-                    f"repos/{CENTRAL}/actions/workflows/fleet-publish.yml"
+                    f"repos/{CENTRAL}/actions/workflows/77"
                 ]
                 if change in ("missing-attester", "empty-publisher"):
                     page = self.github.catalog(
@@ -905,7 +904,7 @@ class HistoricalWriterTests(unittest.TestCase):
                             )
                         else:
                             self.github.original.routes[
-                                f"repos/{CENTRAL}/actions/workflows/fleet-publish.yml"
+                                f"repos/{CENTRAL}/actions/workflows/77"
                             ]["id"] = 78
                     return result
 
@@ -1019,15 +1018,14 @@ class HistoricalCredentialTransportTests(unittest.TestCase):
                 for kind in ("blobs", "trees", "commits", "refs"):
                     self.assertEqual(github.api(f"repos/{CENTRAL}/git/{kind}", {"fixture": True}), {"sha": "fixture-write"})
                 recorded = log.read_bytes()
-                for route, payload, method in (
-                    (f"repos/{repo}/git/refs", {"fixture": True}, "POST"),
-                    (f"repos/{CENTRAL}/releases", {"fixture": True}, "POST"),
-                    (f"repos/{CENTRAL}/git/refs", {"fixture": True}, "PATCH"),
-                    (f"repos/{repo}-suffix/git/refs", None, "POST"),
-                    ("repos/jbaruch/unselected/git/refs", None, "POST"),
+                for route, payload in (
+                    (f"repos/{repo}/git/refs", {"fixture": True}),
+                    (f"repos/{CENTRAL}/releases", {"fixture": True}),
+                    (f"repos/{repo}-suffix/git/refs", None),
+                    ("repos/jbaruch/unselected/git/refs", None),
                 ):
                     with self.assertRaises(writer.ArchiveWriteRefused):
-                        github.api(route, payload, method=method)
+                        github.api(route, payload)
                 with self.assertRaises(writer.ArchiveWriteRefused):
                     github.bind_consumer("jbaruch/unselected")
                 self.assertEqual(log.read_bytes(), recorded)

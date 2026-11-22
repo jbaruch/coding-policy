@@ -41,7 +41,7 @@ Moved from `rules/ci-safety.md` (#642) to keep the always-loaded rules under the
   - Verify the version actually published on the channel that carried it
   - Never report a release confirmed while its publish is unconfirmed
 - Two runs matching all four binding facts are an ambiguity to resolve, never a winner to pick — see `skills/release/resolve-publish-run.sh` header
-- Central fleet publication is the scoped consumer mode in `skills/release/references/fleet-publication.md`; read it in full before selecting or confirming that mode. It binds the consumer's merged source separately from the central workflow commit and native dispatch attempt. Legacy push selection remains unchanged. Every registry and moderation conjunct below still binds; central confirmation additionally requires the exact source-bound receipt version and its original successful publish evidence.
+- Historical central fleet publication is the retired consumer mode in `skills/release/references/fleet-publication.md`; read it in full before selecting or confirming that mode. It binds the consumer's merged source separately from the central workflow commit and native dispatch attempt. Legacy push selection remains unchanged. Every registry and moderation conjunct below still binds; central confirmation additionally requires the exact source-bound receipt version and its original successful publish evidence.
 - Release contract:
   1. Before merge: capture the registry's `Latest Version` as baseline
   2. After merge: resolve the publish run by merge-commit `headSha` + `push` event filter
