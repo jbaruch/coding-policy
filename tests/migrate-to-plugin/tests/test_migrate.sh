@@ -40,6 +40,7 @@ run() {
 # Canonical mock: `tessl plugin migrate` writes a minimal plugin.json into
 # cwd; `tessl plugin lint` records its call, emits fixture diagnostics on
 # both streams by default, and returns MOCK_LINT_RC (default 0).
+# Stdout supports printf escapes for byte fixtures.
 tessl() {
   case "$1 ${2:-}" in
     "plugin migrate")
@@ -48,7 +49,7 @@ tessl() {
       ;;
     "plugin lint")
       printf 'lint\n' >> .git/lint-calls || return 2
-      printf '%s' "${MOCK_LINT_STDOUT-$'lint stdout diagnostic\n'}"
+      printf '%b' "${MOCK_LINT_STDOUT-$'lint stdout diagnostic\n'}"
       printf '%s' "${MOCK_LINT_STDERR-$'lint stderr diagnostic\n'}" >&2
       return "${MOCK_LINT_RC:-0}"
       ;;
@@ -160,7 +161,7 @@ t_lint_and_scan_failure_exits_two() {
   local err calls rc=0 persisted=0
   (
     grep() { return 2; }
-    MOCK_LINT_RC=1 MOCK_LINT_STDOUT="$yaml_lint_excerpt" main "$d"
+    MOCK_LINT_RC=1 MOCK_LINT_STDOUT="$yaml_lint_excerpt"'\000' main "$d"
   ) >"$d/.git/migrate.stdout" 2>"$d/.git/migrate.stderr" || rc=$?
   if [[ -s "$d/.git/migrate.stdout" ]]; then
     echo "    FAIL: expected empty stdout: $(<"$d/.git/migrate.stdout")" >&2
@@ -227,7 +228,7 @@ MOCK_LINT_RC=1 MOCK_LINT_STDOUT='✘ Unrecognized diagnostic with INERT_PRIVATE_
 MOCK_LINT_RC=70 MOCK_LINT_STDOUT='' MOCK_LINT_STDERR='' \
   run "silent lint failure reports the status and repair targets" t_legacy_lint_failure_exits_one \
     "migrate: 'tessl plugin lint' exited 70 with no recognized diagnostic. Inspect .tessl-plugin/plugin.json and the frontmatter in its listed SKILL.md files. Run 'tessl --version' to check the CLI."
-run "lint and scan failure reports only the scan error"    t_lint_and_scan_failure_exits_two
+run "NUL in lint output with scan failure reports only the scan error" t_lint_and_scan_failure_exits_two
 run "migrate without manifest exits 2"                    t_migrate_without_manifest_exits_two
 run "pre-existing .tesslignore blocks rename"             t_existing_tesslignore_blocks_rename
 run "output is valid JSON with documented shape"          t_output_is_valid_json_with_documented_shape

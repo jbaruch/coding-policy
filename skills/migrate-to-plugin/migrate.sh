@@ -160,8 +160,8 @@ main() {
 
   local lint_ok lint_output lint_status=0
   # Capture both streams in memory so a lint diagnostic cannot reach the caller
-  # before the residual scan succeeds.
-  if lint_output=$(tessl plugin lint 2>&1); then
+  # before the residual scan succeeds. Bash can warn while discarding NULs.
+  if { lint_output=$(tessl plugin lint 2>&1); } 2>/dev/null; then
     lint_ok=true
   else
     lint_status=$?
