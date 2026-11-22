@@ -151,6 +151,7 @@ jobs:
           name: codex-review-result
           path: /tmp/codex-final.json
           retention-days: 1
+          overwrite: true
 
   # Token minting and review posting run on a clean runner that never ran the
   # Codex review.  GitHub prepares action executables before any job step runs;
@@ -164,15 +165,31 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      pull-requests: write
+      pull-requests: read
     steps:
       - uses: actions/checkout@v7
         with:
-          ref: ${{ github.event.pull_request.head.sha }}
+          # Executable scripts must come from the protected default branch,
+          # not the PR head — including for PRs that target a non-default
+          # branch.  A PR contributor cannot substitute their own scripts into
+          # the privileged posting step.  The reviewed commit remains
+          # authoritative from github.event.pull_request.head.sha (the GitHub
+          # event context), independently of which revision supplies the
+          # executables.
+          ref: ${{ github.event.repository.default_branch }}
           persist-credentials: false
+          sparse-checkout-cone-mode: false
           sparse-checkout: |
             .github/codex-review/post-review.sh
             skills/release/poll-pr-reviews.sh
+            skills/release/review-lanes.sh
+
+      - name: Identify trusted executable revision
+        run: |
+          set -euo pipefail
+          rev=$(git rev-parse HEAD)
+          echo "Executable scripts loaded from: ${{ github.event.repository.default_branch }} (${rev})"
+          echo "Reviewed commit bound from event: ${{ github.event.pull_request.head.sha }}"
 
       - name: Download review result
         uses: actions/download-artifact@v4
