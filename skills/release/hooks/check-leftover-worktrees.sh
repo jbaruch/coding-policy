@@ -3,37 +3,35 @@
 # operator can decide.
 #
 # Worktrees and branches pile up faster than anyone removes them by hand. This
-# hook runs the two owner scripts for the session's repository, live, so
+# hook runs the owner script for the session's repository, live, so
 # everything recoverable from origin goes without a word: idle clean worktrees
-# origin holds, local branches origin holds or merged, and branches on origin
-# merged with no open pull request. The decisions are the owner scripts', never
-# this hook's (rules/script-as-black-box.md):
+# origin holds and local branches origin holds or merged. The decisions are
+# the owner script's, never this hook's (rules/script-as-black-box.md):
 #   - lib/prune-worktrees.sh — worktrees and local branches
-#   - lib/prune-remote-branches.sh — branches on origin
-# What they keep because it exists nowhere else is listed for the operator:
-# idle dirty or unpushed worktrees, idle local branches with unpushed commits,
-# and stale branches on origin merged nowhere with no pull request. Nothing
-# else is listed: no removals, no counts, no other repository.
+# What it keeps because it exists nowhere else is listed for the operator:
+# idle dirty or unpushed worktrees and idle local branches with unpushed commits.
+# Nothing else is listed: no removals, no counts, no other repository.
+# GitHub's delete-branch-on-merge setting handles merged PR branches on origin.
 #
 # Contract:
 #   stdin : consensus SessionStart JSON — not read.
 #   stdout: at most one JSON object {"additionalContext": "<status>"}. The
 #           status holds up to two "Session-start status — " paragraphs: the
 #           items awaiting the operator's decision, each with its command, and
-#           one "could not check" line naming every owner script that failed,
-#           ran out of time, reported an undecided item, or could not reach
-#           gh, with the command to rerun it. A missing git or python3 is
+#           one "could not check" line naming the owner script if it failed,
+#           ran out of time or reported an undecided item, with the command
+#           to rerun it. A missing git or python3 is
 #           that line too, a fixed JSON string printed without either tool.
 #           Silent when neither applies, outside a repository, in a
 #           repository without an origin remote, and in a bare repository.
-#   stderr: the owner scripts' diagnostics, relayed, plus this hook's warnings.
+#   stderr: the owner script's diagnostics, relayed, plus this hook's warnings.
 #   exit  : always 0 (a failure is the "could not check" line, never silence
 #           and never a failed session start).
 #   env   : LEFTOVER_BUDGET_SEC overrides BUDGET_SEC; WORKTREE_ROOT and the
-#           PRUNE_* variables pass through to the owner scripts.
+#           PRUNE_* variables pass through to the owner script.
 set -euo pipefail
 
-#: Wall-clock seconds for both owner scripts together. Session start waits on
+#: Wall-clock seconds for the owner script. Session start waits on
 #: this hook, and the network is the part that can hang.
 BUDGET_SEC="${LEFTOVER_BUDGET_SEC:-40}"
 
@@ -166,8 +164,8 @@ sys.stdout.buffer.write(first[0][len(b"worktree "):] + b"x")
   here="${here%x}"
   here="${here%$'\n'}"
   local runner="${here}/../lib/bounded-run.sh" prune="${here}/../lib/prune-worktrees.sh"
-  local remote="${here}/../lib/prune-remote-branches.sh" f
-  for f in "$runner" "$prune" "$remote"; do
+  local f
+  for f in "$runner" "$prune"; do
     if [[ ! -f "$f" || ! -r "$f" ]]; then
       cannot_check "${f} is not readable; reinstall the plugin."
       return 0
@@ -181,41 +179,29 @@ sys.stdout.buffer.write(first[0][len(b"worktree "):] + b"x")
   trap discard RETURN
 
   # Nothing may stop to ask for a credential: an unattended prompt is a hang.
-  export GIT_TERMINAL_PROMPT=0 GH_PROMPT_DISABLED=1
+  export GIT_TERMINAL_PROMPT=0
   # Appended, never a default: a user-set command keeps BatchMode too.
   export GIT_SSH_COMMAND="${GIT_SSH_COMMAND:-ssh} -o BatchMode=yes"
 
-  local start=$SECONDS left prune_rc=0 remote_rc=0
+  local prune_rc=0
   bash "$runner" "$BUDGET_SEC" bash "$prune" "$shared" \
     >"${SCRATCH}/prune.json" 2>"${SCRATCH}/prune.err" || prune_rc=$?
   relay "${SCRATCH}/prune.err"
-  left=$(( BUDGET_SEC - (SECONDS - start) ))
-  if (( left > 0 )); then
-    bash "$runner" "$left" bash "$remote" "$shared" \
-      >"${SCRATCH}/remote.json" 2>"${SCRATCH}/remote.err" || remote_rc=$?
-    relay "${SCRATCH}/remote.err"
-  else
-    remote_rc=124
-  fi
 
   rc=0
-  python3 - "$shared" "$prune" "$prune_rc" "${SCRATCH}/prune.json" \
-      "$remote" "$remote_rc" "${SCRATCH}/remote.json" <<'PY' || rc=$?
+  python3 - "$shared" "$prune" "$prune_rc" "${SCRATCH}/prune.json" <<'PY' || rc=$?
 import json
 import os
 import shlex
 import sys
 
-shared, prune, prune_rc, prune_out, remote, remote_rc, remote_out = sys.argv[1:8]
+shared, prune, prune_rc, prune_out = sys.argv[1:5]
 items, failures = [], []
 
 
-# The result shapes are the prune scripts' own; one module checks them for
-# every reader (lib/prune_result.py).
+# The result shape belongs to the owner script (lib/prune_result.py).
 sys.path.insert(0, os.path.dirname(prune))
-from prune_result import prune_schema_error, remote_schema_error
-
-SCHEMA = {prune: prune_schema_error, remote: remote_schema_error}
+from prune_result import prune_schema_error
 
 
 def load(path, rc, script):
@@ -234,14 +220,12 @@ def load(path, rc, script):
     if rc not in ("0", "2") or not isinstance(doc, dict):
         failures.append("{} exited {} (run {})".format(name, rc, rerun))
         return None
-    why = SCHEMA[script](doc)
+    why = prune_schema_error(doc)
     if why:
         failures.append("{} exited {} with a result holding {} (run {})".format(name, rc, why, rerun))
         return None
     if doc.get("failed"):
         failures.append("{} could not decide {} item(s) (run {})".format(name, len(doc["failed"]), rerun))
-    if doc.get("could_not_check"):
-        failures.append("{}: {}".format(name, doc["could_not_check"]))
     return doc
 
 
@@ -260,12 +244,6 @@ if local is not None:
             items.append("local branch {}: {} unpushed commit(s), idle {}h — `{}`".format(
                 kept["branch"], kept["unpushed_commits"], kept["age_hours"], kept["command"]))
 
-origin = load(remote_out, remote_rc, remote)
-if origin is not None:
-    for q in origin.get("questionable", []):
-        items.append("origin branch {}: {} commit(s) not in {}, no open pull request, last commit {}h ago by {} — `{}` or `{}`".format(
-            q["branch"], q["ahead"], origin.get("default_branch"), q["age_hours"], q["author"], q["open_pr"], q["delete"]))
-
 paragraphs = []
 if items:
     lines = ["Session-start status — {} item(s) in this repository hold work only the operator can decide on; "
@@ -280,7 +258,7 @@ if paragraphs:
     print(json.dumps({"additionalContext": "\n\n".join(paragraphs)}))
 PY
   if (( rc != 0 )); then
-    cannot_check "the owner scripts' results could not be read (exit ${rc}); run \`bash ${prune} ${shared} --dry-run\` to see them."
+    cannot_check "the owner script's result could not be read (exit ${rc}); run \`bash ${prune} ${shared} --dry-run\` to see it."
   fi
   return 0
 }

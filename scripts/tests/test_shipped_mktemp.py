@@ -39,11 +39,12 @@ def offending_calls(text):
 
 
 def shipped_scripts():
-    """Tracked shell scripts under skills/, excluding test trees."""
+    """Tracked shell scripts present under skills/, excluding test trees."""
     listing = subprocess.run(["git", "ls-files", "skills"], cwd=ROOT,
                              capture_output=True, text=True, check=True)
     return sorted(path for path in listing.stdout.split()
-                  if path.endswith(".sh") and "/tests/" not in path)
+                  if path.endswith(".sh") and "/tests/" not in path
+                  and (ROOT / path).is_file())
 
 
 class Matcher(unittest.TestCase):

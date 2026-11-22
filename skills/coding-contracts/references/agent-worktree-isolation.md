@@ -35,13 +35,11 @@
 - The session-start hook `skills/release/hooks/check-leftover-worktrees.sh` cleans the session's own repository, natively and under tessl
 - It removes an idle clean worktree whose HEAD origin holds
 - It deletes a local branch whose tip origin holds or whose tip origin's default branch contains
-- It deletes an unprotected branch on origin merged into the default branch with no open pull request
-- The removal and deletion predicates live in `skills/release/lib/prune-worktrees.sh` and `skills/release/lib/prune-remote-branches.sh` (top-of-file docstrings)
+- GitHub's delete-branch-on-merge setting handles merged PR branches on origin
+- The removal and deletion predicates live in `skills/release/lib/prune-worktrees.sh` (top-of-file docstring)
 - A dirty or unpushed idle worktree is reported, never removed automatically
 - A local branch holding commits origin lacks is never deleted automatically
 - It is reported once idle
-- An unmerged branch on origin with no pull request is never deleted automatically
-- It is reported once stale
 - A protected branch on origin is never touched or reported
 - A reported item follows `rules/hook-action-reporting.md` Act on What It Names
 - Leave no orphans in `git worktree list`

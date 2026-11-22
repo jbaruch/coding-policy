@@ -1,21 +1,15 @@
-"""Shape checks shared by every reader of the two prune scripts' results."""
+"""Shape checks for the local cleanup result rendered by the session-start hook."""
 import sys
 import unittest
 from pathlib import Path
 
 sys.path.insert(0, str((Path(__file__).resolve().parents[3] / "skills/release/lib")))
 
-from prune_result import prune_schema_error, remote_schema_error
+from prune_result import prune_schema_error
 
 
 def prune_doc(**over):
     doc = {"worktrees_removed": [], "worktrees_kept": [], "branches_deleted": [], "branches_kept": [], "failed": []}
-    doc.update(over)
-    return doc
-
-
-def remote_doc(**over):
-    doc = {"deleted": [], "questionable": [], "kept": [], "failed": [], "could_not_check": None, "default_branch": "main"}
     doc.update(over)
     return doc
 
@@ -43,15 +37,6 @@ class PruneResultTest(unittest.TestCase):
         for why, doc in cases.items():
             with self.subTest(why=why):
                 self.assertEqual(prune_schema_error(doc), why)
-
-    def test_remote_result(self):
-        self.assertIsNone(remote_schema_error(remote_doc()))
-        self.assertEqual(remote_schema_error(remote_doc(default_branch=None)), "no default_branch")
-        self.assertEqual(remote_schema_error(remote_doc(questionable=[{"branch": "b"}])), "a malformed questionable entry")
-        self.assertEqual(remote_schema_error(remote_doc(failed=[None])), "a malformed failed entry")
-        self.assertEqual(remote_schema_error(remote_doc(deleted=[None])), "a malformed deleted entry")
-        self.assertEqual(remote_schema_error(remote_doc(kept=[{}])), "a malformed kept entry")
-        self.assertEqual(remote_schema_error({"deleted": []}), "no questionable list")
 
 
 if __name__ == "__main__":
