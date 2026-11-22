@@ -38,8 +38,8 @@ run() {
 }
 
 # Canonical mock: `tessl plugin migrate` writes a minimal plugin.json into
-# cwd; `tessl plugin lint` records its call, emits on both streams, and
-# returns MOCK_LINT_RC (default 0).
+# cwd; `tessl plugin lint` records its call, emits on both streams unless
+# MOCK_LINT_SILENT is set, and returns MOCK_LINT_RC (default 0).
 tessl() {
   case "$1 ${2:-}" in
     "plugin migrate")
@@ -48,8 +48,10 @@ tessl() {
       ;;
     "plugin lint")
       printf 'lint\n' >> .git/lint-calls || return 2
-      printf 'lint stdout diagnostic\n'
-      printf 'lint stderr diagnostic\n' >&2
+      if [[ -z ${MOCK_LINT_SILENT:-} ]]; then
+        printf 'lint stdout diagnostic\n'
+        printf 'lint stderr diagnostic\n' >&2
+      fi
       return "${MOCK_LINT_RC:-0}"
       ;;
     *) echo "mock tessl: unsupported invocation: $*" >&2; return 2 ;;
@@ -144,6 +146,42 @@ t_legacy_lint_failure_exits_one() {
     || { echo "    FAIL: expected one failed migration report on stdout: $out" >&2; return 1; }
 }
 
+t_silent_lint_failure_exits_one() {
+  local d; d=$(make_legacy_repo) || return 1
+  local out err calls rc=0
+  out=$(MOCK_LINT_RC=70 MOCK_LINT_SILENT=1 main "$d" 2>"$d/.git/migrate.stderr") || rc=$?
+  err=$(<"$d/.git/migrate.stderr")
+  calls=$(<"$d/.git/lint-calls")
+  rm -rf "$d"
+  assert_eq "exit" "1" "$rc" || return 1
+  assert_eq "lint invocations" "lint" "$calls" || return 1
+  assert_eq "stderr" "migrate: 'tessl plugin lint' exited 70 without diagnostics. Run 'tessl --version' to check the CLI." "$err" || return 1
+  jq -es '. == [{status: "migrated", migrated: true, plugin_json: true,
+    tileignore_renamed: true, tile_json_removed: true, lint_ok: false,
+    residual_tile_refs: 1, residual_files: ["rules/intro.md"]}]' <<<"$out" >/dev/null \
+    || { echo "    FAIL: expected one failed migration report on stdout: $out" >&2; return 1; }
+}
+
+t_lint_and_scan_failure_exits_two() {
+  local d; d=$(make_legacy_repo) || return 1
+  local err calls rc=0
+  (
+    grep() { return 2; }
+    MOCK_LINT_RC=1 main "$d"
+  ) >"$d/.git/migrate.stdout" 2>"$d/.git/migrate.stderr" || rc=$?
+  if [[ -s "$d/.git/migrate.stdout" ]]; then
+    echo "    FAIL: expected empty stdout: $(<"$d/.git/migrate.stdout")" >&2
+    rm -rf "$d"
+    return 1
+  fi
+  err=$(<"$d/.git/migrate.stderr")
+  calls=$(<"$d/.git/lint-calls")
+  rm -rf "$d"
+  assert_eq "exit" "2" "$rc" || return 1
+  assert_eq "lint invocations" "lint" "$calls" || return 1
+  assert_eq "stderr" "migrate.sh: residual-file scan failed (grep rc=2) — the tree could not be fully read, so a 'no residual files' result cannot be trusted; check directory permissions, then re-run" "$err"
+}
+
 t_migrate_without_manifest_exits_two() {
   local d; d=$(make_legacy_repo)
   local rc=0
@@ -183,6 +221,8 @@ run "already-migrated is a no-op (exit 0)"                t_already_migrated_is_
 run "not-a-plugin is a no-op (exit 0)"                    t_not_a_plugin_is_noop
 run "legacy happy path migrates + sanitizes + scans"      t_legacy_happy_path
 run "one failed lint emits diagnostics and a JSON report" t_legacy_lint_failure_exits_one
+run "silent lint failure reports its status and CLI check" t_silent_lint_failure_exits_one
+run "lint and scan failure reports only the scan error"    t_lint_and_scan_failure_exits_two
 run "migrate without manifest exits 2"                    t_migrate_without_manifest_exits_two
 run "pre-existing .tesslignore blocks rename"             t_existing_tesslignore_blocks_rename
 run "output is valid JSON with documented shape"          t_output_is_valid_json_with_documented_shape

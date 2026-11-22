@@ -21,7 +21,8 @@
 # Out:   STATUS outcomes (exit 0/1) emit one JSON object on stdout; tool/
 #        precondition errors (exit 2) emit only a stderr diagnostic and no
 #        stdout. Parse stdout only when the exit code is 0 or 1.
-#        If lint fails, its stdout and stderr are reported on stderr.
+#        On exit 1, lint's stdout and stderr are reported on stderr. If lint
+#        produced no diagnostics, stderr reports its exit status and a CLI check.
 #          {"status": "migrated"|"already-migrated"|"not-a-plugin",
 #           "migrated": bool,            # ran `tessl plugin migrate` now
 #           "plugin_json": bool,         # .tessl-plugin/plugin.json exists
@@ -156,13 +157,12 @@ main() {
     [[ ! -f tile.json ]] && tile_json_removed=true
   fi
 
-  local lint_ok=true rc=0 lint_output
-  if ! lint_output=$(tessl plugin lint 2>&1); then
-    if [[ -n "$lint_output" ]]; then
-      printf '%s\n' "$lint_output" >&2
-    fi
+  local lint_ok lint_output lint_status=0
+  if lint_output=$(tessl plugin lint 2>&1); then
+    lint_ok=true
+  else
+    lint_status=$?
     lint_ok=false
-    rc=1
   fi
 
   # Capture, then emit — see the already-migrated path above.
@@ -170,10 +170,16 @@ main() {
   residual=$(scan_residual_files) || exit 2
   emit "migrated" true true "$tileignore_renamed" "$tile_json_removed" "$lint_ok" "$residual"
 
-  if [[ $rc -ne 0 ]]; then
-    echo "migrate: 'tessl plugin lint' failed after migration — inspect the lint output and fix before publishing" >&2
+  if [[ "$lint_ok" == false ]]; then
+    if [[ -n "$lint_output" ]]; then
+      printf '%s\n' "$lint_output" >&2
+      echo "migrate: 'tessl plugin lint' failed after migration — inspect the lint output and fix before publishing" >&2
+    else
+      printf "migrate: 'tessl plugin lint' exited %s without diagnostics. Run 'tessl --version' to check the CLI.\n" "$lint_status" >&2
+    fi
+    exit 1
   fi
-  exit "$rc"
+  exit 0
 }
 
 [[ "${BASH_SOURCE[0]}" == "${0}" ]] && main "$@"
