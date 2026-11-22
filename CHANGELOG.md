@@ -1,3 +1,7 @@
+## 0.10.27 — 2026-11-22
+
+- fix(release): Stop deleting remote branches at session start (#878)
+
 ## 0.10.26 — 2026-11-21
 
 - docs(release): Require verified delivery for fixes to published behavior (#877)
