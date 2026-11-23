@@ -146,7 +146,7 @@ jobs:
       # Upload the review result so the isolated post job can consume it on a
       # clean runner that never ran Codex or touched the subscription credential.
       - name: Upload review result
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: codex-review-result
           path: /tmp/codex-final.json
@@ -192,7 +192,7 @@ jobs:
           echo "Reviewed commit bound from event: ${{ github.event.pull_request.head.sha }}"
 
       - name: Download review result
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: codex-review-result
           path: ${{ runner.temp }}/review-artifact
