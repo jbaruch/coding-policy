@@ -98,7 +98,7 @@ main() {
   fi
 
   local dismissed="[]" left_active="[]"
-  local login reviews latest_state stale migration_clear pr_info app_reviews
+  local login reviews latest_state stale migration_head pr_info app_reviews
   local default_message="$DISMISS_MESSAGE" DISMISS_MESSAGE="$DISMISS_MESSAGE"
 
   for login in "${GATING_BOTS[@]}"; do
@@ -106,7 +106,7 @@ main() {
       continue
     fi
     DISMISS_MESSAGE="$default_message"
-    migration_clear=false
+    migration_head=""
     reviews=$(reviews_by "$owner" "$repo" "$pr" "$login") \
       || { echo "error: failed to fetch reviews for ${login} on ${owner}/${repo}#${pr} — run 'gh auth status' to verify auth, then retry" >&2; exit 1; }
 
@@ -115,55 +115,52 @@ main() {
 
     latest_state=$(jq -r '.[-1].state' <<<"$reviews")
 
-    # The identity cutover cannot natively supersede an old workflow-bot gate.
-    # Never infer policy approval from quality, a comment or workflow success.
-    if [[ "$owner/$repo" == jbaruch/coding-policy && "$login" == 'github-actions[bot]' && "$latest_state" == CHANGES_REQUESTED ]]; then
-      pr_info=$(gh api "repos/${owner}/${repo}/pulls/${pr}") \
-        || { echo "error: cannot read migration PR state/head — check 'gh auth status' and retry" >&2; exit 1; }
-      app_reviews=$(reviews_by "$owner" "$repo" "$pr" 'coding-policy-fleet-reviewer[bot]') \
-        || { echo "error: cannot read migration policy App reviews — restore GitHub API access and retry" >&2; exit 1; }
-      migration_clear=$(jq -nr --argjson pr "$pr_info" --argjson app "$app_reviews" --argjson legacy "$reviews" '
-        $app[-1] as $approval | $legacy[-1] as $old |
-        $pr.state == "open" and ($pr.head.sha | type == "string" and length > 0)
-        and $approval.state == "APPROVED" and $approval.commit_id == $pr.head.sha
-        and ($approval.submitted_at > $old.submitted_at)') \
-        || { echo "error: invalid migration review evidence — inspect the PR and review API responses, then retry" >&2; exit 1; }
-      if [[ "$migration_clear" == true ]]; then
+    if [[ "$latest_state" == CHANGES_REQUESTED ]]; then
+      stale=""
+      # Migration may clear the latest legacy request as well as earlier ones.
+      if [[ "$owner/$repo" == jbaruch/coding-policy && "$login" == 'github-actions[bot]' ]]; then
+        stale=$(jq -c '.[] | select(.state == "CHANGES_REQUESTED")' <<<"$reviews")
         DISMISS_MESSAGE="Superseded by a later current-head policy App approval during coding-policy's github-actions[bot] migration — dismissed by the release skill."
       fi
-    fi
-
-    # The bot's current verdict is still CHANGES_REQUESTED: leave it gating.
-    if [[ "$latest_state" == "CHANGES_REQUESTED" && "$migration_clear" != true ]]; then
-      left_active=$(jq --arg login "$login" \
-        '. + [{login: $login, review_id: '"$(jq '.[-1].id' <<<"$reviews")"'}]' <<<"$left_active")
-      continue
-    fi
-
-    if [[ "$migration_clear" != true && "$latest_state" != "COMMENTED" && "$latest_state" != "APPROVED" ]]; then
-      continue
-    fi
-
-    # Latest is an all-clear — dismiss every EARLIER review still in
-    # CHANGES_REQUESTED (already-DISMISSED ones are excluded, so re-runs
-    # are no-ops).
-    if [[ "$migration_clear" == true ]]; then
-      stale=$(jq -c '.[] | select(.state == "CHANGES_REQUESTED")' <<<"$reviews")
-    else
+    elif [[ "$latest_state" == COMMENTED || "$latest_state" == APPROVED ]]; then
       stale=$(jq -c '.[:-1][] | select(.state == "CHANGES_REQUESTED")' <<<"$reviews")
+    else
+      continue
     fi
-    [[ -z "$stale" ]] && continue
 
     local row rid cid
     while IFS= read -r row; do
       [[ -z "$row" ]] && continue
       rid=$(jq -r '.id' <<<"$row")
       cid=$(jq -r '.commit_id' <<<"$row")
+      if [[ "$latest_state" == CHANGES_REQUESTED ]]; then
+        # Refresh authorization for each migration PUT. Read the PR last and
+        # stop if its head differs from the one that started the sweep.
+        app_reviews=$(reviews_by "$owner" "$repo" "$pr" 'coding-policy-fleet-reviewer[bot]') \
+          || { echo "error: cannot read migration policy App reviews — restore GitHub API access and retry" >&2; exit 1; }
+        pr_info=$(gh api "repos/${owner}/${repo}/pulls/${pr}") \
+          || { echo "error: cannot read migration PR state/head — check 'gh auth status' and retry" >&2; exit 1; }
+        migration_head=$(jq -nr --argjson pr "$pr_info" --argjson app "$app_reviews" \
+          --argjson legacy "$reviews" --arg sweep_head "$migration_head" '
+          $app[-1] as $approval | $legacy[-1] as $old |
+          if $pr.state == "open" and ($pr.head.sha | type == "string" and length > 0)
+            and ($sweep_head == "" or $pr.head.sha == $sweep_head)
+            and $approval.state == "APPROVED" and $approval.commit_id == $pr.head.sha
+            and ($approval.submitted_at > $old.submitted_at)
+          then $pr.head.sha else "" end') \
+          || { echo "error: invalid migration review evidence — inspect the PR and review API responses, then retry" >&2; exit 1; }
+        [[ -n "$migration_head" ]] || break
+      fi
       dismiss_review "$owner" "$repo" "$pr" "$rid" \
         || { echo "error: failed to dismiss review ${rid} by ${login} on ${owner}/${repo}#${pr}" >&2; exit 1; }
       dismissed=$(jq --arg login "$login" --arg cid "$cid" \
         '. + [{login: $login, review_id: '"$rid"', commit_id: $cid}]' <<<"$dismissed")
     done <<<"$stale"
+
+    if [[ "$latest_state" == CHANGES_REQUESTED && -z "$migration_head" ]]; then
+      left_active=$(jq --arg login "$login" \
+        '. + [{login: $login, review_id: '"$(jq '.[-1].id' <<<"$reviews")"'}]' <<<"$left_active")
+    fi
   done
 
   jq -n \

@@ -66,7 +66,12 @@ gh() {
 
   if [[ "$path" == repos/jbaruch/coding-policy/pulls/1 ]]; then
     [[ "${MOCK_PR_FAIL:-0}" != 1 ]] || { echo "PR API unavailable" >&2; return 1; }
-    echo "${MOCK_PR_BODY}"
+    if [[ -n "${MOCK_APP_FETCH_LOG:-}" && $(<"$MOCK_APP_FETCH_LOG") == *$'\n'* ]] ||
+       [[ "${MOCK_HEAD_ADVANCES_AFTER_PUT:-0}" == 1 && -s "$DISMISS_LOG" ]]; then
+      echo '{"state":"open","head":{"sha":"ccc"}}'
+    else
+      echo "${MOCK_PR_BODY}"
+    fi
     return 0
   fi
 
@@ -89,7 +94,12 @@ gh() {
 
   [[ $saw_paginate -eq 1 ]] || { echo "mock gh api: reviews fetch missing --paginate" >&2; return 99; }
   case "$path" in
-    *reviews*)  echo "${MOCK_REVIEWS_BODY:-[]}" ;;
+    *reviews*)
+      if [[ -n "${MOCK_APP_FETCH_LOG:-}" ]]; then
+        # The first inventory lookup is for legacy reviews, the second for the App.
+        echo fetch >> "$MOCK_APP_FETCH_LOG"
+      fi
+      echo "${MOCK_REVIEWS_BODY:-[]}" ;;
     *timeline*) echo "${MOCK_TIMELINE_BODY:-[]}" ;;
     *) echo "mock gh api: unsupported path: $path" >&2; return 2 ;;
   esac
@@ -380,8 +390,43 @@ t_migration_sweeps_only_legacy_requests() {
   assert_eq "rerun performs no PUT" '0' "$(dismiss_count)"
 }
 
+t_migration_holds_when_head_advances_during_app_fetch() {
+  local MOCK_PR_BODY='{"state":"open","head":{"sha":"bbb"}}'
+  local MOCK_REVIEWS_BODY='[
+    {"id":921,"state":"CHANGES_REQUESTED","commit_id":"aaa","submitted_at":"2026-10-20T01:00:00Z","user":{"login":"github-actions[bot]"}},
+    {"id":922,"state":"APPROVED","commit_id":"bbb","submitted_at":"2026-10-20T02:00:00Z","user":{"login":"coding-policy-fleet-reviewer[bot]"}}
+  ]'
+  local out rc MOCK_APP_FETCH_LOG
+  MOCK_APP_FETCH_LOG=$(mktemp) || return 1
+  out=$(main jbaruch coding-policy 1)
+  rc=$?
+  rm -f "$MOCK_APP_FETCH_LOG"
+  assert_eq "exit code" '0' "$rc" || return 1
+  assert_eq "stale approval issues no PUT" '0' "$(dismiss_count)" || return 1
+  assert_eq "held migration output" \
+    '{"pr_number":1,"dismissed":[],"left_active":[{"login":"github-actions[bot]","review_id":921}]}' \
+    "$(jq -c . <<<"$out")"
+}
+
+t_migration_stops_when_head_advances_between_puts() {
+  local MOCK_PR_BODY='{"state":"open","head":{"sha":"bbb"}}'
+  local MOCK_REVIEWS_BODY='[
+    {"id":931,"state":"CHANGES_REQUESTED","commit_id":"aaa","submitted_at":"2026-10-19T01:00:00Z","user":{"login":"github-actions[bot]"}},
+    {"id":932,"state":"CHANGES_REQUESTED","commit_id":"aaa","submitted_at":"2026-10-20T01:00:00Z","user":{"login":"github-actions[bot]"}},
+    {"id":933,"state":"APPROVED","commit_id":"bbb","submitted_at":"2026-10-20T02:00:00Z","user":{"login":"coding-policy-fleet-reviewer[bot]"}}
+  ]'
+  local out
+  out=$(MOCK_HEAD_ADVANCES_AFTER_PUT=1 main jbaruch coding-policy 1) || return 1
+  assert_eq "only the first PUT was issued" '931' "$(<"$DISMISS_LOG")" || return 1
+  assert_eq "interrupted sweep output" \
+    '{"pr_number":1,"dismissed":[{"login":"github-actions[bot]","review_id":931,"commit_id":"aaa"}],"left_active":[{"login":"github-actions[bot]","review_id":932}]}' \
+    "$(jq -c . <<<"$out")"
+}
+
 run_suite() {
   run "migration sweeps only legacy requests and is idempotent" t_migration_sweeps_only_legacy_requests
+  run "migration holds when head advances during App fetch" t_migration_holds_when_head_advances_during_app_fetch
+  run "migration stops when head advances between PUTs" t_migration_stops_when_head_advances_between_puts
   run "Copilot compatibility remains external only" t_copilot_compatibility_is_external_only
   run "own identity migration stays scoped and fails closed" t_own_identity_migration
   run "quality cannot dismiss policy findings" t_quality_does_not_clear_policy_block
