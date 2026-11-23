@@ -1,3 +1,7 @@
+## 0.10.29 — 2026-11-23
+
+- fix(migration): Reuse lint diagnostics during plugin migration (#886)
+
 ## 0.10.28 — 2026-11-23
 
 - fix(release): Restore the installable policy release path (#881)
