@@ -15,6 +15,8 @@ SCRIPT="$(cd "$(dirname "$0")/.." && pwd)/fleet-poll.sh"
 source "$SCRIPT"
 set +e
 
+OBSERVED_REVIEW=$(python3 "${SCRIPT%/.github/*}/tests/fixtures/quality_review_5962464346.py") || exit 2
+
 pass=0; fail=0
 ok()  { printf 'ok   - %s\n' "$1"; pass=$((pass+1)); }
 bad() { printf 'FAIL - %s\n' "$1"; fail=$((fail+1)); }
@@ -74,7 +76,7 @@ gh() {
   esac
 }
 
-run_main() { ( set -euo pipefail; REVIEWER_LOGIN="app[bot]" main ); }
+run_main() { ( set -euo pipefail; REVIEWER_LOGIN="${1:-app[bot]}" main ); }
 
 setup() {
   MOCK_DIR=$(mktemp -d) || { echo "fatal: mktemp -d failed" >&2; exit 2; }
@@ -186,18 +188,114 @@ JSON
 
 t_lanes_deduplicate_separately() {
   setup; MOCK_REPOS=(jbaruch/repo-a)
-  writef "$MOCK_DIR/jbaruch__repo-a.pulls.json" <<'JSON'
-[{"number":7,"base":{"ref":"main"},"head":{"sha":"aaa111","repo":{"full_name":"jbaruch/repo-a"}}}]
-JSON
-  writef "$MOCK_DIR/jbaruch__repo-a.reviews.7.json" <<'JSON'
-[{"user":{"login":"app[bot]"},"commit_id":"aaa111","state":"COMMENTED","body":"<!-- coding-policy:claude-quality-review:v1 -->"}]
-JSON
   local out
-  out=$(REVIEW_LANE=policy run_main)
+  local reviews="$MOCK_DIR/jbaruch__repo-a.reviews.7.json"
+  jq '[{number:7,base:{ref:"main"},head:{sha:.commit_id,repo:{full_name:"jbaruch/repo-a"}}}]' <<<"$OBSERVED_REVIEW" > "$MOCK_DIR/jbaruch__repo-a.pulls.json" || return 1
+  local history mutation
+  history=$(jq '[. + {id:9, body:("<!-- coding-policy:claude-quality-review:v1 -->\nReviewed commit: " +
+    .commit_id + ". Code quality and bugs only.\n")}, .]' <<<"$OBSERVED_REVIEW") || return 1
+  local head state
+  head=$(jq -r .commit_id <<<"$OBSERVED_REVIEW") || return 1
+  state=$(latest_live_quality_state "$head" <<<"$history") || return 1
+  [[ "$state" == none ]] || { bad "sourced callers expect bare none"; teardown; return; }
+  state=$(bash "$REVIEW_MODULE_DIR/review-lanes.sh" state "$head" <<<"$history") || return 1
+  [[ "$state" == '"none"' ]] || { bad "executable callers expect a JSON string"; teardown; return; }
+  for mutation in '.' 'reverse' '.[1].body=null' '.[1].body="missing marker"' '.[1].body=.[0].body | .[1].state="DISMISSED"'; do
+    jq "$mutation" <<<"$history" > "$reviews" || return 1
+    out=$(REVIEW_LANE=quality run_main "$CLAUDE_REVIEW_LOGIN") || return 1
+    [[ "$(jq length <<<"$out")" == 1 ]] || { bad "invalid latest quality review must re-enter the worklist ($mutation)"; teardown; return; }
+  done
+  jq '. + [(.[0] + {id:5962464347, state:"CHANGES_REQUESTED"}), (.[1] + {id:5962464348, state:"PENDING", submitted_at:null})]' \
+    <<<"$history" > "$reviews" || return 1
+  out=$(REVIEW_LANE=policy run_main "$CLAUDE_REVIEW_LOGIN")
   [[ "$(jq length <<<"$out")" == 1 ]] || { bad "quality cannot suppress missing policy"; teardown; return; }
-  out=$(REVIEW_LANE=quality run_main)
-  [[ "$(jq length <<<"$out")" == 0 ]] || { bad "quality dedup recognizes its own result"; teardown; return; }
+  out=$(REVIEW_LANE=quality run_main "$CLAUDE_REVIEW_LOGIN")
+  [[ "$(jq length <<<"$out")" == 0 ]] || { bad "fresh quality change request must suppress duplicate work"; teardown; return; }
   ok "policy and quality deduplicate separately"; teardown
+}
+
+t_bad_quality_history_isolated_to_one_pr() {
+  setup; MOCK_REPOS=(jbaruch/healthy jbaruch/affected)
+  local repo mutation bound copy order out err expected
+  for repo in healthy affected; do
+    jq --arg repo "jbaruch/$repo" '[{number:7,base:{ref:"main"},head:{sha:.commit_id,repo:{full_name:$repo}}}]' \
+      <<<"$OBSERVED_REVIEW" > "$MOCK_DIR/jbaruch__${repo}.pulls.json" || return 1
+  done
+  bound=$(jq -c '[.body |= sub("07ff68f99b0a1acbb5b7af20532eb255b06d34f8"; "d8b9a1e0ea8706cf7ed95f04ca08092ae3d839ca")]' <<<"$OBSERVED_REVIEW") || return 1
+  for mutation in copies missing_actor lookalike decimal string time date row omitted login; do
+    expected="Repeated native review ID"
+    case "$mutation" in
+      copies) copy=$(jq -c '[.]' <<<"$OBSERVED_REVIEW") || return 1 ;;
+      missing_actor) copy=$(jq -c '[.user = null]' <<<"$OBSERVED_REVIEW") || return 1 ;;
+      lookalike) copy=$(jq -c '[.user.login = "similar-reviewer[bot]"]' <<<"$OBSERVED_REVIEW") || return 1 ;;
+      row) copy='[null]'; expected="Invalid native review row" ;;
+      omitted) copy='[{"id":7}]'; expected="Missing review attribution" ;;
+      login) copy='[{"id":7,"user":{}}]'; expected="Invalid review attribution" ;;
+      decimal)
+        # Preserve the raw decimal token across jq versions.
+        copy=$(jq -c '[.user.login = "similar-reviewer[bot]"]' <<<"$OBSERVED_REVIEW" | sed 's/"id":5962464346/"id":5962464346.0/') || return 1
+        expected="Invalid native review ID" ;;
+      string)
+        copy=$(jq -c '[.user = null | .id |= tostring]' <<<"$OBSERVED_REVIEW") || return 1
+        expected="Invalid native review ID" ;;
+      time)
+        copy=$(jq -c '[.id += 1 | .submitted_at = null]' <<<"$OBSERVED_REVIEW") || return 1
+        expected="Invalid quality submission time" ;;
+      date)
+        copy=$(jq -c '[.id += 1 | .submitted_at = "2026-02-30T00:00:00Z"]' <<<"$OBSERVED_REVIEW") || return 1
+        expected="Invalid quality submission date" ;;
+    esac
+    for order in forward reverse; do
+      if [[ "$order" == forward ]]; then
+        printf '%s\n' "$copy" "$bound"
+      else
+        printf '%s\n' "$bound" "$copy"
+      fi > "$MOCK_DIR/jbaruch__affected.reviews.7.json" || return 1
+      if ! out=$(REVIEW_LANE=quality run_main "$CLAUDE_REVIEW_LOGIN" 2>"$MOCK_DIR/err"); then
+        bad "quality sweep aborted on $mutation"; teardown; return
+      fi
+      err=$(cat "$MOCK_DIR/err") || return 1
+      if ! jq -e 'map(.repo) == ["healthy"]' <<<"$out" >/dev/null ||
+          [[ "$err" != *"unresolved for jbaruch/affected#7"* || "$err" != *"$expected"* ]]; then
+        bad "$mutation: expected healthy work and a field-specific warning for affected PR"; teardown; return
+      fi
+      out=$(REVIEW_LANE=policy run_main) || return 1
+      jq -e 'map(.repo) == ["healthy","affected"]' <<<"$out" >/dev/null || { bad "$mutation: missing policy work"; teardown; return; }
+    done
+  done
+  ok "malformed quality ordering isolates one PR in a two-repository sweep"; teardown
+}
+
+t_missing_quality_dependency_stops_discovery() {
+  setup; MOCK_REPOS=(jbaruch/healthy)
+  writef "$MOCK_DIR/jbaruch__healthy.pulls.json" <<'JSON'
+[{"number":7,"base":{"ref":"main"},"head":{"sha":"aaa111","repo":{"full_name":"jbaruch/healthy"}}}]
+JSON
+  local tool tool_path out
+  for tool in jq cat; do
+    tool_path=$(command -v "$tool") || return 1
+    ln -s "$tool_path" "$MOCK_DIR/$tool" || return 1
+  done
+  if out=$(PATH="$MOCK_DIR" REVIEW_LANE=quality run_main "$CLAUDE_REVIEW_LOGIN" 2>&1) ||
+    [[ "$out" != *"Python 3 is required"* || -e "$MOCK_DIR/requests.log" ]]; then
+    bad "missing interpreter must fail before GitHub discovery ($out)"; teardown; return
+  fi
+  if out=$(QUALITY_SELECTOR="$MOCK_DIR/absent.py" REVIEW_LANE=quality run_main "$CLAUDE_REVIEW_LOGIN" 2>&1) ||
+    [[ "$out" != *"restore the complete coding-policy checkout"* || -e "$MOCK_DIR/requests.log" ]]; then
+    bad "missing selector must fail before GitHub discovery ($out)"; teardown; return
+  fi
+  writef "$MOCK_DIR/invalid-output.py" <<'PYTHON'
+print("null")
+PYTHON
+  writef "$MOCK_DIR/jbaruch__healthy.reviews.7.json" <<< '[{"id":7,"user":null}]'
+  if ! out=$(QUALITY_SELECTOR="$MOCK_DIR/invalid-output.py" REVIEW_LANE=quality run_main "$CLAUDE_REVIEW_LOGIN" 2>"$MOCK_DIR/err") ||
+      [[ "$out" != '[]' ]] || ! grep -q 'reinstall the matching' "$MOCK_DIR/err" ||
+      ! grep -q 'unresolved for jbaruch/healthy#7' "$MOCK_DIR/err"; then
+    bad "invalid selector output must hold the observed PR with reinstall guidance"; teardown; return
+  fi
+  out=$(PATH="$MOCK_DIR" REVIEW_LANE=policy run_main) || return 1
+  jq -e 'map(.repo) == ["healthy"]' <<<"$out" >/dev/null || { bad "policy discovery should run without Python"; teardown; return; }
+  ok "unavailable quality dependency fails setup without interrupting policy discovery"; teardown
 }
 
 t_dismissed_review_reenters_worklist() {
@@ -260,6 +358,8 @@ echo "== fleet-poll.sh tests =="
 t_retired_repositories_are_never_queried
 t_dismissed_review_reenters_worklist
 t_lanes_deduplicate_separately
+t_missing_quality_dependency_stops_discovery || { echo "dependency fixture failed" >&2; exit 1; }
+t_bad_quality_history_isolated_to_one_pr || { echo "quality fixture failed" >&2; exit 1; }
 t_needs_review
 t_already_reviewed
 t_head_advanced

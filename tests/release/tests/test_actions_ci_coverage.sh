@@ -30,7 +30,7 @@ gh() {
         *'/reviews?per_page=100')
           jq -n --arg h "$HEAD_SHA" '[
             {id:1,user:{login:"coding-policy-fleet-reviewer[bot]"},state:"APPROVED",commit_id:$h,submitted_at:"2020-01-01T01:00:00Z",body:"Policy clear"},
-            {id:2,user:{login:"jbaruch-claude-reviewer[bot]"},state:"APPROVED",commit_id:$h,submitted_at:"2020-01-01T01:00:00Z",body:"<!-- coding-policy:claude-quality-review:v1 --> Quality clear"}]'
+            {id:2,user:{login:"jbaruch-claude-reviewer[bot]"},state:"APPROVED",commit_id:$h,submitted_at:"2020-01-01T01:00:00Z",body:"<!-- coding-policy:claude-quality-review:v1 -->\n## Claude code review\n\nQuality clear.\n\nReviewed commit: \($h). Code quality and bugs only.\n"}]'
           ;;
         *'/comments?per_page=100') echo '[]' ;;
         *) echo "fixture: unexpected API route: $3" >&2; return 2 ;;

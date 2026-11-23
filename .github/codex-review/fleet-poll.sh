@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Enumerate the open pull requests across the reviewer App's installation that
-# still need a policy review, and emit them as a JSON worklist for the central
+# still need a review, and emit them as a JSON worklist for the central
 # fleet reviewer. Stateless — no state file: a PR needs review unless the App has
 # posted a live verdict in the requested lane on the PR's current head SHA.
+# Quality also requires the analyzed commit to match the PR head.
 #
 # Env:
 #   GH_TOKEN        App installation token, scoped to every installed repo
@@ -28,6 +29,13 @@ command -v jq >/dev/null 2>&1 || { echo "error: jq is not installed" >&2; exit 2
 
 main() {
   : "${REVIEWER_LOGIN:?set REVIEWER_LOGIN to the reviewer App bot login, e.g. coding-policy-fleet-reviewer[bot]}"
+  if [[ "$REVIEW_LANE" == quality ]]; then
+    declare -F require_quality_selector >/dev/null || {
+      echo "error: incompatible $REVIEW_MODULE_DIR/review-lanes.sh — reinstall the matching coding-policy release helpers and retry" >&2
+      return 2
+    }
+    require_quality_selector || return
+  fi
 
   local repos
   # Retired repositories cannot accept reviews, even when old PRs remain open.
@@ -36,7 +44,7 @@ main() {
     || { echo "error: could not list installation repositories — check GH_TOKEN (App installation token)" >&2; exit 1; }
 
   local worklist="[]"
-  local full owner repo prs_json pr number base head headrepo reviews_json reviewed
+  local full owner repo prs_json pr number base head headrepo reviews_json reviewed state
   while IFS= read -r full; do
     [[ -n "$full" ]] || continue
     owner=${full%%/*}; repo=${full#*/}
@@ -83,13 +91,26 @@ main() {
         echo "warn: could not read reviews for ${full}#${number} — treating as needs-review" >&2
         reviews_json="[]"
       fi
-      # A dismissed latest policy verdict reopens the head for review.
-      reviewed=$(jq -s --arg lane "$REVIEW_LANE" --arg who "$REVIEWER_LOGIN" --arg sha "$head" \
-        "$(review_lanes_jq)"' [(add // [])[] | select(.user.login == $who and .commit_id == $sha
-          and ((.state | IN("APPROVED", "COMMENTED", "CHANGES_REQUESTED")) or ($lane == "policy" and .state == "DISMISSED"))
-          and in_review_lane($lane))]
-        | max_by(.submitted_at) | . != null and .state != "DISMISSED"' <<<"$reviews_json")
-      [[ "$reviewed" == "true" ]] && continue
+      if [[ "$REVIEW_LANE" == quality ]]; then
+        if ! state=$(latest_live_quality_state "$head" <<<"$reviews_json"); then
+          echo "warn: quality review unresolved for ${full}#${number} — inspect 'gh api --paginate repos/${full}/pulls/${number}/reviews' and retry" >&2
+          continue
+        fi
+        case "$state" in
+          APPROVED|COMMENTED|CHANGES_REQUESTED)
+            [[ "$REVIEWER_LOGIN" == "$CLAUDE_REVIEW_LOGIN" ]] && continue ;;
+          none) ;;
+          *) echo "error: unexpected quality state for ${full}#${number} — reinstall the matching coding-policy release helpers and retry" >&2; return 2 ;;
+        esac
+      else
+        # A dismissed latest policy verdict reopens the head for review.
+        reviewed=$(jq -s --arg who "$REVIEWER_LOGIN" --arg sha "$head" \
+          "$(review_lanes_jq)"' [(add // [])[] | select(.user.login == $who and .commit_id == $sha
+            and (.state | IN("APPROVED", "COMMENTED", "CHANGES_REQUESTED", "DISMISSED"))
+            and in_review_lane("policy"))]
+          | max_by(.submitted_at) | . != null and .state != "DISMISSED"' <<<"$reviews_json")
+        [[ "$reviewed" == "true" ]] && continue
+      fi
 
       worklist=$(jq -c \
         --arg o "$owner" --arg r "$repo" --argjson n "$number" --arg b "$base" --arg h "$head" \
