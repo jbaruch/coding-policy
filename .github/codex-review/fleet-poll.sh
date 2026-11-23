@@ -2,9 +2,7 @@
 # Enumerate the open pull requests across the reviewer App's installation that
 # still need a policy review, and emit them as a JSON worklist for the central
 # fleet reviewer. Stateless — no state file: a PR needs review unless the App has
-# already posted a review whose commit_id equals the PR's current head SHA, a
-# dismissed one only when it was a ruled dismissal (a new push moves the head
-# SHA, so it re-enters the worklist).
+# posted a live verdict in the requested lane on the PR's current head SHA.
 #
 # Env:
 #   GH_TOKEN        App installation token, scoped to every installed repo
@@ -38,7 +36,7 @@ main() {
     || { echo "error: could not list installation repositories — check GH_TOKEN (App installation token)" >&2; exit 1; }
 
   local worklist="[]"
-  local full owner repo prs_json pr number base head headrepo reviews_json reviewed verdicts state id ruled
+  local full owner repo prs_json pr number base head headrepo reviews_json reviewed
   while IFS= read -r full; do
     [[ -n "$full" ]] || continue
     owner=${full%%/*}; repo=${full#*/}
@@ -85,26 +83,12 @@ main() {
         echo "warn: could not read reviews for ${full}#${number} — treating as needs-review" >&2
         reviews_json="[]"
       fi
-      verdicts=$(jq -s -r --arg lane "$REVIEW_LANE" --arg who "$REVIEWER_LOGIN" --arg sha "$head" \
-                   "$(review_lanes_jq)"' (add // [])[] | select(.user.login==$who and .commit_id==$sha
-                     and (.state | IN("APPROVED", "COMMENTED", "CHANGES_REQUESTED", "DISMISSED")) and in_review_lane($lane))
-                   | "\(.state) \(.id)"' <<<"$reviews_json")
-      # A dismissed review counts only when it was a ruled dismissal (the same
-      # test as post-review.sh); a stale-review dismissal leaves the head unreviewed.
-      reviewed=false
-      while read -r state id; do
-        [[ -n "$state" ]] || continue
-        if [[ "$state" == DISMISSED ]]; then
-          # shellcheck source=/dev/null
-          if ! ruled=$(source "$REVIEW_MODULE_DIR/poll-pr-reviews.sh" \
-              && resolve_ruled_dismissal "$owner" "$repo" "$number" "{\"_dismissed_review_id\": ${id}}" | jq -r .state); then
-            echo "warn: could not read how review ${id} on ${full}#${number} was dismissed — treating as needs-review" >&2
-            continue
-          fi
-          [[ "$ruled" == RULED ]] || continue
-        fi
-        reviewed=true
-      done <<<"$verdicts"
+      # A dismissed latest policy verdict reopens the head for review.
+      reviewed=$(jq -s --arg lane "$REVIEW_LANE" --arg who "$REVIEWER_LOGIN" --arg sha "$head" \
+        "$(review_lanes_jq)"' [(add // [])[] | select(.user.login == $who and .commit_id == $sha
+          and ((.state | IN("APPROVED", "COMMENTED", "CHANGES_REQUESTED")) or ($lane == "policy" and .state == "DISMISSED"))
+          and in_review_lane($lane))]
+        | max_by(.submitted_at) | . != null and .state != "DISMISSED"' <<<"$reviews_json")
       [[ "$reviewed" == "true" ]] && continue
 
       worklist=$(jq -c \

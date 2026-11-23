@@ -23,7 +23,7 @@ bad() { printf 'FAIL - %s\n' "$1"; fail=$((fail+1)); }
 # With MOCK_422_ON_APPROVE=1, an APPROVE submit fails HTTP 422 (as github-actions[bot]
 # would), so the fallback-to-COMMENT path can be exercised. The review lookup
 # (a GET) prints MOCK_REVIEWS, or fails like an API outage with MOCK_LOOKUP_FAIL=1;
-# the timeline lookup prints MOCK_TIMELINE, or fails with MOCK_LOOKUP_FAIL=timeline.
+# the timeline lookup prints MOCK_TIMELINE.
 # With MOCK_PERSISTED set to a file, GitHub keeps each POST as a review appended
 # to that file, which the lookup also lists, but the response is lost (HTTP 502).
 GH_CAPTURE=""
@@ -38,7 +38,6 @@ OLDER_HEAD_SHA=3333333333333333333333333333333333333333
 export REVIEWER_LOGIN="coding-policy-fleet-reviewer[bot]"
 gh() {
   if [[ "${1:-}" == "api" && "$*" == */timeline* ]]; then
-    [[ "$MOCK_LOOKUP_FAIL" != "timeline" ]] || { echo "gh: Server Error (HTTP 502)" >&2; return 1; }
     printf '%s\n' "$MOCK_TIMELINE"
     return 0
   fi
@@ -74,12 +73,9 @@ gh() {
 
 run_main() { ( set -euo pipefail; main "$@" "$REVIEWED_SHA" ); }
 
-# Succeeds when the captured body ends with the '## Review metadata' heading and
-# the marker carrying exactly {schema_version: 1, blocking: $1}.
+# Succeeds when the final line carries exactly {schema_version: 1, blocking: $1}.
 marker_is() {
-  local heading last
-  heading=$(jq -r .body "$GH_CAPTURE" | tail -n 2 | head -n 1)
-  [[ "$heading" == "## Review metadata" ]] || return 1
+  local last
   last=$(jq -r .body "$GH_CAPTURE" | tail -n 1)
   [[ "$last" == "<!-- coding-policy-blockers "*" -->" ]] || return 1
   last=${last#"<!-- coding-policy-blockers "}
@@ -251,17 +247,16 @@ review_page() {
     '[{"id":1,"user":{"login":$login},"state":$state,"commit_id":$commit,"body":"earlier verdict"}]'
 }
 
-# How GitHub's timeline records review 1's dismissal: by dismiss-ruled-review.sh,
-# and by GitHub's automatic stale-review dismissal.
+# Historical and automatic dismissal messages for review 1.
 RULED_TIMELINE='[{"event":"review_dismissed","dismissed_review":{"review_id":1,"dismissal_message":"JUDGE-RULED: 0123456789abcdef covers 1 blocking findings at head; tracked in #9"}}]'
 STALE_TIMELINE='[{"event":"review_dismissed","dismissed_review":{"review_id":1,"dismissal_message":null}}]'
 
 # --- the first verdict on a head stands: a later run on that head posts nothing ---
 t_head_already_reviewed() {
   local state dir out rc
-  for state in APPROVED CHANGES_REQUESTED DISMISSED; do
+  for state in APPROVED CHANGES_REQUESTED COMMENTED; do
     dir=$(mktemp -d) || { bad "already reviewed: mktemp -d failed"; return; }
-    GH_CAPTURE="$dir/payload.json"; MOCK_TIMELINE="$RULED_TIMELINE"
+    GH_CAPTURE="$dir/payload.json"
     # The matching review sits on the second page, so pagination is read whole.
     MOCK_REVIEWS="$(review_page "$REVIEWER_LOGIN" COMMENTED "$OLDER_HEAD_SHA")"$'\n'"$(review_page "$REVIEWER_LOGIN" "$state" "$REVIEWED_SHA")"
     printf '{"summary":"Policy loaded: 23 rule files. One violation.","findings":[{"path":"a.sh","line":1,"rule":"error-handling","severity":"blocking","message":"m"}]}' > "$dir/final.json"
@@ -281,12 +276,17 @@ t_head_already_reviewed() {
 # dismissed one on this head does not count ---
 t_other_reviews_do_not_suppress() {
   local dir out rc label
-  for label in older-head other-reviewer stale-dismissed; do
+  for label in older-head other-reviewer stale-dismissed marked-dismissed; do
     dir=$(mktemp -d) || { bad "other reviews: mktemp -d failed"; return; }
     GH_CAPTURE="$dir/payload.json"
     case "$label" in
       older-head) MOCK_REVIEWS=$(review_page "$REVIEWER_LOGIN" APPROVED "$OLDER_HEAD_SHA") ;;
       other-reviewer) MOCK_REVIEWS=$(review_page "jbaruch-claude-reviewer[bot]" APPROVED "$REVIEWED_SHA") ;;
+      marked-dismissed)
+        MOCK_REVIEWS=$(review_page "$REVIEWER_LOGIN" DISMISSED "$REVIEWED_SHA" | jq '
+          [.[0] + {id:2,state:"COMMENTED",submitted_at:"2026-01-01T01:00:00Z"},
+           .[0] + {submitted_at:"2026-01-02T01:00:00Z"}]')
+        MOCK_TIMELINE="$RULED_TIMELINE" ;;
       stale-dismissed) MOCK_REVIEWS=$(review_page "$REVIEWER_LOGIN" DISMISSED "$REVIEWED_SHA"); MOCK_TIMELINE="$STALE_TIMELINE" ;;
     esac
     printf '{"summary":"Policy loaded: 23 rule files. Clean.","findings":[]}' > "$dir/final.json"
@@ -324,24 +324,19 @@ t_app_request_then_approval() {
   rm -rf "$dir"
 }
 
-# --- a failed review or dismissal lookup fails visibly and posts nothing ---
+# --- a failed review lookup fails visibly and posts nothing ---
 t_lookup_failure_refuses_to_post() {
-  local dir rc mode expect
-  for mode in 1 timeline; do
-    dir=$(mktemp -d) || { bad "lookup failure: mktemp -d failed"; return; }
-    GH_CAPTURE="$dir/payload.json"; MOCK_LOOKUP_FAIL=$mode; rc=0
-    MOCK_REVIEWS=$(review_page "$REVIEWER_LOGIN" DISMISSED "$REVIEWED_SHA")
-    if [[ "$mode" == 1 ]]; then expect="could not list the reviews"; else expect="could not read how review 1"; fi
-    printf '{"summary":"Policy loaded: 23 rule files. Clean.","findings":[]}' > "$dir/final.json"
-    run_main owner repo 5 "$dir/final.json" >/dev/null 2>"$dir/err" || rc=$?
-    MOCK_LOOKUP_FAIL=0; MOCK_REVIEWS='[]'
-    if [[ $rc -ne 0 && ! -f "$GH_CAPTURE" ]] && grep -q "$expect" "$dir/err"; then
-      ok "failed ${mode/1/review} lookup -> non-zero exit, nothing posted"
-    else
-      bad "failed ${mode/1/review} lookup must fail without posting (rc=$rc)"
-    fi
-    rm -rf "$dir"
-  done
+  local dir rc=0
+  dir=$(mktemp -d) || { bad "lookup failure: mktemp -d failed"; return; }
+  GH_CAPTURE="$dir/payload.json"
+  printf '{"summary":"Policy loaded: 23 rule files. Clean.","findings":[]}' > "$dir/final.json"
+  MOCK_LOOKUP_FAIL=1 run_main owner repo 5 "$dir/final.json" >/dev/null 2>"$dir/err" || rc=$?
+  if [[ $rc -ne 0 && ! -f "$GH_CAPTURE" ]] && grep -q "could not list the reviews" "$dir/err"; then
+    ok "failed review lookup -> non-zero exit, nothing posted"
+  else
+    bad "failed review lookup must fail without posting (rc=$rc)"
+  fi
+  rm -rf "$dir"
 }
 
 # --- an unparseable lookup response fails visibly and posts nothing ---

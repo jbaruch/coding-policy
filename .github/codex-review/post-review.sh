@@ -6,10 +6,9 @@
 # review whose body carries the summary and every finding. Findings ride in
 # the review body rather than as inline comments so an off-diff line can never
 # trigger the HTTP 422 that would cascade-fail the whole review. The body's
-# last two lines, on every verdict, are a `## Review metadata` heading and
+# final line on every verdict is
 # `<!-- coding-policy-blockers {"schema_version":1,"blocking":[...]} -->`, the
-# blocking finding objects as compact JSON with `<` and `>` escaped. The heading
-# ends the blocking list for its parsers. This script writes the marker;
+# blocking finding objects as compact JSON with `<` and `>` escaped. This script writes the marker;
 # prior-feedback.py reads it.
 #
 # The review event is DERIVED from per-finding severity, not read from a model
@@ -24,11 +23,10 @@
 # nonblocking result, so the verdict is never lost.
 #
 # The first posted verdict on a head stands (issue #841): when REVIEWER_LOGIN
-# already posted a review whose commit_id is the reviewed head, nothing is
-# posted. A dismissed review counts only when it was a ruled dismissal.
+# already posted a live verdict on the reviewed head, nothing is posted.
 # fleet-review.yml runs one review of a PR's lane at a time, and a dispatch
 # queued behind it can still reach the same head; its verdict could disagree.
-# A new commit is what earns a new verdict.
+# A new head or a dismissed verdict permits a fresh review.
 #
 # Usage: post-review.sh <owner> <repo> <pr-number> <result-json-file> <reviewed-sha>
 # Env:   GH_TOKEN, and REVIEWER_LOGIN, the login that token posts as
@@ -47,38 +45,23 @@ fi
 
 # Whether REVIEWER_LOGIN already posted a verdict on the head: return 0 when it
 # did, 1 when it did not. A failed lookup exits 1: "unknown" must never read as
-# "not reviewed". A dismissed review keeps its verdict only when
-# dismiss-ruled-review.sh dismissed it; after GitHub's stale-review dismissal,
-# or any other, a new review runs. poll-pr-reviews.sh's resolve_ruled_dismissal
-# owns that test.
+# "not reviewed".
 # Args: <owner> <repo> <pr> <reviewed-sha>
 head_reviewed() {
   local owner="$1" repo="$2" pr="$3" reviewed_sha="$4"
-  local reviews verdicts state id ruled
-  local poll_reviews; poll_reviews="$(dirname -- "${BASH_SOURCE[0]}")/../../skills/release/poll-pr-reviews.sh"
+  local reviews reviewed
   if ! reviews=$(gh api --paginate "repos/${owner}/${repo}/pulls/${pr}/reviews?per_page=100"); then
     echo "error: could not list the reviews on ${owner}/${repo}#${pr}, so whether ${reviewed_sha} already has a verdict is unknown; nothing was posted — retry once the GitHub API answers" >&2
     exit 1
   fi
-  if ! verdicts=$(jq -s -r --arg who "$REVIEWER_LOGIN" --arg sha "$reviewed_sha" \
-      '(add // [])[] | select(.user.login == $who and .commit_id == $sha
-         and (.state | IN("APPROVED", "COMMENTED", "CHANGES_REQUESTED", "DISMISSED"))) | "\(.state) \(.id)"' <<<"$reviews"); then
+  if ! reviewed=$(jq -s --arg who "$REVIEWER_LOGIN" --arg sha "$reviewed_sha" '
+      [(add // [])[] | select(.user.login == $who and .commit_id == $sha
+        and (.state | IN("APPROVED", "COMMENTED", "CHANGES_REQUESTED", "DISMISSED")))]
+      | max_by(.submitted_at) | . != null and .state != "DISMISSED"' <<<"$reviews"); then
     echo "error: the review list for ${owner}/${repo}#${pr} is not the expected JSON; nothing was posted — retry, and inspect the GitHub API response if it persists" >&2
     exit 1
   fi
-  while read -r state id; do
-    [[ -n "$state" ]] || continue
-    if [[ "$state" == DISMISSED ]]; then
-      # shellcheck source=/dev/null
-      if ! ruled=$(source "$poll_reviews" && resolve_ruled_dismissal "$owner" "$repo" "$pr" "{\"_dismissed_review_id\": ${id}}" | jq -r .state); then
-        echo "error: could not read how review ${id} on ${owner}/${repo}#${pr} was dismissed, so whether ${reviewed_sha} already has a verdict is unknown; nothing was posted — retry once the GitHub API answers" >&2
-        exit 1
-      fi
-      [[ "$ruled" == RULED ]] || continue
-    fi
-    return 0
-  done <<<"$verdicts"
-  return 1
+  [[ "$reviewed" == true ]]
 }
 
 # Submit ONE review event to the PR, retrying transient failures with backoff.
@@ -158,8 +141,7 @@ main() {
   fi
 
   # Build the review body: summary, then blocking and advisory findings in
-  # labeled sections (each omitted when its tier is empty), then the metadata
-  # heading and the marker.
+  # labeled sections (each omitted when its tier is empty), then the marker.
   local body blocking_md advisory_md marker
   body="$summary"
   if (( blocking_count > 0 )); then
@@ -172,7 +154,7 @@ main() {
   fi
   # Escaped `<` and `>` keep message text from closing the comment early.
   marker=$(jq -r '{schema_version: 1, blocking: .} | tojson | gsub("<"; "\\u003c") | gsub(">"; "\\u003e") | "<!-- coding-policy-blockers \(.) -->"' <<<"$blocking")
-  body="${body}"$'\n\n'"## Review metadata"$'\n'"${marker}"
+  body="${body}"$'\n\n'"${marker}"
 
   # A pass is APPROVE when the token can approve (a GitHub App); a token that
   # cannot approve (github-actions[bot] — HTTP 422) falls back to COMMENT so the

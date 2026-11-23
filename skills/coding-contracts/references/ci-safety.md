@@ -19,13 +19,6 @@
 - Preconditions are binding: read `skills/release/references/ci-safety-carve-outs.md` Superseded-Bot-Review Dismissal Carve-Out before relying on it
 - Every other dismissal still gates
 
-## Judge-Ruled-Review Dismissal Carve-Out
-
-- Narrow exception for dismissing the policy reviewer's latest `CHANGES_REQUESTED` on the PR head
-- Applies when a weighing ruling rules every blocking finding in that review `defer` or `decline` under `rules/review-severity.md` Judge-Weighed Finding Carve-Out
-- Preconditions are binding: read `skills/release/references/ci-safety-carve-outs.md` Judge-Ruled-Review Dismissal Carve-Out before relying on it
-- Every other policy-review `CHANGES_REQUESTED` blocks the merge until resolved through review
-
 ## Publish-Pipeline Loop-Prevention Carve-Out
 
 - Narrow exception for `[skip ci]` on the publish workflow's own commit to the protected branch

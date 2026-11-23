@@ -9,25 +9,11 @@ The full preconditions of each `rules/ci-safety.md` carve-out, moved out of the 
 - Preconditions (all required):
   1. Run `skills/release/dismiss-stale-reviews.sh` with its existing owner, repository and PR arguments. No hand dismissal is authorized.
   2. The request belongs to a legacy bot on the script's `GATING_BOTS` allowlist, never a human or an approving App. On `jbaruch/coding-policy`, only the legacy workflow identity is eligible for ordinary dismissal; external callers retain the existing same-bot contract.
-  3. The same bot posted a later all-clear under the script's decision contract, or the coding-policy identity migration below applies. An unmarked dismissal or pending review is never an all-clear.
-- Identity migration applies only to an OPEN PR in `jbaruch/coding-policy` whose latest `github-actions[bot]` review requests changes. The latest `coding-policy-fleet-reviewer[bot]` review must be APPROVED on the current PR head and submitted later than that legacy review. Only the legacy identity's requests may be dismissed; an App comment, ruled dismissal, older-head approval or quality approval cannot authorize migration.
+  3. The same bot posted a later all-clear under the script's decision contract, or the coding-policy identity migration below applies. A dismissal or pending review is never an all-clear.
+- Identity migration applies only to an OPEN PR in `jbaruch/coding-policy` whose latest `github-actions[bot]` review requests changes. The latest `coding-policy-fleet-reviewer[bot]` review must be APPROVED on the current PR head and submitted later than that legacy review. Only the legacy identity's requests may be dismissed; an App comment, dismissal, older-head approval or quality approval cannot authorize migration.
 - The helper preserves its argument, JSON output, exit-code and API-failure contracts for declared external callers. Decision predicates and identity lists live in its header.
-- After migration, use native App approvals for ordinary re-reviews. Retain the helper for open legacy gates, external callers and the ruled sweep below.
-- Every other change request still gates until resolved through review or the ruled carve-out below.
-
-## Judge-Ruled-Review Dismissal Carve-Out
-
-- Preconditions (all required):
-  1. The dismissal runs through `skills/release/dismiss-ruled-review.sh` — coverage predicate, authority lines and rule-id floors in its header
-  2. The ruling is an operator ruling quoting the operator's answer verbatim, or a judge's collected report whose sha256 matches the cited digest, limited to `decline` and `defer` on their stated grounds
-  3. No check on the head is failing
-  4. The script posted the ruled findings to the task's follow-up issue before dismissing
-  5. The dismissal message carries the script's `JUDGE-RULED:` marker
-- A hand dismissal of a gating policy review is not sanctioned
-- A hand dismissal carrying the marker violates this carve-out
-- The release scripts trust the marker and never detect a hand-written one
-- After a ruled dismissal, `skills/release/dismiss-stale-reviews.sh` sweeps the same policy identity's earlier `CHANGES_REQUESTED` reviews, the fleet reviewer included
-- The merge after a ruled dismissal complies with `Never Skip Tests`
+- After migration, use native App approvals for ordinary re-reviews. Retain the helper for open legacy gates and external callers.
+- Every other change request still gates until resolved through review.
 
 ## Publish-Pipeline Loop-Prevention Carve-Out
 

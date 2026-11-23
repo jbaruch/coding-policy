@@ -3,21 +3,20 @@
 Merge only when:
 - Step 5 returned `.watch.result` as `ready`; use that step's script-contract reference for its meaning, AND
 - Every `review_bodies[].body` in the returned snapshot has been read in full, from every author, page and review state, and any blocking finding has been addressed per Step 6, AND
-- Every `inline_comment_bodies[].body` in Step 5's snapshot has been read in full and any blocking finding has been addressed per Step 6. Ordinary advisory acknowledgments and thread resolution are outside the merge predicate, AND
-- A ruled finding's reply cites its ruling, per Step 6.
+- Every `inline_comment_bodies[].body` in Step 5's snapshot has been read in full and any blocking finding has been addressed per Step 6. Ordinary advisory acknowledgments and thread resolution are outside the merge predicate.
 
 A `COMMENTED` review never gates the merge on its state alone — but its body must be read before merge, zero inline comments included. Every inline comment must also be read. Advisory findings (either reviewer's `## Advisory findings` section) do not block the merge or require thread closure; use Step 6's acknowledgment form during the existing review work. Only a blocking finding gates.
 
 Once these conditions hold, merge automatically per `rules/ship-on-green.md` — the green gates are the approval, stakes raise care not permission, and the only blocks are its three objective exits (Red / No undo / Murky). Do not pause to ask a human whether to merge.
 
-**Settle legacy or ruled review gates when present.** Ordinary policy App approvals supersede that App's earlier requests natively. Run the compatibility helper only for a legacy gate or after a ruled dismissal:
+**Settle legacy review gates when present.** Ordinary policy App approvals supersede that App's earlier requests natively. Run the compatibility helper only for a legacy gate:
 
 ```bash
 KS=.tessl/plugins/jbaruch/coding-policy/skills/release/; [ -d "$KS" ] || KS="$HOME/$KS"; [ -d "$KS" ] || case "$(git config --get remote.origin.url)" in git@github.com:jbaruch/coding-policy|git@github.com:jbaruch/coding-policy.git|https://github.com/jbaruch/coding-policy|https://github.com/jbaruch/coding-policy.git|ssh://git@github.com/jbaruch/coding-policy|ssh://git@github.com/jbaruch/coding-policy.git) KS=skills/release/ ;; *) echo "coding-policy skill not found: run tessl install jbaruch/coding-policy" >&2; exit 1 ;; esac
 bash "$KS/dismiss-stale-reviews.sh" <owner> <repo> <pr-number>
 ```
 
-For identity migration, first read both review bodies and verify the current-head policy App approval; the legacy request can still hold Step 5. Run the helper, then return to Step 5 and require `ready` before merging. After a ruled dismissal or an external caller's same-bot all-clear, run it before the final Step 5 check as well. It emits a JSON summary of what it dismissed and what it left active, exits non-zero on API failure, and is idempotent on re-run. Which reviews it dismisses and which it leaves is the script's decision contract — see `skills/release/dismiss-stale-reviews.sh` header, not restated here (`rules/script-as-black-box.md`).
+For identity migration, first read both review bodies and verify the current-head policy App approval; the legacy request can still hold Step 5. Run the helper, then return to Step 5 and require `ready` before merging. After an external caller's same-bot all-clear, run it before the final Step 5 check as well. It emits a JSON summary of what it dismissed and what it left active, exits non-zero on API failure, and is idempotent on re-run. Which reviews it dismisses and which it leaves is the script's decision contract — see `skills/release/dismiss-stale-reviews.sh` header, not restated here (`rules/script-as-black-box.md`).
 
 **Name this repo's publication channels before merging.** The confirmation a release owes is keyed on the publication, never on the package — a package that publishes through more than one channel owes the duty once per publication, each confirmed against the channel that carried it. The release contract's Publication Confirmation section, in the reference block below, is a required read before this step's gates. Read the repo's publish workflow and its manifest, and name every channel it publishes on. How each channel is recognized, the command for every gate below, each helper's exit-code contract, and a walkthrough of the Tessl-only, tag/asset-only and mixed cases:
 

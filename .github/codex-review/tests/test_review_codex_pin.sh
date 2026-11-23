@@ -245,10 +245,7 @@ PY
 }
 
 # --- focused regression: post job source ref and sparse-checkout dependency ---
-# Verifies that the post job loads executable scripts from the repository's
-# protected default branch (not the PR head) and that every script sourced at
-# runtime is included in the sparse-checkout.  Inert: reads only YAML, no
-# network or filesystem side effects.
+# Verify the post job checks out its executable from the protected default branch.
 t_post_checkout_trust() {
   # Source-ref check: post job checkout must use the default branch, not the
   # PR head SHA, so a PR contributor cannot substitute their own scripts.
@@ -295,8 +292,7 @@ PY
     bad "post job checkout missing sparse-checkout-cone-mode: false — cone mode rejects individual file paths"
   fi
 
-  # Dependency availability: every script sourced at runtime must be listed in
-  # the sparse-checkout, or the post job fails before it can post anything.
+  # The posting job executes the script from its sparse checkout.
   if python3 - "$WORKFLOW" <<'PY'
 import sys
 from pathlib import Path
@@ -305,14 +301,11 @@ workflow = Path(sys.argv[1]).read_text()
 post_section = workflow.split("  post:\n")[1]
 checkout_block = post_section.split("      - uses: actions/checkout@v7\n")[1].split("      - ")[0]
 assert ".github/codex-review/post-review.sh" in checkout_block, "post-review.sh missing"
-assert "skills/release/poll-pr-reviews.sh" in checkout_block, "poll-pr-reviews.sh missing"
-assert "skills/release/review-lanes.sh" in checkout_block, \
-    "review-lanes.sh missing (sourced by poll-pr-reviews.sh)"
 PY
   then
-    ok "post job sparse-checkout includes post-review.sh and all sourced helpers (dependency check)"
+    ok "post job sparse-checkout includes post-review.sh"
   else
-    bad "post job sparse-checkout missing review-lanes.sh or another required helper (dependency check)"
+    bad "post job sparse-checkout missing post-review.sh"
   fi
 }
 

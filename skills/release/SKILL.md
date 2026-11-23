@@ -5,8 +5,7 @@ description: >
   and quality review, polling, feedback, merge, cleanup, and verification.
   Auto-merges when required checks and both reviews are green. Dismisses
   superseded legacy bot reviews (same-bot all-clear or coding-policy reviewer
-  identity migration) and explicitly ruled policy reviews only under binding
-  CI-safety carve-outs.
+  identity migration) under the binding CI-safety carve-out.
   Use when the user wants to open a PR, resume an existing PR, ship code, merge a
   branch, or handle post-merge cleanup on GitHub. Also use for an authorized
   request to fix already-published or deployed behavior in an operator-owned

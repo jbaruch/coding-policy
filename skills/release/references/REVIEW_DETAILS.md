@@ -8,7 +8,7 @@ The policy reviewer reviews the PR diff against the in-tree `rules/*.md` and pos
 
 Both derive the review event from per-finding severity (`rules/review-severity.md`; `.github/codex-review/post-review.sh` header) — any blocking finding posts `REQUEST_CHANGES`; nonblocking results approve with any advisory notes included, falling back to `COMMENT` only when GitHub forbids approval.
 
-The first verdict posted on a head stands. When the posting identity already reviewed the head, a later run posts nothing and exits 0. A dismissed review counts only when `dismiss-ruled-review.sh` dismissed it, so a run after GitHub's stale-review dismissal posts again; a new commit earns a new verdict. A failed review lookup fails the run without posting (`.github/codex-review/post-review.sh` header).
+When the posting identity already has a live verdict on the head, a later run posts nothing and exits 0. A dismissed review permits a fresh review on the same head. A failed review lookup fails the run without posting (`.github/codex-review/post-review.sh` header).
 
 ### A. coding-policy's own PRs — in-repo `review-codex.yml`
 
@@ -17,7 +17,7 @@ The `.github/workflows/review-codex.yml` GitHub Actions workflow runs the OpenAI
 - **Trigger:** fires on `pull_request` `opened` / `synchronize` / `reopened` — reviews on open and re-reviews each pushed commit. Fork PRs are skipped (no secret access) — adopt via `Skill(skill: "adopt-fork-pr")`.
 - **Authorship:** submitted as `coding-policy-fleet-reviewer[bot]` using the same `FLEET_APP_ID` / `FLEET_APP_PRIVATE_KEY` as `fleet-review.yml`. The posting token selects this repository and requests Pull requests write. History reads use that App's login; posting and dedup use the minted App slug.
 - **APPROVE:** a clean or advisory-only re-review approves and supersedes this App's earlier change request natively. Open PRs with legacy `github-actions[bot]` requests retain the migration cleanup in Step 7; an approval from another identity does not clear them automatically.
-- **Recovery:** token creation fails if either existing App secret or this repository's installation grant is missing. Restore the existing App's installation with Pull requests write or re-seed its named secrets, then rerun the failed workflow. Verify the posted review's author, current `commit_id` and APPROVED state, not only the workflow conclusion. Never substitute the workflow token or Claude App. A new commit is required for re-review of a head that already has an App verdict.
+- **Recovery:** token creation fails if either existing App secret or this repository's installation grant is missing. Restore the existing App's installation with Pull requests write or re-seed its named secrets, then rerun the failed workflow. Verify the posted review's author, current `commit_id` and APPROVED state, not only the workflow conclusion. Never substitute the workflow token or Claude App. A new commit is required for re-review of a head that already has a live App verdict.
 - **Auth / cost:** the subscription token is read only from `CODEX_AUTH_JSON` at runtime, never persisted to the runner (rules/no-secrets.md); Codex refreshes the access token in-memory. No per-token API billing. If the refresh token expires the review fails loudly and the operator re-seeds the secret. One-time setup — `codex login` plus `gh secret set CODEX_AUTH_JSON < ~/.codex/auth.json` — is in the `review-codex.yml` header.
 
 ### B. Consumer repos — central `coding-policy-fleet-reviewer[bot]` App
@@ -53,66 +53,3 @@ Read both bodies before merge. On failed authentication, renew the subscription
 token in coding-policy and rerun the failed job. Do not use API-key fallback or
 request Copilot. The workflow pins the Claude CLI; recheck the model pin when
 Renovate updates the CLI and at the weekly capability refresh.
-
-## Weighed findings and the ruled dismissal
-
-Reference for Step 6 — how a marginal blocking finding reaches a weighing and how the ruling clears the gating policy review (`rules/review-severity.md` Judge-Weighed Finding Carve-Out; `rules/ci-safety.md` Judge-Ruled-Review Dismissal Carve-Out).
-
-### Who rules
-
-The agent nominates. The judge is the operator or a software-factory judge.
-
-- A software-factory judge rules only:
-  - `decline`: the finding misreads the code or the governing policy
-  - `defer`: the finding is pre-existing or outside the PR's goal, tracked in the named follow-up issue, and fixing it now costs more than the failure it prevents
-- A correctly applied binding rule the judge considers defective goes to the operator. The judge cannot waive it.
-- A real defect the change introduced stays the operator's risk acceptance, even when described as outside scope.
-- Floors are `fix` whichever authority rules.
-
-### The question
-
-Nominate only a finding on lines the previous fix push added, or one you can support with a cited reachability claim — a path from input to the flagged line, with file and line citations. A gate a software-factory judge rules wholly `decline` or `defer` needs no question. The claim travels in the question itself; no separate report is needed. Otherwise ask the operator one question per gate, carrying every nomination:
-
-```text
-Weighing request at <head sha>. For each finding answer fix, defer or decline:
-1. <source> <path>:<line> <rule> — <finding text> — nominated because <added by the last fix push | reachability claim with citations>
-Floors are always fix. I keep fixing meanwhile; no answer means fix.
-```
-
-The question never blocks. Keep working the fix loop; a finding the operator has not answered stays blocking.
-
-### The ruling file
-
-The ruling file's format, `schema_version`, owner and writer/reader contract are in the `skills/release/dismiss-ruled-review.sh` header. Keep the file for the life of the PR; the dismissal message pins its sha256 digest.
-
-- **Operator:** write the operator's answer into a ruling file with `AUTHORITY: operator` and its `ANSWER:` line.
-- **Software-factory judge:** the judge's collected report is the ruling file. Brief the judge to emit the ruling format as its report artifacts, one line per artifact, in order:
-
-  ```text
-  Rule on each blocking finding of the policy review on <owner>/<repo>#<pr> at <head sha>.
-  Report these lines as your artifacts, one line per artifact, in this order, and no other artifact before them:
-  RULING: weighed
-  schema_version: 4
-  AUTHORITY: judge
-  HEAD: <head sha>
-  FINDING: policy <path>:<line> <rule> — <verdict>
-  One FINDING line per blocking finding below, each verdict one of:
-  decline — wrong: <evidence that the finding misreads the code or the governing policy>
-  defer — out-of-scope #<follow-up issue>: <evidence that it is pre-existing or outside the PR's goal>; cost: <why fixing now costs more than the failure it prevents>
-  fix
-  Rule fix on a floor, on a defect this change introduced, and on a correctly applied rule you consider defective; those are the operator's.
-  Blocking findings:
-  1. <path>:<line> <rule> — <message>
-  ```
-
-  Take the findings from the script's list mode. After collection, pass the report's absolute path, `<task>.<id>.<harness>.report.txt` beside the judge's receipt, as `--ruling` and its sha256 (`shasum -a 256 <path>`) as `--ruling-sha256`. Never edit or rewrite the report. A report the script refuses as malformed or outdated needs a new judge report; a finding it leaves uncovered goes back to the fix loop or to the operator.
-
-### Order of work
-
-1. Run `dismiss-ruled-review.sh` with `--ruling` and `--followup-issue`, plus `--ruling-sha256` for a judge's report (Step 6 command block). It posts the ruled findings to the follow-up issue — `defer`, or `decline` labelled won't-fix — then dismisses the review. Exit 1 names each unmet condition in `.unmet`; fix those findings instead.
-2. Reply citing the ruling, with `<digest>` the 16-hex digest from the script's `.message`. Policy findings appear in the review body; reply in a PR comment citing the review and finding:
-   - Declined: `Declining — judge ruling <digest>: <reason from the ruling>`
-   - Deferred: `Acknowledged — deferred to #<follow-up issue> (judge ruling <digest>)`
-3. Run `dismiss-stale-reviews.sh` (Step 7), then re-run the Step 5 watcher. `poll-pr-reviews.sh` reads the dismissed review as `RULED`, which the watcher's ready test accepts.
-
-A later push re-runs the policy reviewer. Run the script again with the same ruling: it dismisses the new review when the ruling still covers it, and exits 1 naming each finding it no longer covers otherwise. Those go back to a new question or the fix loop.

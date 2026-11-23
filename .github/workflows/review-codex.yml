@@ -181,8 +181,6 @@ jobs:
           sparse-checkout-cone-mode: false
           sparse-checkout: |
             .github/codex-review/post-review.sh
-            skills/release/poll-pr-reviews.sh
-            skills/release/review-lanes.sh
 
       - name: Identify trusted executable revision
         run: |

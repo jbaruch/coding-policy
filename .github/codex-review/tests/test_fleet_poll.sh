@@ -200,22 +200,21 @@ JSON
   ok "policy and quality deduplicate separately"; teardown
 }
 
-# A ruled dismissal (dismiss-ruled-review.sh's JUDGE-RULED: message) keeps the
-# head reviewed; GitHub's automatic stale-review dismissal does not.
-t_dismissed_review_counts_only_when_ruled() {
+t_dismissed_review_reenters_worklist() {
   setup; MOCK_REPOS=(jbaruch/repo-a)
   writef "$MOCK_DIR/jbaruch__repo-a.pulls.json" <<'JSON'
 [{"number":7,"base":{"ref":"main"},"head":{"sha":"aaa111","repo":{"full_name":"jbaruch/repo-a"}}}]
 JSON
   writef "$MOCK_DIR/jbaruch__repo-a.reviews.7.json" <<'JSON'
-[{"id":41,"user":{"login":"app[bot]"},"commit_id":"aaa111","state":"DISMISSED","body":"ruled policy findings"}]
+[{"id":40,"user":{"login":"app[bot]"},"commit_id":"aaa111","state":"COMMENTED","submitted_at":"2026-01-01T00:00:00Z"},
+ {"id":41,"user":{"login":"app[bot]"},"commit_id":"aaa111","state":"DISMISSED","submitted_at":"2026-01-02T00:00:00Z","body":"blocking findings"}]
 JSON
   writef "$MOCK_DIR/jbaruch__repo-a.timeline.7.json" <<'JSON'
 [{"event":"review_dismissed","dismissed_review":{"review_id":41,"dismissal_message":"JUDGE-RULED: 0123456789abcdef covers 1 blocking findings at aaa111; tracked in #9"}}]
 JSON
   local out
   out=$(run_main)
-  [[ "$(jq length <<<"$out")" == 0 ]] || { bad "ruled-dismissed current-head policy review must stay deduplicated"; teardown; return; }
+  [[ "$(jq length <<<"$out")" == 1 ]] || { bad "historical dismissal must permit fresh policy review"; teardown; return; }
   out=$(REVIEW_LANE=quality run_main)
   [[ "$(jq length <<<"$out")" == 1 ]] || { bad "dismissed policy review cannot suppress quality review"; teardown; return; }
   writef "$MOCK_DIR/jbaruch__repo-a.timeline.7.json" <<'JSON'
@@ -223,12 +222,13 @@ JSON
 JSON
   out=$(run_main)
   [[ "$(jq length <<<"$out")" == 1 ]] || { bad "a stale-dismissed current-head review must re-enter the worklist, got $out"; teardown; return; }
-  printf 'not json\n' > "$MOCK_DIR/jbaruch__repo-a.timeline.7.json" || { echo "fatal: could not write fixture" >&2; exit 2; }
-  out=$(run_main 2>"$MOCK_DIR/err")
-  if [[ "$(jq length <<<"$out")" != 1 ]] || ! grep -q "could not read how review 41 on jbaruch/repo-a#7 was dismissed" "$MOCK_DIR/err"; then
-    bad "an unreadable dismissal must warn and re-enter the worklist, got $out"; teardown; return
-  fi
-  ok "a ruled dismissal keeps the head reviewed; a stale or unreadable dismissal re-enters it"; teardown
+  writef "$MOCK_DIR/jbaruch__repo-a.reviews.7.json" <<'JSON'
+[{"id":41,"user":{"login":"app[bot]"},"commit_id":"aaa111","state":"DISMISSED","submitted_at":"2026-01-02T00:00:00Z"},
+ {"id":42,"user":{"login":"app[bot]"},"commit_id":"aaa111","state":"APPROVED","submitted_at":"2026-01-03T00:00:00Z"}]
+JSON
+  out=$(run_main)
+  [[ "$(jq length <<<"$out")" == 0 ]] || { bad "fresh native approval must deduplicate"; teardown; return; }
+  ok "dismissed policy review re-enters the worklist until a fresh approval"; teardown
 }
 
 t_retired_repositories_are_never_queried() {
@@ -258,7 +258,7 @@ JSON
 
 echo "== fleet-poll.sh tests =="
 t_retired_repositories_are_never_queried
-t_dismissed_review_counts_only_when_ruled
+t_dismissed_review_reenters_worklist
 t_lanes_deduplicate_separately
 t_needs_review
 t_already_reviewed
