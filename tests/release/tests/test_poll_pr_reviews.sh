@@ -24,6 +24,8 @@ SCRIPT="$(cd "$(dirname "$0")/../../../skills/release" && pwd)/poll-pr-reviews.s
 source "$SCRIPT" || true
 set +e
 
+OBSERVED_REVIEW=$(python3 "${SCRIPT%/skills/*}/tests/fixtures/quality_review_5962464346.py") || exit 2
+
 FAIL_COUNT=0
 COPILOT_COMMENT_LOGINS=("Copilot" "copilot-pull-request-reviewer[bot]")
 PASS_COUNT=0
@@ -31,7 +33,7 @@ PASS_COUNT=0
 # The head SHA the mock's `gh pr view` returns. A review fixture whose
 # commit_id equals this is "fresh" (bound to head); anything else is "stale"
 # and its verdict resolves to state "none" (#186).
-HEAD_SHA="head000000000000000000000000000000000000"
+HEAD_SHA="d8b9a1e0ea8706cf7ed95f04ca08092ae3d839ca"
 OLD_SHA="0ld00000000000000000000000000000000000000"
 
 assert_eq() {
@@ -120,7 +122,17 @@ gh() {
       [[ $saw_paginate -eq 1 ]] || { echo "mock gh api: missing --paginate (required so the script never silently misses page 2+)" >&2; return 99; }
       case "$path" in
         */actions/runs\?*) echo '{"total_count":0,"workflow_runs":[]}' ;;
-        *reviews*) echo "${MOCK_REVIEWS_BODY:-[]}" ;;
+        *reviews*)
+          if [[ -n "${MOCK_REVIEW_READS:-}" ]]; then
+            if [[ -s "$MOCK_REVIEW_READS" ]]; then
+              printf '%s\n' "${MOCK_REVIEWS_NEXT:?}"
+            else
+              printf '%s\n' "${MOCK_REVIEWS_BODY:-[]}"
+            fi
+            printf 'read\n' >> "$MOCK_REVIEW_READS"
+          else
+            printf '%s\n' "${MOCK_REVIEWS_BODY:-[]}"
+          fi ;;
         *comments*) echo "${MOCK_COMMENTS_BODY:-[]}" ;;
         *timeline*) echo "${MOCK_TIMELINE_BODY:-[]}" ;;
         *) echo "mock gh api: unsupported path: $path" >&2; return 2 ;;
@@ -131,6 +143,14 @@ gh() {
 }
 
 # --- test bodies ---
+
+fixture_review_by() {
+  slurp_api_array "repos/owner/repo/pulls/1/reviews?per_page=100" "review" | latest_review_by "$@"
+}
+
+fixture_comments_by() {
+  slurp_api_array "repos/owner/repo/pulls/1/comments?per_page=100" "inline comment" | toplevel_comments_by "$@"
+}
 
 t_fetch_merge_state_clean_returns_mergeable_envelope() {
   MOCK_MERGE_STATE=clean
@@ -190,7 +210,7 @@ t_main_propagates_dirty_state() {
 t_latest_review_by_picks_from_last_page() {
   MOCK_REVIEWS_BODY='[{"user":{"login":"github-actions[bot]"},"state":"APPROVED","submitted_at":"2026-05-18T16:00:00Z"},{"user":{"login":"github-actions[bot]"},"state":"COMMENTED","submitted_at":"2026-05-18T17:00:00Z"}][{"user":{"login":"github-actions[bot]"},"state":"CHANGES_REQUESTED","submitted_at":"2026-05-18T18:04:00Z"}]'
   local out state submitted_at
-  out=$(latest_review_by "owner" "repo" "1" "github-actions[bot]")
+  out=$(fixture_review_by "github-actions[bot]")
   state=$(echo "$out" | jq -r '.state')
   submitted_at=$(echo "$out" | jq -r '.submitted_at')
   assert_eq "state from last page"        "CHANGES_REQUESTED"     "$state"        || return 1
@@ -200,7 +220,7 @@ t_latest_review_by_picks_from_last_page() {
 t_latest_review_by_returns_none_when_no_reviews() {
   MOCK_REVIEWS_BODY='[]'
   local out state submitted_at body
-  out=$(latest_review_by "owner" "repo" "1" "github-actions[bot]")
+  out=$(fixture_review_by "github-actions[bot]")
   state=$(echo "$out" | jq -r '.state')
   submitted_at=$(echo "$out" | jq -r '.submitted_at')
   body=$(echo "$out" | jq -r '.body')
@@ -215,7 +235,7 @@ t_latest_review_by_returns_none_when_no_reviews() {
 t_latest_review_by_surfaces_body_text() {
   MOCK_REVIEWS_BODY='[{"user":{"login":"github-actions[bot]"},"state":"COMMENTED","submitted_at":"2026-05-18T16:00:00Z","body":"Non-blocking, but the rename in foo.py:42 drops the retry guard."}]'
   local out state body
-  out=$(latest_review_by "owner" "repo" "1" "github-actions[bot]")
+  out=$(fixture_review_by "github-actions[bot]")
   state=$(echo "$out" | jq -r '.state')
   body=$(echo "$out" | jq -r '.body')
   assert_eq "state surfaced"  "COMMENTED" "$state" || return 1
@@ -228,7 +248,7 @@ t_latest_review_by_filters_other_logins_across_pages() {
   # bot review, even though the page-2 human is newer.
   MOCK_REVIEWS_BODY='[{"user":{"login":"alice"},"state":"COMMENTED","submitted_at":"2026-05-18T15:00:00Z"},{"user":{"login":"github-actions[bot]"},"state":"APPROVED","submitted_at":"2026-05-18T16:00:00Z"},{"user":{"login":"bob"},"state":"COMMENTED","submitted_at":"2026-05-18T16:30:00Z"}][{"user":{"login":"alice"},"state":"COMMENTED","submitted_at":"2026-05-18T17:00:00Z"}]'
   local out state submitted_at
-  out=$(latest_review_by "owner" "repo" "1" "github-actions[bot]")
+  out=$(fixture_review_by "github-actions[bot]")
   state=$(echo "$out" | jq -r '.state')
   submitted_at=$(echo "$out" | jq -r '.submitted_at')
   assert_eq "bot state"        "APPROVED"             "$state"        || return 1
@@ -241,14 +261,14 @@ t_latest_review_by_filters_other_logins_across_pages() {
 t_toplevel_comments_by_sums_across_pages() {
   MOCK_COMMENTS_BODY='[{"user":{"login":"github-actions[bot]"},"in_reply_to_id":null},{"user":{"login":"github-actions[bot]"},"in_reply_to_id":null},{"user":{"login":"alice"},"in_reply_to_id":null}][{"user":{"login":"github-actions[bot]"},"in_reply_to_id":null},{"user":{"login":"github-actions[bot]"},"in_reply_to_id":12345}]'
   local count
-  count=$(toplevel_comments_by "owner" "repo" "1" "github-actions[bot]")
+  count=$(fixture_comments_by "github-actions[bot]")
   assert_eq "top-level bot comments across both pages" "3" "$count"
 }
 
 t_toplevel_comments_by_returns_zero_for_no_comments() {
   MOCK_COMMENTS_BODY='[]'
   local count
-  count=$(toplevel_comments_by "owner" "repo" "1" "github-actions[bot]")
+  count=$(fixture_comments_by "github-actions[bot]")
   assert_eq "comments count for empty" "0" "$count"
 }
 
@@ -259,7 +279,7 @@ t_toplevel_comments_by_returns_zero_for_no_comments() {
 t_toplevel_comments_by_counts_copilot_login() {
   MOCK_COMMENTS_BODY='[{"user":{"login":"Copilot"},"in_reply_to_id":null,"path":"a/b.md","body":"Real finding."}]'
   local count
-  count=$(toplevel_comments_by "owner" "repo" "1" "${COPILOT_COMMENT_LOGINS[@]}")
+  count=$(fixture_comments_by "${COPILOT_COMMENT_LOGINS[@]}")
   assert_eq "Copilot-authored comment is counted" "1" "$count"
 }
 
@@ -269,14 +289,14 @@ t_toplevel_comments_by_counts_copilot_login() {
 t_toplevel_comments_by_matches_either_copilot_login() {
   MOCK_COMMENTS_BODY='[{"user":{"login":"Copilot"},"in_reply_to_id":null},{"user":{"login":"copilot-pull-request-reviewer[bot]"},"in_reply_to_id":null}]'
   local count
-  count=$(toplevel_comments_by "owner" "repo" "1" "${COPILOT_COMMENT_LOGINS[@]}")
+  count=$(fixture_comments_by "${COPILOT_COMMENT_LOGINS[@]}")
   assert_eq "both Copilot logins counted" "2" "$count"
 }
 
 t_toplevel_comments_by_excludes_replies_and_other_logins() {
   MOCK_COMMENTS_BODY='[{"user":{"login":"Copilot"},"in_reply_to_id":null},{"user":{"login":"Copilot"},"in_reply_to_id":991},{"user":{"login":"some-human"},"in_reply_to_id":null}]'
   local count
-  count=$(toplevel_comments_by "owner" "repo" "1" "${COPILOT_COMMENT_LOGINS[@]}")
+  count=$(fixture_comments_by "${COPILOT_COMMENT_LOGINS[@]}")
   assert_eq "replies and foreign logins excluded" "1" "$count"
 }
 
@@ -288,7 +308,7 @@ t_toplevel_comments_by_excludes_replies_and_other_logins() {
 t_toplevel_comments_by_survives_non_object_element() {
   MOCK_COMMENTS_BODY='["Not Found",{"user":{"login":"Copilot"},"in_reply_to_id":null},{"user":{"login":"Copilot"},"in_reply_to_id":null}]'
   local count
-  count=$(toplevel_comments_by "owner" "repo" "1" "${COPILOT_COMMENT_LOGINS[@]}" 2>/dev/null)
+  count=$(fixture_comments_by "${COPILOT_COMMENT_LOGINS[@]}" 2>/dev/null)
   assert_eq "count survives a non-object element" "2" "$count"
 }
 
@@ -297,7 +317,7 @@ t_toplevel_comments_by_survives_non_object_element() {
 t_toplevel_comments_by_warns_on_non_object_element() {
   MOCK_COMMENTS_BODY='["Not Found",{"user":{"login":"Copilot"},"in_reply_to_id":null}]'
   local err
-  err=$( { toplevel_comments_by "owner" "repo" "1" "${COPILOT_COMMENT_LOGINS[@]}" >/dev/null; } 2>&1 )
+  err=$( { fixture_comments_by "${COPILOT_COMMENT_LOGINS[@]}" >/dev/null; } 2>&1 )
   case "$err" in
     *"1 non-object element"*) return 0 ;;
     *) echo "    FAIL: expected a non-object-element warning on stderr, got: '${err}'" >&2; return 1 ;;
@@ -309,7 +329,7 @@ t_toplevel_comments_by_warns_on_non_object_element() {
 t_latest_review_by_survives_non_object_element() {
   MOCK_REVIEWS_BODY='["Not Found",{"user":{"login":"github-actions[bot]"},"state":"APPROVED","submitted_at":"2026-05-18T16:00:00Z","body":"ok","commit_id":"'"$HEAD_SHA"'"}]'
   local out state
-  out=$(latest_review_by "owner" "repo" "1" "github-actions[bot]" 2>/dev/null)
+  out=$(fixture_review_by "github-actions[bot]" 2>/dev/null)
   state=$(echo "$out" | jq -r '.state')
   assert_eq "verdict survives a non-object element" "APPROVED" "$state"
 }
@@ -317,6 +337,7 @@ t_latest_review_by_survives_non_object_element() {
 # End-to-end: the poll returns a snapshot instead of failing, which is what
 # kept watch-pr-reviews.sh from stalling to budget on a degraded response.
 t_main_survives_non_object_comment_element() {
+  local MOCK_REVIEWS_BODY='[]'
   MOCK_MERGE_STATE=clean
   MOCK_COMMENTS_BODY='["Not Found",{"user":{"login":"Copilot"},"in_reply_to_id":null}]'
   local out copilot
@@ -328,6 +349,7 @@ t_main_survives_non_object_comment_element() {
 # End-to-end through main() — the path the Step 7 merge gate actually reads.
 # Codex and Copilot counts must not bleed into each other.
 t_main_counts_copilot_comments_in_snapshot() {
+  local MOCK_REVIEWS_BODY='[]'
   MOCK_MERGE_STATE=clean
   MOCK_COMMENTS_BODY='[{"user":{"login":"Copilot"},"in_reply_to_id":null},{"user":{"login":"github-actions[bot]"},"in_reply_to_id":null},{"user":{"login":"github-actions[bot]"},"in_reply_to_id":null}]'
   local out counts
@@ -343,7 +365,7 @@ t_main_counts_copilot_comments_in_snapshot() {
 t_latest_review_by_resolves_fleet_app_login() {
   MOCK_REVIEWS_BODY='[{"user":{"login":"coding-policy-fleet-reviewer[bot]"},"state":"APPROVED","submitted_at":"2026-07-21T05:15:00Z"}]'
   local out state
-  out=$(latest_review_by "owner" "repo" "1" "${CODEX_REVIEW_LOGINS[@]}")
+  out=$(fixture_review_by "${CODEX_REVIEW_LOGINS[@]}")
   state=$(echo "$out" | jq -r '.state')
   assert_eq "fleet-App review resolves to policy state" "APPROVED" "$state"
 }
@@ -353,7 +375,7 @@ t_latest_review_by_resolves_fleet_app_login() {
 t_latest_review_by_policy_reviewer_picks_newest_across_logins() {
   MOCK_REVIEWS_BODY='[{"user":{"login":"github-actions[bot]"},"state":"COMMENTED","submitted_at":"2026-07-21T05:00:00Z"},{"user":{"login":"coding-policy-fleet-reviewer[bot]"},"state":"CHANGES_REQUESTED","submitted_at":"2026-07-21T05:10:00Z"}]'
   local out state
-  out=$(latest_review_by "owner" "repo" "1" "${CODEX_REVIEW_LOGINS[@]}")
+  out=$(fixture_review_by "${CODEX_REVIEW_LOGINS[@]}")
   state=$(echo "$out" | jq -r '.state')
   assert_eq "newest policy verdict across both logins" "CHANGES_REQUESTED" "$state"
 }
@@ -365,14 +387,14 @@ t_latest_review_by_policy_reviewer_picks_newest_across_logins() {
 t_latest_review_by_changes_requested_not_masked_by_later_other_login() {
   MOCK_REVIEWS_BODY='[{"user":{"login":"github-actions[bot]"},"state":"CHANGES_REQUESTED","submitted_at":"2026-07-21T05:00:00Z"},{"user":{"login":"coding-policy-fleet-reviewer[bot]"},"state":"COMMENTED","submitted_at":"2026-07-21T05:10:00Z"}]'
   local out state
-  out=$(latest_review_by "owner" "repo" "1" "${CODEX_REVIEW_LOGINS[@]}")
+  out=$(fixture_review_by "${CODEX_REVIEW_LOGINS[@]}")
   state=$(echo "$out" | jq -r '.state')
   assert_eq "active block not masked by later clean review" "CHANGES_REQUESTED" "$state"
 }
 
 t_main_surfaces_fleet_app_review_as_codex() {
   MOCK_MERGE_STATE=clean
-  MOCK_REVIEWS_BODY='[{"user":{"login":"coding-policy-fleet-reviewer[bot]"},"state":"APPROVED","submitted_at":"2026-07-21T05:15:00Z","commit_id":"'"$HEAD_SHA"'"}]'
+  MOCK_REVIEWS_BODY='[{"id":1,"user":{"login":"coding-policy-fleet-reviewer[bot]"},"state":"APPROVED","submitted_at":"2026-07-21T05:15:00Z","commit_id":"'"$HEAD_SHA"'"}]'
   local out state
   out=$(main "owner" "repo" "1")
   state=$(echo "$out" | jq -r '.reviews.codex.state')
@@ -382,7 +404,7 @@ t_main_surfaces_fleet_app_review_as_codex() {
 t_toplevel_comments_by_counts_fleet_app_login() {
   MOCK_COMMENTS_BODY='[{"user":{"login":"coding-policy-fleet-reviewer[bot]"},"in_reply_to_id":null}]'
   local count
-  count=$(toplevel_comments_by "owner" "repo" "1" "${CODEX_COMMENT_LOGINS[@]}")
+  count=$(fixture_comments_by "${CODEX_COMMENT_LOGINS[@]}")
   assert_eq "fleet-App inline comment counted for policy reviewer" "1" "$count"
 }
 
@@ -395,7 +417,7 @@ t_toplevel_comments_by_counts_fleet_app_login() {
 t_latest_review_by_picks_max_by_time_not_array_position() {
   MOCK_REVIEWS_BODY='[{"user":{"login":"github-actions[bot]"},"state":"CHANGES_REQUESTED","submitted_at":"2026-07-25T18:00:00Z"},{"user":{"login":"github-actions[bot]"},"state":"COMMENTED","submitted_at":"2026-07-25T17:00:00Z"},{"user":{"login":"github-actions[bot]"},"state":"APPROVED","submitted_at":"2026-07-25T16:00:00Z"}]'
   local out state submitted_at
-  out=$(latest_review_by "owner" "repo" "1" "github-actions[bot]")
+  out=$(fixture_review_by "github-actions[bot]")
   state=$(echo "$out" | jq -r '.state')
   submitted_at=$(echo "$out" | jq -r '.submitted_at')
   assert_eq "latest by time, not array position" "CHANGES_REQUESTED"     "$state"        || return 1
@@ -409,7 +431,7 @@ t_latest_review_by_picks_max_by_time_not_array_position() {
 t_latest_review_by_normalizes_dismissed_to_none() {
   MOCK_REVIEWS_BODY='[{"user":{"login":"github-actions[bot]"},"state":"DISMISSED","submitted_at":"2026-07-25T16:00:00Z","body":"was dismissed"}]'
   local out state
-  out=$(latest_review_by "owner" "repo" "1" "github-actions[bot]")
+  out=$(fixture_review_by "github-actions[bot]")
   state=$(echo "$out" | jq -r '.state')
   assert_eq "DISMISSED normalizes to none" "none" "$state"
 }
@@ -417,7 +439,7 @@ t_latest_review_by_normalizes_dismissed_to_none() {
 t_latest_review_by_normalizes_pending_to_none() {
   MOCK_REVIEWS_BODY='[{"user":{"login":"github-actions[bot]"},"state":"PENDING","submitted_at":"2026-07-25T16:00:00Z"}]'
   local out state
-  out=$(latest_review_by "owner" "repo" "1" "github-actions[bot]")
+  out=$(fixture_review_by "github-actions[bot]")
   state=$(echo "$out" | jq -r '.state')
   assert_eq "PENDING normalizes to none" "none" "$state"
 }
@@ -469,7 +491,7 @@ t_resolve_against_head_none_stays_none_not_stale() {
 # keeps waiting instead of merging unreviewed code.
 t_main_stale_review_collapses_to_none() {
   MOCK_MERGE_STATE=clean
-  MOCK_REVIEWS_BODY='[{"user":{"login":"github-actions[bot]"},"state":"COMMENTED","submitted_at":"2026-07-25T09:00:00Z","body":"looks fine","commit_id":"'"$OLD_SHA"'"}]'
+  MOCK_REVIEWS_BODY='[{"id":1,"user":{"login":"github-actions[bot]"},"state":"COMMENTED","submitted_at":"2026-07-25T09:00:00Z","body":"looks fine","commit_id":"'"$OLD_SHA"'"}]'
   local out state stale
   out=$(main "owner" "repo" "1")
   state=$(echo "$out" | jq -r '.reviews.codex.state')
@@ -481,7 +503,7 @@ t_main_stale_review_collapses_to_none() {
 # A fresh verdict (commit_id == head) surfaces normally.
 t_main_fresh_review_surfaces_state() {
   MOCK_MERGE_STATE=clean
-  MOCK_REVIEWS_BODY='[{"user":{"login":"github-actions[bot]"},"state":"APPROVED","submitted_at":"2026-07-25T10:00:00Z","body":"ok","commit_id":"'"$HEAD_SHA"'"}]'
+  MOCK_REVIEWS_BODY='[{"id":1,"user":{"login":"github-actions[bot]"},"state":"APPROVED","submitted_at":"2026-07-25T10:00:00Z","body":"ok","commit_id":"'"$HEAD_SHA"'"}]'
   local out state stale
   out=$(main "owner" "repo" "1")
   state=$(echo "$out" | jq -r '.reviews.codex.state')
@@ -597,7 +619,7 @@ t_main_reads_inline_bodies_and_replies_from_every_page() {
 t_main_reads_every_review_body_without_changing_bot_verdicts() {
   local MOCK_MERGE_STATE=clean MOCK_COMMENTS_BODY='[]' MOCK_TIMELINE_BODY='[]'
   local MOCK_REVIEWS_BODY='[{"id":1,"user":{"login":"github-actions[bot]"},"state":"COMMENTED","body":"Policy clear","commit_id":"'"$HEAD_SHA"'","submitted_at":"2026-10-07T00:00:00Z"},{"id":2,"user":{"login":"human"},"state":"APPROVED","body":"Read my concern","commit_id":"'"$OLD_SHA"'"}]
-[{"id":3,"user":{"login":"other-bot"},"state":"DISMISSED","body":"Historical concern"},{"id":4,"user":{"login":"human"},"state":"PENDING","body":"Pending concern"},{"id":5,"body":""},{"id":6,"body":null}]'
+[{"id":3,"user":null,"state":"DISMISSED","body":"Historical concern"},{"id":4,"user":{"login":"human"},"state":"PENDING","body":"Pending concern"},{"id":5,"user":null,"body":""},{"id":6,"user":null,"body":null}]'
   local out
   out=$(main owner repo 1) || return 1
   assert_eq "all nonempty bodies across authors, states and pages" \
@@ -642,22 +664,143 @@ t_lanes_from_distinct_bots_are_independent() {
   local MOCK_REVIEWS_BODY
   MOCK_REVIEWS_BODY=$(jq -n --arg h "$HEAD_SHA" --arg q "$CLAUDE_REVIEW_LOGIN" '[
     {id:1,user:{login:"github-actions[bot]"},commit_id:$h,state:"CHANGES_REQUESTED",submitted_at:"2026-10-20T01:00:00Z",body:"blocking policy"},
-    {id:2,user:{login:$q},commit_id:$h,state:"COMMENTED",submitted_at:"2026-10-20T02:00:00Z",body:"<!-- coding-policy:claude-quality-review:v1 -->\nquality advisory"}]')
+    {id:2,user:{login:$q},commit_id:$h,state:"COMMENTED",submitted_at:"2026-10-20T02:00:00Z",body:"<!-- coding-policy:claude-quality-review:v1 -->\n## Claude code review\n\nAdvisory.\n\nReviewed commit: \($h). Code quality and bugs only.\n"}]')
   local out
   out=$(main owner repo 1) || return 1
   assert_eq "policy block remains" "CHANGES_REQUESTED" "$(jq -r '.reviews.codex.state' <<<"$out")" || return 1
   assert_eq "quality comment arrives" "COMMENTED" "$(jq -r '.reviews.claude.state' <<<"$out")" || return 1
-  MOCK_REVIEWS_BODY=$(jq '.[0].state="COMMENTED" | .[1].state="CHANGES_REQUESTED"' <<<"$MOCK_REVIEWS_BODY")
-  out=$(main owner repo 1) || return 1
-  assert_eq "quality block remains" "CHANGES_REQUESTED" "$(jq -r '.reviews.claude.state' <<<"$out")" || return 1
-  assert_eq "policy comment separate" "COMMENTED" "$(jq -r '.reviews.codex.state' <<<"$out")"
+  local history order
+  history=$(jq --argjson mismatch "$OBSERVED_REVIEW" '
+    ($mismatch + {body: .[1].body}) as $bound
+    | [(.[0] | .state="COMMENTED"), ($bound | .id -= 1 | .state="CHANGES_REQUESTED"),
+       $mismatch, ($bound | .id += 1 | .state="COMMENTED")]' <<<"$MOCK_REVIEWS_BODY") || return 1
+  for order in '.[]' 'reverse[]'; do
+    MOCK_REVIEWS_BODY=$(jq -c "$order | [.]" <<<"$history") || return 1
+    out=$(main owner repo 1) || return 1
+    assert_eq "quality block remains" "CHANGES_REQUESTED" "$(jq -r '.reviews.claude.state' <<<"$out")" || return 1
+    assert_eq "policy comment separate" "COMMENTED" "$(jq -r '.reviews.codex.state' <<<"$out")" || return 1
+    assert_eq "all feedback retained" 4 "$(jq '.review_bodies | length' <<<"$out")" || return 1
+  done
 }
+
+t_review_verdict_and_feedback_share_one_inventory() (
+  local MOCK_MERGE_STATE=clean MOCK_REVIEWS_BODY MOCK_REVIEWS_NEXT MOCK_REVIEW_READS
+  local policy_and_bound pages order first second
+  MOCK_REVIEW_READS=$(mktemp) || return 1
+  trap 'rm -f "$MOCK_REVIEW_READS"' EXIT
+  policy_and_bound=$(jq -c '[{id:1,user:{login:"github-actions[bot]"},state:"APPROVED",commit_id},
+    (. + {id:2,submitted_at:"2020-01-01T00:00:00Z",
+      body:("<!-- coding-policy:claude-quality-review:v1 -->\nReviewed commit: " + .commit_id + ". Code quality and bugs only.")})]' <<<"$OBSERVED_REVIEW") || return 1
+  MOCK_REVIEWS_NEXT=$policy_and_bound
+  pages=$(jq -c --argjson initial "$policy_and_bound" '[$initial, [.]]' <<<"$OBSERVED_REVIEW") || return 1
+  for order in '.[]' 'reverse[]'; do
+    : > "$MOCK_REVIEW_READS" || return 1
+    MOCK_REVIEWS_BODY=$(jq -c "$order" <<<"$pages") || return 1
+    first=$(main owner repo 1) || return 1
+    if ! jq -e '.reviews.codex.state == "APPROVED" and
+      (.reviews.claude | .state == "none" and .stale == true) and
+      any(.review_bodies[]; .id == 5962464346)' <<<"$first" >/dev/null; then
+      echo "expected one snapshot to retain the mismatch and hold its quality verdict ($order)" >&2
+      return 1
+    fi
+    assert_eq "one reviews read for the first snapshot" read "$(cat "$MOCK_REVIEW_READS")" || return 1
+    second=$(main owner repo 1) || return 1
+    assert_eq "next snapshot reflects the next inventory" APPROVED "$(jq -r '.reviews.claude.state' <<<"$second")" || return 1
+    assert_eq "no mismatched feedback in the next inventory" false "$(jq 'any(.review_bodies[]; .id == 5962464346)' <<<"$second")" || return 1
+  done
+)
+
+t_misattributed_quality_approval_keeps_release_pending() (
+  local MOCK_REVIEWS_BODY MOCK_MERGE_STATE=clean out result rc=0 history recovered
+  assert_eq "API attribution matches the requested head" "$HEAD_SHA" "$(jq -r .commit_id <<<"$OBSERVED_REVIEW")" || return 1
+  # A newer inconsistent review must not revive an earlier valid approval.
+  MOCK_REVIEWS_BODY=$(jq '[{id:3,user:{login:"github-actions[bot]"},state:"APPROVED",commit_id},
+    (. + {id:1, submitted_at:"2020-01-01T00:00:00Z",
+      body:("<!-- coding-policy:claude-quality-review:v1 -->\nReviewed commit: " + .commit_id + ". Code quality and bugs only.\n")}), .]' <<<"$OBSERVED_REVIEW") || return 1
+  out=$(main owner repo 1) || return 1
+  assert_eq "quality unresolved" none "$(jq -r '.reviews.claude.state' <<<"$out")" || return 1
+  assert_eq "original review retained" "$(jq -r .body <<<"$OBSERVED_REVIEW")" "$(jq -r '.reviews.claude.body' <<<"$out")" || return 1
+  history=$MOCK_REVIEWS_BODY
+  local mutation
+  for mutation in '.[1].id=5962464347' '.[2].body=null' '.[2].body="missing marker"' \
+      '.[2].body=.[1].body | .[2].state="DISMISSED"' \
+      '.[1].submitted_at=.[2].submitted_at' '(.[1].submitted_at=.[2].submitted_at) | reverse'; do
+    MOCK_REVIEWS_BODY=$(jq "$mutation" <<<"$history") || return 1
+    out=$(main owner repo 1) || return 1
+    assert_eq "quality unresolved for $mutation" none "$(jq -r '.reviews.claude.state' <<<"$out")" || return 1
+  done
+  for mutation in '.[2].submitted_at=null' '.[2].submitted_at="2026-02-30T00:00:00Z"' '.[2].id="13"'; do
+    MOCK_REVIEWS_BODY=$(jq "$mutation" <<<"$history") || return 1
+    if (main owner repo 1) >/dev/null; then
+      echo "expected unreadable submission order to stop the snapshot ($mutation)" >&2; return 1
+    fi
+  done
+  # A later valid submission settles readiness even with an outstanding draft.
+  MOCK_REVIEWS_BODY=$(jq '. + [(.[1] + {id:5962464347,submitted_at:.[2].submitted_at}),
+    (.[2] + {id:5962464348,state:"PENDING",submitted_at:null})]' <<<"$history") || return 1
+  recovered=$(main owner repo 1) || return 1
+  assert_eq "fresh approval accepted" APPROVED "$(jq -r '.reviews.claude.state' <<<"$recovered")" || return 1
+
+  export WATCH_PR_REVIEWS_INTERVAL_SEC=1 WATCH_PR_REVIEWS_BUDGET_SEC=1
+  # shellcheck disable=SC1090,SC1091  # Load the ordinary watcher alongside the tested poll.
+  source "${SCRIPT%/*}/watch-pr-reviews.sh" || [[ $? == 1 ]] || return 1
+  set +e
+  # shellcheck disable=SC2329  # Called by the sourced watcher.
+  fetch_snapshot() { printf '%s' "$out"; }
+  result=$(main owner repo 1) || rc=$?
+  assert_eq "unresolved watch exit" 1 "$rc" || return 1
+  assert_eq "release waits for quality" pending_at_budget "$(jq -r '.watch.result' <<<"$result")" || return 1
+  out=$recovered
+  result=$(main owner repo 1) || return 1
+  assert_eq "successor releases watch" ready "$(jq -r '.watch.result' <<<"$result")"
+)
+
+t_quality_observation_errors() (
+  local MOCK_MERGE_STATE=clean MOCK_REVIEWS_BODY pages diagnostic mutation expected actor order
+  pages=$(jq -c '[., (.body = ("<!-- coding-policy:claude-quality-review:v1 -->\nReviewed commit: " + .commit_id + ". Code quality and bugs only."))]' <<<"$OBSERVED_REVIEW") || return 1
+  # Exercise the watcher with its real snapshot and only the native reads mocked.
+  # shellcheck source=/dev/null  # The fixture loads the watcher in its own subshell.
+  source "${SCRIPT%/*}/watch-pr-reviews.sh" || true
+  set +e
+  # shellcheck disable=SC2329  # Invoked by the watcher.
+  fetch_snapshot() (
+    # shellcheck source=/dev/null  # The real poll runs with the fixture gh function.
+    source "$SCRIPT"
+    main "$@"
+  )
+  for mutation in copies reverse missing_actor reverse_missing_actor lookalike reverse_lookalike decimal row omitted login body historical_body; do
+    actor='.'
+    order='.[]'
+    case "$mutation" in
+      *missing_actor) actor='null' ;;
+      *lookalike) actor='{login:"similar-reviewer[bot]"}' ;;
+    esac
+    case "$mutation" in
+      reverse*) order='reverse[]' ;;
+    esac
+    case "$mutation" in
+      copies|reverse|*missing_actor|*lookalike)
+        MOCK_REVIEWS_BODY=$(jq -c ".[0].user |= $actor | $order | [.]" <<<"$pages"); expected="Repeated native review ID" ;;
+      decimal) MOCK_REVIEWS_BODY=$(jq -c '.[1:]' <<<"$pages" | sed 's/"id":5962464346/"id":5962464347.0/'); expected="Invalid native review ID" ;;
+      row) MOCK_REVIEWS_BODY=$(jq '.[1:] + [null]' <<<"$pages"); expected="Invalid native review row" ;;
+      omitted) MOCK_REVIEWS_BODY=$(jq '.[1:] + [{id:7}]' <<<"$pages"); expected="Missing review attribution" ;;
+      login) MOCK_REVIEWS_BODY=$(jq '.[1:] + [{id:7,user:{login:42}}]' <<<"$pages"); expected="Invalid review attribution" ;;
+      body) MOCK_REVIEWS_BODY=$(jq '[.body = {"bad":true}]' <<<"$OBSERVED_REVIEW"); expected="Invalid quality review body" ;;
+      historical_body) MOCK_REVIEWS_BODY=$(jq '.[0].body = {"bad":true} | .[1].id += 1' <<<"$pages"); expected="Invalid quality review body" ;;
+    esac
+    local rc=0
+    diagnostic=$(main owner repo 1 2>&1) || rc=$?
+    assert_eq "watch refused $mutation" 2 "$rc" || return 1
+    [[ "$diagnostic" == *"$expected"* && "$diagnostic" == *"owner/repo#1"* ]] || {
+      echo "$mutation: missing PR and field diagnostic: $diagnostic" >&2; return 1; }
+  done
+)
 
 t_copilot_unavailable_does_not_block_new_reviewers() (
   local MOCK_MERGE_STATE=clean MOCK_REVIEWS_BODY
   MOCK_REVIEWS_BODY=$(jq -n --arg h "$HEAD_SHA" --arg q "$CLAUDE_REVIEW_LOGIN" '[
-    {user:{login:"github-actions[bot]"},commit_id:$h,state:"APPROVED",submitted_at:"2026-10-20T01:00:00Z",body:"policy clean"},
-    {user:{login:$q},commit_id:$h,state:"APPROVED",submitted_at:"2026-10-20T02:00:00Z",body:"<!-- coding-policy:claude-quality-review:v1 --> clean"}]')
+    {id:1,user:{login:"github-actions[bot]"},commit_id:$h,state:"APPROVED",submitted_at:"2026-10-20T01:00:00Z",body:"policy clean"},
+    {id:2,user:{login:$q},commit_id:$h,state:"APPROVED",submitted_at:"2026-10-20T02:00:00Z",body:"<!-- coding-policy:claude-quality-review:v1 -->\n## Claude code review\n\nClean.\n\nReviewed commit: \($h). Code quality and bugs only.\n"}]')
   local out MOCK_COPILOT_UNAVAILABLE=1
   out=$(main owner repo 1) || return 1
   # shellcheck disable=SC1090,SC1091  # The separately checked watcher is loaded by a test-derived path.
@@ -671,6 +814,9 @@ t_copilot_unavailable_does_not_block_new_reviewers() (
 )
 
 run_suite() {
+  run "snapshot verdict and feedback use the same paginated reviews" t_review_verdict_and_feedback_share_one_inventory
+  run "unreadable quality ordering or body stops the watcher" t_quality_observation_errors
+  run "misattributed quality approval keeps the ordinary release pending" t_misattributed_quality_approval_keeps_release_pending
   run "Copilot endpoint failures cannot block Codex/Claude readiness" t_copilot_unavailable_does_not_block_new_reviewers
   run "distinct policy and quality identities cannot mask each other" t_lanes_from_distinct_bots_are_independent
   echo "== poll-pr-reviews.sh tests ==" >&2

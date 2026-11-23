@@ -6,7 +6,14 @@ Block until the PR reaches a merge-gate-relevant terminal state. The watcher pol
 skills/release/references/release-contract.md
 ```
 
-Then run the watcher:
+The watcher requires Python 3 on `PATH` for the review selector shipped alongside
+the release helpers. Install Python 3 if it is missing or reinstall the plugin
+if the selector is missing. After an install, update, or rollback, verify the
+selected plugin root against the intended release before using its verdict.
+For ACR, confirm the locked source revision and a clean `acr check` for the
+selected agent. Recover interrupted writes with `acr realize` and recheck.
+For Tessl, compare the installed inventory with the delivered package and
+reinstall if incomplete. Restart the watcher from the verified root.
 
 ```bash
 KS=.tessl/plugins/jbaruch/coding-policy/skills/release/; [ -d "$KS" ] || KS="$HOME/$KS"; [ -d "$KS" ] || case "$(git config --get remote.origin.url)" in git@github.com:jbaruch/coding-policy|git@github.com:jbaruch/coding-policy.git|https://github.com/jbaruch/coding-policy|https://github.com/jbaruch/coding-policy.git|ssh://git@github.com/jbaruch/coding-policy|ssh://git@github.com/jbaruch/coding-policy.git) KS=skills/release/ ;; *) echo "coding-policy skill not found: run tessl install jbaruch/coding-policy" >&2; exit 1 ;; esac

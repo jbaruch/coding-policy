@@ -7,7 +7,7 @@ only its subscription token, a replacement system prompt and a throwaway source
 checkout. No policy installation, GitHub token, settings, history or execution
 tools enter its session. Findings are blocking or advisory; the verdict is bound
 to the exact analyzed commit. A failed/invalid/stale review fails visibly without posting.
-The first verdict posted on a head stands: when this App already reviewed the
+When this App's latest submitted verdict is live and bound to the analyzed
 head, nothing is posted (issue #841). A dismissed review does not count.
 """
 
@@ -82,6 +82,11 @@ def validate_review(value: object) -> dict:
     return value
 
 
+def quote_markdown(text: str, indent: str = "") -> str:
+    lines = text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+    return "\n".join(f"{indent}> {line}" if line else f"{indent}>" for line in lines)
+
+
 def claude_environment(config: Path) -> dict[str, str]:
     # Allowlist instead of removing a growing list of provider/CI credentials.
     allowed = ("PATH", "HOME", "TMPDIR", "LANG", "LC_ALL", "SSL_CERT_FILE", "SSL_CERT_DIR")
@@ -106,7 +111,8 @@ def claude_command() -> list[str]:
 
 
 def review_pr(owner: str, repo: str, pr: str, base: str) -> dict:
-    lane = json.loads(run(["bash", str(HERE.parents[1] / "skills/release/review-lanes.sh")]))
+    lane_command = ["bash", str(HERE.parents[1] / "skills/release/review-lanes.sh")]
+    lane = json.loads(run(lane_command))
     if os.environ.get("REVIEWER_LOGIN") != lane["quality_login"]:
         raise ReviewError("Claude requires its dedicated reviewer App identity; correct CLAUDE_REVIEW_APP_ID and CLAUDE_REVIEW_APP_PRIVATE_KEY")
     endpoint = f"repos/{owner}/{repo}/pulls/{pr}"
@@ -152,26 +158,39 @@ def review_pr(owner: str, repo: str, pr: str, base: str) -> dict:
     if latest["state"] != "open" or latest["head"]["sha"] != head or latest["base"]["ref"] != base:
         raise ReviewError("PR changed during review; refusing to post a stale verdict; retry")
     marker = lane["quality_marker"]
-    body = f"{marker}\n## Claude code review\n\n{review['summary']}\n\n"
-    body += f"Reviewed commit: {head}. Code quality and bugs only.\n"
+    body = f"{marker}\n## Claude code review\n\nReviewed commit: {head}. Code quality and bugs only.\n"
+    body += f"\n{quote_markdown(review['summary'])}\n"
     blocking = [finding for finding in review["findings"] if finding["severity"] == "blocking"]
     advisory = [finding for finding in review["findings"] if finding["severity"] == "advisory"]
     for severity, findings in (("Blocking", blocking), ("Advisory", advisory)):
         if findings:
             body += f"\n## {severity} findings\n"
             for finding in findings:
-                body += f"\n- {finding['path']}:{finding['line']} — {finding['message']}\n"
-    # A dispatch queued behind a finished review can reach the same head; the
-    # first posted verdict stands. A failed lookup raises, so "unknown" never reads as "not reviewed".
+                path = finding["path"].replace("\r\n", "\n").replace("\r", "\n").replace("\n", r"\n")
+                ticks = "`" * (1 + max((len(run) for run in re.findall(r"`+", path)), default=0))
+                body += f"\n- {ticks} {path}:{finding['line']} {ticks}\n\n{quote_markdown(finding['message'], '  ')}\n"
+    # Read every page immediately before posting so a queued dispatch sees the latest verdict.
     pages = json.loads(run(["gh", "api", "--paginate", "--slurp", endpoint + "/reviews?per_page=100"]))
     if (not isinstance(pages, list) or not all(isinstance(page, list) for page in pages)
             or not all(isinstance(item, dict) for page in pages for item in page)):
         raise ReviewError("GitHub returned an unreadable review list; nothing was posted; retry the review")
-    if any(item.get("commit_id") == head and (item.get("user") or {}).get("login") == lane["quality_login"]
-           and item.get("state") in ("APPROVED", "COMMENTED", "CHANGES_REQUESTED")
-           for page in pages for item in page):
+    reviews = [item for page in pages for item in page]
+    verdict = subprocess.run([*lane_command, "state", head], input=json.dumps(reviews),
+                             text=True, capture_output=True, check=False)
+    if verdict.returncode == 2:
+        raise ReviewError("Quality review selector unavailable; restore the matching review helper and ensure Python 3 and jq are on PATH")
+    if verdict.returncode != 0:
+        raise ReviewError(f"Quality review ordering unresolved for {owner}/{repo}#{pr}; inspect native IDs, "
+                          f"actor logins and submission times with 'gh api --paginate {endpoint}/reviews' and retry")
+    try:
+        state = json.loads(verdict.stdout)
+    except json.JSONDecodeError as error:
+        raise ReviewError("Expected a JSON quality state from review-lanes.sh; restore the matching helper and retry") from error
+    if not isinstance(state, str) or state not in ("none", "APPROVED", "COMMENTED", "CHANGES_REQUESTED"):
+        raise ReviewError("Expected a JSON quality state from review-lanes.sh; restore the matching helper and retry")
+    if state != "none":
         print(f"{lane['quality_login']} already reviewed {owner}/{repo}#{pr} at {head}; "
-              "the first verdict on a head stands, so nothing was posted", file=sys.stderr)
+              "the latest verdict is bound to this head, so nothing was posted", file=sys.stderr)
         return {"state": "already_reviewed", "reviewer": "claude", "head_sha": head}
     # An App's COMMENT does not supersede its earlier REQUEST_CHANGES. Approve
     # every nonblocking result, with advisory notes in the body. The dedicated

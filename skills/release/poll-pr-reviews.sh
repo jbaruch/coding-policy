@@ -55,10 +55,10 @@ CODEX_COMMENT_LOGINS=("github-actions[bot]" "coding-policy-fleet-reviewer[bot]")
 # not across the stream), so slurp every page into one array with `jq -s`
 # before filtering. `per_page=100` is the API maximum and keeps request
 # volume bounded.
-slurp_api_array() {
+normalize_api_array() {
   local endpoint="$1" what="$2" payload malformed
-  payload=$(gh api --paginate "$endpoint" | jq -s '(add // [])') \
-    || { echo "error: failed to fetch ${what} from ${endpoint}" >&2; return 1; }
+  payload=$(jq -s '(add // [])') \
+    || { echo "error: failed to read ${what} from ${endpoint}" >&2; return 1; }
   malformed=$(printf '%s' "$payload" | jq '[.[] | select(type != "object")] | length') \
     || { echo "error: failed to inspect the ${what} payload from ${endpoint}" >&2; return 1; }
   if (( malformed > 0 )); then
@@ -67,9 +67,10 @@ slurp_api_array() {
   printf '%s' "$payload" | jq '[.[] | select(type == "object")]'
 }
 
-# Missing a page would let the `last` filter pick the last entry on page 1 —
-# not the actual latest review — and the gate could approve a merge against
-# stale data; slurp_api_array above owns the pagination.
+slurp_api_array() {
+  gh api --paginate "$1" | normalize_api_array "$@"
+}
+
 # Variadic on login so one reviewer's multiple identities collapse to a single
 # verdict — the policy reviewer is `github-actions[bot]` on coding-policy's own
 # PRs and `coding-policy-fleet-reviewer[bot]` on consumer repos (see the login
@@ -85,20 +86,20 @@ slurp_api_array() {
 # assumption — a login whose re-review came back out of order would gate on a
 # superseded verdict — so select the max by submitted_at explicitly.
 latest_review_by() {
-  local owner="$1" repo="$2" pr="$3"; shift 3
-  local logins_json lane="${REVIEW_LANE:-policy}"
-  logins_json=$(jq -n '$ARGS.positional' --args "$@") \
-    || { echo "error: failed to encode login list for review lookup" >&2; return 1; }
-  slurp_api_array "repos/${owner}/${repo}/pulls/${pr}/reviews?per_page=100" "review" \
-    | jq --arg lane "$lane" --argjson logins "$logins_json" "$(review_lanes_jq)"'
-        [.[] | select(.user.login | IN($logins[])) | select(in_review_lane($lane))]
-        | (group_by(.user.login) | map(max_by(.submitted_at))) as $per_login_latest
-        | ( ($per_login_latest | map(select(.state == "CHANGES_REQUESTED")) | first)
-            // ($per_login_latest | sort_by(.submitted_at) | last) )
-        # Keep historical review details even when there is no live verdict.
-        | if . == null then {state: "none", submitted_at: null, body: null, commit_id: null}
-          else {state: (if (.state | IN("APPROVED", "CHANGES_REQUESTED", "COMMENTED")) then .state else "none" end),
-                submitted_at, body, commit_id} end'
+  jq "$(review_lanes_jq)"'
+    $ARGS.positional as $logins
+    | [.[] | select(.user.login | IN($logins[])) | select(in_review_lane("policy"))]
+    | (group_by(.user.login) | map(max_by(.submitted_at))) as $per_login_latest
+    | ( ($per_login_latest | map(select(.state == "CHANGES_REQUESTED")) | first)
+        // ($per_login_latest | sort_by(.submitted_at) | last) )' --args "$@" | normalize_review
+}
+
+normalize_review() {
+  jq '
+    # Keep historical review details even when there is no live verdict.
+    if . == null then {state: "none", submitted_at: null, body: null, commit_id: null}
+    else {state: (if (.state | IN("APPROVED", "CHANGES_REQUESTED", "COMMENTED")) then .state else "none" end),
+          submitted_at, body, commit_id} end'
 }
 
 # Resolve a latest_review_by result against the PR head SHA. A review's verdict
@@ -108,6 +109,7 @@ latest_review_by() {
 # flag. `head` is always the live headRefOid in production (main asserts it
 # non-empty); an empty head would mark every real review stale, which is why
 # main refuses to proceed without one rather than silently voiding the gate.
+# Quality also requires the selected review's recorded analyzed SHA to agree.
 #
 # NOTE on ordering vs the CHANGES_REQUESTED-wins aggregation in
 # latest_review_by: today exactly one policy-reviewer identity posts per PR, so
@@ -116,10 +118,10 @@ latest_review_by() {
 # does not occur (see the login table above); if it ever does, fold this
 # binding into the jq above so stale reviews drop before the CR-wins pick.
 resolve_review_against_head() {
-  local review="$1" head="$2"
-  printf '%s' "$review" | jq --arg head "$head" '
+  local review="$1" head="$2" lane="${3:-policy}"
+  printf '%s' "$review" | jq --arg head "$head" --arg lane "$lane" "$(review_lanes_jq)"'
     if .state == "none" then . + {stale: false}
-    elif .commit_id == $head then . + {stale: false}
+    elif .commit_id == $head and ($lane != "quality" or quality_review_at($head)) then . + {stale: false}
     else {state: "none", submitted_at, body, commit_id, stale: true} end'
 }
 
@@ -127,14 +129,9 @@ resolve_review_against_head() {
 # Variadic on login so one reviewer's multiple author identities collapse to a
 # single count — see the login table at the top of this file.
 toplevel_comments_by() {
-  local owner="$1" repo="$2" pr="$3"; shift 3
-  local logins_json
-  logins_json=$(jq -n '$ARGS.positional' --args "$@") \
-    || { echo "error: failed to encode login list for comment count" >&2; return 1; }
-  slurp_api_array "repos/${owner}/${repo}/pulls/${pr}/comments?per_page=100" "inline comment" \
-    | jq --argjson logins "$logins_json" '
-        [.[] | select(.in_reply_to_id == null) | select(.user.login | IN($logins[]))]
-        | length'
+  jq '$ARGS.positional as $logins
+      | [.[] | select(.in_reply_to_id == null) | select(.user.login | IN($logins[]))]
+      | length' --args "$@"
 }
 
 # Also carries the PR head SHA (headRefOid) so review verdicts can be bound to
@@ -219,6 +216,11 @@ main() {
       exit 2
     fi
   done
+  declare -F require_quality_selector >/dev/null || {
+    echo "error: incompatible ${_ppr_dir}/review-lanes.sh — reinstall the matching coding-policy release helpers and retry" >&2
+    exit 2
+  }
+  require_quality_selector || exit 2
 
   # gh pr checks exits 8 when no checks are configured — distinguish that from real errors.
   local checks_json checks_raw rc=0
@@ -273,31 +275,32 @@ main() {
     pending) [[ "$ci_status" == failure ]] || ci_status=pending ;;
   esac
 
-  local codex_review claude_review copilot_review codex_comments copilot_comments comment_bodies review_bodies
-  codex_review=$(REVIEW_LANE=policy latest_review_by   "$owner" "$repo" "$pr_number" "${CODEX_REVIEW_LOGINS[@]}") \
-    || { echo "error: failed to fetch Codex review state" >&2; exit 1; }
-  claude_review=$(REVIEW_LANE=quality latest_review_by "$owner" "$repo" "$pr_number" "$CLAUDE_REVIEW_LOGIN") \
-    || { echo "error: failed to fetch Claude review state" >&2; exit 1; }
-  claude_review=$(resolve_review_against_head "$claude_review" "$head_sha")
+  local reviews_endpoint="repos/${owner}/${repo}/pulls/${pr_number}/reviews?per_page=100"
+  local review_pages reviews codex_review claude_review copilot_review
+  local comments codex_comments copilot_comments comment_bodies review_bodies
+  review_pages=$(gh api --paginate "$reviews_endpoint") \
+    || { echo "error: failed to fetch reviews for ${owner}/${repo}#${pr_number} — restore GitHub API access and retry" >&2; exit 1; }
+  # Select quality from the raw pages so jq cannot change ID representations.
+  claude_review=$(quality_review_for_head "$head_sha" <<<"$review_pages" | normalize_review) \
+    || { echo "error: quality review unresolved for ${owner}/${repo}#${pr_number} — inspect the submitted GitHub reviews and retry" >&2; exit 1; }
+  reviews=$(normalize_api_array "$reviews_endpoint" "review" <<<"$review_pages") || exit 1
+  codex_review=$(latest_review_by "${CODEX_REVIEW_LOGINS[@]}" <<<"$reviews") \
+    || { echo "error: failed to resolve Codex review state — inspect the submitted GitHub reviews and retry" >&2; exit 1; }
+  claude_review=$(resolve_review_against_head "$claude_review" "$head_sha" quality)
   claude_review=$(printf '%s' "$claude_review" | jq '. + {requested: false}')
   # Resolve each verdict against head — stale reviews collapse to "none".
   codex_review=$(resolve_review_against_head   "$codex_review"   "$head_sha")
   codex_review=$(printf '%s' "$codex_review" | jq '. + {requested: false}')
-  codex_comments=$(toplevel_comments_by   "$owner" "$repo" "$pr_number" "${CODEX_COMMENT_LOGINS[@]}") \
-    || { echo "error: failed to count Codex inline comments" >&2; exit 1; }
-  copilot_review='{"state":"none","submitted_at":null,"body":null,"commit_id":null,"stale":false,"requested":false}'
-  copilot_comments=0
-  comment_bodies=$(slurp_api_array "repos/${owner}/${repo}/pulls/${pr_number}/comments?per_page=100" "inline comment" \
-    | jq '[.[] | {id, in_reply_to_id, path, line, body, html_url, author: .user.login}]') \
+  comments=$(slurp_api_array "repos/${owner}/${repo}/pulls/${pr_number}/comments?per_page=100" "inline comment") \
     || { echo "error: failed to read inline comment bodies — restore GitHub API access and rerun this snapshot before merging" >&2; exit 1; }
-  # Count legacy feedback from the same all-author snapshot, without a Copilot
-  # request, run, timeline or reviewer-specific API lookup.
-  copilot_comments=$(printf '%s' "$comment_bodies" | jq '[.[] | select(.in_reply_to_id == null)
-    | select(.author | IN("Copilot", "copilot-pull-request-reviewer[bot]"))] | length')
-  review_bodies=$(slurp_api_array "repos/${owner}/${repo}/pulls/${pr_number}/reviews?per_page=100" "review" \
-    | jq '[.[] | select(.body != null and .body != "")
-                   | {id, state, submitted_at, commit_id, body, html_url, author: .user.login}]') \
-    || { echo "error: failed to read all review bodies — restore GitHub API access and rerun this snapshot before merging" >&2; exit 1; }
+  codex_comments=$(toplevel_comments_by "${CODEX_COMMENT_LOGINS[@]}" <<<"$comments")
+  copilot_review='{"state":"none","submitted_at":null,"body":null,"commit_id":null,"stale":false,"requested":false}'
+  copilot_comments=$(toplevel_comments_by "Copilot" "copilot-pull-request-reviewer[bot]" <<<"$comments")
+  comment_bodies=$(jq '[.[] | {id, in_reply_to_id, path, line, body, html_url, author: .user.login}]' <<<"$comments")
+  review_bodies=$(jq --arg login "$CLAUDE_REVIEW_LOGIN" "$(review_lanes_jq)"'[.[] | if .user.login == $login then readable_quality_body else . end
+                   | select(.body != null and .body != "")
+                   | {id, state, submitted_at, commit_id, body, html_url, author: .user.login}]' <<<"$reviews") \
+    || { echo "error: review feedback unresolved for ${owner}/${repo}#${pr_number} — inspect 'gh api --paginate repos/${owner}/${repo}/pulls/${pr_number}/reviews' and rerun this snapshot before merging" >&2; exit 1; }
 
   # Review text can exceed a platform's per-argument limit. Stream every
   # potentially large JSON payload instead of passing it through --argjson.

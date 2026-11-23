@@ -40,7 +40,7 @@ from claude setup-token; the token is held only in coding-policy. Its dedicated 
 Both reviews run on PR events. The central fleet workflow runs them as separate
 jobs using distinct reviewer Apps; existing consumer dispatches start both. The quality result posts as a
 severity-derived verdict with the exact analyzed commit and the marker owned by
-`skills/release/review-lanes.sh` — `CLAUDE_REVIEW_LOGIN` and `review_lanes_jq`. Snapshot and dedup use that classifier and the separate logins. Claude posts as jbaruch-claude-reviewer[bot], independently of the Codex policy identity. Its first verdict on a head stands the same way (`.github/claude-review/review.py` docstring).
+`skills/release/review-lanes.sh` — `CLAUDE_REVIEW_LOGIN` and `review_lanes_jq`. Snapshot and dedup use that classifier and the separate logins. Claude posts as jbaruch-claude-reviewer[bot], independently of the Codex policy identity. A live, correctly bound latest submission suppresses a duplicate. Invalid provenance allows a fresh review.
 
 Claude approves nonblocking results, including advisory notes. An App's approval
 supersedes its earlier change request; a plain comment would leave that request
