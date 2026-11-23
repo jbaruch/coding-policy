@@ -1,3 +1,7 @@
+## 0.10.28 — 2026-11-23
+
+- fix(release): Restore the installable policy release path (#881)
+
 ## 0.10.27 — 2026-11-22
 
 - fix(release): Stop deleting remote branches at session start (#878)
