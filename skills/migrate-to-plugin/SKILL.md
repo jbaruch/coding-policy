@@ -33,7 +33,7 @@ Otherwise parse stdout and branch on the emitted `status`:
 
 - `not-a-plugin` (exit 0) — no `tile.json` or `plugin.json` here. Report that this is not a tessl plugin directory and finish here.
 - `already-migrated` (exit 0) — `plugin.json` already exists, nothing to convert. If `residual_tile_refs` is 0, finish here; otherwise proceed to Step 2 to reconcile the leftover wording.
-- `migrated` with `lint_ok: false` (exit 1) — migration ran but `tessl plugin lint` failed. Report the lint failure, run `tessl plugin lint` directly to read it, fix the manifest, then proceed to Step 2.
+- `migrated` with `lint_ok: false` (exit 1) — report the safe repair guidance on stderr. Use it to inspect and repair the plugin, then proceed to Step 2. Run the acceptance lint in Step 4 after repairs and reconciliation.
 - `migrated` with `lint_ok: true` (exit 0) — proceed immediately to Step 2.
 
 ## Step 2 — Reconcile Residual Terminology

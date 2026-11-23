@@ -21,6 +21,9 @@
 # Out:   STATUS outcomes (exit 0/1) emit one JSON object on stdout; tool/
 #        precondition errors (exit 2) emit only a stderr diagnostic and no
 #        stdout. Parse stdout only when the exit code is 0 or 1.
+#        On exit 1, stderr gives repair guidance from the first lint error
+#        header when recognized. Otherwise it gives the lint exit status and
+#        suggests where to check. Lint output is held in memory.
 #          {"status": "migrated"|"already-migrated"|"not-a-plugin",
 #           "migrated": bool,            # ran `tessl plugin migrate` now
 #           "plugin_json": bool,         # .tessl-plugin/plugin.json exists
@@ -155,10 +158,14 @@ main() {
     [[ ! -f tile.json ]] && tile_json_removed=true
   fi
 
-  local lint_ok=true rc=0
-  if ! tessl plugin lint >/dev/null 2>&1; then
+  local lint_ok lint_output lint_status=0
+  # Capture both streams in memory so a lint diagnostic cannot reach the caller
+  # before the residual scan succeeds. Bash can warn while discarding NULs.
+  if { lint_output=$(tessl plugin lint 2>&1); } 2>/dev/null; then
+    lint_ok=true
+  else
+    lint_status=$?
     lint_ok=false
-    rc=1
   fi
 
   # Capture, then emit — see the already-migrated path above.
@@ -166,10 +173,30 @@ main() {
   residual=$(scan_residual_files) || exit 2
   emit "migrated" true true "$tileignore_renamed" "$tile_json_removed" "$lint_ok" "$residual"
 
-  if [[ $rc -ne 0 ]]; then
-    echo "migrate: 'tessl plugin lint' failed after migration — inspect the lint output and fix before publishing" >&2
+  if [[ "$lint_ok" == false ]]; then
+    # Tessl 0.122.0 marks the first error with a cross. Later lines can be
+    # source excerpts. Forward only a skill slug and numeric coordinates.
+    local lint_header LC_ALL=C
+    local skill_error="^✘ Skill '([a-z0-9][a-z0-9-]*)': "
+    local yaml_error='Failed to parse YAML frontmatter: .+ at line ([1-9][0-9]*), column ([1-9][0-9]*):$'
+    local description_error='SKILL\.md frontmatter field "description" must be at most 1024 characters\.$'
+    while IFS= read -r lint_header; do
+      if [[ "$lint_header" == '✘ '* ]]; then
+        break
+      fi
+    done < <(printf '%s\n' "$lint_output")
+    if [[ "$lint_header" =~ ${skill_error}${yaml_error} ]]; then
+      printf 'migrate: Fix YAML frontmatter in the SKILL.md for skill %s (frontmatter line %s, column %s).\n' \
+        "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}" "${BASH_REMATCH[3]}" >&2
+    elif [[ "$lint_header" =~ ${skill_error}${description_error} ]]; then
+      printf 'migrate: Shorten the description in the SKILL.md frontmatter for skill %s to 1024 characters or fewer.\n' \
+        "${BASH_REMATCH[1]}" >&2
+    else
+      printf "migrate: 'tessl plugin lint' exited %s with no recognized diagnostic. Inspect .tessl-plugin/plugin.json and the frontmatter in its listed SKILL.md files. Run 'tessl --version' to check the CLI.\n" "$lint_status" >&2
+    fi
+    exit 1
   fi
-  exit "$rc"
+  exit 0
 }
 
 [[ "${BASH_SOURCE[0]}" == "${0}" ]] && main "$@"
