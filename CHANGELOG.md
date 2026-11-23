@@ -1,3 +1,7 @@
+## 0.10.30 — 2026-11-23
+
+- fix(review): Bind Claude verdicts to the analyzed commit (#889)
+
 ## 0.10.29 — 2026-11-23
 
 - fix(migration): Reuse lint diagnostics during plugin migration (#886)
