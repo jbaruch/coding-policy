@@ -27,16 +27,12 @@ It returns the full `poll-pr-reviews.sh` snapshot plus a `watch` object — `{"r
 - `ci_failure` (exit 0) — fix the failed checks through Step 6, push and re-run the watcher.
 - `dirty` (exit 0) — rebase onto current `main`, resolve conflicts, force-push the owned feature branch and re-run the watcher.
 - `pending_at_budget` (exit 1) — inspect which field is still `none`/`pending` in the returned snapshot.
-  - If the quality lane (`reviews.claude`) has `state: none` and `stale: true`, match its `body` and
-    `commit_id` in `review_bodies` and open that entry's `html_url`. Compare the body's `Reviewed commit`
-    with the native `commit_id` and the snapshot's `head_sha`. Follow the normal trigger or workflow
-    recovery in [Step 4](step-4-review.md) to get a quality review for the current head.
-    In the #845 capture, `Reviewed commit` was `2bc7a056ab6a9de4aa0c065b5ebbac888c2fe841`.
-    Both `commit_id` and `head_sha` were `afc0f34d9af7942364494d708d1edd8127cc1302`.
-    [Captured #845 approval](https://github.com/jbaruch/coding-policy/pull/845#pullrequestreview-5934420083)
-  - If either reviewer never posted (`state: none` and `stale: false`), inspect `review-codex.yml` or
-    `review-claude.yml` and its subscription credential (`CODEX_AUTH_JSON` or `CLAUDE_CODE_OAUTH_TOKEN`)
-    on coding-policy's own PRs. On a consumer repo, confirm `review-trigger.yml` dispatched and the fleet
-    App ran in coding-policy. Its scheduled poll is the backstop.
+  For either review lane with `state: none`, inspect retained `submitted_at`, `commit_id`, and `body`.
+  Open the matching review's `html_url` from `review_bodies` if available. Compare the native
+  `commit_id` with the snapshot's `head_sha`. If the quality review body records a `Reviewed commit`,
+  compare it with both SHAs. A missing, ambiguous, or dismissed review leaves the gate pending, as
+  does a SHA mismatch or a missing or ambiguous `Reviewed commit` in a quality review.
 
-  Re-run the watcher to keep waiting once the cause is understood.
+  For each pending review lane, follow the ordinary current-head trigger or failure recovery in
+  [Step 4](step-4-review.md). Check the lane's workflow if there is no submission evidence.
+  Re-run the watcher.
