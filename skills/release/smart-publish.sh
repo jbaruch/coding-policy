@@ -80,7 +80,10 @@
 #          "version":"x.y.z"|null,"credit_signature":true|false,
 #          "first_publish":true|false,"landed_after_error":true|false,
 #          "terminal_line":"<last substantive line>"|null,
-#          "publish_exit_code":N,"source_commit":"<pushed SHA>"|null}
+#          "publish_exit_code":N,"source_commit":"<source SHA>"|null}
+#       On a branch, source_commit identifies the acknowledged push, a commit
+#       verified in remote history after a push error, or HEAD on a no-op.
+#       A verified SHA does not clear a push error.
 #       `landed_after_error` is true when the publish command exited non-zero
 #       and the registry proved the exact version landed anyway;
 #       `terminal_line` carries that exit's last substantive output line and
@@ -279,10 +282,8 @@ open(m, "w").write(new)
 # Pushes HEAD:<ref-name> (not a bare `git push`, which fails on the detached
 # HEAD actions/checkout leaves). Returns non-zero when the push is REJECTED so
 # the caller reds the run: a blocked bump-push is a post-publish failure and
-# stays red (rules/ci-safety.md), never a PR carrying a check-suppressing
-# `[skip ci]` commit onto a feature branch — that marker is sanctioned ONLY on
-# the protected-branch bookkeeping commit (Publish-Pipeline Loop-Prevention
-# Carve-Out), and re-bumping through a PR would loop the publish on merge.
+# stays red (rules/ci-safety.md). Recover through the publication contract;
+# re-bumping through a PR would loop the publish on merge.
 commit_back() {
   local manifest="$1" name="$2" version="$3" ref_name="$4" ref_type="$5"
   shift 5
@@ -309,18 +310,25 @@ commit_back() {
     return 1
   fi
 
-  # [skip ci] is non-negotiable HERE and sanctioned ONLY here: the bump commit
-  # lands on the PROTECTED branch and would otherwise re-trigger this publish
-  # workflow (ci-safety Publish-Pipeline Loop-Prevention Carve-Out). Pathspec-
-  # scoped so an unrelated staged file is never swept into the bump commit.
-  git commit -m "Bump ${name} to ${version} [skip ci]" -- "${paths[@]}" >&2 || return 1
+  # The caller's publish trigger prevents bookkeeping loops without skipping
+  # tests. Pathspec-scoped so unrelated staged files stay out of the commit.
+  git commit -m "Bump ${name} to ${version}" -- "${paths[@]}" >&2 || return 1
 
+  local stamp
+  stamp="$(git rev-parse HEAD)" || return 1
+  # Keep the exact candidate in the run log if cancellation interrupts the receipt.
+  echo "smart-publish: pushing bookkeeping commit ${stamp} to ${ref_name}." >&2
   if ! git push origin "HEAD:${ref_name}" >&2; then
-    echo "error: published ${name}@${version} but the manifest bump-push to ${ref_name} was rejected — the protected branch likely blocks the github-actions bot. The artifact IS published (the registry advanced); land the manifest bump by hand, or set this repo to publish-mode: as-is. Surfacing a failed run per rules/ci-safety.md — a bump-push failure stays red, distinct from a tolerated out-of-credits exit." >&2
+    # The server may have accepted the update before the client lost its reply.
+    if git fetch --no-tags origin "refs/heads/${ref_name}" >&2 && git merge-base --is-ancestor "$stamp" FETCH_HEAD; then
+      SP_SOURCE_COMMIT="$stamp"
+      echo "smart-publish: verified bookkeeping commit ${stamp} on ${ref_name} after the push error." >&2
+    fi
+    echo "error: published ${name}@${version} but git push reported failure. Check ${stamp} against the remote ${ref_name} history before retrying publication." >&2
     return 1
   fi
+  SP_SOURCE_COMMIT="$stamp"
   echo "smart-publish: pushed the manifest bump to ${version} on ${ref_name}." >&2
-  SP_SOURCE_COMMIT="$(git rev-parse HEAD)" || return 1
   return 0
 }
 

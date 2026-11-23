@@ -540,7 +540,7 @@ make_marker_fixture() {
     # BRANCH (off first-parent). --first-parent must exclude it.
     git checkout -q -b feat
     git -c user.name="$BOT_NAME" -c user.email="$BOT_EMAIL" \
-      commit -q --allow-empty -m "Bump acme/x to 9.9.9 [skip ci]"
+      commit -q --allow-empty -m "Bump acme/x to 9.9.9"
     git checkout -q main
     git merge -q --no-ff -m "Merge feat" feat
     # A later push (e.g. an action-pin bump) that re-triggers publish.
@@ -548,12 +548,12 @@ make_marker_fixture() {
     git add -A; git commit -q -m "add delta skill"
     # Look-alike 2 — a hand-authored (non-bot) bump-message commit on mainline.
     # --author must exclude it.
-    git commit -q --allow-empty -m "Bump acme/x to 2.0.0 [skip ci]"
+    git commit -q --allow-empty -m "Bump acme/x to 2.0.0"
     # Look-alike 3 — a bot-authored first-parent commit whose SUBJECT does not
     # match but whose BODY carries a bump line. Subject-matching must exclude it.
     # Newest, so a whole-message (`git log --grep`) resolver would pick it.
     git -c user.name="$BOT_NAME" -c user.email="$BOT_EMAIL" commit -q --allow-empty \
-      -m "chore: routine bot bookkeeping" -m "Bump acme/x to 5.5.5 [skip ci]"
+      -m "chore: routine bot bookkeeping" -m "Bump acme/x to 5.5.5"
   )
 }
 make_marker_fixture || { echo "fatal: could not build marker fixture" >&2; exit 2; }
@@ -626,6 +626,22 @@ fi
 # No marker in history → review ALL (fail-safe), never github.event.before. The
 # GITREPO fixture above (no bump commit) exercises this: its assertion returns
 # every skill dir, including the unchanged zeta.
+
+# New bookkeeping commits advance the review base without a CI-skip suffix.
+# The earlier assertions retain coverage for the historical suffixed boundary.
+(
+  set -e
+  cd "$MARKERREPO"
+  git -c user.name="$BOT_NAME" -c user.email="$BOT_EMAIL" \
+    commit -q --allow-empty -m "Bump acme/x to 1.0.1"
+  mkdir -p skills/epsilon; echo e > skills/epsilon/SKILL.md
+  git add -A; git commit -q -m "add epsilon skill"
+) || { echo "fatal: could not extend marker fixture" >&2; exit 2; }
+new_bump_sha=$( cd "$MARKERREPO" && git rev-parse HEAD~1 )
+assert_eq "$(resolve_marker_in "$MARKERREPO")" "$new_bump_sha" \
+  "resolve_publish_marker: recognizes a bump without a CI-skip suffix"
+got=$(capture_identify "$MARKERREPO" "skills" "" "push" "$delta_sha")
+assert_eq "$got" "epsilon" "identify_skills: new bump closes the published review window"
 
 # --- main: emits the unreviewed-skills output ---
 

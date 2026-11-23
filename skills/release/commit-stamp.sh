@@ -31,15 +31,6 @@ main() {
     return 1
   fi
 
-  # Loop-prevention is non-negotiable: the stamp commit MUST carry the CI-skip
-  # marker or it re-triggers the publish workflow. Enforce it even when a caller
-  # overrode `commit-message` without it.
-  local msg="$commit_message"
-  case "$msg" in
-    *"[skip ci]"*) ;;
-    *) msg="$msg [skip ci]" ;;
-  esac
-
   # No working-tree or staged change to the changelog => nothing to stamp.
   # Capture to a variable so a `git status` failure aborts under set -e rather
   # than reading as an empty (no-op) result inside the test.
@@ -55,7 +46,7 @@ main() {
   git config user.email "github-actions[bot]@users.noreply.github.com"
   # Commit ONLY the changelog path (pathspec) so an unrelated staged file is
   # never swept into the stamp commit and pushed.
-  git commit -m "$msg" -- "$changelog" >&2
+  git commit -m "$commit_message" -- "$changelog" >&2
 
   # Always push the stamp commit ourselves rather than delegating to a
   # downstream bump commit. Delegating stranded the stamp whenever the publish

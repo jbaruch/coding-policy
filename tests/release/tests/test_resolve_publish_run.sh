@@ -527,6 +527,38 @@ test_non_numeric_run_id_rejected() {
 }
 run "non-numeric run id rejected with diagnostic" test_non_numeric_run_id_rejected
 
+# --- Test 13: bookkeeping CI gate — Tests run resolved by source-commit SHA ---
+# Regression: the publish-only paths filter drops the CI-skip marker and leaves
+# the bookkeeping push eligible for the Tests workflow. The release walkthrough
+# requires resolving and watching that Tests run before reporting delivery.
+# This test verifies the resolver selects the Tests run when called with the
+# bookkeeping commit's source-commit SHA, `push` event and `main` ref — the
+# same four-argument binding used for the publish run, with the Tests workflow.
+# The fixture includes workflowName so the transport mock narrows by workflow;
+# the publish run on SHA_MERGE must not be selected.
+SHA_BOOKKEEPING=bb22cc33dd44ee55ff6677889900aabbccddeeff
+TESTS_WORKFLOW=tests.yml
+write_fixture bookkeeping-tests.json <<JSON
+[
+  {"databaseId": 99001234567, "headSha": "${SHA_BOOKKEEPING}", "event": "push", "headBranch": "main", "workflowName": "tests.yml"},
+  {"databaseId": 34288062324, "headSha": "${SHA_MERGE}", "event": "push", "headBranch": "main", "workflowName": "publish.yml"}
+]
+JSON
+
+test_bookkeeping_tests_run_resolved() {
+  reset_mocks
+  queue_fixtures bookkeeping-tests.json
+  local output rc=0
+  output=$(main jbaruch coding-policy "$SHA_BOOKKEEPING" "$TESTS_WORKFLOW" 2>&1) || rc=$?
+  assert_eq "exit code" "0" "$rc" || return 1
+  assert_eq "database_id" "99001234567" "$(database_id_of "$output")" || return 1
+  assert_absent "publish-run id must not appear" "34288062324" "$output" || return 1
+  assert_eq "gh call count" "1" "$(gh_calls)" || return 1
+  assert_eq "sleep call count" "0" "$(sleep_calls)" || return 1
+  gh_args | grep -q -- "--branch main" || { echo "    FAIL: should request --branch main, got: $(gh_args)" >&2; return 1; }
+}
+run "bookkeeping CI gate: Tests run resolved by source-commit SHA on main" test_bookkeeping_tests_run_resolved
+
 echo
 echo "results: ${PASS_COUNT} pass, ${FAIL_COUNT} fail"
 exit "$FAIL_COUNT"

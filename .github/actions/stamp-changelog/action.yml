@@ -1,8 +1,7 @@
 name: 'Stamp CHANGELOG with the published version'
 description: |
   Stamps the CHANGELOG with the version the publish step is about to
-  assign, then commits the result with `[skip ci]` and pushes that commit
-  itself.
+  assign, then commits the result and pushes that commit itself.
 
   It always self-pushes the stamp commit rather than delegating to a downstream
   bump commit. Delegating stranded the stamp whenever the publish step exited
@@ -10,9 +9,9 @@ description: |
   `patch-version-publish` before its bump commit/push runs, so the artifact
   ships while `CHANGELOG.md` on the branch stays unstamped
   (`jbaruch/coding-policy#284`). Self-pushing decouples the stamp from the
-  publish step's exit status. The `[skip ci]` on the commit stops the push
-  re-triggering the publish workflow (ci-safety Publish-Pipeline
-  Loop-Prevention Carve-Out).
+  publish step's exit status. The caller must prevent publish recursion through
+  its trigger or credential behavior, without skipping tests (ci-safety
+  Publish-Pipeline Loop-Prevention Carve-Out).
 
   Per `jbaruch/coding-policy: context-artifacts` "CHANGELOG Hygiene"
   (every merge publishes): the PR title is the changelog line. This step
@@ -34,6 +33,10 @@ description: |
       `latest:` explicitly.
     - The consumer repo checked out (`actions/checkout@v4`) with a writable
       working tree; the step runs against `$GITHUB_WORKSPACE`.
+    - Publish-loop prevention in the caller: a publish-only paths filter for
+      bookkeeping paths, or the default GITHUB_TOKEN's push-trigger suppression.
+      With a paths filter, keep workflow_dispatch for deliberate releases
+      changing only those paths.
     - Full history (`fetch-depth: 0`), so the stamp can find the last
       publish-bookkeeping commit; a shallow checkout fails the step.
 
@@ -62,10 +65,9 @@ inputs:
     default: ''
   commit-message:
     description: |
-      Commit message for the stamp commit. `[skip ci]` is appended if absent
-      — loop-prevention requires it, so it cannot be overridden away.
+      Commit message for the stamp commit, used verbatim. Omit CI-skip markers.
     required: false
-    default: 'Stamp CHANGELOG for the published version [skip ci]'
+    default: 'Stamp CHANGELOG for the published version'
 
 runs:
   using: 'composite'
@@ -100,9 +102,8 @@ runs:
 
         python3 "$script" "${args[@]}"
 
-        # The deterministic git side effects (stage / commit with a guaranteed
-        # `[skip ci]` / self-push) live in a script so they are testable against
-        # a temporary remote — see tests/release/tests/test_commit_stamp.sh.
+        # The deterministic git side effects (commit / self-push) live in a
+        # script so they are testable against a temporary remote — see tests/release/tests/test_commit_stamp.sh.
         # Same three-levels-up resolution as the python script above.
         commit_script="$GITHUB_ACTION_PATH/../../../skills/release/commit-stamp.sh"
         if [ ! -f "$commit_script" ]; then

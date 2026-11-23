@@ -76,7 +76,7 @@ When you add, remove, or rename a rule or skill, update **all** of these:
 
 ## CHANGELOG Hygiene
 
-- Every merge publishes a version (publish-on-merge, e.g. via `tesslio/patch-version-publish`)
+- Every merge publishes a version (publish-on-merge, e.g. via `tesslio/patch-version-publish`), except this repository's bookkeeping-only changes filtered by `publish.yml`; deliberate releases follow `skills/release/references/PUBLICATION.md` Deliberate manifest-only release
 - The PR title (`rules/commit-conventions.md`) is the changelog line
 - The PR description carries motivation and detail, per `rules/context-writing-style.md`
 - No `Unreleased` section — the heading is forbidden

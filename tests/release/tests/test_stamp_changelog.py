@@ -299,7 +299,7 @@ class MergedChanges(unittest.TestCase):
 
     def stamp(self):
         text = (self.root / "CHANGELOG.md").read_text()
-        self.commit("CHANGELOG.md", text + "\n- stamped\n", "Stamp CHANGELOG [skip ci]", BOT)
+        self.commit("CHANGELOG.md", text + "\n- stamped\n", "Stamp CHANGELOG", BOT)
 
     def changes(self, root=None):
         return stamp_changelog.merged_changes((root or self.root) / "CHANGELOG.md", None)
@@ -313,7 +313,7 @@ class MergedChanges(unittest.TestCase):
 
     def test_a_bot_version_bump_is_bookkeeping(self):
         self.stamp()
-        self.commit(".tessl-plugin/plugin.json", "{}\n", "chore: bump [skip ci]", BOT)
+        self.commit(".tessl-plugin/plugin.json", "{}\n", "chore: bump", BOT)
         self.merge_pr(5, "feat: Five")
         self.assertEqual(self.changes(), ["feat: Five (#5)"])
 
@@ -324,7 +324,7 @@ class MergedChanges(unittest.TestCase):
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_text("release bookkeeping\n")
         self.git("add", ".")
-        self.git("commit", "-qm", "Bump both manifests [skip ci]", author=BOT)
+        self.git("commit", "-qm", "Bump both manifests", author=BOT)
         self.merge_pr(5, "feat: Five")
         self.assertEqual(self.changes(), ["feat: Five (#5)"])
 

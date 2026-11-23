@@ -272,7 +272,7 @@ t_autobump_success_commits_and_pushes_bump() {
     || { echo "    FAIL: unexpected JSON: $out" >&2; return 1; }
   [[ "$(_remote_count "$root")" == "2" ]] || { echo "    FAIL: expected the bump commit on the remote" >&2; return 1; }
   [[ "$(_remote_msg "$root")" == *"Bump testws/testplugin to 0.1.1"* ]] || { echo "    FAIL: bump commit message wrong: $(_remote_msg "$root")" >&2; return 1; }
-  [[ "$(_remote_msg "$root")" == *"[skip ci]"* ]] || { echo "    FAIL: bump commit missing [skip ci]" >&2; return 1; }
+  [[ "$(_remote_msg "$root")" == "Bump testws/testplugin to 0.1.1" ]] || { echo "    FAIL: unexpected bump commit message" >&2; return 1; }
   [[ "$(_remote_version "$root")" == "0.1.1" ]] || { echo "    FAIL: remote manifest not bumped to 0.1.1" >&2; return 1; }
   [[ "$(git -C "$root/remote.git" show main:agent-plugin.yaml)" == $'name: testws/testplugin\nversion: "0.1.1" # preserve formatting' ]] || return 1
   [[ "$(echo "$out" | python3 -c 'import json,sys;print(json.load(sys.stdin)["source_commit"])')" == "$(git -C "$root/remote.git" rev-parse main)" ]] || return 1
@@ -294,7 +294,7 @@ t_combined_stamp_pushes_only_bookkeeping_once() {
   [[ "$(git -C "$root/work" diff --cached --name-only)" == unrelated.txt ]] || return 1
   [[ "$(git -C "$root/remote.git" diff-tree --no-commit-id --name-only -r main)" == $'.tessl-plugin/plugin.json\nCHANGELOG.md\nagent-plugin.yaml' ]] || return 1
   git -C "$root/remote.git" show main:CHANGELOG.md | grep -q '^## 0.1.1 — ' || return 1
-  [[ "$(_remote_msg "$root")" == *'[skip ci]'* ]] || return 1
+  [[ "$(_remote_msg "$root")" == "Bump testws/testplugin to 0.1.1" ]] || return 1
 }
 
 t_autobump_without_acr_manifest_still_publishes() {
@@ -481,11 +481,31 @@ t_push_blocked_reds_the_run() {
   local out rc
   out="$(_run "$root" 0.1.0 ok auto-bump . main branch)"; rc=$?
   [[ "$rc" -ne 0 ]] || { echo "    FAIL: a rejected bump-push must red the run" >&2; return 1; }
-  echo "$out" | python3 -c 'import json,sys;d=json.load(sys.stdin);assert d["outcome"]=="failure" and d["credit_signature"] is False and d["version"]=="0.1.1"' \
+  echo "$out" | python3 -c 'import json,sys;d=json.load(sys.stdin);assert d["outcome"]=="failure" and d["credit_signature"] is False and d["version"]=="0.1.1" and d["source_commit"] is None' \
     || { echo "    FAIL: blocked push should emit outcome=failure, credit_signature=false, version 0.1.1: $out" >&2; return 1; }
   if _remote_has_bump_branch "$root"; then
     echo "    FAIL: a fallback bump branch was pushed — there must be no PR fallback" >&2; return 1
   fi
+}
+
+t_accepted_push_with_lost_reply_returns_stamp_but_stays_red() {
+  local root real_git out rc=0 stamp
+  root="$(_sandbox 0.1.0)"
+  real_git="$(command -v git)"
+  mkdir "$root/bin"
+  cat > "$root/bin/git" <<'STUB'
+#!/usr/bin/env bash
+if [[ "$1" == push ]]; then
+  "$REAL_GIT" "$@" || exit 2
+  exit 1
+fi
+exec "$REAL_GIT" "$@"
+STUB
+  chmod +x "$root/bin/git"
+  out="$(PATH="$root/bin:$PATH" REAL_GIT="$real_git" _run "$root" 0.1.0 ok auto-bump . main branch)" || rc=$?
+  stamp="$(git -C "$root/remote.git" rev-parse main)"
+  [[ "$rc" == 1 && "$(_remote_version "$root")" == 0.1.1 ]] || return 1
+  jq -e --arg stamp "$stamp" '.outcome == "failure" and .source_commit == $stamp and .credit_signature == false' <<< "$out" >/dev/null
 }
 
 t_wrong_arity_is_usage_error() {
@@ -526,7 +546,7 @@ assert d["publish_exit_code"] == 1, d' \
   # The commit-back is the half that used to be skipped, leaving the manifest
   # behind the registry after every tolerated failure.
   [[ "$(_remote_version "$root")" == "0.1.1" ]] || { echo "    FAIL: manifest not bumped on the landed path: $(_remote_version "$root")" >&2; return 1; }
-  [[ "$(_remote_msg "$root")" == *"[skip ci]"* ]] || { echo "    FAIL: bump commit missing [skip ci]" >&2; return 1; }
+  [[ "$(_remote_msg "$root")" == "Bump testws/testplugin to 0.1.1" ]] || { echo "    FAIL: unexpected bump commit message" >&2; return 1; }
 }
 
 # Regression: the server finishes after the first post-timeout read, without
@@ -737,8 +757,9 @@ main() {
   run "Tessl-only auto-bump needs no ACR manifest" t_autobump_without_acr_manifest_still_publishes
   run "invalid ACR version stops before publishing" t_invalid_acr_version_stops_before_publish
   run "failed commit cannot report the old source as published" t_commit_failure_stays_red_without_publishing_old_source
+  run "lost push reply emits the verified stamp and preserves failure" t_accepted_push_with_lost_reply_returns_stamp_but_stays_red
   run "credit landing plus rejected push cannot pass confirm" t_credit_landed_but_blocked_push_cannot_pass_confirm_gate
-  run "auto-bump success commits + pushes the bump [skip ci]"    t_autobump_success_commits_and_pushes_bump
+  run "auto-bump success commits + pushes the bump without a CI-skip marker"    t_autobump_success_commits_and_pushes_bump
   run "stale manifest bumps from the registry (no collision)"    t_stale_manifest_bumps_from_registry_no_collision
   run "manifest ahead of registry publishes the manifest"        t_manifest_ahead_publishes_manifest
   run "credit failure reports credit_signature, no commit"       t_credit_fail_reports_signature_no_commit

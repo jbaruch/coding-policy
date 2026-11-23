@@ -40,7 +40,7 @@ Readback of an existing central fleet publication follows
 and confirmation. Keep the captured baseline and actual consumer merge SHA.
 The commands below retain the ordinary consumer-push and tag publication modes.
 
-Bind the resolution to the workflow, the exact commit, the `push` event and the ref that fired it, never to "latest on main". The lookup polls until the run is listed, past the publish workflow's enqueue latency.
+For push-triggered publication, bind resolution to the workflow, the exact commit, the `push` event and the ref that fired it, never to "latest on main". This repository's deliberate manifest-only release follows the walkthrough below. The lookup polls until the run is listed, past the publish workflow's enqueue latency.
 
 Each channel uses its actual publisher run. Separate workflows have separate ids. A merge-triggered workflow containing both publication jobs uses one id for both independent confirmation helpers; it still owes both sets of artifact evidence.
 
@@ -84,7 +84,7 @@ gh run watch <tag-run-id>
 
 **Merge-triggered dual publisher** — resolve the workflow with the reviewed merge SHA, `push` event and default-branch ref, using the same command as the Tessl merge-triggered case. It creates `v<explicit-manifest-version>` itself. Record that id for both channels, watch it once, and independently verify the Tessl registry/moderation and the exact GitHub tag/assets. The ACR owner receives the triggering source SHA and refuses source outside the fetched default history. A Tessl-only run never substitutes for an ACR publisher run.
 
-Omit `--exit-status` from the watch. Read the run conclusion through each channel's confirmation helper — `confirm-tessl-landed.sh` for Tessl, `verify-github-release.sh` for a tag publication.
+Omit `--exit-status` from the push-triggered publisher watch. Read the run conclusion through each channel's confirmation helper — `confirm-tessl-landed.sh` for Tessl, `verify-github-release.sh` for a tag publication.
 
 `gh pr view` returns the specific merge commit for this PR, unaffected by parallel merges. Exit 0 emits `{"database_id": N}` on stdout per `rules/script-delegation.md`. A non-zero exit emits no id and a stderr diagnostic; the run is unresolved, and no watch or confirmation may proceed on a guess or an empty id. The four facts the resolver binds, its enqueue-latency retry, its refusal to pick between two runs matching all four, and which condition lands in which rc are the script's decision contract — see `skills/release/resolve-publish-run.sh` header, not restated here (`rules/script-as-black-box.md`). The watch is a timing precondition for the confirmations below, not the gate.
 
@@ -129,10 +129,27 @@ Exit 0 = both conjuncts hold. Exit 1 = a definitive no — an unconfirmed releas
 
 **Both, separate workflows.** Set one version explicitly in every channel's manifest in the PR and confirm the Tessl publisher preserves it without auto-bumping (Step 3). Record `<pre>` before merging. Merge, fast-forward `main`, push the tag. Resolve TWO runs — `<tessl-run-id>` from the merge SHA, `<tag-run-id>` from the tag — and watch both. Run `confirm-tessl-landed.sh` and `verify-moderation-cleared.sh` against the Tessl channel, and `verify-github-release.sh` against `<tag-run-id>`. Report both confirmations. Neither channel's result stands in for the other's.
 
+**Both, merge-triggered jobs (this repository).** Leave both manifest versions unchanged in the PR. Capture `<pre>` before merge. Resolve and watch `publish.yml` for the reviewed merge SHA and the `main` push. Use that SHA as `<source-sha>` and apply the dual-release confirmations below with the bound run ID.
 
-**Both, merge-triggered jobs (this repository).** Leave both manifest versions unchanged in the PR. Capture `<pre>` before merge. Resolve and watch `publish.yml` by its reviewed merge SHA and `main` push. The Tessl publisher auto-bumps and pushes both manifests with the CHANGELOG stamp in one guarded bookkeeping commit. The dependent ACR job checks out the publisher's `source-commit` output and creates the immutable tag from those bumped manifests. Run `confirm-tessl-landed.sh`, `verify-moderation-cleared.sh` and `verify-github-release.sh` with the actual run and exact published version tag. Report both channel results.
+**Deliberate manifest-only release (this repository).** Capture `<pre>` and record the current HEAD of `main` as `<source-sha>` (`gh api repos/<owner>/<repo>/git/refs/heads/main --jq '.object.sha'`), then run `gh workflow run publish.yml --ref main`. Select its run with `gh run list --workflow publish.yml --branch main --commit <source-sha> --event workflow_dispatch --json databaseId,headSha,headBranch,event,url`. Require exactly one matching run bound to that workflow, source SHA, `main` and `workflow_dispatch`; if absent or ambiguous, stop — do not guess a run id and do not proceed. `resolve-publish-run.sh` intentionally selects push runs only. Watch the selected run failing closed:
+
+```bash
+gh run watch --repo <owner>/<repo> --exit-status <dispatch-run-id>
+```
+
+A non-zero exit leaves delivery unconfirmed. Apply the same dual-release confirmations below with the selected dispatch run ID and the captured `<source-sha>`. If the publisher fails or observation is interrupted, follow partial publication recovery.
+
+### Dual-release confirmations (this repository)
+
+Identify the original stamp-producing attempt of the bound `publish.yml` run. For each candidate attempt, select its `publish` job ID with `gh run view <bound-run-id> --repo <owner>/<repo> --attempt <attempt> --json jobs`, then read its log with `gh run view <bound-run-id> --repo <owner>/<repo> --attempt <attempt> --job <publish-job-id> --log`. If the original attempt is missing or ambiguous, leave publication unconfirmed. Record the unique full SHA on the `pushing bookkeeping commit` line for `main` as `<stamp-sha>`. With the target repository as `origin`, require `git fetch --no-tags origin refs/heads/main` to succeed. Require `git rev-list --parents -n 1 <stamp-sha>` to print exactly `<stamp-sha> <source-sha>` and `git merge-base --is-ancestor <stamp-sha> FETCH_HEAD` to succeed against that fetch.
+
+For the verified stamp, pass `<owner> <repo> <stamp-sha> tests.yml main` to `resolve-publish-run.sh` as above. Watch the emitted `database_id` with `gh run watch <id> --repo <owner>/<repo> --exit-status`.
+
+Run `confirm-tessl-landed.sh` with the baseline and bound publisher run ID to obtain `<current>`. Confirm moderation with `verify-moderation-cleared.sh` for that version. Require `gh api repos/<owner>/<repo>/git/refs/tags/v<current> --jq '.object.sha'` to match `<stamp-sha>`. Confirm the published tag and retrievable assets with `verify-github-release.sh` for `v<current>` and the same publisher run ID. Report both channel results and the Tests result independently, including partial outcomes. Final confirmation requires all three.
 
 ## Partial publication recovery
+
+Resume an interrupted publisher watch on the same bound run ID. Before any publication retry, reconcile an unknown bookkeeping push with the bound publish job log and fetched `main` as above. An unavailable or ambiguous stamp leaves bookkeeping unconfirmed. If the stamp is verified, watch its Tests run even if the publisher later fails. Resume a failed or interrupted Tests observation on the same run ID or resolve it again from the verified stamp, without rerunning the publisher. Inspect a failed Tests run's logs and keep delivery unconfirmed until Tests succeeds. A successful recovery watch confirms only Tests.
 
 For a first Tessl publication, `registry-baseline.sh` prints `unpublished` only after an authenticated absent-plugin response or an empty versions array. Preserve that literal as `<pre>`; `confirm-tessl-landed.sh` requires a successful bound run and a real published version. Empty output, authentication failures and unreadable responses remain errors. Never substitute a guessed `0.0.0` baseline.
 

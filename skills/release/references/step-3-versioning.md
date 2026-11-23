@@ -1,6 +1,6 @@
 ## Step 3 — Reason About Versioning
 
-Inspect the publisher before editing versions. In this repository, PRs leave both `.tessl-plugin/plugin.json` and `agent-plugin.yaml` unchanged. `publish.yml` uses `smart-publish` in `auto-bump` mode; its commit-back records the published version in both manifests with the CHANGELOG stamp. ACR reads that commit. Do not create a competing tag. A minor or major release requires a separately authorized publisher change.
+Inspect the publisher before editing versions. In this repository, PRs leave both `.tessl-plugin/plugin.json` and `agent-plugin.yaml` unchanged. `publish.yml` uses `smart-publish` in `auto-bump` mode; its commit-back records the published version in both manifests with the CHANGELOG stamp. ACR reads that commit. The commit omits CI-skip markers; `publish.yml` filters bookkeeping-only pushes. A deliberate release changing only filtered paths uses `workflow_dispatch` on `main` per `PUBLICATION.md`. Do not create a competing tag. A minor or major release requires a separately authorized publisher change.
 
 For consumer repositories, decide the bump per semver, then apply the inspected channels' requirements:
 
