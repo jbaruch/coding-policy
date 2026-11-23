@@ -11,7 +11,8 @@
 #      not the first verdict to land).
 #   4. Zero inline comments is still ready — a clean verdict with no inline
 #      comments is complete; the watcher does not wait for comments.
-#   5. ci "none" (no checks configured) is accepted as ready.
+#   5. ci "none" can be ready with merge state CLEAN.
+#  5b. ci "none" with merge state BLOCKED stays pending even with both reviews.
 #   6. changes_requested — the policy reviewer's CHANGES_REQUESTED is terminal.
 #  6b. Claude blocking — a Claude CHANGES_REQUESTED gates independently.
 #   7. ci_failure — a failed check is terminal.
@@ -230,7 +231,8 @@ test_both_bots_required() {
 # --- Test 4: zero inline comments is still ready ------------------------------
 test_zero_comments_ready() {
   reset_mocks
-  queue "$(snap MERGEABLE CLEAN success COMMENTED APPROVED 0 0)"
+  # GitHub can still hold a superseded legacy change request after an all-clear.
+  queue "$(snap MERGEABLE BLOCKED success COMMENTED APPROVED 0 0)"
   local out rc=0
   out=$(main jbaruch coding-policy 42 2>&1) || rc=$?
   assert_eq "exit code" "0" "$rc" || return 1
@@ -238,7 +240,7 @@ test_zero_comments_ready() {
   assert_eq "poll count" "1" "$(calls)" || return 1
 }
 
-# --- Test 5: ci none accepted as ready ---------------------------------------
+# --- Test 5: ci none accepted as ready with merge state CLEAN -----------------
 test_ci_none_ready() {
   reset_mocks
   queue "$(snap MERGEABLE CLEAN none APPROVED APPROVED)"
@@ -246,6 +248,18 @@ test_ci_none_ready() {
   out=$(main jbaruch coding-policy 42 2>&1) || rc=$?
   assert_eq "exit code" "0" "$rc" || return 1
   assert_eq "result" "ready" "$(result_of "$out")" || return 1
+}
+
+# --- Test 5b: ci none with merge state BLOCKED stays pending ------------------
+test_ci_none_blocked_stays_pending() {
+  reset_mocks
+  local snapshot out rc=0
+  snapshot=$(snap MERGEABLE BLOCKED none COMMENTED APPROVED) || return 1
+  queue "$snapshot"
+  out=$(main jbaruch coding-policy 42 2>&1) || rc=$?
+  assert_eq "exit code" "1" "$rc" || return 1
+  assert_eq "result" "pending_at_budget" "$(result_of "$out")" || return 1
+  assert_eq "snapshot preserved" "$snapshot" "$(jq -c 'del(.watch)' <<<"$out")"
 }
 
 # --- Test 6: changes_requested is terminal -----------------------------------
@@ -365,8 +379,9 @@ run_suite() {
   run "historical verdict waits for native policy approval" test_historical_verdict_waits
   run "deferred ready polls until both bots post" test_deferred_ready
   run "lone codex verdict is not ready — waits for both bots" test_both_bots_required
-  run "zero inline comments is a complete review — ready" test_zero_comments_ready
-  run "ci 'none' (no checks) counts as ready" test_ci_none_ready
+  run "green CI with a legacy review hold and zero inline comments is ready" test_zero_comments_ready
+  run "ci 'none' counts as ready with merge state CLEAN" test_ci_none_ready
+  run "ci 'none' stays pending with merge state BLOCKED and both reviews" test_ci_none_blocked_stays_pending
   run "changes_requested is a terminal verdict" test_changes_requested
   run "Claude blocking findings gate independently" test_claude_blocking_is_terminal
   run "ci failure is terminal (before waiting on reviews)" test_ci_failure

@@ -7,7 +7,7 @@
 # Usage: watch-pr-reviews.sh OWNER REPO PR
 # stdout: snapshot plus watch {result, attempts, elapsed_seconds}.
 # rc 0: ready, changes_requested, ci_failure or dirty (act on result).
-# rc 1: pending_at_budget (inspect missing signal and retry after recovery).
+# rc 1: pending_at_budget (inspect the unresolved gate and retry after recovery).
 # rc 2: setup/poll failure, stderr diagnostic. Script-owned interval and budget
 # are overridable for tests; never wrap a watch in an invented timeout.
 
@@ -112,16 +112,15 @@ main() {
       emit_and_exit "changes_requested" "$attempts" "$elapsed" "$snapshot" 0
     fi
 
-    # Both current-head verdicts must have arrived; findings remain readable
-    # in the snapshot. Blocking findings returned above.
+    # Both current-head verdicts must have arrived. An empty CI snapshot also
+    # requires GitHub to report a CLEAN merge state.
     if [[ "$mergeable" == "MERGEABLE" \
-       && ( "$ci" == "success" || "$ci" == "none" ) \
+       && ( "$ci" == "success" || ( "$ci" == "none" && "$mstatus" == "CLEAN" ) ) \
        && ( "$codex" == "APPROVED" || "$codex" == "COMMENTED" ) \
        && ( "$claude" == "APPROVED" || "$claude" == "COMMENTED" ) ]]; then
       emit_and_exit "ready" "$attempts" "$elapsed" "$snapshot" 0
     fi
 
-    # Still pending (UNKNOWN mergeability, CI pending, or a bot yet to post).
     # Skip the trailing sleep on the boundary iteration; otherwise cap the
     # sleep at remaining budget so total sleep tracks BUDGET_SEC.
     (( elapsed == BUDGET_SEC )) && break
