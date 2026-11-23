@@ -80,8 +80,9 @@ skills/release/references/step-6-feedback.md
 ```
 
 Read every review body and inline comment in full before judging findings.
-Fix blocking findings from either reviewer and CI failures;
-advisory-only feedback creates no repair or re-review round.
+Resolve blocking findings from either reviewer and fix CI failures.
+Follow the reference's re-review flow for disputed policy blockers.
+Advisory-only feedback creates no repair or re-review round.
 After each required push, both reviewers run automatically; return to Step 5.
 Proceed immediately to Step 7 after the reference's gates are satisfied.
 

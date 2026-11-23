@@ -13,11 +13,11 @@
   - Accepted: `Fixed in <sha>` (literal phrase; `Done` / `Accepted and fixed` do not satisfy)
   - Declined: `Declining — <reason with cited evidence>` (em dash `—`, not hyphen or period)
   - Advisory: `Acknowledged — advisory noted`. Never create a new follow-up obligation
-- For a disputed policy blocker, reply with the evidence and keep the gate open until the normal policy re-review clears it.
+- **Disputed policy blocker.** Post a PR conversation comment in the `Declining —` form above. Link the review and cite concrete evidence for the disputed finding.
+  - If there is no source correction to push, start from the current PR head on its source branch with a clean index. Create one intentional empty commit, for example `git commit --allow-empty -m "chore(review): Trigger fresh policy and quality reviews"`, and push it normally to that branch.
+  - If the fresh policy review still blocks on the finding, keep the merge blocked and resolve the finding under `rules/review-severity.md` before another review round.
 
 - **Legacy identity gate after App approval:** follow Step 7's migration cleanup, then return to Step 5. A legacy change-request state alone does not require another fix push after the current policy App approved; every body still requires reading.
 
-- Push fixes to the same branch
-- Both reviewers run automatically after each required push; return to Step 5.
-- The policy reviewer re-runs automatically on every push (coding-policy via `review-codex.yml` `pull_request: synchronize`; consumers via `review-trigger.yml` re-dispatching the fleet App). No manual re-request.
-- Repeat Step 5 until neither reviewer carries a blocking finding — `APPROVED` or `COMMENTED` with its body read and only advisories — with addressed blocking findings replied to. Proceed immediately to Step 7.
+- Push corrections normally to the same PR source branch. After each push, return immediately to Step 5. The [existing `synchronize` routes](REVIEW_DETAILS.md#policy-reviewer--two-deployments) run both reviewers on the new commit.
+- Proceed immediately to Step 7 when Step 5 returns `ready`, both reviewers have posted nonblocking verdicts on the current commit (`APPROVED` or `COMMENTED` with only advisories), required CI passes, and addressed blocking findings have replies.
