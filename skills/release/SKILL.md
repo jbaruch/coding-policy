@@ -1,19 +1,20 @@
 ---
 name: release
 description: >
-  Structured workflow for shipping code via GitHub pull requests: readiness,
-  versioning, PR selection, Codex policy and Claude quality reviews, feedback,
-  merge, publication/deployment verification, and cleanup.
-  Use when the user wants to open a pull request, resume an existing PR,
-  ship code, merge a branch, or handle post-merge cleanup on GitHub.
-  Also use for an authorized request to fix already-published or deployed
-  behavior in an operator-owned repository with an established release path,
-  even without an explicit request to ship.
-  Do not use this skill when the user explicitly limits the task to a local
-  patch, draft, prototype or review; retain repository authority and existing gates.
-  Follow the existing completion and readback steps: report the fix complete
-  only after verifying the published artifact or production deployment.
-  If shipping is blocked, report the exact stage and blocker.
+  Ship via GitHub PRs. Covers readiness, creation, versioning, automated policy
+  and quality review, polling, feedback, merge, cleanup, and verification.
+  Auto-merges when required checks and both reviews are green. Dismisses
+  superseded legacy bot reviews (same-bot all-clear or coding-policy reviewer
+  identity migration) under the binding CI-safety carve-out.
+  Use when the user wants to open a PR, resume an existing PR, ship code, merge a
+  branch, or handle post-merge cleanup on GitHub. Also use for an authorized
+  request to fix already-published or deployed behavior in an operator-owned
+  repository with an established release path, even without an explicit request
+  to ship. Do not use this skill when the user explicitly limits the task to a
+  local patch, draft, prototype or review; retain repository authority and
+  existing gates. Report the fix complete only after verifying the published
+  artifact or production deployment. If shipping is blocked, report the exact
+  stage and blocker.
 argument-hint: "[existing-pr <GitHub PR URL>]"
 ---
 
@@ -79,8 +80,9 @@ skills/release/references/step-6-feedback.md
 ```
 
 Read every review body and inline comment in full before judging findings.
-Fix blocking findings from either reviewer and CI failures;
-advisory-only feedback creates no repair or re-review round.
+Resolve blocking findings from either reviewer and fix CI failures.
+Follow the reference's re-review flow for disputed policy blockers.
+Advisory-only feedback creates no repair or re-review round.
 After each required push, both reviewers run automatically; return to Step 5.
 Proceed immediately to Step 7 after the reference's gates are satisfied.
 

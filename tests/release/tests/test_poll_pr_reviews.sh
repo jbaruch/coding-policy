@@ -490,39 +490,20 @@ t_main_fresh_review_surfaces_state() {
   assert_eq "fresh codex verdict not stale" "false"   "$stale"
 }
 
-# A policy review dismissed through dismiss-ruled-review.sh (marker message)
-# reads RULED on the head; an unmarked dismissal reads none; a marked one on an
-# older commit collapses to none and is flagged stale.
-ruled_fixture() { # <review-commit> <dismissal-message>
-  MOCK_MERGE_STATE=clean
-  MOCK_REVIEWS_BODY='[{"id":501,"user":{"login":"github-actions[bot]"},"state":"DISMISSED","submitted_at":"2026-07-25T10:00:00Z","body":"blocking","commit_id":"'"$1"'"}]'
-  MOCK_TIMELINE_BODY='[{"event":"labeled"},{"event":"review_dismissed","dismissed_review":{"review_id":501,"state":"changes_requested","dismissal_message":"'"$2"'"}}]'
-}
-
-t_main_marked_dismissal_reads_ruled() {
-  ruled_fixture "$HEAD_SHA" "JUDGE-RULED: 0123456789abcdef covers 1 blocking findings at ${HEAD_SHA}"
-  local out
-  out=$(main "owner" "repo" "1")
-  MOCK_TIMELINE_BODY='[]'
-  assert_eq "marked dismissal on head reads RULED" "RULED" "$(jq -r '.reviews.codex.state' <<<"$out")" || return 1
-  assert_eq "internal id field stripped" "false" "$(jq '.reviews.codex | has("_dismissed_review_id")' <<<"$out")"
-}
-
-t_main_unmarked_dismissal_reads_none() {
-  ruled_fixture "$HEAD_SHA" "dismissed by hand"
-  local out
-  out=$(main "owner" "repo" "1")
-  MOCK_TIMELINE_BODY='[]'
-  assert_eq "unmarked dismissal reads none" "none" "$(jq -r '.reviews.codex.state' <<<"$out")"
-}
-
-t_main_marked_dismissal_on_old_head_is_stale() {
-  ruled_fixture "$OLD_SHA" "JUDGE-RULED: 0123456789abcdef covers 1 blocking findings at ${OLD_SHA}"
-  local out
-  out=$(main "owner" "repo" "1")
-  MOCK_TIMELINE_BODY='[]'
-  assert_eq "stale ruled dismissal reads none" "none" "$(jq -r '.reviews.codex.state' <<<"$out")" || return 1
-  assert_eq "stale ruled dismissal flagged"    "true" "$(jq -r '.reviews.codex.stale' <<<"$out")"
+# A dismissal leaves the body in review history and the policy lane waiting.
+t_main_dismissal_requires_fresh_verdict() {
+  local message out
+  local MOCK_MERGE_STATE=clean MOCK_REVIEWS_BODY MOCK_TIMELINE_BODY
+  for message in "dismissed by hand" "JUDGE-RULED: historical dismissal"; do
+    MOCK_REVIEWS_BODY='[{"id":501,"user":{"login":"coding-policy-fleet-reviewer[bot]"},"state":"DISMISSED","submitted_at":"2026-07-25T10:00:00Z","body":"blocking","commit_id":"'"$HEAD_SHA"'"}]'
+    MOCK_TIMELINE_BODY=$(jq -nc --arg message "$message" '[{event:"review_dismissed",dismissed_review:{review_id:501,dismissal_message:$message}}]')
+    out=$(main owner repo 1) || return 1
+    assert_eq "dismissal leaves policy pending" "none" "$(jq -r '.reviews.codex.state' <<<"$out")" || return 1
+    assert_eq "dismissed body stays readable" "blocking" "$(jq -r '.review_bodies[0].body' <<<"$out")" || return 1
+  done
+  MOCK_REVIEWS_BODY=$(jq --arg head "$HEAD_SHA" '. + [{id:502,user:{login:"coding-policy-fleet-reviewer[bot]"},state:"APPROVED",submitted_at:"2026-07-25T11:00:00Z",body:"clean",commit_id:$head}]' <<<"$MOCK_REVIEWS_BODY")
+  out=$(main owner repo 1) || return 1
+  assert_eq "fresh verdict on the same head" "APPROVED" "$(jq -r '.reviews.codex.state' <<<"$out")"
 }
 
 t_main_surfaces_head_sha_top_level() {
@@ -728,9 +709,7 @@ run_suite() {
   run "resolve_review_against_head: absent stays none, not stale"       t_resolve_against_head_none_stays_none_not_stale
   run "main collapses a stale review to none (#186 false ready)"        t_main_stale_review_collapses_to_none
   run "main surfaces a fresh (head-bound) review's state"               t_main_fresh_review_surfaces_state
-  run "main reads a marked dismissal on head as RULED"                  t_main_marked_dismissal_reads_ruled
-  run "main reads an unmarked dismissal as none"                        t_main_unmarked_dismissal_reads_none
-  run "main collapses a ruled dismissal on an old head to none"         t_main_marked_dismissal_on_old_head_is_stale
+  run "dismissed policy reviews require a fresh verdict"                t_main_dismissal_requires_fresh_verdict
   run "main surfaces head_sha as a top-level field"                     t_main_surfaces_head_sha_top_level
   run "main fails loudly on an empty headRefOid"                        t_main_no_head_sha_fails
   run "ci.status: success next to a cancelled twin is success (#182)"   t_ci_status_cancel_with_success_is_success

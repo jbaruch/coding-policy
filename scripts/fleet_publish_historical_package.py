@@ -26,11 +26,11 @@ from fleet_publish import (
     tree,
     projection,
     previous,
-    publication_facts,
     overlay_previous_changelog,
     stamp_package,
     replace_suffix,
 )
+from fleet_publish_evidence import facts as publication_facts
 from fleet_publish_record import valid_sha
 from fleet_publish_historical import (
     MAX_PACKAGE_BYTES,

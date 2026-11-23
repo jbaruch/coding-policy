@@ -30,6 +30,9 @@ name: PR Policy Review (Codex, subscription)
 #      CODEX_AUTH_JSON (re-run this whenever the review fails on expired auth):
 #        gh secret set CODEX_AUTH_JSON < ~/.codex/auth.json
 # See https://learn.chatgpt.com/docs/auth/ci-cd-auth
+# Posting reuses fleet-review.yml's FLEET_APP_ID / FLEET_APP_PRIVATE_KEY.
+# Install coding-policy-fleet-reviewer on this repo with Pull requests: write.
+# A missing secret or grant fails token creation; repair that setup and rerun.
 
 on:
   pull_request:
@@ -38,7 +41,7 @@ on:
 # Fork PRs cannot read secrets, so the review only runs for same-repo PRs.
 permissions:
   contents: read
-  pull-requests: write
+  pull-requests: read
 
 concurrency:
   group: codex-review-${{ github.event.pull_request.number }}
@@ -54,6 +57,7 @@ jobs:
         with:
           fetch-depth: 0
           ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
 
       - name: Cheap package checks before model review
         run: |
@@ -70,7 +74,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
-          REVIEWER_LOGIN: github-actions[bot]
+          REVIEWER_LOGIN: coding-policy-fleet-reviewer[bot]
         run: |
           set -euo pipefail
           reviewed_head=$(git rev-parse HEAD)
@@ -139,14 +143,98 @@ jobs:
           bash .github/codex-review/assert-no-secret-leak.sh "$HOME/.codex/auth.json" /tmp/codex-final.json
           rm -f "$HOME/.codex/auth.json"
 
+      # Upload the review result so the isolated post job can consume it on a
+      # clean runner that never ran Codex or touched the subscription credential.
+      - name: Upload review result
+        uses: actions/upload-artifact@v4
+        with:
+          name: codex-review-result
+          path: /tmp/codex-final.json
+          retention-days: 1
+          overwrite: true
+
+  # Token minting and review posting run on a clean runner that never ran the
+  # Codex review.  GitHub prepares action executables before any job step runs;
+  # separating the jobs ensures that no code from the review runner (including
+  # any prompt-injected mutation) can reach the action executable used to mint
+  # the App token.  Repo, PR number, and head SHA are bound from the GitHub
+  # event context (trusted source); the downloaded artifact is treated as
+  # untrusted data and its shape is validated before use.
+  post:
+    needs: review
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # Executable scripts must come from the protected default branch,
+          # not the PR head — including for PRs that target a non-default
+          # branch.  A PR contributor cannot substitute their own scripts into
+          # the privileged posting step.  The reviewed commit remains
+          # authoritative from github.event.pull_request.head.sha (the GitHub
+          # event context), independently of which revision supplies the
+          # executables.
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            .github/codex-review/post-review.sh
+            skills/release/poll-pr-reviews.sh
+            skills/release/review-lanes.sh
+
+      - name: Identify trusted executable revision
+        run: |
+          set -euo pipefail
+          rev=$(git rev-parse HEAD)
+          echo "Executable scripts loaded from: ${{ github.event.repository.default_branch }} (${rev})"
+          echo "Reviewed commit bound from event: ${{ github.event.pull_request.head.sha }}"
+
+      - name: Download review result
+        uses: actions/download-artifact@v4
+        with:
+          name: codex-review-result
+          path: ${{ runner.temp }}/review-artifact
+
+      # Validate that the artifact is well-formed JSON with the expected top-level
+      # shape.  Repo, PR, and head SHA come from the GitHub event (trusted); only
+      # the review content (summary + findings) is consumed from the artifact.
+      - name: Validate review artifact shape
+        env:
+          REVIEWED_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          artifact="$RUNNER_TEMP/review-artifact/codex-final.json"
+          if [[ ! -f "$artifact" ]]; then
+            echo "error: review artifact not found — the review job did not upload its result" >&2
+            exit 1
+          fi
+          if ! jq -e 'has("summary") and has("findings") and (.findings | type == "array")' "$artifact" >/dev/null 2>&1; then
+            echo "error: review artifact missing required fields (summary, findings[]) — shape invalid" >&2
+            exit 1
+          fi
+          # reviewed_sha is authoritative from the GitHub event, not the artifact.
+          echo "Artifact shape valid; head SHA bound from event: $REVIEWED_SHA"
+
+      - name: Mint the policy reviewer App installation token
+        id: apptoken
+        uses: actions/create-github-app-token@v3
+        with:
+          app-id: ${{ secrets.FLEET_APP_ID }}
+          private-key: ${{ secrets.FLEET_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+          permission-pull-requests: write
+
       - name: Post the review
         env:
-          GH_TOKEN: ${{ github.token }}
-          REVIEWER_LOGIN: github-actions[bot]
+          GH_TOKEN: ${{ steps.apptoken.outputs.token }}
+          REVIEWER_LOGIN: ${{ steps.apptoken.outputs.app-slug }}[bot]
           REVIEWED_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           bash .github/codex-review/post-review.sh \
             "${{ github.repository_owner }}" \
             "${{ github.event.repository.name }}" \
             "${{ github.event.pull_request.number }}" \
-            /tmp/codex-final.json "$REVIEWED_SHA"
+            "$RUNNER_TEMP/review-artifact/codex-final.json" "$REVIEWED_SHA"

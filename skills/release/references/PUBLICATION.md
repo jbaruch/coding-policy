@@ -35,7 +35,7 @@ git tag <tag> && git push origin <tag>
 
 ## After the merge — every publication: resolve and watch its run
 
-An enrolled central fleet consumer follows
+Readback of an existing central fleet publication follows
 `skills/release/references/fleet-publication.md` in full for selection, watching
 and confirmation. Keep the captured baseline and actual consumer merge SHA.
 The commands below retain the ordinary consumer-push and tag publication modes.

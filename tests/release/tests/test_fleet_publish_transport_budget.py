@@ -60,7 +60,7 @@ def graph(commits, branch="main"):
         current
     )
     for sha in (native.workflow, finalizer, current):
-        native.routes[f"repos/{fixture.CENTRAL}/compare/{sha}...{current}"] = {
+        native.routes[f"repos/{fixture.CENTRAL}/compare/{sha}...{current}?per_page=1&page=2"] = {
             "status": "identical" if sha == current else "ahead",
             "base_commit": {"sha": sha},
             "merge_base_commit": {"sha": sha},
@@ -157,7 +157,7 @@ def recovery_graph(commits):
         recovery_finalizer,
         current,
     ):
-        native.routes[f"repos/{fixture.CENTRAL}/compare/{sha}...{current}"] = {
+        native.routes[f"repos/{fixture.CENTRAL}/compare/{sha}...{current}?per_page=1&page=2"] = {
             "status": "identical" if sha == current else "ahead",
             "base_commit": {"sha": sha},
             "merge_base_commit": {"sha": sha},
@@ -260,45 +260,89 @@ class NativeTransport(unittest.TestCase):
                 self.assertEqual(outcome, "confirmed")
                 self.assertLessEqual(client._commands, 512)
 
-    def test_actual_producer_record_resolves_nontrivial_native_branches(self):
-        scripts = fixture.SOURCE.parents[1] / "scripts"
-        with patch.object(sys, "path", [str(scripts), str(fixture.SOURCE), *sys.path]):
-            import fleet_publish as publisher
+    def test_historical_record_resolves_nontrivial_branches_after_workflow_retirement(self):
         for branch in ("release+stable", "releases/stable_1.0", "préprod/%literal"):
             with self.subTest(branch=branch):
                 native = graph(0, branch)
-                source_tree = native.routes[
-                    f"repos/{fixture.REPO}/git/commits/{native.source}"
-                ]["tree"]["sha"]
-                record = publisher.initial_record(
-                    fixture.REPO,
-                    native.source,
-                    "refs/heads/" + branch,
-                    source_tree,
-                    fixture.REPO,
-                    "0.1.0",
-                    "0.1.1",
-                    {
-                        "GITHUB_REPOSITORY": fixture.CENTRAL,
-                        "GITHUB_EVENT_NAME": "workflow_dispatch",
-                        "GITHUB_REF": "refs/heads/main",
-                        "GITHUB_WORKFLOW_REF": fixture.CENTRAL
-                        + "/"
-                        + publisher.CENTRAL_WORKFLOW
-                        + "@refs/heads/main",
-                        "GITHUB_RUN_ATTEMPT": "1",
-                        "GITHUB_SHA": native.workflow,
-                        "GITHUB_RUN_ID": fixture.RUN,
-                    },
-                )
-                self.assertEqual(record, native.intent)
-                native.records[fixture.RUN, "intent"] = record
+                del native.routes[
+                    f"repos/{fixture.CENTRAL}/actions/workflows/fleet-publish.yml"
+                ]
                 client = fixture.github_owner.ResolutionGitHubClient()
                 with self.bind(native):
                     result = fixture.resolver.resolve(
                         client, fixture.REPO, native.source
                     )
                 self.assertEqual(result["source_ref"], "refs/heads/" + branch)
+
+    def test_ancestry_metadata_avoids_oversized_comparison_and_first_page(self):
+        native = graph(0)
+        comparisons = [
+            route for route in native.routes
+            if "/compare/" in route
+            and route.endswith(f"{native.central_tip}?per_page=1&page=2")
+        ]
+        for route in comparisons:
+            metadata = native.routes[route]
+            # REST file patches occur only on page 1, even with per_page=1.
+            oversized = {
+                **metadata,
+                "files": [{"patch": "x" * (1024 * 1024)}],
+            }
+            unpaged = route.split("?", 1)[0]
+            native.routes[unpaged] = oversized
+            native.routes[unpaged + "?per_page=1&page=1"] = oversized
+            # Two commits ahead returns the second commit; one ahead and
+            # identical pairs have empty pages with the same ancestry metadata.
+            native.routes[route] = {
+                **metadata,
+                "commits": (
+                    [{"sha": native.central_tip}]
+                    if metadata["base_commit"]["sha"] == native.workflow else []
+                ),
+            }
+        client = fixture.github_owner.ResolutionGitHubClient()
+        with self.bind(native):
+            for suffix in ("", "?per_page=1&page=1"):
+                with self.assertRaises(fixture.FleetPublishLookupError) as error:
+                    client.json(comparisons[0].split("?", 1)[0] + suffix)
+                self.assertEqual(error.exception.kind, "stdout_budget")
+            self.calls.write_text("")
+            result = fixture.resolver.resolve(client, fixture.REPO, native.source)
+        self.assertEqual(result, native.records[fixture.RUN, "receipt"])
+        calls = self.calls.read_text().splitlines()
+        self.assertEqual(
+            {route for route in calls if "/compare/" in route}, set(comparisons)
+        )
+
+    def test_paginated_comparison_keeps_byte_cap_and_json_validation(self):
+        native = graph(0)
+        route = (
+            f"repos/{fixture.CENTRAL}/compare/{native.workflow}...{native.central_tip}"
+            "?per_page=1&page=2"
+        )
+        metadata = native.routes[route]
+        for raw, kind in (
+            (
+                json.dumps({
+                    **metadata, "padding": "x" * (1024 * 1024)
+                }).encode(),
+                "stdout_budget",
+            ),
+            (b'{"status":"ahead","status":"identical"}', "invalid_json"),
+            (b'{"status":', "invalid_json"),
+        ):
+            with self.subTest(kind=kind):
+                self.bind(native)
+                responses = json.loads(self.routes.read_text())
+                responses[route] = base64.b64encode(raw).decode()
+                self.routes.write_text(json.dumps(responses))
+                self.calls.write_text("")
+                client = fixture.github_owner.ResolutionGitHubClient()
+                with self.assertRaises(fixture.FleetPublishLookupError) as error:
+                    fixture.producer.verify_workflow_protocol(client, native.workflow)
+                self.assertEqual(error.exception.kind, kind)
+                self.assertEqual(self.calls.read_text().splitlines()[-1], route)
+                self.assertEqual(client._commands, 3)
 
     def test_base_budget_stays128_and_reader_exhaustion_is_a_refusal(self):
         native = graph(124)  # needs 339 commands, past the base 128

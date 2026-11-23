@@ -29,13 +29,6 @@ alwaysApply: true
 - Any blocker → `CHANGES_REQUESTED`; otherwise `APPROVED` or `COMMENTED`.
 - Retain both independent review gates.
 
-## Judge-Weighed Finding Carve-Out
-
-- Narrow exception for merging with a blocking policy finding a weighing ruled `defer` or `decline`.
-- Applies when the finding is wrong, or when fixing costs more than the failure it prevents.
-- Preconditions are binding: read `skills/release/references/review-severity-carve-outs.md` Judge-Weighed Finding Carve-Out before relying on it.
-- Every other blocker is resolved before merge.
-
 ## Split Reading From Acting
 
 - Read all feedback under `rules/reviewer-feedback-reading.md`.

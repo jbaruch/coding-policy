@@ -131,8 +131,6 @@ class ReviewTest(unittest.TestCase):
                 self.assertIn(f"already reviewed o/r#1 at {HEAD}", logged)
 
     def test_older_head_other_reviewer_or_dismissed_review_does_not_suppress_the_post(self):
-        # A quality review is never ruled-dismissed, so any dismissal, GitHub's
-        # automatic stale-review dismissal included, lets a new review run.
         for review in (self.earlier_review("APPROVED", "c" * 40),
                        self.earlier_review("APPROVED", login="coding-policy-fleet-reviewer[bot]"),
                        self.earlier_review("DISMISSED")):

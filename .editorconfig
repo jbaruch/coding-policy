@@ -1,0 +1,13 @@
+# Enforces rules/code-formatting.md Basics in the editor.
+root = true
+
+[*]
+indent_style = space
+insert_final_newline = true
+trim_trailing_whitespace = true
+
+[*.py]
+indent_size = 4
+
+[*.{sh,yml,yaml,json}]
+indent_size = 2

@@ -21,7 +21,6 @@ from fleet_publish_archive import (  # noqa: E402 - trusted co-shipped owner.
     FINALIZER_WORKFLOW,
     PREFIX,
     encode_archive,
-    make_intent,
     make_hold,
     parse_hold,
     make_terminal,
@@ -103,7 +102,7 @@ class ConsumerHistoricalClient(ResolutionGitHubClient):
 
 
 class HistoricalGitHub(GitHub):
-    """Reuse the publisher's Git/package owner with fixed historical credentials."""
+    """Reuse the historical Git/package owner with fixed historical credentials."""
 
     def __init__(self) -> None:
         super().__init__()
@@ -114,15 +113,11 @@ class HistoricalGitHub(GitHub):
         require(self.consumer_repository in (None, repository))
         self.consumer_repository = repository
 
-    def _command_environment(
-        self, path: str, payload: Any, method: str
-    ) -> dict[str, str]:
+    def _command_environment(self, path: str, payload: Any) -> dict[str, str]:
         if owned_route(path, CENTRAL_REPOSITORY):
             if payload is not None:
                 require(
-                    method == "POST"
-                    and path
-                    in {
+                    path in {
                         f"repos/{CENTRAL_REPOSITORY}/git/{kind}"
                         for kind in ("blobs", "trees", "commits", "refs")
                     }
@@ -226,54 +221,6 @@ def create_only(
         require(lookup() is not None)
     final = lookup()
     require(final is not None and encode_archive(final) == raw)
-
-
-def persist_claim(
-    github: Any, reader: Any, intent: object, bookkeeping_sha: str
-) -> None:
-    """Called only after actual consumer CAS and before publication."""
-    envelope = make_intent(intent, bookkeeping_sha)
-    record = envelope["intent"]
-    repo, source, run = (
-        record["consumer_repository"],
-        record["source_sha"],
-        record["run_id"],
-    )
-
-    def source_lookup() -> object | None:
-        return reader.source_claim(repo, source)
-
-    if record["origin_run_id"] == run:
-        create_only(
-            github,
-            ref_name("source", repository=repo, source_sha=source),
-            envelope,
-            source_lookup,
-        )
-    else:
-        original = source_lookup()
-        require(original is not None)
-        original = parse_intent(original)["intent"]
-        require(
-            original["run_id"] == record["origin_run_id"]
-            and all(
-                original[key] == record[key]
-                for key in (
-                    "consumer_repository",
-                    "source_sha",
-                    "source_tree_sha",
-                    "source_ref",
-                    "plugin_name",
-                    "version",
-                    "origin_run_id",
-                    "origin_run_attempt",
-                )
-            )
-        )
-    create_only(
-        github, ref_name("intent", run_id=run), envelope, lambda: reader.run_intent(run)
-    )
-    require(reader.run_intent(run) == envelope)
 
 
 def finalizer_context(
@@ -512,7 +459,7 @@ def historical_quiescence(
     def quiet(value: object) -> None:
         if not value:
             raise ArchiveWriteRefused(
-                "Keep FLEET_PUBLISHER_ENABLED disabled and preserve run metadata; "
+                "Keep the central publisher retired and preserve run metadata; "
                 "wait for every other central poll/publication/finalizer run to "
                 "finish and restore complete stable native totals and active "
                 "catalogs before attesting."
@@ -574,13 +521,23 @@ def historical_quiescence(
 
     for path in (CENTRAL_WORKFLOW, FINALIZER_WORKFLOW):
         route = f"repos/{CENTRAL_REPOSITORY}/actions/workflows"
-        workflow = obj(github.api(f"{route}/{path.rsplit('/', 1)[1]}"))
+        selected = (
+            str(expected_run["workflow_id"])
+            if path == CENTRAL_WORKFLOW
+            else path.rsplit("/", 1)[1]
+        )
+        workflow = obj(github.api(f"{route}/{selected}"))
         quiet(type(workflow.get("id")) is int)
         workflow_id = identifier(workflow.get("id"))
         quiet(
             workflow_id not in workflows
+            and (path != CENTRAL_WORKFLOW or workflow_id == selected)
             and workflow.get("path") == path
-            and workflow.get("state") == "active"
+            and (
+                workflow.get("state") in ("active", "deleted")
+                if path == CENTRAL_WORKFLOW
+                else workflow.get("state") == "active"
+            )
         )
         workflows.add(workflow_id)
         if path == FINALIZER_WORKFLOW:
@@ -593,7 +550,7 @@ def historical_quiescence(
             total, rows = raw.get("total_count"), raw.get("workflow_runs")
             if type(total) is not int or total < 0:
                 raise ArchiveWriteRefused(
-                    "Keep FLEET_PUBLISHER_ENABLED disabled; restore a nonnegative "
+                    "Keep the central publisher retired; restore a nonnegative "
                     "native workflow total before attesting."
                 )
             quiet(isinstance(rows, list) and len(rows) == min(1, total))

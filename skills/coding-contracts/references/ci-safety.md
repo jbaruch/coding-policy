@@ -15,16 +15,9 @@
 ## Superseded-Bot-Review Dismissal Carve-Out
 
 - Narrow exception for dismissing a gating bot's superseded `CHANGES_REQUESTED`
-- Applies when the same bot's all-clear re-review supersedes it, the bot cannot `APPROVE`, and the stale request keeps the merge `BLOCKED`
+- Applies to legacy bot gates superseded by an all-clear under the migration or external-caller contract in the binding reference
 - Preconditions are binding: read `skills/release/references/ci-safety-carve-outs.md` Superseded-Bot-Review Dismissal Carve-Out before relying on it
 - Every other dismissal still gates
-
-## Judge-Ruled-Review Dismissal Carve-Out
-
-- Narrow exception for dismissing the policy reviewer's latest `CHANGES_REQUESTED` on the PR head
-- Applies when a weighing ruling rules every blocking finding in that review `defer` or `decline` under `rules/review-severity.md` Judge-Weighed Finding Carve-Out
-- Preconditions are binding: read `skills/release/references/ci-safety-carve-outs.md` Judge-Ruled-Review Dismissal Carve-Out before relying on it
-- Every other policy-review `CHANGES_REQUESTED` blocks the merge until resolved through review
 
 ## Publish-Pipeline Loop-Prevention Carve-Out
 
@@ -32,13 +25,6 @@
 - Applies when that commit would otherwise re-trigger the same publish workflow
 - Preconditions are binding: read `skills/release/references/ci-safety-carve-outs.md` Publish-Pipeline Loop-Prevention Carve-Out before relying on it
 - Every other commit omits `[skip ci]`, and `[skip ci]` never skips failing tests or unblocks a merge
-
-## Bootstrap-Red Carve-Out
-
-- Narrow exception for a required check failing on an explicit cache-binding or bootstrap guard, not a test assertion
-- Applies when the PR changes a key the CI cache is bound to AND the rebuilt cache can only be seeded from the default branch after merge
-- Preconditions are binding: read `skills/release/references/ci-safety-carve-outs.md` Bootstrap-Red Carve-Out before relying on it
-- Every other failing check blocks the merge: fix the tests or fix the code
 
 ## Install, Don't Skip
 
@@ -91,13 +77,6 @@
 
 - Lookup, refusal, exit-code and regression contracts are binding: read `skills/release/references/script-output-contracts.md` Release Readback Consumers before invoking these targets from another plugin.
 - Lookup supplies no merge, publication, installation or operator authority.
-
-## Central Publication Bookkeeping
-
-- Narrow exception for the fleet publish workflow adding an enrolled plugin's published version, source claim and changelog stamp to that plugin's default-branch history.
-- Applies only to `.github/workflows/fleet-publish.yml` in `jbaruch/coding-policy`.
-- Preconditions are binding: read `skills/release/references/fleet-publication.md` Bookkeeping Authority before relying on it.
-- Every other protected-branch write follows Protected Branches unchanged.
 
 ## Publish Outcomes
 

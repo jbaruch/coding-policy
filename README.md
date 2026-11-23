@@ -33,6 +33,26 @@ See [CHANGELOG.md](CHANGELOG.md) for full version history.
 tessl install jbaruch/coding-policy
 ```
 
+## Contributor setup
+
+Install Python 3.11+ and Go 1.24.11+. In an isolated Python environment, install
+[pre-commit](https://pre-commit.com/) at the pinned revision below (v4.7.0), then
+run these commands from this repository's clone:
+
+```sh
+python3 -m pip install 'git+https://github.com/pre-commit/pre-commit@65bb884a567e8be6adc51e8bfbcf26f708eb35a2'
+pre-commit install --install-hooks
+pre-commit run gitleaks
+```
+
+The repository-local hook uses [Gitleaks](https://github.com/gitleaks/gitleaks)
+to scan staged changes, redact matches in its output and block matching commits.
+Run setup in each clone before committing. These commands change no global hooks
+or Git configuration. Renovate renews the frozen Gitleaks revision in
+`.pre-commit-config.yaml`; manual updates use `pre-commit autoupdate --freeze`.
+Maintainers review pre-commit's installation pin monthly and re-pin its release
+commit above in a dedicated dependency change.
+
 ## What's Included
 
 Compact rule routers retain startup boundaries and require their complete
@@ -67,7 +87,7 @@ Tessl imports. Combined native-session acceptance lives in
 | Discipline | [boy-scout](rules/boy-scout.md) | Fix coherent in-scope defects; record unrelated blocking risks once; advisories and maintenance create no delivery obligation |
 | Scope | [external-repo-contributions](rules/external-repo-contributions.md) | Default deny on issues, PRs, comments, reactions, and discussions in repos the operator does not own; explicit permission required per repo and action type |
 | Communication | [response-clarity](rules/response-clarity.md) | Shape responses action-first: lead with the command, number steps, show progress, plain errors, one concrete next step, no preamble or closers (exceptions for explanations, destructive actions, debug, ambiguity) |
-| Discipline | [ship-on-green](rules/ship-on-green.md) | Green gate is the approval — merge, never ask; asking in a costume (flag/confirm/"say go") is deciding not to ship; stakes raise care not permission; three objective exits only — Red / No undo / Murky |
+| Discipline | [ship-on-green](rules/ship-on-green.md) | Green gate is the approval — merge, never ask; flag/confirm/"say go" count as asking; stakes raise care not permission; three objective exits only — Red / No undo / Murky |
 | Automation | [hook-action-reporting](rules/hook-action-reporting.md) | Relay any `Session-start status —` hook payloads to the user once at session start, then act on any action they name (a SessionStart hook's output reaches the model, not the transcript) |
 
 ## Skills
@@ -82,11 +102,9 @@ Tessl imports. Combined native-session acceptance lives in
 
 On-demand [review calibration](skills/coding-contracts/references/review-calibration.md) compares a small fixed PR sample with the same role, instructions and source packet for both models. Assess useful defects, unsupported blockers, unnecessary work and observed rounds. The ordinary Codex-policy and Claude-quality lanes have different contexts and do not establish a matched model comparison.
 
-### Central fleet publication
+### Historical central fleet publication
 
-The opt-in [central publisher contract](skills/release/references/fleet-publication.md) keeps Tessl and App credentials in `coding-policy`. Reviewed consumer enrollment selects a data-only package; source-bound intent, claim and receipt readers retain each publication and its moderation result. Activation stays disabled until the App permissions and consumer publication handoff are verified. The same owner can retain a separately typed later source proof for a verified historical publication whose original receipt bytes are unavailable; this explicit recovery never reconstructs a receipt or republishes. Compatible readers must be installed before proof creation.
-
-The scheduled backstop runs every 15 minutes and examines at most two enrolled consumers per tick. One poll has a shared 200-request central API budget, including native context, paginated artifact reads and up to two dispatches. App-scoped repository discovery and consumer reads use the installation's separate quota and their existing pagination and per-command bounds; they are not charged to the central-token budget. Budget-deferred consumers remain explicit; they are never treated as absent or successfully published. The poll caches only immutable Git objects and comparisons for its own lifetime; native refs, runs, jobs, artifacts, reviews and publication gates stay fresh. The verified native scheduled run creation time selects a UTC quarter-hour slot; child dispatch counts do not change rotation. At 24 stable enrollments and an uninterrupted fifteen-minute schedule, every consumer receives a first proof slot within 24 ticks (six hours); a second slot can complete earlier. Missed or delayed cron runs can defer that coverage. This is backstop latency, not a fifteen-minute consumer delivery guarantee. Explicit selected dispatch remains independent and must pass the full current source, claim and publication checks.
+The central publisher is retired. The [historical publication contract](skills/release/references/fleet-publication.md) retains source-bound resolver, archive, proof and confirmation readers for existing releases. The finalizer archives previously admitted runs and supports explicit later source proof without publication or consumer writes. New releases use each consumer's reviewed publication workflow; the [reusable publisher](docs/fleet-publish-setup.md) remains available.
 
 ## Hooks
 

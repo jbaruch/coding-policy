@@ -73,13 +73,13 @@ class Fixture:
             "ref": "refs/heads/main",
             "object": {"type": "commit", "sha": self.central_tip},
         }
-        self.routes[f"repos/{CENTRAL}/compare/{self.workflow}...{self.central_tip}"] = {
+        self.routes[f"repos/{CENTRAL}/compare/{self.workflow}...{self.central_tip}?per_page=1&page=2"] = {
             "status": "ahead",
             "base_commit": {"sha": self.workflow},
             "merge_base_commit": {"sha": self.workflow},
         }
         self.routes[
-            f"repos/{CENTRAL}/compare/{self.central_tip}...{self.central_tip}"
+            f"repos/{CENTRAL}/compare/{self.central_tip}...{self.central_tip}?per_page=1&page=2"
         ] = {
             "status": "identical",
             "base_commit": {"sha": self.central_tip},
@@ -434,6 +434,18 @@ class ResolverTests(unittest.TestCase):
         self.assertNotEqual(f.tip, f.claim)
         self.assertEqual(resolver.resolve(f, REPO, f.source), f.records[RUN, "receipt"])
 
+    def test_deleted_workflow_keeps_native_and_expired_evidence_readable(self):
+        for expired in (False, True):
+            with self.subTest(expired=expired):
+                f = Fixture()
+                receipt = copy.deepcopy(f.records[RUN, "receipt"])
+                del f.routes[f"repos/{CENTRAL}/actions/workflows/fleet-publish.yml"]
+                if expired:
+                    f.expire_actions()
+                stored_files = copy.deepcopy(f.files)
+                self.assertEqual(resolver.resolve(f, REPO, f.source), receipt)
+                self.assertEqual(f.files, stored_files)
+
     def test_explicit_recovery_requires_original_native_publish_success(self):
         f = self.fixture
         f.records[RUN, "receipt"].update(state="published", moderation="pending")
@@ -584,7 +596,7 @@ class ResolverTests(unittest.TestCase):
 
     def test_off_main_producer_and_missing_claim_are_never_not_found(self):
         f = self.fixture
-        route = f"repos/{CENTRAL}/compare/{f.workflow}...{f.central_tip}"
+        route = f"repos/{CENTRAL}/compare/{f.workflow}...{f.central_tip}?per_page=1&page=2"
         original = f.routes[route]
         f.routes[route] = {**original, "status": "diverged"}
         self.hold(lambda: resolver.select(f, REPO, f.source), "unavailable")

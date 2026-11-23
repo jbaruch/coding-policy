@@ -6,25 +6,23 @@ alwaysApply: true
 
 ## Green Gate Is the Approval
 
-- Required checks green and none of the exits below apply ⇒ merge. The green gates ARE the approval
+- Required checks green and none of the exits below apply ⇒ merge
 - Do not pause to ask a human whether to merge
-- Flag, confirm, "say go and I'll", "worth one confirmation", "want me to?" are asking in a costume — each resolves to asking, and asking IS the decision to not ship
-- Governs every merge, whether or not `skills/release` was invoked — an agent running the flow by hand is bound identically
+- Flagging, confirming, "say go and I'll", "worth one confirmation" and "want me to?" count as asking
+- Governs every merge, with or without `skills/release`
 
 ## Stakes Raise Care, Not Permission
 
-- Scary, wide-reaching, always-on, ships-to-prod, deletes-a-thing ⇒ verify harder — more tests, tighter review, a pristine-checkout lint
-- A change being high-impact is never itself an exit — stakes buy care, never permission
+- A wide-reaching, always-on, ships-to-prod, deleting or otherwise high-impact change gets harder verification: more tests, tighter review, a pristine-checkout lint
+- High impact is never itself an exit
 
 ## The Three Exits Are Exhaustive
 
-- Merge is blocked only by one of these three, each with a literal test — no fourth exit, no vibe word:
-- **Red** — a required check is failing or pending. Not "I feel uneasy"
-- **No undo** — `git revert` cannot restore it: force-push over protected history, an immutable published artifact, deleted data, sent external comms. A supersedable version bump is undoable; shipping to prod is NOT "no undo"
-- **Murky** — the task's own source states 2+ conflicting options AND names no default. Source names a default ⇒ take it, never murky
-
-## Relationship to Other Rules
-
-- `skills/release/SKILL.md` Step 7 references this rule for the merge decision rather than restating it
-- The release contract's watch and verify steps (`rules/ci-safety.md`) feed the Red test; they add no fourth exit
-- Advisory findings never gate (`rules/review-severity.md`), so an unaddressed advisory does not make a gate Red
+- Merge is blocked only by one of these three exits, each judged by its literal test:
+- **Red** — a required check is failing or pending
+- **No undo** — `git revert` cannot restore it: force-push over protected history, an immutable published artifact, deleted data, sent external comms
+- A supersedable version bump or shipping to prod does NOT qualify as No undo
+- **Murky** — the task's own source states 2+ conflicting options AND names no default
+- Source names a default ⇒ take it, never Murky
+- The watch and verify steps of `rules/ci-safety.md` feed the Red test, never a fourth exit
+- An unaddressed advisory finding never makes a gate Red, per `rules/review-severity.md`

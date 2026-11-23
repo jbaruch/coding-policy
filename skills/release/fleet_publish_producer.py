@@ -137,8 +137,10 @@ def verify_workflow_protocol(client: GitHubRead, workflow_sha: str) -> None:
         and valid_sha(tip),
         "workflow_metadata",
     )
+    # Compare metadata spans the exact pair on every page. Page 2 omits the
+    # potentially large first-page file patches; one commit bounds unused data.
     comparison = client.json(
-        f"repos/{CENTRAL_REPOSITORY}/compare/{workflow_sha}...{tip}"
+        f"repos/{CENTRAL_REPOSITORY}/compare/{workflow_sha}...{tip}?per_page=1&page=2"
     )
     _require(isinstance(comparison, dict), "workflow_ancestry")
     if not isinstance(comparison, dict):

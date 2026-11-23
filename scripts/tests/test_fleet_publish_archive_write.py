@@ -272,48 +272,29 @@ class ArchiveWriterTests(unittest.TestCase):
         self.protocol.start()
         self.addCleanup(self.protocol.stop)
 
+    def test_archive_transport_refuses_retired_effect_routes_before_command(self):
+        from fleet_publish import GitHub, PublishRefused
+
+        github = GitHub()
+        with patch("fleet_publish.subprocess.run") as command:
+            for route in (
+                f"repos/{REPO}/git/blobs",
+                f"repos/{REPO}/git/refs",
+                f"repos/{REPO}/git/refs/heads/main",
+                "repos/jbaruch/coding-policy/actions/workflows/fleet-publish.yml/dispatches",
+                "repos/jbaruch/coding-policy/git/refs/heads/main",
+            ):
+                with self.subTest(route=route), self.assertRaises(PublishRefused):
+                    github.api(route, {})
+            command.assert_not_called()
+
     def claim(self):
-        writer.persist_claim(self.git, self.git, deepcopy(RECORD), CLAIM)
-
-    def test_source_and_run_refs_retain_same_exact_envelope_without_updates(self):
-        self.claim()
-        original = deepcopy(self.git.refs)
-        expected = make_intent(RECORD, CLAIM)
-        self.assertEqual(self.git.source_claim(REPO, SOURCE), expected)
-        self.assertEqual(self.git.run_intent("101"), expected)
-        count = len(self.git.calls)
-        self.claim()
-        self.assertEqual(self.git.refs, original)
-        self.assertEqual(len(self.git.calls), count)
-        self.assertTrue(
-            all(
-                route.startswith("repos/jbaruch/coding-policy/git/")
-                for route, _ in self.git.calls
-            )
-        )
-        self.assertTrue(all(not route.endswith("/main") for route, _ in self.git.calls))
-
-    def test_different_original_is_refused_without_overwriting_any_record(self):
-        self.claim()
-        before, count = deepcopy(self.git.refs), len(self.git.calls)
-        with self.assertRaises(writer.ArchiveWriteRefused):
-            writer.persist_claim(
-                self.git,
-                self.git,
-                {**RECORD, "run_id": "102", "origin_run_id": "102"},
-                "f" * 40,
-            )
-        self.assertEqual(self.git.refs, before)
-        self.assertEqual(len(self.git.calls), count)
-
-    def test_recovery_creates_only_own_intent_and_preserves_original_index(self):
-        self.claim()
-        original = self.git.source_claim(REPO, SOURCE)
-        writer.persist_claim(self.git, self.git, {**RECORD, "run_id": "102"}, "f" * 40)
-        self.assertEqual(self.git.source_claim(REPO, SOURCE), original)
-        self.assertEqual(
-            present(self.git.run_intent("102"))["intent"]["origin_run_id"], "101"
-        )
+        envelope = make_intent(RECORD, CLAIM)
+        for ref in (
+            ref_name("source", repository=REPO, source_sha=SOURCE),
+            ref_name("intent", run_id="101"),
+        ):
+            writer.create_only(self.git, ref, envelope, lambda: self.git.lookup(ref))
 
     def test_failed_write_or_missing_readback_never_infers_durable_claim(self):
         self.git.fail_write = True
@@ -525,7 +506,7 @@ class ArchiveWriterTests(unittest.TestCase):
 
         with patch("fleet_publish_producer.verify_workflow_protocol"):
             reader = ArchiveReader(self.git)
-            writer.persist_claim(self.git, reader, RECORD, CLAIM)
+            self.claim()
             self.assertTrue(
                 writer.finalize(self.git, reader, ENV, {"workflow_run": {"id": 101}})
             )
@@ -608,9 +589,7 @@ class ArchiveWriterTests(unittest.TestCase):
         self.assertIn("version: '0.119.0'", setup)
         self.assertEqual(text.count("secrets.TESSL_TOKEN"), 1)
         self.assertIn("original_run_id:", text)
-        self.assertIn(
-            "github.run_attempt == 1 && vars.FLEET_PUBLISHER_ENABLED != 'true'", text
-        )
+        self.assertIn("github.run_attempt == 1", text)
         self.assertIn("github.event_name == 'workflow_run'", text)
         self.assertIn("permission-contents: read", text)
         self.assertIn("permission-pull-requests: read", text)

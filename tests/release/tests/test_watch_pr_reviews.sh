@@ -190,13 +190,15 @@ test_ready_first_poll() {
   assert_eq "sleep count" "0" "$(sleeps)" || return 1
 }
 
-# A policy review dismissed under a weighing ruling (RULED) plus green is ready.
-test_ruled_is_ready() {
+# A historical RULED snapshot cannot clear the gate.
+test_historical_verdict_waits() {
   reset_mocks
   queue "$(snap MERGEABLE CLEAN success RULED COMMENTED)"
+  queue "$(snap MERGEABLE CLEAN success APPROVED COMMENTED)"
   local out rc=0
   out=$(main jbaruch coding-policy 42 2>&1) || rc=$?
   assert_eq "exit code" "0" "$rc" || return 1
+  assert_eq "poll count" "2" "$(calls)" || return 1
   assert_eq "result" "ready" "$(result_of "$out")"
 }
 
@@ -360,7 +362,7 @@ run_suite() {
   run "a requested Claude lane still waits for its verdict" test_requested_claude_still_waits
   run "a snapshot without the requested field keeps waiting" test_missing_requested_field_still_waits
   run "ready on first poll — no sleep" test_ready_first_poll
-  run "RULED policy review plus green is ready" test_ruled_is_ready
+  run "historical verdict waits for native policy approval" test_historical_verdict_waits
   run "deferred ready polls until both bots post" test_deferred_ready
   run "lone codex verdict is not ready — waits for both bots" test_both_bots_required
   run "zero inline comments is a complete review — ready" test_zero_comments_ready

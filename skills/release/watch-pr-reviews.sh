@@ -116,8 +116,8 @@ main() {
     # in the snapshot. Blocking findings returned above.
     if [[ "$mergeable" == "MERGEABLE" \
        && ( "$ci" == "success" || "$ci" == "none" ) \
-       && "$codex" != "none" \
-       && "$claude" != "none" ]]; then
+       && ( "$codex" == "APPROVED" || "$codex" == "COMMENTED" ) \
+       && ( "$claude" == "APPROVED" || "$claude" == "COMMENTED" ) ]]; then
       emit_and_exit "ready" "$attempts" "$elapsed" "$snapshot" 0
     fi
 

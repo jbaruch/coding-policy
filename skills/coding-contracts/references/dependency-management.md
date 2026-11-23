@@ -25,7 +25,7 @@
 - Automate it where a scanner supports the ecosystem: a committed Dependabot or Renovate config
 - Where no scanner tracks the pin — a version baked into a script or action step, a pinned model version behind a bounded classification — document the renewal cadence beside the pin
 - A version bump is its own focused change, never bundled with feature work
-- Formatter and linter bumps especially (see `rules/code-formatting.md` Separation of Concerns)
+- Formatter and linter bumps especially (see `rules/commit-conventions.md` One Change Per Commit)
 - Match a stale pin locally to ship the current task; bump it in a separate change
 
 ## Runtime-Managed Manifest Carve-Out

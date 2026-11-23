@@ -8,8 +8,7 @@ checkout. No policy installation, GitHub token, settings, history or execution
 tools enter its session. Findings are blocking or advisory; the verdict is bound
 to the exact analyzed commit. A failed/invalid/stale review fails visibly without posting.
 The first verdict posted on a head stands: when this App already reviewed the
-head, nothing is posted (issue #841). A dismissed review does not count: only
-policy reviews are ever ruled-dismissed (skills/release/dismiss-ruled-review.sh).
+head, nothing is posted (issue #841). A dismissed review does not count.
 """
 
 import base64

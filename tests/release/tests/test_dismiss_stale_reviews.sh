@@ -64,6 +64,17 @@ gh() {
     esac
   done
 
+  if [[ "$path" == repos/jbaruch/coding-policy/pulls/1 ]]; then
+    [[ "${MOCK_PR_FAIL:-0}" != 1 ]] || { echo "PR API unavailable" >&2; return 1; }
+    if [[ -n "${MOCK_APP_FETCH_LOG:-}" && $(<"$MOCK_APP_FETCH_LOG") == *$'\n'* ]] ||
+       [[ "${MOCK_HEAD_ADVANCES_AFTER_PUT:-0}" == 1 && -s "$DISMISS_LOG" ]]; then
+      echo '{"state":"open","head":{"sha":"ccc"}}'
+    else
+      echo "${MOCK_PR_BODY}"
+    fi
+    return 0
+  fi
+
   if [[ "$method" == "PUT" && "$path" == *"/dismissals" ]]; then
     local rid="${path%/dismissals}"; rid="${rid##*/}"
     if [[ "${MOCK_PUT_FAIL:-0}" == "1" ]]; then
@@ -83,7 +94,12 @@ gh() {
 
   [[ $saw_paginate -eq 1 ]] || { echo "mock gh api: reviews fetch missing --paginate" >&2; return 99; }
   case "$path" in
-    *reviews*)  echo "${MOCK_REVIEWS_BODY:-[]}" ;;
+    *reviews*)
+      if [[ -n "${MOCK_APP_FETCH_LOG:-}" ]]; then
+        # The first inventory lookup is for legacy reviews, the second for the App.
+        echo fetch >> "$MOCK_APP_FETCH_LOG"
+      fi
+      echo "${MOCK_REVIEWS_BODY:-[]}" ;;
     *timeline*) echo "${MOCK_TIMELINE_BODY:-[]}" ;;
     *) echo "mock gh api: unsupported path: $path" >&2; return 2 ;;
   esac
@@ -183,29 +199,13 @@ t_latest_dismissed_leaves_earlier_active_cr() {
   assert_eq "dismissed empty" "0" "$(jq '.dismissed | length' <<<"$out")"
 }
 
-# Latest review DISMISSED by dismiss-ruled-review.sh (marker message) is a
-# ruled all-clear: the earlier CHANGES_REQUESTED is swept.
-t_latest_ruled_dismissal_sweeps_earlier_cr() {
-  MOCK_REVIEWS_BODY='[
-    {"id":81,"state":"CHANGES_REQUESTED","commit_id":"aaa","submitted_at":"2026-01-01T00:00:00Z","user":{"login":"github-actions[bot]"}},
-    {"id":82,"state":"DISMISSED","commit_id":"bbb","submitted_at":"2026-01-02T00:00:00Z","user":{"login":"github-actions[bot]"}}
-  ]'
-  MOCK_TIMELINE_BODY='[{"event":"review_dismissed","dismissed_review":{"review_id":82,"state":"changes_requested","dismissal_message":"JUDGE-RULED: 0123456789abcdef covers 1 blocking findings at bbb"}}]'
-  local out ids
-  out=$(main "owner" "repo" "1") || { MOCK_TIMELINE_BODY='[]'; return 1; }
-  MOCK_TIMELINE_BODY='[]'
-  ids=$(jq -r '.dismissed | map(.review_id) | join(",")' <<<"$out")
-  assert_eq "earlier CR swept" "81" "$ids" || return 1
-  assert_eq "one dismissal"    "1"  "$(dismiss_count)"
-}
-
-# A DISMISSED latest whose message lacks the marker stays a no-op.
-t_latest_unmarked_dismissal_is_not_all_clear() {
+# A historical marker cannot supersede earlier active requests.
+t_marked_dismissal_leaves_earlier_request() {
   MOCK_REVIEWS_BODY='[
     {"id":91,"state":"CHANGES_REQUESTED","commit_id":"aaa","submitted_at":"2026-01-01T00:00:00Z","user":{"login":"github-actions[bot]"}},
     {"id":92,"state":"DISMISSED","commit_id":"bbb","submitted_at":"2026-01-02T00:00:00Z","user":{"login":"github-actions[bot]"}}
   ]'
-  MOCK_TIMELINE_BODY='[{"event":"review_dismissed","dismissed_review":{"review_id":92,"state":"changes_requested","dismissal_message":"dismissed by hand"}}]'
+  MOCK_TIMELINE_BODY='[{"event":"review_dismissed","dismissed_review":{"review_id":92,"state":"changes_requested","dismissal_message":"JUDGE-RULED: historical dismissal"}}]'
   local out
   out=$(main "owner" "repo" "1") || { MOCK_TIMELINE_BODY='[]'; return 1; }
   MOCK_TIMELINE_BODY='[]'
@@ -213,20 +213,16 @@ t_latest_unmarked_dismissal_is_not_all_clear() {
   assert_eq "dismissed empty" "0" "$(jq '.dismissed | length' <<<"$out")"
 }
 
-# The fleet App is swept after a ruled dismissal of its latest review, and
-# only then: an APPROVED latest leaves its earlier CR to GitHub's own supersession.
-t_fleet_reviewer_swept_only_after_ruled_dismissal() {
+t_fleet_requests_are_never_swept() {
   MOCK_REVIEWS_BODY='[
     {"id":101,"state":"CHANGES_REQUESTED","commit_id":"aaa","submitted_at":"2026-01-01T00:00:00Z","user":{"login":"coding-policy-fleet-reviewer[bot]"}},
     {"id":102,"state":"DISMISSED","commit_id":"bbb","submitted_at":"2026-01-02T00:00:00Z","user":{"login":"coding-policy-fleet-reviewer[bot]"}}
   ]'
   MOCK_TIMELINE_BODY='[{"event":"review_dismissed","dismissed_review":{"review_id":102,"state":"changes_requested","dismissal_message":"JUDGE-RULED: 0123456789abcdef covers 1 blocking findings at bbb; tracked in #12"}}]'
-  local out ids
+  local out
   out=$(main "owner" "repo" "1") || { MOCK_TIMELINE_BODY='[]'; return 1; }
   MOCK_TIMELINE_BODY='[]'
-  ids=$(jq -r '.dismissed | map("\(.login):\(.review_id)") | join(",")' <<<"$out")
-  assert_eq "fleet CR swept" "coding-policy-fleet-reviewer[bot]:101" "$ids" || return 1
-  : > "$DISMISS_LOG"
+  assert_eq "fleet requests stay untouched" "0" "$(dismiss_count)" || return 1
   MOCK_REVIEWS_BODY='[
     {"id":111,"state":"CHANGES_REQUESTED","commit_id":"aaa","submitted_at":"2026-01-01T00:00:00Z","user":{"login":"coding-policy-fleet-reviewer[bot]"}},
     {"id":112,"state":"APPROVED","commit_id":"bbb","submitted_at":"2026-01-02T00:00:00Z","user":{"login":"coding-policy-fleet-reviewer[bot]"}}
@@ -322,7 +318,117 @@ t_quality_does_not_clear_policy_block() {
   assert_eq "no cross-lane dismissal" "0" "$(jq '.dismissed | length' <<<"$out")"
 }
 
+t_own_identity_migration() {
+  local out state sha submitted who
+  local legacy='{"id":903,"state":"CHANGES_REQUESTED","commit_id":"aaa","submitted_at":"2026-10-20T01:00:00Z","user":{"login":"github-actions[bot]"}}'
+  local MOCK_PR_BODY='{"state":"open","head":{"sha":"bbb"}}'
+  # Only a later, current-head APPROVED from the policy App may clear migration.
+  for state in APPROVED COMMENTED CHANGES_REQUESTED DISMISSED PENDING; do
+    for sha in aaa bbb; do
+      for submitted in 2026-10-19T02:00:00Z 2026-10-20T02:00:00Z; do
+        for who in 'coding-policy-fleet-reviewer[bot]' 'jbaruch-claude-reviewer[bot]'; do
+          : > "$DISMISS_LOG"
+          MOCK_REVIEWS_BODY=$(jq -nc --argjson legacy "$legacy" --arg state "$state" --arg sha "$sha" --arg submitted "$submitted" --arg who "$who" \
+            '[$legacy, {id:904,state:$state,commit_id:$sha,submitted_at:$submitted,user:{login:$who}}]') || return 1
+          out=$(main jbaruch coding-policy 1) || return 1
+          if [[ "$state/$sha/$submitted/$who" == 'APPROVED/bbb/2026-10-20T02:00:00Z/coding-policy-fleet-reviewer[bot]' ]]; then
+            assert_eq "migration dismissed only legacy" '903' "$(jq -r '.dismissed | map(.review_id) | join(",")' <<<"$out")" || return 1
+            assert_eq "migration PUT" '1' "$(dismiss_count)" || return 1
+            # The same evidence on an external repo retains its old contract.
+            : > "$DISMISS_LOG"
+            out=$(main owner repo 1) || return 1
+            assert_eq "no external cross-identity dismissal" '0' "$(dismiss_count)" || return 1
+            # Closed PRs never enter migration.
+            out=$(MOCK_PR_BODY='{"state":"closed","head":{"sha":"bbb"}}' main jbaruch coding-policy 1) || return 1
+            assert_eq "no closed-PR dismissal" '0' "$(dismiss_count)" || return 1
+          else
+            assert_eq "no dismissal for $state/$sha/$submitted/$who" '0' "$(dismiss_count)" || return 1
+            assert_eq "legacy remains active" '903' "$(jq -r '.left_active[0].review_id' <<<"$out")" || return 1
+          fi
+        done
+      done
+    done
+  done
+  # A failed native head read holds the gate and performs no PUT.
+  : > "$DISMISS_LOG"
+  if (MOCK_PR_FAIL=1 main jbaruch coding-policy 1 >/dev/null 2>&1); then
+    echo "    FAIL: unavailable migration evidence succeeded" >&2; return 1
+  fi
+  assert_eq "API failure cannot dismiss" '0' "$(dismiss_count)"
+}
+
+t_copilot_compatibility_is_external_only() {
+  MOCK_REVIEWS_BODY='[
+    {"id":905,"state":"CHANGES_REQUESTED","commit_id":"aaa","user":{"login":"copilot-pull-request-reviewer[bot]"}},
+    {"id":906,"state":"COMMENTED","commit_id":"bbb","user":{"login":"copilot-pull-request-reviewer[bot]"}}
+  ]'
+  local out
+  out=$(main jbaruch coding-policy 1) || return 1
+  assert_eq "own repo does not dismiss retired Copilot gate" '0' "$(dismiss_count)" || return 1
+  out=$(main owner repo 1) || return 1
+  assert_eq "external compatibility still dismisses" '905' "$(jq -r '.dismissed[0].review_id' <<<"$out")"
+}
+
+t_migration_sweeps_only_legacy_requests() {
+  local MOCK_PR_BODY='{"state":"open","head":{"sha":"bbb"}}'
+  MOCK_REVIEWS_BODY='[
+    {"id":911,"state":"CHANGES_REQUESTED","commit_id":"aaa","submitted_at":"2026-10-19T01:00:00Z","user":{"login":"github-actions[bot]"}},
+    {"id":912,"state":"CHANGES_REQUESTED","commit_id":"aaa","submitted_at":"2026-10-20T01:00:00Z","user":{"login":"github-actions[bot]"}},
+    {"id":913,"state":"CHANGES_REQUESTED","commit_id":"aaa","submitted_at":"2026-10-20T01:00:00Z","user":{"login":"coding-policy-fleet-reviewer[bot]"}},
+    {"id":914,"state":"CHANGES_REQUESTED","commit_id":"bbb","submitted_at":"2026-10-20T01:00:00Z","user":{"login":"human-reviewer"}},
+    {"id":915,"state":"CHANGES_REQUESTED","commit_id":"bbb","submitted_at":"2026-10-20T01:00:00Z","user":{"login":"jbaruch-claude-reviewer[bot]"}},
+    {"id":916,"state":"APPROVED","commit_id":"bbb","submitted_at":"2026-10-20T02:00:00Z","user":{"login":"coding-policy-fleet-reviewer[bot]"}}
+  ]'
+  local out
+  out=$(main jbaruch coding-policy 1) || return 1
+  assert_eq "only legacy requests dismissed" '911,912' "$(jq -r '.dismissed | map(.review_id) | join(",")' <<<"$out")" || return 1
+  assert_eq "only two PUTs" '2' "$(dismiss_count)" || return 1
+  # Replay GitHub's resulting states: migration is idempotent.
+  MOCK_REVIEWS_BODY=$(jq 'map(if .id == 911 or .id == 912 then .state = "DISMISSED" else . end)' <<<"$MOCK_REVIEWS_BODY") || return 1
+  : > "$DISMISS_LOG"
+  out=$(main jbaruch coding-policy 1) || return 1
+  assert_eq "rerun performs no PUT" '0' "$(dismiss_count)"
+}
+
+t_migration_holds_when_head_advances_during_app_fetch() {
+  local MOCK_PR_BODY='{"state":"open","head":{"sha":"bbb"}}'
+  local MOCK_REVIEWS_BODY='[
+    {"id":921,"state":"CHANGES_REQUESTED","commit_id":"aaa","submitted_at":"2026-10-20T01:00:00Z","user":{"login":"github-actions[bot]"}},
+    {"id":922,"state":"APPROVED","commit_id":"bbb","submitted_at":"2026-10-20T02:00:00Z","user":{"login":"coding-policy-fleet-reviewer[bot]"}}
+  ]'
+  local out rc MOCK_APP_FETCH_LOG
+  MOCK_APP_FETCH_LOG=$(mktemp) || return 1
+  out=$(main jbaruch coding-policy 1)
+  rc=$?
+  rm -f "$MOCK_APP_FETCH_LOG"
+  assert_eq "exit code" '0' "$rc" || return 1
+  assert_eq "stale approval issues no PUT" '0' "$(dismiss_count)" || return 1
+  assert_eq "held migration output" \
+    '{"pr_number":1,"dismissed":[],"left_active":[{"login":"github-actions[bot]","review_id":921}]}' \
+    "$(jq -c . <<<"$out")"
+}
+
+t_migration_stops_when_head_advances_between_puts() {
+  local MOCK_PR_BODY='{"state":"open","head":{"sha":"bbb"}}'
+  local MOCK_REVIEWS_BODY='[
+    {"id":931,"state":"CHANGES_REQUESTED","commit_id":"aaa","submitted_at":"2026-10-19T01:00:00Z","user":{"login":"github-actions[bot]"}},
+    {"id":932,"state":"CHANGES_REQUESTED","commit_id":"aaa","submitted_at":"2026-10-20T01:00:00Z","user":{"login":"github-actions[bot]"}},
+    {"id":933,"state":"APPROVED","commit_id":"bbb","submitted_at":"2026-10-20T02:00:00Z","user":{"login":"coding-policy-fleet-reviewer[bot]"}}
+  ]'
+  local out
+  out=$(MOCK_HEAD_ADVANCES_AFTER_PUT=1 main jbaruch coding-policy 1) || return 1
+  assert_eq "only the first PUT was issued" '931' "$(<"$DISMISS_LOG")" || return 1
+  assert_eq "interrupted sweep output" \
+    '{"pr_number":1,"dismissed":[{"login":"github-actions[bot]","review_id":931,"commit_id":"aaa"}],"left_active":[{"login":"github-actions[bot]","review_id":932}]}' \
+    "$(jq -c . <<<"$out")"
+}
+
 run_suite() {
+  run "migration sweeps only legacy requests and is idempotent" t_migration_sweeps_only_legacy_requests
+  run "migration holds when head advances during App fetch" t_migration_holds_when_head_advances_during_app_fetch
+  run "migration stops when head advances between PUTs" t_migration_stops_when_head_advances_between_puts
+  run "Copilot compatibility remains external only" t_copilot_compatibility_is_external_only
+  run "own identity migration stays scoped and fails closed" t_own_identity_migration
   run "quality cannot dismiss policy findings" t_quality_does_not_clear_policy_block
   echo "test_dismiss_stale_reviews.sh" >&2
   run "stale CR then COMMENT is dismissed"        t_stale_cr_then_comment_is_dismissed
@@ -331,9 +437,8 @@ run_suite() {
   run "per-bot independence"                      t_per_bot_independence
   run "no reviews is a no-op"                     t_no_reviews_is_noop
   run "latest DISMISSED leaves earlier active CR" t_latest_dismissed_leaves_earlier_active_cr
-  run "latest ruled dismissal sweeps earlier CR"  t_latest_ruled_dismissal_sweeps_earlier_cr
-  run "unmarked dismissal is not an all-clear"    t_latest_unmarked_dismissal_is_not_all_clear
-  run "fleet reviewer swept only after ruling"    t_fleet_reviewer_swept_only_after_ruled_dismissal
+  run "marked dismissal is not an all-clear"    t_marked_dismissal_leaves_earlier_request
+  run "fleet requests are never swept"    t_fleet_requests_are_never_swept
   run "multiple stale CRs all dismissed"          t_multiple_stale_crs_all_dismissed
   run "login is glob-safe against cwd files"      t_login_is_glob_safe_against_cwd_files
   run "failed PUT but DISMISSED is success"       t_failed_put_but_dismissed_is_success

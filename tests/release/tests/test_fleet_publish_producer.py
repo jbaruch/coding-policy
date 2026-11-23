@@ -47,7 +47,7 @@ def entry(name, sha, *, directory=False):
 class Fixture:
     def __init__(self, pins: dict[str, str] | None = None):
         self.pins = (pins if pins is not None else GRAPH_0_5_23).copy()
-        self.routes = {
+        self.routes: dict[str, Any] = {
             f"repos/{CENTRAL}": {
                 "full_name": CENTRAL,
                 "default_branch": "main",
@@ -58,7 +58,7 @@ class Fixture:
                 "ref": "refs/heads/main",
                 "object": {"type": "commit", "sha": TIP},
             },
-            f"repos/{CENTRAL}/compare/{WORKFLOW}...{TIP}": {
+            f"repos/{CENTRAL}/compare/{WORKFLOW}...{TIP}?per_page=1&page=2": {
                 "status": "ahead",
                 "base_commit": {"sha": WORKFLOW},
                 "merge_base_commit": {"sha": WORKFLOW},
@@ -125,7 +125,7 @@ class ProducerTests(unittest.TestCase):
                 producer.verify_workflow_protocol(f, WORKFLOW)
             self.assertNotIn("PRIVATE", str(error.exception))
         f.routes[route] = original
-        f.routes[f"repos/{CENTRAL}/compare/{WORKFLOW}...{TIP}"]["status"] = "diverged"
+        f.routes[f"repos/{CENTRAL}/compare/{WORKFLOW}...{TIP}?per_page=1&page=2"]["status"] = "diverged"
         with self.assertRaises(FleetPublishLookupError) as error:
             producer.verify_workflow_protocol(f, WORKFLOW)
         self.assertEqual(error.exception.kind, "workflow_ancestry")
@@ -134,6 +134,27 @@ class ProducerTests(unittest.TestCase):
         for pins in producer.HISTORICAL_PRODUCERS:
             with self.subTest(owner=pins[producer.PRODUCER_OWNER_PATH]):
                 self.assertEqual(producer.historical_pinset(Fixture(pins), WORKFLOW), pins)
+
+    def test_paginated_metadata_requires_exact_base_and_merge_base(self):
+        route = f"repos/{CENTRAL}/compare/{WORKFLOW}...{TIP}?per_page=1&page=2"
+        original = self.fixture.routes[route]
+        for comparison in (
+            None,
+            [],
+            {},
+            {**original, "status": "behind"},
+            {**original, "status": "diverged"},
+            {**original, "base_commit": None},
+            {**original, "base_commit": {"sha": TIP}},
+            {**original, "merge_base_commit": []},
+            {**original, "merge_base_commit": {"sha": TIP}},
+        ):
+            with self.subTest(comparison=comparison):
+                self.fixture.routes[route] = comparison
+                with self.assertRaises(FleetPublishLookupError) as error:
+                    producer.historical_pinset(self.fixture, WORKFLOW)
+                self.assertEqual(error.exception.kind, "workflow_ancestry")
+                self.assertFalse(any("/git/trees/" in r for r in self.fixture.calls))
 
     def test_any_mutated_historical_blob_is_unknown_producer(self):
         for name in GRAPH_0_5_23:
@@ -146,7 +167,7 @@ class ProducerTests(unittest.TestCase):
 
     def test_historical_graph_requires_main_ancestry_before_source_reads(self):
         f = self.fixture
-        f.routes[f"repos/{CENTRAL}/compare/{WORKFLOW}...{TIP}"]["status"] = "diverged"
+        f.routes[f"repos/{CENTRAL}/compare/{WORKFLOW}...{TIP}?per_page=1&page=2"]["status"] = "diverged"
         with self.assertRaises(FleetPublishLookupError) as error:
             producer.historical_pinset(f, WORKFLOW)
         self.assertEqual(error.exception.kind, "workflow_ancestry")

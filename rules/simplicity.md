@@ -7,12 +7,10 @@ alwaysApply: true
 ## KISS and YAGNI
 
 - Choose the simplest design that solves the stated problem today.
-- Build nothing for a need nobody has today.
-- Overengineering is forbidden.
+- Build nothing for a need nobody has today, a future consumer's included.
 - Add no option, flag, schema version, fallback, abstraction or extension point without a current caller or an observed failure.
 - One caller gets no abstraction.
 - One value gets no setting.
-- Future consumers justify no machinery.
 - Prefer deleting code, state and process over adding them.
 - Delete code, options and files a change leaves unused in that change.
 
@@ -23,7 +21,7 @@ alwaysApply: true
 - Treat issue proposals as suggestions; explain simpler options' gaps before adopting machinery.
 - Justify custom state, recovery, coordination and abstractions with requirements and platform gaps.
 - Weigh maintenance, rollout and failures against likelihood and impact.
-- Explain briefly.
+- Keep the problem statement, simpler-option gaps and justifications brief.
 - Add no approval gate.
 
 ## During Review

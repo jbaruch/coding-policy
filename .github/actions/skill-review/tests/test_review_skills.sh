@@ -47,13 +47,9 @@ PASS_COUNT=0
 # they report (rules/error-handling.md setup-failure clause).
 FIXTURE_ROOT=$(mktemp -d -t skill-review-test.XXXXXX) \
   || { echo "fatal: could not create fixture dir" >&2; exit 2; }
-# Absolute review-all fixtures use the canonical native runner-temp projection.
-RUNNER_TEMP=$(cd "$FIXTURE_ROOT" && pwd -P) \
-  || { echo "fatal: could not resolve fixture root" >&2; exit 2; }
-export RUNNER_TEMP
-FIXTURE="$RUNNER_TEMP/fleet-publish/package/skills"
+FIXTURE="$FIXTURE_ROOT/skills"
 mkdir -p "$FIXTURE" \
-  || { echo "fatal: could not create projection fixture" >&2; exit 2; }
+  || { echo "fatal: could not create skill fixture" >&2; exit 2; }
 # Workspace-resolution fixtures live OUTSIDE $FIXTURE: that dir doubles as
 # SKILLS_DIR, so a subdirectory there is discovered as a skill and would show
 # up in identify_skills' listing.
@@ -466,8 +462,12 @@ capture_identify() {
 
 # Review-all fallback (workflow_dispatch / no base) returns every immediate
 # skill-dir basename, sorted. FIXTURE holds alpha, beta, deleted, needs-credits.
-got=$(capture_identify "$FIXTURE" "$FIXTURE" "" "workflow_dispatch" "")
+got=$(capture_identify "$FIXTURE" "." "" "workflow_dispatch" "")
 assert_eq "$got" "$(printf 'alpha\nbeta\ndeleted\nneeds-credits')" "identify_skills: review-all lists every skill dir, sorted"
+
+capture_identify "$FIXTURE" "$FIXTURE" "" "workflow_dispatch" "" > "$FIXTURE/absolute.out" 2>&1
+assert_rc 2 "identify_skills: retired absolute projection is refused"
+assert_contains "$(cat "$FIXTURE/absolute.out")" "relative to the workspace" "identify_skills: names the supported directory input"
 
 # A throwaway git tree with NO publish marker: base commit adds alpha + zeta,
 # HEAD modifies alpha and adds beta. There is no bump commit, so on a normal
@@ -644,13 +644,13 @@ capture_main() {
 # write the outage skill to $GITHUB_OUTPUT.
 GH_OUT="$FIXTURE/gh_output"; : > "$GH_OUT"
 MOCK_MODE="by-path"
-capture_main "$FIXTURE" "workflow_dispatch" "" "skip" "$GH_OUT" "$FIXTURE/sum2" >/dev/null 2>&1
+( cd "$FIXTURE" && capture_main "." "workflow_dispatch" "" "skip" "$GH_OUT" "$FIXTURE/sum2" ) >/dev/null 2>&1
 assert_eq "$(cat "$GH_OUT")" "unreviewed-skills=needs-credits" "main: writes the credit-skipped skill to GITHUB_OUTPUT"
 
 # A fully-clean review-all writes an empty output value.
 GH_OUT2="$FIXTURE/gh_output2"; : > "$GH_OUT2"
 MOCK_MODE="success"
-capture_main "$FIXTURE" "workflow_dispatch" "" "skip" "$GH_OUT2" "$FIXTURE/sum3" >/dev/null 2>&1
+( cd "$FIXTURE" && capture_main "." "workflow_dispatch" "" "skip" "$GH_OUT2" "$FIXTURE/sum3" ) >/dev/null 2>&1
 assert_eq "$(cat "$GH_OUT2")" "unreviewed-skills=" "main: clean review-all writes an empty unreviewed-skills value"
 
 echo "─────────────────────────────────────────────"

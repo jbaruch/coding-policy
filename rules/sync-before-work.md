@@ -7,9 +7,8 @@ description: Fetch and start from the fresh remote default before repository wor
 
 ## Sync Before Reading
 
-- At the start of any task that will read or modify a repo, sync the local checkout with the remote default branch
-- Run `git fetch origin` before the first read — not after the first failure
-- The default branch you start from must match what the remote currently has, not whatever the local clone was left at
+- At the start of any task that will read or modify a repo, sync the local checkout with the remote default branch's current state
+- Run `git fetch origin` before the first read
 
 ## Land on the Fresh Default
 

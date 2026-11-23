@@ -4,29 +4,16 @@ The full preconditions of each `rules/ci-safety.md` carve-out, moved out of the 
 
 ## Superseded-Bot-Review Dismissal Carve-Out
 
-- Narrow exception for dismissing a review gate.
-- Covers a bot's `CHANGES_REQUESTED` that the same bot later superseded with an all-clear re-review
-- Applies when a gating bot that cannot `APPROVE` (`github-actions[bot]` — GitHub returns HTTP 422) re-reviews clean but cannot post the `APPROVED` verdict that would supersede its earlier `CHANGES_REQUESTED` — the stale request keeps the merge `BLOCKED` until dismissed
+- Narrow exception for dismissing superseded legacy bot review gates.
+- coding-policy and consumer policy Apps approve natively; their ordinary change requests are never dismissed by this carve-out.
 - Preconditions (all required):
-  1. The dismissed review is a `CHANGES_REQUESTED` from a gating bot on the allowlist (`GATING_BOTS` in `skills/release/dismiss-stale-reviews.sh`), never a human reviewer — a human can `APPROVE`, so a human's supersession goes through re-request-and-approve, never dismissal
-  2. The same bot posted a later all-clear on the PR — the accepting verdict states are the script's decision predicate (`dismiss-stale-reviews.sh` header), not restated here; a `DISMISSED` or `PENDING` latest state is not an all-clear
-- Deterministic form is `skills/release/dismiss-stale-reviews.sh` — it enforces both preconditions and is the recommended path; decision predicate and allowlisted bot logins live in the script header, not restated here (`rules/script-as-black-box.md`)
-- A hand dismissal meeting both preconditions satisfies the same gate, and the merge that follows complies with `Never Skip Tests`
-- Every other dismissal still gates: a bot `CHANGES_REQUESTED` no all-clear superseded, or any human reviewer's change request, blocks the merge until resolved through review
-
-## Judge-Ruled-Review Dismissal Carve-Out
-
-- Preconditions (all required):
-  1. The dismissal runs through `skills/release/dismiss-ruled-review.sh` — coverage predicate, authority lines and rule-id floors in its header
-  2. The ruling is an operator ruling quoting the operator's answer verbatim, or a judge's collected report whose sha256 matches the cited digest, limited to `decline` and `defer` on their stated grounds
-  3. No check on the head is failing
-  4. The script posted the ruled findings to the task's follow-up issue before dismissing
-  5. The dismissal message carries the script's `JUDGE-RULED:` marker
-- A hand dismissal of a gating policy review is not sanctioned
-- A hand dismissal carrying the marker violates this carve-out
-- The release scripts trust the marker and never detect a hand-written one
-- After a ruled dismissal, `skills/release/dismiss-stale-reviews.sh` sweeps the same policy identity's earlier `CHANGES_REQUESTED` reviews, the fleet reviewer included
-- The merge after a ruled dismissal complies with `Never Skip Tests`
+  1. Run `skills/release/dismiss-stale-reviews.sh` with its existing owner, repository and PR arguments. No hand dismissal is authorized.
+  2. The request belongs to a legacy bot on the script's `GATING_BOTS` allowlist, never a human or an approving App. On `jbaruch/coding-policy`, only the legacy workflow identity is eligible for ordinary dismissal; external callers retain the existing same-bot contract.
+  3. The same bot posted a later all-clear under the script's decision contract, or the coding-policy identity migration below applies. A dismissal or pending review is never an all-clear.
+- Identity migration applies only to an OPEN PR in `jbaruch/coding-policy` whose latest `github-actions[bot]` review requests changes. The latest `coding-policy-fleet-reviewer[bot]` review must be APPROVED on the current PR head and submitted later than that legacy review. Only the legacy identity's requests may be dismissed; an App comment, dismissal, older-head approval or quality approval cannot authorize migration.
+- The helper preserves its argument, JSON output, exit-code and API-failure contracts for declared external callers. Decision predicates and identity lists live in its header.
+- After migration, use native App approvals for ordinary re-reviews. Retain the helper for open legacy gates and external callers.
+- Every other change request still gates until resolved through review.
 
 ## Publish-Pipeline Loop-Prevention Carve-Out
 
@@ -35,19 +22,6 @@ The full preconditions of each `rules/ci-safety.md` carve-out, moved out of the 
   1. Commit is authored by the CI bot inside the publish workflow — never a human- or agent-authored PR commit
   2. Sole purpose is the workflow's own release bookkeeping — manifest version bump, CHANGELOG version stamp — carrying no source or test changes that need CI validation
   3. `[skip ci]` rides only on the commit pushed back to the protected branch, solely to stop self-retrigger
-
-## Bootstrap-Red Carve-Out
-
-- Applies when the PR changes a key the CI cache is bound to (an interaction hash, a schema fingerprint) AND the rebuilt cache can only be seeded from the default branch after merge
-- Pre-merge gates (all required):
-  1. The failing check's output names the guard explicitly (e.g., `InteractionMismatchError`) and shows zero test assertions executed
-  2. The consuming repo documents the merge-then-re-seed procedure in its own plugin or contributor docs
-  3. The repo owner approves the merge explicitly — review approval or a recorded dismissal of the blocking review — with a recorded commitment to the post-merge obligations
-- Post-merge obligations (both required):
-  4. The re-seed runs immediately after merge
-  5. The green re-seed result is verified and recorded on the PR or its tracking issue
-- A PR matching both Applies-when criteria and all three pre-merge gates is mergeable, and reviewers judge it on those gates rather than on the red check alone
-- Open post-merge obligations block the next use of this carve-out — complete and record them first
 
 ## Content-Only Direct-Push Carve-Out
 

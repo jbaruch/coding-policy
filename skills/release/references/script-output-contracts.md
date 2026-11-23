@@ -35,7 +35,7 @@ version stdout also follows Version Stdout below.
 A successful lookup never substitutes for successful source-bound publication,
 registry advance or moderation. Readback grants no approval of changed bytes.
 
-The central fleet mode co-ships `fleet_publish_resolver.py` and
+The historical central fleet readers co-ship `fleet_publish_resolver.py` and
 `fleet_publish_confirm.py` under the same verified release provider. Their JSON
 selection and confirmation contracts are declared in their docstrings and
 `skills/release/references/fleet-publication.md`. Neither changes the legacy

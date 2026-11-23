@@ -5,7 +5,7 @@ reviewers. Codex checks policy compliance. Claude reviews code quality and bugs
 with a replacement system prompt and no loaded policy, agent instructions,
 plugins, skills, hooks or memory. Both authenticate through subscriptions.
 
-- In coding-policy, review-codex.yml posts as github-actions[bot]; review-claude.yml posts as jbaruch-claude-reviewer[bot].
+- In coding-policy, review-codex.yml posts as coding-policy-fleet-reviewer[bot]; review-claude.yml posts as jbaruch-claude-reviewer[bot].
 - In consumers, review-trigger.yml dispatches fleet-review.yml; its policy and
   quality jobs post as coding-policy-fleet-reviewer[bot] and jbaruch-claude-reviewer[bot], respectively. The marker-gated
   scheduled poll is a backstop, deduplicated separately for each lane.

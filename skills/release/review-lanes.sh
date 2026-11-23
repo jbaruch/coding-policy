@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Shared lane classifier for fleet dedup, release snapshots and dismissals.
+# Shared lane classifier for fleet dedup and release snapshots.
 # Sourcing defines review_lanes_jq; execution emits the marker as JSON.
 set -euo pipefail
 
@@ -7,7 +7,6 @@ CLAUDE_REVIEW_LOGIN="jbaruch-claude-reviewer[bot]"
 
 review_lanes_jq() {
   cat <<'JQ'
-# Shared by fleet deduplication, release snapshots and stale-review dismissal.
 # Legacy unmarked reviews from the trusted reviewer identities are policy reviews.
 def quality_marker: "<!-- coding-policy:claude-quality-review:v1 -->";
 def is_quality_review: ((.body // "") | startswith(quality_marker));

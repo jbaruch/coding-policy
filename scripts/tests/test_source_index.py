@@ -77,7 +77,8 @@ class DiagnosticsScope(unittest.TestCase):
     def tracked_python(self):
         listing = subprocess.run(["git", "ls-files", "*.py"], cwd=ROOT,
                                  capture_output=True, text=True, check=True)
-        return sorted(listing.stdout.split())
+        # Unstaged deletions remain in Git's index but cannot be type-checked.
+        return sorted(path for path in listing.stdout.split() if (ROOT / path).is_file())
 
     def included(self):
         return sorted(json.loads(PYRIGHT.read_text())["include"])
