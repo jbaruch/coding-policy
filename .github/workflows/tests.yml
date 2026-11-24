@@ -69,6 +69,7 @@ jobs:
         with:
           # The prior-feedback compatibility regression reads the pre-#849 reader with git show.
           fetch-depth: 0
+      - uses: ./.github/actions/setup-acr-metadata
       - name: Install Tessl CLI for actual package exclusion regressions
         uses: tesslio/setup-tessl@v2
         with:
