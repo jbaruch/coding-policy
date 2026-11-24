@@ -1,3 +1,7 @@
+## 0.10.45 — 2026-11-24
+
+- Update actions/setup-go action to v7.1.0 (#845)
+
 ## 0.10.44 — 2026-11-24
 
 - fix(renovate): Keep the release issue declaration on dependency PRs (#907)
