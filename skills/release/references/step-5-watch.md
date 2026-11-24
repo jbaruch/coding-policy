@@ -28,8 +28,7 @@ It returns the full `poll-pr-reviews.sh` snapshot plus a `watch` object — `{"r
 - `dirty` (exit 0) — rebase onto current `main`, resolve conflicts, force-push the owned feature branch and re-run the watcher.
 - `pending_at_budget` (exit 1) — inspect which field is still `none`/`pending` in the returned snapshot.
 
-  With no checks (`ci: none`), readiness requires GitHub's `CLEAN` merge state.
-  If GitHub reports a merge hold, inspect it before retrying.
+  If the snapshot shows no CI and GitHub reports a merge hold, inspect the hold before retrying.
 
   For either review lane with `state: none`, inspect retained `submitted_at`, `commit_id`, and `body`.
   Open the matching review's `html_url` from `review_bodies` if available. Compare the native
