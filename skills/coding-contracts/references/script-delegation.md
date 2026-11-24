@@ -91,7 +91,7 @@ Scripts follow the baseline in `rules/file-hygiene.md` (exit codes, stderr, idem
 - Every other release script retains the JSON-producing requirement
 
 - Narrow exception for `skills/release/lib/bounded-run.sh` pass-through stdout.
-- Applies when a caller runs another script under a wall-clock budget
+- Applies when a caller runs a script or an existing third-party tool under a wall-clock budget
 - Preconditions are binding: read `skills/release/references/script-output-contracts.md` Bounded Runner Stdout before relying on it.
 - Every other skill script retains the JSON-producing requirement
 
