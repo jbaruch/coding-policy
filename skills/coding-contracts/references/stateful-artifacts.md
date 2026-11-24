@@ -34,7 +34,7 @@
   1. An installed reader contract names the finite artifact inventory, real runtime owner, owner's schema-of-record source, record kinds, schemas, writers and readers. Cite the actual owner source; invent no provider, schema or version guarantee.
   2. Every new record carries `schema_version`. The owner declares existing unversioned records as legacy version 0 and documents accepted versions, required fields and defaults.
   3. Readers preserve the meaning of accepted historical records and accept only documented kinds and versions. Unsupported versions produce actionable unavailable evidence, never invented zeros, health or permission.
-  4. Historical records remain unchanged. Readers neither migrate, rewrite nor backfill the log; the owner emits the current version on new appends.
+  4. Retained historical records stay byte-for-byte unchanged. Only the owner may expire whole records within the retention limits stated in the installed reader contract. Readers leave the log read-only. The owner emits the current version on new appends.
   5. The log never gates authorization, payment, or an irreversible or consequential external action. It may decide only whether to send or repeat an informational notification whose repetition or omission has no other effect. A change that repurposes historical field meaning does not qualify.
 - Every other artifact follows Required Attributes and Migration Policy unchanged.
 
