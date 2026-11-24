@@ -1,3 +1,7 @@
+## 0.10.41 — 2026-11-24
+
+- fix(policy): Scope post-edit audits to changed obligations (#885)
+
 ## 0.10.40 — 2026-11-24
 
 - test(adoption): Make pointer expectations portable (#901)
