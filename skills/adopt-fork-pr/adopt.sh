@@ -4,8 +4,8 @@
 # policy reviewer (fork-guarded) can run on it.
 #
 # Usage: adopt.sh metadata <pr-number>
-#        adopt.sh preview <pr-number> <repo> <metadata_payload>
-#        adopt.sh <pr-number> <repo> <approved_payload>
+#        adopt.sh preview <pr-number> <repo>
+#        adopt.sh <pr-number> <repo> < approved-preview.json
 # Metadata and preview are read-only. All calls bind origin's fetch and push URLs using
 # skills/release/origin-repo.py. Preview renders the fork PR metadata, the
 # destination adopt/pr-<N>-<slug(headRefName)> and both outgoing messages.
@@ -15,9 +15,8 @@
 # An existing same-repo PR for that branch and base can resume at the
 # pointer comment. A pointer already present makes the retry a no-op.
 #
-# Metadata outputs {repo, number, isCrossRepository, metadata_payload}.
-# Preview outputs {preview, approved_payload}. Each payload is Base64 of
-# the corresponding JSON bytes including the producer's final newline.
+# Metadata outputs {repo, number, isCrossRepository}.
+# Preview outputs one JSON object. Execution takes that same object on stdin.
 # Execution outputs a single JSON object on stdout:
 #   {"state": "...", "adopted_branch": "...", "new_pr_url": "...",
 #    "original_pr": N, "author": "..."}
@@ -99,7 +98,11 @@ emit() {
 resolve_repo() {
   # Sets repo to origin's GitHub repository, or dies with origin-repo.py's
   # own diagnostic above.
-  local helper="${ADOPT_DIR}/../release/origin-repo.py" out
+  local release_dir=release helper out
+  if [[ "${ADOPT_DIR##*/}" == acr__jbaruch__coding-policy__adopt-fork-pr ]]; then
+    release_dir=acr__jbaruch__coding-policy__release
+  fi
+  helper="${ADOPT_DIR}/../${release_dir}/origin-repo.py"
   [[ -f "$helper" && -r "$helper" ]] \
     || die "${helper} is not readable, so origin cannot be matched to a GitHub repository — reinstall the plugin." 1
   out=$(python3 "$helper" .) \
@@ -129,35 +132,31 @@ main() {
   esac
   if [[ $mode == metadata ]]; then
     [[ $# == 1 ]] || die "usage: adopt.sh metadata <pr-number>" 2
+  elif [[ $mode == preview ]]; then
+    [[ $# == 2 ]] || fresh_preview "usage: adopt.sh preview <pr-number> <repo>" 2
   else
-    [[ $# == 3 ]] || fresh_preview "usage: adopt.sh [preview] <pr-number> <repo> <payload>" 2
+    [[ $# == 2 ]] || fresh_preview "usage: adopt.sh <pr-number> <repo> < approved-preview.json" 2
   fi
   local n="$1"
   [[ "$n" =~ ^[1-9][0-9]*$ ]] || fresh_preview "PR number must be a positive integer" 2
 
   git rev-parse --is-inside-work-tree >/dev/null 2>&1 || fresh_preview "not inside a git work tree"
   resolve_repo
-  local meta input
+  local meta approved
   if [[ $mode == metadata ]]; then
-    meta=$(read_metadata "$n" | jq -Rsec --arg repo "$repo" --argjson n "$n" '
-      . as $raw | fromjson |
+    meta=$(read_metadata "$n" | jq -ec --arg repo "$repo" --argjson n "$n" '
       select(.number == $n and (.isCrossRepository | type == "boolean")) |
-      {repo: $repo, number, isCrossRepository, metadata_payload: ($raw | @base64)}
+      {repo: $repo, number, isCrossRepository}
     ') || die "could not classify PR #$n — check the gh diagnostic and PR number."
     printf '%s\n' "$meta"
     return
   fi
   [[ "$repo" == "$2" ]] || fresh_preview "origin differs from the preview repository"
-  # Keep trailing JSON whitespace through command substitution.
-  input=$(python3 "$ADOPT_DIR/validate-handoff.py" "$3" && printf x) \
-    || fresh_preview "invalid handoff payload"
-  input=${input%x}
-  if [[ $mode == preview ]]; then
-    meta=$input
-  else
-    meta=$(read_metadata "$n") \
-      || fresh_preview "could not read PR #$n"
+  if [[ $mode == adopt ]]; then
+    approved=$(python3 "$ADOPT_DIR/validate-handoff.py") \
+      || fresh_preview "invalid approved preview JSON"
   fi
+  meta=$(read_metadata "$n") || fresh_preview "could not read PR #$n"
   if jq -e '.isCrossRepository == false' <<<"$meta" >/dev/null; then
     fresh_preview "PR #$n is a same-repo PR — the reviewer already covers it" 3
   fi
@@ -167,7 +166,7 @@ main() {
     all(.headRefName, .headRefOid, .baseRefName, .headRepositoryOwner.login,
         .headRepository.name, .author.login, .title, .url;
         type == "string" and length > 0) and
-    (.headRefOid | test("^[0-9a-f]{40}$"))
+    (.headRefOid | test("\\A[0-9a-f]{40}\\z"))
   ' <<<"$meta" >/dev/null; then
     fresh_preview "open fork metadata for #$n is incomplete or unavailable"
   fi
@@ -203,26 +202,23 @@ main() {
      body: "Adopted from #\(.number) by @\(.author.login) (fork \($fork)).\n\n\($credit)\n\nOriginal PR: \(.url)"}
   ' <<<"$meta")
   if [[ $mode == preview ]]; then
-    printf '%s\n' "$action" | jq -Rsc '{preview: fromjson, approved_payload: @base64}'
+    printf '%s\n' "$action"
     return
   fi
   # An unresolved link covers the URL created by an earlier partial attempt.
   # A link already shown in the question must still identify the same PR.
-  if ! jq -en --argjson approved "$input" --argjson current "$action" --arg unresolved "$pointer_template" '
-    ($approved | if .pointer == $unresolved then .pointer = $current.pointer else . end) == $current
-  ' >/dev/null; then
+  if ! jq -e --argjson current "$action" --arg unresolved "$pointer_template" '
+    (if .pointer == $unresolved then .pointer = $current.pointer else . end) == $current
+  ' <<<"$approved" >/dev/null; then
     fresh_preview "the approved action is unavailable or has changed"
   fi
 
   local title body new_url state=adopted fetched
   # Preserve trailing newlines in both consented text arguments.
-  branch=$(jq -r '.branch' <<<"$input")
-  head_oid=$(jq -r '.headRefOid' <<<"$input")
-  base_ref=$(jq -r '.baseRefName' <<<"$input")
-  title=$(jq -r '.title + "x"' <<<"$input")
-  body=$(jq -r '.body + "x"' <<<"$input")
-  pointer=$(jq -r '.pointer' <<<"$input")
-  author=$(jq -r '.author' <<<"$input")
+  title=$(jq -r '.title + "x"' <<<"$approved")
+  body=$(jq -r '.body + "x"' <<<"$approved")
+  pointer=$(jq -r '.pointer' <<<"$approved")
+  author=$(jq -r '.author' <<<"$approved")
 
   if [[ -z "$remote_heads" ]]; then
     git fetch --no-tags origin "refs/pull/$n/head" >&2 || fresh_preview "could not fetch PR #$n"

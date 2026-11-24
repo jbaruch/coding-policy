@@ -1,12 +1,10 @@
 """Exercise the documented fork consent, shell handoffs and origin-bound commands."""
 
-import base64
 import json
 import os
 import re
 import shutil
 import subprocess
-import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -62,31 +60,6 @@ class SkillRepoBindingTest(unittest.TestCase):
         self.assertEqual(re.findall(r"^- \*\*(.*?)\*\* —", choices, re.M), ["Just inspect", "Adopt for review"])
 
 
-class HandoffValidatorTest(unittest.TestCase):
-    command = [sys.executable, str(SKILL.with_name("validate-handoff.py"))]
-
-    def test_valid_handoff_preserves_bytes(self):
-        raw = '{ "title": "雪" }\r\n'.encode("utf-8")
-        for args, stdin in (([], raw), ([base64.b64encode(raw).decode("ascii")], b"")):
-            with self.subTest(args=args):
-                result = subprocess.run([*self.command, *args], input=stdin, capture_output=True)
-                self.assertEqual(result.returncode, 0, result.stderr)
-                self.assertEqual(result.stdout, raw)
-                self.assertEqual(result.stderr, b"")
-
-    def test_invalid_handoff_reports_only_regeneration_message(self):
-        marker = "fixture-marker"
-        encoded = base64.b64encode(marker.encode()).decode("ascii")
-        for args, stdin in (([], marker.encode()), ([marker], b""), ([encoded], b""),
-                            (["e31="], b""), (["e30=", marker], b"")):
-            with self.subTest(args=args):
-                result = subprocess.run([*self.command, *args], input=stdin, capture_output=True)
-                self.assertEqual(result.returncode, 1)
-                self.assertEqual(result.stdout, b"")
-                self.assertEqual(result.stderr, b"Expected a UTF-8 JSON object or its canonical Base64 handoff. "
-                                               b"Regenerate the handoff and retry.\n")
-
-
 class DocumentedCommandsTest(unittest.TestCase):
     shell = ["bash", "--noprofile", "--norc"]
     repo = "owner/blog-writer"
@@ -110,9 +83,10 @@ class DocumentedCommandsTest(unittest.TestCase):
         holder = tempfile.TemporaryDirectory()
         self.addCleanup(holder.cleanup)
         self.root = Path(holder.name)
-        mount = self.root / ".tessl/plugins/jbaruch/coding-policy"
-        mount.mkdir(parents=True)
-        (mount / "skills").symlink_to(SKILL.parents[1], target_is_directory=True)
+        mount = self.root / ".tessl/plugins/jbaruch/coding-policy/skills"
+        shutil.copytree(SKILL.parent, mount / "adopt-fork-pr")
+        (mount / "release").mkdir()
+        shutil.copyfile(SKILL.parents[1] / "release/origin-repo.py", mount / "release/origin-repo.py")
         self.env = {"PATH": str(self.root) + os.pathsep + os.environ["PATH"], "HOME": str(self.root),
                     "GH_HOST": "enterprise.example.invalid", "GH_REPO": "different/repo"}
         # Only declared argv can succeed. Even an unexpected write stays local.
@@ -147,10 +121,12 @@ sys.stdout.buffer.write(answer.encode("utf-8", "surrogateescape"))
     def calls(self):
         return [json.loads(line) for line in (self.root / "calls").read_text().splitlines()]
 
-    def execute(self, command, **literals):
+    def execute(self, command, preview_json=None, **literals):
         for word, value in literals.items():
             for prefix in ("", "github.com/"):
                 command = command.replace(f"'{prefix}{word}'", f"'{prefix}{value}'")
+        if preview_json is not None:
+            command = command.replace("\nAPPROVED_PREVIEW_JSON\n", f"\n{preview_json}\n")
         return subprocess.run([*self.shell, "-c", command], cwd=self.root, env=self.env,
                               capture_output=True)
 
@@ -163,19 +139,15 @@ sys.stdout.buffer.write(answer.encode("utf-8", "surrogateescape"))
         self.answer(self.view, raw)
         result = self.fence(1, PR_NUMBER=self.number)
         self.assertEqual(result.returncode, 0, result.stderr)
-        envelope = json.loads(result.stdout)
-        payload = envelope.pop("metadata_payload")
-        self.assertEqual(payload, base64.b64encode(raw.encode()).decode())
-        self.assertEqual(envelope, dict(repo=self.repo, number=6, isCrossRepository=self.metadata["isCrossRepository"]))
+        self.assertEqual(json.loads(result.stdout),
+                         dict(repo=self.repo, number=6, isCrossRepository=self.metadata["isCrossRepository"]))
         self.assertEqual(self.calls(), [*self.preflight, self.view])
-        return payload
 
     def preview(self):
-        payload = self.read_metadata()
-        result = self.fence(3, PR_NUMBER=self.number, VALIDATED_REPO=self.repo, METADATA_PAYLOAD=payload)
+        self.read_metadata()
+        result = self.fence(3, PR_NUMBER=self.number, VALIDATED_REPO=self.repo)
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(self.calls(), [*self.preflight, self.view, *self.preflight, self.heads])
-        envelope = json.loads(result.stdout)
+        self.assertEqual(self.calls(), [*self.preflight, self.view, *self.preflight, self.view, self.heads])
         action = dict(repo=self.repo, number=6, fork="fork/blog-writer", headRefName="feat/example",
                       headRefOid=self.oid, baseRefName="main", branch=self.branch, author="contributor",
                       title=self.metadata["title"],
@@ -185,10 +157,9 @@ sys.stdout.buffer.write(answer.encode("utf-8", "surrogateescape"))
                       body="Adopted from #6 by @contributor (fork fork/blog-writer).\n\n"
                            "Carries the contributor's original commits unchanged — authorship is preserved. "
                            f"As a same-repo PR, it gets the policy review.\n\nOriginal PR: {self.metadata['url']}")
-        self.assertEqual(envelope["preview"], action)
-        raw = json.dumps(action, ensure_ascii=False, separators=(",", ":")) + "\n"
-        self.assertEqual(envelope["approved_payload"], base64.b64encode(raw.encode()).decode())
-        return envelope["preview"], envelope["approved_payload"]
+        preview = json.loads(result.stdout)
+        self.assertEqual(preview, action)
+        return preview, result.stdout.decode("utf-8").rstrip("\n")
 
     def inspect(self, number, expected):
         self.answer(self.status, '{"reviewDecision":"APPROVED"}')
@@ -203,6 +174,31 @@ sys.stdout.buffer.write(answer.encode("utf-8", "surrogateescape"))
         self.metadata["isCrossRepository"] = False
         self.read_metadata()
         self.inspect(2, [self.status])
+
+    def test_installed_metadata_uses_its_own_release_sibling(self):
+        self.read_metadata()
+        tessl = self.root / ".tessl/plugins/jbaruch/coding-policy/skills"
+        acr = self.root / ".codex/skills"
+        adopt = acr / "acr__jbaruch__coding-policy__adopt-fork-pr"
+        release = acr / "acr__jbaruch__coding-policy__release"
+        shutil.copytree(tessl / "adopt-fork-pr", adopt)
+        shutil.copytree(tessl / "release", release)
+        command = f'bash "{adopt.relative_to(self.root)}/adopt.sh" metadata \'{self.number}\''
+
+        start = len(self.calls())
+        result = self.execute(command)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout), dict(repo=self.repo, number=6, isCrossRepository=True))
+        self.assertEqual(self.calls()[start:], [*self.preflight, self.view])
+
+        release.rename(acr / "release")
+        start = len(self.calls())
+        result = self.execute(command)
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertEqual(result.stdout, b"")
+        self.assertIn(b"acr__jbaruch__coding-policy__release/origin-repo.py", result.stderr)
+        self.assertIn(b"reinstall the plugin", result.stderr)
+        self.assertEqual(self.calls()[start:], self.preflight[:1])
 
     def test_metadata_requires_valid_json_for_the_requested_pr(self):
         for raw in ("", "{}", '{"number":7,"isCrossRepository":true}', '{"number":6,"isCrossRepository":null}',
@@ -219,7 +215,7 @@ sys.stdout.buffer.write(answer.encode("utf-8", "surrogateescape"))
         self.inspect(3, [self.diff, self.status])
 
     def test_approved_fence_sends_the_displayed_action(self):
-        action, payload = self.preview()
+        action, preview_json = self.preview()
         ref = "refs/heads/" + self.branch
         url = "https://" + self.origin + "/pull/99"
         fetch = ["git", "fetch", "--no-tags", "origin", "refs/pull/6/head"]
@@ -249,45 +245,39 @@ sys.stdout.buffer.write(answer.encode("utf-8", "surrogateescape"))
             self.answer(lookup, json.dumps(prs))
             self.answer(comments, json.dumps({"comments": linked}))
             start = len(self.calls())
-            result = self.fence(4, PR_NUMBER=self.number, VALIDATED_REPO=self.repo, APPROVED_PAYLOAD=payload)
+            result = self.fence(4, PR_NUMBER=self.number, VALIDATED_REPO=self.repo, preview_json=preview_json)
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertEqual(json.loads(result.stdout)["state"], "already-adopted" if prs else "adopted")
             self.assertEqual(self.calls()[start:], [*self.preflight, self.view, self.heads, *expected])
         self.assertFalse((self.root / "interpolated").exists())
 
-    def test_rejects_malformed_handoffs(self):
-        action, approved = self.preview()
-        for number, word, document in ((1, None, self.metadata), (3, "METADATA_PAYLOAD", self.metadata),
-                                       (4, "APPROVED_PAYLOAD", action), (4, None, self.metadata)):
-            raw = json.dumps(document, separators=(",", ":")).encode()
-            invalid = [raw.replace(b'"number":6', b'"number":+6'), raw.replace(b'"number":6', b'"number":6.'),
-                       raw + b" {}", b"[1]", b"{", raw + b"\x00"]
-            for member in (b'"extra":"\xff"', b'"extra":NaN', b'"extra":Infinity', b'"extra":-Infinity',
-                           br'"extra":[["\ud800"]]', br'"\udfff":true', br'"extra":"\u0000"',
-                           br'"\u0000":0', br'"extra":{"key":"\udfff","key":0}'):
-                invalid.append(b"{" + member + b"," + raw[1:])
-            if word:
-                values = [base64.b64encode(item).decode() for item in invalid] + ["", "!!!", "e30==", "e31="]
-                diagnostic = b"invalid handoff payload"
-            else:
-                values = [item.decode("utf-8", "surrogateescape") for item in invalid]
-                diagnostic = b"could not classify PR #6" if number == 1 else b"could not read PR #6"
-            for value in values:
-                with self.subTest(step=number, source=word or "gh", value=value):
-                    args = dict(PR_NUMBER=self.number, VALIDATED_REPO=self.repo)
-                    if word:
-                        args[word] = value
-                    else:
-                        self.answer(self.view, value)
-                        args["APPROVED_PAYLOAD"] = approved
+    def test_rejects_malformed_approved_preview_before_any_write(self):
+        action, preview_json = self.preview()
+        invalid = ("", "[]", preview_json + "\n{}", json.dumps(dict(action, title="NUL\0")),
+                   json.dumps(action).replace('"number": 6', '"number": +6'))
+        for value in invalid:
+            with self.subTest(value=value):
+                start = len(self.calls())
+                result = self.fence(4, PR_NUMBER=self.number, VALIDATED_REPO=self.repo, preview_json=value)
+                self.assertEqual(result.returncode, 1)
+                self.assertEqual(result.stdout, b"")
+                self.assertIn(b"invalid approved preview JSON", result.stderr)
+                self.assertEqual(self.calls()[start:], self.preflight)
+
+    def test_rejects_malformed_current_metadata_before_any_write(self):
+        _, preview_json = self.preview()
+        raw = json.dumps(dict(self.metadata, title="fixture title"))
+        for title in ('"\udcff"', r'"\udcff"', r'"\u0000"', "NaN"):
+            with self.subTest(title=title):
+                self.answer(self.view, raw.replace('"fixture title"', title, 1))
+                for number in (3, 4):
                     start = len(self.calls())
-                    result = self.fence(number, **args)
-                    self.assertEqual(self.calls()[start:], self.preflight if word else [*self.preflight, self.view])
-                    self.assertNotEqual(result.returncode, 0)
+                    result = self.fence(number, PR_NUMBER=self.number, VALIDATED_REPO=self.repo,
+                                        preview_json=preview_json)
+                    self.assertEqual(result.returncode, 1)
                     self.assertEqual(result.stdout, b"")
-                    self.assertIn(diagnostic, result.stderr)
-                    if number != 1:
-                        self.assertIn(b"fresh preview", result.stderr)
+                    self.assertIn(b"could not read PR #6", result.stderr)
+                    self.assertEqual(self.calls()[start:], [*self.preflight, self.view])
 
 
 class ZshDocumentedCommandsTest(DocumentedCommandsTest):

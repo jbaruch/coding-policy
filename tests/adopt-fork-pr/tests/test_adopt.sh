@@ -150,14 +150,13 @@ rm -f "$jqm_err"
 
 # ---- argument validation -------------------------------------------------
 run_main >/dev/null 2>&1;     rc_is "$?" 2 "no arg → exit 2"
-run_main abc "$ORIGIN_REPO" "{}" >/dev/null 2>&1; rc_is "$?" 2 "non-numeric → exit 2"
-run_main 0 "$ORIGIN_REPO" "{}" >/dev/null 2>&1;   rc_is "$?" 2 "zero → exit 2"
+run_main abc "$ORIGIN_REPO" >/dev/null 2>&1; rc_is "$?" 2 "non-numeric → exit 2"
+run_main 0 "$ORIGIN_REPO" >/dev/null 2>&1;   rc_is "$?" 2 "zero → exit 2"
 
-METADATA_PAYLOAD=$(run_main metadata 6 | jq -er .metadata_payload) || exit 1
-PREVIEW=$(run_main preview 6 "$ORIGIN_REPO" "$METADATA_PAYLOAD") || { bad "read-only preview"; exit 1; }
-adopt() { run_main 6 "$ORIGIN_REPO" "$(jq -er .approved_payload <<<"$PREVIEW")"; }
+PREVIEW=$(run_main preview 6 "$ORIGIN_REPO") || { bad "read-only preview"; exit 1; }
+adopt() { run_main 6 "$ORIGIN_REPO" <<<"$PREVIEW"; }
 if [[ ! -s "$WRITES" ]] && jq -e --arg title "$EXPECTED_TITLE" --arg body "$EXPECTED_BODY" --arg pointer "$EXPECTED_POINTER" '
-  .preview | .body == $body and .pointer == $pointer and .title == $title
+  .body == $body and .pointer == $pointer and .title == $title
 ' <<<"$PREVIEW" >/dev/null; then ok "preview renders the messages without writing"; else bad "read-only preview content"; fi
 
 # ---- not-a-fork refusal --------------------------------------------------
@@ -234,9 +233,9 @@ check_pointer 99
 
 # ---- idempotency: branch on origin AND an open PR exists → no-op ----------
 : > "$WRITES"
-retry_preview=$(FIXTURE_BRANCH_EXISTS=1 FIXTURE_OPEN_PR=1 run_main preview 6 "$ORIGIN_REPO" "$METADATA_PAYLOAD") || exit 1
+retry_preview=$(FIXTURE_BRANCH_EXISTS=1 FIXTURE_OPEN_PR=1 run_main preview 6 "$ORIGIN_REPO") || exit 1
 retry_url="https://github.com/owner/blog-writer/pull/42"
-eq "$(jq -r .preview.pointer <<<"$retry_preview")" "${EXPECTED_POINTER/<new_pr_url>/"$retry_url"}" "retry previews the actual pointer to the existing PR"
+eq "$(jq -r .pointer <<<"$retry_preview")" "${EXPECTED_POINTER/<new_pr_url>/"$retry_url"}" "retry previews the actual pointer to the existing PR"
 out=$(FIXTURE_BRANCH_EXISTS=1 FIXTURE_OPEN_PR=1 PREVIEW="$retry_preview" adopt 2>/dev/null); rc=$?
 if [ "$rc" -eq 0 ] \
    && [ "$(jq -r '.state' <<<"$out")" = "already-adopted" ] \
@@ -292,17 +291,18 @@ for edit in '.title = "edited"' '.author.login = "another"' '.url += "/changed"'
   'del(.headRefOid)' 'del(.headRepository)' 'del(.title)'; do
   FIXTURE_EDIT="$edit" refuses "PR metadata change: $edit" "" adopt
 done
-refuses "missing approved JSON" "" run_main 6 "$ORIGIN_REPO"
-refuses "unavailable approved JSON" "" run_main 6 "$ORIGIN_REPO" ""
+FIXTURE_EDIT='.headRefOid += "\n"' refuses "malformed fork SHA refused at preview" "" run_main preview 6 "$ORIGIN_REPO"
+refuses "missing approved JSON" "" run_main 6 "$ORIGIN_REPO" </dev/null
+refuses "incomplete approved JSON" "" run_main 6 "$ORIGIN_REPO" <<<'{}'
 command git remote set-url origin https://github.com/other/blog-writer.git || exit 2
 refuses "origin changed after consent" "" adopt
 command git remote set-url origin "git@github.com:${ORIGIN_REPO}.git" || exit 2
 command git config remote.origin.pushurl https://github.com/other/blog-writer.git || exit 2
 refuses "origin push target changed after consent" "" adopt
 command git config --unset remote.origin.pushurl || exit 2
-refuses "edited body in consent" "" run_main 6 "$ORIGIN_REPO" "$(jq -r '.preview | .body += " edited" | @base64' <<<"$PREVIEW")"
-refuses "edited destination in consent" "" run_main 6 "$ORIGIN_REPO" "$(jq -r '.preview | .branch += "-other" | @base64' <<<"$PREVIEW")"
-refuses "existing adopted PR disappeared" "" run_main 6 "$ORIGIN_REPO" "$(jq -er .approved_payload <<<"$retry_preview")"
+refuses "edited body in consent" "" run_main 6 "$ORIGIN_REPO" <<<"$(jq '.body += " edited"' <<<"$PREVIEW")"
+refuses "edited destination in consent" "" run_main 6 "$ORIGIN_REPO" <<<"$(jq '.branch += "-other"' <<<"$PREVIEW")"
+refuses "existing adopted PR disappeared" "" run_main 6 "$ORIGIN_REPO" <<<"$retry_preview"
 FIXTURE_BRANCH_EXISTS=1 FIXTURE_REMOTE_OID=other refuses "different commit on recovery branch" "" adopt
 FIXTURE_BRANCH_EXISTS=1 FIXTURE_OPEN_PR=1 FIXTURE_PR_BASE=other refuses "existing PR targets another base" "" adopt
 FIXTURE_FETCHED_OID=other refuses "head changed during fetch" "fetch" adopt
