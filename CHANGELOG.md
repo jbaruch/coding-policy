@@ -1,3 +1,7 @@
+## 0.10.47 — 2026-11-24
+
+- ci(review): Pin setup-node in policy workflows (#905)
+
 ## 0.10.46 — 2026-11-24
 
 - Update actions/create-github-app-token digest to f418cff (#867)
