@@ -1,3 +1,7 @@
+## 0.10.40 — 2026-11-24
+
+- test(adoption): Make pointer expectations portable (#901)
+
 ## 0.10.39 — 2026-11-24
 
 - fix(policy): Judge simplicity against the stated goal (#899)
