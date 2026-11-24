@@ -1,3 +1,7 @@
+## 0.10.44 — 2026-11-24
+
+- fix(renovate): Keep the release issue declaration on dependency PRs (#907)
+
 ## 0.10.43 — 2026-11-24
 
 - refactor(rules): State router reader mechanics once (#838)
