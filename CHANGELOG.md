@@ -1,3 +1,7 @@
+## 0.10.36 — 2026-11-24
+
+- fix(adoption): Restore readable installed fork adoption (#897)
+
 ## 0.10.35 — 2026-11-24
 
 - refactor(adoption): Clarify fork consent and provision Zsh in CI (#887)
