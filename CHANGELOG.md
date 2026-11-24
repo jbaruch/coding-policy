@@ -1,3 +1,7 @@
+## 0.10.37 — 2026-11-24
+
+- Permit explicitly approved telemetry retention (#898)
+
 ## 0.10.36 — 2026-11-24
 
 - fix(adoption): Restore readable installed fork adoption (#897)
