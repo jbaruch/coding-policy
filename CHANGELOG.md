@@ -1,3 +1,7 @@
+## 0.10.50 — 2026-11-24
+
+- fix(review): Preserve trusted context through ACR migrations (#904)
+
 ## 0.10.49 — 2026-11-24
 
 - feat(fleet-review): Install plugins from listed manifests at declared versions (#828)
