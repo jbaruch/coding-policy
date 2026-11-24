@@ -99,7 +99,7 @@ run_poll() {
   local script work
   script=$(extract_run "$POLL_STEP")
   [[ -n "$script" ]] || { echo "fatal: step '$POLL_STEP' has no run block in $WORKFLOW" >&2; exit 2; }
-  work=$(mktemp -d) || { echo "fatal: mktemp -d failed" >&2; exit 2; }
+  work=$(mktemp -d "${TMPDIR:-/tmp}/fleet-workflow-test.XXXXXX") || { echo "fatal: mktemp -d failed" >&2; exit 2; }
   if ! (
     set -e
     mkdir -p "$work/bin" "$work/tree/.github/codex-review" "$work/tree/.github/claude-review"
@@ -233,10 +233,44 @@ t_manual_run_starts_only_the_selected_lane() {
   ok "a manual run starts only the selected lane's poll and review; all and the schedule start both"
 }
 
+t_event_inputs_stay_out_of_step_logs() {
+  local step='Review the dispatched PR' script work out rc lane field
+  script=$(extract_run "$step")
+  [[ "$script" == *GITHUB_EVENT_PATH* ]] || { bad 'review step must read the event file'; return; }
+  if awk -v step="$step" 'index($0,"- name: " step) { active = 1; next }
+      active && /- name:/ { exit }
+      active { print }' "$WORKFLOW" | grep -qF 'github.event.inputs'; then
+    bad 'review step config exposes dispatch values'; return
+  fi
+  work=$(mktemp -d "${TMPDIR:-/tmp}/fleet-dispatch-test.XXXXXX") || exit 2
+  mkdir -p "$work/.github/codex-review" "$work/.github/claude-review" &&
+    printf 'printf "policy %%s %%s %%s %%s\\n" "$@"\n' > "$work/.github/codex-review/fleet-review-one.sh" &&
+    printf 'import sys\nprint("quality", *sys.argv[1:])\n' > "$work/.github/claude-review/review.py" || exit 2
+  for lane in policy quality; do
+    printf '%s\n' '{"inputs":{"repo":"alpha","pr":"7","base":"release/1.x"}}' > "$work/event.json" || exit 2
+    rc=0
+    out=$(cd "$work" && REVIEW_LANE="$lane" GITHUB_EVENT_PATH="$work/event.json" bash -c "$script" 2>&1) || rc=$?
+    if [[ "$rc" -ne 0 || "$out" != "$lane jbaruch alpha 7 release/1.x" ]]; then
+      bad "$lane dispatch did not pass the validated arguments (rc=$rc)"; rmwarn "$work"; return
+    fi
+  done
+  for field in repo pr base; do
+    jq -n --arg field "$field" '{inputs: {repo:"alpha", pr:"7", base:"main"} | .[$field] = "dispatch-input-sentinel\u0000"}' \
+      > "$work/event.json" || exit 2
+    rc=0
+    out=$(cd "$work" && REVIEW_LANE=policy GITHUB_EVENT_PATH="$work/event.json" bash -c "$script" 2>&1) || rc=$?
+    if [[ "$rc" -eq 0 || "$out" != *"dispatch input '$field'"* || "$out" == *dispatch-input-sentinel* ]]; then
+      bad "invalid $field is not rejected without exposing its value"; rmwarn "$work"; return
+    fi
+  done
+  rmwarn "$work"
+  ok 'dispatch fields reach both lanes as arguments and rejected values stay out of step logs'
+}
+
 for t in t_poll_dispatches_instead_of_reviewing t_poll_failed_dispatch_fails_after_the_rest \
   t_poll_empty_worklist_dispatches_nothing t_poll_malformed_worklist_fails \
   t_push_and_poll_share_the_per_pr_group t_polls_never_overlap t_poll_app_token_is_read_only \
-  t_manual_run_starts_only_the_selected_lane; do
+  t_manual_run_starts_only_the_selected_lane t_event_inputs_stay_out_of_step_logs; do
   "$t"
 done
 

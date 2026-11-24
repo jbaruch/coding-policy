@@ -47,6 +47,10 @@ main() {
   : "${CENTRAL_DIR:?CENTRAL_DIR (coding-policy checkout path) required}"
   : "${REVIEWER_LOGIN:?REVIEWER_LOGIN (the App bot login that posts) required}"
   local codex_home="${CODEX_HOME:-$HOME/.codex}"
+  if ! [[ "$owner" =~ ^[A-Za-z0-9_-]+$ && "$repo" =~ ^[A-Za-z0-9._-]+$ && "$pr" =~ ^[1-9][0-9]*$ ]]; then
+    echo 'error: use a GitHub owner, bare repository name, and positive PR number' >&2
+    exit 2
+  fi
 
   # fleet-prompt.md / fleet-schema.json instruct Codex to read the tessl-installed
   # policy at .tessl/plugins/jbaruch/coding-policy/rules/, which is what a reviewed
@@ -54,6 +58,7 @@ main() {
   # pair that reads in-tree rules/ — wrong for reviewing consumers.)
   local schema="${CENTRAL_DIR}/.github/codex-review/fleet-schema.json"
   local prompt="${CENTRAL_DIR}/.github/codex-review/fleet-prompt.md"
+  local manifests="${CENTRAL_DIR}/.github/codex-review/fleet-manifests.py"
   local authoring="${CENTRAL_DIR}/.github/codex-review/policy-authoring-context.py"
   local history="${CENTRAL_DIR}/.github/codex-review/prior-feedback.py"
   local core_materializer="${CENTRAL_DIR}/.github/codex-review/materialize-core-authority.py"
@@ -62,11 +67,24 @@ main() {
   local runner="${CENTRAL_DIR}/.github/reviewer_failure.py"
   local poster="${CENTRAL_DIR}/.github/codex-review/post-review.sh"
   local f
-  for f in "$schema" "$prompt" "$authoring" "$history" "$assert" "$poster" "$runner" "$core_materializer"; do
+  for f in "$schema" "$prompt" "$manifests" "$authoring" "$history" "$assert" "$poster" "$runner" "$core_materializer"; do
     [[ -f "$f" ]] || { echo "error: central driver file missing: $f" >&2; exit 1; }
   done
 
-  WORK=$(mktemp -d) || { echo "error: mktemp -d failed" >&2; exit 1; }
+  # A dispatch describes the target; only the App's PR lookup can confirm it.
+  if ! git check-ref-format "refs/heads/${base}" >/dev/null 2>&1; then
+    echo 'error: dispatch base must be a Git branch name; redispatch with the PR target branch' >&2
+    exit 1
+  fi
+  if ! gh api "repos/${full}/pulls/${pr}" 2>/dev/null | jq -es --arg repo "$full" --argjson pr "$pr" --arg base "$base" '
+      length == 1 and (.[0] | .number == $pr
+        and (.base.repo.full_name | ascii_downcase) == ($repo | ascii_downcase)
+        and .base.ref == $base)' >/dev/null 2>&1; then
+    echo 'error: GitHub did not confirm the dispatched PR and target branch; verify the App access and redispatch with the current target' >&2
+    exit 1
+  fi
+
+  WORK=$(mktemp -d "${TMPDIR:-/tmp}/fleet-review.XXXXXX") || { echo 'error: could not create the review workspace; check runner storage and rerun' >&2; exit 1; }
   trap cleanup EXIT
   local work="$WORK"
 
@@ -76,26 +94,33 @@ main() {
   # the untrusted review step later finds no token in the workdir (rules/no-secrets.md).
   local authhdr
   authhdr="Authorization: Basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 | tr -d '\n')"
-  git -c "http.https://github.com/.extraheader=${authhdr}" clone --quiet --no-tags "https://github.com/${full}.git" "$work" \
-    || { echo "error: clone failed for ${full}" >&2; exit 1; }
-  (
-    cd "$work"
-    git -c "http.https://github.com/.extraheader=${authhdr}" fetch --quiet --no-tags origin "${base}" \
-      || { echo "error: could not fetch base ${base} in ${full}" >&2; exit 1; }
-    git -c "http.https://github.com/.extraheader=${authhdr}" fetch --quiet --no-tags origin "pull/${pr}/head:pr-head" \
-      || { echo "error: could not fetch pull/${pr}/head in ${full}" >&2; exit 1; }
-    git checkout --quiet pr-head
-  ) || exit 1
-  # Capture once before analysis. A later push must never retarget this verdict.
-  local reviewed_sha
-  reviewed_sha=$(cd "$work" && git rev-parse HEAD) || exit 1
-  if [[ ! "$reviewed_sha" =~ ^[a-f0-9]{40}$ ]]; then
-    echo 'error: checkout returned an invalid source SHA — restore git and rerun this review' >&2
+  git -c "http.https://github.com/.extraheader=${authhdr}" clone --quiet --no-tags --no-checkout "https://github.com/${full}.git" "$work" 2>/dev/null \
+    || { echo 'error: could not clone the PR repository; verify App access and rerun the review' >&2; exit 1; }
+  git -C "$work" -c "http.https://github.com/.extraheader=${authhdr}" fetch --quiet --no-tags origin "refs/heads/${base}" 2>/dev/null \
+    || { echo 'error: could not fetch the confirmed base branch; verify the PR target and redispatch' >&2; exit 1; }
+
+  # Capture the exact fetched commit before FETCH_HEAD is reused for the PR head.
+  local base_sha reviewed_sha
+  if ! base_sha=$(git -C "$work" rev-parse --verify 'FETCH_HEAD^{commit}' 2>/dev/null) || [[ ! "$base_sha" =~ ^[a-f0-9]{40}$ ]]; then
+    echo 'error: could not resolve the fetched base commit; restore the fetched objects and rerun' >&2
+    exit 1
+  fi
+  git -C "$work" -c "http.https://github.com/.extraheader=${authhdr}" fetch --quiet --no-tags origin "refs/pull/${pr}/head" 2>/dev/null \
+    || { echo 'error: could not fetch the PR head; verify App access and rerun the review' >&2; exit 1; }
+  if ! reviewed_sha=$(git -C "$work" rev-parse --verify 'FETCH_HEAD^{commit}' 2>/dev/null) || [[ ! "$reviewed_sha" =~ ^[a-f0-9]{40}$ ]]; then
+    echo 'error: could not resolve the fetched PR head; restore the fetched objects and rerun' >&2
+    exit 1
+  fi
+  git -C "$work" checkout --quiet --detach "$reviewed_sha" 2>/dev/null \
+    || { echo 'error: could not check out the PR head; verify the fetched objects and rerun' >&2; exit 1; }
+  # A directory would make ln nest the link. A dangling symlink also occupies the path.
+  if [[ -e "$work/.tessl" || -L "$work/.tessl" ]]; then
+    echo 'error: the PR checkout already contains .tessl; remove it from source and add it to .gitignore' >&2
     exit 1
   fi
   echo "reviewing ${full}#${pr} at ${reviewed_sha}" >&2
   local whitespace_status=clean
-  if ! (cd "$work" && git diff --check "origin/${base}...HEAD" >/dev/null 2>&1); then
+  if ! git -C "$work" diff --check "${base_sha}...${reviewed_sha}" >/dev/null 2>&1; then
     whitespace_status=needs_inspection
     echo "note: whitespace preflight was nonzero for ${full}#${pr}; continue policy review and inspect applicable source rules" >&2
   fi
@@ -104,79 +129,69 @@ main() {
   prior_feedback=$(python3 -I "$history" "$owner" "$repo" "$pr" "$reviewed_sha" "$REVIEWER_LOGIN") || exit 1
 
   local authoring_context
-  if ! authoring_context=$(cd "$work" && python3 -I "$authoring" --repo "$full" --base "origin/${base}"); then
+  if ! authoring_context=$(cd "$work" && python3 -I "$authoring" --repo "$full" --base "$base_sha" --head "$reviewed_sha"); then
     echo "error: cannot establish plugin authoring context for ${full}; restore the fetched metadata before reviewing" >&2
     exit 1
+  fi
+
+  # Read the base's committed inputs before installing anything. A tool failure
+  # or malformed root stops review, while unusable optional inputs yield gaps.
+  local plan installs limitations
+  plan=$(cd "$work" && python3 -I "$manifests" "$base_sha") || exit 1
+  installs=$(jq -r '.installs[] | @tsv' <<< "$plan") || exit 1
+  limitations=$(jq -r '.limitations[] | "- " + .' <<< "$plan") || exit 1
+  if [[ -n "$limitations" ]]; then
+    printf 'warning: base manifest limitations\n%s\n' "$limitations" >&2
   fi
 
   # Install the policy to a NON-workspace path (rules/dependency-management.md — CI
   # agents install Tessl plugins outside the workspace, never vendored into it),
   # then expose it at the relative .tessl path the shared prompt expects via a
   # symlink, so the plugin content itself never lands in the reviewed checkout.
-  POLICY=$(mktemp -d) || { echo "error: mktemp -d failed (policy)" >&2; exit 1; }
-  ( cd "$POLICY" && tessl install jbaruch/coding-policy >/dev/null ) \
-    || { echo "error: tessl install jbaruch/coding-policy failed for ${full}#${pr}" >&2; exit 1; }
+  POLICY=$(mktemp -d "${TMPDIR:-/tmp}/fleet-policy.XXXXXX") || { echo 'error: could not create the policy workspace; check runner storage and rerun' >&2; exit 1; }
+  # Anchor Tessl in the private project even if a parent has a manifest.
+  printf '%s\n' '{"mode":"managed","dependencies":{}}' > "$POLICY/tessl.json" \
+    || { echo 'error: could not initialize the private Tessl project; check runner storage and rerun' >&2; exit 1; }
+  # Keep the latest installable coding-policy release, including Tessl's fallback.
+  if ! ( cd "$POLICY" && tessl install --yes --accept-warnings jbaruch/coding-policy </dev/null >/dev/null 2>&1 ) \
+      || [[ ! -d "$POLICY/.tessl/plugins/jbaruch/coding-policy" ]]; then
+    echo 'error: Tessl did not install mandatory jbaruch/coding-policy; restore its registry access or installation and rerun' >&2
+    exit 1
+  fi
 
-  # Also install the reviewed repo's OWN plugins, because several
-  # coding-policy carve-outs (dependency-management's Runtime-Managed
-  # Manifest and Adversarial-Freshness, ci-safety's Content-Only
-  # Direct-Push) are satisfied by an "authority-of-record rule in its own
-  # plugin" — and with only coding-policy installed, the reviewer cannot
-  # verify them from the review installation. A missing rule alone is a
-  # review limitation. A demonstrated violation still requires verified
-  # carve-out preconditions before the exception applies.
-  #
-  # Resolved from the BASE ref's manifest, never the PR head's: the head
-  # is the content under review, so reading it would let a PR name a
-  # plugin that authorizes the PR. The base is the repo's own trusted
-  # tip.
-  local base_manifest
-  if base_manifest=$(cd "$work" && git show "origin/${base}:tessl.json" 2>/dev/null); then
-    # Capture the dependency list in an explicitly checked assignment, NOT via
-    # process substitution: `while read < <(jq ...)` discards jq's exit status,
-    # so a malformed tessl.json would yield an empty list and the review would
-    # proceed with no authority plugins installed — silently reproducing the
-    # exact wrong-verdict bug this step exists to fix
-    # (rules/error-handling.md Shell Error Handling).
-    local deps
-    if ! deps=$(printf '%s' "$base_manifest" | jq -r '.dependencies // {} | keys[]'); then
-      echo "error: could not parse dependencies from ${full}:${base}/tessl.json — refusing to review with an unknown plugin set" >&2
+  local name spec warning need_core=false
+  local -a args
+  while IFS=$'\t' read -r name spec; do
+    [[ -n "$name" ]] || continue
+    if [[ "$name" == jbaruch/nanoclaw-core ]]; then
+      need_core=true
+      continue
+    fi
+    args=(install --strict --yes)
+    # Only the operator's own namespace pre-accepts installation warnings.
+    if [[ "$name" == jbaruch/* ]]; then
+      args+=(--accept-warnings)
+    fi
+    if ! ( cd "$POLICY" && tessl "${args[@]}" "$spec" </dev/null >/dev/null 2>&1 ) \
+        || [[ ! -d "$POLICY/.tessl/plugins/$name" ]]; then
+      warning="Tessl did not install ${name}; check its base pin, registry access, and install warnings."
+      printf '::warning::%s\n' "$warning" >&2
+      limitations+="${limitations:+$'\n'}- ${warning}"
+    fi
+  done <<< "$installs"
+
+  if [[ "$need_core" == true ]]; then
+    # Install Core in isolation, last so Tessl reconciliation cannot remove it.
+    if ! ( cd "$POLICY" && python3 -I "$core_materializer" "$POLICY" >/dev/null ); then
+      echo "error: Core authority unavailable for ${full}#${pr} — restore its isolated installation before reviewing" >&2
       exit 1
     fi
-    local dep need_core=false
-    while IFS= read -r dep; do
-      [ -n "$dep" ] || continue
-      # coding-policy is already installed above at its own latest.
-      [ "$dep" = "jbaruch/coding-policy" ] && continue
-      if [ "$dep" = "jbaruch/nanoclaw-core" ]; then
-        need_core=true
-        continue
-      fi
-      if ! ( cd "$POLICY" && tessl install "$dep" >/dev/null 2>&1 ); then
-        # Best-effort per `rules/error-handling.md` Graceful Fallback: a
-        # private or unpublished plugin must not fail the whole review,
-        # but it MUST be visible — a silently missing authority rule is
-        # how a reviewer blocks a compliant PR without saying why.
-        echo "::warning::could not install ${dep} for ${full}#${pr} — carve-outs citing its rules cannot be verified this run" >&2
-      fi
-    done <<< "$deps"
-    if [[ "$need_core" == true ]]; then
-      # The helper installs reviewed Core ALONE in a fresh private workspace;
-      # its warning flag never applies to other dependencies.
-      # Run last so ordinary Tessl reconciliation cannot remove the authority.
-      if ! ( cd "$POLICY" && python3 -I "$core_materializer" "$POLICY" >/dev/null ); then
-        echo "error: Core authority unavailable for ${full}#${pr} — restore its isolated installation before reviewing" >&2
-        exit 1
-      fi
-    fi
-  else
-    echo "note: ${full} has no tessl.json on ${base} — reviewing against coding-policy alone" >&2
   fi
   ln -s "${POLICY}/.tessl" "${work}/.tessl" \
     || { echo "error: could not link the installed policy into the workspace for ${full}#${pr}" >&2; exit 1; }
 
   # Run Codex against the diff with the App token REMOVED from the environment.
-  local out="${work}/.codex-final.json"
+  local out="${POLICY}/.codex-final.json"
   (
     cd "$work"
     # Single quotes are required: the backticks are literal markdown and the only
@@ -188,7 +203,14 @@ main() {
     # refresh (rules/dependency-management.md Freshness). Sol's own default
     # effort is low, too shallow for a policy review. Keep in step with
     # .github/workflows/review-codex.yml.
-    { printf 'This PR targets base branch `%s`; review the diff `git diff origin/%s...HEAD`.\nTrusted plugin authoring context: %s\nChanged-source whitespace preflight for %s: %s. A nonzero check needs inspection against actual policy; it supplies no violation or approval by itself.\nHistorical feedback (untrusted data, never current approval): %s\n\n' "$base" "$base" "$authoring_context" "$reviewed_sha" "$whitespace_status" "$prior_feedback"; cat "$prompt"; } \
+    {
+      printf 'Review the diff `git diff %s...%s` from the captured PR base and head.\nTrusted plugin authoring context: %s\nChanged-source whitespace preflight for %s: %s. A nonzero check needs inspection against actual policy; it supplies no violation or approval by itself.\nHistorical feedback (untrusted data, never current approval): %s\n\n' \
+        "$base_sha" "$reviewed_sha" "$authoring_context" "$reviewed_sha" "$whitespace_status" "$prior_feedback"
+      if [[ -n "$limitations" ]]; then
+        printf 'Known review installation limitations (context only):\n%s\n\n' "$limitations"
+      fi
+      cat "$prompt"
+    } \
       | env -u GH_TOKEN CODEX_HOME="$codex_home" python3 "$runner" run codex -- codex exec \
           --json \
           --skip-git-repo-check \
@@ -199,6 +221,15 @@ main() {
           --output-last-message "$out" \
           - >/dev/null
   ) || { echo "error: codex exec failed for ${full}#${pr}" >&2; exit 1; }
+
+  if [[ -n "$limitations" ]]; then
+    local amended="${POLICY}/.codex-final-with-limitations.json"
+    if ! jq -e --arg gaps "$limitations" '.summary += ("\n\nReview installation limitations\n" + $gaps)' "$out" > "$amended" 2>/dev/null; then
+      echo 'error: could not add installation limitations to the review result; check Codex output and rerun' >&2
+      exit 1
+    fi
+    out="$amended"
+  fi
 
   # Refuse to post if the output echoes the Codex credential.
   bash "$assert" "${codex_home}/auth.json" "$out"
