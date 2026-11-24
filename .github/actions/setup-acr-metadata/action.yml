@@ -1,0 +1,18 @@
+name: Setup fleet ACR metadata decoder
+description: Build the trusted decoder once before reading consumer Git objects.
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0; Renovate
+      with:
+        go-version-file: .github/codex-review/acr-metadata/go.mod
+        cache-dependency-path: .github/codex-review/acr-metadata/go.sum
+    - shell: bash
+      working-directory: .github/codex-review/acr-metadata
+      run: |
+        set -euo pipefail
+        decoder="$RUNNER_TEMP/acr-metadata"
+        go vet -mod=readonly ./...
+        go build -mod=readonly -o "$decoder" .
+        printf 'ACR_METADATA_DECODER=%s\n' "$decoder" >> "$GITHUB_ENV"

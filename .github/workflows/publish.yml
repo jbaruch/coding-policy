@@ -71,6 +71,7 @@ jobs:
         run: bash scripts/run-diagnostics.sh
 
       - uses: ./.github/actions/setup-zsh
+      - uses: ./.github/actions/setup-acr-metadata
       - name: Run unit tests
         run: bash scripts/run-tests.sh
 
