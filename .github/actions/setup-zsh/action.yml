@@ -1,0 +1,26 @@
+name: Set up Zsh
+description: Install the pinned Ubuntu Resolute amd64 shell for the unit tests.
+
+runs:
+  using: composite
+  steps:
+    - name: Install and verify Zsh
+      shell: bash
+      run: |
+        set -euo pipefail
+        # On renewal, verify zsh and its matching zsh-common in the signed Resolute archive.
+        # renovate: datasource=deb depName=zsh versioning=deb
+        version=5.9-8ubuntu3
+        sudo apt-get update
+        sudo apt-get install -y "zsh=$version"
+        installed=$(dpkg-query -W -f='${Version} ${Architecture} ${db:Status-Status}' zsh)
+        if [[ "$installed" != "$version amd64 installed" ]]; then
+          printf 'Expected zsh %s amd64 installed, got %s. Verify the Resolute pin.\n' "$version" "$installed" >&2
+          exit 1
+        fi
+        if [[ ! "$(command -v zsh)" -ef /usr/bin/zsh ]]; then
+          echo 'Expected the packaged /usr/bin/zsh on PATH. Check the runner PATH.' >&2
+          exit 1
+        fi
+        printf 'Verified zsh package %s at %s\n' "$installed" "$(command -v zsh)"
+        zsh --version

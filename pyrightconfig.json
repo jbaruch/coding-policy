@@ -20,6 +20,7 @@
     "scripts/tests/test_shipped_mktemp.py",
     "scripts/tests/test_skill_bootstrap.py",
     "scripts/tests/test_source_index.py",
+    "skills/adopt-fork-pr/validate-handoff.py",
     "skills/release/check-closing-issues.py",
     "skills/release/lib/prune_result.py",
     "skills/release/origin-repo.py",

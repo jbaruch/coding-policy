@@ -18,48 +18,71 @@ Classify a referenced pull request and, when it comes from a fork, adopt its bra
 
 ## Step 1 — Classify the PR
 
-Resolve origin's repository first; every `gh pr` call in this skill names it, never `gh`'s own default (`gh repo set-default`).
+Replace `PR_NUMBER` inside the quotes with the requested positive decimal PR number. Run each command in its own shell.
 
 ```bash
-KS=.tessl/plugins/jbaruch/coding-policy/skills/release/; [ -d "$KS" ] || KS="$HOME/$KS"; [ -d "$KS" ] || case "$(git config --get remote.origin.url)" in git@github.com:jbaruch/coding-policy|git@github.com:jbaruch/coding-policy.git|https://github.com/jbaruch/coding-policy|https://github.com/jbaruch/coding-policy.git|ssh://git@github.com/jbaruch/coding-policy|ssh://git@github.com/jbaruch/coding-policy.git) KS=skills/release/ ;; *) echo "coding-policy skill not found: run tessl install jbaruch/coding-policy" >&2; exit 1 ;; esac
-python3 "$KS/origin-repo.py" .
+KS=.tessl/plugins/jbaruch/coding-policy/skills/adopt-fork-pr/; [ -d "$KS" ] || KS="$HOME/$KS"; [ -d "$KS" ] || case "$(git config --get remote.origin.url)" in git@github.com:jbaruch/coding-policy|git@github.com:jbaruch/coding-policy.git|https://github.com/jbaruch/coding-policy|https://github.com/jbaruch/coding-policy.git|ssh://git@github.com/jbaruch/coding-policy|ssh://git@github.com/jbaruch/coding-policy.git) KS=skills/adopt-fork-pr/ ;; *) echo "coding-policy skill not found: run tessl install jbaruch/coding-policy" >&2; exit 1 ;; esac
+bash "$KS/adopt.sh" metadata 'PR_NUMBER'
 ```
 
-Contract: see `skills/release/origin-repo.py` — top-of-file docstring. Emits `{ "repo", "owner", "name" }`. A non-zero exit means origin is not a GitHub repository this skill can act on: report its stderr diagnostic and finish here.
-
-Run `gh pr view <N> --repo <repo> --json number,isCrossRepository,headRefName,headRepositoryOwner,headRepository,author,title,url,state`, with `<repo>` from that output.
+The helper validates origin and returns `repo`, `number`, `isCrossRepository` and `metadata_payload` (Base64 of the original PR metadata). On failure, report the diagnostic and finish here. In later commands copy the returned number and repository into `PR_NUMBER` and `VALIDATED_REPO`, keeping the quotes.
 
 - `isCrossRepository: false` — same-repo PR. Proceed to Step 2.
 - `isCrossRepository: true` — fork PR. Proceed to Step 3.
 
 ## Step 2 — Same-Repo Passthrough
 
-The policy reviewer already covers same-repo PRs. Report the PR's review and check status from `gh pr view <N> --repo <repo> --json reviewDecision,statusCheckRollup` and finish here. Do not create branches, push, or open duplicate PRs.
+The policy reviewer already covers same-repo PRs. Report the PR's review and check status from `gh pr view 'PR_NUMBER' --repo 'github.com/VALIDATED_REPO' --json reviewDecision,statusCheckRollup` and finish here. Do not create branches, push, or open duplicate PRs.
 
-## Step 3 — Surface the Fork
+## Step 3 — Confirm Adoption
 
-Tell the user PR #N comes from fork `<headRepositoryOwner.login>/<headRepository.name>` and that the policy reviewer's fork-guard skips it. Proceed immediately to Step 4.
-
-## Step 4 — Confirm Adoption
-
-Ask with `AskUserQuestion`:
-
-- **Adopt for review** — push the contributor's branch into the base repo as a reviewable same-repo PR.
-- **Just inspect** — read-only; no adoption.
-
-On **Just inspect**, report the diff and status, passing `--repo <repo>` to every `gh pr` call, then finish here. On **Adopt for review**, proceed to Step 5.
-
-## Step 5 — Adopt the Branch
-
-The block resolves `KS` to the project-local `adopt-fork-pr` skill, then that
-skill under `$HOME`, then `skills/adopt-fork-pr` in a verified coding-policy
-clone. Other origins stop with the install command.
+Copy the Step 1 `metadata_payload` into `METADATA_PAYLOAD` verbatim. Keep both Base64 payloads opaque.
 
 ```bash
 KS=.tessl/plugins/jbaruch/coding-policy/skills/adopt-fork-pr/; [ -d "$KS" ] || KS="$HOME/$KS"; [ -d "$KS" ] || case "$(git config --get remote.origin.url)" in git@github.com:jbaruch/coding-policy|git@github.com:jbaruch/coding-policy.git|https://github.com/jbaruch/coding-policy|https://github.com/jbaruch/coding-policy.git|ssh://git@github.com/jbaruch/coding-policy|ssh://git@github.com/jbaruch/coding-policy.git) KS=skills/adopt-fork-pr/ ;; *) echo "coding-policy skill not found: run tessl install jbaruch/coding-policy" >&2; exit 1 ;; esac
-bash "$KS/adopt.sh" <N>
+bash "$KS/adopt.sh" preview 'PR_NUMBER' 'VALIDATED_REPO' 'METADATA_PAYLOAD'
 ```
 
-Contract: see `skills/adopt-fork-pr/adopt.sh` — top-of-file docstring carries the branch-naming rule, the verbatim new-PR-body and original-PR-comment templates, the idempotency states, and the exit codes. It checks out the fork head, pushes it to a base-repo branch preserving the original commits, opens a same-repo PR, and comments on the original fork PR linking the adopted one. Emits `{ "state", "adopted_branch", "new_pr_url", "original_pr", "author" }`.
+Render the returned `preview` object and retain its paired `approved_payload` for Step 4. If the helper fails or any text is truncated or inaccessible, report why and offer only **Just inspect** in the conversation.
+
+When the operator can read the entire preview in the dialog before selecting an answer, ask once with `AskUserQuestion`. Fill its plain-text question field from this template. Put each decoded value on its own lines under its label. Let the UI wrap the text. Preserve all characters, paragraph breaks and full URLs, including the returned pointer's existing link or literal `<new_pr_url>`.
+
+```text
+PR github.com/<repo>#<number> comes from fork <fork>, branch <headRefName> at <headRefOid>.
+The policy reviewer's fork-guard skips fork PRs.
+
+If needed, push this commit to github.com/<repo>:<branch>, open a same-repo PR into github.com/<repo>:<baseRefName>, and post the missing pointer comment on github.com/<repo>#<number>.
+
+Adopted PR title
+{title}
+
+Adopted PR body
+{body}
+
+Pointer comment on the original PR
+{pointer}
+
+The link uses the existing adopted PR on recovery or the URL returned by PR creation.
+Use Page Up and Page Down to review the full preview. How should I proceed?
+```
+
+Use these single-select options in order, with **Just inspect** focused by default.
+
+- **Just inspect** — read-only inspection.
+- **Adopt for review** — authorize these actions in `github.com/<repo>` as needed.
+
+On **Just inspect**, report the diff from `gh pr diff 'PR_NUMBER' --repo 'github.com/VALIDATED_REPO'` and the status from `gh pr view 'PR_NUMBER' --repo 'github.com/VALIDATED_REPO' --json reviewDecision,statusCheckRollup`. Finish here.
+Proceed immediately to Step 4 only on an explicit **Adopt for review** selection covering the push and both previewed GitHub actions in `github.com/<repo>`.
+
+## Step 4 — Adopt the Branch
+
+Copy the exact `approved_payload` paired with the preview the operator approved into `APPROVED_PAYLOAD`. If that payload is lost or the helper requests a fresh preview, return to Step 1 and seek consent again.
+
+```bash
+KS=.tessl/plugins/jbaruch/coding-policy/skills/adopt-fork-pr/; [ -d "$KS" ] || KS="$HOME/$KS"; [ -d "$KS" ] || case "$(git config --get remote.origin.url)" in git@github.com:jbaruch/coding-policy|git@github.com:jbaruch/coding-policy.git|https://github.com/jbaruch/coding-policy|https://github.com/jbaruch/coding-policy.git|ssh://git@github.com/jbaruch/coding-policy|ssh://git@github.com/jbaruch/coding-policy.git) KS=skills/adopt-fork-pr/ ;; *) echo "coding-policy skill not found: run tessl install jbaruch/coding-policy" >&2; exit 1 ;; esac
+bash "$KS/adopt.sh" 'PR_NUMBER' 'VALIDATED_REPO' 'APPROVED_PAYLOAD'
+```
+
+Contract: see [skills/adopt-fork-pr/adopt.sh](adopt.sh) for inputs, recovery and exit codes. On success it emits `{ "state", "adopted_branch", "new_pr_url", "original_pr", "author" }`.
 
 Report the adopted PR URL. The original fork PR is left open with a pointer comment — the contributor closes it on their own. From here it is an ordinary same-repo PR: the policy reviewer runs and you merge through your normal flow. Finish here.

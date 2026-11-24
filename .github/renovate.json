@@ -11,6 +11,7 @@
       "customType": "regex",
       "managerFilePatterns": [
         ".github/actions/setup-diagnostics/action.yml",
+        ".github/actions/setup-zsh/action.yml",
         ".github/workflows/review-codex.yml",
         ".github/workflows/fleet-review.yml",
         ".github/workflows/review-claude.yml"
@@ -43,6 +44,23 @@
         "ubuntu"
       ],
       "allowedVersions": "<25"
+    },
+    {
+      "description": "Move the unit-test and publish runners together with the Zsh archive and pin.",
+      "matchFileNames": [".github/workflows/tests.yml", ".github/workflows/publish.yml"],
+      "matchDepNames": ["ubuntu"],
+      "matchCurrentValue": "26.04",
+      "allowedVersions": "26.04"
+    },
+    {
+      "matchFileNames": [".github/actions/setup-zsh/action.yml"],
+      "matchDatasources": ["deb"],
+      "matchDepNames": ["zsh"],
+      "registryUrls": [
+        "https://archive.ubuntu.com/ubuntu?suite=resolute&components=main&binaryArch=amd64",
+        "https://archive.ubuntu.com/ubuntu?suite=resolute-updates&components=main&binaryArch=amd64",
+        "https://security.ubuntu.com/ubuntu?suite=resolute-security&components=main&binaryArch=amd64"
+      ]
     }
   ]
 }
