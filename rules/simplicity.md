@@ -9,6 +9,7 @@ alwaysApply: true
 - Choose the simplest design that solves the stated problem today.
 - Build nothing for a need nobody has today, a future consumer's included.
 - Add no option, flag, schema version, fallback, abstraction or extension point without a current caller or an observed failure.
+- Scope each lesson to the exact failure observed.
 - One caller gets no abstraction.
 - One value gets no setting.
 - Prefer deleting code, state and process over adding them.
@@ -17,8 +18,10 @@ alwaysApply: true
 ## Before Implementation
 
 - State problem and smallest sufficient solution in conversation or PR.
+- Before correcting the same area again, restate the problem in the requester's words and name the simplest feasible approach.
 - Try scoped instructions, agent actions, platform behavior or deletion before automation.
-- Treat issue proposals as suggestions; explain simpler options' gaps before adopting machinery.
+- Treat issue proposals and reviewer remedies as suggestions. Consider options beyond them.
+- Explain simpler options' gaps before adopting machinery.
 - Justify custom state, recovery, coordination and abstractions with requirements and platform gaps.
 - Weigh maintenance, rollout and failures against likelihood and impact.
 - Keep the problem statement, simpler-option gaps and justifications brief.
@@ -27,6 +30,7 @@ alwaysApply: true
 ## During Review
 
 - Apply `rules/review-severity.md`.
+- Judge whether the approach is the simplest way to meet the stated goal.
 - Flag machinery added without the justification above as a `[policy mismatch]` against this rule.
 - Recommend smallest sufficient remedy.
 - Consider deletion or authorized policy narrowing before safeguards.
