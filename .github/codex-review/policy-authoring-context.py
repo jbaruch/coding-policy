@@ -177,6 +177,11 @@ def context(repo, base, head="HEAD"):
     if path is None or trusted[path]["name"] != repo:
         return result
     if ACR_MANIFEST in trusted and trusted[ACR_MANIFEST]["repository"] != f"https://github.com/{repo}":
+        print(
+            f"policy-authoring-context: local authoring context disabled — "
+            f"set source.repository in {ACR_MANIFEST} on the base to https://github.com/{repo}",
+            file=sys.stderr,
+        )
         return result
     head_tree = tree(head_sha)
     authored = manifests(head_tree)

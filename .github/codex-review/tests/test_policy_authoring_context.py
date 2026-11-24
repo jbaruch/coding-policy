@@ -150,7 +150,10 @@ description: Source identity fixture
       activation: {{mode: always}}
 """)
                 invalid = self.save()
-                self.assertFalse(MODULE.context("jbaruch/example", invalid, base)["eligible"])
+                self.assert_base_disabled(
+                    invalid,
+                    "set source.repository in agent-plugin.yaml on the base to https://github.com/jbaruch/example",
+                )
                 self.assert_authority_refused(base, invalid, "Head ACR source.repository")
 
     def test_acr_uses_decoded_binary_keys_and_values(self):
