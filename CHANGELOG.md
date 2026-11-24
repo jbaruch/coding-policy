@@ -1,3 +1,7 @@
+## 0.10.33 — 2026-11-24
+
+- fix(review): Judge plugin authority in the target runtime (#882)
+
 ## 0.10.32 — 2026-11-24
 
 - refactor(test): Check the interpreter before suite dispatch (#888)
