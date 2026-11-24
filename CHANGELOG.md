@@ -1,3 +1,7 @@
+## 0.10.49 — 2026-11-24
+
+- feat(fleet-review): Install plugins from listed manifests at declared versions (#828)
+
 ## 0.10.48 — 2026-11-24
 
 - Update GitHub Artifact Actions (major) (#890)
