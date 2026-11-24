@@ -1,3 +1,7 @@
+## 0.10.39 — 2026-11-24
+
+- fix(policy): Judge simplicity against the stated goal (#899)
+
 ## 0.10.38 — 2026-11-24
 
 - fix(publish): Limit the bookkeeping path filter to publication (#880)
