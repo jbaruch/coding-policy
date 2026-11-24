@@ -1,3 +1,7 @@
+## 0.10.38 — 2026-11-24
+
+- fix(publish): Limit the bookkeeping path filter to publication (#880)
+
 ## 0.10.37 — 2026-11-24
 
 - Permit explicitly approved telemetry retention (#898)
