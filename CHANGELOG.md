@@ -1,3 +1,7 @@
+## 0.10.35 — 2026-11-24
+
+- refactor(adoption): Clarify fork consent and provision Zsh in CI (#887)
+
 ## 0.10.34 — 2026-11-24
 
 - feat(boy-scout): File untracked out-of-scope defects in owned repos (#836)
