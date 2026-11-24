@@ -41,7 +41,7 @@ The full preconditions and authority-of-record detail of each `rules/dependency-
 
 ## First-Party Co-Shipped Dependency Carve-Out
 
-- The covered reference MUST carry no specifier at all — a bare `owner/repo` install. A branch ref, a tag, and a commit SHA are all specifiers and all stay forbidden under this carve-out
+- The install reference resolves to the dependency's current default branch on every consumer deploy
 - The exemption reaches that reference alone — never the project's lock file, and never a sibling dependency in the same manifest
 - Preconditions (each covered reference, all required):
   1. Project documentation names every covered reference, who owns both sides, and what stands in for the version-bump review

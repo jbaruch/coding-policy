@@ -65,8 +65,8 @@ Every other release script retains the JSON-producing requirement.
 
 ## Bounded Runner Stdout
 
-Applies to `skills/release/lib/bounded-run.sh` when a caller runs another script
-under a wall-clock budget.
+Applies to `skills/release/lib/bounded-run.sh` when a caller runs a script or an
+existing third-party tool under a wall-clock budget.
 
 Preconditions (all required):
 
@@ -74,7 +74,7 @@ Preconditions (all required):
 2. The runner adds nothing to stdout on success.
 3. On a spent budget the runner adds nothing to stdout, writes a diagnostic to stderr, and exits 124.
 4. The runner's own failures exit non-zero and write only to stderr.
-5. The wrapped command itself satisfies Script Requirements.
+5. A wrapped skill script remains subject to Script Requirements. Existing third-party tools may use their own output contracts.
 6. A caller discards the wrapped command's partial stdout on exit 124 or 125.
 
 Every other skill script retains the JSON-producing requirement.
