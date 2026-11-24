@@ -1,3 +1,7 @@
+## 0.10.42 — 2026-11-24
+
+- fix(policy): Narrow two carve-out preconditions (#893)
+
 ## 0.10.41 — 2026-11-24
 
 - fix(policy): Scope post-edit audits to changed obligations (#885)
