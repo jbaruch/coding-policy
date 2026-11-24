@@ -6,6 +6,7 @@
     "enabled": true
   },
   "ignorePaths": [".github/workflows/*.lock.yml"],
+  "prBodyNotes": ["No issue"],
   "customManagers": [
     {
       "customType": "regex",
