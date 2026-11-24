@@ -1,3 +1,7 @@
+## 0.10.31 — 2026-11-24
+
+- fix(release): Hold readiness when CI is absent and merge is blocked (#891)
+
 ## 0.10.30 — 2026-11-23
 
 - fix(review): Bind Claude verdicts to the analyzed commit (#889)
