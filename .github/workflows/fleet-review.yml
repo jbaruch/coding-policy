@@ -196,28 +196,25 @@ jobs:
           REVIEWER_LOGIN: ${{ steps.apptoken.outputs.app-slug }}[bot]
           REVIEW_LANE: ${{ matrix.lane }}
           CLAUDE_CODE_OAUTH_TOKEN: ${{ matrix.lane == 'quality' && secrets.CLAUDE_CODE_OAUTH_TOKEN || '' }}
-          DISPATCH_REPO: ${{ github.event.inputs.repo }}
-          DISPATCH_PR: ${{ github.event.inputs.pr }}
-          DISPATCH_BASE: ${{ github.event.inputs.base }}
         run: |
           set -euo pipefail
-          # Validate inputs up front so a bad dispatch fails here, not deep in a git fetch.
-          if ! [[ "${DISPATCH_REPO}" =~ ^[A-Za-z0-9._-]+$ ]]; then
-            echo "error: dispatch input 'repo' must be a bare repo name under jbaruch/ (no owner/slash), got '${DISPATCH_REPO}'" >&2
+          # Actions prints step environment values. Validate event data before shell capture.
+          if ! repo=$(jq -er '.inputs.repo | strings | select(test("^[A-Za-z0-9._-]+\\z"))' "$GITHUB_EVENT_PATH" 2>/dev/null); then
+            echo "error: dispatch input 'repo' must be a bare repo name under jbaruch/" >&2
             exit 1
           fi
-          if ! [[ "${DISPATCH_PR:-}" =~ ^[0-9]+$ ]]; then
-            echo "error: dispatch input 'pr' must be a number, got '${DISPATCH_PR:-}'" >&2
+          if ! pr=$(jq -er '.inputs.pr | strings | select(test("^[1-9][0-9]*\\z"))' "$GITHUB_EVENT_PATH" 2>/dev/null); then
+            echo "error: dispatch input 'pr' must be a positive PR number" >&2
             exit 1
           fi
-          if [ -z "${DISPATCH_BASE:-}" ]; then
-            echo "error: dispatch input 'base' is required when 'repo' is set" >&2
+          if ! base=$(jq -er '.inputs.base | strings | select(length > 0 and (test("\\p{Cc}") | not))' "$GITHUB_EVENT_PATH" 2>/dev/null); then
+            echo "error: dispatch input 'base' must be a nonempty branch name" >&2
             exit 1
           fi
           if [ "$REVIEW_LANE" = quality ]; then
-            python3 .github/claude-review/review.py jbaruch "$DISPATCH_REPO" "$DISPATCH_PR" "$DISPATCH_BASE"
+            python3 .github/claude-review/review.py jbaruch "$repo" "$pr" "$base"
           else
-            bash .github/codex-review/fleet-review-one.sh jbaruch "$DISPATCH_REPO" "$DISPATCH_PR" "$DISPATCH_BASE"
+            bash .github/codex-review/fleet-review-one.sh jbaruch "$repo" "$pr" "$base"
           fi
 
       - name: Drop the Codex credential

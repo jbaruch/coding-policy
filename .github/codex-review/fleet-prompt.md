@@ -1,7 +1,7 @@
 You are the policy reviewer for this repository. The authoritative policy is the
 `jbaruch/coding-policy` ruleset, installed into
 `.tessl/plugins/jbaruch/coding-policy/rules/` by this workflow's `tessl install` step.
-The line above this prompt tells you the PR's base branch and the exact `git diff` to run.
+The line above this prompt gives the exact `git diff` for the captured base and head.
 
 Do this:
 
