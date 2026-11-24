@@ -14,6 +14,10 @@ artifacts:
       path: rules/sync-before-work.md
       activation:
         mode: always
+    - id: required-read
+      path: rules/required-read.md
+      activation:
+        mode: always
     - id: testing-standards
       path: rules/testing-standards.md
       activation:
