@@ -31,14 +31,20 @@ main() {
     return 1
   fi
 
-  # GitHub recognizes bracketed controls anywhere in the message. Reserve
-  # a full skip-checks: true line, including the no-space spelling, before
-  # Git has a chance to normalize the message's whitespace.
+  # GitHub recognizes bracketed controls anywhere in the message. Let Git
+  # identify trailers so a skip-checks example in the body remains prose.
   local skip_marker='\[(skip ci|ci skip|no ci|skip actions|actions skip)\]'
   local skip_trailer=$'(^|\n)[[:blank:]]*skip-checks:[[:blank:]]*true[[:blank:]\r]*(\n|$)'
+  local trailers
+  # Local trailer aliases and separators do not control GitHub's parser.
+  if ! trailers=$(GIT_DIR=/dev/null GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null \
+    git interpret-trailers --parse --no-divider <<< "$commit_message"); then
+    echo 'error: cannot parse stamp-changelog commit trailers; check the Git installation and retry.' >&2
+    return 1
+  fi
   if (
     shopt -s nocasematch
-    [[ "$commit_message" =~ $skip_marker || "$commit_message" =~ $skip_trailer ]]
+    [[ "$commit_message" =~ $skip_marker || "$trailers" =~ $skip_trailer ]]
   ); then
     echo 'error: stamp-changelog commit message contains a GitHub CI-skip control; remove it before stamping.' >&2
     return 1

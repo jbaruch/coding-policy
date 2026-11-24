@@ -148,14 +148,14 @@ A successful watch proceeds to the dual-release confirmations with the selected 
 
 ### Dual-release confirmations (this repository)
 
-From the publisher's checkout, resolve bookkeeping using the original source SHA and bound publisher run ID. The helper reads the original publish attempt's job log and fetches `main` from `jbaruch/coding-policy`, including after an ACR-only retry.
+From the publisher's checkout, resolve bookkeeping using the original source SHA and bound publisher run ID. The helper reads the stamp-producing publish job's log and fetches `main` from `jbaruch/coding-policy`, including after a publish or ACR-only retry.
 
 ```bash
 KS=.tessl/plugins/jbaruch/coding-policy/skills/release/; [ -d "$KS" ] || KS="$HOME/$KS"; [ -d "$KS" ] || case "$(git config --get remote.origin.url)" in git@github.com:jbaruch/coding-policy|git@github.com:jbaruch/coding-policy.git|https://github.com/jbaruch/coding-policy|https://github.com/jbaruch/coding-policy.git|ssh://git@github.com/jbaruch/coding-policy|ssh://git@github.com/jbaruch/coding-policy.git) KS=skills/release/ ;; *) echo "coding-policy skill not found: run tessl install jbaruch/coding-policy" >&2; exit 1 ;; esac
 bash "$KS/resolve-bookkeeping-stamp.sh" <source-sha> <bound-run-id>
 ```
 
-Exit 0 returns JSON with `outcome` and `source_commit`. Record `source_commit` as `<release-sha>` for the ACR tag check. `pushed` identifies the verified bookkeeping commit. `noop` identifies the original source when the publisher explicitly recorded no bookkeeping change. A non-zero exit stops confirmation, including when the original job archive is unavailable. The header of `skills/release/resolve-bookkeeping-stamp.sh` owns the evidence and exit contract.
+Exit 0 returns JSON with `outcome` and `source_commit`. Record `source_commit` as `<release-sha>` for the ACR tag check. `pushed` identifies the verified bookkeeping commit. `noop` identifies the original source when the publisher explicitly recorded no bookkeeping change. A non-zero exit stops confirmation, including when the selected job archive is unavailable. The header of `skills/release/resolve-bookkeeping-stamp.sh` owns the evidence and exit contract.
 
 For `pushed`, pass `<owner> <repo> <release-sha> tests.yml main` to `resolve-publish-run.sh` as above. Watch the emitted `database_id` with `gh run watch <id> --repo <owner>/<repo> --exit-status`. For `noop`, report that no bookkeeping push occurred and proceed to the channel checks.
 

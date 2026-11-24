@@ -112,7 +112,7 @@ t_noop_when_nothing_staged() {
 t_commit_message_preserved() {
   local root; root="$(_sandbox)"
   printf '\n### entry\n' >> "$root/work/CHANGELOG.md"
-  local message=$'Document skip-checks: true in the changelog\n\nskip-checks: false'
+  local message=$'Document the skip-checks trailer\n\nskip-checks: true\nThis example belongs in the changelog.\n\nskip-checks: false'
   _run_json "$root" CHANGELOG.md "$message" main branch >/dev/null \
     || { echo "    FAIL: script exited non-zero" >&2; return 1; }
   [[ "$(_remote_msg "$root")" == "$message" ]] \
@@ -124,6 +124,7 @@ t_refuses_ci_skip_controls() {
   root="$(_sandbox)"
   before="$(_remote_sha "$root")"
   printf '\n### entry\n' >> "$root/work/CHANGELOG.md"
+  git -C "$root/work" config trailer.separators '=' || return 1
   for message in 'Stamp [skip ci]' 'Stamp [ci skip]' 'Stamp [no ci]' 'Stamp [skip actions]' \
     'Stamp [actions skip]' $'Stamp\n\nBody [SKIP CI]' $'Stamp\n\n\nskip-checks:true' \
     $'Stamp\n\n\nReviewed-by: Example\nskip-checks: true'; do

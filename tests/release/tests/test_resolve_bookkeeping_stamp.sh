@@ -22,10 +22,14 @@ gh() (
   cd "$BOOKKEEPING_FIXTURE"
   local route=repos/jbaruch/coding-policy/actions/runs/142
   case "$*" in
-    "api --hostname github.com $route/attempts/1 --jq "*) jq -r "$6" run.json ;;
-    "api --hostname github.com --paginate $route/attempts/1/jobs --jq "*) jq -r "$7" jobs.json ;;
-    "run view --repo github.com/jbaruch/coding-policy --attempt 1 --job 573 --log")
-      cat job.log
+    "api --hostname github.com $route --jq "*) jq -r "$6" run.json ;;
+    "api --hostname github.com --paginate $route/attempts/"*"/jobs --jq "*)
+      local attempt=${5#"$route/attempts/"}
+      jq -r "$7" "jobs-${attempt%/jobs}.json"
+      ;;
+    "run view --repo github.com/jbaruch/coding-policy --attempt 1 --job 573 --log"|\
+    "run view --repo github.com/jbaruch/coding-policy --attempt 2 --job 675 --log")
+      cat "job-$8.log"
       exit "${LOG_EXIT:-0}"
       ;;
     *) echo "unexpected GitHub read: $*" >&2; exit 99 ;;
@@ -49,14 +53,19 @@ setup() {
   cat > ../run.json <<JSON
 {"id":142,"path":".github/workflows/publish.yml","head_branch":"main","head_sha":"$SOURCE","run_attempt":1,"event":"push","status":"completed","conclusion":"success"}
 JSON
-  cat > ../jobs.json <<JSON
-{"total_count":2,"jobs":[{"id":573,"name":"publish","run_id":142,"head_sha":"$SOURCE","run_attempt":1},{"id":574,"name":"acr","run_id":142,"head_sha":"$SOURCE","run_attempt":1}]}
+  cat > ../jobs-1.json <<JSON
+{"total_count":2,"jobs":[
+  {"id":573,"name":"publish","run_id":142,"head_sha":"$SOURCE","run_attempt":1,
+   "status":"completed","conclusion":"success","steps":[
+     {"name":"Run unit tests","status":"completed","conclusion":"success"},
+     {"name":"Stamp CHANGELOG and publish next patch","status":"completed","conclusion":"success"}]},
+  {"id":574,"name":"acr","run_id":142,"head_sha":"$SOURCE","run_attempt":1,"status":"completed","conclusion":"success"}]}
 JSON
-  : > ../job.log
+  : > ../job-573.log
 }
 
 log_line() {
-  printf 'publish\t%s\t2025-01-01T00:00:00.0000000Z %s\n' "$1" "$2" >> ../job.log
+  printf 'publish\t%s\t2025-01-01T00:00:00.0000000Z %s\n' "$1" "$2" >> ../job-573.log
 }
 
 stamp_line() { log_line 'Stamp CHANGELOG and publish next patch' "smart-publish: pushing bookkeeping commit $1 to main."; }
@@ -66,6 +75,15 @@ push_main() { git push --quiet ../remote.git HEAD:main; }
 edit_fixture() {
   jq "$2" "../$1.json" > "../$1.new"
   mv "../$1.new" "../$1.json"
+}
+
+publish_retry() {
+  jq '.jobs[0].id = 675 | del(.jobs[0].run_attempt) |
+      .jobs[1] |= (.id = 676 | .run_attempt = 2 | .conclusion = "failure")' ../jobs-1.json > ../jobs-2.json
+  edit_fixture run '.run_attempt = 2 | .conclusion = "failure"'
+  stamp_line "$STAMP"
+  mv ../job-573.log ../job-675.log
+  push_main
 }
 
 expect_result() {
@@ -84,8 +102,9 @@ expect_refusal() {
   fi
 }
 
-for scenario in pushed lost_reply noop acr_retry unavailable_run unavailable_log wrong_run absent_job \
-  ambiguous_job wrong_attempt wrong_job_source missing_marker ambiguous_stamps conflicting_noop wrong_ref wrong_parent unlanded fetch_failure; do
+for scenario in pushed lost_reply noop acr_retry publish_then_acr_retry unavailable_run unavailable_log wrong_run absent_job \
+  ambiguous_job wrong_attempt wrong_job_source unclear_earlier_attempt two_publish_attempts skipped_stamp \
+  missing_marker ambiguous_stamps conflicting_noop wrong_ref wrong_parent unlanded fetch_failure; do
   (
     setup "$scenario"
     case "$scenario" in
@@ -100,6 +119,7 @@ for scenario in pushed lost_reply noop acr_retry unavailable_run unavailable_log
         stamp_line "$STAMP"
         log_line 'Stamp CHANGELOG and publish next patch' 'error: git push reported failure.'
         edit_fixture run '.conclusion = "failure"'
+        edit_fixture jobs-1 '.jobs[0] |= (.conclusion = "failure" | .steps[1].conclusion = "failure")'
         push_main
         expect_result pushed "$STAMP"
         ;;
@@ -109,20 +129,43 @@ for scenario in pushed lost_reply noop acr_retry unavailable_run unavailable_log
         expect_result noop "$SOURCE"
         ;;
       acr_retry)
-        # The transport exposes only the original job and archive, even if the
-        # latest attempt contains only ACR. The job row need not repeat the attempt.
-        edit_fixture jobs 'del(.jobs[0].run_attempt)'
+        jq '{total_count:1,jobs:[.jobs[1] | .id = 676 | .run_attempt = 2]}' ../jobs-1.json > ../jobs-2.json
+        edit_fixture run '.run_attempt = 2'
         stamp_line "$STAMP"
         push_main
+        expect_result pushed "$STAMP"
+        ;;
+      publish_then_acr_retry)
+        # Run 40945432139 failed its tests before stamping, then reran publish.
+        publish_retry
+        edit_fixture jobs-1 '.jobs[0] |= (.conclusion = "failure" |
+          .steps[0].conclusion = "failure" | .steps[1].conclusion = "skipped") |
+          .jobs[1].conclusion = "skipped"'
+        expect_result pushed "$STAMP"
+        jq '{total_count:1,jobs:[.jobs[1] | .id = 776 | .run_attempt = 3 | .conclusion = "success"]}' ../jobs-2.json > ../jobs-3.json
+        edit_fixture run '.run_attempt = 3 | .conclusion = "success"'
         expect_result pushed "$STAMP"
         ;;
       unavailable_run) rm ../run.json; expect_refusal 'cannot read run' ;;
       unavailable_log) noop_line; LOG_EXIT=7 expect_refusal 'cannot read the log' ;;
       wrong_run) edit_fixture run '.path = ".github/workflows/tests.yml"'; expect_refusal 'does not match publish.yml' ;;
-      absent_job) edit_fixture jobs 'del(.jobs[0])'; expect_refusal 'no unique source-bound publish job' ;;
-      ambiguous_job) edit_fixture jobs '.jobs += [.jobs[0] | .id = 575]'; expect_refusal 'no unique source-bound publish job' ;;
-      wrong_attempt) edit_fixture jobs '.jobs[0].run_attempt = 2'; expect_refusal 'no unique source-bound publish job' ;;
-      wrong_job_source) edit_fixture jobs '.jobs[0].head_sha = "other"'; expect_refusal 'no unique source-bound publish job' ;;
+      absent_job) edit_fixture jobs-1 'del(.jobs[0])'; expect_refusal 'no unique source-bound completed publish job' ;;
+      ambiguous_job) edit_fixture jobs-1 '.jobs += [.jobs[0] | .id = 575]'; expect_refusal 'no unique source-bound completed publish job' ;;
+      wrong_attempt) edit_fixture jobs-1 '.jobs[0].run_attempt = 2'; expect_refusal 'no unique source-bound completed publish job' ;;
+      wrong_job_source) edit_fixture jobs-1 '.jobs[0].head_sha = "other"'; expect_refusal 'no unique source-bound completed publish job' ;;
+      unclear_earlier_attempt)
+        publish_retry
+        edit_fixture jobs-1 '.jobs[0] |= (.conclusion = "failure" | del(.steps[1]))'
+        expect_refusal 'attempt 1 job 573 has no conclusive stamp step metadata'
+        ;;
+      two_publish_attempts)
+        publish_retry
+        expect_refusal 'attempts 1 and 2 both have a publish job with an unskipped stamp step'
+        ;;
+      skipped_stamp)
+        edit_fixture jobs-1 '.jobs[0].steps[1].conclusion = "skipped"'
+        expect_refusal 'no publish job that ran the stamp step'
+        ;;
       missing_marker) log_line 'UNKNOWN STEP' 'smart-publish: manifest already at 0.1.1, nothing to commit back.'; expect_refusal 'no unique bookkeeping result' ;;
       ambiguous_stamps) stamp_line "$STAMP"; stamp_line "$SOURCE"; expect_refusal 'no unique bookkeeping result' ;;
       conflicting_noop) stamp_line "$STAMP"; noop_line; expect_refusal 'no unique bookkeeping result' ;;
