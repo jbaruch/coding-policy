@@ -17,6 +17,7 @@ alwaysApply: true
 - Record optional hardening, presentation, unproven harm or a tracked root cause once in the task record or PR body, never an issue
 - **Unrelated blocking risk** — record it once with evidence, consequence, owner if known, and required next decision: in the issue an out-of-scope finding files, else the existing authorized task record or current conversation
 - **Advisory** — use `rules/review-severity.md` Split Reading From Acting
+- Maintenance due in another repository and unrelated checkout hygiene stay observations and never gate the selected task
 - `rules/external-repo-contributions.md` governs repositories the operator does not own
 
 ## Reconciliation With `commit-conventions`
