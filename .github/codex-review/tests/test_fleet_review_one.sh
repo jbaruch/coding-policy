@@ -467,15 +467,16 @@ t_unusable_manifests() {
   printf '%s' '{"dependencies":{"jbaruch/nanoclaw-core":{"version":"1.0.0","source":"source-input-sentinel"},"jbaruch/optional":{"version":"latest"},"third-party/range":{"version":"pin-input-sentinel"}}}' \
     > "$remote/unsupported.json" && ln -s unsupported.json "$remote/link.json" && commit_fixture "$remote" || exit 2
   review_fixture main CORE_CONTEXT_LOG="$CODEXH/core.log"
-  if [[ "$RC" -eq 0 && ! -e "$CODEXH/core.log" && $(wc -l < "$CODEXH/installs") -eq 1 ]] &&
+  if [[ "$RC" -eq 0 && ! -e "$CODEXH/core.log" && $(wc -l < "$CODEXH/installs") -eq 2 ]] &&
+      grep -qFx 'install --strict --yes --accept-warnings jbaruch/optional' "$CODEXH/installs" &&
       jq -e '.event == "APPROVE" and (.body | contains("line 6: use a regular committed file") and
         contains("line 7: use a repository-relative path") and contains("line 8: use a repository-relative path") and
         ([scan("declare one JSON object")] | length == 4) and
         contains("jbaruch/nanoclaw-core: declare a registry version") and
-        contains("jbaruch/optional: declare an exact SemVer") and contains("third-party/range: declare an exact SemVer"))' \
+        (contains("jbaruch/optional") | not) and contains("third-party/range: declare an exact SemVer"))' \
         "$CODEXH/posted.jsonl" >/dev/null &&
       ! grep -q 'input-sentinel' "$CODEXH/stderr" "$CODEXH/prompt" "$CODEXH/posted.jsonl"; then
-    ok 'malformed, nonregular and unsupported optional inputs yield redacted limitations without installs'
+    ok 'first-party latest in extra manifest installs; malformed, nonregular and other unsupported inputs yield redacted limitations'
   else
     bad "optional input validation or redaction failed (rc=$RC)"
   fi

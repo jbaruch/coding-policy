@@ -122,7 +122,7 @@ def selection(base: str, head: str) -> dict:
             if name == "jbaruch/nanoclaw-core":
                 # The declaration enrolls Core. The materializer owns its pin.
                 spec = name
-            elif version == "latest" and path == ROOT and name.startswith("jbaruch/"):
+            elif version == "latest" and name.startswith("jbaruch/"):
                 spec = name
             elif SEMVER.fullmatch(version):
                 spec = f"{name}@{version}"
