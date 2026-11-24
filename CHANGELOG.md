@@ -1,3 +1,7 @@
+## 0.10.46 — 2026-11-24
+
+- Update actions/create-github-app-token digest to f418cff (#867)
+
 ## 0.10.45 — 2026-11-24
 
 - Update actions/setup-go action to v7.1.0 (#845)
