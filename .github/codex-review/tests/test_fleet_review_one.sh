@@ -390,6 +390,7 @@ t_root_only() {
   "$REAL_GIT" -C "$remote" checkout -qb head-only || exit 2
   printf '%s\n' 'head.json' > "$remote/.github/fleet-review-manifests" &&
     printf '%s\n' '{"dependencies":{"third-party/head-only":{"version":"1.0.0"}}}' > "$remote/head.json" &&
+    printf '{}\0' > "$remote/tessl.json" &&
     commit_fixture "$remote" && "$REAL_GIT" -C "$remote" update-ref refs/pull/7/head HEAD || exit 2
   "$REAL_GIT" -C "$remote" checkout -q main || exit 2
   for list in absent comments; do
@@ -401,7 +402,7 @@ t_root_only() {
     if [[ "$RC" -eq 0 && $(cat "$CODEXH/installs") == \
       $'install --yes --accept-warnings jbaruch/coding-policy\ninstall --strict --yes --accept-warnings jbaruch/provider\ninstall --strict --yes third-party/policy@2.3.4' ]] &&
         jq -e '.event == "APPROVE" and (.body | contains("limitations") | not)' "$CODEXH/posted.jsonl" >/dev/null; then
-      ok "$list base list keeps root installs and ignores the head-only list"
+      ok "$list base list keeps root installs despite a malformed head root and head-only list"
     else
       bad "$list base list must use root authority only (rc=$RC)"
     fi
@@ -478,14 +479,82 @@ t_unusable_manifests() {
   else
     bad "optional input validation or redaction failed (rc=$RC)"
   fi
-  printf '{}\0' > "$remote/tessl.json" && commit_fixture "$remote" || exit 2
+  rmwarn "$BIN" "$CENTRAL" "$CODEXH"
+}
+
+t_malformed_root_repair() {
+  local env_line remote base head repair_head oid mode expected_error
+  local limitation='The base tessl.json was unusable and was omitted for this repair review.'
+  env_line=$(make_env) || exit 2
+  read -r BIN CENTRAL CODEXH <<< "$env_line"
+  remote="$CODEXH/remote"
+  mkdir -p "$remote/.github" &&
+    printf '%s\n' 'extra.json' > "$remote/.github/fleet-review-manifests" &&
+    printf '%s\n' '{"dependencies":{"third-party/base":{"version":"1.2.3"}}}' > "$remote/extra.json" &&
+    printf '{}\0' > "$remote/tessl.json" && commit_fixture "$remote" || exit 2
+  base=$("$REAL_GIT" -C "$remote" rev-parse main) || exit 2
+
+  # The original head diverged before the root was added, so its review delta leaves the root unchanged.
   review_fixture main
-  if [[ "$RC" -ne 0 && ! -e "$CODEXH/prompt" && ! -e "$CODEXH/posted.jsonl" ]] &&
-      grep -qF 'could not parse dependencies from base tessl.json' "$CODEXH/stderr"; then
-    ok 'raw NUL in the root manifest fails closed'
+  if [[ "$RC" -ne 0 && ! -e "$CODEXH/installs" && ! -e "$CODEXH/prompt" && ! -e "$CODEXH/posted.jsonl" ]] &&
+      grep -qF 'Commit a valid replacement or delete tessl.json' "$CODEXH/stderr"; then
+    ok 'a stale head with no root change in the review delta cannot repair a malformed base root'
   else
-    bad "malformed root must stop the review (rc=$RC)"
+    bad "a stale head must not be treated as a root deletion (rc=$RC)"
   fi
+
+  "$REAL_GIT" -C "$remote" checkout -qb root-repair || exit 2
+  printf '%s\n' '{"dependencies":{"third-party/base":{"version":"9.9.9"}}}' > "$remote/extra.json" || exit 2
+  for mode in replacement deletion; do
+    case "$mode" in
+      replacement)
+        printf '%s\n' '{"dependencies":{"jbaruch/nanoclaw-core":{"version":"latest"},"third-party/head-root":{"version":"4.5.6"}}}' \
+          > "$remote/tessl.json" || exit 2 ;;
+      deletion) rm "$remote/tessl.json" || exit 2 ;;
+    esac
+    commit_fixture "$remote" && "$REAL_GIT" -C "$remote" update-ref refs/pull/7/head HEAD || exit 2
+    head=$("$REAL_GIT" -C "$remote" rev-parse HEAD) || exit 2
+    if [[ "$mode" == replacement ]]; then repair_head=$head; fi
+    review_fixture main MOVE_TRACKING_BASE=main CORE_CONTEXT_LOG="$CODEXH/core.log"
+    if [[ "$RC" -eq 0 && ! -e "$CODEXH/core.log" && $(cat "$CODEXH/installs") == \
+      $'install --yes --accept-warnings jbaruch/coding-policy\ninstall --strict --yes third-party/base@1.2.3' ]] &&
+        grep -qF "git diff $base...$head" "$CODEXH/prompt" &&
+        grep -qF "$limitation" "$CODEXH/prompt" &&
+        jq -e --arg head "$head" --arg limitation "$limitation" '.commit_id == $head and .event == "APPROVE" and
+          (.body | contains("\n\nReview installation limitations\n- " + $limitation + "\n"))' "$CODEXH/posted.jsonl" >/dev/null &&
+        ! grep -qE 'third-party/head-root|jbaruch/nanoclaw-core|9\.9\.9' "$CODEXH/stderr" "$CODEXH/prompt" "$CODEXH/posted.jsonl"; then
+      ok "root $mode reviews the captured head with only base extra authority and a fixed limitation"
+    else
+      bad "root $mode did not preserve base authority or post the repair limitation (rc=$RC)"
+    fi
+  done
+
+  for mode in invalid nonregular unavailable; do
+    case "$mode" in
+      invalid)
+        printf '%s\n' '{"dependencies":null}' > "$remote/tessl.json" && commit_fixture "$remote" || exit 2
+        expected_error='Commit a valid replacement or delete tessl.json' ;;
+      nonregular)
+        rm "$remote/tessl.json" && ln -s extra.json "$remote/tessl.json" && commit_fixture "$remote" || exit 2
+        expected_error='use a regular committed file' ;;
+      unavailable)
+        oid=$("$REAL_GIT" -C "$remote" rev-parse "$repair_head:tessl.json") &&
+          "$REAL_GIT" -C "$remote" update-ref refs/pull/7/head "$repair_head" || exit 2
+        expected_error='git cat-file failed' ;;
+    esac
+    if [[ "$mode" == unavailable ]]; then
+      review_fixture main DROP_BLOB="$oid"
+    else
+      "$REAL_GIT" -C "$remote" update-ref refs/pull/7/head HEAD || exit 2
+      review_fixture main
+    fi
+    if [[ "$RC" -ne 0 && ! -e "$CODEXH/installs" && ! -e "$CODEXH/prompt" && ! -e "$CODEXH/posted.jsonl" ]] &&
+        grep -qF "$expected_error" "$CODEXH/stderr"; then
+      ok "$mode head root fails before installs, Codex or posting"
+    else
+      bad "$mode head root must stop recovery (rc=$RC)"
+    fi
+  done
   rmwarn "$BIN" "$CENTRAL" "$CODEXH"
 }
 
@@ -593,6 +662,7 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
   t_root_only
   t_base_selection_and_repair
   t_unusable_manifests
+  t_malformed_root_repair
   t_dispatch_and_checkout_trust
   t_install_refusal_and_posting
   echo "== summary: ${pass} passed, ${fail} failed =="

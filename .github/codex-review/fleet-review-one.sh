@@ -134,10 +134,10 @@ main() {
     exit 1
   fi
 
-  # Read the base's committed inputs before installing anything. A tool failure
-  # or malformed root stops review, while unusable optional inputs yield gaps.
+  # Select installs from the captured base before installing anything. Consult
+  # the captured head only to confirm a repair of a malformed base root.
   local plan installs limitations
-  plan=$(cd "$work" && python3 -I "$manifests" "$base_sha") || exit 1
+  plan=$(cd "$work" && python3 -I "$manifests" "$base_sha" "$reviewed_sha") || exit 1
   installs=$(jq -r '.installs[] | @tsv' <<< "$plan") || exit 1
   limitations=$(jq -r '.limitations[] | "- " + .' <<< "$plan") || exit 1
   if [[ -n "$limitations" ]]; then

@@ -29,8 +29,8 @@ def git(command: str, *args: str) -> bytes:
     return result.stdout
 
 
-def blob(base: str, path: str) -> bytes | None:
-    entry = git("ls-tree", "--full-tree", "--format=%(objectmode) %(objectname)", base, "--", path)
+def blob(commit: str, path: str) -> bytes | None:
+    entry = git("ls-tree", "--full-tree", "--format=%(objectmode) %(objectname)", commit, "--", path)
     if not entry:
         return None
     mode, oid = entry.split()
@@ -70,7 +70,7 @@ def dependencies(data: bytes) -> dict:
     return deps
 
 
-def selection(base: str) -> dict:
+def selection(base: str, head: str) -> dict:
     limitations = []
     manifests = {ROOT: ROOT}
     try:
@@ -101,8 +101,18 @@ def selection(base: str) -> dict:
             deps = dependencies(data)
         except ManifestError as error:
             if path == ROOT:
-                sys.exit(f"error: could not parse dependencies from base {ROOT} — {error} before reviewing")
-            limitations.append(f"{location}: {error} on the base.")
+                try:
+                    if not git("diff", "--name-only", f"{base}...{head}", "--", ROOT):
+                        raise error
+                    repaired = blob(head, ROOT)
+                    if repaired is not None:
+                        dependencies(repaired)
+                except ManifestError as repair_error:
+                    sys.exit(f"error: could not parse dependencies from base {ROOT} — {repair_error}. "
+                             f"Commit a valid replacement or delete {ROOT} before reviewing.")
+                limitations.append(f"The base {ROOT} was unusable and was omitted for this repair review.")
+            else:
+                limitations.append(f"{location}: {error} on the base.")
             continue
         for name, record in sorted(deps.items()):
             if "source" in record:
@@ -132,4 +142,4 @@ def selection(base: str) -> dict:
 
 
 if __name__ == "__main__":
-    print(json.dumps(selection(sys.argv[1])))
+    print(json.dumps(selection(sys.argv[1], sys.argv[2])))

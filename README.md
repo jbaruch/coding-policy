@@ -102,7 +102,9 @@ Tessl imports. Combined native-session acceptance lives in
 
 On-demand [review calibration](skills/coding-contracts/references/review-calibration.md) compares a small fixed PR sample with the same role, instructions and source packet for both models. Assess useful defects, unsupported blockers, unnecessary work and observed rounds. The ordinary Codex-policy and Claude-quality lanes have different contexts and do not establish a matched model comparison.
 
-Fleet consumers can commit `.github/fleet-review-manifests` with one repository-relative manifest path per line, such as `tessl-workspace/tessl.json`. Blank lines and comments beginning with `#` are allowed. The policy reviewer reads the list and manifests from the captured PR target commit. An absent or blank/comment-only list uses only the root `tessl.json`. Extra manifests declare exact registry versions. Missing or invalid optional manifests and unavailable optional installs appear in the review summary while review continues with the available rules.
+Fleet consumers can commit `.github/fleet-review-manifests` with one repository-relative manifest path per line, such as `tessl-workspace/tessl.json`. Blank lines and comments beginning with `#` are allowed. The policy reviewer reads the list and manifests from the captured PR target commit. An absent or blank/comment-only list uses only the root `tessl.json`. For ordinary plugins, extra manifests declare exact registry versions. Missing or invalid optional manifests and unavailable optional installs appear in the review summary while review continues with the available rules.
+
+A structurally valid `jbaruch/nanoclaw-core` declaration with a `version` and no `source` in a trusted manifest enrolls Core. The reviewer installs its own fixed Core version regardless of the declared version. If the reviewer cannot materialize enrolled Core, it stops before review.
 
 ### Historical central fleet publication
 
