@@ -63,11 +63,6 @@ inputs:
     description: 'Heading date (YYYY-MM-DD). When empty, today in UTC.'
     required: false
     default: ''
-  commit-message:
-    description: |
-      Commit message for the stamp commit, used verbatim. Omit CI-skip markers.
-    required: false
-    default: 'Stamp CHANGELOG for the published version'
 
 runs:
   using: 'composite'
@@ -79,7 +74,6 @@ runs:
         MANIFEST: ${{ inputs.manifest }}
         LATEST: ${{ inputs.latest }}
         DATE: ${{ inputs.date }}
-        COMMIT_MESSAGE: ${{ inputs.commit-message }}
       run: |
         set -eo pipefail
 
@@ -110,4 +104,4 @@ runs:
           echo "::error::commit-stamp.sh not found at $commit_script — verify the pinned jbaruch/coding-policy/.github/actions/stamp-changelog@<ref> in this workflow points at a ref that carries skills/release/commit-stamp.sh, and bump the ref if it is stale." >&2
           exit 1
         fi
-        bash "$commit_script" "$CHANGELOG" "$COMMIT_MESSAGE" "$GITHUB_REF_NAME" "$GITHUB_REF_TYPE"
+        bash "$commit_script" "$CHANGELOG" "$GITHUB_REF_NAME" "$GITHUB_REF_TYPE"

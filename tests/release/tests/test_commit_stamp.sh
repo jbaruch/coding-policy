@@ -4,15 +4,14 @@
 # runs the real script against an isolated temporary bare remote + work clone
 # and asserts on the emitted JSON outcome plus the remote's resulting state,
 # covering:
-#   - self-push: a stamped CHANGELOG lands on the branch as one commit without a CI-skip marker
-#     and the script prints {"outcome":"pushed"};
+#   - self-push: a stamped CHANGELOG lands as one commit with the fixed
+#     message and the script prints {"outcome":"pushed","ref":"main"};
 #   - no-op: an already-headed CHANGELOG prints {"outcome":"noop"}, no push;
-#   - the caller's message is preserved without adding a CI-skip marker;
-#   - GitHub CI-skip controls are refused before a commit or push;
+#   - a rejecting pre-commit hook keeps both branch tips at the seed commit;
 #   - a non-branch (tag) ref is refused — no commit, no tag-named branch;
-#   - an unrelated staged file is NOT swept into the stamp commit.
+#   - the stamp commit changes only CHANGELOG and preserves unrelated staging.
 #
-# Run: bash skills/release/tests/test_commit_stamp.sh
+# Run: bash tests/release/tests/test_commit_stamp.sh
 # Stdout: one JSON line {"suite","passed","failed"}; progress goes to stderr.
 # Exit 0 on all-pass; non-zero with a per-test diagnostic on failure.
 
@@ -71,10 +70,7 @@ _sandbox() {
 }
 
 _remote_sha()   { git -C "$1/remote.git" rev-parse main; }
-_remote_msg()   { git -C "$1/remote.git" log -1 --format=%B main; }
 _remote_count() { git -C "$1/remote.git" rev-list --count main; }
-# Files changed by the remote's tip commit.
-_remote_tip_files() { git -C "$1/remote.git" show --name-only --format= main; }
 
 # Run the script in $work. The caller captures stdout (the JSON outcome) via
 # command substitution; stderr (progress prose, and any failure diagnostic)
@@ -89,69 +85,52 @@ _run_json() {
 t_self_push_lands_one_commit() {
   local root; root="$(_sandbox)"
   printf '\n### new entry\n' >> "$root/work/CHANGELOG.md"
-  local out; out="$(_run_json "$root" CHANGELOG.md "Stamp the version" main branch)" \
+  local out; out="$(_run_json "$root" CHANGELOG.md main branch)" \
     || { echo "    FAIL: script exited non-zero" >&2; return 1; }
-  echo "$out" | jq -e '.outcome == "pushed"' >/dev/null \
-    || { echo "    FAIL: expected outcome=pushed, got: $out" >&2; return 1; }
+  echo "$out" | jq -e '. == {"outcome":"pushed","ref":"main"}' >/dev/null \
+    || { echo "    FAIL: expected pushed outcome for main, got: $out" >&2; return 1; }
   [[ "$(_remote_count "$root")" == "2" ]] || { echo "    FAIL: expected 2 remote commits" >&2; return 1; }
-  [[ "$(_remote_msg "$root")" == "Stamp the version" ]] || { echo "    FAIL: remote commit message changed" >&2; return 1; }
+  git -C "$root/remote.git" cat-file commit main |
+    python3 -c 'import sys; sys.stdout.buffer.write(sys.stdin.buffer.read().split(b"\n\n", 1)[1])' |
+    cmp -s - <(printf 'Stamp CHANGELOG for the published version\n') \
+    || { echo "    FAIL: raw remote commit message differs from the fixed message" >&2; return 1; }
   git -C "$root/remote.git" show main:CHANGELOG.md | grep -q "new entry" \
     || { echo "    FAIL: remote CHANGELOG missing the stamped entry" >&2; return 1; }
 }
 
-t_noop_when_nothing_staged() {
+t_noop_when_changelog_unchanged() {
   local root; root="$(_sandbox)"
   local before; before="$(_remote_sha "$root")"
-  local out; out="$(_run_json "$root" CHANGELOG.md "Stamp" main branch)" \
+  local out; out="$(_run_json "$root" CHANGELOG.md main branch)" \
     || { echo "    FAIL: script exited non-zero on no-op" >&2; return 1; }
-  echo "$out" | jq -e '.outcome == "noop"' >/dev/null \
+  echo "$out" | jq -e '. == {"outcome":"noop"}' >/dev/null \
     || { echo "    FAIL: expected outcome=noop, got: $out" >&2; return 1; }
   [[ "$before" == "$(_remote_sha "$root")" ]] || { echo "    FAIL: remote advanced on a no-op" >&2; return 1; }
+  [[ "$before" == "$(git -C "$root/work" rev-parse refs/heads/main)" ]] \
+    || { echo "    FAIL: local branch advanced on a no-op" >&2; return 1; }
 }
 
-t_commit_message_preserved() {
-  local root; root="$(_sandbox)"
-  printf '\n### entry\n' >> "$root/work/CHANGELOG.md"
-  local message=$'Document the skip-checks trailer\n\nskip-checks: true\nThis example belongs in the changelog.\n\nskip-checks: false\n\n'
-  git -C "$root/work" config commit.cleanup strip || return 1
-  _run_json "$root" CHANGELOG.md "$message" main branch >/dev/null \
-    || { echo "    FAIL: script exited non-zero" >&2; return 1; }
-  git -C "$root/remote.git" log -1 --format=format:%B main | cmp -s - <(printf '%s' "$message") \
-    || { echo "    FAIL: caller message changed" >&2; return 1; }
-}
-
-t_refuses_ci_skip_controls() {
-  local root before message rc out
-  root="$(_sandbox)"
-  before="$(_remote_sha "$root")"
-  printf '\n### entry\n' >> "$root/work/CHANGELOG.md"
-  git -C "$root/work" config trailer.separators '=' || return 1
-  for message in 'Stamp [skip ci]' 'Stamp [ci skip]' 'Stamp [no ci]' 'Stamp [skip actions]' \
-    'Stamp [actions skip]' $'Stamp\n\nBody [SKIP CI]' $'Stamp\n\n\nskip-checks:true' \
-    $'Stamp\n\n\nReviewed-by: Example\nskip-checks: true'; do
-    rc=0
-    out=$(_run_json "$root" CHANGELOG.md "$message" main branch 2>"$root/err") || rc=$?
-    [[ "$rc" == 1 && -z "$out" && "$(cat "$root/err")" == *"CI-skip control"* ]] \
-      || { echo "    FAIL: did not refuse CI-skip message: $message" >&2; return 1; }
-    [[ "$(git -C "$root/work" rev-parse HEAD)" == "$before" && "$(_remote_sha "$root")" == "$before" ]] \
-      || { echo "    FAIL: a CI-skip message mutated local or remote history" >&2; return 1; }
-  done
-}
-
-t_refuses_ci_skip_trailer_with_inherited_config() {
-  local root before local_after remote_after rc=0 out
+t_rejecting_hook_leaves_refs_unchanged() {
+  local root before local_after remote_after rc=0 out hook
   root="$(_sandbox)" || return 1
   before="$(_remote_sha "$root")" || return 1
   printf '\n### entry\n' >> "$root/work/CHANGELOG.md" || return 1
-  out=$(GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=trailer.separators GIT_CONFIG_VALUE_0='=' \
-    GIT_CONFIG_PARAMETERS="'trailer.separators==' 'commit.cleanup=verbatim'" \
-    _run_json "$root" CHANGELOG.md $'Stamp\n\n\nskip-checks:true' main branch 2>"$root/err") || rc=$?
+  hook="$root/work/.git/hooks/pre-commit"
+  git -C "$root/work" config core.hooksPath "${hook%/*}" || return 1
+  cat > "$hook" <<'HOOK' || return 1
+#!/usr/bin/env bash
+set -euo pipefail
+echo 'fixture pre-commit hook rejected the stamp' >&2
+exit 1
+HOOK
+  chmod +x "$hook" || return 1
+  out=$(_run_json "$root" CHANGELOG.md main branch 2>"$root/err") || rc=$?
   local_after="$(git -C "$root/work" rev-parse refs/heads/main)" || return 1
   remote_after="$(_remote_sha "$root")" || return 1
   [[ "$local_after" == "$before" && "$remote_after" == "$before" ]] \
     || { echo "    FAIL: expected both refs at $before, got local $local_after and remote $remote_after" >&2; return 1; }
-  [[ "$rc" == 1 && -z "$out" && "$(cat "$root/err")" == *"CI-skip control"* ]] \
-    || { echo "    FAIL: expected CI-skip refusal under inherited Git config (exit $rc)" >&2; return 1; }
+  [[ "$rc" -ne 0 && -z "$out" && "$(cat "$root/err")" == *"fixture pre-commit hook rejected the stamp"* ]] \
+    || { echo "    FAIL: expected pre-commit refusal and empty stdout (exit $rc), got: $out" >&2; return 1; }
 }
 
 t_refuses_non_branch_ref() {
@@ -159,7 +138,7 @@ t_refuses_non_branch_ref() {
   printf '\n### entry\n' >> "$root/work/CHANGELOG.md"
   local before; before="$(_remote_sha "$root")"
   local err rc
-  err="$( ( cd "$root/work" && bash "$SCRIPT" CHANGELOG.md "Stamp" v1.2.3 tag ) 2>&1 >/dev/null )"; rc=$?
+  err="$(_run_json "$root" CHANGELOG.md v1.2.3 tag 2>&1 >/dev/null)"; rc=$?
   [[ "$rc" -ne 0 ]] || { echo "    FAIL: expected non-zero exit on a tag ref" >&2; return 1; }
   [[ "$err" == *"branch"* ]] || { echo "    FAIL: error message missing 'branch': $err" >&2; return 1; }
   [[ "$before" == "$(_remote_sha "$root")" ]] || { echo "    FAIL: remote main advanced on a tag ref" >&2; return 1; }
@@ -176,26 +155,26 @@ t_does_not_sweep_unrelated_staged_file() {
   # A caller left an unrelated file staged before the stamp step ran.
   printf 'unrelated\n' > "$root/work/unrelated.txt"
   git -C "$root/work" add unrelated.txt
-  _run_json "$root" CHANGELOG.md "Stamp" main branch >/dev/null \
+  _run_json "$root" CHANGELOG.md main branch >/dev/null \
     || { echo "    FAIL: script exited non-zero" >&2; return 1; }
-  local files; files="$(_remote_tip_files "$root")"
-  echo "$files" | grep -qx "CHANGELOG.md" || { echo "    FAIL: stamp commit missing CHANGELOG.md" >&2; return 1; }
-  if echo "$files" | grep -qx "unrelated.txt"; then
-    echo "    FAIL: unrelated staged file was swept into the pushed commit" >&2; return 1
-  fi
+  local files staged
+  files="$(git -C "$root/remote.git" show --name-only --format= main)" || return 1
+  [[ "$files" == "CHANGELOG.md" ]] \
+    || { echo "    FAIL: expected only CHANGELOG.md in the pushed diff, got: $files" >&2; return 1; }
+  staged="$(git -C "$root/work" diff --cached --name-only)" || return 1
+  [[ "$staged" == "unrelated.txt" ]] \
+    || { echo "    FAIL: expected unrelated.txt to remain staged, got: $staged" >&2; return 1; }
 }
 
 # --- driver ---
 
 run_suite() {
   echo "test_commit_stamp.sh" >&2
-  run "self-push lands one commit without a CI-skip marker on the branch"   t_self_push_lands_one_commit
-  run "no commit or push when nothing is staged"             t_noop_when_nothing_staged
-  run "caller message preserved without a CI-skip marker"         t_commit_message_preserved
-  run "GitHub CI-skip controls are rejected before commit or push" t_refuses_ci_skip_controls
-  run "inherited Git config cannot suppress CI-skip trailer refusal" t_refuses_ci_skip_trailer_with_inherited_config
-  run "a non-branch (tag) ref is refused"                    t_refuses_non_branch_ref
-  run "an unrelated staged file is not swept into the commit" t_does_not_sweep_unrelated_staged_file
+  run "self-push lands one commit with the exact fixed message" t_self_push_lands_one_commit
+  run "unchanged CHANGELOG leaves both branch tips in place" t_noop_when_changelog_unchanged
+  run "a rejecting pre-commit hook leaves both branch tips in place" t_rejecting_hook_leaves_refs_unchanged
+  run "a non-branch (tag) ref is refused" t_refuses_non_branch_ref
+  run "self-push changes only CHANGELOG and preserves unrelated staging" t_does_not_sweep_unrelated_staged_file
   printf '{"suite":"test_commit_stamp.sh","passed":%d,"failed":%d}\n' "$PASS_COUNT" "$FAIL_COUNT"
   [[ $FAIL_COUNT -eq 0 ]]
 }

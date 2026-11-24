@@ -138,7 +138,9 @@ KS=.tessl/plugins/jbaruch/coding-policy/skills/release/; [ -d "$KS" ] || KS="$HO
 bash "$KS/resolve-publish-run.sh" <owner> <repo> <source-sha> publish.yml main workflow_dispatch
 ```
 
-On exit 0, record `database_id` as `<dispatch-run-id>` and watch it. A non-zero exit leaves the run unresolved.
+For the first release, if the installed resolver lacks the event argument, run `bash skills/release/resolve-publish-run.sh <owner> <repo> <source-sha> publish.yml main workflow_dispatch` from the reviewed publisher checkout.
+
+On exit 0, record `database_id` as `<dispatch-run-id>` and watch it. A non-zero exit stops confirmation.
 
 ```bash
 gh run watch --repo <owner>/<repo> --exit-status <dispatch-run-id>
