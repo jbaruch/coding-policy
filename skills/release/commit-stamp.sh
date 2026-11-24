@@ -31,14 +31,20 @@ main() {
     return 1
   fi
 
+  # Complete the final line once so the parser and commit read the same bytes.
+  if [[ -n "$commit_message" && "$commit_message" != *$'\n' ]]; then
+    commit_message+=$'\n'
+  fi
+
   # GitHub recognizes bracketed controls anywhere in the message. Let Git
   # identify trailers so a skip-checks example in the body remains prose.
   local skip_marker='\[(skip ci|ci skip|no ci|skip actions|actions skip)\]'
   local skip_trailer=$'(^|\n)[[:blank:]]*skip-checks:[[:blank:]]*true[[:blank:]\r]*(\n|$)'
   local trailers
-  # Local trailer aliases and separators do not control GitHub's parser.
-  if ! trailers=$(GIT_DIR=/dev/null GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null \
-    git interpret-trailers --parse --no-divider <<< "$commit_message"); then
+  # Keep repository, file and environment config out of trailer parsing.
+  if ! trailers=$(printf '%s' "$commit_message" |
+    GIT_DIR=/dev/null GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null \
+    GIT_CONFIG_COUNT=0 GIT_CONFIG_PARAMETERS='' git interpret-trailers --parse --no-divider); then
     echo 'error: cannot parse stamp-changelog commit trailers; check the Git installation and retry.' >&2
     return 1
   fi
@@ -65,7 +71,7 @@ main() {
   git config user.email "github-actions[bot]@users.noreply.github.com"
   # Commit ONLY the changelog path (pathspec) so an unrelated staged file is
   # never swept into the stamp commit and pushed.
-  git commit -m "$commit_message" -- "$changelog" >&2
+  printf '%s' "$commit_message" | git commit --cleanup=verbatim -F - -- "$changelog" >&2
 
   # Always push the stamp commit ourselves rather than delegating to a
   # downstream bump commit. Delegating stranded the stamp whenever the publish

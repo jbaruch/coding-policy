@@ -155,6 +155,8 @@ KS=.tessl/plugins/jbaruch/coding-policy/skills/release/; [ -d "$KS" ] || KS="$HO
 bash "$KS/resolve-bookkeeping-stamp.sh" <source-sha> <bound-run-id>
 ```
 
+For the first delivery, if an older installed skill shadows the reviewed helper, run `bash skills/release/resolve-bookkeeping-stamp.sh <source-sha> <bound-run-id>` from the reviewed publisher checkout.
+
 Exit 0 returns JSON with `outcome` and `source_commit`. Record `source_commit` as `<release-sha>` for the ACR tag check. `pushed` identifies the verified bookkeeping commit. `noop` identifies the original source when the publisher explicitly recorded no bookkeeping change. A non-zero exit stops confirmation, including when the selected job archive is unavailable. The header of `skills/release/resolve-bookkeeping-stamp.sh` owns the evidence and exit contract.
 
 For `pushed`, pass `<owner> <repo> <release-sha> tests.yml main` to `resolve-publish-run.sh` as above. Watch the emitted `database_id` with `gh run watch <id> --repo <owner>/<repo> --exit-status`. For `noop`, report that no bookkeeping push occurred and proceed to the channel checks.
