@@ -21,7 +21,15 @@ The full preconditions of each `rules/ci-safety.md` carve-out, moved out of the 
 - Preconditions (all required):
   1. Commit is authored by the CI bot inside the publish workflow — never a human- or agent-authored PR commit
   2. Sole purpose is the workflow's own release bookkeeping — manifest version bump, CHANGELOG version stamp — carrying no source or test changes that need CI validation
-  3. `[skip ci]` rides only on the commit pushed back to the protected branch, solely to stop self-retrigger
+  3. No CI-skip marker is added
+  4. Prevent recursion through the publish trigger or the push credential's native event suppression
+  5. Never suppress failing tests
+  6. Never bypass a merge gate
+  7. Limit a publish-only paths filter to the bookkeeping paths
+  8. Retain `workflow_dispatch` for a deliberate release changing only the filtered paths
+  9. Keep other workflows eligible on a path-filtered bookkeeping push
+- In this repository, `.github/workflows/publish.yml` owns the ignored path set. Auto-bump, the deploy-key push, the exact-main-ref guard and source-bound publication confirmation remain required
+- Every other protected-branch write follows Protected Branches
 
 ## Content-Only Direct-Push Carve-Out
 

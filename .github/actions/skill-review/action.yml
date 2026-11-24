@@ -10,8 +10,9 @@ description: |
   Detection: `git diff $BASE..HEAD -- $skills-dir/`. BASE is the input
   `base-ref` if provided; else the nearest first-parent, CI-bot-authored
   ancestor whose SUBJECT marks the last successful publish (the `Bump …
-  to X.Y.Z [skip ci]` commit), so a publish that failed after the review
-  step does not drop its changed skills from the next run's window, while
+  to X.Y.Z` commit, accepting the historical CI-skip suffix too), so a
+  publish that failed after the review step does not drop its changed skills
+  from the next run's window, while
   a look-alike commit (merged branch, hand-authored, or body-only match)
   cannot move the base past unreviewed skills.
 

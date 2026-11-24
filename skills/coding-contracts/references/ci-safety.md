@@ -21,10 +21,10 @@
 
 ## Publish-Pipeline Loop-Prevention Carve-Out
 
-- Narrow exception for `[skip ci]` on the publish workflow's own commit to the protected branch
+- Narrow exception for the publish workflow's own bookkeeping commit to the protected branch
 - Applies when that commit would otherwise re-trigger the same publish workflow
 - Preconditions are binding: read `skills/release/references/ci-safety-carve-outs.md` Publish-Pipeline Loop-Prevention Carve-Out before relying on it
-- Every other commit omits `[skip ci]`, and `[skip ci]` never skips failing tests or unblocks a merge
+- Every commit omits CI-skip markers; every other protected-branch write follows Protected Branches
 
 ## Install, Don't Skip
 

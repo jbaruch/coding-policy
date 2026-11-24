@@ -17,6 +17,11 @@ description: |
   `outcome` and its `credit-signature` output. The step still exits with the
   publish command's real code, so `outcome` reflects reality.
 
+  Commit-back messages omit CI-skip markers. The caller must prevent publish
+  recursion through its trigger or push credential behavior, without skipping
+  tests. This repository uses a publish-only paths filter; deliberate releases
+  changing only bookkeeping paths use workflow_dispatch on main.
+
   Requirements (consumer must arrange):
     - `tessl` CLI set up and authenticated earlier in the job
       (`tesslio/setup-tessl@v2`).
@@ -48,7 +53,7 @@ inputs:
 
 outputs:
   source-commit:
-    description: 'Pushed bookkeeping commit containing the published version; empty unless auto-bump commit-back succeeded.'
+    description: 'Auto-bump source SHA, including a verified remote stamp after a push error or the checked-out SHA when no commit was needed.'
     value: ${{ steps.publish.outputs.source-commit }}
   credit-signature:
     description: |

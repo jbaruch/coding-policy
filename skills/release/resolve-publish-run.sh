@@ -17,8 +17,7 @@
 #               `headBranch`, which is what makes an explicit tag ref
 #               resolvable through the same path as a `main` push.
 #   commit    — `headSha == <head-sha>`
-#   event     — `event == "push"`, so a manual `workflow_dispatch`
-#               sharing the commit is excluded
+#   event     — `event == <event>`, defaulting to `push`
 # Unrelated branches or tags pointing at the same commit fail the ref
 # check and are excluded with them.
 #
@@ -33,10 +32,11 @@
 # busy ref with many recent runs doesn't push the match off
 # `gh run list`'s default 20-row page.
 #
-# Usage: resolve-publish-run.sh <owner> <repo> <head-sha> <workflow-name> [ref]
+# Usage: resolve-publish-run.sh <owner> <repo> <head-sha> <workflow-name> [ref [event]]
 #        <ref> defaults to `main` — the four-argument merge-to-main form
 #        is unchanged. Pass a tag name (`v0.1.4`) to resolve a
 #        tag-triggered release run.
+#        <event> is `push` or `workflow_dispatch`.
 # Out:   one JSON object on stdout: {"database_id": N} per
 #        rules/script-delegation.md "JSON-producing"
 # Exit:  0 on success; 1 if the run never appears within the budget, if
@@ -58,8 +58,8 @@ validate_positive_int() {
 }
 
 main() {
-  if [[ $# -lt 4 || $# -gt 5 ]]; then
-    echo "usage: $0 <owner> <repo> <head-sha> <workflow-name> [ref]" >&2
+  if [[ $# -lt 4 || $# -gt 6 ]]; then
+    echo "usage: $0 <owner> <repo> <head-sha> <workflow-name> [ref [event]]" >&2
     exit 2
   fi
   validate_positive_int "RESOLVE_PUBLISH_RUN_INTERVAL_SEC" "$INTERVAL_SEC"
@@ -79,6 +79,11 @@ main() {
     echo "error: ref must not be empty — omit the argument for the default 'main', or pass a branch or tag name" >&2
     exit 2
   fi
+  local event="${6-push}"
+  case "$event" in
+    push|workflow_dispatch) ;;
+    *) echo "error: event must be 'push' or 'workflow_dispatch'; omit it for 'push'" >&2; exit 2 ;;
+  esac
   local elapsed=0 matches match_count
 
   # Git refs permit quotes. Encode both interpolated arguments as jq
@@ -99,13 +104,14 @@ main() {
       --repo "${owner}/${repo}" \
       --branch "$ref" \
       --workflow "$workflow" \
+      --event "$event" \
       --limit "$RUN_LIST_LIMIT" \
       --json databaseId,headSha,event,headBranch \
-      --jq '.[] | select(.headSha == "'"$jq_sha"'") | select(.event == "push") | select(.headBranch == "'"$jq_ref"'") | .databaseId')
+      --jq '.[] | select(.headSha == "'"$jq_sha"'") | select(.event == "'"$event"'") | select(.headBranch == "'"$jq_ref"'") | .databaseId')
     if [[ -n "$matches" ]]; then
       match_count=$(printf '%s\n' "$matches" | wc -l | tr -d ' ')
       if (( match_count > 1 )); then
-        echo "error: ${match_count} '${workflow}' push-event runs match commit ${head_sha} on ref ${ref} in ${owner}/${repo}: $(printf '%s' "$matches" | tr '\n' ' ')— resolve by hand with 'gh run view <id>' and watch the intended run, or delete the duplicate ref push that created the second run" >&2
+        echo "error: ${match_count} '${workflow}' ${event}-event runs match commit ${head_sha} on ref ${ref} in ${owner}/${repo}: $(printf '%s' "$matches" | tr '\n' ' ') — inspect the candidates with 'gh run view <id>' before continuing" >&2
         exit 1
       fi
       if ! [[ "$matches" =~ ^[0-9]+$ ]]; then
@@ -131,7 +137,7 @@ main() {
     elapsed=$(( elapsed + sleep_for ))
   done
 
-  echo "error: no '${workflow}' push-event run found for commit ${head_sha} on ref ${ref} in ${owner}/${repo} after ${BUDGET_SEC}s — inspect 'gh run list --repo ${owner}/${repo} --branch ${ref} --workflow \"${workflow}\" --limit ${RUN_LIST_LIMIT}' to diagnose (workflow may have failed to enqueue, or the commit may not have triggered it on that ref)" >&2
+  echo "error: no '${workflow}' ${event}-event run found for commit ${head_sha} on ref ${ref} in ${owner}/${repo} after ${BUDGET_SEC}s — inspect 'gh run list --repo ${owner}/${repo} --branch ${ref} --workflow \"${workflow}\" --event ${event} --limit ${RUN_LIST_LIMIT}' to diagnose (workflow may have failed to enqueue, or the commit may not have triggered it on that ref)" >&2
   exit 1
 }
 

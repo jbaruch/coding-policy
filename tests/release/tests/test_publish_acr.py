@@ -1,5 +1,7 @@
 """Tag ownership, clean source and a fresh default gate the ACR publisher."""
 
+import fnmatch
+import itertools
 import json
 import os
 import re
@@ -59,6 +61,33 @@ class PublishAcrTest(unittest.TestCase):
         second = self.publish()
         self.assertEqual(second.returncode, 0, second.stderr)
         self.assertEqual(self.git("rev-parse", "v0.4.0").strip(), self.head)
+
+    def test_bookkeeping_push_filters_only_publish_and_dispatch_remains_available(self):
+        root = SOURCE.parents[2]
+        workflow = (root / ".github/workflows/publish.yml").read_text()
+        trigger = workflow.split("on:\n", 1)[1].split("\npermissions:", 1)[0]
+        self.assertIn("  workflow_dispatch:\n", trigger)
+        push = trigger.split("  push:\n", 1)[1].split("  workflow_dispatch:", 1)[0]
+        self.assertIn("    branches: [main]\n", push)
+        ignored = re.findall(r"^      - '([^']+)'$", push, re.MULTILINE)
+        bookkeeping = (".tessl-plugin/plugin.json", "agent-plugin.yaml", "CHANGELOG.md")
+        self.assertEqual(set(ignored), set(bookkeeping))
+        self.assertNotIn("    paths:", push)
+        # GitHub skips only when every changed path matches paths-ignore.
+        for size in range(1, 4):
+            for changed in itertools.combinations(bookkeeping, size):
+                with self.subTest(changed=changed):
+                    self.assertTrue(all(any(fnmatch.fnmatchcase(path, pattern) for pattern in ignored)
+                                        for path in changed))
+                    for source in ("skills/release/smart-publish.sh", "rules/ci-safety.md",
+                                   "tests/release/tests/test_publish_acr.py", ".github/workflows/publish.yml",
+                                   "nested/CHANGELOG.md", ".tessl-plugin/other.json"):
+                        self.assertFalse(all(any(fnmatch.fnmatchcase(path, pattern) for pattern in ignored)
+                                             for path in (*changed, source)))
+        tests = (root / ".github/workflows/tests.yml").read_text()
+        tests_trigger = tests.split("on:\n", 1)[1].split("\npermissions:", 1)[0]
+        self.assertIn("  push:\n    branches: [main]\n", tests_trigger)
+        self.assertNotIn("paths", tests_trigger)
 
     def test_publish_workflow_rejects_non_exact_main_before_credentialed_checkout(self):
         workflow = (SOURCE.parents[2] / ".github/workflows/publish.yml").read_text()

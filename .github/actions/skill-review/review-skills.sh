@@ -46,9 +46,10 @@ CREDIT_OUTAGE="${CREDIT_OUTAGE:-fail}"
 WORKSPACE="${WORKSPACE:-}"
 MANIFEST="${MANIFEST:-.tessl-plugin/plugin.json}"
 LEGACY_MANIFEST="${LEGACY_MANIFEST:-tile.json}"
-# The commit tesslio/patch-version-publish pushes after a green review+publish
-# ("Bump <name> to X.Y.Z [skip ci]"). identify_skills diffs from the nearest
-# such ancestor rather than github.event.before, so a publish that FAILED at or
+# The commit the publisher pushes after a green review+publish
+# ("Bump <name> to X.Y.Z"). Historical commits may carry a CI-skip suffix.
+# identify_skills diffs from the nearest such ancestor rather than
+# github.event.before, so a publish that FAILED at or
 # after the review step does not drop its changed skills from the next run's
 # window (#271).
 #
@@ -64,7 +65,7 @@ LEGACY_MANIFEST="${LEGACY_MANIFEST:-tile.json}"
 # SUBJECT (not the whole message, so a body line cannot false-match);
 # PUBLISH_MARKER_AUTHOR is a git --author regex. Override both for a publish flow
 # with a different marker (a consumer can always pass base-ref).
-PUBLISH_MARKER_PATTERN="${PUBLISH_MARKER_PATTERN:-^Bump .+ to [0-9]+\.[0-9]+\.[0-9]+.*\[skip ci\]}"
+PUBLISH_MARKER_PATTERN="${PUBLISH_MARKER_PATTERN:-^Bump .+ to [0-9]+\.[0-9]+\.[0-9]+( \[skip ci\])?$}"
 PUBLISH_MARKER_AUTHOR="${PUBLISH_MARKER_AUTHOR:-github-actions\[bot\]}"
 
 # Skills skipped because the tessl org was out of credits. Populated by

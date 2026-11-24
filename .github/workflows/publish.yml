@@ -3,6 +3,12 @@ name: Review & Publish Plugin
 on:
   push:
     branches: [main]
+    # Bookkeeping pushes still run tests; only publication is filtered.
+    paths-ignore:
+      - '.tessl-plugin/plugin.json'
+      - 'agent-plugin.yaml'
+      - 'CHANGELOG.md'
+  # Use main for a deliberate manifest-only release.
   workflow_dispatch:
 
 permissions:

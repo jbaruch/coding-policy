@@ -40,7 +40,7 @@ Readback of an existing central fleet publication follows
 and confirmation. Keep the captured baseline and actual consumer merge SHA.
 The commands below retain the ordinary consumer-push and tag publication modes.
 
-Bind the resolution to the workflow, the exact commit, the `push` event and the ref that fired it, never to "latest on main". The lookup polls until the run is listed, past the publish workflow's enqueue latency.
+For push-triggered publication, bind resolution to the workflow, the exact commit, the `push` event and the ref that fired it, never to "latest on main". This repository's deliberate manifest-only release follows the walkthrough below. The lookup polls until the run is listed, past the publish workflow's enqueue latency.
 
 Each channel uses its actual publisher run. Separate workflows have separate ids. A merge-triggered workflow containing both publication jobs uses one id for both independent confirmation helpers; it still owes both sets of artifact evidence.
 
@@ -84,7 +84,7 @@ gh run watch <tag-run-id>
 
 **Merge-triggered dual publisher** — resolve the workflow with the reviewed merge SHA, `push` event and default-branch ref, using the same command as the Tessl merge-triggered case. It creates `v<explicit-manifest-version>` itself. Record that id for both channels, watch it once, and independently verify the Tessl registry/moderation and the exact GitHub tag/assets. The ACR owner receives the triggering source SHA and refuses source outside the fetched default history. A Tessl-only run never substitutes for an ACR publisher run.
 
-Omit `--exit-status` from the watch. Read the run conclusion through each channel's confirmation helper — `confirm-tessl-landed.sh` for Tessl, `verify-github-release.sh` for a tag publication.
+Omit `--exit-status` from the push-triggered publisher watch. Read the run conclusion through each channel's confirmation helper — `confirm-tessl-landed.sh` for Tessl, `verify-github-release.sh` for a tag publication.
 
 `gh pr view` returns the specific merge commit for this PR, unaffected by parallel merges. Exit 0 emits `{"database_id": N}` on stdout per `rules/script-delegation.md`. A non-zero exit emits no id and a stderr diagnostic; the run is unresolved, and no watch or confirmation may proceed on a guess or an empty id. The four facts the resolver binds, its enqueue-latency retry, its refusal to pick between two runs matching all four, and which condition lands in which rc are the script's decision contract — see `skills/release/resolve-publish-run.sh` header, not restated here (`rules/script-as-black-box.md`). The watch is a timing precondition for the confirmations below, not the gate.
 
@@ -129,13 +129,48 @@ Exit 0 = both conjuncts hold. Exit 1 = a definitive no — an unconfirmed releas
 
 **Both, separate workflows.** Set one version explicitly in every channel's manifest in the PR and confirm the Tessl publisher preserves it without auto-bumping (Step 3). Record `<pre>` before merging. Merge, fast-forward `main`, push the tag. Resolve TWO runs — `<tessl-run-id>` from the merge SHA, `<tag-run-id>` from the tag — and watch both. Run `confirm-tessl-landed.sh` and `verify-moderation-cleared.sh` against the Tessl channel, and `verify-github-release.sh` against `<tag-run-id>`. Report both confirmations. Neither channel's result stands in for the other's.
 
+**Both, merge-triggered jobs (this repository).** Leave both manifest versions unchanged in the PR. Capture `<pre>` before merge. Resolve and watch `publish.yml` for the reviewed merge SHA and the `main` push. Use that SHA as `<source-sha>` and apply the dual-release confirmations below with the bound run ID.
 
-**Both, merge-triggered jobs (this repository).** Leave both manifest versions unchanged in the PR. Capture `<pre>` before merge. Resolve and watch `publish.yml` by its reviewed merge SHA and `main` push. The Tessl publisher auto-bumps and pushes both manifests with the CHANGELOG stamp in one guarded bookkeeping commit. The dependent ACR job checks out the publisher's `source-commit` output and creates the immutable tag from those bumped manifests. Run `confirm-tessl-landed.sh`, `verify-moderation-cleared.sh` and `verify-github-release.sh` with the actual run and exact published version tag. Report both channel results.
+**Deliberate manifest-only release (this repository).** Capture `<pre>` and record the current HEAD of `main` as `<source-sha>` (`gh api repos/<owner>/<repo>/git/refs/heads/main --jq '.object.sha'`), then run `gh workflow run publish.yml --ref main`. Resolve the dispatch run with the existing resolver's explicit event argument.
+
+```bash
+KS=.tessl/plugins/jbaruch/coding-policy/skills/release/; [ -d "$KS" ] || KS="$HOME/$KS"; [ -d "$KS" ] || case "$(git config --get remote.origin.url)" in git@github.com:jbaruch/coding-policy|git@github.com:jbaruch/coding-policy.git|https://github.com/jbaruch/coding-policy|https://github.com/jbaruch/coding-policy.git|ssh://git@github.com/jbaruch/coding-policy|ssh://git@github.com/jbaruch/coding-policy.git) KS=skills/release/ ;; *) echo "coding-policy skill not found: run tessl install jbaruch/coding-policy" >&2; exit 1 ;; esac
+bash "$KS/resolve-publish-run.sh" <owner> <repo> <source-sha> publish.yml main workflow_dispatch
+```
+
+For the first release, if the installed resolver lacks the event argument, run `bash skills/release/resolve-publish-run.sh <owner> <repo> <source-sha> publish.yml main workflow_dispatch` from the reviewed publisher checkout.
+
+On exit 0, record `database_id` as `<dispatch-run-id>` and watch it. A non-zero exit stops confirmation.
+
+```bash
+gh run watch --repo <owner>/<repo> --exit-status <dispatch-run-id>
+```
+
+A successful watch proceeds to the dual-release confirmations with the selected run ID and captured `<source-sha>`. A non-zero watch leaves delivery unconfirmed. Follow partial publication recovery if the publisher fails or observation is interrupted.
+
+### Dual-release confirmations (this repository)
+
+From the publisher's checkout, resolve bookkeeping using the original source SHA and bound publisher run ID. The helper reads the stamp-producing publish job's log and fetches `main` from `jbaruch/coding-policy`, including after a publish or ACR-only retry.
+
+```bash
+KS=.tessl/plugins/jbaruch/coding-policy/skills/release/; [ -d "$KS" ] || KS="$HOME/$KS"; [ -d "$KS" ] || case "$(git config --get remote.origin.url)" in git@github.com:jbaruch/coding-policy|git@github.com:jbaruch/coding-policy.git|https://github.com/jbaruch/coding-policy|https://github.com/jbaruch/coding-policy.git|ssh://git@github.com/jbaruch/coding-policy|ssh://git@github.com/jbaruch/coding-policy.git) KS=skills/release/ ;; *) echo "coding-policy skill not found: run tessl install jbaruch/coding-policy" >&2; exit 1 ;; esac
+bash "$KS/resolve-bookkeeping-stamp.sh" <source-sha> <bound-run-id>
+```
+
+For the first delivery, if an older installed skill shadows the reviewed helper, run `bash skills/release/resolve-bookkeeping-stamp.sh <source-sha> <bound-run-id>` from the reviewed publisher checkout.
+
+Exit 0 returns JSON with `outcome` and `source_commit`. Record `source_commit` as `<release-sha>` for the ACR tag check. `pushed` identifies the verified bookkeeping commit. `noop` identifies the original source when the publisher explicitly recorded no bookkeeping change. A non-zero exit stops confirmation, including when the selected job archive is unavailable. The header of `skills/release/resolve-bookkeeping-stamp.sh` owns the evidence and exit contract.
+
+For `pushed`, pass `<owner> <repo> <release-sha> tests.yml main` to `resolve-publish-run.sh` as above. Watch the emitted `database_id` with `gh run watch <id> --repo <owner>/<repo> --exit-status`. For `noop`, report that no bookkeeping push occurred and proceed to the channel checks.
+
+Run `confirm-tessl-landed.sh` with the baseline and bound publisher run ID to obtain `<current>`. Confirm moderation with `verify-moderation-cleared.sh` for that version. Require `gh api repos/<owner>/<repo>/git/refs/tags/v<current> --jq '.object.sha'` to match `<release-sha>`. Confirm the published tag and retrievable assets with `verify-github-release.sh` for `v<current>` and the same publisher run ID. Report both channel results and the bookkeeping Tests result when a stamp was pushed. Final confirmation requires both channels and successful Tests for a pushed stamp.
 
 ## Partial publication recovery
 
+Resume an interrupted publisher watch on the same bound run ID. Before any publication retry, reconcile an unknown bookkeeping push with `resolve-bookkeeping-stamp.sh` as above. A refusal leaves bookkeeping unconfirmed. Watch Tests for a verified stamp even when the publisher stays red after a lost push reply. Resume a failed or interrupted Tests observation on the same run ID or resolve it again from the verified stamp, without rerunning the publisher. Inspect a failed Tests run's logs and keep delivery unconfirmed until Tests succeeds. A successful recovery watch confirms only Tests.
+
 For a first Tessl publication, `registry-baseline.sh` prints `unpublished` only after an authenticated absent-plugin response or an empty versions array. Preserve that literal as `<pre>`; `confirm-tessl-landed.sh` requires a successful bound run and a real published version. Empty output, authentication failures and unreadable responses remain errors. Never substitute a guessed `0.0.0` baseline.
 
-When Tessl succeeds and the downstream ACR job fails, preserve the original baseline and source commit, including the publisher's bookkeeping SHA for this repository. Use `gh run rerun <run-id> --failed` to retry only the failed job; its successful Tessl prerequisite remains completed. Do not dispatch a new full publish or rerun the successful Tessl job against an already-published version. Watch the same run to a terminal result, then recheck each channel's artifacts independently. Existing matching tags are reused; another commit at that version is a refusal, never a force-push. An unknown external effect remains unconfirmed until readback proves it.
+When Tessl succeeds and the downstream ACR job fails, preserve the original baseline, source SHA and bookkeeping result for this repository. Use `gh run rerun <run-id> --failed` to retry only the failed job; its successful Tessl prerequisite remains completed. Do not dispatch a new full publish or rerun the successful Tessl job against an already-published version. Watch the same run to a terminal result, then recheck each channel's artifacts independently. Existing matching tags are reused; another commit at that version is a refusal, never a force-push. An unknown external effect remains unconfirmed until readback proves it.
 
 If Tessl lands but the bookkeeping push is rejected, the job stays red and ACR does not run. Run `bash skills/release/registry-has-version.sh jbaruch coding-policy <attempted-version>` and require `exists: true` before treating that artifact as published. Restore `STAMP_DEPLOY_KEY` write access using `.env.example` if that caused the rejection; a concurrent main advance instead requires a fresh source checkout. Follow the release contract's follow-up-commit recovery, which starts a fresh publish from the registry's latest version. Never force-push over a concurrent merge or replay the old local bookkeeping commit. Verify the new run's registry advance, moderation and exact ACR tag/assets through the helpers above. The next publish allocates another patch; it does not repair the earlier immutable artifact in place.
