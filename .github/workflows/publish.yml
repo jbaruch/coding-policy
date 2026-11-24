@@ -15,7 +15,7 @@ concurrency:
 
 jobs:
   publish:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     outputs:
       source-commit: ${{ steps.publish_autobump.outputs.source-commit }}
     steps:
@@ -64,6 +64,7 @@ jobs:
       - name: Run language diagnostics
         run: bash scripts/run-diagnostics.sh
 
+      - uses: ./.github/actions/setup-zsh
       - name: Run unit tests
         run: bash scripts/run-tests.sh
 

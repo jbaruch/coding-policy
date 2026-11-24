@@ -63,7 +63,7 @@ jobs:
 
   unit-tests:
     needs: [diagnostics, lint, acr-manifest]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@v7
         with:
@@ -75,5 +75,6 @@ jobs:
           # Renew monthly, atomically with TESSL_VERSION in the package verifier
           # and fleet-publish-finalize.yml, in a dedicated dependency change.
           version: '0.119.0'
+      - uses: ./.github/actions/setup-zsh
       - name: Run unit test suites
         run: bash scripts/run-tests.sh
