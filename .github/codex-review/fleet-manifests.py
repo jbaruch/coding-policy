@@ -109,18 +109,19 @@ def selection(base: str) -> dict:
                 limitations.append(f"{location}, {name}: declare a registry version in place of source.")
                 continue
             version = record["version"]
-            if version == "latest" and path == ROOT and name.startswith("jbaruch/"):
+            if name == "jbaruch/nanoclaw-core":
+                # The declaration enrolls Core. The materializer owns its pin.
+                spec = name
+            elif version == "latest" and path == ROOT and name.startswith("jbaruch/"):
                 spec = name
             elif SEMVER.fullmatch(version):
                 spec = f"{name}@{version}"
             else:
                 limitations.append(f"{location}, {name}: declare an exact SemVer such as 1.2.3.")
                 continue
-            # The reviewer owns these versions. Core uses the declaration only for enrollment.
+            # The reviewer installs coding-policy separately.
             if name == "jbaruch/coding-policy":
                 continue
-            if name == "jbaruch/nanoclaw-core":
-                spec = name
             if installs.setdefault(name, spec) != spec and name not in conflicts:
                 conflicts.add(name)
                 limitations.append(f"{location}, {name}: conflicting versions; use one pin across base manifests.")

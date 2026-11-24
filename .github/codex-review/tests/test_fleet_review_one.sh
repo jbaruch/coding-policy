@@ -343,14 +343,17 @@ t_core_context_from_trusted_base() {
 t_core_context_refusal_stops_review() {
   local env_line; env_line=$(make_env) || exit 2
   read -r BIN CENTRAL CODEXH <<< "$env_line"
-  printf '{"dependencies":{"jbaruch/nanoclaw-core":{"version":"latest"}}}' > "$CODEXH/remote/tessl.json" &&
+  printf '{"dependencies":{"jbaruch/nanoclaw-core":{"version":"^0.1.160"}}}' > "$CODEXH/remote/tessl.json" &&
     commit_fixture "$CODEXH/remote" || exit 2
   local rc=0
   PATH="$BIN:$PATH" GH_TOKEN=tok CENTRAL_DIR="$CENTRAL" CODEX_HOME="$CODEXH" \
-    CORE_CONTEXT_RC=2 CODEX_ARGV_LOG="$CODEXH/codex.log" \
+    CORE_CONTEXT_RC=2 CORE_CONTEXT_LOG="$CODEXH/core.log" CODEX_ARGV_LOG="$CODEXH/codex.log" \
     bash "$SCRIPT" jbaruch repo-a 7 main >/dev/null 2>&1 || rc=$?
-  if [[ $rc -ne 0 && ! -e "$CODEXH/codex.log" ]]; then ok "Core context refusal stops before reviewer execution";
-  else bad "missing Core authority reached review (rc=$rc)"; fi
+  if [[ $rc -ne 0 && -s "$CODEXH/core.log" && ! -e "$CODEXH/codex.log" && ! -e "$CODEXH/posted.jsonl" ]]; then
+    ok "Core materializer refusal stops review and posting for a committed range"
+  else
+    bad "expected Core materializer refusal to stop review and posting for a committed range (rc=$rc)"
+  fi
   rmwarn "$BIN" "$CENTRAL" "$CODEXH"
 }
 
