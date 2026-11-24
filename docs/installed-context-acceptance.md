@@ -59,13 +59,55 @@ rules preserve the applicable role, ownership, credential, approval and failure
 boundaries. Missing references stop the affected action. References load by
 explicit reads; `@` imports would restore the startup load and are forbidden.
 
+## Centralized Required Read (#833), 2026-11-16
+
+Thirteen full-contract routers dropped their per-router reader bullets. The new
+always-loaded `rules/required-read.md` states those directives once. This probe
+covers coding-policy alone. The other four plugins above were not changed.
+
+A fresh disposable fixture installed candidate d9825096 (coding-policy 0.10.14)
+with Tessl CLI 0.119.0 and
+`tessl install --agent claude-code --yes file:<path>`. The installed `rules/`
+and `skills/` trees matched the source byte for byte. Observed with Claude Code 2.1.326, Haiku 5.5, low effort:
+
+| Observation | Result |
+| --- | --- |
+| Native `/context` memory inventory | All 27 coding-policy rules, including `rules/required-read.md`; no reference file |
+| One-turn READY probe input + cache tokens | 23,852 |
+| READY probe output | 4 tokens, success |
+| Task-selection tool trace | `rules/ci-safety.md`, then all of `references/ci-safety.md` |
+
+The READY probe used `--no-session-persistence`, disabled hooks, no MCP services
+and no built-in tools. Unrelated user-level instruction files also loaded
+through normal discovery.
+
+The read-only task-selection probe allowed only `Read`. Its synthetic task was
+authoring a commit message. The prompt asked for the governing rule file to be
+opened first, without naming it or its reference. The trace read the
+commit-conventions and ci-safety routers. It then read the whole ci-safety
+reference without offset or limit, and no other reference. An earlier run
+without the open-first request read the same whole reference directly from the
+natively loaded router. No instruction file `@`-imports a reference. Neither run
+made a write.
+
+Contract retention: twelve routers equal their prior text minus the five reader
+bullets. The context-writing-style router also rewrote its carve-out section.
+Every router keeps its Required Read trigger and Boundary. The only reference
+change is one added Structure line in `references/context-writing-style.md`.
+Both `.tessl-plugin/plugin.json` and `agent-plugin.yaml` package
+`rules/required-read.md` and `skills/coding-contracts`, which holds all thirteen
+router references. The fixture was removed after the run.
+
 ## Repeating acceptance
 
 Rebuild fresh disposable installations from the exact candidate artifacts.
 Observe native startup, `/memory` and `/context` before any task. Run a
-no-action READY request to verify the provider path independently. Run a separate
-read-only task-selection case and inspect its tool trace for the required full
-reference read. Confirm both distribution manifests still package each target.
-Retain aggregate results only in public evidence; keep private source content
-and raw local probe logs out of public reports. Stop each disposable session and
-remove its owned fixture when the release verification is complete.
+no-action READY request to verify the provider path independently. Run a
+separate read-only task-selection case and inspect its tool trace for the
+required full reference read. Unset `CLAUDE_CODE_DISABLE_CLAUDE_MDS` and
+`CLAUDE_CODE_SAFE_MODE` for probes started from inside another Claude Code
+session. With them inherited, project instructions did not load and READY still
+succeeded. Confirm both distribution manifests still package each target. Retain
+aggregate results only in public evidence; keep private source content and raw
+local probe logs out of public reports. Stop each disposable session and remove
+its owned fixture when the release verification is complete.

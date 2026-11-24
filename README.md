@@ -18,7 +18,7 @@ Coding policy plugin for Baruch's AI agents. Language-agnostic code quality rule
 - `session-start` hook — the plugin's one `SessionStart` entry, native for Claude Code and Codex and portable for other agents: runs every SessionStart hook and merges their statuses into one payload
 - `check-git-sync` hook — fetches origin every session and fast-forwards a local default branch strictly behind `origin/<default>` (`rules/sync-before-work.md`). A diverged branch is reported only. Never blocks
 - Policy review runs on the OpenAI Codex CLI authenticated by a ChatGPT subscription (no API key) via `.github/workflows/review-codex.yml`, reviewing every PR against the in-tree `rules/*.md`; Claude stays as the complementary code-quality lane
-- 26 rules — 20 always-on, 6 conditional (scoped via `applyTo:` to the files where the rule's prescriptions actually fire). Breakdown: 10 covering code quality, 7 covering plugin authoring, 1 covering concurrency, 1 covering review discipline, 1 covering reviewer-feedback reading, 1 covering review severity, 1 covering external-repo action scope, 1 covering response communication, 1 covering merge/ship autonomy, 1 covering hook-status reporting, 1 covering design simplicity
+- 27 rules — 21 always-on, 6 conditional (scoped via `applyTo:` to the files where the rule's prescriptions actually fire). Breakdown: 10 covering code quality, 7 covering plugin authoring, 1 covering concurrency, 1 covering review discipline, 1 covering reviewer-feedback reading, 1 covering review severity, 1 covering external-repo action scope, 1 covering response communication, 1 covering merge/ship autonomy, 1 covering hook-status reporting, 1 covering design simplicity, 1 covering Required Read loading
 - `release` skill — structured PR + merge workflow with separate Codex policy and Claude code-quality reviews; blocking findings from either hold the merge
 - `onboard-repo` skill (renamed from `install-reviewer`) — bootstrap a consumer repo onto coding-policy: enroll it in the central fleet policy reviewer, pin its `jbaruch/*` tessl deps to `latest`, and add the tessl-generated-artifacts `.gitignore` block so agents never commit per-developer output
 - `adopt-fork-pr` skill — bring a fork PR's branch into the base repo as a same-repo PR the reviewer can run on
@@ -65,6 +65,7 @@ Tessl imports. Combined native-session acceptance lives in
 |----------|------|---------|
 | Git | [commit-conventions](rules/commit-conventions.md) | Imperative mood, one change per commit, PR hygiene |
 | Git | [sync-before-work](rules/sync-before-work.md) | Fetch and branch from the fresh remote default |
+| Policy | [required-read](rules/required-read.md) | Every rule's Required Read reference binds as rule content, resolves in its owning plugin, stops the action when missing, and loads by explicit read, never `@` import |
 | Testing | [testing-standards](rules/testing-standards.md) | Outcome-based, deterministic, no binary fixtures |
 | Errors | [error-handling](rules/error-handling.md) | Specific exceptions (with outer-boundary process-contract carve-out), actionable messages, structured logging |
 | Deps | [dependency-management](rules/dependency-management.md) | Stdlib-first, pinned versions kept fresh via a renewal mechanism, lock files |

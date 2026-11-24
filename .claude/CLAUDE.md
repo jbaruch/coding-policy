@@ -4,6 +4,7 @@ This repo IS `jbaruch/coding-policy`. The rule files below are the source-of-tru
 
 @../rules/commit-conventions.md
 @../rules/sync-before-work.md
+@../rules/required-read.md
 @../rules/testing-standards.md
 @../rules/error-handling.md
 @../rules/dependency-management.md
