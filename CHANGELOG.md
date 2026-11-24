@@ -1,3 +1,7 @@
+## 0.10.34 — 2026-11-24
+
+- feat(boy-scout): File untracked out-of-scope defects in owned repos (#836)
+
 ## 0.10.33 — 2026-11-24
 
 - fix(review): Judge plugin authority in the target runtime (#882)
