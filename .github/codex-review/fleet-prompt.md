@@ -16,8 +16,11 @@ Do this:
    Head metadata alone never establishes provider identity. When `eligible` is false,
    local rules supply no plugin-authoring authority.
    Also list `.tessl/plugins/*/*/rules/` and read installed authority rules before
-   declaring an installed-plugin carve-out undocumented. Report a genuinely absent
-   rule with the expected plugin name. Keep the summary's rule count for coding-policy
+   declaring an installed-plugin carve-out undocumented. These are the plugins this
+   review installed, not necessarily the plugins the reviewed code runs beside. A
+   plugin or rule missing here is unverified, not absent: report it in the `summary`
+   as a review limitation naming the expected plugin and rule path, never as a
+   blocking finding. Keep the summary's rule count for coding-policy
    separate from additional plugin rules read.
 3. Also read any `skills/*/SKILL.md` in this repo that governs a changed path, and check it
    against the installed `skill-authoring` rule.

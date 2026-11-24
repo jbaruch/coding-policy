@@ -122,9 +122,10 @@ main() {
   # Manifest and Adversarial-Freshness, ci-safety's Content-Only
   # Direct-Push) are satisfied by an "authority-of-record rule in its own
   # plugin" — and with only coding-policy installed, the reviewer cannot
-  # resolve a single one of them. It then reports the rule as absent and
-  # blocks a PR whose carve-out is fully documented, which is what
-  # happened on jbaruch/nanoclaw#883.
+  # verify a single one of them. It can only report such a rule as a
+  # review limitation; before fleet-prompt.md said so, it reported the
+  # rule as absent and blocked jbaruch/nanoclaw#883, whose carve-out was
+  # fully documented.
   #
   # Resolved from the BASE ref's manifest, never the PR head's: the head
   # is the content under review, so reading it would let a PR name a
