@@ -1,3 +1,7 @@
+## 0.10.43 — 2026-11-24
+
+- refactor(rules): State router reader mechanics once (#838)
+
 ## 0.10.42 — 2026-11-24
 
 - fix(policy): Narrow two carve-out preconditions (#893)
