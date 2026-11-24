@@ -28,17 +28,10 @@
 #   base-dir   Directory to search for suites. Defaults to the repo root
 #              (the script's parent's parent). The optional arg exists so
 #              the runner's own test can point it at a fixture tree.
-# Exit:  0 if every suite passes, 1 if any suite fails, 2 on setup error
-#        (base dir missing, or no suite found).
+# Exit:  0 if every suite passes, 1 if any suite fails, 2 on setup error.
 
 set -euo pipefail
 
-# Dispatch a suite to its interpreter by extension. Both suite kinds are
-# self-driving — a shell harness counts its own failures and exits
-# non-zero; a unittest module does the same through the entry-point guard
-# `rules/file-hygiene.md` requires — so the runner only picks the
-# interpreter and reads the exit code.
-#
 # Interpreters are overridable so a runner with a differently-named binary
 # (python3.11, a venv shim) can point at it without editing this file, and
 # so the missing-interpreter path is testable without breaking PATH for the
@@ -46,42 +39,6 @@ set -euo pipefail
 SH_BIN="${SH_BIN:-bash}"
 PY_BIN="${PY_BIN:-python3}"
 export PYTHONDONTWRITEBYTECODE=1
-
-# A dispatcher fault must be distinguishable from a suite's own exit code.
-# No exit code can do that job: 2 collides with the harnesses here (they
-# exit 2 on a fatal precondition), and any reserved sentinel — 125 included
-# — is only a soft invariant, since nothing stops a suite from returning it
-# and being misreported as a broken runner. So the DISPATCH FAULT does not
-# travel by exit code: run_suite sets DISPATCH_FAULT_SUITE for a dispatch
-# fault (unknown suite type, missing interpreter). The exit code run_suite
-# returns is still the suite's own verdict on the happy path — the caller
-# reads it — but it is only trusted as a verdict when the side channel is
-# empty.
-DISPATCH_FAULT_SUITE=""
-
-run_suite() {
-  local suite="$1" interp
-  case "$suite" in
-    *.sh) interp="$SH_BIN" ;;
-    *.py) interp="$PY_BIN" ;;
-    *)
-      DISPATCH_FAULT_SUITE="$suite"
-      echo "run-tests: no interpreter for suite type: $suite" >&2
-      return 1
-      ;;
-  esac
-  # Check the interpreter exists before dispatching. Without this, a runner
-  # lacking python3 gives the suite exit 127, which the caller counts as a
-  # FAILING TEST rather than the setup error (rc 2) this contract promises —
-  # reporting a red suite where the truth is an unprovisioned runner, and
-  # sending whoever reads CI to debug a test that never ran.
-  if ! command -v "$interp" >/dev/null; then
-    DISPATCH_FAULT_SUITE="$suite"
-    echo "run-tests: '${interp}' not found on PATH — cannot run ${suite}; install it on this runner (this is a setup error, not a test failure)" >&2
-    return 1
-  fi
-  "$interp" "$suite"
-}
 
 # JSON string escaper. A Unix path may contain any byte except NUL and
 # '/', so escape the JSON-mandatory characters AND the C0 control set
@@ -169,9 +126,10 @@ main() {
   rm -f "$tmplist"
 
   if [[ ${#suites[@]} -eq 0 ]]; then
-    echo "run-tests: no test suites found under ${base}/**/tests/test_*.{sh,py}" >&2
+    local message="no test suites found under ${base}/**/tests/test_*.{sh,py}"
+    echo "run-tests: $message" >&2
     printf '{"suites":0,"passed":0,"failed":0,"failures":[],"error":%s}\n' \
-      "$(json_str "no test suites found under ${base}/**/tests/test_*.{sh,py}")"
+      "$(json_str "$message")"
     return 2
   fi
 
@@ -189,19 +147,7 @@ main() {
   echo "Running ${#suites[@]} test suite(s):" >&2
   echo "" >&2
 
-  # A dispatcher fault (interpreter absent, unknown suite type) is NOT a test
-  # verdict. Folding it into `failed` would report "1 suite failed" for a
-  # runner that never executed the suite at all — a red CI pointing at
-  # innocent tests. Surface it as the contract's setup error (rc 2, suites=0)
-  # and stop: subsequent suites would hit the same missing interpreter and
-  # bury the cause under noise.
-  #
-  # Two signals, read in order: the side channel says whether this was a
-  # dispatch fault, and only if it wasn't is the exit code trusted as the
-  # suite's verdict. That ordering is what lets a suite's own 2 or 125 count
-  # as a failure while a dispatch fault (same numeric codes possible) does
-  # not — the value never disambiguates them, the side channel does.
-  local failed=() setup_error="" n=0
+  local failed=() interp n=0
   for s in "${suites[@]}"; do
     echo "▶ $s" >&2
     n=$((n + 1))
@@ -211,14 +157,23 @@ main() {
       return 2
     fi
     export XDG_STATE_HOME="$XDG_RUN_HOME/$n/state" XDG_CONFIG_HOME="$XDG_RUN_HOME/$n/config"
-    local suite_rc=0
-    DISPATCH_FAULT_SUITE=""
-    run_suite "$s" >&2 || suite_rc=$?
-    if [[ -n "$DISPATCH_FAULT_SUITE" ]]; then
-      setup_error="$DISPATCH_FAULT_SUITE"
-      break
+
+    # Discovery yields only .sh and .py suites.
+    if [[ "$s" == *.sh ]]; then
+      interp="$SH_BIN"
+    else
+      interp="$PY_BIN"
     fi
-    if [[ $suite_rc -eq 0 ]]; then
+    if ! command -v "$interp" >/dev/null; then
+      echo "run-tests: '${interp}' not found on PATH — cannot run ${s}; install it on this runner (this is a setup error, not a test failure)" >&2
+      echo "─────────────────────────────────────────────" >&2
+      echo "SETUP ERROR: cannot run ${s} — see stderr above" >&2
+      printf '{"suites":0,"passed":0,"failed":0,"failures":[],"error":%s}\n' \
+        "$(json_str "cannot run ${s}: interpreter missing or unknown suite type")"
+      return 2
+    fi
+
+    if "$interp" "$s" >&2; then
       echo "  ✓ $s" >&2
     else
       echo "  ✗ $s" >&2
@@ -226,14 +181,6 @@ main() {
     fi
     echo "" >&2
   done
-
-  if [[ -n "$setup_error" ]]; then
-    echo "─────────────────────────────────────────────" >&2
-    echo "SETUP ERROR: cannot run ${setup_error} — see stderr above" >&2
-    printf '{"suites":0,"passed":0,"failed":0,"failures":[],"error":%s}\n' \
-      "$(json_str "cannot run ${setup_error}: interpreter missing or unknown suite type")"
-    return 2
-  fi
 
   echo "─────────────────────────────────────────────" >&2
   if [[ ${#failed[@]} -gt 0 ]]; then

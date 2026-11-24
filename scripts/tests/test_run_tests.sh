@@ -229,8 +229,7 @@ rm -rf "$base"
 # An earlier draft used 125 as the dispatcher's private sentinel. Any
 # reserved exit code is only a soft invariant: nothing stops a suite from
 # returning it, and a real red suite then reports as a broken runner and
-# stops the run. The fault now travels by side channel, so EVERY status a
-# suite returns is its own verdict. This pins that.
+# stops the run. Every status a suite returns is its own verdict.
 make_base; add_suite "$base" alpha 0; add_suite "$base" sentinel125 125
 invoke "$base"
 if [[ "$CODE" == 1 ]] \
