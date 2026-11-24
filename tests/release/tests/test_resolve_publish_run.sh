@@ -17,7 +17,7 @@
 #      exit non-zero with a diagnostic naming both, and emit no id.
 #   7. Budget exhausted — the listing never carries a match; exit
 #      non-zero with a diagnostic naming the commit, ref and workflow.
-#   8. Arg-count validation — 3 args and 6 args produce exit 2 + usage.
+#   8. Arg-count validation — 3 args and 7 args produce exit 2 + usage.
 #   9. Env-var validation — non-positive-integer INTERVAL/BUDGET values
 #      produce exit 2 with a clear diagnostic naming the bad var.
 #  10. INTERVAL > BUDGET rejected.
@@ -74,7 +74,7 @@ TAG=v0.1.4
 WORKFLOW=publish.yml
 
 # Tempfiles tracking mock state across subshell boundaries.
-TMPDIR_TEST=$(mktemp -d -t resolve-pub-test.XXXXXX)
+TMPDIR_TEST=$(mktemp -d "${TMPDIR:-/tmp}/resolve-pub-test.XXXXXX")
 # Named handler ending `return 0`, not a bare `trap 'rm -rf ...'`: the
 # EXIT trap's final command status becomes the process's exit status, so
 # a failed cleanup would turn an all-green run non-zero and flake CI
@@ -323,28 +323,26 @@ run "quoted and query-shaped refs retain exact commit/event/ref binding" test_qu
 
 # The transport can use jq internally while the real CLI entry point has
 # no jq binary on PATH, just as gh supplies its own query engine.
-test_cli_quoted_ref_without_system_jq() {
+test_cli_quoted_ref_without_system_jq() (
   local bin="$TMPDIR_TEST/no-jq" ref='v1.0"quoted' output rc=0 tool
   mkdir "$bin" || return 1
   for tool in wc tr; do
     ln -s "$(command -v "$tool")" "$bin/$tool" || return 1
   done
-  cat > "$bin/gh" <<'MOCK'
-#!/bin/bash
-set -euo pipefail
-filter=""
-while (( $# )); do
-  if [[ "$1" == --jq ]]; then filter="$2"; shift; fi
-  shift
-done
-"$MOCK_REAL_JQ" -r "$filter" "$FIXTURE_DIR/quoted-cli.json"
-MOCK
-  chmod +x "$bin/gh" || return 1
+  gh() {
+    local filter=""
+    while (( $# )); do
+      if [[ "$1" == --jq ]]; then filter="$2"; shift; fi
+      shift
+    done
+    "$MOCK_REAL_JQ" -r "$filter" "$FIXTURE_DIR/quoted-cli.json"
+  }
+  export -f gh
   jq -n --arg ref "$ref" --arg sha "$SHA_RELEASE" '[{databaseId: 34188269042, headSha: $sha, event: "push", headBranch: $ref}]' > "$FIXTURE_DIR/quoted-cli.json" || return 1
   output=$(PATH="$bin" MOCK_REAL_JQ="$(command -v jq)" "$BASH" "$SCRIPT" jbaruch coding-policy "$SHA_RELEASE" "$WORKFLOW" "$ref" 2>"$TMPDIR_TEST/err") || rc=$?
   assert_eq "CLI exit code without system jq" "0" "$rc" || { cat "$TMPDIR_TEST/err" >&2; return 1; }
   assert_eq "CLI quoted ref resolves" "34188269042" "$(database_id_of "$output")" || return 1
-}
+)
 run "CLI resolves a quoted ref with no system jq on PATH" test_cli_quoted_ref_without_system_jq
 
 # --- Test 3: unrelated refs at the same commit are excluded -------------------
@@ -447,11 +445,11 @@ run "three args exits 2 with usage" test_too_few_args
 test_too_many_args() {
   reset_mocks
   local stderr rc=0
-  stderr=$(main jbaruch coding-policy abc123 "$WORKFLOW" "$TAG" extra 2>&1 >/dev/null) || rc=$?
+  stderr=$(main jbaruch coding-policy abc123 "$WORKFLOW" "$TAG" push extra 2>&1 >/dev/null) || rc=$?
   assert_eq "exit code" "2" "$rc" || return 1
   echo "$stderr" | grep -q "usage:" || { echo "    FAIL: stderr missing usage line, got: ${stderr}" >&2; return 1; }
 }
-run "six args exits 2 with usage" test_too_many_args
+run "seven args exits 2 with usage" test_too_many_args
 
 test_empty_ref_rejected() {
   reset_mocks
@@ -558,6 +556,54 @@ test_bookkeeping_tests_run_resolved() {
   gh_args | grep -q -- "--branch main" || { echo "    FAIL: should request --branch main, got: $(gh_args)" >&2; return 1; }
 }
 run "bookkeeping CI gate: Tests run resolved by source-commit SHA on main" test_bookkeeping_tests_run_resolved
+
+write_fixture dispatch-main.json <<JSON
+[
+  {"databaseId": 201, "headSha": "$SHA_MERGE", "event": "workflow_dispatch", "headBranch": "main", "workflowName": "publish.yml"},
+  {"databaseId": 202, "headSha": "$SHA_MERGE", "event": "push", "headBranch": "main", "workflowName": "publish.yml"},
+  {"databaseId": 203, "headSha": "$SHA_MERGE", "event": "workflow_dispatch", "headBranch": "Main", "workflowName": "publish.yml"},
+  {"databaseId": 204, "headSha": "$SHA_RELEASE", "event": "workflow_dispatch", "headBranch": "main", "workflowName": "publish.yml"},
+  {"databaseId": 205, "headSha": "$SHA_MERGE", "event": "workflow_dispatch", "headBranch": "main", "workflowName": "tests.yml"}
+]
+JSON
+jq '. + [.[0] | .databaseId = 206]' "$FIXTURE_DIR/dispatch-main.json" > "$FIXTURE_DIR/ambiguous-dispatch.json"
+
+test_manual_dispatch_selected() {
+  reset_mocks
+  queue_fixtures empty.json dispatch-main.json
+  local output rc=0
+  output=$(MOCK_GH_IGNORE_BRANCH=1 main jbaruch coding-policy "$SHA_MERGE" "$WORKFLOW" main workflow_dispatch) || rc=$?
+  assert_eq "exit code" "0" "$rc" || return 1
+  assert_eq "database_id" "201" "$(database_id_of "$output")" || return 1
+  assert_eq "gh call count" "2" "$(gh_calls)" || return 1
+  [[ "$(gh_args)" == *"--event workflow_dispatch"* ]]
+}
+run "manual dispatch polls and binds workflow, ref, SHA and event" test_manual_dispatch_selected
+
+test_ambiguous_dispatch_refused() {
+  reset_mocks
+  queue_fixtures ambiguous-dispatch.json
+  local output stderr rc=0
+  output=$(main jbaruch coding-policy "$SHA_MERGE" "$WORKFLOW" main workflow_dispatch 2>"$TMPDIR_TEST/err") || rc=$?
+  stderr=$(cat "$TMPDIR_TEST/err")
+  assert_eq "exit code" "1" "$rc" || return 1
+  assert_eq "stdout" "" "$output" || return 1
+  [[ "$stderr" == *"workflow_dispatch-event"* && "$stderr" == *201* && "$stderr" == *206* ]]
+}
+run "ambiguous dispatch refuses both matching run ids" test_ambiguous_dispatch_refused
+
+test_invalid_event_rejected() {
+  reset_mocks
+  local event stderr rc
+  for event in "" pull_request; do
+    rc=0
+    stderr=$(main jbaruch coding-policy "$SHA_MERGE" "$WORKFLOW" main "$event" 2>&1 >/dev/null) || rc=$?
+    assert_eq "exit code" "2" "$rc" || return 1
+    [[ "$stderr" == *"event must be"* ]] || return 1
+  done
+  assert_eq "gh call count" "0" "$(gh_calls)"
+}
+run "empty and unsupported events are refused before lookup" test_invalid_event_rejected
 
 echo
 echo "results: ${PASS_COUNT} pass, ${FAIL_COUNT} fail"

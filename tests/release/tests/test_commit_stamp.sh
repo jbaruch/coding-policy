@@ -8,6 +8,7 @@
 #     and the script prints {"outcome":"pushed"};
 #   - no-op: an already-headed CHANGELOG prints {"outcome":"noop"}, no push;
 #   - the caller's message is preserved without adding a CI-skip marker;
+#   - GitHub CI-skip controls are refused before a commit or push;
 #   - a non-branch (tag) ref is refused — no commit, no tag-named branch;
 #   - an unrelated staged file is NOT swept into the stamp commit.
 #
@@ -20,7 +21,7 @@ set -uo pipefail
 SCRIPT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../skills/release" && pwd)/commit-stamp.sh"
 [[ -f "$SCRIPT" ]] || { echo "fatal: commit-stamp.sh not found at $SCRIPT" >&2; exit 2; }
 
-TESTTMP="$(mktemp -d)" || { echo "fatal: mktemp -d failed" >&2; exit 2; }
+TESTTMP="$(mktemp -d "${TMPDIR:-/tmp}/commit-stamp-test.XXXXXX")" || { echo "fatal: mktemp -d failed" >&2; exit 2; }
 # Named handler ending `return 0`, not a bare `trap 'rm -rf ...'`: the EXIT
 # trap's final command status can become the process's exit status, so a failed
 # cleanup would turn an all-green run non-zero and flake CI
@@ -111,10 +112,28 @@ t_noop_when_nothing_staged() {
 t_commit_message_preserved() {
   local root; root="$(_sandbox)"
   printf '\n### entry\n' >> "$root/work/CHANGELOG.md"
-  _run_json "$root" CHANGELOG.md "Stamp without a marker" main branch >/dev/null \
+  local message=$'Document skip-checks: true in the changelog\n\nskip-checks: false'
+  _run_json "$root" CHANGELOG.md "$message" main branch >/dev/null \
     || { echo "    FAIL: script exited non-zero" >&2; return 1; }
-  [[ "$(_remote_msg "$root")" == "Stamp without a marker" ]] \
+  [[ "$(_remote_msg "$root")" == "$message" ]] \
     || { echo "    FAIL: caller message changed" >&2; return 1; }
+}
+
+t_refuses_ci_skip_controls() {
+  local root before message rc out
+  root="$(_sandbox)"
+  before="$(_remote_sha "$root")"
+  printf '\n### entry\n' >> "$root/work/CHANGELOG.md"
+  for message in 'Stamp [skip ci]' 'Stamp [ci skip]' 'Stamp [no ci]' 'Stamp [skip actions]' \
+    'Stamp [actions skip]' $'Stamp\n\nBody [SKIP CI]' $'Stamp\n\n\nskip-checks:true' \
+    $'Stamp\n\n\nReviewed-by: Example\nskip-checks: true'; do
+    rc=0
+    out=$(_run_json "$root" CHANGELOG.md "$message" main branch 2>"$root/err") || rc=$?
+    [[ "$rc" == 1 && -z "$out" && "$(cat "$root/err")" == *"CI-skip control"* ]] \
+      || { echo "    FAIL: did not refuse CI-skip message: $message" >&2; return 1; }
+    [[ "$(git -C "$root/work" rev-parse HEAD)" == "$before" && "$(_remote_sha "$root")" == "$before" ]] \
+      || { echo "    FAIL: a CI-skip message mutated local or remote history" >&2; return 1; }
+  done
 }
 
 t_refuses_non_branch_ref() {
@@ -155,6 +174,7 @@ run_suite() {
   run "self-push lands one commit without a CI-skip marker on the branch"   t_self_push_lands_one_commit
   run "no commit or push when nothing is staged"             t_noop_when_nothing_staged
   run "caller message preserved without a CI-skip marker"         t_commit_message_preserved
+  run "GitHub CI-skip controls are rejected before commit or push" t_refuses_ci_skip_controls
   run "a non-branch (tag) ref is refused"                    t_refuses_non_branch_ref
   run "an unrelated staged file is not swept into the commit" t_does_not_sweep_unrelated_staged_file
   printf '{"suite":"test_commit_stamp.sh","passed":%d,"failed":%d}\n' "$PASS_COUNT" "$FAIL_COUNT"

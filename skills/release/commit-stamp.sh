@@ -12,8 +12,8 @@
 # Out:  one JSON object on stdout describing the outcome —
 #         {"outcome":"pushed","ref":"<name>"} | {"outcome":"noop"}
 #       progress and diagnostics go to stderr.
-# Exit: 0 on pushed / noop; non-zero on a non-branch ref, a bad
-#       argument count, or a git failure.
+# Exit: 0 on pushed / noop; non-zero on a non-branch ref, a CI-skip
+#       message, a bad argument count, or a git failure.
 set -euo pipefail
 
 main() {
@@ -28,6 +28,19 @@ main() {
   # sense in a branch-triggered publish.
   if [ "$ref_type" != "branch" ]; then
     echo "error: stamp-changelog must push on a branch ref, got ref-type='${ref_type}' (ref '${ref_name}'). Run it in a branch-triggered workflow." >&2
+    return 1
+  fi
+
+  # GitHub recognizes bracketed controls anywhere in the message. Reserve
+  # a full skip-checks: true line, including the no-space spelling, before
+  # Git has a chance to normalize the message's whitespace.
+  local skip_marker='\[(skip ci|ci skip|no ci|skip actions|actions skip)\]'
+  local skip_trailer=$'(^|\n)[[:blank:]]*skip-checks:[[:blank:]]*true[[:blank:]\r]*(\n|$)'
+  if (
+    shopt -s nocasematch
+    [[ "$commit_message" =~ $skip_marker || "$commit_message" =~ $skip_trailer ]]
+  ); then
+    echo 'error: stamp-changelog commit message contains a GitHub CI-skip control; remove it before stamping.' >&2
     return 1
   fi
 
