@@ -1,3 +1,7 @@
+## 0.10.48 — 2026-11-24
+
+- Update GitHub Artifact Actions (major) (#890)
+
 ## 0.10.47 — 2026-11-24
 
 - ci(review): Pin setup-node in policy workflows (#905)
