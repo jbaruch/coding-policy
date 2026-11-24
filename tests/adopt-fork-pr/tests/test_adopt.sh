@@ -226,7 +226,7 @@ printf '%s\0' pr create --repo "github.com/$ORIGIN_REPO" --base main --head "$BR
 if cmp "$FIXTURE_DIR/expected-create" "$FIXTURE_DIR/create"; then ok "exact approved create arguments"; else bad "create arguments"; fi
 check_pointer() {
   local url="https://github.com/owner/blog-writer/pull/$1"
-  printf '%s\0' pr comment 6 --repo "github.com/$ORIGIN_REPO" --body "${EXPECTED_POINTER/<new_pr_url>/"$url"}" > "$FIXTURE_DIR/expected-comment"
+  printf '%s\0' pr comment 6 --repo "github.com/$ORIGIN_REPO" --body "${EXPECTED_POINTER%%<new_pr_url>*}$url${EXPECTED_POINTER#*<new_pr_url>}" > "$FIXTURE_DIR/expected-comment"
   if cmp "$FIXTURE_DIR/expected-comment" "$FIXTURE_DIR/comment"; then ok "exact pointer to #$1"; else bad "pointer arguments"; fi
 }
 check_pointer 99
@@ -235,7 +235,7 @@ check_pointer 99
 : > "$WRITES"
 retry_preview=$(FIXTURE_BRANCH_EXISTS=1 FIXTURE_OPEN_PR=1 run_main preview 6 "$ORIGIN_REPO") || exit 1
 retry_url="https://github.com/owner/blog-writer/pull/42"
-eq "$(jq -r .pointer <<<"$retry_preview")" "${EXPECTED_POINTER/<new_pr_url>/"$retry_url"}" "retry previews the actual pointer to the existing PR"
+eq "$(jq -r .pointer <<<"$retry_preview")" "${EXPECTED_POINTER%%<new_pr_url>*}$retry_url${EXPECTED_POINTER#*<new_pr_url>}" "retry previews the actual pointer to the existing PR"
 out=$(FIXTURE_BRANCH_EXISTS=1 FIXTURE_OPEN_PR=1 PREVIEW="$retry_preview" adopt 2>/dev/null); rc=$?
 if [ "$rc" -eq 0 ] \
    && [ "$(jq -r '.state' <<<"$out")" = "already-adopted" ] \
