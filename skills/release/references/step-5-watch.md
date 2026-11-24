@@ -27,6 +27,9 @@ It returns the full `poll-pr-reviews.sh` snapshot plus a `watch` object — `{"r
 - `ci_failure` (exit 0) — fix the failed checks through Step 6, push and re-run the watcher.
 - `dirty` (exit 0) — rebase onto current `main`, resolve conflicts, force-push the owned feature branch and re-run the watcher.
 - `pending_at_budget` (exit 1) — inspect which field is still `none`/`pending` in the returned snapshot.
+
+  If the snapshot shows no CI and GitHub reports a merge hold, inspect the hold before retrying.
+
   For either review lane with `state: none`, inspect retained `submitted_at`, `commit_id`, and `body`.
   Open the matching review's `html_url` from `review_bodies` if available. Compare the native
   `commit_id` with the snapshot's `head_sha`. If the quality review body records a `Reviewed commit`,
