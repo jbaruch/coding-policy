@@ -100,8 +100,8 @@ After modifying rules, audit for cross-rule alignment:
 
 ## Post-Edit Rule Audit
 
-After editing a rule, audit the repo itself against the new rule text and fix any drift in the same PR:
+After editing a rule, audit its repository against each obligation the edit adds or changes.
 
-- Grep for every instance of the pattern the rule governs (`.env.example` files, `SKILL.md` step headings, secret names, etc.) and update them to satisfy the new wording
-- A rule that doesn't describe what's already committed in the repo erodes trust in every rule
-- If drift can't be fixed in the same PR, record it with the rule-edit commit under `rules/boy-scout.md` How to Apply
+- Check the edited rule itself and every repository surface governed by the changed obligation.
+- Fix drift introduced by the edit in the same PR.
+- Handle independently substantiated pre-existing findings under `rules/boy-scout.md` How to Apply and `rules/review-severity.md`.
