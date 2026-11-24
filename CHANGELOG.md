@@ -1,3 +1,7 @@
+## 0.10.32 — 2026-11-24
+
+- refactor(test): Check the interpreter before suite dispatch (#888)
+
 ## 0.10.31 — 2026-11-24
 
 - fix(release): Hold readiness when CI is absent and merge is blocked (#891)
