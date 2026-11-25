@@ -24,7 +24,7 @@ import tempfile
 PLUGIN = "jbaruch/nanoclaw-core"
 # Review this pin monthly and when Core authority rules change. New package
 # releases do not invalidate it; renewal changes this version alone.
-VERSION = "0.1.160"
+VERSION = "0.1.171"
 
 
 class MaterializationError(RuntimeError):

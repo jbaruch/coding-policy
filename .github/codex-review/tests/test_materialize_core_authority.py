@@ -76,13 +76,13 @@ class MaterializationTests(unittest.TestCase):
         proof = OWNER.materialize(self.policy)
         self.assertEqual(proof, {
             "schema_version": 2, "status": "materialized", "plugin": "jbaruch/nanoclaw-core",
-            "version": "0.1.160",
+            "version": OWNER.VERSION,
         })
         self.assertEqual(project.read_bytes(), before)
         self.assertEqual(sibling.read_text(), "Retained authority")
         call, = self.calls()
         self.assertEqual(call["args"], [
-            "install", "jbaruch/nanoclaw-core@0.1.160", "--yes", "--accept-warnings",
+            "install", f"jbaruch/nanoclaw-core@{OWNER.VERSION}", "--yes", "--accept-warnings",
             "--strict", "--agent", "codex",
         ])
         self.assertNotEqual(Path(call["cwd"]), self.policy)
@@ -95,9 +95,12 @@ class MaterializationTests(unittest.TestCase):
         first = OWNER.materialize(self.policy)
         next_context = self.root / "next context"
         next_context.mkdir(mode=0o700)
-        with patch.object(OWNER, "VERSION", "0.1.161"):
+        version_parts = OWNER.VERSION.split(".")
+        version_parts[-1] = str(int(version_parts[-1]) + 1)
+        next_version = ".".join(version_parts)
+        with patch.object(OWNER, "VERSION", next_version):
             second = OWNER.materialize(next_context)
-        self.assertEqual((first["version"], second["version"]), ("0.1.160", "0.1.161"))
+        self.assertEqual((first["version"], second["version"]), (OWNER.VERSION, next_version))
         self.assertEqual(len(self.calls()), 2)
 
     def test_repeated_call_reuses_this_review_context_without_another_install(self):
