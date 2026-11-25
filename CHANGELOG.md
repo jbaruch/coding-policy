@@ -1,3 +1,7 @@
+## 0.10.51 — 2026-11-25
+
+- fix(ci): renew pinned Core authority for Sent intake (#911)
+
 ## 0.10.50 — 2026-11-24
 
 - fix(review): Preserve trusted context through ACR migrations (#904)
