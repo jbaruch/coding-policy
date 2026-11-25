@@ -76,13 +76,13 @@ class MaterializationTests(unittest.TestCase):
         proof = OWNER.materialize(self.policy)
         self.assertEqual(proof, {
             "schema_version": 2, "status": "materialized", "plugin": "jbaruch/nanoclaw-core",
-            "version": "0.1.160",
+            "version": "0.1.171",
         })
         self.assertEqual(project.read_bytes(), before)
         self.assertEqual(sibling.read_text(), "Retained authority")
         call, = self.calls()
         self.assertEqual(call["args"], [
-            "install", "jbaruch/nanoclaw-core@0.1.160", "--yes", "--accept-warnings",
+            "install", "jbaruch/nanoclaw-core@0.1.171", "--yes", "--accept-warnings",
             "--strict", "--agent", "codex",
         ])
         self.assertNotEqual(Path(call["cwd"]), self.policy)
@@ -95,9 +95,9 @@ class MaterializationTests(unittest.TestCase):
         first = OWNER.materialize(self.policy)
         next_context = self.root / "next context"
         next_context.mkdir(mode=0o700)
-        with patch.object(OWNER, "VERSION", "0.1.161"):
+        with patch.object(OWNER, "VERSION", "0.1.172"):
             second = OWNER.materialize(next_context)
-        self.assertEqual((first["version"], second["version"]), ("0.1.160", "0.1.161"))
+        self.assertEqual((first["version"], second["version"]), ("0.1.171", "0.1.172"))
         self.assertEqual(len(self.calls()), 2)
 
     def test_repeated_call_reuses_this_review_context_without_another_install(self):
