@@ -6,11 +6,21 @@ alwaysApply: true
 
 ## Required Read
 
-- Before writing or reviewing shipped code, building fixtures, running tests or relying on a test exemption, or relying on any exception to this rule, read `skills/coding-contracts/references/testing-standards.md` in full.
+- Read the named sections of `skills/coding-contracts/references/testing-standards.md` before acting.
+- Adding shipped modules or deciding coverage → `Scope` and `Coverage`.
+- Authoring, changing or reviewing tests → `Assertions`, `Determinism`, `Fixtures` and `Independence`.
+- Diagnosing flaky tests → `Determinism` and `Independence`.
+- Relying on an instrument-tree exemption → `Scope`.
+- Relying on another testing exception → its named carve-out.
 
-## Boundary
+## Coverage
 
-- Every shipped module has tests.
-- Assert outcomes with fixed independent fixtures.
-- Keep tests deterministic.
-- A test exemption needs every binding precondition.
+- Test every shipped module unless a binding carve-out applies.
+- Follow the project's test file naming convention.
+
+## Test Behavior
+
+- Assert outcomes, not implementation details.
+- Use fixed inputs outside binding carve-outs.
+- Control time-dependent inputs outside binding carve-outs.
+- Keep tests independent of order and shared mutable state.

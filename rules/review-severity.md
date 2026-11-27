@@ -9,9 +9,10 @@ alwaysApply: true
 - Prefix messages with `[defect]`, `[policy mismatch]` or `[optional hardening]`.
 - Defects require a concrete trigger, reachable path and material consequence.
 - Policy mismatches cite binding clauses and source.
-- For a blocker about a claimed state, cite evidence of a current supported producer or transition that reaches it, or show how the change violates an independently binding explicit contract such as an invariant.
-- When citing reachability, name the path, such as a writer, migration, import, restore, rollback or documented failure sequence. Include relevant production concurrency and untrusted input boundaries.
-- A fixture that inserts impossible data or a hypothetical future writer does not establish a current defect.
+- For a blocker about a claimed state, cite a current supported path or show a violation of an independently binding explicit contract such as an invariant.
+- Name the producer or transition when citing reachability, such as a writer, migration, import, restore, rollback or documented failure sequence.
+- Include relevant production concurrency and untrusted input boundaries.
+- Do not treat an impossible fixture or hypothetical future writer as evidence of a current defect.
 - Identify unproven harm as unproven.
 - Optional hardening adds safeguards without a demonstrated defect or obligation.
 
@@ -24,6 +25,7 @@ alwaysApply: true
 - On a re-review, anything else already present at the last reviewed head is advisory.
 - A re-review whose last reviewed head is unreadable counts as a first review.
 - Resolve mismatches through compliant code or authorized policy amendment and re-review.
+- Keep the obligation and review gate in force until any amendment is reviewed and installed.
 - Reviewers cannot waive policy.
 - Apply `rules/simplicity.md` to remedy cost and scope.
 
@@ -35,7 +37,9 @@ alwaysApply: true
 ## Split Reading From Acting
 
 - Read all feedback under `rules/reviewer-feedback-reading.md`.
-- Independently check claimed states against current source and contracts. Decline or downgrade unsupported findings with concrete evidence and ask for the missing supported path or binding contract instead of adding defensive branches.
+- Independently check claimed states against current source and contracts.
+- Decline or downgrade unsupported findings with concrete evidence.
+- Ask for the missing supported path or binding contract instead of adding defensive branches.
 - Advisory → note it directly in the existing review conversation or authorized task record.
 - Fold advisories into required same-surface fixes only without another push or check round.
 - Advisories require no push, review round, issue, PR or delivery prerequisite.

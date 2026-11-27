@@ -6,11 +6,21 @@ alwaysApply: true
 
 ## Required Read
 
-- Before writing code, selecting, installing or changing dependencies and manifests, or relying on a dependency carve-out, or relying on any exception to this rule, read `skills/coding-contracts/references/dependency-management.md` in full.
+- Read the named sections of `skills/coding-contracts/references/dependency-management.md` before deciding.
+- Selecting a new dependency → `Stdlib First`.
+- Changing dependencies or their manifest entries → `Declaration`, `Pinning`, `Freshness` and `Dependency Groups`.
+- Choosing how to install → `No Vendoring` and `CI Compatibility`.
+- Judging vendoring scope → `No Vendoring`.
+- Deciding whether resolved state is a lock file → `Pinning`.
+- Relying on a pinning exception → its named carve-out.
 
-## Boundary
+## Selection and Declaration
 
 - Prefer stdlib.
-- Declare and pin dependencies with a renewal mechanism.
+- Declare every dependency.
+- Pin dependencies unless a binding carve-out applies.
+- Give each pin a renewal mechanism.
+
+## Installation
+
 - Never vendor this repository's dependencies.
-- A floating exception needs every binding precondition.
