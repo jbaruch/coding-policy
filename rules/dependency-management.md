@@ -8,7 +8,7 @@ alwaysApply: true
 
 - Read the named sections of `skills/coding-contracts/references/dependency-management.md` before deciding.
 - Selecting a new dependency → `Stdlib First`.
-- Changing dependencies or their manifest entries → `Declaration`, `Pinning`, `Freshness` and `Dependency Groups`.
+- Changing dependencies or their manifest entries → `Declaration`, `Pinning`, `Freshness`, `Dependency Groups` and `CI Compatibility`.
 - Choosing how to install → `No Vendoring` and `CI Compatibility`.
 - Judging vendoring scope → `No Vendoring`.
 - Deciding whether resolved state is a lock file → `Pinning`.

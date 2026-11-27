@@ -249,7 +249,7 @@ if items:
     lines = ["Session-start status — {} item(s) in this repository hold work only the operator can decide on; "
              "nothing was touched:".format(len(items))]
     lines += ["  - " + item for item in items]
-    lines.append("Raise each with the user, one at a time: push, commit, open a pull request, delete or keep.")
+    lines.append("Ask the user what to do with each item. Offer applicable choices to push, commit, open a pull request, delete or keep.")
     paragraphs.append("\n".join(lines))
 if failures:
     paragraphs.append("Session-start status — could not check this repository for leftover worktrees and branches: "

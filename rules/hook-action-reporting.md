@@ -18,6 +18,6 @@ alwaysApply: true
 ## Act Within Authority
 
 - After relaying the status, take only actions authorized under their governing rules.
-- Get an explicit user decision for each listed dirty worktree or unpushed branch.
+- Get an explicit user decision for every listed worktree or branch.
 - Offer applicable choices to commit, push, open a pull request, delete or keep the work.
 - Never commit, push, open a pull request, stash, delete or discard listed work unasked.

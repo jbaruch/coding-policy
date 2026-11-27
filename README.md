@@ -55,8 +55,8 @@ commit above in a dedicated dependency change.
 
 ## What's Included
 
-Compact rule routers retain startup boundaries and require their complete
-[coding contracts](skills/coding-contracts/SKILL.md) before the affected action.
+Compact rules keep startup boundaries and point to the relevant
+[coding contracts](skills/coding-contracts/SKILL.md) before each affected action.
 References load through explicit reads; conditional frontmatter does not reduce
 Tessl imports. Combined native-session acceptance lives in
 [the acceptance record](docs/installed-context-acceptance.md).
@@ -65,7 +65,7 @@ Tessl imports. Combined native-session acceptance lives in
 |----------|------|---------|
 | Git | [commit-conventions](rules/commit-conventions.md) | Imperative mood, one change per commit, PR hygiene |
 | Git | [sync-before-work](rules/sync-before-work.md) | Fetch and branch from the fresh remote default |
-| Policy | [required-read](rules/required-read.md) | Every rule's Required Read reference binds as rule content, resolves in its owning plugin, stops the action when missing, and loads by explicit read, never `@` import |
+| Policy | [required-read](rules/required-read.md) | Read the named sections or entire reference explicitly in its owning plugin. Missing content stops the affected action. |
 | Testing | [testing-standards](rules/testing-standards.md) | Outcome-based, deterministic, no binary fixtures |
 | Errors | [error-handling](rules/error-handling.md) | Specific exceptions (with outer-boundary process-contract carve-out), actionable messages, structured logging |
 | Deps | [dependency-management](rules/dependency-management.md) | Stdlib-first, pinned versions kept fresh via a renewal mechanism, lock files |
@@ -81,15 +81,15 @@ Tessl imports. Combined native-session acceptance lives in
 | Authoring | [script-delegation](rules/script-delegation.md) | Deterministic → script, fixed answers read by meaning → bounded classification, everything else → LLM. Standing operator approval permits direct routing within recorded question, model, score and action bounds. Script stdout carve-outs for paths, versions and wrapped commands |
 | Authoring | [script-as-black-box](rules/script-as-black-box.md) | Skills reference the script's contract (inputs/outputs/exit codes), not its internal logic — thresholds and predicates live in the script |
 | Authoring | [stateful-artifacts](rules/stateful-artifacts.md) | Cross-invocation state: schema, owning skill/runtime/service, schema_version, reader contracts and migrations; runtime-owned tables use their migration schema |
-| Review | [reviewer-feedback-reading](rules/reviewer-feedback-reading.md) | A review's state classifies merge-gating, not whether its body must be read; read every reviewer's body before declaring merge-ready, COMMENTED-with-zero-inline included |
-| Review | [review-severity](rules/review-severity.md) | Separate demonstrated defects, binding policy mismatches and optional hardening; require evidence for blockers; resolve mismatches through compliant code or authorized policy amendments |
+| Review | [reviewer-feedback-reading](rules/reviewer-feedback-reading.md) | Read all original review bodies and inline comments before disposing of feedback or merging. |
+| Review | [review-severity](rules/review-severity.md) | Require a supported path or binding contract for blockers about claimed states. Verify findings independently before acting. |
 | Design and review | [simplicity](rules/simplicity.md) | KISS and YAGNI — build only what today's problem needs; overengineering is forbidden, and machinery without a current caller or observed failure is a review finding; calibrate reviewers with matched inputs and useful outcomes |
 | Concurrency | [agent-worktree-isolation](rules/agent-worktree-isolation.md) | Mandatory git worktrees for concurrent agent work; cleanup; read-only exception |
 | Discipline | [boy-scout](rules/boy-scout.md) | Fix coherent in-scope defects; record unrelated blocking risks once; advisories and maintenance create no delivery obligation |
 | Scope | [external-repo-contributions](rules/external-repo-contributions.md) | Default deny on issues, PRs, comments, reactions, and discussions in repos the operator does not own; explicit permission required per repo and action type |
-| Communication | [response-clarity](rules/response-clarity.md) | Shape responses action-first: lead with the command, number steps, show progress, plain errors, one concrete next step, no preamble or closers (exceptions for explanations, destructive actions, debug, ambiguity) |
+| Communication | [response-clarity](rules/response-clarity.md) | Lead with the answer or action. Give verifiable outcomes and plain errors. Confirm destructive actions. |
 | Discipline | [ship-on-green](rules/ship-on-green.md) | Green gate is the approval — merge, never ask; flag/confirm/"say go" count as asking; stakes raise care not permission; three objective exits only — Red / No undo / Murky |
-| Automation | [hook-action-reporting](rules/hook-action-reporting.md) | Relay any `Session-start status —` hook payloads to the user once at session start, then act on any action they name (a SessionStart hook's output reaches the model, not the transcript) |
+| Automation | [hook-action-reporting](rules/hook-action-reporting.md) | Relay the full startup status once and act within the authority for each reported item. |
 
 ## Skills
 
