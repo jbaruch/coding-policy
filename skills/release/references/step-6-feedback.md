@@ -2,6 +2,7 @@
 
 - **Read every review in full first.** Read every `review_bodies[].body` and `inline_comment_bodies[].body` in Step 5's snapshot, including human, other-bot and historical reviews, before judging any item (see `rules/reviewer-feedback-reading.md`). The bot-specific `reviews` fields route verdicts, never limit reading
 - **Classify before acting** under `rules/review-severity.md`: distinguish demonstrated defects, binding policy mismatches and optional hardening. Changing behavior alone does not make a correction mandatory.
+- **Check claimed states independently.** Trace the current source and check applicable contracts. If the finding lacks support, decline or downgrade it with concrete evidence and ask the reviewer for the missing supported path or binding contract instead of adding a defensive branch. Still follow the disputed policy blocker flow below when it applies.
 - **Resolve blocking findings** with the smallest sufficient correction. For policy mismatches, consider an authorized policy amendment alongside a code change; keep the current obligation and review gate effective until the amendment is reviewed and installed.
 - **Advisory findings**: note them directly in review replies.
 - Fold an advisory only when an already-required blocking correction touches the same surface and adds no push or verification round
