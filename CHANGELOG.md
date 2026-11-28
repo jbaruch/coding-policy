@@ -1,3 +1,7 @@
+## 0.10.52 — 2026-11-28
+
+- refactor(policy): Simplify rules and require review evidence (#912)
+
 ## 0.10.51 — 2026-11-25
 
 - fix(ci): renew pinned Core authority for Sent intake (#911)
