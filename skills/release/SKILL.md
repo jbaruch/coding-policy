@@ -79,12 +79,8 @@ and continuation without an invented timeout.
 skills/release/references/step-6-feedback.md
 ```
 
-Read every review body and inline comment in full before judging findings.
-Resolve blocking findings from either reviewer and fix CI failures.
-Follow the reference's re-review flow for disputed policy blockers.
-Advisory-only feedback creates no repair or re-review round.
-After each required push, both reviewers run automatically; return to Step 5.
-Proceed immediately to Step 7 after the reference's gates are satisfied.
+Apply the reference's feedback and CI recovery flow. Return to Step 5 after
+each required push. Proceed immediately to Step 7 when the Step 6 gates pass.
 
 ## Step 7 — Deliver
 

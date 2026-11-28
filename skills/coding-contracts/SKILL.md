@@ -17,18 +17,16 @@ Process steps in order. Do not skip ahead.
 
 ## Step 1 — Read the Applicable Contract
 
-Read the full reference named by each triggering `rules/<rule-name>.md`
-before the affected action:
+Read what each triggering `rules/<rule-name>.md` names before the affected
+action. Follow `rules/required-read.md` for section and whole-reference reads.
+The coding contracts live at:
 
 ```text
 skills/coding-contracts/references/<rule-name>.md
 ```
 
 Resolve paths within this installed plugin, or this repository when maintaining it.
-References retain the complete binding policy; load additional references
-only when their own rule triggers apply. A section cited through a router
-belongs to its full reference. Missing or unreadable content stops the
-affected action until the plugin is repaired.
+Load additional references only when their own rule triggers apply.
 
 This read grants no authority or exemption. Resume the original task under
 the loaded contracts. Finish here.

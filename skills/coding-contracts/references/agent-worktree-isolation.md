@@ -41,7 +41,7 @@
 - A local branch holding commits origin lacks is never deleted automatically
 - It is reported once idle
 - A protected branch on origin is never touched or reported
-- A reported item follows `rules/hook-action-reporting.md` Act on What It Names
+- A reported item follows `rules/hook-action-reporting.md` Act Within Authority
 - Leave no orphans in `git worktree list`
 
 ## Exception — Single-Reader Inspection

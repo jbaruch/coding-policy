@@ -266,6 +266,9 @@ main() {
   quiet "wt unpushed" git -C "$SHARED" worktree add -q -b feat/unpushed "$ROOT/unpushed" origin/main
   commit_file "$ROOT/unpushed" u.txt
   age_wt "$ROOT/unpushed" "$AGED_MTIME"
+  quiet "wt detached" git -C "$SHARED" worktree add -q --detach "$ROOT/detached" origin/main
+  commit_file "$ROOT/detached" d.txt
+  age_wt "$ROOT/detached" "$AGED_MTIME"
   quiet "local unpushed" git -C "$SHARED" switch -q -c feat/local-only main
   commit_file "$SHARED" l.txt
   quiet "switch main" git -C "$SHARED" switch -q main
@@ -277,13 +280,14 @@ main() {
   age_wt "$ROOT/other-dirty" "$AGED_MTIME"
   run_hook "$SHARED"
   ctx="$(context)"
-  if [[ $RC -eq 0 ]] && [[ "$ctx" == "Session-start status — 3 item(s)"* ]] \
+  if [[ $RC -eq 0 ]] && [[ "$ctx" == "Session-start status — 4 item(s)"* ]] \
      && [[ "$ctx" == *"$ROOT/dirty (review/dirty): 1 uncommitted file(s)"* ]] \
      && [[ "$ctx" == *"$ROOT/unpushed (feat/unpushed): 1 commit(s) origin does not hold"* ]] \
      && [[ "$ctx" == *"local branch feat/local-only: 1 unpushed commit(s)"* ]] \
-     && [[ "$ctx" == *"one at a time"* ]] \
+     && [[ "$ctx" == *"$ROOT/detached (detached): 1 commit(s) origin does not hold"* ]] \
+     && [[ "$ctx" == *"Ask the user what to do with each item."* && "$ctx" != *"one at a time"* ]] \
      && [[ "$ctx" != *feat/stale* && "$ctx" != *other-dirty* ]] \
-     && [[ -e "$ROOT/dirty/notes.txt" && -e "$ROOT/unpushed" && -e "$ROOT/other-dirty" ]] \
+     && [[ -e "$ROOT/dirty/notes.txt" && -e "$ROOT/unpushed" && -e "$ROOT/detached" && -e "$ROOT/other-dirty" ]] \
      && has_branch feat/local-only && on_origin feat/stale; then pass
   else fail "c2: RC=$RC OUT=$OUT ERR=$ERR"; fi
 
